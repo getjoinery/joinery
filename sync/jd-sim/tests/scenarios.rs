@@ -4615,6 +4615,121 @@ fn a_keyless_local_file_renamed_inside_the_vault_leaves_no_ghost_record() {
     assert_converged(&world);
 }
 
+/// Dragged into the vault AND edited before anyone looked.
+///
+/// The scan cannot recognise this file: neither its path nor its content is
+/// what it was, and a bare inode is not allowed to answer who a file is. So it
+/// is let go of at the old path and adopted at the new one -- correct, and it
+/// costs the one fact that holds the server's copy back. Without a provenance
+/// hint the source reads as deleted and the plaintext original is trashed while
+/// this device waits for a key it may never get. The inode is trusted for that
+/// hint alone: not who the file is, only which server copy to keep a little
+/// longer, where being wrong delays one delete and being right saves the copy
+/// everybody else can still reach.
+#[test]
+fn a_file_dragged_into_a_vault_and_edited_still_holds_the_servers_copy() {
+    let vault = SimVault::new(9_221);
+    let mut world = World::new(9_221, &["holder", "guest"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+
+    world.server.seed_encrypted_folder(None, "Private");
+    let body = b"the version everyone can reach";
+    world.device("guest").fs.user_write("memo.txt", body);
+    committed.note("memo.txt", body);
+    assert!(world.settle().is_some(), "the plaintext file goes up first");
+
+    // Both in one go, before a pass runs: the move and the edit are a single
+    // event as far as the next scan is concerned.
+    let guest = world.device("guest");
+    guest.fs.user_mkdir("Private");
+    guest.fs.user_rename("memo.txt", "Private/memo.txt");
+    let edited = b"and the version only this disk has";
+    guest.fs.user_write("Private/memo.txt", edited);
+    committed.note("Private/memo.txt", edited);
+
+    assert!(
+        world.settle().is_some(),
+        "a device that cannot do the conversion still has to go quiet"
+    );
+
+    assert!(
+        world.server.tree().contains_key("memo.txt"),
+        "the plaintext copy was trashed during a wait this device cannot end: {:?}",
+        world.server.tree()
+    );
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// A file that inherits a deleted file's inode is a new file, not that one.
+///
+/// A real disk hands a deleted file's inode straight to whatever asks next. The
+/// scan used to read that as the tracked file having moved and been edited,
+/// which is wrong twice over: applied, it renames the entry onto the stranger
+/// and sends the stranger's bytes up as the entry's next version; unapplied, its
+/// claim stops the stranger being adopted and nothing owns those bytes again.
+/// The estate found the second half as a conflict copy no entry claimed.
+#[test]
+fn a_stranger_that_inherits_an_inode_is_adopted_rather_than_mistaken() {
+    let world = World::new(9_223, &["laptop"]);
+    let mut committed = Committed::default();
+    let fs = &world.device("laptop").fs;
+    fs.reuse_file_ids(true);
+
+    let first = b"the original";
+    fs.user_write("notes.txt", first);
+    committed.note("notes.txt", first);
+    assert!(world.settle().is_some(), "the first file goes up");
+
+    // Gone, and its inode goes back in the pot. The next file to want one gets
+    // it, and it is nothing to do with the file that had it before.
+    fs.user_remove("notes.txt");
+    let stranger = b"a completely different document";
+    fs.user_write("stranger.txt", stranger);
+    committed.note("stranger.txt", stranger);
+
+    assert!(world.settle().is_some(), "both decisions have to settle");
+
+    let server = world.server.tree();
+    assert!(
+        server.contains_key("stranger.txt"),
+        "the stranger was never adopted, so nothing ever sent it: {server:?}"
+    );
+    assert!(
+        !server.contains_key("notes.txt"),
+        "the deleted file should have been let go of, not renamed onto the \
+         stranger: {server:?}"
+    );
+    assert_eq!(
+        server.get("stranger.txt"),
+        Some(&Some(jd_sim::sha256_hex(stranger))),
+        "the stranger went up as itself"
+    );
+    // The corruption half, which the tree alone cannot show: with the inode
+    // trusted for identity the two files become ONE on the server, the
+    // stranger's bytes arriving as the next version of the document the user
+    // deleted. Same paths, same contents, one history that never happened.
+    let (was, now) = (jd_sim::sha256_hex(first), jd_sim::sha256_hex(stranger));
+    for row in world.server.all_versions() {
+        let mine: Vec<String> = world
+            .server
+            .all_versions()
+            .into_iter()
+            .filter(|v| v.file_id == row.file_id)
+            .map(|v| v.sha256)
+            .collect();
+        assert!(
+            !(mine.contains(&was) && mine.contains(&now)),
+            "one server file carries both documents: the stranger arrived as a \
+             new version of the file that was deleted"
+        );
+    }
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
 /// A plaintext folder dragged into the vault is converted, contents and all.
 ///
 /// Not merely a stuck move. Until it is converted the user is looking at a

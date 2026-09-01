@@ -2436,6 +2436,31 @@ fn scratch_ghost_probe() {
 /// It fails on the old code with either fix reverted, and both fixes stop it
 /// independently: the one that refuses to record a fingerprint about bytes it
 /// has not read, and the commit-time content check behind it.
+/// The seed that proves a park stands down for work it is blocking.
+///
+/// A park gives up a local copy, and refuses while that copy holds bytes the
+/// server has not got -- correctly, because trashing it would be the loss the
+/// whole operation exists to avoid. It refused by RETRYING, and a retry is what
+/// made the refusal permanent: an entity with an open op is skipped by the
+/// round, and the round is what plans uploads. So the park waited for work its
+/// own presence prevented anyone from doing, two thousand times, with the
+/// device never once quiet and nothing said to the user.
+///
+/// A clean world reaches it: no chaos, no kills, two ordinary devices. What it
+/// needs is a name clash whose loser is already materialized -- which only
+/// became reachable when parking such an entry started going through the park
+/// operation instead of a status flip -- and a local edit that has not been
+/// sent yet when the park runs.
+///
+/// Standing down is not giving up. The clash is still there, so naming derives
+/// the park again a pass later, by which time the entity is free, the upload
+/// has run, and the copy on the disk is one the server holds.
+#[test]
+fn frozen_park_standing_down_seed() {
+    let refs: [(&str, Platform); 2] = [("mac", Platform::MacOs), ("pc", Platform::Windows)];
+    workload_core(3_072_116, 40, &refs, false, Vault::Shared, false, Names::Ordinary);
+}
+
 /// The seed that proves an encrypted file keeps its own name across a retry.
 ///
 /// The defect: `move_remote` asks the server where the file ended up -- which

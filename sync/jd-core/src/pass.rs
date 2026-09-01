@@ -318,6 +318,35 @@ pub fn run_pass(
         // it by itself the moment a key arrives.
         if entry.is_encrypted && env.vault.is_none() {
             entry.status = LocalStatus::PendingKey;
+            // Where these bytes came from, if the disk still says so.
+            //
+            // A file MOVED into the vault arrives as a move and the crossing
+            // branch mints the claimant with its provenance. A file moved AND
+            // EDITED arrives here instead: with the inode no longer trusted for
+            // identity, the scan cannot recognise it as the same file, so it is
+            // let go of at the old path and adopted as a new one here. Correct,
+            // and it loses the one fact that holds the server's copy: without
+            // it the source reads as deleted and the server's copy is trashed
+            // during a wait for a key that may never end.
+            //
+            // The inode is enough for THIS, and only because of what it costs
+            // when it is wrong. It is not being asked who this file is -- it has
+            // its own identity either way -- only which server copy to hold on
+            // to a little longer. A wrong guess delays one delete until a key
+            // arrives; a right one keeps the copy everyone else can still reach.
+            // Order, not identity, which is the whole rule.
+            entry.replaces = all_entries(env)?
+                .into_iter()
+                .filter(|e| !e.id.is_provisional() && !e.is_encrypted && !e.remote_deleted)
+                .filter(|e| {
+                    e.synced_fingerprint
+                        .is_some_and(|fp| fp.file_id == file.fingerprint.file_id)
+                })
+                .find(|e| match relative_path(env, e) {
+                    Ok(Some(path)) => !observed.iter().any(|o| o.path == path),
+                    _ => false,
+                })
+                .map(|e| e.id);
         }
         env.store.put_entry(&entry)?;
         out.local_creations += 1;

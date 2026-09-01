@@ -98,6 +98,19 @@ pub enum OpOutcome {
     /// stops quietly.
     Overtaken(String),
     /// Try again later. Carries what to say about it in the meantime.
+    ///
+    /// Only ever for progress some OTHER actor can make while this op sits in
+    /// the journal: external state such as a vault unlock or a grant off the
+    /// feed, another entity's operation, or an impediment this op has just
+    /// cleared itself. Work the ROUND has to plan for this op's own entity can
+    /// never be waited for here -- an entity with an open op is skipped by the
+    /// round, so the op is what stops the round doing the thing it is waiting
+    /// for. That reads as a device politely retrying and is a deadlock.
+    ///
+    /// The park is the instance: it refused while the local copy held bytes the
+    /// server did not have, waiting for an upload only the round could plan,
+    /// and spent two thousand attempts doing it. Stand down with `Overtaken`
+    /// instead and let the next round decide afresh.
     Retry(String),
 }
 
@@ -1382,7 +1395,27 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     //
     // So the file is read. It costs one hash of a file this operation is about
     // to rewrite in full, and only when something is actually standing there.
-    if entry.synced_fingerprint.is_some() && env.vfs.fingerprint(&path)?.is_some() {
+    // A file standing here is the only precondition. This used to also require
+    // a recorded fingerprint, which read as a hole and was not one: with no
+    // fingerprint, `spool.commit` is handed a `None` expectation, and both
+    // filesystems refuse that outright over any standing file (`jd-vfs`
+    // real.rs, and the simulator alongside it) precisely because a file the
+    // engine has never seen may be the only copy of it. Every content case
+    // landed in the same place either way -- the refusal arm below adopts,
+    // refreshes or stands down exactly as this gate does, one call later.
+    //
+    // It is removed because of what the comment above claims. A gate described
+    // as the one that cannot be defeated by history must not borrow its
+    // totality from a guard two crates away: stated here, it should be true
+    // here. Nothing about behaviour changes.
+    //
+    // The state that provoked the question, so the next reader finds the answer
+    // rather than the doubt: an upload that finishes against a file the user
+    // has already saved over records the agreement with no fingerprint on
+    // purpose, so the next scan re-hashes and sends the newer save. That is the
+    // record at its least trustworthy, and it is covered -- here now, and in
+    // `commit` all along.
+    if env.vfs.fingerprint(&path)?.is_some() {
         let here = env.vfs.hash(&path)?;
         let agreed = entry.synced_content.as_ref().map(|c| c.sha256.as_str());
         if here != arrived.plain.sha256 && agreed != Some(here.as_str()) {
@@ -1435,6 +1468,22 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
                     blocker.display(),
                 )));
             }
+            // The fingerprint is taken BEFORE the hash, and the order is
+            // load-bearing rather than incidental. These are two instants, and
+            // on a file the size a real application saves they are milliseconds
+            // apart -- a user save landing between them is not exotic.
+            //
+            // Taken in this order, such a save leaves the fingerprint stale in
+            // the safe direction: it describes the file as it was BEFORE the
+            // save, so nothing here can conclude the two agree, and the next
+            // scan re-hashes and meets the edit. Reversed, the hash would
+            // describe the old bytes and the fingerprint the new file, and the
+            // adopt below would bind them together as one fact -- the edit
+            // recorded as already synced, and swallowed without a trace.
+            //
+            // No simulator can catch a reversal: its map is behind a lock, so
+            // nothing can land between the two calls. This comment is the only
+            // thing standing between that ordering and a tidy-looking refactor.
             let Some(fp) = env.vfs.fingerprint(&path)? else {
                 return Ok(OpOutcome::Overtaken(
                     "the file changed here while it was downloading".into(),
@@ -3339,8 +3388,22 @@ fn unmaterialize_and_park(
             now.unchanged_from(agreed, &env.vfs.personality())
         });
         if agreed.is_none() || entry.synced_content.is_none() {
-            return Ok(OpOutcome::Retry(
-                "this copy has work the server does not have yet".into(),
+            // Stand down rather than retry, and the difference is the whole
+            // operation. A retry keeps this op in the journal, an entity with
+            // an open op is skipped by the round, and the upload this is
+            // waiting for is planned by the round -- so retrying waits for work
+            // that its own existence prevents anyone from doing. The rig found
+            // it as a park on two thousand attempts against a file the user had
+            // simply gone on editing, with the device never once quiet.
+            //
+            // Dropping it is not giving up. The clash that provoked the park is
+            // still there, so the naming pass derives it again on a later pass
+            // -- by which time the entity is free, the ordinary upload has run,
+            // and the copy standing here is one the server has. That is the
+            // order this operation always meant to run in.
+            return Ok(OpOutcome::Overtaken(
+                "the copy here has work the server does not have yet"
+                    .into(),
             ));
         }
         match env.vfs.trash(&path) {

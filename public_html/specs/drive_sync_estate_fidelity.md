@@ -18,6 +18,16 @@ The estate cannot find a defect in a class it cannot produce. So the question
 that pays is not "what failed" but "what could this harness never have shown
 me". All three below answer that, and none was reachable by running more seeds.
 
+There is a second version of the same blindness, found later and worth as much:
+**an oracle that reads only the end state will bless a defect whose damage is in
+how the state was reached.** Defect I is the proof. A recycled inode made one
+document continue as another's next version, and the file tree that resulted was
+byte-for-byte identical to the correct one — same paths, same contents. Every
+tree assertion passed. The server's version rows were the only witness, and the
+first test written for that defect passed with the defect restored because it
+asserted on the tree. Where a wrong answer and a right one can produce the same
+picture, the picture is not the evidence.
+
 ---
 
 ## Defect 1 — a recovery that could not fire in production
@@ -593,6 +603,149 @@ state a long hostile run reaches by accident and a scenario cannot yet ask for.
 
 ---
 
+## Defect H — the park that waited for work it was preventing
+
+A regression from defect D, found by the first estate run against the fix.
+
+A park gives up a local copy, and refuses while that copy holds bytes the server
+has not got — correctly, because trashing it would be exactly the loss the
+operation exists to avoid. The comment says what happens next: the op retries,
+the ordinary upload runs first, and the park happens on a later pass once the
+work is safe.
+
+The upload never runs. A retry keeps the operation in the journal; an entity
+with an open operation is skipped by the round; and the round is what plans
+uploads. So the park waited for work its own presence prevented anyone from
+doing — two thousand attempts, the device never once quiet, and nothing said to
+the user. The refusal was right and the way it refused made it permanent.
+
+This was unreachable before defect D. A park only met a file on the disk once
+materialized entries started going through the park operation instead of a
+status flip; before that there was never a copy standing there to refuse over.
+Two of the three faults in a 40,070-seed estate were this, and one of them is a
+CLEAN world — no chaos, no kills, two ordinary devices — so it is not a
+fault-injection artifact.
+
+The fix is one outcome, not one condition: stand down instead of retrying. The
+premise no longer holds, nothing here is anybody's problem, and the next round
+decides afresh from what is actually there — which is what `Overtaken` is for.
+Standing down is not giving up: the clash that provoked the park is still there,
+so naming derives it again a pass later, by which time the entity is free, the
+upload has run, and the copy on the disk is one the server holds. That is the
+order the operation always meant to run in; it just could not get there from
+inside its own retry.
+
+Pinned by frozen seed 3072116. Hand-building it runs into the same wall as
+defect D — a settled twin wins the name before the loser ever materializes, so
+the ingredient that makes this reachable cannot be staged directly.
+
+---
+
+## Defect I — the inode that was allowed to say who a file was
+
+A real disk hands a deleted file's inode straight to whatever asks for one next.
+The scan had a rule that read that as the tracked file having moved and been
+edited, on the grounds that the inode was all there was to go on. Its own
+comment said so.
+
+It was wrong in both directions at once. Applied, it renamed the entry onto the
+stranger's name and sent the stranger's bytes up as the next version of the
+entry's server content — one document's history continuing with another
+document's contents, which is the very version chain the rule existed to
+preserve. Not applied, its claim on the observed file stopped that file being
+adopted by anyone, and nothing owned those bytes again. The estate found the
+second half: a conflict copy on one disk that no entry claimed.
+
+The engine had already decided this question one rule earlier. Pairing by
+content refuses a bare inode and says why: an inode alone can be recycled by an
+unrelated file, and pairing on that would silently swap two files' identities.
+Two rules disagreeing about what an inode is worth is worse than either answer,
+so the doctrine now sits where the rule was. **A bare inode may fund order — a
+hold, a wait, a hint that costs only time when it is wrong — but never identity:
+a name, a file's contents, a claim on somebody's data.**
+
+The price is chosen, not overlooked: a file both moved and edited between two
+scans has neither its path nor its content left to recognise it by, so it reads
+as a delete plus a creation. The version chain is lost and no bytes are.
+Corruption against degradation is not a close call. The unit test that used to
+bless the old behaviour keeps its name and its comment and now asserts the safe
+outcome; the other one is renamed for what it records — a move the scan cannot
+confirm reads as a delete plus a create.
+
+One consequence had to be paid for separately. A file MOVED into a vault this
+device cannot open still arrives as a move, so defect F's claimant and its hold
+are untouched. A file moved AND edited now arrives as a creation instead — owned,
+but with no memory of where it came from, so the source read as deleted and the
+server's plaintext copy was trashed during a wait for a key that may never end.
+That is a durability regression hiding inside a correctness fix, and no oracle
+asserts the server copy survives the wait.
+
+So the provenance is recovered at adoption, and the inode is what recovers it —
+which is the doctrine applied, not an exception to it. It is not being asked who
+the file is; the file has its own identity either way. It is asked which server
+copy to hold on to a little longer, where a wrong answer delays one delete until
+a key arrives and a right one keeps the copy everybody else can still reach.
+Order, not identity.
+
+The engine's other reader of inodes was audited against the doctrine and left
+alone. The folder-displacement detector asks where a folder went, which is an
+order question, and it never asks on an inode alone: a child corroborates only
+when its inode AND its name land where the folder is supposed to have moved,
+and an inode found anywhere else vetoes the wholesale reading rather than
+supporting it. A recycled inode there produces a refusal to recognise a move —
+the folder is handled as a delete plus a creation — which is the same
+degradation-shaped wrong answer chosen above, not a claim on anyone's data.
+
+The hint costs one field and no machinery. Because the adopted entry is
+provisional, the hold on the source, the convergence excuse for the divergence
+it creates, and the lapse when the file goes all apply to it by construction —
+it inherits the whole `replaces` contract from defect F without a line of its
+own.
+
+Pinned by two scenarios, both verified to fail without their fix: a stranger
+inheriting an inode is adopted rather than mistaken, asserted against the server
+version rows so the poisoned history is caught and not just the tree; and a file
+dragged into a vault and edited still holds the server's copy, which fails with
+the plaintext original already trashed.
+
+---
+
+## A redundancy removed, and no hole closed
+
+Worth writing down because it was nearly recorded as a defect, and it is not
+one.
+
+The read-before-overwrite gate at the download commit asked for a recorded
+fingerprint before it would read the file. That looked like a hole: an upload
+that finishes against a file the user has already saved over records the
+agreement with no fingerprint ON PURPOSE, so the next scan re-hashes and sends
+the newer save — the record at its least trustworthy, and exactly where the gate
+was skipping itself.
+
+It was not a hole. Underneath the gate, `spool.commit` is handed the same
+absent expectation, and both filesystems refuse a `None` expectation over any
+standing file, because a file the engine has never seen may be the only copy of
+it. Every content case lands in the same place either way: the refusal arm
+adopts, refreshes or stands down exactly as the gate does, one call later.
+That equivalence is also why no scenario can be written that fails without the
+change — there is no behavioural difference to witness, which is a different
+thing from a difference that is hard to stage.
+
+The clause is gone anyway, for what the code SAYS. The gate's own comment calls
+it the one gate that cannot be defeated by history; with the clause in place
+that sentence was true only by borrowing from a guard two crates away. A gate
+should state its own totality. No behaviour changed, and the state that provoked
+the question is now named at the gate so the next reader finds the answer
+instead of the doubt.
+
+The general lesson, since this round has been collecting them: **a gate's own
+comment is not the whole truth about a gate.** Reading it and concluding that a
+skip is a hole stops one layer above the code that decides. It is the same
+mistake as reading a loss from the shape of its aftermath — in both cases the
+answer was one layer further down.
+
+---
+
 ## Still open on this axis
 
 - **`path_for`'s forward derivation is still weaker than naming.** Destination
@@ -635,6 +788,101 @@ state a long hostile run reaches by accident and a scenario cannot yet ask for.
   in `open_metadata`, for both callers at once. Worth saying why it was not
   simply folded into the wait: waiting on a blob that will never have a name is
   an unbounded wedge, which is a worse failure than a bounded wrong name.
+- **Two soak-rig losses that no mechanism here explains.** Runs 341 and 463,
+  both under the same client build, both a persona rewriting a hot file in
+  place. In each the scan read the user's bytes within seconds and they never
+  became the agreement, and in each the overwrite landed a minute or more later
+  — 64 seconds and 125 seconds — so it is not the instruction-width window
+  below, which is microseconds wide. The guard present in that build compares
+  size and mtime, the standing file mismatched on both, and the refusal arm
+  should have hashed it, found bytes that were neither what arrived nor what was
+  agreed, and stood down. In run 341 a rescue did fire — but its conflict copy
+  holds 623,009 bytes and was raised twelve minutes before the lost write, so it
+  is an earlier intermediate and innocent.
+
+  The inode history in run 463 says what happened at the landing. Every cached
+  row at that inode, in order: the file the user's own device wrote there
+  earlier; the user's in-place rewrite, 1,105,548 bytes, read by the scan one
+  second after the save; and then, half a second AFTER the download landed, the
+  same inode carrying a sibling file's downloaded content. An inode only comes
+  back after an unlink, and the unlink is the spool rename landing on the path.
+  The user's file was standing there and the landing replaced it.
+
+  Which means the guard was handed something that let it through. The entry had
+  a fingerprint — `make_room` runs only when there is none, so its silence in
+  the issues table says the fingerprint existed, not that the path was empty —
+  and `commit` compares that fingerprint against the standing file, which
+  differed in size by nearly three hundred kilobytes. That must refuse. It did
+  not.
+
+  Five mechanisms were proposed and all five are dead, each killed by a query
+  rather than an opinion: the code the download-guard fixes address (no move
+  operation exists on either entity); a fingerprint coincidence (the sizes
+  differ by hundreds of kilobytes); the check-then-rename window (the landings
+  were 64 and 125 seconds after the saves, not microseconds); a hallucinated
+  pairing carrying the bytes off under a sibling's identity (the sibling's
+  content is the wrong size and its fingerprint postdates the landing); and a
+  mid-window upload that would have made the guard match honestly (it would have
+  put the bytes on the server, where the oracle looked and did not find them).
+
+  What survives is not a mechanism but a contradiction, and it points at one
+  place. Every precondition was verified: the comparator is strict on size,
+  inode and mtime; the expectation passed is the agreement itself; the guard was
+  present in that build. Those facts cannot coexist with a landing that
+  succeeded over a standing file — unless the guard did not run. And it could
+  not: the commit read its stat with `if let Ok(..)`, so a stat that failed for
+  any reason other than absence skipped the check and let the rename proceed.
+  The last gate before the one irreversible act in this engine, silently absent
+  for exactly the commit that could not be checked.
+
+  That is a **candidate** for these losses and nothing more — the sixth
+  hypothesis after five corpses, and it is unproven. But the fail-open is true
+  regardless of whether it is the mechanism, so it is fixed: both branches now
+  treat an unanswerable stat as a refusal. Absence is an answer; so is a path
+  component that turns out to be a file, which has its own handling that names
+  the blocker. Everything else means the question was not answered, and an
+  unanswerable question at a gate is a no.
+
+  No simulator can reach this. Its map is in memory, so its stat cannot fail —
+  which is why thousands of seeds ran past it. Nor can a test on a real disk:
+  every stat failure that can be provoked from outside — an unsearchable parent,
+  a symlink loop, an over-long name — fails the rename that follows too, so the
+  file survives whether the guard ran or not. The state where the fix does
+  something is reachable only by injection, so `jd-vfs` now has a test-only seam
+  that makes the guard's next look fail once, and two tests that use it: with an
+  agreement and without. Both fail with the fix reverted, naming the commit that
+  went ahead over a file it had not been able to check. The one fact
+  that would settle the wild losses — what the entry's fingerprint held at the
+  landing — is not in these bundles, because the database in the evidence is the
+  state after it. Named and open, with two independent instances.
+- **The commit's check-then-rename window cannot exist in the simulator.**
+  `jd-vfs`'s real spool refuses to land on an occupied path, but says in its own
+  comment that this is still a check followed by a rename rather than one atomic
+  step, and that `renameat2(RENAME_NOREPLACE)` would close the remaining
+  instruction-width window. The simulator's map is behind a lock, so a save can
+  never land between its check and its rename — which means every argument that
+  leans on that refusal is true by construction in the estate and true on real
+  hardware only while the window stays shut. A persona rewriting a hot file in
+  place under churn is the load that would open it. This is the one candidate
+  that would explain a rig losing bytes the estate cannot lose; it needs a
+  VFS-level test that interleaves a real writer with a real commit, which does
+  not exist yet.
+- **The commit guard still skips a target it does not understand.** The stat
+  fail-open is fixed, but inside the answered branch the comparison runs only
+  `if md.is_file()`: anything else standing at the destination — a symlink, most
+  plainly — is renamed over without a word. The harm is bounded (the link dies,
+  its referent does not) and the fix is not a one-liner, because refusing at the
+  gate only moves the question: the refusal reaches the caller's arm, whose
+  fingerprint call answers None for a non-file, which reads today as "the file
+  changed here" and drops the operation — replanned next pass, refused next
+  pass, without end. So the real question is who moves a standing non-file aside
+  and how the loop terminates, which is a design item rather than a guard patch.
+- **An oracle went partially blind under the conditions that produce losses.**
+  Soak run 458 reported that it could not read three file histories and so could
+  not say whether anything was lost — honest, and correct behaviour for an
+  oracle that must not guess. Why the histories were unreadable is unexplained,
+  and an oracle that loses its sight exactly when the interesting thing happens
+  is a finding about the oracle.
 - **Sharing is not modelled at all.** The mock has one owner. On the platform a
   `missing` stat means gone OR no longer visible, so a revoked share reads to
   the client as a deletion — and the client trashes the local copy. Whether

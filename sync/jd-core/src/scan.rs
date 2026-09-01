@@ -200,19 +200,28 @@ pub fn pair(known: &[KnownLocal], observed: &[ObservedFile]) -> ScanOutcome {
             })
         });
 
-        // 4. Same inode but DIFFERENT content: moved and edited before we
-        //    looked. Only trusted when the inode matches, since without either
-        //    the path or the content to corroborate, the inode is all there is.
-        let moved_and_edited = if by_hash.is_none() {
-            k.fingerprint.and_then(|fp| {
-                observed
-                    .iter()
-                    .enumerate()
-                    .find(|(i, o)| !claimed[*i] && o.fingerprint.file_id == fp.file_id)
-            })
-        } else {
-            None
-        };
+        // 4. There is no fourth rule, and the reason is the doctrine this whole
+        //    function turns on: a bare inode may fund ORDER -- a hold, a wait, a
+        //    hint that costs only time when it is wrong -- but never IDENTITY: a
+        //    name, a file's contents, a claim on somebody's data. Rule 3 above
+        //    already says so; this is the same ruling applied twice.
+        //
+        //    There used to be one. Same inode, different content, read as moved
+        //    and edited before we looked -- and its own comment admitted the
+        //    inode was all there was. A real disk hands a deleted file's inode
+        //    straight to the next file that wants one, so that rule bound a
+        //    tracked entry to a stranger every time recycling beat the scan. It
+        //    was wrong in both directions at once: applied, it renamed the entry
+        //    onto the stranger's name and sent the stranger's bytes up over the
+        //    entry's server content, poisoning the very version chain it existed
+        //    to preserve; unapplied, its claim on the observed file stopped the
+        //    stranger ever being adopted, and nothing owned those bytes again.
+        //
+        //    The price of not having it is known and chosen: a file both moved
+        //    and edited between two scans reads as a delete plus a creation. The
+        //    version chain is lost and no bytes are. Corruption against
+        //    degradation is not a close call.
+        let moved_and_edited: Option<(usize, &ObservedFile)> = None;
 
         match (by_hash, moved_and_edited) {
             (Some((i, obs)), _) => {
@@ -353,14 +362,19 @@ mod tests {
             &[known(1, "gone.txt", 100, "sha-gone")],
             &[observed("unrelated.txt", 100, "sha-completely-different")],
         );
-        // The inode match is only trusted as "moved and edited" — never as an
-        // identity claim strong enough to move somebody's data on its own.
+        // The tracked file is gone, and says so. Anything else is a claim on the
+        // stranger: as a change it moves the entry onto the stranger's name, and
+        // as a claim it stops the stranger being adopted by anyone else.
         match out.change_for(EntityId::file(1)) {
-            Some(LocalChange::MovedAndEdited { to_path, .. }) => {
-                assert_eq!(to_path, "unrelated.txt")
-            }
+            Some(LocalChange::Deleted) => {}
             other => panic!("unexpected: {other:?}"),
         }
+        // ...and the stranger is a new file, which is what it is.
+        assert_eq!(
+            out.created.iter().map(|o| o.path.as_str()).collect::<Vec<_>>(),
+            vec!["unrelated.txt"],
+            "the file that inherited the inode has to be adopted by somebody"
+        );
     }
 
     #[test]
@@ -467,20 +481,25 @@ mod tests {
     }
 
     #[test]
-    fn a_rename_and_an_edit_together_are_recognized_as_both() {
+    fn a_move_the_scan_cannot_confirm_reads_as_a_delete_plus_a_create() {
+        // The price of refusing to pair on a bare inode, recorded rather than
+        // discovered. A file renamed AND edited between two scans has neither
+        // its path nor its content left to recognise it by, and an inode alone
+        // cannot tell this apart from a stranger that inherited the number. So
+        // it is let go of and picked up again as a new file: the version chain
+        // is lost, and no bytes are. That is chosen, not overlooked.
         let out = pair(
             &[known(1, "draft.txt", 100, "sha-old")],
             &[observed("final.txt", 100, "sha-new")],
         );
         match out.change_for(EntityId::file(1)) {
-            Some(LocalChange::MovedAndEdited {
-                to_path, sha256, ..
-            }) => {
-                assert_eq!(to_path, "final.txt");
-                assert_eq!(sha256, "sha-new");
-            }
+            Some(LocalChange::Deleted) => {}
             other => panic!("unexpected: {other:?}"),
         }
+        assert_eq!(
+            out.created.iter().map(|o| o.path.as_str()).collect::<Vec<_>>(),
+            vec!["final.txt"]
+        );
     }
 
     #[test]
