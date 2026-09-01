@@ -4,7 +4,8 @@
  * URL: /admin/server_manager/host_add
  *      /admin/server_manager/host_add?mgh_id=N  (edit mode)
  *
- * @version 1.0
+ * @version 1.1 - host agent link (mgh_mgn_host_node_id) and a delete action; a host is
+ *                deleted last, after its container sites and its own node identity
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_host_class.php'));
@@ -17,10 +18,45 @@ $host = $is_edit ? new ManagedHost((int)$_GET['mgh_id'], TRUE) : new ManagedHost
 
 $error = null;
 
-if ($_POST && isset($_POST['mgh_name'])) {
+// Delete action — handled before the generic save path, and returns from it.
+// A host is deleted last: never while container sites still name it as their
+// placement, and never while it still has a live agent node identity.
+if ($_POST && ($_POST['action'] ?? '') === 'delete_host' && $is_edit) {
+	try {
+		if (!$host->key) {
+			throw new ManagedHostException('Host not found.');
+		}
+		$site_count = $host->count_sites();
+		if ($site_count > 0) {
+			throw new ManagedHostException(
+				"This host still has {$site_count} site" . ($site_count === 1 ? '' : 's') .
+				" placed on it. Decommission or reassign them first."
+			);
+		}
+		if ($host->host_node()) {
+			throw new ManagedHostException(
+				'This host still has a live agent node record linked. Delete the node record first.'
+			);
+		}
+		$host->soft_delete();
+
+		$page_regex = '/\/admin\/server_manager/';
+		$session->save_message(new DisplayMessage(
+			'Host deleted.',
+			'Success', $page_regex,
+			DisplayMessage::MESSAGE_ANNOUNCEMENT,
+			DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+		));
+		header('Location: /admin/server_manager');
+		exit;
+	} catch (Exception $e) {
+		$error = $e->getMessage();
+	}
+} elseif ($_POST && isset($_POST['mgh_name'])) {
 	$editable_fields = [
 		'mgh_name', 'mgh_slug', 'mgh_host', 'mgh_ssh_user', 'mgh_ssh_key_path',
 		'mgh_ssh_port', 'mgh_max_sites', 'mgh_provisioning_enabled', 'mgh_notes',
+		'mgh_mgn_host_node_id',
 	];
 
 	foreach ($editable_fields as $field) {
@@ -32,6 +68,8 @@ if ($_POST && isset($_POST['mgh_name'])) {
 			$value = 22;
 		} elseif ($field === 'mgh_max_sites' && $value === '') {
 			$value = 50;
+		} elseif ($field === 'mgh_mgn_host_node_id') {
+			$value = $value === '' ? null : (int)$value;
 		}
 		$host->set($field, $value);
 	}
@@ -132,6 +170,23 @@ $formwriter->checkboxinput('mgh_provisioning_enabled', 'Enable automated provisi
 	'checked' => (bool)$host->get('mgh_provisioning_enabled'),
 ]);
 
+echo '<h6 class="text-muted mt-4 mb-3">Host Agent</h6>';
+
+$node_options = ['' => '— no agent node —'];
+$candidate_nodes = new MultiManagedNode(['deleted' => false], ['mgn_name' => 'ASC']);
+$candidate_nodes->load();
+foreach ($candidate_nodes as $cn) {
+	$label = $cn->get('mgn_name') . ' (' . $cn->get('mgn_slug') . ')';
+	if ($cn->get('mgn_agent_paired_time')) {
+		$label .= ' — paired';
+	}
+	$node_options[$cn->key] = $label;
+}
+$formwriter->dropinput('mgh_mgn_host_node_id', 'Host Agent Node', [
+	'options' => $node_options,
+	'helptext' => 'The paired node record that IS this machine — where host-scope work (removing a container site) is addressed. Enroll the host\'s agent first, then link its node here.',
+]);
+
 echo '<h6 class="text-muted mt-4 mb-3">Notes</h6>';
 
 $formwriter->textbox('mgh_notes', 'Notes', ['rows' => 3]);
@@ -140,5 +195,30 @@ $formwriter->submitbutton('btn_submit', $is_edit ? 'Save Changes' : 'Add Host');
 echo $formwriter->end_form();
 
 $page->end_box();
+
+if ($is_edit && $host->key) {
+	$page->begin_box(['title' => 'Delete Host']);
+	$site_count = $host->count_sites();
+	$live_host_node = $host->host_node();
+	if ($site_count > 0 || $live_host_node) {
+		echo '<p class="text-muted mb-0">A host is deleted last. ';
+		if ($site_count > 0) {
+			echo 'This host still has ' . (int)$site_count . ' site' . ($site_count === 1 ? '' : 's') . ' placed on it. ';
+		}
+		if ($live_host_node) {
+			echo 'Its agent node record (' . htmlspecialchars($live_host_node->get('mgn_slug')) . ') is still live. ';
+		}
+		echo 'Remove those first.</p>';
+	} else {
+		echo '<p class="text-muted">Removes this placement record from the dashboard. The machine itself is untouched.</p>';
+		echo AdminPage::action_button('Delete Host', '/admin/server_manager/host_add?mgh_id=' . $host->key, [
+			'hidden'  => ['action' => 'delete_host'],
+			'confirm' => 'Delete this host record?',
+			'class'   => 'btn btn-danger btn-sm',
+		]);
+	}
+	$page->end_box();
+}
+
 $page->admin_footer();
 ?>

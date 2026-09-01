@@ -5,6 +5,10 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.50 - decommission crosses to the channel: build_decommission_node routes ONE
+ *                 destructive primitive (decommission_site) to the Docker HOST's own paired
+ *                 agent, or refuses naming the fix; the scp/ssh teardown bodies are deleted.
+ *                 The victim approves its own removal on its own admin (docker_host_agent.md)
  * @version 1.49 - the last SSH fallbacks behind primitive-routed ops are gone: upload_backup and
  *                 delete_backup route primitive or refuse, and upload_step /
  *                 build_node_uploader_script / strip_php_tags go with them
@@ -213,7 +217,21 @@ class JobCommandBuilder {
 		// confirm buys a guaranteed refusal.
 		'managed_domain_prepare' => '1.14.0',
 		'managed_domain_notice'  => '1.14.0',
+		// Removing a container site from its host, dispatched to the HOST's
+		// own machine-posture agent. Its own floor rather than the restore
+		// family's: the restore verifier (1.13.0) must not vouch for a
+		// primitive that only exists from 1.15.0.
+		'decommission_site' => '1.15.0',
 	];
+
+	/**
+	 * The platform release that carries the decommission approval panel
+	 * (DecommissionApprovalPanel and its settings rows). A victim below this
+	 * cannot RENDER the consent it would be asked for, so dispatch refuses
+	 * with the fix in the message rather than staging a ceremony into rows no
+	 * page reads.
+	 */
+	const DECOMMISSION_PANEL_MIN_CORE_VERSION = '0.8.357';
 
 	/**
 	 * Operations the agent registers as ClassDestructive.
@@ -226,7 +244,7 @@ class JobCommandBuilder {
 	 * this list decides what the plane will not ask for, and the agent decides
 	 * what it will not do.
 	 */
-	const DESTRUCTIVE_PRIMITIVES = ['restore_database', 'restore_project', 'restore_chain'];
+	const DESTRUCTIVE_PRIMITIVES = ['restore_database', 'restore_project', 'restore_chain', 'decommission_site'];
 
 	/**
 	 * May this node be sent a destructive primitive job?
@@ -266,13 +284,20 @@ class JobCommandBuilder {
 	 *
 	 * @param ManagedNode $node The node a job would be dispatched to.
 	 */
-	public static function node_can_dispatch_destructive($node) {
+	public static function node_can_dispatch_destructive($node, $operation = 'restore_database') {
 		if (!self::has_agent_channel($node)) {
 			return false;
 		}
-		// One floor for the family: every restore carries the same requirement,
-		// which is an agent that can ask its own operator.
-		$min = self::PRIMITIVE_MIN_AGENT_VERSION['restore_database'];
+		// Every destructive operation carries its OWN floor. Falling back to
+		// another operation's — the restore family's 1.13.0 was the tempting
+		// one — is how a verifier quietly vouches for work it predates, so an
+		// operation with no declared floor fails closed: adding a destructive
+		// primitive means adding its PRIMITIVE_MIN_AGENT_VERSION row, and a
+		// forgotten row is a refusal at build time, not an inherited pass.
+		$min = self::PRIMITIVE_MIN_AGENT_VERSION[$operation] ?? null;
+		if ($min === null) {
+			return false;
+		}
 		$version = trim((string)$node->get('mgn_agent_version'));
 		return $version !== '' && version_compare($version, $min, '>=');
 	}
@@ -290,7 +315,7 @@ class JobCommandBuilder {
 		// dispatch restore to. The version and vocabulary checks below then
 		// apply as they do to everything else.
 		if (in_array($operation, self::DESTRUCTIVE_PRIMITIVES, true)
-				&& !self::node_can_dispatch_destructive($node)) {
+				&& !self::node_can_dispatch_destructive($node, $operation)) {
 			return false;
 		}
 
@@ -2146,17 +2171,58 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * Permanently remove a site from its host and confirm it is gone.
+	 * The HOST node a container victim's decommission is addressed to.
 	 *
-	 * Ships the tested remove_account.sh (sysadmin_tools) to the host, runs it with
-	 * -y, then re-probes the host and emits DECOMMISSION_VERIFIED only when the
-	 * container, its ${site}_* volumes, and the ${site}.conf vhost are all absent.
-	 * For a Docker node every step runs on the host (on_host); for bare-metal the
-	 * commands run on the node directly. remove_account.sh self-selects docker vs
-	 * bare-metal and is idempotent (REMOVE_ACCOUNT_NOTHING when there is nothing left).
+	 * The routing chain is the placement record: victim → mgn_mgh_host_id →
+	 * host row → mgh_mgn_host_node_id → the host's own paired ManagedNode.
+	 * Every missing link refuses naming its fix — the operator's next step is
+	 * in the message, not in a runbook.
+	 */
+	public static function decommission_host_node_for($node) {
+		$host_id = (int)$node->get('mgn_mgh_host_id');
+		if (!$host_id) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' has no placement record (mgn_mgh_host_id), so this plane "
+				. "cannot say which host to address. Assign the node to its host first."
+			);
+		}
+		$host = new ManagedHost($host_id, TRUE);
+		if (!$host->key || $host->get('mgh_delete_time')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' names a host record that no longer exists."
+			);
+		}
+		$host_node = $host->host_node();
+		if (!$host_node) {
+			throw new Exception(
+				"The host '{$host->get('mgh_name')}' has no agent node of its own yet. Pair the host's "
+				. "agent (siteless install, then join) and link its node on the host's edit page."
+			);
+		}
+		return $host_node;
+	}
+
+	/**
+	 * Permanently remove a container site from its shared host, with the site's
+	 * own consent.
 	 *
-	 * Relays are refused: a relay is not a remove_account.sh-shaped site and is torn
-	 * down through the relay flow (rebuild_relay / relay_remove_tenant) instead.
+	 * Routed as ONE destructive primitive (decommission_site) to the HOST's
+	 * own paired agent — the victim's agent lives inside the container being
+	 * destroyed and cannot outlive the work. The host runs the bundled,
+	 * self-verifying remove_account.sh; before anything is touched, the victim
+	 * approves its own removal on its own admin with its own recovery key
+	 * (DecommissionApprovalPanel). This plane is not in the approval path —
+	 * the primitive declares no parameter an answer could travel through.
+	 *
+	 * Refusals, each naming the operator's next step:
+	 * - a relay: torn down through the relay flow, unchanged;
+	 * - a bare-metal node: a whole machine is decommissioned at the PROVIDER
+	 *   (delete the instance, then delete the node record) — the settled
+	 *   answer, stated where the operator acts;
+	 * - an unpaired host: pair the host's agent;
+	 * - a victim below the release that carries the approval panel: upgrade it
+	 *   first, or it cannot render the consent it would be asked for;
+	 * - a victim with pending or running jobs: finish or cancel them first.
 	 */
 	public static function build_decommission_node($node, $params = []) {
 		if ($node->get('mgn_is_relay')) {
@@ -2165,69 +2231,91 @@ class JobCommandBuilder {
 				. "teardown flow (remove its tenants first), not site removal."
 			);
 		}
-		if (!self::has_ssh($node)) {
+		if (!trim((string)$node->get('mgn_container_name'))) {
 			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' has no SSH credentials configured; the host teardown "
-				. "cannot run without them."
+				"Node '{$node->get('mgn_slug')}' is not a container site. A dedicated machine is "
+				. "decommissioned at its provider: delete the instance there, then delete this node "
+				. "record from the dashboard."
 			);
 		}
 
-		$is_docker = (bool)$node->get('mgn_container_name');
-		$site      = self::decommission_site_name($node);
-		$site_esc  = escapeshellarg($site);
+		$site = self::decommission_site_name($node);
+		// The agent's own wire pattern, applied at build time so a legacy
+		// container name the host would refuse fails here, with the reason.
+		if (!preg_match('/^[a-z0-9_-]{1,50}$/', $site)) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' derives the site name '{$site}', which is not in the "
+				. "shape the host agent accepts (lowercase letters, digits, _ and -, at most 50)."
+			);
+		}
 
-		$transfer_id  = substr(md5(uniqid(mt_rand(), true)), 0, 12);
-		$remote_script = "/tmp/joinery_remove_account_{$transfer_id}.sh";
-		$remote_esc    = escapeshellarg($remote_script);
+		$host_node = self::decommission_host_node_for($node);
+		if (!self::has_primitive($host_node, 'decommission_site')) {
+			throw new Exception(
+				"The host agent '{$host_node->get('mgn_slug')}' cannot remove a site: that needs a "
+				. "paired agent of at least " . self::PRIMITIVE_MIN_AGENT_VERSION['decommission_site']
+				. " reporting the decommission_site primitive. Update the host's agent."
+			);
+		}
 
-		// The management node's own copy of the remover (this is where the agent runs).
-		$local_script = PathHelper::getSiteRoot() . '/maintenance_scripts/sysadmin_tools/remove_account.sh';
+		// The victim renders its own consent, so the release carrying the
+		// approval panel must be ON the victim before the host can stage one.
+		$core = trim((string)$node->get('mgn_joinery_version'));
+		if ($core === '' || version_compare($core, self::DECOMMISSION_PANEL_MIN_CORE_VERSION, '<')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' runs core " . ($core === '' ? '(unknown)' : $core)
+				. ", which cannot render the removal approval. Upgrade it to "
+				. self::DECOMMISSION_PANEL_MIN_CORE_VERSION . " or later first — the site must be able "
+				. "to consent to its own removal."
+			);
+		}
 
-		$steps = [];
+		// A victim mid-work is not demolished. Finish or cancel its jobs first,
+		// so nothing dies strangely when the container goes.
+		$open = self::open_job_count($node);
+		if ($open > 0) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' has {$open} pending or running job"
+				. ($open === 1 ? '' : 's') . ". Finish or cancel them before removing the site."
+			);
+		}
 
-		// 1. Ship the tested remover to the host. On a Docker host this MUST run at
-		//    host scope (docker + apache live there), so the script goes to the host
-		//    filesystem and every following step is on_host.
-		$steps[] = ['type' => 'scp', 'label' => 'Ship site remover to host',
-			'direction' => 'upload', 'local_path' => $local_script, 'remote_path' => $remote_script];
+		// An in-flight decommission is filed against the HOST, so the victim's
+		// own queue cannot see it — a second dispatch would otherwise pass
+		// every refusal above and run two teardowns. One removal per host at a
+		// time.
+		$db = DbConnector::get_instance()->get_db_link();
+		$hq = $db->prepare(
+			"SELECT COUNT(*) FROM mjb_management_jobs
+			 WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'decommission_node'
+			   AND mjb_status IN ('pending', 'running')");
+		$hq->execute([(int)$host_node->key]);
+		if ((int)$hq->fetchColumn() > 0) {
+			throw new Exception(
+				"The host '{$host_node->get('mgn_slug')}' already has a site removal pending or running. "
+				. "Wait for it to finish before dispatching another."
+			);
+		}
 
-		// 2. Run it. -y skips the interactive prompt; the marker lands in the output.
-		$steps[] = ['type' => 'ssh', 'label' => 'Remove the site from the host',
-			'on_host' => $is_docker, 'timeout' => 600,
-			'cmd' => "bash {$remote_esc} {$site_esc} -y"];
-
-		// 3. Verify gone. This is what the result processor gates the record finalize
-		//    on — never trust the run step alone.
-		$steps[] = ['type' => 'ssh', 'label' => 'Verify the site is gone',
-			'on_host' => $is_docker, 'continue_on_error' => false,
-			'cmd' => self::decommission_verify_cmd($site, $is_docker)];
-
-		// 4. Teardown: drop the shipped script. Never fail the job over cleanup.
-		$steps[] = ['type' => 'ssh', 'label' => 'Clean up shipped remover',
-			'on_host' => $is_docker, 'teardown' => true, 'continue_on_error' => true,
-			'cmd' => "rm -f {$remote_esc}"];
-
-		return $steps;
+		return self::build_decommission_site_primitive($host_node, ['site' => $site]);
 	}
 
 	/**
-	 * Shell that re-probes the host and prints DECOMMISSION_VERIFIED only when every
-	 * trace of the site is gone, else DECOMMISSION_FAILED_VERIFY and a non-zero exit.
+	 * The envelope, addressed to the HOST node. One parameter: a site NAME,
+	 * never a path — every path is composed host-side from compiled-in
+	 * patterns, and the approval answer has no field to travel through.
 	 */
-	private static function decommission_verify_cmd($site, $is_docker) {
-		$site_esc = escapeshellarg($site);
-		$checks = [];
-		if ($is_docker) {
-			$checks[] = "if command -v docker >/dev/null 2>&1 && docker ps -a --format '{{.Names}}' | grep -qx {$site_esc}; then GONE=0; echo 'still present: container'; fi";
-			$checks[] = "if command -v docker >/dev/null 2>&1 && docker volume ls --format '{{.Name}}' | grep -q \"^{$site}_\"; then GONE=0; echo 'still present: volumes'; fi";
-		}
-		// The reverse-proxy vhost and project dir live on the host for both topologies.
-		$checks[] = "if [ -f /etc/apache2/sites-available/{$site}.conf ]; then GONE=0; echo 'still present: vhost'; fi";
-		$checks[] = "if [ -d /var/www/html/{$site} ]; then GONE=0; echo 'still present: web root'; fi";
-		// Join with '; ' — each check ends in `fi`, and `fi if` on one line is a
-		// bash syntax error (exit 2). `fi; if` is valid.
-		return "GONE=1; " . implode('; ', $checks)
-		     . "; if [ \"\$GONE\" = 1 ]; then echo DECOMMISSION_VERIFIED; else echo DECOMMISSION_FAILED_VERIFY; exit 1; fi";
+	public static function build_decommission_site_primitive($host_node, $params = []) {
+		return ['primitive' => 'decommission_site', 'params' => ['site' => (string)($params['site'] ?? '')]];
+	}
+
+	/** Pending or running jobs filed against a node. */
+	private static function open_job_count($node) {
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare(
+			"SELECT COUNT(*) FROM mjb_management_jobs WHERE mjb_mgn_node_id = ? AND mjb_status IN ('pending', 'running')");
+		$q->execute([(int)$node->key]);
+		return (int)$q->fetchColumn();
 	}
 
 	/**
@@ -2753,30 +2841,40 @@ class JobCommandBuilder {
 	 * Next free published port for a host's Docker containers (base 8080). THE
 	 * single allocator — every path that assigns a container port goes through
 	 * here so one set of rules applies. Uses MAX(mgn_port)+1 over ALL nodes on
-	 * the host — deleted rows included, so a removed-but-still-running
-	 * container's port is never handed out again (P-18 collision-safety). Rows
-	 * are matched by host string AND host id, because nodes carry one or the
-	 * other depending on how they were created. Excludes the node being
-	 * installed.
+	 * the machine — deleted rows included, so a removed-but-still-running
+	 * container's port is never handed out again (P-18 collision-safety).
+	 *
+	 * Sibling identity is the placement FK, never the per-node host string —
+	 * a container node without one cannot be allocated a port. But one
+	 * MACHINE can be described by more than one host ROW (duplicates from the
+	 * per-SSH-tuple backfill; a soft-deleted row re-minted later), and a port
+	 * reserved under any of them is reserved on the machine — so the max runs
+	 * over every node whose placement row, deleted rows included, shares the
+	 * target row's address. Excludes the node being installed.
 	 */
-	public static function next_container_port($host, $host_id = null, $exclude_node_id = 0) {
+	public static function next_container_port($host_id, $exclude_node_id = 0) {
+		if (!(int)$host_id) {
+			throw new Exception('next_container_port requires a managed host id: a container node names its host by mgn_mgh_host_id.');
+		}
 		$db = DbConnector::get_instance()->get_db_link();
-		$where  = "(mgn_host = ?" . ($host_id ? " OR mgn_mgh_host_id = ?" : "") . ") AND mgn_id <> ?";
-		$params = $host_id
-			? [$host, (int)$host_id, (int)$exclude_node_id]
-			: [$host, (int)$exclude_node_id];
-		$q = $db->prepare("SELECT COALESCE(MAX(mgn_port), 0) FROM mgn_managed_nodes WHERE {$where}");
-		$q->execute($params);
+		$q = $db->prepare(
+			"SELECT COALESCE(MAX(n.mgn_port), 0)
+			 FROM mgn_managed_nodes n
+			 JOIN mgh_managed_hosts h ON h.mgh_id = n.mgn_mgh_host_id
+			 WHERE h.mgh_host = (SELECT mgh_host FROM mgh_managed_hosts WHERE mgh_id = ?)
+			   AND n.mgn_id <> ?");
+		$q->execute([(int)$host_id, (int)$exclude_node_id]);
 		$max = (int)$q->fetchColumn();
 		return $max >= 8080 ? $max + 1 : 8080;
 	}
 
 	private static function allocate_container_port($node) {
-		return self::next_container_port(
-			$node->get('mgn_host'),
-			$node->get('mgn_mgh_host_id') ?: null,
-			(int)$node->key
-		);
+		$host_id = (int)$node->get('mgn_mgh_host_id');
+		if (!$host_id) {
+			$host = ManagedHost::ensure_for_node($node);
+			$host_id = (int)$host->key;
+		}
+		return self::next_container_port($host_id, (int)$node->key);
 	}
 
 	public static function build_install_node($node, $params) {

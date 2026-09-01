@@ -100,4 +100,33 @@ return [
 			$dblink->exec("CREATE INDEX IF NOT EXISTS mjb_external_order_item_id_idx ON mjb_management_jobs (mjb_external_order_item_id)");
 		},
 	],
+
+	[
+		// The placement FK (mgn_mgh_host_id) is the only sibling identity —
+		// port allocation and host-scope routing read nothing else. sm_002
+		// filtered to LIVE rows, so soft-deleted rows kept a NULL FK and their
+		// port reservations were invisible to an FK-keyed allocator. Assign
+		// every remaining NULL-FK row, deleted included, to the oldest live
+		// host row for its address. Rows whose address matches no host row are
+		// left alone: they are machines with no placement record, and minting
+		// one is a decision made where a node is created, not in a sweep.
+		'id' => 'sm_006_host_fk_covers_deleted_rows',
+		'version' => '1.3.0',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$dblink->exec("
+				UPDATE mgn_managed_nodes n
+				SET mgn_mgh_host_id = (
+					SELECT h.mgh_id FROM mgh_managed_hosts h
+					WHERE h.mgh_host = n.mgn_host AND h.mgh_delete_time IS NULL
+					ORDER BY h.mgh_id ASC LIMIT 1
+				)
+				WHERE n.mgn_mgh_host_id IS NULL
+				  AND EXISTS (
+					SELECT 1 FROM mgh_managed_hosts h2
+					WHERE h2.mgh_host = n.mgn_host AND h2.mgh_delete_time IS NULL
+				  )
+			");
+		},
+	],
 ];

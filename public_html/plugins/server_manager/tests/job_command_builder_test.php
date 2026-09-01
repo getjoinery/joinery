@@ -1355,80 +1355,228 @@ check(strpos($split_dl_json, 'X-Amz-Signature') !== false
 // Without a node credential, everything stays on the main token ($run_node's
 // target has none) — already asserted above via credentials_b64 === __SM_CREDS_.
 
-section('Decommission: ship + run remove_account.sh, then verify gone');
+section('Decommission: one destructive primitive to the host agent, or a refusal naming the fix');
 
-// A Docker node's teardown runs entirely on the host (docker + apache live there):
-// the tested remover is shipped via scp, run on_host with the derived site name, and
-// a verify step re-probes the host and gates on DECOMMISSION_VERIFIED.
-$decom_docker = jcb_node(array(
-	'mgn_container_name' => 'decomsite',
-	'mgn_web_root'       => '/var/www/html/decomsite/public_html'));
-$dsteps = JobCommandBuilder::build_decommission_node($decom_docker);
-$scp = null; $run = null; $verify = null;
-foreach ($dsteps as $s) {
-	if (($s['type'] ?? '') === 'scp') { $scp = $s; }
-	if (strpos($s['label'] ?? '', 'Remove the site') === 0) { $run = $s; }
-	if (strpos($s['label'] ?? '', 'Verify the site') === 0) { $verify = $s; }
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_host_class.php'));
+
+/** A placement record linked to its own paired host-agent node. */
+function jcb_host_with_agent(array $host_agent_fields = array()) {
+	$suffix = bin2hex(random_bytes(3));
+	$host_node = jcb_node(array_merge(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x0b", 32)),
+		'mgn_agent_version'    => '1.15.0',
+		'mgn_agent_primitives' => 'check_status,decommission_site',
+	), $host_agent_fields));
+	$host = new ManagedHost(NULL);
+	$host->set('mgh_slug', 'harnesstest-host-' . $suffix);
+	$host->set('mgh_name', 'HarnessTest Host ' . $suffix);
+	$host->set('mgh_host', '192.0.2.10');
+	$host->set('mgh_mgn_host_node_id', $host_node->key);
+	$host->prepare();
+	$host->save();
+	$host->load();
+	harness_register_row('mgh_managed_hosts', 'mgh_id', $host->key);
+	return array($host, $host_node);
 }
-check($scp !== null && ($scp['direction'] ?? '') === 'upload'
-	&& substr((string)($scp['local_path'] ?? ''), -strlen('sysadmin_tools/remove_account.sh')) === 'sysadmin_tools/remove_account.sh',
-	'ships remove_account.sh to the host via scp upload', $scp['local_path'] ?? '?');
-check($run !== null && !empty($run['on_host']),
-	'docker teardown runs on the host (on_host)');
-check($run !== null && strpos($run['cmd'], "'decomsite'") !== false && strpos($run['cmd'], ' -y') !== false,
-	'runs the remover with the escaped, node-derived site name and -y', $run['cmd'] ?? '?');
-check($verify !== null && strpos($verify['cmd'], 'DECOMMISSION_VERIFIED') !== false
-	&& strpos($verify['cmd'], 'DECOMMISSION_FAILED_VERIFY') !== false && strpos($verify['cmd'], 'exit 1') !== false,
-	'verify step gates on DECOMMISSION_VERIFIED and fails when any trace remains', $verify['cmd'] ?? '?');
+
+/** A container victim placed on a host, at a core that can render the consent panel. */
+function jcb_decom_victim($host, array $fields = array()) {
+	return jcb_node(array_merge(array(
+		'mgn_container_name'  => 'decomsite',
+		'mgn_web_root'        => '/var/www/html/decomsite/public_html',
+		'mgn_mgh_host_id'     => $host->key,
+		'mgn_joinery_version' => JobCommandBuilder::DECOMMISSION_PANEL_MIN_CORE_VERSION,
+	), $fields));
+}
+
+// The happy path: envelope addressed at the host, ONE parameter, a NAME.
+list($decom_host, $decom_host_node) = jcb_host_with_agent();
+$decom_docker = jcb_decom_victim($decom_host);
+$denv = JobCommandBuilder::build_decommission_node($decom_docker);
+check(($denv['primitive'] ?? '') === 'decommission_site',
+	'a container victim routes as the decommission_site primitive');
+check(($denv['params'] ?? null) === array('site' => 'decomsite'),
+	'the envelope carries exactly one parameter: the site NAME', json_encode($denv));
+check(strpos((string)json_encode($denv), '/var/www') === false
+	&& strpos((string)json_encode($denv), '__SM_CREDS_') === false,
+	'no path and no credential crosses to the host');
+check((int)JobCommandBuilder::decommission_host_node_for($decom_docker)->key === (int)$decom_host_node->key,
+	'the job subject resolves through placement record to the host\'s own node');
 
 // Site name is derived from node fields only — never from operator input.
 check(JobCommandBuilder::decommission_site_name($decom_docker) === 'decomsite',
 	'docker site name = container name');
-$decom_bare = jcb_node(array('mgn_web_root' => '/var/www/html/baremetalsite/public_html'));
-check(JobCommandBuilder::decommission_site_name($decom_bare) === 'baremetalsite',
+$name_bare = jcb_node(array('mgn_web_root' => '/var/www/html/baremetalsite/public_html'));
+check(JobCommandBuilder::decommission_site_name($name_bare) === 'baremetalsite',
 	'bare-metal site name = web-root parent directory');
-foreach (JobCommandBuilder::build_decommission_node($decom_bare) as $s) {
-	if (strpos($s['label'] ?? '', 'Remove the site') === 0) {
-		check(empty($s['on_host']), 'bare-metal teardown runs on the node itself (not on_host)');
-	}
-}
-
-// A relay is not a remove_account.sh-shaped site: decommission_node refuses it.
-$relay = jcb_node(array('mgn_is_relay' => true, 'mgn_web_root' => '/var/www/html/relaysite/public_html'));
-$relay_refused = false;
-try { JobCommandBuilder::build_decommission_node($relay); } catch (Exception $e) { $relay_refused = true; }
-check($relay_refused, 'a relay node refuses decommission_node');
 
 // A malformed site name (no safe value derivable) refuses rather than guessing.
 $bad = jcb_node(array('mgn_web_root' => ''));
 $bad_refused = false;
 try { JobCommandBuilder::decommission_site_name($bad); } catch (Exception $e) { $bad_refused = true; }
-check($bad_refused, 'an underivable site name refuses instead of building a dangerous command');
+check($bad_refused, 'an underivable site name refuses instead of building a dangerous parameter');
 
-// No credential material anywhere in the built steps.
-$all_decom = implode("\n", array_map(function ($s) { return ($s['cmd'] ?? '') . '|' . ($s['local_path'] ?? ''); }, $dsteps));
-check(strpos($all_decom, '__SM_CREDS_') === false && strpos($all_decom, 'secret_key') === false,
-	'decommission steps carry no credentials');
+// A container name outside the agent's wire pattern refuses at build time,
+// with the reason — not on the host as a mystery.
+$decom_upper = jcb_decom_victim($decom_host, array('mgn_container_name' => 'DecomSite'));
+$upper_msg = '';
+try { JobCommandBuilder::build_decommission_node($decom_upper); } catch (Exception $e) { $upper_msg = $e->getMessage(); }
+check(strpos($upper_msg, 'shape the host agent accepts') !== false,
+	'a site name outside the wire pattern refuses naming the shape', $upper_msg);
 
-// Shell validity: every ssh step must parse as bash. The verify step joins one
-// check per resource, and a bad separator (`fi if` on one line) is a syntax
-// error — exit 2 at run time — that the substring asserts above wave through.
-// This runs the actual command text through `bash -n` for both topologies.
-$decom_sets = [
-	'docker'     => JobCommandBuilder::build_decommission_node($decom_docker),
-	'bare-metal' => JobCommandBuilder::build_decommission_node($decom_bare),
-];
-foreach ($decom_sets as $kind => $steps_set) {
-	foreach ($steps_set as $s) {
-		if (($s['type'] ?? '') !== 'ssh' || empty($s['cmd'])) { continue; }
-		$tmp = tempnam(sys_get_temp_dir(), 'jcbdecom');
-		file_put_contents($tmp, $s['cmd'] . "\n");
-		$lint = [];
-		exec('bash -n ' . escapeshellarg($tmp) . ' 2>&1', $lint, $rc);
-		unlink($tmp);
-		check($rc === 0, "{$kind}: step '" . ($s['label'] ?? '?') . "' parses as valid bash", implode("\n", $lint));
-	}
-}
+// A relay is torn down through the relay flow: refused, unchanged.
+$relay = jcb_node(array('mgn_is_relay' => true, 'mgn_web_root' => '/var/www/html/relaysite/public_html'));
+$relay_refused = false;
+try { JobCommandBuilder::build_decommission_node($relay); } catch (Exception $e) { $relay_refused = true; }
+check($relay_refused, 'a relay node refuses decommission_node');
+
+// A bare-metal node is a whole machine: decommissioned at the PROVIDER, and
+// the refusal says so where the operator acts.
+$decom_bare = jcb_node(array('mgn_web_root' => '/var/www/html/baremetalsite/public_html'));
+$bare_msg = '';
+try { JobCommandBuilder::build_decommission_node($decom_bare); } catch (Exception $e) { $bare_msg = $e->getMessage(); }
+check(strpos($bare_msg, 'provider') !== false,
+	'a bare-metal victim refuses naming the provider-deletion answer', $bare_msg);
+
+// A victim with no placement record cannot say which host to address.
+$decom_unplaced = jcb_node(array(
+	'mgn_container_name'  => 'decomsite2',
+	'mgn_joinery_version' => JobCommandBuilder::DECOMMISSION_PANEL_MIN_CORE_VERSION));
+$unplaced_msg = '';
+try { JobCommandBuilder::build_decommission_node($decom_unplaced); } catch (Exception $e) { $unplaced_msg = $e->getMessage(); }
+check(strpos($unplaced_msg, 'placement record') !== false,
+	'a victim with no placement record refuses naming the fix', $unplaced_msg);
+
+// A host with no agent identity of its own refuses naming the fix: pair it.
+$suffix_np = bin2hex(random_bytes(3));
+$host_unpaired = new ManagedHost(NULL);
+$host_unpaired->set('mgh_slug', 'harnesstest-host-' . $suffix_np);
+$host_unpaired->set('mgh_name', 'HarnessTest Unpaired Host ' . $suffix_np);
+$host_unpaired->set('mgh_host', '192.0.2.11');
+$host_unpaired->prepare();
+$host_unpaired->save();
+$host_unpaired->load();
+harness_register_row('mgh_managed_hosts', 'mgh_id', $host_unpaired->key);
+$decom_no_agent = jcb_decom_victim($host_unpaired, array('mgn_container_name' => 'decomsite3'));
+$np_msg = '';
+try { JobCommandBuilder::build_decommission_node($decom_no_agent); } catch (Exception $e) { $np_msg = $e->getMessage(); }
+check(strpos($np_msg, "Pair the host's agent") !== false,
+	'an unpaired host refuses naming the fix', $np_msg);
+
+// The old-executor tripwire, plane half: an older host agent is never routed
+// at. One that REPORTS a vocabulary without decommission_site refuses on the
+// report; one that predates reporting refuses on the 1.15.0 floor — the
+// restore floor (1.13.0) must not vouch for a primitive it predates.
+list($host_old) = jcb_host_with_agent(array(
+	'mgn_agent_version' => '1.13.1', 'mgn_agent_primitives' => 'check_status,restore_database'));
+$decom_old = jcb_decom_victim($host_old, array('mgn_container_name' => 'decomsite4'));
+$old_msg = '';
+try { JobCommandBuilder::build_decommission_node($decom_old); } catch (Exception $e) { $old_msg = $e->getMessage(); }
+check(strpos($old_msg, "Update the host's agent") !== false,
+	'a host agent that does not report decommission_site refuses loudly', $old_msg);
+list($host_mute) = jcb_host_with_agent(array(
+	'mgn_agent_version' => '1.10.0', 'mgn_agent_primitives' => ''));
+$decom_mute = jcb_decom_victim($host_mute, array('mgn_container_name' => 'decomsite5'));
+$mute_msg = '';
+try { JobCommandBuilder::build_decommission_node($decom_mute); } catch (Exception $e) { $mute_msg = $e->getMessage(); }
+check(strpos($mute_msg, "Update the host's agent") !== false,
+	'a pre-report host agent refuses on the 1.15.0 floor, not the restore floor', $mute_msg);
+
+// A victim below the release carrying the approval panel cannot render the
+// consent it would be asked for: refused, with the upgrade in the message.
+$decom_old_core = jcb_decom_victim($decom_host, array(
+	'mgn_container_name' => 'decomsite6', 'mgn_joinery_version' => '0.8.350'));
+$core_msg = '';
+try { JobCommandBuilder::build_decommission_node($decom_old_core); } catch (Exception $e) { $core_msg = $e->getMessage(); }
+check(strpos($core_msg, 'consent') !== false
+	&& strpos($core_msg, JobCommandBuilder::DECOMMISSION_PANEL_MIN_CORE_VERSION) !== false,
+	'a victim below the panel-carrying core refuses naming the upgrade', $core_msg);
+
+// A victim mid-work is not demolished: open jobs refuse the dispatch.
+$decom_busy = jcb_decom_victim($decom_host, array('mgn_container_name' => 'decomsite7'));
+$busy_job = ManagementJob::createJob($decom_busy->key, 'check_status',
+	array(array('type' => 'api', 'label' => 'Busy fixture', 'method' => 'GET', 'endpoint' => 'status', 'timeout' => 30)),
+	array(), 1);
+harness_register_row('mjb_management_jobs', 'mjb_id', $busy_job->key);
+$busy_msg = '';
+try { JobCommandBuilder::build_decommission_node($decom_busy); } catch (Exception $e) { $busy_msg = $e->getMessage(); }
+check(strpos($busy_msg, 'pending or running job') !== false,
+	'a victim with open jobs refuses until they are finished or cancelled', $busy_msg);
+
+// Dispatch bookkeeping survives the real filing path: the job record carries
+// the CALLER's victim_node_id beside the envelope's site — createFromBuild
+// once discarded caller params for primitive envelopes, which made a verified
+// teardown finalize the HOST's record.
+list($host_b, $host_b_node) = jcb_host_with_agent();
+$decom_v1 = jcb_decom_victim($host_b, array('mgn_container_name' => 'decomsite8'));
+$denv2 = JobCommandBuilder::build_decommission_node($decom_v1);
+$djob = ManagementJob::createFromBuild($host_b_node->key, 'decommission_node', $denv2,
+	array('victim_node_id' => (int)$decom_v1->key, 'site' => 'decomsite8'), 1);
+harness_register_row('mjb_management_jobs', 'mjb_id', $djob->key);
+$recorded = json_decode((string)$djob->get('mjb_parameters'), true);
+check((int)($recorded['victim_node_id'] ?? 0) === (int)$decom_v1->key
+	&& ($recorded['site'] ?? '') === 'decomsite8',
+	'the filed job records victim_node_id beside the envelope params', json_encode($recorded));
+
+// An in-flight decommission is filed against the HOST, invisible to the
+// victim's own queue — a second dispatch on that host refuses.
+$decom_v2 = jcb_decom_victim($host_b, array('mgn_container_name' => 'decomsite9'));
+$inflight_msg = '';
+try { JobCommandBuilder::build_decommission_node($decom_v2); } catch (Exception $e) { $inflight_msg = $e->getMessage(); }
+check(strpos($inflight_msg, 'already has a site removal') !== false,
+	'a host with a removal pending refuses a second dispatch', $inflight_msg);
+
+// A destructive operation with no declared version floor fails closed rather
+// than inheriting the restore family's.
+check(JobCommandBuilder::node_can_dispatch_destructive($decom_host_node, 'no_such_destructive_op') === false,
+	'an undeclared destructive floor refuses instead of inheriting');
+
+section('Placement records: the FK survives what the host-row lifecycle does');
+
+// A port reserved under a soft-deleted host row stays reserved on the machine:
+// the allocator unions siblings across every host row sharing the address,
+// deleted rows included (P-18 across a delete-and-re-mint).
+$suffix_pa = bin2hex(random_bytes(3));
+$host_old_row = new ManagedHost(NULL);
+$host_old_row->set('mgh_slug', 'harnesstest-portpool-' . $suffix_pa);
+$host_old_row->set('mgh_name', 'HarnessTest PortPool ' . $suffix_pa);
+$host_old_row->set('mgh_host', '192.0.2.99');
+$host_old_row->prepare();
+$host_old_row->save();
+$host_old_row->load();
+harness_register_row('mgh_managed_hosts', 'mgh_id', $host_old_row->key);
+$ported = jcb_node(array('mgn_host' => '192.0.2.99', 'mgn_mgh_host_id' => $host_old_row->key,
+	'mgn_container_name' => 'portpoolsite', 'mgn_port' => 9055));
+$host_old_row->soft_delete();
+$reminted = jcb_node(array('mgn_host' => '192.0.2.99', 'mgn_container_name' => 'portpoolsite2'));
+$new_host = ManagedHost::ensure_for_node($reminted);
+harness_register_row('mgh_managed_hosts', 'mgh_id', $new_host->key);
+check((int)$new_host->key !== (int)$host_old_row->key,
+	'a deleted host row is re-minted, not resurrected');
+check(JobCommandBuilder::next_container_port($new_host->key, (int)$reminted->key) === 9056,
+	'a port reserved under the deleted row is still reserved on the machine',
+	(string)JobCommandBuilder::next_container_port($new_host->key, (int)$reminted->key));
+
+// Duplicate host rows for one address: every caller converges on the oldest.
+$dup_row = new ManagedHost(NULL);
+$dup_row->set('mgh_slug', 'harnesstest-dup-' . $suffix_pa);
+$dup_row->set('mgh_name', 'HarnessTest Dup ' . $suffix_pa);
+$dup_row->set('mgh_host', '192.0.2.99');
+$dup_row->prepare();
+$dup_row->save();
+$dup_row->load();
+harness_register_row('mgh_managed_hosts', 'mgh_id', $dup_row->key);
+$converge = jcb_node(array('mgn_host' => '192.0.2.99'));
+$picked = ManagedHost::ensure_for_node($converge);
+check((int)$picked->key === (int)min((int)$new_host->key, (int)$dup_row->key),
+	'ensure_for_node picks the oldest live row for an address, deterministically');
+
+// A long hostname mints a row instead of overflowing mgh_slug (varchar 50).
+$long_node = jcb_node(array('mgn_host' => str_repeat('very-long-hostname.', 5) . 'example.com'));
+$long_host = ManagedHost::ensure_for_node($long_node);
+harness_register_row('mgh_managed_hosts', 'mgh_id', $long_host->key);
+check(strlen($long_host->get('mgh_slug')) <= 50,
+	'a minted slug fits the column whatever the address length', $long_host->get('mgh_slug'));
 
 section('Status dot: uptime fallback when there is no status-check data');
 

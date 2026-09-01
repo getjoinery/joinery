@@ -368,4 +368,55 @@ $dn3->load();
 check(empty($dn3->get('mgn_delete_time')),
 	'a completed-but-unverified decommission leaves the node intact');
 
+// The primitive shape: the job's SUBJECT is the HOST that ran the teardown,
+// the record to finalize is the VICTIM named in the params, and the verdict
+// travels inside the primitive's result envelope. Filed through the REAL
+// dispatch path (createFromBuild) rather than hand-written parameters — the
+// path once DISCARDED caller params for primitive envelopes, so a verified
+// teardown finalized the host's record, and a hand-written fixture could not
+// have seen it.
+$dhost4 = jrp_node(array());
+$dvictim4 = jrp_node(array('mgn_container_name' => 'decomrp4', 'mgn_web_root' => '/var/www/html/decomrp4/public_html'));
+$dj4 = ManagementJob::createFromBuild($dhost4->key, 'decommission_node',
+	array('primitive' => 'decommission_site', 'params' => array('site' => 'decomrp4')),
+	array('victim_node_id' => (int)$dvictim4->key, 'site' => 'decomrp4'), 1);
+harness_register_row('mjb_management_jobs', 'mjb_id', $dj4->key);
+$dj4->set('mjb_status', 'completed');
+$dj4->set('mjb_output', json_encode(array('api_version' => 1, 'data' => array(
+	'output' => "REMOVE_ACCOUNT_OK decomrp4\nDECOMMISSION_VERIFIED decomrp4"))));
+$dj4->save();
+JobResultProcessor::process($dj4);
+$dvictim4->load();
+$dhost4->load();
+check(!empty($dvictim4->get('mgn_delete_time')),
+	'a verified primitive decommission finalizes the VICTIM named in the params, through the real dispatch path',
+	var_export($dvictim4->get('mgn_delete_time'), true));
+check(empty($dhost4->get('mgn_delete_time')),
+	'the HOST that ran the teardown is untouched');
+
+// The same envelope carrying a failed verify leaves the victim intact.
+$dvictim5 = jrp_node(array('mgn_container_name' => 'decomrp5', 'mgn_web_root' => '/var/www/html/decomrp5/public_html'));
+$dj5 = ManagementJob::createFromBuild($dhost4->key, 'decommission_node',
+	array('primitive' => 'decommission_site', 'params' => array('site' => 'decomrp5')),
+	array('victim_node_id' => (int)$dvictim5->key, 'site' => 'decomrp5'), 1);
+harness_register_row('mjb_management_jobs', 'mjb_id', $dj5->key);
+$dj5->set('mjb_status', 'completed');
+$dj5->set('mjb_output', json_encode(array('api_version' => 1, 'data' => array(
+	'output' => "REMOVE_ACCOUNT_OK decomrp5\nDECOMMISSION_FAILED_VERIFY decomrp5\nstill present: volumes"))));
+$dj5->save();
+JobResultProcessor::process($dj5);
+$dvictim5->load();
+check(empty($dvictim5->get('mgn_delete_time')),
+	'an envelope-wrapped failed verify leaves the victim intact');
+
+// A host-subject job that somehow carries NO victim params must never finalize
+// the host's record — the legacy subject fallback applies only to a subject
+// that looks like a site.
+$dhost6 = jrp_node(array());
+$dj6 = jrp_job($dhost6, 'decommission_node', "REMOVE_ACCOUNT_OK ghost\nDECOMMISSION_VERIFIED ghost");
+JobResultProcessor::process($dj6);
+$dhost6->load();
+check(empty($dhost6->get('mgn_delete_time')),
+	'a victimless verified job never finalizes a siteless (host) subject');
+
 harness_finish();

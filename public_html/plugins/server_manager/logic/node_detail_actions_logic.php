@@ -279,11 +279,36 @@ class NodeDetailActions {
 			}
 
 			case 'apply_update_all_on_host': {
-				$siblings = new MultiManagedNode(
-					['host' => $node->get('mgn_host'), 'enabled' => true, 'deleted' => false],
-					['mgn_slug' => 'ASC']
-				);
-				$siblings->load();
+				// Siblings share a placement record (mgn_mgh_host_id), never a host
+				// string. A node with no placement record has no known siblings, so
+				// the action covers just it. Either way, a LIVE node at the same
+				// address that the placement grouping would miss is a refusal, not
+				// a silent skip — "all sites on this host" must never quietly mean
+				// "some".
+				$host_id = (int)$node->get('mgn_mgh_host_id');
+				$db_ungrouped = DbConnector::get_instance()->get_db_link();
+				$uq = $db_ungrouped->prepare(
+					"SELECT string_agg(mgn_slug, ', ') FROM mgn_managed_nodes
+					 WHERE mgn_host = ? AND mgn_delete_time IS NULL AND mgn_enabled = true
+					   AND mgn_mgh_host_id IS DISTINCT FROM ? AND mgn_id <> ?");
+				$uq->execute([(string)$node->get('mgn_host'), $host_id ?: null, (int)$node->key]);
+				$ungrouped = (string)$uq->fetchColumn();
+				if ($ungrouped !== '') {
+					self::fail($session, $page_regex,
+						"Some sites at this address are not grouped under this host record ({$ungrouped}). "
+						. 'Assign them on their node pages first, so this action covers every site.');
+					return $base_url . '&tab=updates';
+				}
+				if ($host_id) {
+					$siblings = new MultiManagedNode(
+						['host_id' => $host_id, 'enabled' => true, 'deleted' => false],
+						['mgn_slug' => 'ASC']
+					);
+					$siblings->load();
+				} else {
+					$siblings = new MultiManagedNode(['deleted' => false]);
+					$siblings->add($node);
+				}
 				if ($siblings->count() === 0) {
 					self::fail($session, $page_regex, 'No eligible sites found on this host.');
 					return $base_url . '&tab=updates';
@@ -584,10 +609,22 @@ class NodeDetailActions {
 					));
 					return $base_url . '&tab=overview';
 				}
-				$steps = JobCommandBuilder::build_decommission_node($node, []);
-				$job = ManagementJob::createJob($node->key, 'decommission_node', $steps, [], $uid);
+				// The job's SUBJECT is the HOST's node — the machine that runs the
+				// teardown — and the victim travels in the params so the result
+				// processor finalizes the right record. Built first, so every
+				// refusal (unpaired host, core too old, open jobs) lands before
+				// anything is filed.
+				$built = JobCommandBuilder::build_decommission_node($node, []);
+				$host_node = JobCommandBuilder::decommission_host_node_for($node);
+				$job = ManagementJob::createFromBuild($host_node->key, 'decommission_node', $built,
+					['victim_node_id' => $node->key, 'site' => $expected], $uid);
+				// The victim goes quiet: its agent dies with the container, and
+				// that death is a deliberate silence, not a node that broke.
+				$node->set('mgn_agent_quiet_time', gmdate('Y-m-d H:i:s'));
+				$node->save();
 				$session->save_message(new DisplayMessage(
-					'Permanent deletion started. The record is removed once the host teardown is verified.', 'Success',
+					'Permanent deletion started. The site must approve its own removal on its Backups page; '
+					. 'the record is removed once the host verifies the site gone.', 'Success',
 					$page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 				));
 				return self::jobUrl($job);

@@ -2432,6 +2432,18 @@
       "helptext": "JSON handoff the other way: {job_id, answer} or {job_id, declined}. Written by this machine's Backups page after an administrator opened the pending challenge with their recovery key in the browser; the agent compares the answer in constant time against what it sealed, and only then restores. The answer is a one-time secret bound to one job and is worthless for anything else. Cleared by the agent."
     },
     {
+      "name": "decommission_approval_request",
+      "default": "",
+      "managed": true,
+      "helptext": "JSON handoff from the Docker HOST's root agent to this site's own Backups page: the same shape as restore_approval_request, staged over this container's published database port when the host has claimed a job that would permanently destroy this site. Decommission's own row and HKDF context — never the restore's — so the consent screen always says what is actually being approved. Cleared by the host's agent when the job ends."
+    },
+    {
+      "name": "decommission_approval_answer",
+      "default": "",
+      "managed": true,
+      "helptext": "JSON handoff the other way: {job_id, answer} or {job_id, declined}, written by this site's Backups page after an administrator opened the pending removal challenge with this site's recovery key. The host's agent compares in constant time against what it sealed, and only then tears down. Cleared by the host's agent."
+    },
+    {
       "name": "api_upload_rate_limit_requests",
       "default": "10000",
       "helptext": "Max Drive chunk-upload requests per window per IP (own bucket, not the general API limit).",
