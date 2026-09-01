@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#VERSION 2.54 - PostgreSQL memory is sized from the machine by
+#               sysadmin_tools/tune_postgres_memory.sh (shared_buffers 20% of RAM,
+#               effective_cache_size 50%, as a conf.d drop-in) instead of a fixed 64MB.
 #VERSION 2.53 - Docker sites receive the admin email, admin password and
 #              upgrade server. _site_init.sh runs inside the container on first
 #              boot, so the host-side exports never reached it: --admin-email,
@@ -2341,7 +2344,19 @@ EOF
     sed -i "s/#port = 5432/port = 5432/" ${PG_CONFIG_DIR}/postgresql.conf
     sed -i "s/#max_wal_size = 1GB/max_wal_size = 64MB/" ${PG_CONFIG_DIR}/postgresql.conf
     sed -i "s/max_wal_size = 1GB/max_wal_size = 64MB/" ${PG_CONFIG_DIR}/postgresql.conf
-    sed -i "s/shared_buffers = 128MB/shared_buffers = 64MB/" ${PG_CONFIG_DIR}/postgresql.conf
+
+    # Memory is sized from the machine, not fixed: shared_buffers 20% of the
+    # RAM this box (or container) actually has, effective_cache_size 50%, as
+    # the conf.d drop-in sysadmin_tools/tune_postgres_memory.sh writes. The
+    # fixed 64MB this used to set was smaller than one busy table on a 2 GB
+    # VPS. --no-restart because PostgreSQL is restarted just below.
+    print_info "Sizing PostgreSQL memory from this machine..."
+    pg_tuner="${SCRIPT_DIR}/../sysadmin_tools/tune_postgres_memory.sh"
+    if [ -f "$pg_tuner" ]; then
+        bash "$pg_tuner" --no-restart
+    else
+        print_warning "tune_postgres_memory.sh not found beside the installer; PostgreSQL keeps its packaged shared_buffers"
+    fi
 
     # Record who connects, and from where.
     #

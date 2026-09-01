@@ -1534,7 +1534,15 @@ ceremony, and window-close) — it registers the File decrypt hook and mail's
 `plugins/mailbox/includes/MailboxIndex.php` is a disposable, per-owner SQLite FTS5
 index — sender, subject, both bodies, and attachment *filenames* (never attachment
 contents) — held **only** in `/dev/shm` (RAM-backed, never touches disk in the clear)
-for the lifetime of the unlock window.
+for the lifetime of the unlock window. The table is contentless (`content=''`) and
+positionless (`detail=none`), keyed by the message id as its rowid: a search returns
+ids and nothing else, so the text is never read back, and every query is single
+tokens ANDed, so positions are never consulted — the working copy is about an eighth
+of what storing both would cost (~105 MB for a 101k-message mailbox). `PRAGMA
+user_version` carries `MailboxIndex::FORMAT`; a working copy or restored blob of any
+other format fails to open and is rebuilt from the sealed rows, so a shape change is
+one rebuild per owner, never a migration. `contentless_delete` needs SQLite 3.43+,
+which the provisioning check `checkSearchIndexEngine()` verifies with the real DDL.
 
 Folding is batched, checkpointed, and bounded
 (`specs/mailbox_search_incremental_fold.md`): every id is delete-then-insert (so
@@ -1572,7 +1580,9 @@ whatever part of the scope the viewer holds a grant for — one mailbox or all o
 them (`sealedIndexScope()`) — and unions those hits with the plain Postgres
 `tsvector` search, which answers for the rest of the scope (another member's
 unsealed mailbox under an all-access view, unmatched mail) and simply never
-matches a sealed row's ciphertext. Locked surfaces as `search_locked` in the
+matches a sealed row's ciphertext — so its GIN index (`iem_fulltext_unsealed_idx`)
+is partial on unsealed rows, and every full-text query carries the same predicate
+(`MailboxService::FULLTEXT_INDEX_PREDICATE`) so the planner uses it. Locked surfaces as `search_locked` in the
 response, not a silent empty result, and the Postgres half still runs so unsealed
 hits show under the unlock prompt; a scope with no sealed content left needs no
 unlock and no index.
@@ -1625,6 +1635,16 @@ existed) has its content columns sealed while its existing attachment Files stay
 plaintext — safe, because every byte reader keys on the per-file `ima_is_sealed` flag,
 so those Files keep streaming as-is (the accepted pre-launch residual; there are no
 production users yet).
+
+**Per-page cost.** The reader reads `iem_inbound_email_messages` by mailbox on every
+page load — the Inbox list, the rail's unread badge, the per-mailbox totals — and the
+message class declares two partial indexes for exactly those reads (live rows by
+mailbox with the archived/read/spam/direction columns the queries filter on, and trashed
+rows by mailbox). The queries are shaped to them: the Inbox filter is `iem_is_archived =
+false` (the column is NOT NULL; `IS NOT TRUE` is not a btree operator), and totals and
+unread are two queries so the totals run index-only. A page of threads opens only the
+content it shows: the sender of every message, the subject/body/summary of the newest
+per thread, and the HTML body only when the plain part yields no preview.
 
 **Provisioning.** `ext-sqlite3` (with FTS5 compiled in) backs `MailboxIndex` and has no
 fallback — without it, search on a sealed mailbox is simply unavailable (the reader

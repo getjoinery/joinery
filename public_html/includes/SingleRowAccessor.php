@@ -10,7 +10,7 @@ function _RowFetch($table, $key_column, $key_value, $key_pdo_type,
 		return NULL;
 	}
 
-	require_once('DbConnector.php');
+	require_once(__DIR__ . '/DbConnector.php');
 	$dbhelper = DbConnector::get_instance();
 	$dblink = $dbhelper->get_db_link();
 

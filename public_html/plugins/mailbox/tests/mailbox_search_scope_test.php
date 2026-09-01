@@ -29,6 +29,7 @@
  *
  * Run: php -d apc.enable_cli=1 plugins/mailbox/tests/mailbox_search_scope_test.php
  *
+ * @version 1.1 - list rows: senders across the thread, snippet from the newest body, HTML only without a plain part
  * @version 1.0
  */
 
@@ -136,6 +137,20 @@ InboundEmailMessage::sealAndPersistContent($m_sealed, $vault, 'sender@example.co
 	'sealed@example.com', 'Trip to New Orleans', 'orleanskw in the sealed body', '');
 $m_plain = $make_msg($plain_alias, '<plain@x>', 'Plain note', 'orleanskw in the plain body');
 
+// A second, older message in the sealed thread from someone else: the list
+// row names every sender in the thread but shows only the newest body.
+$m_sealed_older = $make_msg($sealed_alias, '<sealed@x>', 'placeholder', 'placeholder');
+InboundEmailMessage::sealAndPersistContent($m_sealed_older, $vault, 'colleague@example.com',
+	'sealed@example.com', 'Re: Trip', 'orleanskw earlier in the thread', '');
+$db->prepare('UPDATE iem_inbound_email_messages SET iem_received_time = iem_received_time - interval \'1 hour\'
+	WHERE iem_inbound_email_message_id = ?')->execute(array($m_sealed_older));
+
+// A sealed message with an HTML body and no plain part: its snippet has to
+// come from the HTML, which the list opens only for exactly this case.
+$m_html = $make_msg($sealed_alias, '<htmlonly@x>', 'placeholder', 'placeholder');
+InboundEmailMessage::sealAndPersistContent($m_html, $vault, 'sender@example.com',
+	'sealed@example.com', 'HTML only', '', '<p>htmlonlykw inside markup</p>');
+
 $sealed_col = $db->prepare('SELECT iem_content_sealed, iem_body_plain FROM iem_inbound_email_messages
 	WHERE iem_inbound_email_message_id = ?');
 $sealed_col->execute(array($m_sealed));
@@ -191,6 +206,29 @@ try {
 	$subject_hit = $svc->listThreads(null, array('q' => 'new orleans'));
 	check($keys($subject_hit) === array('<sealed@x>'),
 		'a two-word query matches the sealed subject', json_encode($keys($subject_hit)));
+
+	// =====================================================================
+	section('a list row opens only what it shows');
+
+	$row = null;
+	foreach ($svc->listThreads(null, array('q' => 'orleanskw'))['threads'] as $t) {
+		if ($t['thread_key'] === '<sealed@x>') { $row = $t; }
+	}
+	check($row !== null, 'the sealed thread is listed');
+	check($row && $row['subject'] === 'Trip to New Orleans', 'with the newest message\'s subject', json_encode($row['subject'] ?? null));
+	check($row && strpos($row['snippet'], 'orleanskw in the sealed body') !== false,
+		'and its snippet from the newest plain body', json_encode($row['snippet'] ?? null));
+	check($row && $row['senders'] === 'sender@example.com, colleague@example.com',
+		'and every sender in the thread', json_encode($row['senders'] ?? null));
+	check($row && intval($row['msg_count']) === 2, 'across both messages');
+
+	$html_row = null;
+	foreach ($svc->listThreads(null, array('q' => 'htmlonlykw'))['threads'] as $t) {
+		if ($t['thread_key'] === '<htmlonly@x>') { $html_row = $t; }
+	}
+	check($html_row !== null, 'an HTML-only sealed message is found');
+	check($html_row && strpos($html_row['snippet'], 'htmlonlykw inside markup') !== false,
+		'and its snippet is read from the HTML when there is no plain part', json_encode($html_row['snippet'] ?? null));
 
 	check($keys($svc->listThreads($sealed_alias, array('q' => 'orleanskw'))) === array('<sealed@x>'),
 		'the sealed mailbox alone finds only its own message');

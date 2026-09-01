@@ -3338,6 +3338,112 @@ fn move_local(
     Ok(OpOutcome::Done)
 }
 
+/// Do two paths name the same slot on this filesystem?
+///
+/// Folded per component, because the clashes that produce a park are decided
+/// folded: a case-insensitive volume and a normalizing one both hand one file
+/// to two spellings, and `resolve_siblings` groups them by exactly this key.
+/// Comparing the strings raw would answer "different slot" for the very
+/// collisions that put a stranger's file in front of a park.
+fn same_slot(a: &str, b: &str, personality: &jd_vfs::Personality) -> bool {
+    let (mut a, mut b) = (a.split('/'), b.split('/'));
+    loop {
+        match (a.next(), b.next()) {
+            (None, None) => return true,
+            (Some(x), Some(y)) => {
+                if jd_vfs::comparison_key(x, personality)
+                    != jd_vfs::comparison_key(y, personality)
+                {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
+    }
+}
+
+/// Is the file standing at this park's path somebody else's?
+///
+/// The question a park has to ask before it decides what to do about a file
+/// that is not what it agreed. A stranger's file and this entry's own unsent
+/// edit both differ from the agreement, so the bytes alone cannot separate
+/// them.
+///
+/// Two conditions, and BOTH are needed. Another live entry has to say it lives
+/// at this slot -- and the file actually standing here has to hold that
+/// entry's agreed CONTENT. A claimant on its own is not enough:
+/// the naming pass ranks by records rather than by disk, so an entry whose own
+/// file has already left can be awarded a name while the loser's edited copy is
+/// still lying at it. Disowning on the claim alone would throw away work
+/// nobody has sent, which is the one thing this operation exists to refuse.
+fn the_file_here_is_another_entrys(
+    env: &ExecEnv,
+    entry: &Entry,
+    path: &std::path::Path,
+) -> Result<bool, ExecError> {
+    let Some(mine) = crate::pass::relative_path(env, entry)? else {
+        return Ok(false);
+    };
+    let personality = env.vfs.personality();
+    let mut here: Option<String> = None;
+    for other in crate::pass::all_entries(env)? {
+        if other.id == entry.id || other.remote_deleted {
+            continue;
+        }
+        // A parked entry owns no file, so its claim says nothing about who the
+        // bytes belong to.
+        if matches!(other.status, LocalStatus::Unsyncable(_)) {
+            continue;
+        }
+        let Some(theirs) = crate::pass::relative_path(env, &other)? else {
+            continue;
+        };
+        if !same_slot(&mine, &theirs, &personality) {
+            continue;
+        }
+        // Read once, and only when a claimant has already been found.
+        //
+        // By CONTENT, and deliberately not by fingerprint. A fingerprint match
+        // is anchored on the inode -- `unchanged_from` requires file_id
+        // equality -- so using one to decide whose file this is would fund an
+        // identity claim with a recycled inode, which is the thing this engine
+        // has already been bitten by and now refuses on principle. It would
+        // also buy nothing: a claimant's genuinely unedited file matches by
+        // content too, so the fingerprint arm has no true positive of its own
+        // and only a false one.
+        //
+        // The false one is the worst state this codebase knows. A recycled
+        // inode with a matching size, written in a tick the clock has not
+        // moved, would have this entry's UNSENT edit read as the claimant's
+        // file -- disowning the edit, and leaving the claimant's record
+        // fingerprint-matching bytes that are not its agreed content. That
+        // record then tells the claimant's own scan there is nothing to
+        // re-read and hands the download guard a reference that agrees by
+        // construction, which is precisely the shape frozen seed 2024110 pins.
+        //
+        // A content match cannot make that state: equal to the claimant's last
+        // agreed content means the bytes are on the server, so nothing this
+        // branch gives up can be lost.
+        // A claimant with no agreed content cannot be matched against
+        // anything, so it does not earn the read.
+        let Some(agreed) = other.synced_content.as_ref() else {
+            continue;
+        };
+        let hash = match &here {
+            Some(h) => h.clone(),
+            None => {
+                let h = env.vfs.hash(path)?;
+                here = Some(h.clone());
+                h
+            }
+        };
+        if agreed.sha256 == hash {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// Give up the local copy, then park.
 ///
 /// Reached when the name the server has given this entry cannot be held on this
@@ -3388,6 +3494,50 @@ fn unmaterialize_and_park(
             now.unchanged_from(agreed, &env.vfs.personality())
         });
         if agreed.is_none() || entry.synced_content.is_none() {
+            // Is what is standing here even ours?
+            //
+            // A park's path is derived from an agreement the naming pass has
+            // just overruled, so it can name a spot another entry now holds --
+            // the escaped spelling of one file and the literal name of another
+            // land on the same string, and the loser's path is the winner's
+            // file. There is nothing of this entry's to give up in that case:
+            // the record is what has to change, and the file belongs to
+            // somebody else who is looking after it.
+            //
+            // It takes two things to say so, and the claim is not one of them
+            // on its own: another live entry has to say it lives at this slot,
+            // AND the file standing here has to hold that entry's agreed
+            // content. Naming ranks by records rather than by disk, so an entry
+            // whose own file has already left can win a name while the loser's
+            // edited copy is still lying at it -- and disowning on the claim
+            // alone would throw away work nobody has sent, which is the one
+            // thing this operation exists to refuse.
+            if the_file_here_is_another_entrys(env, &entry, &path)? {
+                let told = entry
+                    .synced_placement
+                    .as_ref()
+                    .map(|p| p.name.clone())
+                    .unwrap_or_else(|| entry.remote.name.clone());
+                entry.synced_placement = None;
+                entry.synced_fingerprint = None;
+                entry.synced_content = None;
+                entry.synced_remote_content = None;
+                entry.local_name = None;
+                entry.status = LocalStatus::Unsyncable(reason.clone());
+                env.store.put_entry(&entry)?;
+                env.store.raise_issue(
+                    Some(entry.id),
+                    "unsyncable",
+                    &format!(
+                        "{told} cannot be held here under the name it now has on the \
+                         server ({reason:?}); the name belongs to another file on this \
+                         computer. It is safe on the server, and it comes back here if \
+                         the clash is resolved."
+                    ),
+                    (env.now_ms)() as i64,
+                )?;
+                return Ok(OpOutcome::Done);
+            }
             // Stand down rather than retry, and the difference is the whole
             // operation. A retry keeps this op in the journal, an entity with
             // an open op is skipped by the round, and the upload this is

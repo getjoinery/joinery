@@ -49,6 +49,14 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.35
+ * @changelog 1.35 - the reader's per-page cost on a large mailbox: the Inbox
+ *   list and rail counts read the mailbox-scoped indexes instead of scanning
+ *   the table (archived = false, totals and unread as two index-shaped
+ *   queries); a page opens only the content it shows (senders for every
+ *   message, subject/body/summary for the newest per thread, HTML only when
+ *   the plain part has no preview); the full-text index is partial on
+ *   unsealed rows (FULLTEXT_INDEX_PREDICATE, iem_016).
  * @version 1.34
  * @changelog 1.34 - a search consults the VIEWER's sealed index for every scope
  *   it covers — all mailboxes included — unioned with the Postgres search for
@@ -215,6 +223,17 @@ class MailboxService {
 	 * what a person searches for, and the messages this size are almost always
 	 * markup or encoded blobs anyway.
 	 */
+	/**
+	 * The full-text index is partial: a sealed row's content columns are
+	 * ciphertext, which never matches a query, so indexing them only grew the
+	 * index (3 GB of a 5 GB table on a fully sealed mailbox) and taxed every
+	 * write. The predicate here MUST be byte-identical to the index's WHERE
+	 * (iem_016) and appear in every full-text query, or the planner will not
+	 * use the index. A row entering or leaving the sealed state moves into or
+	 * out of the index on its own.
+	 */
+	const FULLTEXT_INDEX_PREDICATE = 'iem_content_sealed IS NOT TRUE';
+
 	const FULLTEXT_SQL = "to_tsvector('english',
 					left(coalesce(iem_sender, ''), 1000)        || ' ' ||
 					left(coalesce(iem_subject, ''), 4000)       || ' ' ||
@@ -464,28 +483,42 @@ class MailboxService {
 			// since the Inbox does not list those either and their
 			// unread flag is whatever the source's \Seen said, never something the
 			// member set. A count that spans a view the click cannot reach sends
-			// the reader looking for unread mail the Inbox does not hold. IS NOT TRUE, not "= false", so a NULL
-			// from before the column existed counts as not-archived — the same
-			// idiom listThreads uses, or the two would disagree on legacy rows.
+			// the reader looking for unread mail the Inbox does not hold.
 			//
 			// `total` deliberately stays mailbox-wide: it answers "does this box
 			// hold anything at all", which decides whether the box is offered in
 			// the rail. Narrowing it to the Inbox would hide a fully-archived
 			// mailbox and its Trash with it.
-			$sql = "SELECT iem_iea_inbound_email_alias_id AS alias_id,
-						COUNT(*) AS total,
-						COUNT(*) FILTER (
-							WHERE iem_is_read = false AND iem_is_archived IS NOT TRUE
-							AND (iem_direction IS DISTINCT FROM 'outbound' OR iem_self_delivered)
-						) AS unread
+			//
+			// Two queries, not one with a FILTER: the totals run index-only over
+			// the live-rows-by-mailbox index (every column they touch is in it),
+			// and the unread count seeks the (mailbox, archived=false, read=false)
+			// range and reads the handful of rows there for iem_self_delivered.
+			// One query with a FILTER referencing that column would fetch the
+			// heap for every row of the mailbox — a 100k-message mailbox at
+			// ~190 ms per page load, the same cost as no index at all.
+			$sql = "SELECT iem_iea_inbound_email_alias_id AS alias_id, COUNT(*) AS total
 					FROM iem_inbound_email_messages
 					WHERE iem_delete_time IS NULL
 					AND iem_spam_verdict IS DISTINCT FROM 'spam'" . self::NO_DRAFTS . "
 					AND iem_iea_inbound_email_alias_id IN ($in)
 					GROUP BY iem_iea_inbound_email_alias_id";
-			$stmt = $db->query($sql);
-			foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
-				$agg[intval($r['alias_id'])] = $r;
+			foreach ($db->query($sql)->fetchAll(PDO::FETCH_ASSOC) as $r) {
+				$agg[intval($r['alias_id'])] = array('total' => intval($r['total']), 'unread' => 0);
+			}
+			$sql = "SELECT iem_iea_inbound_email_alias_id AS alias_id, COUNT(*) AS unread
+					FROM iem_inbound_email_messages
+					WHERE iem_delete_time IS NULL
+					AND iem_is_archived = false AND iem_is_read = false
+					AND iem_spam_verdict IS DISTINCT FROM 'spam'" . self::NO_DRAFTS . "
+					AND (iem_direction IS DISTINCT FROM 'outbound' OR iem_self_delivered)
+					AND iem_iea_inbound_email_alias_id IN ($in)
+					GROUP BY iem_iea_inbound_email_alias_id";
+			foreach ($db->query($sql)->fetchAll(PDO::FETCH_ASSOC) as $r) {
+				$aid = intval($r['alias_id']);
+				if (isset($agg[$aid])) {
+					$agg[$aid]['unread'] = intval($r['unread']);
+				}
 			}
 		}
 
@@ -606,17 +639,34 @@ class MailboxService {
 			// box opens its Inbox view, so the count has to describe what that view
 			// shows — a badge counting mail sitting in Spam or Trash sends the reader
 			// looking for unread mail the Inbox does not hold.
+			//
+			// Live and trashed are two queries so each reads its own partial
+			// index (live rows by mailbox, trashed rows by mailbox — both seek
+			// alias IS NULL); one query spanning both matched neither and
+			// scanned the table on every superadmin page load.
+			$counts = array();
 			$stmt = $db->query("SELECT iem_ied_inbound_email_domain_id AS domain_id,
-					COUNT(*) FILTER (WHERE iem_delete_time IS NULL) AS total,
-					COUNT(*) FILTER (
-						WHERE iem_delete_time IS NULL AND iem_is_read = false
-						AND iem_is_archived IS NOT TRUE
-						AND iem_spam_verdict IS DISTINCT FROM 'spam'
-					) AS unread,
-					COUNT(*) FILTER (WHERE iem_delete_time IS NOT NULL) AS trashed
+					COUNT(*) AS total,
+					COUNT(*) FILTER (WHERE iem_is_read = false AND iem_is_archived = false
+					AND iem_spam_verdict IS DISTINCT FROM 'spam') AS unread
 				FROM iem_inbound_email_messages
-				WHERE iem_iea_inbound_email_alias_id IS NULL" . self::NO_DRAFTS . "
+				WHERE iem_delete_time IS NULL AND iem_iea_inbound_email_alias_id IS NULL" . self::NO_DRAFTS . "
 				GROUP BY iem_ied_inbound_email_domain_id");
+			foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+				$counts[intval($r['domain_id'])] = array('domain_id' => $r['domain_id'],
+					'total' => intval($r['total']), 'unread' => intval($r['unread']), 'trashed' => 0);
+			}
+			$stmt = $db->query("SELECT iem_ied_inbound_email_domain_id AS domain_id, COUNT(*) AS trashed
+				FROM iem_inbound_email_messages
+				WHERE iem_delete_time IS NOT NULL AND iem_iea_inbound_email_alias_id IS NULL" . self::NO_DRAFTS . "
+				GROUP BY iem_ied_inbound_email_domain_id");
+			foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+				$did = intval($r['domain_id']);
+				if (!isset($counts[$did])) {
+					$counts[$did] = array('domain_id' => $r['domain_id'], 'total' => 0, 'unread' => 0, 'trashed' => 0);
+				}
+				$counts[$did]['trashed'] = intval($r['trashed']);
+			}
 
 			// Domain names + their protection level, so each box can carry an honest
 			// chip. A row whose domain record has gone is still listed, under its id —
@@ -631,7 +681,7 @@ class MailboxService {
 			}
 
 			$unmatched = array();
-			foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+			foreach ($counts as $r) {
 				$did = intval($r['domain_id']);
 				$unmatched[] = array(
 					'domain_id'      => $did,
@@ -923,7 +973,12 @@ class MailboxService {
 		// the reader can label it.
 		$searching = !empty($filters['q']);
 		if (!$trash && !$sent && !empty($filters['inbox']) && !$searching) {
-			$where[] = "iem_is_archived IS NOT TRUE";
+			// "= false", not IS NOT TRUE: the column is NOT NULL, so they mean
+			// the same thing, and only the equality lets the planner seek the
+			// (mailbox, archived) index range — the Inbox is a fraction of a
+			// percent of a large mailbox, and IS NOT TRUE is not a btree
+			// operator, so it read the whole mailbox to find it.
+			$where[] = "iem_is_archived = false";
 			$where[] = "(iem_direction IS DISTINCT FROM 'outbound' OR iem_self_delivered)";
 		}
 
@@ -961,7 +1016,8 @@ class MailboxService {
 		// needs no unlock and no index.
 		$search_locked = false;
 		if (!empty($filters['q'])) {
-			$fts_sql = self::FULLTEXT_SQL . " @@ websearch_to_tsquery('english', ?)";
+			$fts_sql = '(' . self::FULLTEXT_SQL . " @@ websearch_to_tsquery('english', ?) AND "
+				. self::FULLTEXT_INDEX_PREDICATE . ')';
 			$viewer_id = $this->viewer->getUserId();
 			$index_scope = $this->sealedIndexScope($aliasId);
 			$vault = count($index_scope) ? UserEncryptionVault::loadForUser($viewer_id) : null;
@@ -994,10 +1050,11 @@ class MailboxService {
 					$params[] = $filters['q'];
 				}
 			} else {
-				// The expression MUST stay byte-identical to iem_013's GIN index
-				// expression (plugins/mailbox/migrations/migrations.php), or the
-				// planner will not use the index. websearch_to_tsquery tolerates
-				// arbitrary user input (stray quotes/operators won't raise).
+				// The expression MUST stay byte-identical to iem_016's GIN index
+				// expression (plugins/mailbox/migrations/migrations.php), and the
+				// predicate to its WHERE, or the planner will not use the index.
+				// websearch_to_tsquery tolerates arbitrary user input (stray
+				// quotes/operators won't raise).
 				$where[] = $fts_sql;
 				$params[] = $filters['q'];
 			}
@@ -1088,7 +1145,11 @@ class MailboxService {
 				$page_ids[] = $mid;
 			}
 		}
-		$content = $this->fetchAndDecryptContent(array_unique($page_ids));
+		$latest_ids = array();
+		foreach ($rows as $r) {
+			$latest_ids[] = intval($r['latest_id']);
+		}
+		$content = $this->fetchAndDecryptContent(array_unique($page_ids), $latest_ids);
 		// Which of this page's messages carry a real attachment, for the list
 		// paperclip. Presence only — the manifest itself is a thread-open cost.
 		$clipped = $this->messageIdsWithAttachments(array_unique($page_ids));
@@ -1199,23 +1260,41 @@ class MailboxService {
 	}
 
 	/**
-	 * Every message id in $ids, with sender/subject/body_plain/body_html/ai_summary
-	 * resolved through the Sealed Vault raw-row read hook (docs/sealed_vault.md)
-	 * — decrypted when sealed and in-window, a locked placeholder when sealed
-	 * and locked, plain as-is when never sealed. Mirrors
-	 * plugins/joinery_ai/includes/ModelQueryExecutor.php's decryptSealedFields().
+	 * Content for a page of threads, resolved through the Sealed Vault raw-row
+	 * read hook (docs/sealed_vault.md) — decrypted when sealed and in-window, a
+	 * locked placeholder when sealed and locked, plain as-is when never sealed.
+	 * Mirrors plugins/joinery_ai/includes/ModelQueryExecutor.php's
+	 * decryptSealedFields().
 	 *
+	 * Only what the list shows is fetched and opened. A thread row shows its
+	 * newest message's subject, snippet and AI summary, and the senders of
+	 * every message in it — so every id in $ids yields its sender, and only
+	 * the ids in $full_ids (the newest per thread) yield the rest. The HTML
+	 * body is opened only when the plain part gives no preview, which is the
+	 * same rule buildSnippet() applies. A page of fifty Inbox threads was
+	 * opening 2.4 MB of HTML bodies to print fifty one-line snippets.
+	 *
+	 * Every entry carries all five keys, so callers never branch on shape.
+	 *
+	 * @param int[] $ids       every message id on the page
+	 * @param int[] $full_ids  the ids whose subject/body/summary are shown
 	 * @return array<int, array{sender:string,subject:string,body_plain:string,body_html:string,ai_summary:string}>
 	 */
-	private function fetchAndDecryptContent(array $ids): array {
+	private function fetchAndDecryptContent(array $ids, array $full_ids = array()): array {
 		$out = array();
 		if (!count($ids)) {
 			return $out;
 		}
+		$full = array_flip(array_map('intval', $full_ids));
 		$in = implode(',', array_map('intval', $ids));
+		$in_full = count($full) ? implode(',', array_keys($full)) : '0';
 		$sql = "SELECT iem_inbound_email_message_id, iem_iea_inbound_email_alias_id, iem_direction,
 					iem_content_sealed, iem_sealed_key, iem_sealed_owner_user_id, iem_pending_parse,
-					iem_sender, iem_subject, iem_body_plain, iem_body_html, iem_ai_summary
+					iem_sender,
+					CASE WHEN iem_inbound_email_message_id IN ($in_full) THEN iem_subject END AS iem_subject,
+					CASE WHEN iem_inbound_email_message_id IN ($in_full) THEN iem_body_plain END AS iem_body_plain,
+					CASE WHEN iem_inbound_email_message_id IN ($in_full) THEN iem_body_html END AS iem_body_html,
+					CASE WHEN iem_inbound_email_message_id IN ($in_full) THEN iem_ai_summary END AS iem_ai_summary
 				FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id IN ($in)";
 		$rows = $this->db()->query($sql)->fetchAll(PDO::FETCH_ASSOC);
 
@@ -1229,39 +1308,54 @@ class MailboxService {
 			// parsed — its content columns are empty. It renders the SAME
 			// placeholder as a locked sealed row, never a visible third state.
 			$pending = $this->pgBool($row['iem_pending_parse'] ?? false);
+			$wanted = isset($full[$mid]) ? $fields : array('iem_sender' => 'sender');
 			foreach ($fields as $col => $key) {
+				if (!isset($wanted[$col])) {
+					$entry[$key] = '';
+					continue;
+				}
 				if ($pending) {
 					$entry[$key] = self::SEALED_PLACEHOLDER;
 					$this->content_locked = true;
 					continue;
 				}
-				$value = $row[$col];
-				if ($value !== null && $value !== '') {
-					try {
-						$value = InboundEmailMessage::decryptSealedFieldStatic($col, $value, $row);
-					} catch (VaultLockedException $e) {
-						$value = self::SEALED_PLACEHOLDER;
-						$this->content_locked = true;
-					} catch (Throwable $e) {
-						// A column that will not open — a damaged blob, or one
-						// left plaintext under a sealed flag by a rogue write
-						// path. One bad row must not take down the whole thread
-						// list, so it renders as unreadable and says so in the
-						// log, naming the message and column. content_locked
-						// stays down: that flag is the reader's "unlock your
-						// vault" prompt, and no unlock fixes a damaged column —
-						// raising it here made a write-path bug masquerade as a
-						// locked vault (specs/bugfix_promoted_sent_row_sealing.md).
-						error_log('MailboxService: could not read ' . $col . ' on message '
-							. $mid . ': ' . $e->getMessage());
-						$value = self::SEALED_PLACEHOLDER;
-					}
+				if ($col === 'iem_body_html'
+						&& MailboxHtmlSanitizer::previewText(mb_substr((string)$entry['body_plain'], 0, 4000)) !== '') {
+					// The plain part already yields the snippet; the HTML —
+					// routinely the largest column on the row — stays sealed.
+					$entry[$key] = '';
+					continue;
 				}
-				$entry[$key] = (string)$value;
+				$entry[$key] = $this->openListColumn($col, $row[$col], $row, $mid);
 			}
 			$out[$mid] = $entry;
 		}
 		return $out;
+	}
+
+	/**
+	 * One list column through the raw-row read hook. A locked vault yields the
+	 * placeholder and raises content_locked (the reader's unlock prompt); a
+	 * column that will not open — a damaged blob, or one left plaintext under
+	 * a sealed flag by a rogue write path — yields the placeholder and a log
+	 * line naming the message and column, with content_locked left down: no
+	 * unlock fixes a damaged column, and raising it here made a write-path bug
+	 * masquerade as a locked vault (specs/bugfix_promoted_sent_row_sealing.md).
+	 * One bad row must never take down the whole thread list.
+	 */
+	private function openListColumn(string $col, $value, array $row, int $mid): string {
+		if ($value === null || $value === '') {
+			return '';
+		}
+		try {
+			return (string)InboundEmailMessage::decryptSealedFieldStatic($col, $value, $row);
+		} catch (VaultLockedException $e) {
+			$this->content_locked = true;
+			return self::SEALED_PLACEHOLDER;
+		} catch (Throwable $e) {
+			error_log('MailboxService: could not read ' . $col . ' on message ' . $mid . ': ' . $e->getMessage());
+			return self::SEALED_PLACEHOLDER;
+		}
 	}
 
 	/** Parse a Postgres integer array literal ("{1,2,3}", PDO returns it as a string) to int[]. */

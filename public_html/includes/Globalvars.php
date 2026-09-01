@@ -38,7 +38,11 @@ class Globalvars {
 			}
 		}
 		
-		require_once('DbConnector.php');
+		// Anchored to this directory: a bare relative require executed inside a
+		// method resolves against whichever file is executing at the time — during
+		// a class-constant expression in data/ that is the data class, and there is
+		// no data/DbConnector.php.
+		require_once(__DIR__ . '/DbConnector.php');
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 		$sql = 'SELECT stg_value FROM stg_settings WHERE stg_name = :stg_name';

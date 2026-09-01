@@ -27,6 +27,7 @@
  * message rows are unsealed — the index reads content through the same get()
  * hook either way; under test here is the fold lifecycle, not sealing.
  *
+ * @version 1.1 - stale postings under a rowid are observed through search, since a contentless table stores no rows to count
  * @version 1.0
  */
 
@@ -115,7 +116,7 @@ $shm_rows = function (?int $id = null) use ($uid) {
 	$s = new SQLite3((new MailboxIndex())->shmPath($uid), SQLITE3_OPEN_READONLY);
 	$sql = $id === null
 		? 'SELECT count(*) FROM mailfts'
-		: 'SELECT count(*) FROM mailfts WHERE message_id = ' . intval($id);
+		: 'SELECT count(*) FROM mailfts WHERE rowid = ' . intval($id);
 	$n = (int)$s->querySingle($sql);
 	$s->close();
 	return $n;
@@ -154,18 +155,24 @@ check(MailboxIndex::hasBacklog($uid) === false, 'no backlog once caught up');
 
 // ------------------------------------------------- idempotency heals duplicates
 
-section('re-folding a range collapses duplicate rows instead of adding to them');
+section('re-folding a range replaces stale postings instead of adding to them');
 
-// The damage a pre-checkpoint build left behind: the same id inserted twice.
+// The damage a pre-checkpoint build left behind: the same id indexed twice.
+// A contentless FTS5 table does not police rowid uniqueness, so the second
+// insert lands as extra postings under m1's rowid — its stale words match m1.
 $s = new SQLite3($idx->shmPath($uid));
-$s->exec("INSERT INTO mailfts (message_id, content) VALUES ($m1, 'stale duplicate copy')");
+$s->exec("INSERT INTO mailfts (rowid, content) VALUES ($m1, 'stalekw duplicate copy')");
 $s->close();
-check($shm_rows($m1) === 2, 'fixture: a duplicate FTS row exists for m1');
+check($idx->search($uid, 'stalekw') === array($m1), 'fixture: stale postings match m1');
 
+// Delete-then-insert removes EVERY posting for the rowid (contentless_delete),
+// so a re-fold of a range the mark forgot replaces the row rather than
+// stacking a third copy on it.
 $set_mark(0); // as if an interrupted build never got its checkpoint
 $r = $idx->fold($uid, $kp['secret']);
 check($r['complete'] === true, 'the re-fold completes');
-check($shm_rows($m1) === 1, 'delete-then-insert collapsed the duplicate');
+check($idx->search($uid, 'stalekw') === array(), 'the stale postings are gone');
+check($idx->search($uid, 'incfoldkwone') === array($m1), 'and m1 is still found by its real content');
 check($shm_rows() === 3, 'one row per message overall', 'rows=' . $shm_rows());
 
 // ------------------------------------------------- the fold lock

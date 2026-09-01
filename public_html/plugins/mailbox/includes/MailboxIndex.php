@@ -74,6 +74,19 @@
  * folding), and restoring one under a newer mark would otherwise open a silent
  * coverage gap.
  *
+ * SHAPE: the FTS5 table is contentless (content='') with detail=none, and the
+ * message id is the row's rowid. Search returns ids and nothing else, so the
+ * text is never read back — storing it was two-thirds of the working copy —
+ * and every query is single tokens ANDed (sanitizeFtsQuery), so word
+ * positions were never used. Measured on a 101k-message mailbox: 799 MB of
+ * /dev/shm as (message_id, content) with positions, ~105 MB in this shape,
+ * identical results. contentless_delete=1 (SQLite 3.43+) is what lets the
+ * fold delete-then-reinsert a row. FORMAT is stamped in PRAGMA user_version;
+ * a working copy or restored blob of another format fails to open and is
+ * rebuilt — the disposable-cache contract, so a shape change never needs a
+ * migration, just one rebuild per owner on their next unlocked visit.
+ * @version 1.8 - contentless, positionless FTS table keyed by rowid, with a
+ *                format stamp that rebuilds any older working copy or blob
  * @version 1.7 - batched checkpointed folding with a deadline and a per-user
  *                fold lock; blob coverage recording; pending-parse rows fold
  *                as no-ops (refolded after parse)
@@ -93,6 +106,12 @@ class MailboxIndexException extends Exception {}
 class MailboxIndex {
 
 	const SHM_DIR = '/dev/shm';
+
+	/** The working copy's schema. See SHAPE in the class comment. */
+	const FTS_DDL = "CREATE VIRTUAL TABLE mailfts USING fts5(content, content='', detail=none, contentless_delete=1)";
+
+	/** Stamped in PRAGMA user_version; a copy carrying another value is rebuilt. */
+	const FORMAT = 2;
 
 	/** Messages per checkpoint: the high-water mark advances after each fully
 	 *  successful batch, so an interrupted fold resumes instead of restarting. */
@@ -195,7 +214,7 @@ class MailboxIndex {
 		if ($db === null) {
 			return array();
 		}
-		$stmt = $db->prepare('SELECT message_id FROM mailfts WHERE mailfts MATCH :q ORDER BY rank');
+		$stmt = $db->prepare('SELECT rowid AS message_id FROM mailfts WHERE mailfts MATCH :q ORDER BY rank');
 		if (!$stmt) {
 			return array();
 		}
@@ -227,7 +246,8 @@ class MailboxIndex {
 		}
 		$db = new SQLite3($path);
 		$db->busyTimeout(self::BUSY_TIMEOUT_MS);
-		$db->exec('CREATE VIRTUAL TABLE mailfts USING fts5(message_id UNINDEXED, content)');
+		$db->exec(self::FTS_DDL);
+		$db->exec('PRAGMA user_version = ' . self::FORMAT);
 		$db->close();
 
 		$bookkeeping = InboundMailboxSearchIndex::loadOrCreateForUser($user_id);
@@ -321,7 +341,8 @@ class MailboxIndex {
 			$db = new SQLite3($path, SQLITE3_OPEN_READWRITE);
 			$db->busyTimeout(self::BUSY_TIMEOUT_MS);
 			$check = $db->querySingle("SELECT name FROM sqlite_master WHERE type='table' AND name='mailfts'");
-			if ($check !== 'mailfts') {
+			if ($check !== 'mailfts' || intval($db->querySingle('PRAGMA user_version')) !== self::FORMAT) {
+				// Not ours, or an older shape — refused so the caller rebuilds.
 				$db->close();
 				return null;
 			}
@@ -348,6 +369,13 @@ class MailboxIndex {
 		$fil_id = intval($bookkeeping->get('imi_fil_file_id'));
 		$sealed_key = $bookkeeping->get('imi_sealed_key');
 		if ($fil_id <= 0 || !$sealed_key) {
+			return false;
+		}
+		if (intval($bookkeeping->get('imi_format')) !== self::FORMAT) {
+			// Another shape (or a legacy blob with no stamp): refused before a
+			// byte is decrypted — restoring hundreds of megabytes into /dev/shm
+			// only to find the wrong table underneath is the one thing the
+			// format stamp exists to avoid. The caller rebuilds.
 			return false;
 		}
 		$file = new File($fil_id, TRUE);
@@ -449,6 +477,7 @@ class MailboxIndex {
 
 		$bookkeeping->set('imi_fil_file_id', intval($file->key));
 		$bookkeeping->set('imi_sealed_key', $sealed_key);
+		$bookkeeping->set('imi_format', self::FORMAT);
 		// What the sealed file covers. The fold checkpointed the mark before
 		// this ran (and holds the fold lock), so the working copy just sealed
 		// contains everything at or below it.
@@ -540,8 +569,8 @@ class MailboxIndex {
 
 		$shm = new SQLite3($this->shmPath($user_id));
 		$shm->busyTimeout(self::BUSY_TIMEOUT_MS);
-		$insert = $shm->prepare('INSERT INTO mailfts (message_id, content) VALUES (:id, :content)');
-		$delete = $shm->prepare('DELETE FROM mailfts WHERE message_id = :id');
+		$insert = $shm->prepare('INSERT INTO mailfts (rowid, content) VALUES (:id, :content)');
+		$delete = $shm->prepare('DELETE FROM mailfts WHERE rowid = :id');
 
 		// Drop the id's FTS row (rows, in a copy damaged by a pre-checkpoint
 		// build), then re-insert when it has indexable content. False on a

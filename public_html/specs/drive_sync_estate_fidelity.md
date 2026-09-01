@@ -710,6 +710,95 @@ the plaintext original already trashed.
 
 ---
 
+## Defect J — the park that fought another file for its name
+
+The bill for defect D, found by the first estate run against the fix that
+followed it.
+
+A park's path is derived from an agreement the naming pass has just overruled,
+so it can name a spot another entry now holds. On Windows the escaped spelling
+of a reserved stem — `CON.28.txt` becoming `%43ON.28.txt` — lands on the same
+string as a different file whose real name is literally that, and the loser's
+path resolves to the winner's file. What is standing there is not the loser's
+copy at all, and it has nothing of its own to give up.
+
+The park read it as "this copy has work the server does not have yet" and stood
+down, correctly refusing to trash bytes it could not account for. Then naming
+derived the same park on the next pass, and the next: a device that never went
+quiet, with an empty queue, no error and nothing raised. Before defect D routed
+materialized parks through the park operation this seed settled; it is that
+change's consequence rather than an old fault the estate happened to reach.
+Defect H's stand-down did not cause it and did not cure it — it changed the
+failure from a wedge into a livelock, which is why the seed failed either side
+of that fix.
+
+The question that separates the two cases is not about the bytes alone. A
+stranger's file and this entry's own unsent edit both differ from what was
+agreed, and no hash tells them apart by itself.
+
+It takes two conditions, and the first is not enough on its own. Another live
+entry must say it lives at this slot — **and** the file actually standing there
+must hold that entry's agreed content. A claimant alone proves nothing: the
+naming pass ranks by records rather than by disk, so an entry whose own file has
+already left can win a name while the loser's edited copy is still lying at it,
+and disowning on the claim alone would throw away work nobody has sent. That is
+the one thing this operation exists to refuse.
+
+By content, and deliberately not by fingerprint, which is the same doctrine as
+defect I one layer along. A fingerprint match is anchored on the inode —
+`unchanged_from` requires equal file ids — so deciding whose file this is from
+one would fund an identity claim with a recycled inode. It would also buy
+nothing: a claimant's genuinely unedited file matches by content too, so the
+fingerprint test has no true positive of its own and only a false one. That
+false one is the worst state here: a recycled inode, a matching size and a
+write in a tick the clock has not moved would read this entry's unsent edit as
+the claimant's file — disowning the edit AND leaving the claimant's record
+fingerprint-matching bytes that are not its agreed content, which is exactly
+what frozen seed 2024110 pins. A content match cannot produce that: bytes equal
+to the claimant's last agreement are bytes the server already holds, so nothing
+this branch gives up can be lost.
+
+The slot comparison is folded per path component rather than compared as
+strings, because the clashes that produce a park are decided folded: a
+case-insensitive volume and a normalizing one each hand one slot to two
+spellings, and the naming pass groups them by exactly that key. Comparing raw
+would answer "different slot" for the very collisions that put a stranger's file
+in front of a park — this seed is only visible at all because its two spellings
+happen to be byte-identical.
+
+When both conditions hold, the entry parks by record and leaves the file where
+it is; nothing is stranded, because the file has an owner already. Otherwise the
+stand-down stands and the upload goes first.
+
+Two residuals, both stated rather than fixed. A file whose bytes are exactly
+equal to a claimant's agreed content — two empty files, most likely — is
+disowned even when it was this entry's own unsent edit: no byte is lost, since
+those bytes are on the server, but the edit's intent is, and the case is
+genuinely undecidable from local state. Standing down instead would livelock in
+the far commoner stranger case, so this is the right side to err on. And a
+claimant that has never synced, or whose own file has been edited since its
+agreement, matches neither condition, so the park stands down until that
+entry's own work updates its record — bounded by somebody else's ordinary
+progress rather than by this operation's existence, which is what separates it
+from the deadlock defect H was about.
+
+Pinned by frozen seed 4123847, which never settles without the fix.
+
+The content-only choice is argued in the code and **not yet pinned**, which
+leaves it in the shape this project has already paid for once: a property
+stated in a comment and enforced nowhere. Nothing has to be hunted to fix that —
+the false positive can be placed rather than found. Stage the clash with the
+loser materialized and edited, turn on `reuse_file_ids`, write twice inside one
+tick the clock has not moved so the standing file wears the claimant's old id,
+size and mtime, run one pass, and assert the loser stood down and still owns its
+edit. Green with the content test, red the day somebody re-adds the fingerprint
+one as an optimisation. It is left open rather than done because two earlier
+attempts to hand-stage a materialized park both failed — the settled twin wins
+the name before the loser ever materializes — so this needs a way to place that
+state that nothing here has yet.
+
+---
+
 ## A redundancy removed, and no hole closed
 
 Worth writing down because it was nearly recorded as a defect, and it is not

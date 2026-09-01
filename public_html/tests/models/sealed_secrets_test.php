@@ -131,6 +131,29 @@ $has_oauth = false;
 foreach ($dead as $d) { if ($d['locator'] === 'oauth_google_client_secret') $has_oauth = true; }
 check($has_oauth, 'dead_items lists the flagged operator secret');
 
+// --- Reconcile: a broken enumerator is one category's problem ----------------
+section('Reconcile — a throwing enumerator does not abort the run');
+// The shape that took down a production reconcile: a declared category whose
+// enumerator resolves but whose table this deployment never created (an
+// installed, inactive plugin). Point a declared row at an enumerator that
+// throws and the run must still finish, with that row judged by its locator.
+class SsrThrowingEnumerator { public static function blobs() { throw new RuntimeException('relation does not exist'); } }
+$q = $dblink->prepare("SELECT ssr_enumerator FROM ssr_sealed_secret_registry WHERE ssr_locator = 'oauth_google_client_secret'");
+$q->execute();
+$saved_enumerator = $q->fetchColumn();
+$dblink->prepare("UPDATE ssr_sealed_secret_registry SET ssr_enumerator = 'SsrThrowingEnumerator::blobs' WHERE ssr_locator = 'oauth_google_client_secret'")->execute();
+harness_defer(function () use ($dblink, $saved_enumerator) {
+	$dblink->prepare("UPDATE ssr_sealed_secret_registry SET ssr_enumerator = ? WHERE ssr_locator = 'oauth_google_client_secret'")
+		->execute(array($saved_enumerator === false ? null : $saved_enumerator));
+});
+$threw = null;
+try { $r3 = SecretReconciler::reconcile(); } catch (\Throwable $e) { $threw = $e; }
+check($threw === null, 'the reconcile completes', $threw ? get_class($threw) . ': ' . $threw->getMessage() : '');
+$q = $dblink->prepare("SELECT ssr_last_state FROM ssr_sealed_secret_registry WHERE ssr_locator = 'oauth_google_client_secret'");
+$q->execute();
+check((string)$q->fetchColumn() === SealedSecretRegistry::STATE_DEAD,
+	'and the category was still judged through its locator (the planted dead blob is seen)');
+
 // --- Import scrub -------------------------------------------------------------
 section('Import scrub');
 $plant_setting('oauth_google_client_secret', $DEAD_BLOB);   // re-plant (heal never runs on operator)

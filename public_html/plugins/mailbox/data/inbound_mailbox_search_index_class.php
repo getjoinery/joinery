@@ -17,6 +17,7 @@
  * Never excluded from backup — losing this row only costs a search-index
  * rebuild, not content (the ground truth is always the sealed message rows).
  *
+ * @version 1.3 - imi_format: the shape of the persisted blob, checked before a restore
  * @version 1.2 - imi_blob_high_water: what the persisted blob covers
  * @version 1.1
  */
@@ -62,6 +63,10 @@ class InboundMailboxSearchIndex extends SystemBase {
 		// a legacy blob was only ever written after a complete fold, when it and
 		// imi_fts_high_water agreed by construction.
 		'imi_blob_high_water'  => array('type'=>'int8', 'is_nullable'=>true),
+		// MailboxIndex::FORMAT of the persisted blob. A blob of another format
+		// (or a legacy one with no stamp) is not worth decrypting — restore
+		// refuses it before reading a byte and the next unlock rebuilds.
+		'imi_format'           => array('type'=>'int4', 'is_nullable'=>true),
 		'imi_created_time'     => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'imi_updated_time'     => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	);
