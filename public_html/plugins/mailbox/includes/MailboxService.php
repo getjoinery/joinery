@@ -49,6 +49,12 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.34
+ * @changelog 1.34 - a search consults the VIEWER's sealed index for every scope
+ *   it covers — all mailboxes included — unioned with the Postgres search for
+ *   the rest of the scope. The index was consulted only for a single-mailbox
+ *   scope, and the reader opens on all mailboxes, where a fully sealed
+ *   mailbox searched ciphertext and found nothing.
  * @version 1.33
  * @changelog 1.33 - Sent and Drafts are strictly reverse-chronological: the
  *   unread/starred sectioning is an Inbox affordance and meant nothing on mail
@@ -271,6 +277,29 @@ class MailboxService {
 	 * without this a draft would surface inside that conversation.
 	 */
 	const NO_DRAFTS = " AND iem_direction IS DISTINCT FROM 'draft'";
+
+	/**
+	 * The alias ids in $aliasId's scope that the viewer's own search index
+	 * covers: the scope's aliases intersected with the viewer's grants
+	 * (MailboxIndex folds exactly InboundEmailMailboxGrant::alias_ids_for_user).
+	 * Empty for the unmatched sentinels and for a mailbox the viewer reads
+	 * without a grant (an all-access view of someone else's) — those search
+	 * Postgres only.
+	 *
+	 * @return int[]
+	 */
+	private function sealedIndexScope(?int $aliasId): array {
+		if ($aliasId !== null && $aliasId <= 0) {
+			return array();
+		}
+		$viewer_id = $this->viewer->getUserId();
+		if ($viewer_id <= 0) {
+			return array();
+		}
+		$scope = array_map('intval', $this->viewer->scopeAliasIds($aliasId));
+		$granted = array_map('intval', InboundEmailMailboxGrant::alias_ids_for_user($viewer_id));
+		return array_values(array_intersect($scope, $granted));
+	}
 
 	private function readScopeSql(?int $aliasId): string {
 		// "Unmatched, domain D" — the per-domain catch-all box. Superadmin-only, same
@@ -912,25 +941,37 @@ class MailboxService {
 		// Full-text search (specs/implemented/inbound_email_encryption_at_rest.md §
 		// 6): a sealed mailbox's content columns are ciphertext, unsearchable in
 		// SQL — MailboxIndex (a sealed, in-window SQLite FTS5 working copy) is the
-		// only way to search it. This resolves per single-mailbox scope, since the
-		// index is per owner: a single alias whose owner holds a Sealed Vault AND
-		// whose mailbox still has sealed content — its domain seals, or sealed
-		// rows remain from an earlier level (specs/mailbox_lowering_unseal.md) —
-		// searches via the index (locked → an explicit signal, not silently empty
-		// forever). Every other scope (all-mail, a converged lowered mailbox,
-		// "unmatched") keeps the Postgres tsvector search on the plaintext
-		// columns — a sealed row elsewhere in a broad scope simply never matches
-		// its own ciphertext, which is inert degradation, not a leak.
+		// only way to search it. The index is per VIEWER and covers every mailbox
+		// the viewer holds a grant for, so it serves whatever part of the current
+		// scope is the viewer's own — one mailbox or all of them. The reader opens
+		// on "all mailboxes", and a member whose every message is sealed used to
+		// get nothing there: the index was consulted only for a single-mailbox
+		// scope, and the Postgres search below never matches ciphertext (a
+		// 100k-message Gmail import answered "new orleans" with 0 of its 236 hits).
+		//
+		// The two searches are unioned. The index answers for the viewer's own
+		// mailboxes; the Postgres tsvector search answers for anything else in
+		// scope — another member's unsealed mailbox under an all-access view,
+		// unmatched mail — and is inert on a sealed row, which simply never
+		// matches its own ciphertext. Locked (a vault-holding viewer with sealed
+		// content in scope and no open window) is an explicit signal, not a
+		// silently empty result: the Postgres half still runs, so unsealed hits
+		// show under the unlock prompt. A scope with no sealed content left
+		// (a fully-converged lowered mailbox, specs/mailbox_lowering_unseal.md)
+		// needs no unlock and no index.
 		$search_locked = false;
 		if (!empty($filters['q'])) {
-			$owner_id = ($aliasId !== null && $aliasId > 0) ? InboundEmailMessage::singleOwnerUserId($aliasId) : null;
-			$vault = $owner_id !== null ? UserEncryptionVault::loadForUser($owner_id) : null;
+			$fts_sql = self::FULLTEXT_SQL . " @@ websearch_to_tsquery('english', ?)";
+			$viewer_id = $this->viewer->getUserId();
+			$index_scope = $this->sealedIndexScope($aliasId);
+			$vault = count($index_scope) ? UserEncryptionVault::loadForUser($viewer_id) : null;
 
-			if ($vault !== null && InboundEmailMessage::aliasSealedContentActive((int)$aliasId)) {
-				$secret = VaultUnlock::secretKey($owner_id);
+			if ($vault !== null && InboundEmailMessage::scopeSealedContentActive($index_scope)) {
+				$secret = VaultUnlock::secretKey($viewer_id);
 				if ($secret === null) {
 					$search_locked = true;
-					$where[] = '1=0'; // no query is meaningful while locked
+					$where[] = $fts_sql;
+					$params[] = $filters['q'];
 				} else {
 					// Budgeted: fold a bounded slice of any backlog, then search
 					// what is indexed. A backlog too large for the slice (a bulk
@@ -938,7 +979,7 @@ class MailboxService {
 					// the 'mailbox_fts_fold' deferred-work consumer; until it
 					// catches up, the response says the index is still building.
 					$index = new MailboxIndex();
-					$fold = $index->fold($owner_id, $secret,
+					$fold = $index->fold($viewer_id, $secret,
 						microtime(true) + self::SEARCH_FOLD_BUDGET_SECONDS);
 					if (empty($fold['complete'])) {
 						$this->search_indexing = array(
@@ -946,17 +987,18 @@ class MailboxService {
 							'total'     => intval($fold['total']),
 						);
 					}
-					$ids = $index->search($owner_id, $filters['q']);
-					$where[] = count($ids)
+					$ids = $index->search($viewer_id, $filters['q']);
+					$where[] = '(' . (count($ids)
 						? 'iem_inbound_email_message_id IN (' . implode(',', array_map('intval', $ids)) . ')'
-						: '1=0';
+						: '1=0') . ' OR ' . $fts_sql . ')';
+					$params[] = $filters['q'];
 				}
 			} else {
 				// The expression MUST stay byte-identical to iem_013's GIN index
 				// expression (plugins/mailbox/migrations/migrations.php), or the
 				// planner will not use the index. websearch_to_tsquery tolerates
 				// arbitrary user input (stray quotes/operators won't raise).
-				$where[] = self::FULLTEXT_SQL . " @@ websearch_to_tsquery('english', ?)";
+				$where[] = $fts_sql;
 				$params[] = $filters['q'];
 			}
 		}

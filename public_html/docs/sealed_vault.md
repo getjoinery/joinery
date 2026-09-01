@@ -635,6 +635,9 @@ check per statement. Hot, an INSERT or UPDATE carrying a string longer than
 
 - every long value is already a sealed blob (`v1.aead.` or `v1.seal.`) — this is
   how `sealColumns()` writes through the rule it sits behind;
+- every long value is a list of integers (a JSON array or comma list of ids,
+  `SealedEgressGuard::isIntegerList()`) — ids are references to content, never
+  content, so a queue of message ids passes at any length;
 - the statement updates a single row already sealed to the owner whose scope
   this process opened.
 

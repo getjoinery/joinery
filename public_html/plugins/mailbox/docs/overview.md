@@ -1329,9 +1329,9 @@ relay blobs) drain through `DeferredIngest` first and unseal on a later pass.
 `unsealAndPersistContent()` is recovery-safe: plaintext writes back
 per-file/per-flag and the key wrapping clears last, so an interrupted pass
 always leaves a still-sealed row for the next pass, never a stranded
-ciphertext. Search follows the mailbox's actual sealed content
-(`aliasSealedContentActive()`): the sealed FTS index serves a scope only
-while its domain seals or sealed rows remain — a fully-converged lowered
+ciphertext. Search follows the scope's actual sealed content
+(`scopeSealedContentActive()`): the sealed FTS index serves a scope only
+while a mailbox in it seals or sealed rows remain — a fully-converged lowered
 mailbox searches plain Postgres FTS with no unlock. The Setup tab carries an
 INFO **Sealed leftovers** row naming any not-yet-converged count.
 
@@ -1567,11 +1567,15 @@ from the sealed message rows; the cache is never the source of truth. `InboundMa
 passive-close safety net for a working copy the wipe callback missed (an idle APCu
 expiry, a worker recycle); it is declared as that class's `$retention_policy` and runs
 in the daily retention sweep, so worst case a copy lingers until the next sweep.
-`MailboxService::listThreads()`'s `q` path uses the index only when the scope resolves
-to a single, vault-holding owner (locked surfaces as `search_locked` in the response,
-not a silent empty result); every broader scope (all-mail, an unsealed mailbox) keeps
-the plain Postgres `tsvector` search, which simply never matches a sealed row's
-ciphertext.
+`MailboxService::listThreads()`'s `q` path consults the **viewer's** index for
+whatever part of the scope the viewer holds a grant for — one mailbox or all of
+them (`sealedIndexScope()`) — and unions those hits with the plain Postgres
+`tsvector` search, which answers for the rest of the scope (another member's
+unsealed mailbox under an all-access view, unmatched mail) and simply never
+matches a sealed row's ciphertext. Locked surfaces as `search_locked` in the
+response, not a silent empty result, and the Postgres half still runs so unsealed
+hits show under the unlock prompt; a scope with no sealed content left needs no
+unlock and no index.
 
 The index covers **every stored message** in the owner's mailboxes — trashed ones
 included, drafts excepted — and the **read scope decides what a search returns**: hits

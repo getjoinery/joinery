@@ -103,6 +103,9 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.27
+ * @changelog 1.27 - scopeSealedContentActive(): the sealed-content check over a
+ *   set of mailboxes, for a search that spans every mailbox the viewer holds.
  * @version 1.26
  * @changelog 1.26 - iem_self_delivered + markSelfDelivered(): a message sent to
  *   the mailbox that composed it reconciles onto the composer's row instead of
@@ -1149,7 +1152,21 @@ class InboundEmailMessage extends SystemBase {
 	 * with no unlock.
 	 */
 	public static function aliasSealedContentActive(int $alias_id): bool {
-		if ($alias_id <= 0) {
+		return self::scopeSealedContentActive(array($alias_id));
+	}
+
+	/**
+	 * aliasSealedContentActive() over a set of mailboxes — true when any of
+	 * them still has sealed content to honor. This is what a search over the
+	 * viewer's whole set of mailboxes asks.
+	 *
+	 * @param int[] $alias_ids
+	 */
+	public static function scopeSealedContentActive(array $alias_ids): bool {
+		$alias_ids = array_values(array_filter(array_map('intval', $alias_ids), function ($id) {
+			return $id > 0;
+		}));
+		if (!count($alias_ids)) {
 			return false;
 		}
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
@@ -1157,9 +1174,11 @@ class InboundEmailMessage extends SystemBase {
 		try {
 			// The mailbox's own posture where it has one, the domain's otherwise
 			// (specs/mailbox_connect_flow.md § D).
-			$alias = new InboundEmailAlias($alias_id, TRUE);
-			if ($alias->key && $alias->seals_content()) {
-				return true;
+			foreach ($alias_ids as $alias_id) {
+				$alias = new InboundEmailAlias($alias_id, TRUE);
+				if ($alias->key && $alias->seals_content()) {
+					return true;
+				}
 			}
 		} catch (\Throwable $e) {
 			return true; // unresolvable — fail toward the sealed path, never a silent leak
@@ -1167,10 +1186,10 @@ class InboundEmailMessage extends SystemBase {
 		$db = DbConnector::get_instance()->get_db_link();
 		$stmt = $db->prepare(
 			'SELECT 1 FROM iem_inbound_email_messages
-			 WHERE iem_iea_inbound_email_alias_id = ?
+			 WHERE iem_iea_inbound_email_alias_id IN (' . implode(',', $alias_ids) . ')
 			   AND (iem_content_sealed = true OR iem_pending_parse = true)
 			   AND iem_delete_time IS NULL LIMIT 1');
-		$stmt->execute(array($alias_id));
+		$stmt->execute();
 		return (bool)$stmt->fetchColumn();
 	}
 

@@ -33,6 +33,7 @@
  *
  * Run: php tests/run.php db --filter=sealed_egress_guard
  *
+ * @version 1.1 - integer id lists pass at any length
  * @version 1.0
  */
 
@@ -200,6 +201,38 @@ try {
 	check($unsealed->rowIsSealed(), 'a genuinely sealed row reports sealed');
 	$plain = new ApiIdempotencyKey(NULL);
 	check(!$plain->rowIsSealed(), 'and a row with no flag set reports unsealed, whatever spelling the default uses');
+
+	// =====================================================================
+	section('a list of integer ids is a reference, not content');
+
+	// The mailbox search index queues message ids for re-indexing as a JSON
+	// array on its bookkeeping row; past eight or so ids the array is longer
+	// than THRESHOLD, and the process that writes it is hot because it just
+	// decrypted those messages to index them. On a production mailbox that
+	// refusal took every search down with a 422. Digits carry no content.
+	$id_list = json_encode(range(100000, 100020));
+	check(strlen($id_list) > SealedEgressGuard::THRESHOLD, 'the id list under test is over the threshold');
+	check(SealedEgressGuard::isIntegerList($id_list), 'a JSON array of integers is recognised as a list');
+	check(SealedEgressGuard::isIntegerList('5, 2110, 101623, 101621, 101619, 101617, 101616, 101614, 101613, 101612'),
+		'so is a bare comma-separated list');
+	check(!SealedEgressGuard::isIntegerList('["' . seg_long('x') . '"]'), 'a JSON array holding a string is not');
+	check(!SealedEgressGuard::isIntegerList('[1,2,3] ' . seg_long('y')), 'nor is a list with text after it');
+	check(!SealedEgressGuard::isIntegerList(''), 'nor an empty string');
+
+	$list_row = new GeneralError(NULL);
+	$list_row->set('err_level', 'Test');
+	$list_row->set('err_message', $id_list);
+	$list_row->save();
+	harness_register_row('err_general_errors', 'err_general_error_id', (int)$list_row->key);
+	check((int)$list_row->key > 0, 'a long integer list writes to an unsealed table while hot');
+
+	$text_in_list = seg_refusal(function () use ($id_list) {
+		$row = new GeneralError(NULL);
+		$row->set('err_level', 'Test');
+		$row->set('err_message', $id_list . ' ' . seg_long('z'));
+		$row->save();
+	});
+	check($text_in_list !== null, 'but the same list with text appended is still refused');
 
 	// =====================================================================
 	section('a row sealed to the recorded owner may receive plaintext');
