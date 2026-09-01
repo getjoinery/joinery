@@ -58,9 +58,11 @@ function agent_channel_node($slug) {
 
 $made_nodes = [];
 $made_join_requests = [];
+$made_hosts = [];
 
 // Anything a previous crashed run left behind. A test that cannot clean up
 // after its own failure eventually stops being runnable.
+$db->exec("DELETE FROM mgh_managed_hosts WHERE mgh_slug LIKE 'agtest-host-%'");
 foreach ($db->query("SELECT mgn_id FROM mgn_managed_nodes WHERE mgn_slug LIKE 'agtest-%'")->fetchAll(PDO::FETCH_COLUMN) as $stale_id) {
 	$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_node_id = ?')->execute([$stale_id]);
 	$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_id = ?')->execute([$stale_id]);
@@ -437,11 +439,75 @@ check(strpos((string)$poison->get('mjb_error_message'), 'without a result') !== 
 	'That failure says what happened, and points at the node');
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+section('Approving a host agent names it as the host node');
+
+// A host that a container was provisioned onto already has a placement record
+// (ensure_for_node minted it) with no host node yet. Approving the host's own
+// agent join must fill mgh_mgn_host_node_id, or host-scope work
+// (decommission_site, certificates) is routed to the host by nothing.
+$host_addr = '198.51.100.' . random_int(10, 250);
+$host_rec = new ManagedHost(NULL);
+$host_rec->set('mgh_slug', 'agtest-host-' . substr(bin2hex(random_bytes(3)), 0, 6));
+$host_rec->set('mgh_name', 'agtest host');
+$host_rec->set('mgh_host', $host_addr);
+$host_rec->set('mgh_provisioning_enabled', false);
+$host_rec->prepare();
+$host_rec->save();
+$made_hosts[] = $host_rec->key;
+
+// The joining machine: a machine-posture node at the host's address (no
+// container name, no web root — it is the host, not a site on it).
+$host_node = agent_channel_node('agtest-hn-' . substr(bin2hex(random_bytes(4)), 0, 8));
+$host_node->set('mgn_host', $host_addr);
+$host_node->save();
+$made_nodes[] = $host_node->key;
+
+$hkp = sodium_crypto_sign_keypair();
+$hpub = sodium_crypto_sign_publickey($hkp);
+$hjr = new AgentJoinRequest();
+$hjr->set('ajr_claimed_name', 'agtest-hostjoin');
+$hjr->set('ajr_public_key', base64_encode($hpub));
+$hjr->set('ajr_fingerprint', AgentJoinRequest::fingerprint($hpub));
+$hjr->set('ajr_status', AgentJoinRequest::STATUS_PENDING);
+$hjr->save();
+$made_join_requests[] = $hjr->key;
+
+AgentChannelEndpoint::approveJoin($hjr, $host_node);
+$host_rec->load();
+check((int)$host_rec->get('mgh_mgn_host_node_id') === (int)$host_node->key,
+	'Approving the host agent links the placement record to it');
+
+// A second machine at the same address must not take the host over: first host
+// node wins, exactly as approval is meant to.
+$intruder = agent_channel_node('agtest-hn2-' . substr(bin2hex(random_bytes(4)), 0, 8));
+$intruder->set('mgn_host', $host_addr);
+$intruder->save();
+$made_nodes[] = $intruder->key;
+$linked = ManagedHost::link_host_node($intruder);
+check($linked === null, 'A second host join does not re-point an already-linked host');
+$host_rec->load();
+check((int)$host_rec->get('mgh_mgn_host_node_id') === (int)$host_node->key,
+	'The first host node still owns the placement record');
+
+// A container node (it carries a web root) is a site, never its own host.
+$container = agent_channel_node('agtest-ctr-' . substr(bin2hex(random_bytes(4)), 0, 8));
+$container->set('mgn_host', '203.0.113.' . random_int(10, 250));
+$container->set('mgn_web_root', '/var/www/html/agtest/public_html');
+$container->save();
+$made_nodes[] = $container->key;
+check(ManagedHost::link_host_node($container) === null,
+	'A node with a web root is a site, not a host — it links nothing');
+
 section('Cleanup');
 
-// Jobs first: mjb_mgn_node_id is a real foreign key, so a node with rows still
-// pointing at it does not delete — and a cleanup that half-works leaves the
-// next run to trip over what this one made.
+// Hosts first: mgh_mgn_host_node_id points at a node, so a host row still
+// naming one blocks that node's delete. Jobs likewise (mjb_mgn_node_id is a
+// real foreign key) — a cleanup that half-works leaves the next run to trip
+// over what this one made.
+foreach ($made_hosts as $id) {
+	$db->prepare('DELETE FROM mgh_managed_hosts WHERE mgh_id = ?')->execute([$id]);
+}
 foreach ($made_nodes as $id) {
 	$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_node_id = ?')->execute([$id]);
 	$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_id = ?')->execute([$id]);

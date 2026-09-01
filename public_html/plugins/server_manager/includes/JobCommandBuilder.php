@@ -95,6 +95,8 @@
  * @version 1.21 - build_upload_backup(): push one already-existing backup from the node to its cloud
  *                 target (the per-file Backups tab action), sharing upload_step() with the automatic
  *                 post-backup upload; the step timeout is sized from S3Signer's retry budget
+ * @version 1.21 - install_node names this plane (--management-node=URL) on the docker and site
+ *                 steps, so a machine it builds asks to join without a human at a terminal
  * @version 1.20 - backup key escrow runs as a management-node step (step_escrow_backup_key) instead of
  *                 inside the web request: node SSH keys are operator-owned, so only the agent can read
  *                 them, and encrypting backups seal the key on their way in
@@ -2899,6 +2901,20 @@ class JobCommandBuilder {
 		$release_url = "https://{$webdir}/utils/latest_release";
 		$release_url_esc = escapeshellarg($release_url);
 
+		// This plane's own address, for the machine to join. It comes from the
+		// same setting as the release URL — the target already reaches this
+		// host to fetch the release — and passes the same acceptance rule as
+		// the node's own page and CLI, so a bad webDir fails here, loudly,
+		// rather than as a join that never arrives. The join stays a request
+		// an operator approves; naming the plane enrolls nothing.
+		require_once(PathHelper::getIncludePath('adm/logic/admin_management_node_logic.php'));
+		$plane_url = 'https://' . preg_replace('#^https?://#', '', rtrim($webdir, '/'));
+		$refusal = admin_management_node_url_refusal($plane_url);
+		if ($refusal !== null) {
+			throw new Exception("install_node cannot name a management node for the target to join ({$plane_url}): {$refusal}");
+		}
+		$plane_url_esc = escapeshellarg($plane_url);
+
 		$sitename_esc = escapeshellarg($sitename);
 		$domain_esc = escapeshellarg($domain);
 		$mode_flag = ($docker === 'docker') ? ' --docker' : ' --bare-metal';
@@ -3022,9 +3038,12 @@ class JobCommandBuilder {
 		if ($docker === 'docker') {
 			// install.sh docker is idempotent — short-circuits if Docker is already installed.
 			// Docker subcommand does NOT harden SSH, so root access stays intact.
-			$steps[] = ['type' => 'ssh', 'label' => 'Install Docker (if missing)',
+			// --management-node: the machine gets its own siteless host agent and
+			// asks to join this plane, so host-scope work (certificates, site
+			// removal, rebuild) has a route once the password is burned.
+			$steps[] = ['type' => 'ssh', 'label' => 'Install Docker and the host agent',
 				'on_host' => true,
-				'cmd' => "cd {$remote_tools_dir} && ./install.sh -y -q docker",
+				'cmd' => "cd {$remote_tools_dir} && ./install.sh -y -q docker --management-node={$plane_url_esc}",
 				'timeout' => 1800];
 		} else {
 			// Bare-metal: install.sh server runs `PermitRootLogin no` + restarts sshd, locking
@@ -3109,8 +3128,10 @@ class JobCommandBuilder {
 		// That is the one case where "should this machine run an agent?" is
 		// already answered — someone asked this plane to build and manage it —
 		// and it saves a root moment per node during the fleet rollout. It still
-		// enrolls nothing: joining is a request the operator approves here.
-		$install_cmd = "cd {$remote_tools_dir} && sudo ./install.sh -y -q site{$mode_flag} {$sitename_esc}{$pass_arg} {$domain_esc}{$port_arg} --no-ssl --enable-agent";
+		// enrolls nothing: joining is a request the operator approves here —
+		// --management-node is what makes the site's agent ASK, so the request
+		// arrives on its own instead of waiting for someone at a terminal.
+		$install_cmd = "cd {$remote_tools_dir} && sudo ./install.sh -y -q site{$mode_flag} {$sitename_esc}{$pass_arg} {$domain_esc}{$port_arg} --no-ssl --enable-agent --management-node={$plane_url_esc}";
 		$steps[] = ['type' => 'ssh', 'label' => 'Create the site',
 			'on_host' => true, 'cmd' => $install_cmd, 'timeout' => 3600];
 

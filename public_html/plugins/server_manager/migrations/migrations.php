@@ -6,7 +6,7 @@
  * Menu migrations (sm_002 through sm_005) have been removed -- they are
  * already marked as applied in existing installations and are no longer needed.
  *
- * @version 1.2
+ * @version 1.3 - sm_007 drops the customer-cloud SSH key setting (keyless provisioning)
  */
 return [
 	[
@@ -127,6 +127,20 @@ return [
 					WHERE h2.mgh_host = n.mgn_host AND h2.mgh_delete_time IS NULL
 				  )
 			");
+		},
+	],
+
+	[
+		// Keyless provisioning removed the customer-cloud SSH key setting: a
+		// machine we create receives no key of ours. The declaration is gone
+		// from plugin.json, but the seeded stg_settings row persists (seeding
+		// never deletes), so it reads as an undeclared orphan. Remove it.
+		'id' => 'sm_007_drop_customer_cloud_ssh_key_setting',
+		'version' => '1.4.0',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$stmt = $dblink->prepare("DELETE FROM stg_settings WHERE stg_name = ?");
+			$stmt->execute(['server_manager_customer_cloud_ssh_key_path']);
 		},
 	],
 ];

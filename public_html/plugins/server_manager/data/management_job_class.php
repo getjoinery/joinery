@@ -109,7 +109,13 @@ class ManagementJob extends SystemBase {
 		$job = new ManagementJob(NULL);
 		$job->set('mjb_mgn_node_id', $node_id);
 		$job->set('mjb_job_type', $job_type);
-		$job->set('mjb_status', 'pending');
+		// install_node is a bootstrap: it runs before the target has an agent,
+		// over the provision's sealed root password, and so is executed by the
+		// plane-side InstallJobExecutor — not the node-agent local queue. It
+		// starts 'queued', a status the agent's claim ('pending' only) never
+		// matches, so the two never fight over the same job. Everything else is
+		// 'pending' as before.
+		$job->set('mjb_status', $job_type === 'install_node' ? 'queued' : 'pending');
 		$job->set('mjb_commands', json_encode(['steps' => $steps]));
 		$job->set('mjb_parameters', $parameters ? json_encode($parameters) : null);
 		// Progress counts the main phase only: teardown appends never advance

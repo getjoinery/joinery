@@ -202,30 +202,17 @@ echo $fw_email->end_form();
 		</td>
 	</tr>
 	<tr>
-		<th>Provisioning SSH key</th>
+		<th>Instance access</th>
 		<td>
-			<?php if ($cloud['ssh_key_path'] === ''): ?>
-				<span class="badge bg-warning">Not set</span>
-			<?php else: ?>
-				<?= smps_badge($cloud['ssh_key_exists'], 'Key found', 'Key file missing', 'danger') ?>
-				<?= smps_badge($cloud['ssh_pub_exists'], '.pub found', '.pub missing', 'danger') ?>
-				<code><?= htmlspecialchars($cloud['ssh_key_path']) ?></code>
-			<?php endif; ?>
+			<span class="badge bg-success">Keyless</span>
+			Instances are created with a one-time root password and no SSH key of ours — nothing is placed on a machine we create.
 		</td>
 	</tr>
 </table>
-<?php if ($cloud['ssh_key_path'] === '' || !$cloud['ssh_key_exists'] || !$cloud['ssh_pub_exists']): ?>
-	<form method="post">
-		<input type="hidden" name="action" value="generate_ssh_key">
-		<button type="submit" class="btn btn-primary">Generate provisioning key</button>
-	</form>
-<?php endif; ?>
 <?php
 $fw_cloud = $page->getFormWriter('form_cloud');
 echo $fw_cloud->begin_form();
 echo '<input type="hidden" name="action" value="save_cloud">';
-$fw_cloud->textinput('ssh_key_path', 'SSH private key path', ['value' => $cloud['ssh_key_path'],
-	'helptext' => 'Its .pub sibling is installed on created instances.']);
 $fw_cloud->textinput('referral_url', 'Linode referral URL', ['value' => $cloud['referral_url']]);
 $fw_cloud->textinput('region', 'Default region', ['value' => $cloud['region']]);
 $fw_cloud->textinput('instance_type', 'Default instance type', ['value' => $cloud['type']]);

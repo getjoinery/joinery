@@ -1,0 +1,7 @@
+{
+  "name": "Run Install Jobs",
+  "description": "Spawns the plane-side install executor to run any queued install_node bootstrap jobs over the provision's sealed root password. The executor is a short-lived detached worker; this task only pokes it and returns.",
+  "activate_on_install": true,
+  "default_frequency": "every_run",
+  "config_fields": {}
+}

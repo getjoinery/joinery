@@ -1,7 +1,61 @@
 # Keyless provisioning — we never put a key on a machine we create
 
-**Status: DIRECTION SETTLED BY OWNER 2026-08-30. Ready to build.**
+**Status: PART-BUILT 2026-09-01. The executor-independent work and a minimal
+bootstrap executor are done and tested; wiring the host-agent join and the burn
+are the next build.** Direction settled by owner 2026-08-30.
 Pulled out of `fleet_ssh_credential_custody.md`, which had this wrong.
+
+**The bootstrap executor (owner 2026-09-01: "simplest functional, then iterate").**
+`install_node` runs plane-side over the provision's sealed root password —
+`InstallJobExecutor` (a `local`/`ssh`-only runner, `ssh` via `sshpass -e`),
+poked by the `RunInstallJobs` task spawning `utils/run_install_executor.php`.
+It is deliberately install_node-only and does NOT replace the local queue.
+Routing takes zero agent change: install_node jobs are created `queued`, a
+status the node agent's `pending`-only claim never matches. Scope: fresh docker;
+`scp`/cross-node (from_backup) and bare-metal are refused for now. This is the
+"executor WP1" the sections below refer to; it is built (minimally).
+
+**Landed 2026-09-01 (build the unblocked pieces first, owner call):**
+- **WP1 (provisioning seal).** `ProvisionCustomerCloud` creates the instance
+  with a root password and no key of ours, sealing it onto the new
+  `cvp_root_pass_sealed` (SecretBox, `ephemeral` kind, declared in plugin.json
+  and seeded to the registry). `handle_booting` leaves `mgn_ssh_key_path`
+  empty. The old "key path unset ⇒ pipeline blocked" gate is gone. Class 1.5.
+- **WP4 (agent on the machine), install.sh 2.56.** Docker mode installs the
+  siteless host agent from the release's `agent_dist` and, given
+  `--management-node=URL`, issues the CLI join (never fails the Docker install;
+  the early Docker-present `exit 0` no longer skips the agent step). The Docker
+  *site* path now honours `--enable-agent` inside the container — it was
+  silently dropped before, so a container came up unmanageable. `host-harden`
+  takes `--agent-managed`: a keyless machine whose access path is its joined
+  agent can be hardened (the burn), which its empty `authorized_keys` otherwise
+  refuses.
+- **WP5 (host link at approval).** `ManagedHost::link_host_node()` (class 1.2),
+  called from `AgentChannelEndpoint::approveJoin`, names a machine-posture node
+  as its host's own agent (`mgh_mgn_host_node_id`) when a placement record for
+  its address exists with no host node yet — conservative (a container node
+  with a web root links nothing; an already-linked host is never re-pointed).
+- Tests: `agent_channel_test` (+ host-link section), `customer_cloud_provisioning_test`
+  (+ keyless section) — both green on db tier.
+
+- **Join wiring (2026-09-01, after the once-over).** `build_install_node` names
+  this plane on both steps — `install.sh docker --management-node=URL` (the
+  host agent asks to join) and `install.sh site … --enable-agent
+  --management-node=URL` (install.sh 2.57: the container's agent runs
+  `agent_control.php --on --join=URL`). Two join requests arrive without a
+  human at a terminal. Shapes keyless cannot finish yet — bare, bare-metal,
+  from_backup — are refused at `handle_ready` before an instance is created,
+  and by the executor on the job's parameters before a step runs, instead of
+  stalling in `installing` or dying mid-run. The job pages treat `queued` as
+  live (polling, cancel, a queued-too-long notice naming the executor).
+
+**NOT built:** the actual burn (WP2/WP3: `host-harden --agent-managed`
+over the password at approval, then erase `cvp_root_pass_sealed`) and WP5's
+provider re-check + source-IP match — the IP match is deferred until
+`ajr_source_ip` gets trusted-proxy handling (it is bare `REMOTE_ADDR` today,
+wrong behind Cloudflare). WP2's prose still says "burn at end of install"; the
+design section §4 (burn plane-driven at approval, not on "running") is correct
+and supersedes it.
 
 > **Status and ordering live in `agent_management_first_principles.md`.**
 > This spec is an annex: it carries the design and nothing else. If this
@@ -206,15 +260,22 @@ whether `rebuildInstance` — which also accepts `authorized_keys`
 (`LinodeComputeDriver:60-78`), today only from `RelayCloudProvisioner:293`
 — stays relay-only.
 
-**WP2 — Close the machine when the agent is up.** At the end of the site
-install, once the agent is confirmed running: disable root password login, and
-give `host-harden`'s empty-`authorized_keys` refusal the same condition. This is
-the ~10 lines measured above. The safety check exists to prevent orphaning a
-machine; the agent is a truthful answer that it is not orphaned.
+**WP2 — Close the machine when the agent is ADMITTED.** The burn is
+plane-driven at approval, not at the end of the install — a running agent is
+not an admitted one (see the design section, step 4). Once a human approves the
+join, the executor uses the still-sealed password one last time to disable root
+password login. The install-script half is done: `host-harden --agent-managed`
+gives the empty-`authorized_keys` refusal the fourth answer (a keyless machine
+whose access path is its joined agent is not orphaned). The safety check exists
+to prevent orphaning a machine; an admitted agent is a truthful answer that it
+is not orphaned.
 
-**WP3 — Erase the password.** On install completion, erase the sealed password
-from the provision row. After WP2 and WP3 nothing anywhere can log into that
-machine but its owner and its agent.
+**WP3 — Erase the password.** At the approval-time burn, once root password
+login is disabled, erase the sealed password from the provision row. After WP2
+and WP3 nothing anywhere can log into that machine but its owner and its agent.
+A provision that ends with *no instance created* erases it immediately (there
+is no machine it opens) — built. A provision that fails with a *live* instance
+keeps it for manual recovery: an owner call on WP3's list, not settled here.
 
 **WP4 — every machine we create runs an agent ON THE MACHINE.**
 

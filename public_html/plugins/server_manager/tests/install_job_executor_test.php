@@ -1,0 +1,192 @@
+<?php
+/** @joinery-test
+ * name: install_job_executor
+ * tier: db
+ * env: any
+ * needs: []
+ */
+/**
+ * InstallJobExecutor — the plane-side bootstrap runner for install_node.
+ *
+ * Proven without a live target: the step loop, output contract, terminal
+ * status, the queued-not-pending routing that keeps it off the node agent's
+ * claim, and the refusals for shapes it does not handle yet. The ssh transport
+ * itself needs a real box and is a live-acceptance item.
+ */
+
+require_once(__DIR__ . '/../../../tests/lib/harness.php');
+harness_boot();
+require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/InstallJobExecutor.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
+
+$db = DbConnector::get_instance()->get_db_link();
+$made_nodes = array();
+$made_provisions = array();
+$made_jobs = array();
+
+// Clean any debris from a crashed run.
+$db->exec("DELETE FROM cvp_customer_cloud_provisions WHERE cvp_slug LIKE 'ijetest-%'");
+foreach ($db->query("SELECT mgn_id FROM mgn_managed_nodes WHERE mgn_slug LIKE 'ijetest-%'")->fetchAll(PDO::FETCH_COLUMN) as $sid) {
+	$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_node_id = ?')->execute([$sid]);
+	$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_id = ?')->execute([$sid]);
+}
+
+/** A throwaway managed node, optionally with a sealed-password provision. */
+function ije_node($slug, $seal_password = null) {
+	global $made_nodes, $made_provisions;
+	$node = new ManagedNode(NULL);
+	$node->set('mgn_name', 'IJE test ' . $slug);
+	$node->set('mgn_slug', $slug);
+	$node->set('mgn_host', '203.0.113.' . random_int(2, 250));
+	$node->set('mgn_ssh_user', 'root');
+	$node->set('mgn_ssh_port', 22);
+	$node->set('mgn_install_state', 'installing');
+	$node->set('mgn_uptime_enabled', false);
+	$node->save();
+	$node->load();
+	$made_nodes[] = $node->key;
+
+	if ($seal_password !== null) {
+		$prov = new CustomerCloudProvision(NULL);
+		$prov->set('cvp_origin', 'admin');
+		$prov->set('cvp_usr_user_id', 990000 + random_int(0, 9999));
+		$prov->set('cvp_domain', $slug . '.example.com');
+		$prov->set('cvp_slug', $slug);
+		$prov->set('cvp_mgn_node_id', $node->key);
+		$prov->set('cvp_status', 'installing');
+		$box = new SecretBox();
+		$prov->set('cvp_root_pass_sealed',
+			$box->seal('cvp_customer_cloud_provisions.cvp_root_pass_sealed', $seal_password));
+		$prov->save();
+		$made_provisions[] = $prov->key;
+	}
+	return $node;
+}
+
+function ije_job($node, $steps) {
+	global $made_jobs;
+	$job = ManagementJob::createJob($node->key, 'install_node', $steps, array('mode' => 'fresh'), null);
+	$made_jobs[] = $job->key;
+	return $job;
+}
+
+// ---------------------------------------------------------------------------
+section('install_node is queued, not pending — the agent never sees it');
+
+$suffix = substr(bin2hex(random_bytes(4)), 0, 8);
+$node = ije_node('ijetest-ok-' . $suffix, 'Aa1!' . bin2hex(random_bytes(10)));
+$job = ije_job($node, array(
+	array('type' => 'local', 'label' => 'Preflight',       'cmd' => 'echo PREFLIGHT_OK'),
+	array('type' => 'local', 'label' => 'Create the site', 'cmd' => 'echo INSTALL_SUCCESS; echo CONTAINER_PORT=8091'),
+	array('type' => 'local', 'label' => 'Cleanup', 'cmd' => 'echo cleaning up', 'teardown' => true),
+));
+
+$job->load();
+check($job->get('mjb_status') === 'queued',
+	'a new install_node job starts in status queued');
+
+// A non-install_node job still starts pending.
+$other = ManagementJob::createJob($node->key, 'check_status', array(array('type' => 'local', 'label' => 'x', 'cmd' => 'true')), array(), null);
+$made_jobs[] = $other->key;
+$other->load();
+check($other->get('mjb_status') === 'pending', 'a non-install_node job still starts pending');
+
+// The node agent claims WHERE mjb_status = 'pending'; the executor claims
+// WHERE mjb_status = 'queued'. Prove both predicates against this exact job.
+$agent_sees = $db->prepare("SELECT COUNT(*) FROM mjb_management_jobs WHERE mjb_id = ? AND mjb_status = 'pending'");
+$agent_sees->execute([$job->key]);
+check((int)$agent_sees->fetchColumn() === 0, 'the node agent claim predicate does not match it');
+
+$exec_claim = $db->prepare("UPDATE mjb_management_jobs SET mjb_status = 'running', mjb_started_time = now() WHERE mjb_id = ? AND mjb_status = 'queued'");
+$exec_claim->execute([$job->key]);
+check($exec_claim->rowCount() === 1, 'the executor claim predicate matches it exactly once');
+
+// ---------------------------------------------------------------------------
+section('A fresh install runs its steps and writes the runner contract');
+
+(new InstallJobExecutor())->execute($job);
+$job->load();
+$out = (string)$job->get('mjb_output');
+
+check($job->get('mjb_status') === 'completed', 'the job completes');
+check(strpos($out, '=== [Step 1/2] Preflight ===') !== false, 'step 1 header, teardown excluded from the count');
+check(strpos($out, 'PREFLIGHT_OK') !== false, 'step 1 output captured');
+check(strpos($out, '=== [Step 2/2] Create the site ===') !== false, 'step 2 header');
+check(strpos($out, 'INSTALL_SUCCESS') !== false, 'the success marker JobResultProcessor reads is present');
+check(strpos($out, '=== Teardown ===') !== false && strpos($out, 'cleaning up') !== false,
+	'teardown ran after the main phase');
+
+// The result processor reads a completed job exactly as it read the agent's.
+JobResultProcessor::process($job);
+$node->load();
+check($node->get('mgn_install_state') === null, 'JobResultProcessor clears install_state on INSTALL_SUCCESS');
+check((int)$node->get('mgn_port') === 8091, 'and reads CONTAINER_PORT back into mgn_port');
+
+// ---------------------------------------------------------------------------
+section('No sealed password — the job is failed, not silently skipped');
+
+$node2 = ije_node('ijetest-nopass-' . $suffix); // no provision, no sealed password
+$job2 = ije_job($node2, array(array('type' => 'local', 'label' => 'x', 'cmd' => 'echo INSTALL_SUCCESS')));
+(new InstallJobExecutor())->execute($job2);
+$job2->load();
+check($job2->get('mjb_status') === 'failed', 'a job with no sealed password fails');
+check(strpos((string)$job2->get('mjb_error_message'), 'No sealed root password') !== false,
+	'and says why, naming the missing credential');
+
+// ---------------------------------------------------------------------------
+section('Shapes the bootstrap executor does not handle yet are refused clearly');
+
+$node3 = ije_node('ijetest-scp-' . $suffix, 'Aa1!' . bin2hex(random_bytes(10)));
+$job3 = ije_job($node3, array(
+	array('type' => 'scp', 'label' => 'Fetch backup', 'direction' => 'download',
+		'local_path' => '/tmp/x', 'remote_path' => '/tmp/y'),
+));
+(new InstallJobExecutor())->execute($job3);
+$job3->load();
+check($job3->get('mjb_status') === 'failed', 'an scp (from_backup) step fails the job');
+check(strpos((string)$job3->get('mjb_error_message'), 'scp') !== false,
+	'the failure names scp, so it reads as a not-yet rather than a bug');
+
+// ---------------------------------------------------------------------------
+section('A job whose parameters ask for bare-metal or from_backup is refused before any step runs');
+
+$node4 = ije_node('ijetest-bare-' . $suffix, 'Aa1!' . bin2hex(random_bytes(10)));
+$job4 = ManagementJob::createJob($node4->key, 'install_node',
+	array(array('type' => 'local', 'label' => 'x', 'cmd' => 'echo SHOULD_NOT_RUN')),
+	array('mode' => 'fresh', 'docker_mode' => 'bare-metal'), null);
+$made_jobs[] = $job4->key;
+(new InstallJobExecutor())->execute($job4);
+$job4->load();
+check($job4->get('mjb_status') === 'failed', 'a bare-metal install_node job fails');
+check(strpos((string)$job4->get('mjb_error_message'), 'bare-metal') !== false,
+	'the failure names bare-metal, not a mid-run authorized_keys FATAL');
+check(strpos((string)$job4->get('mjb_output'), 'SHOULD_NOT_RUN') === false,
+	'and none of its steps ran');
+
+$job5 = ManagementJob::createJob($node4->key, 'install_node',
+	array(array('type' => 'local', 'label' => 'x', 'cmd' => 'echo SHOULD_NOT_RUN')),
+	array('mode' => 'from_backup', 'docker_mode' => 'docker'), null);
+$made_jobs[] = $job5->key;
+(new InstallJobExecutor())->execute($job5);
+$job5->load();
+check($job5->get('mjb_status') === 'failed'
+	&& strpos((string)$job5->get('mjb_error_message'), 'from_backup') !== false,
+	'a from_backup job is refused up front by name');
+
+// ---------------------------------------------------------------------------
+section('Cleanup');
+
+foreach ($made_provisions as $id) { $db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_id = ?')->execute([$id]); }
+foreach ($made_jobs as $id) { $db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_id = ?')->execute([$id]); }
+foreach ($made_nodes as $id) {
+	$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_node_id = ?')->execute([$id]);
+	$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_id = ?')->execute([$id]);
+}
+$left = (int)$db->query("SELECT COUNT(*) FROM mgn_managed_nodes WHERE mgn_slug LIKE 'ijetest-%'")->fetchColumn();
+check($left === 0, 'every node this test created is gone', $left . ' left');
+
+harness_finish();
