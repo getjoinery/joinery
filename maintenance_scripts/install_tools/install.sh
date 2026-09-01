@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+#VERSION 2.58 - The host agent's join no longer blocks the docker install:
+#               it is lodged with --no-wait and the running agent finishes it
+#               when approved. docker mode takes --node-name=NAME so the plane's
+#               pending list shows a name, not "localhost"; a site container
+#               gets --hostname SITENAME for the same reason. (keyless_provisioning.md)
 #VERSION 2.57 - install.sh site takes --management-node=URL: with --enable-agent
 #               the site's agent asks to join that plane in the same step (docker:
 #               inside the container; bare metal: on the host), so a plane-built
@@ -263,7 +268,7 @@
 #               cd out of BUILD_DIR before removing it to avoid getcwd() warnings.
 #
 # Usage:
-#   ./install.sh docker [--management-node=URL]      # Install Docker + the siteless host agent (joins URL if given)
+#   ./install.sh docker [--management-node=URL] [--node-name=NAME]  # Install Docker + the siteless host agent (joins URL if given, as NAME)
 #   ./install.sh host-harden [--agent-managed]        # One-time: harden a Docker host server (--agent-managed: the joined agent is the access path)
 #   ./install.sh build-base                          # One-time per host: build joinery-base image
 #   ./install.sh server [--allow-unsupported-os]     # One-time: set up bare-metal server
@@ -1499,6 +1504,7 @@ service_reload() {
 # the Docker install — a host that is up but not yet enrolled is recoverable.
 install_docker_host_agent() {
     local mgmt_url="$1"
+    local node_name="$2"
     local dist_dir="$SCRIPT_DIR/../../public_html/agent_dist"
 
     print_step "Installing the Joinery host agent (siteless)..."
@@ -1516,10 +1522,16 @@ install_docker_host_agent() {
 
     if [ -n "$mgmt_url" ]; then
         print_step "Requesting to join $mgmt_url ..."
-        if joinery-agent join --management-node="$mgmt_url"; then
-            print_success "Join requested — approve it on the management node (the host link is set automatically on approval)"
+        # --no-wait: lodge the ask and move on. An approval may be hours away
+        # and nobody is at this terminal; the running agent finishes the join
+        # itself once it is approved. --name: what the plane's operator sees
+        # in the pending list (the hostname here is usually "localhost").
+        local -a join_args=(--management-node="$mgmt_url" --no-wait)
+        [ -n "$node_name" ] && join_args+=(--name="$node_name")
+        if joinery-agent join "${join_args[@]}"; then
+            print_success "Join requested — approve it on the management node; the agent finishes the join itself (the host link is set automatically on approval)"
         else
-            print_warning "Join request failed; run: joinery-agent join --management-node=$mgmt_url"
+            print_warning "Join request failed; run: joinery-agent join --management-node=$mgmt_url${node_name:+ --name=$node_name}"
         fi
     else
         print_info "Host agent installed but not joined (no --management-node given)."
@@ -1529,10 +1541,12 @@ install_docker_host_agent() {
 
 do_docker_install() {
     local MGMT_NODE_URL=""
+    local NODE_NAME=""
     local arg
     for arg in "$@"; do
         case "$arg" in
             --management-node=*) MGMT_NODE_URL="${arg#--management-node=}" ;;
+            --node-name=*) NODE_NAME="${arg#--node-name=}" ;;
             *) consume_global_flag "$arg" || { print_error "Unknown option for docker: $arg"; exit 1; } ;;
         esac
     done
@@ -1567,7 +1581,7 @@ do_docker_install() {
         # Do NOT exit here: an existing Docker host still needs its host agent
         # installed and (if a URL was given) joined — the whole point on a
         # keyless machine. Fall through to the agent step.
-        install_docker_host_agent "$MGMT_NODE_URL"
+        install_docker_host_agent "$MGMT_NODE_URL" "$NODE_NAME"
         if [ "$QUIET_MODE" -eq 1 ]; then
             echo -e "${GREEN}Docker installation complete!${NC}"
         else
@@ -1655,7 +1669,7 @@ do_docker_install() {
         print_success "Postgres ports 9080-9099 blocked on $PUBLIC_IFACE (tunnels still work)"
     fi
 
-    install_docker_host_agent "$MGMT_NODE_URL"
+    install_docker_host_agent "$MGMT_NODE_URL" "$NODE_NAME"
 
     if [ "$QUIET_MODE" -eq 1 ]; then
         echo -e "${GREEN}Docker installation complete!${NC}"
@@ -3876,6 +3890,7 @@ EOF
     if [ "$QUIET_MODE" -eq 1 ]; then
         docker run -d \
             --name "$SITENAME" \
+            --hostname "$SITENAME" \
             --restart unless-stopped \
             --env-file "$ENV_FILE" \
             $MEMORY_OPTS \
@@ -3900,6 +3915,7 @@ EOF
     else
         docker run -d \
             --name "$SITENAME" \
+            --hostname "$SITENAME" \
             --restart unless-stopped \
             --env-file "$ENV_FILE" \
             $MEMORY_OPTS \

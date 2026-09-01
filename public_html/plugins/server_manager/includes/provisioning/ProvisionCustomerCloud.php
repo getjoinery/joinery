@@ -38,6 +38,7 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 1.7 - fleet enrollment seeding reaches a keyless node over its sealed root password
  * @version 1.6 - handle_ready refuses what keyless cannot finish yet (bare, bare-metal, from_backup)
                  before an instance is created
  * @version 1.5 - keyless: seal a root password instead of installing a key
@@ -104,9 +105,6 @@ class ProvisionCustomerCloud {
 	 * Returns 1 if the provision advanced, 0 otherwise.
 	 */
 	protected function handle_ready($provision) {
-		$driver = $this->get_driver($provision);
-		if ($driver === null) return 0;
-
 		// Only a fresh docker install can be finished keyless today: the
 		// bootstrap executor runs install_node over the sealed password for that
 		// shape alone. A bare instance is verified by an SSH probe nothing can
@@ -123,6 +121,12 @@ class ProvisionCustomerCloud {
 				. "(Bare, bare-metal and from_backup wait on the install executor — specs/keyless_provisioning.md.)");
 			return 1;
 		}
+
+		// The shape check comes before the driver on purpose: a provision that
+		// can never finish is refused whether or not the grant is usable, so a
+		// stale token cannot park it for re-connect first and hide the refusal.
+		$driver = $this->get_driver($provision);
+		if ($driver === null) return 0;
 
 		$settings = Globalvars::get_instance();
 		$region = $provision->get('cvp_region')        ?: ($settings->get_setting('server_manager_customer_cloud_region') ?: 'us-southeast');
@@ -465,7 +469,16 @@ class ProvisionCustomerCloud {
 				return;
 			}
 			$sitename = $provision->get('cvp_sitename') ?: $provision->get('cvp_slug');
-			$result = FleetProvisionSeeding::seedNode($node, $buyer_id, (string)$sitename);
+			// A keyless node is reached over the provision's sealed root
+			// password, which by design outlives the install until the agent's
+			// join is approved; seeding runs at completion, inside that window.
+			$root_password = null;
+			$sealed = (string)$provision->get('cvp_root_pass_sealed');
+			if ($sealed !== '') {
+				$opened = (new SecretBox())->open($sealed);
+				if ($opened['state'] === 'ok') { $root_password = $opened['value']; }
+			}
+			$result = FleetProvisionSeeding::seedNode($node, $buyer_id, (string)$sitename, $root_password);
 			if ($result['ok']) {
 				error_log('ProvisionCustomerCloud: fleet enrollment seeded for provision #'
 					. $provision->key . ' (' . $provision->get('cvp_domain') . ')');

@@ -324,19 +324,19 @@ Each machine reports the bundle version it holds on every claim, stored as `mgn_
 There is no admin page on these machines, so the ceremony is the same one reached from the command line:
 
 ```bash
-joinery-agent join --management-node=https://plane.example.com
+joinery-agent join --management-node=https://plane.example.com [--name=NAME] [--no-wait]
 joinery-agent status
 joinery-agent enable | disable
 joinery-agent leave
 ```
 
-`join` generates the keypair, sends only the public half, and prints the fingerprint to compare against the pending request on the plane — the same comparison, and the same approval, as a node enrolling from its own admin page. The run switch is the marker file `/etc/joinery-agent/enabled`, which `enable` and `disable` write directly: on a machine with no settings table, the marker is the switch rather than a projection of one.
+`join` generates the keypair, sends only the public half, and prints the fingerprint to compare against the pending request on the plane — the same comparison, and the same approval, as a node enrolling from its own admin page. `--name` is what the plane's pending list shows for this machine (default: the hostname, which on a fresh VPS is usually `localhost`). Without `--no-wait` the command waits up to five minutes for the approval; with it, the command returns once the ask is lodged. Either way the running agent finishes the join itself: it watches the staged keypair, and when the plane approves — minutes or hours later — it stores the credential and starts polling without a restart or anyone at the terminal. `install.sh docker --management-node=URL --node-name=NAME` is how a plane-built host asks. The run switch is the marker file `/etc/joinery-agent/enabled`, which `enable` and `disable` write directly: on a machine with no settings table, the marker is the switch rather than a projection of one.
 
 Install with `install_agent.sh --siteless`, which is explicit and never inferred — a missing site config keeps meaning "not my machine, exit 0" for everything else. `--dist-dir=DIR` names where the first artifact is, since no release delivered one.
 
 ### The Docker host as a node
 
-A shared Docker host is a plain ManagedNode in machine posture — paired, addressed and versioned like any node, with no web root and no container name. `install.sh docker` installs the host's own siteless agent as part of the install and, given `--management-node=URL`, issues its join; the machine that runs our Docker is managed by its own agent, which is the only path to certificate renewal or site removal once SSH is gone. The placement record (`mgh_managed_hosts`) stays what it is: which containers live where. One nullable link joins the two worlds: `mgh_mgn_host_node_id` on the host record names the host's own paired node. Approving the host agent's join sets it (`ManagedHost::link_host_node` fills an existing placement record for the host's address that has no host node yet), and the host's edit page sets it by hand. That is the routing chain for host-scope work — a container victim's `mgn_mgh_host_id` finds the host record, the host record names the host's node, and the job is addressed there. Sibling containers on a host are found by `mgn_mgh_host_id` and nothing else; `ManagedHost::ensure_for_node()` mints or links the placement record the moment a node needs a container port, so the FK is never absent where it matters.
+A shared Docker host is a plain ManagedNode in machine posture — paired, addressed and versioned like any node, with no web root and no container name. `install.sh docker` installs the host's own siteless agent as part of the install and, given `--management-node=URL` (and `--node-name=NAME` for the pending list), lodges its join; the machine that runs our Docker is managed by its own agent, which is the only path to certificate renewal or site removal once SSH is gone. The placement record (`mgh_managed_hosts`) stays what it is: which containers live where. One nullable link joins the two worlds: `mgh_mgn_host_node_id` on the host record names the host's own paired node. Approving the host agent's join sets it (`ManagedHost::link_host_node` fills an existing placement record for the host's address that has no host node yet), and the host's edit page sets it by hand. That is the routing chain for host-scope work — a container victim's `mgn_mgh_host_id` finds the host record, the host record names the host's node, and the job is addressed there. Sibling containers on a host are found by `mgn_mgh_host_id` and nothing else; `ManagedHost::ensure_for_node()` mints or links the placement record the moment a node needs a container port, so the FK is never absent where it matters.
 
 A host record can be deleted (soft) from its edit page — last, deliberately: the delete refuses while any container site still names it as placement, and while its own agent node record is live.
 
@@ -562,7 +562,10 @@ over the sealed root password (`sshpass`, password in the environment, never on
 a command line), and writes the same output and status contract the agent
 runner writes. It handles fresh docker installs only: `handle_ready` refuses a
 bare, bare-metal or from_backup provision before an instance is created, and the
-executor refuses such a job by its parameters before running a step.
+executor refuses such a job by its parameters before running a step. Fleet
+enrollment seeding at completion (the mailbox plugin's `FleetProvisionSeeding`)
+reaches a keyless node the same way, over the sealed root password, which by
+design lives until the node's agent is approved.
 
 Settings: `server_manager_customer_cloud_region` / `_type` / `_image` (instance
 defaults), `server_manager_linode_referral_url`. Provider credentials are the
