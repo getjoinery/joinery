@@ -166,6 +166,45 @@ include_internal: bool,
     Ok(out)
 }
 
+/// The guard's look at the target, and the one place a test can make it fail.
+///
+/// The state this seam exists for cannot be produced from outside: every stat
+/// failure a test can force on a real filesystem -- an unsearchable parent, a
+/// symlink loop, an over-long name -- fails the rename that follows too, so the
+/// file survives whether the guard ran or not and the test proves nothing. The
+/// dangerous case is the TRANSIENT one, where the stat fails and the rename
+/// would then have succeeded, and nothing outside this process can stage it.
+///
+/// So it is staged from inside, in test builds only. The rest of this codebase
+/// injects the filesystem, the network and the clock for exactly this reason;
+/// this is the same move at the one layer that reaches the OS directly.
+#[cfg(test)]
+fn guard_stat(target: &Path) -> std::io::Result<fs::Metadata> {
+    if let Some(kind) = tests::take_injected_stat_error() {
+        return Err(std::io::Error::new(kind, "injected stat failure"));
+    }
+    target.symlink_metadata()
+}
+
+#[cfg(not(test))]
+fn guard_stat(target: &Path) -> std::io::Result<fs::Metadata> {
+    target.symlink_metadata()
+}
+
+/// Does this stat error mean "nothing is at that path"?
+///
+/// `NotFound` is the ordinary answer. `NotADirectory` is one too: a component
+/// of the path is a file, so nothing can be at the path either, and the
+/// create-the-parent step below turns that into an error that names the
+/// blocker. Every other error means the question was not answered, which at a
+/// gate is a refusal rather than a pass.
+fn not_there(e: &std::io::Error) -> bool {
+    matches!(
+        e.kind(),
+        std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+    )
+}
+
 fn io_err(path: &Path, e: std::io::Error) -> VfsError {
     match e.kind() {
         std::io::ErrorKind::NotFound => VfsError::NotFound(path.to_path_buf()),
@@ -459,14 +498,32 @@ impl OsSpoolFile {
         // The guard against overwriting work done while we were downloading. If
         // the file at the target is no longer what the engine decided against,
         // somebody changed it in the meantime and this download is stale.
+        //
+        // An unanswerable question at a gate is a NO. This used to read the
+        // stat with `if let Ok(..)`, so an lstat that FAILED for any reason
+        // other than the file being absent skipped the check entirely and let
+        // the rename go ahead -- the last gate before the one irreversible act
+        // in this program, silently absent for exactly the commit that could
+        // not be checked. The conditions that produce a transient stat error
+        // are the conditions two busy devices produce, and no in-memory
+        // simulator can generate one, so nothing above would ever have caught
+        // it. Absent is the only error that means "nothing is in the way".
         if let Some(expected) = expect {
-            if let Ok(md) = target.symlink_metadata() {
-                if md.is_file() {
-                    let actual = fingerprint_of(target, &md);
-                    if !actual.unchanged_from(&expected, &Personality::native()) {
-                        return Err(VfsError::AlreadyExists(target.to_path_buf()));
+            match guard_stat(target) {
+                Ok(md) => {
+                    if md.is_file() {
+                        let actual = fingerprint_of(target, &md);
+                        if !actual.unchanged_from(&expected, &Personality::native()) {
+                            return Err(VfsError::AlreadyExists(target.to_path_buf()));
+                        }
                     }
                 }
+                // Absent, or a path component that is a file rather than a
+                // directory: both are answers, and the second has its own
+                // handling below that names the blocker. Anything else is the
+                // stat failing to answer at all.
+                Err(e) if not_there(&e) => {}
+                Err(e) => return Err(io_err(target, e)),
             }
         }
 
@@ -481,8 +538,20 @@ impl OsSpoolFile {
         // instruction-width window; it is not in `std` and has no portable
         // equivalent, so it is deliberately left as the next thing to do here
         // rather than reached for with a dependency.
-        if expect.is_none() && target.symlink_metadata().is_ok() {
-            return Err(VfsError::AlreadyExists(target.to_path_buf()));
+        //
+        // Fails closed for the same reason as the branch above: `.is_ok()` read
+        // a stat error as an empty path, which is the most dangerous possible
+        // reading of "I could not look".
+        if expect.is_none() {
+            match guard_stat(target) {
+                Ok(_) => return Err(VfsError::AlreadyExists(target.to_path_buf())),
+                // Absent, or a path component that is a file rather than a
+                // directory: both are answers, and the second has its own
+                // handling below that names the blocker. Anything else is the
+                // stat failing to answer at all.
+                Err(e) if not_there(&e) => {}
+                Err(e) => return Err(io_err(target, e)),
+            }
         }
 
         if let Some(parent) = target.parent() {
@@ -622,6 +691,89 @@ mod tests {
 
         assert!(!target.exists());
         assert_eq!(fs::read_dir(d.path().join("spool")).unwrap().count(), 0);
+    }
+
+    thread_local! {
+        static INJECTED_STAT_ERROR: std::cell::Cell<Option<std::io::ErrorKind>> =
+            const { std::cell::Cell::new(None) };
+    }
+
+    /// Make the guard's next look at the target fail, once.
+    pub(super) fn fail_the_next_guard_stat(kind: std::io::ErrorKind) {
+        INJECTED_STAT_ERROR.with(|c| c.set(Some(kind)));
+    }
+
+    pub(super) fn take_injected_stat_error() -> Option<std::io::ErrorKind> {
+        INJECTED_STAT_ERROR.with(|c| c.take())
+    }
+
+    /// A stat that cannot answer must not be read as permission to proceed.
+    ///
+    /// This is the last gate before the one irreversible act in this program,
+    /// and it used to be skipped entirely whenever the stat errored: the
+    /// comparison was written `if let Ok(..)`, so a transient failure -- memory
+    /// pressure, exhausted descriptors, anything two busy devices produce --
+    /// removed the guard for exactly the commit that could not be checked, and
+    /// the rename went ahead over whatever was standing there.
+    ///
+    /// Nothing outside this process can stage that: every stat failure a real
+    /// filesystem can be provoked into fails the rename too, so the file
+    /// survives either way and the test cannot tell the fix from its absence.
+    /// Hence the injection.
+    #[test]
+    fn a_stat_that_cannot_answer_refuses_the_commit() {
+        let d = TempDir::new("guard-blind");
+        let v = vfs(&d);
+        let target = v.root().unwrap().join("precious.txt");
+        fs::write(&target, b"the only copy").unwrap();
+        let seen = v.fingerprint(&target).unwrap().unwrap();
+
+        // The file is UNCHANGED, so the guard would say yes if it could look.
+        // The only thing wrong is that it cannot look.
+        fail_the_next_guard_stat(std::io::ErrorKind::Other);
+        let mut spool = v.spool(&target).unwrap();
+        spool.write_all(b"the download").unwrap();
+        let err = spool.commit(&target, Some(seen)).unwrap_err();
+
+        assert!(
+            matches!(err, VfsError::Io { .. }),
+            "an unanswerable stat must refuse, not proceed; got {err:?}"
+        );
+        assert_eq!(
+            fs::read(&target).unwrap(),
+            b"the only copy",
+            "the commit went ahead over a file it had not been able to check"
+        );
+
+        // And the refusal is the transient thing it says it is: the next
+        // attempt, with the stat answering again, lands.
+        let mut spool = v.spool(&target).unwrap();
+        spool.write_all(b"the download").unwrap();
+        spool.commit(&target, Some(seen)).unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"the download");
+    }
+
+    /// The same, for a commit with no agreement to compare against.
+    #[test]
+    fn a_stat_that_cannot_answer_refuses_a_commit_with_no_agreement() {
+        let d = TempDir::new("guard-blind-none");
+        let v = vfs(&d);
+        let target = v.root().unwrap().join("theirs.txt");
+        fs::write(&target, b"a file the engine has never seen").unwrap();
+
+        fail_the_next_guard_stat(std::io::ErrorKind::Other);
+        let mut spool = v.spool(&target).unwrap();
+        spool.write_all(b"the download").unwrap();
+        let err = spool.commit(&target, None).unwrap_err();
+
+        assert!(
+            matches!(err, VfsError::Io { .. }),
+            "a stat error must not read as an empty path; got {err:?}"
+        );
+        assert_eq!(
+            fs::read(&target).unwrap(),
+            b"a file the engine has never seen"
+        );
     }
 
     #[test]
