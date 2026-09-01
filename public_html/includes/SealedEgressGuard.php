@@ -35,6 +35,12 @@
  * mechanism, on purpose: the audit found no legitimate case for one, and it
  * would exist only to be misused.
  *
+ * Two kinds of value are recognised as not-content whatever their length:
+ * ciphertext SealedBox produced (isSealedBlob), and a list of integers
+ * (isIntegerList) — a JSON array or comma list of ids IS the "store a
+ * reference" fix, and a string of digits cannot carry a subject or a body.
+ * Both are classifications of the value itself, not of where it lands.
+ *
  * Owner attribution comes from VaultUnlock::secretKey(), which is the only
  * way to reach a DEK and therefore runs before any open. When exactly one
  * owner's scope has been opened, that owner is the one a destination row must
@@ -56,6 +62,7 @@
  * egressGated() (hot OR a caller-declared durable restriction), while the
  * write-guard keeps asking isHot() alone.
  *
+ * @version 1.2 - a list of integers is a reference, not content, whatever its length
  * @version 1.1
  */
 
@@ -346,9 +353,22 @@ class SealedEgressGuard {
 			if (!is_string($value)) continue;
 			if (strlen($value) <= self::THRESHOLD) continue;
 			if (self::isSealedBlob($value)) continue;
+			if (self::isIntegerList($value)) continue;
 			return true;
 		}
 		return false;
+	}
+
+	/**
+	 * True for a JSON array or comma-separated list of integers, such as a
+	 * queue of message ids (`[5,2110,101623,...]`). Ids are references to
+	 * content, never content: a string that holds nothing but digits, commas,
+	 * brackets and whitespace cannot carry a subject or a body, so it passes
+	 * at any length. A mailbox with more than a handful of ids queued for
+	 * re-indexing crosses THRESHOLD with its own bookkeeping otherwise.
+	 */
+	public static function isIntegerList(string $value): bool {
+		return (bool)preg_match('/^\s*\[?\s*-?\d+(?:\s*,\s*-?\d+)*\s*\]?\s*$/', $value);
 	}
 
 	/** True for anything SealedBox produced — already protected, so free to write. */
