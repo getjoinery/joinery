@@ -21,6 +21,7 @@
  * message rows are unsealed — the index reads content through the same get()
  * hook either way, and what is under test here is the blob lifecycle.
  *
+ * @version 1.1 - the format stamp refuses a blob of another shape before decrypting it
  * @version 1.0
  */
 
@@ -181,6 +182,25 @@ harness_register_model('File', $fil_3);
 check($fil_3 > 0 && $fil_3 !== (int)$legacy_file->key,
 	'the rebuild persisted a fresh blob in place of the legacy one', "legacy={$legacy_file->key} now=$fil_3");
 check(SealedBox::isStreamFile($blob_path($fil_3)), 'and it is stream-format');
+SealedEgressGuard::reset();
+
+// -------------------------------------------------------- format stamp
+
+section('a blob of another format is refused before it is decrypted');
+
+check(intval(InboundMailboxSearchIndex::loadOrCreateForUser($uid)->get('imi_format')) === MailboxIndex::FORMAT,
+	'persist stamps the current format on the bookkeeping row');
+$bk = InboundMailboxSearchIndex::loadOrCreateForUser($uid);
+$bk->set('imi_format', MailboxIndex::FORMAT - 1);
+$bk->save();
+$idx->wipe($uid);
+$idx->fold($uid, $kp['secret']);
+$fil_4 = $blob_file_id();
+harness_register_model('File', $fil_4);
+check($fil_4 > 0 && $fil_4 !== $fil_3, 'a mismatched stamp skips the restore and rebuilds', "before=$fil_3 now=$fil_4");
+check($idx->search($uid, 'streamkwone') === array($m1), 'and the rebuilt index searches');
+check(intval(InboundMailboxSearchIndex::loadOrCreateForUser($uid)->get('imi_format')) === MailboxIndex::FORMAT,
+	'and the rebuild re-stamped the format');
 SealedEgressGuard::reset();
 
 $idx->wipe($uid);

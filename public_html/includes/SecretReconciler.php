@@ -25,6 +25,8 @@
  * is what the setup-wizard pill and the management-node stats blob read, so
  * neither has to walk a live decrypt of every row on every admin request.
  *
+ * @version 1.1 - an enumerator is consulted only while its plugin is active, and one that
+ *                throws falls back to the code-free locator path instead of aborting the run
  * @version 1.0
  */
 class SecretReconciler {
@@ -281,12 +283,29 @@ class SecretReconciler {
 			if ($box->open($candidate)['state'] === SecretBox::OPEN_DEAD) $dead++;
 		};
 
+		// The declared enumerator belongs to its owning plugin's code, and is
+		// only consulted while that plugin is active: an installed-but-inactive
+		// plugin's classes may still resolve, and its tables may never have
+		// been created. An enumerator that throws — a table gone with the
+		// plugin, a query against a schema this deployment never had — is
+		// logged and the category falls through to the code-free path below,
+		// which tolerates a missing table. One category can never abort the
+		// reconcile of every other secret.
 		$enumerator = (string)$row->get('ssr_enumerator');
-		if (!$is_orphan && $enumerator !== '' && strpos($enumerator, '::') !== false && is_callable($enumerator)) {
-			foreach ((array)call_user_func($enumerator) as $entry) {
-				$classify(is_array($entry) ? ($entry['blob'] ?? null) : (string)$entry);
+		$source = (string)$row->get('ssr_source');
+		if (!$is_orphan && $enumerator !== '' && strpos($enumerator, '::') !== false
+				&& ($source === '' || $source === 'core' || self::plugin_active($source))
+				&& is_callable($enumerator)) {
+			try {
+				foreach ((array)call_user_func($enumerator) as $entry) {
+					$classify(is_array($entry) ? ($entry['blob'] ?? null) : (string)$entry);
+				}
+				return array('present' => $present, 'dead' => $dead);
+			} catch (\Throwable $e) {
+				error_log('SecretReconciler: enumerator ' . $enumerator . ' for ' . $locator
+					. ' failed, falling back to the locator: ' . $e->getMessage());
+				$present = 0; $dead = 0;
 			}
-			return array('present' => $present, 'dead' => $dead);
 		}
 
 		// Code-free path. A singleton locator is a setting name; a row-scoped one

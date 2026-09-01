@@ -677,6 +677,16 @@ Cross-shape rebuilds work in both directions with no extra step: a container bac
 
 The distinction matters beyond the upgrade endpoint: any control that edits a file the upgrade replaces wholesale belongs only on a publishing instance, because on a consuming site the edit is discarded at the next upgrade. Version-controlled manifests like Joinery AI's [recipes.json](../plugins/joinery_ai/docs/overview.md#shipped-recipes) are for the same reason edited only on the publishing checkout.
 
+### PostgreSQL memory
+
+`maintenance_scripts/sysadmin_tools/tune_postgres_memory.sh` sizes PostgreSQL from the
+RAM the machine (or container, via its cgroup limit) actually has and writes the result
+as `conf.d/20-joinery-memory.conf`: `shared_buffers` at 20% of RAM (floor 64MB, cap 2GB)
+and `effective_cache_size` at 50%. The installer runs it on every install; on an existing
+node run it by hand — it is idempotent, writes nothing when the drop-in already matches,
+and restarts the cluster unit (`postgresql@{version}-main`) only when it wrote. `--dry-run`
+prints what it would write; `--no-restart` writes without restarting.
+
 ### The deploy tier
 
 `php tests/run.php deploy` is the set `upgrade.php` runs after a swap. It pulls in no other tier and no other tier pulls it in.

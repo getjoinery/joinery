@@ -124,7 +124,7 @@ check($after->get('imi_refold_ids') === null, 'imi_refold_ids cleared after the 
 
 // Exactly one FTS row for the morphed id (no duplicate from delete-and-reinsert).
 $shm = new SQLite3($idx->shmPath($uid), SQLITE3_OPEN_READONLY);
-$rows = intval($shm->querySingle('SELECT COUNT(*) FROM mailfts WHERE message_id = ' . $draft_id));
+$rows = intval($shm->querySingle('SELECT COUNT(*) FROM mailfts WHERE rowid = ' . $draft_id));
 $shm->close();
 check($rows === 1, 'exactly one FTS row for the morphed message id', "rows=$rows");
 

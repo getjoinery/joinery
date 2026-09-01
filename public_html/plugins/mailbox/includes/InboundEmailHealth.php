@@ -20,6 +20,7 @@
  * is a no-op; with smarthost on, checkRelayTunnel applies and the two provider
  * checks are no-ops. The check list always matches the chosen path.
  *
+ * @version 1.17 - checkSearchIndexEngine() probes the index's real table shape
  * @version 1.16 - checkSealingMailboxHolders(): a protected mailbox with nobody
  *                 to seal to is held mail, so it is named loudly and early
  * @version 1.15 - checkRelayMapFresh() grades a differing map: pending
@@ -344,12 +345,20 @@ class InboundEmailHealth {
             );
         }
         try {
+            // The index's own shape (MailboxIndex::FTS_DDL): contentless_delete
+            // needs SQLite 3.43+, so an older library fails here at provisioning
+            // rather than at the first unlock.
             $db = new SQLite3(':memory:');
-            $db->exec('CREATE VIRTUAL TABLE t USING fts5(x)');
+            $ok = @$db->exec(str_replace('mailfts', 't', MailboxIndex::FTS_DDL));
+            $err = $ok ? '' : $db->lastErrorMsg();
             $db->close();
+            if (!$ok) {
+                throw new \RuntimeException($err);
+            }
         } catch (\Throwable $e) {
             throw new ProvisioningCheckFailed(
-                'ext-sqlite3 is loaded but FTS5 is not compiled in: ' . $e->getMessage()
+                'ext-sqlite3 is loaded but FTS5 with contentless_delete (SQLite 3.43+) is unavailable: '
+                . $e->getMessage()
             );
         }
     }

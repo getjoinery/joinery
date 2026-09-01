@@ -2403,39 +2403,42 @@ fn scratch_ghost_probe() {
     }
 }
 
-/// The seed that found a download destroying an unsynced local file.
+/// The seed that proves a park does not fight another file for its name.
 ///
-/// `move_local` recorded the fingerprint of the file standing at the
-/// destination while leaving `synced_content` describing an older one. The
-/// record then said "unchanged, and its content is X" about bytes that were
-/// neither -- and the download guard, which compares only fingerprints, was
-/// handed a reference that matched by construction. It overwrote seven bytes
-/// nothing had ever uploaded, and the no-loss oracle found them nowhere.
+/// A park's path comes from an agreement the naming pass has just overruled, so
+/// it can name a spot another entry now holds: on Windows the escaped spelling
+/// of a reserved stem and the literal name of a different file land on the same
+/// string, and the loser's path is the winner's file. Standing there is not the
+/// loser's copy at all, and there is nothing of its own to give up.
 ///
-/// Frozen with the arm's exact shape rather than left in the sweep, because it
-/// is the only reproduction there is. What cannot be staged from outside is the
-/// LYING RECORD -- not the state around it. The scan is honest throughout: in
-/// the fatal pass it refused the cached hash, read the real bytes and reported
-/// them correctly. Its honesty about the disk simply does not constrain what an
-/// operation writes into the record later in the same pass.
+/// Read as "this copy has work the server does not have" it produced a device
+/// that never went quiet: the park stood down, naming derived it again on the
+/// next pass, and around it went with an empty queue and nothing to show. Told
+/// apart by asking who claims the path — the one question that separates a
+/// stranger from an edit nobody has sent — it parks by record and leaves the
+/// winner's file alone.
 ///
-/// The obvious ingredients were tried and do NOT reproduce it. Staging an
-/// untracked file of the user's at the name a rename is about to claim, with
-/// the rename and an edit arriving together, ends correctly: `make_room` moves
-/// the stranger aside as a conflict copy and both files survive, with the fixes
-/// off as well as on. So an occupied destination is not the missing ingredient.
-///
-/// What this seed has instead is an entry whose OWN local file had already been
-/// replaced -- a different inode, holding bytes nothing had uploaded -- while
-/// `synced_content` still described the file before it. Its op history runs
-/// through a `preserve_local_as` to get there. `move_local` then stamped a
-/// fresh fingerprint over that stale content half, and a record that had been
-/// merely out of date became one that actively asserted agreement. Nobody has
-/// yet staged that by hand; if someone does, this seed can go.
-///
-/// It fails on the old code with either fix reverted, and both fixes stop it
-/// independently: the one that refuses to record a fingerprint about bytes it
-/// has not read, and the commit-time content check behind it.
+/// This seed passed before parking a materialized entry went through the park
+/// operation, so it is that change's bill coming due rather than an old fault
+/// the estate happened to reach.
+#[test]
+fn frozen_park_onto_a_strangers_name_seed() {
+    let refs: [(&str, Platform); 3] = [
+        ("mac", Platform::MacOs),
+        ("pc", Platform::Windows),
+        ("disk", Platform::Decomposing),
+    ];
+    workload_core(
+        4_123_847,
+        60,
+        &refs,
+        true,
+        Vault::None,
+        false,
+        Names::WindowsHostile,
+    );
+}
+
 /// The seed that proves a park stands down for work it is blocking.
 ///
 /// A park gives up a local copy, and refuses while that copy holds bytes the
@@ -2499,6 +2502,39 @@ fn frozen_vault_placeholder_seed() {
     workload_core(1_073_449, 40, &refs, true, Vault::Shared, false, Names::Ordinary);
 }
 
+/// The seed that found a download destroying an unsynced local file.
+///
+/// `move_local` recorded the fingerprint of the file standing at the
+/// destination while leaving `synced_content` describing an older one. The
+/// record then said "unchanged, and its content is X" about bytes that were
+/// neither -- and the download guard, which compares only fingerprints, was
+/// handed a reference that matched by construction. It overwrote seven bytes
+/// nothing had ever uploaded, and the no-loss oracle found them nowhere.
+///
+/// Frozen with the arm's exact shape rather than left in the sweep, because it
+/// is the only reproduction there is. What cannot be staged from outside is the
+/// LYING RECORD -- not the state around it. The scan is honest throughout: in
+/// the fatal pass it refused the cached hash, read the real bytes and reported
+/// them correctly. Its honesty about the disk simply does not constrain what an
+/// operation writes into the record later in the same pass.
+///
+/// The obvious ingredients were tried and do NOT reproduce it. Staging an
+/// untracked file of the user's at the name a rename is about to claim, with
+/// the rename and an edit arriving together, ends correctly: `make_room` moves
+/// the stranger aside as a conflict copy and both files survive, with the fixes
+/// off as well as on. So an occupied destination is not the missing ingredient.
+///
+/// What this seed has instead is an entry whose OWN local file had already been
+/// replaced -- a different inode, holding bytes nothing had uploaded -- while
+/// `synced_content` still described the file before it. Its op history runs
+/// through a `preserve_local_as` to get there. `move_local` then stamped a
+/// fresh fingerprint over that stale content half, and a record that had been
+/// merely out of date became one that actively asserted agreement. Nobody has
+/// yet staged that by hand; if someone does, this seed can go.
+///
+/// It fails on the old code with either fix reverted, and both fixes stop it
+/// independently: the one that refuses to record a fingerprint about bytes it
+/// has not read, and the commit-time content check behind it.
 #[test]
 fn frozen_stale_agreement_seed() {
     let refs: [(&str, Platform); 3] = [

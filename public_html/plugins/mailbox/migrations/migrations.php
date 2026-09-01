@@ -875,4 +875,27 @@ return [
 			}
 		},
 	],
+	[
+		// The full-text index over the content columns was 3 GB of a 5 GB table
+		// on a fully sealed mailbox: a sealed row's columns are ciphertext, which
+		// no query ever matches, so indexing them only grew the index and taxed
+		// every ingest and import. Partial on unsealed rows; the search adds the
+		// same predicate (MailboxService::FULLTEXT_INDEX_PREDICATE) so the planner
+		// keeps using it. Create the new index before dropping the old so a
+		// search never runs without one in between.
+		'id' => 'iem_016_fulltext_index_unsealed_only',
+		'version' => '1.105.0',
+		'up' => function($dbconnector) {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxService.php'));
+			$dblink = $dbconnector->get_db_link();
+			$dblink->exec(
+				"CREATE INDEX IF NOT EXISTS iem_fulltext_unsealed_idx
+				 ON iem_inbound_email_messages
+				 USING GIN (" . MailboxService::FULLTEXT_SQL . ")
+				 WHERE " . MailboxService::FULLTEXT_INDEX_PREDICATE);
+			$dblink->exec("DROP INDEX IF EXISTS iem_fulltext_idx");
+			echo "Full-text index rebuilt over unsealed rows only.\n";
+		},
+	],
+
 ];

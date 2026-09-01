@@ -116,7 +116,7 @@ abstract class PublicPageBase {
 		// Check protocol_mode for HTTPS redirect
 		$protocol_mode = $settings->get_setting('protocol_mode', false, true); // fail_silently = true
 		if($protocol_mode === 'https_redirect'){
-			require_once('LibraryFunctions.php');
+			require_once(__DIR__ . '/LibraryFunctions.php');
 			if(!LibraryFunctions::isSecure()){
 				$location = 'https://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'];
 				header('HTTP/1.1 301 Moved Permanently');
@@ -984,7 +984,7 @@ abstract class PublicPageBase {
 		// Check protocol_mode for HTTPS redirect (duplicate check for safety)
 		$protocol_mode = $settings->get_setting('protocol_mode', false, true); // fail_silently = true
 		if($protocol_mode === 'https_redirect'){
-			require_once('LibraryFunctions.php');
+			require_once(__DIR__ . '/LibraryFunctions.php');
 			if(!LibraryFunctions::isSecure()){
 				$location = 'https://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'];
 				header('HTTP/1.1 301 Moved Permanently');

@@ -103,6 +103,9 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.28
+ * @changelog 1.28 - two mailbox-scoped partial indexes (live rows, trashed rows)
+ *   so the reader's list and count queries stop scanning the whole table.
  * @version 1.27
  * @changelog 1.27 - scopeSealedContentActive(): the sealed-content check over a
  *   set of mailboxes, for a search that spans every mailbox the viewer holds.
@@ -438,6 +441,20 @@ class InboundEmailMessage extends SystemBase {
 	 */
 	public static $index_specifications = array(
 		array('columns' => array('LOWER(iem_recipient)'), 'where' => "iem_direction = 'inbound'"),
+		// Live rows by mailbox. Every reader page load reads this table by
+		// mailbox — the Inbox list (mailbox + not archived), the rail's unread
+		// badge (mailbox + not archived + unread) and the per-mailbox totals —
+		// and without it each of those is a sequential scan of the whole table
+		// (160-190 ms on a 100k-message mailbox, three to four times per load,
+		// on one CPU). The columns after the mailbox are exactly the ones those
+		// queries filter on, so a count runs index-only and the Inbox list
+		// touches the heap for its 0.2% of rows. Partial on live rows because
+		// that is every read scope but Trash, which has its own index below.
+		array('columns' => array('iem_iea_inbound_email_alias_id', 'iem_is_archived', 'iem_is_read',
+			'iem_spam_verdict', 'iem_direction'), 'where' => 'iem_delete_time IS NULL'),
+		// Trash by mailbox: the discarded rows are a sliver of the table and
+		// the Trash view must not scan the live 99.9% to find them.
+		array('columns' => array('iem_iea_inbound_email_alias_id'), 'where' => 'iem_delete_time IS NOT NULL'),
 	);
 
 	function authenticate_write($data) {
