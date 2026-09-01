@@ -124,7 +124,7 @@ pairs at birth (`install.sh --enable-agent`, fingerprint-compared approval).
 | Holder | Holds | Never holds |
 |---|---|---|
 | Management node | Node public keys, per-node write-only backup slots, its own site | Any SSH private key the job system can use; any node's recovery key; anything that opens a customer machine |
-| Managed node | Its own Ed25519 identity (0600 root), its own proven recovery **public** key (which is also what approvals are sealed to), root-owned policy, and its own upload ledger of what it sent to the bucket | A database credential (dies with the local queue); any fleet-shared secret; the recovery **private** key, which only a human has |
+| Managed node | Its own Ed25519 identity (0600 root), its own proven recovery **public** key (which is also what approvals are sealed to), root-owned policy, and its own upload ledger of what it sent to the bucket | A database credential (dies with the local queue; one transient exception: a host-posture agent staging a decommission approval holds the victim's DB credential in memory for the life of the connection — never at rest, never its own; `docker_host_agent.md`); any fleet-shared secret; the recovery **private** key, which only a human has |
 | Publisher (dev box) | The release signing key (0600, offsite in its own sealed backup) | — custody is the only defense; a compromised publisher is stated game-over |
 | Operator (human) | Personal per-node SSH keys (internal/BYO only), the backup recovery private key that answers a destructive approval | — |
 | A provisioned customer machine | Nothing of ours, ever — no key is placed at creation (`keyless_provisioning.md`) | Any SSH key of ours, at any point, for any duration |
@@ -136,9 +136,12 @@ SSL probes, agent restart, recovery-key report, and the three restores.
 What deliberately never becomes a primitive: provisioning-time operations
 (`install_node`, `enable_agent`, `discover_nodes` — they run before pairing;
 for machines we create the install moves to a first-boot script and none of
-them is used at all), `decommission_node` (a provider API call on the
-customer's grant, not a script on a dying box), `publish_upgrade`
-(publisher-local), and the relay operations (dead code at cutover).
+them is used at all), `decommission_node` for a whole machine (a provider API
+call on the customer's grant, not a script on a dying box — but a container
+site on a shared host is removed by the HOST's agent, which is not dying:
+`decommission_site`, per `docker_host_agent.md`, owner 2026-08-31),
+`publish_upgrade` (publisher-local), and the relay operations (dead code at
+cutover).
 
 **The standing acceptance test** (owner, 2026-08-28, restated as the bar for
 "the agent is capable"): *a maintenance task that requires a shell on a

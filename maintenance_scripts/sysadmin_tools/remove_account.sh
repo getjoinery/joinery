@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+#VERSION 2.2 - Self-verifying: after removal the script re-probes (container, volumes, vhost,
+#              web root) and emits DECOMMISSION_VERIFIED or DECOMMISSION_FAILED_VERIFY (exit 1),
+#              so one run carries its own verdict instead of needing a separate verify step.
+#              Orphaned volumes count as a docker site during detection, so a re-run after a
+#              failed volume removal removes them instead of reporting nothing to do
 #VERSION 2.1 - Machine-readable terminal markers (REMOVE_ACCOUNT_OK / REMOVE_ACCOUNT_NOTHING);
 #              nothing-to-remove is now idempotent success (exit 0) so re-runs are safe as a job step
 #VERSION 2.0 - Added Docker support
@@ -63,9 +68,14 @@ VIRTUALHOST_FILE="/etc/apache2/sites-available/$SITE_NAME.conf"
 IS_DOCKER=false
 IS_BAREMETAL=false
 
-# Check for Docker container
+# Check for Docker container — or its volumes. Volumes alone happen when an
+# earlier removal deleted the container and then failed on `docker volume rm`;
+# a re-run must see that as a docker site still needing removal, not as
+# nothing (which would verify the site gone while its data sits orphaned).
 if command -v docker &> /dev/null; then
     if docker ps -a --format '{{.Names}}' | grep -qw "^${SITE_NAME}$"; then
+        IS_DOCKER=true
+    elif docker volume ls --format '{{.Name}}' 2>/dev/null | grep -q "^${SITE_NAME}_"; then
         IS_DOCKER=true
     fi
 fi
@@ -80,10 +90,11 @@ if [ "$IS_DOCKER" = false ] && [ "$IS_BAREMETAL" = false ]; then
     # job re-run (or a teardown that already happened) must not fail here. The
     # marker lets the caller distinguish "already gone" from "removed just now".
     echo "No site found with name '$SITE_NAME':"
-    echo "  - No Docker container named '$SITE_NAME'"
+    echo "  - No Docker container or volumes named '$SITE_NAME'"
     echo "  - No directory at $SITE_ROOT"
     echo "  - No virtual host at $VIRTUALHOST_FILE"
     echo "REMOVE_ACCOUNT_NOTHING $SITE_NAME"
+    echo "DECOMMISSION_VERIFIED $SITE_NAME"
     exit 0
 fi
 
@@ -255,6 +266,33 @@ if [ "$IS_BAREMETAL" = true ]; then
 fi
 
 # =============================================================================
+# VERIFY GONE
+# =============================================================================
+# Re-probe everything a removal is supposed to have taken away. The verdict
+# marker is what a caller trusts — not the exit codes of the removal commands
+# above, several of which warn-and-continue.
+
+LEFTOVERS=""
+
+if command -v docker &> /dev/null; then
+    if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qw "^${SITE_NAME}$"; then
+        LEFTOVERS="${LEFTOVERS}  - Docker container still present: $SITE_NAME"$'\n'
+    fi
+    LEFT_VOLUMES=$(docker volume ls --format '{{.Name}}' 2>/dev/null | grep "^${SITE_NAME}_" || true)
+    if [ -n "$LEFT_VOLUMES" ]; then
+        LEFTOVERS="${LEFTOVERS}  - Docker volumes still present: $(echo "$LEFT_VOLUMES" | tr '\n' ' ')"$'\n'
+    fi
+fi
+
+if [ -f "$VIRTUALHOST_FILE" ]; then
+    LEFTOVERS="${LEFTOVERS}  - Virtual host still present: $VIRTUALHOST_FILE"$'\n'
+fi
+
+if [ -d "$SITE_ROOT" ]; then
+    LEFTOVERS="${LEFTOVERS}  - Web root still present: $SITE_ROOT"$'\n'
+fi
+
+# =============================================================================
 # COMPLETE
 # =============================================================================
 
@@ -264,4 +302,13 @@ echo "Site '$SITE_NAME' has been removed."
 echo "=========================================="
 echo ""
 echo "REMOVE_ACCOUNT_OK $SITE_NAME"
+
+if [ -n "$LEFTOVERS" ]; then
+    echo "Removal ran but the site could not be verified gone:"
+    printf '%s' "$LEFTOVERS"
+    echo "DECOMMISSION_FAILED_VERIFY $SITE_NAME"
+    exit 1
+fi
+
+echo "DECOMMISSION_VERIFIED $SITE_NAME"
 echo "You can now run 'install.sh site' to create a new site."

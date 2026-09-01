@@ -70,6 +70,10 @@ function admin_backups_logic($input = array()) {
 	// be an approval screen for a restore that is no longer running.
 	require_once(PathHelper::getIncludePath('includes/RestoreApproval.php'));
 
+	// A removal the HOST's agent is holding open — this site consenting to its
+	// own destruction. Same read-fresh rule, its own settings rows.
+	require_once(PathHelper::getIncludePath('includes/DecommissionApproval.php'));
+
 	return LogicResult::render(array(
 		'session'       => $session,
 		'settings'      => Globalvars::get_instance(),
@@ -83,6 +87,7 @@ function admin_backups_logic($input = array()) {
 		'is_managed'    => ManagementNodeStatus::is_managed(),
 		'manager_url'   => ManagementNodeStatus::manager_url(),
 		'approval'      => RestoreApproval::pending(),
+		'decommission_approval' => DecommissionApproval::pending(),
 	));
 }
 
@@ -145,6 +150,35 @@ function _admin_backups_handle($action, array $input, $session) {
 			// on a machine somebody is trying to recover. It fails safe (nothing
 			// is destroyed) and it fails at the worst moment, which is why these
 			// two are checked where the rest of this file's actions are not.
+			// ── Approving this site's own permanent removal ──
+			//
+			// The same shape as the restore pair below, under decommission's own
+			// names: the challenge was staged by the HOST's agent, the answer is
+			// a one-time secret only this site's recovery key could produce, and
+			// the host compares it in constant time. Token-checked for the same
+			// reason: DECLINE takes nothing but a printed job id, and a lured
+			// superadmin must not be able to refuse (or worse, be tricked into
+			// answering) a removal via a crafted link.
+			case 'approve_decommission':
+			case 'decline_decommission': {
+				require_once(PathHelper::getIncludePath('includes/DecommissionApproval.php'));
+				$form = ($action === 'approve_decommission') ? 'decommission_approval_form' : 'decommission_decline_form';
+				$fw = new FormWriterV2HTML5($form);
+				if (!$fw->validateCSRF($input)) {
+					$say('That request could not be verified — reload the Backups page and try again.', false);
+					return $url;
+				}
+				$job_id = (int)($input['approval_job_id'] ?? 0);
+				if ($action === 'approve_decommission') {
+					DecommissionApproval::answer($job_id, (string)($input['approval_answer'] ?? ''));
+					$say('Approved. The host is checking your answer and will remove this site permanently.', true);
+				} else {
+					DecommissionApproval::decline($job_id);
+					$say('Declined. Nothing was deleted, and the removal is reported refused.', true);
+				}
+				return $url;
+			}
+
 			case 'approve_restore':
 			case 'decline_restore': {
 				require_once(PathHelper::getIncludePath('includes/RestoreApproval.php'));

@@ -5,6 +5,9 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.19 - process_decommission_node reads the primitive envelope first and finalizes the
+ *                 VICTIM named in the job params — the job's subject is now the HOST that ran the
+ *                 teardown (docker_host_agent.md)
  * @version 1.18 - process_backup_database and process_backup_project are gone with their
  *                 builders; backup_run is the one backup result that stamps a node
  * @version 1.17 - the managed-domain pair: process_managed_domain_prepare reads the node's mail plan
@@ -1798,9 +1801,18 @@ HTML;
 	 *
 	 * Only a completed job whose output carries DECOMMISSION_VERIFIED (and NOT
 	 * DECOMMISSION_FAILED_VERIFY) finalizes the record — the site is genuinely gone
-	 * from the host. A failed or unverified job leaves the node intact and enabled so
-	 * the operator can retry; we never leave a half-deleted record pointing at a live
-	 * site. The record is soft-deleted, not hard-deleted: the port reservation, the job
+	 * from the host. The verdict is composed on the host by the self-verifying
+	 * remove_account.sh and travels inside the primitive's result envelope, so the
+	 * envelope is unwrapped first (the known class of envelope bug). A failed,
+	 * refused or unverified job leaves the node intact and enabled so the operator
+	 * can retry; we never leave a half-deleted record pointing at a live site.
+	 *
+	 * THE JOB'S SUBJECT IS THE HOST'S NODE — the machine that ran the teardown —
+	 * and the record to finalize is the VICTIM, carried in the job params
+	 * (victim_node_id). The pre-primitive shape had the victim as subject; that is
+	 * kept as the fallback so any old job row still finalizes correctly.
+	 *
+	 * The record is soft-deleted, not hard-deleted: the port reservation, the job
 	 * history, and the backup-key escrow rows all survive (the escrow FK is SET NULL and
 	 * soft-delete triggers no cascade), so the node's offsite backups stay recoverable.
 	 */
@@ -1808,13 +1820,34 @@ HTML;
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
 
 		$output = (string)($job->get('mjb_output') ?: '');
+		$data = self::extract_api_envelope_data($output);
+		if (is_array($data) && isset($data['output'])) {
+			$output = (string)$data['output'];
+		}
 		$status = (string)$job->get('mjb_status');
 		$verified = strpos($output, 'DECOMMISSION_VERIFIED') !== false
 			&& strpos($output, 'DECOMMISSION_FAILED_VERIFY') === false;
 
+		$params = $job->get('mjb_parameters');
+		if (is_string($params)) { $params = json_decode($params, true); }
+		$victim_id = (int)(is_array($params) ? ($params['victim_node_id'] ?? 0) : 0);
+
 		if ($status === 'completed' && $verified) {
 			$soft_deleted = false;
-			$node_id = $job->get('mjb_mgn_node_id');
+			$node_id = $victim_id;
+			if (!$node_id) {
+				// Legacy shape: pre-primitive jobs carried the victim as the
+				// SUBJECT. The fallback applies only when the subject actually
+				// looks like a site (container name or web root) — a job whose
+				// subject is a HOST node and whose params name no victim is a
+				// build defect, and finalizing the host's record for it is the
+				// one wrong answer.
+				$subject = new ManagedNode($job->get('mjb_mgn_node_id'), TRUE);
+				if ($subject->key && (trim((string)$subject->get('mgn_container_name')) !== ''
+						|| trim((string)$subject->get('mgn_web_root')) !== '')) {
+					$node_id = $subject->key;
+				}
+			}
 			if ($node_id) {
 				$node = new ManagedNode($node_id, TRUE);
 				if ($node->key && !$node->get('mgn_delete_time')) {

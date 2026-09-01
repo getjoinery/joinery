@@ -193,6 +193,10 @@ class ManagementJob extends SystemBase {
 		// A whole chain: a full plus every incremental, each of them possibly
 		// gigabytes. Sized to the agent's own declaration for it.
 		'stage_chain'           => 8700,  // 2h20m + slack
+		// Removing a container site from its host: the teardown is minutes,
+		// the victim's approval window is the hour. Sized above the agent's
+		// declared 15m + ApprovalWindow.
+		'decommission_site'     => 5400,  // 15m + 60m approval + slack
 	];
 
 	/** The shortest budget in play — the SQL prefilter cannot use less. */
@@ -251,7 +255,13 @@ class ManagementJob extends SystemBase {
 	 * node would refuse for size fails loudly when it is built, rather than
 	 * travelling to a machine that will silently decline it.
 	 */
-	static function createPrimitiveJob($node_id, $job_type, $primitive, $params, $created_by) {
+	static function createPrimitiveJob($node_id, $job_type, $primitive, $params, $created_by, $record_params = null) {
+		// $params is the envelope — what the node receives. $record_params is
+		// what the plane writes down about the job (mjb_parameters): the
+		// envelope plus caller context its own result processing needs, like
+		// decommission's victim_node_id. The node reads mjb_commands only, so
+		// recorded context never reaches the wire.
+		$record_params = $record_params ?? $params;
 		$params = $params ?: new stdClass();
 
 		// The payload carries a tripwire step alongside the primitive envelope.
@@ -287,7 +297,7 @@ class ManagementJob extends SystemBase {
 		$job->set('mjb_job_type', $job_type);
 		$job->set('mjb_status', 'pending');
 		$job->set('mjb_commands', $payload);
-		$job->set('mjb_parameters', $params ? json_encode($params) : null);
+		$job->set('mjb_parameters', $record_params ? json_encode($record_params) : null);
 		$job->set('mjb_total_steps', 1);
 		$job->set('mjb_current_step', 0);
 		$job->set('mjb_created_by', $created_by);
@@ -314,8 +324,17 @@ class ManagementJob extends SystemBase {
 			return NodeHealthProbe::run_and_record(new ManagedNode($node_id, TRUE), $created_by);
 		}
 		if (is_array($built) && isset($built['primitive'])) {
+			// The caller's $params survive into the job record alongside the
+			// envelope's (envelope wins on a shared key — those are the
+			// validated values). Dropping them here is how decommission's
+			// victim_node_id once vanished and a verified teardown finalized
+			// the HOST's record instead of the victim's.
+			$record = array_merge(
+				is_array($params) ? $params : [],
+				is_array($built['params'] ?? null) ? $built['params'] : []
+			);
 			return self::createPrimitiveJob($node_id, $job_type, $built['primitive'],
-				$built['params'] ?? [], $created_by);
+				$built['params'] ?? [], $created_by, $record ?: null);
 		}
 		return self::createJob($node_id, $job_type, $built, $params, $created_by);
 	}

@@ -132,10 +132,13 @@ consumer inventory (WP4), and jeremytunnell (WP5).
 
 ## WP3 — Decommission through the provider, not the box
 
-`decommission_node` has no primitive and does not need one. Deleting a
-customer's VPS is a `deleteInstance()` call on the grant already held
-(`CloudComputeProvider`), not a script run on a machine that is about to cease
-to exist.
+`decommission_node` for a whole machine has no primitive and does not need
+one. Deleting a customer's VPS is a `deleteInstance()` call on the grant
+already held (`CloudComputeProvider`), not a script run on a machine that is
+about to cease to exist. A container site on a shared host is the case this
+reasoning never covered — the script runs on the host, which is not dying —
+and that one does become a primitive: `decommission_site` on the host's own
+agent, per `docker_host_agent.md` (owner, 2026-08-31).
 
 ## WP4 — Delete `config/provisioning_key`
 

@@ -232,10 +232,26 @@ fresh.
 So Docker-mode provisions install a **siteless host agent alongside the
 container's sited one**. `install_agent.sh` v2.8's own header names "Docker hosts
 that the plane manages but that host no deployment" as its purpose, so the
-artifact exists. Two consequences to design for rather than discover: the host
-needs an agent identity distinct from the container node's (the known
-"Docker host has no agent identity" gap), and a VPS then involves **two join
-approvals**.
+artifact exists. The host's identity shape is settled and built
+(`docker_host_agent.md`, 2026-09-01): the host is a **plain ManagedNode in
+machine posture**, and the placement record's `mgh_mgn_host_node_id` names it —
+that link is how host-scope work (decommission_site today; certificates and
+container install through the same door) is routed. One consequence remains to
+design for rather than discover: a VPS involves **two join approvals**.
+
+**The default is the machine, every path (owner, 2026-09-01):** any FRESH
+machine that runs our Docker gets the host agent as part of the install itself
+— `install.sh`'s docker mode installs it siteless and issues the CLI join —
+not only the customer-cloud provisioning path. A docker host without an agent
+identity has no path for certificate renewal or site removal once SSH is gone,
+whoever created it. Existing docker hosts are the manual-enrollment case, per
+the rule.
+
+**Approving a HOST join must also set the link.** A host agent that pairs but
+is never named in `mgh_mgn_host_node_id` is routed to by nothing — the
+approval flow (WP5's card, or the host edit page it points at) sets the
+placement record's link when the joining machine is a provision's host, so
+host-scope routing works without a separate manual step to forget.
 
 The rejected alternatives: keeping the sealed password forever for Docker hosts
 is a standing plane-held credential — the shared-key defect in new clothes; and

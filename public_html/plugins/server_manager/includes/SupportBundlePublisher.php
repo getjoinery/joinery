@@ -40,7 +40,9 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
- * @version 1.0
+ * @version 1.1 - first live consumer: the Docker host's decommission_site runs the bundled
+ *                remove_account.sh, so hasConsumer() is true and the publish pipeline builds
+ *                the bundle
  */
 
 class SupportBundlePublisher {
@@ -48,21 +50,13 @@ class SupportBundlePublisher {
 	/**
 	 * Whether any machine in the fleet consumes a support bundle.
 	 *
-	 * SHELVED (owner, 2026-08-28). The bundle exists for machines that run the
-	 * agent and host no Joinery site, and there are none: the relay is not
-	 * managed by design, and both hardening targets move as full-site nodes.
-	 * A mechanism that runs on every publish and is consumed by nobody is a
-	 * mechanism nobody watches, so the pipeline does not call it — this class
-	 * and its tests stand, ready, and are exercised directly.
-	 *
-	 * FLIP THIS TO TRUE when a siteless machine actually needs a verified
-	 * script tree. The Docker host is the candidate: it would run
-	 * provision_certificate from a bundle-supplied setup_ssl.sh, which is the
-	 * last executor missing before the shared provisioning key can be
-	 * destroyed.
+	 * TRUE since the Docker host became a paired machine-posture node (owner,
+	 * 2026-08-31, specs/docker_host_agent.md): it runs decommission_site from
+	 * the bundle-supplied remove_account.sh, and later gains certificate work
+	 * (setup_ssl.sh) and container install through the same door.
 	 */
 	public static function hasConsumer() {
-		return false;
+		return true;
 	}
 
 	/** Where the bundle ships. Beside the agent artifact, served by the same endpoint. */
@@ -88,14 +82,17 @@ class SupportBundlePublisher {
 	 * complete reprovisioning, so it runs no agent and invokes no primitive. The
 	 * prebuilt relay-sealer reaches it through the provisioning tarball instead.
 	 *
-	 * The consumer this list is waiting for is the Docker host, which needs
-	 * setup_ssl.sh to issue certificates for the containers it fronts.
+	 * The consumer is the Docker host: decommission_site runs
+	 * remove_account.sh today, and setup_ssl.sh waits for the certificate
+	 * round.
 	 */
 	private static $contents = array(
 		'maintenance_scripts/sysadmin_tools/setup_ssl.sh',
 		// setup_ssl.sh sources this for provision_origin_cert() and its
 		// helpers; without it the bundle ships a script that cannot run.
 		'maintenance_scripts/install_tools/install.sh',
+		// decommission_site (self-verifying; sources nothing).
+		'maintenance_scripts/sysadmin_tools/remove_account.sh',
 	);
 
 	/**

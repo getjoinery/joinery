@@ -74,8 +74,8 @@ check(JobCommandBuilder::node_can_dispatch_destructive(rpg_node()) === true,
 	'this is a ROUTING decision and never permission — the node still refuses the job unless '
 	. 'somebody at its own site opens a challenge sealed to its own backup recovery key');
 
-check(JobCommandBuilder::DESTRUCTIVE_PRIMITIVES === RESTORE_OPS,
-	'the destructive set names exactly the three restore operations',
+check(JobCommandBuilder::DESTRUCTIVE_PRIMITIVES === array_merge(RESTORE_OPS, array('decommission_site')),
+	'the destructive set names exactly the three restore operations plus decommission_site',
 	'got: ' . implode(',', JobCommandBuilder::DESTRUCTIVE_PRIMITIVES));
 
 $paired = rpg_node();

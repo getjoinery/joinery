@@ -11,6 +11,9 @@
  *
  * @version 1.8 - the health badge and the measured-at line read the fold's per-key provenance, so
  *                figures too old to judge health by grey the badge out instead of colouring it green
+ * @version 1.8 - Permanently Delete Site is offered for container sites (the removal runs on the
+ *                host's agent, so SSH plays no part in the gate); a dedicated machine gets the
+ *                provider-deletion note instead
  * @version 1.7 - the Actions item leads to the API Keys tab: either the pending join requests to
  *                review, or the connect instructions (enrollment starts on the node — Phase 1.5)
  * @version 1.6 - Actions menu offers agent pairing (superadmin, unpaired nodes) — posts the existing
@@ -113,12 +116,16 @@
 	echo '</div>';
 	?>
 	<?php
-	// Permanent-delete-the-SITE is offered whenever the host teardown can actually
-	// run: SSH configured, not a relay, and a safe site name derivable from node
-	// fields. Available for a removed node too — its site may still be running on
-	// the host (Remove from Dashboard leaves it up).
+	// Permanent-delete-the-SITE is offered whenever the removal can actually be
+	// dispatched: a CONTAINER site (not a relay) with a safe site name derivable
+	// from node fields — the teardown runs on the host's own agent, so no SSH
+	// figures in it. A bare-metal node is a whole machine and gets the
+	// provider-deletion note instead of a button that could only refuse.
+	// Available for a removed node too — its site may still be running on the
+	// host (Remove from Dashboard leaves it up).
 	$decommission_site = null;
-	if (!$node->get('mgn_is_relay') && JobCommandBuilder::has_ssh($node)) {
+	$is_container_site = trim((string)$node->get('mgn_container_name')) !== '';
+	if (!$node->get('mgn_is_relay') && $is_container_site) {
 		try { $decommission_site = JobCommandBuilder::decommission_site_name($node); }
 		catch (Throwable $e) { $decommission_site = null; }
 	}
@@ -194,6 +201,8 @@
 				</li>
 			<?php elseif ($decommission_site !== null && $is_removed): ?>
 				<li><span class="dropdown-item-text text-muted small d-block px-3" style="max-width:22rem;white-space:normal;">No live site was ever confirmed on this host, so there is nothing to tear down. Use Permanently Delete Entry to remove the record.</span></li>
+			<?php elseif (!$node->get('mgn_is_relay') && !$is_container_site && $node->get('mgn_web_root')): ?>
+				<li><span class="dropdown-item-text text-muted small d-block px-3" style="max-width:22rem;white-space:normal;">This is a dedicated machine, not a container site. To retire it, delete the instance at its provider, then remove this record from the dashboard.</span></li>
 			<?php endif; ?>
 			<?php if ($is_removed): ?>
 				<li>

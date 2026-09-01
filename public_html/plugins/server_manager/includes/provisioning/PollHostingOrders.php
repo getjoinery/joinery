@@ -178,8 +178,8 @@ class PollHostingOrders {
 
 			// Next available Docker host port — through the single allocator, so
 			// deleted-but-possibly-still-running containers keep their ports
-			// reserved and both node keyings (host string, host id) are counted.
-			$port = JobCommandBuilder::next_container_port($host->get('mgh_host'), $host->key);
+			// reserved.
+			$port = JobCommandBuilder::next_container_port($host->key);
 
 			// Create or reuse a failed node record
 			if ($existing_failed) {

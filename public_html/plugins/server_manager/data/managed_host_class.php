@@ -2,7 +2,8 @@
 /**
  * ManagedHost - A server that hosts one or more auto-provisioned Joinery sites.
  *
- * @version 1.0
+ * @version 1.1 - ensure_for_node(): the placement record is minted (or linked) the moment a
+ *                container node needs one, so mgn_mgh_host_id is the only sibling identity
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -14,6 +15,10 @@ class ManagedHost extends SystemBase {
 	public static $tablename = 'mgh_managed_hosts';
 	public static $pkey_column = 'mgh_id';
 
+	protected static $foreign_key_actions = [
+		'mgh_mgn_host_node_id' => ['action' => 'null'],
+	];
+
 	public static $field_specifications = array(
 		'mgh_id'                   => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'mgh_slug'                 => array('type'=>'varchar(50)', 'required'=>true, 'is_nullable'=>false, 'unique'=>true),
@@ -24,6 +29,12 @@ class ManagedHost extends SystemBase {
 		'mgh_ssh_port'             => array('type'=>'int4', 'default'=>'22'),
 		'mgh_max_sites'            => array('type'=>'int4', 'default'=>'50'),
 		'mgh_provisioning_enabled' => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		// The host's own agent identity: the paired ManagedNode that host-scope
+		// primitives (decommission_site, later certs and container install) are
+		// addressed to. The host IS a node — a plain machine-posture one — so
+		// the job table needs no second subject; this link is only the routing
+		// step from a container victim's placement record to that node.
+		'mgh_mgn_host_node_id'     => array('type'=>'int8'),
 		'mgh_notes'                => array('type'=>'text'),
 		'mgh_create_time'          => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'mgh_update_time'          => array('type'=>'timestamp(6)'),
@@ -59,6 +70,18 @@ class ManagedHost extends SystemBase {
 	}
 
 	/**
+	 * The host's own paired node record, or null if none is linked or the
+	 * linked record is deleted.
+	 */
+	public function host_node() {
+		$node_id = (int)$this->get('mgh_mgn_host_node_id');
+		if (!$node_id) return null;
+		$node = new ManagedNode($node_id, TRUE);
+		if (!$node->key || $node->get('mgn_delete_time')) return null;
+		return $node;
+	}
+
+	/**
 	 * Count active (non-deleted) nodes assigned to this host.
 	 */
 	public function count_sites() {
@@ -66,6 +89,74 @@ class ManagedHost extends SystemBase {
 		$q = $db->prepare("SELECT COUNT(*) FROM mgn_managed_nodes WHERE mgn_mgh_host_id = ? AND mgn_delete_time IS NULL");
 		$q->execute([$this->key]);
 		return (int) $q->fetchColumn();
+	}
+
+	/**
+	 * Link a node to its placement record, creating the record if none exists.
+	 *
+	 * A container node names its host by mgn_mgh_host_id and nothing else, so
+	 * any path that is about to treat a node as a container (allocating it a
+	 * port, addressing its host) calls this first. Matching is by the host
+	 * address string once, here, at write time — never again at read time.
+	 */
+	public static function ensure_for_node($node) {
+		$addr = trim((string)$node->get('mgn_host'));
+		if ($addr === '') {
+			throw new ManagedHostException('Cannot assign a host record: the node has no host address.');
+		}
+
+		// Oldest matching row wins, deterministically. Duplicate rows for one
+		// address exist (the backfill grouped by SSH tuple, and a concurrent
+		// create can race — there is no unique constraint on mgh_host), and
+		// the port allocator unions siblings across same-address rows, so a
+		// duplicate splits nothing that matters; picking by lowest id just
+		// keeps every caller converging on the same record.
+		$existing = new MultiManagedHost(['deleted' => false], ['mgh_id' => 'ASC']);
+		$existing->load();
+		$host = null;
+		foreach ($existing as $ex) {
+			if ($ex->get('mgh_host') === $addr) {
+				$host = $ex;
+				break;
+			}
+		}
+
+		if (!$host) {
+			// mgh_slug is DB-unique across deleted rows too, so probe with a suffix
+			// loop the way the backfill migration did. The column is varchar(50);
+			// the base is truncated to leave room for the loop's suffix, so a long
+			// hostname mints a row instead of a database error.
+			$db = DbConnector::get_instance()->get_db_link();
+			$base_slug = substr('host-' . preg_replace('/[^a-z0-9]+/', '-', strtolower($addr)), 0, 42);
+			$base_slug = rtrim($base_slug, '-');
+			$slug = $base_slug;
+			$i = 1;
+			$sq = $db->prepare("SELECT COUNT(*) FROM mgh_managed_hosts WHERE mgh_slug = ?");
+			while (true) {
+				$sq->execute([$slug]);
+				if ((int)$sq->fetchColumn() === 0) break;
+				$slug = $base_slug . '-' . $i++;
+			}
+			$host = new ManagedHost(NULL);
+			$host->set('mgh_slug', $slug);
+			$host->set('mgh_name', substr($addr, 0, 100));
+			$host->set('mgh_host', $addr);
+			$host->set('mgh_ssh_user', $node->get('mgn_ssh_user') ?: 'root');
+			$host->set('mgh_ssh_key_path', $node->get('mgn_ssh_key_path') ?: null);
+			$host->set('mgh_ssh_port', (int)($node->get('mgn_ssh_port') ?: 22));
+			$host->set('mgh_provisioning_enabled', false);
+			$host->prepare();
+			$host->save();
+			$host->load();
+		}
+
+		if ((int)$node->get('mgn_mgh_host_id') !== (int)$host->key) {
+			$node->set('mgn_mgh_host_id', $host->key);
+			if ($node->key) {
+				$node->save();
+			}
+		}
+		return $host;
 	}
 
 	/**

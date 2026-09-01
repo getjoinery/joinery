@@ -21,6 +21,7 @@ $task         = $page_vars['task'];
 $is_managed   = $page_vars['is_managed'];
 $manager_url  = $page_vars['manager_url'];
 $approval     = $page_vars['approval'];
+$decommission_approval = $page_vars['decommission_approval'];
 
 $page = new AdminPage();
 $page->admin_header(array(
@@ -44,7 +45,20 @@ $when = function ($utc) use ($tz) {
 // open until somebody here says yes with the recovery key. It is the most urgent
 // thing this page can be showing, and it is showing it because the machine
 // itself asked — not because a management node did.
-if ($approval) {
+// A removal outranks a restore, and the page renders exactly one approval
+// ceremony at a time — recovery-readiness.js binds one window.rrApproval, and
+// two key boxes on one screen is how a person answers the wrong one. In the
+// unlikely case both are pending, the restore waits and says so.
+if ($decommission_approval) {
+	require_once(PathHelper::getIncludePath('includes/DecommissionApprovalPanel.php'));
+	$page->begin_box(array('title' => 'Approve the permanent removal of this site'));
+	DecommissionApprovalPanel::render($page, $decommission_approval);
+	if ($approval) {
+		echo '<p class="text-muted small mt-3">A restore approval is also waiting. It will be shown '
+		   . 'here once this removal request is answered or expires.</p>';
+	}
+	$page->end_box();
+} elseif ($approval) {
 	require_once(PathHelper::getIncludePath('includes/RestoreApprovalPanel.php'));
 	$page->begin_box(array('title' => 'Approve a restore'));
 	RestoreApprovalPanel::render($page, $approval);
