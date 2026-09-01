@@ -520,6 +520,26 @@ class InboundEmailRouter {
 			$message_id_header = substr($message_id_header, 0, 255);
 		}
 
+		// A message this mailbox sent to ITSELF comes back through MX as an ordinary
+		// delivery (specs/bugfix_self_addressed_send.md). MailboxSender already stored
+		// it as the Sent copy, so storing the delivery too would put one message in the
+		// conversation twice — once tagged Sent, once reading as a reply to it. The
+		// composer's row is the message: reconcile onto it, and let the flag carry it
+		// into the Inbox as well as Sent.
+		//
+		// The lookup is Message-ID scoped to the MAILBOX, never the (Message-ID,
+		// recipient, direction) unique key: the directions differ, so that key can
+		// never fire here, and on a sealing mailbox the composed row's iem_recipient is
+		// ciphertext besides. This is the same reason ImapIngestor dedups this way.
+		$direction = (string)($options['direction'] ?? 'inbound');
+		if ($direction === 'inbound' && $alias && $alias->key && $message_id_header !== null) {
+			$composed_id = $this->composedMessageId(intval($alias->key), $message_id_header);
+			if ($composed_id > 0) {
+				InboundEmailMessage::markSelfDelivered($composed_id, $auth);
+				return ['message' => null, 'dedup' => true];
+			}
+		}
+
 		$subject_raw = $parsed['subject'] ?? '';
 		$subject = substr($this->decodeMimeHeader($subject_raw), 0, 4000);
 		$sender = $this->senderDisplayString($parsed);
@@ -554,7 +574,7 @@ class InboundEmailRouter {
 		// as CONTENT, not as the routing address — that is what decryptSealedField
 		// does with it — so on a sealing mailbox it has to go through the seal like
 		// the body. Live delivery never hits this: its rows are always inbound.
-		$direction = (string)($options['direction'] ?? 'inbound');
+		// ($direction was resolved above, where the self-addressed reconcile needs it.)
 		$seal_recipient = ($sealing && InboundEmailMessage::isComposedDirection($direction));
 		$recipient_value = substr((string)$envelope_recipient, 0, 500);
 
@@ -974,6 +994,20 @@ class InboundEmailRouter {
 		// nothing honest to say about a message that never crossed SMTP, so they
 		// record 'unverified' and the SOURCE names what actually vouched.
 		$auth = array('dkim'=>'unverified', 'spf'=>'unverified', 'dmarc'=>'unverified', 'source'=>'joinery_direct');
+
+		// A self-addressed send reconciles here too, on the same terms as the SMTP
+		// store above: Direct discovery can resolve a domain this very deployment
+		// hosts, so a message can leave over the channel and arrive back at the
+		// mailbox that composed it. The composer's row is the message either way,
+		// and a store path that opted out of the rule would put it in the
+		// conversation twice on one transport and once on the other.
+		if ($alias && $alias->key && $message_id_header !== null) {
+			$composed_id = $this->composedMessageId(intval($alias->key), $message_id_header);
+			if ($composed_id > 0) {
+				InboundEmailMessage::markSelfDelivered($composed_id, $auth);
+				return array('message' => null, 'dedup' => true);
+			}
+		}
 
 		// Consent elevates past scoring; anything else is scored exactly as SMTP
 		// mail would be. Sender-sealed content carries no relay-stamped verdict —
@@ -1861,6 +1895,39 @@ class InboundEmailRouter {
 		$stmt->execute($params);
 		$id = $stmt->fetchColumn();
 		return $id === false ? null : intval($id);
+	}
+
+	/**
+	 * The id of the COMPOSER's live row for this Message-ID in this mailbox, or 0.
+	 *
+	 * Composed directions only (outbound and draft) — the directions where
+	 * iem_recipient holds the address list as content rather than the routing
+	 * address, so the (Message-ID, recipient, direction) unique key structurally
+	 * cannot recognise the row and this Message-ID-scoped lookup is the only one
+	 * that can. Mirrors ImapIngestor::aliasMessageIdByMessageId($composedOnly),
+	 * including its deterministic outbound-before-draft ordering: the two ingress
+	 * paths must resolve a self-addressed delivery to the same row or they would
+	 * disagree about which copy is the message.
+	 *
+	 * A trashed composed row is not a hit — the member threw their Sent copy away,
+	 * and the delivery is then ordinary inbound mail that stores on its own.
+	 */
+	private function composedMessageId(int $alias_id, string $message_id_header): int {
+		if ($alias_id <= 0 || trim($message_id_header) === '') {
+			return 0;
+		}
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare(
+			"SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
+			 WHERE iem_iea_inbound_email_alias_id = ? AND iem_message_id_header = ?
+			   AND iem_delete_time IS NULL
+			   AND iem_direction IN ('outbound', 'draft')
+			 ORDER BY CASE iem_direction WHEN 'outbound' THEN 0 ELSE 1 END,
+			   iem_inbound_email_message_id ASC
+			 LIMIT 1");
+		$stmt->execute(array($alias_id, substr(trim($message_id_header), 0, 255)));
+		$id = $stmt->fetchColumn();
+		return $id ? intval($id) : 0;
 	}
 
 	/** True if the throwable is (or wraps) a SQLSTATE 23505 unique violation. */

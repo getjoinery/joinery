@@ -32,13 +32,17 @@
  *    composer copy's ciphertext recipient makes the unique key blind, so this
  *    lookup is the only dedup that can fire. The composer copy adopts the
  *    locator; no duplicate row is stored.
- *  - A self-addressed send is exempt from that dedup outside the Sent folder:
- *    its Inbox/All Mail appearance is the delivered copy and stores as its
- *    own inbound row.
+ *  - A self-addressed send is NOT exempt from that dedup
+ *    (specs/bugfix_self_addressed_send.md). Its appearance outside the Sent
+ *    folder IS the delivered copy, but the composer's row is still the message:
+ *    storing the delivery too put one message in the conversation twice, once
+ *    tagged Sent and once reading as a reply to it. It reconciles onto the
+ *    composer's row, which gains iem_self_delivered so the Inbox — defined as
+ *    "not outbound" — still lists it.
  *
  * Run: php tests/run.php db --filter=imap_sent_direction
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -100,7 +104,7 @@ class ImapSentDirectionTest {
 		$this->testPromotionNeverDemotes();
 		$this->testPromotionStandsDownOnLiveOutboundSibling();
 		$this->testCoveragePassDedupsIntoComposerCopy();
-		$this->testSelfSendExemptFromCoverageDedup();
+		$this->testSelfSendReconcilesOntoComposerCopy();
 		$this->tearDown();
 	}
 
@@ -297,24 +301,45 @@ class ImapSentDirectionTest {
 			'the Sent pass dedups into the same composer copy');
 	}
 
-	private function testSelfSendExemptFromCoverageDedup() {
-		// A self-addressed send: the composer copy exists, but the All Mail /
-		// Inbox appearance is the DELIVERED copy and belongs in the Inbox as
-		// its own inbound row — exactly as the source mailbox shows it.
+	private function testSelfSendReconcilesOntoComposerCopy() {
+		// A self-addressed send the platform composed: the All Mail / Inbox
+		// appearance is the DELIVERED copy, but it is the SAME message as the
+		// composer's row. Two rows put it in the conversation twice, so the
+		// delivery reconciles onto the composer's copy and marks it
+		// self-delivered — one row, listed in the Inbox and in Sent.
 		$composer_id = $this->insertComposerCopy($this->mid('selfcomposed'), self::SELF_ADDRESS);
 
 		$env = new SentDirectionEnvelope(self::SELF_ADDRESS, array(self::SELF_ADDRESS), $this->mid('selfcomposed'));
 		$res = $this->ingest($this->folder_all, $env);
-		check(!$res['dedup'] && $res['message_id'] > 0 && $res['message_id'] !== $composer_id,
-			'the coverage pass stores the delivered copy of a self-send as its own row');
-		check($this->direction($res['message_id']) === 'inbound', 'and it is inbound — it belongs in the Inbox');
+		check($res['dedup'] && $res['message_id'] === $composer_id,
+			'the coverage pass reconciles a self-send onto the composer copy — no duplicate row');
+		check($this->selfDelivered($composer_id),
+			'and marks it self-delivered, which is what keeps it in the Inbox');
+		check($this->direction($composer_id) === 'outbound',
+			'the row stays outbound — it is still the message the member sent');
 
-		// In the SENT folder the same message is the sent copy — that one dedups.
+		// In the SENT folder the same message is the sent copy — same row again,
+		// and the Sent sighting is not a delivery, so it sets no flag of its own.
 		$sent = $this->ingest($this->folder_sent, $env);
 		check($sent['dedup'] && $sent['message_id'] === $composer_id,
-			'the Sent-folder sighting dedups into the composer copy');
-		check($this->direction($res['message_id']) === 'inbound',
-			'the delivered inbound copy is left alone — no promotion');
+			'the Sent-folder sighting lands on that same one row');
+
+		// A self-send this platform did NOT compose has no composer copy to
+		// reconcile onto: it stores as ordinary inbound mail, as before.
+		$env2 = new SentDirectionEnvelope(self::SELF_ADDRESS, array(self::SELF_ADDRESS), $this->mid('selfforeign'));
+		$foreign = $this->ingest($this->folder_all, $env2);
+		check(!$foreign['dedup'] && $foreign['message_id'] > 0,
+			'a self-send composed elsewhere still stores its own row');
+		check($this->direction($foreign['message_id']) === 'inbound'
+			&& !$this->selfDelivered($foreign['message_id']),
+			'and it is plain inbound mail — nothing to reconcile, nothing to flag');
+	}
+
+	private function selfDelivered(int $messageId): bool {
+		$stmt = $this->db->prepare('SELECT iem_self_delivered FROM iem_inbound_email_messages
+			WHERE iem_inbound_email_message_id = ?');
+		$stmt->execute(array($messageId));
+		return (bool)$stmt->fetchColumn();
 	}
 }
 

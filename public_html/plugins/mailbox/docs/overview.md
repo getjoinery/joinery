@@ -967,9 +967,11 @@ so the constraint cannot recognize a provider-filed copy of a locally-composed
 send. Every IMAP store path therefore dedups by Message-ID alone against the
 alias's outbound/draft rows before storing (`ImapIngestor::storeMessage`): on
 a hit the composer's copy adopts the IMAP locator and the folder membership,
-and no new row is stored. A self-addressed send is exempt outside the
-Sent-role folder — its Inbox/All Mail appearance is the delivered copy and
-stores as its own inbound row. Where a Sent-folder sighting promotes an
+and no new row is stored. That includes a **self-addressed** send: its
+appearance outside the Sent-role folder is the delivered copy of a message the
+composer's row already holds, so it reconciles there and the row is marked
+`iem_self_delivered` (see *Mail addressed to yourself* below). Where a
+Sent-folder sighting promotes an
 already-stored inbound row to outbound on a sealed mailbox, the row's
 plaintext recipient becomes a sealing debt (`iem_reseal_pending`), paid
 in-window by the `mailbox_promoted_reseal` deferred-work consumer
@@ -977,6 +979,30 @@ in-window by the `mailbox_promoted_reseal` deferred-work consumer
 composer's copy when one exists: the composer's copy adopts the locator, the
 duplicate is stripped of its remote binding (so the trash push can never
 relocate the provider's copy) and soft-deleted.
+
+### Mail addressed to yourself
+
+A message sent from a hosted mailbox to that same mailbox is **one row**, not a
+Sent copy plus a delivered copy. `MailboxSender` writes the row at send time;
+when the message completes the trip out through MX and back in through Postfix,
+`InboundEmailRouter::storeMessage()` finds that row — by Message-ID scoped to
+the mailbox, since the `(Message-ID, recipient, direction)` key differs in
+direction by construction and is blind to a sealed row's ciphertext recipient —
+stamps `iem_self_delivered` on it, adopts the delivery's DKIM/SPF/DMARC verdicts
+where the row still holds placeholders, and stores nothing. Repeating the
+delivery reconciles again rather than forking a row. `storeDirectMessage()`
+applies the same rule, since Direct discovery can resolve a domain this
+deployment hosts.
+
+`iem_self_delivered` is what the Inbox reads: the view is otherwise "not
+outbound", and the flag is the one exception, so the message lists once in the
+Inbox and once in Sent, as it does in any mail client. Opening the conversation
+shows one message.
+
+A delivery stores its own row as usual when there is nothing to reconcile onto:
+mail from outside, a self-send composed in another client, a self-send whose Sent
+copy the member discarded (the delivery is then their only copy), and a matching
+row that belongs to a different mailbox.
 
 ## Attachment & message storage
 
@@ -1216,7 +1242,10 @@ There is no second ceremony.
   owner has a vault. A sealing mailbox that cannot produce a key **declines the
   message** rather than writing it in the clear — see *A sealing mailbox always has
   someone to seal to* below. This covers pushed mail (`storeMessage`), Direct
-  (`storeDirectMessage`) and IMAP-polled mail (`storeExtracted`) alike.
+  (`storeDirectMessage`) and IMAP-polled mail (`storeExtracted`) alike. Composing
+  is an ingress path too and asks the same resolver, through
+  `MailboxSender::sealTargetFor()` — used by the send and by the draft autosave, so
+  a draft and the message it becomes can never disagree about being sealed.
 - **Relay seal target** — `RelayMapExporter::sealTargetForAlias()` seals to the owner's
   vault key (`key_kind=user`, producing Fortress pending-parse rows) **only** for a
   Fortress domain; every other posture seals to the ambient transport key, which
@@ -1405,7 +1434,8 @@ off for Fortress. (These ride the native app + push packages.)
 
 ## Encryption at rest
 
-A mailbox seals when its **single owner** (the alias's one grantee — a shared or
+A mailbox seals when its **posture** says so — Private or Fortress, resolved per
+mailbox — *and* its **single owner** (the alias's one grantee — a shared or
 catch-all mailbox is never sealed) holds a Sealed Vault (`docs/sealed_vault.md`, the
 platform's per-user X25519 key hierarchy and unlock window). Mail is the vault's first
 consumer: it supplies its own AD row-binding convention and content, and reuses every
@@ -4105,7 +4135,9 @@ A message filed in the source Sent folder reads as **sent mail** (`iem_direction
 'outbound'`) whichever folder stored it first: when the `\All` coverage pass wins the
 race and stores it as an ordinary row, the Sent pass's dedup promotes that same row.
 A **self-addressed** message is the exception — it stays inbound and shows in the
-Inbox, exactly as the source mailbox files it. The promotion only ever lifts an
+Inbox, exactly as the source mailbox files it. (A self-send this deployment
+composed has no such row to promote: it reconciled onto the composer's copy at
+ingest.) The promotion only ever lifts an
 inbound row (outbound and draft rows are never touched) and stands down when a live
 outbound row already holds the same `(Message-ID, recipient)` dedup key.
 

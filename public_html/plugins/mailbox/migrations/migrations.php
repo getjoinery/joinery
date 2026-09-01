@@ -792,4 +792,87 @@ return [
 			echo "Full-text index rebuilt with capped input.\n";
 		},
 	],
+
+	[
+		// Heal the self-addressed sends already stored twice
+		// (specs/bugfix_self_addressed_send.md). A message sent to the mailbox
+		// that composed it left the Sent copy AND the delivered copy as two rows
+		// carrying one Message-ID, so the conversation showed it twice — once
+		// tagged Sent, once reading as a reply to itself. Ingest now reconciles
+		// the delivery onto the composer's row; this does the same for the pairs
+		// that predate the fix.
+		//
+		// The composer's row is the survivor, matching every other place the
+		// platform resolves this collision (ImapIngestor's composed-copy dedup,
+		// PromotedRowRepair's duplicate retirement). It gains the delivery's
+		// authentication verdicts where it still holds placeholders, and
+		// iem_self_delivered so the Inbox keeps listing it.
+		//
+		// The delivered copy goes through permanent_delete(), not a DELETE: it
+		// owns attachment Files and manifest rows that a one-level cascade cannot
+		// reach. Read state is carried over first — a member who opened the
+		// delivered copy has read this message.
+		'id' => 'iem_015_reconcile_self_addressed_sends',
+		'version' => '1.104.0',
+		'up' => function($dbconnector) {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+			$dblink = $dbconnector->get_db_link();
+
+			// Pairs in ONE mailbox sharing ONE Message-ID: the composer's live row
+			// and a live inbound delivery of it. Both halves must be live — a
+			// trashed Sent copy means the delivery is the member's only copy.
+			$pairs = $dblink->query(
+				"SELECT o.iem_inbound_email_message_id AS composed_id,
+				        i.iem_inbound_email_message_id AS delivered_id,
+				        i.iem_is_read AS delivered_read,
+				        i.iem_dkim_result, i.iem_spf_result, i.iem_dmarc_result, i.iem_auth_source
+				   FROM iem_inbound_email_messages o
+				   JOIN iem_inbound_email_messages i
+				     ON i.iem_iea_inbound_email_alias_id = o.iem_iea_inbound_email_alias_id
+				    AND i.iem_message_id_header = o.iem_message_id_header
+				  WHERE o.iem_direction = 'outbound'
+				    AND i.iem_direction = 'inbound'
+				    AND o.iem_delete_time IS NULL
+				    AND i.iem_delete_time IS NULL
+				    AND o.iem_message_id_header IS NOT NULL
+				    AND o.iem_iea_inbound_email_alias_id IS NOT NULL
+				  ORDER BY o.iem_inbound_email_message_id")->fetchAll(PDO::FETCH_ASSOC);
+
+			$healed = 0;
+			$failed = 0;
+			foreach ($pairs as $pair) {
+				$composed_id = (int)$pair['composed_id'];
+				$delivered_id = (int)$pair['delivered_id'];
+				try {
+					InboundEmailMessage::markSelfDelivered($composed_id, array(
+						'dkim'   => $pair['iem_dkim_result'],
+						'spf'    => $pair['iem_spf_result'],
+						'dmarc'  => $pair['iem_dmarc_result'],
+						'source' => $pair['iem_auth_source'],
+					));
+					if (!empty($pair['delivered_read']) && $pair['delivered_read'] !== 'f') {
+						$dblink->prepare('UPDATE iem_inbound_email_messages SET iem_is_read = true
+							 WHERE iem_inbound_email_message_id = ?')->execute(array($composed_id));
+					}
+					$delivered = new InboundEmailMessage($delivered_id, TRUE);
+					if ($delivered->key) {
+						$delivered->permanent_delete();
+					}
+					$healed++;
+				} catch (Throwable $e) {
+					// One unreclaimable pair must not strand the rest.
+					$failed++;
+					error_log('iem_015: failed to reconcile ' . $delivered_id
+						. ' onto ' . $composed_id . ': ' . $e->getMessage());
+				}
+			}
+
+			echo $healed > 0
+				? "Reconciled $healed duplicated self-addressed send(s).\n"
+				: "No duplicated self-addressed sends found.\n";
+			if ($failed) {
+				echo "$failed pair(s) failed - see the error log.\n";
+			}
+		},
+	],
 ];

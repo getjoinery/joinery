@@ -51,6 +51,10 @@
  * cid-rewritten into the stored/sent HTML). The stored iem_body_plain is derived from
  * the final sanitized HTML.
  *
+ * @version 1.14 - sealTargetFor(): the mailbox's posture decides whether a Sent
+ *                  copy is sealed, not whether its owner holds a vault, so a
+ *                  Standard mailbox stops encrypting its own sent mail
+ *                  (specs/bugfix_self_addressed_send.md)
  * @version 1.13 - a compose send always stores its outbound row; the filed
  *                  Sent copy reconciles to it by Message-ID
  */
@@ -1151,9 +1155,9 @@ class MailboxSender {
 		$body_html = (string)$email->getHtmlBody();
 		$subject_trunc = substr($subject, 0, 4000);
 
-		$owner_id = InboundEmailMessage::singleOwnerUserId(intval($alias->key));
-		$vault = $owner_id !== null ? UserEncryptionVault::loadForUser($owner_id) : null;
-		$sealing = ($vault !== null);
+		$seal = self::sealTargetFor($alias);
+		$vault = $seal['vault'];
+		$sealing = $seal['sealing'];
 
 		// The columns common to a fresh Sent row and a draft-morph. Content is empty
 		// when sealing (sealAndPersistContent writes the ciphertext right after).
@@ -1255,6 +1259,34 @@ class MailboxSender {
 		}
 
 		return array('id' => intval($row->key), 'dek' => $dek);
+	}
+
+	/**
+	 * Whose key a message composed in this mailbox seals to — the MAILBOX's
+	 * posture, never merely "does its owner happen to hold a vault".
+	 *
+	 * Composing is an ingress path like any other, so it asks the one resolver
+	 * every other path asks (InboundEmailRouter::resolveSealTarget). Deciding it
+	 * locally is how a Standard mailbox came to store sealed Sent mail while its
+	 * delivered mail stayed plaintext: unreadable outside the owner's unlock
+	 * window, and outside search, on a mailbox nobody asked to encrypt.
+	 *
+	 * A sealing mailbox with no usable key throws rather than downgrading — the
+	 * same refusal delivery makes, surfaced here as a send/save failure, because
+	 * writing the composer's own words in the clear on a Private or Fortress
+	 * mailbox is the one outcome that must never happen quietly.
+	 *
+	 * @return array{sealing:bool,vault:?UserEncryptionVault,owner_id:?int}
+	 * @throws MailboxSenderException when the mailbox seals but no key resolves
+	 */
+	public static function sealTargetFor(InboundEmailAlias $alias): array {
+		$domain_id = intval($alias->get('iea_ied_inbound_email_domain_id'));
+		$domain = $domain_id > 0 ? new InboundEmailDomain($domain_id, TRUE) : null;
+		try {
+			return (new InboundEmailRouter())->resolveSealTarget($alias, $domain);
+		} catch (MailboxSealTargetMissing $e) {
+			throw new MailboxSenderException($e->getMessage());
+		}
 	}
 
 	/**

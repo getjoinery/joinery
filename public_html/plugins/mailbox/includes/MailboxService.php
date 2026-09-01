@@ -431,7 +431,8 @@ class MailboxService {
 			// clicking the badge lands: judged spam is excluded (it lives in the
 			// Spam view — specs/inbound_email_spam_filtering.md) and so is archived
 			// mail, matching listThreads' inbox filter exactly — outbound rows
-			// included, since the Inbox does not list those either and their
+			// included (bar a self-addressed send, which the Inbox does list),
+			// since the Inbox does not list those either and their
 			// unread flag is whatever the source's \Seen said, never something the
 			// member set. A count that spans a view the click cannot reach sends
 			// the reader looking for unread mail the Inbox does not hold. IS NOT TRUE, not "= false", so a NULL
@@ -446,7 +447,7 @@ class MailboxService {
 						COUNT(*) AS total,
 						COUNT(*) FILTER (
 							WHERE iem_is_read = false AND iem_is_archived IS NOT TRUE
-							AND iem_direction IS DISTINCT FROM 'outbound'
+							AND (iem_direction IS DISTINCT FROM 'outbound' OR iem_self_delivered)
 						) AS unread
 					FROM iem_inbound_email_messages
 					WHERE iem_delete_time IS NULL
@@ -864,6 +865,13 @@ class MailboxService {
 		// thread-level effect: a thread with any qualifying inbound row still
 		// lists, with its full history in the thread view.
 		//
+		// The one outbound row the Inbox does admit is a message the member
+		// addressed to THIS mailbox (specs/bugfix_self_addressed_send.md). It was
+		// delivered here, so it is inbox material, and it is a single row rather
+		// than a Sent copy plus a delivered copy — the delivered copy reconciles
+		// onto the composer's row at ingest. iem_self_delivered is that row saying
+		// so; without it a self-send would appear in Sent and nowhere else.
+		//
 		// Sent view: conversations carrying a message the member sent. A
 		// pseudo-folder like Spam — it reads a column (the direction), not
 		// folder membership, so it works for local and IMAP mailboxes alike.
@@ -887,7 +895,7 @@ class MailboxService {
 		$searching = !empty($filters['q']);
 		if (!$trash && !$sent && !empty($filters['inbox']) && !$searching) {
 			$where[] = "iem_is_archived IS NOT TRUE";
-			$where[] = "iem_direction IS DISTINCT FROM 'outbound'";
+			$where[] = "(iem_direction IS DISTINCT FROM 'outbound' OR iem_self_delivered)";
 		}
 
 		// Label dimension: restrict to messages carrying the chosen custom label.

@@ -22,7 +22,9 @@
  * mailbox they hold a grant for. Discard is a hard delete (row + ima_ manifest + Files) —
  * there is no draft trash.
  *
- * @version 1.1
+ * @version 1.2 - the sealing posture comes from the mailbox (MailboxSender::sealTargetFor),
+ *   not from whether its owner holds a vault, so a Standard mailbox's drafts stay plaintext
+ *   like its mail (specs/bugfix_self_addressed_send.md).
  */
 
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // VaultLockedException + isOpen/secretKey
@@ -110,10 +112,14 @@ class MailboxDrafts {
 
 		$sender = strtolower($alias->get_full_address());
 
-		// Sealing posture.
-		$owner_id = InboundEmailMessage::singleOwnerUserId($alias_id);
-		$vault = $owner_id !== null ? UserEncryptionVault::loadForUser($owner_id) : null;
-		$sealing = ($vault !== null);
+		// Sealing posture — the MAILBOX's, resolved through the one resolver every
+		// ingress path uses (MailboxSender::sealTargetFor). A draft is the same
+		// content as the send it becomes, so the two must answer this identically
+		// or a Standard mailbox's draft would seal and its Sent copy would not.
+		$seal = MailboxSender::sealTargetFor($alias);
+		$owner_id = $seal['owner_id'];
+		$vault = $seal['vault'];
+		$sealing = $seal['sealing'];
 
 		// DEK strategy for a sealed UPDATE: reuse the existing DEK (in-window) so
 		// already-persisted attachments stay readable; a sealed draft that already has

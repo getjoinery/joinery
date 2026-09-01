@@ -103,6 +103,11 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.26
+ * @changelog 1.26 - iem_self_delivered + markSelfDelivered(): a message sent to
+ *   the mailbox that composed it reconciles onto the composer's row instead of
+ *   storing the delivered copy as a second one, and the flag carries that one row
+ *   into the Inbox (specs/bugfix_self_addressed_send.md).
  * @version 1.25
  * @changelog 1.25 - a second retention window, purgeExpiredUnmatched(): stored mail
  *   for an address no alias claims ages out on its own setting. Nothing removed it
@@ -337,6 +342,13 @@ class InboundEmailMessage extends SystemBase {
 		'iem_message_id_header'   => array('type'=>'varchar(255)', 'unique_with'=>array('iem_recipient', 'iem_direction')),
 		'iem_thread_key'          => array('type'=>'varchar(255)'), // indexed via migration iem_001 (no declarative non-unique index support)
 		'iem_direction'           => array('type'=>'varchar(10)', 'default'=>'inbound', 'is_nullable'=>false), // inbound | outbound (reply/forward sent from the reader)
+		// A composed message that was ALSO delivered to the mailbox that sent it —
+		// mail addressed to yourself (specs/bugfix_self_addressed_send.md). The
+		// composer's row is the only row: the delivered copy reconciles onto it
+		// rather than storing a second one, and this flag is what puts that one row
+		// in the Inbox as well as in Sent. Without it the Inbox, which is defined as
+		// "not outbound", could not show a message the member sent.
+		'iem_self_delivered'      => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'iem_is_read'             => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'iem_is_starred'          => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		// "Skip the Inbox" (specs/implemented/inbound_email_filters.md). An archived
@@ -576,6 +588,43 @@ class InboundEmailMessage extends SystemBase {
 	 */
 	public static function rawAd(int $message_id): string {
 		return 'mail:' . $message_id . ':raw';
+	}
+
+	/**
+	 * Record that a composed row's message was also DELIVERED to the mailbox that
+	 * sent it — a message addressed to yourself
+	 * (specs/bugfix_self_addressed_send.md).
+	 *
+	 * The delivered copy is not stored: it is the same message, and a second row
+	 * puts it in the conversation twice — once tagged Sent, once reading as a
+	 * reply. Both ingress paths (Postfix/MX via InboundEmailRouter, and the
+	 * source mailbox's Inbox folder via ImapIngestor) call this on the composer's
+	 * row instead, and the Inbox view admits the flag alongside inbound mail.
+	 *
+	 * Idempotent, and deliberately writes nothing else: the row keeps the
+	 * composer's timestamp and its read state (you wrote it — it is not unread).
+	 * The delivery's authentication verdicts are adopted only where the composed
+	 * row still holds its placeholders, so a re-delivery cannot overwrite a real
+	 * verdict with a weaker one.
+	 *
+	 * @param array|null $auth ['dkim','spf','dmarc','source'] from the delivery
+	 */
+	public static function markSelfDelivered(int $message_id, ?array $auth = null): void {
+		if ($message_id <= 0) {
+			return;
+		}
+		$db = DbConnector::get_instance()->get_db_link();
+		$db->prepare('UPDATE iem_inbound_email_messages SET iem_self_delivered = true
+			 WHERE iem_inbound_email_message_id = ?')->execute(array($message_id));
+		if ($auth === null) {
+			return;
+		}
+		$db->prepare("UPDATE iem_inbound_email_messages
+			 SET iem_dkim_result = ?, iem_spf_result = ?, iem_dmarc_result = ?, iem_auth_source = ?
+			 WHERE iem_inbound_email_message_id = ?
+			   AND COALESCE(iem_auth_source, 'none') = 'none'")->execute(array(
+			$auth['dkim'] ?? 'unverified', $auth['spf'] ?? 'unverified',
+			$auth['dmarc'] ?? 'unverified', $auth['source'] ?? 'none', $message_id));
 	}
 
 	/**

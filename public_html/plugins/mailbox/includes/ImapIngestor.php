@@ -1256,19 +1256,24 @@ class ImapIngestor {
 		// locator and this folder's membership onto the composer's copy; no new
 		// row, no promotion needed (the copy is already outbound).
 		//
-		// A self-addressed send is exempt outside the Sent folder: its Inbox /
-		// All Mail appearance is the DELIVERED copy and belongs in the Inbox as
-		// its own inbound row, exactly as it does in the source mailbox.
+		// A self-addressed send is no exception (specs/bugfix_self_addressed_send.md):
+		// its appearance outside the Sent folder IS the delivered copy, but the
+		// composer's row is still the message. Storing the delivery as a second row
+		// put it in the conversation twice — once tagged Sent, once reading as a
+		// reply to it. It reconciles like any other composed copy, and
+		// iem_self_delivered is what carries that one row into the Inbox, which is
+		// otherwise defined as "not outbound".
 		$sentRole = (string)$folder->get('iif_role') === InboundImapFolder::ROLE_SENT;
-		if ($sentRole || !$this->envelopeAddressedToSelf($envelope)) {
-			$composedId = $this->aliasMessageIdByMessageId($alias, (string)$envelope->message_id, true);
-			if ($composedId > 0) {
-				$this->adoptLocatorIfMissing($composedId, intval($uid), intval($serverUidValidity), $folderName);
-				if ($recordMembership) {
-					$this->recordFolderMembership($folder, $composedId, intval($uid), intval($serverUidValidity));
-				}
-				return array('dedup' => true, 'message_id' => $composedId);
+		$composedId = $this->aliasMessageIdByMessageId($alias, (string)$envelope->message_id, true);
+		if ($composedId > 0) {
+			$this->adoptLocatorIfMissing($composedId, intval($uid), intval($serverUidValidity), $folderName);
+			if (!$sentRole && $this->envelopeAddressedToSelf($envelope)) {
+				InboundEmailMessage::markSelfDelivered($composedId);
 			}
+			if ($recordMembership) {
+				$this->recordFolderMembership($folder, $composedId, intval($uid), intval($serverUidValidity));
+			}
+			return array('dedup' => true, 'message_id' => $composedId);
 		}
 
 		// §9 Sent dedup: a message in the Sent folder may be one Joinery already
