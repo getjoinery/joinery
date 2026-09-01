@@ -29,7 +29,8 @@
  * (Fix 2), and the refold queue (Fix 6, see drafts_fts_test.php) need a real transport
  * or an open window and are verified there / on dev with Playwright (§ Tests).
  *
- * @version 1.1
+ * @version 1.2 - the sealing fixture carries a Private level; a vault-holding owner
+ *   on a Standard mailbox no longer seals anything (specs/bugfix_self_addressed_send.md).
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -48,7 +49,11 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxIndex.p
 
 $db = DbConnector::get_instance()->get_db_link();
 
-// ── Fixtures: a Standard alias + user (no vault) and a sealed alias + owner ──
+// ── Fixtures: a Standard alias + user (no vault) and a sealing alias + owner ──
+// The sealing one carries a Private level of its own. A vault-holding owner is
+// not what makes a mailbox seal — the MAILBOX's posture is
+// (specs/bugfix_self_addressed_send.md), and drafts read it through the same
+// resolver every other ingress path uses.
 $std_user = make_user('DraftStd', 5);
 $std_uid = (int)$std_user->key;
 
@@ -192,6 +197,9 @@ harness_register_row('uev_user_encryption_vaults', 'uev_user_encryption_vault_id
 
 $sealed_alias = $make_alias('sealed');
 $grant($sealed_alias, $suid);
+$sealed_row = new InboundEmailAlias($sealed_alias, TRUE);
+$sealed_row->set('iea_security_level', InboundEmailDomain::LEVEL_PRIVATE);
+$sealed_row->save();
 $sviewer = MailboxViewer::forUser($suid, 5);
 $sdrafts = new MailboxDrafts($sviewer);
 
