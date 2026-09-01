@@ -178,6 +178,26 @@ check($job5->get('mjb_status') === 'failed'
 	'a from_backup job is refused up front by name');
 
 // ---------------------------------------------------------------------------
+section('The first ssh step waits for the target to answer, and gives up with a clear message');
+
+// 203.0.113.0/24 is TEST-NET-3: never routed, so ssh cannot connect. With a
+// two-second budget the wait fails fast and the job says why.
+putenv('JOINERY_INSTALL_SSH_READY_TIMEOUT=2');
+$node6 = ije_node('ijetest-noready-' . $suffix, 'Aa1!' . bin2hex(random_bytes(10)));
+$job6 = ije_job($node6, array(array('type' => 'ssh', 'label' => 'Ensure curl is installed', 'cmd' => 'echo never')));
+$t0 = microtime(true);
+(new InstallJobExecutor())->execute($job6);
+$took = microtime(true) - $t0;
+putenv('JOINERY_INSTALL_SSH_READY_TIMEOUT');
+$job6->load();
+check($job6->get('mjb_status') === 'failed', 'an unreachable target fails the job');
+check(strpos((string)$job6->get('mjb_error_message'), 'did not accept SSH') !== false,
+	'and the failure says the target never answered SSH, not a bare exit code');
+check(strpos((string)$job6->get('mjb_output'), 'waiting for the target to accept SSH') !== false,
+	'the output shows it was waiting, so a watcher knows what the pause is');
+check($took < 60, 'the budget is honoured', round($took) . 's');
+
+// ---------------------------------------------------------------------------
 section('Cleanup');
 
 foreach ($made_provisions as $id) { $db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_id = ?')->execute([$id]); }

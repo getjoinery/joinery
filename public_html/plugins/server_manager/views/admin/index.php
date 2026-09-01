@@ -3,6 +3,7 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.17 - agent update state fetch_failed: the artifact could not be fetched and the agent is retrying
  * @version 1.16 - recovery-readiness attention line (never-verified/stale must-save secrets) linking to the readiness page
  * @version 1.16 - the backup alert is recovery-key setup only; per-node escrow rows are gone
  * @version 1.15 - escrow alert covers recovery-not-set-up as its own row and links to the guided
@@ -140,6 +141,8 @@ if ($agent_online) {
 	if ($update_state === 'verify_failed') {
 		$agent_update_alert = "Agent update to v{$bundled} REFUSED: the shipped artifact failed checksum or signature verification. The agent will not retry until a corrected release is published.";
 		$agent_update_class = 'danger';
+	} elseif ($update_state === 'fetch_failed') {
+		$agent_update_alert = "Agent update to v{$bundled} could not be fetched yet (the artifact was unreadable or the request timed out — common while a publish is still writing it). The agent retries on its next check.";
 	} elseif ($update_state === 'version_rejected') {
 		$agent_update_alert = "Agent v{$bundled} failed to start on this host and was rolled back; the agent is holding at v{$agent->get('ahb_agent_version')} until a newer release ships.";
 		$agent_update_class = 'danger';

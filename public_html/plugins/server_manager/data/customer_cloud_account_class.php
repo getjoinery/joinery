@@ -10,6 +10,7 @@
  * Status: 'active' (usable), 'refresh_failed' (token refresh failed; needs
  * re-connect), 'revoked' (provider rejected the grant; needs re-connect).
  *
+ * @version 1.1 - grant_expired(): whether a stored grant can still be used, so pages can say so up front
  * @version 1.0
  */
 
@@ -41,6 +42,20 @@ class CustomerCloudAccount extends SystemBase {
 		'cca_update_time'   => array('type'=>'timestamp(6)'),
 		'cca_delete_time'   => array('type'=>'timestamp(6)'),
 	);
+
+	/**
+	 * Whether this account's grant is past its expiry with no way to refresh
+	 * it — Linode issues no refresh token, so an expired grant means the owner
+	 * must re-consent before anything can use the account. A missing expiry
+	 * is treated as usable (the consumer finds out on first use).
+	 */
+	public static function grant_expired($account): bool {
+		$expires = trim((string)$account->get('cca_token_expires'));
+		if ($expires === '') {
+			return false;
+		}
+		return strtotime($expires . ' UTC') < time() && trim((string)$account->get('cca_refresh_token')) === '';
+	}
 
 	function prepare() {
 		if (empty($this->get('cca_usr_user_id'))) {

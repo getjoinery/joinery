@@ -95,6 +95,7 @@
  * @version 1.21 - build_upload_backup(): push one already-existing backup from the node to its cloud
  *                 target (the per-file Backups tab action), sharing upload_step() with the automatic
  *                 post-backup upload; the step timeout is sized from S3Signer's retry budget
+ * @version 1.22 - the docker step also names the host for the plane's pending list (--node-name)
  * @version 1.21 - install_node names this plane (--management-node=URL) on the docker and site
  *                 steps, so a machine it builds asks to join without a human at a terminal
  * @version 1.20 - backup key escrow runs as a management-node step (step_escrow_backup_key) instead of
@@ -3043,7 +3044,8 @@ class JobCommandBuilder {
 			// removal, rebuild) has a route once the password is burned.
 			$steps[] = ['type' => 'ssh', 'label' => 'Install Docker and the host agent',
 				'on_host' => true,
-				'cmd' => "cd {$remote_tools_dir} && ./install.sh -y -q docker --management-node={$plane_url_esc}",
+				'cmd' => "cd {$remote_tools_dir} && ./install.sh -y -q docker --management-node={$plane_url_esc}"
+				       . " --node-name=" . escapeshellarg($sitename . '-host'),
 				'timeout' => 1800];
 		} else {
 			// Bare-metal: install.sh server runs `PermitRootLogin no` + restarts sshd, locking

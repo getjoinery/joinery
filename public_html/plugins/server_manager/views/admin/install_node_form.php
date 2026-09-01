@@ -75,6 +75,12 @@ if ($_POST && isset($_POST['mgn_name'])) {
 					|| $cloud_account->get('cca_status') !== 'active'
 					|| $cloud_account->get('cca_delete_time')) {
 				$field_errors['cca_account_id'] = 'Choose an active connected cloud account.';
+			} elseif (CustomerCloudAccount::grant_expired($cloud_account)) {
+				// A Linode grant lasts two hours and cannot be refreshed. Saying
+				// so here beats a provision that parks for re-connect on its
+				// first tick and emails the buyer about it.
+				$field_errors['cca_account_id'] = 'That account\'s cloud grant has expired. Re-connect it at '
+					. '/profile/server_manager/connect_cloud (signed in as its owner), then return here.';
 			}
 			if (trim($_POST['cloud_region'] ?? '') === '') {
 				$field_errors['cloud_region'] = 'Region is required.';
@@ -249,7 +255,8 @@ foreach ($cloud_accounts as $ca) {
 	$who = $ca_user->key
 		? trim($ca_user->get('usr_first_name') . ' ' . $ca_user->get('usr_last_name'))
 		: ('user #' . $ca->get('cca_usr_user_id'));
-	$cloud_account_options[$ca->key] = ucfirst($ca->get('cca_provider')) . ' — ' . $who;
+	$cloud_account_options[$ca->key] = ucfirst($ca->get('cca_provider')) . ' — ' . $who
+		. (CustomerCloudAccount::grant_expired($ca) ? ' (grant expired — re-connect first)' : '');
 }
 $has_cloud_accounts = count($cloud_account_options) > 1;
 

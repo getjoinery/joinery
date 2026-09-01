@@ -16,7 +16,14 @@
  * secret travels to the tenant box over SSH stdin into a psql heredoc — it is
  * never in a job-step row, an argv, or a log line.
  *
- * @version 1.0
+ * How SSH authenticates depends on how the node was made. A node that holds a
+ * key of ours uses it. A keyless node (customer-cloud provisioning places no
+ * key) is reached over the provision's sealed root password, which by design
+ * lives until the node's agent is approved — seeding runs at install
+ * completion, inside that window. The password goes to ssh through sshpass's
+ * environment variable, never a command line.
+ *
+ * @version 1.1 - keyless nodes: seed over the provision's sealed root password
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetService.php'));
@@ -56,7 +63,7 @@ class FleetProvisionSeeding {
 	 * buyer's API key and write the three settings into the site's database
 	 * over SSH. Returns ['ok' => bool, 'message' => string]; never throws.
 	 */
-	public static function seedNode($node, int $buyer_user_id, string $sitename): array {
+	public static function seedNode($node, int $buyer_user_id, string $sitename, ?string $root_password = null): array {
 		try {
 			if (!preg_match('/^[a-z0-9][a-z0-9-]{0,60}$/', $sitename)) {
 				return array('ok' => false, 'message' => "Refusing to seed: sitename '{$sitename}' is not a plain slug.");
@@ -69,7 +76,7 @@ class FleetProvisionSeeding {
 			$service_url = rtrim(LibraryFunctions::get_absolute_url('/'), '/');
 
 			$remote = self::buildRemoteCommand($node, $sitename, $service_url, $key['public_key']);
-			$run = self::runSsh($node, $remote, $key['secret_key'] . "\n");
+			$run = self::runSsh($node, $remote, $key['secret_key'] . "\n", $root_password);
 
 			if (!$run['ok'] || strpos($run['output'], 'FLEET_SEEDED') === false) {
 				return array('ok' => false, 'message' => 'Fleet seeding SSH step failed (exit '
@@ -162,29 +169,53 @@ class FleetProvisionSeeding {
 	 * Run one SSH command against the node with $stdin piped in. Returns
 	 * ['ok' => bool, 'code' => int, 'output' => string].
 	 */
-	private static function runSsh($node, string $remote_command, string $stdin): array {
+	private static function runSsh($node, string $remote_command, string $stdin, ?string $root_password = null): array {
 		$key_path = (string)$node->get('mgn_ssh_key_path');
 		$host = (string)$node->get('mgn_host');
 		$user = (string)$node->get('mgn_ssh_user') ?: 'root';
 		$port = intval($node->get('mgn_ssh_port')) ?: 22;
-		if ($key_path === '' || !is_readable($key_path) || $host === '') {
+		if ($host === '') {
+			return array('ok' => false, 'code' => -1, 'output' => 'Node has no host address.');
+		}
+		$has_key = ($key_path !== '' && is_readable($key_path));
+		$has_password = ($root_password !== null && $root_password !== '');
+		if (!$has_key && !$has_password) {
 			return array('ok' => false, 'code' => -1,
-				'output' => 'Node SSH coordinates incomplete (key: ' . $key_path . ', host: ' . $host . ').');
+				'output' => 'No route to the node: it holds no SSH key of ours and its provision holds no sealed '
+					. 'root password (already burned, or not a keyless provision). Seeding over the agent channel is not built yet.');
 		}
 
-		$cmd = array(
-			'ssh', '-i', $key_path, '-p', (string)$port,
-			'-o', 'BatchMode=yes',
-			'-o', 'StrictHostKeyChecking=accept-new',
-			'-o', 'ConnectTimeout=15',
-			$user . '@' . $host,
-			$remote_command,
-		);
+		$env = null;
+		if ($has_key) {
+			$cmd = array(
+				'ssh', '-i', $key_path, '-p', (string)$port,
+				'-o', 'BatchMode=yes',
+				'-o', 'StrictHostKeyChecking=accept-new',
+				'-o', 'ConnectTimeout=15',
+				$user . '@' . $host,
+				$remote_command,
+			);
+		} else {
+			// Keyless: the sealed root password, handed to ssh through
+			// sshpass's environment — the child's only, never exported here.
+			$cmd = array(
+				'sshpass', '-e', 'ssh', '-p', (string)$port,
+				'-o', 'StrictHostKeyChecking=accept-new',
+				'-o', 'UserKnownHostsFile=/dev/null',
+				'-o', 'ConnectTimeout=15',
+				$user . '@' . $host,
+				$remote_command,
+			);
+			$env = array();
+			foreach ($_ENV as $k => $v) { $env[$k] = $v; }
+			if (empty($env['PATH'])) { $env['PATH'] = '/usr/local/bin:/usr/bin:/bin'; }
+			$env['SSHPASS'] = $root_password;
+		}
 		$proc = proc_open($cmd, array(
 			0 => array('pipe', 'r'),
 			1 => array('pipe', 'w'),
 			2 => array('pipe', 'w'),
-		), $pipes);
+		), $pipes, null, $env);
 		if (!is_resource($proc)) {
 			return array('ok' => false, 'code' => -1, 'output' => 'Could not start ssh.');
 		}

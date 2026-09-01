@@ -222,6 +222,8 @@ class CustomerCloudProvisioningTest {
 			'the install job is created queued, for the plane-side executor');
 		check(strpos($docker_cmd, "install.sh -y -q docker --management-node='https://") !== false,
 			'the docker step names this plane, so the host agent asks to join');
+		check(strpos($docker_cmd, "--node-name='keyless" . $suffix . "-host'") !== false,
+			'and names the host for the pending list, so the operator sees more than localhost');
 		check(strpos($site_cmd, "--enable-agent --management-node='https://") !== false,
 			'the site step names this plane, so the container agent asks to join');
 

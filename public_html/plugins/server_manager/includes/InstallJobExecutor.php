@@ -25,6 +25,8 @@
  * It writes the same mjb_output / mjb_status contract the agent's runner wrote,
  * so JobResultProcessor::process_install_node reads a completed job unchanged.
  *
+ * @version 1.2 - waits for the target to answer SSH before the first remote step: a provider reports
+ *                'running' before sshd listens, and the install starts seconds after that
  * @version 1.1 - a job whose parameters ask for from_backup or bare-metal is refused up front
  * @version 1.0
  */
@@ -32,6 +34,11 @@
 class InstallJobExecutorException extends Exception {}
 
 class InstallJobExecutor {
+
+	/** How long a freshly created instance is given to start answering SSH. */
+	const SSH_READY_TIMEOUT_SECONDS = 300;
+	/** Seconds between readiness probes. */
+	const SSH_READY_PROBE_INTERVAL = 10;
 
 	/**
 	 * Atomically claim the oldest queued install_node job. Returns a
@@ -142,9 +149,23 @@ class InstallJobExecutor {
 
 		$ok = true;
 		$fail_message = '';
+		$ssh_ready = false;
 		foreach ($main as $i => $step) {
 			$label = (string)($step['label'] ?? '');
 			$this->append($job, "\n=== [Step " . ($i + 1) . "/{$total}] {$label} ===\n", $i);
+			// A provider says 'running' before sshd is listening, and this job
+			// is created in the same tick that sees 'running' — so the first
+			// remote step would race the machine's boot. Wait for it, once.
+			if (($step['type'] ?? '') === 'ssh' && !$ssh_ready) {
+				$waited = $this->wait_for_ssh($job, $ctx, $i);
+				if ($waited === null) {
+					$ok = false;
+					$fail_message = 'Step ' . ($i + 1) . " ({$label}) failed: the target did not accept SSH within "
+						. (int)(self::SSH_READY_TIMEOUT_SECONDS / 60) . ' minutes of the install starting';
+					break;
+				}
+				$ssh_ready = true;
+			}
 			list($out, $code, $err) = $this->run_step($step, $ctx);
 			if ($out !== '') { $this->append($job, $out . "\n", $i); }
 			if ($code !== 0) {
@@ -174,6 +195,44 @@ class InstallJobExecutor {
 		}
 
 		$this->finish($job, $ok, $fail_message);
+	}
+
+	/**
+	 * Probe the target over SSH until it answers, up to the readiness budget.
+	 * Returns the seconds waited, or null when the budget ran out. Each probe
+	 * is a real login with the sealed password, so 'ready' means the whole
+	 * path works — sshd up, password accepted — not merely that port 22 opens.
+	 */
+	private function wait_for_ssh($job, $ctx, $step_index) {
+		$started = time();
+		$budget = $this->ssh_ready_timeout();
+		$attempt = 0;
+		while (true) {
+			$attempt++;
+			$probe = array('type' => 'ssh', 'cmd' => 'echo SSH_READY', 'timeout' => 30);
+			list($out, $code) = $this->run_step($probe, $ctx);
+			if ($code === 0 && strpos($out, 'SSH_READY') !== false) {
+				$waited = time() - $started;
+				if ($attempt > 1) {
+					$this->append($job, "[target answered SSH after {$waited}s]\n", $step_index);
+				}
+				return $waited;
+			}
+			if ($attempt === 1) {
+				$this->append($job, "[waiting for the target to accept SSH — a new instance boots for a minute or two after the provider reports it running]\n", $step_index);
+			}
+			if (time() - $started >= $budget) {
+				$this->append($job, "[target still not answering SSH after {$attempt} attempts: " . trim((string)$out) . "]\n", $step_index);
+				return null;
+			}
+			sleep(min(self::SSH_READY_PROBE_INTERVAL, max(1, $budget - (time() - $started))));
+		}
+	}
+
+	/** The readiness budget in seconds; tests shorten it through the environment. */
+	private function ssh_ready_timeout() {
+		$env = getenv('JOINERY_INSTALL_SSH_READY_TIMEOUT');
+		return ($env !== false && (int)$env > 0) ? (int)$env : self::SSH_READY_TIMEOUT_SECONDS;
 	}
 
 	/**

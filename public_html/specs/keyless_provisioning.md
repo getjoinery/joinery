@@ -48,6 +48,21 @@ status the node agent's `pending`-only claim never matches. Scope: fresh docker;
   and by the executor on the job's parameters before a step runs, instead of
   stalling in `installing` or dying mid-run. The job pages treat `queued` as
   live (polling, cancel, a queued-too-long notice naming the executor).
+- **Live technical pass (2026-09-01, provision 2787 / keyless1) and its fixes.**
+  The path ran end to end: instance born with a sealed password, install over
+  it from the plane, both joins arrived unattended, both channels carried a
+  status check. Found and fixed the same day: (1) a siteless agent never
+  noticed its approval once the CLI's five-minute wait gave up — agent 1.16.0
+  adds `StagedJoinWatcher`, so the running agent finishes the join itself
+  hours later, and `join --no-wait` lets the install lodge the ask and move
+  on; (2) joins claimed the machine hostname (`localhost`, a container id) —
+  `join --name`, `install.sh docker --node-name`, and `--hostname SITENAME` on
+  the site container; (3) fleet enrollment seeding at completion shelled out
+  to keyed SSH — it now reaches a keyless node over the sealed password;
+  (4) the Install New Node form says up front when a Linode grant (two hours,
+  no refresh token) has expired. Not bugs: the container's site and agent come
+  from getjoinery's release channel, not this plane's; a parked provision
+  already emails the buyer a re-connect link.
 
 **NOT built:** the actual burn (WP2/WP3: `host-harden --agent-managed`
 over the password at approval, then erase `cvp_root_pass_sealed`) and WP5's
