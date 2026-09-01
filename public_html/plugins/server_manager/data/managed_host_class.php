@@ -2,6 +2,8 @@
 /**
  * ManagedHost - A server that hosts one or more auto-provisioned Joinery sites.
  *
+ * @version 1.2 - link_host_node(): agent-join approval names a machine-posture node as its
+ *                host's own agent (mgh_mgn_host_node_id), so host-scope routing has a target
  * @version 1.1 - ensure_for_node(): the placement record is minted (or linked) the moment a
  *                container node needs one, so mgn_mgh_host_id is the only sibling identity
  */
@@ -160,6 +162,50 @@ class ManagedHost extends SystemBase {
 	}
 
 	/**
+	 * At agent-join approval, name the joining machine as a host's own agent.
+	 *
+	 * A host-scope primitive (decommission_site today; certificates and
+	 * container install through the same door) is routed from a container
+	 * victim's placement record to the host's paired node via
+	 * mgh_mgn_host_node_id. A host agent that pairs but is never named there is
+	 * routed to by nothing, so this closes the gap the moment the human
+	 * approves — no separate manual step to forget.
+	 *
+	 * Conservative by design: it links only a machine-posture node (no
+	 * container name, no web root — a container node is a site on a host, not a
+	 * host) to a ManagedHost that ALREADY EXISTS for its address and has no
+	 * host node yet. A container provisioned on this host already minted that
+	 * record (ensure_for_node); an arbitrary bare node with no host record mints
+	 * nothing here. Returns the linked host, or null when nothing matched.
+	 */
+	public static function link_host_node($node) {
+		// A host is a machine, not a site on one. A node carrying a container
+		// name or a web root is the site; it is never its own host.
+		if (trim((string)$node->get('mgn_container_name')) !== ''
+				|| trim((string)$node->get('mgn_web_root')) !== '') {
+			return null;
+		}
+		$addr = trim((string)$node->get('mgn_host'));
+		if ($addr === '') {
+			return null;
+		}
+
+		$candidates = new MultiManagedHost(['host' => $addr, 'deleted' => false], ['mgh_id' => 'ASC']);
+		foreach ($candidates as $host) {
+			// Already linked to a live node? Leave it — first host node wins,
+			// and re-pointing it on a second join is exactly the takeover the
+			// approval ceremony exists to prevent.
+			if ($host->host_node()) {
+				return null;
+			}
+			$host->set('mgh_mgn_host_node_id', (int)$node->key);
+			$host->save();
+			return $host;
+		}
+		return null;
+	}
+
+	/**
 	 * Select the least-loaded provisioning-enabled host with available capacity.
 	 * Returns a ManagedHost or null if no capacity is available.
 	 */
@@ -189,6 +235,10 @@ class MultiManagedHost extends SystemMultiBase {
 
 		if (isset($this->options['slug'])) {
 			$filters['mgh_slug'] = [$this->options['slug'], PDO::PARAM_STR];
+		}
+
+		if (isset($this->options['host'])) {
+			$filters['mgh_host'] = [$this->options['host'], PDO::PARAM_STR];
 		}
 
 		if (isset($this->options['provisioning_enabled'])) {

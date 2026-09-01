@@ -71,6 +71,12 @@ class CustomerCloudProvision extends SystemBase {
 		'cvp_source_node_id'         => array('type'=>'int8'),
 		'cvp_backup_source'          => array('type'=>'varchar(10)'),
 		'cvp_port'                   => array('type'=>'int4', 'is_nullable'=>false, 'default'=>8080),
+		// The instance's root password, sealed (SecretBox) for the length of the
+		// install only. It is the sole credential for a keyless provision — no
+		// SSH key is ever placed on a machine we create — and it is erased by
+		// the burn step the moment the agent's join is approved. NULL means
+		// either a pre-keyless provision or a provision whose bridge is burned.
+		'cvp_root_pass_sealed'       => array('type'=>'text'),
 		'cvp_error'                  => array('type'=>'text'),
 		'cvp_create_time'            => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'cvp_update_time'            => array('type'=>'timestamp(6)'),

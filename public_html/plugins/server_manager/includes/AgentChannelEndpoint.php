@@ -414,6 +414,13 @@ class AgentChannelEndpoint {
 		$request->set('ajr_status', AgentJoinRequest::STATUS_APPROVED);
 		$request->set('ajr_mgn_node_id', (int)$node->key);
 		$request->save();
+
+		// If the joining machine is a host waiting for its own agent, name it
+		// as that host's node now — host-scope routing (decommission_site,
+		// certificates, container install) has nothing to address until this
+		// link is set, and doing it at approval means no separate manual step.
+		// The caller surfaces the returned host so the operator sees it happened.
+		return ManagedHost::link_host_node($node);
 	}
 
 	// ==================================================================

@@ -27,14 +27,20 @@
  * 401 from the provider flips the account to refresh_failed/revoked and parks
  * the provision back at pending_connect for the buyer to re-connect.
  *
- * Settings (Server Manager plugin settings):
- *   server_manager_customer_cloud_ssh_key_path  private key the Go agent uses
- *       for created nodes; its .pub sibling is installed via authorized_keys
- *   server_manager_customer_cloud_region        default region
- *   server_manager_customer_cloud_type          default instance type
- *   server_manager_customer_cloud_image         default OS image
+ * Keyless: a machine we create never receives an SSH key. The instance is
+ * born with a root password we seal onto the provision row
+ * (cvp_root_pass_sealed), which the install executor uses to authenticate for
+ * the length of the install and which the approval-time burn erases once the
+ * node's agent has joined. See specs/keyless_provisioning.md.
  *
- * @version 1.4
+ * Settings (Server Manager plugin settings):
+ *   server_manager_customer_cloud_region  default region
+ *   server_manager_customer_cloud_type    default instance type
+ *   server_manager_customer_cloud_image   default OS image
+ *
+ * @version 1.6 - handle_ready refuses what keyless cannot finish yet (bare, bare-metal, from_backup)
+                 before an instance is created
+ * @version 1.5 - keyless: seal a root password instead of installing a key
  */
 
 class ProvisionCustomerCloud {
@@ -65,21 +71,17 @@ class ProvisionCustomerCloud {
 			return ['status' => 'success', 'message' => 'No customer-cloud provisions to advance.'];
 		}
 
-		$settings = Globalvars::get_instance();
-		$key_path = trim((string)$settings->get_setting('server_manager_customer_cloud_ssh_key_path'));
-		if ($key_path === '' || !is_readable($key_path . '.pub')) {
-			return [
-				'status'  => 'error',
-				'message' => 'server_manager_customer_cloud_ssh_key_path is unset or its .pub sibling is unreadable — customer-cloud provisioning is blocked.',
-			];
-		}
-
+		// A keyless provision places no SSH key on the machine, so the
+		// customer-cloud key setting is no longer a precondition to run: the
+		// instance is created with a root password we seal onto the row and use
+		// for the install only. The pipeline is unblocked whether or not a key
+		// path is configured.
 		$advanced = 0;
 		foreach ($actionable as $provision) {
 			try {
 				switch ($provision->get('cvp_status')) {
-					case 'ready':      $advanced += $this->handle_ready($provision, $key_path); break;
-					case 'booting':    $advanced += $this->handle_booting($provision, $key_path); break;
+					case 'ready':      $advanced += $this->handle_ready($provision); break;
+					case 'booting':    $advanced += $this->handle_booting($provision); break;
 					case 'installing': $advanced += $this->handle_installing($provision); break;
 					case 'failed':     $advanced += $this->handle_failed_recheck($provision); break;
 				}
@@ -101,16 +103,43 @@ class ProvisionCustomerCloud {
 	 * ready -> booting: create the instance on the customer's account.
 	 * Returns 1 if the provision advanced, 0 otherwise.
 	 */
-	private function handle_ready($provision, $key_path) {
+	protected function handle_ready($provision) {
 		$driver = $this->get_driver($provision);
 		if ($driver === null) return 0;
+
+		// Only a fresh docker install can be finished keyless today: the
+		// bootstrap executor runs install_node over the sealed password for that
+		// shape alone. A bare instance is verified by an SSH probe nothing can
+		// run, a bare-metal install needs the key-based user switch, and
+		// from_backup needs scp. Refuse BEFORE an instance is created — a box we
+		// cannot finish would otherwise sit on the customer's account, billing,
+		// in 'installing' forever with no alert.
+		$install_mode = $provision->get('cvp_install_mode') ?: 'fresh';
+		$docker_mode  = $provision->get('cvp_docker_mode')  ?: 'docker';
+		if ($install_mode !== 'fresh' || $docker_mode !== 'docker') {
+			$this->alert_and_fail($provision,
+				"Keyless provisioning can finish fresh docker installs only; this provision asks for "
+				. "install mode '{$install_mode}' on '{$docker_mode}'. No instance was created. "
+				. "(Bare, bare-metal and from_backup wait on the install executor — specs/keyless_provisioning.md.)");
+			return 1;
+		}
 
 		$settings = Globalvars::get_instance();
 		$region = $provision->get('cvp_region')        ?: ($settings->get_setting('server_manager_customer_cloud_region') ?: 'us-southeast');
 		$type   = $provision->get('cvp_instance_type') ?: ($settings->get_setting('server_manager_customer_cloud_type')   ?: 'g6-nanode-1');
 		$image  = $settings->get_setting('server_manager_customer_cloud_image') ?: 'linode/ubuntu26.04';
 
-		$pubkey = trim((string)file_get_contents($key_path . '.pub'));
+		// Keyless: create with a root password and no SSH key of ours. The
+		// password is the sole credential, and only for the length of the
+		// install — sealed onto the row here, used by the install executor, and
+		// erased the moment the agent's join is approved. Seal it BEFORE the
+		// instance exists, so a crash between create and save never leaves a
+		// running box whose only credential we have forgotten.
+		$root_pass = 'Aa1!' . bin2hex(random_bytes(20));
+		$box = new SecretBox();
+		$provision->set('cvp_root_pass_sealed',
+			$box->seal('cvp_customer_cloud_provisions.cvp_root_pass_sealed', $root_pass));
+		$provision->save();
 
 		try {
 			$instance = $driver->createInstance(array(
@@ -120,9 +149,8 @@ class ProvisionCustomerCloud {
 				'region'          => $region,
 				'type'            => $type,
 				'image'           => $image,
-				// Never stored; all management is via the SSH key.
-				'root_pass'       => 'Aa1!' . bin2hex(random_bytes(20)),
-				'authorized_keys' => array($pubkey),
+				'root_pass'       => $root_pass,
+				// No key of ours is installed on a machine we create.
 			));
 		} catch (CloudComputeException $e) {
 			return $this->handle_compute_failure($provision, $e, 'ready');
@@ -142,7 +170,7 @@ class ProvisionCustomerCloud {
 	 * booting -> installing: once the instance is running with a public IP,
 	 * create the managed node and dispatch the standard install_node job.
 	 */
-	private function handle_booting($provision, $key_path) {
+	protected function handle_booting($provision) {
 		$driver = $this->get_driver($provision);
 		if ($driver === null) return 0;
 
@@ -195,7 +223,10 @@ class ProvisionCustomerCloud {
 
 		$node->set('mgn_host',          $instance['ip']);
 		$node->set('mgn_ssh_user',      'root');
-		$node->set('mgn_ssh_key_path',  $key_path);
+		// Keyless: no key path. The install executor authenticates with the
+		// sealed root password on the provision row; after the burn nothing but
+		// the machine's owner and its agent can reach it.
+		$node->set('mgn_ssh_key_path',  null);
 		$node->set('mgn_ssh_port',      22);
 		$node->set('mgn_install_state', 'installing');
 		if ($is_bare) {
@@ -217,6 +248,17 @@ class ProvisionCustomerCloud {
 		}
 		$node->save();
 		$node->load();
+
+		// A container on a shared host needs its placement record now. It is the
+		// only sibling identity (mgn_mgh_host_id), the port pool unions siblings
+		// through it, and — once the host's own agent joins — it is the record
+		// link_host_node fills so host-scope work (decommission_site, certs,
+		// rebuild) can be routed. The Install New Node paths mint it; the cloud
+		// path must too, or the machines this keyless work exists for have no
+		// host record and no route.
+		if ($docker_mode === 'docker' && !$is_bare) {
+			ManagedHost::ensure_for_node($node);
+		}
 
 		// A bare instance is done when it answers over SSH: dispatch a plain
 		// status check as the verification job and let handle_installing watch
@@ -457,7 +499,7 @@ class ProvisionCustomerCloud {
 	 * account. Returns null (after parking the provision appropriately) when
 	 * no usable grant exists.
 	 */
-	private function get_driver($provision) {
+	protected function get_driver($provision) {
 		$account_id = (int)$provision->get('cvp_cca_account_id');
 		$account = $account_id ? new CustomerCloudAccount($account_id, TRUE) : null;
 		if (!$account || !$account->key || $account->get('cca_status') !== 'active') {
@@ -531,9 +573,27 @@ class ProvisionCustomerCloud {
 	 * note why. The Connect page doubles as the re-connect page; the consumer
 	 * flips it to ready again on the next grant.
 	 */
+	/**
+	 * A sealed root password is the credential for a running instance, and only
+	 * for the length of its install. When a provision ends (or parks) with no
+	 * instance created, there is no machine it opens — so it is erased now
+	 * rather than held indefinitely, which would be the shared-key defect in
+	 * miniature. A provision that failed WITH a live instance keeps it: that is
+	 * the WP3 recovery decision, made where the instance actually exists.
+	 */
+	private function erase_sealed_root_pass_if_no_instance($provision) {
+		if (trim((string)$provision->get('cvp_instance_id')) !== '') {
+			return;
+		}
+		if (trim((string)$provision->get('cvp_root_pass_sealed')) !== '') {
+			$provision->set('cvp_root_pass_sealed', null);
+		}
+	}
+
 	private function park_for_reconnect($provision, $reason) {
 		$provision->set('cvp_status', 'pending_connect');
 		$provision->set('cvp_error',  mb_substr($reason, 0, 4000));
+		$this->erase_sealed_root_pass_if_no_instance($provision);
 		$provision->save();
 		$this->errors[] = "Provision #{$provision->key}: parked for re-connect — {$reason}";
 
@@ -556,7 +616,10 @@ class ProvisionCustomerCloud {
 	/**
 	 * Terminal failure: record it and alert the ops address.
 	 */
-	private function alert_and_fail($provision, $reason) {
+	protected function alert_and_fail($provision, $reason) {
+		// Erase before fail()'s save so a no-instance failure carries no dangling
+		// credential; a failure with a live instance keeps it (WP3 recovery).
+		$this->erase_sealed_root_pass_if_no_instance($provision);
 		$provision->fail($reason);
 		$this->errors[] = "Provision #{$provision->key}: FAILED — {$reason}";
 

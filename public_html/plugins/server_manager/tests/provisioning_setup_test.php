@@ -40,7 +40,6 @@ $snapshot_settings = array(
 	'server_manager_getjoinery_api_public_key',
 	'server_manager_getjoinery_api_secret_key',
 	'server_manager_provisioning_domain_question_id',
-	'server_manager_customer_cloud_ssh_key_path',
 );
 $saved = array();
 foreach ($snapshot_settings as $name) {
@@ -210,40 +209,18 @@ check($t3['results'][$paused_class] === 'resumed', 'paused task is resumed',
 	'paused: ' . $paused_class);
 
 // ---------------------------------------------------------------------------
-section('ensureSshKey');
+section('Provisioning is keyless — the plane mints no SSH key');
 // ---------------------------------------------------------------------------
 
-$key_dir = sys_get_temp_dir() . '/smps_key_test_' . bin2hex(random_bytes(4));
-mkdir($key_dir, 0700);
-$key_path = $key_dir . '/provisioning_key';
-
-ProvisioningSetup::writeSetting('server_manager_customer_cloud_ssh_key_path', '');
-
-$k1 = ProvisioningSetup::ensureSshKey($key_path);
-check($k1['ok'] === true && $k1['generated'] === true, 'keypair generated');
-check(file_exists($key_path) && file_exists($key_path . '.pub'), 'key and .pub exist on disk');
-check(ProvisioningSetup::readSetting('server_manager_customer_cloud_ssh_key_path') === $key_path,
-	'blank setting filled with the key path');
-
-$private1 = file_get_contents($key_path);
-$k2 = ProvisioningSetup::ensureSshKey($key_path);
-check($k2['ok'] === true && $k2['generated'] === false, 'second run keeps the existing key');
-check(file_get_contents($key_path) === $private1, 'private key unchanged');
-
-unlink($key_path . '.pub');
-$k3 = ProvisioningSetup::ensureSshKey($key_path);
-check($k3['ok'] === true && file_exists($key_path . '.pub'), 'missing .pub is re-derived');
-
-ProvisioningSetup::writeSetting('server_manager_customer_cloud_ssh_key_path', '/custom/path/key');
-ProvisioningSetup::ensureSshKey($key_path);
-check(ProvisioningSetup::readSetting('server_manager_customer_cloud_ssh_key_path') === '/custom/path/key',
-	'non-blank setting is never overwritten');
-
-$k4 = ProvisioningSetup::ensureSshKey($key_dir . '/missing_dir/key');
-check($k4['ok'] === false, 'missing directory reports failure');
-
-array_map('unlink', glob($key_dir . '/provisioning_key*'));
-rmdir($key_dir);
+// The customer-cloud key setting and its minting are gone: a machine we create
+// receives no key of ours. A regression that re-introduces either fails here.
+check(!method_exists('ProvisioningSetup', 'ensureSshKey'),
+	'ProvisioningSetup no longer mints a provisioning keypair');
+$plugin_json = json_decode(file_get_contents(
+	PathHelper::getIncludePath('plugins/server_manager/plugin.json')), true);
+$setting_names = array_column($plugin_json['settings'] ?? [], 'name');
+check(!in_array('server_manager_customer_cloud_ssh_key_path', $setting_names, true),
+	'the customer-cloud SSH key setting is no longer declared');
 
 // ---------------------------------------------------------------------------
 section('CustomerCloudFulfillment provider');

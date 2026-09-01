@@ -81,7 +81,7 @@ $page->admin_header([
 				<label class="form-label">Status</label>
 				<select name="status" class="form-select form-select-sm">
 					<option value="">All</option>
-					<?php foreach (['pending', 'running', 'completed', 'failed', 'cancelled'] as $s): ?>
+					<?php foreach (['queued', 'pending', 'running', 'completed', 'failed', 'cancelled'] as $s): ?>
 						<option value="<?php echo $s; ?>" <?php echo (isset($_GET['status']) && $_GET['status'] === $s) ? 'selected' : ''; ?>><?php echo ucfirst($s); ?></option>
 					<?php endforeach; ?>
 				</select>

@@ -41,16 +41,7 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 				ProvisioningSetup::writeSetting('server_manager_provisioning_admin_alert_email',
 					trim($input['admin_alert_email'] ?? ''));
 				$message = 'Email settings saved.';
-			} elseif ($action === 'generate_ssh_key') {
-				$result = ProvisioningSetup::ensureSshKey();
-				if ($result['ok']) {
-					$message = $result['message'];
-				} else {
-					$error = $result['message'];
-				}
 			} elseif ($action === 'save_cloud') {
-				$ssh_key_path = trim($input['ssh_key_path'] ?? '');
-				ProvisioningSetup::writeSetting('server_manager_customer_cloud_ssh_key_path', $ssh_key_path);
 				ProvisioningSetup::writeSetting('server_manager_linode_referral_url',
 					trim($input['referral_url'] ?? ''));
 				ProvisioningSetup::writeSetting('server_manager_customer_cloud_region',
@@ -60,9 +51,6 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 				ProvisioningSetup::writeSetting('server_manager_customer_cloud_image',
 					trim($input['image'] ?? ''));
 				$message = 'Customer-cloud settings saved.';
-				if ($ssh_key_path !== '' && !file_exists($ssh_key_path . '.pub')) {
-					$message .= ' Warning: ' . $ssh_key_path . '.pub not found — it is required on created instances.';
-				}
 			} elseif ($action === 'save_domains') {
 				ProvisioningSetup::writeSetting('server_manager_namecheap_api_user',
 					trim($input['ncp_api_user'] ?? ''));

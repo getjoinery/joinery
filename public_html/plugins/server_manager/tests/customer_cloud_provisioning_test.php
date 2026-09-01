@@ -36,6 +36,7 @@ require_once(PathHelper::getIncludePath('includes/cloud_compute/LinodeComputeDri
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/oauth_consumers/CustomerCloudConsumer.php'));
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Token.php'));
 require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/provisioning/ProvisionCustomerCloud.php'));
 
 use GuzzleHttp\Client;
 use GuzzleHttp\Handler\MockHandler;
@@ -70,6 +71,7 @@ class CustomerCloudProvisioningTest {
 			$this->test_origin_rules();
 			$this->test_consumer();
 			$this->test_reverse_dns();
+			$this->test_keyless_provisioning();
 		} catch (Exception $e) {
 			check(false, 'uncaught exception', $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
 		} finally {
@@ -152,6 +154,108 @@ class CustomerCloudProvisioningTest {
 		} catch (CloudComputeException $e) {
 			check($e->getCode() === 400 && strpos($e->getMessage(), 'rdns: Hostname does not resolve') !== false,
 				'setReverseDns 400 raises with field context');
+		}
+	}
+
+	private function test_keyless_provisioning() {
+		section('Keyless: a password is sealed, no key is placed');
+
+		$suffix = substr(bin2hex(random_bytes(4)), 0, 8);
+		$fake = new KeylessProbeDriver();
+		$probe = new KeylessProbeProvision();
+		$probe->fakeDriver = $fake;
+
+		$prov = new CustomerCloudProvision(NULL);
+		$prov->set('cvp_origin', 'admin');
+		$prov->set('cvp_usr_user_id', $this->user_id);
+		$prov->set('cvp_domain', 'keyless-' . $suffix . '.example.com');
+		$prov->set('cvp_slug', 'keyless-' . $suffix);
+		$prov->set('cvp_status', 'ready');
+		$prov->save();
+
+		// WP1 — handle_ready: a root password is generated and sealed, and no
+		// SSH key of ours is handed to the provider.
+		$probe->probeReady($prov);
+		$prov->load();
+		$opts = $fake->lastCreateOpts;
+		check(is_array($opts) && !array_key_exists('authorized_keys', $opts),
+			'handle_ready passes no authorized_keys to createInstance');
+		check(isset($opts['root_pass']) && strpos($opts['root_pass'], 'Aa1!') === 0,
+			'a root password is generated for the instance');
+		$box = new SecretBox();
+		$open = $box->open($prov->get('cvp_root_pass_sealed'));
+		check($open['state'] === 'ok' && $open['value'] === $opts['root_pass'],
+			'the provision row seals exactly that password (SecretBox round-trip)');
+
+		// B3 — handle_booting mints the container's placement record, so the
+		// host agent's later join has something to link and host-scope work has
+		// a route. The cloud path used to skip this entirely.
+		$ip = '198.51.100.' . random_int(20, 240);
+		$prov->set('cvp_docker_mode', 'docker');
+		$prov->set('cvp_install_mode', 'fresh');
+		$prov->set('cvp_sitename', 'keyless' . $suffix);
+		$prov->set('cvp_port', random_int(8100, 8999));
+		$prov->save();
+		$fake->getInstanceResult = ['id' => '77001', 'ip' => $ip, 'status' => 'running'];
+		$probe->probeBooting($prov);
+		$prov->load();
+
+		$node_id = (int)$prov->get('cvp_mgn_node_id');
+		$node = new ManagedNode($node_id, TRUE);
+		check($node_id > 0 && (int)$node->get('mgn_mgh_host_id') > 0,
+			'the container node is given a placement record (mgn_mgh_host_id)');
+		$host_count = 0;
+		foreach (new MultiManagedHost(['host' => $ip, 'deleted' => false]) as $h) { $host_count++; }
+		check($host_count === 1, 'a ManagedHost exists for the instance address');
+
+		// The install job names this plane for the machine to join — on the
+		// docker step (the host agent) and the site step (the container's).
+		$install_job = null;
+		foreach (new MultiManagementJob(['node_id' => $node_id]) as $j) { $install_job = $j; }
+		$cmds = $install_job ? json_decode((string)$install_job->get('mjb_commands'), true) : null;
+		$docker_cmd = $site_cmd = '';
+		foreach (($cmds['steps'] ?? []) as $s) {
+			if (strpos((string)($s['label'] ?? ''), 'Install Docker') === 0) { $docker_cmd = $s['cmd']; }
+			if (($s['label'] ?? '') === 'Create the site') { $site_cmd = $s['cmd']; }
+		}
+		check($install_job && $install_job->get('mjb_status') === 'queued',
+			'the install job is created queued, for the plane-side executor');
+		check(strpos($docker_cmd, "install.sh -y -q docker --management-node='https://") !== false,
+			'the docker step names this plane, so the host agent asks to join');
+		check(strpos($site_cmd, "--enable-agent --management-node='https://") !== false,
+			'the site step names this plane, so the container agent asks to join');
+
+		// Cleanup: node first (its FK points at the host), then host, job, provision.
+		$db = $this->db;
+		$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_node_id = ?')->execute([$node_id]);
+		$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_id = ?')->execute([$node_id]);
+		$db->prepare('DELETE FROM mgh_managed_hosts WHERE mgh_host = ?')->execute([$ip]);
+		$db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_id = ?')->execute([$prov->key]);
+
+		// B4 — a shape keyless cannot finish (bare, bare-metal, from_backup) is
+		// refused at 'ready': no instance created, no password sealed, an alert.
+		foreach ([['bare', 'docker'], ['fresh', 'bare-metal'], ['from_backup', 'docker']] as $shape) {
+			$fake->lastCreateOpts = null;
+			$probe->lastFailReason = null;
+			$bad = new CustomerCloudProvision(NULL);
+			$bad->set('cvp_origin', 'admin');
+			$bad->set('cvp_usr_user_id', $this->user_id);
+			$bad->set('cvp_domain', 'refuse-' . $suffix . '.example.com');
+			$bad->set('cvp_slug', 'refuse-' . $suffix);
+			$bad->set('cvp_status', 'ready');
+			$bad->set('cvp_install_mode', $shape[0]);
+			$bad->set('cvp_docker_mode', $shape[1]);
+			if ($shape[0] === 'from_backup') { $bad->set('cvp_source_node_id', $node_id); }
+			$bad->save();
+			$probe->probeReady($bad);
+			$bad->load();
+			$label = $shape[0] . '/' . $shape[1];
+			check($bad->get('cvp_status') === 'failed' && $fake->lastCreateOpts === null,
+				"{$label}: refused at ready with no instance created");
+			check((string)$bad->get('cvp_root_pass_sealed') === ''
+				&& strpos((string)$probe->lastFailReason, 'fresh docker installs only') !== false,
+				"{$label}: no password sealed, and the alert says why");
+			$db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_id = ?')->execute([$bad->key]);
 		}
 	}
 
@@ -502,6 +606,37 @@ class RdnsFakeDriver implements CloudComputeProvider {
 		$this->last_hostname = $hostname;
 		return array('ip' => $ip, 'rdns' => $hostname);
 	}
+}
+
+/** Records createInstance opts and serves a settable getInstance result. */
+class KeylessProbeDriver implements CloudComputeProvider {
+	public $lastCreateOpts = null;
+	public $getInstanceResult = ['id' => '77001', 'ip' => '', 'status' => 'provisioning'];
+
+	public function createInstance(array $opts): array {
+		$this->lastCreateOpts = $opts;
+		return ['id' => '77001', 'ip' => '', 'status' => 'provisioning'];
+	}
+	public function getInstance(string $instance_id): array { return $this->getInstanceResult; }
+	public function rebuildInstance(string $instance_id, array $opts): array { throw new CloudComputeException('not used'); }
+	public function deleteInstance(string $instance_id): void {}
+	public function setReverseDns(string $instance_id, string $ip, string $hostname): array {
+		return ['ip' => $ip, 'rdns' => $hostname];
+	}
+}
+
+/** Runs handle_ready/handle_booting against a fake driver, no OAuth, no network. */
+class KeylessProbeProvision extends ProvisionCustomerCloud {
+	public $fakeDriver;
+	public $lastFailReason;
+	protected function get_driver($provision) { return $this->fakeDriver; }
+	// Record the failure instead of emailing the ops address from a test.
+	protected function alert_and_fail($provision, $reason) {
+		$this->lastFailReason = $reason;
+		$provision->fail($reason);
+	}
+	public function probeReady($p) { return $this->handle_ready($p); }
+	public function probeBooting($p) { return $this->handle_booting($p); }
 }
 
 (new CustomerCloudProvisioningTest())->run();

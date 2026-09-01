@@ -52,7 +52,7 @@ Three ways to set it, all writing the same setting:
 - the machine's own **Admin → System → Management Node** page, which also says what is still needed for it to take effect
 - `php utils/agent_control.php --on` (also `--off`, `--join=URL`, `--leave`, `--status`) on the machine
 - from a management node, the node detail **Agent Channel** panel's *Turn on the agent over SSH*, which switches it on, runs the installer, and has the node ask to join — the fleet path, available only while SSH is, and retired with it at the Phase 3 cutover
-- `install.sh --enable-agent` at install time. A site this management node provisions passes it automatically, so a node it builds comes up running its agent — the one case where whether the machine should run one is already answered
+- `install.sh --enable-agent` at install time, with `--management-node=URL` to have that agent ask to join the named plane in the same step. A site this management node provisions passes both automatically, so a node it builds comes up running its agent and asking to join — the one case where whether the machine should run one is already answered. The join is still a request an operator approves here
 
 None of those enroll anything. A join is a request; approving it here after comparing key fingerprints is what binds a node, unchanged.
 
@@ -336,7 +336,7 @@ Install with `install_agent.sh --siteless`, which is explicit and never inferred
 
 ### The Docker host as a node
 
-A shared Docker host is a plain ManagedNode in machine posture — paired, addressed and versioned like any node, with no web root and no container name. The placement record (`mgh_managed_hosts`) stays what it is: which containers live where. One nullable link joins the two worlds: `mgh_mgn_host_node_id` on the host record names the host's own paired node, set on the host's edit page after its agent joins. That is the routing chain for host-scope work — a container victim's `mgn_mgh_host_id` finds the host record, the host record names the host's node, and the job is addressed there. Sibling containers on a host are found by `mgn_mgh_host_id` and nothing else; `ManagedHost::ensure_for_node()` mints or links the placement record the moment a node needs a container port, so the FK is never absent where it matters.
+A shared Docker host is a plain ManagedNode in machine posture — paired, addressed and versioned like any node, with no web root and no container name. `install.sh docker` installs the host's own siteless agent as part of the install and, given `--management-node=URL`, issues its join; the machine that runs our Docker is managed by its own agent, which is the only path to certificate renewal or site removal once SSH is gone. The placement record (`mgh_managed_hosts`) stays what it is: which containers live where. One nullable link joins the two worlds: `mgh_mgn_host_node_id` on the host record names the host's own paired node. Approving the host agent's join sets it (`ManagedHost::link_host_node` fills an existing placement record for the host's address that has no host node yet), and the host's edit page sets it by hand. That is the routing chain for host-scope work — a container victim's `mgn_mgh_host_id` finds the host record, the host record names the host's node, and the job is addressed there. Sibling containers on a host are found by `mgn_mgh_host_id` and nothing else; `ManagedHost::ensure_for_node()` mints or links the placement record the moment a node needs a container port, so the FK is never absent where it matters.
 
 A host record can be deleted (soft) from its edit page — last, deliberately: the delete refuses while any container site still names it as placement, and while its own agent node record is live.
 
@@ -541,15 +541,30 @@ provider 401 parks the provision back at `pending_connect` and flags the
 account link — a fresh grant resumes it automatically.
 
 **Customer-owned node semantics:** the resulting node is a normal
-`ManagedNode` (installs, upgrades, uptime checks, SSL all apply), with
-`mgn_ssh_key_path` set from `server_manager_customer_cloud_ssh_key_path`
-(whose `.pub` sibling is installed on the instance at create time) and no
-`mgn_mgh_host_id` — it belongs to no managed host. The server is the
-customer's property: cancelling their subscription stops management, never
-touches the instance.
+`ManagedNode` (installs, upgrades, uptime checks, SSL all apply). Provisioning
+is keyless — the instance is created with a one-time root password sealed onto
+the provision row (`cvp_root_pass_sealed`) and no SSH key of ours, so
+`mgn_ssh_key_path` is empty; the machine is managed by its own agent, which
+joins at install and whose join a human approves here. A docker provision's
+container gets `mgn_mgh_host_id` (its placement record, minted at booting), and
+the host's own agent, once approved, is named in `mgh_mgn_host_node_id`. The
+server is the customer's property: cancelling their subscription stops
+management, never touches the instance.
 
-Settings: `server_manager_customer_cloud_ssh_key_path` (required),
-`server_manager_customer_cloud_region` / `_type` / `_image` (instance
+The install itself runs from this management node, not from a node agent: a
+machine we just created has no agent yet. `ManagementJob::createJob` creates
+every `install_node` job in status `queued`, which the agent channel's claim
+(`pending` only) never matches; the `Run Install Jobs` scheduled task spawns
+`plugins/server_manager/utils/run_install_executor.php` (detached, single
+instance, log at `logs/install_executor.log`), and `InstallJobExecutor` claims
+each queued job, runs its `local` steps here and its `ssh` steps on the target
+over the sealed root password (`sshpass`, password in the environment, never on
+a command line), and writes the same output and status contract the agent
+runner writes. It handles fresh docker installs only: `handle_ready` refuses a
+bare, bare-metal or from_backup provision before an instance is created, and the
+executor refuses such a job by its parameters before running a step.
+
+Settings: `server_manager_customer_cloud_region` / `_type` / `_image` (instance
 defaults), `server_manager_linode_referral_url`. Provider credentials are the
 core `oauth_linode_*` settings (Admin → System → OAuth Providers).
 

@@ -168,14 +168,6 @@
       "type": "text"
     },
     {
-      "name": "server_manager_customer_cloud_ssh_key_path",
-      "default": "",
-      "helptext": "Private key path the management agent uses for customer-cloud nodes; its .pub sibling is installed on created instances via authorized_keys. Required for customer-cloud provisioning.",
-      "group": "provisioning",
-      "label": "Customer cloud SSH key path",
-      "type": "text"
-    },
-    {
       "name": "server_manager_customer_cloud_region",
       "default": "us-southeast",
       "helptext": "Default region for customer-cloud instances.",
@@ -360,6 +352,12 @@
       "feature": "Server Manager provisioning",
       "kind": "regenerable-breaks-things",
       "locator": "server_manager_getjoinery_api_secret_key"
+    },
+    {
+      "label": "Provisioning root password",
+      "feature": "Customer cloud provisioning",
+      "kind": "ephemeral",
+      "locator": "cvp_customer_cloud_provisions.cvp_root_pass_sealed"
     }
   ]
 }

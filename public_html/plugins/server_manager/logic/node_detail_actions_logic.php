@@ -528,11 +528,15 @@ class NodeDetailActions {
 					return $base_url . '&tab=api_keys';
 				}
 				require_once(PathHelper::getIncludePath('plugins/server_manager/includes/AgentChannelEndpoint.php'));
-				AgentChannelEndpoint::approveJoin($request, $node);
+				$linked_host = AgentChannelEndpoint::approveJoin($request, $node);
+				$host_note = $linked_host
+					? ' It is this host\'s own agent, so host-scope work (site removal, certificates) now routes to it.'
+					: '';
 				$session->save_message(new DisplayMessage(
 					'Agent connected. ' . $request->get('ajr_claimed_name') . ' (key '
 					. AgentJoinRequest::display_fingerprint($request->get('ajr_fingerprint'))
-					. ') is now this node\'s agent; it will pick the approval up on its next check.',
+					. ') is now this node\'s agent; it will pick the approval up on its next check.'
+					. $host_note,
 					'Success', $page_regex,
 					DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 				));

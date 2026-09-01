@@ -38,7 +38,7 @@ try {
 $post_action = ($_POST['action'] ?? '');
 
 // Cancel and re-run are POST actions (a GET link is CSRF-triggerable), CSRF-validated.
-if ($post_action === 'cancel_job' && $job->get('mjb_status') === 'pending') {
+if ($post_action === 'cancel_job' && in_array($job->get('mjb_status'), ['pending', 'queued'], true)) {
 	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager/job_detail?job_id=' . $job_id); exit; }
 	$job->set('mjb_status', 'cancelled');
 	$job->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
@@ -188,6 +188,21 @@ $status_class = match($job->get('mjb_status')) {
 			<?php endif;
 		}
 
+		// A queued install runs from this management node (the plane-side
+		// install executor), not from a node agent: the Run Install Jobs task
+		// spawns the worker on its next tick, so a wait of one cron interval is
+		// normal and an agent-offline hint would point at the wrong machine.
+		if ($job->get('mjb_status') === 'queued') {
+			$queued_seconds = time() - strtotime($job->get('mjb_create_time'));
+			if ($queued_seconds > 1200): ?>
+				<div class="alert alert-warning mt-2">
+					<strong>This install has been queued for <?php echo round($queued_seconds / 60); ?> minutes.</strong>
+					It is run by this management node's install executor, which the Run Install Jobs scheduled task starts on its next tick.
+					If the task is running and this persists, check <code>logs/install_executor.log</code> on this management node.
+				</div>
+			<?php endif;
+		}
+
 		if ($job->get('mjb_status') === 'running') {
 			$running_seconds = time() - strtotime($job->get('mjb_started_time'));
 			if ($running_seconds > 3600): ?>
@@ -200,7 +215,7 @@ $status_class = match($job->get('mjb_status')) {
 		?>
 
 		<div class="mt-2">
-			<?php if ($job->get('mjb_status') === 'pending'): ?>
+			<?php if (in_array($job->get('mjb_status'), ['pending', 'queued'], true)): ?>
 				<form method="post" action="/admin/server_manager/job_detail?job_id=<?php echo $job->key; ?>" id="cancel_job_form" style="display:inline;">
 					<input type="hidden" name="action" value="cancel_job">
 					<?php echo SmAdminCsrf::field(); ?>
@@ -272,7 +287,7 @@ if ($commands_data && isset($commands_data['steps'])) {
 }
 ?>
 
-<?php if (in_array($job->get('mjb_status'), ['pending', 'running'])): ?>
+<?php if (in_array($job->get('mjb_status'), ['queued', 'pending', 'running'])): ?>
 <?php echo SmAssets::script_tag(); ?>
 <script>
 (function() {
@@ -307,7 +322,7 @@ if ($commands_data && isset($commands_data['steps'])) {
 				}
 				progressEl.textContent = doneSteps;
 
-				if (data.status !== 'pending' && data.status !== 'running') {
+				if (data.status !== 'queued' && data.status !== 'pending' && data.status !== 'running') {
 					polling = false;
 					statusEl.textContent = data.status;
 					statusEl.className = 'badge bg-' + (data.status === 'completed' ? 'success' : 'danger');

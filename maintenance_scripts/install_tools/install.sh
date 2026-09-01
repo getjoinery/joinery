@@ -1,4 +1,14 @@
 #!/usr/bin/env bash
+#VERSION 2.57 - install.sh site takes --management-node=URL: with --enable-agent
+#               the site's agent asks to join that plane in the same step (docker:
+#               inside the container; bare metal: on the host), so a plane-built
+#               site's join request arrives without a human at a terminal. The
+#               join is still a request the plane's operator approves. (keyless_provisioning.md B1)
+#VERSION 2.56 - Keyless provisioning: docker mode installs the siteless host
+#               agent (and joins it with --management-node=URL); the docker
+#               site path honours --enable-agent inside the container; and
+#               host-harden accepts --agent-managed so a keyless machine whose
+#               access path is its joined agent can be hardened. (keyless_provisioning.md)
 #VERSION 2.55 - PostgreSQL memory is sized per container at container start,
 #               not baked into the base image. do_server_setup is what
 #               `docker build` runs (Dockerfile.base), so a value computed
@@ -253,8 +263,8 @@
 #               cd out of BUILD_DIR before removing it to avoid getcwd() warnings.
 #
 # Usage:
-#   ./install.sh docker                              # One-time: install Docker
-#   ./install.sh host-harden                          # One-time: harden a Docker host server
+#   ./install.sh docker [--management-node=URL]      # Install Docker + the siteless host agent (joins URL if given)
+#   ./install.sh host-harden [--agent-managed]        # One-time: harden a Docker host server (--agent-managed: the joined agent is the access path)
 #   ./install.sh build-base                          # One-time per host: build joinery-base image
 #   ./install.sh server [--allow-unsupported-os]     # One-time: set up bare-metal server
 #   ./install.sh site SITENAME [DOMAIN] [PORT]      # Create a site (auto-generates password)
@@ -271,6 +281,8 @@
 #   --with-test-site       Create companion test site (bare-metal only)
 #   --enable-agent         Run the Joinery agent on this site (the binary is
 #                          installed either way; this starts it). Off by default.
+#   --management-node=URL  With --enable-agent: ask to join that management node
+#                          (a request its operator approves; nothing is enrolled here)
 #   --no-ssl               Skip automatic SSL certificate setup
 #   --themes               Download themes/plugins from distribution server
 #   --upgrade-server=URL   Override default distribution server
@@ -1478,10 +1490,51 @@ service_reload() {
 # SUBCOMMAND: docker - Install Docker on the server
 #==============================================================================
 
+# Install the siteless host agent on a Docker host and, if a management node
+# URL is given, request to join it. Every fresh machine that runs our Docker
+# gets the host agent as part of the install itself: a Docker host without an
+# agent identity has no path for certificate renewal or site removal once SSH
+# is gone (specs/docker_host_agent.md, specs/keyless_provisioning.md WP4). The
+# binary ships in the release's agent_dist; nothing is downloaded. Never fails
+# the Docker install — a host that is up but not yet enrolled is recoverable.
+install_docker_host_agent() {
+    local mgmt_url="$1"
+    local dist_dir="$SCRIPT_DIR/../../public_html/agent_dist"
+
+    print_step "Installing the Joinery host agent (siteless)..."
+    if [ ! -f "$dist_dir/manifest.json" ]; then
+        print_warning "No agent artifact at $dist_dir — skipping host agent install."
+        print_warning "Install it later with: install_agent.sh --siteless --dist-dir=DIR --enable"
+        return 0
+    fi
+
+    if ! "$SCRIPT_DIR/install_agent.sh" --siteless --dist-dir="$dist_dir" --enable; then
+        print_warning "Host agent install did not complete; the Docker host is up. Re-run install_agent.sh to retry."
+        return 0
+    fi
+    print_success "Host agent installed and enabled"
+
+    if [ -n "$mgmt_url" ]; then
+        print_step "Requesting to join $mgmt_url ..."
+        if joinery-agent join --management-node="$mgmt_url"; then
+            print_success "Join requested — approve it on the management node (the host link is set automatically on approval)"
+        else
+            print_warning "Join request failed; run: joinery-agent join --management-node=$mgmt_url"
+        fi
+    else
+        print_info "Host agent installed but not joined (no --management-node given)."
+        print_info "Enroll later with: joinery-agent join --management-node=URL"
+    fi
+}
+
 do_docker_install() {
+    local MGMT_NODE_URL=""
     local arg
     for arg in "$@"; do
-        consume_global_flag "$arg" || { print_error "Unknown option for docker: $arg"; exit 1; }
+        case "$arg" in
+            --management-node=*) MGMT_NODE_URL="${arg#--management-node=}" ;;
+            *) consume_global_flag "$arg" || { print_error "Unknown option for docker: $arg"; exit 1; } ;;
+        esac
     done
 
     print_header "Docker Installation"
@@ -1511,7 +1564,16 @@ do_docker_install() {
         else
             print_success "Docker daemon is running"
         fi
-        exit 0
+        # Do NOT exit here: an existing Docker host still needs its host agent
+        # installed and (if a URL was given) joined — the whole point on a
+        # keyless machine. Fall through to the agent step.
+        install_docker_host_agent "$MGMT_NODE_URL"
+        if [ "$QUIET_MODE" -eq 1 ]; then
+            echo -e "${GREEN}Docker installation complete!${NC}"
+        else
+            print_success "Docker installation complete!"
+        fi
+        return 0
     fi
 
     print_info "Docker is not installed"
@@ -1593,6 +1655,8 @@ do_docker_install() {
         print_success "Postgres ports 9080-9099 blocked on $PUBLIC_IFACE (tunnels still work)"
     fi
 
+    install_docker_host_agent "$MGMT_NODE_URL"
+
     if [ "$QUIET_MODE" -eq 1 ]; then
         echo -e "${GREEN}Docker installation complete!${NC}"
     else
@@ -1605,9 +1669,17 @@ do_docker_install() {
 #==============================================================================
 
 do_host_harden() {
+    local AGENT_MANAGED=0
     local arg
     for arg in "$@"; do
-        consume_global_flag "$arg" || { print_error "Unknown option for host-harden: $arg"; exit 1; }
+        case "$arg" in
+            # The machine's access path is its joined agent, not an SSH key.
+            # Asserted by the caller (the plane's approval-time burn, once the
+            # agent's join has been approved) — an agent that has been ADMITTED
+            # is a truthful answer that disabling password login orphans nobody.
+            --agent-managed) AGENT_MANAGED=1 ;;
+            *) consume_global_flag "$arg" || { print_error "Unknown option for host-harden: $arg"; exit 1; } ;;
+        esac
     done
 
     print_header "Docker Host Security Hardening"
@@ -1617,16 +1689,23 @@ do_host_harden() {
         exit 1
     fi
 
-    # Safety check: require at least one authorized SSH key before disabling password auth
+    # Safety check: require a reachable account before disabling password auth.
+    # A key in authorized_keys is one; a joined agent (--agent-managed) is the
+    # other — the fourth answer to derive_ssh_access's question, for a keyless
+    # machine whose only management path is its agent.
     local AUTH_KEYS="${HOME}/.ssh/authorized_keys"
-    if [ ! -f "$AUTH_KEYS" ] || [ ! -s "$AUTH_KEYS" ]; then
+    if [ "$AGENT_MANAGED" = "1" ]; then
+        print_info "Agent-managed host: the joined agent is the access path — safe to disable password auth"
+    elif [ ! -f "$AUTH_KEYS" ] || [ ! -s "$AUTH_KEYS" ]; then
         print_error "No SSH authorized_keys found at $AUTH_KEYS"
         print_error "Add your SSH public key before running host-harden to avoid being locked out"
+        print_error "(A plane-managed keyless host is hardened by the management node with --agent-managed.)"
         exit 1
+    else
+        local KEY_COUNT
+        KEY_COUNT=$(grep -c 'ssh-' "$AUTH_KEYS" 2>/dev/null || echo 0)
+        print_info "Found $KEY_COUNT SSH key(s) in authorized_keys — safe to disable password auth"
     fi
-    local KEY_COUNT
-    KEY_COUNT=$(grep -c 'ssh-' "$AUTH_KEYS" 2>/dev/null || echo 0)
-    print_info "Found $KEY_COUNT SSH key(s) in authorized_keys — safe to disable password auth"
 
     if [ "$ASSUME_YES" -ne 1 ]; then
         echo ""
@@ -2762,6 +2841,7 @@ do_site_create() {
     local ACTIVATE_THEME=""
     local WITH_TEST_SITE=false
     local ENABLE_AGENT=false
+    local MANAGEMENT_NODE_URL=""
     local NO_SSL=false
     local THEMES=""
     local CLONE_FROM=""
@@ -2823,6 +2903,14 @@ do_site_create() {
             --no-ssl)
                 NO_SSL=true
                 shift
+                ;;
+            --management-node=*)
+                MANAGEMENT_NODE_URL="${1#*=}"
+                shift
+                ;;
+            --management-node)
+                MANAGEMENT_NODE_URL="$2"
+                shift 2
                 ;;
             --admin-email=*)
                 ADMIN_EMAIL="${1#*=}"
@@ -2892,6 +2980,7 @@ do_site_create() {
                 echo "  --activate THEME       Set active theme after installation"
                 echo "  --with-test-site       Create companion test site (bare-metal only)"
                 echo "  --enable-agent         Run the Joinery agent (installed either way; off by default)"
+                echo "  --management-node=URL  With --enable-agent: ask to join that management node"
                 echo "  --no-ssl               Skip automatic SSL certificate setup"
                 echo "  --memory=SIZE          Memory budget for the container (512m, 2g)."
                 echo "                         Unlimited by default. Set it on any host running"
@@ -2966,6 +3055,14 @@ do_site_create() {
                 ;;
         esac
     done
+
+    # What --enable-agent runs on the new site: switch the agent on and, given
+    # a management node, ask to join it in the same step. agent_control.php
+    # validates the URL; the join is a request the plane's operator approves.
+    local -a AGENT_CONTROL_ARGS=(--on)
+    if [ -n "$MANAGEMENT_NODE_URL" ]; then
+        AGENT_CONTROL_ARGS+=("--join=$MANAGEMENT_NODE_URL")
+    fi
 
     # Validate required parameters
     if [ -z "$SITENAME" ]; then
@@ -3882,6 +3979,21 @@ EOF
         sleep 5
     done
 
+    # --enable-agent for a Docker site: the site's agent runs INSIDE the
+    # container (its join reads the site's own stg_settings), so it is enabled
+    # there, not on the host. The binary ships in the image; agent_control.php
+    # --on writes the setting and runs the installer in one step. Bare metal
+    # does the same on the host at the equivalent point. Without this the flag
+    # was silently dropped on the Docker path and the site came up unmanageable.
+    if [ "$ENABLE_AGENT" = true ]; then
+        print_step "Enabling the Joinery agent inside the container..."
+        if docker exec "$SITENAME" php "/var/www/html/${SITENAME}/public_html/utils/agent_control.php" "${AGENT_CONTROL_ARGS[@]}"; then
+            print_success "Agent enabled inside $SITENAME${MANAGEMENT_NODE_URL:+ and asked to join $MANAGEMENT_NODE_URL}"
+        else
+            print_warning "Could not enable the agent; the site is installed and it can be turned on from Admin → System → Management Node"
+        fi
+    fi
+
     # Cleanup build directory
     print_step "Cleaning up build directory..."
     if [ -d "$BUILD_DIR" ]; then
@@ -4070,8 +4182,8 @@ do_site_baremetal() {
     # a typo here fails loudly instead of storing a row nothing reads.
     if [ "$ENABLE_AGENT" = true ]; then
         print_step "Enabling the Joinery agent for this site..."
-        if php "/var/www/html/${SITENAME}/public_html/utils/agent_control.php" --on; then
-            print_success "Agent enabled — it starts with the host installers below"
+        if php "/var/www/html/${SITENAME}/public_html/utils/agent_control.php" "${AGENT_CONTROL_ARGS[@]}"; then
+            print_success "Agent enabled${MANAGEMENT_NODE_URL:+ and asked to join $MANAGEMENT_NODE_URL} — it starts with the host installers below"
         else
             print_warning "Could not enable the agent; the site is installed and it can be turned on from Admin → System → Management Node"
         fi
