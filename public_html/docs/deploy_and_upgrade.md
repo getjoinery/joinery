@@ -679,13 +679,44 @@ The distinction matters beyond the upgrade endpoint: any control that edits a fi
 
 ### PostgreSQL memory
 
-`maintenance_scripts/sysadmin_tools/tune_postgres_memory.sh` sizes PostgreSQL from the
-RAM the machine (or container, via its cgroup limit) actually has and writes the result
-as `conf.d/20-joinery-memory.conf`: `shared_buffers` at 20% of RAM (floor 64MB, cap 2GB)
-and `effective_cache_size` at 50%. The installer runs it on every install; on an existing
-node run it by hand — it is idempotent, writes nothing when the drop-in already matches,
-and restarts the cluster unit (`postgresql@{version}-main`) only when it wrote. `--dry-run`
-prints what it would write; `--no-restart` writes without restarting.
+`maintenance_scripts/sysadmin_tools/tune_postgres_memory.sh` sizes PostgreSQL from the RAM
+the machine actually owns and writes the result as `conf.d/20-joinery-memory.conf`:
+`shared_buffers` at 20% of RAM (floor 64MB, cap 2GB) and `effective_cache_size` at 50%. It
+is idempotent, writes nothing when the drop-in already matches, and restarts the cluster
+unit (`postgresql@{version}-main`) only when it wrote. `--dry-run` prints what it would
+write; `--no-restart` writes without restarting.
+
+"RAM the machine owns" is the whole question, and on a shared host only the container knows
+the answer. The budget is resolved in one order, and the script skips rather than guesses:
+
+| Source | When it applies |
+|---|---|
+| `--ram-mb=N` | Always wins when given |
+| The cgroup limit | The container has a memory limit |
+| `MemTotal` | This is not a container |
+| *skip, exit 3* | A container with no memory limit |
+
+The last row is the case with no honest answer: `/proc/meminfo` reports the host's memory,
+which is not the container's to size from, and every container on that host reads the same
+figure — eight containers each taking 20% of one host claim 160% of it. PostgreSQL keeps its
+packaged settings until the container is given a budget.
+
+**Where it runs.** On bare metal, `install.sh server` runs it during the install: that host is
+the machine. On Docker it runs from the container start command on every start, before
+PostgreSQL starts, so the value applies to the first postmaster. It is deliberately not part
+of the base image — `install.sh server` is what `docker build` runs to bake that image, so a
+figure computed there would be the build host's RAM, frozen into the image and shipped to
+every container on every host — and deliberately not in `_site_init.sh`, which runs only on
+first boot while `/etc/postgresql` is reset by a container rebuild.
+
+**Giving a container a budget.** `install.sh site --memory=SIZE` (Docker's syntax: `512m`,
+`2g`) sets the limit at creation, and `--memory-swap` is pinned to the same figure so the cap
+is not doubled by swap. An already running container takes one with
+`docker update --memory=512m --memory-swap=512m NAME`, and picks up the sizing at its next
+start. Containers are unlimited by default: a limit that arrives uninvited OOM-kills a site
+that was fitting fine, so it is a decision for whoever knows how many sites share the host.
+On any host running more than one site it is worth setting — it is the only thing that tells
+each container what share of the host is its own.
 
 ### The deploy tier
 

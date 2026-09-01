@@ -1,4 +1,17 @@
 # Joinery Docker Template
+# VERSION 4.9 - PostgreSQL's memory is sized here, at every start, before the
+#               server comes up. It cannot be done in the base image: the
+#               image is built by install.sh do_server_setup, so any figure
+#               computed there is the BUILD host's RAM, baked in and shipped
+#               to every container on every host. It cannot be done in
+#               _site_init.sh either, for the same reason /etc/cron.d is
+#               written here — /etc/postgresql does not survive a container
+#               rebuild and _site_init.sh only runs on first boot. Started
+#               before `service postgresql start` so the value applies to the
+#               first postmaster: shared_buffers needs a start, not a reload.
+#               Sizing is skipped unless the container has a memory limit to
+#               read (install.sh site --memory=SIZE); see
+#               sysadmin_tools/tune_postgres_memory.sh.
 # VERSION 4.8 - The container start command is the single owner of the cache
 #               directory and the scheduled-task cron file, because it is the
 #               only step that runs every start with the volumes mounted.
@@ -221,6 +234,7 @@ CMD set +H && \
         echo "       archive, or reinstall this site with install.sh."; \
         exit 1; \
     fi && \
+    (bash "/var/www/html/${SITENAME}/maintenance_scripts/sysadmin_tools/tune_postgres_memory.sh" --no-restart --container || true) && \
     service postgresql start && \
     sleep 3 && \
     export PGPASSWORD="${POSTGRES_PASSWORD}" && \

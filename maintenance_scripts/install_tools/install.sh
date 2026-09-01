@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+#VERSION 2.55 - PostgreSQL memory is sized per container at container start,
+#               not baked into the base image. do_server_setup is what
+#               `docker build` runs (Dockerfile.base), so a value computed
+#               there is the BUILD host's RAM, frozen into the image and
+#               shipped to every container on every host. The tuner now
+#               refuses to size from a machine it does not own, and
+#               `site --memory=SIZE` gives a container the budget it reads.
 #VERSION 2.54 - PostgreSQL memory is sized from the machine by
 #               sysadmin_tools/tune_postgres_memory.sh (shared_buffers 20% of RAM,
 #               effective_cache_size 50%, as a conf.d drop-in) instead of a fixed 64MB.
@@ -355,6 +362,16 @@ CLOUDFLARE_PROXY=0  # Set to 1 if domain is behind Cloudflare proxy
 SSL_DEFERRED=0      # Set to 1 when DNS wasn't ready, so the closing summary can say so
 SSH_ROOT_LOGIN_SAFE=0    # Set by derive_ssh_access: 1 when disabling root SSH orphans nobody
 SSH_REACHABLE_ACCOUNT="" # Set by derive_ssh_access: the account that keeps access
+
+# --memory=SIZE: the memory budget for a site container, in Docker's own syntax
+# (512m, 2g). Empty means unlimited, which is Docker's default and stays the
+# default here — a limit that arrives uninvited OOM-kills a site that was
+# fitting fine. It is worth setting on any host running more than one
+# container: it is the only thing that tells a container how much of a shared
+# host is actually its own, and PostgreSQL's memory is sized from it at start
+# (Dockerfile.template CMD -> sysadmin_tools/tune_postgres_memory.sh). Without
+# it that sizing is skipped and PostgreSQL keeps its packaged settings.
+CONTAINER_MEMORY=""
 
 # Global flags are honoured wherever they appear: `install.sh docker -y` and
 # `install.sh -y docker` mean the same thing. Subcommands route stray
@@ -2345,17 +2362,31 @@ EOF
     sed -i "s/#max_wal_size = 1GB/max_wal_size = 64MB/" ${PG_CONFIG_DIR}/postgresql.conf
     sed -i "s/max_wal_size = 1GB/max_wal_size = 64MB/" ${PG_CONFIG_DIR}/postgresql.conf
 
-    # Memory is sized from the machine, not fixed: shared_buffers 20% of the
-    # RAM this box (or container) actually has, effective_cache_size 50%, as
-    # the conf.d drop-in sysadmin_tools/tune_postgres_memory.sh writes. The
-    # fixed 64MB this used to set was smaller than one busy table on a 2 GB
-    # VPS. --no-restart because PostgreSQL is restarted just below.
+    # Memory is sized from the RAM this machine owns: shared_buffers 20%,
+    # effective_cache_size 50%, as the conf.d drop-in
+    # sysadmin_tools/tune_postgres_memory.sh writes. --no-restart because
+    # PostgreSQL is restarted just below.
+    #
+    # On bare metal this function IS the machine, so tuning here is right. In a
+    # container it is not: this same function is what `docker build` runs to
+    # bake the base image (Dockerfile.base: `install.sh server`), where the only
+    # RAM figure available is the BUILD host's -- a number that would then be
+    # frozen into the image and shipped to every container on every host, and
+    # that every container on a shared host would read identically. The tuner
+    # refuses that case itself rather than guessing (exit 3), so this call is
+    # safe on both paths; the per-container sizing happens at container start,
+    # where the cgroup limit is readable. See Dockerfile.template's CMD.
     print_info "Sizing PostgreSQL memory from this machine..."
     pg_tuner="${SCRIPT_DIR}/../sysadmin_tools/tune_postgres_memory.sh"
     if [ -f "$pg_tuner" ]; then
-        bash "$pg_tuner" --no-restart
+        # Exit 3 is "this is a container with no memory budget I can read" --
+        # expected during an image build, and not a failure of the install.
+        bash "$pg_tuner" --no-restart || [ "$?" -eq 3 ]
     else
-        print_warning "tune_postgres_memory.sh not found beside the installer; PostgreSQL keeps its packaged shared_buffers"
+        # Not an error on the container build path: Dockerfile.base copies only
+        # install.sh into the build context, so sysadmin_tools is absent by
+        # design and PostgreSQL keeps its packaged settings until first start.
+        print_info "tune_postgres_memory.sh not in this context; PostgreSQL is sized at container start"
     fi
 
     # Record who connects, and from where.
@@ -2760,6 +2791,14 @@ do_site_create() {
                 WIPE_DATA=1
                 shift
                 ;;
+            --memory=*)
+                CONTAINER_MEMORY="${1#*=}"
+                shift
+                ;;
+            --memory)
+                CONTAINER_MEMORY="$2"
+                shift 2
+                ;;
             --allow-downgrade)
                 ALLOW_DOWNGRADE=1
                 shift
@@ -2854,6 +2893,10 @@ do_site_create() {
                 echo "  --with-test-site       Create companion test site (bare-metal only)"
                 echo "  --enable-agent         Run the Joinery agent (installed either way; off by default)"
                 echo "  --no-ssl               Skip automatic SSL certificate setup"
+                echo "  --memory=SIZE          Memory budget for the container (512m, 2g)."
+                echo "                         Unlimited by default. Set it on any host running"
+                echo "                         more than one site: PostgreSQL sizes its memory"
+                echo "                         from this, and skips sizing without it."
                 echo ""
                 echo "Clone Options:"
                 echo "  --clone-from=URL       Clone database and uploads from existing site"
@@ -3693,6 +3736,20 @@ EOF
         CLONE_ENV_OPTS="-e CLONE_FROM=${CLONE_FROM} -e CLONE_KEY=${CLONE_KEY}"
     fi
 
+    # --memory bounds the container, and it is also the only way the container
+    # can learn what share of a shared host is its own: with a limit set, the
+    # cgroup reports it and tune_postgres_memory.sh sizes PostgreSQL from that
+    # at every start. Unset means unlimited (Docker's default), and then that
+    # sizing is skipped rather than computed from the host's RAM. --memory-swap
+    # is pinned to the same figure so the limit is real: left alone Docker
+    # allows swap equal to the limit again, and a container that should be
+    # capped at 512m quietly uses 1g of the host's swap instead.
+    MEMORY_OPTS=""
+    if [ -n "$CONTAINER_MEMORY" ]; then
+        MEMORY_OPTS="--memory=${CONTAINER_MEMORY} --memory-swap=${CONTAINER_MEMORY}"
+        print_info "Container memory budget: ${CONTAINER_MEMORY}"
+    fi
+
     # The database password reaches the container here, at run time, and only
     # here — not through --build-arg, which would bake it into the image where
     # `docker inspect` and `docker history` keep it after the container is gone.
@@ -3724,6 +3781,7 @@ EOF
             --name "$SITENAME" \
             --restart unless-stopped \
             --env-file "$ENV_FILE" \
+            $MEMORY_OPTS \
             -p "$PORT":80 \
             -p 127.0.0.1:"$DB_PORT":5432 \
             $CLONE_ENV_OPTS \
@@ -3747,6 +3805,7 @@ EOF
             --name "$SITENAME" \
             --restart unless-stopped \
             --env-file "$ENV_FILE" \
+            $MEMORY_OPTS \
             -p "$PORT":80 \
             -p 127.0.0.1:"$DB_PORT":5432 \
             $CLONE_ENV_OPTS \
