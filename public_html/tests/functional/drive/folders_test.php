@@ -112,6 +112,26 @@ check(res_ok($rMoveRoot), 'move Grand to root');
 $grand_reload = new Folder($grand_id, true);
 check($grand_reload->get('fol_parent_folder_id') === null, 'Grand parent is null (root) after move');
 
+// Moving it to where it already is changes nothing and says so — a retried
+// move converges rather than colliding with itself.
+$rAgain = drive_move_logic(array('entity_type' => 'folder', 'entity_id' => $grand_id, 'parent_id' => 0));
+check(res_ok($rAgain) && !empty($rAgain->data['unchanged']), 'moving Grand to the root it is already in is an ok no-op');
+$rAgainOmit = drive_move_logic(array('entity_type' => 'folder', 'entity_id' => $grand_id));
+check(res_ok($rAgainOmit) && !empty($rAgainOmit->data['unchanged']), 'and omitting parent_id (root) says the same');
+
+// A negative destination is neither a folder nor the root: refused, and the
+// item stays put rather than landing at the root as if that were meant.
+$rNeg = drive_move_logic(array('entity_type' => 'folder', 'entity_id' => $grand_id, 'parent_id' => -7));
+check(res_err($rNeg) && isset($rNeg->data['reason']) && $rNeg->data['reason'] === 'invalid_parent',
+	'a negative parent_id is refused with reason invalid_parent');
+$rNegBack = drive_move_logic(array('entity_type' => 'folder', 'entity_id' => $grand_id, 'parent_id' => $beta_id));
+check(res_ok($rNegBack), 'move Grand back under Beta');
+$rNeg2 = drive_move_logic(array('entity_type' => 'folder', 'entity_id' => $grand_id, 'parent_id' => -1));
+check(res_err($rNeg2) && (int)(new Folder($grand_id, true))->get('fol_parent_folder_id') === $beta_id,
+	'a refused negative move leaves the folder where it was, not at the root');
+$rRootBack = drive_move_logic(array('entity_type' => 'folder', 'entity_id' => $grand_id, 'parent_id' => 0));
+check(res_ok($rRootBack), 'move Grand to root again for the checks below');
+
 // -------------------------------------------------------------------------
 section('Depth cap');
 

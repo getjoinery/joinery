@@ -25,6 +25,7 @@
  *
  * Run: php tests/run.php db --filter=messenger_sealed
  *
+ * @version 1.1 - permanent delete of a room removes its key grants (the FK rule, exercised)
  * @version 1.0
  */
 
@@ -344,6 +345,26 @@ try {
 } catch (ConversationException $e) { $refused = $e->getMessage(); }
 check(strpos($refused, 'ceremony') !== false,
 	'protection is a ceremony, not a column that can be set at insert');
+
+// =====================================================================
+section('permanent delete takes every key grant with it');
+
+// A grant is a wrapped copy of the room key for one member. Once the room is
+// gone the grants are keys to nothing, and keys to nothing must not outlive the
+// thing they opened. The rule lives on ConversationKeyGrant::$foreign_key_actions
+// (permanent_delete on the conversation); this proves the cascade actually runs.
+$room_id = (int)$room->key;
+$grants_before = (int)$db->query("SELECT COUNT(*) FROM ckg_conversation_key_grants WHERE ckg_cnv_conversation_id = " . $room_id)->fetchColumn();
+check($grants_before > 0, 'the sealed room holds key grants (' . $grants_before . ')');
+$room->permanent_delete();
+$q = $db->prepare("SELECT COUNT(*) FROM cnv_conversations WHERE cnv_conversation_id = ?");
+$q->execute(array($room_id));
+check((int)$q->fetchColumn() === 0, 'the conversation row is gone');
+$q = $db->prepare("SELECT COUNT(*) FROM ckg_conversation_key_grants WHERE ckg_cnv_conversation_id = ?");
+$q->execute(array($room_id));
+check((int)$q->fetchColumn() === 0, 'and every grant went with it');
+check(count(new MultiConversationKeyGrant(array('conversation_id' => $room_id))) === 0,
+	'the grant collection agrees');
 
 lock_everyone(array($alice, $bob, $carol));
 harness_finish();

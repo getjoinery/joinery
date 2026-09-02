@@ -15,6 +15,7 @@
  * ImapFetchBusyException whoever the two callers are. Callers decide what a
  * busy account means to them (skip, warn); this helper just lets it through.
  *
+ * @version 1.1 - observes the outcome on the account (feed health, announced on transition)
  * @version 1.0
  */
 
@@ -38,12 +39,23 @@ class ImapFetch {
 				if ($account->isTwoWay()) {
 					$syncer->push($maxPerRun);      // STORE / COPY / MOVE / EXPUNGE / trash
 				}
-				return $result;
+			} else {
+				$result = $ingestor->poll($maxPerRun);
 			}
-			return $ingestor->poll($maxPerRun);
+		} catch (ImapFetchBusyException $e) {
+			// Not an outcome: the fetch this caller wanted is already running.
+			throw $e;
+		} catch (Throwable $e) {
+			// Every fetch path passes through here, so this is where a feed's
+			// health is observed: a fault is announced once, on transition, and
+			// the exception still reaches the caller that records the status.
+			$account->observeFetchOutcome(false, $e->getMessage());
+			throw $e;
 		} finally {
 			$ingestor->close();
 		}
+		$account->observeFetchOutcome(true, '', (int)($result['stored'] ?? 0));
+		return $result;
 	}
 }
 ?>

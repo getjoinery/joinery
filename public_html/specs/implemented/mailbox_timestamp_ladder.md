@@ -1,5 +1,7 @@
 # The reader's timestamp ladder
 
+**Status: implemented** — verified against the code 2026-09-02: `fmtTime` / `sixMonthsBefore` in `plugins/mailbox/assets/mailbox_reader.js`, gated by `timestamp_ladder.mjs`.
+
 A timestamp answers a different question as mail ages. Minutes old, the only
 thing being asked is *how long ago*. Earlier today, the clock time places it in
 your day. Within the year, roughly when in the day and on what date. Older than

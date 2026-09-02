@@ -1,7 +1,7 @@
 {
     "name": "Mailbox",
     "description": "Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS",
-    "version": "1.105.1",
+    "version": "1.106.0",
     "author": "Joinery",
     "license": "PolyForm-Noncommercial-1.0.0",
     "status": "stable",
@@ -82,6 +82,15 @@
             "check": {
                 "type": "code",
                 "call": "InboundEmailHealth::checkForwardingRelay"
+            }
+        },
+        {
+            "key": "imap_feeds_fetching",
+            "label": "Connected mailboxes are fetching",
+            "details": "Every enabled IMAP feed can open its mailbox. Fails naming each feed that is broken — authorization revoked or expired, or unreachable for several polls in a row — with the reason and the fix. Passes silently when there are no feeds.",
+            "check": {
+                "type": "code",
+                "call": "InboundEmailHealth::checkImapFeeds"
             }
         },
         {
@@ -690,6 +699,45 @@
                 "title_template": "{relay_name} stopped scanning mail for spam",
                 "body_template": "{detail} {coverage}",
                 "link_template": "/plugins/mailbox/admin/admin_mailbox_setup"
+            }
+        },
+        "mailbox.imap_feed_broken": {
+            "label": "A connected mailbox stopped receiving mail",
+            "description": "An IMAP feed can no longer fetch: its authorization was revoked or expired, or the mailbox has been unreachable for several polls in a row. Raised once when it happens, not repeatedly while it stays broken.",
+            "category": "Mailbox",
+            "payload": {
+                "address": "The mailbox address this is about",
+                "provider": "The provider, e.g. Gmail / Google Workspace",
+                "reason": "Why fetching stopped, in plain terms",
+                "since": "When the feed was found broken (UTC)",
+                "sending": "Whether sending through the same account is affected, or empty",
+                "fix": "What to press"
+            },
+            "notify": {
+                "ntf_type": "system",
+                "supports_topic": true,
+                "default_email": true,
+                "title_template": "New mail for {address} has stopped arriving",
+                "body_template": "{reason} {sending} {fix}",
+                "link_template": "/plugins/mailbox/admin/admin_mailbox_accounts"
+            }
+        },
+        "mailbox.imap_feed_recovered": {
+            "label": "A connected mailbox is receiving mail again",
+            "description": "An IMAP feed that had stopped fetching opened its mailbox again.",
+            "category": "Mailbox",
+            "payload": {
+                "address": "The mailbox address this is about",
+                "provider": "The provider, e.g. Gmail / Google Workspace",
+                "detail": "What the first successful fetch brought in"
+            },
+            "notify": {
+                "ntf_type": "system",
+                "supports_topic": true,
+                "default_email": true,
+                "title_template": "Mail for {address} is arriving again",
+                "body_template": "{detail}",
+                "link_template": "/plugins/mailbox/admin/admin_mailbox_accounts"
             }
         },
         "mailbox.relay_scanner_recovered": {

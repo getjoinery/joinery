@@ -1,6 +1,6 @@
 # Spec: The IMAP seed's import scope is enforced at storage time
 
-**Status:** Draft (awaiting implementation)
+**Status:** Built — `iif_seed_high_uid` is a live column on `iif_inbound_imap_folders`, the `out_of_scope` reconciliation is documented in `ImapIngestor`, and `plugins/mailbox/tests/imap_seed_scope_guard_test.php` covers it (header corrected 2026-09-02; it still read Draft after the build).
 **Version:** 1.0
 **Area:** `plugins/mailbox/includes/ImapIngestor.php`, `plugins/mailbox/data/inbound_imap_folder_class.php`, `plugins/mailbox/includes/MailRunRecord.php`
 **Related:** `specs/mail_import_loss_proof.md` (§ B seed proofs — this spec keeps its guarantees), `specs/imap_source_domain_boundaries.md`, `plugins/mailbox/docs/overview.md`

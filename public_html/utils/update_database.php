@@ -373,6 +373,29 @@
 			echo "✓ Schema verification passed - all " . count($classes) . " tables verified<br>\n";
 		}
 
+		// Step 3.95: Plugin tables and columns (additive), BEFORE migrations.
+		// Plugin schema otherwise lands only in the Plugin & Theme Sync step at
+		// the end, so a migration touching a new plugin column failed on its
+		// first run and passed on the second. The sync step repeats this pass
+		// afterwards and finds nothing left to add.
+		echo "-----PLUGIN TABLES (before migrations)-----<br>\n";
+		try {
+			require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
+			$plugin_tables = PluginManager::getInstance()->syncTables();
+			if (!empty($plugin_tables['messages'])) {
+				echo implode('<br>', $plugin_tables['messages']) . "<br>\n";
+			} else {
+				echo "✓ Plugin tables up to date<br>\n";
+			}
+			foreach ($plugin_tables['errors'] as $plugin_table_error) {
+				echo 'ERROR: ' . $plugin_table_error . "<br>\n";
+			}
+		} catch (Exception $e) {
+			// Not fatal here: the full sync at the end runs the same pass and
+			// reports on its own. What is lost is only the ordering benefit.
+			echo 'WARNING: plugin table pass before migrations failed: ' . $e->getMessage() . "<br>\n";
+		}
+
 		// Step 4: Run database migrations
 		echo "-----MIGRATIONS-----<br>\n";
 

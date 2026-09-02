@@ -27,6 +27,9 @@
  * Discovered by interface from this plugin's includes/oauth_consumers/ (see
  * OAuth2ConsumerRegistry); no registration call is needed.
  *
+ * @version 2.3 - reconnect verifies the mailbox opens before saying Connected, and announces
+ *   recovery of a broken feed; a denied or errored consent lands on the Accounts tab
+ *   with the cause translated (OAuth2ConsumerHandlesDenial) instead of a bare "cancelled"
  * @version 2.2
  * @changelog 2.2 - both entry points check WHAT was granted and refuse a grant
  *   that authorizes sign-in but not mail access, instead of storing it and
@@ -40,13 +43,15 @@
  */
 
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Consumer.php'));
+require_once(PathHelper::getIncludePath('includes/oauth/OAuth2ConsumerHandlesDenial.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ImapIngestor.php'));
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Client.php'));
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2ProviderRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ImapFeedProvisioner.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ImapConnectStash.php'));
 
-class InboundImapOAuthConsumer implements OAuth2Consumer {
+class InboundImapOAuthConsumer implements OAuth2Consumer, OAuth2ConsumerHandlesDenial {
 
 	const ACCOUNTS_URL = '/plugins/mailbox/admin/admin_mailbox_accounts';
 	const WIZARD_URL   = '/plugins/mailbox/admin/admin_mailbox_connect';
@@ -122,6 +127,26 @@ class InboundImapOAuthConsumer implements OAuth2Consumer {
 			return self::WIZARD_URL . '?state=configure&account_id=' . intval($account->key) . '&connected=1';
 		}
 
+		// Verify before celebrating. A token the provider handed over can still
+		// fail to open the mailbox (scope, a Workspace policy, a different
+		// account than the feed authenticates as); saying "Connected" and
+		// letting the next cron pass re-flag it is the silence this feature
+		// exists to end. The same test the Accounts tab's Test button runs.
+		$probe = new ImapIngestor($account);
+		$verdict = $probe->testConnection(); // closes its own connection
+		if (empty($verdict['ok'])) {
+			$account->recordStatus('Reconnected, but the mailbox could not be opened: ' . substr((string)$verdict['message'], 0, 400));
+			SessionControl::get_instance()->save_message(new DisplayMessage(
+				'The authorization was stored, but ' . htmlspecialchars((string)$account->get('iia_username'))
+					. ' still could not be opened: ' . htmlspecialchars((string)$verdict['message'])
+					. ' Nothing will be fetched until this is fixed.',
+				'Not connected', '~/plugins/mailbox/admin/~',
+				DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+			return self::ACCOUNTS_URL;
+		}
+		// A feed announced broken is announced recovered here, not on the next poll.
+		$account->observeFetchOutcome(true, '', 0);
+
 		// Say so. Landing back on a list where nothing acknowledges the round trip
 		// reads as "did that work?" — the one question the whole trip answered.
 		SessionControl::get_instance()->save_message(new DisplayMessage(
@@ -129,6 +154,34 @@ class InboundImapOAuthConsumer implements OAuth2Consumer {
 			'Connected', '~/plugins/mailbox/admin/~',
 			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
 
+		return self::ACCOUNTS_URL;
+	}
+
+	/**
+	 * The consent was denied or the provider returned an error. Land on the
+	 * Accounts tab with the error translated into what to do next, so no
+	 * outcome of the consent flow strands the operator without a way back to
+	 * the feed. Google's own 403 page comes first and cannot be avoided; this
+	 * is the page after it.
+	 */
+	public function onConsentDenied(string $error, string $provider, array $payload): ?string {
+		$error = strtolower(trim($error)) ?: 'cancelled';
+		if ($error === 'access_denied' && $provider === 'google') {
+			$text = 'Google refused the sign-in (access_denied). The two usual causes: the Google account '
+				. 'is not listed as a test user on the OAuth app, or the app is in Testing mode and its '
+				. 'consent has expired. In the Google Cloud console, open the OAuth consent screen and '
+				. 'add the account under Test users — or publish the app to production, so authorizations '
+				. 'stop expiring every 7 days. Then press Reconnect again. Nothing was changed.';
+		} elseif ($error === 'cancelled') {
+			$text = 'The sign-in was cancelled before the provider granted access. Nothing was changed; '
+				. 'press Reconnect to try again.';
+		} else {
+			$text = 'The provider returned "' . $error . '" instead of granting access. Nothing was changed. '
+				. 'Press Reconnect to try again, or check the OAuth app settings at the provider.';
+		}
+		SessionControl::get_instance()->save_message(new DisplayMessage(
+			htmlspecialchars($text), 'Not connected', '~/plugins/mailbox/admin/~',
+			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
 		return self::ACCOUNTS_URL;
 	}
 

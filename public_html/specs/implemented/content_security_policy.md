@@ -1,6 +1,6 @@
 ---
 title: Content-Security-Policy (CSP) Header
-status: ready to build (Phase 1)
+status: Phase 1 built 2026-09-02 — settings, header, policy builder, safe test (tests/security/csp_header_test.php). The rollout step (enable report-only, use the site, enforce) is operator work and has not been run on any site
 priority: medium
 ---
 

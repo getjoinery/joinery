@@ -2354,7 +2354,7 @@
     {
       "name": "api_agent_rate_limit_requests",
       "default": "6000",
-      "helptext": "Max agent-channel requests per window per IP (own bucket, not the general API limit). A node agent polls for work on a seconds cadence, so this is sized for machine traffic.",
+      "helptext": "Max agent-channel requests per window per IP (own bucket, not the general API limit). Counts every request on the channel except a successful claim — the steady-state poll — so a healthy fleet uses almost none of it and a flood of refused or malformed requests fills it.",
       "group": "api_rate_limits",
       "label": "Max agent channel requests per window",
       "type": "number",
@@ -2632,6 +2632,22 @@
       "label": "Send Referrer-Policy",
       "type": "checkbox",
       "helptext": "Limits what URL detail is passed to sites a visitor clicks through to (strict-origin-when-cross-origin)."
+    },
+    {
+      "name": "enable_csp",
+      "default": "0",
+      "group": "protocol",
+      "label": "Send Content-Security-Policy",
+      "type": "checkbox",
+      "helptext": "Tells browsers which hosts may supply scripts, styles and frames on this site, so an injected script or a leak to an unlisted host is blocked by the browser. Off by default. Turn it on with report-only left on first, watch the browser console for violations while using the site, then turn report-only off."
+    },
+    {
+      "name": "csp_report_only",
+      "default": "1",
+      "group": "protocol",
+      "label": "Content-Security-Policy is report-only",
+      "type": "checkbox",
+      "helptext": "While on, the policy is sent as Content-Security-Policy-Report-Only: violations show in the browser console and nothing is blocked. Turn off to enforce. Has no effect until Send Content-Security-Policy is on."
     },
     {
       "name": "connected_account_id",

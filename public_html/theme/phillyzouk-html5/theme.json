@@ -2,6 +2,7 @@
     "name": "phillyzouk-html5",
     "display_name": "Phillyzouk HTML5",
     "version": "1.0.6",
+    "status": "stable",
     "audience": [
         "phillyzouk.org"
     ],

@@ -364,6 +364,47 @@
 		}
 
 		// =====================================================
+		// Guard: the tree must pass its own tests
+		// =====================================================
+		// The archive is built from whatever is on this disk at this moment,
+		// half-finished edits included, and until now nothing between "publish"
+		// and a node's post-deploy smoke test read a line of it. So the tree is
+		// asked to pass its tests here, before anything is written:
+		//
+		//   - `deploy` everywhere — every deployable file compiles, the core
+		//     classes load, the database answers, the manifests parse, the site
+		//     answers over HTTP. Seconds, all reads, runs on any machine; it is
+		//     the same tier a node runs after the swap.
+		//   - `safe` where this site authored the code (mayMintReleaseVersion):
+		//     the development gate, a couple of minutes. A relay republishes
+		//     what it received and its tests would assert things about a
+		//     checkout it is not (docs/deploy_and_upgrade.md § The deploy tier).
+		//
+		// A failure refuses the release. There is no flag to skip this: a
+		// release that cannot pass its own tests is exactly the one the gate is
+		// for, and the fix is the failing test or the failing code, not the gate.
+		$gate_tiers = array('deploy');
+		if (DeploymentHelper::mayMintReleaseVersion()) {
+			$gate_tiers[] = 'safe';
+		}
+		$runner = $full_site_dir . '/public_html/tests/run.php';
+		foreach ($gate_tiers as $gate_tier) {
+			publish_output("\nRunning the {$gate_tier} test tier before anything is written...");
+			$gate = PublishTestGate::run($runner, $gate_tier, 'publish_output');
+			if (!$gate['started']) {
+				publish_output("Refusing to publish {$version} — the test runner at {$runner} could not be started, so the release cannot be tested before it ships.");
+				publish_output("Nothing has been written.");
+				exit(1);
+			}
+			if (!$gate['ok']) {
+				publish_output("\nRefusing to publish {$version} — the {$gate_tier} test tier failed (exit {$gate['exit_code']}).");
+				publish_output("Fix the failing test or the code it caught and publish again. Nothing has been written.");
+				exit(1);
+			}
+			publish_output("The {$gate_tier} tier passed.");
+		}
+
+		// =====================================================
 		// Bundle the management agent artifact (release channel)
 		// =====================================================
 		// Runs here — before the VERSION file, the core archive, the release

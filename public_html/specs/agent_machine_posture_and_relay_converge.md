@@ -647,11 +647,12 @@ eliminate a row or shrink a cell, never shuffle trust between rows.
   proof — install a siteless agent on the scratch box, enroll it, watch it fetch
   and verify a bundle — is an owner-gated step and is owed before R4 depends on
   the mechanism.
-- **The general agent-channel rate bucket is vacuous.** `api_agent` is checked
-  in `apiv1.php` but nothing writes an `api_agent` row, so the counter is always
-  zero and the limit never fires. R2's artifact bucket writes its own rows and
-  is therefore real; the general one is a pre-existing gap, noticed here and not
-  fixed here.
+- ~~**The general agent-channel rate bucket is vacuous.**~~ FIXED 2026-09-01:
+  `AgentChannelEndpoint::dispatchPreAuth()` writes one `api_agent` row per
+  request at shutdown (outcome included) for everything except a successful
+  claim, the steady-state poll — ~54k/day on dev against ~900 of everything
+  else, and `check_rate_limit()` counts rows with a query. `meterOutcome()` is
+  the rule; `agent_channel_metering_test.php` pins it.
 - **`update_database` on the live plane** for the two new `mgn_` columns. Run
   on dev 2026-08-28 (it added exactly those two); the management node gets them
   at its own upgrade, and until it does, a node's reported vocabulary has

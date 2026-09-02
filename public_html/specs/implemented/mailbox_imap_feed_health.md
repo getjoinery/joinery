@@ -1,5 +1,7 @@
 # Mailbox: IMAP Feed Health — Announce Failures, Stop Failing Silently
 
+**Status: BUILT 2026-09-02.** §1 (iia_health_state / iia_consecutive_failures / iia_broken_since, `feedHealthTransition`, `observeFetchOutcome` hooked in `ImapFetch::run`), §2 (signal pair in plugin.json), §4 (`InboundEmailHealth::checkImapFeeds`, provisioning key `imap_feeds_fetching`), §5 (`OAuth2ConsumerHandlesDenial`, translated flash), §6 (reconnect verifies via `testConnection()` before Connected). §3 already existed before this build — the reader's Setup banner reads `iia_needs_reauth` through the Setup verdict — and is unchanged. Tests: `plugins/mailbox/tests/imap_feed_health_test.php` (43 checks; spec tests 1–7 and 9; 8 is the pre-existing banner). The live gate below has NOT been run.
+
 ## Problem
 
 When an IMAP feed's OAuth token dies (observed live on dev: Google testing-mode

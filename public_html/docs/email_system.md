@@ -774,7 +774,9 @@ second send path. `XOAuth2TokenProvider` (`includes/XOAuth2TokenProvider.php`) i
 PHPMailer's `OAuthTokenProvider`, sourcing a live access token from OAuth2 Core
 (`OAuth2Client::ensureFresh()`) and persisting a refreshed token back onto the account — the same
 shared grant inbound IMAP polling uses. A refresh failure flags `iia_needs_reauth`, so one
-**Reconnect** fixes both inbound and outbound.
+**Reconnect** fixes both inbound and outbound — and the feed's health announcement
+(`mailbox.imap_feed_broken`, raised once by the poller) says that sending is affected too, so one
+broken token is one notification covering both directions.
 
 - **Google** — the `https://mail.google.com/` IMAP scope already authorizes SMTP send; no re-consent.
 - **Microsoft** — needs `https://outlook.office365.com/SMTP.Send` alongside the IMAP scope; the

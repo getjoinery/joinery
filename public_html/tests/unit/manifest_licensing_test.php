@@ -28,6 +28,7 @@
  *
  * Run: php tests/unit/manifest_licensing_test.php
  *
+ * @version 1.2.0 - themes must declare a maturity status too
  * @version 1.1.0
  */
 
@@ -163,6 +164,30 @@ foreach ($manifests as $name => $manifest) {
 }
 check($unlabeled === array(), 'every plugin declares a maturity status',
 	'unlabeled: ' . implode(', ', $unlabeled));
+
+// Themes say it too. The admin Themes page reads an absent status as stable
+// (adm/admin_themes.php), the same silent default plugins were cured of.
+$theme_dir = PathHelper::getIncludePath('theme');
+$theme_manifests = array();
+foreach (glob($theme_dir . '/*/theme.json') as $json_file) {
+	$tname = basename(dirname($json_file));
+	$tdata = json_decode(file_get_contents($json_file), true);
+	check(is_array($tdata), "$tname: theme.json parses", json_last_error_msg());
+	if (is_array($tdata)) {
+		$theme_manifests[$tname] = $tdata;
+	}
+}
+$theme_unlabeled = array();
+foreach ($theme_manifests as $tname => $tmanifest) {
+	if (!array_key_exists('status', $tmanifest)) {
+		$theme_unlabeled[] = $tname;
+	} else {
+		check(in_array($tmanifest['status'], $STATUS_ENUM, true),
+			"$tname: theme status value is in the enum", (string)$tmanifest['status']);
+	}
+}
+check($theme_unlabeled === array(), 'every theme declares a maturity status',
+	'unlabeled: ' . implode(', ', $theme_unlabeled));
 
 // ---------------------------------------------------------------------------
 section('Unknown status is a manifest validation error');

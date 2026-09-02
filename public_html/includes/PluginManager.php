@@ -1339,6 +1339,40 @@ class PluginManager extends AbstractExtensionManager {
         }
     }
 
+    /**
+     * Create missing tables and add missing columns for every active plugin's
+     * data classes — the additive half of what sync() does to plugin schema,
+     * and nothing else (no constraint, index, foreign-key or migration work).
+     *
+     * update_database runs this BEFORE core migrations. Plugin schema otherwise
+     * lands only in sync(), which runs after them, so a migration that read or
+     * wrote a new plugin column failed on its first run with "column does not
+     * exist" and passed on the second — an ordering fault that looked like a
+     * flaky migration. sync() repeats the same pass afterwards; the repeat is
+     * a no-op because everything it would add is already there.
+     *
+     * @return array ['messages' => string[], 'errors' => string[]]
+     */
+    public function syncTables() {
+        require_once(PathHelper::getIncludePath('includes/DatabaseUpdater.php'));
+        require_once(PathHelper::getIncludePath('data/plugins_class.php'));
+        $database_updater = new DatabaseUpdater(false, true /* upgrade */, false);
+        $messages = array();
+        $errors = array();
+        $active_plugins = new MultiPlugin(['plg_active' => 1]);
+        foreach ($active_plugins as $plugin) {
+            $plugin_name = $plugin->get('plg_name');
+            $table_result = $database_updater->runPluginTablesOnly($plugin_name);
+            foreach (($table_result['messages'] ?? []) as $m) {
+                $messages[] = $m;
+            }
+            foreach (($table_result['errors'] ?? []) as $e) {
+                $errors[] = "$plugin_name: $e";
+            }
+        }
+        return array('messages' => $messages, 'errors' => $errors);
+    }
+
     public function sync(array $options = array()) {
         $result = parent::sync($options);
 

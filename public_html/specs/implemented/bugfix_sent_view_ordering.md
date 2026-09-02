@@ -1,5 +1,7 @@
 # Sent is ordered by time, not by unread
 
+**Status: implemented** — verified against the code 2026-09-02: `MailboxService` sections the list only when the view is neither Sent nor Drafts.
+
 ## The failure
 
 The owner's Sent folder for `jeremy.tunnell@gmail.com` showed **August 6** as its

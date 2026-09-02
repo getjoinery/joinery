@@ -2,6 +2,10 @@
     "name": "devonnearhill-html5",
     "display_name": "Devon Near Hill HTML5",
     "version": "1.0.4",
+    "status": "stable",
+    "audience": [
+        "devonnearhill.com"
+    ],
     "requires_plugins": [
         "event_manager"
     ],

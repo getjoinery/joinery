@@ -35,6 +35,8 @@
  *
  * Run: php tests/run.php db --filter=self_addressed_send
  *
+ * @version 1.1 - harness_finish() runs after the body, not from a finally: an exit() reached while
+ *                an exception unwinds would report PASS on however many checks had run
  * @version 1.0
  */
 
@@ -128,168 +130,165 @@ function sas_auth(): array {
 	return array('dkim' => 'pass', 'spf' => 'pass', 'dmarc' => 'pass', 'source' => 'milter');
 }
 
-try {
 
-	$router  = new InboundEmailRouter();
-	$domain  = sas_domain($suffix);
-	$alias   = sas_alias($domain, 'me');
-	$address = strtolower($alias->get_full_address());
+$router  = new InboundEmailRouter();
+$domain  = sas_domain($suffix);
+$alias   = sas_alias($domain, 'me');
+$address = strtolower($alias->get_full_address());
 
-	// The owner holds a vault. On a Standard mailbox that must change nothing —
-	// it is exactly the condition that used to seal the Sent copy alone.
-	$owner = make_user('SelfSend' . $suffix);
-	$keys  = sodium_crypto_box_keypair();
-	$vault = new UserEncryptionVault(NULL);
-	$vault->set('uev_usr_user_id', intval($owner->key));
-	$vault->set('uev_public_key', SealedBox::b64url(sodium_crypto_box_publickey($keys)));
-	$vault->set('uev_salt', SealedBox::b64url(random_bytes(16)));
-	$vault->save();
-	$vault->load();
-	harness_register_row('uev_user_encryption_vaults', 'uev_user_encryption_vault_id', intval($vault->key));
+// The owner holds a vault. On a Standard mailbox that must change nothing —
+// it is exactly the condition that used to seal the Sent copy alone.
+$owner = make_user('SelfSend' . $suffix);
+$keys  = sodium_crypto_box_keypair();
+$vault = new UserEncryptionVault(NULL);
+$vault->set('uev_usr_user_id', intval($owner->key));
+$vault->set('uev_public_key', SealedBox::b64url(sodium_crypto_box_publickey($keys)));
+$vault->set('uev_salt', SealedBox::b64url(random_bytes(16)));
+$vault->save();
+$vault->load();
+harness_register_row('uev_user_encryption_vaults', 'uev_user_encryption_vault_id', intval($vault->key));
 
-	$grant = new InboundEmailMailboxGrant(NULL);
-	$grant->set('ieg_iea_inbound_email_alias_id', intval($alias->key));
-	$grant->set('ieg_usr_user_id', intval($owner->key));
-	$grant->save();
-	$grant->load();
-	harness_register_row('ieg_inbound_email_mailbox_grants',
-		'ieg_inbound_email_mailbox_grant_id', intval($grant->key));
+$grant = new InboundEmailMailboxGrant(NULL);
+$grant->set('ieg_iea_inbound_email_alias_id', intval($alias->key));
+$grant->set('ieg_usr_user_id', intval($owner->key));
+$grant->save();
+$grant->load();
+harness_register_row('ieg_inbound_email_mailbox_grants',
+	'ieg_inbound_email_mailbox_grant_id', intval($grant->key));
 
-	// -----------------------------------------------------------------------
-	section('the delivery reconciles onto the composer row');
+// -----------------------------------------------------------------------
+section('the delivery reconciles onto the composer row');
 
-	$mid = '<sas-self-' . $suffix . '@sas.example>';
-	$composer_id = sas_composer_row($alias, $mid);
-	$before = sas_row_count($alias);
+$mid = '<sas-self-' . $suffix . '@sas.example>';
+$composer_id = sas_composer_row($alias, $mid);
+$before = sas_row_count($alias);
 
-	$raw = sas_raw($address, $address, $mid);
-	$result = $router->storeMessage($raw, $router->parseEmail($raw), $alias, $domain,
-		$address, sas_auth(), array('signal' => 'none', 'score' => null));
+$raw = sas_raw($address, $address, $mid);
+$result = $router->storeMessage($raw, $router->parseEmail($raw), $alias, $domain,
+	$address, sas_auth(), array('signal' => 'none', 'score' => null));
 
-	check(!empty($result['dedup']) && $result['message'] === null,
-		'the delivered copy of a self-send reports as a dedup, storing nothing');
-	check(sas_row_count($alias) === $before,
-		'no second row — the conversation cannot show the message twice',
-		'rows before ' . $before . ', after ' . sas_row_count($alias));
-	check((bool)sas_col($composer_id, 'iem_self_delivered'),
-		'the composer row is marked self-delivered — what puts it in the Inbox');
-	check((string)sas_col($composer_id, 'iem_direction') === 'outbound',
-		'and stays outbound: it is still the message the member sent');
-	check((string)sas_col($composer_id, 'iem_dkim_result') === 'pass'
-		&& (string)sas_col($composer_id, 'iem_auth_source') === 'milter',
-		'it adopts the delivery verdicts, which only the delivery could know');
-	check((bool)sas_col($composer_id, 'iem_is_read'),
-		'and is not turned unread — the member wrote it');
+check(!empty($result['dedup']) && $result['message'] === null,
+	'the delivered copy of a self-send reports as a dedup, storing nothing');
+check(sas_row_count($alias) === $before,
+	'no second row — the conversation cannot show the message twice',
+	'rows before ' . $before . ', after ' . sas_row_count($alias));
+check((bool)sas_col($composer_id, 'iem_self_delivered'),
+	'the composer row is marked self-delivered — what puts it in the Inbox');
+check((string)sas_col($composer_id, 'iem_direction') === 'outbound',
+	'and stays outbound: it is still the message the member sent');
+check((string)sas_col($composer_id, 'iem_dkim_result') === 'pass'
+	&& (string)sas_col($composer_id, 'iem_auth_source') === 'milter',
+	'it adopts the delivery verdicts, which only the delivery could know');
+check((bool)sas_col($composer_id, 'iem_is_read'),
+	'and is not turned unread — the member wrote it');
 
-	// Idempotent: a retried delivery (Postfix redelivers on any transient error)
-	// must not fork a row on the second pass either.
-	$again = $router->storeMessage($raw, $router->parseEmail($raw), $alias, $domain,
-		$address, sas_auth(), array('signal' => 'none', 'score' => null));
-	check(!empty($again['dedup']) && sas_row_count($alias) === $before,
-		'a redelivery reconciles again rather than forking a row');
+// Idempotent: a retried delivery (Postfix redelivers on any transient error)
+// must not fork a row on the second pass either.
+$again = $router->storeMessage($raw, $router->parseEmail($raw), $alias, $domain,
+	$address, sas_auth(), array('signal' => 'none', 'score' => null));
+check(!empty($again['dedup']) && sas_row_count($alias) === $before,
+	'a redelivery reconciles again rather than forking a row');
 
-	// Direct is a store path too, and discovery can resolve a domain this very
-	// deployment hosts — so the same message can leave over the channel and
-	// arrive back here. A path that opted out would duplicate on one transport
-	// and not the other.
-	$direct_mid = '<sas-direct-' . $suffix . '@sas.example>';
-	$direct_composer = sas_composer_row($alias, $direct_mid);
-	$direct_before = sas_row_count($alias);
-	$dres = $router->storeDirectMessage(
-		array('sender' => $address, 'subject' => 'A note to myself', 'message_id' => $direct_mid),
-		array('body_plain' => 'the body', 'body_html' => '', 'attachments' => array()),
-		$alias, $domain, $address, true);
-	check(!empty($dres['dedup']) && sas_row_count($alias) === $direct_before,
-		'a self-send arriving over Direct reconciles too, storing no second row');
-	check((bool)sas_col($direct_composer, 'iem_self_delivered')
-		&& (string)sas_col($direct_composer, 'iem_auth_source') === 'joinery_direct',
-		'onto the composer row, which records what actually vouched for it');
+// Direct is a store path too, and discovery can resolve a domain this very
+// deployment hosts — so the same message can leave over the channel and
+// arrive back here. A path that opted out would duplicate on one transport
+// and not the other.
+$direct_mid = '<sas-direct-' . $suffix . '@sas.example>';
+$direct_composer = sas_composer_row($alias, $direct_mid);
+$direct_before = sas_row_count($alias);
+$dres = $router->storeDirectMessage(
+	array('sender' => $address, 'subject' => 'A note to myself', 'message_id' => $direct_mid),
+	array('body_plain' => 'the body', 'body_html' => '', 'attachments' => array()),
+	$alias, $domain, $address, true);
+check(!empty($dres['dedup']) && sas_row_count($alias) === $direct_before,
+	'a self-send arriving over Direct reconciles too, storing no second row');
+check((bool)sas_col($direct_composer, 'iem_self_delivered')
+	&& (string)sas_col($direct_composer, 'iem_auth_source') === 'joinery_direct',
+	'onto the composer row, which records what actually vouched for it');
 
-	// -----------------------------------------------------------------------
-	section('it reaches for nothing else');
+// -----------------------------------------------------------------------
+section('it reaches for nothing else');
 
-	// Ordinary incoming mail is untouched by any of this.
-	$ext_mid = '<sas-ext-' . $suffix . '@elsewhere.example>';
-	$ext_raw = sas_raw('someone@elsewhere.example', $address, $ext_mid);
-	$ext = $router->storeMessage($ext_raw, $router->parseEmail($ext_raw), $alias, $domain,
-		$address, sas_auth(), array('signal' => 'none', 'score' => null));
-	check(empty($ext['dedup']) && !empty($ext['message']),
-		'a message from outside stores its own row, as always');
-	if (!empty($ext['message'])) {
-		harness_register_model('InboundEmailMessage', intval($ext['message']->key));
-		check(!sas_col(intval($ext['message']->key), 'iem_self_delivered'),
-			'and carries no self-delivered flag');
-	}
-
-	// A composed row the member threw away is not a copy to reconcile onto: the
-	// delivery is then the only copy they have, and must land.
-	$trashed_mid = '<sas-trashed-' . $suffix . '@sas.example>';
-	$trashed_id = sas_composer_row($alias, $trashed_mid);
-	$db->prepare('UPDATE iem_inbound_email_messages SET iem_delete_time = now()
-		WHERE iem_inbound_email_message_id = ?')->execute(array($trashed_id));
-	$traw = sas_raw($address, $address, $trashed_mid);
-	$tres = $router->storeMessage($traw, $router->parseEmail($traw), $alias, $domain,
-		$address, sas_auth(), array('signal' => 'none', 'score' => null));
-	check(empty($tres['dedup']) && !empty($tres['message']),
-		'a delivery whose Sent copy was discarded stores on its own');
-	if (!empty($tres['message'])) {
-		harness_register_model('InboundEmailMessage', intval($tres['message']->key));
-	}
-
-	// The lookup is scoped to ONE mailbox. A neighbour's row with the same
-	// Message-ID must never swallow this mailbox's delivery.
-	$neighbour = sas_alias($domain, 'someone-else');
-	$shared_mid = '<sas-shared-' . $suffix . '@sas.example>';
-	sas_composer_row($neighbour, $shared_mid);
-	$nraw = sas_raw($address, $address, $shared_mid);
-	$nres = $router->storeMessage($nraw, $router->parseEmail($nraw), $alias, $domain,
-		$address, sas_auth(), array('signal' => 'none', 'score' => null));
-	check(empty($nres['dedup']) && !empty($nres['message']),
-		'a composed row in another mailbox does not capture this delivery');
-	if (!empty($nres['message'])) {
-		harness_register_model('InboundEmailMessage', intval($nres['message']->key));
-	}
-
-	// -----------------------------------------------------------------------
-	section('the reader shows that one row in both views');
-
-	$service = new MailboxService(MailboxViewer::forUser(intval($owner->key), 0));
-
-	$in_inbox = false;
-	foreach ($service->listThreads(intval($alias->key), array('inbox' => true), 1, 50)['threads'] as $t) {
-		if ($t['thread_key'] === $mid) { $in_inbox = intval($t['msg_count']); }
-	}
-	check($in_inbox === 1,
-		'the Inbox lists the self-send once, as one message',
-		'msg_count: ' . var_export($in_inbox, true));
-
-	$in_sent = false;
-	foreach ($service->listThreads(intval($alias->key), array('sent' => true), 1, 50)['threads'] as $t) {
-		if ($t['thread_key'] === $mid) { $in_sent = intval($t['msg_count']); }
-	}
-	check($in_sent === 1, 'and Sent lists it too — it is in both, like every mail client',
-		'msg_count: ' . var_export($in_sent, true));
-
-	check(count($service->messageIdsInThread(intval($alias->key), $mid)) === 1,
-		'opening the conversation shows one message, not the same one twice');
-
-	// -----------------------------------------------------------------------
-	section('composing asks the mailbox whether to seal');
-
-	$seal = MailboxSender::sealTargetFor($alias);
-	check($seal['sealing'] === false && $seal['vault'] === null,
-		'a Standard mailbox does not seal its Sent copy, though its owner holds a vault');
-
-	// The same resolver says yes the moment the mailbox actually seals, so this
-	// is posture being read — not sealing quietly switched off everywhere.
-	$alias->set('iea_security_level', InboundEmailDomain::LEVEL_PRIVATE);
-	$alias->save();
-	$raised = new InboundEmailAlias(intval($alias->key), TRUE);
-	$seal = MailboxSender::sealTargetFor($raised);
-	check($seal['sealing'] === true && $seal['vault'] !== null,
-		'and a Private mailbox does seal it, to the owner who holds the key');
-	check(intval($seal['owner_id']) === intval($owner->key), 'sealed to that mailbox owner');
-
-} finally {
-	harness_finish();
+// Ordinary incoming mail is untouched by any of this.
+$ext_mid = '<sas-ext-' . $suffix . '@elsewhere.example>';
+$ext_raw = sas_raw('someone@elsewhere.example', $address, $ext_mid);
+$ext = $router->storeMessage($ext_raw, $router->parseEmail($ext_raw), $alias, $domain,
+	$address, sas_auth(), array('signal' => 'none', 'score' => null));
+check(empty($ext['dedup']) && !empty($ext['message']),
+	'a message from outside stores its own row, as always');
+if (!empty($ext['message'])) {
+	harness_register_model('InboundEmailMessage', intval($ext['message']->key));
+	check(!sas_col(intval($ext['message']->key), 'iem_self_delivered'),
+		'and carries no self-delivered flag');
 }
+
+// A composed row the member threw away is not a copy to reconcile onto: the
+// delivery is then the only copy they have, and must land.
+$trashed_mid = '<sas-trashed-' . $suffix . '@sas.example>';
+$trashed_id = sas_composer_row($alias, $trashed_mid);
+$db->prepare('UPDATE iem_inbound_email_messages SET iem_delete_time = now()
+	WHERE iem_inbound_email_message_id = ?')->execute(array($trashed_id));
+$traw = sas_raw($address, $address, $trashed_mid);
+$tres = $router->storeMessage($traw, $router->parseEmail($traw), $alias, $domain,
+	$address, sas_auth(), array('signal' => 'none', 'score' => null));
+check(empty($tres['dedup']) && !empty($tres['message']),
+	'a delivery whose Sent copy was discarded stores on its own');
+if (!empty($tres['message'])) {
+	harness_register_model('InboundEmailMessage', intval($tres['message']->key));
+}
+
+// The lookup is scoped to ONE mailbox. A neighbour's row with the same
+// Message-ID must never swallow this mailbox's delivery.
+$neighbour = sas_alias($domain, 'someone-else');
+$shared_mid = '<sas-shared-' . $suffix . '@sas.example>';
+sas_composer_row($neighbour, $shared_mid);
+$nraw = sas_raw($address, $address, $shared_mid);
+$nres = $router->storeMessage($nraw, $router->parseEmail($nraw), $alias, $domain,
+	$address, sas_auth(), array('signal' => 'none', 'score' => null));
+check(empty($nres['dedup']) && !empty($nres['message']),
+	'a composed row in another mailbox does not capture this delivery');
+if (!empty($nres['message'])) {
+	harness_register_model('InboundEmailMessage', intval($nres['message']->key));
+}
+
+// -----------------------------------------------------------------------
+section('the reader shows that one row in both views');
+
+$service = new MailboxService(MailboxViewer::forUser(intval($owner->key), 0));
+
+$in_inbox = false;
+foreach ($service->listThreads(intval($alias->key), array('inbox' => true), 1, 50)['threads'] as $t) {
+	if ($t['thread_key'] === $mid) { $in_inbox = intval($t['msg_count']); }
+}
+check($in_inbox === 1,
+	'the Inbox lists the self-send once, as one message',
+	'msg_count: ' . var_export($in_inbox, true));
+
+$in_sent = false;
+foreach ($service->listThreads(intval($alias->key), array('sent' => true), 1, 50)['threads'] as $t) {
+	if ($t['thread_key'] === $mid) { $in_sent = intval($t['msg_count']); }
+}
+check($in_sent === 1, 'and Sent lists it too — it is in both, like every mail client',
+	'msg_count: ' . var_export($in_sent, true));
+
+check(count($service->messageIdsInThread(intval($alias->key), $mid)) === 1,
+	'opening the conversation shows one message, not the same one twice');
+
+// -----------------------------------------------------------------------
+section('composing asks the mailbox whether to seal');
+
+$seal = MailboxSender::sealTargetFor($alias);
+check($seal['sealing'] === false && $seal['vault'] === null,
+	'a Standard mailbox does not seal its Sent copy, though its owner holds a vault');
+
+// The same resolver says yes the moment the mailbox actually seals, so this
+// is posture being read — not sealing quietly switched off everywhere.
+$alias->set('iea_security_level', InboundEmailDomain::LEVEL_PRIVATE);
+$alias->save();
+$raised = new InboundEmailAlias(intval($alias->key), TRUE);
+$seal = MailboxSender::sealTargetFor($raised);
+check($seal['sealing'] === true && $seal['vault'] !== null,
+	'and a Private mailbox does seal it, to the owner who holds the key');
+check(intval($seal['owner_id']) === intval($owner->key), 'sealed to that mailbox owner');
+
+harness_finish();

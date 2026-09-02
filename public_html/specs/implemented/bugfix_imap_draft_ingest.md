@@ -1,5 +1,7 @@
 # A draft on the source is not mail
 
+**Status: implemented** — verified against the code 2026-09-02: `ImapIngestor::isSourceDraft()` and the `source_draft` dimension are live; `plugins/mailbox/tests/imap_draft_ingest_test.php` covers it.
+
 ## The failure
 
 Composing one email in Gmail put **four incoming emails from himself** in the

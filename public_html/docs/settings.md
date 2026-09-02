@@ -505,6 +505,23 @@ pages, because changing them has consequences the settings form cannot check.
 `config/Globalvars_site.php`.** The latter is the site installation directory
 identifier and is almost never changed after setup.
 
+## Transport security headers
+
+Every page sent through `PublicPageBase` (public views and, through `PublicPage`, the admin) carries a set of response headers that tell the browser what it may do with the page. They are emitted once by `PublicPageBase::send_transport_headers()`, and most are switchable in the **protocol** settings group:
+
+| Header | Setting | Default |
+|---|---|---|
+| `Strict-Transport-Security` | `enable_hsts` (only under `protocol_mode = https_redirect`) | off |
+| `X-Content-Type-Options: nosniff` | always sent | — |
+| `X-Permitted-Cross-Domain-Policies: none` | always sent | — |
+| `X-Frame-Options: SAMEORIGIN` | `enable_x_frame_options` | on |
+| `Referrer-Policy: strict-origin-when-cross-origin` | `enable_referrer_policy` | on |
+| `Content-Security-Policy` | `enable_csp`, `csp_report_only` | off, report-only on |
+
+**Content-Security-Policy** names the hosts that may supply scripts, styles, frames and the rest, so an injected script or a leak to an unlisted host is stopped by the browser itself. The policy is `PublicPageBase::csp_policy()`: `'self'` plus the third parties pages actually load — Stripe and PayPal (scripts, checkout frames, the PayPal redirect form), hCaptcha and reCAPTCHA, YouTube embeds, Google Fonts, and the script CDNs themes declare — with `object-src 'none'`, `base-uri 'self'` and `frame-ancestors 'self'`. It keeps `'unsafe-inline'` for scripts and styles: FormWriter output, the views and the plugins rely on inline handlers and style blocks throughout, and removing them is a separate project.
+
+Switching it on: turn on `enable_csp` with `csp_report_only` left on. The header goes out as `Content-Security-Policy-Report-Only`, which blocks nothing and reports every violation to the browser console. Use the site — checkout, uploads, the admin — and add any host that shows up there to `csp_policy()`. Then turn `csp_report_only` off to enforce. A site that has never turned it on sends no CSP header at all. Test: `tests/security/csp_header_test.php`.
+
 ## Troubleshooting
 
 ### A setting does not appear on any page
