@@ -10,16 +10,20 @@
  * the developer runs the tier, the runner stamps the tree it passed on, and the
  * publisher checks the stamp against the tree it is about to archive.
  *
- * The tree identity is the HEAD commit plus every path git reports as changed or
- * untracked, each with a content hash. Editing a tracked file, adding a file,
- * committing, or deleting a file all change the identity; a stamp is evidence
- * for one tree and nothing else. Ignored paths (cache/, logs/, uploads/) are not
- * part of it, so writing the stamp does not invalidate it.
+ * The tree identity is the CONTENT of every file in the working tree, tracked or
+ * untracked, keyed by path — nothing about git state. Editing, adding or deleting
+ * a file changes it; committing, staging or amending does not, because the bytes
+ * a publish would archive are the same bytes either way. Unchanged tracked files
+ * contribute the blob hash git already holds in the index, so identifying a
+ * 4,000-file tree costs a few file reads, not a few thousand. Ignored paths
+ * (cache/, logs/, uploads/) are not part of it, so writing the stamp does not
+ * invalidate it.
  *
  * Stored at {site root}/cache/test_tier_stamp.json, one entry per tier. Only a
  * FULL run of a tier writes or clears its entry - a run narrowed by --filter,
  * --only or --changed proves nothing about the tier as a whole.
  *
+ * @version 1.1 - identity is file content only; a commit of the same bytes keeps the stamp valid
  * @version 1.0
  */
 class TestTierStamp {
@@ -34,8 +38,9 @@ class TestTierStamp {
 	/**
 	 * Identify the working tree of the repository containing $public_html.
 	 *
-	 * @return array|null ['id' => sha256, 'head' => commit, 'files' => [path => hash]]
-	 *                    or null when there is no git or no repository here.
+	 * @return array|null ['id' => sha256, 'head' => commit (informational),
+	 *                     'files' => [path => blob hash]] or null when there is
+	 *                     no git or no repository here.
 	 */
 	public static function treeId($public_html) {
 		$repo = dirname($public_html);
@@ -43,28 +48,35 @@ class TestTierStamp {
 		if ($head === null || !preg_match('/^[0-9a-f]{40,64}$/', $head)) {
 			return null;
 		}
-		$status = self::git($repo, 'status --porcelain=v1 -z --untracked-files=all');
-		if ($status === null) {
-			return null;
-		}
+		// Every tracked file, with the blob hash the index holds for it.
+		$index = self::git($repo, 'ls-files -s -z');
+		if ($index === null) return null;
 		$files = array();
-		$entries = explode("\0", $status);
-		for ($i = 0; $i < count($entries); $i++) {
-			$entry = $entries[$i];
-			if ($entry === '') continue;
-			$code = substr($entry, 0, 2);
-			$path = substr($entry, 3);
-			// A rename or copy carries the original path in the next record.
-			if (strpos($code, 'R') !== false || strpos($code, 'C') !== false) {
-				$i++;
-				if (isset($entries[$i])) {
-					$files[$entries[$i]] = 'deleted';
-				}
-			}
-			$files[$path] = self::hashPath($repo . '/' . $path);
+		foreach (explode("\0", $index) as $entry) {
+			if ($entry === '' || !preg_match('/^\d+ ([0-9a-f]+) \d\t(.+)$/s', $entry, $m)) continue;
+			$files[$m[2]] = $m[1];
+		}
+		$algo = (isset($m[1]) && strlen($m[1]) === 64) ? 'sha256' : 'sha1';
+		// Tracked files whose working copy differs from the index: hash the copy
+		// (or drop a deletion). --name-status -z emits status\0path\0.
+		$dirty = self::git($repo, 'diff-files -z --name-status');
+		if ($dirty === null) return null;
+		$parts = explode("\0", $dirty);
+		for ($i = 0; $i + 1 < count($parts); $i += 2) {
+			$status = $parts[$i]; $path = $parts[$i + 1];
+			if ($path === '') continue;
+			if ($status[0] === 'D') { unset($files[$path]); continue; }
+			$files[$path] = self::blobHash($repo . '/' . $path, $algo);
+		}
+		// Untracked, not ignored: content that is about to ship all the same.
+		$untracked = self::git($repo, 'ls-files -o --exclude-standard -z');
+		if ($untracked === null) return null;
+		foreach (explode("\0", $untracked) as $path) {
+			if ($path === '') continue;
+			$files[$path] = self::blobHash($repo . '/' . $path, $algo);
 		}
 		ksort($files, SORT_STRING);
-		$material = $head . "\n";
+		$material = '';
 		foreach ($files as $path => $hash) {
 			$material .= $path . "\0" . $hash . "\n";
 		}
@@ -132,9 +144,6 @@ class TestTierStamp {
 			return array('ok' => true, 'stamp' => $stamp, 'changed' => array(), 'reason' => '');
 		}
 		$changed = array();
-		if ($tree['head'] !== ($stamp['head'] ?? '')) {
-			$changed[] = 'HEAD moved from ' . substr((string)$stamp['head'], 0, 10) . ' to ' . substr($tree['head'], 0, 10);
-		}
 		$stamped_files = isset($stamp['files']) && is_array($stamp['files']) ? $stamp['files'] : array();
 		foreach (array_unique(array_merge(array_keys($stamped_files), array_keys($tree['files']))) as $path) {
 			if (($stamped_files[$path] ?? null) !== ($tree['files'][$path] ?? null)) {
@@ -161,11 +170,20 @@ class TestTierStamp {
 		return true;
 	}
 
-	private static function hashPath($abs) {
-		if (is_dir($abs)) return 'dir';
-		if (!file_exists($abs)) return 'deleted';
-		$h = @hash_file('sha256', $abs);
-		return $h === false ? 'unreadable' : $h;
+	/**
+	 * Git's own object hash for a file, so a working copy that matches the index
+	 * gets the same value the index carries: "blob <size>\0<content>".
+	 */
+	private static function blobHash($abs, $algo) {
+		if (is_dir($abs) || !is_file($abs)) return 'missing';
+		$size = filesize($abs);
+		$ctx = hash_init($algo);
+		hash_update($ctx, 'blob ' . $size . "\0");
+		$fh = @fopen($abs, 'rb');
+		if ($fh === false) return 'unreadable';
+		hash_update_stream($ctx, $fh);
+		fclose($fh);
+		return hash_final($ctx);
 	}
 
 	/**

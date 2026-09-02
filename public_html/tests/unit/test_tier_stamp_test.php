@@ -17,6 +17,7 @@
  *
  * Run: php tests/run.php safe --filter=test_tier_stamp
  *
+ * @version 1.1 - identity is content only: a commit of the same bytes keeps the stamp
  * @version 1.0
  */
 
@@ -44,8 +45,9 @@ try {
 	check($rc === 0, 'first commit', $o);
 
 	$tree = TestTierStamp::treeId($ph);
-	check(is_array($tree) && preg_match('/^[0-9a-f]{64}$/', $tree['id']) && $tree['files'] === array(),
-		'a clean tree is HEAD alone, no changed paths', json_encode($tree));
+	check(is_array($tree) && preg_match('/^[0-9a-f]{64}$/', $tree['id'])
+		&& array_keys($tree['files']) === array('.gitignore', 'public_html/a.php') && strlen($tree['files']['public_html/a.php']) === 40,
+		'a tree is every file with its git blob hash', json_encode($tree));
 
 	section('Record and verify');
 	check(TestTierStamp::verify($ph, 'safe')['ok'] === false, 'no stamp yet → not ok');
@@ -78,16 +80,25 @@ try {
 	@mkdir($site . '/logs'); file_put_contents($site . '/logs/x.log', 'x');
 	check(TestTierStamp::verify($ph, 'safe')['ok'] === true, 'ignored paths (cache/, logs/) are not part of the tree');
 
-	file_put_contents($ph . '/b.php', "<?php // b\n");
+	section('Git state is not content: committing the same bytes keeps the stamp');
+	file_put_contents($ph . '/a.php', "<?php // a edited\n");
+	TestTierStamp::record($ph, array('safe'), TestTierStamp::treeId($ph), array('tests' => 1));
 	$git('add -A'); $git('commit -q -m two');
+	check(TestTierStamp::verify($ph, 'safe')['ok'] === true, 'a commit of the stamped content still verifies');
+	$git('commit -q --amend --allow-empty -m two-amended');
+	check(TestTierStamp::verify($ph, 'safe')['ok'] === true, 'an amend still verifies');
+	$git('add -A'); check(TestTierStamp::verify($ph, 'safe')['ok'] === true, 'staging changes nothing');
+
+	file_put_contents($ph . '/b.php', "<?php // b\n");
+	$git('add -A'); $git('commit -q -m three');
 	$v = TestTierStamp::verify($ph, 'safe');
-	check($v['ok'] === false && count(array_filter($v['changed'], function ($c) { return strpos($c, 'HEAD moved') === 0; })) === 1,
-		'a new commit refuses and says HEAD moved', json_encode($v['changed']));
+	check($v['ok'] === false && in_array('public_html/b.php', $v['changed'], true),
+		'a commit that ADDS content refuses and names the file', json_encode($v['changed']));
 
 	section('A stamp taken on a dirty tree is for that dirty tree');
 	file_put_contents($ph . '/b.php', "<?php // b dirty\n");
 	$dirty = TestTierStamp::treeId($ph);
-	check(isset($dirty['files']['public_html/b.php']) && strlen($dirty['files']['public_html/b.php']) === 64, 'the dirty path is hashed into the identity');
+	check(isset($dirty['files']['public_html/b.php']) && strlen($dirty['files']['public_html/b.php']) === 40, 'the dirty path is hashed into the identity');
 	TestTierStamp::record($ph, array('safe'), $dirty, array('tests' => 1));
 	check(TestTierStamp::verify($ph, 'safe')['ok'] === true, 'the same dirty content verifies');
 	file_put_contents($ph . '/b.php', "<?php // b dirtier\n");
