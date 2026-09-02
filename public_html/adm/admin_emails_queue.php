@@ -1,13 +1,7 @@
 <?php
 	
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
-	require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
-	
 	require_once(PathHelper::getIncludePath('data/emails_class.php'));
-	require_once(PathHelper::getIncludePath('includes/RecipientGroupProviderRegistry.php'));
-	require_once(PathHelper::getIncludePath('data/email_recipients_class.php'));
-	require_once(PathHelper::getIncludePath('data/groups_class.php'));
-	require_once(PathHelper::getIncludePath('data/group_members_class.php'));
 	
 	$session = SessionControl::get_instance();
 	//$session->set_return();
@@ -35,84 +29,12 @@
 	
 	$pageoptions['title'] = "New Email";
 	$page->begin_box($pageoptions);
-	
-	$settings = Globalvars::get_instance();
-	if(!$settings->get_setting('mailgun_domain') || !$settings->get_setting('mailgun_api_key')){
-		echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Mailgun credentials are not in the db or settings.</div>';
-		exit;
-	}	
-	
-	if($email->get('eml_mlt_mailing_list_id')){
-		//MAILING LIST
-		$mailing_list = new MailingList($email->get('eml_mlt_mailing_list_id'), TRUE);
-		$final_recipients = $mailing_list->get_subscribed_users('array');
-	}
-	else{
-		//CUSTOM EMAIL
-		
-		//GET THE RECIPIENTS
-		$recipient_groups = $email->get_recipient_groups('add');
 
-		//ADD THE *ADD* LISTS TOGETHER
-		$queued_recipients = array();
-		foreach($recipient_groups as $recipient_group){
-			$provider = RecipientGroupProviderRegistry::get($recipient_group->get('erg_provider'));
-			if($provider){
-				foreach($provider->resolve((int)$recipient_group->get('erg_reference_id')) as $uid){
-					$queued_recipients[] = $uid;
-				}
-			}
-		}
+	// The audience expands onto the email and the scheduled sender takes it
+	// from here. A missing mail service is the sender's to report.
+	$total_num_queued = $email->queue();
 
-		//NOW REMOVE THE RECIPIENTS WHO NEED TO BE REMOVED
-		$recipient_groups = $email->get_recipient_groups('remove');
-		
-		$removal_list = array();
-		foreach($recipient_groups as $recipient_group){
-			$provider = RecipientGroupProviderRegistry::get($recipient_group->get('erg_provider'));
-			if($provider){
-				foreach($provider->resolve((int)$recipient_group->get('erg_reference_id')) as $uid){
-					$removal_list[] = $uid;
-				}
-			}
-		}
-		
-		//REMOVE DUPLICATES
-		$queued_recipients = array_unique($queued_recipients);
-		$removal_list = array_unique($removal_list);
-		
-		//SUBTRACT THE REMOVAL LIST AND REMOVE DUPLICATES
-		$final_recipients = array_diff($queued_recipients, $removal_list);
-	}
-
-	//LOAD THE RECIPIENTS INTO THE QUEUE
-	$total_num_queued = 0;
-	foreach($final_recipients as $final_recipient){
-		$user= new User($final_recipient, TRUE);
-				
-		if (!EmailRecipient::CheckIfExists($email->key, $user->get('usr_email'))){
-			$recipient = new EmailRecipient(NULL);
-			$recipient->set('erc_email', $user->get('usr_email'));
-			$recipient->set('erc_usr_user_id', $user->key);
-			$recipient->set('erc_name', $user->display_name());
-			$recipient->set('erc_eml_email_id', $email->key);
-			$recipient->prepare();
-			$recipient->save();
-			echo 'Recipient added: '.$user->display_name() .'<br>';	
-			$total_num_queued++;
-		}
-		else{
-			echo 'Recipient already added, skipping: '.$user->display_name() .'<br>';
-			$total_num_queued++;
-		}			
-
-	}
-	
-	//SET EMAIL STATUS TO QUEUED
-	if(!empty($final_recipients)){
-		$email->set('eml_scheduled_time', 'now()');
-		$email->set('eml_status', Email::EMAIL_QUEUED);
-		$email->save();
+	if($total_num_queued > 0){
 		echo '<p>Your email was successfully queued to '.$total_num_queued.' recipients.  <a href="/admin/admin_emails">Return to the email page</a>';
 	}
 	else{

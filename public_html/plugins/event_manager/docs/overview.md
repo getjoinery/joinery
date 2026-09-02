@@ -6,7 +6,7 @@ The Event Manager plugin (`/plugins/event_manager/`) is the platform's event sub
 
 **Owns:** `evt_events`, `evs_event_sessions` (+ session files), `evr_event_registrants`, `ewl_event_waiting_lists`, `evt_event_types`, `loc_locations`.
 
-**Core URLs (plugin-delegated in serve.php):** `/events`, `/event/{slug}`, `/event/{slug}/{date}`, `/location/{slug}`, `/event_waiting_list`, the profile event pages, and the ICS handler routes (`/event/{slug}.ics`, `/event/{slug}/{date}.ics`, `/events/calendar.ics` — served by handler files in `includes/`, no view resolution). Admin pages live at `/plugins/event_manager/admin/*`.
+**Core URLs (plugin-delegated in serve.php):** `/events`, `/event/{slug}`, `/event/{slug}/{date}`, `/location/{slug}`, `/event_waiting_list`, the profile event pages, and the ICS handler routes (`/event/{slug}.ics`, `/event/{slug}/{date}.ics`, `/events/calendar.ics` — served by handler files in `includes/`, no view resolution). Admin pages live at `/plugins/event_manager/admin/*`. The event admin page lists the emails sent to the event's registrants and to its waiting list (`MultiEmail` `recipient_group` on the `event` / `event_waiting_list` providers), each linking to its delivery page; "Email registrants" and "Email waiting list" queue a new one through `/admin/admin_users_message`.
 
 ## Key Pieces
 

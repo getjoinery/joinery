@@ -6,10 +6,10 @@
  * or an event's registrants/waiting-list. That targeting is generalized behind
  * providers: a recipient-group row stores a provider key + a reference id, and
  * the provider both resolves the reference to a user-id list and supplies the
- * admin picker options. Core ships the `group` provider; event_manager registers
- * `event` and `event_waiting_list`.
+ * admin picker options. Core ships the `group`, `mailing_list` and `user`
+ * providers; event_manager registers `event` and `event_waiting_list`.
  *
- * @version 1.0.0
+ * @version 1.2.0
  */
 
 interface RecipientGroupProvider {
@@ -30,6 +30,15 @@ class RecipientGroupProviderRegistry {
     /** @var array<string,RecipientGroupProvider> keyed by provider key */
     private static $providers = [];
 
+    /**
+     * Core provider class names not yet instantiated. Instantiation waits for
+     * the first lookup: this file is loaded by the autoloader the moment any
+     * provider file reaches `implements RecipientGroupProvider`, and a class
+     * cannot be constructed from inside its own file before its declaration.
+     * @var string[]
+     */
+    private static $pending_core = [];
+
     /** Register a provider. Idempotent (last-wins by key). */
     public static function register(RecipientGroupProvider $provider): void {
         self::$providers[$provider->key()] = $provider;
@@ -43,29 +52,39 @@ class RecipientGroupProviderRegistry {
         if ($key === null || $key === '') {
             return null;
         }
+        self::materializeCoreDefaults();
         return self::$providers[$key] ?? null;
     }
 
     /** All registered providers, registration order. */
     public static function all(): array {
+        self::materializeCoreDefaults();
         return array_values(self::$providers);
     }
 
-    /** Register core-owned recipient-group providers. */
+    /** Name the core-owned providers; they resolve by class name when first needed. */
     public static function registerCoreDefaults(): void {
-        require_once(PathHelper::getIncludePath('includes/recipient_group_providers/GroupRecipientProvider.php'));
-        self::register(new GroupRecipientProvider());
-        require_once(PathHelper::getIncludePath('includes/recipient_group_providers/MailingListRecipientProvider.php'));
-        self::register(new MailingListRecipientProvider());
+        self::$pending_core = ['GroupRecipientProvider', 'MailingListRecipientProvider', 'UserRecipientProvider'];
         // The event + event_waiting_list providers register from event_manager's
         // serve.php when that plugin is active.
+    }
+
+    /** Instantiate the named core providers. An explicit register() for the same key wins. */
+    private static function materializeCoreDefaults(): void {
+        while (($class = array_shift(self::$pending_core)) !== null) {
+            $provider = new $class();
+            if (!isset(self::$providers[$provider->key()])) {
+                self::$providers[$provider->key()] = $provider;
+            }
+        }
     }
 
     /** Clear the registry (tests only). */
     public static function resetCache(): void {
         self::$providers = [];
+        self::$pending_core = [];
     }
 }
 
-// Register core-owned providers when this file is loaded.
+// Name core-owned providers when this file is loaded.
 RecipientGroupProviderRegistry::registerCoreDefaults();

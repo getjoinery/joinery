@@ -653,33 +653,27 @@
 
 	$page->endtable($spager);
 
-	//MESSAGES
-	$headers = array("Sender", "Message", "Time");
+	//EMAILS TO REGISTRANTS
 	$altlinks = array();
-	if(!$event->get('evt_delete_time')) {
-		if($_SESSION['permission'] >= 8){
-			$altlinks +=  array('Send message' => '/admin/admin_users_message?evt_event_id='.$event->key);
-		}
+	if(!$event->get('evt_delete_time') && $_SESSION['permission'] >= 8){
+		$altlinks += array('Email registrants' => '/admin/admin_users_message?evt_event_id='.$event->key);
 	}
-	$box_vars =	array(
+	$page->email_audience_table($registrant_emails, array(
 		'altlinks' => $altlinks,
-		'title' => "Messages to Registrants",
-		'card' => true
-	);
+		'title' => 'Emails to Registrants',
+		'card' => true,
+	), $mpager);
 
-	$page->tableheader($headers, $box_vars, $mpager);
-
-	foreach($messages as $message){
-		$user = new User($message->get('msg_usr_user_id_sender'), TRUE);
-
-		$rowvalues=array();
-		array_push($rowvalues, $user->display_name());
-		array_push($rowvalues, '<a href="/admin/admin_message?msg_message_id='.$message->key.'">'.$message->display_title(). '...</a>');
-		array_push($rowvalues, $message->get_local('msg_sent_time'));
-        $page->disprow($rowvalues);
+	//EMAILS TO THE WAITING LIST
+	$altlinks = array();
+	if(!$event->get('evt_delete_time') && $_SESSION['permission'] >= 8){
+		$altlinks += array('Email waiting list' => '/admin/admin_users_message?waiting_list=1&evt_event_id='.$event->key);
 	}
-
-	$page->endtable($mpager);
+	$page->email_audience_table($waiting_list_emails, array(
+		'altlinks' => $altlinks,
+		'title' => 'Emails to Waiting List',
+		'card' => true,
+	), $lpager);
 
 	?>
 	<?php if($photo_editable): ?>

@@ -89,3 +89,6 @@ public_html/tests/fixtures/email_security_corpus/
 /content_packs/
 RELEASE_MANIFEST
 RELEASE_MANIFEST.sig
+
+# Migration 177 writes the legacy message export beside public_html; it is data, not source
+legacy_message_export_*.json

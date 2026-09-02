@@ -1338,3 +1338,29 @@
 	$migration['migration_file'] = 'enable_agent_where_it_was_already_installed.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// msg_messages once held a copy of every group send per recipient, beside
+	// the conversation messages it holds now. No member surface ever rendered
+	// those copies; group sends are email campaigns (the Email row is the
+	// record). The copies are written to a file outside the web root, then
+	// deleted. The three columns that carried them are dropped one release
+	// after this has run everywhere. Nothing to select = nothing to do.
+	$migration = array();
+	$migration['database_version'] = '177';
+	$migration['test'] = "SELECT CASE WHEN EXISTS(SELECT 1 FROM msg_messages WHERE msg_cnv_conversation_id IS NULL) THEN 0 ELSE 1 END AS count";
+	$migration['migration_file'] = 'export_legacy_message_rows.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
+	// One membership row per (conversation, member) is declared on the model
+	// (cnp_cnv_conversation_id unique_with cnp_usr_user_id), which update_database
+	// materializes as a partial unique index it names itself. A hand-made index
+	// on the same pair predates the declaration; its name is not one the
+	// updater recognises as its own, so it is retired here. Inverted test: 0
+	// while the index exists (run), 1 once it is gone (skip).
+	$migration = array();
+	$migration['database_version'] = '178';
+	$migration['test'] = "SELECT CASE WHEN EXISTS(SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'idx_cnp_conversation_user') THEN 0 ELSE 1 END AS count";
+	$migration['migration_sql'] = "DROP INDEX IF EXISTS idx_cnp_conversation_user";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
