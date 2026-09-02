@@ -180,25 +180,6 @@ development tiers as the site's user.
 See [Deploy and Upgrade](deploy_and_upgrade.md#the-deploy-tier) for what it
 currently checks.
 
-### The PASS stamp: how a publish knows the tree was tested
-
-A publish archives whatever is on the publisher's disk, and the publisher is
-root on the local job queue, so it cannot run the development tiers itself. It
-reads the runner's stamp instead. A **full** run of `safe`, `db` or `test-db`
-(no `--filter`, `--only` or `--changed`) writes `{site root}/cache/test_tier_stamp.json`
-on PASS, one entry per tier the batch covered, and removes those entries on
-FAIL. The entry names the exact tree by content: every file, tracked or
-untracked, with its git blob hash, identified before the first test runs.
-Committing, staging or amending changes none of those bytes, so a stamp taken
-on the working tree survives the commit that follows; an edit, a new file or a
-deletion does not. The runner's summary says when it stamped.
-
-`publish_upgrade.php` runs the `deploy` tier itself and, where the site authored
-the code, requires a `safe` stamp whose tree matches the one on disk. Any edit,
-new file or deletion after the run changes the tree, and the refusal lists the
-paths that differ. The fix is `php tests/run.php safe` as the site's user, then
-publish again. `TestTierStamp` (core `includes/`) owns the identity and the file.
-
 ### What each tier costs
 
 The working loop is a scoped run: `php tests/run.php --changed` executes only

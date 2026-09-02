@@ -7383,3 +7383,698 @@ fn a_rename_onto_a_siblings_escaped_name_does_not_evict_the_sibling() {
     assert_converged(&world);
 
 }
+
+// ---- probes around the empty-vault rename rule (2026-09-02) ----
+
+fn vault_stat(world: &World, vid: i64) -> serde_json::Value {
+    world
+        .server
+        .action(
+            "drive_stat",
+            &serde_json::json!({ "entities": [{ "entity_type": "folder", "entity_id": vid }], "urls": false }),
+        )
+        .unwrap()["items"][0]
+        .clone()
+}
+
+/// Renaming an empty vault by case alone, on a disk that folds case.
+#[test]
+fn renaming_an_empty_vault_folder_by_case_only_keeps_it_a_vault() {
+    let vault = SimVault::new(9_240);
+    let mut world = World::of(9_240, &[("holder", jd_sim::Platform::MacOs)]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+
+    let vid = world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some());
+    let holder = world.device("holder");
+    holder.fs.user_rename("Private", "PRIVATE");
+    assert!(world.settle().is_some());
+
+    let item = vault_stat(&world, vid);
+    assert_eq!(item["deleted"], false, "the vault was trashed for a case rename: {item}");
+    assert_eq!(item["name"], "PRIVATE", "the vault did not take the new case: {item}");
+    assert_eq!(item["encrypted"], true);
+    assert_eq!(world.server.tree().keys().collect::<Vec<_>>(), vec!["PRIVATE"]);
+    assert!(holder.store.open_issues().unwrap().is_empty(), "{:?}", holder.store.open_issues().unwrap());
+
+    let body = b"still private";
+    holder.fs.user_write("PRIVATE/note.txt", body);
+    committed.note("PRIVATE/note.txt", body);
+    assert!(world.settle().is_some());
+    let tree = world.server.tree();
+    assert!(tree.keys().any(|p| p.starts_with("PRIVATE/")), "{tree:?}");
+    assert!(!tree.contains_key("PRIVATE/note.txt"), "went up in the clear: {tree:?}");
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// A file saved into the renamed vault before the daemon has seen the rename
+/// is private too: the new folder holds nothing known, so it is still the vault.
+#[test]
+fn a_file_written_into_a_renamed_empty_vault_before_the_pass_goes_up_encrypted() {
+    let vault = SimVault::new(9_241);
+    let mut world = World::new(9_241, &["holder"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+
+    let vid = world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some());
+    let holder = world.device("holder");
+    holder.fs.user_rename("Private", "Secret");
+    let body = b"typed straight after the rename";
+    holder.fs.user_write("Secret/note.txt", body);
+    committed.note("Secret/note.txt", body);
+    assert!(world.settle().is_some());
+
+    let item = vault_stat(&world, vid);
+    assert_eq!(item["deleted"], false, "the vault was trashed: {item}");
+    assert_eq!(item["name"], "Secret", "{item}");
+    let tree = world.server.tree();
+    assert!(tree.keys().any(|p| p.starts_with("Secret/")), "{tree:?}");
+    assert!(!tree.contains_key("Secret/note.txt"), "went up in the clear: {tree:?}");
+    assert!(!tree.keys().any(|p| p.starts_with("Private")), "a plain Private survived: {tree:?}");
+    assert!(holder.store.open_issues().unwrap().is_empty(), "{:?}", holder.store.open_issues().unwrap());
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// One holder renames the empty vault while another holder fills it.
+#[test]
+fn an_empty_vault_renamed_while_a_peer_fills_it_keeps_both() {
+    let vault = SimVault::new(9_242);
+    let mut world = World::new(9_242, &["renamer", "writer"]);
+    world.give_vault("renamer", &vault);
+    world.give_vault("writer", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+
+    let vid = world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some());
+
+    world.device("renamer").fs.user_rename("Private", "Secret");
+    let body = b"written by the peer meanwhile";
+    world.device("writer").fs.user_write("Private/doc.txt", body);
+    world.pass(world.device("writer"));
+    assert!(world.settle().is_some());
+
+    let item = vault_stat(&world, vid);
+    assert_eq!(item["deleted"], false, "the vault was trashed: {item}");
+    assert_eq!(item["encrypted"], true);
+    let tree = world.server.tree();
+    let name = item["name"].as_str().unwrap().to_string();
+    assert_eq!(name, "Secret", "the rename was lost to the peer's write: {item}");
+    committed.note(&format!("{name}/doc.txt"), body);
+    assert!(tree.keys().any(|p| p.starts_with(&format!("{name}/"))), "the file is gone: {tree:?}");
+    assert!(!tree.contains_key(&format!("{name}/doc.txt")), "in the clear: {tree:?}");
+    assert_eq!(tree.keys().filter(|p| !p.contains('/')).count(), 1, "two top folders: {tree:?}");
+    assert_converged(&world);
+    for d in ["renamer", "writer"] {
+        let disk = disk_tree(world.device(d));
+        assert!(disk.contains_key(&format!("{name}/doc.txt")), "{d} lacks the file: {disk:?}");
+    }
+}
+
+/// Two holders rename the same empty vault to different names at once.
+#[test]
+fn two_holders_renaming_an_empty_vault_at_once_converge_on_one_vault() {
+    let vault = SimVault::new(9_243);
+    let mut world = World::new(9_243, &["a", "b"]);
+    world.give_vault("a", &vault);
+    world.give_vault("b", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+
+    let vid = world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some());
+    world.device("a").fs.user_rename("Private", "Alpha");
+    world.device("b").fs.user_rename("Private", "Beta");
+    assert!(world.settle().is_some());
+
+    let item = vault_stat(&world, vid);
+    assert_eq!(item["deleted"], false, "the vault was trashed: {item}");
+    assert_eq!(item["encrypted"], true);
+    let tree = world.server.tree();
+    assert_eq!(tree.len(), 1, "more than one folder survived: {tree:?}");
+    assert_converged(&world);
+}
+
+fn folder_name_of(world: &World, id: i64) -> (bool, String) {
+    let item = world
+        .server
+        .action(
+            "drive_stat",
+            &serde_json::json!({ "entities": [{ "entity_type": "folder", "entity_id": id }], "urls": false }),
+        )
+        .unwrap()["items"][0]
+        .clone();
+    (item["deleted"] == true, item["name"].as_str().unwrap_or("").to_string())
+}
+
+/// RED, open (Defect Q, one axis over): a parent and the folder inside it
+/// renamed in one go, and the parent loses its identity.
+///
+/// `A/B/f.txt`; the user renames `A` to `X` and `B` to `C`. `B` is found
+/// under `X/C` by its file. `A` is credited with `B/f.txt`, but the relative
+/// path changed with `B`'s name, so nothing under `X` matches it: `A` is
+/// trashed and `X` minted plain, with `C` moved into it. Nothing is lost and
+/// the trees agree; whatever was granted on `A` is gone. Pairing `A` by where
+/// its child folder went is a rule that cannot tell this from the user moving
+/// `B` into a brand-new `X` and deleting `A` -- and in that reading it would
+/// carry `A`'s grants onto a folder the user made fresh. Owner's call which
+/// error to prefer; ignored so the suite stays green.
+#[test]
+#[ignore]
+fn renaming_a_folder_and_its_subfolder_together_keeps_both_identities() {
+    let world = World::new(9_244, &["laptop"]);
+    let mut committed = Committed::default();
+    let laptop = world.device("laptop");
+    let body = b"deep inside";
+    laptop.fs.user_mkdir("A");
+    laptop.fs.user_mkdir("A/B");
+    laptop.fs.user_write("A/B/f.txt", body);
+    assert!(world.settle().is_some());
+    let a = world.server.folder_id_at("A").unwrap();
+    let b = world.server.folder_id_at("A/B").unwrap();
+
+    laptop.fs.user_rename("A", "X");
+    laptop.fs.user_rename("X/B", "X/C");
+    committed.note("X/C/f.txt", body);
+    assert!(world.settle().is_some());
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+    assert_eq!(folder_name_of(&world, a), (false, "X".into()), "A lost its identity");
+    assert_eq!(folder_name_of(&world, b), (false, "C".into()), "B lost its identity");
+    assert_eq!(world.server.tree().keys().collect::<Vec<_>>(), vec!["X", "X/C", "X/C/f.txt"]);
+}
+
+/// RED, open: the same shape with the old parent's name rebuilt empty behind
+/// it. The rebuilt `A` keeps the old identity, since nothing places the real
+/// one, and `X` is minted plain. Same call as the test above.
+#[test]
+#[ignore]
+fn renaming_a_folder_and_its_subfolder_with_the_old_name_rebuilt_keeps_both_identities() {
+    let world = World::new(9_245, &["laptop"]);
+    let mut committed = Committed::default();
+    let laptop = world.device("laptop");
+    let body = b"deep inside";
+    laptop.fs.user_mkdir("A");
+    laptop.fs.user_mkdir("A/B");
+    laptop.fs.user_write("A/B/f.txt", body);
+    assert!(world.settle().is_some());
+    let a = world.server.folder_id_at("A").unwrap();
+    let b = world.server.folder_id_at("A/B").unwrap();
+
+    laptop.fs.user_rename("A", "X");
+    laptop.fs.user_rename("X/B", "X/C");
+    laptop.fs.user_mkdir("A");
+    committed.note("X/C/f.txt", body);
+    assert!(world.settle().is_some());
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+    assert_eq!(folder_name_of(&world, a), (false, "X".into()), "A lost its identity");
+    assert_eq!(folder_name_of(&world, b), (false, "C".into()), "B lost its identity");
+    let tree = world.server.tree();
+    assert_eq!(tree.keys().collect::<Vec<_>>(), vec!["A", "X", "X/C", "X/C/f.txt"], "{tree:?}");
+    assert_ne!(world.server.folder_id_at("A").unwrap(), a, "the rebuilt A took the old identity");
+}
+
+/// A subfolder moved out of its parent, which stays standing but empty, beside
+/// a brand-new empty folder: the parent is not read as having become the new one.
+#[test]
+fn a_parent_left_empty_by_its_child_leaving_is_not_paired_with_a_new_folder() {
+    let world = World::new(9_246, &["laptop"]);
+    let mut committed = Committed::default();
+    let laptop = world.device("laptop");
+    let body = b"deep inside";
+    laptop.fs.user_mkdir("A");
+    laptop.fs.user_mkdir("A/B");
+    laptop.fs.user_write("A/B/f.txt", body);
+    assert!(world.settle().is_some());
+    let a = world.server.folder_id_at("A").unwrap();
+    let b = world.server.folder_id_at("A/B").unwrap();
+
+    laptop.fs.user_rename("A/B", "B");
+    laptop.fs.user_mkdir("D");
+    committed.note("B/f.txt", body);
+    assert!(world.settle().is_some());
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+    assert_eq!(folder_name_of(&world, a), (false, "A".into()), "A was moved or trashed");
+    assert_eq!(folder_name_of(&world, b), (false, "B".into()), "B lost its identity");
+    let tree = world.server.tree();
+    assert_eq!(tree.keys().collect::<Vec<_>>(), vec!["A", "B", "B/f.txt", "D"], "{tree:?}");
+    assert_eq!(world.server.folder_id_at("A"), Some(a));
+}
+
+/// The cycle shape with one leg inside a vault: a plain file and a private
+/// file swap places across the vault edge, on a folding disk. Crossing the
+/// edge is a conversion -- trash on one side, upload on the other -- not a
+/// rename, so there is no cycle to park; this pins that the swap converges
+/// with the right bytes on each side and the plain bytes never sit in the
+/// vault in the clear.
+#[test]
+fn a_swap_across_a_vault_edge_converts_both_ways() {
+    let vault = SimVault::new(9_247);
+    let mut world = World::of(9_247, &[("laptop", jd_sim::Platform::MacOs)]);
+    world.give_vault("laptop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some());
+    let laptop = world.device("laptop");
+
+    let a = b"the plain one";
+    let b = b"the private one";
+    laptop.fs.user_mkdir("Plain");
+    laptop.fs.user_write("Plain/x.txt", a);
+    laptop.fs.user_write("Private/y.txt", b);
+    committed.note("Plain/x.txt", a);
+    committed.note("Private/y.txt", b);
+    assert!(world.settle().is_some(), "both files go up first");
+
+    laptop.fs.user_rename("Plain/x.txt", "Private/held");
+    laptop.fs.user_rename("Private/y.txt", "Plain/X.txt");
+    laptop.fs.user_rename("Private/held", "Private/Y.txt");
+    committed.note("Plain/X.txt", b);
+    committed.note("Private/Y.txt", a);
+
+    assert!(world.settle().is_some(), "the park must not wedge the device");
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+    let tree = world.server.tree();
+    assert!(!tree.keys().any(|p| p.contains(".jd-")), "park never finished: {tree:?}");
+    assert_eq!(
+        tree.get("Plain/X.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(b)),
+        "Plain/X.txt should now hold the former private bytes, in the clear: {tree:?}"
+    );
+    assert!(!tree.contains_key("Private/Y.txt"), "the plain bytes went into the vault in the clear: {tree:?}");
+    assert_eq!(tree.keys().filter(|p| p.starts_with("Private/")).count(), 1, "{tree:?}");
+    let disk = disk_tree(laptop);
+    assert_eq!(disk.get("Plain/X.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b)), "{disk:?}");
+    assert_eq!(disk.get("Private/Y.txt").cloned().flatten(), Some(jd_sim::sha256_hex(a)), "{disk:?}");
+    assert!(laptop.store.open_issues().unwrap().is_empty(), "{:?}", laptop.store.open_issues().unwrap());
+}
+
+/// The device that parked dies before finishing, the peer passes and puts the
+/// park back, and the parker comes back to its queue. Whatever call the death
+/// lands on, the swap ends finished on every side and nothing is lost.
+///
+/// Not asserted, because it is the open no-grace item and not this pin's:
+/// the peer's put-back lands `x.txt` beside the `X.txt` the swap had already
+/// moved in, which on the peer's folding disk is a case clash, so the peer
+/// trashes its own copy and keeps a "parked" issue saying so after the swap
+/// has resolved and the file is back. The copy is in the peer's trash, the
+/// bytes are on the server; the cost is a stale issue and a re-download.
+#[test]
+fn a_peer_putting_a_park_back_does_not_break_the_parkers_finish() {
+    for die_after in 0..12u64 {
+        let world = World::of(
+            9_248,
+            &[("a", jd_sim::Platform::MacOs), ("b", jd_sim::Platform::MacOs)],
+        );
+        let mut committed = Committed::default();
+        let a = world.device("a");
+        let b = world.device("b");
+        let one = b"the contents of A";
+        let two = b"the contents of B";
+        a.fs.user_mkdir("One");
+        a.fs.user_mkdir("Two");
+        a.fs.user_write("One/x.txt", one);
+        a.fs.user_write("Two/y.txt", two);
+        committed.note("One/x.txt", one);
+        committed.note("Two/y.txt", two);
+        assert!(world.settle().is_some());
+
+        a.fs.user_rename("One/x.txt", "Two/held");
+        a.fs.user_rename("Two/y.txt", "One/X.txt");
+        a.fs.user_rename("Two/held", "Two/Y.txt");
+        committed.note("One/X.txt", two);
+        committed.note("Two/Y.txt", one);
+
+        a.net.arm_death(die_after);
+        world.pass(a);
+        world.pass(b);
+        world.pass(b);
+        assert!(world.settle().is_some(), "die_after={die_after}: did not settle");
+        assert_converged(&world);
+        assert_nothing_lost(&world, &committed);
+        let tree = world.server.tree();
+        assert!(!tree.keys().any(|p| p.contains(".jd-")), "die_after={die_after}: park left: {tree:?}");
+        assert_eq!(tree.get("One/X.txt").cloned().flatten(), Some(jd_sim::sha256_hex(two)), "die_after={die_after}: {tree:?}");
+        assert_eq!(tree.get("Two/Y.txt").cloned().flatten(), Some(jd_sim::sha256_hex(one)), "die_after={die_after}: {tree:?}");
+        for d in [a, b] {
+            assert!(!d.fs.all_paths().iter().any(|p| p.contains(".jd-")), "die_after={die_after}: {} has a park: {:?}", d.name, d.fs.all_paths());
+        }
+    }
+}
+
+/// A vault root dragged into a plain folder is refused, once, with advice
+/// that fits a vault root: the server keeps it where it was, nothing is
+/// lost, and the user is not sent to change a protection level.
+#[test]
+fn moving_a_vault_root_into_a_plain_folder_is_refused_and_said() {
+    let vault = SimVault::new(9_249);
+    let mut world = World::new(9_249, &["holder"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+    world.server.seed_folder(None, "To");
+    let vid = world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some());
+    let holder = world.device("holder");
+    let body = b"private bytes";
+    holder.fs.user_write("Private/note.txt", body);
+    committed.note("Private/note.txt", body);
+    assert!(world.settle().is_some());
+
+    holder.fs.user_rename("Private", "To/Private");
+    assert!(world.settle().is_some(), "the refusal must not loop");
+    assert_nothing_lost(&world, &committed);
+    assert_eq!(folder_name_of(&world, vid), (false, "Private".into()));
+    assert_eq!(world.server.folder_id_at("Private"), Some(vid), "the vault left the root: {:?}", world.server.tree());
+    let issues = holder.store.open_issues().unwrap();
+    assert_eq!(issues.len(), 1, "{issues:?}");
+    assert!(issues[0].detail.contains("a vault can sit only at the drive root"), "{issues:?}");
+    assert!(!issues[0].detail.contains("protection level"), "sent to a level change that cannot apply: {issues:?}");
+}
+
+/// A move whose answer never came back is finished on the retry, not dropped.
+///
+/// The server applied the move; the client did not hear so. Next pass the
+/// index walk records the file where the server has it, which is exactly
+/// where the retried op wants it. That is our own move landed, not somebody
+/// else's, and the retry has to write the agreement down instead of standing
+/// down as overtaken -- otherwise the record keeps naming the folder the
+/// file has left. Estate v15 seed 11091499.
+#[test]
+fn a_move_whose_answer_was_lost_is_finished_on_the_retry() {
+    for devices in [1usize, 2] {
+        let names: &[&str] = if devices == 1 { &["laptop"] } else { &["laptop", "desktop"] };
+        let world = World::new(9_250 + devices as u64, names);
+        let mut committed = Committed::default();
+        let laptop = world.device("laptop");
+        let body = b"moved while the line was bad";
+        laptop.fs.user_mkdir("Sub");
+        laptop.fs.user_write("Sub/Report 13.docx", body);
+        committed.note("Sub/Report 13.docx", body);
+        assert!(world.settle().is_some());
+        let fid = laptop
+            .store
+            .every_entry()
+            .unwrap()
+            .into_iter()
+            .find(|e| e.id.entity_type == jd_core::model::EntityType::File && e.remote.name == "Report 13.docx")
+            .map(|e| e.id.server_id)
+            .unwrap();
+
+        laptop.net.set_faults(NetFaults {
+            lose_answer_to: Some("drive_move".into()),
+            ..NetFaults::none()
+        });
+        laptop.fs.user_rename("Sub/Report 13.docx", "Report 13.docx");
+        committed.note("Report 13.docx", body);
+        assert!(world.settle().is_some(), "devices={devices}");
+        assert_eq!(laptop.net.stats().dropped_after, 1, "devices={devices}: the move's answer was not lost");
+        assert_converged(&world);
+        assert_nothing_lost(&world, &committed);
+        let e = laptop.store.get_entry(jd_core::model::EntityId::file(fid)).unwrap().unwrap();
+        assert_eq!(e.remote.parent, None, "devices={devices}: {e:?}");
+        assert_eq!(
+            e.synced_placement.as_ref().map(|p| p.parent),
+            Some(None),
+            "devices={devices}: the agreement still names the folder the file left: {e:?}"
+        );
+        assert!(laptop.store.open_issues().unwrap().is_empty(), "devices={devices}: {:?}", laptop.store.open_issues().unwrap());
+    }
+}
+
+/// A file moved on the server after this keyless device dragged it into a
+/// vault it cannot open keeps its record current: the hold that stops the
+/// server copy being trashed must not also freeze the record at a name the
+/// file has left, or a peer's file wanting that name is parked against a
+/// ghost. Estate v15 seed 11091499.
+#[test]
+fn a_held_file_moved_on_the_server_does_not_keep_its_old_name() {
+    let vault = SimVault::new(9_253);
+    let mut world = World::new(9_253, &["holder", "guest"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+    world.server.seed_encrypted_folder(None, "Private");
+    let sub = world.server.seed_folder(None, "Sub");
+    let body = b"the one that went into the vault";
+    world.server.seed_file(Some(sub), "Report.docx", body);
+    assert!(world.settle().is_some());
+    committed.note("Sub/Report.docx", body);
+    let guest = world.device("guest");
+    let holder = world.device("holder");
+    // The keyless guest never materializes the vault; its user makes the
+    // directory by hand, as the sweep's workload does.
+    guest.fs.user_mkdir("Private");
+
+    // The guest moves the file to the root; the move lands, the answer does not.
+    guest.net.set_faults(NetFaults {
+        lose_answer_to: Some("drive_move".into()),
+        ..NetFaults::none()
+    });
+    guest.fs.user_rename("Sub/Report.docx", "Report.docx");
+    world.pass(guest);
+    assert_eq!(guest.net.stats().dropped_after, 1, "the move's answer was not lost");
+    guest.net.set_faults(NetFaults::none());
+    assert_eq!(world.server.tree().get("Report.docx").cloned().flatten(), Some(jd_sim::sha256_hex(body)), "{:?}", world.server.tree());
+
+    // Then, before the next pass, into the vault it has no key for.
+    guest.fs.user_rename("Report.docx", "Private/Report.docx");
+    world.pass(guest);
+    world.pass(guest);
+
+    // The holder follows the move, then makes a NEW file under the name the
+    // moved file used to have.
+    world.pass(holder);
+    world.pass(holder);
+    assert!(holder.fs.exists("Report.docx") && !holder.fs.exists("Sub/Report.docx"), "{:?}", disk_tree(holder));
+    let fresh = b"a new report in the old place";
+    holder.fs.user_write("Sub/Report.docx", fresh);
+    committed.note("Report.docx", body);
+    committed.note("Sub/Report.docx", fresh);
+    assert!(world.settle().is_some());
+    assert_nothing_lost(&world, &committed);
+    let disk = disk_tree(guest);
+    assert_eq!(
+        disk.get("Sub/Report.docx").cloned().flatten(),
+        Some(jd_sim::sha256_hex(fresh)),
+        "the peer's file never reached the guest: {disk:?} issues={:?}",
+        guest.store.open_issues().unwrap()
+    );
+    let e = guest.store.get_entry(jd_core::model::EntityId::file(901)).unwrap().unwrap();
+    assert_eq!(
+        e.synced_placement.as_ref().map(|p| p.parent),
+        Some(None),
+        "the held file's record still names the folder it left: {e:?}"
+    );
+    // The file the guest dragged into the vault it cannot open is still
+    // there, waiting, and the server still has the bytes. What the guest
+    // is told is the wait, not a duplicate.
+    assert!(guest.fs.exists("Private/Report.docx"));
+    assert_eq!(world.server.tree().get("Report.docx").cloned().flatten(), Some(jd_sim::sha256_hex(body)));
+    let issues = guest.store.open_issues().unwrap();
+    assert!(
+        !issues.iter().any(|i| i.detail.contains("DuplicateName")),
+        "a duplicate was reported against a name nobody uses: {issues:?}"
+    );
+}
+
+/// The held file's record follows the server only onto an empty path. A
+/// stranger already standing at the server's new path on this disk is not
+/// handed to the held file: the server's copy stays live under its name,
+/// nothing is trashed for it, and its version chain never gains the
+/// stranger's bytes.
+#[test]
+fn a_held_file_does_not_take_over_a_stranger_at_the_servers_new_path() {
+    let vault = SimVault::new(9_254);
+    let mut world = World::new(9_254, &["holder", "guest"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+    world.server.seed_encrypted_folder(None, "Private");
+    let sub = world.server.seed_folder(None, "Sub");
+    let body = b"the one that went into the vault";
+    let fid = world.server.seed_file(Some(sub), "Report.docx", body);
+    assert!(world.settle().is_some());
+    committed.note("Sub/Report.docx", body);
+    let guest = world.device("guest");
+    guest.fs.user_mkdir("Private");
+
+    guest.net.set_faults(NetFaults {
+        lose_answer_to: Some("drive_move".into()),
+        ..NetFaults::none()
+    });
+    guest.fs.user_rename("Sub/Report.docx", "Report.docx");
+    world.pass(guest);
+    assert_eq!(guest.net.stats().dropped_after, 1, "the move's answer was not lost");
+    guest.net.set_faults(NetFaults::none());
+
+    // Into the keyless vault, and a stranger saved where the server now has it.
+    guest.fs.user_rename("Report.docx", "Private/Report.docx");
+    let stranger = b"a different report the guest saved at the root";
+    guest.fs.user_write("Report.docx", stranger);
+    committed.note("Report.docx", body);
+    committed.note("Report.docx", stranger);
+    // The stranger's first upload is refused, so it is still standing at
+    // the root when the next scan runs -- after the record has followed the
+    // server there.
+    guest.net.set_faults(NetFaults {
+        refuse_before: Some("drive_upload_init".into()),
+        ..NetFaults::none()
+    });
+    world.pass(guest);
+    guest.net.set_faults(NetFaults::none());
+    assert!(world.settle().is_some());
+    assert_nothing_lost(&world, &committed);
+    let item = world
+        .server
+        .action(
+            "drive_stat",
+            &serde_json::json!({ "entities": [{ "entity_type": "file", "entity_id": fid }], "urls": false }),
+        )
+        .unwrap()["items"][0]
+        .clone();
+    assert_eq!(item["deleted"], false, "the held file's server copy was trashed: {item}");
+    assert_eq!(
+        item["content_sha256"].as_str(),
+        Some(jd_sim::sha256_hex(body).as_str()),
+        "the held file's version chain took the stranger's bytes: {item}"
+    );
+    assert!(guest.fs.exists("Private/Report.docx"), "the held bytes left the vault directory");
+    let tree = world.server.tree();
+    assert!(
+        tree.values().flatten().any(|h| *h == jd_sim::sha256_hex(stranger)),
+        "the stranger's bytes never reached the server: {tree:?}"
+    );
+}
+
+/// A stranger saved under a held file's name, after its record has
+/// followed the server there, is a new file: the held file is known by its
+/// inode, which is waiting inside the vault, so the stranger goes up on its
+/// own and the held file's version chain never takes its bytes. Read by
+/// path, the stranger became the held file edited, the hold lapsed, and
+/// nothing said so. Raised by the Defect S review.
+#[test]
+fn a_stranger_saved_later_at_a_held_files_path_is_a_new_file() {
+    let vault = SimVault::new(9_255);
+    let mut world = World::new(9_255, &["holder", "guest"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    world.server.seed_encrypted_folder(None, "Private");
+    let sub = world.server.seed_folder(None, "Sub");
+    let body = b"the one that went into the vault";
+    let fid = world.server.seed_file(Some(sub), "Report.docx", body);
+    assert!(world.settle().is_some());
+    let guest = world.device("guest");
+    guest.fs.user_mkdir("Private");
+    guest.net.set_faults(NetFaults { lose_answer_to: Some("drive_move".into()), ..NetFaults::none() });
+    guest.fs.user_rename("Sub/Report.docx", "Report.docx");
+    world.pass(guest);
+    guest.net.set_faults(NetFaults::none());
+    guest.fs.user_rename("Report.docx", "Private/Report.docx");
+    for _ in 0..4 { world.clock.advance_secs(20 * 60); world.pass(guest); }
+    let e = guest.store.get_entry(jd_core::model::EntityId::file(fid)).unwrap().unwrap();
+        assert_eq!(e.synced_placement.as_ref().map(|p| p.parent), Some(None), "the record did not follow the server: {e:?}");
+    let stranger = b"a different report the guest saved at the root";
+    guest.fs.user_write("Report.docx", stranger);
+    assert!(world.settle().is_some());
+    let item = world
+        .server
+        .action(
+            "drive_stat",
+            &serde_json::json!({ "entities": [{ "entity_type": "file", "entity_id": fid }], "urls": false }),
+        )
+        .unwrap()["items"][0]
+        .clone();
+    assert_eq!(item["deleted"], false, "the held file's server copy was trashed: {item}");
+    assert_eq!(
+        item["content_sha256"].as_str(),
+        Some(jd_sim::sha256_hex(body).as_str()),
+        "the held file's version chain took the stranger's bytes: {item}"
+    );
+    let tree = world.server.tree();
+    assert!(
+        tree.values().flatten().any(|h| *h == jd_sim::sha256_hex(stranger)),
+        "the stranger never went up on its own: {tree:?}"
+    );
+    assert!(guest.fs.exists("Private/Report.docx"), "the held bytes left the vault directory");
+    let claimant = guest.store.every_entry().unwrap().into_iter().find(|e| e.replaces == Some(jd_core::model::EntityId::file(fid)));
+    assert!(claimant.is_some(), "the hold lapsed for a stranger: {:?}", guest.store.every_entry().unwrap());
+}
+
+/// The same stranger, against a held file whose record carries no
+/// fingerprint: its upload finished while the user was already moving it
+/// into the vault, so the agreement was written without one. A held record
+/// with nothing to match an inode against pairs by path with nobody -- the
+/// bytes brought back are still found by hash -- and the stranger is a new
+/// file. Raised by the Defect S review.
+#[test]
+fn a_stranger_at_a_held_files_path_is_new_even_without_a_fingerprint() {
+    let vault = SimVault::new(9_256);
+    let mut world = World::new(9_256, &["holder", "guest"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+    world.server.seed_encrypted_folder(None, "Private");
+    let sub = world.server.seed_folder(None, "Sub");
+    let fid = world.server.seed_file(Some(sub), "Report.docx", b"first draft");
+    assert!(world.settle().is_some());
+    let guest = world.device("guest");
+    guest.fs.user_mkdir("Private");
+
+    // The edit goes up, and the file is dragged into the vault while the
+    // upload is completing: the agreement lands without a fingerprint.
+    let edited = b"the edited draft that went into the vault";
+    guest.fs.user_write("Sub/Report.docx", edited);
+    committed.note("Sub/Report.docx", edited);
+    let disk = guest.fs.clone();
+    let mut fired = false;
+    world.server.while_completing_an_upload(move || {
+        if !fired && disk.peek("Sub/Report.docx").is_some() {
+            disk.user_rename("Sub/Report.docx", "Private/Report.docx");
+            fired = true;
+        }
+    });
+    for _ in 0..3 {
+        world.clock.advance_secs(20 * 60);
+        world.pass(guest);
+    }
+    let e = guest.store.get_entry(jd_core::model::EntityId::file(fid)).unwrap().unwrap();
+    assert!(e.synced_fingerprint.is_none(), "the shape needs a record without a fingerprint: {e:?}");
+    assert!(guest.fs.exists("Private/Report.docx"), "{:?}", disk_tree(guest));
+    assert!(
+        guest.store.every_entry().unwrap().iter().any(|c| c.replaces == Some(e.id)),
+        "the shape needs the file held: {:?}",
+        guest.store.every_entry().unwrap()
+    );
+
+    let stranger = b"a different report saved under the old name";
+    guest.fs.user_write("Sub/Report.docx", stranger);
+    assert!(world.settle().is_some());
+    let item = world
+        .server
+        .action(
+            "drive_stat",
+            &serde_json::json!({ "entities": [{ "entity_type": "file", "entity_id": fid }], "urls": false }),
+        )
+        .unwrap()["items"][0]
+        .clone();
+    assert_eq!(item["deleted"], false, "the held file's server copy was trashed: {item}");
+    assert_eq!(
+        item["content_sha256"].as_str(),
+        Some(jd_sim::sha256_hex(edited).as_str()),
+        "the held file's version chain took the stranger's bytes: {item}"
+    );
+    let tree = world.server.tree();
+    assert!(tree.values().flatten().any(|h| *h == jd_sim::sha256_hex(stranger)), "the stranger never went up on its own: {tree:?}");
+    assert!(guest.store.every_entry().unwrap().iter().any(|c| c.replaces == Some(e.id)), "the hold lapsed for a stranger");
+    assert_nothing_lost(&world, &committed);
+}
