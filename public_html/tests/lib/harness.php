@@ -697,6 +697,52 @@ function harness_cleanup_stale_fixtures() {
 	$floor = gmdate('Y-m-d H:i:s', time() - 3600);
 	$db = DbConnector::get_instance()->get_db_link();
 
+	// The self-labelling families referential_integrity watches, same floor,
+	// BEFORE the users: a stale fixture user who is the sole member of a
+	// protected mailbox cannot be deleted while that mailbox stands (the grant
+	// refuses, correctly), and the mailbox is fixture debris too. Deleting the
+	// alias first cascades its grants and feeds; the user then goes cleanly.
+	// A class that does not resolve here (inactive plugin) is skipped: its
+	// rows cannot be deleted with their cascades honoured, and the gate still
+	// names them. Each family names the LIKE pattern its fixtures carry —
+	// 'HarnessTest ' for display names, 'harnesstest_' / 'harnesstest-' where
+	// the value is an address part or a hostname and cannot hold a space.
+	$families = array(
+		array('InboundEmailDomain', 'ied_inbound_email_domains', 'ied_domain', 'ied_create_time', 'harnesstest-%'),
+		array('InboundEmailAlias', 'iea_inbound_email_aliases', 'iea_alias', 'iea_create_time', 'harnesstest\\_%'),
+		array('InboundImapAccount', 'iia_inbound_imap_accounts', 'iia_username', 'iia_create_time', 'harnesstest\\_%'),
+		array('Event', 'evt_events', 'evt_name', 'evt_create_time', 'HarnessTest %'),
+		array('Survey', 'svy_surveys', 'svy_name', 'svy_create_time', 'HarnessTest %'),
+		array('Group', 'grp_groups', 'grp_name', 'grp_create_time', 'HarnessTest %'),
+		array('Product', 'pro_products', 'pro_name', 'pro_create_time', 'HarnessTest %'),
+		array('BookingType', 'bkt_booking_types', 'bkt_name', 'bkt_create_time', 'HarnessTest %'),
+		array('ManagedNode', 'mgn_managed_nodes', 'mgn_name', 'mgn_create_time', 'HarnessTest %'),
+		array('Question', 'qst_questions', 'qst_question', 'qst_create_time', 'HarnessTest %'),
+	);
+	foreach ($families as $f) {
+		list($cls, $table, $name_col, $created_col, $pattern) = $f;
+		if (!class_exists($cls)) continue;
+		if (!property_exists($cls, 'tablename') || $cls::$tablename !== $table) continue;
+		try {
+			$pkey_col = $cls::$pkey_column;
+			$q = $db->prepare("SELECT {$pkey_col}, {$name_col} FROM {$table} WHERE {$name_col} LIKE ? AND {$created_col} < ?");
+			$q->execute(array($pattern, $floor));
+			foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+				try {
+					$id = (int)$row[$pkey_col];
+					$obj = new $cls($id, TRUE);
+					if (!$obj->key) { continue; }
+					$obj->permanent_delete();
+					echo "  reclaimed stale fixture row {$table}#{$id} (" . $row[$name_col] . ")\n";
+				} catch (\Throwable $e) {
+					echo "  WARNING: could not reclaim {$table} row: " . $e->getMessage() . "\n";
+				}
+			}
+		} catch (\Throwable $e) {
+			// Absent table or column on this install: nothing to reclaim.
+		}
+	}
+
 	// Users. Every make_user_row() fixture stamps usr_terms_accepted_time at
 	// creation, which doubles as its birth time here; the rare fixture whose
 	// suite cleared it is left for referential_integrity to name.
@@ -715,43 +761,6 @@ function harness_cleanup_stale_fixtures() {
 		}
 	} catch (\Throwable $e) {
 		echo "  WARNING: stale fixture user lookup failed: " . $e->getMessage() . "\n";
-	}
-
-	// The self-labelling families referential_integrity watches, same floor.
-	// A class that does not resolve here (inactive plugin) is skipped: its
-	// rows cannot be deleted with their cascades honoured, and the gate still
-	// names them.
-	$families = array(
-		array('Event', 'evt_events', 'evt_name', 'evt_create_time'),
-		array('Survey', 'svy_surveys', 'svy_name', 'svy_create_time'),
-		array('Group', 'grp_groups', 'grp_name', 'grp_create_time'),
-		array('Product', 'pro_products', 'pro_name', 'pro_create_time'),
-		array('BookingType', 'bkt_booking_types', 'bkt_name', 'bkt_create_time'),
-		array('ManagedNode', 'mgn_managed_nodes', 'mgn_name', 'mgn_create_time'),
-		array('Question', 'qst_questions', 'qst_question', 'qst_create_time'),
-	);
-	foreach ($families as $f) {
-		list($cls, $table, $name_col, $created_col) = $f;
-		if (!class_exists($cls)) continue;
-		if (!property_exists($cls, 'tablename') || $cls::$tablename !== $table) continue;
-		try {
-			$pkey_col = $cls::$pkey_column;
-			$q = $db->prepare("SELECT {$pkey_col}, {$name_col} FROM {$table} WHERE {$name_col} LIKE 'HarnessTest %' AND {$created_col} < ?");
-			$q->execute(array($floor));
-			foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
-				try {
-					$id = (int)$row[$pkey_col];
-					$obj = new $cls($id, TRUE);
-					if (!$obj->key) { continue; }
-					$obj->permanent_delete();
-					echo "  reclaimed stale fixture row {$table}#{$id} (" . $row[$name_col] . ")\n";
-				} catch (\Throwable $e) {
-					echo "  WARNING: could not reclaim {$table} row: " . $e->getMessage() . "\n";
-				}
-			}
-		} catch (\Throwable $e) {
-			// Absent table or column on this install: nothing to reclaim.
-		}
 	}
 }
 

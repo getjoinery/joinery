@@ -84,6 +84,22 @@ if (!in_array($tier_arg, $valid_tiers, true)) {
 	exit(2);
 }
 
+// Only `deploy` may run as root. The development tiers exercise installers,
+// sysadmin tools and system commands inside sandboxes that hold ONLY for an
+// unprivileged user — a gate that proves "the installer stops at its root check"
+// proves it by running the installer. As root that check passes and the
+// installer runs for real: on 2026-09-02 a safe-tier run under the root job
+// queue switched this box's agent off, replaced its binary and stopped its
+// service, killing the publish that had started it. Nothing said so until the
+// job died with "signal: terminated". This is the thing that says so.
+$euid = function_exists('posix_geteuid') ? posix_geteuid() : (int)trim((string)shell_exec('id -u'));
+if ($euid === 0 && $tier_arg !== 'deploy') {
+	fwrite(STDERR, "Refusing to run the '$tier_arg' tier as root. Only the deploy tier is built to run as root;\n"
+		. "the development tiers run installers and system tools inside sandboxes that root walks straight through.\n"
+		. "Run this as the site's user instead.\n");
+	exit(2);
+}
+
 // Which tiers a batch request includes. safe ⊂ db ⊂ test-db are cumulative, so
 // the pre-deploy gate covers the model suite too; asking for test-db alone still
 // runs just that tier. live never pulls in the others — it has real external
@@ -112,6 +128,15 @@ $selected_tiers = $tiers_to_run[$tier_arg];
 
 $debug_on = (bool)Globalvars::get_instance()->get_setting('debug');
 $ROOT = dirname(__DIR__); // public_html
+
+// The tree this run is about, identified BEFORE any test runs — tests leave
+// debris and the stamp must describe what was tested, not what was left behind.
+// Only a full run of a development tier can stamp it; a narrowed run (--filter,
+// --only, --changed) proves nothing about the tier as a whole, and `deploy`
+// has no repository to identify. See TestTierStamp.
+$stamp_eligible = $tier_arg !== 'deploy' && !$want_list && $filter === '' && $only === '' && !$changed_mode
+	&& !in_array('--lane-worker', $args, true);
+$stamp_tree = $stamp_eligible ? TestTierStamp::treeId($ROOT) : null;
 
 // ---------------------------------------------------------------------------
 // Lane worker mode (internal — spawned by the overlapped gate, not by hand).
@@ -641,9 +666,28 @@ $checks_passed = array_sum(array_map(function ($r) { return $r['stats']['passed'
 $checks_failed = array_sum(array_map(function ($r) { return $r['stats']['failed']; }, $results));
 $checks_skipped = array_sum(array_map(function ($r) { return $r['stats']['skipped'] ?? 0; }, $results));
 
+// A full development-tier run is evidence about this exact tree: a PASS stamps
+// it for every tier the batch covered, a FAIL forgets any stamp those tiers had.
+// publish_upgrade.php reads the stamp instead of running these tiers itself.
+$stamp_note = '';
+if ($stamp_tree !== null) {
+	if ($tests_failed > 0) {
+		TestTierStamp::clear($ROOT, $selected_tiers);
+		$stamp_note = 'Cleared the PASS stamp for: ' . implode(', ', $selected_tiers) . ' (this tree failed).';
+	} elseif (TestTierStamp::record($ROOT, $selected_tiers, $stamp_tree, array(
+			'tests' => $tests_total, 'checks_passed' => $checks_passed, 'checks_skipped' => $checks_skipped,
+			'skipped_needs' => array_map(function ($x) { return $x['meta']['name']; }, $skipped_needs)))) {
+		$stamp_note = 'Stamped this tree as passing: ' . implode(', ', $selected_tiers)
+			. ' (' . harness_rel(TestTierStamp::path($ROOT), $ROOT) . ') — a publish of this exact tree accepts it.';
+	} else {
+		$stamp_note = 'Could not write the PASS stamp at ' . TestTierStamp::path($ROOT) . '; a publish will refuse this tree until a full run can.';
+	}
+}
+
 if ($want_json) {
 	echo json_encode(array(
 		'tier_requested' => $tier_arg,
+		'stamp' => $stamp_note,
 		'tiers_run' => $selected_tiers,
 		'filter' => $filter,
 		'debug_env' => $debug_on,
@@ -695,6 +739,8 @@ if ($undeclared) {
 	foreach ($undeclared as $p) echo "  - " . harness_rel($p, $ROOT) . "\n";
 }
 if ($tests_total === 0) echo "\n(no tests matched this tier/filter)\n";
+
+if ($stamp_note !== '') echo "\n" . $stamp_note . "\n";
 
 echo "\n" . ($tests_failed > 0 ? "RESULT: FAIL" : "RESULT: PASS") . "\n";
 exit($tests_failed > 0 ? 1 : 0);

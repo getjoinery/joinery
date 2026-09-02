@@ -168,8 +168,34 @@ in. Three rules for anything added to it:
 - **An unreachable dependency is a SKIP, not a failure.** Reverting a working
   release because a socket would not open is the worse error.
 
+**Only `deploy` may run as root.** The development tiers prove things about
+installers and sysadmin tools by running them inside sandboxes — a stubbed
+`systemctl` on `PATH`, a temp directory standing in for `/etc`, an installer
+expected to stop at its own root check. Those sandboxes hold only for an
+unprivileged user; root walks through every one of them and the test performs
+the real operation on the machine running the suite. `tests/run.php` refuses any
+tier other than `deploy` when its effective user is root, and says so. Run the
+development tiers as the site's user.
+
 See [Deploy and Upgrade](deploy_and_upgrade.md#the-deploy-tier) for what it
 currently checks.
+
+### The PASS stamp: how a publish knows the tree was tested
+
+A publish archives whatever is on the publisher's disk, and the publisher is
+root on the local job queue, so it cannot run the development tiers itself. It
+reads the runner's stamp instead. A **full** run of `safe`, `db` or `test-db`
+(no `--filter`, `--only` or `--changed`) writes `{site root}/cache/test_tier_stamp.json`
+on PASS, one entry per tier the batch covered, and removes those entries on
+FAIL. The entry names the exact tree: the HEAD commit plus every path git
+reports as changed or untracked, each with a content hash, identified before the
+first test runs. The runner's summary says when it stamped.
+
+`publish_upgrade.php` runs the `deploy` tier itself and, where the site authored
+the code, requires a `safe` stamp whose tree matches the one on disk. Any edit,
+commit or new file after the run changes the tree, and the refusal lists the
+paths that differ. The fix is `php tests/run.php safe` as the site's user, then
+publish again. `TestTierStamp` (core `includes/`) owns the identity and the file.
 
 ### What each tier costs
 
@@ -342,7 +368,13 @@ Name any standalone fixture `HarnessTest <something>` in the table's name column
 (`evt_events`, `svy_surveys`, `grp_groups`, `pro_products`, `bkt_booking_types`,
 `mgn_managed_nodes`, `qst_questions` are covered) and a leak reports the table
 and the offending row instead of waiting to be noticed as a phantom entry in an
-admin screen. A fixture reachable from a registered parent needs no name.
+admin screen. Where the value cannot hold a space, the label is a prefix instead:
+mailbox domains start `harnesstest-` (`ied_domain`), mailbox aliases and IMAP
+account usernames start `harnesstest_` (`iea_alias`, `iia_username`). The
+boot-time reclaim takes these families before the users, because a fixture user
+who is the sole member of a protected mailbox cannot be deleted while that
+mailbox stands — the alias goes first and cascades its grants and feeds. A
+fixture reachable from a registered parent needs no name.
 
 ### Mail a run sends is cleaned up too
 

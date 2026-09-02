@@ -27,6 +27,7 @@
  *
  * Run: php tests/run.php db --filter=mailbox_level_scope
  *
+ * @version 1.1 - fixtures carry the harnesstest label so a killed run's leftovers reclaim at the next db boot
  * @version 1.0
  */
 
@@ -37,10 +38,11 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRo
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ImapFeedProvisioner.php'));
 require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
 
-/** A live domain at $level, registered for teardown. */
+/** A live domain at $level, registered for teardown. Named so a KILLED run's
+ *  leftovers are reclaimed by harness_cleanup_stale_fixtures() (harnesstest- / harnesstest_). */
 function mls_domain(string $level, bool $imap_source = false): InboundEmailDomain {
 	$domain = new InboundEmailDomain(NULL);
-	$domain->set('ied_domain', 'mls-' . bin2hex(random_bytes(4)) . '.example');
+	$domain->set('ied_domain', 'harnesstest-mls-' . bin2hex(random_bytes(4)) . '.example');
 	$domain->set('ied_is_enabled', true);
 	$domain->set('ied_security_level', $level);
 	$domain->set('ied_is_imap_source', $imap_source);
@@ -54,7 +56,7 @@ function mls_domain(string $level, bool $imap_source = false): InboundEmailDomai
 function mls_alias(InboundEmailDomain $domain, string $local, ?string $level = null): InboundEmailAlias {
 	$alias = new InboundEmailAlias(NULL);
 	$alias->set('iea_ied_inbound_email_domain_id', intval($domain->key));
-	$alias->set('iea_alias', $local);
+	$alias->set('iea_alias', 'harnesstest_' . $local);
 	$alias->set('iea_delivery_mode', InboundEmailAlias::MODE_STORE);
 	$alias->set('iea_destinations', '');
 	$alias->set('iea_is_enabled', true);
@@ -304,7 +306,7 @@ try {
 	// -----------------------------------------------------------------------
 	section('provisioner: find-or-create, for a new provider domain and a hosted one');
 
-	$address = 'mls' . bin2hex(random_bytes(3)) . '@gmail.com';
+	$address = 'harnesstest_mls' . bin2hex(random_bytes(3)) . '@gmail.com';
 	$account = ImapFeedProvisioner::provision('imap_gmail', $address,
 		array('reader_user_id' => $reader_id, 'security_level' => InboundEmailDomain::LEVEL_PRIVATE), null);
 	harness_register_row('iia_inbound_imap_accounts', 'iia_inbound_imap_account_id', intval($account->key));
@@ -337,7 +339,7 @@ try {
 	// An address on a domain this deployment already HOSTS reuses that domain and
 	// keeps its level: that domain is an identity we hold, so it decides.
 	list($hosted_reader, $hosted_secret) = mls_vault_user('MlsHosted');
-	$hosted_address = 'pulledin@' . $private_domain->get('ied_domain');
+	$hosted_address = 'harnesstest_pulledin@' . $private_domain->get('ied_domain');
 	$hosted_account = ImapFeedProvisioner::provision('imap_generic', $hosted_address,
 		array('reader_user_id' => intval($hosted_reader->key),
 			'security_level' => InboundEmailDomain::LEVEL_STANDARD), null);
