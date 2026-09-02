@@ -26,6 +26,24 @@
 	// Detect CLI mode early to avoid loading unnecessary UI components
 	$is_cli = (php_sapi_name() === 'cli');
 
+	// The staging area (uploads/upgrades/) is created by whoever runs the
+	// upgrade — root, under the agent — and it lives inside uploads/, which the
+	// web user has to be able to walk: the clone export's manifest, and anything
+	// else that measures or archives uploads, opens every directory in it. Give
+	// staging its parent's owner, group and mode, so a root-run upgrade leaves
+	// nothing root-only behind in content. A non-root run owns the directory
+	// already and the chown is a harmless no-op.
+	function upgrade_stage_dir_match_parent($dir) {
+		$dir = rtrim($dir, '/');
+		$parent = dirname($dir);
+		if (!is_dir($dir) || !is_dir($parent)) return;
+		@chmod($dir, 0770);
+		$uid = @fileowner($parent);
+		$gid = @filegroup($parent);
+		if ($uid !== false) @chown($dir, $uid);
+		if ($gid !== false) @chgrp($dir, $gid);
+	}
+
 	// Turn the run's HTML into the plain text a terminal or a log file wants.
 	// Only tags this pipeline actually emits are removed: an unexpected <...> in
 	// a tar or php -l error message is content, and passes through untouched.
@@ -771,6 +789,7 @@
 			echo 'Failed to create staging location: '.$stage_location.'...aborting.<br>';
 			exit;
 		}
+		upgrade_stage_dir_match_parent($stage_location);
 		if($verbose) upgrade_echo('Staging area cleared<br>');
 
 		// EXTRACT THE ARCHIVE (supports both tar.gz and legacy zip)
@@ -1302,6 +1321,7 @@
 						. 'Continuing with upgrade — staging cleanup can be done manually later.');
 				} else {
 					@mkdir($stage_location, 0770, true);
+					upgrade_stage_dir_match_parent($stage_location);
 					if($verbose) echo 'Staging area cleared<br>';
 				}
 			}

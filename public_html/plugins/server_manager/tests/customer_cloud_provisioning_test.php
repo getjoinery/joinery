@@ -24,6 +24,7 @@
  *
  * Run: php plugins/server_manager/tests/customer_cloud_provisioning_test.php
  *
+ * @version 1.2 - node fixtures carry the HarnessTest prefix so a killed run's rows self-reclaim at the next db boot
  * @version 1.1
  */
 
@@ -266,7 +267,7 @@ class CustomerCloudProvisioningTest {
 		$fake->lastCreateOpts = null;
 		$probe->lastFailReason = null;
 		$src_unpaired = new ManagedNode(NULL);
-		$src_unpaired->set('mgn_name', 'clone source ' . $suffix);
+		$src_unpaired->set('mgn_name', 'HarnessTest clone source ' . $suffix);
 		$src_unpaired->set('mgn_slug', 'clonesrc-' . $suffix);
 		$src_unpaired->set('mgn_host', '198.51.100.9');
 		$src_unpaired->set('mgn_site_url', 'https://clonesrc-' . $suffix . '.example.com');
@@ -620,7 +621,7 @@ class CustomerCloudProvisioningTest {
 
 		// A node that was not cloud-born has no provision — actionable error.
 		$manual_node = new ManagedNode(NULL);
-		$manual_node->set('mgn_name', 'RDNS Test Manual');
+		$manual_node->set('mgn_name', 'HarnessTest RDNS Manual');
 		$manual_node->set('mgn_slug', 'rdns-test-manual-' . random_int(1000, 9999));
 		$manual_node->set('mgn_host', '203.0.113.99');
 		$manual_node->save();
@@ -636,7 +637,7 @@ class CustomerCloudProvisioningTest {
 		// Cloud-born node: provision row links node → instance; injected fake
 		// driver receives the provision's instance id + ip and the hostname.
 		$node = new ManagedNode(NULL);
-		$node->set('mgn_name', 'RDNS Test Cloud');
+		$node->set('mgn_name', 'HarnessTest RDNS Cloud');
 		$node->set('mgn_slug', 'rdns-test-cloud-' . random_int(1000, 9999));
 		$node->set('mgn_host', '203.0.113.80');
 		$node->save();

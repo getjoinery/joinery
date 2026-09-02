@@ -1548,9 +1548,13 @@ section('The health probe reports reachability, not liveness');
 // printed "Site is responding with HTTP 200". The probe now carries the
 // configured domain, and a redirect to a scheme the install did not configure
 // is a failure, not a pass.
+// The clone-source manifest check also keeps its HTTP status (to say why a
+// source refused), but it asks another site's export endpoint, not this
+// site's health — it is not a probe line.
 $probe_lines = array_values(array_filter(
     preg_split('/\R/', $install_exec),
-    function ($l) { return strpos($l, '%{http_code}') !== false && strpos($l, 'curl') !== false; }
+    function ($l) { return strpos($l, '%{http_code}') !== false && strpos($l, 'curl') !== false
+        && strpos($l, 'clone_export') === false; }
 ));
 check(count($probe_lines) >= 2, 'both install paths probe the site',
     'probe lines found: ' . count($probe_lines));

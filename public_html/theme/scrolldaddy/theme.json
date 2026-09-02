@@ -2,7 +2,7 @@
     "name": "scrolldaddy",
     "display_name": "ScrollDaddy Theme",
     "description": "ScrollDaddy self-hosted DNS filtering service theme",
-    "version": "1.0.7",
+    "version": "1.0.8",
     "status": "stable",
     "audience": [
         "scrolldaddy.app"

@@ -1,6 +1,6 @@
 # SSH is one bootstrap, run once — everything else is the agent
 
-**Status: BUILT 2026-09-02, awaiting live verification on the keyless boxes.**
+**Status: BUILT and LIVE-VERIFIED 2026-09-02 on every shape (fresh, clone, bare, bare-metal; certificates via host or self; fleet seeding; apply_update after a fresh install) — see "Live gate" under Acceptance. Twelve defects found by the gate are fixed and published (0.8.368, agent 1.17.2).**
 WP1–WP5 and B1 are implemented (agent 1.17.0 adds `clone_export_arm` and
 `fleet_enroll`; `build_install_node` is one session; `ProvisionPendingSsl`
 observes then asks, with a container's certificate issued on its host;
@@ -11,8 +11,8 @@ deleted). Two schema columns were added (`cvp_clone_key_sealed`,
 fixed while building: **B2** — in quiet mode (every plane-driven install)
 install.sh never armed the deferred-SSL retry timer at all, because arming
 lived inside the verbose summary; it is armed before the summary now, on a
-colon-separated candidate list the timer resolves when it fires. Nothing below
-has run against a live box yet; the Acceptance list is the live gate.
+colon-separated candidate list the timer resolves when it fires. The Acceptance
+list was the live gate; its results are recorded under it.
 
 **Review 2026-09-02 (public-html-01), all findings resolved in code:** the
 install form creates cloud instances only (its existing-server target could
@@ -306,6 +306,135 @@ certificate" true.
 - `FleetProvisionSeeding.php` and `JobCommandBuilder.php` contain no `sshpass`
   or `ssh -i`; `InstallJobExecutor.php` is the only file under
   `plugins/server_manager` that does.
+
+### Live gate (2026-09-02, release 0.8.363, agent 1.17.0)
+
+- The four keyless hosts took agent 1.17.0 on their own from the release
+  channel within a minute of the publish, and advertise `provision_certificate`
+  and `fleet_enroll`.
+- Once the four names had A records, the scheduled pass filed one
+  `provision_certificate` job per site on the site's **host** (`for_node_id`
+  = the site), and keyless2, keyless3 and keyless4 reached `mgn_ssl_state =
+  active` within one tick each. No `provision_ssl` job exists for any of
+  them. **Acceptance item 3 holds.**
+- keyless1's host answered "Unable to validate JWS :: Account not found" from
+  Let's Encrypt on HTTP-01 — a stale certbot account under
+  `/etc/letsencrypt/accounts` on that host, left by the 2026-09-01 SSH-era
+  attempt — then fell to DNS-01 and reported the operator alert as designed.
+  That is a fixture defect, not a path defect; the box is disposable.
+- **B5 (found here, fixed in install.sh 2.60):** a fresh install never carried
+  `RELEASE_MANIFEST` and `.sig` to the site root — only `upgrade.php` did — so
+  every freshly installed node's agent refused every script primitive,
+  `apply_update` among them: "no script from this release can be verified
+  before running as root: it ships no signed release manifest". A fresh node
+  could therefore never take the upgrade that would have given it a
+  manifest. `install.sh` now places the manifest on both the bare-metal and
+  Docker paths and, when the core overlay applies a newer archive, the
+  manifest of that archive. The four keyless sites from before 2.60 stay
+  unupgradable through the agent and are replaced, not repaired.
+- **Fresh provision on 0.8.364 (keyless5, provision 3105): acceptance item
+  1 holds.** `ready` → `booting` → `installing` → `done` with one
+  `install_node` job of two steps (local preflight, one ssh session), ending
+  in `INSTALL_SUCCESS` and `CONTAINER_PORT=8080`, seven minutes end to end.
+  The host agent joined at 1.17.0 and the site's agent joined; both approved
+  from the plane, the host linked to its placement at approval. With the A
+  record in place the next pass filed `provision_certificate` on the host and
+  the site went `active` in one tick. No `provision_ssl` job.
+- **B6 (found on keyless5, fixed in JobCommandBuilder 1.53):** `apply_update`
+  on the fresh site was refused with "tree manifest signature does not verify
+  against the compiled-in release key". The bootstrap fetched the plane's
+  release, but `install.sh site` defaults `UPGRADE_SERVER` to getjoinery.com
+  and overlaid *that* core — and that `agent_dist` — over the plane's, so the
+  container's agent was built and keyed by getjoinery.com while the manifest
+  at the site root was signed here. The site's `upgrade_source` pointed at
+  getjoinery.com as well. The bootstrap passes
+  `--upgrade-server=<this plane>` with both site installs, so the overlay,
+  the theme and plugin downloads, `upgrade_source` and the container's agent
+  all come from the plane whose release the box fetched. The SSH-era builder
+  never passed it either; the production plane hides it because there the
+  plane and getjoinery.com are one machine. keyless5, like keyless1–4, is
+  therefore unupgradable from this plane and is replaced.
+- **Fresh provision on the 1.53 builder (keyless6, provision 3106): items 1
+  and 5 hold, and B5/B6 are confirmed closed.** One two-step install job,
+  `INSTALL_SUCCESS`; the site's agent joined at **1.17.0** (the plane's own
+  build, so B6 is closed); `apply_update` was **accepted** and ran — the
+  node was already on 0.8.365 because the overlay now comes from here (B5
+  closed: the manifest is present and verifies). Fleet seeding: the provision
+  went `done` with seed state `pending`, the next pass dispatched ONE
+  `fleet_enroll` job (agent transport), the node answered `{"seeded": true}`,
+  and the job row's parameters and commands hold no secret afterwards. No
+  SSH process anywhere in it.
+- **Clone from keyless6 (keyless7, provision 3107):** the source was armed
+  at `ready` by ONE `clone_export_arm` job over the agent (`CLONE_EXPORT_ARM=
+  armed`, the key blanked from the job row on completion); the key sealed on
+  the provision; the instance created; the bootstrap job had two steps and
+  zero `scp`, pulling from `https://keyless6.dev.getjoinery.com` with the
+  key. It failed on the first try, which found two defects:
+  - **B7 (fixed, install.sh 2.61):** the manifest check ran `curl -f` in a
+    command substitution under `set -e`, so any HTTP error ended the script
+    before its own diagnostic printed — the job said "exited 22" and nothing
+    else. It now reports the HTTP code and what it means.
+  - **B8 (fixed, upgrade.php + clone_export.php 1.5):** the source's
+    `utils/clone_export` answered 500 to the correct key because
+    `uploads/upgrades/` — the upgrade staging area, recreated at the end of
+    `upgrade.php` after `fix_permissions.sh` has run — was `root:root 0750`:
+    under the agent an upgrade runs as root, where the SSH path ran as user1.
+    The manifest's directory walk threw on it. Every agent-upgraded node has
+    this directory today. `upgrade.php` now gives staging its parent's owner,
+    group and mode at both places it creates it (nodes self-heal on their
+    next upgrade, because the extracted `upgrade.php` re-runs itself);
+    `clone_export.php` neither counts nor exports the staging directory and
+    skips an unreadable entry instead of dying. keyless6 was repaired by hand
+    (one `chown`) and the clone retried with the source still armed.
+  - **The retry completed:** two steps, zero `scp`; the provision went
+    `done`, the clone key left the provision and the bootstrap job's commands,
+    and the source received exactly two jobs in its life as a source — the
+    arm and the disarm (`CLONE_EXPORT_ARM=disarmed`). keyless7's own agent
+    joined at 1.17.0, its certificate was issued on its host, and its fleet
+    seeding completed. **Acceptance item 4 holds.**
+- **B9 (fixed, FleetProvisionSeeding 2.1):** `mintTenantKey` keeps ONE
+  active fleet key per buyer, so seeding a buyer's second site deactivated
+  the key the first site enrolled with — seen when keyless6 was re-seeded
+  after keyless7 and keyless7's key went inactive. The fleet model is one
+  slot per subscription (`FleetService::enroll` returns the user's single
+  live slot), so a second site is refused at seeding, naming the site that
+  holds the slot, and no key is minted; re-seeding the holder itself is a
+  rotation and goes through. Whether a subscription should ever carry more
+  than one slot is a product question the fleet service answers, not this
+  spec.
+- **B10 (fixed, install_node_form 1.8):** the install form encoded a `bare`
+  instance as `cvp_docker_mode = 'bare-metal'`, and the builder (1.52 review
+  fix) refuses that pairing — a bare instance IS a Docker host. Every bare
+  provision from the form failed at "Failed to build install steps" before
+  any SSH. The form writes `'docker'` for it now. Found on keyless8.
+- **`bare` (keyless8, provision 3124) and bare-metal (keyless9, provision
+  3125), run live 2026-09-02 evening — acceptance item 1 holds for every
+  shape.** Each was one job of two steps, one ssh session, zero scp,
+  `INSTALL_SUCCESS`: the bare host in one minute, the bare-metal site in
+  six. keyless8's agent joined as `keyless8` at 1.17.0. keyless9 issued its
+  own certificate during the install (the A record was already in place) and
+  its agent joined at 1.17.0.
+- **B11 (fixed, agent 1.17.1):** keyless9's join arrived as `localhost` —
+  the fresh instance's hostname — because a site-driven join claimed the OS
+  hostname, while the Docker host path names its agent through the CLI's
+  `--name`. A machine carrying a site now claims the site's name (the site
+  root's directory name); only a siteless machine falls back to hostname.
+- **B12 (fixed, agent 1.17.2):** `joinery-agent status` run by hand on
+  keyless9 printed "Posture: machine (no Joinery site on this box)" while
+  the daemon was serving the site. The daemon finds the site through
+  `JOINERY_CONFIG`, which systemd loads from
+  `/etc/joinery-agent/joinery-agent.env`; a root shell has no such variable
+  and the CLI fell through to a compiled default that exists on one
+  development box. The agent now reads the variable out of the unit's
+  environment file when the environment lacks it, so the CLI and the daemon
+  resolve the site the same way.
+- **The spec's one-shot claim is narrower than assumed:** `install.sh server`
+  leaves root password login ENABLED when no SSH key is present and the run
+  is not from a sudo account ("Root password login is the only way into this
+  server, so it is being left enabled"). A keyless bare-metal box therefore
+  still answers the sealed password after its bootstrap, and `retry_install`'s
+  refusal of a bare-metal retry (review fix B4) is stricter than the
+  installer. Left as is: the refusal costs a re-provision, never a stuck box.
 
 ## Related
 

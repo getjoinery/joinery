@@ -25,6 +25,7 @@
  * happen, which publish_upgrade.php treats as a reason to refuse the release
  * rather than ship a bundle it already knows is stale.
  *
+ * @version 1.7 - a built result reports the version now in the bundle, not the one it replaced
  * @version 1.6 - rrmdir reports whether the tree is actually gone, and the caller names the real
  *                cause. A root-owned agent_dist.old left by a publish that ran as root could not
  *                be cleared by a later publish running as the site user, and the failure surfaced
@@ -206,7 +207,8 @@ class AgentDistPublisher {
 
 			$msg = "Agent artifact: bundled v{$agent_version} for " . implode(', ', self::ARCHES);
 			$say($msg);
-			return $result(self::STATUS_BUILT, $msg, $agent_version, $bundled_version);
+			// The bundle now holds what was just built; the pre-build version is history.
+			return $result(self::STATUS_BUILT, $msg, $agent_version, $agent_version);
 		} catch (\Throwable $e) {
 			if (isset($staging)) { self::rrmdir($staging); }
 
