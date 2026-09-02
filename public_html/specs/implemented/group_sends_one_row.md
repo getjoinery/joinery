@@ -1,13 +1,13 @@
 # Group sends — an email campaign, queued
 
-**Status:** BUILT 2026-09-02 (WP1–WP4 and WP5's migration), uncommitted. Scope
+**Status:** IMPLEMENTED 2026-09-02 (WP1–WP4 and WP5's migration). Scope
 reduced the same day by the owner: a group send is an email campaign, queued
 and drained in the background. The in-app announcement channel and batch
 sending are **deferred** and kept whole in §9. `update_database` (plain, then
 `--upgrade` for the index pass) has run on dev: migration 177 exported and
 deleted 3411 rows; the three indexes exist, the unique one as a partial index
-over live rows, and migration 178 retired the hand-made index on the same pair. Open: WP5's column and option
-removal (§3.7 step 2) waits one release after the migration has run fleet-wide.
+over live rows, and migration 178 retired the hand-made index on the same pair. Follow-up, one release after the
+migration has run fleet-wide: WP5's column and option removal (§3.7 step 2).
 Emails sent before this build carry no audience row, so the event and group
 boxes list sends from this build on; the earlier ones remain under
 `/admin/admin_emails`.
