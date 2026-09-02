@@ -36,6 +36,10 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.10 - the channel fills the api_agent bucket it is checked against: one request-log
+ *                 row per request at shutdown, carrying the outcome, for everything except a
+ *                 successful claim (the steady-state poll). The bucket had no writer, so the
+ *                 limit in apiv1.php could never fire
  * @version 1.9 - a claim carries the node's own vocabulary and bundle version, and the plane
  *                records both. A version number is a GUESS about what a node can do; the node's
  *                own list is not (the first apply_update rollout guessed, and nine agents refused)
@@ -116,6 +120,22 @@ class AgentChannelEndpoint {
 	public static function dispatchPreAuth($url_segments) {
 		$endpoint = strtolower($url_segments[3] ?? '');
 
+		// Meter the channel. apiv1.php refuses when the api_agent bucket is
+		// over its limit, and this is what fills the bucket — recorded at
+		// shutdown so the one row per request carries the outcome, whichever
+		// api_error()/api_success() exit ended it. The healthy poll is the one
+		// request left out: see meterOutcome().
+		register_shutdown_function(function () use ($endpoint) {
+			$code = http_response_code();
+			$code = is_int($code) ? $code : 200;
+			if (!self::meterOutcome($endpoint, $code)) {
+				return;
+			}
+			$action = preg_replace('/[^a-z0-9_]/', '', $endpoint);
+			RequestLogger::log('api_agent', substr($action !== '' ? $action : '(none)', 0, 40),
+				$code < 400, ['status_code' => $code]);
+		});
+
 		if (strtoupper($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
 			api_error('The agent channel accepts POST only.', 'ActionError', 405);
 		}
@@ -152,6 +172,23 @@ class AgentChannelEndpoint {
 				break;
 		}
 		exit;
+	}
+
+	/**
+	 * Does this request count toward the api_agent bucket?
+	 *
+	 * Everything on the channel counts — joins, results, artifact fetches,
+	 * unknown paths, refused signatures — except a claim that succeeded. A
+	 * fleet polls on a seconds cadence (SUGGESTED_POLL_INTERVAL), which on a
+	 * modest fleet is tens of thousands of requests a day against a few
+	 * hundred of everything else, and check_rate_limit() counts rows with a
+	 * query. Writing the steady-state poll would swamp the table that every
+	 * other rate limit on the platform reads. A claim that FAILED is not
+	 * steady state — an unsigned or mis-signed flood looks exactly like that —
+	 * so it counts.
+	 */
+	public static function meterOutcome($endpoint, $status_code) {
+		return !($endpoint === 'claim' && (int)$status_code < 400);
 	}
 
 	// ==================================================================

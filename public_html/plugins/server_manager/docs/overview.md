@@ -295,6 +295,8 @@ An agent claims a job and then reports. If it never reports — it crashed, the 
 
 `/artifact` is the one response that is bytes rather than a JSON envelope, and it is described under [Machines with no site](#machines-with-no-site). Its body fetches are metered on their own bucket (`api_agent_artifact_rate_limit_requests`, per address per window) and each is recorded, because they are the expensive ones; the small manifest fetches ride the general agent-channel limit.
 
+The general limit (`api_agent_rate_limit_requests`, per address per window) counts one request-log row per request on the channel — joins, results, manifest fetches, unknown paths, refused signatures — written at shutdown with the outcome. The one request it does not count is a claim that succeeded: a fleet polls on a seconds cadence, which is tens of thousands of requests a day against a few hundred of everything else, and the rate-limit check counts rows with a query. A claim that fails does count, since an unsigned or mis-signed flood looks exactly like that. `AgentChannelEndpoint::meterOutcome()` is the rule.
+
 ## Machines with no site
 
 Some machines a management node manages host no Joinery site at all — a mail relay, a Docker host. They run the same agent in a **machine posture**: no site root, no local database, no admin page, and no platform release ever delivered to them. Two things follow, and both are served by the same endpoint.

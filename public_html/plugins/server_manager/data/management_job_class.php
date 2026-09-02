@@ -2,6 +2,9 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.13 - rerun(): a new job carrying this job's work in whichever shape it has. A
+ *                  primitive job re-run through createJob(steps) lost its envelope and
+ *                  completed green having done nothing; rerun() copies the envelope
  * @version 1.12 - backup_database and backup_project leave the job-type filter (retired ops)
  * @version 1.11 - createFromBuild routes a probe envelope to NodeHealthProbe, which completes it
  *                 in-request and files an already-finished row
@@ -343,6 +346,41 @@ class ManagementJob extends SystemBase {
 				$built['params'] ?? [], $created_by, $record ?: null);
 		}
 		return self::createJob($node_id, $job_type, $built, $params, $created_by);
+	}
+
+	/**
+	 * Queue a fresh job that does what this one did, for the same node, with
+	 * the same parameters. The unit of work is copied in whichever shape the
+	 * job carries: a primitive envelope goes back through createPrimitiveJob
+	 * (with the record params the plane wrote down about it), a step list back
+	 * through createJob. Reading only the `steps` key silently turned a
+	 * primitive re-run into a zero-step job that completed green having done
+	 * nothing — the one outcome a re-run must never produce, so a job with no
+	 * work in it refuses here instead.
+	 */
+	function rerun($created_by) {
+		$commands = $this->get('mjb_commands');
+		if (is_string($commands)) {
+			$commands = json_decode($commands, true);
+		}
+		$parameters = $this->get('mjb_parameters');
+		if (is_string($parameters)) {
+			$parameters = json_decode($parameters, true);
+		}
+		$node_id  = $this->get('mjb_mgn_node_id');
+		$job_type = $this->get('mjb_job_type');
+
+		if ($this->isPrimitiveJob()) {
+			return self::createPrimitiveJob($node_id, $job_type, $commands['primitive'],
+				$commands['params'] ?? [], $created_by, $parameters ?: null);
+		}
+		$steps = is_array($commands) ? ($commands['steps'] ?? null) : null;
+		if (!is_array($steps) || count($steps) === 0) {
+			throw new ManagementJobException(
+				"Job #{$this->key} ({$job_type}) carries no steps and no primitive — re-running it "
+				. 'would queue a job that completes without doing anything.');
+		}
+		return self::createJob($node_id, $job_type, $steps, $parameters ?: null, $created_by);
 	}
 
 	/**

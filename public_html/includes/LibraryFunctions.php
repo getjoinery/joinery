@@ -310,12 +310,43 @@ class LibraryFunctions {
 			return $observed;
 		}
 
-		$remembered = strtolower(trim((string)Globalvars::get_instance()
-			->get_setting('protocol_observed_scheme', true, true)));
+		return self::resolve_scheme('auto', (string)Globalvars::get_instance()
+			->get_setting('protocol_observed_scheme', true, true), null);
+	}
+
+	/**
+	 * The scheme a link is built on, from the two settings and the request.
+	 *
+	 * Pure: everything it needs is handed in, so it can be asked what it would
+	 * do for any combination without touching the settings table. get_absolute_url()
+	 * and detect_protocol() feed it the live values.
+	 *
+	 * @param string      $protocol_mode    'http' | 'https' | 'https_redirect' | 'auto' ('' = auto)
+	 * @param string      $observed_scheme  protocol_observed_scheme — what the last real
+	 *                                      request arrived on, or '' if never served one
+	 * @param string|null $request_scheme   the scheme of the request being served, or
+	 *                                      null when running headless (cron, CLI)
+	 * @return string 'http' or 'https'
+	 */
+	static function resolve_scheme($protocol_mode, $observed_scheme, $request_scheme) {
+		switch ((string)$protocol_mode ?: 'auto') {
+			case 'http':
+				return 'http';
+			case 'https':
+			case 'https_redirect':
+				return 'https';
+		}
+		// auto: the request being served knows its own scheme. Headless code
+		// uses what a real request recorded; a site that has never served one
+		// gets http, which redirects to https where that is on, rather than an
+		// https link nobody could reach on an http-only site.
+		if ($request_scheme === 'http' || $request_scheme === 'https') {
+			return $request_scheme;
+		}
+		$remembered = strtolower(trim((string)$observed_scheme));
 		if ($remembered === 'http' || $remembered === 'https') {
 			return $remembered;
 		}
-
 		return 'http';
 	}
 
@@ -382,20 +413,11 @@ class LibraryFunctions {
 		$settings = Globalvars::get_instance();
 		$protocol_mode = $settings->get_setting('protocol_mode') ?: 'auto';
 
-		// Determine protocol based on protocol_mode
-		switch ($protocol_mode) {
-			case 'http':
-				$protocol = 'http';
-				break;
-			case 'https':
-			case 'https_redirect':
-				$protocol = 'https';
-				break;
-			case 'auto':
-			default:
-				$protocol = self::detect_protocol();
-				break;
-		}
+		// detect_protocol() also records the scheme a real request arrived on;
+		// resolve_scheme() is the rule both paths share.
+		$protocol = ($protocol_mode === 'http' || $protocol_mode === 'https' || $protocol_mode === 'https_redirect')
+			? self::resolve_scheme($protocol_mode, '', null)
+			: self::detect_protocol();
 
 		// Get host from webDir, stripping any protocol, otherwise use current host
 		$webDir = $settings->get_setting('webDir');

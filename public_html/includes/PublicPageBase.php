@@ -112,51 +112,7 @@ abstract class PublicPageBase {
 			$this->user = new User($session->get_user_id(), TRUE);
 		}
 		
-		//https://blog.vnaik.com/posts/web-attacks.html
-		// Check protocol_mode for HTTPS redirect
-		$protocol_mode = $settings->get_setting('protocol_mode', false, true); // fail_silently = true
-		if($protocol_mode === 'https_redirect'){
-			require_once(__DIR__ . '/LibraryFunctions.php');
-			if(!LibraryFunctions::isSecure()){
-				$location = 'https://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'];
-				header('HTTP/1.1 301 Moved Permanently');
-				header('Location: ' . $location);
-				exit;
-			}
-
-			// Only set HSTS if explicitly enabled in settings
-			if ($settings->get_setting('enable_hsts', false, true)) {
-				header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
-			}
-		}
-		// X-Content-Type-Options is always sent (prevents MIME sniffing)
-		header('X-Content-Type-Options: nosniff');
-		// X-Permitted-Cross-Domain-Policies is always sent (prevents Flash/PDF cross-domain requests)
-		header('X-Permitted-Cross-Domain-Policies: none');
-
-		// X-Frame-Options only if enabled in settings (prevents clickjacking)
-		if ($settings->get_setting('enable_x_frame_options', false, true)) {
-			header('X-Frame-Options: SAMEORIGIN');
-		}
-
-		// Referrer-Policy only if enabled in settings (controls URL leakage)
-		if ($settings->get_setting('enable_referrer_policy', false, true)) {
-			header('Referrer-Policy: strict-origin-when-cross-origin');
-		}
-
-		// TODO (security): Implement Content-Security-Policy.
-		// The codebase has ~28 inline <script> blocks across views and includes, so
-		// strict CSP (no unsafe-inline) requires either:
-		//   (a) A nonce system: generate a per-request nonce, inject it into every
-		//       inline <script> tag via the page object, and include it in the header.
-		//   (b) Move all inline scripts to external .js files.
-		// Recommended approach: add Content-Security-Policy-Report-Only first with a
-		// strict policy and a report-uri endpoint to identify violations in production
-		// before enforcing. Known external origins to allowlist: js.stripe.com,
-		// www.paypal.com, www.google.com, www.hcaptcha.com,
-		// cdn.tailwindcss.com, cdnjs.cloudflare.com, cdn.jsdelivr.net,
-		// fonts.googleapis.com, fonts.gstatic.com.
-
+		$this->send_transport_headers($settings);
 	}
 
 	/**
@@ -957,31 +913,15 @@ abstract class PublicPageBase {
 	}
 
 	/**
-	 * Whether a brand-token value is safe to emit inside a <style> declaration.
-	 * Allows only the conservative CSS value charset used by colours, lengths,
-	 * numbers, keywords, var() references, and font stacks — which excludes the
-	 * characters ( ; { } < > \ @ and control chars) that could break out of the
-	 * declaration or inject markup.
+	 * Transport-level response headers, sent once per page from the constructor
+	 * and again from public_header_common() for pages that build their own
+	 * response: the HTTPS redirect and HSTS under protocol_mode, the always-on
+	 * MIME and cross-domain headers, the toggleable X-Frame-Options and
+	 * Referrer-Policy, and the Content-Security-Policy (csp_header()).
 	 */
-	private static function is_safe_css_token_value($val): bool {
-		if (!is_string($val)) { return false; }
-		$val = trim($val);
-		if ($val === '' || strlen($val) > 200) { return false; }
-		return (bool) preg_match('~^[#A-Za-z0-9 ,.\'"()%/-]+$~', $val);
-	}
-
-	public function public_header_common($options=array()) {
-		$_GLOBALS['page_header_loaded'] = true;
-		
-		if(!isset($options['is_404'])){
-			$options['is_404'] = 0;
-		}		
-		$session = SessionControl::get_instance();
-		$settings = Globalvars::get_instance();
-		
-		// SECURITY HEADERS — must run before ANY output below (the admin-bar
-		// <style>/<script> echoed for admins), or header() warns "headers already sent".
-		// Check protocol_mode for HTTPS redirect (duplicate check for safety)
+	protected function send_transport_headers($settings) {
+		//https://blog.vnaik.com/posts/web-attacks.html
+		// Check protocol_mode for HTTPS redirect
 		$protocol_mode = $settings->get_setting('protocol_mode', false, true); // fail_silently = true
 		if($protocol_mode === 'https_redirect'){
 			require_once(__DIR__ . '/LibraryFunctions.php');
@@ -1011,6 +951,113 @@ abstract class PublicPageBase {
 		if ($settings->get_setting('enable_referrer_policy', false, true)) {
 			header('Referrer-Policy: strict-origin-when-cross-origin');
 		}
+
+		// Content-Security-Policy: off by factory default, report-only when
+		// first switched on. See csp_header().
+		$csp = self::csp_header(
+			(bool)$settings->get_setting('enable_csp', false, true),
+			(bool)$settings->get_setting('csp_report_only', false, true)
+		);
+		if ($csp !== null) {
+			header($csp[0] . ': ' . $csp[1]);
+		}
+	}
+
+	/**
+	 * The Content-Security-Policy this site sends, as directive => sources.
+	 *
+	 * Tells the browser where scripts, styles, frames and the rest may come
+	 * from, so an injected script or an exfiltration to an unlisted host is
+	 * stopped by the browser itself. This is the permissive policy: 'unsafe-inline'
+	 * stays for scripts and styles because FormWriter output, the views and the
+	 * plugins rely on inline handlers and style blocks throughout — removing
+	 * them is the strict-CSP project (specs/content_security_policy.md, Future),
+	 * not this policy. What it does close: scripts and frames from any host not
+	 * listed here, plugins and objects entirely, and framing by other sites.
+	 *
+	 * The listed hosts are the third parties pages actually load: the payment
+	 * providers (script + their checkout frames), hCaptcha and reCAPTCHA,
+	 * YouTube embeds, Google Fonts, and the script CDNs themes declare.
+	 */
+	public static function csp_policy() {
+		return array(
+			'default-src'     => array("'self'"),
+			'script-src'      => array("'self'", "'unsafe-inline'",
+				'https://js.stripe.com', 'https://www.paypal.com', 'https://www.paypalobjects.com',
+				'https://js.hcaptcha.com', 'https://*.hcaptcha.com',
+				'https://www.google.com', 'https://www.gstatic.com',
+				'https://cdn.tailwindcss.com', 'https://cdnjs.cloudflare.com', 'https://cdn.jsdelivr.net'),
+			'style-src'       => array("'self'", "'unsafe-inline'", 'https://fonts.googleapis.com',
+				'https://cdnjs.cloudflare.com', 'https://cdn.jsdelivr.net'),
+			'img-src'         => array("'self'", 'data:', 'blob:', 'https:'),
+			'font-src'        => array("'self'", 'data:', 'https:'),
+			'media-src'       => array("'self'", 'blob:', 'https:'),
+			'connect-src'     => array("'self'", 'https:', 'wss:'),
+			'frame-src'       => array("'self'",
+				'https://js.stripe.com', 'https://hooks.stripe.com', 'https://checkout.stripe.com',
+				'https://www.paypal.com', 'https://www.sandbox.paypal.com',
+				'https://*.hcaptcha.com', 'https://www.google.com',
+				'https://www.youtube.com', 'https://www.youtube-nocookie.com'),
+			'worker-src'      => array("'self'", 'blob:'),
+			'object-src'      => array("'none'"),
+			'base-uri'        => array("'self'"),
+			'form-action'     => array("'self'", 'https://www.paypal.com', 'https://www.sandbox.paypal.com',
+				'https://checkout.stripe.com'),
+			'frame-ancestors' => array("'self'"),
+		);
+	}
+
+	/**
+	 * The CSP header to send for a pair of settings, or null for none.
+	 *
+	 * @param bool $enabled     enable_csp
+	 * @param bool $report_only csp_report_only — Content-Security-Policy-Report-Only,
+	 *                          which logs violations to the browser console and
+	 *                          blocks nothing, so a policy can be watched before
+	 *                          it is enforced
+	 * @return array|null [header name, header value]
+	 */
+	public static function csp_header($enabled, $report_only) {
+		if (!$enabled) {
+			return null;
+		}
+		$parts = array();
+		foreach (self::csp_policy() as $directive => $sources) {
+			$parts[] = $directive . ' ' . implode(' ', $sources);
+		}
+		return array(
+			$report_only ? 'Content-Security-Policy-Report-Only' : 'Content-Security-Policy',
+			implode('; ', $parts),
+		);
+	}
+
+	/**
+	 * Whether a brand-token value is safe to emit inside a <style> declaration.
+	 * Allows only the conservative CSS value charset used by colours, lengths,
+	 * numbers, keywords, var() references, and font stacks — which excludes the
+	 * characters ( ; { } < > \ @ and control chars) that could break out of the
+	 * declaration or inject markup.
+	 */
+	private static function is_safe_css_token_value($val): bool {
+		if (!is_string($val)) { return false; }
+		$val = trim($val);
+		if ($val === '' || strlen($val) > 200) { return false; }
+		return (bool) preg_match('~^[#A-Za-z0-9 ,.\'"()%/-]+$~', $val);
+	}
+
+	public function public_header_common($options=array()) {
+		$_GLOBALS['page_header_loaded'] = true;
+		
+		if(!isset($options['is_404'])){
+			$options['is_404'] = 0;
+		}		
+		$session = SessionControl::get_instance();
+		$settings = Globalvars::get_instance();
+		
+		// SECURITY HEADERS — must run before ANY output below (the admin-bar
+		// <style>/<script> echoed for admins), or header() warns "headers already sent".
+		// Check protocol_mode for HTTPS redirect (duplicate check for safety)
+		$this->send_transport_headers($settings);
 
 		// App display mode: tag the body so page CSS can adapt to chrome-less
 		// rendering (the jy-app-mode hook). Themes omit the chrome server-side

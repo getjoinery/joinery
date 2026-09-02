@@ -34,6 +34,10 @@
  * the stored grant power SMTP send (SmtpConfig::fromConnectedAccount), and the
  * outbound helpers below report SMTP send-capability and granted-scope state.
  *
+ * @version 1.5 - feed health: iia_health_state / iia_consecutive_failures / iia_broken_since,
+ *   feedHealthTransition() (pure rule) and observeFetchOutcome(), which announces
+ *   mailbox.imap_feed_broken / _recovered on transition only — a dead
+ *   authorization used to be re-detected every poll and told nobody
  * @version 1.4 - saving a feed drops the remembered Setup verdict for its
  *   mailbox, so a reconnect is believed immediately
  * @version 1.3 - the catalog's 'auth' is the default (easiest) method, not the
@@ -102,6 +106,14 @@ class InboundImapAccount extends SystemBase {
 	 *
 	 * @var array<string,array{label:string,host:?string,port:int,encryption:string,auth:string,oauth_provider:?string,smtp_host:?string,smtp_port:int,smtp_encryption:?string,smtp_files_sent:bool}>
 	 */
+	// Feed health states (iia_health_state). 'broken' is announced once, when
+	// entered; 'ok' again when the feed recovers.
+	const HEALTH_OK     = 'ok';
+	const HEALTH_BROKEN = 'broken';
+	/** Consecutive failed polls before a non-auth fault counts as an outage. One
+	 *  blip is not an outage; three in a row (~15 min at the default cadence) is. */
+	const HEALTH_FAILURE_THRESHOLD = 3;
+
 	const PRESETS = array(
 		'imap_gmail'     => array('label'=>'Gmail / Google Workspace', 'host'=>'imap.gmail.com',        'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>'google',    'app_password_url'=>'https://myaccount.google.com/apppasswords',              'smtp_host'=>'smtp.gmail.com',     'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>true),
 		'imap_microsoft' => array('label'=>'Microsoft 365 / Outlook',  'host'=>'outlook.office365.com', 'port'=>993, 'encryption'=>'ssl', 'auth'=>'oauth2',   'oauth_provider'=>'microsoft', 'app_password_url'=>null,                                                     'smtp_host'=>'smtp.office365.com', 'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>true),
@@ -176,6 +188,12 @@ class InboundImapAccount extends SystemBase {
 		'iia_last_poll_time'            => array('type'=>'timestamp(6)'),
 		'iia_last_status'               => array('type'=>'varchar(500)'),
 		'iia_needs_reauth'              => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		// Feed health, announced on transition only (feedHealthTransition):
+		// the last ANNOUNCED state is the comparison anchor, and the failure
+		// count says how many polls in a row have failed since the last success.
+		'iia_health_state'              => array('type'=>'varchar(10)', 'default'=>'ok', 'is_nullable'=>false, 'allowed_values'=>array(self::HEALTH_OK, self::HEALTH_BROKEN)),
+		'iia_consecutive_failures'      => array('type'=>'int4', 'default'=>0, 'is_nullable'=>false),
+		'iia_broken_since'              => array('type'=>'timestamp(6)'),
 		// How far back the feed reaches, and the window size when it is 'days'.
 		'iia_import_scope'              => array('type'=>'varchar(10)', 'default'=>'future', 'is_nullable'=>false, 'allowed_values'=>array(self::SCOPE_FUTURE, self::SCOPE_DAYS, self::SCOPE_FULL)),
 		'iia_import_days'               => array('type'=>'int4', 'default'=>'30'),
@@ -637,6 +655,133 @@ class InboundImapAccount extends SystemBase {
 			return $this->hasOAuthToken();
 		}
 		return $this->hasPassword() && (bool)$this->get('iia_imap_host');
+	}
+
+	// ── Feed health ─────────────────────────────────────────────────────────
+
+	/** The catalog's name for this account's provider, e.g. "Gmail / Google Workspace". */
+	function providerLabel(): string {
+		$key = (string)($this->get('iia_provider_key') ?: 'imap_generic');
+		return (string)(self::PRESETS[$key]['label'] ?? 'IMAP');
+	}
+
+	/**
+	 * What a fetch outcome means for the feed's announced state.
+	 *
+	 * Pure, so the rule can be read and tested on its own (the relay's
+	 * healthTransition has the same shape):
+	 *   - a failure with the credential refused (auth) breaks the feed at once —
+	 *     it never self-heals, so there is nothing to wait for;
+	 *   - any other failure breaks it at HEALTH_FAILURE_THRESHOLD in a row;
+	 *   - a success recovers a broken feed;
+	 *   - everything else is silence, which is the normal state.
+	 *
+	 * @param string $previous             the last announced state ('ok' | 'broken'; '' reads as ok)
+	 * @param bool   $ok                   did this fetch succeed
+	 * @param bool   $auth_failure         was the credential refused (needsReauth after the attempt)
+	 * @param int    $consecutive_failures failures in a row INCLUDING this one
+	 * @return string 'broken' | 'recovered' | 'none'
+	 */
+	public static function feedHealthTransition(string $previous, bool $ok, bool $auth_failure, int $consecutive_failures): string {
+		$was_broken = ($previous === self::HEALTH_BROKEN);
+		if ($ok) {
+			return $was_broken ? 'recovered' : 'none';
+		}
+		$broken_now = $auth_failure || $consecutive_failures >= self::HEALTH_FAILURE_THRESHOLD;
+		if (!$broken_now || $was_broken) {
+			return 'none';
+		}
+		return 'broken';
+	}
+
+	/**
+	 * Record one fetch outcome and announce a change of state, once.
+	 *
+	 * Called by ImapFetch::run() for every fetch path (the scheduled poller,
+	 * Fetch now, the reader's Refresh) and by the OAuth reconnect after its
+	 * verification fetch. A disabled feed takes part in no transitions —
+	 * switching a feed off is not an outage.
+	 *
+	 * @param bool   $ok       did the fetch succeed
+	 * @param string $detail   credential-free failure text (ignored on success)
+	 * @param int    $stored   messages the successful fetch brought in
+	 * @param bool   $announce dispatch the signal (tests pass false)
+	 * @return string the transition: 'broken' | 'recovered' | 'none'
+	 */
+	function observeFetchOutcome(bool $ok, string $detail = '', int $stored = 0, bool $announce = true): string {
+		if (!$this->get('iia_is_enabled')) {
+			return 'none';
+		}
+		$failures = $ok ? 0 : (int)$this->get('iia_consecutive_failures') + 1;
+		$auth = !$ok && $this->needsReauth();
+		$transition = self::feedHealthTransition((string)$this->get('iia_health_state'), $ok, $auth, $failures);
+
+		$this->set('iia_consecutive_failures', $failures);
+		if ($transition === 'broken') {
+			$this->set('iia_health_state', self::HEALTH_BROKEN);
+			$this->set('iia_broken_since', gmdate('Y-m-d H:i:s'));
+		} elseif ($transition === 'recovered') {
+			$this->set('iia_health_state', self::HEALTH_OK);
+			$this->set('iia_broken_since', null);
+		}
+		$this->save();
+
+		if ($transition !== 'none' && $announce) {
+			$this->announceFeedHealth($transition, $auth, $detail, $stored);
+		}
+		return $transition;
+	}
+
+	/**
+	 * The payload for mailbox.imap_feed_broken / _recovered — plain words an
+	 * owner can act on: what stopped, why, since when, whether sending is hit
+	 * too (the same connected account powers outbound), and what to press.
+	 */
+	function feedHealthPayload(string $transition, bool $auth_failure, string $detail = '', int $stored = 0): array {
+		$address  = (string)$this->get('iia_username');
+		$provider = $this->providerLabel();
+		$since    = (string)($this->get('iia_broken_since') ?: gmdate('Y-m-d H:i:s'));
+		if ($transition === 'recovered') {
+			return array(
+				'address'  => $address,
+				'provider' => $provider,
+				'detail'   => $stored > 0
+					? 'The first successful fetch brought in ' . $stored . ' message' . ($stored === 1 ? '' : 's') . '.'
+					: 'The mailbox opened again and the feed resumed where it left off.',
+			);
+		}
+		if ($auth_failure) {
+			$reason = 'The stored authorization for ' . $provider . ' was revoked or has expired, so every fetch is refused.';
+			if ((string)$this->get('iia_provider_key') === 'imap_gmail') {
+				$reason .= ' A Google OAuth app left in Testing mode expires its authorization every 7 days; publishing the app to production stops that.';
+			}
+		} else {
+			$reason = 'The last ' . (int)$this->get('iia_consecutive_failures') . ' fetch attempts failed'
+				. ($detail !== '' ? ': ' . substr($detail, 0, 300) : '.');
+		}
+		$sending = $this->isOAuth()
+			? 'Sending from this address goes through the same connected account, so it is affected too.'
+			: '';
+		return array(
+			'address'  => $address,
+			'provider' => $provider,
+			'reason'   => $reason,
+			'since'    => $since,
+			'sending'  => $sending,
+			'fix'      => 'Press Reconnect on the Accounts tab; mail waiting at ' . $provider . ' arrives on the next fetch.',
+		);
+	}
+
+	private function announceFeedHealth(string $transition, bool $auth_failure, string $detail, int $stored): void {
+		try {
+			require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
+			SignalBus::dispatch(
+				$transition === 'recovered' ? 'mailbox.imap_feed_recovered' : 'mailbox.imap_feed_broken',
+				$this->feedHealthPayload($transition, $auth_failure, $detail, $stored)
+			);
+		} catch (Throwable $e) {
+			error_log('InboundImapAccount: could not announce feed ' . $transition . ' for #' . $this->key . ' — ' . $e->getMessage());
+		}
 	}
 
 	/**

@@ -1229,6 +1229,34 @@ private static function UcName($string) {
 				CalendarSubject::user($this->key)->purge();
 			}
 
+			//DELETE THE DRIVE. A member's Drive is owned content — private storage
+			//that is meaningless without its owner — so it goes with them. Left to
+			//the generic FK rules, folders and Drive files were re-homed under the
+			//USER_DELETED tombstone, where they piled up (17 folders and 644 files
+			//on dev by 2026-09-02) and collided on the per-owner sibling-name
+			//index, so the delete itself failed. The tree walk releases blob
+			//references the way "delete forever" does; files from other sources
+			//(uploads referenced by surviving content) keep the set_value rule.
+			if(!$debug){
+				require_once(PathHelper::getIncludePath('includes/DriveHelper.php'));
+				$q = $dblink->prepare("SELECT fol_folder_id FROM fol_folders WHERE fol_usr_user_id = ? AND fol_parent_folder_id IS NULL");
+				$q->execute(array($this->key));
+				foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $fol_id) {
+					$root_folder = DriveHelper::load_folder((int)$fol_id);
+					if ($root_folder) {
+						DriveHelper::permanent_delete_tree(DriveHelper::ENTITY_FOLDER, $root_folder);
+					}
+				}
+				$q = $dblink->prepare("SELECT fil_file_id FROM fil_files WHERE fil_usr_user_id = ? AND fil_source = ? AND fil_fol_folder_id IS NULL");
+				$q->execute(array($this->key, File::SOURCE_DRIVE));
+				foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $fil_id) {
+					$root_file = DriveHelper::load_file((int)$fil_id);
+					if ($root_file) {
+						DriveHelper::permanent_delete_tree(DriveHelper::ENTITY_FILE, $root_file);
+					}
+				}
+			}
+
 			//DO ANY PREP ABOVE THIS LINE
 			parent::permanent_delete($debug);
 		} catch (\Throwable $e) {

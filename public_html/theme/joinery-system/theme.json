@@ -2,6 +2,7 @@
     "name": "joinery-system",
     "display_name": "Joinery System",
     "version": "1.0.9",
+    "status": "stable",
     "description": "The Joinery system admin theme. Vanilla HTML5+CSS \u2014 no Bootstrap, FontAwesome, jQuery, Simplebar, or Popper. ~98% smaller payload.",
     "author": "Joinery Team",
     "receives_upgrades": true,

@@ -51,6 +51,11 @@
  * cid-rewritten into the stored/sent HTML). The stored iem_body_plain is derived from
  * the final sanitized HTML.
  *
+ * @version 1.15 - buildRawMime() assembles the APPENDed Sent copy through
+ *                  SmtpMailer::applyMessage() + preSend(), the mapping every SMTP
+ *                  send uses. Horde_Mime_Mail::getRaw() throws "No base part set"
+ *                  unless a send() has run first, so every APPEND to a source Sent
+ *                  folder had failed since the feature shipped (logged, swallowed)
  * @version 1.14 - sealTargetFor(): the mailbox's posture decides whether a Sent
  *                  copy is sealed, not whether its owner holds a vault, so a
  *                  Standard mailbox stops encrypting its own sent mail
@@ -1048,72 +1053,25 @@ class MailboxSender {
 	}
 
 	/**
-	 * Serialize an EmailMessage to raw RFC822 MIME (via Horde_Mime_Mail) for the
-	 * APPEND, carrying the same Message-ID + threading headers so the Sent ingest
-	 * dedups by Message-ID.
+	 * Serialize an EmailMessage to raw RFC822 MIME for the APPEND, carrying the same
+	 * Message-ID + threading headers so the Sent ingest dedups by Message-ID.
 	 */
 	private function buildRawMime(EmailMessage $email): string {
+		// The same EmailMessage → PHPMailer mapping every SMTP send goes through
+		// (SmtpMailer::applyMessage), so the APPENDed copy is the message as sent:
+		// pinned Message-ID, threading headers, HTML + plain alternative, regular and
+		// inline (cid:) attachments. preSend() assembles the MIME without connecting
+		// to anything; getSentMIMEMessage() hands back the bytes.
 		require_once(PathHelper::getComposerAutoloadPath());
 
-		$mail = new Horde_Mime_Mail();
-		$from = $email->getFromName()
-			? $email->getFromName() . ' <' . $email->getFrom() . '>'
-			: $email->getFrom();
-		$mail->addHeader('From', $from);
-		$mail->addHeader('To', $this->joinAddresses($email->getRecipients()));
-		$cc = $this->joinAddresses($email->getCc());
-		if ($cc !== '') {
-			$mail->addHeader('Cc', $cc);
+		$mailer = new SmtpMailer();
+		$mailer->applyMessage($email);
+		if (!$mailer->preSend()) {
+			error_log('MailboxSender: could not assemble the Sent copy: ' . $mailer->ErrorInfo);
+			return '';
 		}
-		$mail->addHeader('Subject', (string)$email->getSubject());
-		$mail->addHeader('Date', gmdate('r'));
-		if ($email->getMessageId()) {
-			$mail->addHeader('Message-ID', $email->getMessageId());
-		}
-		// Threading + any other custom headers (In-Reply-To / References).
-		foreach ((array)$email->getHeaders() as $name => $value) {
-			$mail->addHeader($name, $value);
-		}
-
-		$html = (string)$email->getHtmlBody();
-		$text = (string)$email->getTextBody();
-		if ($html !== '') {
-			$mail->setHtmlBody($html, 'UTF-8', true);
-		} elseif ($text !== '') {
-			$mail->setBody($text, 'UTF-8');
-		}
-
-		foreach ($email->getAttachments() as $a) {
-			$bytes = null;
-			if (!empty($a['data'])) {
-				$bytes = (string)$a['data'];
-			} elseif (!empty($a['path']) && is_readable($a['path'])) {
-				$bytes = (string)file_get_contents($a['path']);
-			}
-			if ($bytes === null) {
-				continue;
-			}
-			$part = new Horde_Mime_Part();
-			$part->setType($a['type'] ?? 'application/octet-stream');
-			$part->setContents($bytes);
-			$part->setName($a['name'] ?? 'attachment');
-			$part->setDisposition('attachment');
-			$mail->addMimePart($part);
-		}
-
-		$raw = $mail->getRaw(false);
+		$raw = $mailer->getSentMIMEMessage();
 		return is_string($raw) ? $raw : '';
-	}
-
-	/** Join EmailMessage recipient arrays into a "Name <email>" comma list. */
-	private function joinAddresses(array $list): string {
-		$parts = array();
-		foreach ($list as $r) {
-			if (!empty($r['email'])) {
-				$parts[] = !empty($r['name']) ? $r['name'] . ' <' . $r['email'] . '>' : $r['email'];
-			}
-		}
-		return implode(', ', $parts);
 	}
 
 	// ── storage ────────────────────────────────────────────────────────────

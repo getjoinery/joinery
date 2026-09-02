@@ -5,6 +5,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.4 - re-run goes through ManagementJob::rerun(), so a primitive job re-runs its primitive
  * @version 1.3 - structured result display redacted too
  * @version 1.2
  */
@@ -50,13 +51,18 @@ if ($post_action === 'cancel_job' && in_array($job->get('mjb_status'), ['pending
 // Handle re-run action
 if ($post_action === 'rerun_job') {
 	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager/job_detail?job_id=' . $job_id); exit; }
-	$new_job = ManagementJob::createJob(
-		$job->get('mjb_mgn_node_id'),
-		$job->get('mjb_job_type'),
-		json_decode($job->get('mjb_commands'), true)['steps'] ?? [],
-		$job->get('mjb_parameters') ? json_decode($job->get('mjb_parameters'), true) : null,
-		$session->get_user_id()
-	);
+	// The job model copies its own work — a primitive envelope or a step list —
+	// so the page never has to know which shape it is looking at.
+	try {
+		$new_job = $job->rerun($session->get_user_id());
+	} catch (ManagementJobException $e) {
+		$session->save_message(new DisplayMessage(
+			$e->getMessage(), 'Error', '#^/admin/server_manager#',
+			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+		));
+		header('Location: /admin/server_manager/job_detail?job_id=' . $job_id);
+		exit;
+	}
 	header('Location: /admin/server_manager/job_detail?job_id=' . $new_job->key);
 	exit;
 }

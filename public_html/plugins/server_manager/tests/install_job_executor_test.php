@@ -35,6 +35,16 @@ foreach ($db->query("SELECT mgn_id FROM mgn_managed_nodes WHERE mgn_slug LIKE 'i
 	$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_id = ?')->execute([$sid]);
 }
 
+// Everything this test writes lives inside ONE transaction that is rolled back
+// at the end. The rows never commit, so the live install worker — which claims
+// any committed 'queued' install_node job, whoever created it — cannot pick up
+// a fixture addressed to a TEST-NET host and spend its readiness budget probing
+// an address that never answers while a real install waits behind it. (That
+// happened: a cron-spawned worker claimed a fixture job between its creation
+// and this test's cleanup.) The executor itself never opens a transaction on
+// this path — claim_next() does, and this test drives execute() directly.
+$db->beginTransaction();
+
 /** A throwaway managed node, optionally with a sealed-password provision. */
 function ije_node($slug, $seal_password = null) {
 	global $made_nodes, $made_provisions;
@@ -113,6 +123,7 @@ $job->load();
 $out = (string)$job->get('mjb_output');
 
 check($job->get('mjb_status') === 'completed', 'the job completes');
+check((string)$job->get('mjb_result') !== '', 'and its result is processed by the executor itself, not left for a watcher');
 check(strpos($out, '=== [Step 1/2] Preflight ===') !== false, 'step 1 header, teardown excluded from the count');
 check(strpos($out, 'PREFLIGHT_OK') !== false, 'step 1 output captured');
 check(strpos($out, '=== [Step 2/2] Create the site ===') !== false, 'step 2 header');
@@ -198,14 +209,34 @@ check(strpos((string)$job6->get('mjb_output'), 'waiting for the target to accept
 check($took < 60, 'the budget is honoured', round($took) . 's');
 
 // ---------------------------------------------------------------------------
+section('The worker script: one instance at a time, and it says which case it hit');
+
+$worker = PathHelper::getIncludePath('plugins/server_manager/utils/run_install_executor.php');
+$lock_path = PathHelper::getSiteRoot() . '/logs/install_executor.lock';
+$held = fopen($lock_path, 'c');
+check($held !== false, 'the worker lock file opens', $lock_path);
+// A live worker may legitimately hold the lock while this runs (an install in
+// progress on this box). Either way someone holds it now — this test or that
+// worker — and the property under test is the same: a second worker exits
+// quietly, saying so.
+$we_hold = $held !== false && flock($held, LOCK_EX | LOCK_NB);
+$out = array(); $code = 0;
+exec('php ' . escapeshellarg($worker) . ' 2>&1', $out, $code);
+check($code === 0 && strpos(implode("\n", $out), 'already running') !== false,
+	'a second worker while one holds the lock exits quietly, saying so' . ($we_hold ? '' : ' (a live worker holds it)'),
+	implode(' | ', $out));
+if ($we_hold) { flock($held, LOCK_UN); }
+if ($held !== false) { fclose($held); }
+$perms = substr(sprintf('%o', fileperms($lock_path)), -3);
+check($perms === '666', 'the lock file is openable by any user, so a hand run never locks the cron user out', $perms);
+
+// ---------------------------------------------------------------------------
 section('Cleanup');
 
-foreach ($made_provisions as $id) { $db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_id = ?')->execute([$id]); }
-foreach ($made_jobs as $id) { $db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_id = ?')->execute([$id]); }
-foreach ($made_nodes as $id) {
-	$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_node_id = ?')->execute([$id]);
-	$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_id = ?')->execute([$id]);
-}
+// Nothing committed, so nothing to delete: the rollback takes every fixture
+// row with it, and the ids the test collected prove there were rows to take.
+check(count($made_nodes) > 0 && count($made_jobs) > 0, 'fixtures were created inside the transaction');
+$db->rollBack();
 $left = (int)$db->query("SELECT COUNT(*) FROM mgn_managed_nodes WHERE mgn_slug LIKE 'ijetest-%'")->fetchColumn();
 check($left === 0, 'every node this test created is gone', $left . ' left');
 

@@ -17,6 +17,8 @@
  * validated to be a same-site path before redirecting (open-redirect safety).
  * No token or secret ever appears in an error message or a URL.
  *
+ * @version 1.1 - a consumer implementing OAuth2ConsumerHandlesDenial chooses the landing page for a
+ *                denied or errored consent, so an operator is told the cause rather than "cancelled"
  * @version 1.0
  */
 
@@ -68,6 +70,22 @@ function oauth_callback_logic(array $input, ?OAuth2Client $client = null): Logic
     $has_error = isset($input['error']) && $input['error'] !== '';
     $code = isset($input['code']) ? (string)$input['code'] : '';
     if ($has_error || $code === '') {
+        // A consumer that can say what the error means gets it first: the
+        // operator lands on a page that names the cause and the fix, not a
+        // bare "cancelled". Its answer is held to the same same-site rule.
+        require_once(PathHelper::getIncludePath('includes/oauth/OAuth2ConsumerHandlesDenial.php'));
+        $denial_consumer = OAuth2ConsumerRegistry::get((string)$flow['purpose']);
+        if ($denial_consumer instanceof OAuth2ConsumerHandlesDenial) {
+            $landing = $denial_consumer->onConsentDenied(
+                $has_error ? (string)$input['error'] : 'cancelled',
+                (string)$flow['provider'],
+                is_array($flow['payload']) ? $flow['payload'] : []
+            );
+            $landing = oauth_callback_safe_path($landing);
+            if ($landing !== null) {
+                return LogicResult::redirect($landing);
+            }
+        }
         if ($returnUrl === null) {
             error_log('OAuth2 callback: cancelled flow had an unsafe returnUrl; not redirecting.');
             return $neutral_error;

@@ -22,7 +22,14 @@ function drive_move_logic(array $input): LogicResult {
 
 	$entity_type = (string)($input['entity_type'] ?? '');
 	$entity_id   = (int)($input['entity_id'] ?? 0);
-	$parent_id   = (isset($input['parent_id']) && (int)$input['parent_id'] > 0) ? (int)$input['parent_id'] : 0;
+	// 0 and omitted both mean the root. A negative id is not a folder and not
+	// the root either: a client that sends one (a provisional local id, an
+	// arithmetic slip) meant a folder this server has never seen, and moving
+	// the item to the root instead would look like success.
+	$parent_id   = isset($input['parent_id']) ? (int)$input['parent_id'] : 0;
+	if ($parent_id < 0) {
+		return LogicResult::error('Destination folder not found.', array('reason' => 'invalid_parent', 'folder_id' => $parent_id));
+	}
 
 	if ($entity_type !== DriveHelper::ENTITY_FILE && $entity_type !== DriveHelper::ENTITY_FOLDER) {
 		return LogicResult::error('Invalid entity type.');
@@ -34,6 +41,20 @@ function drive_move_logic(array $input): LogicResult {
 	}
 	if (!DriveHelper::can_write($entity_type, $entity, $user_id, $session->get_permission())) {
 		return LogicResult::error('You do not have permission to move this item.');
+	}
+
+	// Already there: nothing to move. Answered as success so a retried move
+	// converges instead of being refused for a collision with itself, and so
+	// no conversion, depth or cycle work runs for a move that changes nothing.
+	$current_parent = (int)$entity->get($entity_type === DriveHelper::ENTITY_FOLDER ? 'fol_parent_folder_id' : 'fil_fol_folder_id');
+	if ($current_parent === $parent_id) {
+		return LogicResult::render(array(
+			'ok'        => true,
+			'unchanged' => true,
+			'item'      => ($entity_type === DriveHelper::ENTITY_FOLDER)
+				? DriveHelper::folder_export($entity)
+				: DriveHelper::file_export($entity),
+		));
 	}
 
 	if ($parent_id > 0) {
@@ -229,7 +250,7 @@ function drive_move_logic_descriptor(): array {
 		'input'            => array(
 			'entity_type' => array('type' => 'string', 'required' => true, 'enum' => array('file', 'folder'), 'label' => 'Entity type'),
 			'entity_id'   => array('type' => 'int', 'required' => true, 'label' => 'Entity id'),
-			'parent_id'   => array('type' => 'int', 'required' => false, 'label' => 'Destination folder id (omit for root)'),
+			'parent_id'   => array('type' => 'int', 'required' => false, 'min' => 0, 'label' => 'Destination folder id (omit or 0 for root)'),
 		),
 	);
 }

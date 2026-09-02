@@ -282,6 +282,7 @@ php plugins/server_manager/includes/publish_upgrade.php "release notes here"
 - Core archive excludes theme/ and plugins/ directories
 - Each theme/plugin with `included_in_publish: true` gets its own versioned archive
 - Prevents overwriting existing versions
+- Refuses a release whose tree fails its tests (see Publish refusals below)
 - Automatic cleanup on failure
 - Registers upgrade in stg_upgrades table
 
@@ -317,10 +318,14 @@ Every publish writes the full text of its run to `{site root}/logs/publish/publi
 
 **Publish refusals:**
 
-Two conditions stop a publish before anything is written — no VERSION change, no archives, no release row:
+These conditions stop a publish before anything is written — no VERSION change, no archives, no release row:
 
 1. The requested version is lower than the one already in the `VERSION` file.
-2. This box holds agent source newer than the bundled agent artifact and the rebuild fails (see [Server Manager](../plugins/server_manager/docs/overview.md)).
+2. `LICENSE.md` is missing or empty (every archive carries the license text).
+3. A default install bundle names a plugin this release cannot carry.
+4. **The tree fails its own tests.** The publisher runs the `deploy` tier (every deployable file compiles, the core classes load, the database answers, the manifests parse, the site answers over HTTP — seconds, all reads) and, where this site authored the code (`DeploymentHelper::mayMintReleaseVersion()`), the `safe` tier as well (the development gate, a couple of minutes). A relay republishing what it received runs only `deploy`, because the development tiers assert things about a checkout it is not — see [The deploy tier](#the-deploy-tier). Per-suite PASS lines are left out of the publish output; failures, skips and the summary are kept. There is no flag to skip the gate: the fix is the failing test or the code it caught.
+5. This box holds agent source newer than the bundled agent artifact and the rebuild fails (see [Server Manager](../plugins/server_manager/docs/overview.md)).
+6. The mailbox plugin's relay sealer binaries cannot be built.
 
 ---
 
@@ -515,9 +520,14 @@ Each entry: `columns` (required, array of bare names or SQL expressions), option
 
 **Drop safety.** The obsolete-drop pass only touches an index when all three hold: its name carries the reserved suffix, it does not back a constraint and is not a primary key, and it is not in the class's declared set. Primary keys, constraint-backing indexes, and hand-made indexes are never dropped.
 
-### Plugin Tables Excluded
+### Plugin Tables
 
-`update_database.php` always runs with `include_plugins => false`. Plugin tables are managed through the plugin activation workflow (`PluginManager::activate()` calls `DatabaseUpdater::runPluginTablesOnly()`), not through the core updater. This is intentional — core can't know about plugins at compile time.
+The core table pass (`runCoreTablesOnly`) runs with `include_plugins => false`; plugin schema is managed by `PluginManager` (`DatabaseUpdater::runPluginTablesOnly()`), which core cannot enumerate on its own. `update_database` touches plugin schema at two points:
+
+1. **Before migrations** — `PluginManager::syncTables()` creates missing tables and adds missing columns for every active plugin's data classes, and does nothing else. It runs after the core table pass (a plugin table may reference a core one) and before the migrations step, so a migration that reads or writes a new plugin column finds it on the first run.
+2. **After migrations** — the Plugin & Theme Sync step runs `PluginManager::sync()`: the same additive pass again (a no-op by then), then column modifications, unique constraints, indexes, foreign keys, plugin migrations, deletion rules, menus and settings.
+
+Plugin tables are also synced on plugin activation and from the admin Plugins page ("Sync with Filesystem").
 
 ### Agent File Regeneration
 

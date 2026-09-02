@@ -3845,6 +3845,33 @@ the reader's Refresh button (`mailbox/check_mail`, the viewer's own feeds) and
 the admin **Fetch now** row action. Every path funnels through the per-account
 advisory fetch lock inside `ImapIngestor::poll()`, so concurrent fetches on one
 account fail fast rather than racing the cursors.
+**Feed health is announced, once.** Every fetch path reports its outcome to the
+account (`InboundImapAccount::observeFetchOutcome()`), which keeps the last
+announced state on the row (`iia_health_state`, `iia_consecutive_failures`,
+`iia_broken_since`) and raises `mailbox.imap_feed_broken` /
+`mailbox.imap_feed_recovered` on the signal bus **on transition only** — the
+relay scanner's pattern. A refused credential (`iia_needs_reauth`: the token
+refresh was refused, or the server rejected the login) breaks the feed at once,
+since it never self-heals; any other failure breaks it after
+`HEALTH_FAILURE_THRESHOLD` (3) polls in a row; the first successful fetch
+recovers it. Both signals carry a `notify` block (in-app + email to admins),
+saying what stopped arriving, why, since when, whether sending through the same
+connected account is affected too, and what to press. A disabled feed takes
+part in no transitions. The same state feeds the provisioning check
+`InboundEmailHealth::checkImapFeeds()` ("Connected mailboxes are fetching"), so
+a broken feed shows anywhere provisioning status is shown, and the reader's
+"needs attention" banner and the Setup tab read the row as before.
+
+**Reconnect** (the OAuth consumer) stores the fresh token, then runs the same
+connection test the Accounts tab's Test button runs before it says Connected —
+a token that still cannot open the mailbox is reported on the spot, with the
+error, and the feed stays flagged. A denied or errored consent lands back on the
+Accounts tab with the cause translated: for Google's `access_denied`, that the
+account is not a test user on the OAuth app or the app sits in Testing mode with
+an expired consent, and what to change in the Google console. A Google OAuth app
+left in Testing mode expires its authorization every 7 days; publishing it to
+production is the operational answer to weekly reconnects.
+
 **Existing mail** is a per-mailbox choice (`iia_import_scope`) on the feed
 editor — how far back into the source the feed reaches:
 - **Future only** (default) — the cursor seeds to the folder's current high UID,

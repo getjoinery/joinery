@@ -226,6 +226,36 @@ class InboundEmailHealth {
     }
 
     /**
+     * Every enabled IMAP feed can open its mailbox.
+     *
+     * Reads the feed's announced health state (InboundImapAccount::observeFetchOutcome
+     * keeps it current on every fetch path) rather than connecting: a broken
+     * feed is one the poller has already found broken, and this check puts that
+     * finding on the plugin's standard health surfaces instead of only inside
+     * the mailbox pages. Passes silently when there are no feeds.
+     *
+     * @throws ProvisioningCheckFailed naming each broken feed, its reason and the fix.
+     */
+    public static function checkImapFeeds() {
+        require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
+        $broken = array();
+        $feeds = new MultiInboundImapAccount(array('enabled' => true, 'deleted' => false));
+        foreach ($feeds as $feed) {
+            if ((string)$feed->get('iia_health_state') !== InboundImapAccount::HEALTH_BROKEN) {
+                continue;
+            }
+            $payload = $feed->feedHealthPayload('broken', $feed->needsReauth());
+            $broken[] = $payload['address'] . ' (' . $payload['provider'] . '): ' . $payload['reason'];
+        }
+        if (!empty($broken)) {
+            throw new ProvisioningCheckFailed(
+                count($broken) . ' connected mailbox' . (count($broken) === 1 ? ' has' : 'es have')
+                . ' stopped receiving mail — ' . implode(' | ', $broken)
+                . '. Press Reconnect on the Accounts tab.');
+        }
+    }
+
+    /**
      * Verify DNS and host setup for every enabled inbound domain.
      *
      * Delegates to InboundEmailSetupCheck — the single verification engine the

@@ -15,6 +15,8 @@ class FolderException extends SystemBaseException {}
  * move, depth cap, and soft-delete cascade/selective-restore — are enforced in
  * the drive logic layer (logic/drive_*), not here; this class stays CRUD.
  *
+ * @version 1.2.0 - a folder is owned by its member: permanent_delete on the owner, not a re-home
+ *                  under USER_DELETED (which collided on the sibling-name index and failed the delete)
  * @version 1.1.0
  */
 class Folder extends SystemBase {
@@ -24,12 +26,16 @@ class Folder extends SystemBase {
 
 	// Not a REST/AI resource — all access flows through the drive_* actions.
 
-	// When the owner is deleted, reassign to the deleted-user sentinel (matches
-	// File's owner rule). fol_parent_folder_id is a self-reference with a
+	// Owned: a folder is private storage with no meaning apart from its owner,
+	// and it has children of its own, so the doctrine's answer is
+	// permanent_delete (docs/deletion_system.md). User::permanent_delete() walks
+	// the Drive first through DriveHelper::permanent_delete_tree(), which
+	// releases blob references; this rule is the backstop for any row that walk
+	// did not reach. fol_parent_folder_id is a self-reference with a
 	// non-standard segment ('parent'), so it registers no auto-detected rule —
 	// descendant lifecycle is handled in the logic layer.
 	protected static $foreign_key_actions = array(
-		'fol_usr_user_id' => array('action' => 'set_value', 'value' => User::USER_DELETED),
+		'fol_usr_user_id' => array('action' => 'permanent_delete', 'source_class' => 'User'),
 	);
 
 	public static $field_specifications = array(
