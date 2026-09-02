@@ -5,6 +5,10 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.53 - the bootstrap passes --upgrade-server=<this plane> with the site install, so the core
+ *                 overlay, the downloads, upgrade_source and the container's agent all come from the plane
+ *                 whose release the box fetched (found live: the default overlaid getjoinery.com's core and
+ *                 agent, and that agent refused this plane's signed manifest for good)
  * @version 1.52 - review fixes: the release lands under /opt/joinery-install (not /tmp, which Ubuntu empties
  *                 at boot); the bare-metal prerequisite block has no password harvest and cannot mask
  *                 a failed password generation under set -e
@@ -2830,8 +2834,19 @@ class JobCommandBuilder {
 				// DNS is not here yet. `-` generates the container's own
 				// Postgres password. --enable-agent --management-node: the
 				// site's agent asks to join too.
-				$lines[] = "./install.sh -y -q site --docker {$sitename_esc} - {$domain_esc}{$port_arg}"
-				         . " --enable-agent --management-node={$plane_url_esc}{$clone_flags}";
+				// --upgrade-server names THIS plane: the release the box just
+			// fetched came from here, so the core overlay, the theme and
+			// plugin downloads, and the site's upgrade_source all stay on
+			// the same stream — and the agent baked into the container is
+			// the one this plane built and signed. Without it install.sh
+			// defaults to getjoinery.com, overlays that core and that
+			// agent over the plane's, and the site's agent then trusts a
+			// key this plane does not hold: every script primitive from
+			// here, apply_update first, is refused for the life of the
+			// container. Invisible on the production plane, where the two
+			// are the same machine.
+			$lines[] = "./install.sh -y -q site --docker {$sitename_esc} - {$domain_esc}{$port_arg}"
+				         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$plane_url_esc}{$clone_flags}";
 			}
 		} else {
 			// Bare metal: prerequisites, then the site. install.sh server
@@ -2857,7 +2872,7 @@ class JobCommandBuilder {
 			         . ' ./install.sh -y -q server;'
 			         . ' fi';
 			$lines[] = "./install.sh -y -q site --bare-metal {$sitename_esc} --password-file=/root/.joinery_postgres_password {$domain_esc}"
-			         . " --enable-agent --management-node={$plane_url_esc}{$clone_flags}";
+			         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$plane_url_esc}{$clone_flags}";
 		}
 		$lines[] = 'echo INSTALL_SUCCESS';
 

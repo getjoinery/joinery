@@ -172,6 +172,39 @@ foreach ($keys as $key_row) {
 check($minted_matches, 'the public key on the job is the buyer\'s newly minted active key');
 check(FleetProvisionSeeding::outcome($paired)['state'] === 'pending', 'before the node answers, the outcome is pending');
 
+// One slot per subscription: a buyer whose seeding is already done on ANOTHER
+// site is refused, naming that site, and no key is minted — minting would have
+// revoked the credential the first site enrolled with. The same site again is
+// a rotation and goes through.
+section('One seeded site per buyer');
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
+$holder = new CustomerCloudProvision(NULL);
+$holder->set('cvp_origin', 'admin');
+$holder->set('cvp_usr_user_id', $buyer->key);
+$holder->set('cvp_domain', 'harnesstest-fleet-holder.example.com');
+$holder->set('cvp_slug', 'harnesstest-fleet-holder-' . substr(md5(uniqid('', true)), 0, 6));
+$holder->set('cvp_status', 'done');
+$holder->set('cvp_install_mode', 'fresh');
+$holder->set('cvp_docker_mode', 'docker');
+$holder->set('cvp_mgn_node_id', $unpaired->key);
+$holder->set('cvp_fleet_seed_state', 'done');
+$holder->save();
+$holder->load();
+harness_register_row('cvp_customer_cloud_provisions', 'cvp_id', $holder->key);
+check(FleetProvisionSeeding::seededElsewhere($paired, $buyer->key) === 'harnesstest-fleet-holder.example.com',
+	'the slot holder is found by the buyer, on a node other than the one being seeded');
+check(FleetProvisionSeeding::seededElsewhere($unpaired, $buyer->key) === null,
+	'seen from the holder itself there is no other holder — re-seeding it is a rotation');
+$keys_before = 0;
+foreach (new MultiApiKey(array('user_id' => $buyer->key)) as $k) { $keys_before++; }
+$res = FleetProvisionSeeding::seedNode($paired, $buyer->key);
+check($res['ok'] === false && strpos($res['message'], 'harnesstest-fleet-holder.example.com') !== false
+	&& strpos($res['message'], 'Not seeded') !== false,
+	'seeding a second site is refused, naming the site that holds the slot', $res['message']);
+$keys_after = 0;
+foreach (new MultiApiKey(array('user_id' => $buyer->key)) as $k) { $keys_after++; }
+check($keys_after === $keys_before, 'and no key was minted, so the holder\'s credential stands');
+
 // ── D. The operator console's Fortress product ──────────────────────────────
 section('Fortress product creation');
 

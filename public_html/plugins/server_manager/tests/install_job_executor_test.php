@@ -49,7 +49,7 @@ $db->beginTransaction();
 function ije_node($slug, $seal_password = null) {
 	global $made_nodes, $made_provisions;
 	$node = new ManagedNode(NULL);
-	$node->set('mgn_name', 'IJE test ' . $slug);
+	$node->set('mgn_name', 'HarnessTest IJE ' . $slug);
 	$node->set('mgn_slug', $slug);
 	$node->set('mgn_host', '203.0.113.' . random_int(2, 250));
 	$node->set('mgn_ssh_user', 'root');

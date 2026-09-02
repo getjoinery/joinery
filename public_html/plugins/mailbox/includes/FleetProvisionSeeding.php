@@ -23,6 +23,8 @@
  * The plane already mints this key, holds its hash, and is the API it
  * authenticates TO, so the job row is not a new holder of anything.
  *
+ * @version 2.1 - one seeded site per buyer: seeding a second site is refused, naming the site that
+ *                holds the slot, instead of silently revoking that site's credential
  * @version 2.0 - seeding is the fleet_enroll primitive over the agent channel; the SSH path is gone
  * @version 1.1 - keyless nodes: seed over the provision's sealed root password
  */
@@ -85,6 +87,18 @@ class FleetProvisionSeeding {
 					. 'the fleet_enroll primitive (agent 1.17.0 or later). There is no SSH route for this.');
 			}
 
+			// One slot per subscription, so one seeded site per buyer. Minting
+			// for a second site would deactivate the key the first site enrolled
+			// with — a silent takeover nobody asked for. Refuse and say which
+			// site holds the slot; re-seeding THAT site (a key rotation) is fine.
+			$holder = self::seededElsewhere($node, $buyer_user_id);
+			if ($holder !== null) {
+				return array('ok' => false, 'job_id' => null, 'message' =>
+					'This account\'s hosted relay slot is already seeded on ' . $holder
+					. '. A subscription carries one slot, and seeding a second site would revoke the '
+					. 'first site\'s credential. Not seeded.');
+			}
+
 			$key = self::mintTenantKey($buyer_user_id);
 			$service_url = rtrim(LibraryFunctions::get_absolute_url('/'), '/');
 
@@ -99,6 +113,26 @@ class FleetProvisionSeeding {
 		} catch (\Throwable $e) {
 			return array('ok' => false, 'job_id' => null, 'message' => 'Fleet seeding failed: ' . $e->getMessage());
 		}
+	}
+
+	/**
+	 * The domain of another provision of this buyer whose seeding is done on
+	 * a node other than $node, or null when this buyer's slot is unclaimed (or
+	 * claimed by this very node, which is a rotation, not a takeover).
+	 */
+	public static function seededElsewhere($node, int $buyer_user_id): ?string {
+		if (!class_exists('CustomerCloudProvision')) {
+			return null;
+		}
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare(
+			"SELECT cvp_domain FROM cvp_customer_cloud_provisions " .
+			"WHERE cvp_usr_user_id = ? AND cvp_fleet_seed_state = 'done' AND cvp_delete_time IS NULL " .
+			"AND cvp_mgn_node_id IS NOT NULL AND cvp_mgn_node_id <> ? ORDER BY cvp_id LIMIT 1"
+		);
+		$q->execute(array($buyer_user_id, (int)$node->key));
+		$domain = $q->fetchColumn();
+		return $domain === false ? null : (string)$domain;
 	}
 
 	/**

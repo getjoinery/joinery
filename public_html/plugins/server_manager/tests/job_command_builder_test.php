@@ -331,6 +331,8 @@ check(strpos($boot_cmd, "install.sh -y -q site --docker 'bootsite' - 'boot.examp
 	'then creates the site container', $boot_cmd);
 check(strpos($boot_cmd, "--enable-agent --management-node='https://") !== false,
 	'and the site\'s own agent asks to join too');
+check(preg_match("#--management-node=('https://[^']+') --upgrade-server=\\1#", $boot_cmd) === 1,
+	'the site installs from, and upgrades from, the plane whose release it fetched — not the getjoinery.com default', $boot_cmd);
 check(strpos($boot_cmd, '--no-ssl') === false,
 	'no --no-ssl: install.sh writes the universal vhost and arms the certificate retry itself');
 check(strpos($boot_cmd, 'manage_domain.sh') === false, 'no separate proxy step');
@@ -411,6 +413,8 @@ check(strpos($metal_cmd, './install.sh -y -q server') !== false, 'bare metal run
 check(strpos($metal_cmd, "install.sh -y -q site --bare-metal 'metalsite' --password-file=/root/.joinery_postgres_password 'metal.example.com' --enable-agent") !== false,
 	'then the site, with the postgres role password the server setup recorded', $metal_cmd);
 check(strpos($metal_cmd, 'install.sh -y -q docker') === false, 'and no Docker');
+check(preg_match("#--management-node=('https://[^']+') --upgrade-server=\\1#", $metal_cmd) === 1,
+	'bare metal too installs and upgrades from this plane', $metal_cmd);
 check(strpos($metal_cmd, 'grep dbpassword') === false,
 	'no password is harvested from another site\'s config — a machine this plane creates has none');
 check(strpos($metal_cmd, "test -n \"\$POSTGRES_PASSWORD\"") !== false && strpos($metal_cmd, 'export POSTGRES_PASSWORD;') !== false,

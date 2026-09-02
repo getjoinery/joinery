@@ -1,4 +1,14 @@
 #!/usr/bin/env bash
+#VERSION 2.61 - A clone whose source refuses or fails the manifest request says
+#               which (HTTP code and meaning) instead of dying under set -e with
+#               a bare exit 22, because the guard after a failing command
+#               substitution never ran.
+#VERSION 2.60 - A fresh install carries the release's signed tree manifest
+#               (RELEASE_MANIFEST + .sig) to the site root, bare-metal and
+#               Docker alike, and the core overlay brings the manifest of the
+#               release it actually applied. Without it the node's agent refuses
+#               every script primitive — apply_update included — so a fresh
+#               node could never take the upgrade that would have fixed it.
 #VERSION 2.59 - The deferred-SSL retry timer is armed before the summary, so a
 #               quiet (plane-driven) install arms it too; on a Docker host it
 #               runs the host agent's bundled setup_ssl.sh first and the
@@ -1183,6 +1193,8 @@ deploy_application_code() {
                   "$site_root/maintenance_scripts/" > /dev/null
     fi
 
+    deploy_release_manifest "$archive_root" "$site_root"
+
     # Copy config templates if they exist
     if [ -d "$archive_root/config" ]; then
         print_info "Copying config templates..."
@@ -1289,6 +1301,21 @@ download_themes_and_plugins() {
 # themes and plugins are never overwritten by the empty stubs in the core archive.
 # Gracefully warns and continues if the server is unreachable or download fails.
 # Usage: download_core_archive TARGET_DIR
+# Carry a release's signed tree manifest (RELEASE_MANIFEST + RELEASE_MANIFEST.sig,
+# at the archive's top level) to a site root. The node's agent verifies every
+# script it runs as root against this file; a tree without it refuses all
+# script primitives, apply_update among them. upgrade.php does the same copy
+# on every upgrade — this is the install-time half. A release that ships no
+# manifest is left alone, silently: the agent reports that state itself.
+deploy_release_manifest() {
+    local src_root="$1" dest_root="$2" mf
+    for mf in RELEASE_MANIFEST RELEASE_MANIFEST.sig; do
+        if [ -f "$src_root/$mf" ]; then
+            cp "$src_root/$mf" "$dest_root/$mf"
+        fi
+    done
+}
+
 download_core_archive() {
     local target_dir="$1"
 
@@ -1336,6 +1363,9 @@ download_core_archive() {
         rsync -a --exclude='theme/' --exclude='plugins/' --exclude='.claude' "$tmp_extract/public_html/" "$target_dir/"
         local rsync_rc=$?
         if [ "$rsync_rc" -eq 0 ]; then
+            # The manifest must describe the tree that was just laid down, so
+            # it comes from THIS archive, not the one the install started from.
+            deploy_release_manifest "$tmp_extract" "$(dirname "$target_dir")"
             print_success "Core archive applied: $(basename "$core_location")"
         else
             print_warning "Core archive rsync failed (exit ${rsync_rc}) — container may be missing fresh core files"
@@ -3298,11 +3328,24 @@ do_site_create() {
             exit 1
         fi
 
-        MANIFEST=$(curl -sf -H "Authorization: Bearer ${CLONE_KEY}" "${CLONE_FROM}/utils/clone_export?action=manifest" 2>/dev/null)
+        # The status code is kept and the body is fetched without -f: under
+        # set -e a failing command substitution ends the script on the spot,
+        # so the diagnosis below never printed — a clone died with a bare
+        # "exited 22" and nothing said which side refused, or why.
+        local MANIFEST_CODE
+        MANIFEST=$(curl -s -w '\n%{http_code}' -H "Authorization: Bearer ${CLONE_KEY}" "${CLONE_FROM}/utils/clone_export?action=manifest" 2>/dev/null) || MANIFEST=""
+        MANIFEST_CODE="${MANIFEST##*$'\n'}"
+        MANIFEST="${MANIFEST%$'\n'*}"
 
-        if [ $? -ne 0 ] || [ -z "$MANIFEST" ]; then
-            print_error "Cannot connect to clone source or invalid key"
-            print_info "Verify the URL and clone key are correct"
+        if [ -z "$MANIFEST" ] || [ "$MANIFEST_CODE" != "200" ]; then
+            print_error "Clone source ${CLONE_FROM} did not answer the manifest request (HTTP ${MANIFEST_CODE:-none})"
+            if [ "$MANIFEST_CODE" = "403" ]; then
+                print_info "403 means the source refused the key: it is not armed, or armed with a different key."
+            elif [ "$MANIFEST_CODE" = "500" ]; then
+                print_info "500 means utils/clone_export failed on the source; its logs/error.log says why."
+            else
+                print_info "Verify the URL is reachable over HTTPS from this machine."
+            fi
             exit 1
         fi
 
@@ -3776,6 +3819,9 @@ do_site_docker() {
 
     print_info "Copying public_html..."
     cp -r "$ARCHIVE_ROOT/public_html" "$BUILD_DIR/$SITENAME/"
+    # The Dockerfile copies the whole staged site directory, so the manifest
+    # placed here lands at the container's site root beside public_html.
+    deploy_release_manifest "$ARCHIVE_ROOT" "$BUILD_DIR/$SITENAME"
 
     # Overlay fresh core files from the upgrade server so the image always ships
     # with current code, not whatever was in the local archive.  Skip when cloning:

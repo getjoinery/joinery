@@ -18,6 +18,10 @@
  * - themes: Streams tar.gz archive of themes directory
  * - plugins: Streams tar.gz archive of plugins directory
  *
+ * @version 1.5 - the upgrade staging directory (uploads/upgrades) is neither counted nor exported,
+ *                and an entry the web user cannot read is skipped instead of ending the request
+ *                with a 500 (an agent-run upgrade had left staging root-owned); the request log
+ *                lives in the site's own logs/ directory
  * @version 1.4 - connects to 127.0.0.1 outright, matching DbConnector
  * @version 1.3 - Fixed uploads path (was incorrectly looking in public_html/uploads instead of uploads/)
  */
@@ -302,9 +306,11 @@ function handle_uploads_export($settings, $client_ip) {
         ob_end_clean();
     }
 
-    // Stream tar output directly (from site root, creates uploads/ in archive)
+    // Stream tar output directly (from site root, creates uploads/ in archive).
+    // uploads/upgrades is the upgrade staging area, not content: excluded, so a
+    // stale or root-owned staging tree neither travels nor breaks the archive.
     $cmd = sprintf(
-        "tar -czf - -C %s uploads 2>/dev/null",
+        "tar -czf - -C %s --exclude=uploads/upgrades uploads 2>/dev/null",
         escapeshellarg($site_root)
     );
 
@@ -442,7 +448,7 @@ function handle_static_files_export($settings, $client_ip) {
  */
 function log_clone_request($action, $client_ip) {
     $site_root = dirname(dirname(__DIR__));
-    $log_dir = dirname($site_root) . '/logs';
+    $log_dir = $site_root . '/logs';
 
     if (!is_dir($log_dir)) {
         @mkdir($log_dir, 0755, true);
@@ -460,23 +466,43 @@ function log_clone_request($action, $client_ip) {
  */
 function count_files_recursive($dir) {
     $count = 0;
-
-    if (!is_dir($dir)) {
-        return 0;
+    foreach (readable_files_under($dir) as $item) {
+        $count++;
     }
+    return $count;
+}
 
-    $iterator = new RecursiveIteratorIterator(
-        new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS),
-        RecursiveIteratorIterator::SELF_FIRST
-    );
-
-    foreach ($iterator as $item) {
-        if ($item->isFile()) {
-            $count++;
+/**
+ * Every regular file under $dir the web user can reach. A directory it cannot
+ * open is skipped rather than thrown — the walk is for a size estimate, and
+ * the upgrade staging area (uploads/upgrades) is left out because it is not
+ * content and is what an agent-run upgrade leaves root-owned.
+ */
+function readable_files_under($dir) {
+    if (!is_dir($dir) || !is_readable($dir)) {
+        return;
+    }
+    $stack = [$dir];
+    while ($stack) {
+        $current = array_pop($stack);
+        if (basename($current) === 'upgrades' && dirname($current) === dirname(dirname(__DIR__)) . '/uploads') {
+            continue;
+        }
+        $entries = @scandir($current);
+        if ($entries === false) {
+            continue;
+        }
+        foreach ($entries as $entry) {
+            if ($entry === '.' || $entry === '..') continue;
+            $path = $current . '/' . $entry;
+            if (is_link($path)) continue;
+            if (is_dir($path)) {
+                $stack[] = $path;
+            } elseif (is_file($path)) {
+                yield $path;
+            }
         }
     }
-
-    return $count;
 }
 
 /**
@@ -484,18 +510,10 @@ function count_files_recursive($dir) {
  */
 function get_directory_size($dir) {
     $size = 0;
-
-    if (!is_dir($dir)) {
-        return 0;
-    }
-
-    $iterator = new RecursiveIteratorIterator(
-        new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS)
-    );
-
-    foreach ($iterator as $item) {
-        if ($item->isFile()) {
-            $size += $item->getSize();
+    foreach (readable_files_under($dir) as $path) {
+        $bytes = @filesize($path);
+        if ($bytes !== false) {
+            $size += $bytes;
         }
     }
 

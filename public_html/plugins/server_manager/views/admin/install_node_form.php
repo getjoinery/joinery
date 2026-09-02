@@ -11,6 +11,8 @@
  * create. It is enrolled from its own Admin → System → Management Node page
  * and added on the Connect Site page.
  *
+ * @version 1.8 - a bare instance is encoded as docker_mode 'docker' (it is a Docker host with no site); the
+ *                builder refused the bare-metal encoding this form used, so every bare provision failed
  * @version 1.7 - cloud instances only: the existing-server target (an SSH key on a machine the plane
  *                did not create) is gone with the SSH surface it needed
  * @version 1.6 - From-backup is a clone over HTTPS from the source site (specs/ssh_single_bootstrap.md):
@@ -137,7 +139,7 @@ if ($_POST && isset($_POST['mgn_name'])) {
 				$provision->set('cvp_provider',       $cloud_account->get('cca_provider'));
 				$provision->set('cvp_region',         trim($_POST['cloud_region']));
 				$provision->set('cvp_instance_type',  trim($_POST['cloud_instance_type']));
-				$provision->set('cvp_docker_mode',    $is_bare ? 'bare-metal' : $docker_mode);
+				$provision->set('cvp_docker_mode',    $is_bare ? 'docker' : $docker_mode); // a bare instance IS a Docker host; the builder refuses any other shape for it
 				$provision->set('cvp_install_mode',   $mode);
 				if ($mode === 'from_backup') {
 					$provision->set('cvp_source_node_id', $source_node_id);
