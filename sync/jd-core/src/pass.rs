@@ -357,26 +357,41 @@ pub fn run_pass(
             // during a wait for a key that may never end.
             //
             // The inode is enough for THIS, and only because of what it costs
-            // when it is wrong. It is not being asked who this file is -- it has
-            // its own identity either way -- only which server copy to hold on
-            // to a little longer. A wrong guess delays one delete until a key
-            // arrives; a right one keeps the copy everyone else can still reach.
-            // Order, not identity, which is the whole rule.
-            entry.replaces = all_entries(env)?
-                .into_iter()
-                .filter(|e| !e.id.is_provisional() && !e.is_encrypted && !e.remote_deleted)
-                .filter(|e| {
-                    e.synced_fingerprint
-                        .is_some_and(|fp| fp.file_id == file.fingerprint.file_id)
-                })
-                .find(|e| match relative_path(env, e) {
-                    Ok(Some(path)) => !observed.iter().any(|o| o.path == path),
-                    _ => false,
-                })
-                .map(|e| e.id);
+            // when it is wrong -- see `plaintext_source_of`.
+            entry.replaces = plaintext_source_of(env, file.fingerprint.file_id, &observed)?;
         }
         env.store.put_entry(&entry)?;
         out.local_creations += 1;
+    }
+    // The same question, asked again of every claimant already standing. A
+    // claimant that has never uploaded has no content of its own: whatever
+    // stands at its path is its file, and the scan reads any change of bytes
+    // there as an edit. When the bytes that arrived are a plaintext file's --
+    // the original brought back OUT of the vault under a new name, then
+    // dragged back IN over this path -- the original pairs with nothing, reads
+    // deleted, and its server copy would be trashed while the only bytes wait
+    // under an entry that cannot upload. So the hold follows the bytes: the
+    // claimant takes over holding whichever server copy the inode says it now
+    // stands in for, by the same rule and for the same reason as above.
+    for mut claimant in all_entries(env)? {
+        if !claimant.id.is_provisional()
+            || claimant.id.entity_type != EntityType::File
+            || !claimant.is_encrypted
+            || claimant.status != LocalStatus::PendingKey
+        {
+            continue;
+        }
+        let Some(crate::scan::LocalChange::Edited { fingerprint, .. }) = scan.change_for(claimant.id)
+        else {
+            continue;
+        };
+        let Some(source) = plaintext_source_of(env, fingerprint.file_id, &observed)? else {
+            continue;
+        };
+        if claimant.replaces != Some(source) {
+            claimant.replaces = Some(source);
+            env.store.put_entry(&claimant)?;
+        }
     }
 
     // ---- what each side did, per entry --------------------------------------
@@ -572,10 +587,18 @@ pub fn run_pass(
             //
             // So the hold lapses: the claimant stands on its own, and this
             // entry goes on as the file it is.
-            let alive = matches!(
-                scan.change_for(entry.id),
-                Some(c) if !matches!(c, crate::scan::LocalChange::Deleted)
-            );
+            let alive = match entry.id.entity_type {
+                EntityType::File => matches!(
+                    scan.change_for(entry.id),
+                    Some(c) if !matches!(c, crate::scan::LocalChange::Deleted)
+                ),
+                // Folders are absent from the file scan; the folder scan
+                // answers the same question -- standing at its path, or found
+                // somewhere else by the files inside it.
+                EntityType::Folder => {
+                    folders.present.contains(&entry.id) || folders.moves.contains_key(&entry.id)
+                }
+            };
             if !alive {
                 continue;
             }
@@ -762,7 +785,18 @@ pub fn run_pass(
                      PendingKey skip above is meant to have taken it"
                 );
                 if !held_for_replacement.contains(&entry.id) {
-                    let claimant = EntityId::file(env.store.next_provisional_id()?);
+                    // The claimant is the same kind of thing as the source. A
+                    // FILE claimant for a folder source has nothing at its
+                    // path, is swept on the next pass, and is minted again on
+                    // the one after -- the folder never held, never sent,
+                    // never told about, and the directory it stands in claimed
+                    // by nothing. A folder claimant stands at the directory,
+                    // and the files inside it then cross the edge one by one
+                    // as moves under it, each minting its own claimant.
+                    let claimant = EntityId {
+                        entity_type: entry.id.entity_type,
+                        server_id: env.store.next_provisional_id()?,
+                    };
                     let mut waiting = blank(claimant, to);
                     waiting.is_encrypted = true;
                     waiting.status = LocalStatus::PendingKey;
@@ -1905,6 +1939,31 @@ fn crossing_a_vault_edge(
     } else {
         Ok(Some(Crossing::OutOfReach))
     }
+}
+
+/// Which plaintext server copy do the bytes with this identity on the volume
+/// stand in for -- an entry that agreed on this inode and whose own path is
+/// now empty.
+///
+/// The inode is enough for THIS, and only because of what it costs when it is
+/// wrong. It is not being asked who a file is -- only which server copy to hold
+/// on to a little longer while an upload waits for a key. A wrong guess delays
+/// one delete until the key arrives; a right one keeps the copy everyone else
+/// can still reach. Order, not identity, which is the whole rule.
+fn plaintext_source_of(
+    env: &ExecEnv,
+    file_id: u64,
+    observed: &[ObservedFile],
+) -> Result<Option<EntityId>, ExecError> {
+    Ok(all_entries(env)?
+        .into_iter()
+        .filter(|e| !e.id.is_provisional() && !e.is_encrypted && !e.remote_deleted)
+        .filter(|e| e.synced_fingerprint.is_some_and(|fp| fp.file_id == file_id))
+        .find(|e| match relative_path(env, e) {
+            Ok(Some(path)) => !observed.iter().any(|o| o.path == path),
+            _ => false,
+        })
+        .map(|e| e.id))
 }
 
 /// Does this folder hold encrypted content? `None` is the drive root, which is
