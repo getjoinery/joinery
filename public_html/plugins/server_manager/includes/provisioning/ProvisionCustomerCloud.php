@@ -4,21 +4,29 @@
  *
  * Handles both origins: order-origin provisions created by hosting purchases
  * and admin-origin provisions created by the Install New Node form's
- * cloud-instance target. Install parameters (docker mode, fresh/from-backup,
- * source node, port) ride on the provision row.
+ * cloud-instance target. Install parameters (docker mode, fresh/from-backup/
+ * bare, source node, port) ride on the provision row.
  *
  * Works the cvp_customer_cloud_provisions state machine each cron tick:
  *
- *   ready      -> create the instance on the customer's cloud account -> booting
- *   booting    -> wait for running + public IP -> create ManagedNode +
- *                 install_node job (Go agent executes it) -> installing
+ *   ready      -> (from_backup: arm the source's clone export) -> create the
+ *                 instance on the customer's cloud account -> booting
+ *   booting    -> wait for running + public IP (and, for a clone, for the
+ *                 source to report armed) -> create ManagedNode + install_node
+ *                 job (InstallJobExecutor runs it, plane-side) -> installing
  *   installing -> drive JobResultProcessor on the finished job -> done | failed
+ *   done       -> fleet seeding, once the node's agent has paired (below)
  *
- * install_mode 'bare' (admin-origin only) births the instance and creates the
- * ManagedNode but installs no site: the verification job is a plain
- * check_status, and the node completes with mgn_skip_joinery_checks set and no
- * web root, site URL, or SSL state. Infrastructure roles (e.g. mail relay
- * shards) build on the bare node via their own provision jobs.
+ * The install job is ONE SSH session — the bootstrap (specs/ssh_single_bootstrap.md).
+ * Every shape travels it: fresh, from_backup (a clone the new machine pulls
+ * over HTTPS from the source site, which this task armed and disarms through
+ * the source agent's clone_export_arm primitive) and bare (a Docker host with
+ * no site, for infrastructure roles). Nothing after the bootstrap opens SSH.
+ *
+ * Fleet enrollment seeding (the mailbox plugin's FleetProvisionSeeding) is a
+ * primitive on the new site's own agent, so it waits for that agent to pair:
+ * cvp_fleet_seed_state goes pending at completion, dispatched once the node
+ * reports the fleet_enroll primitive, then done or failed by the job's answer.
  *
  * The install job carries mjb_external_order_item_id, so the standard welcome
  * email and Provision Pending SSL flows apply unchanged from 'installing' on.
@@ -38,6 +46,12 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 1.9 - review fixes: one clone per source at a time, arm once (not on every transient tick),
+ *                disarm only when the source's latest arm is ours, blank the bootstrap's clone key at
+ *                completion, and a failed provision releases its source after CLONE_ARM_TTL_DAYS
+ * @version 1.8 - every shape provisions keyless: from_backup arms the source (clone_export_arm) and the
+ *                clone travels over HTTPS in the bootstrap; bare is the bootstrap's docker half; fleet
+ *                seeding is a primitive that waits for the node's agent to pair (specs/ssh_single_bootstrap.md)
  * @version 1.7 - fleet enrollment seeding reaches a keyless node over its sealed root password
  * @version 1.6 - handle_ready refuses what keyless cannot finish yet (bare, bare-metal, from_backup)
                  before an instance is created
@@ -47,6 +61,13 @@
 class ProvisionCustomerCloud {
 
 	const BOOT_TIMEOUT_SECONDS = 1800; // 30 min from instance create to running
+
+	/**
+	 * A failed provision keeps its source armed so Retry Install can re-run
+	 * the same bootstrap. Not forever: after this many days the key is
+	 * released whether or not anybody retried.
+	 */
+	const CLONE_ARM_TTL_DAYS = 7;
 
 	/** @var array Collected human-readable errors for the run summary. */
 	private $errors = [];
@@ -68,7 +89,16 @@ class ProvisionCustomerCloud {
 		));
 		$actionable->load();
 
-		if (count($actionable) === 0) {
+		// Done provisions whose fleet seeding is still travelling: waiting for
+		// the node's agent to pair, or for the seeding job to answer.
+		$seeding = new MultiCustomerCloudProvision(array(
+			'statuses'          => array('done'),
+			'fleet_seed_states' => array('pending', 'dispatched'),
+			'deleted'           => false,
+		));
+		$seeding->load();
+
+		if (count($actionable) === 0 && count($seeding) === 0) {
 			return ['status' => 'success', 'message' => 'No customer-cloud provisions to advance.'];
 		}
 
@@ -90,8 +120,15 @@ class ProvisionCustomerCloud {
 				$this->errors[] = "Provision #{$provision->key} ({$provision->get('cvp_domain')}): " . $e->getMessage();
 			}
 		}
+		foreach ($seeding as $provision) {
+			try {
+				$advanced += $this->handle_seeding($provision);
+			} catch (Exception $e) {
+				$this->errors[] = "Provision #{$provision->key} ({$provision->get('cvp_domain')}): seeding: " . $e->getMessage();
+			}
+		}
 
-		$msg = "Customer-cloud: {$advanced} provision(s) advanced of " . count($actionable) . " actionable.";
+		$msg = "Customer-cloud: {$advanced} provision(s) advanced of " . (count($actionable) + count($seeding)) . " actionable.";
 		if ($this->errors) {
 			$msg .= ' ' . count($this->errors) . ' error(s): ' . implode('; ', array_slice($this->errors, 0, 3));
 			if (count($this->errors) > 3) $msg .= ' …';
@@ -105,26 +142,16 @@ class ProvisionCustomerCloud {
 	 * Returns 1 if the provision advanced, 0 otherwise.
 	 */
 	protected function handle_ready($provision) {
-		// Only a fresh docker install can be finished keyless today: the
-		// bootstrap executor runs install_node over the sealed password for that
-		// shape alone. A bare instance is verified by an SSH probe nothing can
-		// run, a bare-metal install needs the key-based user switch, and
-		// from_backup needs scp. Refuse BEFORE an instance is created — a box we
-		// cannot finish would otherwise sit on the customer's account, billing,
-		// in 'installing' forever with no alert.
 		$install_mode = $provision->get('cvp_install_mode') ?: 'fresh';
-		$docker_mode  = $provision->get('cvp_docker_mode')  ?: 'docker';
-		if ($install_mode !== 'fresh' || $docker_mode !== 'docker') {
-			$this->alert_and_fail($provision,
-				"Keyless provisioning can finish fresh docker installs only; this provision asks for "
-				. "install mode '{$install_mode}' on '{$docker_mode}'. No instance was created. "
-				. "(Bare, bare-metal and from_backup wait on the install executor — specs/keyless_provisioning.md.)");
+
+		// A clone's source is armed BEFORE the instance exists: the new machine
+		// pulls the source over HTTPS inside its install, and the key it
+		// presents has to be on the source by then. Refusing here, when the
+		// source cannot be armed, leaves no box on the customer's account.
+		if ($install_mode === 'from_backup' && !$this->arm_clone_source($provision)) {
 			return 1;
 		}
 
-		// The shape check comes before the driver on purpose: a provision that
-		// can never finish is refused whether or not the grant is usable, so a
-		// stale token cannot park it for re-connect first and hide the refusal.
 		$driver = $this->get_driver($provision);
 		if ($driver === null) return 0;
 
@@ -171,8 +198,125 @@ class ProvisionCustomerCloud {
 	}
 
 	/**
+	 * Arm the clone's source: mint one export key, seal it on the provision,
+	 * and hand it to the source through its agent (clone_export_arm). The
+	 * source is reached by its web address from then on. Returns false after
+	 * failing the provision when the source cannot be armed.
+	 */
+	private function arm_clone_source($provision): bool {
+		$source = $this->clone_source($provision);
+		if (!$source) {
+			$this->alert_and_fail($provision, 'The clone source node no longer exists. No instance was created.');
+			return false;
+		}
+		$clone_from = rtrim((string)$source->get('mgn_site_url'), '/');
+		if (!preg_match('#^https://#', $clone_from)) {
+			$this->alert_and_fail($provision,
+				"The clone source '{$source->get('mgn_slug')}' has no https site URL to pull from. No instance was created.");
+			return false;
+		}
+
+		// Armed already, by this provision: a transient provider failure on a
+		// previous tick left the row at ready. Arm once.
+		if (trim((string)$provision->get('cvp_clone_key_sealed')) !== '' && $this->source_armed_by($source, $provision)) {
+			return true;
+		}
+
+		// clone_export_key is ONE value on the source, so one clone at a
+		// time: a second arm would overwrite the first key mid-pull, and the
+		// first disarm would blank the second. Wait, saying so on the row.
+		$busy = $this->source_busy_with($source, $provision);
+		if ($busy !== null) {
+			$provision->set('cvp_error', "Waiting: clone source '{$source->get('mgn_slug')}' is armed for provision #{$busy} until it finishes.");
+			$provision->save();
+			$this->errors[] = "Provision #{$provision->key}: waiting for the clone source, armed for provision #{$busy}.";
+			return false;
+		}
+
+		$key = JobCommandBuilder::mint_clone_export_key();
+		try {
+			$built = JobCommandBuilder::build_clone_export_arm($source, ['export_key' => $key]);
+		} catch (Exception $e) {
+			$this->alert_and_fail($provision, 'Cannot arm the clone source — ' . $e->getMessage() . ' No instance was created.');
+			return false;
+		}
+		$box = new SecretBox();
+		$provision->set('cvp_clone_key_sealed',
+			$box->seal('cvp_customer_cloud_provisions.cvp_clone_key_sealed', $key));
+		$provision->save();
+		ManagementJob::createFromBuild($source->key, 'clone_export_arm', $built,
+			['provision_id' => (int)$provision->key], null);
+		return true;
+	}
+
+	/**
+	 * Another live provision holding this source's key, or null. Live means
+	 * not yet released: any status, with a sealed clone key still on the row.
+	 */
+	private function source_busy_with($source, $provision) {
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare(
+			"SELECT cvp_id FROM cvp_customer_cloud_provisions
+			 WHERE cvp_source_node_id = ? AND cvp_id <> ? AND cvp_delete_time IS NULL
+			   AND COALESCE(cvp_clone_key_sealed, '') <> ''
+			 ORDER BY cvp_id ASC LIMIT 1");
+		$q->execute([(int)$source->key, (int)$provision->key]);
+		$id = $q->fetchColumn();
+		return $id ? (int)$id : null;
+	}
+
+	/** Is the source's latest arm job this provision's? */
+	private function source_armed_by($source, $provision): bool {
+		$job = ManagementJob::latestForNode($source->key, 'clone_export_arm');
+		return $job && (int)($this->job_params($job)['provision_id'] ?? 0) === (int)$provision->key;
+	}
+
+	/** The source node of a from_backup provision, or null. */
+	private function clone_source($provision) {
+		$id = (int)$provision->get('cvp_source_node_id');
+		if (!$id) return null;
+		$source = new ManagedNode($id, TRUE);
+		return ($source->key && !$source->get('mgn_delete_time')) ? $source : null;
+	}
+
+	/**
+	 * Has the source answered its arm job? 'ready', 'wait', or 'failed' (with
+	 * the reason). Read from the job the plane filed, processed here if the
+	 * channel has not yet.
+	 */
+	private function clone_source_state($provision, $source): array {
+		$job = ManagementJob::latestForNode($source->key, 'clone_export_arm');
+		if (!$job) {
+			return ['state' => 'failed', 'reason' => 'the arm job for the clone source is missing'];
+		}
+		if ((int)($this->job_params($job)['provision_id'] ?? 0) !== (int)$provision->key) {
+			return ['state' => 'failed', 'reason' => "the clone source was re-armed by another provision (job #{$job->key}) after this one armed it"];
+		}
+		$status = (string)$job->get('mjb_status');
+		if ($status !== 'completed' && $status !== 'failed') {
+			return ['state' => 'wait', 'reason' => ''];
+		}
+		if (!$job->get('mjb_result')) {
+			JobResultProcessor::process($job);
+			$job->load();
+		}
+		$result = json_decode((string)$job->get('mjb_result'), true);
+		if ($status === 'completed' && is_array($result) && !empty($result['armed'])) {
+			return ['state' => 'ready', 'reason' => ''];
+		}
+		return ['state' => 'failed', 'reason' => "the clone source did not arm its export (job #{$job->key} {$status}: "
+			. trim((string)($job->get('mjb_error_message') ?: 'see the job output')) . ')'];
+	}
+
+	private function job_params($job): array {
+		$params = $job->get('mjb_parameters');
+		if (is_string($params)) { $params = json_decode($params, true); }
+		return is_array($params) ? $params : [];
+	}
+
+	/**
 	 * booting -> installing: once the instance is running with a public IP,
-	 * create the managed node and dispatch the standard install_node job.
+	 * create the managed node and dispatch the bootstrap.
 	 */
 	protected function handle_booting($provision) {
 		$driver = $this->get_driver($provision);
@@ -198,8 +342,38 @@ class ProvisionCustomerCloud {
 			return 0;
 		}
 
-		$domain = $provision->get('cvp_domain');
-		$slug   = $provision->get('cvp_slug');
+		$domain       = $provision->get('cvp_domain');
+		$slug         = $provision->get('cvp_slug');
+		$docker_mode  = $provision->get('cvp_docker_mode')  ?: 'docker';
+		$install_mode = $provision->get('cvp_install_mode') ?: 'fresh';
+		$sitename     = $provision->get('cvp_sitename')     ?: $slug;
+		$port         = (int)($provision->get('cvp_port')   ?: 8080);
+		$is_bare      = ($install_mode === 'bare');
+
+		// A clone waits for its source to report armed: the bootstrap pulls
+		// from the source the moment it runs.
+		$clone = null;
+		if ($install_mode === 'from_backup') {
+			$source = $this->clone_source($provision);
+			if (!$source) {
+				$this->alert_and_fail($provision, 'The clone source node no longer exists.');
+				return 1;
+			}
+			$state = $this->clone_source_state($provision, $source);
+			if ($state['state'] === 'wait') {
+				return 0;
+			}
+			if ($state['state'] === 'failed') {
+				$this->alert_and_fail($provision, 'Cannot clone: ' . $state['reason'] . '.');
+				return 1;
+			}
+			$opened = (new SecretBox())->open((string)$provision->get('cvp_clone_key_sealed'));
+			if ($opened['state'] !== 'ok') {
+				$this->alert_and_fail($provision, 'The sealed clone key on this provision cannot be read back.');
+				return 1;
+			}
+			$clone = ['from' => rtrim((string)$source->get('mgn_site_url'), '/'), 'key' => $opened['value']];
+		}
 
 		// Same duplicate-slug rule as shared-host fulfillment: an existing
 		// non-failed node with this slug needs manual resolution.
@@ -219,11 +393,6 @@ class ProvisionCustomerCloud {
 			$node->set('mgn_name', $domain);
 			$node->set('mgn_slug', $slug);
 		}
-		$docker_mode  = $provision->get('cvp_docker_mode')  ?: 'docker';
-		$install_mode = $provision->get('cvp_install_mode') ?: 'fresh';
-		$sitename     = $provision->get('cvp_sitename')     ?: $slug;
-		$port         = (int)($provision->get('cvp_port')   ?: 8080);
-		$is_bare      = ($install_mode === 'bare');
 
 		$node->set('mgn_host',          $instance['ip']);
 		$node->set('mgn_ssh_user',      'root');
@@ -235,8 +404,8 @@ class ProvisionCustomerCloud {
 		$node->set('mgn_install_state', 'installing');
 		if ($is_bare) {
 			// No site on the box: nothing for Joinery status checks to probe,
-			// no vhost for ProvisionPendingSsl to certbot. The domain is the
-			// node's name/DNS identity (e.g. a relay MX hostname), not a site.
+			// no domain to certify. The domain is the node's name/DNS identity
+			// (e.g. a relay MX hostname), not a site.
 			$node->set('mgn_skip_joinery_checks', true);
 		} else {
 			$node->set('mgn_web_root',  "/var/www/html/{$sitename}/public_html");
@@ -257,55 +426,23 @@ class ProvisionCustomerCloud {
 		// only sibling identity (mgn_mgh_host_id), the port pool unions siblings
 		// through it, and — once the host's own agent joins — it is the record
 		// link_host_node fills so host-scope work (decommission_site, certs,
-		// rebuild) can be routed. The Install New Node paths mint it; the cloud
-		// path must too, or the machines this keyless work exists for have no
-		// host record and no route.
+		// rebuild) can be routed.
 		if ($docker_mode === 'docker' && !$is_bare) {
 			ManagedHost::ensure_for_node($node);
-		}
-
-		// A bare instance is done when it answers over SSH: dispatch a plain
-		// status check as the verification job and let handle_installing watch
-		// it, reusing the same job-driven completion path as site installs.
-		if ($is_bare) {
-			try {
-				$built = JobCommandBuilder::build_check_status($node);
-			} catch (Exception $e) {
-				$node->set('mgn_install_state', 'install_failed');
-				$node->save();
-				$this->alert_and_fail($provision, 'Failed to build verification steps — ' . $e->getMessage());
-				return 1;
-			}
-			// createFromBuild: a paired node's check_status is a primitive
-			// envelope, which createJob would store where nothing can find it.
-			ManagementJob::createFromBuild($node->key, 'check_status', $built, [], null);
-			$provision->set('cvp_mgn_node_id', $node->key);
-			$provision->set('cvp_instance_ip', $instance['ip']);
-			$provision->set('cvp_status',      'installing');
-			$provision->save();
-			return 1;
-		}
-
-		// build_install_node contract: 'domain' is the primary domain for a
-		// fresh install but the SOURCE domain for from_backup (the target
-		// domain comes from the node's site URL via post-restore fixups).
-		$job_domain = $domain;
-		if ($install_mode === 'from_backup') {
-			$source_node = new ManagedNode((int)$provision->get('cvp_source_node_id'), TRUE);
-			$job_domain = parse_url($source_node->get('mgn_site_url') ?: '', PHP_URL_HOST) ?: $domain;
 		}
 
 		$job_params = [
 			'mode'        => $install_mode,
 			'sitename'    => $sitename,
-			'domain'      => $job_domain,
+			'domain'      => $domain,
 			'docker_mode' => $docker_mode,
 			'admin_email' => $provision->get('cvp_buyer_email'),
 			'user_name'   => $provision->get('cvp_buyer_name'),
 		];
-		if ($install_mode === 'from_backup') {
+		if ($clone !== null) {
 			$job_params['source_node_id'] = (int)$provision->get('cvp_source_node_id');
-			$job_params['backup_source']  = $provision->get('cvp_backup_source') ?: 'new';
+			$job_params['clone_from']     = $clone['from'];
+			$job_params['clone_key']      = $clone['key'];
 		}
 
 		try {
@@ -330,23 +467,20 @@ class ProvisionCustomerCloud {
 
 	/**
 	 * installing -> done|failed: drive result processing on the finished
-	 * install job (the Go agent writes job status directly to the DB; result
-	 * processing is what flips node state and sends the welcome email).
+	 * install job (the executor writes job status directly; result processing
+	 * is what flips node state and sends the welcome email).
 	 */
 	private function handle_installing($provision) {
-		$is_bare  = ($provision->get('cvp_install_mode') === 'bare');
-		$job_type = $is_bare ? 'check_status' : 'install_node';
-
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare(
 			"SELECT mjb_id FROM mjb_management_jobs " .
-			"WHERE mjb_mgn_node_id = ? AND mjb_job_type = ? AND mjb_delete_time IS NULL " .
+			"WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'install_node' AND mjb_delete_time IS NULL " .
 			"ORDER BY mjb_id DESC LIMIT 1"
 		);
-		$q->execute([$provision->get('cvp_mgn_node_id'), $job_type]);
+		$q->execute([$provision->get('cvp_mgn_node_id')]);
 		$job_id = $q->fetchColumn();
 		if (!$job_id) {
-			$this->alert_and_fail($provision, ucfirst($is_bare ? 'verification' : 'install') . ' job disappeared — manual review required.');
+			$this->alert_and_fail($provision, 'Install job disappeared — manual review required.');
 			return 1;
 		}
 
@@ -363,29 +497,8 @@ class ProvisionCustomerCloud {
 
 		$node = new ManagedNode($provision->get('cvp_mgn_node_id'), TRUE);
 
-		// Bare instances: nothing clears install_state for a check_status job —
-		// a completed check IS the proof of life, so clear it here.
-		if ($is_bare) {
-			if ($status === 'completed') {
-				$node->set('mgn_install_state', null);
-				$node->save();
-				$provision->set('cvp_status', 'done');
-				$provision->set('cvp_error',  null);
-				$provision->save();
-			} else {
-				$node->set('mgn_install_state', 'install_failed');
-				$node->save();
-				$this->alert_and_fail($provision,
-					"Verification job #{$job->key} finished '{$status}' — the instance is up on the provider but did not answer over SSH.");
-			}
-			return 1;
-		}
-
 		if ($node->get('mgn_install_state') === null) {
-			$provision->set('cvp_status', 'done');
-			$provision->set('cvp_error',  null);
-			$provision->save();
-			$this->seed_fleet_enrollment($provision, $node);
+			$this->complete($provision, $node);
 		} else {
 			$this->alert_and_fail($provision,
 				"Install job #{$job->key} finished '{$status}' with install_state '{$node->get('mgn_install_state')}' — see the job detail page.");
@@ -403,6 +516,16 @@ class ProvisionCustomerCloud {
 	 * the admin.
 	 */
 	private function handle_failed_recheck($provision) {
+		// A failed clone keeps its source armed for Retry Install, but not
+		// past the TTL: a key scoped to one provision needs an end.
+		if (trim((string)$provision->get('cvp_clone_key_sealed')) !== '') {
+			$since = $provision->get('cvp_update_time') ?: $provision->get('cvp_create_time');
+			if ($since && (time() - strtotime($since . ' UTC')) > self::CLONE_ARM_TTL_DAYS * 86400) {
+				$this->release_clone_source($provision);
+				$provision->save();
+				return 1;
+			}
+		}
 		$node_id = (int)$provision->get('cvp_mgn_node_id');
 		if (!$node_id) {
 			return 0; // failed before a node existed — nothing to recover from
@@ -428,10 +551,7 @@ class ProvisionCustomerCloud {
 			return 0;
 		}
 
-		$provision->set('cvp_status', 'done');
-		$provision->set('cvp_error',  null);
-		$provision->save();
-		$this->seed_fleet_enrollment($provision, $node);
+		$this->complete($provision, $node);
 
 		// The buyer's welcome email is normally sent by JobResultProcessor when
 		// the completed job carries the order-item linkage. A retry job that
@@ -446,59 +566,143 @@ class ProvisionCustomerCloud {
 	}
 
 	/**
-	 * Order-time fleet enrollment (specs/mailbox_relay_shared_fleet.md
-	 * § Follow-up): when the buyer's tier carries the fleet-slot feature, the
-	 * finished site gets the fleet-service settings pre-seeded so its owner
-	 * lands on a one-click Enroll. Best-effort — the site is up either way and
-	 * the owner can always enter the credentials manually, so a seeding
-	 * failure alerts ops but never fails the provision. Bare instances have
-	 * no site to seed.
+	 * The install is done: mark it, let the clone's source go, and queue the
+	 * fleet seeding that waits for the node's agent.
 	 */
-	private function seed_fleet_enrollment($provision, $node) {
-		if (($provision->get('cvp_install_mode') ?: 'fresh') === 'bare') {
+	private function complete($provision, $node): void {
+		$provision->set('cvp_status', 'done');
+		$provision->set('cvp_error',  null);
+		$provision->set('cvp_fleet_seed_state', $this->seeding_applies($provision) ? 'pending' : null);
+		$this->release_clone_source($provision);
+		$provision->save();
+		// The bootstrap job carried the clone key for Retry Install. The
+		// source is disarmed, so the key opens nothing and does not stay.
+		$install = ManagementJob::latestForNode($node->key, 'install_node');
+		if ($install) {
+			JobResultProcessor::blank_install_clone_key($install);
+		}
+	}
+
+	/**
+	 * Disarm the clone's source and forget the key. Called when the provision
+	 * ends, and when it fails before an instance exists; a failure WITH a live
+	 * instance keeps the source armed, because Retry Install re-runs the same
+	 * bootstrap with the same key (the mirror of the sealed-root-password rule).
+	 */
+	private function release_clone_source($provision): void {
+		if (trim((string)$provision->get('cvp_clone_key_sealed')) === '') {
 			return;
 		}
-		$seeder = PathHelper::getIncludePath('plugins/mailbox/includes/FleetProvisionSeeding.php');
-		if (!is_file($seeder) || !PluginHelper::isPluginActive('mailbox')) {
+		$provision->set('cvp_clone_key_sealed', null);
+		$source = $this->clone_source($provision);
+		if (!$source) {
+			return;
+		}
+		// Disarm only a key that is ours. If another provision has since armed
+		// the source (it should not have — see source_busy_with — but a row
+		// edited by hand can get there), blanking it would cut that clone off
+		// mid-pull.
+		if (!$this->source_armed_by($source, $provision)) {
 			return;
 		}
 		try {
+			ManagementJob::createFromBuild($source->key, 'clone_export_arm',
+				JobCommandBuilder::build_clone_export_arm($source, ['export_key' => '']),
+				['provision_id' => (int)$provision->key], null);
+		} catch (Exception $e) {
+			// The source cannot be disarmed over the channel right now. Say
+			// so: an armed export is a door left open.
+			$reason = "Could not disarm the clone source '{$source->get('mgn_slug')}': " . $e->getMessage()
+				. ' Clear clone_export_key on that site.';
+			error_log('ProvisionCustomerCloud: ' . $reason);
+			$this->errors[] = "Provision #{$provision->key}: {$reason}";
+		}
+	}
+
+	// ── Fleet enrollment seeding (specs/mailbox_relay_shared_fleet.md § Follow-up) ──
+	//
+	// When the buyer's tier carries the fleet-slot feature, the finished site
+	// gets the fleet-service settings seeded so its owner lands on a one-click
+	// Enroll. It travels as the fleet_enroll primitive on the new site's own
+	// agent, so it waits for that agent to pair. Best-effort — the site is up
+	// either way and the owner can always enter the credentials manually — so
+	// a seeding failure alerts ops but never fails the provision. Bare
+	// instances have no site to seed.
+
+	private function seeding_applies($provision): bool {
+		if (($provision->get('cvp_install_mode') ?: 'fresh') === 'bare') {
+			return false;
+		}
+		$seeder = PathHelper::getIncludePath('plugins/mailbox/includes/FleetProvisionSeeding.php');
+		if (!is_file($seeder) || !PluginHelper::isPluginActive('mailbox')) {
+			return false;
+		}
+		try {
 			require_once($seeder);
-			$buyer_id = (int)$provision->get('cvp_usr_user_id');
-			if (!FleetProvisionSeeding::applies($buyer_id)) {
-				return;
-			}
-			$sitename = $provision->get('cvp_sitename') ?: $provision->get('cvp_slug');
-			// A keyless node is reached over the provision's sealed root
-			// password, which by design outlives the install until the agent's
-			// join is approved; seeding runs at completion, inside that window.
-			$root_password = null;
-			$sealed = (string)$provision->get('cvp_root_pass_sealed');
-			if ($sealed !== '') {
-				$opened = (new SecretBox())->open($sealed);
-				if ($opened['state'] === 'ok') { $root_password = $opened['value']; }
-			}
-			$result = FleetProvisionSeeding::seedNode($node, $buyer_id, (string)$sitename, $root_password);
-			if ($result['ok']) {
-				error_log('ProvisionCustomerCloud: fleet enrollment seeded for provision #'
-					. $provision->key . ' (' . $provision->get('cvp_domain') . ')');
-				return;
-			}
+			return FleetProvisionSeeding::applies((int)$provision->get('cvp_usr_user_id'));
 		} catch (\Throwable $e) {
-			$result = array('ok' => false, 'message' => $e->getMessage());
+			error_log('ProvisionCustomerCloud: fleet seeding gate failed: ' . $e->getMessage());
+			return false;
+		}
+	}
+
+	/**
+	 * pending -> dispatched once the node's agent has paired and reports
+	 * fleet_enroll; dispatched -> done | failed by the job's answer.
+	 */
+	private function handle_seeding($provision) {
+		$node_id = (int)$provision->get('cvp_mgn_node_id');
+		$node = $node_id ? new ManagedNode($node_id, TRUE) : null;
+		if (!$node || !$node->key || $node->get('mgn_delete_time')) {
+			$provision->set('cvp_fleet_seed_state', 'failed');
+			$provision->save();
+			return 1;
+		}
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetProvisionSeeding.php'));
+
+		if ($provision->get('cvp_fleet_seed_state') === 'pending') {
+			if (!FleetProvisionSeeding::nodeReady($node)) {
+				return 0; // the agent has not paired yet, or is older than fleet_enroll
+			}
+			$result = FleetProvisionSeeding::seedNode($node, (int)$provision->get('cvp_usr_user_id'));
+			if (!$result['ok']) {
+				$this->fail_seeding($provision, $result['message']);
+				return 1;
+			}
+			$provision->set('cvp_fleet_seed_state', 'dispatched');
+			$provision->save();
+			return 1;
 		}
 
-		$reason = 'Fleet enrollment seeding failed for ' . $provision->get('cvp_domain')
-			. ': ' . $result['message'];
+		$outcome = FleetProvisionSeeding::outcome($node);
+		if ($outcome['state'] === 'pending') {
+			return 0;
+		}
+		if ($outcome['state'] === 'seeded') {
+			$provision->set('cvp_fleet_seed_state', 'done');
+			$provision->save();
+			error_log('ProvisionCustomerCloud: fleet enrollment seeded for provision #'
+				. $provision->key . ' (' . $provision->get('cvp_domain') . ')');
+			return 1;
+		}
+		$this->fail_seeding($provision, $outcome['message']);
+		return 1;
+	}
+
+	private function fail_seeding($provision, string $message): void {
+		$provision->set('cvp_fleet_seed_state', 'failed');
+		$provision->save();
+
+		$reason = 'Fleet enrollment seeding failed for ' . $provision->get('cvp_domain') . ': ' . $message;
 		error_log('ProvisionCustomerCloud: ' . $reason);
 		$this->errors[] = "Provision #{$provision->key}: {$reason}";
 		$to = $this->resolve_alert_recipient();
 		if ($to) {
 			try {
 				EmailSender::quickSend($to, '[customer-cloud] Fleet seeding failed: ' . $provision->get('cvp_domain'),
-					"The site installed fine, but pre-seeding its hosted-relay credentials failed.\n\n"
+					"The site installed fine, but seeding its hosted-relay credentials failed.\n\n"
 					. "Domain: " . $provision->get('cvp_domain') . "\n"
-					. "Reason: " . $result['message'] . "\n\n"
+					. "Reason: " . $message . "\n\n"
 					. "The owner can still connect manually: mint an API key for their account and "
 					. "enter it with this deployment's URL on their mailbox Settings tab.\n");
 			} catch (\Throwable $e) {
@@ -582,31 +786,33 @@ class ProvisionCustomerCloud {
 	}
 
 	/**
-	 * Park a provision back at pending_connect (the buyer must re-grant) and
-	 * note why. The Connect page doubles as the re-connect page; the consumer
-	 * flips it to ready again on the next grant.
+	 * The bridge credentials — the sealed root password, and a clone's export
+	 * key — exist for a running instance, and only for the length of its
+	 * install. When a provision ends (or parks) with no instance created,
+	 * there is no machine they open — so they are released now rather than
+	 * held indefinitely, which would be the shared-key defect in miniature. A
+	 * provision that failed WITH a live instance keeps both: that is the WP3
+	 * recovery decision, made where the instance actually exists.
 	 */
-	/**
-	 * A sealed root password is the credential for a running instance, and only
-	 * for the length of its install. When a provision ends (or parks) with no
-	 * instance created, there is no machine it opens — so it is erased now
-	 * rather than held indefinitely, which would be the shared-key defect in
-	 * miniature. A provision that failed WITH a live instance keeps it: that is
-	 * the WP3 recovery decision, made where the instance actually exists.
-	 */
-	private function erase_sealed_root_pass_if_no_instance($provision) {
+	private function release_credentials_if_no_instance($provision) {
 		if (trim((string)$provision->get('cvp_instance_id')) !== '') {
 			return;
 		}
 		if (trim((string)$provision->get('cvp_root_pass_sealed')) !== '') {
 			$provision->set('cvp_root_pass_sealed', null);
 		}
+		$this->release_clone_source($provision);
 	}
 
+	/**
+	 * Park a provision back at pending_connect (the buyer must re-grant) and
+	 * note why. The Connect page doubles as the re-connect page; the consumer
+	 * flips it to ready again on the next grant.
+	 */
 	private function park_for_reconnect($provision, $reason) {
 		$provision->set('cvp_status', 'pending_connect');
 		$provision->set('cvp_error',  mb_substr($reason, 0, 4000));
-		$this->erase_sealed_root_pass_if_no_instance($provision);
+		$this->release_credentials_if_no_instance($provision);
 		$provision->save();
 		$this->errors[] = "Provision #{$provision->key}: parked for re-connect — {$reason}";
 
@@ -630,9 +836,9 @@ class ProvisionCustomerCloud {
 	 * Terminal failure: record it and alert the ops address.
 	 */
 	protected function alert_and_fail($provision, $reason) {
-		// Erase before fail()'s save so a no-instance failure carries no dangling
-		// credential; a failure with a live instance keeps it (WP3 recovery).
-		$this->erase_sealed_root_pass_if_no_instance($provision);
+		// Release before fail()'s save so a no-instance failure carries no
+		// dangling credential; a failure with a live instance keeps them (WP3 recovery).
+		$this->release_credentials_if_no_instance($provision);
 		$provision->fail($reason);
 		$this->errors[] = "Provision #{$provision->key}: FAILED — {$reason}";
 

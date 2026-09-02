@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+#VERSION 2.59 - The deferred-SSL retry timer is armed before the summary, so a
+#               quiet (plane-driven) install arms it too; on a Docker host it
+#               runs the host agent's bundled setup_ssl.sh first and the
+#               extracted release until that bundle lands, so the archive an
+#               install leaves behind is no longer load-bearing. The docker site
+#               summary prints CONTAINER_PORT=N for the management node that
+#               drove it. (ssh_single_bootstrap.md WP1, B1)
 #VERSION 2.58 - The host agent's join no longer blocks the docker install:
 #               it is lodged with --no-wait and the running agent finishes it
 #               when approved. docker mode takes --node-name=NAME so the plane's
@@ -610,7 +617,9 @@ should_setup_ssl() {
 # machinery for its new name — and two copies of a retry loop that talks to a
 # rate-limited CA is one copy too many.
 #
-# $1 = domain, $2 = on-host path to setup_ssl.sh for this install mode.
+# $1 = domain, $2 = on-host path(s) to setup_ssl.sh for this install mode,
+#      colon-separated and most durable first; the timer runs the first that
+#      exists when it fires.
 install_ssl_retry_timer() {
     local domain="$1"
     local ssl_script="$2"
@@ -621,20 +630,46 @@ install_ssl_retry_timer() {
 }
 
 
-# Closing reminder for an install that came up on HTTP because DNS wasn't
-# pointing here yet. Printed in the summary so it survives a long scrollback.
-# Installs the retry timer at the same time — this is called once per install
-# mode, from the summary, with the on-host path that mode uses.
-# $1 = on-host path to setup_ssl.sh for this install mode.
+# An install that came up on HTTP because DNS wasn't pointing here yet arms
+# the retry timer HERE, before the summary and whether or not the run is quiet.
+# A plane-driven install is always quiet, and arming from inside the verbose
+# summary left every such box with no timer at all.
+#
+# $1 = colon-separated candidate paths to setup_ssl.sh for this install mode,
+#      most durable first. The retry script runs the first one that exists at
+#      the time it fires, so a path that does not exist yet (the host agent's
+#      bundle, which lands when its join is approved) is still the right first
+#      choice.
+SSL_RETRY_ARMED=0
+SSL_RETRY_CANDIDATES=""
+arm_ssl_deferred_retry() {
+    [ "$SSL_DEFERRED" -eq 1 ] || return 0
+    SSL_RETRY_CANDIDATES="$1"
+    if install_ssl_retry_timer "$DOMAIN_NAME" "$SSL_RETRY_CANDIDATES"; then
+        SSL_RETRY_ARMED=1
+    fi
+}
+
+# Closing reminder for an install that came up on HTTP. Printed in the summary
+# so it survives a long scrollback. Prints only: the timer was armed by
+# arm_ssl_deferred_retry, which does not depend on the summary being shown.
 print_ssl_deferred_notice() {
     [ "$SSL_DEFERRED" -eq 1 ] || return 0
-    local ssl_script="$1"
+    # The path a human runs by hand: the first candidate that exists now, or
+    # the last one named.
+    local ssl_script="" candidate
+    local -a candidates=()
+    IFS=':' read -r -a candidates <<< "${SSL_RETRY_CANDIDATES:-}"
+    for candidate in "${candidates[@]}"; do
+        ssl_script="$candidate"
+        [ -f "$candidate" ] && break
+    done
 
     echo -e "${YELLOW}No SSL certificate was issued — DNS did not point here during install.${NC}"
     echo "Your site is serving HTTP."
     echo ""
 
-    if install_ssl_retry_timer "$DOMAIN_NAME" "$ssl_script"; then
+    if [ "$SSL_RETRY_ARMED" -eq 1 ]; then
         echo "Nothing further is needed. Point $DOMAIN_NAME at this server whenever you"
         echo "are ready and a certificate will be issued within a few minutes, on its own."
         echo ""
@@ -4021,6 +4056,16 @@ EOF
         print_success "Build directory removed"
     fi
 
+    # The certificate retry timer, armed whether or not this run is quiet. On
+    # a host that runs the Joinery host agent the maintained copy of
+    # setup_ssl.sh is the agent's bundle; the extracted release is the fallback
+    # until that bundle lands (it arrives when the host's join is approved).
+    local ssl_candidates="$ARCHIVE_ROOT/maintenance_scripts/sysadmin_tools/setup_ssl.sh"
+    if command -v joinery-agent > /dev/null 2>&1 || [ -d /opt/joinery-agent ]; then
+        ssl_candidates="/opt/joinery-agent/tree/maintenance_scripts/sysadmin_tools/setup_ssl.sh:${ssl_candidates}"
+    fi
+    arm_ssl_deferred_retry "$ssl_candidates"
+
     # Summary (always shown, even in quiet mode)
     if [ "$QUIET_MODE" -eq 1 ]; then
         # Minimal summary for quiet mode
@@ -4050,7 +4095,7 @@ EOF
         print_admin_login "/var/www/html/$SITENAME/config/admin_credentials.txt" \
             "docker exec $SITENAME cat" \
             "docker exec $SITENAME cat /var/www/html/$SITENAME/config/admin_credentials.txt"
-        print_ssl_deferred_notice "$ARCHIVE_ROOT/maintenance_scripts/sysadmin_tools/setup_ssl.sh"
+        print_ssl_deferred_notice
         echo "Useful commands:"
         echo -e "  View logs:      ${BLUE}docker logs $SITENAME${NC}"
         echo -e "  Shell access:   ${BLUE}docker exec -it $SITENAME bash${NC}"
@@ -4071,9 +4116,18 @@ EOF
 
         # Remind about source archive disk usage
         ARCHIVE_SIZE=$(du -sh "$ARCHIVE_ROOT" 2>/dev/null | cut -f1)
-        print_info "Note: Source archive at $ARCHIVE_ROOT (${ARCHIVE_SIZE}) is no longer needed for this site."
-        print_info "If all sites are installed, you can free space with: rm -rf $ARCHIVE_ROOT"
+        if [ "$SSL_RETRY_ARMED" -eq 1 ] && [ ! -d /opt/joinery-agent/tree ]; then
+            print_info "Note: Source archive at $ARCHIVE_ROOT (${ARCHIVE_SIZE}) is what the deferred-SSL timer runs until the host agent's bundle lands. Keep it until the certificate is issued."
+        else
+            print_info "Note: Source archive at $ARCHIVE_ROOT (${ARCHIVE_SIZE}) is no longer needed for this site."
+            print_info "If all sites are installed, you can free space with: rm -rf $ARCHIVE_ROOT"
+        fi
     fi
+
+    # Machine-readable, whichever summary printed: a management node that
+    # drove this install reads the port the container actually publishes here
+    # (install.sh moves off a pinned port that is busy).
+    echo "CONTAINER_PORT=$PORT"
 
     # Set up SSL with reverse proxy if domain provided
     if should_setup_ssl "$DOMAIN_NAME" "$NO_SSL"; then
@@ -4240,6 +4294,9 @@ do_site_baremetal() {
         print_warning "Site returned HTTP $HTTP_CODE - may need manual verification"
     fi
 
+    # The certificate retry timer, armed whether or not this run is quiet.
+    arm_ssl_deferred_retry "/var/www/html/$SITENAME/maintenance_scripts/sysadmin_tools/setup_ssl.sh"
+
     # Summary (always shown, even in quiet mode)
     if [ "$QUIET_MODE" -eq 1 ]; then
         # Minimal summary for quiet mode
@@ -4275,7 +4332,7 @@ do_site_baremetal() {
         fi
         echo ""
         print_admin_login "/var/www/html/$SITENAME/config/admin_credentials.txt"
-        print_ssl_deferred_notice "/var/www/html/$SITENAME/maintenance_scripts/sysadmin_tools/setup_ssl.sh"
+        print_ssl_deferred_notice
         echo "Useful commands:"
         echo -e "  View logs:      ${BLUE}tail -f /var/www/html/$SITENAME/logs/error.log${NC}"
         echo -e "  Restart Apache: ${BLUE}sudo systemctl restart apache2${NC}"

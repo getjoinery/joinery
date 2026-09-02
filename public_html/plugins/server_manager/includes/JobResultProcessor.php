@@ -5,6 +5,11 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.20 - SSH is one bootstrap (specs/ssh_single_bootstrap.md): process_provision_ssl and
+ *                 process_discover_nodes are gone with their builders; process_provision_certificate
+ *                 stamps the node the job was FOR (for_node_id — a container's certificate is issued
+ *                 on its host); process_install_node leaves a bare host's SSL state alone;
+ *                 process_clone_export_arm and process_fleet_enroll blank the secret the job carried
  * @version 1.19 - process_decommission_node reads the primitive envelope first and finalizes the
  *                 VICTIM named in the job params — the job's subject is now the HOST that ran the
  *                 teardown (docker_host_agent.md)
@@ -713,7 +718,7 @@ class JobResultProcessor {
 	}
 
 	/** Does a certificate name cover this host? Exact, or a single-label wildcard. */
-	private static function cert_name_covers($name, $domain) {
+	public static function cert_name_covers($name, $domain) {
 		$name   = strtolower(trim($name));
 		$domain = strtolower($domain);
 		if ($name === '' || $domain === '') return false;
@@ -964,7 +969,9 @@ class JobResultProcessor {
 
 		if ($status === 'completed' && strpos($output, 'INSTALL_SUCCESS') !== false) {
 			$node->set('mgn_install_state', null);
-			if ($node->get('mgn_ssl_state') !== 'active') {
+			// A bare instance (a Docker host with no site) has no domain to
+			// certify; everything else awaits its certificate from here.
+			if ($node->get('mgn_ssl_state') !== 'active' && !$node->get('mgn_skip_joinery_checks')) {
 				$node->set('mgn_ssl_state', 'pending');
 			}
 			// Ground truth for the port ledger: install.sh auto-picks a different
@@ -1274,68 +1281,6 @@ HTML;
 	}
 
 	/**
-	 * On provision_ssl success, flip mgn_ssl_state to active.
-	 * Failure tracking and the 16h give-up logic live in ProvisionPendingSsl.
-	 */
-	private static function process_provision_ssl($job) {
-		$node_id = $job->get('mjb_mgn_node_id');
-		if (!$node_id) return;
-
-		try {
-			$node = new ManagedNode($node_id, TRUE);
-		} catch (Exception $e) { return; }
-
-		$rdns_attempt = null;
-		if ($job->get('mjb_status') === 'completed') {
-			$output = $job->get('mjb_output') ?: '';
-			$is_cf  = (strpos($output, 'SSL_SKIPPED_CLOUDFLARE') !== false);
-
-			// Belt-and-braces on the Cloudflare path: the build fails the job
-			// when the routing probe misses, so a completed CF job should always
-			// carry CF_ROUTING_VERIFIED — but "active" is a promise to stop
-			// watching this domain, so it is only made on explicit evidence that
-			// traffic for the domain reaches this node.
-			if ($is_cf && strpos($output, 'CF_ROUTING_VERIFIED') === false) {
-				$result = ['ssl_state' => $node->get('mgn_ssl_state'), 'note' => 'cloudflare path completed without routing verification'];
-				$job->set('mjb_result', json_encode($result));
-				$job->save();
-				return;
-			}
-
-			$was_active = ($node->get('mgn_ssl_state') === 'active');
-			$node->set('mgn_ssl_state', 'active');
-			$node->save();
-
-			// The cert just issued, so the domain provably resolves to this
-			// box — the provider's precondition for accepting it as reverse
-			// DNS. Set the PTR through the birth provision's grant now, so a
-			// standalone site never needs the management-node panel. Best-effort
-			// and first-issuance-only: a stale grant or manual node leaves the
-			// PTR to the mailbox Setup tab checklist, and a later custom PTR
-			// is never overwritten by a cert renewal. Not on the Cloudflare
-			// path: there the domain's A records are Cloudflare's, which is
-			// exactly what the PTR provider would reject.
-			if (!$was_active && !$is_cf) {
-				$params = json_decode($job->get('mjb_parameters') ?: '', true);
-				$rdns_domain = is_array($params) && !empty($params['domain'])
-					? $params['domain']
-					: (parse_url($node->get('mgn_site_url') ?: '', PHP_URL_HOST) ?: '');
-				if ($rdns_domain && !filter_var($rdns_domain, FILTER_VALIDATE_IP)) {
-					require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeReverseDns.php'));
-					$rdns_attempt = NodeReverseDns::setQuietly($node, $rdns_domain);
-				}
-			}
-		}
-
-		$result = ['ssl_state' => $node->get('mgn_ssl_state')];
-		if ($rdns_attempt !== null) {
-			$result['rdns_attempt'] = $rdns_attempt;
-		}
-		$job->set('mjb_result', json_encode($result));
-		$job->save();
-	}
-
-	/**
 	 * Record what a provision_certificate job actually achieved.
 	 *
 	 * THE JOB'S STATUS DOES NOT ANSWER THIS, and that is the whole reason this
@@ -1353,7 +1298,14 @@ HTML;
 	 * one it was instead of "completed".
 	 */
 	private static function process_provision_certificate($job) {
-		$node_id = $job->get('mjb_mgn_node_id');
+		// A container's certificate is issued by its HOST's agent, so the job
+		// is filed against the host and names the site it was for. Stamp that
+		// node, never the one the job ran on.
+		$params = $job->get('mjb_parameters');
+		if (is_string($params)) { $params = json_decode($params, true); }
+		$node_id = (is_array($params) && !empty($params['for_node_id']))
+			? (int)$params['for_node_id']
+			: $job->get('mjb_mgn_node_id');
 		if (!$node_id) return;
 
 		try {
@@ -1398,7 +1350,6 @@ HTML;
 		// Best-effort: a stale grant leaves the PTR to the Setup tab checklist,
 		// and a later custom PTR is never overwritten by a renewal.
 		if (!$was_active && $outcome['challenge'] === SslProvisionOutcome::CHALLENGE_HTTP_01) {
-			$params = json_decode($job->get('mjb_parameters') ?: '', true);
 			$rdns_domain = is_array($params) && !empty($params['domain'])
 				? $params['domain']
 				: (parse_url($node->get('mgn_site_url') ?: '', PHP_URL_HOST) ?: '');
@@ -1537,68 +1488,97 @@ HTML;
 	}
 
 	/**
-	 * Parse discover_nodes output into structured instance data.
+	 * clone_export_arm: the source of a clone was armed (or disarmed).
+	 *
+	 * Records which, from the script's own line, and BLANKS THE KEY out of the
+	 * job row once the job is terminal: the row is redacted on display, but a
+	 * bearer token that opens a full-site export has no reason to outlive the
+	 * job that delivered it. The provision that minted the key holds it sealed
+	 * until it disarms the source.
 	 */
-	private static function process_discover_nodes($job) {
-		$output = $job->get('mjb_output') ?: '';
-		$params = $job->get('mjb_parameters');
-		$params = is_string($params) ? json_decode($params, true) : $params;
-
-		$result = [
-			'host' => $params['host'] ?? '',
-			'ssh_user' => $params['ssh_user'] ?? 'root',
-			'ssh_key_path' => $params['ssh_key_path'] ?? '',
-			'ssh_port' => intval($params['ssh_port'] ?? 22),
-			'hostname' => '',
-			'has_docker' => true,
-			'instances' => [],
-		];
-
-		// Parse hostname from connection test
-		if (preg_match('/CONNECT_OK\s*\n\s*(.+)/m', $output, $m)) {
-			$result['hostname'] = trim($m[1]);
+	private static function process_clone_export_arm($job) {
+		$data   = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		$text   = is_array($data) && isset($data['output']) ? (string)$data['output'] : (string)($job->get('mjb_output') ?: '');
+		$result = ['armed' => strpos($text, 'CLONE_EXPORT_ARM=armed') !== false];
+		if (strpos($text, 'CLONE_EXPORT_ARM=disarmed') !== false) {
+			$result['disarmed'] = true;
 		}
-
-		// Check for NO_DOCKER
-		if (strpos($output, 'NO_DOCKER') !== false) {
-			$result['has_docker'] = false;
-		}
-
-		// Parse JOINERY_INSTANCE lines
-		// Format: JOINERY_INSTANCE|type|name|web_root|domain|db_name|version
-		//         m[1]=type, m[2]=name, m[3]=web_root, m[4]=domain, m[5]=db_name, m[6]=version
-		if (preg_match_all('/JOINERY_INSTANCE\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|(.*)$/m', $output, $matches, PREG_SET_ORDER)) {
-			foreach ($matches as $m) {
-				$name = trim($m[2]);
-				$domain = trim($m[4]);
-				$instance = [
-					'type' => trim($m[1]),
-					'container_name' => (trim($m[1]) === 'docker') ? $name : '',
-					'name' => ucwords(str_replace(['-', '_'], ' ', $name)),
-					'slug' => strtolower($name),
-					'web_root' => trim($m[3]),
-					'site_url' => $domain ? 'https://' . $domain : '',
-					'db_name' => trim($m[5]),
-					'version' => trim($m[6]),
-				];
-				$result['instances'][] = $instance;
-			}
-		}
-
-		// Check which slugs already exist as nodes
-		$existing_slugs = [];
-		$existing_nodes = new MultiManagedNode(['deleted' => false]);
-		$existing_nodes->load();
-		foreach ($existing_nodes as $en) {
-			$existing_slugs[] = $en->get('mgn_slug');
-		}
-		foreach ($result['instances'] as &$inst) {
-			$inst['already_added'] = in_array($inst['slug'], $existing_slugs);
-		}
-		unset($inst);
-
+		self::blank_secret_params($job, ['export_key']);
 		$job->set('mjb_result', json_encode($result));
 		$job->save();
+	}
+
+	/**
+	 * fleet_enroll: the site's fleet credentials were seeded (or not).
+	 *
+	 * The secret half of the key pair rode the job row to the node. Once the
+	 * node has answered — either way — it is blanked here, so the plaintext
+	 * does not outlive the job. ProvisionCustomerCloud reads `seeded`.
+	 */
+	private static function process_fleet_enroll($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		$text = is_array($data) && isset($data['output']) ? (string)$data['output'] : (string)($job->get('mjb_output') ?: '');
+		self::blank_secret_params($job, ['secret_key']);
+		$job->set('mjb_result', json_encode([
+			'seeded' => ($job->get('mjb_status') === 'completed' && strpos($text, 'FLEET_ENROLL=ok') !== false),
+		]));
+		$job->save();
+	}
+
+	/**
+	 * Blank the clone key out of a finished bootstrap job: the recorded
+	 * clone_key parameter and the --clone-key= value in the session's command.
+	 * Called by the provision at completion, once the source is disarmed.
+	 */
+	public static function blank_install_clone_key($job): void {
+		$params = $job->get('mjb_parameters');
+		if (is_string($params)) { $params = json_decode($params, true); }
+		$key = is_array($params) ? (string)($params['clone_key'] ?? '') : '';
+		if ($key === '') {
+			return;
+		}
+		$params['clone_key'] = '';
+		$job->set('mjb_parameters', json_encode($params));
+		$commands = $job->get('mjb_commands');
+		if (is_string($commands)) { $commands = json_decode($commands, true); }
+		if (is_array($commands) && isset($commands['steps']) && is_array($commands['steps'])) {
+			foreach ($commands['steps'] as &$step) {
+				if (isset($step['cmd'])) {
+					$step['cmd'] = str_replace($key, '', (string)$step['cmd']);
+				}
+			}
+			unset($step);
+			$job->set('mjb_commands', json_encode($commands));
+		}
+		$job->save();
+	}
+
+	/**
+	 * Blank named parameters out of both places a primitive job carries them:
+	 * the envelope the node read (mjb_commands) and the plane's own record
+	 * (mjb_parameters). The value is replaced, not removed, so the row still
+	 * says what shape the job had.
+	 */
+	private static function blank_secret_params($job, array $names) {
+		foreach (['mjb_commands', 'mjb_parameters'] as $column) {
+			$raw = $job->get($column);
+			$decoded = is_string($raw) ? json_decode($raw, true) : $raw;
+			if (!is_array($decoded)) continue;
+			$changed = false;
+			foreach ($names as $name) {
+				if (isset($decoded['params'][$name]) && $decoded['params'][$name] !== '') {
+					$decoded['params'][$name] = '';
+					$changed = true;
+				}
+				if (isset($decoded[$name]) && $decoded[$name] !== '') {
+					$decoded[$name] = '';
+					$changed = true;
+				}
+			}
+			if ($changed) {
+				$job->set($column, json_encode($decoded));
+			}
+		}
 	}
 
 	/**

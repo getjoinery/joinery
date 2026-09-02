@@ -221,12 +221,6 @@ foreach (array('build_relay_set_domains', 'build_relay_remove_tenant') as $fn) {
 	check($threw, $fn . ' refuses a slug carrying shell metacharacters');
 }
 
-$threw = false;
-try {
-	JobCommandBuilder::build_provision_ssl($ssh_node, array('domain' => ''));
-} catch (Exception $e) { $threw = true; }
-check($threw, 'provision_ssl refuses an empty domain');
-
 // A node with no transport at all cannot have a job built for it silently.
 $threw = false;
 try {
@@ -250,15 +244,6 @@ $cases['relay_add_tenant domains'] = jcb_cmds(JobCommandBuilder::build_relay_add
 
 $cases['relay_set_domains domains'] = jcb_cmds(JobCommandBuilder::build_relay_set_domains(
 	$ssh_node, array('slug' => 'tenant-a', 'domains' => $SUBSHELL)));
-
-$cases['provision_ssl domain'] = jcb_cmds(JobCommandBuilder::build_provision_ssl(
-	$ssh_node, array('domain' => 'example.test', 'admin_email' => $PAYLOAD)));
-
-$cases['ssh_prefix host'] = JobCommandBuilder::ssh_prefix(
-	$PAYLOAD, 'root', '/tmp/key', 22);
-
-$cases['ssh_prefix key path'] = JobCommandBuilder::ssh_prefix(
-	'192.0.2.10', 'root', '/tmp/' . $BACKTICK, 22);
 
 foreach ($cases as $label => $cmd) {
 	check(strpos($cmd, 'CANARY_FIRED') !== false,
@@ -312,103 +297,199 @@ check(strpos((string)json_encode($del_built), '/backups/') === false,
 	'no path crosses to the node');
 
 // ---------------------------------------------------------------------------
-section('Path construction');
+section('The bootstrap is one SSH session (specs/ssh_single_bootstrap.md)');
 
-// escapeshellarg returns its value WITH quotes. Interpolated inside a
-// double-quoted shell string those quotes become part of the path, so the file
-// is never found — and because the step ends in an echo or `|| true`, it still
-// reports success. The proxy config would silently keep serving
-// X-Forwarded-Proto "http" to a backend sitting behind TLS.
-$named = jcb_node(array('mgn_container_name' => 'mysite'));
-$steps = JobCommandBuilder::build_provision_ssl($named, array(
-	'domain' => 'ssl-test.invalid', 'admin_email' => 'admin@example.test'));
-$cmd = jcb_cmds($steps);
-
-check(strpos($cmd, "sites-enabled/'") === false,
-	'the proxy config path carries no stray quote from escapeshellarg',
-	'emitted: ' . substr($cmd, 0, 200));
-
-// Prove the emitted fragment actually finds the file it names.
-@mkdir($tmpdir . '/sites-enabled', 0777, true);
-$conf = $tmpdir . '/sites-enabled/mysite-proxy-le-ssl.conf';
-file_put_contents($conf, "Header set X-Forwarded-Proto \"http\"\n");
-
-// Take the SSL patch step and point it at the fixture tree instead of /etc.
-$patch = '';
-foreach ($steps as $step) {
-	if (isset($step['label']) && strpos($step['label'], 'X-Forwarded-Proto') !== false) {
-		$patch = $step['cmd'];
-	}
+// install_node is the ONE reach the plane makes over SSH in a machine's life.
+// It fetches the release and runs install.sh, which installs the host agent,
+// creates the site, writes the universal proxy vhost, tries for a certificate
+// and arms the host's own retry timer. Nothing after it opens SSH: no verify
+// round trip, no proxy step, no cleanup, no user switch.
+function jcb_ssh_steps($steps) {
+	return array_values(array_filter($steps, function ($s) { return ($s['type'] ?? '') === 'ssh'; }));
 }
-check($patch !== '', 'the SSL patch step is emitted');
-$local_patch = str_replace('/etc/apache2/sites-enabled', $tmpdir . '/sites-enabled', $patch);
-$local_patch = str_replace('systemctl reload apache2', 'true', $local_patch);
-@shell_exec($local_patch . ' >/dev/null 2>&1');
-
-$after = (string)file_get_contents($conf);
-check(strpos($after, 'X-Forwarded-Proto "https"') !== false,
-	'the emitted patch finds its config file and rewrites the protocol header',
-	'file now: ' . trim($after));
-
-// The patch has to say which of four things happened. A step that exits zero
-// and prints the same thing whether it rewrote a file, found it already correct,
-// or never found it at all cannot be trusted when it reports success — which is
-// exactly how the broken path stayed invisible.
-function jcb_proto_outcome($steps, $tmpdir) {
-	foreach ($steps as $step) {
-		if (isset($step['label']) && strpos($step['label'], 'X-Forwarded-Proto') !== false) {
-			$cmd = str_replace('/etc/apache2/sites-enabled', $tmpdir . '/sites-enabled', $step['cmd']);
-			$cmd = str_replace('systemctl reload apache2', 'true', $cmd);
-			return trim((string)shell_exec($cmd . ' 2>/dev/null'));
-		}
-	}
-	return '';
+function jcb_step_types($steps) {
+	return array_values(array_unique(array_map(function ($s) { return $s['type'] ?? '?'; }, $steps)));
 }
 
-$outcome_node = jcb_node(array('mgn_container_name' => 'outcomesite'));
-$outcome_steps = JobCommandBuilder::build_provision_ssl($outcome_node,
-	array('domain' => 'ssl-outcome.invalid'));
-$outcome_conf = $tmpdir . '/sites-enabled/outcomesite-proxy-le-ssl.conf';
-
-@unlink($outcome_conf);
-check(jcb_proto_outcome($outcome_steps, $tmpdir) === 'PROTO_CONF_MISSING',
-	'a missing config file is reported, not passed over silently',
-	jcb_proto_outcome($outcome_steps, $tmpdir));
-
-file_put_contents($outcome_conf, "RequestHeader set X-Forwarded-Proto \"http\"\n");
-check(jcb_proto_outcome($outcome_steps, $tmpdir) === 'PROTO_PATCHED',
-	'rewriting the header is reported as a patch');
-check(strpos((string)file_get_contents($outcome_conf), 'X-Forwarded-Proto "https"') !== false,
-	'and the file actually carries https afterwards',
-	trim((string)file_get_contents($outcome_conf)));
-
-// Re-running must be a no-op that says so, since provision_ssl can be repeated.
-check(jcb_proto_outcome($outcome_steps, $tmpdir) === 'PROTO_ALREADY_HTTPS',
-	'a second run reports the header was already correct');
-check(substr_count((string)file_get_contents($outcome_conf), 'X-Forwarded-Proto') === 1,
-	'a second run does not duplicate the header');
-
-file_put_contents($outcome_conf, "ServerName example.test\n");
-check(jcb_proto_outcome($outcome_steps, $tmpdir) === 'PROTO_HEADER_ABSENT',
-	'a config with no such header is reported rather than silently skipped');
-
-// A site name carrying a space still has to resolve — quoting is what makes
-// that work, and it is the case that a naive fix would break.
-$spaced = jcb_node(array('mgn_container_name' => 'my site'));
-$steps = JobCommandBuilder::build_provision_ssl($spaced, array('domain' => 'ssl-test2.invalid'));
-$cmd = jcb_cmds($steps);
-$conf2 = $tmpdir . '/sites-enabled/my site-proxy-le-ssl.conf';
-file_put_contents($conf2, "Header set X-Forwarded-Proto \"http\"\n");
-foreach ($steps as $step) {
-	if (isset($step['label']) && strpos($step['label'], 'X-Forwarded-Proto') !== false) {
-		$local = str_replace('/etc/apache2/sites-enabled', $tmpdir . '/sites-enabled', $step['cmd']);
-		$local = str_replace('systemctl reload apache2', 'true', $local);
-		@shell_exec($local . ' >/dev/null 2>&1');
-	}
+$boot_target = jcb_node(array('mgn_web_root' => '/var/www/html/bootsite/public_html',
+	'mgn_site_url' => 'https://boot.example.com'));
+$boot_steps = JobCommandBuilder::build_install_node($boot_target, array(
+	'mode' => 'fresh', 'sitename' => 'bootsite', 'domain' => 'boot.example.com', 'docker_mode' => 'docker'));
+$boot_ssh = jcb_ssh_steps($boot_steps);
+check(count($boot_ssh) === 1, 'a fresh docker install is exactly one ssh step', count($boot_ssh) . ' ssh steps');
+check(jcb_step_types($boot_steps) === array('local', 'ssh'),
+	'the only other step is the local release pre-flight', implode(',', jcb_step_types($boot_steps)));
+foreach ($boot_steps as $st) {
+	check(empty($st['teardown']), 'the bootstrap has no teardown — there is no later session to clean up in');
 }
-check(strpos((string)file_get_contents($conf2), 'X-Forwarded-Proto "https"') !== false,
-	'a site name containing a space still resolves to its config file',
-	'file now: ' . trim((string)file_get_contents($conf2)));
+$boot_cmd = $boot_ssh[0]['cmd'];
+check(strpos($boot_cmd, "install.sh -y -q docker --management-node='https://") !== false,
+	'the session installs Docker and the host agent, which asks to join this plane', $boot_cmd);
+check(strpos($boot_cmd, "--node-name='bootsite-host'") !== false,
+	'the host agent is named for the pending list');
+check(strpos($boot_cmd, "install.sh -y -q site --docker 'bootsite' - 'boot.example.com' '") !== false,
+	'then creates the site container', $boot_cmd);
+check(strpos($boot_cmd, "--enable-agent --management-node='https://") !== false,
+	'and the site\'s own agent asks to join too');
+check(strpos($boot_cmd, '--no-ssl') === false,
+	'no --no-ssl: install.sh writes the universal vhost and arms the certificate retry itself');
+check(strpos($boot_cmd, 'manage_domain.sh') === false, 'no separate proxy step');
+check(strpos($boot_cmd, 'user1') === false && strpos($boot_cmd, 'authorized_keys') === false,
+	'no login is prepared for a next session, because there is none');
+check(strpos($boot_cmd, 'sudo ') === false, 'nothing is sudo-wrapped: the bootstrap runs as root');
+check(strpos($boot_cmd, 'INSTALL_SUCCESS') !== false && strpos($boot_cmd, 'set -eo pipefail') === 0,
+	'INSTALL_SUCCESS is printed only past the last line, under set -e');
+check(strpos($boot_cmd, 'rm -rf /opt/joinery-install/') !== false
+	&& substr_count($boot_cmd, 'rm -rf') === 1,
+	'the extracted release is replaced on the way in and never deleted on the way out');
+$boot_target->load();
+check($boot_target->get('mgn_container_name') === 'bootsite',
+	'the container name is the site name this plane chose, recorded at build time');
+check((int)$boot_target->get('mgn_port') >= 8080, 'the published port is allocated and recorded');
+
+// A clone pulls from the source over HTTPS with the key the plane armed it with.
+$clone_key = JobCommandBuilder::mint_clone_export_key();
+$clone_target = jcb_node(array('mgn_web_root' => '/var/www/html/clonesite/public_html',
+	'mgn_site_url' => 'https://clone.example.com'));
+$clone_steps = JobCommandBuilder::build_install_node($clone_target, array(
+	'mode' => 'from_backup', 'sitename' => 'clonesite', 'domain' => 'clone.example.com',
+	'docker_mode' => 'docker', 'clone_from' => 'https://source.example.com', 'clone_key' => $clone_key));
+$clone_ssh = jcb_ssh_steps($clone_steps);
+check(count($clone_ssh) === 1 && !in_array('scp', jcb_step_types($clone_steps), true),
+	'a clone is the same single session: no scp, nothing addressed to the source');
+$clone_cmd = $clone_ssh[0]['cmd'];
+check(strpos($clone_cmd, "--clone-from='https://source.example.com' --clone-key='" . $clone_key . "'") !== false,
+	'the site command carries --clone-from and --clone-key', $clone_cmd);
+check(strpos($clone_cmd, "'clone.example.com'") !== false,
+	'the domain on the command is the NEW site\'s own, not the source\'s');
+foreach ($clone_steps as $st) {
+	check(empty($st['node_id']), 'no step names another node');
+}
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmSecretRedactor.php'));
+$shown = SmSecretRedactor::redact($clone_cmd);
+check(strpos($shown, $clone_key) === false && strpos($shown, '--clone-key=') !== false,
+	'the export key is redacted on display', substr($shown, strpos($shown, '--clone-key='), 40));
+
+foreach (array(
+	'no clone_from'   => array('clone_key' => $clone_key),
+	'http clone_from' => array('clone_from' => 'http://source.example.com', 'clone_key' => $clone_key),
+	'a path'          => array('clone_from' => 'https://source.example.com/x', 'clone_key' => $clone_key),
+	'no key'          => array('clone_from' => 'https://source.example.com'),
+	'a short key'     => array('clone_from' => 'https://source.example.com', 'clone_key' => 'abc'),
+	'a shell key'     => array('clone_from' => 'https://source.example.com', 'clone_key' => $PAYLOAD),
+) as $why => $extra) {
+	$threw = false;
+	try {
+		JobCommandBuilder::build_install_node($clone_target, array_merge(array(
+			'mode' => 'from_backup', 'sitename' => 'clonesite', 'domain' => 'clone.example.com',
+			'docker_mode' => 'docker'), $extra));
+	} catch (Exception $e) { $threw = true; }
+	check($threw, 'a clone is refused with ' . $why);
+}
+
+// A bare instance is the docker half alone: a host agent, no site, and the
+// machine's node takes the site name.
+$bare_target = jcb_node(array());
+$bare_steps = JobCommandBuilder::build_install_node($bare_target, array(
+	'mode' => 'bare', 'sitename' => 'relayshard', 'docker_mode' => 'docker'));
+$bare_cmd = jcb_ssh_steps($bare_steps)[0]['cmd'];
+check(strpos($bare_cmd, "install.sh -y -q docker --management-node=") !== false
+	&& strpos($bare_cmd, "--node-name='relayshard'") !== false,
+	'a bare instance installs the host agent under the node\'s own name');
+check(strpos($bare_cmd, 'install.sh -y -q site') === false, 'and no site');
+$bare_target->load();
+check((string)$bare_target->get('mgn_container_name') === '', 'a bare node is not given a container name');
+
+// Bare metal: install.sh server (which hardens SSH — this session survives it,
+// and there is no next one), then the site whose agent is the machine\'s.
+$metal_target = jcb_node(array('mgn_web_root' => '/var/www/html/metalsite/public_html',
+	'mgn_site_url' => 'https://metal.example.com'));
+$metal_cmd = jcb_ssh_steps(JobCommandBuilder::build_install_node($metal_target, array(
+	'mode' => 'fresh', 'sitename' => 'metalsite', 'domain' => 'metal.example.com',
+	'docker_mode' => 'bare-metal')))[0]['cmd'];
+check(strpos($metal_cmd, './install.sh -y -q server') !== false, 'bare metal runs install.sh server when prerequisites are missing');
+check(strpos($metal_cmd, "install.sh -y -q site --bare-metal 'metalsite' --password-file=/root/.joinery_postgres_password 'metal.example.com' --enable-agent") !== false,
+	'then the site, with the postgres role password the server setup recorded', $metal_cmd);
+check(strpos($metal_cmd, 'install.sh -y -q docker') === false, 'and no Docker');
+check(strpos($metal_cmd, 'grep dbpassword') === false,
+	'no password is harvested from another site\'s config — a machine this plane creates has none');
+check(strpos($metal_cmd, "test -n \"\$POSTGRES_PASSWORD\"") !== false && strpos($metal_cmd, 'export POSTGRES_PASSWORD;') !== false,
+	'a failed password generation fails the session rather than being masked by export');
+
+// Refusals: every value that becomes a name on the target is a shape.
+foreach (array(
+	'a shell sitename'      => array('sitename' => $PAYLOAD, 'domain' => 'x.example.com', 'docker_mode' => 'docker'),
+	'an uppercase sitename' => array('sitename' => 'MySite', 'domain' => 'x.example.com', 'docker_mode' => 'docker'),
+	'a shell domain'        => array('sitename' => 'site', 'domain' => $SUBSHELL, 'docker_mode' => 'docker'),
+	'no domain'             => array('sitename' => 'site', 'domain' => '', 'docker_mode' => 'docker'),
+	'an unknown docker_mode'=> array('sitename' => 'site', 'domain' => 'x.example.com', 'docker_mode' => 'kvm'),
+	'bare on bare metal'    => array('mode' => 'bare', 'sitename' => 'site', 'docker_mode' => 'bare-metal'),
+	'an unknown mode'       => array('mode' => 'restore', 'sitename' => 'site', 'domain' => 'x.example.com', 'docker_mode' => 'docker'),
+) as $why => $params) {
+	$threw = false;
+	try { JobCommandBuilder::build_install_node(jcb_node(array()), array_merge(array('mode' => 'fresh'), $params)); }
+	catch (Exception $e) { $threw = true; }
+	check($threw, 'install_node refuses ' . $why);
+}
+
+// The builders SSH used to own are gone, not stubbed.
+foreach (array('build_provision_ssl', 'build_enable_agent', 'build_discover_nodes', 'ssh_prefix',
+	'proto_patch_cmd', 'sudo_prefix', 'get_db_credentials_script') as $gone) {
+	check(!method_exists('JobCommandBuilder', $gone), $gone . ' no longer exists');
+}
+
+// A certificate for a container is issued on its HOST: the builder resolves
+// the issuer, and refuses by name when the host has no paired agent.
+$cert_host_node = jcb_node(array('mgn_host' => '192.0.2.77',
+	'mgn_agent_public_key' => base64_encode(str_repeat("\x0c", 32)),
+	'mgn_agent_version'    => '1.16.3',
+	'mgn_agent_primitives' => 'check_status,provision_certificate,decommission_site'));
+$cert_host = ManagedHost::ensure_for_node($cert_host_node);
+harness_register_row('mgh_managed_hosts', 'mgh_id', $cert_host->key);
+$cert_container = jcb_node(array('mgn_host' => '192.0.2.77', 'mgn_container_name' => 'certsite',
+	'mgn_web_root' => '/var/www/html/certsite/public_html', 'mgn_site_url' => 'https://cert.example.com'));
+ManagedHost::ensure_for_node($cert_container);
+$cert_threw = '';
+try { JobCommandBuilder::certificate_issuer_for($cert_container); }
+catch (Exception $e) { $cert_threw = $e->getMessage(); }
+check(strpos($cert_threw, 'host') !== false && strpos($cert_threw, 'Pair') !== false,
+	'a container on a host with no paired host agent has no issuer, and the refusal says to pair the host', $cert_threw);
+$cert_host->set('mgh_mgn_host_node_id', $cert_host_node->key);
+$cert_host->save();
+$issuer = JobCommandBuilder::certificate_issuer_for($cert_container);
+check((int)$issuer->key === (int)$cert_host_node->key, 'once the host agent is linked, the host node is the issuer');
+$cert_built = JobCommandBuilder::build_provision_certificate($cert_container, array('domain' => 'Cert.Example.com'));
+check(($cert_built['primitive'] ?? '') === 'provision_certificate'
+	&& ($cert_built['params']['domain'] ?? '') === 'cert.example.com',
+	'the envelope names the site\'s domain, lowercased');
+check((int)JobCommandBuilder::certificate_issuer_for($cert_host_node)->key === (int)$cert_host_node->key,
+	'a bare-metal node with the primitive is its own issuer');
+
+// The two compiled-names settings writers.
+$arm_paired = jcb_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x0d", 32)),
+	'mgn_agent_version' => '1.17.0', 'mgn_agent_primitives' => 'clone_export_arm,fleet_enroll'));
+$arm_built = JobCommandBuilder::build_clone_export_arm($arm_paired, array('export_key' => $clone_key));
+check($arm_built === array('primitive' => 'clone_export_arm', 'params' => array('export_key' => $clone_key)),
+	'clone_export_arm carries the key and nothing else', json_encode($arm_built));
+check(JobCommandBuilder::build_clone_export_arm($arm_paired, array())['params']['export_key'] === '',
+	'an absent key is an explicit disarm');
+$threw = false;
+try { JobCommandBuilder::build_clone_export_arm($ssh_node, array('export_key' => $clone_key)); }
+catch (Exception $e) { $threw = true; }
+check($threw, 'an unpaired source cannot be armed — there is no SSH route for it');
+$fe_built = JobCommandBuilder::build_fleet_enroll($arm_paired, array(
+	'service_url' => 'https://operator.example.com', 'public_key' => 'public_abcdefgh12345678', 'secret_key' => 'secret_abcdefgh12345678'));
+check(($fe_built['primitive'] ?? '') === 'fleet_enroll' && count($fe_built['params']) === 3,
+	'fleet_enroll carries the three values and nothing else', json_encode($fe_built));
+foreach (array(
+	array('service_url' => 'http://operator.example.com', 'public_key' => 'public_abcdefgh12345678', 'secret_key' => 'secret_abcdefgh12345678'),
+	array('service_url' => 'https://operator.example.com', 'public_key' => 'public_' . $PAYLOAD, 'secret_key' => 'secret_abcdefgh12345678'),
+	array('service_url' => 'https://operator.example.com', 'public_key' => 'public_abcdefgh12345678', 'secret_key' => 'nope'),
+) as $bad) {
+	$threw = false;
+	try { JobCommandBuilder::build_fleet_enroll($arm_paired, $bad); } catch (Exception $e) { $threw = true; }
+	check($threw, 'fleet_enroll refuses a value outside the platform\'s shapes');
+}
 
 // ---------------------------------------------------------------------------
 section('Step structure');
@@ -480,163 +561,6 @@ check(($pi_built['params'] ?? null) === array(),
 $threw = false;
 try { JobCommandBuilder::build_run_plugin_installers($ssh_node); } catch (Exception $e) { $threw = true; }
 check($threw, 'an unpaired node is refused run_plugin_installers at build time');
-
-section('Turning a node\'s agent on from here');
-
-// The fleet path: switch the agent on over the SSH this plane already has,
-// rather than visiting every node's own admin page. Two steps, in this order —
-// the switch is a setting, and the installer is the root moment that acts on
-// it. Reversing them would install nothing and report success.
-$enable = jcb_node(array(
-	'mgn_ssh_user' => 'user1',
-	'mgn_web_root' => '/var/www/html/jeremytunnell/public_html'));
-$steps = JobCommandBuilder::build_enable_agent($enable);
-check(count($steps) === 2, 'two steps: record the switch, then act on it', 'steps: ' . count($steps));
-check(strpos($steps[0]['cmd'], 'utils/agent_control.php --on') !== false,
-	'the first step switches the agent on through the node\'s own CLI', $steps[0]['cmd']);
-check(strpos($steps[0]['cmd'], '--join') === false,
-	'with no plane_url the node is not asked to join anything', $steps[0]['cmd']);
-check(strpos($steps[1]['cmd'], '_plugin_installers_start.sh') !== false,
-	'the second step is the root moment that installs it', $steps[1]['cmd']);
-
-// Asking to join is the same call plus a URL. It is a request, not an
-// enrollment: approval here after a fingerprint comparison is untouched.
-$steps = JobCommandBuilder::build_enable_agent($enable, array('plane_url' => 'https://manage.example.com'));
-check(preg_match("#--join='https://manage\\.example\\.com'#", $steps[0]['cmd']) === 1,
-	'the management node URL is passed as a quoted argument', $steps[0]['cmd']);
-
-// A URL is a value from a settings row, so it goes through the same discipline
-// every other builder input does — and a bare host is all a join needs, so a
-// path, a query, or a shell payload is refused rather than escaped and sent.
-foreach (array(
-	'https://evil.example.com/;rm -rf /',
-	'https://evil.example.com/path',
-	'https://evil.example.com?x=1',
-	'$(id).example.com',
-	'ftp://example.com',
-) as $bad_url) {
-	$threw = false;
-	try { JobCommandBuilder::build_enable_agent($enable, array('plane_url' => $bad_url)); }
-	catch (Exception $e) { $threw = true; }
-	check($threw, 'refused as a management node URL: ' . $bad_url);
-}
-
-$threw = false;
-try { JobCommandBuilder::build_enable_agent(jcb_node(array('mgn_web_root' => ''))); }
-catch (Exception $e) { $threw = true; }
-check($threw, 'a node without mgn_web_root cannot be given an agent');
-
-section('From-backup clone: extract depth and restore verification');
-
-// backup_project.sh writes archives two levels deep —
-//   {backup_name}/project_files/{public_html,uploads,config,...}
-// — with the archive's own metadata (apache_config/, backup_info.txt, the .sql
-// dump) as siblings of project_files. Extracting with one level stripped buries
-// the entire site under a project_files/ directory at the site root and leaves
-// the metadata scattered beside it. Nothing about the resulting site looks
-// broken: the fresh install already ran and the database restore succeeded, so
-// it serves pages while every uploaded file is absent from where the database
-// says it lives. That combination is why this is asserted on the emitted text
-// AND executed below rather than trusted to review.
-$source_node = jcb_node(array(
-	'mgn_web_root' => '/var/www/html/sourcesite/public_html',
-	'mgn_site_url' => 'https://source.example.com'));
-$target_node = jcb_node(array(
-	'mgn_web_root' => '/var/www/html/clonesite/public_html',
-	'mgn_site_url' => 'https://clone.example.com'));
-
-$clone_steps = JobCommandBuilder::build_install_node($target_node, array(
-	'mode'           => 'from_backup',
-	'sitename'       => 'clonesite',
-	'domain'         => 'source.example.com',
-	'docker_mode'    => 'bare-metal',
-	'source_node_id' => $source_node->key,
-	'backup_source'  => 'new',
-));
-
-$extract_step = null;
-$verify_step  = null;
-foreach ($clone_steps as $step) {
-	if (($step['label'] ?? '') === 'Extract project files') { $extract_step = $step; }
-	if (($step['label'] ?? '') === 'Verify restored files')  { $verify_step  = $step; }
-}
-
-check($extract_step !== null, 'the clone emits an extract step');
-check($verify_step !== null, 'the clone emits a restore-verification step');
-
-$extract_cmd = $extract_step['cmd'] ?? '';
-check(strpos($extract_cmd, '--strip-components=2') !== false,
-	'both archive levels are stripped, so content lands at the site root', $extract_cmd);
-check(strpos($extract_cmd, '--strip-components=1') === false,
-	'the one-level strip that buries the site under project_files/ is gone', $extract_cmd);
-check(strpos($extract_cmd, "'*/project_files/*'") !== false,
-	'only the project_files subtree is extracted, not the archive metadata', $extract_cmd);
-check(empty($extract_step['continue_on_error']),
-	'a failed extract fails the clone rather than continuing to a fileless site');
-check(empty($verify_step['continue_on_error']),
-	'a failed verification fails the clone');
-
-// Execute the emitted verification against real fixtures. The command opens by
-// assigning SITE and TAR; everything after that is the logic under test, so the
-// body is re-hosted onto a throwaway site directory and a replica archive.
-$verify_body = '';
-$body_at = strpos($verify_step['cmd'] ?? '', 'if [ -d');
-if ($body_at !== false) { $verify_body = substr($verify_step['cmd'], $body_at); }
-check($verify_body !== '', 'the verification body can be isolated for execution');
-
-$fx = $tmpdir . '/clonefx';
-@mkdir($fx . '/src/mysite-2026-01-01-000000/project_files/public_html', 0777, true);
-@mkdir($fx . '/src/mysite-2026-01-01-000000/project_files/uploads/avatar', 0777, true);
-@mkdir($fx . '/src/mysite-2026-01-01-000000/project_files/config', 0777, true);
-@mkdir($fx . '/src/mysite-2026-01-01-000000/apache_config', 0777, true);
-file_put_contents($fx . '/src/mysite-2026-01-01-000000/project_files/public_html/index.php', "code\n");
-file_put_contents($fx . '/src/mysite-2026-01-01-000000/project_files/uploads/avatar/pic.jpg', "bytes\n");
-file_put_contents($fx . '/src/mysite-2026-01-01-000000/project_files/config/Globalvars_site.php', "sourcecfg\n");
-file_put_contents($fx . '/src/mysite-2026-01-01-000000/apache_config/mysite.conf', "vhost\n");
-file_put_contents($fx . '/src/mysite-2026-01-01-000000/backup_info.txt', "meta\n");
-$archive = $fx . '/archive.tar.gz';
-@shell_exec('tar -czf ' . escapeshellarg($archive) . ' -C ' . escapeshellarg($fx . '/src') . ' mysite-2026-01-01-000000 2>/dev/null');
-check(file_exists($archive), 'a replica backup archive was built for the verification fixtures');
-
-/** Run the emitted verification body against $site_dir; returns the exit code. */
-$run_verify = function ($site_dir) use ($verify_body, $archive) {
-	$cmd = 'SITE=' . escapeshellarg($site_dir) . '; TAR=' . escapeshellarg($archive) . '; ' . $verify_body;
-	// A subshell, not a brace group: the body ends in `exit 1` on failure, which
-	// in a brace group would terminate the whole shell before the status is read.
-	@shell_exec('( ' . $cmd . ' ) >/dev/null 2>&1; echo $? > ' . escapeshellarg($site_dir . '/.rc'));
-	$rc = trim((string)@file_get_contents($site_dir . '/.rc'));
-	@unlink($site_dir . '/.rc');
-	return $rc === '' ? -1 : (int)$rc;
-};
-
-// The corrected command, run for real: content lands at the site root.
-$good = $fx . '/good';
-@mkdir($good, 0777, true);
-@shell_exec('tar xzf ' . escapeshellarg($archive) . ' -C ' . escapeshellarg($good)
-	. " --strip-components=2 --wildcards --exclude='config/Globalvars_site.php' '*/project_files/*' 2>/dev/null");
-check(file_exists($good . '/uploads/avatar/pic.jpg'),
-	'the corrected extract puts uploads at the site root');
-check(!file_exists($good . '/config/Globalvars_site.php'),
-	'the target keeps its own Globalvars_site.php');
-check($run_verify($good) === 0, 'verification passes a correctly restored site');
-
-// The defect itself: one level stripped.
-$bad = $fx . '/bad';
-@mkdir($bad, 0777, true);
-@shell_exec('tar xzf ' . escapeshellarg($archive) . ' -C ' . escapeshellarg($bad)
-	. " --strip-components=1 --exclude='config/Globalvars_site.php' 2>/dev/null");
-check(is_dir($bad . '/project_files'),
-	'the one-level strip reproduces the buried-site layout');
-check($run_verify($bad) === 1, 'verification rejects a site whose files landed a level too deep');
-
-// A partial copy with no structural tell: the site looks right, one file is gone.
-$partial = $fx . '/partial';
-@mkdir($partial, 0777, true);
-@shell_exec('cp -r ' . escapeshellarg($good) . '/. ' . escapeshellarg($partial) . '/ 2>/dev/null');
-@unlink($partial . '/uploads/avatar/pic.jpg');
-check(file_exists($partial . '/public_html/index.php') && !file_exists($partial . '/uploads/avatar/pic.jpg'),
-	'the partial fixture has site code but a missing upload');
-check($run_verify($partial) === 1, 'verification rejects a restore that silently lost one file');
 
 section('Restore jobs travel to the node, and refuse when they cannot');
 
@@ -752,16 +676,9 @@ try {
 } catch (Exception $e) { $stage_threw = $e->getMessage(); }
 check($stage_threw !== '', 'staging refuses a malformed chain id', $stage_threw);
 
-// Fixtures the surviving checks still need. They were shared with the
-// copy-database sections, which are retired (A3): $copy_target is the target of
-// a restore, and $dock_source is the SOURCE NODE of a from-backup install —
-// cloning a new site from an existing one is not the retired operation, which
-// was copying a database into a node that already had one.
+// The target of a restore, for the engine-contract checks below.
 $copy_target = jcb_node(array(
 	'mgn_web_root' => '/var/www/html/copytarget/public_html'));
-$dock_source = jcb_node(array(
-	'mgn_container_name' => 'sourcedock',
-	'mgn_web_root' => '/var/www/html/sourcedock/public_html'));
 
 section('Restore semantics: replace, verified, loud');
 
@@ -829,124 +746,27 @@ foreach (array('--no-pre-restore-dump', '--pre-restore-dump-dir') as $dead_flag)
 		'no builder still passes ' . $dead_flag . ', which the engine would refuse outright');
 }
 
-// The install-node clone restore follows the same engine contract.
-$clone_restore = '';
-foreach ($clone_steps as $step) {
-	if (($step['label'] ?? '') === 'Restore source database') { $clone_restore = $step['cmd']; }
-}
-check($clone_restore !== '', 'install_node from-backup: a DB restore step is emitted');
-jcb_check_engine_restore_cmd('install_node from-backup', $clone_restore);
-
-// Dumps are plain snapshots: never self-cleaning (the restore owns replacement),
-// and job-internal dumps are role-portable because the restore runs as the
-// TARGET site's own DB user under ON_ERROR_STOP — an OWNER TO naming the
-// source site's role would fail the job.
-$dump_sets = ['install_node from-backup' => $clone_steps];
-foreach ($dump_sets as $name => $steps) {
-	foreach ($steps as $step) {
-		$label = $step['label'] ?? '';
-		if (strpos($step['cmd'] ?? '', 'pg_dump') === false) { continue; }
-		check(strpos($step['cmd'], '--clean') === false,
-			$name . ' / ' . $label . ': no dump is self-cleaning', $step['cmd']);
-		if (strpos($label, 'Dump source database') === 0) {
-			check(strpos($step['cmd'], '--no-owner --no-acl') !== false,
-				$name . ' / ' . $label . ': job-internal dumps carry no role names', $step['cmd']);
-		}
-	}
-}
-
 section('Teardown phase: scratch is torn down, deliverables are not');
 
-// A job that fails mid-way never reaches trailing cleanup steps, so scratch —
-// dumps, staged archives, unpacked installers — piles up on shared production
-// hosts (353 MB per attempted clone, and the failure path is the COMMON path:
-// 15 of 28 install jobs failed). Steps flagged 'teardown' run on every exit.
-// These checks pin the two builder-side guarantees the agent relies on:
-// every scratch path has a teardown step, and teardown steps sit at the tail
-// of the array so an un-upgraded agent (which ignores the flag and runs
-// sequentially) never deletes an artifact before the step that uses it.
+// Steps flagged 'teardown' run on every exit. Nothing in the SSH surface that
+// remains emits one: the bootstrap keeps what it extracts, and the relay
+// builders carry their own cleanup inline.
 
-/** Collect the per-job scratch paths mentioned by a builder's MAIN steps. */
-function jcb_scratch_paths($steps) {
-	$paths = array();
-	$pattern = '#(?:/tmp/(?:local_copy|copy|install|joinery_restore|joinery_install|joinery_discover)_[A-Za-z0-9][A-Za-z0-9_.]*|/backups/install_[A-Za-z0-9][A-Za-z0-9_.]*)#';
-	foreach ($steps as $step) {
-		if (!empty($step['teardown'])) { continue; }
-		foreach (array($step['cmd'] ?? '', $step['remote_path'] ?? '', $step['local_path'] ?? '') as $text) {
-			if ($text !== '' && preg_match_all($pattern, $text, $m)) {
-				foreach ($m[0] as $p) { $paths[$p] = true; }
-			}
-		}
-	}
-	return array_keys($paths);
-}
-
-/** Every scratch path a builder creates must appear in some teardown step. */
-function jcb_assert_teardown_coverage($name, $steps) {
-	$teardown_text = '';
-	foreach ($steps as $step) {
-		if (!empty($step['teardown'])) { $teardown_text .= ($step['cmd'] ?? '') . "\n"; }
-	}
-	$paths = jcb_scratch_paths($steps);
-	check(count($paths) > 0, $name . ': scratch paths were found to audit');
-	foreach ($paths as $p) {
-		check(strpos($teardown_text, $p) !== false,
-			$name . ': scratch path ' . $p . ' has a matching teardown step');
-	}
-}
-
-/** No main step may follow a teardown step (the old-agent placement rule). */
-function jcb_assert_tail_placement($name, $steps) {
-	$offender = '';
-	$seen_teardown = false;
-	foreach ($steps as $step) {
-		if (!empty($step['teardown'])) { $seen_teardown = true; continue; }
-		if ($seen_teardown) { $offender = $step['label'] ?? '(unlabeled)'; break; }
-	}
-	check($offender === '', $name . ': no main step follows a teardown step', $offender);
-}
-
-/** Teardown steps must be idempotent, short-fused, and safe on old agents. */
-function jcb_assert_teardown_shape($name, $steps) {
-	foreach ($steps as $step) {
-		if (empty($step['teardown'])) { continue; }
-		$label = $step['label'] ?? '(unlabeled)';
-		check(preg_match('/rm -r?f /', $step['cmd'] ?? '') === 1,
-			$name . ' / ' . $label . ': teardown is an idempotent rm', $step['cmd'] ?? '');
-		check(!empty($step['timeout']) && $step['timeout'] <= 120,
-			$name . ' / ' . $label . ': teardown carries a short timeout');
-		check(!empty($step['continue_on_error']),
-			$name . ' / ' . $label . ': continue_on_error is spelled out for old agents');
-	}
-}
-
-$dock_target = jcb_node(array(
-	'mgn_container_name' => 'targetdock',
-	'mgn_web_root' => '/var/www/html/targetdock/public_html'));
+// The bootstrap has no scratch to tear down: the extracted release stays on
+// the machine on purpose (the deferred-SSL timer may run its setup_ssl.sh
+// until the host agent's bundle lands), and there is no later session to
+// delete anything in. So the audit here is that install_node emits NO
+// teardown step, rather than that every scratch path has one.
 $clone_docker_target = jcb_node(array(
 	'mgn_web_root' => '/var/www/html/dockclone/public_html',
 	'mgn_site_url' => 'https://dockclone.example.com'));
-
-// Every builder in the spec's inventory, in its scratch-heaviest variant.
-$teardown_suites = array(
-	'discover_nodes'              => JobCommandBuilder::build_discover_nodes(array(
-		'host' => '192.0.2.50', 'ssh_user' => 'root',
-		'ssh_key_path' => '/home/user1/.ssh/id_ed25519_claude')),
-	'install_node fresh'          => JobCommandBuilder::build_install_node($clone_docker_target, array(
-		'mode' => 'fresh', 'sitename' => 'freshsite', 'domain' => 'fresh.example.com',
-		'docker_mode' => 'bare-metal')),
-	'install_node clone bare'     => $clone_steps,
-	'install_node clone docker'   => JobCommandBuilder::build_install_node($clone_docker_target, array(
-		'mode' => 'from_backup', 'sitename' => 'dockclone', 'domain' => 'source.example.com',
-		'docker_mode' => 'docker', 'source_node_id' => $dock_source->key,
-		'backup_source' => 'new')),
-);
-
-foreach ($teardown_suites as $name => $suite_steps) {
-	jcb_assert_teardown_coverage($name, $suite_steps);
-	jcb_assert_tail_placement($name, $suite_steps);
-	jcb_assert_teardown_shape($name, $suite_steps);
+$install_teardown = 0;
+foreach (JobCommandBuilder::build_install_node($clone_docker_target, array(
+	'mode' => 'fresh', 'sitename' => 'freshsite', 'domain' => 'fresh.example.com',
+	'docker_mode' => 'docker')) as $step) {
+	if (!empty($step['teardown'])) { $install_teardown++; }
 }
+check($install_teardown === 0, 'install_node emits no teardown step');
 
 // Rule 2 (deliverables): the publish-upgrade job exists to place release
 // archives in the upgrade repository — nothing about it may be teardown.
@@ -973,39 +793,20 @@ $bkt->set('bkt_credentials', json_encode(array('key_id' => 'k', 'application_key
 $bkt->save();
 harness_register_row('bkt_backup_targets', 'bkt_id', $bkt->key);
 
-// From-EXISTING-backup clones: the named /backups/ paths are the user's real
-// backup files, not job scratch. No teardown step may touch them.
-$existing_steps = JobCommandBuilder::build_install_node($clone_docker_target, array(
-	'mode' => 'from_backup', 'sitename' => 'dockclone', 'domain' => 'source.example.com',
-	'docker_mode' => 'bare-metal', 'source_node_id' => $source_node->key,
-	'backup_source' => 'existing',
-	'db_backup_path' => '/backups/keep_me.sql.gz',
-	'project_backup_path' => '/backups/keep_me_project.tar.gz'));
-$touches_named = false;
-foreach ($existing_steps as $step) {
-	if (!empty($step['teardown']) && strpos($step['cmd'] ?? '', '/backups/keep_me') !== false) {
-		$touches_named = true;
-	}
-}
-check(!$touches_named, 'a from-existing-backup clone never tears down the named backup files');
-// The staged and target-side copies are still scratch in that variant.
-jcb_assert_teardown_coverage('install_node clone existing', $existing_steps);
-jcb_assert_tail_placement('install_node clone existing', $existing_steps);
-
-// The installer directory is per-job: a failed install's teardown (or a
-// stale-recovery replay) must never delete it out from under a later install.
-$fresh_a = jcb_cmds($teardown_suites['install_node fresh']);
-check(preg_match('#/tmp/joinery_install_[a-f0-9]{12}#', $fresh_a) === 1,
+// The installer directory is per-job, so two installs on one machine never
+// extract over each other.
+$fresh_a = jcb_cmds(JobCommandBuilder::build_install_node($clone_docker_target, array(
+	'mode' => 'fresh', 'sitename' => 'freshsite', 'domain' => 'fresh.example.com',
+	'docker_mode' => 'bare-metal')));
+check(preg_match('#/opt/joinery-install/[a-f0-9]{12}#', $fresh_a) === 1,
 	'the installer directory carries the per-job transfer id');
-check(strpos($fresh_a, "/tmp/joinery_install ") === false
-	&& strpos($fresh_a, "/tmp/joinery_install/") === false
-	&& strpos($fresh_a, "/tmp/joinery_install\n") === false,
-	'the fixed /tmp/joinery_install path is gone');
+check(strpos($fresh_a, '/tmp/joinery_install') === false,
+	'nothing lands under /tmp, which Ubuntu empties at boot');
 $fresh_b = jcb_cmds(JobCommandBuilder::build_install_node($clone_docker_target, array(
 	'mode' => 'fresh', 'sitename' => 'freshsite', 'domain' => 'fresh.example.com',
 	'docker_mode' => 'bare-metal')));
-preg_match('#/tmp/joinery_install_[a-f0-9]{12}#', $fresh_a, $ma);
-preg_match('#/tmp/joinery_install_[a-f0-9]{12}#', $fresh_b, $mb);
+preg_match('#/opt/joinery-install/[a-f0-9]{12}#', $fresh_a, $ma);
+preg_match('#/opt/joinery-install/[a-f0-9]{12}#', $fresh_b, $mb);
 check(!empty($ma[0]) && !empty($mb[0]) && $ma[0] !== $mb[0],
 	'two installs never share an installer directory', ($ma[0] ?? '?') . ' vs ' . ($mb[0] ?? '?'));
 

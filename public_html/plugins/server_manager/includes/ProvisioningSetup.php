@@ -461,7 +461,7 @@ class ProvisioningSetup {
 
 	/**
 	 * State of the job-executing Go agent. Every job the pipeline creates
-	 * (install_node, provision_ssl, ...) sits pending until an agent polling
+	 * (backups, upgrades, certificates, ...) sits pending until an agent polling
 	 * THIS site's queue claims it — a management node without a live agent looks
 	 * activated but can never execute, so the page surfaces it as a hard
 	 * requirement.

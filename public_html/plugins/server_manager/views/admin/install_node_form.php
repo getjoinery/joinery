@@ -3,13 +3,18 @@
  * Server Manager - Install New Node
  * URL: /admin/server_manager/install_node_form
  *
- * One-click node provisioning. Two targets:
- *   - Existing server: creates a ManagedNode, queues an install_node job,
- *     redirects to the job detail page.
- *   - New cloud instance: creates an admin-origin CustomerCloudProvision at
- *     'ready'; the Provision Customer Cloud task births the instance in the
- *     connected cloud account and dispatches the install from there.
+ * One-click node provisioning of a NEW cloud instance: creates an admin-origin
+ * CustomerCloudProvision at 'ready'; the Provision Customer Cloud task births
+ * the instance in the connected cloud account and dispatches the one-session
+ * bootstrap from there (specs/ssh_single_bootstrap.md). An existing server is
+ * not installed from here: the plane never opens SSH to a machine it did not
+ * create. It is enrolled from its own Admin → System → Management Node page
+ * and added on the Connect Site page.
  *
+ * @version 1.7 - cloud instances only: the existing-server target (an SSH key on a machine the plane
+ *                did not create) is gone with the SSH surface it needed
+ * @version 1.6 - From-backup is a clone over HTTPS from the source site (specs/ssh_single_bootstrap.md):
+ *                no backup-file choice, and the domain given is the new site's own
  * @version 1.5 - Bare install mode: cloud instance with no site (infrastructure nodes)
  * @version 1.4 - Cloud-instance target (admin-origin provisions)
  */
@@ -27,7 +32,6 @@ $session->set_return();
 
 $error = null;
 $field_errors = [];
-$default_ssh_key = '/home/user1/.ssh/id_ed25519_claude';
 
 if ($_POST && isset($_POST['mgn_name'])) {
 	try {
@@ -35,15 +39,11 @@ if ($_POST && isset($_POST['mgn_name'])) {
 		$sitename    = trim($_POST['sitename'] ?? '');
 		$docker_mode = $_POST['docker_mode'] ?? '';
 
-		$is_cloud_target = (($_POST['host_dropdown'] ?? '') === '__cloud__');
+		$is_cloud_target = true; // the only target this form has
 		$is_bare         = ($mode === 'bare');
 
 		if (!in_array($mode, ['fresh', 'from_backup', 'bare'], true)) {
 			$field_errors['install_mode'] = 'Choose an install type.';
-		} elseif ($is_bare && !$is_cloud_target) {
-			// A bare node with no site only makes sense for an instance this
-			// form births; an existing server is added via the node form.
-			$field_errors['install_mode'] = 'Bare instance is only available with the create-cloud-instance target.';
 		}
 
 		if (!$is_bare) {
@@ -60,11 +60,6 @@ if ($_POST && isset($_POST['mgn_name'])) {
 		$domain = rtrim(preg_replace('#^https?://#i', '', trim($_POST['domain'] ?? '')), '/');
 		if (!$domain) {
 			$field_errors['domain'] = 'Domain is required.';
-		}
-
-		$mgn_host = trim($_POST['mgn_host'] ?? '');
-		if (!$is_cloud_target && !$mgn_host) {
-			$field_errors['host_dropdown'] = 'Target host is required.';
 		}
 
 		$cloud_account = null;
@@ -95,12 +90,16 @@ if ($_POST && isset($_POST['mgn_name'])) {
 		} else {
 			$source_node_id = intval($_POST['source_node_id'] ?? 0);
 			if (!$source_node_id) {
-				$field_errors['source_node_id'] = 'Source node is required for from-backup install.';
-			}
-			// A brand-new instance has no cached backups to point at — the
-			// pipeline always captures a fresh source backup for cloud targets.
-			if ($is_cloud_target && ($_POST['backup_source'] ?? 'new') === 'existing') {
-				$field_errors['backup_source'] = 'Cloud instances install from a fresh backup — choose "Take fresh backup now".';
+				$field_errors['source_node_id'] = 'Source node is required for a clone.';
+			} else {
+				// The clone pulls from the source's web address, so the source
+				// must have one, and its agent must be able to arm the export.
+				$source_node = new ManagedNode($source_node_id, TRUE);
+				if (!$source_node->key || !preg_match('#^https://#', (string)$source_node->get('mgn_site_url'))) {
+					$field_errors['source_node_id'] = 'The source node needs an https site URL; the clone pulls from it.';
+				} elseif (!JobCommandBuilder::has_primitive($source_node, 'clone_export_arm')) {
+					$field_errors['source_node_id'] = 'The source node\'s agent cannot arm a clone export (needs agent 1.17.0 or later, paired). Update it first.';
+				}
 			}
 		}
 
@@ -142,7 +141,6 @@ if ($_POST && isset($_POST['mgn_name'])) {
 				$provision->set('cvp_install_mode',   $mode);
 				if ($mode === 'from_backup') {
 					$provision->set('cvp_source_node_id', $source_node_id);
-					$provision->set('cvp_backup_source',  'new');
 				}
 				$provision->prepare();
 				$provision->save();
@@ -151,93 +149,15 @@ if ($_POST && isset($_POST['mgn_name'])) {
 				exit;
 			}
 
-			// Create the node record
-			$node = new ManagedNode(NULL);
-			$node->set('mgn_name', trim($_POST['mgn_name']));
-			$node->set('mgn_slug', $slug);
-			$node->set('mgn_host', $mgn_host);
-			$node->set('mgn_ssh_user', trim($_POST['mgn_ssh_user']) ?: 'root');
-			$node->set('mgn_ssh_key_path', trim($_POST['mgn_ssh_key_path']));
-			$port = trim($_POST['mgn_ssh_port'] ?? '');
-			$node->set('mgn_ssh_port', $port === '' ? 22 : intval($port));
-			$node->set('mgn_web_root', "/var/www/html/{$sitename}/public_html");
-			$node->set('mgn_site_url', "https://{$domain}");
-			$node->set('mgn_enabled', true);
-			$node->set('mgn_install_state', 'installing');
-			$node->prepare();
-			$node->save();
-			$node->load();
-
-			// Link (or mint) the placement record. Every node names its machine
-			// by mgn_mgh_host_id — sibling grouping (port allocation,
-			// upgrade-all, host-scope routing) reads nothing else, so the FK is
-			// set the moment the node exists rather than only when a host row
-			// happened to.
-			ManagedHost::ensure_for_node($node);
-
-			$params = [
-				'mode'        => $mode,
-				'sitename'    => $sitename,
-				'domain'      => $domain,
-				'docker_mode' => $docker_mode,
-			];
-			if ($mode === 'from_backup') {
-				$params['source_node_id'] = $source_node_id;
-				$params['backup_source']  = $_POST['backup_source'] ?? 'new';
-				if ($params['backup_source'] === 'existing') {
-					$params['db_backup_path']      = trim($_POST['db_backup_path'] ?? '');
-					$params['project_backup_path'] = trim($_POST['project_backup_path'] ?? '');
-				}
-			}
-
-			$steps = JobCommandBuilder::build_install_node($node, $params);
-			$job   = ManagementJob::createJob($node->key, 'install_node', $steps, $params, $session->get_user_id());
-
-			header('Location: /admin/server_manager/job_detail?job_id=' . $job->key);
-			exit;
 		}
 	} catch (Exception $e) {
 		$error = $e->getMessage();
-		if (!empty($node) && $node->key) {
-			$node->set('mgn_install_state', 'install_failed');
-			$node->save();
-		}
 	}
 }
 
 // Existing nodes — source options for from-backup mode and host dropdown
 $existing_nodes = new MultiManagedNode(['deleted' => false, 'enabled' => true], ['mgn_name' => 'ASC']);
 $existing_nodes->load();
-
-// Backup list data for JS, keyed by node id
-require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupListHelper.php'));
-$backup_lists = [];
-foreach ($existing_nodes as $en) {
-	$bl = BackupListHelper::get_for_node($en);
-	$backup_lists[$en->key] = $bl['files'];
-}
-
-// Known hosts from existing nodes, grouped by SSH host IP
-$known_hosts_map = [];
-foreach ($existing_nodes as $en) {
-	$host = $en->get('mgn_host');
-	if (!$host) continue;
-	if (!isset($known_hosts_map[$host])) {
-		$known_hosts_map[$host] = [
-			'host'         => $host,
-			'ssh_user'     => $en->get('mgn_ssh_user') ?: 'root',
-			'ssh_key_path' => $en->get('mgn_ssh_key_path') ?: $default_ssh_key,
-			'ssh_port'     => intval($en->get('mgn_ssh_port') ?: 22),
-			'slugs'        => [],
-			'is_docker'    => false,
-		];
-	}
-	$known_hosts_map[$host]['slugs'][] = $en->get('mgn_slug');
-	if ($en->get('mgn_container_name')) {
-		$known_hosts_map[$host]['is_docker'] = true;
-	}
-}
-$known_hosts = array_values($known_hosts_map);
 
 // Build source node dropdown options
 $source_node_options = ['' => '-- Select source node --'];
@@ -259,27 +179,6 @@ foreach ($cloud_accounts as $ca) {
 		. (CustomerCloudAccount::grant_expired($ca) ? ' (grant expired — re-connect first)' : '');
 }
 $has_cloud_accounts = count($cloud_account_options) > 1;
-
-// Build host dropdown options
-$host_dropdown_options = ['' => '-- Select target --'];
-foreach ($known_hosts as $kh) {
-	$preview = implode(', ', array_slice($kh['slugs'], 0, 3));
-	if (count($kh['slugs']) > 3) $preview .= ', +' . (count($kh['slugs']) - 3) . ' more';
-	$host_dropdown_options[$kh['host']] = $kh['host'] . ' — ' . $preview;
-}
-$host_dropdown_options['__custom__'] = 'Other server (enter SSH details)';
-$host_dropdown_options['__cloud__']  = 'Create a new cloud instance';
-
-// Determine initial state for re-render after validation error
-$post_host = $_POST['mgn_host'] ?? '';
-$host_dropdown_value = '';
-if (($_POST['host_dropdown'] ?? '') === '__cloud__') {
-	$host_dropdown_value = '__cloud__';
-} elseif ($post_host) {
-	$host_dropdown_value = isset($known_hosts_map[$post_host]) ? $post_host : '__custom__';
-}
-$ssh_fields_hidden   = (!$host_dropdown_value || $host_dropdown_value !== '__custom__');
-$cloud_fields_hidden = ($host_dropdown_value !== '__cloud__');
 
 $page = new AdminPage();
 $page->admin_header([
@@ -307,11 +206,6 @@ $page->begin_box(['title' => 'New Node']);
 $formwriter = $page->getFormWriter('install_form', [
 	'values' => [
 		'mgn_name'       => $_POST['mgn_name'] ?? '',
-		'host_dropdown'  => $host_dropdown_value,
-		'mgn_host'       => $_POST['mgn_host'] ?? '',
-		'mgn_ssh_user'   => $_POST['mgn_ssh_user'] ?? 'root',
-		'mgn_ssh_key_path' => $_POST['mgn_ssh_key_path'] ?? $default_ssh_key,
-		'mgn_ssh_port'   => $_POST['mgn_ssh_port'] ?? 22,
 		'sitename'       => $_POST['sitename'] ?? '',
 		'docker_mode'    => $_POST['docker_mode'] ?? '',
 		'install_mode'   => $_POST['install_mode'] ?? 'fresh',
@@ -335,23 +229,12 @@ $formwriter->textinput('mgn_name', 'Display Name', [
 	'placeholder' => 'e.g., Getjoinery Orgs',
 ]);
 
-$formwriter->dropinput('host_dropdown', 'Target Host', [
-	'required' => true,
-	'options'  => $host_dropdown_options,
-]);
+echo '<p class="text-muted small mb-3">A new instance is created in a connected cloud account and installed over one SSH session with a root password this '
+	. 'management node seals for the length of the install; from then on the machine is reached only through its agent. '
+	. 'To manage a server that already exists, add it on <a href="/admin/server_manager/node_add">Connect Site</a> and have it ask to join from its own Management Node page.</p>';
 
-// SSH detail fields — hidden unless "Other server" is selected
-echo '<div id="ssh_fields"' . ($ssh_fields_hidden ? ' hidden' : '') . '>';
-$formwriter->textinput('mgn_host', 'SSH Host', [
-	'placeholder' => '23.239.11.53 or server.example.com',
-]);
-$formwriter->textinput('mgn_ssh_user', 'SSH User');
-$formwriter->textinput('mgn_ssh_key_path', 'SSH Key Path');
-$formwriter->numberinput('mgn_ssh_port', 'SSH Port', ['min' => 1, 'max' => 65535]);
-echo '</div>';
-
-// Cloud-instance fields — shown only for the create-cloud-instance target
-echo '<div id="cloud_fields"' . ($cloud_fields_hidden ? ' hidden' : '') . '>';
+// Cloud-instance fields
+echo '<div id="cloud_fields">';
 if ($has_cloud_accounts) {
 	$formwriter->dropinput('cca_account_id', 'Connected Cloud Account', [
 		'options'      => $cloud_account_options,
@@ -391,7 +274,7 @@ $formwriter->radioinput('install_mode', 'Install Type', [
 	'required' => true,
 	'options'  => [
 		'fresh'       => 'Fresh install — empty Joinery site with default schema and admin user',
-		'from_backup' => 'Install from backup — clone an existing managed node via its backup',
+		'from_backup' => 'Clone — pull an existing managed node\'s database, uploads, themes and plugins over HTTPS',
 		'bare'        => 'Bare instance — no site install (infrastructure node, e.g. mail relay shard); cloud target only',
 	],
 ]);
@@ -399,76 +282,24 @@ $formwriter->radioinput('install_mode', 'Install Type', [
 $formwriter->textinput('domain', 'Domain', [
 	'required'    => true,
 	'placeholder' => 'e.g., orgs.getjoinery.com',
-	'helptext'    => 'Domain only — no http:// or https://. SSL is configured separately after DNS cutover.',
+	'helptext'    => 'Domain only — no http:// or https://. The new site\'s own domain, for a clone too. A certificate is issued during the install when DNS already points here, otherwise on its own once it does.',
 	'pattern'     => '^(?!https?://).+',
 ]);
 
 // Fresh install panel (empty placeholder — nothing extra needed)
 echo '<div id="panel_fresh"></div>';
 
-// From-backup panel
+// Clone panel
 echo '<div id="panel_backup" hidden>';
 $formwriter->dropinput('source_node_id', 'Source Node', [
 	'options'      => $source_node_options,
 	'empty_option' => false,
+	'helptext'     => 'The new machine pulls the source over HTTPS from the source site\'s own address; the source\'s agent is armed with a one-time export key first. Nothing reaches the source\'s shell.',
 ]);
-$formwriter->radioinput('backup_source', 'Backup to Use', [
-	'options' => [
-		'new'      => 'Take fresh backup now (adds a backup job as the first step)',
-		'existing' => 'Use existing backup',
-	],
-]);
-echo '<div id="panel_existing_backup" hidden>';
-$formwriter->dropinput('db_backup_path', 'DB Backup File', ['options' => [], 'empty_option' => false]);
-$formwriter->dropinput('project_backup_path', 'Project Backup File', ['options' => [], 'empty_option' => false]);
-echo '<small class="text-muted d-block mb-3">Populated from the source node\'s cached backup list. If empty, run "List backups" on the source first, or choose "Take fresh backup now".</small>';
-echo '</div>';
 echo '</div>';
 
 $formwriter->submitbutton('btn_submit', 'Install');
 $formwriter->addReadyScript('
-var BACKUP_LISTS = ' . json_encode($backup_lists) . ';
-var KNOWN_HOSTS  = ' . json_encode(array_values($known_hosts_map)) . ';
-
-function applyHostPreset(val) {
-	var fields      = document.getElementById("ssh_fields");
-	var cloudFields = document.getElementById("cloud_fields");
-	var dmDocker    = document.getElementById("docker_mode_docker");
-	var dmBare      = document.getElementById("docker_mode_bare-metal");
-
-	if (cloudFields) cloudFields.hidden = (val !== "__cloud__");
-
-	if (!val || val === "__cloud__") {
-		if (fields) fields.hidden = true;
-		if (dmBare) { dmBare.disabled = false; dmBare.closest(".form-check").style.opacity = "1"; }
-		return;
-	}
-	if (val === "__custom__") {
-		if (fields) fields.hidden = false;
-		if (dmBare) { dmBare.disabled = false; dmBare.closest(".form-check").style.opacity = "1"; }
-		return;
-	}
-	var preset = KNOWN_HOSTS.find(function(h) { return h.host === val; });
-	if (!preset) return;
-
-	var hostEl = document.getElementById("mgn_host");
-	var userEl = document.getElementById("mgn_ssh_user");
-	var keyEl  = document.getElementById("mgn_ssh_key_path");
-	var portEl = document.getElementById("mgn_ssh_port");
-	if (hostEl) hostEl.value = preset.host;
-	if (userEl) userEl.value = preset.ssh_user;
-	if (keyEl)  keyEl.value  = preset.ssh_key_path;
-	if (portEl) portEl.value = preset.ssh_port;
-
-	if (fields) fields.style.display = "none";
-
-	if (preset.is_docker) {
-		if (dmDocker) dmDocker.checked = true;
-		if (dmBare)   { dmBare.checked = false; dmBare.disabled = true; dmBare.closest(".form-check").style.opacity = "0.4"; }
-	} else {
-		if (dmBare) { dmBare.disabled = false; dmBare.closest(".form-check").style.opacity = "1"; }
-	}
-}
 
 function toggleModePanel() {
 	var fresh  = document.querySelector("input[name=install_mode][value=fresh]");
@@ -481,79 +312,12 @@ function toggleModePanel() {
 	if (siteFields) siteFields.hidden = !(isFresh || isBackup);
 }
 
-function syncBareAvailability() {
-	// Bare instance only exists for the create-cloud-instance target: on any
-	// other target, disable it and fall back to fresh if it was selected.
-	var hostSel = document.getElementById("host_dropdown");
-	var bare    = document.querySelector("input[name=install_mode][value=bare]");
-	if (!hostSel || !bare) return;
-	var isCloud = (hostSel.value === "__cloud__");
-	bare.disabled = !isCloud;
-	var wrap = bare.closest(".form-check");
-	if (wrap) wrap.style.opacity = isCloud ? "1" : "0.4";
-	if (!isCloud && bare.checked) {
-		var fresh = document.querySelector("input[name=install_mode][value=fresh]");
-		if (fresh) fresh.checked = true;
-		toggleModePanel();
-	}
-}
-
-function toggleBackupSourcePanel() {
-	var existing = document.querySelector("input[name=backup_source][value=existing]");
-	document.getElementById("panel_existing_backup").hidden = !(existing && existing.checked);
-}
-
-function updateBackupOptions() {
-	var sourceId = document.querySelector("select[name=source_node_id]");
-	sourceId = sourceId ? sourceId.value : "";
-	var dbSel   = document.getElementById("db_backup_path");
-	var projSel = document.getElementById("project_backup_path");
-	if (!dbSel || !projSel) return;
-	dbSel.innerHTML = "";
-	projSel.innerHTML = "";
-	if (!sourceId || !BACKUP_LISTS[sourceId]) {
-		dbSel.innerHTML   = "<option value=\"\">No backups cached</option>";
-		projSel.innerHTML = "<option value=\"\">No backups cached</option>";
-		return;
-	}
-	var files = BACKUP_LISTS[sourceId];
-	files.forEach(function(f) {
-		if (!f.local_path) return;
-		var opt = document.createElement("option");
-		opt.value = f.local_path;
-		opt.textContent = f.filename + " (" + f.size + ", " + f.date + ")";
-		if (/\\.sql\\.gz(\\.enc)?$/.test(f.filename)) {
-			dbSel.appendChild(opt);
-		} else if (/\\.tar\\.gz$/.test(f.filename)) {
-			projSel.appendChild(opt);
-		}
-	});
-	if (!dbSel.children.length)   dbSel.innerHTML   = "<option value=\"\">No DB backups found</option>";
-	if (!projSel.children.length) projSel.innerHTML = "<option value=\"\">No project backups found</option>";
-}
-
 // Wire up events
 var installModeRadios = document.querySelectorAll("input[name=install_mode]");
 installModeRadios.forEach(function(r) { r.addEventListener("change", toggleModePanel); });
 
-var backupSourceRadios = document.querySelectorAll("input[name=backup_source]");
-backupSourceRadios.forEach(function(r) { r.addEventListener("change", toggleBackupSourcePanel); });
-
-var sourceNodeSel = document.querySelector("select[name=source_node_id]");
-if (sourceNodeSel) sourceNodeSel.addEventListener("change", updateBackupOptions);
-
-var hostDropdown = document.getElementById("host_dropdown");
-if (hostDropdown) {
-	hostDropdown.addEventListener("change", function() { applyHostPreset(this.value); syncBareAvailability(); });
-}
-
 // Initial state
 toggleModePanel();
-toggleBackupSourcePanel();
-syncBareAvailability();
-if (hostDropdown && hostDropdown.value && hostDropdown.value !== "__custom__") {
-	applyHostPreset(hostDropdown.value);
-}
 ');
 
 $formwriter->end_form();

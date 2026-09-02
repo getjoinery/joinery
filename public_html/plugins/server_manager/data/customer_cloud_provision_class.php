@@ -23,6 +23,8 @@
  *                     is the standard pipeline)
  *   failed          - terminal; cvp_error says why. Admin alert sent.
  *
+ * @version 1.4 - cvp_clone_key_sealed (the key a from_backup provision armed its source with) and
+ *                cvp_fleet_seed_state (fleet seeding waits for the node's agent to pair)
  * @version 1.3
  */
 
@@ -77,6 +79,15 @@ class CustomerCloudProvision extends SystemBase {
 		// the burn step the moment the agent's join is approved. NULL means
 		// either a pre-keyless provision or a provision whose bridge is burned.
 		'cvp_root_pass_sealed'       => array('type'=>'text'),
+		// from_backup: the export key this provision armed its SOURCE with
+		// (clone_export_arm), sealed for the length of the provision. The
+		// target presents it over HTTPS; the plane disarms the source and
+		// erases this when the provision is done. NULL otherwise.
+		'cvp_clone_key_sealed'       => array('type'=>'text'),
+		// Fleet enrollment seeding (mailbox plugin) travels over the agent
+		// channel, so it waits for the node's agent to pair: pending →
+		// dispatched → done | failed. NULL means no seeding applies.
+		'cvp_fleet_seed_state'       => array('type'=>'varchar(12)', 'allowed_values'=>array('pending', 'dispatched', 'done', 'failed')),
 		'cvp_error'                  => array('type'=>'text'),
 		'cvp_create_time'            => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'cvp_update_time'            => array('type'=>'timestamp(6)'),
@@ -168,6 +179,13 @@ class MultiCustomerCloudProvision extends SystemMultiBase {
 
 		if (isset($this->options['node_id'])) {
 			$filters['cvp_mgn_node_id'] = [$this->options['node_id'], PDO::PARAM_INT];
+		}
+
+		if (isset($this->options['fleet_seed_states']) && is_array($this->options['fleet_seed_states']) && count($this->options['fleet_seed_states'])) {
+			$quoted = array_map(function ($s) {
+				return "'" . preg_replace('/[^a-z_]/', '', $s) . "'";
+			}, $this->options['fleet_seed_states']);
+			$filters['cvp_fleet_seed_state'] = "IN (" . implode(',', $quoted) . ")";
 		}
 
 

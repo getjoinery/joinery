@@ -208,24 +208,28 @@ class CustomerCloudProvisioningTest {
 		foreach (new MultiManagedHost(['host' => $ip, 'deleted' => false]) as $h) { $host_count++; }
 		check($host_count === 1, 'a ManagedHost exists for the instance address');
 
-		// The install job names this plane for the machine to join — on the
-		// docker step (the host agent) and the site step (the container's).
+		// The install job is ONE ssh session that names this plane for the
+		// machine to join — the host agent and the container's.
 		$install_job = null;
 		foreach (new MultiManagementJob(['node_id' => $node_id]) as $j) { $install_job = $j; }
 		$cmds = $install_job ? json_decode((string)$install_job->get('mjb_commands'), true) : null;
-		$docker_cmd = $site_cmd = '';
+		$ssh_cmds = [];
 		foreach (($cmds['steps'] ?? []) as $s) {
-			if (strpos((string)($s['label'] ?? ''), 'Install Docker') === 0) { $docker_cmd = $s['cmd']; }
-			if (($s['label'] ?? '') === 'Create the site') { $site_cmd = $s['cmd']; }
+			if (($s['type'] ?? '') === 'ssh') { $ssh_cmds[] = $s['cmd']; }
 		}
+		$boot_cmd = $ssh_cmds[0] ?? '';
 		check($install_job && $install_job->get('mjb_status') === 'queued',
 			'the install job is created queued, for the plane-side executor');
-		check(strpos($docker_cmd, "install.sh -y -q docker --management-node='https://") !== false,
-			'the docker step names this plane, so the host agent asks to join');
-		check(strpos($docker_cmd, "--node-name='keyless" . $suffix . "-host'") !== false,
+		check(count($ssh_cmds) === 1, 'the install is one ssh session', count($ssh_cmds) . ' ssh steps');
+		check(strpos($boot_cmd, "install.sh -y -q docker --management-node='https://") !== false,
+			'it names this plane on the docker half, so the host agent asks to join');
+		check(strpos($boot_cmd, "--node-name='keyless" . $suffix . "-host'") !== false,
 			'and names the host for the pending list, so the operator sees more than localhost');
-		check(strpos($site_cmd, "--enable-agent --management-node='https://") !== false,
-			'the site step names this plane, so the container agent asks to join');
+		check(strpos($boot_cmd, "--enable-agent --management-node='https://") !== false,
+			'and on the site half, so the container agent asks to join');
+		$node->load();
+		check($node->get('mgn_container_name') === 'keyless' . $suffix,
+			'the container name is recorded at dispatch — it is the site name this plane chose');
 
 		// Cleanup: node first (its FK points at the host), then host, job, provision.
 		$db = $this->db;
@@ -234,31 +238,140 @@ class CustomerCloudProvisioningTest {
 		$db->prepare('DELETE FROM mgh_managed_hosts WHERE mgh_host = ?')->execute([$ip]);
 		$db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_id = ?')->execute([$prov->key]);
 
-		// B4 — a shape keyless cannot finish (bare, bare-metal, from_backup) is
-		// refused at 'ready': no instance created, no password sealed, an alert.
-		foreach ([['bare', 'docker'], ['fresh', 'bare-metal'], ['from_backup', 'docker']] as $shape) {
+		// Every shape is keyless now (specs/ssh_single_bootstrap.md): bare and
+		// bare-metal create their instance like fresh docker does.
+		foreach ([['bare', 'docker'], ['fresh', 'bare-metal']] as $shape) {
 			$fake->lastCreateOpts = null;
 			$probe->lastFailReason = null;
-			$bad = new CustomerCloudProvision(NULL);
-			$bad->set('cvp_origin', 'admin');
-			$bad->set('cvp_usr_user_id', $this->user_id);
-			$bad->set('cvp_domain', 'refuse-' . $suffix . '.example.com');
-			$bad->set('cvp_slug', 'refuse-' . $suffix);
-			$bad->set('cvp_status', 'ready');
-			$bad->set('cvp_install_mode', $shape[0]);
-			$bad->set('cvp_docker_mode', $shape[1]);
-			if ($shape[0] === 'from_backup') { $bad->set('cvp_source_node_id', $node_id); }
-			$bad->save();
-			$probe->probeReady($bad);
-			$bad->load();
+			$ok = new CustomerCloudProvision(NULL);
+			$ok->set('cvp_origin', 'admin');
+			$ok->set('cvp_usr_user_id', $this->user_id);
+			$ok->set('cvp_domain', 'shape-' . $suffix . '.example.com');
+			$ok->set('cvp_slug', 'shape-' . $suffix);
+			$ok->set('cvp_status', 'ready');
+			$ok->set('cvp_install_mode', $shape[0]);
+			$ok->set('cvp_docker_mode', $shape[1]);
+			$ok->save();
+			$probe->probeReady($ok);
+			$ok->load();
 			$label = $shape[0] . '/' . $shape[1];
-			check($bad->get('cvp_status') === 'failed' && $fake->lastCreateOpts === null,
-				"{$label}: refused at ready with no instance created");
-			check((string)$bad->get('cvp_root_pass_sealed') === ''
-				&& strpos((string)$probe->lastFailReason, 'fresh docker installs only') !== false,
-				"{$label}: no password sealed, and the alert says why");
-			$db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_id = ?')->execute([$bad->key]);
+			check($ok->get('cvp_status') === 'booting' && is_array($fake->lastCreateOpts),
+				"{$label}: an instance is created and the provision boots", (string)$probe->lastFailReason);
+			$db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_id = ?')->execute([$ok->key]);
 		}
+
+		// A clone arms its SOURCE before the instance exists: the key is sealed
+		// on the provision and travels to the source as a clone_export_arm job.
+		// A source whose agent cannot be armed refuses at ready, with no box.
+		$fake->lastCreateOpts = null;
+		$probe->lastFailReason = null;
+		$src_unpaired = new ManagedNode(NULL);
+		$src_unpaired->set('mgn_name', 'clone source ' . $suffix);
+		$src_unpaired->set('mgn_slug', 'clonesrc-' . $suffix);
+		$src_unpaired->set('mgn_host', '198.51.100.9');
+		$src_unpaired->set('mgn_site_url', 'https://clonesrc-' . $suffix . '.example.com');
+		$src_unpaired->set('mgn_uptime_enabled', false);
+		$src_unpaired->save();
+		$src_unpaired->load();
+		$clone = new CustomerCloudProvision(NULL);
+		$clone->set('cvp_origin', 'admin');
+		$clone->set('cvp_usr_user_id', $this->user_id);
+		$clone->set('cvp_domain', 'clone-' . $suffix . '.example.com');
+		$clone->set('cvp_slug', 'clone-' . $suffix);
+		$clone->set('cvp_status', 'ready');
+		$clone->set('cvp_install_mode', 'from_backup');
+		$clone->set('cvp_source_node_id', $src_unpaired->key);
+		$clone->save();
+		$probe->probeReady($clone);
+		$clone->load();
+		check($clone->get('cvp_status') === 'failed' && $fake->lastCreateOpts === null
+			&& strpos((string)$probe->lastFailReason, 'clone_export_arm') !== false,
+			'a clone whose source has no paired agent is refused at ready, naming the primitive, with no instance created');
+		check((string)$clone->get('cvp_clone_key_sealed') === '' && (string)$clone->get('cvp_root_pass_sealed') === '',
+			'and holds no credential of either kind');
+
+		$src_unpaired->set('mgn_agent_public_key', base64_encode(str_repeat("\x0e", 32)));
+		$src_unpaired->set('mgn_agent_version', '1.17.0');
+		$src_unpaired->set('mgn_agent_primitives', 'check_status,clone_export_arm');
+		$src_unpaired->save();
+		$clone->set('cvp_status', 'ready');
+		$clone->set('cvp_error', null);
+		$clone->save();
+		$probe->probeReady($clone);
+		$clone->load();
+		check($clone->get('cvp_status') === 'booting' && is_array($fake->lastCreateOpts),
+			'with a paired source the clone provision boots', (string)$probe->lastFailReason);
+		$sealed_key = (new SecretBox())->open((string)$clone->get('cvp_clone_key_sealed'));
+		check($sealed_key['state'] === 'ok' && preg_match('/^[a-f0-9]{48}$/', $sealed_key['value']) === 1,
+			'the export key is sealed on the provision row');
+		$arm_job = ManagementJob::latestForNode($src_unpaired->key, 'clone_export_arm');
+		$arm_env = $arm_job ? json_decode((string)$arm_job->get('mjb_commands'), true) : null;
+		check($arm_job && ($arm_env['primitive'] ?? '') === 'clone_export_arm'
+			&& ($arm_env['params']['export_key'] ?? '') === $sealed_key['value'],
+			'the source was handed exactly that key as a clone_export_arm job');
+
+		// One clone per source at a time: a second provision naming the same
+		// source waits at ready with the reason on its row, and mints nothing.
+		$fake->lastCreateOpts = null;
+		$second = new CustomerCloudProvision(NULL);
+		$second->set('cvp_origin', 'admin');
+		$second->set('cvp_usr_user_id', $this->user_id);
+		$second->set('cvp_domain', 'clone2-' . $suffix . '.example.com');
+		$second->set('cvp_slug', 'clone2-' . $suffix);
+		$second->set('cvp_status', 'ready');
+		$second->set('cvp_install_mode', 'from_backup');
+		$second->set('cvp_source_node_id', $src_unpaired->key);
+		$second->save();
+		$probe->probeReady($second);
+		$second->load();
+		check($second->get('cvp_status') === 'ready' && $fake->lastCreateOpts === null
+			&& strpos((string)$second->get('cvp_error'), 'armed for provision #' . $clone->key) !== false,
+			'a second clone from the same source waits at ready, naming the provision holding the key');
+		$db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_id = ?')->execute([$second->key]);
+
+		// A transient provider failure leaves the row at ready; the next tick
+		// does not re-arm (one key, one job) — the arm job count stays at one.
+		$arm_count = function () use ($db, $src_unpaired) {
+			$q = $db->prepare("SELECT COUNT(*) FROM mjb_management_jobs WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'clone_export_arm'");
+			$q->execute([$src_unpaired->key]);
+			return (int)$q->fetchColumn();
+		};
+		check($arm_count() === 1, 'exactly one arm job so far');
+		$clone->set('cvp_status', 'ready');
+		$clone->save();
+		$probe->probeReady($clone);
+		$clone->load();
+		check($arm_count() === 1 && $clone->get('cvp_status') === 'booting',
+			'a re-run of ready for the same provision arms once and boots');
+
+		// booting waits for the source to report armed, then the bootstrap
+		// carries --clone-from (the source\'s web address) and --clone-key.
+		$clone_ip = '198.51.100.' . random_int(20, 240);
+		$fake->getInstanceResult = ['id' => '77002', 'ip' => $clone_ip, 'status' => 'running'];
+		check($probe->probeBooting($clone) === 0 && $clone->get('cvp_status') === 'booting',
+			'the clone waits while the source has not answered its arm job');
+		$db->prepare("UPDATE mjb_management_jobs SET mjb_status = 'completed', mjb_completed_time = now(), mjb_output = ? WHERE mjb_id = ?")
+			->execute([json_encode(['api_version' => '1.0', 'data' => ['output' => "CLONE_EXPORT_ARM=armed\n"]]), $arm_job->key]);
+		$probe->probeBooting($clone);
+		$clone->load();
+		check($clone->get('cvp_status') === 'installing', 'once the source reports armed, the clone dispatches its install',
+			(string)$probe->lastFailReason . ' ' . (string)$clone->get('cvp_error'));
+		$clone_node_id = (int)$clone->get('cvp_mgn_node_id');
+		$clone_job = ManagementJob::latestForNode($clone_node_id, 'install_node');
+		$clone_boot = '';
+		foreach ((json_decode((string)$clone_job->get('mjb_commands'), true)['steps'] ?? []) as $st) {
+			if (($st['type'] ?? '') === 'ssh') { $clone_boot = $st['cmd']; }
+		}
+		check(strpos($clone_boot, "--clone-from='https://clonesrc-" . $suffix . ".example.com' --clone-key='" . $sealed_key['value'] . "'") !== false,
+			'the bootstrap pulls from the source over HTTPS with the armed key', $clone_boot);
+		check(strpos($clone_boot, "'clone-" . $suffix . ".example.com'") !== false,
+			'and the domain on the site command is the clone\'s own');
+
+		// Cleanup.
+		$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_node_id IN (?, ?)')->execute([$clone_node_id, $src_unpaired->key]);
+		$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_id IN (?, ?)')->execute([$clone_node_id, $src_unpaired->key]);
+		$db->prepare('DELETE FROM mgh_managed_hosts WHERE mgh_host IN (?, ?)')->execute([$clone_ip, '198.51.100.9']);
+		$db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_id = ?')->execute([$clone->key]);
 	}
 
 	private function test_account_tokens() {

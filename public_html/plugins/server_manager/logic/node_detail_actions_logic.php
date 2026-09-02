@@ -19,6 +19,10 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.22 - review fixes: retry_install refuses a keyless bare-metal retry (one-shot) and a clone whose key
+ *                 was released; the SSL button observes a certificate the machine already holds before asking
+ * @version 1.21 - SSH is one bootstrap (specs/ssh_single_bootstrap.md): provision_ssl always starts the
+ *                 agent chain (a container's certificate is issued on its host); enable_agent is gone
  * @version 1.20 - comment truth: apply_update_all_on_host queues primitives only; an unpaired
  *                 sibling throws and is logged, since the SSH fallback no longer exists
  * @version 1.19 - the backup_database and backup_project actions are gone with their builders;
@@ -87,7 +91,6 @@ class NodeDetailActions {
 		'retry_install'            => 'overview',
 		'provision_ssl'            => 'overview',
 		'run_plugin_installers'    => 'overview',
-		'enable_agent'             => 'api_keys',
 		'restart_agent'            => 'api_keys',
 		'set_reverse_dns'          => 'overview',
 		'save_api_credential'      => 'api_keys',
@@ -347,6 +350,24 @@ class NodeDetailActions {
 				}
 				$params = $prev->get('mjb_parameters');
 				if (is_string($params)) { $params = json_decode($params, true); }
+				// A keyless bare-metal bootstrap is one-shot: install.sh server
+				// disabled root password login, and the root password was the
+				// only credential. A retry would wait five minutes for SSH the
+				// box no longer answers. Say so instead.
+				if (($params['docker_mode'] ?? '') === 'bare-metal' && !$node->get('mgn_ssh_key_path')) {
+					self::fail($session, $page_regex,
+						'A bare-metal install cannot be retried: its server setup already disabled root password login, '
+						. 'and the root password was this plane\'s only way in. Finish the site by hand from the provider console, '
+						. 'or delete the instance and provision again.');
+					return $base_url;
+				}
+				// A clone's key was blanked once the provision finished; a
+				// retry after that has no source to pull from.
+				if (($params['mode'] ?? '') === 'from_backup' && (string)($params['clone_key'] ?? '') === '') {
+					self::fail($session, $page_regex,
+						'This clone\'s export key was released when its provision finished; provision a new clone instead.');
+					return $base_url;
+				}
 				$steps = JobCommandBuilder::build_install_node($node, $params ?: []);
 				$node->set('mgn_install_state', 'installing');
 				$node->save();
@@ -367,68 +388,45 @@ class NodeDetailActions {
 					self::fail($session, $page_regex, 'Cannot provision SSL: node has no site URL with a domain.');
 					return $base_url . '&tab=overview';
 				}
-				// A paired bare-metal node issues its own certificate through the
-				// agent, and gets there by a chain of jobs rather than one. This
-				// dispatches the first step through the same entry the scheduled
-				// pass uses — so the button and the timer are the same operation,
-				// with the same Cloudflare, core-version and A-record gates —
-				// and the pass carries it the rest of the way.
-				if (ProvisionPendingSsl::uses_primitive_route($node)) {
-					$outcome = ProvisionPendingSsl::begin_chain($node, $domain, $uid);
-					if ($outcome['error'] !== '') {
-						self::fail($session, $page_regex, 'Cannot provision SSL: ' . $outcome['error']);
-						return $base_url . '&tab=overview';
-					}
-					// Marked pending either way: the node IS awaiting a
-					// certificate, and that is what makes the scheduled pass pick
-					// it up once the wait the note describes is over.
-					$node->set('mgn_ssl_state', 'pending');
+				// Look first: the machine may already hold the certificate (the
+				// host's own timer issued it), in which case the button is the
+				// same observation the scheduled pass makes, and no job.
+				if (ProvisionPendingSsl::certificate_observed($node, $domain)) {
+					$node->set('mgn_ssl_state', 'active');
 					$node->save();
-					if ($outcome['started'] === 0) {
-						self::fail($session, $page_regex, $outcome['note'] !== ''
-							? $outcome['note']
-							: 'SSL provisioning is queued; nothing could be dispatched yet.');
-						return $base_url . '&tab=overview';
-					}
-					return $base_url . '&tab=jobs';
-				}
-
-				if (!JobCommandBuilder::has_ssh($node)) {
-					self::fail($session, $page_regex, 'Cannot provision SSL: SSH is not configured for this node.');
+					$session->save_message(new DisplayMessage(
+						'A certificate for ' . $domain . ' is already on the machine; the node is marked active.',
+						'Success', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
 					return $base_url . '&tab=overview';
 				}
-				$settings = Globalvars::get_instance();
-				$alert_email = $settings->get_setting('server_manager_provisioning_admin_alert_email') ?: '';
-				$job_params = ['domain' => $domain, 'admin_email' => $alert_email];
-				$steps = JobCommandBuilder::build_provision_ssl($node, $job_params);
-				// createFromBuild, not createJob: build_provision_ssl returns a
-				// step list today, but a builder that gains a primitive branch
-				// turns a correct createJob call into a broken one without the
-				// call site being touched, and the job then fails on the node
-				// with a JSON error that never says the word SSL.
-				$job = ManagementJob::createFromBuild($node->key, 'provision_ssl', $steps, $job_params, $uid);
+				// A certificate is issued by the node's own agent (bare metal) or
+				// its host's (a container), by a chain of jobs rather than one.
+				// This dispatches the first step through the same entry the
+				// scheduled pass uses — so the button and the timer are the same
+				// operation, with the same Cloudflare, core-version and A-record
+				// gates — and the pass carries it the rest of the way.
+				$outcome = ProvisionPendingSsl::begin_chain($node, $domain, $uid);
+				if ($outcome['error'] !== '') {
+					self::fail($session, $page_regex, 'Cannot provision SSL: ' . $outcome['error']);
+					return $base_url . '&tab=overview';
+				}
+				// Marked pending either way: the node IS awaiting a certificate,
+				// and that is what makes the scheduled pass pick it up once the
+				// wait the note describes is over.
 				$node->set('mgn_ssl_state', 'pending');
 				$node->save();
-				return self::jobUrl($job);
+				if ($outcome['started'] === 0) {
+					self::fail($session, $page_regex, $outcome['note'] !== ''
+						? $outcome['note']
+						: 'SSL provisioning is queued; nothing could be dispatched yet.');
+					return $base_url . '&tab=overview';
+				}
+				return $base_url . '&tab=jobs';
 			}
 
 			case 'run_plugin_installers': {
 				$built = JobCommandBuilder::build_run_plugin_installers($node);
 				$job = ManagementJob::createFromBuild($node->key, 'run_plugin_installers', $built, [], $uid);
-				return self::jobUrl($job);
-			}
-
-			case 'enable_agent': {
-				// Asking to join is opt-in on the form, because turning the
-				// agent on and pointing it at this plane are two decisions —
-				// the first is about the node running its own maintenance, the
-				// second about who else may give it work.
-				$job_params = [];
-				if (!empty($_POST['request_pairing'])) {
-					$job_params['plane_url'] = rtrim(LibraryFunctions::get_absolute_url(''), '/');
-				}
-				$steps = JobCommandBuilder::build_enable_agent($node, $job_params);
-				$job = ManagementJob::createJob($node->key, 'enable_agent', $steps, $job_params, $uid);
 				return self::jobUrl($job);
 			}
 

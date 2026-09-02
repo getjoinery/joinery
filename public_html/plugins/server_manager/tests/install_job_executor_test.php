@@ -10,7 +10,7 @@
  *
  * Proven without a live target: the step loop, output contract, terminal
  * status, the queued-not-pending routing that keeps it off the node agent's
- * claim, and the refusals for shapes it does not handle yet. The ssh transport
+ * claim, and that every install shape is a job it runs. The ssh transport
  * itself needs a real box and is a live-acceptance item.
  */
 
@@ -149,44 +149,40 @@ check(strpos((string)$job2->get('mjb_error_message'), 'No sealed root password')
 	'and says why, naming the missing credential');
 
 // ---------------------------------------------------------------------------
-section('Shapes the bootstrap executor does not handle yet are refused clearly');
+section('Every install shape is a job the executor runs');
 
-$node3 = ije_node('ijetest-scp-' . $suffix, 'Aa1!' . bin2hex(random_bytes(10)));
-$job3 = ije_job($node3, array(
+// The bootstrap is one session whatever the shape (specs/ssh_single_bootstrap.md):
+// a clone pulls its source over HTTPS inside it, bare metal runs install.sh
+// server inside it, a bare instance is its docker half. None is refused on its
+// parameters, and none carries a step type the executor lacks.
+$node3 = ije_node('ijetest-shapes-' . $suffix, 'Aa1!' . bin2hex(random_bytes(10)));
+foreach (array(
+	array('mode' => 'from_backup', 'docker_mode' => 'docker'),
+	array('mode' => 'fresh',       'docker_mode' => 'bare-metal'),
+	array('mode' => 'bare',        'docker_mode' => 'docker'),
+) as $shape) {
+	$job3 = ManagementJob::createJob($node3->key, 'install_node',
+		array(array('type' => 'local', 'label' => 'x', 'cmd' => 'echo INSTALL_SUCCESS')),
+		$shape, null);
+	$made_jobs[] = $job3->key;
+	(new InstallJobExecutor())->execute($job3);
+	$job3->load();
+	check($job3->get('mjb_status') === 'completed',
+		$shape['mode'] . ' on ' . $shape['docker_mode'] . ' runs rather than being refused',
+		(string)$job3->get('mjb_error_message'));
+}
+
+// A step type the bootstrap no longer emits fails by name, so a builder that
+// regressed to it is caught on the first job rather than half-run.
+$job4 = ije_job($node3, array(
 	array('type' => 'scp', 'label' => 'Fetch backup', 'direction' => 'download',
 		'local_path' => '/tmp/x', 'remote_path' => '/tmp/y'),
 ));
-(new InstallJobExecutor())->execute($job3);
-$job3->load();
-check($job3->get('mjb_status') === 'failed', 'an scp (from_backup) step fails the job');
-check(strpos((string)$job3->get('mjb_error_message'), 'scp') !== false,
-	'the failure names scp, so it reads as a not-yet rather than a bug');
-
-// ---------------------------------------------------------------------------
-section('A job whose parameters ask for bare-metal or from_backup is refused before any step runs');
-
-$node4 = ije_node('ijetest-bare-' . $suffix, 'Aa1!' . bin2hex(random_bytes(10)));
-$job4 = ManagementJob::createJob($node4->key, 'install_node',
-	array(array('type' => 'local', 'label' => 'x', 'cmd' => 'echo SHOULD_NOT_RUN')),
-	array('mode' => 'fresh', 'docker_mode' => 'bare-metal'), null);
-$made_jobs[] = $job4->key;
 (new InstallJobExecutor())->execute($job4);
 $job4->load();
-check($job4->get('mjb_status') === 'failed', 'a bare-metal install_node job fails');
-check(strpos((string)$job4->get('mjb_error_message'), 'bare-metal') !== false,
-	'the failure names bare-metal, not a mid-run authorized_keys FATAL');
-check(strpos((string)$job4->get('mjb_output'), 'SHOULD_NOT_RUN') === false,
-	'and none of its steps ran');
-
-$job5 = ManagementJob::createJob($node4->key, 'install_node',
-	array(array('type' => 'local', 'label' => 'x', 'cmd' => 'echo SHOULD_NOT_RUN')),
-	array('mode' => 'from_backup', 'docker_mode' => 'docker'), null);
-$made_jobs[] = $job5->key;
-(new InstallJobExecutor())->execute($job5);
-$job5->load();
-check($job5->get('mjb_status') === 'failed'
-	&& strpos((string)$job5->get('mjb_error_message'), 'from_backup') !== false,
-	'a from_backup job is refused up front by name');
+check($job4->get('mjb_status') === 'failed'
+	&& strpos((string)$job4->get('mjb_error_message'), "unknown step type 'scp'") !== false,
+	'an scp step is an unknown step type, and the failure names it');
 
 // ---------------------------------------------------------------------------
 section('The first ssh step waits for the target to answer, and gives up with a clear message');

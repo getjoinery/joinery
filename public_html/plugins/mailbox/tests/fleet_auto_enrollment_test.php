@@ -110,54 +110,67 @@ if (count($active) === 1) {
 	check($active[0]->get('apk_type') === ApiKey::TYPE_MACHINE, 'key is a machine key');
 }
 
-// ── C. The remote seeding command ───────────────────────────────────────────
-section('buildRemoteCommand');
+// ── C. Seeding travels as ONE fleet_enroll job on the node's own agent ──────
+section('seedNode dispatches a fleet_enroll primitive');
 
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
 
-$bare = new ManagedNode(NULL);
-$bare->set('mgn_ssh_user', 'user1');
-$cmd = FleetProvisionSeeding::buildRemoteCommand($bare, 'customersite',
-	'https://operator.example.com', 'public_abc123');
-check(strpos($cmd, 'sudo bash -c ') === 0, 'bare-metal non-root command runs under sudo');
-check(strpos($cmd, 'mailbox_fleet_service_url') !== false
-	&& strpos($cmd, 'mailbox_fleet_api_public_key') !== false
-	&& strpos($cmd, 'mailbox_fleet_api_secret_key') !== false,
-	'command seeds all three fleet settings');
-check(strpos($cmd, 'ON CONFLICT (stg_name)') !== false, 'settings write is an upsert');
-// The secret is structurally absent: buildRemoteCommand never receives it.
-// The command must read it from stdin and expand it only inside the heredoc.
-check(strpos($cmd, 'IFS= read -r FLEET_SECRET') !== false
-	&& strpos($cmd, '${FLEET_SECRET}') !== false,
-	'the secret arrives via stdin and expands only inside the psql heredoc');
-check(strpos($cmd, '/var/www/html/customersite/config/Globalvars_site.php') !== false,
-	'DB credentials come from the site config, not from the operator');
+// An unpaired node has no route, and no key is minted for it: the provision
+// re-asks every tick until the agent pairs, and a key per tick would churn.
+$unpaired = new ManagedNode(NULL);
+$unpaired->set('mgn_name', 'fleet unpaired');
+$unpaired->set('mgn_slug', 'harnesstest-fleet-unpaired-' . substr(md5(uniqid('', true)), 0, 6));
+$unpaired->set('mgn_host', '192.0.2.40');
+$unpaired->set('mgn_uptime_enabled', false);
+$unpaired->save();
+$unpaired->load();
+harness_register_row('mgn_managed_nodes', 'mgn_id', $unpaired->key);
+check(FleetProvisionSeeding::nodeReady($unpaired) === false, 'an unpaired node is not ready to seed');
+$before = 0;
+foreach (new MultiApiKey(array('user_id' => $buyer->key)) as $k) { $before++; }
+$res = FleetProvisionSeeding::seedNode($unpaired, $buyer->key);
+check($res['ok'] === false && strpos($res['message'], 'fleet_enroll') !== false && strpos($res['message'], 'SSH') !== false,
+	'seeding an unpaired node fails loudly, naming the primitive and that there is no SSH route');
+$after = 0;
+foreach (new MultiApiKey(array('user_id' => $buyer->key)) as $k) { $after++; }
+check($after === $before, 'and mints no key for it');
 
-$docker = new ManagedNode(NULL);
-$docker->set('mgn_ssh_user', 'root');
-$docker->set('mgn_container_name', 'customersite');
-$dcmd = FleetProvisionSeeding::buildRemoteCommand($docker, 'customersite',
-	'https://operator.example.com', 'public_abc123');
-check(strpos($dcmd, 'docker exec -i ') === 0,
-	'docker site seeds inside the container (root, stdin kept open)');
-
-$bad = FleetProvisionSeeding::seedNode($bare, $buyer->key, 'Bad;Name');
-check($bad['ok'] === false && strpos($bad['message'], 'not a plain slug') !== false,
-	'a non-slug sitename is refused before anything runs');
-
-$unreachable = new ManagedNode(NULL);
-$unreachable->set('mgn_ssh_user', 'root');
-$unreachable->set('mgn_ssh_key_path', '/nonexistent/provisioning_key');
-$unreachable->set('mgn_host', '');
-$res = FleetProvisionSeeding::seedNode($unreachable, $buyer->key, 'customersite');
-check($res['ok'] === false && strpos($res['message'], 'SSH') !== false,
-	'incomplete SSH coordinates fail loudly, never silently');
-// That seedNode minted a key before failing — register it for cleanup.
+// A paired node reporting fleet_enroll gets one job carrying the three values.
+$paired = new ManagedNode(NULL);
+$paired->set('mgn_name', 'fleet paired');
+$paired->set('mgn_slug', 'harnesstest-fleet-paired-' . substr(md5(uniqid('', true)), 0, 6));
+$paired->set('mgn_host', '192.0.2.41');
+$paired->set('mgn_uptime_enabled', false);
+$paired->set('mgn_agent_public_key', base64_encode(str_repeat("\x0f", 32)));
+$paired->set('mgn_agent_version', '1.17.0');
+$paired->set('mgn_agent_primitives', 'check_status,fleet_enroll');
+$paired->save();
+$paired->load();
+harness_register_row('mgn_managed_nodes', 'mgn_id', $paired->key);
+$res = FleetProvisionSeeding::seedNode($paired, $buyer->key);
+check($res['ok'] === true && !empty($res['job_id']), 'a paired node is seeded by a job', $res['message']);
+$job = new ManagementJob((int)$res['job_id'], TRUE);
+harness_register_row('mjb_management_jobs', 'mjb_id', $job->key);
+$env = json_decode((string)$job->get('mjb_commands'), true);
+check(($env['primitive'] ?? '') === 'fleet_enroll', 'the job is the fleet_enroll primitive');
+check(isset($env['params']['service_url'], $env['params']['public_key'], $env['params']['secret_key'])
+	&& count($env['params']) === 3,
+	'it carries the service URL and the key pair, and nothing else', json_encode($env['params'] ?? null));
+check(strpos($env['params']['service_url'], 'https://') === 0, 'the service URL is this deployment, over https');
+check(strpos((string)json_encode($env), 'mailbox_fleet_') === false,
+	'no setting name is on the wire — they are compiled into utils/fleet_enroll.php');
 $keys = new MultiApiKey(array('user_id' => $buyer->key));
 $keys->load();
+$minted_matches = false;
 foreach ($keys as $key_row) {
 	harness_register_key_id($key_row->key);
+	if ($key_row->get('apk_public_key') === $env['params']['public_key'] && $key_row->get('apk_is_active')) {
+		$minted_matches = true;
+	}
 }
+check($minted_matches, 'the public key on the job is the buyer\'s newly minted active key');
+check(FleetProvisionSeeding::outcome($paired)['state'] === 'pending', 'before the node answers, the outcome is pending');
 
 // ── D. The operator console's Fortress product ──────────────────────────────
 section('Fortress product creation');

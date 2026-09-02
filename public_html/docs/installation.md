@@ -424,15 +424,20 @@ Clone an existing site — database, uploads, settings — to a new server. The 
 
 ### Enable export on the source
 
+`clone_export_key` is a managed setting: it is declared, but kept off the settings page so that an admin cannot turn on a full-site export from a browser. It is written in one of two ways.
+
+A management node that provisions a clone of a site it manages arms the source itself, through the source agent's `clone_export_arm` primitive (the setting name is compiled into `utils/clone_export_arm.php` on the source; the plane sends only the key), and disarms it the same way when the provision ends. See the Server Manager docs.
+
+By hand, in the source database:
+
 ```sql
-INSERT INTO stg_settings (stg_name, stg_value)
-VALUES ('clone_export_key', 'YourSecureRandomKey123');
+UPDATE stg_settings SET stg_value = 'YourSecureRandomKey123' WHERE stg_name = 'clone_export_key';
 
 -- When done:
-DELETE FROM stg_settings WHERE stg_name = 'clone_export_key';
+UPDATE stg_settings SET stg_value = '' WHERE stg_name = 'clone_export_key';
 ```
 
-Use a strong random key (32+ chars). HTTPS is required. Rotate or remove the key after cloning. Clone requests are logged on the source.
+Use a strong random key (32+ chars, letters, digits, `_` and `-`). HTTPS is required. Clear the key after cloning. Clone requests are logged on the source. The key is also the password the database dump is encrypted under in transit.
 
 ### Run the clone
 
@@ -456,7 +461,7 @@ sudo ./install.sh site newsite newdomain.com \
 | All settings            | Exact copy from source                         |
 | Uploads directory       | Exact copy from source                         |
 | User accounts           | Preserved from source                          |
-| `clone_export_key`      | Removed on the new site                        |
+| `clone_export_key`      | Cleared on the new site                        |
 | `Globalvars_site.php`   | Regenerated with new DB credentials            |
 | Themes & plugins        | Downloaded from the source site                |
 

@@ -5,6 +5,15 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.52 - review fixes: the release lands under /opt/joinery-install (not /tmp, which Ubuntu empties
+ *                 at boot); the bare-metal prerequisite block has no password harvest and cannot mask
+ *                 a failed password generation under set -e
+ * @version 1.51 - SSH is one bootstrap, run once (specs/ssh_single_bootstrap.md): build_install_node is
+ *                 one remote command (fetch, docker + host agent, site with the universal vhost; a clone
+ *                 pulls over HTTPS with --clone-from); build_provision_ssl, proto_patch_cmd,
+ *                 build_enable_agent, build_discover_nodes, ssh_prefix and the sudo/credential helpers
+ *                 are gone; provision_certificate resolves a container's HOST as issuer
+ *                 (certificate_issuer_for); clone_export_arm and fleet_enroll are compiled-names primitives
  * @version 1.50 - decommission crosses to the channel: build_decommission_node routes ONE
  *                 destructive primitive (decommission_site) to the Docker HOST's own paired
  *                 agent, or refuses naming the fix; the scp/ssh teardown bodies are deleted.
@@ -225,6 +234,11 @@ class JobCommandBuilder {
 		// family's: the restore verifier (1.13.0) must not vouch for a
 		// primitive that only exists from 1.15.0.
 		'decommission_site' => '1.15.0',
+		// The two compiled-names settings writers that retire an SSH session
+		// each (specs/ssh_single_bootstrap.md): arming a clone source, and
+		// seeding fleet credentials. New in 1.17.0.
+		'clone_export_arm' => '1.17.0',
+		'fleet_enroll'     => '1.17.0',
 	];
 
 	/**
@@ -724,54 +738,6 @@ class JobCommandBuilder {
 			return 'warning';
 		}
 		return 'success';
-	}
-
-	/**
-	 * Get the path to Globalvars_site.php on a remote node.
-	 * Config is one level up from web_root (public_html).
-	 */
-	private static function get_config_path($node) {
-		// mgn_web_root is NULL on a node with no site — a bare install, a relay
-		// shard, a DNS box. rtrim(NULL) is deprecated and becomes a TypeError in
-		// PHP 9; the path this builds for such a node was already meaningless,
-		// and it stays exactly as meaningless rather than changing behaviour.
-		$web_root = rtrim((string)$node->get('mgn_web_root'), '/');
-		return dirname($web_root) . '/config/Globalvars_site.php';
-	}
-
-	/**
-	 * Build shell script snippet to extract DB credentials from remote config.
-	 * Sets $DB_NAME, $DB_USER, and $PGPASSWORD variables in the shell context.
-	 * PGPASSWORD is exported so psql picks it up automatically.
-	 */
-	private static function get_db_credentials_script($node) {
-		$config = self::get_config_path($node);
-		// Extract dbname, dbusername, and dbpassword from Globalvars_site.php
-		// Pattern: grep the line, take text before semicolon, take value after =,
-		// strip whitespace, strip surrounding single quotes via sed
-		$extract = 'head -1 | cut -d";" -f1 | cut -d"=" -f2 | tr -d " " | sed s/^.// | sed s/.$//';
-		return "DB_NAME=\$(grep dbname {$config} | {$extract}) && "
-			 . "DB_USER=\$(grep dbusername {$config} | {$extract}) && "
-			 . "export PGPASSWORD=\$(grep dbpassword {$config} | {$extract})";
-	}
-
-	/**
-	 * Get the maintenance scripts path from the web root.
-	 */
-	private static function get_scripts_path($node) {
-		// See get_config_path(): a siteless node stores NULL here.
-		$web_root = rtrim((string)$node->get('mgn_web_root'), '/');
-		return dirname($web_root) . '/maintenance_scripts';
-	}
-
-	/**
-	 * Returns 'sudo ' when the node is bare-metal with a non-root SSH user,
-	 * empty string for Docker nodes (commands run as root inside the container).
-	 */
-	private static function sudo_prefix($node) {
-		$is_docker = (bool)$node->get('mgn_container_name');
-		$ssh_user  = $node->get('mgn_ssh_user') ?: 'root';
-		return (!$is_docker && $ssh_user !== 'root') ? 'sudo ' : '';
 	}
 
 	/**
@@ -1342,68 +1308,6 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * Turn the agent on for a node, and optionally have it ask to join this
-	 * management node — the fleet path, so an operator does not visit every
-	 * node's own admin page to enable something they administer already.
-	 *
-	 * Both halves are the node's own decisions, recorded in the node's own
-	 * settings by the node's own CLI. Nothing here reaches past what SSH to
-	 * that machine already permits, which is precisely why this action exists
-	 * only while SSH does: at the Phase 3 cutover it goes with it, and a node's
-	 * own Management Node page becomes the only way in.
-	 *
-	 * What it deliberately does NOT do is enroll anything. A join is a request;
-	 * an administrator on this plane still approves it after comparing the key
-	 * fingerprint the node reports against the one the request carries. Doing
-	 * that comparison for a fleet is the operator's job, not this job's.
-	 *
-	 * @param array $params plane_url (omit to enable without asking to join)
-	 */
-	public static function build_enable_agent($node, $params = []) {
-		if (!self::has_ssh($node)) {
-			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' cannot be given an agent: no SSH credentials configured.");
-		}
-		$web_root = rtrim($node->get('mgn_web_root'), '/');
-		if (!$web_root || dirname($web_root) === '/' || dirname($web_root) === '.') {
-			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' cannot be given an agent: mgn_web_root is not set.");
-		}
-
-		$plane_url = trim((string)($params['plane_url'] ?? ''));
-		$switch    = '--on';
-		if ($plane_url !== '') {
-			// The same rule the node's own page and CLI apply, from the same
-			// function: what counts as a management node address is one
-			// decision, and a second copy here would be the one that drifts.
-			require_once(PathHelper::getIncludePath('adm/logic/admin_management_node_logic.php'));
-			$refusal = admin_management_node_url_refusal($plane_url);
-			if ($refusal !== null) {
-				throw new Exception('That is not a usable management node URL to join: ' . $refusal);
-			}
-			$switch .= ' --join=' . escapeshellarg(rtrim($plane_url, '/'));
-		}
-
-		$site_dir     = dirname($web_root);
-		$sitename_esc = escapeshellarg(basename($site_dir));
-		$runner       = $site_dir . '/maintenance_scripts/install_tools/_plugin_installers_start.sh';
-		$sudo         = self::sudo_prefix($node);
-		$creds        = self::get_db_credentials_script($node);
-
-		return [
-			['type' => 'ssh', 'label' => 'Switch the agent on for this node',
-			 'cmd' => "cd {$web_root} && php utils/agent_control.php {$switch}",
-			 'timeout' => 120],
-			// The switch is a setting; this is the root moment that acts on it.
-			// Same runner as Run Plugin Installers — the agent installer is a
-			// core one, so it runs here whether or not any plugin is active.
-			['type' => 'ssh', 'label' => 'Install and start the agent',
-			 'cmd' => "{$creds} && {$sudo}env PGPASSWORD=\"\$PGPASSWORD\" bash {$runner} {$sitename_esc}",
-			 'timeout' => 900],
-		];
-	}
-
-	/**
 	 * Primitive path: NO PARAMETERS AT ALL.
 	 *
 	 * Both values the SSH step carries are dropped rather than translated:
@@ -1538,60 +1442,6 @@ class JobCommandBuilder {
 			['type' => 'local', 'label' => 'Publish upgrade',
 			 'cmd' => "cd {$web_root} && php plugins/server_manager/includes/publish_upgrade.php {$version_arg}{$notes}"],
 		];
-	}
-
-	/**
-	 * Build an SSH command prefix for local-type steps that SSH to a remote host.
-	 * Used by discover_nodes which runs before a node record exists.
-	 */
-	public static function ssh_prefix($host, $ssh_user, $ssh_key_path, $ssh_port = 22) {
-		$port_flag = ($ssh_port != 22) ? "-p {$ssh_port} " : '';
-		return "ssh -i " . escapeshellarg($ssh_key_path)
-			 . " -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o BatchMode=yes "
-			 . $port_flag
-			 . escapeshellarg("{$ssh_user}@{$host}");
-	}
-
-	/**
-	 * Discover Joinery instances on a remote host.
-	 * All steps are 'local' type — the agent runs SSH commands from the management node.
-	 * No node record is needed.
-	 */
-	public static function build_discover_nodes($params) {
-		$host = $params['host'];
-		$ssh_user = $params['ssh_user'] ?? 'root';
-		$ssh_key_path = $params['ssh_key_path'];
-		$ssh_port = intval($params['ssh_port'] ?? 22) ?: 22;
-
-		$ssh = self::ssh_prefix($host, $ssh_user, $ssh_key_path, $ssh_port);
-
-		$steps = [];
-
-		// Step 1: Test connection and get hostname
-		$steps[] = ['type' => 'local', 'label' => 'Test SSH connection',
-			'cmd' => "{$ssh} 'echo CONNECT_OK && hostname'"];
-
-		// Step 2: List Docker containers (continue on error — may not have Docker)
-		$steps[] = ['type' => 'local', 'label' => 'List Docker containers',
-			'cmd' => "{$ssh} 'docker ps --format \"{{.Names}}\" 2>/dev/null || echo NO_DOCKER'",
-			'continue_on_error' => true];
-
-		// Step 3: Write scan script to temp file and execute remotely via stdin
-		$scan_script = self::get_discover_script();
-		$script_path = '/tmp/joinery_discover_' . substr(md5(uniqid(mt_rand(), true)), 0, 8) . '.sh';
-
-		$steps[] = ['type' => 'local', 'label' => 'Write scan script',
-			'cmd' => "cat > {$script_path} << 'SCANEOF'\n{$scan_script}\nSCANEOF\nchmod +x {$script_path}"];
-
-		$steps[] = ['type' => 'local', 'label' => 'Scan for Joinery instances',
-			'cmd' => "{$ssh} 'bash -s' < {$script_path}",
-			'timeout' => 120];
-
-		$steps[] = ['type' => 'local', 'label' => 'Clean up scan script',
-			'cmd' => "rm -f {$script_path}",
-			'teardown' => true, 'timeout' => 120, 'continue_on_error' => true];
-
-		return $steps;
 	}
 
 	// ── Backup target helpers ──
@@ -2376,25 +2226,6 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * Build a local shell command that updates a ManagedNode field in the management node DB.
-	 * Reads DB credentials from the management node's Globalvars_site.php. Used during the
-	 * install_node flow to switch mgn_ssh_user to 'user1' after install.sh server disables
-	 * root SSH login.
-	 */
-	private static function _update_node_ssh_user_cmd($node, $new_user) {
-		$node_id = intval($node->key);
-		$new_user_esc = escapeshellarg($new_user);
-		$cfg = escapeshellarg(PathHelper::getSiteRoot() . '/config/Globalvars_site.php');
-		$extract = 'head -1 | cut -d";" -f1 | cut -d"=" -f2 | tr -d " " | sed s/^.// | sed s/.$//';
-		return "CFG={$cfg} && "
-		     . "DB_NAME=\$(grep dbname \$CFG | {$extract}) && "
-		     . "DB_USER=\$(grep dbusername \$CFG | {$extract}) && "
-		     . "export PGPASSWORD=\$(grep dbpassword \$CFG | {$extract}) && "
-		     . "psql -U \"\$DB_USER\" -d \"\$DB_NAME\" -c \"UPDATE mgn_managed_nodes SET mgn_ssh_user = {$new_user_esc} WHERE mgn_id = {$node_id}\" && "
-		     . "echo SSH_USER_UPDATED_TO_{$new_user}";
-	}
-
-	/**
 	 * Run certbot on the node's host to provision a TLS certificate.
 	 *
 	 * For Docker nodes certbot runs on the host (where Apache reverse-proxy lives);
@@ -2431,20 +2262,45 @@ class JobCommandBuilder {
 	 * job exists rather than at the CA.
 	 */
 	public static function build_provision_certificate($node, $params) {
-		if ($node->get('mgn_container_name')) {
-			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' is a container node, so its certificate is issued on "
-				. "the Docker host, not inside the container. Running certbot in the container would "
-				. "write /etc/letsencrypt to a filesystem the next rebuild discards and spend one of "
-				. "this domain's five certificates per week."
-			);
-		}
-		if (!self::has_primitive($node, 'provision_certificate')) {
-			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' cannot issue its own certificate: no agent has paired "
-				. "with this plane.");
-		}
+		// Refuses, naming the fix, when nothing can issue for this node.
+		self::certificate_issuer_for($node);
 		return self::build_provision_certificate_primitive($node, $params);
+	}
+
+	/**
+	 * The node whose agent issues a certificate for this one.
+	 *
+	 * The node itself on bare metal. For a container, its HOST's own paired
+	 * agent, reached the way decommission_site is routed: victim →
+	 * mgn_mgh_host_id → host row → mgh_mgn_host_node_id. Apache, certbot and
+	 * /etc/letsencrypt live on the host; a certificate issued from inside the
+	 * container is written to a filesystem the next rebuild discards, after
+	 * spending one of the five Let's Encrypt allows per domain per week. The
+	 * node cannot refuse that on its own ("am I in a container" has only
+	 * heuristic answers); mgn_container_name is the non-heuristic answer and
+	 * it lives here, so the gate lives here.
+	 *
+	 * A container on a host with no paired host agent has no issuance path.
+	 * That is the manual-enrollment case for a Docker host that predates the
+	 * host agent, and the refusal says so.
+	 */
+	public static function certificate_issuer_for($node) {
+		if (!trim((string)$node->get('mgn_container_name'))) {
+			if (!self::has_primitive($node, 'provision_certificate')) {
+				throw new Exception(
+					"Node '{$node->get('mgn_slug')}' cannot issue its own certificate: no agent has paired "
+					. "with this plane.");
+			}
+			return $node;
+		}
+		$host_node = self::decommission_host_node_for($node);
+		if (!self::has_primitive($host_node, 'provision_certificate')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' is a container, so its certificate is issued on its host — "
+				. "and the host agent '{$host_node->get('mgn_slug')}' does not offer provision_certificate. "
+				. "Update the host's agent.");
+		}
+		return $host_node;
 	}
 
 	public static function build_provision_certificate_primitive($node, $params) {
@@ -2641,137 +2497,74 @@ class JobCommandBuilder {
 	 */
 	const MANAGED_DOMAIN_STATES = ['operator_managed', 'push_requested', 'push_sent', 'self_custody', ''];
 
-	public static function build_provision_ssl($node, $params) {
-		$domain   = $params['domain'] ?? '';
-		$email    = $params['admin_email'] ?? '';
-		$sitename = $node->get('mgn_container_name') ?: $node->get('mgn_slug');
+	// ── Two more compiled-names settings writers (specs/ssh_single_bootstrap.md) ──
+	//
+	// Both are the shape of managed_domain_notice: values cross, the setting
+	// names live in a node-side script the release manifest covers. Neither
+	// has an SSH sibling, and neither may grow one.
 
-		if (!$domain) {
-			throw new Exception("provision_ssl requires a domain.");
+	/**
+	 * Arm the SOURCE of a clone: hand it one export key for the length of a
+	 * provision, so the new machine can pull the site over HTTPS from the
+	 * source's own utils/clone_export. An EMPTY key disarms, and that is how
+	 * the provision ends: nothing opens a shell on the source in either
+	 * direction.
+	 */
+	public static function build_clone_export_arm($node, $params) {
+		if (!self::has_primitive($node, 'clone_export_arm')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot be armed as a clone source: its agent does not "
+				. "offer the clone_export_arm primitive. Apply an update to the node; there is no SSH "
+				. "route for this.");
 		}
+		return self::build_clone_export_arm_primitive($node, $params);
+	}
 
-		$domain_esc   = escapeshellarg($domain);
-		$sitename_esc = escapeshellarg($sitename);
-		$email_arg    = $email
-			? ' -m ' . escapeshellarg($email)
-			: ' --register-unsafely-without-email';
-		$is_docker    = (bool)$node->get('mgn_container_name');
-
-		// The site name reaches the remote shell through a variable rather than
-		// being interpolated into the path directly. escapeshellarg returns the
-		// value WITH its quotes, so placing it inside a double-quoted string
-		// makes those quotes literal path characters — the config file is then
-		// never found, the patch below never runs, and the step still reports
-		// success. Assigning first and expanding as "${SITE}" keeps the value
-		// both quoted and correct.
-		$site_var = 'SITE=' . escapeshellarg($sitename) . '; ';
-
-		// Bare-metal nodes run jobs as user1 after install; every command that
-		// touches /etc, /var/log/letsencrypt, or services needs the sudo prefix
-		// (empty for Docker/root nodes).
-		$sudo = self::sudo_prefix($node);
-
-		if (self::is_cloudflare_domain($domain)) {
-			// Cloudflare-proxied: certbot is skipped (Cloudflare terminates TLS at
-			// its edge). But "resolves to Cloudflare" only proves the domain is
-			// behind Cloudflare — not that the zone proxies to THIS node. So
-			// completion is gated on a routing probe: the node writes a one-time
-			// token into the site's webroot, and the management node fetches it
-			// through the domain. The token is only fetchable because the node's
-			// front controller serves it via its /sm-ssl-probe.txt route
-			// (views/sm_ssl_probe.php) — a webroot file is not otherwise
-			// reachable on a Joinery site, so a node whose code predates that
-			// route can never pass this probe and needs an upgrade first.
-			// A mismatch fails the job before any config is
-			// touched — the domain stays pending (ProvisionPendingSsl keeps
-			// retrying and exempts this case from its give-up window) and the
-			// proxy conf keeps its correct pre-cutover X-Forwarded-Proto until
-			// traffic genuinely arrives through Cloudflare.
-			$web_root   = rtrim($node->get('mgn_web_root'), '/') ?: '/var/www/html/' . $sitename . '/public_html';
-			$token      = 'sm-ssl-probe-' . substr(md5(uniqid(mt_rand(), true)), 0, 24);
-			$probe_path = escapeshellarg($web_root . '/sm-ssl-probe.txt');
-			$probe_url  = escapeshellarg("http://{$domain}/sm-ssl-probe.txt");
-
-			return [
-				['type' => 'ssh', 'label' => 'Place routing probe token in webroot',
-				 'cmd' => "echo {$token} | {$sudo}tee {$probe_path} >/dev/null && echo PROBE_PLACED",
-				 'timeout' => 30],
-				['type' => 'local', 'label' => 'Verify the domain routes to this node',
-				 'cmd' => "RESP=\$(curl -fsSL --max-time 15 {$probe_url} 2>/dev/null); "
-				        . "if [ \"\$RESP\" = \"{$token}\" ]; then echo CF_ROUTING_VERIFIED; "
-				        . "else echo CF_ROUTING_UNVERIFIED; exit 1; fi",
-				 'timeout' => 60],
-				['type' => 'ssh', 'label' => 'Cloudflare detected — skip certbot, patch proxy config', 'on_host' => $is_docker,
-				 'cmd' => $site_var
-				          . self::proto_patch_cmd('"/etc/apache2/sites-enabled/${SITE}-proxy.conf"', $sudo, $is_docker)
-				          . ' && echo SSL_SKIPPED_CLOUDFLARE',
-				 'timeout' => 30],
-				['type' => 'ssh', 'label' => 'Remove routing probe token',
-				 'cmd' => "{$sudo}rm -f {$probe_path}",
-				 'continue_on_error' => true],
-			];
+	public static function build_clone_export_arm_primitive($node, $params) {
+		$key = trim((string)($params['export_key'] ?? ''));
+		if ($key !== '' && !preg_match('/^[A-Za-z0-9_-]{16,128}$/', $key)) {
+			throw new Exception('A clone export key is letters, digits, _ and -, 16 to 128 long; empty disarms.');
 		}
+		return ['primitive' => 'clone_export_arm', 'params' => ['export_key' => $key]];
+	}
 
-		// certbot's Apache plugin copies X-Forwarded-Proto "http" from the HTTP VHost into
-		// the SSL VHost it generates — always patch it to "https" after certbot runs.
-		// The conf is only guaranteed to exist behind the Docker host proxy; on
-		// bare metal there is no proxy vhost, so a missing conf is informational.
-		$ssl_patch_cmd = $site_var
-		               . self::proto_patch_cmd('"/etc/apache2/sites-enabled/${SITE}-proxy-le-ssl.conf"', $sudo, $is_docker);
-
-		return [
-			['type' => 'ssh', 'label' => 'Ensure certbot is installed', 'on_host' => $is_docker,
-			 'cmd' => "command -v certbot >/dev/null 2>&1 || {$sudo}apt-get install -y -qq certbot python3-certbot-apache",
-			 'timeout' => 120],
-			['type' => 'ssh', 'label' => 'Run certbot', 'on_host' => $is_docker,
-			 'cmd' => "{$sudo}certbot --apache -d {$domain_esc} --non-interactive --agree-tos{$email_arg}",
-			 'timeout' => 300],
-			['type' => 'ssh', 'label' => 'Fix X-Forwarded-Proto in SSL VHost', 'on_host' => $is_docker,
-			 'cmd' => $ssl_patch_cmd,
-			 'timeout' => 30],
-			['type' => 'ssh', 'label' => 'Verify certificate', 'on_host' => $is_docker,
-			 'cmd' => "{$sudo}test -f /etc/letsencrypt/live/{$domain_esc}/fullchain.pem && echo SSL_CERT_VERIFIED",
-			 'continue_on_error' => true],
-		];
+	/** The key a provision arms its source with: 48 hex characters. */
+	public static function mint_clone_export_key() {
+		return bin2hex(random_bytes(24));
 	}
 
 	/**
-	 * Shell fragment that forces X-Forwarded-Proto to "https" in a proxy vhost
-	 * and names the outcome in the job output.
-	 *
-	 * A site is installed with a plain HTTP proxy before DNS cutover, so
-	 * manage_domain.sh writes the header as "http" — correct at that moment.
-	 * This flips it once TLS is actually terminating in front of the backend,
-	 * whether by certbot or at the Cloudflare edge. Getting it wrong means the
-	 * application believes every request arrived unencrypted.
-	 *
-	 * The outcome is reported because the previous form could not tell
-	 * "rewrote it", "already correct" and "never found the file" apart: all
-	 * three exited zero and printed the same thing. That is how a patch whose
-	 * target path had stopped matching went unnoticed — a step that cannot fail
-	 * visibly cannot be trusted when it says it succeeded. Each case now names
-	 * itself, so JobResultProcessor and a human reading the log see the same
-	 * four outcomes.
-	 *
-	 * @param string $conf_shell_path Shell expression for the config path,
-	 *                                already quoted for the remote shell.
-	 * @param string $sudo            Sudo prefix ('' or 'sudo ').
-	 * @param bool   $required        True where the conf must exist (Docker host
-	 *                                proxy): a missing conf then fails the step
-	 *                                instead of being reported and skipped.
-	 * @return string
+	 * Seed a new site's fleet-service credentials: where the service is and
+	 * the API key pair that authenticates to it as the buyer. Three values,
+	 * three compiled names. The secret rides the job row until the node
+	 * reports done; JobResultProcessor::process_fleet_enroll blanks it then.
 	 */
-	private static function proto_patch_cmd($conf_shell_path, $sudo = '', $required = false) {
-		$http_pattern  = 'X-Forwarded-Proto "http"';
-		$https_pattern = 'X-Forwarded-Proto "https"';
-		$missing = $required ? 'echo PROTO_CONF_MISSING; exit 1; ' : 'echo PROTO_CONF_MISSING; ';
-		return 'CONF=' . $conf_shell_path . '; '
-		     . 'if [ ! -f "$CONF" ]; then ' . $missing
-		     . 'elif grep -q \'' . $http_pattern . '\' "$CONF"; then '
-		     .   $sudo . 'sed -i \'s/' . $http_pattern . '/' . $https_pattern . '/\' "$CONF" '
-		     .   '&& ' . $sudo . 'systemctl reload apache2 && echo PROTO_PATCHED; '
-		     . 'elif grep -q \'' . $https_pattern . '\' "$CONF"; then echo PROTO_ALREADY_HTTPS; '
-		     . 'else echo PROTO_HEADER_ABSENT; fi';
+	public static function build_fleet_enroll($node, $params) {
+		if (!self::has_primitive($node, 'fleet_enroll')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot be seeded for the fleet: its agent does not offer "
+				. "the fleet_enroll primitive. Apply an update to the node; there is no SSH route for this.");
+		}
+		return self::build_fleet_enroll_primitive($node, $params);
+	}
+
+	public static function build_fleet_enroll_primitive($node, $params) {
+		$url = trim((string)($params['service_url'] ?? ''));
+		$pub = trim((string)($params['public_key'] ?? ''));
+		$sec = trim((string)($params['secret_key'] ?? ''));
+		// The same bounds the node applies, so a bad value fails where the row
+		// that holds it can be looked at.
+		if (!preg_match('#^https://[A-Za-z0-9.\-]+(:[0-9]{1,5})?(/[A-Za-z0-9.\-/_]*)?$#', $url)) {
+			throw new Exception('Fleet seeding needs the service\'s https address, with no query string.');
+		}
+		if (!preg_match('/^public_[a-z0-9]{8,64}$/', $pub) || !preg_match('/^secret_[a-z0-9]{8,64}$/', $sec)) {
+			throw new Exception('Fleet seeding needs the key pair in the shape the platform mints.');
+		}
+		return ['primitive' => 'fleet_enroll', 'params' => [
+			'service_url' => $url,
+			'public_key'  => $pub,
+			'secret_key'  => $sec,
+		]];
 	}
 
 	public static function is_cloudflare_domain($domain) {
@@ -2880,19 +2673,72 @@ class JobCommandBuilder {
 		return self::next_container_port($host_id, (int)$node->key);
 	}
 
+	/**
+	 * The one SSH session in a machine's life: the bootstrap.
+	 *
+	 * A machine this plane creates is reached over SSH exactly once, to run
+	 * the installer. install.sh puts an agent on the machine and the agent
+	 * asks to join; from approval on, the plane talks to the machine only
+	 * through the agent (specs/ssh_single_bootstrap.md). So this job is one
+	 * remote command — fetch the release, `install.sh docker`, `install.sh
+	 * site` — and nothing after it: no second login, no verify round trip, no
+	 * proxy step, no cleanup. Two join requests arriving IS the verification.
+	 *
+	 * What install.sh does inside that one run, that used to be steps here:
+	 *
+	 *  - the universal proxy vhost (both ports forward X-Forwarded-Proto https,
+	 *    the :443 block guarded on the certificate path), written because the
+	 *    site command carries no --no-ssl;
+	 *  - the certificate attempt, and the host's own retry timer when DNS is
+	 *    not here yet — the host issues its own certificate;
+	 *  - a clone (mode from_backup): --clone-from pulls the source's database,
+	 *    uploads, themes and plugins over HTTPS from the source's own
+	 *    utils/clone_export. Nothing reaches the source's shell. The plane
+	 *    armed the source (clone_export_arm) before creating this machine.
+	 *
+	 * Shapes: docker (a host agent, then a site container), bare-metal
+	 * (install.sh server, then a site whose agent is the machine's), and
+	 * `bare` (a Docker host with no site — infrastructure roles build on it).
+	 *
+	 * The container name is the site name this plane chose, so it is set here
+	 * rather than read back. The published port is read back: install.sh
+	 * moves off a pinned port that is busy, and prints CONTAINER_PORT=N.
+	 *
+	 * $params: mode (fresh|from_backup|bare), sitename, domain, docker_mode
+	 * (docker|bare-metal); for from_backup: clone_from (the source site's
+	 * https address) and clone_key (the key the source was armed with).
+	 */
 	public static function build_install_node($node, $params) {
-		$mode      = $params['mode'] ?? 'fresh';
-		$sitename  = $params['sitename'] ?? $node->get('mgn_slug');
-		$domain    = $params['domain'] ?? '';
-		$docker    = $params['docker_mode'] ?? '';
+		$mode     = (string)($params['mode'] ?? 'fresh');
+		$sitename = (string)($params['sitename'] ?? $node->get('mgn_slug'));
+		$domain   = strtolower(trim((string)($params['domain'] ?? '')));
+		$docker   = (string)($params['docker_mode'] ?? '');
 		if ($docker !== 'docker' && $docker !== 'bare-metal') {
 			throw new Exception("install_node requires docker_mode = 'docker' or 'bare-metal' (got: " . var_export($docker, true) . ")");
 		}
+		if (!in_array($mode, ['fresh', 'from_backup', 'bare'], true)) {
+			throw new Exception("install_node requires mode = 'fresh', 'from_backup' or 'bare' (got: " . var_export($mode, true) . ")");
+		}
+		if ($mode === 'bare' && $docker !== 'docker') {
+			throw new Exception('A bare instance is a Docker host with no site; it has no bare-metal shape.');
+		}
+		// The site name becomes a container name, a directory and a database
+		// name on the target, so it is a shape, not an escaped string.
+		if (!preg_match('/^[a-z0-9][a-z0-9_-]{0,49}$/', $sitename)) {
+			throw new Exception("install_node: site name '{$sitename}' is not a plain slug (lowercase letters, digits, _ and -).");
+		}
+		if ($mode !== 'bare') {
+			if ($domain === '' || !preg_match('/^[a-z0-9.-]+$/', $domain)) {
+				throw new Exception('install_node needs the domain the site will answer on.');
+			}
+		}
 
+		// Per-job path, and NOT under /tmp: the extracted release stays on the
+		// machine (the deferred-SSL timer may run its setup_ssl.sh until the
+		// host agent's bundle lands, and there is no later session to delete
+		// it from anyway), and Ubuntu empties /tmp at boot.
 		$transfer_id = substr(md5(uniqid(mt_rand(), true)), 0, 12);
-		// Per-job path: teardown (including a stale-recovery replay) must never
-		// delete the unpacked installer out from under a concurrent install.
-		$remote_install_dir = "/tmp/joinery_install_{$transfer_id}";
+		$remote_install_dir = "/opt/joinery-install/{$transfer_id}";
 		$remote_tools_dir = "{$remote_install_dir}/maintenance_scripts/install_tools";
 
 		// Management node URL — where the target fetches the Joinery release tarball from.
@@ -2916,465 +2762,109 @@ class JobCommandBuilder {
 		}
 		$plane_url_esc = escapeshellarg($plane_url);
 
+		// A clone pulls from the source site's web address with the key the
+		// plane armed it with. Both are shapes: the address is a bare https
+		// origin and the key is what clone_export_arm accepts.
+		$clone_flags = '';
+		if ($mode === 'from_backup') {
+			$clone_from = rtrim((string)($params['clone_from'] ?? ''), '/');
+			$clone_key  = (string)($params['clone_key'] ?? '');
+			if (!preg_match('#^https://[A-Za-z0-9.\-]+(:\d{1,5})?$#', $clone_from)) {
+				throw new Exception('A clone needs the source site\'s https address (clone_from); the source is reached by its web address, never its shell.');
+			}
+			if (!preg_match('/^[A-Za-z0-9_-]{16,128}$/', $clone_key)) {
+				throw new Exception('A clone needs the export key the source was armed with (clone_key).');
+			}
+			$clone_flags = ' --clone-from=' . escapeshellarg($clone_from) . ' --clone-key=' . escapeshellarg($clone_key);
+		}
+
 		$sitename_esc = escapeshellarg($sitename);
-		$domain_esc = escapeshellarg($domain);
-		$mode_flag = ($docker === 'docker') ? ' --docker' : ' --bare-metal';
-		// P-18: pin the container's published port. Without this $port_arg was
-		// empty, so install.sh self-allocated a port the management node never
-		// recorded — mgn_port stayed blank and diverged from reality, and the
-		// next container's MAX(mgn_port)+1 allocation collided. Allocate the port
-		// here (if not already set by a cloud caller), record it, and pass it so
-		// install.sh publishes exactly that port.
+		$domain_esc   = escapeshellarg($domain);
+
+		// A container site: pin the published port so the ledger and the
+		// machine agree, and record the container name — it is the site name
+		// this plane chose, so nothing has to read it back.
 		$port_arg = '';
-		if ($docker === 'docker') {
+		if ($docker === 'docker' && $mode !== 'bare') {
 			$port = (int)$node->get('mgn_port');
 			if (!$port) {
 				$port = self::allocate_container_port($node);
 				$node->set('mgn_port', $port);
-				$node->save();
 			}
+			$node->set('mgn_container_name', $sitename);
+			$node->save();
 			$port_arg = ' ' . escapeshellarg((string)$port);
 		}
 
 		$steps = [];
-		// Teardown steps collect here and go at the tail of the array, after
-		// every main step — an un-upgraded agent runs the array sequentially,
-		// so tail placement is what keeps it correct.
-		$teardown = [];
 
-		// 1. Pre-flight: verify the management node is serving a release archive
+		// Pre-flight, on the plane: the release the target is about to fetch
+		// is actually being served.
 		$steps[] = ['type' => 'local', 'label' => 'Pre-flight: check release archive is available',
 			'cmd' => "CODE=\$(curl -sILo /dev/null -w '%{http_code}' {$release_url_esc}) && "
 			       . "test \"\$CODE\" = '200' -o \"\$CODE\" = '302' || { echo \"Release URL {$release_url} returned HTTP \$CODE\"; exit 1; } && "
 			       . "echo PREFLIGHT_OK"];
 
-		// From-Backup: grab source backups BEFORE installing
-		if ($mode === 'from_backup') {
-			$source_node_id = intval($params['source_node_id'] ?? 0);
-			if (!$source_node_id) {
-				throw new Exception('From-Backup mode requires source_node_id.');
-			}
-			require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-			$source_node = new ManagedNode($source_node_id, TRUE);
-			$source_scripts = self::get_scripts_path($source_node);
-			$source_creds = self::get_db_credentials_script($source_node);
-			$source_web_root = rtrim($source_node->get('mgn_web_root'), '/');
-			$source_project = basename(dirname($source_web_root));
+		// The one session. Runs as root — the bootstrap credential is the
+		// machine's root password — so nothing is sudo-wrapped. set -e turns
+		// any failing line into a failed job, and INSTALL_SUCCESS is printed
+		// only past the last one.
+		$lines = [];
+		$lines[] = 'set -eo pipefail';
+		$lines[] = 'command -v curl >/dev/null || { apt-get update -qq && apt-get install -y -qq curl; }';
+		$lines[] = "rm -rf {$remote_install_dir} && mkdir -p {$remote_install_dir}";
+		$lines[] = "curl -sL {$release_url_esc} | tar xz -C {$remote_install_dir}";
+		$lines[] = "test -f {$remote_tools_dir}/install.sh && chmod +x {$remote_tools_dir}/*.sh && echo RELEASE_EXTRACTED";
+		$lines[] = "cd {$remote_tools_dir}";
 
-			$db_backup_remote = $params['db_backup_path'] ?? '';
-			$project_backup_remote = $params['project_backup_path'] ?? '';
-
-			if (($params['backup_source'] ?? 'new') === 'new') {
-				$db_backup_remote = "/backups/install_{$transfer_id}.sql.gz";
-				$project_backup_remote = "/backups/install_{$transfer_id}_project.tar.gz";
-
-				$source_sudo = self::sudo_prefix($source_node);
-				$steps[] = ['type' => 'ssh', 'label' => 'Ensure backup directory on source',
-					'node_id' => $source_node_id, 'cmd' => "{$source_sudo}mkdir -p /backups && {$source_sudo}chmod 1777 /backups"];
-				$steps[] = ['type' => 'ssh', 'label' => 'Dump source database',
-					'node_id' => $source_node_id,
-					'cmd' => "{$source_creds} && umask 077 && pg_dump --no-owner --no-acl -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > {$db_backup_remote}",
-					'timeout' => 3600];
-				$steps[] = ['type' => 'ssh', 'label' => 'Archive source project files',
-					'node_id' => $source_node_id,
-					'cmd' => "bash {$source_scripts}/sysadmin_tools/backup_project.sh {$source_project} --non-interactive --plaintext --output-dir /backups "
-					       . "&& NEW_BK=\$(ls -t /backups/{$source_project}*.tar.gz 2>/dev/null | head -1) "
-					       . "&& test -n \"\$NEW_BK\" && mv \"\$NEW_BK\" {$project_backup_remote}",
-					'timeout' => 3600];
-			} else {
-				if (!$db_backup_remote || !$project_backup_remote) {
-					throw new Exception('From-Backup with existing backup requires db_backup_path and project_backup_path.');
-				}
-			}
-
-			$local_db_backup = "/tmp/install_{$transfer_id}.sql.gz";
-			$local_project_backup = "/tmp/install_{$transfer_id}_project.tar.gz";
-
-			// Docker source: files are inside the container; copy them to /tmp/ on the host
-			// so that SCP (which reads from the host filesystem) can transfer them.
-			$source_container = $source_node->get('mgn_container_name');
-			$scp_db_remote  = $db_backup_remote;
-			$scp_prj_remote = $project_backup_remote;
-			if ($source_container) {
-				$sc   = escapeshellarg($source_container);
-				$db_r = escapeshellarg($db_backup_remote);
-				$pr_r = escapeshellarg($project_backup_remote);
-				// Stage to /tmp/ on the host (always writable by root)
-				$scp_db_remote  = $local_db_backup;
-				$scp_prj_remote = $local_project_backup;
-				$db_host = escapeshellarg($local_db_backup);
-				$pr_host = escapeshellarg($local_project_backup);
-				$steps[] = ['type' => 'ssh', 'label' => 'Copy DB dump from container to host',
-					'node_id' => $source_node_id, 'on_host' => true,
-					'cmd' => "docker cp {$sc}:{$db_r} {$db_host}"];
-				$steps[] = ['type' => 'ssh', 'label' => 'Copy project archive from container to host',
-					'node_id' => $source_node_id, 'on_host' => true,
-					'cmd' => "docker cp {$sc}:{$pr_r} {$pr_host}"];
-			}
-
-			$steps[] = ['type' => 'scp', 'label' => 'Fetch DB backup to management node',
-				'node_id' => $source_node_id, 'direction' => 'download',
-				'remote_path' => $scp_db_remote, 'local_path' => $local_db_backup];
-			$steps[] = ['type' => 'scp', 'label' => 'Fetch project backup to management node',
-				'node_id' => $source_node_id, 'direction' => 'download',
-				'remote_path' => $scp_prj_remote, 'local_path' => $local_project_backup];
-		}
-
-		// 2. Fetch the Joinery release tarball on the target and extract it.
-		// Target needs curl (usually present on Ubuntu; install if missing).
-		// All commands sudo-wrapped so they work whether the agent connects as root or user1.
-		$steps[] = ['type' => 'ssh', 'label' => 'Ensure curl is installed',
-			'on_host' => true,
-			'cmd' => "command -v curl >/dev/null || sudo bash -c 'apt-get update -qq && apt-get install -y -qq curl'"];
-
-		$steps[] = ['type' => 'ssh', 'label' => 'Download and extract Joinery release',
-			'on_host' => true,
-			'cmd' => "sudo rm -rf {$remote_install_dir} && sudo mkdir -p {$remote_install_dir} && "
-			       . "curl -sL {$release_url_esc} | sudo tar xz -C {$remote_install_dir} && "
-			       . "sudo test -f {$remote_tools_dir}/install.sh && sudo chmod +x {$remote_tools_dir}/*.sh && "
-			       . "echo RELEASE_EXTRACTED",
-			'timeout' => 600];
-
-		// 3. Install prereqs (Docker or bare-metal server setup)
 		if ($docker === 'docker') {
-			// install.sh docker is idempotent — short-circuits if Docker is already installed.
-			// Docker subcommand does NOT harden SSH, so root access stays intact.
-			// --management-node: the machine gets its own siteless host agent and
-			// asks to join this plane, so host-scope work (certificates, site
-			// removal, rebuild) has a route once the password is burned.
-			$steps[] = ['type' => 'ssh', 'label' => 'Install Docker and the host agent',
-				'on_host' => true,
-				'cmd' => "cd {$remote_tools_dir} && ./install.sh -y -q docker --management-node={$plane_url_esc}"
-				       . " --node-name=" . escapeshellarg($sitename . '-host'),
-				'timeout' => 1800];
+			// Docker plus the siteless host agent, which asks to join this
+			// plane as NAME-host (the operator's pending list shows a name,
+			// not "localhost"). A bare instance is exactly this and nothing
+			// more; the machine's node IS the host, so it takes the site name.
+			$host_name = ($mode === 'bare') ? $sitename : $sitename . '-host';
+			$lines[] = "./install.sh -y -q docker --management-node={$plane_url_esc} --node-name=" . escapeshellarg($host_name);
+			if ($mode !== 'bare') {
+				// No --no-ssl: install.sh writes the universal proxy vhost,
+				// tries for a certificate, and arms the host's retry timer when
+				// DNS is not here yet. `-` generates the container's own
+				// Postgres password. --enable-agent --management-node: the
+				// site's agent asks to join too.
+				$lines[] = "./install.sh -y -q site --docker {$sitename_esc} - {$domain_esc}{$port_arg}"
+				         . " --enable-agent --management-node={$plane_url_esc}{$clone_flags}";
+			}
 		} else {
-			// Bare-metal: install.sh server runs `PermitRootLogin no` + restarts sshd, locking
-			// out our root-keyed agent. Before it runs, pre-stage user1 with root's authorized
-			// keys and NOPASSWD sudo so the agent can keep talking to the target. After, we
-			// switch the ManagedNode's ssh_user to user1 so subsequent steps (and future jobs)
-			// connect as user1.
-			// All commands prefixed with sudo — works as root (no-op) or as user1 (NOPASSWD sudo
-			// already present from a prior successful run). On retry where we're already user1,
-			// this step is effectively a no-op re-sync.
-			$steps[] = ['type' => 'ssh', 'label' => 'Pre-stage user1 for managed access',
-				'on_host' => true,
-				'cmd' => "set -e; "
-				       . "sudo test -s /root/.ssh/authorized_keys || { echo 'FATAL: /root/.ssh/authorized_keys is empty or missing — cannot pre-stage user1 safely. Aborting before install.sh server locks out root SSH.'; exit 1; }; "
-				       . "id user1 >/dev/null 2>&1 || sudo useradd -m -s /bin/bash user1; "
-				       . "sudo install -d -m 700 -o user1 -g user1 /home/user1/.ssh; "
-				       . "sudo touch /home/user1/.ssh/authorized_keys; "
-				       . "sudo bash -c 'cat /root/.ssh/authorized_keys >> /home/user1/.ssh/authorized_keys && sort -u /home/user1/.ssh/authorized_keys -o /home/user1/.ssh/authorized_keys'; "
-				       . "sudo chmod 600 /home/user1/.ssh/authorized_keys; "
-				       . "sudo chown user1:user1 /home/user1/.ssh/authorized_keys; "
-				       . "echo 'user1 ALL=(ALL:ALL) NOPASSWD: ALL' | sudo tee /etc/sudoers.d/user1 >/dev/null; "
-				       . "sudo chmod 440 /etc/sudoers.d/user1; "
-				       . "echo USER1_READY"];
-
-			// Switch the agent to user1 BEFORE running install.sh server (which disables
-			// root login). The SSH pool re-creates its connection using the updated user
-			// on the next step since install.sh server also restarts sshd.
-			$steps[] = ['type' => 'local', 'label' => 'Switch SSH user to user1',
-				'cmd' => self::_update_node_ssh_user_cmd($node, 'user1')];
-
-			// Now as user1 (via sudo, NOPASSWD). Only run server setup if prereqs missing —
-			// install.sh server resets the postgres role password and would break other sites.
+			// Bare metal: prerequisites, then the site. install.sh server
+			// hardens SSH (PermitRootLogin prohibit-password, no password
+			// auth) — this session survives that, and there is no next one:
+			// on a keyless box the root password was the only credential, so
+			// a bare-metal bootstrap is ONE-SHOT. retry_install refuses it.
 			//
-			// The password file at /root/.joinery_postgres_password is required by the site
-			// creation step below (it uses --password-file to ensure the site's DB password
-			// matches the postgres role password — _site_init.sh uses the site password as
-			// PGPASSWORD for createdb -U postgres). If prereqs are already installed but the
-			// file doesn't exist (host was set up manually), harvest the password from an
-			// existing site's Globalvars_site.php.
-			$steps[] = ['type' => 'ssh', 'label' => 'Install Apache/PHP/Postgres (if missing)',
-				'on_host' => true,
-				'cmd' => "cd {$remote_tools_dir} && "
-				       . "if command -v apache2 >/dev/null && command -v psql >/dev/null && command -v php >/dev/null; then "
-				       .   "echo 'PREREQS_ALREADY_INSTALLED — skipping install.sh server'; "
-				       .   "if ! sudo test -s /root/.joinery_postgres_password; then "
-				       .     "echo 'Harvesting postgres password from an existing site config...'; "
-				       .     "EXISTING_CFG=\$(sudo find /var/www/html -maxdepth 3 -name Globalvars_site.php -path '*/config/*' 2>/dev/null | head -1); "
-				       .     "if [ -z \"\$EXISTING_CFG\" ]; then "
-				       .       "echo 'FATAL: prereqs installed but no postgres password available — cannot determine DB password. Manually create /root/.joinery_postgres_password containing the postgres role password.'; exit 1; "
-				       .     "fi; "
-				       .     "PW=\$(sudo grep dbpassword \"\$EXISTING_CFG\" | head -1 | cut -d\\; -f1 | cut -d= -f2 | tr -d ' ' | sed \"s/^.//;s/.$//\"); "
-				       .     "test -n \"\$PW\" || { echo 'FATAL: could not extract dbpassword from existing config'; exit 1; }; "
-				       .     "echo \"\$PW\" | sudo tee /root/.joinery_postgres_password >/dev/null && sudo chmod 600 /root/.joinery_postgres_password; "
-				       .     "echo 'Password harvested from existing site config'; "
-				       .   "fi; "
-				       . "else "
-				       .   "export POSTGRES_PASSWORD=\$(openssl rand -base64 18 | tr -d '/+=' | head -c 24) && "
-				       .   "echo 'Auto-generated postgres password (recorded in /root/.joinery_postgres_password on target):' && "
-				       .   "echo \"\$POSTGRES_PASSWORD\" | sudo tee /root/.joinery_postgres_password >/dev/null && sudo chmod 600 /root/.joinery_postgres_password && "
-				       .   "sudo -E ./install.sh -y -q server; "
-				       . "fi",
-				'timeout' => 3600];
+			// _site_init.sh uses the site's DB password as PGPASSWORD for the
+			// postgres role when it runs createdb, so the site's password MUST
+			// match the role password install.sh server set; it is kept in
+			// /root/.joinery_postgres_password. A machine this plane creates
+			// is bare, so the prerequisites branch only ever runs the server
+			// setup; the other arm is a refusal, not a harvest.
+			$lines[] = 'if command -v apache2 >/dev/null && command -v psql >/dev/null && command -v php >/dev/null; then'
+			         . " echo 'PREREQS_ALREADY_INSTALLED — skipping install.sh server';"
+			         . " test -s /root/.joinery_postgres_password || { echo 'FATAL: prerequisites are installed but /root/.joinery_postgres_password is missing — a machine this plane creates is bare; create the file with the postgres role password.'; exit 1; };"
+			         . ' else'
+			         . " POSTGRES_PASSWORD=\$(openssl rand -base64 18 | tr -d '/+=' | head -c 24);"
+			         . " test -n \"\$POSTGRES_PASSWORD\" || { echo 'FATAL: could not generate a postgres password'; exit 1; };"
+			         . ' echo "$POSTGRES_PASSWORD" > /root/.joinery_postgres_password && chmod 600 /root/.joinery_postgres_password;'
+			         . ' export POSTGRES_PASSWORD;'
+			         . ' ./install.sh -y -q server;'
+			         . ' fi';
+			$lines[] = "./install.sh -y -q site --bare-metal {$sitename_esc} --password-file=/root/.joinery_postgres_password {$domain_esc}"
+			         . " --enable-agent --management-node={$plane_url_esc}{$clone_flags}";
 		}
+		$lines[] = 'echo INSTALL_SUCCESS';
 
-		// 4. Create the site.
-		// --no-ssl is always passed (DNS typically not yet pointing here).
-		// Prefix with sudo so it works whether connecting as root or user1.
-		//
-		// Bare-metal: _site_init.sh uses $PASSWORD as PGPASSWORD for the `postgres` role when
-		// running createdb, so the site's DB password MUST match the postgres role password
-		// set by install.sh server (stored in /root/.joinery_postgres_password). Without this,
-		// createdb auth-fails and the schema load skips silently. Passing `-` (auto-generate)
-		// produces a mismatch — use --password-file instead.
-		//
-		// Docker mode runs Postgres inside the container with a fresh password, so `-` is fine.
-		if ($docker === 'docker') {
-			$pass_arg = ' -';
-		} else {
-			$pass_arg = ' --password-file=/root/.joinery_postgres_password';
-		}
-		// A site this management node is installing comes up running its agent.
-		// That is the one case where "should this machine run an agent?" is
-		// already answered — someone asked this plane to build and manage it —
-		// and it saves a root moment per node during the fleet rollout. It still
-		// enrolls nothing: joining is a request the operator approves here —
-		// --management-node is what makes the site's agent ASK, so the request
-		// arrives on its own instead of waiting for someone at a terminal.
-		$install_cmd = "cd {$remote_tools_dir} && sudo ./install.sh -y -q site{$mode_flag} {$sitename_esc}{$pass_arg} {$domain_esc}{$port_arg} --no-ssl --enable-agent --management-node={$plane_url_esc}";
-		$steps[] = ['type' => 'ssh', 'label' => 'Create the site',
-			'on_host' => true, 'cmd' => $install_cmd, 'timeout' => 3600];
-
-		// Docker mode: report the port the container ACTUALLY publishes. install.sh
-		// auto-picks a different port when the pinned one is busy, so the ledger is
-		// only trustworthy if it records ground truth read back from Docker —
-		// JobResultProcessor parses CONTAINER_PORT= and corrects mgn_port.
-		if ($docker === 'docker') {
-			$steps[] = ['type' => 'ssh', 'label' => 'Report published container port', 'on_host' => true,
-				'cmd' => "echo \"CONTAINER_PORT=\$(docker port {$sitename_esc} 80/tcp | head -1 | awk -F: '{print \$NF}')\"",
-				'continue_on_error' => true];
-		}
-
-		// Docker mode: record the container name in the management node DB so future jobs
-		// (backups, restores, status checks) correctly use docker exec to reach the site.
-		if ($docker === 'docker') {
-			$sitename_db_esc = str_replace("'", "''", $sitename);
-			$node_id_int = intval($node->key);
-			$cfg_esc = escapeshellarg(PathHelper::getSiteRoot() . '/config/Globalvars_site.php');
-			$extr = 'head -1 | cut -d";" -f1 | cut -d"=" -f2 | tr -d " " | sed s/^.// | sed s/.$//';
-			$update_cmd = "CFG={$cfg_esc} && "
-			            . "DB_NAME=\$(grep dbname \$CFG | {$extr}) && "
-			            . "DB_USER=\$(grep dbusername \$CFG | {$extr}) && "
-			            . "export PGPASSWORD=\$(grep dbpassword \$CFG | {$extr}) && "
-			            . "psql -U \"\$DB_USER\" -d \"\$DB_NAME\" -c \"UPDATE mgn_managed_nodes SET mgn_container_name = '{$sitename_db_esc}' WHERE mgn_id = {$node_id_int}\" && "
-			            . "echo CONTAINER_NAME_UPDATED";
-			$steps[] = ['type' => 'local', 'label' => 'Record container name in management node',
-				'cmd' => $update_cmd];
-		}
-
-		// Docker mode: set up an HTTP reverse proxy on the host so port 80 serves the site.
-		// In docker mode, maintenance_scripts/ is baked into the container image — not on
-		// the host — so we use the still-extracted copy under the per-job install dir
-		// (removed only at teardown). manage_domain.sh auto-installs Apache + mod_proxy if
-		// missing, writes {sitename}-proxy.conf, and reloads. Idempotent. SSL stays a
-		// separate admin action after DNS cutover.
-		// Skip for localhost / bare IP — a ServerName-based proxy needs a routable domain.
-		$is_ip = (bool)preg_match('/^\d+\.\d+\.\d+\.\d+$/', $domain);
-		if ($docker === 'docker' && $domain !== '' && $domain !== 'localhost' && !$is_ip) {
-			$manage_domain = "{$remote_install_dir}/maintenance_scripts/sysadmin_tools/manage_domain.sh";
-			$steps[] = ['type' => 'ssh', 'label' => 'Set up HTTP reverse proxy',
-				'on_host' => true,
-				'cmd' => "sudo bash {$manage_domain} set {$sitename_esc} {$domain_esc} --no-ssl",
-				'timeout' => 300];
-		}
-
-		// From-Backup: restore DB + files onto freshly-installed site
-		if ($mode === 'from_backup') {
-			$target_config = "/var/www/html/{$sitename}/config/Globalvars_site.php";
-			$remote_db_dump = "/tmp/joinery_restore_{$transfer_id}.sql.gz";
-			$remote_project_tar = "/tmp/joinery_restore_{$transfer_id}_project.tar.gz";
-			$local_db_backup = "/tmp/install_{$transfer_id}.sql.gz";
-			$local_project_backup = "/tmp/install_{$transfer_id}_project.tar.gz";
-
-			// SCP uploads to target: for Docker, files land on HOST /tmp/
-			$steps[] = ['type' => 'scp', 'label' => 'Upload DB backup to target',
-				'direction' => 'upload', 'local_path' => $local_db_backup, 'remote_path' => $remote_db_dump];
-			$steps[] = ['type' => 'scp', 'label' => 'Upload project backup to target',
-				'direction' => 'upload', 'local_path' => $local_project_backup, 'remote_path' => $remote_project_tar];
-
-			// Docker target: SCP landed on host /tmp/ but restore runs inside the container —
-			// copy files from host into the container so the restore steps can access them.
-			// Use $docker/$sitename here (not mgn_container_name — it's blank until the post-install update step runs).
-			$is_docker_install = ($docker === 'docker');
-			$restore_on_host   = !$is_docker_install; // bare-metal: on_host=true; Docker: run inside container
-			if ($is_docker_install) {
-				$tc   = escapeshellarg($sitename);   // container name = sitename for new Docker installs
-				$db_r = escapeshellarg($remote_db_dump);
-				$pr_r = escapeshellarg($remote_project_tar);
-				$steps[] = ['type' => 'ssh', 'label' => 'Copy DB dump into container',
-					'on_host' => true,
-					'cmd' => "docker cp {$remote_db_dump} {$tc}:{$db_r}"];
-				$steps[] = ['type' => 'ssh', 'label' => 'Copy project backup into container',
-					'on_host' => true,
-					'cmd' => "docker cp {$remote_project_tar} {$tc}:{$pr_r}"];
-			}
-
-			$extract = 'head -1 | cut -d";" -f1 | cut -d"=" -f2 | tr -d " " | sed s/^.// | sed s/.$//';
-			$creds = "DB_NAME=\$(grep dbname {$target_config} | {$extract}) && "
-			       . "DB_USER=\$(grep dbusername {$target_config} | {$extract}) && "
-			       . "export PGPASSWORD=\$(grep dbpassword {$target_config} | {$extract})";
-
-			$sudo = self::sudo_prefix($node);
-			$step_base = $restore_on_host ? ['on_host' => true] : [];
-
-			$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Auto-backup fresh DB before restore',
-				'cmd' => "{$sudo}mkdir -p /backups && {$sudo}chmod 1777 /backups && {$creds} && umask 077 && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_install_restore_\$(date +%Y%m%d_%H%M%S).sql.gz",
-				'timeout' => 3600]);
-
-			// Same restore engine as every other path: verify-before-destroy,
-			// schema replace, ON_ERROR_STOP. Handles a plaintext clone dump or an
-			// .enc archive identically (audit finding 9 — an .enc dump used to die
-			// at gunzip -t after the fresh site was already installed).
-			$restore_engine = "/var/www/html/{$sitename}/maintenance_scripts/sysadmin_tools/restore_database.sh";
-			$db_dump_arg = escapeshellarg($remote_db_dump);
-			$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Restore source database',
-				'cmd' => "{$creds} && KEY_PATH=\"\$HOME/.joinery_backup_key\" && bash " . escapeshellarg($restore_engine) . " \"\$DB_NAME\" {$db_dump_arg} --non-interactive --db-user \"\$DB_USER\" --key-file \"\$KEY_PATH\"",
-				'timeout' => 3600]);
-
-			// backup_project.sh archives are two levels deep:
-			//   {backup_name}/project_files/{public_html,uploads,config,...}
-			// with the archive's own metadata (apache_config/, backup_info.txt, the
-			// .sql dump) as siblings of project_files. Both levels have to come off,
-			// and only the project_files subtree may be extracted — stripping one
-			// level buries the whole site a directory deep under project_files/ and
-			// scatters the metadata across the site root. The site still comes up
-			// (the fresh install ran first, the DB restore succeeded), so the failure
-			// is silent: every uploaded file is simply absent from where the database
-			// says it is. The extract must also be allowed to fail the job, since a
-			// clone that lost its files is not a usable clone.
-			//
-			// config/backup_site_key is excluded for a different reason than
-			// Globalvars_site.php. It is the keypair that identifies THIS machine
-			// as a recipient of its own backups, and it is supposed to be per-site
-			// and disposable. A clone that inherits its source's key makes two
-			// sites share one identity: the envelope's site recipient stops saying
-			// which machine made a backup, and one machine's key opens the other's
-			// archives. backup_envelope.php mints a fresh one on first use, so
-			// leaving it absent is the correct state, not a gap.
-			$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Extract project files',
-				'cmd' => "tar xzf {$remote_project_tar} -C /var/www/html/{$sitename} --strip-components=2 --wildcards"
-					. " --exclude='config/Globalvars_site.php' --exclude='config/backup_site_key' '*/project_files/*'",
-				'timeout' => 3600]);
-
-			// Prove the files actually landed. Every regular file the archive carries
-			// must now exist at the site root; the two files the target keeps or
-			// mints for itself are excluded on both sides. A leftover project_files/
-			// directory is checked by name because it is the exact signature of an
-			// extract at the wrong depth.
-			$site_dir_esc = escapeshellarg("/var/www/html/{$sitename}");
-			$tar_esc      = escapeshellarg($remote_project_tar);
-			$verify_cmd =
-				  "SITE={$site_dir_esc}; TAR={$tar_esc}; "
-				. "if [ -d \"\$SITE/project_files\" ]; then "
-				.   "echo 'VERIFY FAILED: project_files/ present in the site root - archive extracted at the wrong depth'; exit 1; fi; "
-				. "LIST=\$(tar tzf \"\$TAR\" | sed -n 's|^[^/]*/project_files/||p' | grep -v '/\$' "
-				.   "| grep -v '^config/Globalvars_site\\.php\$' | grep -v '^config/backup_site_key\$'); "
-				. "TOTAL=\$(printf '%s\\n' \"\$LIST\" | grep -c . || true); "
-				. "MISSING=\$(printf '%s\\n' \"\$LIST\" | while IFS= read -r f; do "
-				.   "if [ -n \"\$f\" ] && [ ! -e \"\$SITE/\$f\" ]; then printf '%s\\n' \"\$f\"; fi; done); "
-				. "MCOUNT=\$(printf '%s\\n' \"\$MISSING\" | grep -c . || true); "
-				. "echo \"restore verify: \$TOTAL files expected, \$MCOUNT missing\"; "
-				. "if [ \"\$MCOUNT\" -gt 0 ]; then echo 'missing (first 20):'; printf '%s\\n' \"\$MISSING\" | head -20; exit 1; fi; "
-				. "echo 'restore verify: OK'";
-			$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Verify restored files',
-				'cmd' => $verify_cmd,
-				'timeout' => 3600]);
-
-			$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Fix permissions',
-				'cmd' => "bash /var/www/html/{$sitename}/maintenance_scripts/install_tools/fix_permissions.sh {$sitename}",
-				'continue_on_error' => true]);
-
-			// The clone now carries the SOURCE site's identity — its domain in the
-			// restored database, its idea of what machine it is on — while sitting
-			// on this one. Reconciliation settles that, and it is the same step
-			// every other restore path ends with, so a clone and a rebuild cannot
-			// drift apart in what they fix up.
-			//
-			// It is a gate, not a fixup: it refuses if the restored database will
-			// not open with this machine's credentials, which is the failure that
-			// otherwise shows up as SQLSTATE[08006] on every page of a clone that
-			// reported success.
-			$target_domain = parse_url($node->get('mgn_site_url') ?: '', PHP_URL_HOST) ?: '';
-			if ($target_domain) {
-				$reconcile = "/var/www/html/{$sitename}/maintenance_scripts/sysadmin_tools/reconcile_site.sh";
-				$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Reconcile the clone to this machine',
-					'cmd' => 'bash ' . escapeshellarg($reconcile)
-					       . ' ' . escapeshellarg($sitename)
-					       . ' --domain ' . escapeshellarg($target_domain),
-					'timeout' => 600]);
-
-				// A container's public name is served by the HOST's proxy, which is
-				// outside the container and so outside everything above.
-				if ($is_docker_install && $target_domain !== 'localhost'
-				    && !preg_match('/^\d+\.\d+\.\d+\.\d+$/', $target_domain)) {
-					$manage_domain_host = "{$remote_install_dir}/maintenance_scripts/sysadmin_tools/manage_domain.sh";
-					$steps[] = ['type' => 'ssh', 'label' => 'Publish the clone domain on the host',
-						'on_host' => true,
-						'cmd' => 'sudo bash ' . escapeshellarg($manage_domain_host) . ' set '
-						       . escapeshellarg($sitename) . ' ' . escapeshellarg($target_domain) . ' --no-ssl',
-						'timeout' => 300, 'continue_on_error' => true];
-				}
-			}
-
-			$teardown[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Clean up restore artifacts on target',
-				'cmd' => "rm -f {$remote_db_dump} {$remote_project_tar}",
-				'teardown' => true, 'timeout' => 120, 'continue_on_error' => true]);
-
-			// For Docker: also clean up the staged files on the host
-			if ($is_docker_install) {
-				$teardown[] = ['type' => 'ssh', 'label' => 'Clean up restore artifacts on host',
-					'on_host' => true,
-					'cmd' => "rm -f {$remote_db_dump} {$remote_project_tar}",
-					'teardown' => true, 'timeout' => 120, 'continue_on_error' => true];
-			}
-
-			$teardown[] = ['type' => 'local', 'label' => 'Clean up backup files on management node',
-				'cmd' => "rm -f {$local_db_backup} {$local_project_backup}",
-				'teardown' => true, 'timeout' => 120, 'continue_on_error' => true];
-
-			// The dump and the project archive were written on the source too. A
-			// Docker source holds two copies - one inside the container where the
-			// dump was written, one on the host where docker cp staged it for SCP -
-			// and both are the full site, so a few copies fill the disk of a shared
-			// host serving live sites. Only the backup_source === 'new' variant may
-			// touch /backups/ on the source: when an EXISTING backup was named,
-			// those paths are the user's real backup files, not job scratch.
-			if (($params['backup_source'] ?? 'new') === 'new') {
-				$teardown[] = ['type' => 'ssh', 'label' => 'Clean up backup files on source',
-					'node_id' => $source_node_id,
-					'cmd' => 'rm -f ' . escapeshellarg($db_backup_remote) . ' ' . escapeshellarg($project_backup_remote),
-					'teardown' => true, 'timeout' => 120, 'continue_on_error' => true];
-
-				if ($source_container) {
-					$teardown[] = ['type' => 'ssh', 'label' => 'Clean up staged backup files on source host',
-						'node_id' => $source_node_id, 'on_host' => true,
-						'cmd' => 'rm -f ' . escapeshellarg($local_db_backup) . ' ' . escapeshellarg($local_project_backup),
-						'teardown' => true, 'timeout' => 120, 'continue_on_error' => true];
-				}
-			}
-		}
-
-		// Cleanup installer on target (release tarball was piped through tar; no local file)
-		$teardown[] = ['type' => 'ssh', 'label' => 'Clean up installer on target',
-			'on_host' => true,
-			'cmd' => "sudo rm -rf {$remote_install_dir}",
-			'teardown' => true, 'timeout' => 120, 'continue_on_error' => true];
-
-		// Post-install verification. Globalvars_site.php is chmod 640 root:www-data so
-		// user1 needs sudo to test-read it.
-		// Docker mode: config lives inside the container — exec test through docker.
-		if ($docker === 'docker') {
-			$verify_cmd = "echo INSTALL_SUCCESS && hostname && "
-			            . "sudo docker exec {$sitename} test -f /var/www/html/{$sitename}/config/Globalvars_site.php && echo CONFIG_OK";
-		} else {
-			$verify_cmd = "echo INSTALL_SUCCESS && hostname && "
-			            . "sudo test -f /var/www/html/{$sitename}/config/Globalvars_site.php && echo CONFIG_OK";
-		}
-		$steps[] = ['type' => 'ssh', 'label' => 'Verify install',
-			'on_host' => true,
-			'cmd' => $verify_cmd];
+		// Docker plus a base-image build plus a site, or a bare-metal server
+		// setup, in one run: ninety minutes is a ceiling on a wedged install.
+		$steps[] = ['type' => 'ssh', 'label' => 'Bootstrap: install, then the agent asks to join',
+			'cmd' => implode("\n", $lines), 'timeout' => 5400];
 
 		// A new site is NOT given a recovery key here. It is covered from birth by
 		// this management node's own backups, which carry their key with each run;
@@ -3382,63 +2872,7 @@ class JobCommandBuilder {
 		// with the possession ceremony that makes it trustworthy. Handing one over
 		// at install time would put this management node's key in a slot whose
 		// custodian is somebody else.
-		return array_merge($steps, $teardown);
-	}
-
-	/**
-	 * The bash script that runs on the remote host to discover Joinery instances.
-	 * Outputs structured lines: JOINERY_INSTANCE|type|name|web_root|domain|db_name|version
-	 */
-	private static function get_discover_script() {
-		return <<<'BASH'
-#!/bin/bash
-found=0
-
-# Check Docker containers
-containers=$(docker ps --format "{{.Names}}" 2>/dev/null)
-if [ -n "$containers" ]; then
-  for c in $containers; do
-    config=$(docker exec "$c" find /var/www/html -maxdepth 3 -name "Globalvars_site.php" -path "*/config/*" 2>/dev/null | head -1)
-    if [ -n "$config" ]; then
-      web_root=$(echo "$config" | sed 's|/config/Globalvars_site.php||')/public_html
-      web_dir=$(docker exec "$c" grep "webDir" "$config" 2>/dev/null | head -1 | grep -oP "'[^']+'" | tail -1 | tr -d "'")
-      db_name=$(docker exec "$c" grep "dbname" "$config" 2>/dev/null | head -1 | grep -oP "'[^']+'" | tail -1 | tr -d "'")
-      db_user=$(docker exec "$c" grep "dbusername" "$config" 2>/dev/null | head -1 | grep -oP "'[^']+'" | tail -1 | tr -d "'")
-      db_pass=$(docker exec "$c" grep "dbpassword" "$config" 2>/dev/null | head -1 | grep -oP "'[^']+'" | tail -1 | tr -d "'")
-      version=""
-      if [ -n "$db_name" ]; then
-        version=$(docker exec "$c" bash -c "PGPASSWORD='$db_pass' psql -U '${db_user:-postgres}' -d '$db_name' -tAc \"SELECT stg_value FROM stg_settings WHERE stg_name = 'system_version'\"" 2>/dev/null)
-      fi
-      echo "JOINERY_INSTANCE|docker|$c|$web_root|$web_dir|$db_name|$version"
-      found=$((found+1))
-    fi
-  done
-fi
-
-# Check bare metal if no containers found
-if [ "$found" = "0" ]; then
-  for config in $(find /var/www/html -maxdepth 3 -name "Globalvars_site.php" -path "*/config/*" 2>/dev/null); do
-    site_dir=$(dirname $(dirname "$config"))
-    web_root="$site_dir/public_html"
-    web_dir=$(grep "webDir" "$config" 2>/dev/null | head -1 | grep -oP "'[^']+'" | tail -1 | tr -d "'")
-    db_name=$(grep "dbname" "$config" 2>/dev/null | head -1 | grep -oP "'[^']+'" | tail -1 | tr -d "'")
-    db_user=$(grep "dbusername" "$config" 2>/dev/null | head -1 | grep -oP "'[^']+'" | tail -1 | tr -d "'")
-    db_pass=$(grep "dbpassword" "$config" 2>/dev/null | head -1 | grep -oP "'[^']+'" | tail -1 | tr -d "'")
-    dir_name=$(basename "$site_dir")
-    version=""
-    if [ -n "$db_name" ]; then
-      version=$(PGPASSWORD="$db_pass" psql -U "${db_user:-postgres}" -d "$db_name" -tAc "SELECT stg_value FROM stg_settings WHERE stg_name = 'system_version'" 2>/dev/null)
-    fi
-    echo "JOINERY_INSTANCE|bare|$dir_name|$web_root|$web_dir|$db_name|$version"
-    found=$((found+1))
-  done
-fi
-
-if [ "$found" = "0" ]; then
-  echo "NO_JOINERY_FOUND"
-fi
-echo "SCAN_COMPLETE|$found"
-BASH;
+		return $steps;
 	}
 
 	/**

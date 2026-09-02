@@ -3,26 +3,27 @@
  * FleetProvisionSeeding - order-time fleet enrollment seeding for
  * customer-cloud provisions (specs/mailbox_relay_shared_fleet.md § Follow-up).
  *
- * Runs on the OPERATOR deployment when a customer-cloud provision completes.
- * When the buyer's tier carries the fleet-slot feature, the freshly installed
- * tenant box gets the three fleet-service settings pre-seeded
- * (mailbox_fleet_service_url + the API key pair), so its owner lands on a
- * one-click Enroll in the mailbox Setup tab instead of pasting credentials.
- * The DNS TXT ownership challenges and the MX edit stay manual by nature —
- * the customer proving domain control at their own DNS provider.
+ * Runs on the OPERATOR deployment once a customer-cloud provision is done and
+ * the new site's agent has paired. When the buyer's tier carries the
+ * fleet-slot feature, the tenant box gets the three fleet-service settings
+ * seeded (mailbox_fleet_service_url + the API key pair), so its owner lands
+ * on a one-click Enroll in the mailbox Setup tab instead of pasting
+ * credentials. The DNS TXT ownership challenges and the MX edit stay manual by
+ * nature — the customer proving domain control at their own DNS provider.
  *
  * The API key is minted here for the buyer's own account (the fleet service
  * authenticates /api/v1 calls as that customer and gates on their tier). The
- * secret travels to the tenant box over SSH stdin into a psql heredoc — it is
- * never in a job-step row, an argv, or a log line.
+ * three values travel to the site as ONE JOB over the agent channel — the
+ * fleet_enroll primitive, whose node-side script utils/fleet_enroll.php holds
+ * the three setting names; the plane cannot say where the values land. The
+ * secret rides the job row until the node answers, redacted on display, and
+ * JobResultProcessor::process_fleet_enroll blanks it then. Nothing opens a
+ * shell (specs/ssh_single_bootstrap.md WP4).
  *
- * How SSH authenticates depends on how the node was made. A node that holds a
- * key of ours uses it. A keyless node (customer-cloud provisioning places no
- * key) is reached over the provision's sealed root password, which by design
- * lives until the node's agent is approved — seeding runs at install
- * completion, inside that window. The password goes to ssh through sshpass's
- * environment variable, never a command line.
+ * The plane already mints this key, holds its hash, and is the API it
+ * authenticates TO, so the job row is not a new holder of anything.
  *
+ * @version 2.0 - seeding is the fleet_enroll primitive over the agent channel; the SSH path is gone
  * @version 1.1 - keyless nodes: seed over the provision's sealed root password
  */
 
@@ -35,6 +36,9 @@ class FleetProvisionSeeding {
 
 	/** read + write, no delete — same axis the provisioning pipeline key uses. */
 	const KEY_PERMISSION = 3;
+
+	/** The job type the seeding travels as. */
+	const JOB_TYPE = 'fleet_enroll';
 
 	/**
 	 * Whether a completed provision for this buyer should be seeded: the
@@ -59,40 +63,74 @@ class FleetProvisionSeeding {
 	}
 
 	/**
-	 * Seed the fleet-service settings on a provisioned node's site: mint the
-	 * buyer's API key and write the three settings into the site's database
-	 * over SSH. Returns ['ok' => bool, 'message' => string]; never throws.
+	 * Can this node be seeded right now? True once its agent has paired and
+	 * reports the fleet_enroll primitive. Checked BEFORE a key is minted, so a
+	 * node still waiting on approval does not churn a fresh key every tick.
 	 */
-	public static function seedNode($node, int $buyer_user_id, string $sitename, ?string $root_password = null): array {
+	public static function nodeReady($node): bool {
+		return class_exists('JobCommandBuilder') && JobCommandBuilder::has_primitive($node, 'fleet_enroll');
+	}
+
+	/**
+	 * Seed the fleet-service settings on a provisioned node: mint the buyer's
+	 * API key and dispatch ONE fleet_enroll job carrying the three values.
+	 * Returns ['ok' => bool, 'message' => string, 'job_id' => int|null];
+	 * never throws.
+	 */
+	public static function seedNode($node, int $buyer_user_id): array {
 		try {
-			if (!preg_match('/^[a-z0-9][a-z0-9-]{0,60}$/', $sitename)) {
-				return array('ok' => false, 'message' => "Refusing to seed: sitename '{$sitename}' is not a plain slug.");
+			if (!self::nodeReady($node)) {
+				return array('ok' => false, 'job_id' => null, 'message' =>
+					'No route to the node: its agent has not paired with this plane, or does not offer '
+					. 'the fleet_enroll primitive (agent 1.17.0 or later). There is no SSH route for this.');
 			}
 
 			$key = self::mintTenantKey($buyer_user_id);
-			if (!preg_match('/^[a-z0-9_]+$/', $key['secret_key'])) {
-				return array('ok' => false, 'message' => 'Refusing to seed: minted secret has an unexpected charset.');
-			}
 			$service_url = rtrim(LibraryFunctions::get_absolute_url('/'), '/');
 
-			$remote = self::buildRemoteCommand($node, $sitename, $service_url, $key['public_key']);
-			$run = self::runSsh($node, $remote, $key['secret_key'] . "\n", $root_password);
-
-			if (!$run['ok'] || strpos($run['output'], 'FLEET_SEEDED') === false) {
-				return array('ok' => false, 'message' => 'Fleet seeding SSH step failed (exit '
-					. $run['code'] . '): ' . trim($run['output']));
-			}
-			return array('ok' => true, 'message' => 'Fleet settings seeded; the owner\'s Setup tab offers one-click Enroll.');
+			$built = JobCommandBuilder::build_fleet_enroll($node, array(
+				'service_url' => $service_url,
+				'public_key'  => $key['public_key'],
+				'secret_key'  => $key['secret_key'],
+			));
+			$job = ManagementJob::createFromBuild($node->key, self::JOB_TYPE, $built, array(), null);
+			return array('ok' => true, 'job_id' => (int)$job->key,
+				'message' => 'Fleet seeding dispatched to the node\'s agent (job #' . $job->key . ').');
 		} catch (\Throwable $e) {
-			return array('ok' => false, 'message' => 'Fleet seeding failed: ' . $e->getMessage());
+			return array('ok' => false, 'job_id' => null, 'message' => 'Fleet seeding failed: ' . $e->getMessage());
 		}
+	}
+
+	/**
+	 * What the latest seeding job for this node did.
+	 * @return array{state:string,message:string} state is pending|seeded|failed|none
+	 */
+	public static function outcome($node): array {
+		$job = ManagementJob::latestForNode($node->key, self::JOB_TYPE);
+		if (!$job) {
+			return array('state' => 'none', 'message' => 'No fleet seeding job exists for this node.');
+		}
+		$status = (string)$job->get('mjb_status');
+		if ($status !== 'completed' && $status !== 'failed') {
+			return array('state' => 'pending', 'message' => 'Fleet seeding job #' . $job->key . ' is ' . $status . '.');
+		}
+		if (!$job->get('mjb_result')) {
+			JobResultProcessor::process($job);
+			$job->load();
+		}
+		$result = json_decode((string)$job->get('mjb_result'), true);
+		if (is_array($result) && !empty($result['seeded'])) {
+			return array('state' => 'seeded', 'message' => 'Fleet settings seeded; the owner\'s Setup tab offers one-click Enroll.');
+		}
+		return array('state' => 'failed', 'message' => 'Fleet seeding job #' . $job->key . ' finished ' . $status
+			. ' without seeding: ' . trim((string)($job->get('mjb_error_message') ?: 'see the job output')));
 	}
 
 	/**
 	 * Mint (or re-mint) the buyer's fleet credential: deactivate this user's
 	 * previous keys of the same name, create a fresh machine key. Returns
 	 * ['public_key' => string, 'secret_key' => plaintext] — the plaintext
-	 * exists only in this request.
+	 * exists only in this request and the job row that carries it.
 	 */
 	public static function mintTenantKey(int $buyer_user_id): array {
 		require_once(PathHelper::getIncludePath('data/api_keys_class.php'));
@@ -120,112 +158,5 @@ class FleetProvisionSeeding {
 		$api_key->save();
 
 		return array('public_key' => $public_key, 'secret_key' => $secret_plaintext);
-	}
-
-	/**
-	 * The remote command string: reads the secret from stdin, resolves the
-	 * site's DB credentials from its config, and upserts the three settings
-	 * through a psql heredoc (stg_name is unique). Docker sites run the same
-	 * script inside the container; bare-metal under sudo when not root.
-	 * The secret never appears in this string.
-	 */
-	public static function buildRemoteCommand($node, string $sitename, string $service_url, string $public_key): string {
-		// Non-secret values, embedded as SQL literals: keep them boring.
-		$url_sql = str_replace("'", "''", $service_url);
-		$pub_sql = str_replace("'", "''", $public_key);
-
-		$extract = 'head -1 | cut -d";" -f1 | cut -d"=" -f2 | tr -d " " | sed "s/^.//;s/.\$//"';
-		// The secret expands inside the psql heredoc — its charset is asserted
-		// quote-free by seedNode() before anything is sent.
-		$upsert = "INSERT INTO stg_settings (stg_name, stg_value) VALUES\n"
-			. "  ('mailbox_fleet_service_url', '{$url_sql}'),\n"
-			. "  ('mailbox_fleet_api_public_key', '{$pub_sql}'),\n"
-			. "  ('mailbox_fleet_api_secret_key', '\${FLEET_SECRET}')\n"
-			. "ON CONFLICT (stg_name) DO UPDATE SET stg_value = EXCLUDED.stg_value, stg_update_time = now();";
-
-		$inner = 'set -e' . "\n"
-			. 'IFS= read -r FLEET_SECRET' . "\n"
-			. "CFG=/var/www/html/{$sitename}/config/Globalvars_site.php\n"
-			. "DB_NAME=\$(grep dbname \$CFG | {$extract})\n"
-			. "DB_USER=\$(grep dbusername \$CFG | {$extract})\n"
-			. "export PGPASSWORD=\$(grep dbpassword \$CFG | {$extract})\n"
-			. "psql -q -U \"\$DB_USER\" -d \"\$DB_NAME\" <<JOINERY_SQL\n"
-			. $upsert . "\n"
-			. "JOINERY_SQL\n"
-			. 'echo FLEET_SEEDED';
-
-		$is_docker = trim((string)$node->get('mgn_container_name')) !== '';
-		$ssh_user = (string)$node->get('mgn_ssh_user') ?: 'root';
-		$sudo = ($ssh_user !== 'root') ? 'sudo ' : '';
-		if ($is_docker) {
-			// -i keeps stdin open so the in-container read sees the secret.
-			return $sudo . 'docker exec -i ' . escapeshellarg($sitename)
-				. ' bash -c ' . escapeshellarg($inner);
-		}
-		return $sudo . 'bash -c ' . escapeshellarg($inner);
-	}
-
-	/**
-	 * Run one SSH command against the node with $stdin piped in. Returns
-	 * ['ok' => bool, 'code' => int, 'output' => string].
-	 */
-	private static function runSsh($node, string $remote_command, string $stdin, ?string $root_password = null): array {
-		$key_path = (string)$node->get('mgn_ssh_key_path');
-		$host = (string)$node->get('mgn_host');
-		$user = (string)$node->get('mgn_ssh_user') ?: 'root';
-		$port = intval($node->get('mgn_ssh_port')) ?: 22;
-		if ($host === '') {
-			return array('ok' => false, 'code' => -1, 'output' => 'Node has no host address.');
-		}
-		$has_key = ($key_path !== '' && is_readable($key_path));
-		$has_password = ($root_password !== null && $root_password !== '');
-		if (!$has_key && !$has_password) {
-			return array('ok' => false, 'code' => -1,
-				'output' => 'No route to the node: it holds no SSH key of ours and its provision holds no sealed '
-					. 'root password (already burned, or not a keyless provision). Seeding over the agent channel is not built yet.');
-		}
-
-		$env = null;
-		if ($has_key) {
-			$cmd = array(
-				'ssh', '-i', $key_path, '-p', (string)$port,
-				'-o', 'BatchMode=yes',
-				'-o', 'StrictHostKeyChecking=accept-new',
-				'-o', 'ConnectTimeout=15',
-				$user . '@' . $host,
-				$remote_command,
-			);
-		} else {
-			// Keyless: the sealed root password, handed to ssh through
-			// sshpass's environment — the child's only, never exported here.
-			$cmd = array(
-				'sshpass', '-e', 'ssh', '-p', (string)$port,
-				'-o', 'StrictHostKeyChecking=accept-new',
-				'-o', 'UserKnownHostsFile=/dev/null',
-				'-o', 'ConnectTimeout=15',
-				$user . '@' . $host,
-				$remote_command,
-			);
-			$env = array();
-			foreach ($_ENV as $k => $v) { $env[$k] = $v; }
-			if (empty($env['PATH'])) { $env['PATH'] = '/usr/local/bin:/usr/bin:/bin'; }
-			$env['SSHPASS'] = $root_password;
-		}
-		$proc = proc_open($cmd, array(
-			0 => array('pipe', 'r'),
-			1 => array('pipe', 'w'),
-			2 => array('pipe', 'w'),
-		), $pipes, null, $env);
-		if (!is_resource($proc)) {
-			return array('ok' => false, 'code' => -1, 'output' => 'Could not start ssh.');
-		}
-		fwrite($pipes[0], $stdin);
-		fclose($pipes[0]);
-		$out = (string)stream_get_contents($pipes[1]);
-		$err = (string)stream_get_contents($pipes[2]);
-		fclose($pipes[1]);
-		fclose($pipes[2]);
-		$code = proc_close($proc);
-		return array('ok' => ($code === 0), 'code' => $code, 'output' => trim($out . "\n" . $err));
 	}
 }

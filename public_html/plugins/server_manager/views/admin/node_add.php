@@ -3,16 +3,20 @@
  * Server Manager - Add Node
  * URL: /admin/server_manager/node_add
  *
- * Auto-detect panel and manual add form for new nodes.
+ * The manual add form for a node that already exists. A node this plane did
+ * not build is enrolled from the node's own Admin → System → Management Node
+ * page, where its agent asks to join; the record here is what that join is
+ * approved against. There is no discovery scan: the plane never needs a shell
+ * on someone else's machine (specs/ssh_single_bootstrap.md).
  * After save, redirects to node_detail.
  *
+ * @version 1.5 - the auto-detect (SSH discovery) panel is gone; enrollment starts on the node
  * @version 1.4 - CSRF on the save handler; tcp_port check requires a port at save time
  * @version 1.3
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAssets.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAdminCsrf.php'));
 
 $session = SessionControl::get_instance();
@@ -94,8 +98,6 @@ if ($_POST && isset($_POST['mgn_name'])) {
 	}
 }
 
-$default_ssh_key = '/home/user1/.ssh/id_ed25519_claude';
-
 $page = new AdminPage();
 $page->admin_header([
 	'menu-id' => 'server-manager',
@@ -112,233 +114,13 @@ if ($error) {
 	echo '<div class="alert alert-danger">' . htmlspecialchars($error) . '</div>';
 }
 
-// ── Auto-detect section ──
-?>
+// ── How a node gets here ──
+echo '<div class="alert alert-info mb-4"><strong>Connecting a site this management node did not install:</strong> '
+   . 'add its record below, then on the node open <em>Admin &rarr; System &rarr; Management Node</em> and enter '
+   . '<code>' . htmlspecialchars(rtrim(LibraryFunctions::get_absolute_url(), '/')) . '</code>. '
+   . 'The node\'s agent asks to join and the request appears on the node\'s API keys tab here for approval. '
+   . 'No key is copied in either direction.</div>';
 
-<div class="card mb-4" id="detect-panel">
-	<div class="card-header"><strong>Auto-Detect Joinery Servers</strong></div>
-	<div class="card-body">
-		<p class="text-muted">Enter an SSH host and key to scan for Joinery instances. Docker containers and bare-metal installs are detected automatically.</p>
-		<div class="row g-3 align-items-end">
-			<div class="col-md-4">
-				<label class="form-label">SSH Host *</label>
-				<input type="text" id="detect_host" class="form-control" placeholder="e.g., 23.239.11.53">
-			</div>
-			<div class="col-md-3">
-				<label class="form-label">SSH Key Path *</label>
-				<input type="text" id="detect_key" class="form-control" value="<?php echo htmlspecialchars($default_ssh_key); ?>">
-			</div>
-			<div class="col-md-2">
-				<label class="form-label">SSH User</label>
-				<input type="text" id="detect_user" class="form-control" value="root">
-			</div>
-			<div class="col-md-1">
-				<label class="form-label">Port</label>
-				<input type="number" id="detect_port" class="form-control" value="22">
-			</div>
-			<div class="col-md-2">
-				<button type="button" id="detect_btn" class="btn btn-primary w-100" onclick="detectServers()">Detect</button>
-			</div>
-		</div>
-		<div id="detect_status" class="mt-3" hidden></div>
-		<div id="detect_results" class="mt-3"></div>
-	</div>
-</div>
-
-<?php echo SmAssets::script_tag(); ?>
-<script>
-function detectServers() {
-	var host = document.getElementById('detect_host').value.trim();
-	var key = document.getElementById('detect_key').value;
-	var user = document.getElementById('detect_user').value.trim() || 'root';
-	var port = document.getElementById('detect_port').value || '22';
-	var btn = document.getElementById('detect_btn');
-	var status = document.getElementById('detect_status');
-	var results = document.getElementById('detect_results');
-
-	if (!host) { alert('Enter an SSH host'); return; }
-	if (!key) { alert('Select an SSH key'); return; }
-
-	btn.disabled = true;
-	btn.textContent = 'Scanning...';
-	status.hidden = false;
-	status.innerHTML = '<div class="text-muted"><span class="spinner-border spinner-border-sm me-2"></span>Creating discovery job... The agent will SSH to ' + smEsc(host) + ' and scan for Joinery instances.</div>';
-	results.innerHTML = '';
-
-	smApiPost('discover_nodes', { host: host, ssh_user: user, ssh_key_path: key, ssh_port: port })
-		.then(function(data) {
-			if (!data.success) {
-				btn.disabled = false;
-				btn.textContent = 'Detect';
-				status.innerHTML = '<div class="alert alert-danger">' + smEsc(data.message) + '</div>';
-				return;
-			}
-			status.innerHTML = '<div class="text-muted"><span class="spinner-border spinner-border-sm me-2"></span>Agent is scanning ' + smEsc(host) + '... <a href="/admin/server_manager/job_detail?job_id=' + encodeURIComponent(data.job_id) + '" target="_blank" class="ms-2">View job #' + smEsc(data.job_id) + '</a></div>';
-			pollDiscoveryJob(data.job_id, host);
-		})
-		.catch(function(err) {
-			btn.disabled = false;
-			btn.textContent = 'Detect';
-			status.innerHTML = '<div class="alert alert-danger">Request failed: ' + smEsc(err.message) + '</div>';
-		});
-}
-
-function pollDiscoveryJob(jobId, host) {
-	var btn = document.getElementById('detect_btn');
-	var status = document.getElementById('detect_status');
-	var results = document.getElementById('detect_results');
-
-	smApiPost('discover_nodes', { job_id: jobId })
-		.then(function(data) {
-			if (!data.success) {
-				btn.disabled = false;
-				btn.textContent = 'Detect';
-				status.innerHTML = '<div class="alert alert-danger">' + smEsc(data.message || 'Poll failed') + '</div>';
-				return;
-			}
-
-			if (data.status === 'pending' || data.status === 'running') {
-				setTimeout(function() { pollDiscoveryJob(jobId, host); }, 2000);
-				return;
-			}
-
-			btn.disabled = false;
-			btn.textContent = 'Detect';
-
-			if (data.status === 'failed') {
-				var msg = data.error_message || 'Discovery job failed';
-				status.innerHTML = '<div class="alert alert-danger"><strong>Detection failed:</strong> ' + smEsc(msg) + '</div>';
-				return;
-			}
-
-			if (!data.result || !data.result.instances || data.result.instances.length === 0) {
-				var hostname = (data.result && data.result.hostname) ? data.result.hostname : host;
-				var hasDocker = data.result && data.result.has_docker;
-				status.innerHTML = '<div class="alert alert-warning">Connected to <strong>' + smEsc(hostname) + '</strong> but no Joinery instances were found'
-					+ (hasDocker ? ' in any Docker container' : '') + '. You can still add a node manually using the form below.</div>';
-				return;
-			}
-
-			var r = data.result;
-			// Keep the discovered result in JS state and reference instances by
-			// index from the button handlers — never serialize objects into an
-			// attribute, where an apostrophe in a remote-controlled field breaks
-			// out of the onclick (S-2).
-			window._smDetected = r;
-			var unadded = r.instances.filter(function(i) { return !i.already_added; }).length;
-			var addAllBtn = unadded >= 2
-				? ' <button type="button" class="btn btn-sm btn-primary ms-3" id="add_all_btn" onclick="addAllDetected(window._smDetected)">Add All (' + smEsc(unadded) + ')</button>'
-				: '';
-			status.innerHTML = '<div class="alert alert-success d-flex align-items-center justify-content-between">'
-				+ '<div>Found <strong>' + smEsc(r.instances.length) + '</strong> Joinery instance(s) on <strong>' + smEsc(r.hostname || host) + '</strong>' + (r.has_docker ? ' (Docker)' : '') + ':</div>'
-				+ addAllBtn
-				+ '</div>';
-
-			var html = '<div class="row">';
-			r.instances.forEach(function(inst, idx) {
-				var disabled = inst.already_added ? ' disabled' : '';
-				var badge = inst.already_added ? '<span class="badge bg-secondary ms-2">Already added</span>' : '';
-				var url = smSafeUrl(inst.site_url);
-				html += '<div class="col-md-6 col-lg-4 mb-3">'
-					+ '<div class="card">'
-					+ '<div class="card-body">'
-					+ '<h6 class="card-title">' + smEsc(inst.name) + badge + '</h6>'
-					+ (inst.container_name ? '<p class="mb-1"><small class="text-muted">Container: ' + smEsc(inst.container_name) + '</small></p>' : '')
-					+ (url ? '<p class="mb-1"><small><a href="' + smEsc(url) + '" target="_blank">' + smEsc(url) + '</a></small></p>' : '')
-					+ (inst.version ? '<p class="mb-1"><small>Version: ' + smEsc(inst.version) + '</small></p>' : '')
-					+ '<p class="mb-1"><small class="text-muted">' + smEsc(inst.web_root) + '</small></p>'
-					+ '<button type="button" class="btn btn-sm btn-primary mt-2' + disabled + '"'
-					+ disabled
-					+ ' onclick="fillFromDetected(window._smDetected.instances[' + idx + '], window._smDetected)">'
-					+ (inst.already_added ? 'Already Added' : 'Add This Node')
-					+ '</button>'
-					+ '</div></div></div>';
-			});
-			html += '</div>';
-			results.innerHTML = html;
-		})
-		.catch(function(err) {
-			setTimeout(function() { pollDiscoveryJob(jobId, host); }, 3000);
-		});
-}
-
-function fillFromDetected(inst, data) {
-	var form = document.createElement('form');
-	form.method = 'POST';
-	form.action = '/admin/server_manager/node_add';
-
-	var fields = {
-		'mgn_name': inst.name,
-		'mgn_slug': inst.slug,
-		'mgn_host': data.host,
-		'mgn_ssh_user': data.ssh_user,
-		'mgn_ssh_key_path': data.ssh_key_path,
-		'mgn_ssh_port': data.ssh_port || 22,
-		'mgn_container_name': inst.container_name || '',
-		'mgn_web_root': inst.web_root,
-		'mgn_site_url': inst.site_url || '',
-		'mgn_enabled': '1',
-	};
-
-	for (var name in fields) {
-		var input = document.createElement('input');
-		input.type = 'hidden';
-		input.name = name;
-		input.value = fields[name];
-		form.appendChild(input);
-	}
-
-	document.body.appendChild(form);
-	form.submit();
-}
-
-function addAllDetected(data) {
-	var btn = document.getElementById('add_all_btn');
-	var status = document.getElementById('detect_status');
-	if (btn) { btn.disabled = true; btn.textContent = 'Adding...'; }
-
-	var unadded = data.instances.filter(function(i) { return !i.already_added; });
-	var payload = {
-		host: data.host,
-		ssh_user: data.ssh_user,
-		ssh_key_path: data.ssh_key_path,
-		ssh_port: data.ssh_port || 22,
-		instances: unadded,
-	};
-
-	smApiPost('add_discovered_nodes', payload)
-		.then(function(j) {
-			if (!j.ok) {
-				status.innerHTML = '<div class="alert alert-danger">' + smEsc(j.message || 'Bulk add failed') + '</div>';
-				if (btn) { btn.disabled = false; btn.textContent = 'Add All (' + unadded.length + ')'; }
-				return;
-			}
-			var parts = [smEsc(j.created) + ' added'];
-			if (j.skipped) parts.push(smEsc(j.skipped) + ' already present');
-			if (j.errors && j.errors.length) parts.push(j.errors.length + ' failed');
-			var cls = (j.errors && j.errors.length) ? 'alert-warning' : 'alert-success';
-			var html = '<div class="alert ' + cls + '"><strong>' + parts.join(', ') + '.</strong>';
-			if (j.errors && j.errors.length) {
-				html += '<ul class="mb-0 mt-2">';
-				j.errors.forEach(function(e) {
-					html += '<li><code>' + smEsc(e.slug) + '</code>: ' + smEsc(e.message) + '</li>';
-				});
-				html += '</ul>';
-			}
-			html += ' <a href="/admin/server_manager" class="ms-2">Return to dashboard</a></div>';
-			status.innerHTML = html;
-			if (j.created > 0 && (!j.errors || j.errors.length === 0)) {
-				setTimeout(function() { window.location.href = '/admin/server_manager'; }, 800);
-			}
-		})
-		.catch(function(err) {
-			status.innerHTML = '<div class="alert alert-danger">Request failed: ' + err.message + '</div>';
-			if (btn) { btn.disabled = false; btn.textContent = 'Add All (' + unadded.length + ')'; }
-		});
-}
-</script>
-
-<?php
 // ── Manual add form ──
 $pageoptions = ['title' => 'Add New Node'];
 $page->begin_box($pageoptions);
@@ -373,9 +155,9 @@ $formwriter->textinput('mgn_ssh_user', 'SSH User', [
 	'validation' => ['maxlength' => 50],
 ]);
 
-$formwriter->textinput('mgn_ssh_key_path', 'SSH Key Path *', [
-	'placeholder' => $default_ssh_key,
-	'validation' => ['required' => true, 'maxlength' => 500],
+$formwriter->textinput('mgn_ssh_key_path', 'SSH Key Path', [
+	'helptext' => 'Only for a relay or DNS box this plane reaches by hand. A managed site is reached through its agent and needs none.',
+	'validation' => ['maxlength' => 500],
 ]);
 
 $formwriter->numberinput('mgn_ssh_port', 'SSH Port', [
