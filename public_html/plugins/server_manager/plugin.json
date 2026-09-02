@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.21.0",
+  "version": "1.21.1",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -358,6 +358,12 @@
       "feature": "Customer cloud provisioning",
       "kind": "ephemeral",
       "locator": "cvp_customer_cloud_provisions.cvp_root_pass_sealed"
+    },
+    {
+      "label": "Clone export key armed on a provision's source",
+      "feature": "Customer cloud provisioning",
+      "kind": "ephemeral",
+      "locator": "cvp_customer_cloud_provisions.cvp_clone_key_sealed"
     }
   ]
 }
