@@ -1154,9 +1154,66 @@ pub fn assert_converged(world: &World) {
         // out of the expectation: refusing to write it is the designed end
         // state, and the entry is parked and surfaced rather than lost.
         let personality = jd_vfs::Vfs::personality(&device.fs);
+        // A path this device has written down a different SPELLING for.
+        //
+        // Two spellings of one word are two files on the server and one slot on
+        // a volume that folds them, so a device can hold the file under a
+        // spelling the server does not use -- and the engine records that as a
+        // local name rather than asking the server for a rename it will never
+        // grant. Read here so the expectation is the spelling the device was
+        // right to keep.
+        //
+        // Only where the two fold EQUAL under this volume's own rule. A local
+        // name that means anything else is a divergence and still fails, which
+        // is what keeps this from being an oracle that shrugs.
+        //
+        // Keyed by the entry's whole server path, not its bare name: a spelling
+        // one file was granted must not be lent to another file that merely
+        // shares its name in a different folder.
+        let respelled: std::collections::HashMap<String, String> = {
+            let entries = device.store.every_entry().unwrap();
+            let folders: std::collections::HashMap<i64, &jd_core::model::Entry> = entries
+                .iter()
+                .filter(|e| e.id.entity_type == jd_core::EntityType::Folder)
+                .map(|e| (e.id.server_id, e))
+                .collect();
+            let server_path = |e: &jd_core::model::Entry| -> Option<String> {
+                let mut parts = vec![e.remote.name.clone()];
+                let mut parent = e.remote.parent;
+                let mut guard = 0;
+                while let Some(id) = parent {
+                    let f = folders.get(&id)?;
+                    parts.push(f.remote.name.clone());
+                    parent = f.remote.parent;
+                    guard += 1;
+                    if guard > 64 {
+                        return None;
+                    }
+                }
+                parts.reverse();
+                Some(parts.join("/"))
+            };
+            entries
+                .iter()
+                .filter(|e| !e.remote_deleted)
+                .filter_map(|e| {
+                    let local = e.local_name.as_deref()?;
+                    (jd_vfs::comparison_key(local, &personality)
+                        == jd_vfs::comparison_key(&e.remote.name, &personality))
+                    .then(|| Some((server_path(e)?, local.to_string())))
+                    .flatten()
+                })
+                .collect()
+        };
         let expected_path = |p: &str| -> Option<String> {
             let mut out: Vec<String> = Vec::new();
+            let mut prefix = String::new();
             for part in p.split('/') {
+                if !prefix.is_empty() {
+                    prefix.push('/');
+                }
+                prefix.push_str(part);
+                let part = respelled.get(&prefix).map(String::as_str).unwrap_or(part);
                 match jd_vfs::to_local_name(part, &personality) {
                     jd_vfs::LocalName::AsIs(n) => out.push(n),
                     jd_vfs::LocalName::Escaped { local, .. } => out.push(local),
@@ -1165,11 +1222,24 @@ pub fn assert_converged(world: &World) {
             }
             Some(out.join("/"))
         };
-        let server: BTreeMap<String, Option<String>> = server
-            .iter()
-            .filter(|(_, h)| !held_back(h))
-            .filter_map(|(p, h)| expected_path(p).map(|q| (q, h.clone())))
-            .collect();
+        // Two server files may not be expected at one disk path. A volume that
+        // folds two spellings holds one of them and PARKS the other, and the
+        // parked one is excused above by its content -- so a collision here is
+        // either an entry the engine failed to park or an expectation this
+        // oracle built wrongly, and letting the later key win would hide both.
+        let mut expected: BTreeMap<String, (String, Option<String>)> = BTreeMap::new();
+        for (p, h) in server.iter().filter(|(_, h)| !held_back(h)) {
+            let Some(q) = expected_path(p) else { continue };
+            if let Some((other, _)) = expected.get(&q) {
+                panic!(
+                    "{} expects two server files at one path {q:?}: {other:?} and {p:?} -- one of them should have been parked",
+                    device.name
+                );
+            }
+            expected.insert(q, (p.clone(), h.clone()));
+        }
+        let server: BTreeMap<String, Option<String>> =
+            expected.into_iter().map(|(q, (_, h))| (q, h)).collect();
         if disk != server {
             let only_disk: Vec<_> = disk.keys().filter(|k| !server.contains_key(*k)).collect();
             let only_server: Vec<_> = server.keys().filter(|k| !disk.contains_key(*k)).collect();

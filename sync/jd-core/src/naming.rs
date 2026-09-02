@@ -261,7 +261,26 @@ pub fn apply_naming(
                     // equal when the server holds a decomposed name and this
                     // filesystem wants the composed one, which is a mapping like
                     // any other and has to be recorded as one.
-                    let mapped = (name != competing_placement(&entry).name).then_some(name);
+                    //
+                    // A spelling already on record that this filesystem cannot
+                    // tell apart from the resolved one is KEPT. It is there
+                    // because the disk holds the file under it and the server
+                    // could not be asked to match -- see
+                    // `same_slot_spelling` -- and it is the name
+                    // the scan pairs the disk against. Recomputed from the
+                    // server's spelling alone it is erased here every pass,
+                    // the scan reads the disk as a rename every pass, and the
+                    // record is written twice a pass for ever: a livelock the
+                    // user never sees, but a livelock.
+                    let kept = entry.local_name.as_deref().filter(|kept| {
+                        *kept != name
+                            && jd_vfs::comparison_key(kept, personality)
+                                == jd_vfs::comparison_key(&name, personality)
+                    });
+                    let mapped = match kept {
+                        Some(kept) => Some(kept.to_string()),
+                        None => (name != competing_placement(&entry).name).then_some(name),
+                    };
                     (mapped, None)
                 }
                 LocalName::Escaped { local, .. } => {
@@ -764,6 +783,45 @@ mod tests {
         ) -> Result<u64, jd_proto::ProtoError> {
             unreachable!("naming does not transfer bytes")
         }
+    }
+
+    #[test]
+    fn a_spelling_the_disk_holds_is_kept_when_the_volume_cannot_tell_it_apart() {
+        // The Mac agreed on the composed spelling and its disk holds the
+        // decomposed one -- written down as the local name because the server
+        // could not be asked to match (the byte-name is another file's). The
+        // resolved name is `AsIs` and equal to the agreement, which used to
+        // mean "no mapping" and erased the record every pass; the scan then
+        // read the disk as a rename every pass, and the record was written
+        // twice a pass for ever.
+        let f = fixture("respell-kept");
+        let mut e = materialized(EntityId::file(1), "caf\u{e9}-1.txt");
+        e.local_name = Some("cafe\u{301}-1.txt".into());
+        f.store.put_entry(&e).unwrap();
+
+        let out = apply_naming(&env(&f.store), &Personality::macos(), 10).unwrap();
+        assert!(out.is_empty());
+        let e = f.store.get_entry(EntityId::file(1)).unwrap().unwrap();
+        assert_eq!(
+            e.local_name.as_deref(),
+            Some("cafe\u{301}-1.txt"),
+            "a spelling this volume cannot distinguish from the agreed one is the disk's answer, not a stale mapping"
+        );
+    }
+
+    #[test]
+    fn a_local_name_that_means_something_else_is_still_recomputed() {
+        // The keep is narrow: only a spelling that folds equal. Anything else
+        // on record is a mapping this personality does not produce and is
+        // brought back in step, exactly as before.
+        let f = fixture("respell-not-kept");
+        let mut e = materialized(EntityId::file(1), "caf\u{e9}-1.txt");
+        e.local_name = Some("coffee-1.txt".into());
+        f.store.put_entry(&e).unwrap();
+
+        apply_naming(&env(&f.store), &Personality::macos(), 10).unwrap();
+        let e = f.store.get_entry(EntityId::file(1)).unwrap().unwrap();
+        assert_eq!(e.local_name, None);
     }
 
     #[test]

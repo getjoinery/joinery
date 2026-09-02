@@ -792,10 +792,225 @@ loser materialized and edited, turn on `reuse_file_ids`, write twice inside one
 tick the clock has not moved so the standing file wears the claimant's old id,
 size and mtime, run one pass, and assert the loser stood down and still owns its
 edit. Green with the content test, red the day somebody re-adds the fingerprint
-one as an optimisation. It is left open rather than done because two earlier
-attempts to hand-stage a materialized park both failed — the settled twin wins
-the name before the loser ever materializes — so this needs a way to place that
-state that nothing here has yet.
+one as an optimisation. It is left open because the state cannot currently be placed, and the reason is
+structural rather than a matter of effort. `resolution_order` ranks a settled,
+materialized entry 0 and everything else below it, so a materialized entry never
+loses a name to an unmaterialized one — which means a materialized LOSER needs
+two rank-0 entries at one slot. Two entries cannot both be settled at one slot
+by construction, so the collision only appears when a server-side rename folds
+an already-settled name onto another already-settled one, and the loser's
+derived path only becomes the WINNER's file if the winner materialized over the
+slot while the loser's agreement still pointed at it. That ordering is what seed
+4123847 supplies and what three hand-built attempts could not: the missing piece
+is a way to stage a rank-0 collision, not a scenario nobody has bothered to
+write.
+
+---
+
+## Defect K — the respelling the server could not grant
+
+Two estate seeds from the v9 run (shift 5,000,000): 5096132 and 5121445. The
+handover described the second as a separate oracle defect — a parked twin that
+never synced, with no content to excuse its server path. Instrumenting the
+oracle at the failure showed otherwise. The parked twin (entity 912) *was*
+excused, by its server content hash, which is what `declined` has always
+matched on. The path the oracle complained about belonged to the held twin
+(entity 944): synced, agreed at the decomposed spelling, sitting on the disk
+under the composed one. Both seeds are one class.
+
+### The mechanism
+
+Two spellings of one word are two files on the server and one slot on a volume
+that folds them, and both are legal: a device that composes on the way out
+uploads the composed twin of a name minted decomposed. A Mac then agrees on one
+spelling while its disk holds the other. The scanner pairs by exact path, so
+the file is not where the record says; it is found by content and reported as
+a rename onto the twin's byte-name. Pushed, the server answers `name_taken` —
+the name is a different live file's — the op is dropped, the record is
+untouched, and the next pass derives the same move. For ever — and in one of the two seeds an issue to the user on
+every pass.
+
+### The fix, and the half of it that was missing
+
+There is nothing to send: the file is where the agreement says, only its
+spelling differs, and this filesystem cannot tell the two apart. So the pass
+writes the spelling down as `local_name` — the field for exactly this, already
+how a decomposing volume's mapping is described — and plans nothing. The
+placement stays the server's.
+
+That was the shape handed over, and it passed the seed. It was not a fix. The
+naming pass runs first every pass and recomputes `local_name` for every
+materialized entry from the server's spelling; on APFS that answer is "no
+mapping", so it erased the record, the scan rediscovered the rename, and the
+respell wrote it again. A probe in the respell branch fired **16 times for one
+entry** across the seed, every time finding `local_name` back at `None`. Two
+store writes per pass for good — a livelock nobody sees, and the seed passed
+because the oracle reads only the end state. Naming now keeps a recorded spelling the volume
+cannot tell from the resolved one; the probe fires once.
+
+### One rule, three cases
+
+The block that already said "a move that lands where the agreement is, is not a
+move" compared the destination against the server's spelling byte for byte.
+For a name held under a mapping that is never equal — and that was a third
+defect, pre-existing and independent of the seeds: **renaming a folder on a
+decomposing volume pushed a rename of every accented file inside it** to the
+composed spelling, the server granted it, and every other device applied it.
+`renaming_a_folder_on_a_decomposing_volume_does_not_respell_the_files_inside`
+fails on the previous code with the server holding `Moved/café.txt` for a file
+the user typed decomposed.
+
+`same_slot_spelling` now judges the destination against the slot. The parent
+must be the same; then, in order:
+
+1. byte-equal to the name the record already describes
+   (`effective_local_name`, so an escaped or decomposed mapping counts) — a
+   displaced folder, nothing to change. The Windows sibling of the folder test
+   pins the escape half: on the previous code `Sub/a:b.txt` renamed with its
+   folder reached the server as `Moved/a%3Ab.txt`, the escape becoming the
+   file's real name everywhere;
+2. byte-equal to the server's own spelling — a mapping gone stale, cleared,
+   because a record that still names the old spelling pairs the file by
+   content alone and the next edit at that path reads as a deletion;
+3. only then the fold test: a name this volume cannot tell from the agreed one
+   whose byte-name belongs to a live entry with no open op that is not
+   materialized here — written down as the local name. If the holder *is* on
+   this disk the two are fighting over one slot, which is a naming clash for
+   naming to park.
+
+A rename the server *can* grant carries the same obligation from the other
+side: once `move_remote` succeeds with a new name, the disk wears that name byte
+for byte and any recorded spelling is cleared with it. The reviewer found the
+gap — a case respell under a recorded normalization spelling was granted and
+left the old spelling on the record; rule 2 heals that on the next scan, but an
+edit made before that scan pairs by neither path nor content and reads as a
+deletion plus a stranger. And when the rival a parked file clashes with is
+renamed, naming re-raises the verdict with the new name in it; the older
+complaint is now false and is withdrawn, the same way a complaint about an
+entry no longer parked already was.
+
+That withdrawal compares the complaint's wording with the reason on the record,
+which is only sound if every `unsyncable` complaint is worded one way. The park
+operations were not: they raised prose ("was moved to the trash…") under the
+same kind, and a materialized park — which naming hands to the operation and
+never re-raises — would have had its only complaint withdrawn on the next pass,
+leaving the copy gone and the panel silent. The reviewer caught it. The park
+operations now raise the state complaint in the same `{reason:?}` shape as
+naming, and what they *did* — a copy moved to the trash — is an event under its
+own kind, `parked`, which no pass withdraws.
+`a_park_that_gave_up_a_copy_keeps_its_complaint_open` pins it: red with the
+prose complaint, green with the split.
+
+Anything else is a rename the server can grant, and it goes up: `report.txt` to
+`Report.txt` on a case-folding volume is a rename the user meant.
+
+### The oracle
+
+Convergence expects each server path at the spelling the device was right to
+keep, read from `local_name` and honoured only where it folds equal to the
+server name — a local name that means anything else is still a divergence.
+Keyed by the entry's whole server path, not its bare name: the name-keyed
+version lent one file's spelling to every same-named file in every folder, and
+failed 5121445 at a later checkpoint on a device that was right. And two server
+files may not be expected at one disk path. The parked one is excused by
+content, so a collision is either an entry the engine failed to park or an
+expectation this oracle built wrongly; the later key used to win silently, and
+now it panics naming both server paths.
+
+### Pinned
+
+- `a_spelling_the_disk_holds_is_kept_when_the_volume_cannot_tell_it_apart` —
+  red without the naming keep.
+- `a_twin_spelling_the_disk_already_holds_is_written_down_not_pushed` — the
+  respell, an edit under it, a granted case rename with an edit inside the one
+  pass before the record heals, the way back, an edit after it; red without the
+  respell branch ("never settles"), red without the way-back clearing (the
+  mapping survives), red without the `move_remote` clearing (the old spelling
+  is still on the record after the grant).
+- `renaming_a_folder_on_a_decomposing_volume_does_not_respell_the_files_inside`
+  and `renaming_a_folder_on_windows_does_not_push_the_escaped_name_to_the_server`
+  — both red on the previous code.
+- Seeds 5096132 and 5121445 pass. The name-keyed oracle was also run against
+  5121445 and failed a later checkpoint on a device that was right; the
+  path-keyed one passes with the held twin's path rewritten and the parked
+  twin's excused.
+
+---
+
+## Defect L — the keyless device that minted a vault folder per pass
+
+Estate v10 (shift 6,000,000), seed 6092348, the kill-vault-platform hunt arm:
+"never settled" with an empty queue. Pre-existing — it reproduces on a clean
+build of HEAD.
+
+A device without a vault key finds a directory on its own disk inside the
+vault (the user made a folder of the vault's name and a folder inside it) and
+adopts it. A **file** in that position is held `PendingKey` at adoption and
+never pushed; a **folder** was pushed. Created on the server, it was parked
+`PendingKey` by naming on the next pass, and from then on its record and the
+directory drift apart, because nothing keyless ever applies a rename to a
+parked entry. Rename the directory to a name the server already holds and it
+is adopted again as a brand-new folder every pass: the create is refused over
+the name its own twin holds, the executor steps aside with a conflict name, and
+the server gains one more folder per pass for as long as it is up. The settle
+trace showed a fresh provisional id every round and the server collecting
+`Sub 38 renamed (conflicted copy …) 2`, `… 3`, and so on.
+
+A folder made inside a vault this device cannot open now waits for a key at
+adoption, exactly as a file made there does, and goes up when the key arrives.
+`a_folder_made_in_a_vault_with_no_key_here_waits_and_mints_nothing` is red on
+the previous code at the first assertion (the folder reached the server);
+`a_folder_waiting_for_a_key_goes_up_when_the_key_arrives` pins the release.
+The seed's exact loop needs the device's own pushed folder renamed on the
+server, which the new rule makes impossible, so the seed itself is the pin for
+the loop.
+
+Still open on this axis: a parked entry whose local placement has drifted from
+its directory (a locked vault whose folder was renamed on the server and on the
+disk in the meantime) is the same drift by another route. It no longer loops,
+but when the vault unlocks the recovered entry looks for a directory that is
+not there.
+
+---
+
+## Defect M — the original held hostage by a vault it had already left
+
+Estate v10, seed 6091570, the one-key-holder hunt arm: the guest holding a file
+no entry claims, `contested (conflicted copy … from guest).txt` at the root.
+Pre-existing; reproduces on HEAD.
+
+Traced by watching the path on every pass. The file's bytes belonged to entry
+903, which the keyless guest had once dragged into the vault. That minted a
+claimant waiting for a key, with `replaces = 903`, and put 903 on hold: its
+path was empty, which reads as a deletion, and acting on that would trash the
+last copy anyone could reach. Then the user brought the bytes back out under a
+new name and saved something else at the vault path. The claimant still had a
+file at its path -- a different one, which it read as an edit of the file it
+was waiting to upload -- so it was never swept, and the hold never lapsed. Every
+pass the scan paired 903 with its file at the root, by inode and by content,
+and every pass the pairing was thrown away at the hold. Nothing scanned, sent,
+moved or removed it.
+
+The hold rests on the source path being empty. When the scan finds the
+entry's own file on the disk anyway, the premise is gone: the bytes waiting
+inside are a new file, not this one's replacement. The hold now lapses in that
+case -- the claimant's `replaces` is cleared and the entry goes on as the file
+it is. `a_file_brought_back_out_of_a_vault_under_a_new_name_is_not_held_hostage`
+is red on the previous code with the guest holding a file no entry claims.
+
+Two to-dos from the review of this fix, neither traced through the sim:
+
+- A claimant released this way stands at the vault path with no `replaces`.
+  If the user later moves the released file back INTO the vault over that
+  path, the scan's same-path step gives the file to the stale claimant, the
+  source pairs with nothing, reads deleted, and is trashed on the server while
+  the only bytes wait under an entry that cannot upload. Trash, not loss, and
+  the keyed path's own order — but the one thing the stricter keyless hold
+  existed to prevent.
+- `crossing_a_vault_edge` answers Convert for a FOLDER dragged into the vault
+  on a keyless device, and the mint makes a file claimant for a folder source.
+  That claimant has nothing at its path and is swept next pass; the folder
+  source then reads deleted and is trashed on the server.
 
 ---
 

@@ -3052,6 +3052,16 @@ fn move_remote(
         None => entry.remote = to,
     }
     entry.synced_placement = Some(entry.remote.clone());
+    // A rename this device derived from its own disk says the file wears the
+    // new name byte for byte, and the server now calls it that too. Any
+    // spelling written down earlier is not a fact about the disk any more.
+    // Kept, it would send the next scan looking for the file under a name it
+    // no longer has -- and edited bytes are then found by neither path nor
+    // content, which reads as a deletion plus a stranger. A reparent alone
+    // changes no name and keeps its mapping.
+    if renaming {
+        entry.local_name = None;
+    }
     if entry.status == LocalStatus::Synced || entry.synced_content.is_some() {
         entry.status = LocalStatus::Synced;
     }
@@ -3513,11 +3523,6 @@ fn unmaterialize_and_park(
             // alone would throw away work nobody has sent, which is the one
             // thing this operation exists to refuse.
             if the_file_here_is_another_entrys(env, &entry, &path)? {
-                let told = entry
-                    .synced_placement
-                    .as_ref()
-                    .map(|p| p.name.clone())
-                    .unwrap_or_else(|| entry.remote.name.clone());
                 entry.synced_placement = None;
                 entry.synced_fingerprint = None;
                 entry.synced_content = None;
@@ -3525,15 +3530,17 @@ fn unmaterialize_and_park(
                 entry.local_name = None;
                 entry.status = LocalStatus::Unsyncable(reason.clone());
                 env.store.put_entry(&entry)?;
+                // The state complaint, in the one shape every "unsyncable"
+                // issue has: the reason as naming would have raised it. The
+                // pass withdraws a complaint whose reason no longer matches the
+                // entry's status, so a second wording here would be withdrawn
+                // as stale on the next pass and leave the park silent. Nothing
+                // was moved -- the file standing at the name was never this
+                // entry's -- so there is no event to report alongside it.
                 env.store.raise_issue(
                     Some(entry.id),
                     "unsyncable",
-                    &format!(
-                        "{told} cannot be held here under the name it now has on the \
-                         server ({reason:?}); the name belongs to another file on this \
-                         computer. It is safe on the server, and it comes back here if \
-                         the clash is resolved."
-                    ),
+                    &format!("{reason:?}"),
                     (env.now_ms)() as i64,
                 )?;
                 return Ok(OpOutcome::Done);
@@ -3578,9 +3585,21 @@ fn unmaterialize_and_park(
     entry.local_name = None;
     entry.status = LocalStatus::Unsyncable(reason.clone());
     env.store.put_entry(&entry)?;
+    // Two things to tell the user, and they are different kinds. The STATE --
+    // this name cannot be held here -- goes under "unsyncable" in the one
+    // shape every such complaint has, the reason as naming raises it, so the
+    // pass can withdraw it when the state ends and only then. The EVENT -- a
+    // copy was moved to the trash -- happened, and no later state makes it
+    // untrue, so it stands until the user waves it away.
     env.store.raise_issue(
         Some(entry.id),
         "unsyncable",
+        &format!("{reason:?}"),
+        (env.now_ms)() as i64,
+    )?;
+    env.store.raise_issue(
+        Some(entry.id),
+        "parked",
         &format!(
             "{told} was moved to the trash: this computer cannot hold the name \
              it now has on the server ({reason:?}). It is safe on the server, \
