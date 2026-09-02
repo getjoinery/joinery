@@ -376,9 +376,16 @@
 		//     answers over HTTP. Seconds, all reads, runs on any machine; it is
 		//     the same tier a node runs after the swap.
 		//   - `safe` where this site authored the code (mayMintReleaseVersion):
-		//     the development gate, a couple of minutes. A relay republishes
-		//     what it received and its tests would assert things about a
-		//     checkout it is not (docs/deploy_and_upgrade.md § The deploy tier).
+		//     the development gate. A relay republishes what it received and
+		//     its tests would assert things about a checkout it is not
+		//     (docs/deploy_and_upgrade.md § The deploy tier). It is NOT run
+		//     here: this publisher is root on the local job queue, and the
+		//     development tiers exercise installers and system tools inside
+		//     sandboxes that hold only for an unprivileged user — run as root,
+		//     one of them installed the agent over itself and stopped it. The
+		//     developer runs the tier; the runner stamps the exact tree it
+		//     passed on (TestTierStamp); this publish accepts the stamp only if
+		//     it describes the tree on disk right now.
 		//
 		// A failure refuses the release. There is no flag to skip this: a
 		// release that cannot pass its own tests is exactly the one the gate is
@@ -389,16 +396,26 @@
 		}
 		$runner = $full_site_dir . '/public_html/tests/run.php';
 		foreach ($gate_tiers as $gate_tier) {
-			publish_output("\nRunning the {$gate_tier} test tier before anything is written...");
-			$gate = PublishTestGate::run($runner, $gate_tier, 'publish_output');
+			if ($gate_tier !== 'deploy') {
+				publish_output("\nChecking that the {$gate_tier} test tier passed on this exact tree...");
+				$gate = PublishTestGate::verifyStamp($full_site_dir . '/public_html', $gate_tier, 'publish_output');
+			} else {
+				publish_output("\nRunning the {$gate_tier} test tier before anything is written...");
+				$gate = PublishTestGate::run($runner, $gate_tier, 'publish_output');
+			}
 			if (!$gate['started']) {
 				publish_output("Refusing to publish {$version} — the test runner at {$runner} could not be started, so the release cannot be tested before it ships.");
 				publish_output("Nothing has been written.");
 				exit(1);
 			}
 			if (!$gate['ok']) {
-				publish_output("\nRefusing to publish {$version} — the {$gate_tier} test tier failed (exit {$gate['exit_code']}).");
-				publish_output("Fix the failing test or the code it caught and publish again. Nothing has been written.");
+				if ($gate['exit_code'] === null) {
+					publish_output("\nRefusing to publish {$version} — the {$gate_tier} test tier has not passed on this tree.");
+				} else {
+					publish_output("\nRefusing to publish {$version} — the {$gate_tier} test tier failed (exit {$gate['exit_code']}).");
+					publish_output("Fix the failing test or the code it caught and publish again.");
+				}
+				publish_output("Nothing has been written.");
 				exit(1);
 			}
 			publish_output("The {$gate_tier} tier passed.");

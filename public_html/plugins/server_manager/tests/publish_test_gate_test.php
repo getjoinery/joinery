@@ -16,6 +16,7 @@
  *
  * Run: php tests/run.php safe --filter=publish_test_gate
  *
+ * @version 1.1 - the safe tier is accepted from the runner's stamp, never run by the publisher
  * @version 1.0
  */
 
@@ -114,7 +115,13 @@ PHP
 	check($version_at === false || $gate_at < $version_at, 'the gate runs before the VERSION file is written');
 	check(strpos($src, "\$gate_tiers = array('deploy')") !== false, 'the deploy tier runs on every publisher');
 	check(strpos($src, "DeploymentHelper::mayMintReleaseVersion()") !== false && strpos($src, "\$gate_tiers[] = 'safe'") !== false,
-		'the safe tier runs where the site authored the code');
+		'the safe tier is required where the site authored the code');
+	// The publisher is root on the local job queue. It must never RUN a
+	// development tier (2026-09-02: a safe-tier gate run as root installed the
+	// agent over itself and stopped it); it accepts the runner's stamp instead.
+	check(strpos($src, "PublishTestGate::verifyStamp(") !== false, 'development tiers are accepted from the stamp');
+	check(preg_match('/if \(\$gate_tier !== \'deploy\'\) \{\s*publish_output\([^;]*;\s*\$gate = PublishTestGate::verifyStamp\(/s', $src) === 1,
+		'every tier but deploy goes through verifyStamp, so run() only ever sees deploy');
 	check(!preg_match('/skip[-_]tests|no[-_]tests|without[-_]tests/i', $src), 'no flag skips the gate');
 
 } finally {

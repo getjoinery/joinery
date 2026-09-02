@@ -22,7 +22,11 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PUBLIC_HTML="$(cd "${HERE}/../../../.." && pwd)"
 WORK="$(mktemp -d)"
-trap 'rm -rf "${WORK}"' EXIT
+# The throwaway Go test below is written INTO the package directory, so it goes
+# on the trap too: a run killed mid-`go test` (or one that fails under set -e)
+# must not leave a file behind that the next run, as another user, cannot
+# overwrite.
+trap 'rm -rf "${WORK}"; rm -f "${HERE}/zz_wire_gate_test.go"' EXIT
 
 command -v go >/dev/null   || { echo "SKIP: no go toolchain"; exit 0; }
 command -v php >/dev/null  || { echo "SKIP: no php"; exit 0; }
