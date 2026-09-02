@@ -977,6 +977,28 @@ fn open_as_the_owner(
     None
 }
 
+/// The server's whole path for an entry, walked up through the folders this
+/// device's store knows about. `None` when a parent is missing from the store.
+fn server_path_of(entries: &[jd_core::model::Entry], e: &jd_core::model::Entry) -> Option<String> {
+    let mut parts = vec![e.remote.name.clone()];
+    let mut parent = e.remote.parent;
+    let mut guard = 0;
+    while let Some(id) = parent {
+        let f = entries
+            .iter()
+            .find(|f| f.id.entity_type == jd_core::EntityType::Folder && f.id.server_id == id)?;
+        parts.push(f.remote.name.clone());
+        parent = f.remote.parent;
+        guard += 1;
+        if guard > 64 {
+            return None;
+        }
+    }
+    parts.reverse();
+    Some(parts.join("/"))
+}
+
+
 /// Every device agrees with the server, and with each other.
 ///
 /// Panics with the difference rather than a bare false, because "they did not
@@ -1100,6 +1122,28 @@ pub fn assert_converged(world: &World) {
         let held_back = |h: &Option<String>| h.as_ref().is_some_and(|h| declined.contains(h));
         let disk: BTreeMap<String, Option<String>> =
             disk.into_iter().filter(|(_, h)| !held_back(h)).collect();
+        // A FOLDER moved into a vault this device cannot open is held the same
+        // way, and has no content to be matched on. The server keeps it until
+        // the claimant standing at the vault path can upload -- so it is
+        // excused by its exact path, and only on the server's side: the
+        // directory itself stands under the vault, where a keyless device is
+        // not asked to account for it at all (below). The files inside it are
+        // each held by a claimant of their own and excused by content above;
+        // one that is NOT -- a child the user deleted and the engine failed to
+        // trash -- must go on failing, which is why this is not a prefix.
+        let held_folders: Vec<String> = entries
+            .iter()
+            .filter(|e| {
+                e.id.entity_type == jd_core::EntityType::Folder
+                    && awaiting_replacement.contains(&e.id)
+            })
+            .filter_map(|e| server_path_of(&entries, e))
+            .collect();
+        let server: BTreeMap<String, Option<String>> = server
+            .iter()
+            .filter(|(p, _)| !held_folders.contains(p))
+            .map(|(p, h)| (p.clone(), h.clone()))
+            .collect();
 
         // A device with no key materializes no vault folder and nothing under
         // one, on purpose -- see `MockServer::vault_folder_paths`. Holding it to
@@ -1170,41 +1214,17 @@ pub fn assert_converged(world: &World) {
         // Keyed by the entry's whole server path, not its bare name: a spelling
         // one file was granted must not be lent to another file that merely
         // shares its name in a different folder.
-        let respelled: std::collections::HashMap<String, String> = {
-            let entries = device.store.every_entry().unwrap();
-            let folders: std::collections::HashMap<i64, &jd_core::model::Entry> = entries
-                .iter()
-                .filter(|e| e.id.entity_type == jd_core::EntityType::Folder)
-                .map(|e| (e.id.server_id, e))
-                .collect();
-            let server_path = |e: &jd_core::model::Entry| -> Option<String> {
-                let mut parts = vec![e.remote.name.clone()];
-                let mut parent = e.remote.parent;
-                let mut guard = 0;
-                while let Some(id) = parent {
-                    let f = folders.get(&id)?;
-                    parts.push(f.remote.name.clone());
-                    parent = f.remote.parent;
-                    guard += 1;
-                    if guard > 64 {
-                        return None;
-                    }
-                }
-                parts.reverse();
-                Some(parts.join("/"))
-            };
-            entries
-                .iter()
-                .filter(|e| !e.remote_deleted)
-                .filter_map(|e| {
-                    let local = e.local_name.as_deref()?;
-                    (jd_vfs::comparison_key(local, &personality)
-                        == jd_vfs::comparison_key(&e.remote.name, &personality))
-                    .then(|| Some((server_path(e)?, local.to_string())))
-                    .flatten()
-                })
-                .collect()
-        };
+        let respelled: std::collections::HashMap<String, String> = entries
+            .iter()
+            .filter(|e| !e.remote_deleted)
+            .filter_map(|e| {
+                let local = e.local_name.as_deref()?;
+                (jd_vfs::comparison_key(local, &personality)
+                    == jd_vfs::comparison_key(&e.remote.name, &personality))
+                .then(|| Some((server_path_of(&entries, e)?, local.to_string())))
+                .flatten()
+            })
+            .collect();
         let expected_path = |p: &str| -> Option<String> {
             let mut out: Vec<String> = Vec::new();
             let mut prefix = String::new();

@@ -4619,6 +4619,186 @@ fn a_file_brought_back_out_of_a_vault_under_a_new_name_is_not_held_hostage() {
     assert_nothing_lost(&world, &committed);
 }
 
+/// The file that came back out is dragged back IN, over the path the released
+/// claimant still stands at.
+///
+/// Releasing the hold leaves a claimant at the vault path with nothing to
+/// replace. If the original's bytes land on that path again, the scan's
+/// same-path step would hand them to the stale claimant, the original would
+/// pair with nothing and read deleted, and its server copy would be trashed
+/// while the only bytes wait under an entry that cannot upload. Trash, not
+/// loss -- but the one thing the keyless hold exists to prevent.
+#[test]
+fn a_released_file_dragged_back_into_the_vault_is_held_again() {
+    let vault = SimVault::new(9_217);
+    let mut world = World::new(9_217, &["holder", "guest"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+
+    world.server.seed_encrypted_folder(None, "Private");
+    let body = b"in, out, and in again";
+    world.device("guest").fs.user_write("memo.txt", body);
+    committed.note("memo.txt", body);
+    assert!(world.settle().is_some(), "the plaintext file goes up first");
+
+    let guest = world.device("guest");
+    guest.fs.user_mkdir("Private");
+    guest.fs.user_rename("memo.txt", "Private/memo.txt");
+    assert!(world.settle().is_some(), "the drag in settles");
+
+    guest.fs.user_rename("Private/memo.txt", "memo-again.txt");
+    guest.fs.user_write("Private/memo.txt", b"a different note, waiting for a key");
+    assert!(world.settle().is_some(), "the hold lapses");
+    assert!(world.server.tree().contains_key("memo-again.txt"));
+
+    // The user clears the vault path and drags the original back in over it.
+    guest.fs.user_remove("Private/memo.txt");
+    guest.fs.user_rename("memo-again.txt", "Private/memo.txt");
+    assert!(world.settle().is_some(), "the second drag in settles");
+
+    let server = world.server.tree();
+    assert!(
+        server.contains_key("memo-again.txt"),
+        "the original was trashed on the server while its only bytes wait on a \
+         keyless device: {server:?}"
+    );
+    assert!(
+        !server.contains_key("Private/memo.txt"),
+        "a keyless device sent a file into the vault: {server:?}"
+    );
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+
+    world.give_vault("guest", &vault);
+    assert!(world.settle().is_some(), "with a key the wait ends");
+    let server = world.server.tree();
+    assert!(
+        server.keys().any(|p| p.starts_with("Private/")),
+        "the file never went up once the key arrived: {server:?}"
+    );
+    assert!(
+        !server.contains_key("memo-again.txt"),
+        "the replaced original should be gone once the upload landed: {server:?}"
+    );
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// A FOLDER dragged into the vault on a device with no key.
+///
+/// The crossing answers Convert for a folder going in, and the mint that
+/// holds the source makes a claimant for the destination. A file claimant for
+/// a folder source has nothing at its path, is swept next pass, and the folder
+/// source then reads deleted and is trashed on the server -- with the files
+/// inside it. Nothing may be trashed on the strength of a conversion this
+/// device cannot perform.
+#[test]
+fn a_folder_dragged_into_a_vault_on_a_keyless_device_waits_for_a_key() {
+    let vault = SimVault::new(9_218);
+    let mut world = World::new(9_218, &["holder", "guest"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+
+    world.server.seed_encrypted_folder(None, "Private");
+    let guest = world.device("guest");
+    guest.fs.user_mkdir("Docs");
+    let body = b"a note in a folder the guest will drag in";
+    guest.fs.user_write("Docs/note.txt", body);
+    committed.note("Docs/note.txt", body);
+    assert!(world.settle().is_some(), "the plaintext folder goes up first");
+    assert!(world.server.tree().contains_key("Docs/note.txt"));
+
+    guest.fs.user_mkdir("Private");
+    guest.fs.user_rename("Docs", "Private/Docs");
+    assert!(world.settle().is_some(), "the drag in settles");
+
+    let server = world.server.tree();
+    assert!(
+        server.contains_key("Docs/note.txt"),
+        "the folder was trashed on the server while its only bytes wait on a \
+         keyless device: {server:?}"
+    );
+    assert!(
+        !server.keys().any(|p| p.starts_with("Private/")),
+        "a keyless device sent something into the vault: {server:?}"
+    );
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+
+    world.give_vault("guest", &vault);
+    assert!(world.settle().is_some(), "with a key the wait ends");
+    let server = world.server.tree();
+    assert!(
+        server.contains_key("Private/Docs"),
+        "the folder never went up once the key arrived: {server:?}"
+    );
+    assert!(
+        server.keys().any(|p| p.starts_with("Private/Docs/")),
+        "the file inside never went up once the key arrived: {server:?}"
+    );
+    assert!(
+        !server.contains_key("Docs"),
+        "the replaced folder should be gone once the move landed: {server:?}"
+    );
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// The folder version of the hostage: dragged in keyless, then brought back OUT
+/// under a new name while a new folder of the old name is made at the vault
+/// path.
+///
+/// A folder is absent from the file scan, so the file rule for the hold
+/// lapsing -- the scan found this entry's own file -- says nothing about it.
+/// The folder scan answers the same question: the folder is standing at its
+/// path, or its files were found under another. Held anyway, the folder that
+/// came back out is a move thrown away every pass, and a directory claimed by
+/// nothing.
+#[test]
+fn a_folder_brought_back_out_of_a_vault_under_a_new_name_is_not_held_hostage() {
+    let vault = SimVault::new(9_219);
+    let mut world = World::new(9_219, &["holder", "guest"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+
+    world.server.seed_encrypted_folder(None, "Private");
+    let guest = world.device("guest");
+    guest.fs.user_mkdir("Docs");
+    let body = b"a note that goes in and comes out again";
+    guest.fs.user_write("Docs/note.txt", body);
+    committed.note("Docs/note.txt", body);
+    assert!(world.settle().is_some(), "the plaintext folder goes up first");
+
+    guest.fs.user_mkdir("Private");
+    guest.fs.user_rename("Docs", "Private/Docs");
+    assert!(world.settle().is_some(), "the drag in settles");
+
+    guest.fs.user_rename("Private/Docs", "Archive");
+    guest.fs.user_mkdir("Private/Docs");
+    guest.fs.user_write("Private/Docs/other.txt", b"something else, waiting for a key");
+    committed.note("Archive/note.txt", body);
+    assert!(world.settle().is_some());
+
+    let server = world.server.tree();
+    assert!(
+        server.contains_key("Archive/note.txt"),
+        "the folder never moved on the server: {server:?}"
+    );
+    assert!(
+        !server.contains_key("Docs"),
+        "the old folder should be gone once the move completed: {server:?}"
+    );
+    assert!(
+        !server.keys().any(|p| p.starts_with("Private/")),
+        "a keyless device sent something into the vault: {server:?}"
+    );
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
 /// Dragged in, then dragged back out again before any key arrives.
 ///
 /// The hold on the server's copy has to be a fact that lapses, not a state

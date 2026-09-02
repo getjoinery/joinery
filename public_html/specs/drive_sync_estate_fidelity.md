@@ -998,19 +998,78 @@ case -- the claimant's `replaces` is cleared and the entry goes on as the file
 it is. `a_file_brought_back_out_of_a_vault_under_a_new_name_is_not_held_hostage`
 is red on the previous code with the guest holding a file no entry claims.
 
-Two to-dos from the review of this fix, neither traced through the sim:
+The review of this fix raised two more, both then traced through the sim and
+both real: Defects N and O.
 
-- A claimant released this way stands at the vault path with no `replaces`.
-  If the user later moves the released file back INTO the vault over that
-  path, the scan's same-path step gives the file to the stale claimant, the
-  source pairs with nothing, reads deleted, and is trashed on the server while
-  the only bytes wait under an entry that cannot upload. Trash, not loss, and
-  the keyed path's own order — but the one thing the stricter keyless hold
-  existed to prevent.
-- `crossing_a_vault_edge` answers Convert for a FOLDER dragged into the vault
-  on a keyless device, and the mint makes a file claimant for a folder source.
-  That claimant has nothing at its path and is swept next pass; the folder
-  source then reads deleted and is trashed on the server.
+---
+
+## Defect N — the released claimant that took the original back
+
+Found by the review of Defect M, written as a scenario, red on the first run.
+
+A claimant released by Defect M stands at the vault path with nothing to
+replace. It has never uploaded, so it has no content of its own: whatever
+stands at its path is its file, and the scan reads any change of bytes there
+as an edit. When the user later drags the released original back INTO the
+vault over that path, the scan's same-path step gives the file to the stale
+claimant, the original pairs with nothing, reads deleted, and is trashed on
+the server while the only bytes wait under an entry that cannot upload. Trash,
+not loss, and the keyed path's own order -- but the one thing the stricter
+keyless hold exists to prevent.
+
+The hold now follows the bytes. The adoption path already answers "which
+server copy do these bytes stand in for" by the inode -- a plaintext entry that
+agreed on this file id and whose own path is now empty -- and that rule is
+`plaintext_source_of`, asked once more of every claimant already standing
+whose file the scan reports edited. The claimant takes over holding whichever
+copy the inode says it now stands in for, and if that is a different copy
+than before, the previous one is released by the same act: the user
+overwrote its bytes, and its server copy goes to the trash exactly as a
+plaintext overwrite's would.
+
+`a_released_file_dragged_back_into_the_vault_is_held_again` is red on the
+previous code with the original trashed on the server; with a key handed over
+afterwards, the upload lands and the replaced original goes.
+
+---
+
+## Defect O — the folder that crossed into a vault with no key here
+
+Found by the same review, and the same shape: written as a scenario, red on
+the first run.
+
+`crossing_a_vault_edge` answers Convert for a folder dragged into the vault,
+and the keyless mint made a FILE claimant for it. A file claimant for a folder
+source has nothing at its path, is swept on the next pass, and is minted again
+on the one after -- the folder never held, never sent, never told about, and
+the directory it stands in claimed by nothing. The device reported itself
+quiet throughout.
+
+The claimant is now the same kind of thing as its source. A folder claimant
+stands at the directory, `folder_paths` knows it, and the files inside then
+cross the edge one by one as moves under it, each minting its own claimant by
+the existing file rule. When a key arrives the folder goes up first, then its
+files, and the holds lapse in the order the uploads land.
+
+The hold's lapse had to learn about folders too. Defect M releases a source
+when the scan finds its own file; a folder is absent from the file scan, so
+that test said nothing, and a folder brought back OUT of the vault under a new
+name while a fresh folder of the old name was made inside stayed held for
+ever -- a move thrown away every pass. The folder scan answers the same
+question, standing at its path or found under another by its files, and the
+release now asks it.
+
+The convergence oracle excused a held FILE by its content and had no way to
+excuse a held folder. It now excuses a folder awaiting replacement by its
+exact server path, on the server's side only: the directory itself stands
+under the vault, where a keyless device is not asked to account for it at
+all. The files inside are each held by a claimant of their own and excused by
+content already; a child the user deleted that the engine failed to trash has
+no such excuse and goes on failing, which is why the excuse is not a prefix.
+
+`a_folder_dragged_into_a_vault_on_a_keyless_device_waits_for_a_key` and
+`a_folder_brought_back_out_of_a_vault_under_a_new_name_is_not_held_hostage`
+are each red with their own fix removed.
 
 ---
 
