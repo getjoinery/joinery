@@ -22,6 +22,9 @@
  * `filesSent` is the PRESETS smtp_files_sent capability: true when the provider's
  * SMTP saves the sent copy itself; false when two-way sync must APPEND it.
  *
+ * @version 1.5 - forHostedAlias() refuses an address on an IMAP-source
+ *   domain: mail from a connected account leaves only through that account's
+ *   own SMTP, never platform egress (specs/imap_source_domain_boundaries.md §5)
  * @version 1.4
  */
 
@@ -79,6 +82,21 @@ class OutboundTransport {
         $t = new self();
         $t->fromAddress = $aliasAddress;
         $t->filesSent = false; // no source mailbox to file a copy into
+
+        // A connected account's address (user@gmail.com) is never a hosted
+        // identity: the platform has no standing to put that From on the wire
+        // through its own provider, the relay, or a DKIM signer. The send
+        // reaches here only when the account's feed is disabled or paused —
+        // the state every feed is born in — so the error names the fix rather
+        // than falling through to a spoofed or nonsensical platform send.
+        if (class_exists('InboundEmailDomain')) {
+            $imap_row = InboundEmailDomain::GetByDomain(MailIdentityGuard::domainOf($aliasAddress));
+            if ($imap_row !== false && $imap_row->is_imap_source()) {
+                $t->error = 'This mailbox sends through its connected account, which is currently '
+                    . 'disabled. Re-enable it under Mailbox → Accounts to send from this address.';
+                return $t;
+            }
+        }
 
         // Relay-fronted deployment. The relay defaults to INBOUND-ONLY
         // (specs/mailbox_relay_inbound_only.md): compose sends leave through the

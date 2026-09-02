@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.53
+ * No framework. @version 2.54
  *
  * The conversation list updates in place after mutations
  * (specs/implemented/mailbox_reader_list_persistence.md): actions that take rows out of
@@ -2226,7 +2226,10 @@
 		var to = field.value.trim();
 		if (!to) { hint.hidden = true; return; }
 
-		joineryApi.post(CFG.directStatusUrl, { to: to }).then(function (data) {
+		// The From mailbox goes along: a message only goes direct from a domain
+		// this site holds a signing identity for, so a connected account's
+		// address (or an unpublished hosted one) never earns the mark.
+		joineryApi.post(CFG.directStatusUrl, { to: to, alias_id: composeAliasId() }).then(function (data) {
 			var map = (data && data.addresses) || {};
 			var names = Object.keys(map);
 			if (!names.length) { hint.hidden = true; return; }
@@ -3207,6 +3210,7 @@
 		state.draftAlias = source.alias_id;   // implicit From identity for autosave
 		insertSignature(source.alias_id);     // signature at the bottom, caret above (§ Phase 3)
 		loadContacts();                       // recipient autocomplete (§ Phase 4)
+		showSendPreflight(source.alias_id);   // can this mailbox send at all?
 
 		var chips = document.querySelector('.mbx-reply-actions');
 		if (chips) chips.hidden = true;
@@ -3262,6 +3266,7 @@
 		state.draftAlias = aliasSel ? aliasSel.value : state.aliasId;
 		insertSignature(state.draftAlias);    // signature for the chosen From (§ Phase 3)
 		loadContacts();                       // recipient autocomplete (§ Phase 4)
+		showSendPreflight(state.draftAlias);  // can this mailbox send at all?
 
 		var chips = document.querySelector('.mbx-reply-actions');
 		if (chips) chips.hidden = true;
@@ -3455,6 +3460,7 @@
 
 		state.draftId = data.draft_id;
 		state.draftAlias = data.alias_id;
+		showSendPreflight(data.alias_id);     // can this mailbox send at all?
 		state.draftDirty = false;
 		state.draftAttachments = data.attachments || [];
 		loadContacts();                       // recipient autocomplete (§ Phase 4)
@@ -3519,6 +3525,28 @@
 		var e = $('#mbx-compose-error');
 		e.hidden = true;
 		e.textContent = '';
+	}
+
+	// Send-capability preflight: can the From mailbox send at all? The answer
+	// rides the switcher payload (send_ok / send_error per mailbox, decided by
+	// the same server code the send runs), so opening a compose on a paused or
+	// unauthorized connected account says so before a word is written. The
+	// form stays usable — hiding it would hide the diagnosis.
+	function showSendPreflight(aliasId) {
+		var box = document.getElementById('mbx-compose-preflight');
+		if (!box) return;
+		var want = aliasId != null ? String(aliasId) : '';
+		var m = null;
+		for (var i = 0; i < state.mailboxes.length; i++) {
+			if (String(state.mailboxes[i].alias_id) === want) { m = state.mailboxes[i]; break; }
+		}
+		if (m && m.send_ok === false && m.send_error) {
+			box.textContent = m.send_error;
+			box.hidden = false;
+		} else {
+			box.textContent = '';
+			box.hidden = true;
+		}
 	}
 
 	function submitCompose(e) {
@@ -3820,6 +3848,9 @@
 			// what was kept in a personal one. Addresses already typed stay put;
 			// only the suggestion list changes.
 			loadContacts(aliasSel.value);
+			// The From changed, so both "can it send" and "can it go direct" did.
+			showSendPreflight(aliasSel.value);
+			queueDirectHint();
 			markDraftDirty();
 		});
 		// Recipient autocomplete on To/Cc/Bcc (§ Phase 4).

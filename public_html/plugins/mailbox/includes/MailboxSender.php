@@ -51,6 +51,13 @@
  * cid-rewritten into the stored/sent HTML). The stored iem_body_plain is derived from
  * the final sanitized HTML.
  *
+ * @version 1.16 - sendCapabilityFor(): the one answer to "can this mailbox send
+ *                  right now", shared by send() itself, the reader's compose
+ *                  preflight and the Setup tab's Sending row. An IMAP-source
+ *                  mailbox whose feed is disabled, unauthorized, or generic-IMAP
+ *                  without SMTP is refused BEFORE a message is written, with the
+ *                  same words the send would fail with
+ *                  (specs/imap_source_domain_boundaries.md §5, §7)
  * @version 1.15 - buildRawMime() assembles the APPENDed Sent copy through
  *                  SmtpMailer::applyMessage() + preSend(), the mapping every SMTP
  *                  send uses. Horde_Mime_Mail::getRaw() throws "No base part set"
@@ -156,11 +163,14 @@ class MailboxSender {
 		$alias_address = strtolower($alias->get_full_address());
 
 		// Resolve "send AS this mailbox" — connected IMAP account or hosted alias.
-		$account = $this->connectedAccountFor($alias_id);
-		$transport = resolveOutboundTransport($account ?: $alias_address);
-		if ($transport->error) {
-			throw new MailboxSenderException($transport->error);
+		// The same answer the compose preflight gave, so the refusal a person
+		// sees before writing is the refusal the send would give after.
+		$capability = self::sendCapabilityFor($alias);
+		if (!$capability['ok']) {
+			throw new MailboxSenderException($capability['error']);
 		}
+		$account = $capability['account'];
+		$transport = $capability['transport'];
 		$from_address = $transport->fromAddress ?: $alias_address;
 
 		// Recipients: trust the (admin-entered) To/Cc/Bcc; for reply-all the client
@@ -334,15 +344,56 @@ class MailboxSender {
 		return $source;
 	}
 
-	/** The enabled connected IMAP account bound to this alias, or null (hosted). */
-	private function connectedAccountFor(int $alias_id): ?InboundImapAccount {
+	/**
+	 * Can this mailbox send right now, and through what?
+	 *
+	 * One answer for every surface that asks: send() itself, the reader's
+	 * compose preflight (so the banner appears before a message is written, not
+	 * after), and the Setup tab's Sending row. A mailbox on a connected
+	 * account's domain (specs/imap_source_domain_boundaries.md §2.3) sends ONLY
+	 * through that account's own SMTP — so a feed that is disabled, that has no
+	 * SMTP host (generic IMAP), or that is not authorized to send is refused
+	 * here with the fix named; there is no platform-egress fallback for it
+	 * (OutboundTransport::forHostedAlias() refuses too, as the backstop).
+	 *
+	 * Nothing here connects anywhere: a transport is configured, not opened.
+	 *
+	 * @return array{ok: bool, error: ?string, account: ?InboundImapAccount, transport: ?OutboundTransport}
+	 */
+	public static function sendCapabilityFor(InboundEmailAlias $alias): array {
+		$alias_address = strtolower($alias->get_full_address());
 		$accounts = new MultiInboundImapAccount(array(
-			'alias_id' => $alias_id,
-			'enabled'  => true,
+			'alias_id' => intval($alias->key),
 			'deleted'  => false,
 		));
 		$accounts->load();
-		return count($accounts) ? $accounts->get(0) : null;
+		$account = null;
+		$any_feed = null;
+		foreach ($accounts as $candidate) {
+			$any_feed = $any_feed ?: $candidate;
+			if ($candidate->get('iia_is_enabled')) {
+				$account = $candidate;
+				break;
+			}
+		}
+
+		if ($account === null) {
+			$domain = new InboundEmailDomain(intval($alias->get('iea_ied_inbound_email_domain_id')), TRUE);
+			if ($domain->key && $domain->is_imap_source()) {
+				$error = ($any_feed === null)
+					? 'This mailbox has no connected account to send through. Connect one under '
+						. 'Mailbox → Accounts.'
+					: 'This mailbox sends through its connected account, which is currently disabled. '
+						. 'Re-enable it under Mailbox → Accounts to send from this address.';
+				return array('ok' => false, 'error' => $error, 'account' => null, 'transport' => null);
+			}
+		}
+
+		$transport = resolveOutboundTransport($account ?: $alias_address);
+		if ($transport->error) {
+			return array('ok' => false, 'error' => $transport->error, 'account' => $account, 'transport' => $transport);
+		}
+		return array('ok' => true, 'error' => null, 'account' => $account, 'transport' => $transport);
 	}
 
 	// ── message building ───────────────────────────────────────────────────

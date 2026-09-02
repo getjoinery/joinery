@@ -439,7 +439,10 @@ and a mark.
   reproduce it.
 - Three UI surfaces: a compose-time indicator under the To field (which states only
   that a recipient's domain *can* take a direct delivery — whether that person
-  accepts one is theirs to answer live, and is deliberately not queryable), a small
+  accepts one is theirs to answer live, and is deliberately not queryable — and
+  only when the From mailbox's own domain holds a signing identity: a connected
+  account's address, or a hosted domain not yet published, sends as ordinary
+  email whatever the recipient supports, and the indicator stays silent), a small
   mark beside the sender in the conversation list, and a hairline accent plus one
   plain-language line on the message itself.
 

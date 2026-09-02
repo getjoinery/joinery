@@ -15,6 +15,8 @@
  * The mailbox itself is built by ImapFeedProvisioner, the one path a pulled-in
  * mailbox comes into being by; this page collects answers and nothing more.
  *
+ * @version 1.5 - the configure step's compose / Sent-sync box is checked by
+ *   default: it is what keeps a sent message to one Sent row and one thread
  * @version 1.4
  * @changelog 1.4 - the configure step offers Keep in step with the original
  *   (with its deletion and compose follow-ons) when the server supports sync,
@@ -448,7 +450,13 @@ if (!empty($sync_supported)) {
 	$formwriter->checkboxinput('iia_sync_deletes', 'Also sync deletions', array(
 		'helptext' => 'Deleting here moves the source message to Trash; a deletion in the source removes it here.',
 	));
+	// On by default whenever sync is on: this flag is what files the sent copy
+	// into the source Sent folder so the provider's Message-ID rewrite does not
+	// produce a duplicate Sent row and a broken thread — with it off, a compose
+	// (already offered for any granted mailbox) loses data, so off is not a
+	// preference (specs/imap_source_domain_boundaries.md §7.1).
 	$formwriter->checkboxinput('iia_show_compose', 'Enable compose / Sent sync', array(
+		'checked'  => true,
 		'helptext' => 'Show reply/forward in the reader and file sent copies into the source Sent folder.',
 	));
 } elseif ($is_connected) {

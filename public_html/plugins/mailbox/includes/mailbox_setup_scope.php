@@ -14,6 +14,10 @@
  * expected to cache (see the reader's setup_status action); this file always
  * answers live.
  *
+ * @version 1.6 - an IMAP-pull mailbox gets a Sending row of its own — the
+ *                connected account is its only way out, so a paused, unauthorized
+ *                or SMTP-less feed stops the verdict reading green
+ *                (specs/imap_source_domain_boundaries.md §5.3)
  * @version 1.5 - a grant that signed in without mail access is reported as
  *                that, not as an expired authorization
  * @version 1.4 - the remembered verdict moved to mailbox_setup_memory.php, so
@@ -90,6 +94,14 @@ function mailbox_setup_scoped_rows(int $alias_id, string $relay_advanced_url = '
 		$feeds->load();
 		$imap_feed = count($feeds) ? $feeds->get(0) : null;
 		$receiving_rows = _setup_imap_receiving_rows($imap_feed);
+
+		// Sending: replies and new mail from a pulled-in mailbox leave ONLY
+		// through the connected account's own SMTP (never platform egress), so
+		// whether that account can send right now is this mailbox's Sending
+		// verdict — the same answer the compose preflight and the send give.
+		if ($is_imap) {
+			$forwarding_rows[] = _setup_imap_sending_row($alias);
+		}
 
 		// Forwarding still applies if the mailbox forwards; those checks are
 		// server-global (relay/SRS), so a domain-less run supplies them.
@@ -289,6 +301,32 @@ function _setup_row_is_in_zone(array $r, string $focus_domain): bool {
  * Mirrors the row shape InboundEmailSetupCheck::r() produces so the same
  * renderer handles them.
  */
+/**
+ * The one Sending row of a pulled-in mailbox: can its connected account send?
+ * Decided by MailboxSender::sendCapabilityFor(), so the Setup tab, the compose
+ * banner and the send itself all say the same thing.
+ */
+function _setup_imap_sending_row(InboundEmailAlias $alias): array {
+	try {
+		$capability = MailboxSender::sendCapabilityFor($alias);
+	} catch (Throwable $e) {
+		$capability = array('ok' => false, 'error' => $e->getMessage());
+	}
+	return array(
+		'id' => 'imap.sending', 'scope' => '', 'layer' => 'imap',
+		'label' => 'Sending', 'severity' => InboundEmailSetupCheck::REQUIRED,
+		'status' => $capability['ok'] ? InboundEmailSetupCheck::PASS : InboundEmailSetupCheck::WARN,
+		'summary' => $capability['ok']
+			? 'Replies and new mail leave through the connected account.'
+			: (string)$capability['error'],
+		'detail' => $capability['ok'] ? ''
+			: 'A mailbox on a connected account sends only through that account — there is no '
+				. 'other way out for its address.',
+		'fix' => $capability['ok'] ? null : array('text' => 'Manage this mailbox on the Accounts tab.'),
+		'recheckable' => true,
+	);
+}
+
 function _setup_imap_receiving_rows(?InboundImapAccount $imap): array {
 	$row = function ($status, $label, $summary, $detail = '', $fix = null) {
 		return array(

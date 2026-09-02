@@ -37,6 +37,9 @@
  * mailbox is open. See plugins/mailbox/docs/overview.md § The list toolbar and
  * multi-select.
  *
+ * @version 1.20.0 - a compose preflight banner (#mbx-compose-preflight) sits
+ *   above the form: a mailbox that cannot send says so before a word is written
+ *   (specs/imap_source_domain_boundaries.md §5.2)
  * @version 1.19.0
  */
 
@@ -142,6 +145,14 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 				<button type="button" class="mbx-iconbtn" id="mbx-compose-close" title="Save &amp; close">&times;</button>
 			</div>
 			<div class="mbx-compose-error" id="mbx-compose-error" hidden></div>
+			<?php
+			// The send-capability preflight (MailboxService's send_ok / send_error
+			// per mailbox): a connected account that is paused, unauthorized, or
+			// has no SMTP is named here when the compose opens, not after the
+			// message is written. The form stays usable — hiding it would hide
+			// the diagnosis — and the send refuses with the same words.
+			?>
+			<div class="mbx-compose-preflight" id="mbx-compose-preflight" hidden></div>
 			<?php
 			$compose->begin_form();
 			$compose->hiddeninput('mode', '', array('value' => '', 'id' => 'mbx_mode'));
