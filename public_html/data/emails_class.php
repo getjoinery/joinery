@@ -124,6 +124,94 @@ class Email extends SystemBase {	public static $prefix = 'eml';
 		
 	}	
 
+	/**
+	 * Who this email goes to, as user ids: every `add` recipient group resolved
+	 * through its provider, minus every `remove` group, de-duplicated. A
+	 * mailing-list email's audience is its list's subscribers.
+	 *
+	 * A group whose provider is not registered (its plugin is inactive)
+	 * contributes nobody, as on any read of a recipient group.
+	 *
+	 * @return int[]
+	 */
+	function resolve_recipient_user_ids() {
+		if ($this->get('eml_mlt_mailing_list_id')) {
+			$mailing_list = new MailingList($this->get('eml_mlt_mailing_list_id'), TRUE);
+			$ids = $mailing_list->key ? $mailing_list->get_subscribed_users('array') : array();
+			return array_values(array_unique(array_map('intval', $ids)));
+		}
+
+		$added = array();
+		foreach ($this->get_recipient_groups('add') as $recipient_group) {
+			$provider = RecipientGroupProviderRegistry::get($recipient_group->get('erg_provider'));
+			if ($provider) {
+				foreach ($provider->resolve((int)$recipient_group->get('erg_reference_id')) as $uid) {
+					$added[] = (int)$uid;
+				}
+			}
+		}
+
+		$removed = array();
+		foreach ($this->get_recipient_groups('remove') as $recipient_group) {
+			$provider = RecipientGroupProviderRegistry::get($recipient_group->get('erg_provider'));
+			if ($provider) {
+				foreach ($provider->resolve((int)$recipient_group->get('erg_reference_id')) as $uid) {
+					$removed[] = (int)$uid;
+				}
+			}
+		}
+
+		return array_values(array_diff(array_unique($added), array_unique($removed)));
+	}
+
+	/**
+	 * Expand the audience into erc_email_recipients rows and hand the email to
+	 * the scheduled sender.
+	 *
+	 * One row per resolved user who is not already on the email (matched on
+	 * address, as EmailRecipient::CheckIfExists does). A user with no address
+	 * — a deleted account, say — has nowhere to be sent to and is skipped.
+	 *
+	 * With at least one recipient on the email the row is stamped
+	 * eml_scheduled_time = now() and eml_status = EMAIL_QUEUED, and the
+	 * SendQueuedEmails task picks it up on its next run. With none, the email
+	 * is left exactly as it was. This never marks anything sent: delivery
+	 * state is the sender's to record, per recipient, as it sends.
+	 *
+	 * @return int The number of recipients the email has after expansion.
+	 */
+	function queue() {
+		if (!$this->key) {
+			throw new EmailException('Save the email before queueing it.');
+		}
+
+		$count = 0;
+		foreach ($this->resolve_recipient_user_ids() as $user_id) {
+			$user = new User($user_id, TRUE);
+			if (!$user->key || trim((string)$user->get('usr_email')) === '') {
+				continue;
+			}
+			if (!EmailRecipient::CheckIfExists($this->key, $user->get('usr_email'))) {
+				$recipient = new EmailRecipient(NULL);
+				$recipient->set('erc_email', $user->get('usr_email'));
+				$recipient->set('erc_usr_user_id', $user->key);
+				$recipient->set('erc_name', $user->display_name());
+				$recipient->set('erc_eml_email_id', $this->key);
+				$recipient->prepare();
+				$recipient->save();
+			}
+			$count++;
+		}
+
+		if ($count > 0) {
+			$this->set('eml_scheduled_time', 'now()');
+			$this->set('eml_status', self::EMAIL_QUEUED);
+			$this->save();
+		}
+
+		return $count;
+	}
+
 	function authenticate_write($data) {
 		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
 			// If the user's ID doesn't match, we have to make
@@ -173,10 +261,6 @@ class Email extends SystemBase {	public static $prefix = 'eml';
 			$this->cached_references['user'] = $user;
 		} 
 		return $this->cached_references['user'];
-	}
-
-	function get_unsent_recipients() { 
-		return MultiEmailRecipient::GetUnsentRecipientsForEmail($this->key);
 	}
 
 	function get_tracking_code() { 
@@ -242,6 +326,22 @@ class MultiEmail extends SystemMultiBase {
         }
         
         
+        // Every email addressed to one audience: ['provider' => 'event',
+        // 'reference_id' => 12]. Only `add` rows count — an audience named on
+        // the remove side of an email was not sent that email.
+        if (isset($this->options['recipient_group'])) {
+            $rg = $this->options['recipient_group'];
+            $provider = isset($rg['provider']) ? (string)$rg['provider'] : '';
+            if (!preg_match('/^[a-z0-9_]{1,32}$/', $provider)) {
+                throw new InvalidArgumentException('recipient_group needs a provider key');
+            }
+            $reference_id = (int)($rg['reference_id'] ?? 0);
+            $filters['eml_email_id'] = "IN (SELECT erg_eml_email_id FROM erg_email_recipient_groups"
+                . " WHERE erg_provider = '" . $provider . "'"
+                . " AND erg_reference_id = " . $reference_id
+                . " AND erg_operation = 'add')";
+        }
+
         if (isset($this->options['scheduleddate']) && $this->options['scheduleddate'] == self::SCHEDULED_PAST) {
             $filters['eml_scheduled_time'] = "< NOW()";
         } elseif (isset($this->options['scheduleddate']) && $this->options['scheduleddate'] == self::SCHEDULED_FUTURE) {

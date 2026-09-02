@@ -344,9 +344,27 @@ Providers are the pluggable half — `includes/RecipientGroupProviderRegistry.ph
 | `resolve(int $reference_id)` | The reference expanded to a user-id list (`[]` if unresolvable) |
 | `reference_label(int $reference_id)` | Display label for a saved targeting row |
 
-Core ships the `group` provider (`includes/recipient_group_providers/GroupRecipientProvider.php`); event_manager registers `event` and `event_waiting_list` from its `serve.php`. A row whose provider is unregistered (e.g. its plugin is inactive) resolves to an empty group — the email simply targets no one from that row, never errors.
+Core ships three providers (`includes/recipient_group_providers/`): `group` (a Group's members), `mailing_list` (a list's subscribers) and `user` (one person — `resolve()` is the id itself, `options()` is empty so the campaign picker does not offer it). event_manager registers `event` and `event_waiting_list` from its `serve.php`. A row whose provider is unregistered (e.g. its plugin is inactive) resolves to an empty group — the email simply targets no one from that row, never errors.
 
 To add a targeting source, implement the interface and call `RecipientGroupProviderRegistry::register(new YourProvider())` — from `registerCoreDefaults()` for core, or from your plugin's `serve.php`.
+
+### Queueing: `Email::queue()`
+
+Expansion is a model operation, so every path that sends to an audience does the same thing:
+
+```php
+$email->add_recipient_group('event', $event->key);
+$email->add_recipient_group('user', $sender->key);   // the sender's own copy
+$queued = $email->queue();                            // int: recipients on the email
+```
+
+`queue()` resolves every `add` group through its provider, subtracts every `remove` group and de-duplicates by user id (a mailing-list email — `eml_mlt_mailing_list_id` — resolves to its subscribers instead). It writes one `erc_email_recipients` row per user not already on the email, skipping a user with no address. With at least one recipient it stamps `eml_scheduled_time = now()` and `eml_status = EMAIL_QUEUED`; with none it leaves the email untouched and returns 0. It never marks anything sent — the `SendQueuedEmails` task records delivery per recipient as it sends, and resumes from the unsent rows after a failure.
+
+`/admin/admin_emails_queue` calls it for a campaign. `/admin/admin_users_message` — reached from "Email registrants", "Email waiting list", "Email group" and "Send email to user" — creates one Email, attaches the audience plus `('user', sender)` (and `('user', leader)` for an event with a leader), queues it, and reports the count with a link to `/admin/admin_email` where per-person delivery state lives. Nothing is sent inside the request.
+
+### Listing the emails sent to an audience
+
+`MultiEmail` takes a `recipient_group` option — `['provider' => 'event', 'reference_id' => 12]` — matching every email that named that audience on its `add` side. `AdminPage::email_audience_table()` renders such a collection as a box (subject, sender, status, sent-of-total, time); the event admin page ("Emails to Registrants", "Emails to Waiting List") and the group members page use it.
 
 ## Service Configuration
 

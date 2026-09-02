@@ -53,8 +53,10 @@ class ConversationParticipant extends SystemBase {
 
 	public static $field_specifications = array(
 		'cnp_conversation_participant_id' => array('type' => 'int8', 'is_nullable' => false, 'serial' => true),
-		'cnp_cnv_conversation_id'         => array('type' => 'int8', 'required' => true),
-		'cnp_usr_user_id'                 => array('type' => 'int4', 'required' => true),
+		// One membership row per (conversation, member); the inbox and the
+		// unread count look a member up by their own column alone.
+		'cnp_cnv_conversation_id'         => array('type' => 'int8', 'required' => true, 'unique_with' => array('cnp_usr_user_id')),
+		'cnp_usr_user_id'                 => array('type' => 'int4', 'required' => true, 'index' => true),
 		'cnp_last_read_time'              => array('type' => 'timestamp(6)'),
 		'cnp_is_muted'                    => array('type' => 'bool', 'default' => false),
 		// Group admins manage membership and the group name. The creator is one;

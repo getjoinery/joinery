@@ -1,406 +1,128 @@
 <?php
-require_once(__DIR__ . '/../../includes/PathHelper.php');
-
+/**
+ * Group send: an email to an audience — an event's registrants, its waiting
+ * list, a group's members, or one person — queued as an email campaign.
+ *
+ * The page creates one Email row, attaches the audience and the copies as
+ * recipient groups, and queues it. The scheduled sender expands the audience
+ * and delivers in the background, resuming after a failure instead of
+ * repeating. Nothing is sent inside this request.
+ *
+ * @version 2.0.0
+ */
 function admin_users_message_logic(array $input): LogicResult {
-	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-
-	require_once(PathHelper::getIncludePath('data/emails_class.php'));
-	require_once(PathHelper::getIncludePath('data/email_recipients_class.php'));
-	require_once(PathHelper::getIncludePath('data/groups_class.php'));
-	require_once(PathHelper::getIncludePath('data/messages_class.php'));
-	// Event classes belong to event_manager; they are loaded only when targeting
-	// an event (which is only reachable while that plugin is active).
-	require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
-	require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
-	require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
-	require_once(PathHelper::getIncludePath('data/notifications_class.php'));
 
 	$session = SessionControl::get_instance();
-	//$session->set_return();
 	$session->check_permission(8);
 
-	$evt_event_id = LibraryFunctions::fetch_variable('evt_event_id', 0, FALSE, '');
-	$grp_group_id = LibraryFunctions::fetch_variable('grp_group_id', 0, FALSE, '');
-	$usr_user_id = LibraryFunctions::fetch_variable('usr_user_id', 0, FALSE, '');
+	$evt_event_id = (int)LibraryFunctions::fetch_variable('evt_event_id', 0, FALSE, '');
+	$grp_group_id = (int)LibraryFunctions::fetch_variable('grp_group_id', 0, FALSE, '');
+	$usr_user_id  = (int)LibraryFunctions::fetch_variable('usr_user_id', 0, FALSE, '');
+	$waiting_list = !empty($input['waiting_list']);
 
-	if(!$evt_event_id && !$usr_user_id && !$grp_group_id){
-		return LogicResult::error("You must pass an event or a group or a user.");
+	$targets = ($evt_event_id ? 1 : 0) + ($grp_group_id ? 1 : 0) + ($usr_user_id ? 1 : 0);
+	if ($targets === 0) {
+		return LogicResult::error('You must pass an event or a group or a user.');
 	}
-	else if($evt_event_id && $usr_user_id && $grp_group_id){
-		return LogicResult::error("You cannot pass both an event and a user and a group.");
+	if ($targets > 1) {
+		return LogicResult::error('Pass one of an event, a group or a user — not more than one.');
 	}
 
 	$sender = new User($session->get_user_id(), TRUE);
+	$settings = Globalvars::get_instance();
 
 	$event = NULL;
 	$group = NULL;
 	$recipient = NULL;
 
-	if($evt_event_id){
+	// Each entry names its audience as recipient groups, and the inner
+	// template the email is rendered with. The sender always gets a copy.
+	$recipient_groups = array();
+
+	if ($evt_event_id) {
 		if (!PluginHelper::isPluginActive('event_manager')) {
 			return LogicResult::error('Event messaging requires the Event Manager plugin.');
 		}
-		require_once(PathHelper::getIncludePath('plugins/event_manager/data/events_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_registrants_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_waiting_lists_class.php'));
 		$event = new Event($evt_event_id, TRUE);
+		if (!$event->key) {
+			return LogicResult::error('No such event.');
+		}
+		$inner_template = $settings->get_setting('event_email_inner_template');
+		if ($waiting_list) {
+			$recipient_groups[] = array('event_waiting_list', $event->key);
+		} else {
+			$recipient_groups[] = array('event', $event->key);
+			if ($event->get('evt_usr_user_id_leader')) {
+				$recipient_groups[] = array('user', (int)$event->get('evt_usr_user_id_leader'));
+			}
+		}
 	}
-	else if($grp_group_id){
+	else if ($grp_group_id) {
 		$group = new Group($grp_group_id, TRUE);
+		if (!$group->key) {
+			return LogicResult::error('No such group.');
+		}
+		$inner_template = $settings->get_setting('group_email_inner_template');
+		$recipient_groups[] = array('group', $group->key);
 	}
-	else if($usr_user_id){
+	else {
 		$recipient = new User($usr_user_id, TRUE);
-	}
-	else{
-		return LogicResult::error("You must pass an event or a user.");
-	}
-
-	$settings = Globalvars::get_instance();
-
-	if(!$settings->get_setting('mailgun_domain') || !$settings->get_setting('mailgun_api_key')){
-		return LogicResult::error('Mailgun credentials are not in the db or settings.');
-	}
-
-	$email_inner_template = $settings->get_setting('event_email_inner_template');
-	$email_outer_template = $settings->get_setting('event_email_outer_template');
-	$email_footer_template = $settings->get_setting('event_email_footer_template');
-
-	$numrecipients = 0;
-
-	if(LibraryFunctions::isFormSubmission()){
-
-		$input['eml_message'] = nl2br($input['eml_message']);
-
-		$settings = Globalvars::get_instance();
-		$sitename = $settings->get_setting('site_name');
-		$fromname = $settings->get_setting('defaultemailname');
-		$fromaddress = $settings->get_setting('defaultemail');
-
-		$email_record = new Email(NULL);
-		$email_record->set('eml_usr_user_id', $sender->key);
-		$email_record->set('eml_from_address', $fromaddress);
-		$email_record->set('eml_from_name', $fromname);
-		$email_record->set('eml_subject', $input['eml_subject']);
-		$email_record->set('eml_reply_to', $fromaddress);
-		//$email_record->set('eml_message_template_plain', NULL);
-		$email_record->set('eml_message_html', $input['eml_message']);
-		$email_record->set('eml_message_plain', LibraryFunctions::htmlToText($input['eml_message']));
-		$email_record->set('eml_scheduled_time', 'now()');
-		$email_record->set('eml_sent_time', 'now()');
-		$email_record->set('eml_status', 5);
-		$email_record->save();
-		$email_record->load();
-
-		if($event){
-			$event_registrants = NULL;
-			//EVENT-ONLY ENTRY, THIS IS SO WE CAN KEEP A RECORD OF THE EVENT MESSAGE
-			$message = new Message(NULL);
-			$message->set('msg_usr_user_id_sender', $sender->key);
-			$message->set('msg_usr_user_id_recipient', NULL);
-			$message->set('msg_context_type', 'event');
-			$message->set('msg_context_id', $event->key);
-			$message->set('msg_body', $input['eml_message']);
-			$message->set('msg_sent_time', 'now()');
-			$message->save();
-
-			//REGISTRANTS OR WAITING LIST
-			if(isset($input['waiting_list']) || isset($input['waiting_list'])){
-				$event_registrants = new MultiWaitingList(array('event_id' => $event->key), NULL);
-				$event_registrants->load();
-			}
-			else{
-				$event_registrants = new MultiEventRegistrant(array('event_id' => $event->key, 'expired' => false), NULL);
-				//$numregistrants = $event_registrants->count_all();
-				$event_registrants->load();
-			}
-
-			$settings = Globalvars::get_instance();
-			$email_inner_template = $settings->get_setting('event_email_inner_template');
-			$email_outer_template = $settings->get_setting('event_email_outer_template');
-			$email_footer_template = $settings->get_setting('event_email_footer_template');
-
-			//SAVE THE TEMPLATE
-			$email_record->set('eml_message_template_html', $email_inner_template);
-			$email_record->save();
-
-			foreach ($event_registrants as $event_registrant){
-				// Using new EmailMessage system instead
-
-				if(isset($input['waiting_list']) || isset($input['waiting_list'])){
-					$recipient_user = new User($event_registrant->get('ewl_usr_user_id'), TRUE);
-					// Template variables handled in new system below
-				}
-				else{
-					$recipient_user = new User($event_registrant->get('evr_usr_user_id'), TRUE);
-					// Template variables handled in new system below
-				}
-
-				$message = new Message(NULL);
-				$message->set('msg_usr_user_id_sender', $sender->key);
-				$message->set('msg_usr_user_id_recipient', $recipient_user->key);
-				if($event){
-					$message->set('msg_context_type', 'event');
-					$message->set('msg_context_id', $event->key);
-				}
-				$message->set('msg_body', $input['eml_message']);
-				$message->set('msg_sent_time', 'now()');
-				$message->save();
-
-				// In-app notification for event registrant
-				try {
-					$ntf_title = $event ? 'New message about ' . $event->get('evt_name') : 'New message from ' . $sender->display_name();
-					Notification::create_notification(
-						$recipient_user->key,
-						'message',
-						$ntf_title,
-						substr(strip_tags($input['eml_message']), 0, 100),
-						null,
-						$sender->key
-					);
-				} catch (Exception $e) { /* notification system not available */ }
-
-				$recipient_email = new EmailRecipient(NULL);
-				$recipient_email->set('erc_usr_user_id', $recipient_user->key);
-				$recipient_email->set('erc_email', $recipient_user->get('usr_email'));
-				$recipient_email->set('erc_name', $recipient_user->display_name());
-				$recipient_email->set('erc_eml_email_id', $email_record->key);
-				$recipient_email->set('erc_sent_time', 'now()');
-				$recipient_email->set('erc_status', 1);
-				$recipient_email->save();
-				$numrecipients++;
-				// Create and send using new system
-			$message_obj = EmailMessage::fromTemplate($email_inner_template, [
-				'subject' => $input['eml_subject'],
-				'body' => $input['eml_message'],
-				'utm_medium' => 'email',
-				'utm_content' => urlencode($input['eml_subject']),
-				'recipient' => $recipient_user->export_as_array()
-			]);
-			$message_obj->subject($input['eml_subject'])
-					   ->to($recipient_user->get('usr_email'), $recipient_user->display_name());
-			$sender_obj = new EmailSender();
-			$result = $sender_obj->send($message_obj);
-
-			}
-
-			if($result){
-				$email_record->mark_all_recipients_sent();
-				$email_record->set('eml_status', 10);
-				$email_record->save();
-			}
-
-			//SEND ONE TO LEADER
-			if(!(isset($input['waiting_list']) || isset($input['waiting_list']))){
-				if($event->get('evt_usr_user_id_leader')){
-					$leader = new User($event->get('evt_usr_user_id_leader'), TRUE);
-					// Using new EmailMessage system instead
-					// Template variables handled in new system below
-					// Create and send using new system
-			$message_obj = EmailMessage::fromTemplate($email_inner_template, [
-				'subject' => 'COPY: '.$input['eml_subject'],
-				'body' => $input['eml_message'],
-				'utm_medium' => 'email',
-				'utm_content' => urlencode($input['eml_subject']),
-				'recipient' => $leader->export_as_array()
-			]);
-			$message_obj->subject('COPY: '.$input['eml_subject'])
-					   ->to($leader->get('usr_email'), $leader->display_name());
-			$sender_obj = new EmailSender();
-			$result = $sender_obj->send($message_obj);
-				}
-			}
-
+		if (!$recipient->key) {
+			return LogicResult::error('No such user.');
 		}
-		else if($group){
-			$group_members = NULL;
-			//EVENT-ONLY ENTRY, THIS IS SO WE CAN KEEP A RECORD OF THE EVENT MESSAGE
-			$message = new Message(NULL);
-			$message->set('msg_usr_user_id_sender', $sender->key);
-			$message->set('msg_usr_user_id_recipient', NULL);
-			$message->set('msg_context_type', 'event');
-			$message->set('msg_context_id', $event->key);
-			$message->set('msg_body', $input['eml_message']);
-			$message->set('msg_sent_time', 'now()');
-			$message->save();
+		$inner_template = $settings->get_setting('individual_email_inner_template');
+		$recipient_groups[] = array('user', $recipient->key);
+	}
+	$recipient_groups[] = array('user', $sender->key);
 
-			//REGISTRANTS
-			$group_members = new MultiGroupMember(
-				array('group_id' => $group->key),  //SEARCH CRITERIA
-				NULL,  //SORT AND DIRECTION array($usrsort=>$usrsdirection)
-				NULL,  //NUM PER PAGE
-				NULL,  //OFFSET
-				'AND'  //AND OR OR
-			);
-			//$numrecords = $group_members->count_all();
-			$group_members->load();
-
-			$settings = Globalvars::get_instance();
-			$email_inner_template = $settings->get_setting('group_email_inner_template');
-			$email_outer_template = $settings->get_setting('group_email_outer_template');
-			$email_footer_template = $settings->get_setting('group_email_footer_template');
-
-			//SAVE THE TEMPLATE
-			$email_record->set('eml_message_template_html', $email_inner_template);
-			$email_record->save();
-
-			// Using new EmailMessage system instead
-			// Template variables handled in new system below
-
-			foreach ($group_members as $group_member){
-
-				$recipient_user = new User($group_member->get('grm_foreign_key_id'), TRUE);
-
-				$message = new Message(NULL);
-				$message->set('msg_usr_user_id_sender', $sender->key);
-				$message->set('msg_usr_user_id_recipient', $recipient_user->key);
-				if($event){
-					$message->set('msg_context_type', 'event');
-					$message->set('msg_context_id', $event->key);
-				}
-				$message->set('msg_body', $input['eml_message']);
-				$message->set('msg_sent_time', 'now()');
-				$message->save();
-
-				// In-app notification for group member
-				try {
-					$ntf_title = $group ? 'New message in ' . $group->get('grp_name') : 'New message from ' . $sender->display_name();
-					Notification::create_notification(
-						$recipient_user->key,
-						'message',
-						$ntf_title,
-						substr(strip_tags($input['eml_message']), 0, 100),
-						null,
-						$sender->key
-					);
-				} catch (Exception $e) { /* notification system not available */ }
-
-				$recipient_email = new EmailRecipient(NULL);
-				$recipient_email->set('erc_usr_user_id', $recipient_user->key);
-				$recipient_email->set('erc_email', $recipient_user->get('usr_email'));
-				$recipient_email->set('erc_name', $recipient_user->display_name());
-				$recipient_email->set('erc_eml_email_id', $email_record->key);
-				$recipient_email->set('erc_sent_time', 'now()');
-				$recipient_email->set('erc_status', 1);
-				$recipient_email->save();
-				$numrecipients++;
-
-			}
-			// Create and send using new system
-			$message_obj = EmailMessage::fromTemplate($email_inner_template, [
-				'subject' => $input['eml_subject'],
-				'body' => $input['eml_message'],
-				'utm_medium' => 'email',
-				'utm_content' => urlencode($input['eml_subject']),
-				'recipient' => $recipient_user->export_as_array()
-			]);
-			$message_obj->subject($input['eml_subject'])
-					   ->to($recipient_user->get('usr_email'), $recipient_user->display_name());
-			$sender_obj = new EmailSender();
-			$result = $sender_obj->send($message_obj);
-			if($result){
-				$email_record->mark_all_recipients_sent();
-				$email_record->set('eml_status', 10);
-				$email_record->save();
-			}
-
-		}
-		else{
-
-			$settings = Globalvars::get_instance();
-			$email_inner_template = $settings->get_setting('individual_email_inner_template');
-			// Using new EmailMessage system instead
-			// Template variables handled in new system below
-			// Create and send using new system
-			$message_obj = EmailMessage::fromTemplate($email_inner_template, [
-				'subject' => $input['eml_subject'],
-				'body' => $input['eml_message'],
-				'utm_medium' => 'email',
-				'utm_content' => urlencode($input['eml_subject']),
-				'recipient' => $recipient->export_as_array()
-			]);
-			$message_obj->subject($input['eml_subject'])
-					   ->to($recipient->get('usr_email'), $recipient->display_name());
-			$sender_obj = new EmailSender();
-			$result = $sender_obj->send($message_obj);
-			if($result){
-				$email_record->set('eml_status', 10);
-				$email_record->save();
-
-				$message = new Message(NULL);
-				$message->set('msg_usr_user_id_sender', $sender->key);
-				$message->set('msg_usr_user_id_recipient', $recipient->key);
-				if($event){
-					$message->set('msg_context_type', 'event');
-					$message->set('msg_context_id', $event->key);
-				}
-				$message->set('msg_body', $input['eml_message']);
-				$message->set('msg_sent_time', 'now()');
-				$message->save();
-
-				// In-app notification
-				try {
-					Notification::create_notification(
-						$recipient->key,
-						'message',
-						'New message from ' . $sender->display_name(),
-						substr(strip_tags($input['eml_message']), 0, 100),
-						null,
-						$sender->key
-					);
-				} catch (Exception $e) { /* notification system not available */ }
-
-				$recipient_email = new EmailRecipient(NULL);
-				$recipient_email->set('erc_usr_user_id', $recipient->key);
-				$recipient_email->set('erc_email', $recipient->get('usr_email'));
-				$recipient_email->set('erc_name', $recipient->display_name());
-				$recipient_email->set('erc_eml_email_id', $email_record->key);
-				$recipient_email->set('erc_sent_time', 'now()');
-				$recipient_email->set('erc_status', 1);
-				$recipient_email->save();
-				$numrecipients++;
-			}
-
+	if (LibraryFunctions::isFormSubmission()) {
+		$subject = trim((string)($input['eml_subject'] ?? ''));
+		$body = nl2br((string)($input['eml_message'] ?? ''));
+		if ($subject === '' || trim(strip_tags($body)) === '') {
+			return LogicResult::error('A subject and a message are required.');
 		}
 
-		$email_record->set('eml_status', 10);
-		$email_record->save();
-		$email_record->mark_all_recipients_sent();
+		$email = new Email(NULL);
+		$email->set('eml_usr_user_id', $sender->key);
+		$email->set('eml_from_address', $settings->get_setting('defaultemail'));
+		$email->set('eml_from_name', $settings->get_setting('defaultemailname'));
+		$email->set('eml_reply_to', $settings->get_setting('defaultemail'));
+		$email->set('eml_subject', $subject);
+		$email->set('eml_message_html', $body);
+		$email->set('eml_message_plain', LibraryFunctions::htmlToText($body));
+		$email->set('eml_message_template_html', $inner_template);
+		$email->set('eml_status', Email::EMAIL_CREATED);
+		$email->save();
+		$email->load();
 
-		//SEND ONE TO SENDER
+		foreach ($recipient_groups as $rg) {
+			$email->add_recipient_group($rg[0], $rg[1]);
+		}
 
-		$settings = Globalvars::get_instance();
-		$email_inner_template = $settings->get_setting('individual_email_inner_template');
-		// Using new EmailMessage system instead
-		$result = EmailSender::sendTemplate($email_inner_template,
-			$sender->get('usr_email'),
-			[
-				'subject' => 'COPY: '.$input['eml_subject'],
-				'body' => $input['eml_message'],
-				'utm_medium' => 'email',
-				'utm_content' => urlencode($input['eml_subject']),
-				'recipient' => $sender->export_as_array()
-			]
-		);
+		$numrecipients = $email->queue();
 
 		return LogicResult::render(array(
 			'show_success' => true,
 			'numrecipients' => $numrecipients,
+			'email' => $email,
 			'event' => $event,
 			'group' => $group,
-			'recipient' => $recipient
+			'recipient' => $recipient,
+			'waiting_list' => $waiting_list,
 		));
 	}
 
-	if($event){
-		$title = 'Send email to registrants of "'. $event->get('evt_name'). '"';
-		$to_field = 'Registrants of "'. $event->get('evt_name');
+	if ($event) {
+		$audience = $waiting_list ? 'the waiting list for' : 'registrants of';
+		$title = 'Send email to ' . $audience . ' "' . $event->get('evt_name') . '"';
+		$to_field = ucfirst($audience) . ' "' . $event->get('evt_name') . '"';
 	}
-	else if($group){
-		$title = 'Send email to the group: "'. $group->get('grp_name'). '"';
-		$to_field = 'Members of "'. $group->get('grp_name');
+	else if ($group) {
+		$title = 'Send email to the group: "' . $group->get('grp_name') . '"';
+		$to_field = 'Members of "' . $group->get('grp_name') . '"';
 	}
-	else{
-		$title = 'Send email to "'. $recipient->display_name(). '"';
+	else {
+		$title = 'Send email to "' . $recipient->display_name() . '"';
 		$to_field = $recipient->display_name();
 	}
 
@@ -410,7 +132,7 @@ function admin_users_message_logic(array $input): LogicResult {
 		'to_field' => $to_field,
 		'event' => $event,
 		'group' => $group,
-		'recipient' => $recipient
+		'recipient' => $recipient,
+		'waiting_list' => $waiting_list,
 	));
 }
-?>

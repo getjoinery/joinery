@@ -1,16 +1,6 @@
 <?php
 	
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
-	require_once(PathHelper::getIncludePath('data/emails_class.php'));
-	require_once(PathHelper::getIncludePath('data/email_recipients_class.php'));
-	require_once(PathHelper::getIncludePath('data/groups_class.php'));
-	require_once(PathHelper::getIncludePath('data/messages_class.php'));
-	// The $event object (when present) is built and its class loaded by the logic,
-	// only for event targeting — which is reachable only when event_manager is active.
-	require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
-	require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
-	require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
-
 	require_once(PathHelper::getIncludePath('adm/logic/admin_users_message_logic.php'));
 
 	$page_vars = process_logic(admin_users_message_logic(array_merge($_GET, $_POST)));
@@ -30,14 +20,22 @@
 		)
 		);
 		$page->begin_box();
-		if($page_vars['event']){
-			echo '<p>Your email was successfully sent to '.$page_vars['numrecipients'].' recipients.  <a href="/plugins/event_manager/admin/admin_event?evt_event_id='.$page_vars['event']->key.'">Return to the event registrants page</a>';
-		}
-		else if($page_vars['group']){
-			echo '<p>Your email was successfully sent to '.$page_vars['numrecipients'].' recipients.  <a href="/admin/admin_groups">Return to the groups page</a>';
+		$n = (int)$page_vars['numrecipients'];
+		$email_link = '<a href="/admin/admin_email?eml_email_id='.$page_vars['email']->key.'">Email '.$page_vars['email']->key.'</a>';
+		if($n > 0){
+			echo '<p>Queued to '.$n.' recipient'.($n === 1 ? '' : 's').'. It goes out in the background; delivery per person is on '.$email_link.'.</p>';
 		}
 		else{
-			echo '<p>Your email was successfully sent to '.$page_vars['numrecipients'].' recipients.  <a href="/admin/admin_user?usr_user_id='.$page_vars['recipient']->key.'">Return to the user page</a>';
+			echo '<p>Not queued: nobody is in this audience. '.$email_link.' was saved with no recipients.</p>';
+		}
+		if($page_vars['event']){
+			echo '<p><a href="/plugins/event_manager/admin/admin_event?evt_event_id='.$page_vars['event']->key.'">Return to the event page</a></p>';
+		}
+		else if($page_vars['group']){
+			echo '<p><a href="/admin/admin_group_members?grp_group_id='.$page_vars['group']->key.'">Return to the group members page</a></p>';
+		}
+		else{
+			echo '<p><a href="/admin/admin_user?usr_user_id='.$page_vars['recipient']->key.'">Return to the user page</a></p>';
 		}
 		$page->end_box();
 		$page->admin_footer();
@@ -79,7 +77,7 @@
 		'validation' => ['required' => true, 'minlength' => 10]
 	]);
 
-	if(isset($_REQUEST['waiting_list'])){
+	if($page_vars['waiting_list']){
 		$formwriter->hiddeninput('waiting_list', '', ['value' => 1]);
 	}
 

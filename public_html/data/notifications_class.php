@@ -64,7 +64,8 @@ class Notification extends SystemBase {
 
 	public static $field_specifications = array(
 		'ntf_notification_id'       => array('type' => 'int8', 'is_nullable' => false, 'serial' => true),
-		'ntf_usr_user_id'           => array('type' => 'int4', 'required' => true),
+		// The badge count is "unread rows for this member": one index answers it.
+		'ntf_usr_user_id'           => array('type' => 'int4', 'required' => true, 'index_with' => array('ntf_is_read')),
 		'ntf_type'                  => array('type' => 'varchar(50)', 'required' => true),
 		'ntf_title'                 => array('type' => 'varchar(255)', 'required' => true),
 		'ntf_body'                  => array('type' => 'text'),

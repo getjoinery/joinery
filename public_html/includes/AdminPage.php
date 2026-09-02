@@ -142,6 +142,39 @@ class AdminPage extends PublicPage {
 		return $out;
 	}
 
+	/**
+	 * A box listing the emails sent to one audience — an event's registrants,
+	 * a group's members — each linking to the email's delivery page.
+	 *
+	 * @param MultiEmail $emails  Already filtered (recipient_group) and paged
+	 * @param array      $options tableheader() options: title, altlinks, card
+	 * @param Pager|null $pager
+	 */
+	public function email_audience_table($emails, $options = array(), $pager = NULL) {
+		$session = SessionControl::get_instance();
+		$this->tableheader(array('Subject', 'Sent by', 'Status', 'Recipients', 'Time'), $options, $pager);
+		foreach ($emails as $email) {
+			$author = $email->get('eml_usr_user_id') ? $email->get_user() : NULL;
+			$sent = count(new MultiEmailRecipient(array('email_id' => $email->key, 'sent' => true)));
+			$total = count(new MultiEmailRecipient(array('email_id' => $email->key)));
+			if ($email->get('eml_status') == Email::EMAIL_SENT && $email->get('eml_sent_time')) {
+				$time = 'Sent ' . LibraryFunctions::convert_time($email->get('eml_sent_time'), 'UTC', $session->get_timezone());
+			} else if ($email->get('eml_status') == Email::EMAIL_QUEUED && $email->get('eml_scheduled_time')) {
+				$time = 'Queued ' . LibraryFunctions::convert_time($email->get('eml_scheduled_time'), 'UTC', $session->get_timezone());
+			} else {
+				$time = '';
+			}
+			$this->disprow(array(
+				'<a href="/admin/admin_email?eml_email_id=' . $email->key . '">' . htmlspecialchars((string)$email->get('eml_subject')) . '</a>',
+				$author && $author->key ? htmlspecialchars($author->display_name()) : '(System)',
+				$email->get_status_text(),
+				$sent . ' of ' . $total . ' sent',
+				$time,
+			));
+		}
+		$this->endtable($pager);
+	}
+
 	public function admin_footer($options=array()) {
 		$session = SessionControl::get_instance();
 		$session->clear_clearable_messages();

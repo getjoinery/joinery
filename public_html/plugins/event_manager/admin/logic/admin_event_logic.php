@@ -197,23 +197,27 @@ function admin_event_logic(array $input): LogicResult {
 	$event_image = $event->get('evt_fil_file_id') ? new File($event->get('evt_fil_file_id'), TRUE) : null;
 	$event_photos = $event->get_photos();
 
-	//MESSAGES
+	// EMAILS TO REGISTRANTS AND TO THE WAITING LIST: every email whose
+	// audience named this event, newest first.
 	$mnumperpage = 20;
 	$moffset = LibraryFunctions::fetch_variable('moffset', 0, 0, '');
-	$msort = LibraryFunctions::fetch_variable('msort', 'message_id', 0, '');
-	$msdirection = LibraryFunctions::fetch_variable('msdirection', 'DESC', 0, '');
-	$msearchterm = LibraryFunctions::fetch_variable('msearchterm', '', 0, '');
-	$msearch_criteria = array();
-	$msearch_criteria['context_type'] = 'event';
-	$msearch_criteria['context_id_only'] = $event->key;
-	$messages = new MultiMessage(
-		$msearch_criteria,
-		array($msort=>$msdirection),
+	$registrant_emails = new MultiEmail(
+		array('recipient_group' => array('provider' => 'event', 'reference_id' => $event->key), 'deleted' => false),
+		array('email_id' => 'DESC'),
 		$mnumperpage,
 		$moffset);
-	$nummessages = $messages->count_all();
-	$messages->load();
-	$mpager = new Pager(array('numrecords'=>$nummessages, 'numperpage'=> $mnumperpage), 'w');
+	$numregistrantemails = $registrant_emails->count_all();
+	$mpager = new Pager(array('numrecords'=>$numregistrantemails, 'numperpage'=> $mnumperpage), 'm');
+
+	$lnumperpage = 20;
+	$loffset = LibraryFunctions::fetch_variable('loffset', 0, 0, '');
+	$waiting_list_emails = new MultiEmail(
+		array('recipient_group' => array('provider' => 'event_waiting_list', 'reference_id' => $event->key), 'deleted' => false),
+		array('email_id' => 'DESC'),
+		$lnumperpage,
+		$loffset);
+	$numwaitinglistemails = $waiting_list_emails->count_all();
+	$lpager = new Pager(array('numrecords'=>$numwaitinglistemails, 'numperpage'=> $lnumperpage), 'l');
 
 	// Sessions for paged display
 	$snumperpage = 20;
@@ -249,9 +253,12 @@ function admin_event_logic(array $input): LogicResult {
 		'waiting_lists' => $waiting_lists,
 		'numwaitinglist' => $numwaitinglist,
 		'wpager' => $wpager,
-		'messages' => $messages,
-		'nummessages' => $nummessages,
+		'registrant_emails' => $registrant_emails,
+		'numregistrantemails' => $numregistrantemails,
 		'mpager' => $mpager,
+		'waiting_list_emails' => $waiting_list_emails,
+		'numwaitinglistemails' => $numwaitinglistemails,
+		'lpager' => $lpager,
 		'event_sessions_paged' => $event_sessions_paged,
 		'spager' => $spager,
 	);

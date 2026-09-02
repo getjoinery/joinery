@@ -17,7 +17,7 @@ class Message extends SystemBase {	public static $prefix = 'msg';
 	// executor blocklist + auto-block regex prevent extracting credentials, but
 	// recipe authors should treat retrieved bodies as data, not instructions.
 	public static $ai_readable        = true;
-	public static $ai_owner_field     = ['msg_usr_user_id_sender', 'msg_usr_user_id_recipient']; // a member sees messages they sent or received
+	public static $ai_owner_field     = 'msg_usr_user_id_sender'; // a member sees the messages they sent
 	public static $ai_description     = 'Direct messages between users (or to/from event hosts). msg_body is the message text.';
 	public static $ai_excluded_fields = [];
 	public static $ai_untrusted_fields = ['msg_body'];
@@ -215,19 +215,27 @@ function display_title(){
 		}
 	}
 
-	// REST API per-record read scope: a private message is readable only by its
-	// sender or recipient (or staff, permission >= 5). A message has no bare
-	// msg_usr_user_id column — the parties are msg_usr_user_id_sender and
-	// msg_usr_user_id_recipient — so both are checked.
+	// REST API per-record read scope: a message is readable by staff
+	// (permission >= 5) and by anyone in its conversation. Membership, not the
+	// sender column, is what admits a reader: a group thread's messages belong
+	// to every participant, whoever wrote each one.
 	function authenticate_read($data) {
-		$uid = $data['current_user_id'];
-		if ($this->get('msg_usr_user_id_sender') != $uid
-			&& $this->get('msg_usr_user_id_recipient') != $uid) {
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError(
-					'Current user does not have permission to view this entry in '. static::$tablename);
+		if ($data['current_user_permission'] >= 5) {
+			return;
+		}
+		$uid = (int)$data['current_user_id'];
+		if ($this->get('msg_usr_user_id_sender') == $uid) {
+			return;
+		}
+		$conversation_id = (int)$this->get('msg_cnv_conversation_id');
+		if ($conversation_id > 0) {
+			$conversation = new Conversation($conversation_id, TRUE);
+			if ($conversation->key && $conversation->has_participant($uid)) {
+				return;
 			}
 		}
+		throw new SystemAuthenticationError(
+			'Current user does not have permission to view this entry in '. static::$tablename);
 	}
 
 	// REST API per-record write scope: a message is owned by its sender, so only
