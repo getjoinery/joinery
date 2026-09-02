@@ -146,6 +146,32 @@ check(ProvisionPendingSsl::PROBE_MIN_CORE_VERSION === '0.8.304',
 	'the gate is pinned to the release that added the /sm-ssl-probe.txt route',
 	'serve.php 1.6.0 landed 2026-08-19 11:53; 0.8.303 published at 11:16, 0.8.304 at 15:18');
 
+section('A certificate the machine already reports is observed, not requested');
+
+// A machine this plane installs issues its own certificate — during the
+// install, or on the host's retry timer once DNS points here — and its
+// check_status enumerates every lineage. A covering, CA-issued, unexpired
+// lineage flips the node active with no job at all.
+$reports = function ($certs, $extra = []) {
+	return array_merge(['ssl_certificate_count' => count($certs), 'ssl_certificates' => $certs], $extra);
+};
+$live = ['domains' => ['a.example.com'], 'not_after' => gmdate('Y-m-d H:i:s', time() + 86400 * 60)];
+check(ProvisionPendingSsl::status_reports_certificate($reports([$live]), 'a.example.com'),
+	'a live lineage covering the domain is observed');
+check(ProvisionPendingSsl::status_reports_certificate($reports([['domains' => ['*.example.com'], 'not_after' => gmdate('Y-m-d H:i:s', time() + 86400)]]), 'a.example.com'),
+	'a wildcard one level up covers it');
+check(!ProvisionPendingSsl::status_reports_certificate($reports([['domains' => ['b.example.com']]]), 'a.example.com'),
+	'a lineage for another name does not');
+check(!ProvisionPendingSsl::status_reports_certificate($reports([array_merge($live, ['self_signed' => true])]), 'a.example.com'),
+	'a self-signed placeholder is not a certificate');
+check(!ProvisionPendingSsl::status_reports_certificate($reports([['domains' => ['a.example.com'], 'not_after' => '2020-01-01 00:00:00']]), 'a.example.com'),
+	'an expired lineage is not one either — a lapsed renewer is what this task exists to notice');
+check(!ProvisionPendingSsl::status_reports_certificate($reports([$live], ['ssl_certificates_unreadable' => true]), 'a.example.com'),
+	'a report that could not read the directory says nothing');
+check(!ProvisionPendingSsl::status_reports_certificate(['status' => 'ok'], 'a.example.com'),
+	'a report from a transport that cannot see certificates says nothing');
+check(!ProvisionPendingSsl::status_reports_certificate(null, 'a.example.com'), 'no report says nothing');
+
 section('Routing misses are counted the way the lanes expect');
 
 $place = function ($status, $params = null) {

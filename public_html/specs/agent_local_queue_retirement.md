@@ -97,10 +97,10 @@ its live use measured against the job table.
 | Operation | Steps | Live use | Disposition |
 |---|---|---|---|
 | `publish_upgrade` | local | 33 runs / 14d, last 08-28 | **Re-home plane-side (G1)** |
-| `provision_ssl` | local + ssh | issuance only; no renewal traffic | **Blocked on Docker-host certificates (G2)** |
-| `install_node` | local + ssh + scp | last 08-09 | Move to the provisioning runner |
-| `discover_nodes` | local + ssh | last 04-20 | Move to the provisioning runner |
-| `enable_agent` | ssh | UI-reachable | Move to the provisioning runner |
+| `provision_ssl` | local + ssh | issuance only; no renewal traffic | To the agent via the host node — G2 is open now that hosts run an agent. `ssh_single_bootstrap.md` |
+| `install_node` | local + ssh + scp | last 08-09 | The one bootstrap, on `InstallJobExecutor`; collapses to one session. `ssh_single_bootstrap.md` |
+| `discover_nodes` | local + ssh | last 04-20 | **Delete.** `ssh_single_bootstrap.md` |
+| `enable_agent` | ssh | UI-reachable | **Delete.** `ssh_single_bootstrap.md` |
 | `provision_relay` | local + ssh + scp | last 07-19 | Provisioning runner, or dies with the relay |
 | `decommission_node` | ssh + scp | last 07-24, UI-reachable | Becomes a provider API call |
 | `backup_database` | ssh | last 07-31 | **Delete** |
@@ -123,6 +123,10 @@ or a plane-side worker — before `cfg.LocalJobs` can go false. Without one, the
 flip stops all publishing.
 
 **G2 — container nodes cannot ISSUE certificates over the channel.**
+*(Opened 2026-09-01: a Docker host is a paired machine-posture node
+reporting `provision_certificate`, and `mgh_mgn_host_node_id` routes to it.
+The disposition is in `ssh_single_bootstrap.md` WP3; the measurements below
+stand.)*
 `ProvisionPendingSsl::uses_primitive_route()` takes the agent SSL chain only
 when `is_bare_metal($node) && has_primitive($node, 'provision_certificate')`.
 The measured fleet is **8 of 9 paired nodes containerised**; only
@@ -209,7 +213,9 @@ the largest single reduction available to this spec — `install_node`'s sixteen
 remote steps simply have no caller left on the provisioning path.
 
 What remains is machines we did **not** create — `discover_nodes` and
-`enable_agent` against a box whose owner supplies the credential, and
+`enable_agent` against a box whose owner supplies the credential (both
+deleted under `ssh_single_bootstrap.md`: the owner enrolls from the node's
+own Management Node page, and the plane needs no shell on it), and
 `provision_relay`, whose target set is wider than the single relay node on
 paper — it also installs a restricted pull key on relay *shards*, tracked as a
 separate question in `keyless_provisioning.md`.

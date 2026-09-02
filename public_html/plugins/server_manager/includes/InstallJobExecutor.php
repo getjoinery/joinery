@@ -14,17 +14,20 @@
  *     are created in status 'queued' (ManagementJob::createJob), which the
  *     node-agent local queue's claim ('pending' only) never matches, so the
  *     two never contend for the same job.
- *   - It handles the fresh-install shape: 'local' steps run here on the plane,
- *     'ssh' steps run on the target over the sealed password. A from_backup
- *     job (scp transfers, steps addressed to a different source node) is
- *     refused with a clear message rather than half-run — that is a later
- *     increment.
+ *   - It runs two step types: 'local' steps here on the plane, 'ssh' steps
+ *     on the target over the sealed password. build_install_node emits one of
+ *     each — the release pre-flight, then the single bootstrap session — for
+ *     every shape (fresh, from_backup, bare; docker or bare-metal). A clone
+ *     pulls its source over HTTPS inside that session, so there is no scp
+ *     and no step addressed to another machine (specs/ssh_single_bootstrap.md).
  *   - The password is unsealed only in memory and handed to ssh through the
  *     SSHPASS environment variable, never on a command line.
  *
  * It writes the same mjb_output / mjb_status contract the agent's runner wrote,
  * so JobResultProcessor::process_install_node reads a completed job unchanged.
  *
+ * @version 1.4 - every install shape runs: the shape refusal and the scp/other-node refusals are gone,
+ *                since the bootstrap is one session and a clone travels over HTTPS
  * @version 1.3 - processes the job result itself once the job is finished, as the channel endpoint does
  *                for an agent-run job; a retried install otherwise completes and clears nothing
  * @version 1.2 - waits for the target to answer SSH before the first remote step: a provider reports
@@ -97,23 +100,6 @@ class InstallJobExecutor {
 		$node = new ManagedNode((int)$job->get('mjb_mgn_node_id'), TRUE);
 		if (!$node->key) {
 			$this->finish($job, false, 'The install job names no live target node.');
-			return;
-		}
-
-		// Shape first: only a fresh docker install is runnable here. A
-		// from_backup job carries scp steps, and bare metal needs the
-		// pre-stage/user-switch dance a keyless box cannot do — it would die
-		// mid-run at "Pre-stage user1" with a FATAL about authorized_keys.
-		// Refusing on the job's own parameters says so in one line.
-		$params = json_decode((string)$job->get('mjb_parameters'), true);
-		$params = is_array($params) ? $params : array();
-		$mode = (string)($params['mode'] ?? 'fresh');
-		$docker_mode = (string)($params['docker_mode'] ?? 'docker');
-		if ($mode !== 'fresh' || $docker_mode !== 'docker') {
-			$this->finish($job, false,
-				"The bootstrap executor runs fresh docker installs only; this job asks for mode "
-				. "'{$mode}' on '{$docker_mode}'. from_backup and bare-metal wait on a later increment "
-				. "(specs/keyless_provisioning.md).");
 			return;
 		}
 
@@ -251,9 +237,8 @@ class InstallJobExecutor {
 	}
 
 	/**
-	 * Run one step. Returns [output, exit_code, error_message].
-	 * A non-fresh shape (scp, or an ssh step addressed to another node) is
-	 * refused rather than half-attempted.
+	 * Run one step. Returns [output, exit_code, error_message]. Only 'local'
+	 * and 'ssh' exist; anything else is a builder defect and fails by name.
 	 */
 	private function run_step($step, $ctx) {
 		$type = (string)($step['type'] ?? '');
@@ -265,11 +250,6 @@ class InstallJobExecutor {
 		}
 
 		if ($type === 'ssh') {
-			if (!empty($step['node_id']) && (int)$step['node_id'] !== $ctx['job_node']) {
-				return array('', 1,
-					'a step addressed to another node is not supported by the bootstrap executor yet '
-					. '(this is a from_backup transfer); run a fresh install for now');
-			}
 			$ssh = 'sshpass -e ssh'
 				. ' -o StrictHostKeyChecking=accept-new'
 				. ' -o UserKnownHostsFile=/dev/null'
@@ -279,12 +259,6 @@ class InstallJobExecutor {
 				. ' ' . escapeshellarg((string)($step['cmd'] ?? ''));
 			list($out, $code) = $this->shell($ssh, array('SSHPASS' => $ctx['password']), $timeout);
 			return array($out, $code, $code !== 0 ? "ssh step exited {$code}" : '');
-		}
-
-		if ($type === 'scp') {
-			return array('', 1,
-				'scp transfers are not supported by the bootstrap executor yet (from_backup); '
-				. 'run a fresh install for now');
 		}
 
 		return array('', 1, "unknown step type '{$type}'");

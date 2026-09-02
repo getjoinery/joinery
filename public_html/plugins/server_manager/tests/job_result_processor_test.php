@@ -308,30 +308,78 @@ section('Terminal jobs always record a result (the sweep can never re-process fo
 // without recording would make that job re-processed on every render, forever.
 // Handler early-returns (no node on the job) are covered by the process()
 // backstop, for every job type at once.
-$orphan = jrp_job(null, 'provision_ssl', 'whatever');
+$orphan = jrp_job(null, 'provision_certificate', 'whatever');
 JobResultProcessor::process($orphan);
 check((string)$orphan->get('mjb_result') !== '',
 	'a job whose handler returns early still records a result via the backstop',
 	var_export($orphan->get('mjb_result'), true));
 
-// CF gating: a completed Cloudflare-path job without routing verification must
-// NOT flip ssl_state active (and still records a result).
-$cf_node = jrp_node(array('mgn_ssl_state' => 'pending'));
-$cf_job = jrp_job($cf_node, 'provision_ssl', "PROTO_ALREADY_HTTPS\nSSL_SKIPPED_CLOUDFLARE");
-JobResultProcessor::process($cf_job);
-$cf_node->load();
-check($cf_node->get('mgn_ssl_state') !== 'active',
-	'a CF-path completion without CF_ROUTING_VERIFIED does not mark SSL active',
-	var_export($cf_node->get('mgn_ssl_state'), true));
-check((string)$cf_job->get('mjb_result') !== '', 'and the unverified CF job still records a result');
+// The SSH certificate path is gone with its builder (specs/ssh_single_bootstrap.md).
+check(!in_array('provision_ssl', JobResultProcessor::processable_types(), true),
+	'provision_ssl is no longer a job type this processor knows');
+check(!in_array('discover_nodes', JobResultProcessor::processable_types(), true),
+	'and neither is discover_nodes');
 
-$cf_ok_node = jrp_node(array('mgn_ssl_state' => 'pending'));
-$cf_ok = jrp_job($cf_ok_node, 'provision_ssl', "PROBE_PLACED\nCF_ROUTING_VERIFIED\nPROTO_PATCHED\nSSL_SKIPPED_CLOUDFLARE");
-JobResultProcessor::process($cf_ok);
-$cf_ok_node->load();
-check($cf_ok_node->get('mgn_ssl_state') === 'active',
-	'a routing-verified CF completion marks SSL active',
-	var_export($cf_ok_node->get('mgn_ssl_state'), true));
+// ---------------------------------------------------------------------------
+section('A certificate issued on the host is stamped on the site it was for');
+
+// A container's certificate job is filed against its HOST's agent and names
+// the site in for_node_id. The SITE goes active; the host is untouched.
+$issued = "\033[0;32m[OK]\033[0m Issued LE certificate for site.example.com (HTTP-01)\nApache reloaded.\n";
+$cert_host = jrp_node(array('mgn_ssl_state' => null));
+$cert_site = jrp_node(array('mgn_ssl_state' => 'pending', 'mgn_site_url' => 'https://site.example.com',
+	'mgn_container_name' => 'certsite'));
+$cert_job = jrp_job($cert_host, 'provision_certificate', $issued);
+$cert_job->set('mjb_parameters', array('domain' => 'site.example.com', 'for_node_id' => (int)$cert_site->key));
+$cert_job->save();
+JobResultProcessor::process($cert_job);
+$cert_site->load(); $cert_host->load();
+check($cert_site->get('mgn_ssl_state') === 'active', 'the site the job was for goes active',
+	var_export($cert_site->get('mgn_ssl_state'), true));
+check($cert_host->get('mgn_ssl_state') !== 'active', 'the host the job ran on is not marked');
+
+// Without for_node_id (a bare-metal node issuing for itself) the job\'s own node is stamped.
+$self_node = jrp_node(array('mgn_ssl_state' => 'pending', 'mgn_site_url' => 'https://site.example.com'));
+JobResultProcessor::process(jrp_job($self_node, 'provision_certificate', $issued));
+$self_node->load();
+check($self_node->get('mgn_ssl_state') === 'active', 'a node issuing for itself is stamped');
+
+// ---------------------------------------------------------------------------
+section('The secret a compiled-names job carried does not outlive the job');
+
+$arm_node = jrp_node(array());
+$arm_job = jrp_job($arm_node, 'clone_export_arm', json_encode(array('api_version' => '1.0',
+	'data' => array('output' => "CLONE_EXPORT_ARM=armed\n"))));
+$arm_job->set('mjb_commands', array('primitive' => 'clone_export_arm', 'params' => array('export_key' => 'deadbeefdeadbeefdeadbeef')));
+$arm_job->set('mjb_parameters', array('export_key' => 'deadbeefdeadbeefdeadbeef', 'provision_id' => 7));
+$arm_job->save();
+JobResultProcessor::process($arm_job);
+$arm_job->load();
+$arm_result = json_decode((string)$arm_job->get('mjb_result'), true);
+check(!empty($arm_result['armed']), 'the arm job records that the source armed', (string)$arm_job->get('mjb_result'));
+check(strpos((string)json_encode($arm_job->get('mjb_commands')), 'deadbeef') === false
+	&& strpos((string)json_encode($arm_job->get('mjb_parameters')), 'deadbeef') === false,
+	'the export key is blanked out of both the envelope and the record');
+$arm_record = $arm_job->get('mjb_parameters');
+if (is_string($arm_record)) { $arm_record = json_decode($arm_record, true); }
+check((int)($arm_record['provision_id'] ?? 0) === 7, 'the rest of the record survives', json_encode($arm_record));
+
+$fe_node = jrp_node(array());
+$fe_job = jrp_job($fe_node, 'fleet_enroll', json_encode(array('api_version' => '1.0',
+	'data' => array('output' => "FLEET_ENROLL=ok\nservice_url=https://x\n"))));
+$fe_job->set('mjb_commands', array('primitive' => 'fleet_enroll', 'params' => array(
+	'service_url' => 'https://x', 'public_key' => 'public_abcdefgh12345678', 'secret_key' => 'secret_abcdefgh12345678')));
+$fe_job->set('mjb_parameters', array('service_url' => 'https://x', 'public_key' => 'public_abcdefgh12345678', 'secret_key' => 'secret_abcdefgh12345678'));
+$fe_job->save();
+JobResultProcessor::process($fe_job);
+$fe_job->load();
+check(!empty(json_decode((string)$fe_job->get('mjb_result'), true)['seeded']), 'a completed fleet_enroll that said ok is seeded');
+check(strpos((string)json_encode($fe_job->get('mjb_commands')), 'secret_abcdefgh') === false
+	&& strpos((string)json_encode($fe_job->get('mjb_parameters')), 'secret_abcdefgh') === false,
+	'the secret key is blanked; the public key may stay',
+	(string)json_encode($fe_job->get('mjb_parameters')));
+check(strpos((string)json_encode($fe_job->get('mjb_parameters')), 'public_abcdefgh') !== false,
+	'the public half is still on the record');
 
 // ---------------------------------------------------------------------------
 section('Decommission: soft-delete only when verified');

@@ -32,6 +32,9 @@ class SmSecretRedactor {
 	private static $secret_keys = array(
 		'secret_key', 'access_key', 'application_key', 'app_key',
 		'api_secret', 'apk_secret_key', 'password', 'passwd', 'token', 'secret',
+		// The clone export key (clone_export_arm, and --clone-key= on the
+		// bootstrap command) — a bearer token and the dump's encryption password.
+		'export_key', 'clone_key',
 		// The storage target's credential, as it travels in a backup job's
 		// parameters and in the SSH path's config heredoc. Nothing renders
 		// either today, but redaction is the only thing standing between that
@@ -60,6 +63,9 @@ class SmSecretRedactor {
 
 		// Header-style "secret-key: value" carried in API step commands.
 		$text = preg_replace('/(secret-key\s*:\s*)([^\s\'"]+)/i', '${1}' . self::MASK, $text);
+
+		// The bootstrap's --clone-key=KEY flag (a quoted or bare value).
+		$text = preg_replace('/(--clone-key=)(\'[^\']*\'|"[^"]*"|\S+)/', '${1}' . self::MASK, $text);
 
 		// Shell env-var assignments — PGPASSWORD=..., AWS_SECRET_ACCESS_KEY=...,
 		// GITHUB_TOKEN=... — the shape a hand-typed console command uses. Matched

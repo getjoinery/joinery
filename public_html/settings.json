@@ -2661,6 +2661,12 @@
       "helptext": "All site mail is sent as this account address. To send as a hosted alias, or to relay forwarded mail with the original sender intact, use SMTP, Mailgun or SES instead."
     },
     {
+      "name": "clone_export_key",
+      "default": "",
+      "managed": true,
+      "helptext": "Bearer token that turns on this site's clone export (utils/clone_export) for the length of one clone; empty means off. Written by a management node through the agent's clone_export_arm primitive, or by an operator in the database. Kept off the settings page on purpose: an admin must not be able to turn on a full-site export from a browser."
+    },
+    {
       "name": "managed_domain_name",
       "default": "",
       "managed": true,

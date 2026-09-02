@@ -130,15 +130,13 @@ section('What SSH still owns');
 // SSH-only operation is a step backwards taken by accident.
 //
 // Five of these are relay builders that die at the cutover rather than crossing
-// (agent_machine_posture_and_relay_converge.md). The three that have to be
-// answered are install_node, enable_agent and provision_ssl —
-// decommission_node crossed to the host agent's decommission_site primitive
-// (docker_host_agent.md).
+// (agent_machine_posture_and_relay_converge.md). The one that stays by design
+// is install_node: the single bootstrap session in a machine's life
+// (ssh_single_bootstrap.md). provision_ssl went to the agent, and enable_agent
+// and discover_nodes were deleted outright.
 $expected_ssh_only = array(
-	'enable_agent',
 	'install_node',
 	'provision_relay',
-	'provision_ssl',
 	'rebuild_relay',
 	'relay_add_tenant',
 	'relay_remove_tenant',

@@ -168,7 +168,7 @@
 		<button type="button" class="btn btn-sm btn-primary dropdown-toggle" onclick="var m=this.nextElementSibling;m.style.display=m.style.display==='block'?'none':'block'">Actions</button>
 		<ul class="dropdown-menu dropdown-menu-end svm-dropdown-menu">
 			<li><a class="dropdown-item" href="<?php echo $base_url; ?>&tab=overview&edit=1#connectionSettings">Edit Connection Settings</a></li>
-			<?php if (JobCommandBuilder::has_ssh($node) && $node->get('mgn_web_root')): ?>
+			<?php if (JobCommandBuilder::has_primitive($node, 'run_plugin_installers')): ?>
 				<li><a class="dropdown-item" href="#" onclick="JoineryModal.confirm('Run every active plugin\'s host installer on this node (root, idempotent)? Needed after activating a plugin that configures system services, e.g. the mail stack.', function(){ document.getElementById('run_plugin_installers_form').submit(); }); return false;">Run Plugin Installers</a></li>
 			<?php endif; ?>
 			<?php if ($session->get_permission() >= 10 && !$node->get('mgn_agent_public_key')):
@@ -555,9 +555,9 @@
 		$pageoptions = ['title' => 'SSL Setup'];
 		$page->begin_box($pageoptions);
 
-		// Failed alert with link to last provision_ssl job
+		// Failed alert with link to the last certificate-chain job
 		if ($ssl_card_state === 'failed') {
-			$ssl_job = ManagementJob::latestForNode($node->key, 'provision_ssl');
+			$ssl_job = ProvisionPendingSsl::latest_chain_job($node);
 			echo '<div class="alert alert-danger mb-3">A previous SSL provisioning attempt failed.';
 			if ($ssl_job) {
 				echo ' <a href="/admin/server_manager/job_detail?job_id=' . $ssl_job->key . '" class="alert-link">Review the job output →</a>';
@@ -566,7 +566,7 @@
 		}
 
 		if ($ssl_card_state === 'pending') {
-			$ssl_job = ManagementJob::latestForNode($node->key, 'provision_ssl');
+			$ssl_job = ProvisionPendingSsl::latest_chain_job($node);
 			$ssl_job_failed = $ssl_job && $ssl_job->get('mjb_status') === 'failed';
 
 			// "Pending" covers two very different situations: a job in flight,
@@ -586,7 +586,7 @@
 			} else {
 				echo '<p class="mb-3">SSL provisioning is in progress for <strong>' . htmlspecialchars($ssl_card_domain) . '</strong>.</p>';
 				if ($ssl_job) {
-					echo '<p><a href="/admin/server_manager/job_detail?job_id=' . $ssl_job->key . '" class="btn btn-sm btn-outline-secondary">View provision SSL job #' . $ssl_job->key . '</a></p>';
+					echo '<p><a href="/admin/server_manager/job_detail?job_id=' . $ssl_job->key . '" class="btn btn-sm btn-outline-secondary">View certificate job #' . $ssl_job->key . '</a></p>';
 				}
 			}
 		} else {
@@ -631,7 +631,7 @@
 			echo '<a href="' . $base_url . '&tab=overview" class="btn btn-outline-secondary btn-sm">Re-check DNS</a>';
 			echo '</div>';
 			if ($can_provision) {
-				echo '<p class="text-muted small mt-2 mb-0">Certbot will run on the node\'s host and configure Apache to serve HTTPS for this domain.</p>';
+				echo '<p class="text-muted small mt-2 mb-0">The node\'s agent (its host\'s, for a container) issues the certificate and serves HTTPS for this domain. A Docker host also retries on its own timer until DNS points here.</p>';
 			}
 		}
 

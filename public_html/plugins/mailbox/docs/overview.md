@@ -2517,13 +2517,15 @@ server_manager required): a subscription tier whose features grant
 `mailbox_fleet_slot` (an existing slot-granting tier is reused) and an
 inactive `customer_cloud`-fulfilled product on it — pricing and activating it
 are the operator's explicit acts on the product edit page. When a paid order
-then provisions the buyer's server, `ProvisionCustomerCloud` finishes by
-calling `FleetProvisionSeeding` (mailbox side): if the fleet service is on,
-the store is this deployment, and the buyer's tier carries the slot feature,
-it mints a machine API key for the buyer's account (`Fleet enrollment`,
-read+write; re-minting deactivates the previous one) and writes the three
-fleet-service settings into the new site's database over SSH — the secret
-travels on stdin into a psql heredoc, never in a job row, argv, or log. The
+then provisions the buyer's server, `ProvisionCustomerCloud` hands the
+finished site to `FleetProvisionSeeding` (mailbox side) once its agent has
+paired: if the fleet service is on, the store is this deployment, and the
+buyer's tier carries the slot feature, it mints a machine API key for the
+buyer's account (`Fleet enrollment`, read+write; re-minting deactivates the
+previous one) and dispatches ONE `fleet_enroll` job on the site's own agent
+carrying the three values — the setting names are compiled into
+`utils/fleet_enroll.php` on the site, the secret rides the job row redacted
+and is blanked once the node answers, and nothing opens a shell. The
 owner's Setup tab then lands on one-click Enroll; the DNS TXT ownership
 proofs and the MX edit stay manual by nature (the customer proving domain
 control at their own DNS provider). Seeding is best-effort: a failure alerts

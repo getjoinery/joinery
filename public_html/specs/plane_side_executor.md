@@ -96,9 +96,9 @@ dispatched, and fails at its first step:
 | Operation | Why it needs the executor |
 |---|---|
 | ~~`restore_database`, `restore_project`, `restore_chain`~~ | **Closed 2026-08-30 — does not need the executor.** The destructive gate is open for a paired node on agent 1.13.0, and the artifact a restore had nothing to restore from now arrives over the channel too (`download_backup`, `stage_chain`). Needs the 1.13.0 agent published to the fleet; needs nothing from this spec. |
-| `install_node` | ~16 ssh/scp steps (32 emitters); also the keyless password path |
-| `provision_ssl` | Eight of the nine paired nodes; new issuance only (renewal is host-side certbot). `ProvisionPendingSsl::uses_primitive_route()` requires bare metal, so jeremytunnell alone takes the agent chain and is unaffected. |
-| `enable_agent` | Pre-pairing, against machines we did not create |
+| `install_node` | **The one bootstrap.** Runs here over the sealed root password; collapses to a single SSH session per `ssh_single_bootstrap.md` |
+| `provision_ssl` | **Does not move here — goes to the agent** (host node for a container, the node itself on bare metal). `ssh_single_bootstrap.md` |
+| `enable_agent` | **Deleted, not moved.** `ssh_single_bootstrap.md` |
 | `decommission_node` | Until it becomes a provider API call (custody WP3) |
 | `provision_relay` | The relay has no agent, by A8. Moves to the provisioning runner, or dies with the relay — it also installs a restricted pull key on relay shards. |
 | `rebuild_relay`, `relay_add_tenant`, `relay_set_domains`, `relay_remove_tenant` | **Delete at the relay cutover, not move.** Live code over dead data: no live tenant rows on this deployment. Disposition per `agent_local_queue_retirement.md`; an earlier draft of this table wrongly moved all five. |
@@ -112,7 +112,7 @@ step type still executes:
 | Operation | Status |
 |---|---|
 | `publish_upgrade` | Works today. It is a gate for retiring the queue (G1), not for this breakage. |
-| `discover_nodes` | Works today, same reason. Moves for the same reason `local` has to die, not because it is failing. |
+| `discover_nodes` | Works today, same reason. **Deleted, not moved** — `ssh_single_bootstrap.md` |
 
 Also folded in: `ProvisionManagedDomains` and `ManagedDomainWatch`, which shell
 out `ssh -i` outside the job system entirely. They become executor callers
@@ -153,14 +153,19 @@ PHP here as a matter of course.
 **WP3 — `publish_upgrade` as a first-class operation.** Closes G1.
 
 **WP4 — Migrate the remaining operations** in the table above; delete
-`backup_database` and `backup_project` rather than porting them.
+`backup_database` and `backup_project` rather than porting them. Only
+`install_node` migrates; every other operation in the table is deleted or
+goes to the agent, per `ssh_single_bootstrap.md`.
 
 **WP4a — Restore. WITHDRAWN 2026-08-30.** Restore went over the agent
 channel instead; moving a dead builder onto a new executor would be building a
 second transport for a path that already has one. See programme item 1.
 
 **WP5 — Absorb the raw-SSH stragglers**, `ProvisionManagedDomains` and
-`ManagedDomainWatch`.
+`ManagedDomainWatch`. **Closed 2026-09-01 the other way:** both crossed to
+the channel (`managed_domain_over_the_channel.md`) and neither is an
+executor caller. The remaining raw-SSH straggler, `FleetProvisionSeeding`,
+goes to the agent under `ssh_single_bootstrap.md` WP4.
 
 **WP6 — Retire the local queue.** With nothing left emitting `local`, flip
 `cfg.LocalJobs` false and delete the queue, the `local` step type, and every DB

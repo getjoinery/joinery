@@ -58,7 +58,8 @@ status the node agent's `pending`-only claim never matches. Scope: fresh docker;
   on; (2) joins claimed the machine hostname (`localhost`, a container id) —
   `join --name`, `install.sh docker --node-name`, and `--hostname SITENAME` on
   the site container; (3) fleet enrollment seeding at completion shelled out
-  to keyed SSH — it now reaches a keyless node over the sealed password;
+  to keyed SSH — it now reaches a keyless node over the sealed password
+  (interim: it leaves SSH for a primitive under `ssh_single_bootstrap.md`);
   (4) the Install New Node form says up front when a Linode grant (two hours,
   no refresh token) has expired. Not bugs: the container's site and agent come
   from getjoinery's release channel, not this plane's; a parked provision
@@ -178,7 +179,8 @@ steps; erase it on completion.
 **Nothing else changes.** The `install_node` job still exists, so the provision
 state machine keeps its ending — `handle_installing` watches the same job, the
 welcome email and `ProvisionPendingSsl` keep the same order-item linkage.
-`from_backup` keeps its `scp` transfers. No StackScript changes, no Akamai
+`from_backup` keeps its `scp` transfers for now — it becomes install.sh's
+`--clone-from` over HTTPS under `ssh_single_bootstrap.md`. No StackScript changes, no Akamai
 round trip, no join-approval redesign, no new completion path.
 
 **An earlier draft of this spec proposed exactly those four things** — routing
@@ -214,13 +216,13 @@ not new work, and it is the reason this spec sequences behind that executor.
 | Path | Who creates the machine | Keyless |
 |---|---|---|
 | Customer cloud, `fresh` | us | **Yes** |
-| Customer cloud, `from_backup` | us | **Yes** — `scp` still works over the password |
+| Customer cloud, `from_backup` | us | **Yes** — clone over HTTPS inside the one session (`ssh_single_bootstrap.md`) |
 | Customer cloud, `bare` (infrastructure) | us | **Yes**, but see WP4 |
 | Install New Node → new cloud instance | us | **Yes** — creates an admin-origin provision, so it is the three rows above |
 | Paid hosting order onto a shared host | already exists, ours | N/A — a container on a host we already reach; nothing new is placed |
 | Install New Node → existing host | already exists, ours | N/A — same |
-| `discover_nodes` (adopt a box) | its owner | N/A — someone else's machine; its owner supplies the credential |
-| `enable_agent` on an existing node | already exists | N/A — same |
+| `discover_nodes` (adopt a box) | its owner | Deleted — the owner enrolls from the node's own page (`ssh_single_bootstrap.md`) |
+| `enable_agent` on an existing node | already exists | Deleted — same |
 | Relay provisioning | us | **Exempt** — see below |
 | Linode StackScript self-serve | the customer | Already keyless, and unchanged by this spec |
 | Manual `install.sh` | a human | Already keyless |

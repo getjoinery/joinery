@@ -134,9 +134,9 @@ The current vocabulary (15 primitives) already covers status, backup
 run/list/upload/delete, apply-update, plugin installers, certificates and
 SSL probes, agent restart, recovery-key report, and the three restores.
 What deliberately never becomes a primitive: provisioning-time operations
-(`install_node`, `enable_agent`, `discover_nodes` — they run before pairing;
-for machines we create the install moves to a first-boot script and none of
-them is used at all), `decommission_node` for a whole machine (a provider API
+(`install_node` runs before pairing and is the one SSH session a machine
+ever gets from the plane; `enable_agent` and `discover_nodes` are deleted —
+the machine's owner enrolls it from its own page; `ssh_single_bootstrap.md`), `decommission_node` for a whole machine (a provider API
 call on the customer's grant, not a script on a dying box — but a container
 site on a shared host is removed by the HOST's agent, which is not dying:
 `decommission_site`, per `docker_host_agent.md`, owner 2026-08-31),
@@ -164,7 +164,7 @@ status**; the spec named is where its design lives.
 | 3 | The plane-side executor (WP1+WP2) | `plane_side_executor.md` | **BLOCKING.** Twelve operations have no transport since SSH was removed |
 | 4 | Keyless provisioning | `keyless_provisioning.md` | Needs only executor WP1, not the whole executor |
 | 5 | Credential custody — delete the shared key | `fleet_ssh_credential_custody.md` | WP1 done; WP3–WP5 gated on item 2 |
-| 6 | The last raw-SSH flows | `plane_side_executor.md` WP5 | `ProvisionManagedDomains` / `ManagedDomainWatch`; gates jeremytunnell's key |
+| 6 | SSH is one bootstrap, run once | `ssh_single_bootstrap.md` | Managed domains crossed 2026-09-01. What remains: collapse `install_node` to one session, clone instead of scp for from-backup, certificates and fleet seeding to the agent, delete `enable_agent` and `discover_nodes`. Gates jeremytunnell's key and the four keyless boxes' certificates |
 | 7 | Retire the local queue | `agent_local_queue_retirement.md` | Last, not first — thirteen operations still depend on it |
 | 8 | Per-node hardening | — | A per-node ceremony, not a fleet event. `environment_build_surface_reduction.md` rides alongside |
 
@@ -282,6 +282,7 @@ acceptance list of its own.
 |---|---|
 | `plane_side_executor.md` | What the executor is, what moves onto it and what does not, and the job-lifecycle design |
 | `keyless_provisioning.md` | The enrolment design, and coverage of every install path |
+| `ssh_single_bootstrap.md` | The disposition of every remaining SSH reach: the one bootstrap session, and what goes to the agent or is deleted |
 | `fleet_ssh_credential_custody.md` | The full `config/provisioning_key` consumer inventory, and jeremytunnell's particulars |
 | `agent_local_queue_retirement.md` | The thirteen-operation audit, with the two gates and seven deletions |
 | `restore_readiness.md` | The gap item 2 closes |

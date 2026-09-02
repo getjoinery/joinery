@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 
 # arm_ssl_retry.sh - watch for DNS, then issue the certificate on its own
+# Version: 1.1.0 - --setup-ssl takes several candidate paths, colon-separated and most
+#                  durable first; the timer runs the first that exists when it fires.
+#                  An install arms it before the host agent's bundle exists, and the
+#                  extracted release it named used to be deleted out from under it.
 # Version: 1.0.1 - --disarm is never refused by the routable-name guard: timers armed for an
 #                  IP by earlier installers exist in the fleet, and refusing to clean one up
 #                  leaves it polling a rate-limited CA forever
@@ -23,7 +27,7 @@
 #   site rather than one timer that can only ever serve the first.
 #
 # Usage:
-#   ./arm_ssl_retry.sh DOMAIN --setup-ssl PATH   Arm (or re-arm) for DOMAIN
+#   ./arm_ssl_retry.sh DOMAIN --setup-ssl PATH[:PATH...]   Arm (or re-arm) for DOMAIN
 #   ./arm_ssl_retry.sh DOMAIN --disarm           Stop watching for DOMAIN
 #
 # Exit status:
@@ -83,7 +87,7 @@ if [ "$DISARM" = true ]; then
     exit 0
 fi
 
-[ -n "$SETUP_SSL" ] || { echo "--setup-ssl PATH is required when arming." >&2; exit 1; }
+[ -n "$SETUP_SSL" ] || { echo "--setup-ssl PATH[:PATH...] is required when arming." >&2; exit 1; }
 
 mkdir -p /etc/joinery/ssl-retry
 cat > "/etc/joinery/ssl-retry/${DOMAIN}.conf" <<EOF
@@ -112,9 +116,18 @@ CONF="/etc/joinery/ssl-retry/${DOMAIN}.conf"
 # shellcheck source=/dev/null
 . "$CONF"
 
-SETUP_SSL="${SETUP_SSL:-}"
-if [ ! -x "$SETUP_SSL" ] && [ ! -f "$SETUP_SSL" ]; then
-    echo "setup_ssl.sh is no longer at $SETUP_SSL — nothing to run"
+# SETUP_SSL may name several candidates, colon-separated and most durable
+# first: an install arms this timer before the host agent's bundle exists, so
+# the bundle path is listed ahead of the extracted release that is there in
+# the meantime. The first that exists when the timer fires is the one run; none
+# existing is a wait, not a give-up, because the bundle lands on its own.
+RUN_SSL=""
+IFS=':' read -r -a CANDIDATES <<< "${SETUP_SSL:-}"
+for c in "${CANDIDATES[@]}"; do
+    if [ -f "$c" ]; then RUN_SSL="$c"; break; fi
+done
+if [ -z "$RUN_SSL" ]; then
+    echo "setup_ssl.sh is not at any of: ${SETUP_SSL:-(none)} — waiting."
     exit 0
 fi
 
@@ -176,7 +189,7 @@ if ! { [ -n "$SERVER_IP4" ] && [ "$SERVER_IP4" = "$DNS_IP4" ]; } \
 fi
 
 echo "$DOMAIN now points here. Requesting a certificate."
-bash "$SETUP_SSL" "$DOMAIN" || echo "setup_ssl.sh returned non-zero; will try again."
+bash "$RUN_SSL" "$DOMAIN" || echo "setup_ssl.sh returned non-zero; will try again."
 
 have_real_cert && give_up "Certificate issued for $DOMAIN. Retry timer disabled."
 

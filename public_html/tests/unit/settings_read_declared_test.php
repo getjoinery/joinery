@@ -75,19 +75,6 @@ const DELIBERATE = array(
 	'schema_version'                => 'absent until update_database stamps one; read fail-silently and reported as null by the management API',
 	'oauth_test_authorize_endpoint' => 'test fixture — the suite writes the row itself (tests/integration/oauth/fixtures)',
 	'oauth_test_token_endpoint'     => 'test fixture — as above',
-	// Not an oversight: a database-only kill switch, documented as one in
-	// docs/installation.md, INSTALL_README.md and install.sh's own help. The
-	// lifecycle is enable on the source, clone, and _site_init.sh deletes it on
-	// the new site. It stays undeclared for two reasons. The operators who need
-	// it are cloning to a new server and already have psql on both boxes, so the
-	// database step costs them nothing — while a form field would let a
-	// permission-8 admin turn on full-site export from a browser. And the value
-	// is both the bearer token AND the password the dump is encrypted under
-	// (utils/clone_export.php: openssl enc -pass pass:$provided_key), so
-	// declaring it `secret` would park a key that opens everything in
-	// stg_settings in plaintext — exactly what key_management_simplification
-	// Phase B exists to stop.
-	'clone_export_key'              => 'deliberately database-only; see docs/installation.md § Site Cloning',
 );
 
 /**

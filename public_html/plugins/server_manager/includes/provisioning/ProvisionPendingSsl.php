@@ -3,29 +3,37 @@
  * ProvisionPendingSsl - SSL automation scheduled task.
  *
  * For each managed node where mgn_ssl_state='pending' and install is complete,
- * resolves the domain via DNS. If it points to the node's host IP, creates a
- * provision_ssl job to run certbot. Retries hourly on failure; after ~16 hours
- * of failed attempts it flips mgn_ssl_state='failed' for manual resolution.
+ * gets it a certificate — by looking first, and asking second.
  *
- * A Cloudflare domain whose routing probe keeps missing (CF_ROUTING_UNVERIFIED)
- * is a different case: it may legitimately be waiting days for the customer's
- * DNS cutover, so it never flips to 'failed'. Instead it retries hourly for
- * ROUTING_FAST_ATTEMPTS tries, then drops to one try every ROUTING_SLOW_GAP,
- * and sends the operator one alert at the changeover — so a domain that is
- * stuck (rather than waiting) is seen by a person instead of failing silently
- * forever. Both the slow lane and the alert apply only while the domain still
- * resolves to Cloudflare: once it repoints, the next attempt is due within
- * the hour and the 16h give-up window opens fresh at the first non-routing
- * failure.
+ * LOOK FIRST. A machine this plane installs tries for its certificate during
+ * the install and, when DNS is not pointed here yet, arms its own retry timer
+ * (arm_ssl_retry.sh) which issues the moment it is. So most issuance needs no
+ * dispatch at all: the node's — or, for a container, its HOST's — check_status
+ * already reports every certificate under /etc/letsencrypt/live, and a
+ * lineage covering the domain flips the node to active here.
  *
- * A paired bare-metal node takes a different route entirely: instead of one
- * SSH job running certbot over a shell, the plane drives a chain of agent
- * primitives — place the probe token, fetch it from out here, clear it, then
- * ask the node to issue its own certificate. The steps are separate jobs, so
- * this task is the driver: each tick reads where the chain got to and takes
- * the next step. Container nodes keep the SSH path, because certbot and
- * /etc/letsencrypt live on their Docker host rather than inside the container.
+ * ASK SECOND. Where nothing has issued, the plane drives a chain of agent
+ * primitives: place a probe token (Cloudflare domains only), fetch it from out
+ * here, clear it, then ask the ISSUER to issue. The issuer is the node itself
+ * on bare metal and the host's own paired agent for a container — Apache,
+ * certbot and /etc/letsencrypt live on the host, and a certificate issued
+ * from inside a container is written to a filesystem the next rebuild
+ * discards. The steps are separate jobs, so this task is the driver: each
+ * tick reads where the chain got to and takes the next step. No SSH anywhere
+ * (specs/ssh_single_bootstrap.md WP3).
  *
+ * A Cloudflare domain whose routing probe keeps missing is not a fault: it may
+ * legitimately be waiting days for the customer's DNS cutover, so it never
+ * flips to 'failed'. It retries hourly for ROUTING_FAST_ATTEMPTS tries, then
+ * drops to one try every ROUTING_SLOW_GAP, and sends the operator one alert at
+ * the changeover. Anything else gives up after ~16 hours of certificate
+ * attempts and flips mgn_ssl_state='failed' for manual resolution.
+ *
+ * @version 1.6 - chain_jobs keys on for_node_id, so a node that issues for others never sees their jobs as its own
+ * @version 1.5 - observe first: a certificate the host (or node) already reports flips the node
+ *                active; the chain is the on-demand and slow-lane path, with a container's
+ *                certificate job addressed to its host and stamped on the site it was for.
+ *                The SSH provision_ssl path is gone.
  * @version 1.4 - paired bare-metal nodes provision through agent primitives; the
  *                probe is gated on node core version and the certificate result
  *                is read rather than assumed from the job's exit status
@@ -83,28 +91,6 @@ class ProvisionPendingSsl {
 	}
 
 	/**
-	 * Does this node provision through its own agent rather than over SSH?
-	 *
-	 * Two conditions, and the second is a contract only this plane can keep.
-	 * The agent runs INSIDE a container node while Apache, certbot and
-	 * /etc/letsencrypt live on its Docker host, so a certificate issued from
-	 * in there is written to a filesystem the next rebuild discards — after
-	 * spending one of the five certificates per domain per week that Let's
-	 * Encrypt allows. The node cannot refuse that on its own ("am I in a
-	 * container" has only heuristic answers); mgn_container_name is the
-	 * non-heuristic answer and it lives here.
-	 */
-	public static function uses_primitive_route($node): bool {
-		return self::is_bare_metal($node)
-			&& JobCommandBuilder::has_primitive($node, 'provision_certificate');
-	}
-
-	/** Pure half of the container gate, so it can be tested without a node. */
-	public static function is_bare_metal($node): bool {
-		return trim((string)$node->get('mgn_container_name')) === '';
-	}
-
-	/**
 	 * May this node be asked to serve a routing probe?
 	 *
 	 * An unknown version is refused rather than attempted. The cost of guessing
@@ -137,9 +123,7 @@ class ProvisionPendingSsl {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_host_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
-
-		$settings    = Globalvars::get_instance();
-		$alert_email = $settings->get_setting('server_manager_provisioning_admin_alert_email') ?: '';
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
 
 		// Nodes that finished install but are still awaiting SSL
 		$pending = new MultiManagedNode([
@@ -153,13 +137,13 @@ class ProvisionPendingSsl {
 			return ['status' => 'success', 'message' => 'No nodes pending SSL.'];
 		}
 
-		$db      = DbConnector::get_instance()->get_db_link();
-		$started = 0;
-		$skipped = 0;
-		$errors  = [];
+		$db       = DbConnector::get_instance()->get_db_link();
+		$started  = 0;
+		$skipped  = 0;
+		$observed = 0;
+		$errors   = [];
 
 		foreach ($pending as $node) {
-			$node_id  = $node->key;
 			$slug     = $node->get('mgn_slug');
 			$site_url = $node->get('mgn_site_url') ?: '';
 			$domain   = parse_url($site_url, PHP_URL_HOST) ?: $node->get('mgn_name');
@@ -170,137 +154,28 @@ class ProvisionPendingSsl {
 				continue;
 			}
 
+			// Look first. The machine may already hold the certificate — issued
+			// during the install, or by the host's own retry timer since.
+			if (self::certificate_observed($node, $domain)) {
+				$node->set('mgn_ssl_state', 'active');
+				$node->save();
+				$observed++;
+				continue;
+			}
+
 			// Resolved once per node per tick: the retry pacing and the DNS gate
 			// both need to know whether the domain currently parks at Cloudflare.
 			$is_cloudflare = JobCommandBuilder::is_cloudflare_domain($domain);
 
-			// A paired bare-metal node drives the primitive chain instead. The
-			// whole SSH path below is left exactly as it was, because it is
-			// still what container nodes use.
-			if (self::uses_primitive_route($node)) {
-				$outcome = $this->advance_primitive_ssl($db, $node, $domain, $host_ip, $is_cloudflare);
-				$started += $outcome['started'];
-				$skipped += $outcome['skipped'];
-				if ($outcome['error'] !== '') {
-					$errors[] = "Node '{$slug}': " . $outcome['error'];
-				}
-				continue;
+			$outcome = $this->advance_primitive_ssl($db, $node, $domain, $host_ip, $is_cloudflare);
+			$started += $outcome['started'];
+			$skipped += $outcome['skipped'];
+			if ($outcome['error'] !== '') {
+				$errors[] = "Node '{$slug}': " . $outcome['error'];
 			}
-
-			// Inspect previous provision_ssl jobs for this node
-			$q = $db->prepare(
-				"SELECT mjb_id, mjb_status, mjb_create_time, mjb_completed_time, mjb_parameters
-				 FROM mjb_management_jobs
-				 WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'provision_ssl' AND mjb_delete_time IS NULL
-				 ORDER BY mjb_create_time ASC"
-			);
-			$q->execute([$node_id]);
-			$ssl_jobs = $q->fetchAll(PDO::FETCH_ASSOC);
-
-			if (!empty($ssl_jobs)) {
-				$last  = end($ssl_jobs);
-				$first = reset($ssl_jobs);
-
-				// Skip if a job is still in flight
-				if (in_array($last['mjb_status'], ['pending', 'running'])) {
-					$skipped++;
-					continue;
-				}
-
-				// A completed job means the cert is in — process its result
-				// here (flips mgn_ssl_state to active). Admin page views also
-				// process results, but an unattended pipeline must not depend
-				// on someone looking at a dashboard; without this the node
-				// stays pending and gets a fresh certbot job every tick.
-				if ($last['mjb_status'] === 'completed') {
-					require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
-					$done_job = new ManagementJob($last['mjb_id'], TRUE);
-					if (!$done_job->get('mjb_result')) {
-						JobResultProcessor::process($done_job);
-					}
-					$skipped++;
-					continue;
-				}
-
-				if ($last['mjb_status'] === 'failed') {
-					$last_at = strtotime($last['mjb_completed_time'] ?: $last['mjb_create_time']);
-
-					// A Cloudflare routing-probe miss (the fetched token did not
-					// come back through the domain) is "the domain does not reach
-					// this node yet" — the same state the A-record gate models for
-					// non-CF domains, and a DNS cutover legitimately takes days.
-					$oq = $db->prepare("SELECT mjb_output FROM mjb_management_jobs WHERE mjb_id = ?");
-					$oq->execute([$last['mjb_id']]);
-					$awaiting_routing = (strpos((string)$oq->fetchColumn(), 'CF_ROUTING_UNVERIFIED') !== false);
-
-					$failed_attempts = count(array_filter($ssl_jobs, function ($j) {
-						return $j['mjb_status'] === 'failed';
-					}));
-
-					// Backoff between attempts: hourly, except a domain stuck
-					// awaiting routing drops to the slow lane after the fast tries.
-					// The slow lane only applies while the domain still resolves to
-					// Cloudflare — the wait it paces is "the zone does not proxy
-					// here yet". The moment DNS stops parking at Cloudflare (proxy
-					// turned off, records repointed) that wait is over, and the
-					// next attempt takes the certbot path within the hour instead
-					// of sitting out a six-hour gap earned by a state that no
-					// longer exists.
-					$gap = ($awaiting_routing && $is_cloudflare) ? self::routing_retry_gap($failed_attempts) : 3600;
-					if ((time() - $last_at) < $gap) {
-						$skipped++;
-						continue;
-					}
-
-					if ($awaiting_routing) {
-						// Never flips to 'failed' — a cutover the customer has not
-						// made yet is not a fault. But it must not be invisible
-						// either: entering the slow lane sends the operator one
-						// alert, stamped on a job row so it is sent exactly once.
-						if ($is_cloudflare && $failed_attempts >= self::ROUTING_FAST_ATTEMPTS && !$this->routing_alert_sent($ssl_jobs)) {
-							$this->send_routing_alert($node, $domain, $failed_attempts, $first['mjb_create_time']);
-							$this->mark_routing_alert_sent((int)$last['mjb_id']);
-						}
-					} else if ($this->give_up_due($db, $node_id)) {
-						// Any other failure gives up after ~16 hours of attempts.
-						$node->set('mgn_ssl_state', 'failed');
-						$node->save();
-						$errors[] = "Node '{$slug}': SSL provisioning failed after 16+ hours — manual intervention required.";
-						continue;
-					}
-				}
-			}
-
-			// DNS gate. A Cloudflare-proxied domain resolves to Cloudflare edge IPs,
-			// never the host, so the A-record gate would skip it forever (P-6).
-			// Detect Cloudflare the same way the builder does and dispatch anyway —
-			// build_provision_ssl's Cloudflare branch skips certbot, proves routing
-			// with a webroot probe fetched through the domain (the job fails until
-			// Cloudflare actually proxies to this node), then patches the proxy
-			// proto. The A-record gate still applies to non-CF domains, so certbot
-			// never runs before DNS actually points at this host.
-			if (!$is_cloudflare && !self::domain_resolves_to_host($domain, $host_ip)) {
-				$skipped++;
-				continue;
-			}
-
-			$job_params = [
-				'domain'      => $domain,
-				'admin_email' => $alert_email,
-			];
-
-			try {
-				$steps = JobCommandBuilder::build_provision_ssl($node, $job_params);
-			} catch (Exception $e) {
-				$errors[] = "Node '{$slug}': " . $e->getMessage();
-				continue;
-			}
-
-			ManagementJob::createJob($node_id, 'provision_ssl', $steps, $job_params, null);
-			$started++;
 		}
 
-		$msg = "SSL poll: {$started} job(s) started, {$skipped} waiting for DNS.";
+		$msg = "SSL poll: {$observed} certificate(s) observed, {$started} job(s) started, {$skipped} waiting.";
 		if ($errors) {
 			$msg .= ' ' . count($errors) . ' error(s): ' . implode('; ', array_slice($errors, 0, 3));
 			if (count($errors) > 3) $msg .= ' ...';
@@ -310,25 +185,103 @@ class ProvisionPendingSsl {
 	}
 
 	// ------------------------------------------------------------------
+	// Observation
+	// ------------------------------------------------------------------
+
+	/**
+	 * Does a machine this plane already hears from hold a CA-issued
+	 * certificate covering the domain?
+	 *
+	 * Read from the last status report of the node itself and, for a
+	 * container, of its host — the agent's check_status enumerates every
+	 * lineage in /etc/letsencrypt/live. A self-signed placeholder does not
+	 * count; a report that could not read the directory says nothing.
+	 */
+	public static function certificate_observed($node, string $domain): bool {
+		$machines = [$node];
+		$host_node = self::host_node_of($node);
+		if ($host_node) {
+			$machines[] = $host_node;
+		}
+		foreach ($machines as $machine) {
+			$status = $machine->get('mgn_last_status_data');
+			if (is_string($status)) {
+				$status = json_decode($status, true);
+			}
+			if (self::status_reports_certificate($status, $domain)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Pure half of the observation, so it can be tested without a node. */
+	public static function status_reports_certificate($status, string $domain): bool {
+		if (!is_array($status) || !array_key_exists('ssl_certificate_count', $status)) {
+			return false;
+		}
+		if (!empty($status['ssl_certificates_unreadable'])) {
+			return false;
+		}
+		$certs = isset($status['ssl_certificates']) && is_array($status['ssl_certificates'])
+			? $status['ssl_certificates'] : [];
+		foreach ($certs as $cert) {
+			if (!empty($cert['self_signed'])) {
+				continue;
+			}
+			// Expired is not covered: a lineage the renewer let lapse is what
+			// this task exists to notice.
+			if (!empty($cert['not_after'])) {
+				$ts = strtotime((string)$cert['not_after']);
+				if ($ts && $ts < time()) {
+					continue;
+				}
+			}
+			$names = isset($cert['domains']) && is_array($cert['domains']) ? $cert['domains'] : [];
+			foreach ($names as $name) {
+				if (JobResultProcessor::cert_name_covers((string)$name, $domain)) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	/** A container's host node (its host's own paired agent), or null. */
+	public static function host_node_of($node) {
+		if (trim((string)$node->get('mgn_container_name')) === '') {
+			return null;
+		}
+		$host_id = (int)$node->get('mgn_mgh_host_id');
+		if (!$host_id) {
+			return null;
+		}
+		$host = new ManagedHost($host_id, TRUE);
+		if (!$host->key || $host->get('mgh_delete_time')) {
+			return null;
+		}
+		return $host->host_node();
+	}
+
+	// ------------------------------------------------------------------
 	// The primitive chain
 	//
-	// One operation, four jobs, and a plane action in the middle of them:
+	// One operation, up to four jobs, and a plane action in the middle:
 	//
-	//   ssl_probe_place  (node)   write a one-time token into the webroot
-	//   [fetch]          (plane)  read it back through the domain
-	//   ssl_probe_clear  (node)   remove the token, whatever the answer was
-	//   provision_certificate (node)  issue the certificate
+	//   ssl_probe_place       (site node)  write a one-time token into the webroot
+	//   [fetch]               (plane)      read it back through the domain
+	//   ssl_probe_clear       (site node)  remove the token, whatever the answer
+	//   provision_certificate (ISSUER)     issue the certificate
 	//
 	// The fetch is on the plane deliberately and must stay there: a node
 	// asked whether a domain reaches itself is a node answering its own
-	// question. Because each node step is its own job, "the chain" only
-	// exists as a thing this task reconstructs each tick from the job rows —
-	// it reads where the chain got to and takes one more step.
+	// question. The issuer is the site node on bare metal and its HOST's
+	// paired agent for a container, so a chain's jobs can sit on two node
+	// ids; every job names the site it is FOR (for_node_id), and the chain is
+	// reconstructed from that each tick.
 	//
 	// The probe half runs only for a Cloudflare-proxied domain. For anything
-	// else the A-record gate above has already proved the domain reaches this
-	// host, and a probe would add a way to fail while proving nothing that is
-	// not already known.
+	// else the A-record gate has already proved the domain reaches this host.
 	// ------------------------------------------------------------------
 
 	/**
@@ -392,9 +345,9 @@ class ProvisionPendingSsl {
 			}
 
 			if ($stuck_on_routing) {
-				// Same rule the SSH path follows: a cutover the customer has
-				// not made is not a fault and never flips the node to 'failed',
-				// but it does not get to be invisible either.
+				// A cutover the customer has not made is not a fault and never
+				// flips the node to 'failed', but it does not get to be
+				// invisible either.
 				if ($misses >= self::ROUTING_FAST_ATTEMPTS && !$this->alert_sent($jobs, 'routing_alert_sent')) {
 					$first = reset($jobs);
 					$this->send_routing_alert($node, $domain, $misses, $first['mjb_create_time']);
@@ -436,11 +389,10 @@ class ProvisionPendingSsl {
 	 */
 	private function start_chain($node, string $domain, string $host_ip, bool $is_cloudflare, $created_by = null): array {
 		if (!$is_cloudflare) {
-			// The same A-record gate the SSH path applies, and for the same
-			// reason: a domain still pointing somewhere else is mid-cutover,
-			// not broken. Waiting quietly is the right answer, and it is also
-			// what keeps this off Let's Encrypt's five-failed-validations-per-
-			// hour budget for a name that cannot validate yet.
+			// A domain still pointing somewhere else is mid-cutover, not
+			// broken. Waiting quietly is the right answer, and it is also what
+			// keeps this off Let's Encrypt's five-failed-validations-per-hour
+			// budget for a name that cannot validate yet.
 			if (!self::domain_resolves_to_host($domain, $host_ip)) {
 				return self::chain_result(0, 1, '',
 					"{$domain} does not resolve to this node ({$host_ip}) yet, so no certificate was "
@@ -466,7 +418,7 @@ class ProvisionPendingSsl {
 		// The token is kept on the job because the plane, not the node, is the
 		// party that has to recognise it coming back.
 		ManagementJob::createFromBuild($node->key, self::JOB_PROBE_PLACE, $built,
-			['token' => $token, 'domain' => $domain], $created_by);
+			['token' => $token, 'domain' => $domain, 'for_node_id' => (int)$node->key], $created_by);
 		return self::chain_result(1, 0);
 	}
 
@@ -511,7 +463,8 @@ class ProvisionPendingSsl {
 		$started = 0;
 		try {
 			ManagementJob::createFromBuild($node->key, self::JOB_PROBE_CLEAR,
-				JobCommandBuilder::build_ssl_probe_clear($node), ['domain' => $domain], null);
+				JobCommandBuilder::build_ssl_probe_clear($node),
+				['domain' => $domain, 'for_node_id' => (int)$node->key], null);
 			$started++;
 		} catch (Exception $e) {
 			// Not fatal: an uncleared token is untidy, not dangerous (it proves
@@ -530,28 +483,59 @@ class ProvisionPendingSsl {
 		return self::chain_result($started + $cert['started'], 0, $cert['error']);
 	}
 
+	/**
+	 * Ask the issuer for the certificate. The job is filed against the ISSUER
+	 * (the node itself, or its host) and names the site it is for, which is
+	 * the node JobResultProcessor::process_provision_certificate stamps.
+	 */
 	private function dispatch_certificate($node, string $domain, $created_by = null): array {
 		try {
-			$built = JobCommandBuilder::build_provision_certificate($node, ['domain' => $domain]);
+			$issuer = JobCommandBuilder::certificate_issuer_for($node);
+			$built  = JobCommandBuilder::build_provision_certificate($node, ['domain' => $domain]);
 		} catch (Exception $e) {
 			return self::chain_result(0, 0, $e->getMessage());
 		}
-		ManagementJob::createFromBuild($node->key, self::JOB_CERTIFICATE, $built, ['domain' => $domain], $created_by);
+		ManagementJob::createFromBuild($issuer->key, self::JOB_CERTIFICATE, $built,
+			['domain' => $domain, 'for_node_id' => (int)$node->key], $created_by);
 		return self::chain_result(1, 0);
 	}
 
-	/** The chain's jobs for one node, oldest first. */
+	/**
+	 * The chain's jobs for one site, oldest first — wherever they were filed.
+	 * A container's certificate job sits on its host's node id and names the
+	 * site in for_node_id; the probe jobs sit on the site itself.
+	 */
 	private function chain_jobs($db, $node_id): array {
 		$q = $db->prepare(
 			"SELECT mjb_id, mjb_job_type, mjb_status, mjb_create_time, mjb_completed_time,
 			        mjb_parameters, mjb_output
 			 FROM mjb_management_jobs
-			 WHERE mjb_mgn_node_id = ? AND mjb_delete_time IS NULL
+			 WHERE mjb_delete_time IS NULL
 			   AND mjb_job_type IN (?, ?, ?)
+			   AND (mjb_parameters->>'for_node_id' = ?
+			        OR (mjb_mgn_node_id = ? AND mjb_parameters->>'for_node_id' IS NULL))
 			 ORDER BY mjb_create_time ASC, mjb_id ASC"
 		);
-		$q->execute([$node_id, self::JOB_PROBE_PLACE, self::JOB_PROBE_CLEAR, self::JOB_CERTIFICATE]);
+		// for_node_id names the site every chain job is FOR. The second half
+		// is for rows that predate it, and it excludes jobs a node ran for
+		// OTHER sites — a host's chain must not pick up its containers'.
+		$q->execute([self::JOB_PROBE_PLACE, self::JOB_PROBE_CLEAR, self::JOB_CERTIFICATE,
+			(string)(int)$node_id, (int)$node_id]);
 		return $q->fetchAll(PDO::FETCH_ASSOC);
+	}
+
+	/**
+	 * The most recent chain job for a site, for the node page to link to, or
+	 * null when none exists.
+	 */
+	public static function latest_chain_job($node) {
+		$task = new self();
+		$jobs = $task->chain_jobs(DbConnector::get_instance()->get_db_link(), $node->key);
+		if (!$jobs) {
+			return null;
+		}
+		$last = end($jobs);
+		return new ManagementJob((int)$last['mjb_id'], TRUE);
 	}
 
 	/**
@@ -582,8 +566,7 @@ class ProvisionPendingSsl {
 	 * True once certificate attempts alone have run 16+ hours without issuing.
 	 *
 	 * Counted from the first certificate attempt that did not produce one, so
-	 * time a domain spent waiting at Cloudflare never burns this window — the
-	 * same rule give_up_due() applies on the SSH path.
+	 * time a domain spent waiting at Cloudflare never burns this window.
 	 */
 	public static function certificate_give_up_due(array $jobs, int $now): bool {
 		foreach ($jobs as $job) {
@@ -676,47 +659,15 @@ class ProvisionPendingSsl {
 	}
 
 	/**
-	 * True once non-routing failures have run for 16+ hours. The window opens
-	 * at the first failed run that was NOT a routing-probe miss: a domain that
-	 * spent days parked at Cloudflare gets a full fresh window once it repoints
-	 * and certbot starts failing for real reasons, instead of being flipped to
-	 * 'failed' on its first certbot attempt by a clock the routing wait ran out.
-	 */
-	private function give_up_due($db, int $node_id): bool {
-		$q = $db->prepare(
-			"SELECT MIN(mjb_create_time)
-			 FROM mjb_management_jobs
-			 WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'provision_ssl'
-			   AND mjb_delete_time IS NULL AND mjb_status = 'failed'
-			   AND (mjb_output IS NULL OR mjb_output NOT LIKE '%CF_ROUTING_UNVERIFIED%')"
-		);
-		$q->execute([$node_id]);
-		$first_real = $q->fetchColumn();
-		return $first_real && (time() - strtotime($first_real)) > 57600;
-	}
-
-	/**
-	 * Has the awaiting-routing alert already gone out for this node's stuck
-	 * episode? The marker lives in a job row's parameters rather than on the
-	 * node so that clearing the episode (jobs deleted, node re-provisioned)
-	 * naturally re-arms it.
-	 */
-	private function routing_alert_sent(array $ssl_jobs): bool {
-		return $this->alert_sent($ssl_jobs, 'routing_alert_sent');
-	}
-
-	private function mark_routing_alert_sent(int $job_id): void {
-		$this->mark_alert_sent($job_id, 'routing_alert_sent');
-	}
-
-	/**
 	 * Has an alert of this kind already gone out for this node's episode?
 	 *
 	 * Keyed, because a node can be stuck on two different things and only one
 	 * of them is the thing to tell somebody about. A domain that waited days at
 	 * Cloudflare and then could not get a certificate for want of a credentials
 	 * file has two separate stories, and the second is the actionable one — a
-	 * single shared marker would swallow it.
+	 * single shared marker would swallow it. The marker lives in a job row's
+	 * parameters rather than on the node so that clearing the episode (jobs
+	 * deleted, node re-provisioned) naturally re-arms it.
 	 */
 	private function alert_sent(array $jobs, string $key): bool {
 		foreach ($jobs as $job) {

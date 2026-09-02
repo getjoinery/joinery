@@ -87,7 +87,7 @@ Both modes create:
 
 `--config PATH` stamps `JOINERY_CONFIG` into the env file, pointing the agent at the right site without editing anything.
 
-**Every management node needs a live agent.** All jobs (install_node, provision_ssl, backups, upgrades) sit `pending` until an agent polling that site's own database claims them. The **Server Manager → Provisioning** page shows an agent heartbeat badge as requirement #1.
+**Every management node needs a live agent.** Jobs sit `pending` until an agent claims them — the node's own paired agent for everything but `install_node`, which is the one bootstrap the plane runs itself (see [Customer-Cloud Fulfillment](#customer-cloud-fulfillment)). The **Server Manager → Provisioning** page shows an agent heartbeat badge as requirement #1.
 
 #### Configure (usually not needed)
 
@@ -136,19 +136,9 @@ Agents upgrade themselves from the bundled artifact after each platform release 
 
 Go to `/admin/server_manager/node_add` (or click **Add Node** on the dashboard). There are two ways to add nodes:
 
-#### Auto-detect (recommended)
+#### From the node
 
-The **Auto-Detect Joinery Servers** panel scans a remote host for Joinery instances automatically. Enter:
-
-1. **SSH Host** -- the server IP (e.g., `23.239.11.53`)
-2. **SSH Key Path** -- path to the private key on the management node (defaults to `/home/user1/.ssh/id_ed25519_claude`)
-3. Click **Detect**
-
-The plugin creates a `discover_nodes` job. The Go agent SSHes to the host, finds Docker containers (or bare-metal installs) running Joinery, and reports back with each instance's container name, web root, domain, database name, and version.
-
-Detected instances appear as cards with **Add This Node** buttons. Clicking one auto-fills the entire form below -- just click **Add Node** to save.
-
-Auto-detect requires the Go agent to be running (it executes the SSH commands, not PHP).
+A site this management node did not install is enrolled from the node's own **Admin → System → Management Node** page: the admin there enters this management node's URL, the node's agent generates a keypair and asks to join, and the request appears on the node's API keys tab here for approval after a fingerprint comparison. Add the node's record below first so the join has something to be approved against. The plane never needs a shell on someone else's machine — there is no discovery scan (see `specs/ssh_single_bootstrap.md`).
 
 #### Manual
 
@@ -179,7 +169,7 @@ The UI is organized around a **dashboard + node detail** pattern. The dashboard 
 |-----|---------|
 | `/admin/server_manager` | **Dashboard** -- agent status, node cards with health dots, publish upgrade, recent jobs |
 | `/admin/server_manager/node_detail?mgn_id=N` | **Node Detail** -- tabbed page for a single node (see tabs below) |
-| `/admin/server_manager/node_add` | **Add Node** -- auto-detect panel + manual add form |
+| `/admin/server_manager/node_add` | **Add Node** -- the record a node's own join request is approved against |
 | `/admin/server_manager/targets` | **Backup Targets** -- CRUD for cloud storage targets (B2, S3, Linode) |
 | `/admin/server_manager/jobs` | **Jobs** -- global job history with filters by node, status, and type |
 | `/admin/server_manager/job_detail?job_id=N` | **Job Detail** -- single job output with live polling |
@@ -265,7 +255,7 @@ The web tier's only involvement on the node is a handoff through three managed s
 
 ### Routing
 
-A connected agent is routed to — approving the join is the routing decision, and there is no further switch. An operation with a primitive implementation runs on the node's own agent, and only there: a node without a paired agent is refused such a job at build time, with the fix (pair the node) in the message. SSH-credential routing exists only for the operations that have no primitive — bootstrap (`install_node`, `enable_agent`, unpaired `provision_ssl`) and the relay lifecycle. Disconnecting the agent therefore stops a node's primitive operations until it pairs again.
+A connected agent is routed to — approving the join is the routing decision, and there is no further switch. An operation with a primitive implementation runs on the node's own agent, and only there: a node without a paired agent is refused such a job at build time, with the fix (pair the node) in the message. SSH exists only for the one bootstrap (`install_node`, run plane-side by `InstallJobExecutor` over a provision's sealed root password) and the relay lifecycle. Disconnecting the agent therefore stops a node's operations until it pairs again.
 
 Either side can end the pairing, and neither needs the other's cooperation. This plane's Disconnect button forgets the node's key. The node's own Management Node page has a Disconnect too: its agent finishes any running job, sends one signed goodbye to `/api/v1/agent/leave` (so this plane forgets the key immediately), deletes its identity, and returns to serving only local work — and it leaves even when the goodbye cannot be delivered, in which case this plane just sees the agent go silent until someone disconnects the node here as well. Both endings run through `AgentChannelEndpoint::forgetAgent()`, so they cannot drift apart.
 
@@ -368,22 +358,22 @@ Only after the answer verifies does the host run the bundled, self-verifying `re
 | `restore_chain` | Restore a node from an incremental backup chain — what the fleet's scheduled backups actually produce. Fetches the chain manifest, recovers the chain key on the node from the node's own `backup_site_key`, downloads every artifact the manifest names up to the chosen run, then runs `restore_chain.sh`, which verifies each artifact against its recorded size and hash **before writing anything** and applies them in order | **Yes** |
 | `apply_update` | Run `upgrade.php` on target | **Yes** |
 | `publish_upgrade` | Run `publish_upgrade.php` locally on management node (in plugin) | No |
-| `discover_nodes` | Scan a remote host for Joinery instances (Docker + bare metal) | No |
-| `install_node` | Provision a fresh Joinery site on a remote host (fresh or from-backup) | No (target must be clean) |
-| `provision_ssl` | Run certbot on the node's host to obtain a Let's Encrypt cert | No |
-| `backup_run` | This management node's own backup of a node. The node runs its backup engine — chain, envelope, upload, local sweep — with the bucket and a write-only credential supplied for that run and never stored there. What opens the archive is not supplied: the node seals to the recovery key it holds and has verified | No |
+| `install_node` | The one SSH session in a machine's life: fetch the release, `install.sh docker` (host agent), `install.sh site … --enable-agent` (a clone adds `--clone-from` and pulls the source over HTTPS). Run by `InstallJobExecutor` on the plane | No (target must be clean) |
+| `provision_certificate` | Issue the node's certificate as a primitive on the **issuer**: the node itself on bare metal, its host's own agent for a container (`for_node_id` names the site). Driven by `ProvisionPendingSsl`, which observes a certificate the machine already reports before asking | No |
+| `clone_export_arm` | Hand the SOURCE of a clone one export key for the length of a provision (empty disarms). The setting name is compiled into `utils/clone_export_arm.php` on the source | No |
+| `fleet_enroll` | Seed a new site's fleet-service URL and API key pair (three settings; the names are compiled into `utils/fleet_enroll.php`). The secret is blanked from the job row once the node answers | No || `backup_run` | This management node's own backup of a node. The node runs its backup engine — chain, envelope, upload, local sweep — with the bucket and a write-only credential supplied for that run and never stored there. What opens the archive is not supplied: the node seals to the recovery key it holds and has verified | No |
 | `decommission_node` | Permanently remove one container site from its shared host, as the `decommission_site` primitive on the **host's own paired agent** — the site itself approves its removal first (see [Removing a container site](#removing-a-container-site-decommission)) | **Yes** |
 
 Destructive operations auto-backup the target database before proceeding. The UI requires explicit confirmation checkboxes.
 
-**Note on bare-metal nodes with user1 SSH:** When a bare-metal install completes, `install.sh` disables root SSH and the node's `mgn_ssh_user` is automatically updated to `user1`. SSH-only jobs (bootstrap) then run as `user1` with `NOPASSWD sudo`; steps that need root-level paths carry the `sudo` prefix automatically. Backup and restore work runs on the node's own agent, which is already root.
+**Note on bare-metal nodes:** `install.sh server` disables root SSH during the bootstrap; the session that ran it is the last one the plane opens. Everything after it — backups, restores, certificates, upgrades — runs on the node's own agent, which is root.
 
 ### One-Click Node Install
 
 **Dashboard → Install New Node** opens a form that provisions a Joinery site in a single click. The **Target Host** dropdown offers three kinds of target:
 
 - **A known host** (or *Other server* with manual SSH details): the form creates the ManagedNode and dispatches the `install_node` job immediately.
-- **Create a new cloud instance**: no server exists yet. The form records an admin-origin `CustomerCloudProvision` (connected cloud account, region, instance type, plus all install parameters) and the **Provision Customer Cloud** task births the instance, creates the node, and dispatches the install — see [Customer-Cloud Fulfillment](#customer-cloud-fulfillment). The instance is created in, and billed to, the selected connected account; Linode grants expire after two hours, so connect (or re-connect) shortly before submitting. Cloud targets always take a fresh source backup in From-Backup mode. In-flight provisions appear in a banner at the top of the dashboard.
+- **Create a new cloud instance**: no server exists yet. The form records an admin-origin `CustomerCloudProvision` (connected cloud account, region, instance type, plus all install parameters) and the **Provision Customer Cloud** task births the instance, creates the node, and dispatches the install — see [Customer-Cloud Fulfillment](#customer-cloud-fulfillment). The instance is created in, and billed to, the selected connected account; Linode grants expire after two hours, so connect (or re-connect) shortly before submitting. In-flight provisions appear in a banner at the top of the dashboard.
 
   The cloud target also offers **Bare instance** as the install type: the instance is born, the SSH key injected, and the managed node created with `mgn_skip_joinery_checks` set — but no site is installed (no web root, site URL, or SSL flow). Completion is a passing `check_status` job. This is how infrastructure nodes that host no Joinery site — a mail relay shard, for example — enter management; the role's own provisioning (e.g. the mailbox plugin's provision-relay job) builds on the bare node afterward. Bare is admin-origin only; orders always install a site.
 
@@ -392,20 +382,7 @@ Two install types:
 - **Fresh**: empty Joinery site with default schema. Admin picks the domain. The admin login is `admin@example.com` with a password generated for that site alone — there is no shared default. Like the generated Postgres password, it stays on the node rather than in the management node: read it at `/var/www/html/{sitename}/config/admin_credentials.txt` (root only), or set a new one with `maintenance_scripts/sysadmin_tools/reset_admin_password.php`. `usr_force_password_change=true`, so the first sign-in forces a new password.
 - **From Backup**: fresh install + restore of a source node's DB and project files, then reconciliation to the new node — its own domain (the node's recorded URL), its own deployment shape, its own paths. Use source admin credentials to log in; cut DNS over when ready and the certificate is issued on its own.
 
-The job composes existing primitives: the installer artifacts from `maintenance_scripts/install_tools/` are packaged locally, SCP'd, extracted on the target, and `install.sh -y -q site SITENAME - DOMAIN` runs non-interactively. Docker installs add a follow-up step that invokes `manage_domain.sh set SITENAME DOMAIN --no-ssl` on the target to auto-install Apache + mod_proxy (if missing) and wire up an HTTP reverse proxy on port 80 — so the site is reachable at `http://DOMAIN/` as soon as DNS points here. SSL stays a separate admin step (`certbot --apache -d DOMAIN` on the target). For From-Backup, source backups are captured (or an existing cached backup is used), fetched to the management node, and pushed to the target after install.
-
-From-Backup restores files by extracting the source archive with **both** of its
-leading path components stripped, taking only the `project_files/` subtree —
-`backup_project.sh` writes archives as `{backup_name}/project_files/{public_html,
-uploads,config,...}` with the archive's own metadata (`apache_config/`,
-`backup_info.txt`, the `.sql` dump) as siblings. The target keeps its own
-`Globalvars_site.php` (it holds this machine's database password and
-`secret_box_key`) and mints its own `backup_site_key` rather than inheriting the
-source's identity as a backup recipient. A verification step then requires every regular file the
-archive carries to exist at the site root and fails the job otherwise, because a
-clone whose files did not land still serves pages: the fresh install ran first
-and the database restore succeeded, so the only symptom is uploaded files
-missing from where the restored database says they are.
+The job is one remote command, run as root over the provision's sealed root password: fetch the release from this management node, `install.sh -y -q docker --management-node=URL --node-name=NAME-host` (Docker plus the siteless host agent, which asks to join), then `install.sh -y -q site --docker SITENAME - DOMAIN PORT --enable-agent --management-node=URL`. Without `--no-ssl`, install.sh writes the universal proxy vhost on the host (both ports forward `X-Forwarded-Proto https`; the :443 block is guarded on the certificate path), tries for a certificate, and when DNS is not pointed here yet arms the host's own retry timer, which issues once it is. The container name is the site name this plane chose and is recorded at dispatch; the published port is read back from the `CONTAINER_PORT=` line install.sh prints. A clone (`from_backup`) adds `--clone-from=https://SOURCE --clone-key=KEY`: the new machine pulls the source's database, uploads, themes and plugins over HTTPS from the source's own `utils/clone_export`, after this plane armed the source through its agent's `clone_export_arm` primitive (the key is sealed on the provision, `cvp_clone_key_sealed`, and the source is disarmed when the provision is done). A `bare` instance is the docker half alone. Two join requests arriving is the verification; nothing after the bootstrap opens SSH.
 
 The `mgn_install_state` column tracks the lifecycle: `installing` → `NULL` (success) or `install_failed` (failure). On failure, the node detail page surfaces a **Retry Install** button; the target must be cleaned manually (e.g. `rm -rf /var/www/html/SITENAME`) before retry because `install.sh` refuses to overwrite an existing site. Postgres passwords are auto-generated and stored in the target's `Globalvars_site.php` — Server Manager does not capture or display them.
 
@@ -440,15 +417,15 @@ The **Overview** tab shows an **SSL Setup card** when `mgn_ssl_state` is not `ac
 
 1. Resolves the domain via DNS and shows whether it points to the node's host IP
 2. Enables the **Provision SSL** button when DNS is ready (or when the host IP is not configured)
-3. On submit: creates a `provision_ssl` job, sets `mgn_ssl_state = 'pending'`, redirects to job detail
+3. On submit: starts the certificate chain (`ProvisionPendingSsl::begin_chain`), sets `mgn_ssl_state = 'pending'`, redirects to the jobs tab
 
-The `provision_ssl` job runs `certbot --apache -d DOMAIN` on the node's host (for Docker nodes, certbot runs on the reverse-proxy host, not inside the container). On success, `mgn_ssl_state` is set to `active` by `JobResultProcessor`.
+The chain ends in a `provision_certificate` primitive on the **issuer** — the node's own agent on bare metal, its host's paired agent for a container (routed through the placement record, `mgn_mgh_host_id` → `mgh_mgn_host_node_id`; a container on a host with no paired host agent has no issuance path and the refusal says to pair the host). The job names the site in `for_node_id`, and `JobResultProcessor` reads what the script actually did (`SslProvisionOutcome`) before setting that site's `mgn_ssl_state` to `active`.
 
-**Cloudflare-proxied domains** skip certbot (Cloudflare terminates TLS at its edge) but are gated on a routing probe: the job writes a one-time token to `{webroot}/sm-ssl-probe.txt` on the node, and the management node fetches `/sm-ssl-probe.txt` through the domain. The token is only fetchable because core serve.php routes that URL to `views/sm_ssl_probe.php`, which serves the file — a Joinery front controller never serves arbitrary webroot files, so a node whose code predates that route cannot pass the probe and needs an upgrade first. Only a match — proof that traffic for the domain actually lands on this node — patches the proxy's `X-Forwarded-Proto` and marks SSL `active` (`JobResultProcessor` additionally requires the `CF_ROUTING_VERIFIED` marker). A miss fails the job and the domain stays pending until the customer's DNS actually routes here.
+**Cloudflare-proxied domains** are gated on a routing probe first: the `ssl_probe_place` primitive writes a one-time token into the site node's webroot, the management node fetches `/sm-ssl-probe.txt` through the domain, and `ssl_probe_clear` removes it either way. The token is only fetchable because core serve.php routes that URL to `views/sm_ssl_probe.php` — a Joinery front controller never serves arbitrary webroot files, so a node whose code predates that route (`PROBE_MIN_CORE_VERSION`) is refused by name rather than blamed on Cloudflare. Only a match — proof that traffic for the domain actually lands on this node — dispatches the certificate; a miss leaves the domain pending until the customer's DNS actually routes here. The universal vhost already forwards `X-Forwarded-Proto https`, so nothing is patched.
 
 ### Automated Provisioning (installs only)
 
-For nodes installed via **Install New Node**, `ProvisionPendingSsl` (scheduled hourly) watches for nodes with `mgn_ssl_state = 'pending'`, checks DNS, and kicks off `provision_ssl` jobs automatically. After ~16 hours of failed attempts it flips state to `failed` — except a Cloudflare domain still waiting on its DNS cutover (`CF_ROUTING_UNVERIFIED`), which never flips: a cutover the customer has not made is not a fault, and can legitimately take days. Instead the routing wait is paced — hourly for the first `ROUTING_FAST_ATTEMPTS` tries, then one try every `ROUTING_SLOW_GAP` (six hours) — and entering the slow lane emails the operator once (recipient chain: `server_manager_provisioning_admin_alert_email` → `webmaster_email` → first superadmin; the sent marker is stamped into a job row's parameters as `routing_alert_sent`). The slow lane and the alert apply only while the domain still resolves to Cloudflare: once it repoints, the next attempt is due within the hour, and the 16-hour give-up window opens fresh at the first non-routing failure — time spent parked at Cloudflare never burns it. Manual provisioning via the Setup card is the fallback.
+For nodes installed via **Install New Node**, `ProvisionPendingSsl` (scheduled hourly) watches for nodes with `mgn_ssl_state = 'pending'`. It **observes first**: a machine this plane installs issues its own certificate during the install or on its host's retry timer, and the node's (or its host's) `check_status` enumerates every lineage under `/etc/letsencrypt/live` — a CA-issued, unexpired lineage covering the domain flips the node `active` with no job at all. Only then does it **ask**: it checks DNS and drives the certificate chain above on the issuer. After ~16 hours of failed certificate attempts it flips state to `failed` — except a Cloudflare domain still waiting on its DNS cutover (`CF_ROUTING_UNVERIFIED`), which never flips: a cutover the customer has not made is not a fault, and can legitimately take days. Instead the routing wait is paced — hourly for the first `ROUTING_FAST_ATTEMPTS` tries, then one try every `ROUTING_SLOW_GAP` (six hours) — and entering the slow lane emails the operator once (recipient chain: `server_manager_provisioning_admin_alert_email` → `webmaster_email` → first superadmin; the sent marker is stamped into a job row's parameters as `routing_alert_sent`). The slow lane and the alert apply only while the domain still resolves to Cloudflare: once it repoints, the next attempt is due within the hour, and the 16-hour give-up window opens fresh at the first non-routing failure — time spent parked at Cloudflare never burns it. Manual provisioning via the Setup card is the fallback.
 
 ## Hosting Provisioning
 
@@ -562,12 +539,13 @@ instance, log at `logs/install_executor.log`), and `InstallJobExecutor` claims
 each queued job, runs its `local` steps here and its `ssh` steps on the target
 over the sealed root password (`sshpass`, password in the environment, never on
 a command line), and writes the same output and status contract the agent
-runner writes. It handles fresh docker installs only: `handle_ready` refuses a
-bare, bare-metal or from_backup provision before an instance is created, and the
-executor refuses such a job by its parameters before running a step. Fleet
-enrollment seeding at completion (the mailbox plugin's `FleetProvisionSeeding`)
-reaches a keyless node the same way, over the sealed root password, which by
-design lives until the node's agent is approved.
+runner writes. Every shape travels it — fresh, from_backup (a clone over HTTPS
+from the source this plane armed at `ready`) and bare (a Docker host with no
+site) — as one session (`specs/ssh_single_bootstrap.md`). Fleet enrollment
+seeding (the mailbox plugin's `FleetProvisionSeeding`) is the `fleet_enroll`
+primitive on the new site's own agent, so it waits for that agent to pair:
+`cvp_fleet_seed_state` goes `pending` at completion, `dispatched` once the node
+reports the primitive, then `done` or `failed` by the job's answer.
 
 Settings: `server_manager_customer_cloud_region` / `_type` / `_image` (instance
 defaults), `server_manager_linode_referral_url`. Provider credentials are the
@@ -1530,7 +1508,7 @@ This is distinct from `mgn_ssl_state` / the SSL tile, which track certbot **prov
 The dashboard's page JS calls these `POST /api/v1/action/server_manager/{name}`
 actions with the browser-session credential (superadmin only, floor 10) and
 reads the response envelope's `data`. The full set: `probe_api`, `job_status`,
-`discover_nodes`, `backup_actions`, `refresh_node_status`, `add_discovered_nodes`.
+`backup_actions`, `refresh_node_status`.
 
 ### `server_manager/job_status`
 
@@ -1564,10 +1542,6 @@ Used by the backup browser on the Backups tab.
 | `refresh_list` | POST | `node_id` | `{success, job_id}` -- creates a `list_backups` job |
 | `delete_file` | POST | `node_id`, `target` (local/cloud/both), `local_path`, `cloud_path` | `{success, job_id}` -- creates a `delete_backup` job |
 | `list_status` | POST | `node_id`, `job_id` (optional) | `{success, status, backup_list, last_scan}` -- returns cached file listing |
-
-### `server_manager/discover_nodes`
-
-Used by the auto-detect panel on the Add Node page. Creates and polls `discover_nodes` jobs.
 
 ## Troubleshooting
 
@@ -1609,19 +1583,18 @@ Used by the auto-detect panel on the Add Node page. Creates and polls `discover_
 | `includes/provisioning/ProvisionManagedDomains.php` | Register → web DNS → mail DNS → PTR → active |
 | `includes/provisioning/ManagedDomainWatch.php` | Expiry refresh, the six-month prompt, custody detection, the node banner push |
 | `logic/domain_check_logic.php` | `/api/v1/action/server_manager/domain_check` — live availability for the checkout field |
-| `includes/JobCommandBuilder.php` | Command generation for all job types; `ssh_prefix()` is public for use by other tools |
+| `includes/JobCommandBuilder.php` | Command generation for all job types |
 | `includes/JobResultProcessor.php` | Parses completed job output into structured data |
 | `includes/S3Signer.php` | AWS SigV4 signer for S3-compatible storage (get/put/delete) |
 | `includes/TargetLister.php` | Web-tier paginated bucket listing using S3Signer |
 | `includes/TargetTester.php` | Connection test on Save for Backup Targets |
 | `includes/BackupListHelper.php` | Merges latest local list_backups job output with live cloud listing into a unified file table |
 | `ajax/job_status.php` | Live job output polling |
-| `ajax/discover_nodes.php` | Creates and polls node discovery jobs |
 | `ajax/backup_actions.php` | Backup browser actions (scan, delete) |
 | `migrations/migrations.php` | Indexes, admin menu entries, menu consolidation |
 | `views/admin/index.php` | Dashboard -- fleet overview, publish upgrade |
 | `views/admin/node_detail.php` | Node detail -- tabbed page (overview/backups/database/updates/jobs) |
-| `views/admin/node_add.php` | Add node -- auto-detect + manual form |
+| `views/admin/node_add.php` | Add node -- the record a join request is approved against |
 | `views/admin/targets.php` | Backup target CRUD |
 | `views/admin/jobs.php` | Global job history |
 | `views/admin/job_detail.php` | Single job output with live polling |
