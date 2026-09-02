@@ -1664,12 +1664,27 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
     // names are both `slot-2.dat` are a state the server cannot even see, let
     // alone refuse. The client is the only thing that can tell, it parks one of
     // them, and before this the other could never upload again.
+    //
+    // A HELD source is the same distinction from the other side. Its bytes are
+    // known to stand elsewhere -- inside a vault this device has no key for,
+    // claimed there by an entry waiting for the key -- and its record keeps
+    // the server's placement only so the copy the rest of the fleet can reach
+    // is not trashed. Nothing of its is at that path. Counting its claim
+    // vetoed every upload of a stranger the user saved under the old name:
+    // minted by one scan, dropped here, minted again by the next, for ever.
     let mine = |p: &Placement| -> Result<bool, ExecError> {
-        Ok(!env.store.every_entry()?.into_iter().any(|e| {
+        let all = env.store.every_entry()?;
+        let held: std::collections::HashSet<EntityId> = all
+            .iter()
+            .filter(|c| c.id.is_provisional())
+            .filter_map(|c| c.replaces)
+            .collect();
+        Ok(!all.into_iter().any(|e| {
             e.id != op.entity
                 && !e.remote_deleted
                 && e.id.entity_type == EntityType::File
                 && e.holds_a_local_file()
+                && !held.contains(&e.id)
                 && e.local_placement() == p
         }))
     };

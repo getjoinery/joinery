@@ -1217,8 +1217,17 @@ create, by design, and a vault folder with several new empty siblings made in
 the same pass falls back to that. The rule pairs by position and emptiness,
 not by name; a directory identity from the filesystem -- an inode for
 directories -- would settle both properly, and that is a filesystem-layer
-change not made here. A vault root reparented from one plain parent to
-another is still refused as out of reach, though the server would take it.
+change not made here. A vault root dragged into a plain folder is refused
+as out of reach, and rightly: the server takes a vault folder only at the
+drive root or inside another vault (`protection_boundary`), so there is no
+plain-to-plain reparent of a vault root to make. What was wrong was the
+advice: the refusal told the vault's owner to change its protection level,
+which is the way out for a folder INSIDE a vault and no way at all for the
+vault itself. The issue is split by the agreed parent's protection: a folder
+inside a vault is still sent to the level change; a vault root is told a
+vault sits only at the drive root or inside another vault, and that the
+server kept it where it was. Pinned by
+`moving_a_vault_root_into_a_plain_folder_is_refused_and_said`.
 
 The review found the same loss one level up, and it is open: a PLAIN folder
 whose only content is an empty vault, renamed. The plain folder has no file
@@ -1230,6 +1239,28 @@ by the shape inside it -- a vault of that name at that relative path -- is
 the identity-by-shape trade declined for plain folders above; the owner
 decides whether a vault inside changes that. Pinned red, ignored, as
 `renaming_a_plain_folder_whose_only_content_is_an_empty_vault_keeps_the_vault`.
+
+The same trade, plain folders only, one axis over: a parent and the folder
+inside it renamed in one go. `A/B/f.txt`, `A` renamed to `X` and `B` to `C`
+before a pass. `B` is found under `X/C` by its file. `A` is credited with
+`B/f.txt`, but the relative path changed with `B`'s name, so nothing under
+`X` matches it: `A` is trashed, `X` is minted plain, `C` is moved into it.
+Nothing is lost and the trees agree; what was granted on `A` is gone with it.
+The rule that would find `A` -- pair a missing folder with the one new
+directory its relocated child folders now share -- cannot tell this shape
+from the user moving `B` into a brand-new `X` and deleting `A`, and in that
+reading it carries `A`'s grants onto a folder the user made fresh. Trashing
+on rename loses grants; pairing on deletion leaks them. Owner's call. Pinned
+red, ignored, as
+`renaming_a_folder_and_its_subfolder_together_keeps_both_identities` and
+`renaming_a_folder_and_its_subfolder_with_the_old_name_rebuilt_keeps_both_identities`.
+Probed green in the same session, on the staged tree, and kept as pins:
+an empty vault renamed by case only on a folding disk; a file saved into
+the renamed vault before the pass; one holder renaming the empty vault while
+another fills it (the rename wins, the file lands inside, encrypted); two
+holders renaming it to different names at once (one vault survives); and a
+plain parent left empty by its child leaving, beside a new empty folder,
+which is not paired with it.
 
 ---
 
@@ -1309,6 +1340,90 @@ mistake as reading a loss from the shape of its aftermath — in both cases the
 answer was one layer further down.
 
 ---
+
+## Defect S — the held file whose record stayed where the file was not
+
+Estate v15, seed 11091499, one of 40,070; the harness's stale-agreement
+invariant, not a loss. A keyless guest and a holder. Pre-existing at
+dcc95b23, before Defects P and Q.
+
+**What happened.** The guest moved `Sub/Report 13.docx` to the root. The
+move landed on the server and its answer was lost. Before the next pass the
+workload's swap persona moved the guest's copy again, and it ended inside
+the guest's hand-made `Private` directory, the vault this device holds no
+key for. The queued move was retried, found the server already had the
+file at the root, and was dropped as overtaken, which is right. The scan
+then found the file's inode inside the vault and took the keyless-crossing
+exit: a claimant waiting for the key was minted for the bytes, and the
+source was held so the server's copy would not be trashed for a replacement
+this device cannot send. Both waiting exits skip reconcile, so nothing
+recorded that the server had moved the source. Its agreement kept naming
+`Sub/Report 13.docx`.
+
+The holder then made a new file under exactly that name. On the guest it
+was parked `Unsyncable(DuplicateName)` against a name nobody was using, and
+never reached the guest's disk. Reported, at least: an `unsyncable` issue
+naming a duplicate that does not exist.
+
+**Traced, with the sweep's trace runner.** `ROUNDS`, a per-round print of
+the watched entity's record, its queued ops, the disk path holding its
+agreed inode, and every record sharing the name, were added to
+`scratch_onekey_trace` for this and stay. The swap persona picks a random
+device's disk on any device's upload completing, which is how the guest's
+file moved during the holder's pass.
+
+**The fix.** A source waiting on a keyless vault is held, not frozen. The
+hold is about the bytes and says nothing about the name, so both waiting
+exits -- the hold standing, and the crossing that mints the claimant --
+write the server's placement down as the agreement (`follow_the_server`).
+The scan then looks for the source where the server has it, which is as
+empty as the old path was, and the hold stands on the same premise as
+before; the name the file left is free for whatever comes to take it.
+
+**Pinned.** `a_held_file_moved_on_the_server_does_not_keep_its_old_name`
+builds the four steps deterministically -- a lost move answer, the drag into
+the hand-made vault directory, the holder following the move, the holder's
+new file under the old name -- and asserts the new file reaches the guest,
+the held file's record names the root, the held bytes are still on the
+server, and no duplicate is reported. Red on the tree before the fix. Seed
+11091499 passes and joins the pinned seeds in the workspace gate.
+
+**The review found the other half, and it is fixed too.** A stranger saved
+under the held file's name. The scan pairs by path first -- a file standing
+at a path a live record is synced at is that record's -- so the stranger
+became the held file edited: its bytes went up as a version of a file whose
+real bytes were waiting in the vault, the hold lapsed, and nothing said so.
+Pre-existing at the old path; following the server merely moved which path
+was dangerous. Two changes, both from the same fact -- a held record's
+bytes are known to stand somewhere else, so its path proves nothing:
+
+- `KnownLocal::held` marks a source some provisional claimant `replaces`,
+  and `pair` settles a held record by path only for the same inode brought
+  back. Anything else at the path is a creation.
+- The upload's ownership check (`mine`) no longer counts a held source's
+  claim on a placement, the same carve-out it already makes for a parked
+  record: nothing of the held file's is at that path, and counting it
+  minted a fresh provisional for the stranger every scan and dropped it
+  every pass, for ever.
+
+Pinned by `a_stranger_saved_later_at_a_held_files_path_is_a_new_file` (red
+with the scan mark ignored: the version chain takes the stranger's bytes)
+and `a_held_file_does_not_take_over_a_stranger_at_the_servers_new_path`
+(the stranger standing there first, its upload refused once). Both assert
+the held file's server copy is live under its own bytes, the stranger goes
+up on its own, and the claimant still stands. A held record with NO
+fingerprint -- its upload finished while the user was already moving it,
+so the agreement was written without one -- has nothing to match an inode
+against and pairs by path with nobody; the bytes brought back are still
+found by hash. Pinned by
+`a_stranger_at_a_held_files_path_is_new_even_without_a_fingerprint`, red
+when such a record was let through the gate.
+
+**Still open on this axis.** `a_move_whose_answer_was_lost_is_finished_on_the_retry`
+pins the plain shape -- the same lost answer with the file left where the
+user put it -- as green on one and two devices: reconcile's same-target rule
+writes the agreement there. The move op itself still reads its own landed
+move as somebody else's and stands down; that costs a pass, not the record.
 
 ## Still open on this axis
 
@@ -1480,4 +1595,11 @@ answer was one layer further down.
   parker's finisher then finds the file moved and is dropped, and the dance is
   re-planned. It converges, with an "unfinished operation" issue on the peer
   for a park that was never abandoned. Raised by the Defect P review;
-  pre-existing.
+  pre-existing. Swept on 2026-09-02 across the first twelve server calls of
+  the parking pass with a Mac peer racing
+  (`a_peer_putting_a_park_back_does_not_break_the_parkers_finish`): finished
+  and nothing lost at every kill point. One more cost seen there: the
+  put-back lands `x.txt` beside the `X.txt` the swap had already moved in,
+  a case clash on the peer's folding disk, so the peer trashes its own copy,
+  re-downloads it when the swap resolves, and keeps the "parked" issue that
+  records the trashing. A grace period would remove all three.

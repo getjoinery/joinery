@@ -599,6 +599,7 @@ pub fn run_pass(
                 }
             };
             if !alive {
+                follow_the_server(env, &entry)?;
                 continue;
             }
             for mut claimant in all_entries(env)?
@@ -725,13 +726,25 @@ pub fn run_pass(
                 // exists to end. Nothing is undone -- the folder stays where
                 // the user dragged it, and the server keeps its encrypted copy
                 // exactly where it was.
-                env.store.raise_issue(
-                    Some(entry.id),
-                    "withdrawn",
+                // Two folders come this way and want different advice. A
+                // folder INSIDE a vault can leave it by a level change, which
+                // is the server's operation. A vault's own root cannot go into
+                // a plain folder at all -- the server keeps a vault at the
+                // drive root or inside another vault -- and telling its owner
+                // to change a protection level sends them somewhere useless.
+                let agreed_parent = entry
+                    .synced_placement
+                    .as_ref()
+                    .map(|p| p.parent)
+                    .unwrap_or(entry.remote.parent);
+                let detail = if parent_is_encrypted(env, agreed_parent)? {
                     "this folder is protected and cannot be moved out of the vault from here; \
-                     change its protection level first, then move it",
-                    (env.now_ms)() as i64,
-                )?;
+                     change its protection level first, then move it"
+                } else {
+                    "this folder is a vault, and a vault can sit only at the drive root or \
+                     inside another vault; it stays on the server where it was"
+                };
+                env.store.raise_issue(Some(entry.id), "withdrawn", detail, (env.now_ms)() as i64)?;
                 continue;
             }
             if env.vault.is_none() {
@@ -802,6 +815,7 @@ pub fn run_pass(
                     waiting.replaces = Some(entry.id);
                     env.store.put_entry(&waiting)?;
                 }
+                follow_the_server(env, &entry)?;
                 continue;
             }
             // Trash the source and forget it. `trash_remote` never touches the
@@ -1525,6 +1539,38 @@ fn observed_dirs(env: &ExecEnv) -> Result<Vec<String>, ExecError> {
     Ok(out)
 }
 
+/// A source waiting on a keyless vault is held, not frozen.
+///
+/// The hold is about the BYTES -- do not trash the server's copy for a
+/// replacement this device cannot send -- and it says nothing about the NAME.
+/// The server can move the source meanwhile: a peer's move, or this device's
+/// own move landing after its answer was lost. Both waiting exits skip
+/// reconcile, so nothing else records that, and the agreement keeps naming
+/// the place the file left. That name is then held against every file that
+/// comes to take it: a peer's new file under the old name was parked as a
+/// duplicate of a ghost, and never reached this disk. Estate seed 11091499.
+///
+/// So the server's placement is written down as the agreement. The scan then
+/// looks for the source where the server has it, which is as empty as the old
+/// path was, and the hold stands on the same premise as before.
+///
+/// A stranger standing at the server's path on this disk is not handed to
+/// the source by this: the scan pairs a held record by inode, not by path
+/// (`KnownLocal::held`).
+fn follow_the_server(env: &ExecEnv, entry: &Entry) -> Result<(), ExecError> {
+    if entry.synced_placement.as_ref() == Some(&entry.remote) {
+        return Ok(());
+    }
+    let mut moved = entry.clone();
+    let agreed_name = entry.synced_placement.as_ref().map(|p| p.name.as_str());
+    if agreed_name != Some(entry.remote.name.as_str()) {
+        moved.local_name = None;
+    }
+    moved.synced_placement = Some(entry.remote.clone());
+    env.store.put_entry(&moved)?;
+    Ok(())
+}
+
 /// What happened to a tracked folder on this computer since the last agreement.
 ///
 /// The delete branch is guarded on the folder having been *materialized*. A
@@ -1961,7 +2007,13 @@ fn detect_folder_moves(
 fn known_local(env: &ExecEnv) -> Result<Vec<KnownLocal>, ExecError> {
     let mut out = Vec::new();
     let mut deleted = Vec::new();
-    for entry in all_entries(env)? {
+    let all = all_entries(env)?;
+    let held: std::collections::HashSet<EntityId> = all
+        .iter()
+        .filter(|e| e.id.is_provisional())
+        .filter_map(|e| e.replaces)
+        .collect();
+    for entry in all {
         if entry.id.entity_type != EntityType::File {
             continue;
         }
@@ -1989,6 +2041,7 @@ fn known_local(env: &ExecEnv) -> Result<Vec<KnownLocal>, ExecError> {
             fingerprint: entry.synced_fingerprint,
             sha256: entry.synced_content.as_ref().map(|c| c.sha256.clone()),
             server_deleted: entry.remote_deleted,
+            held: held.contains(&entry.id),
         };
         if entry.remote_deleted {
             deleted.push(known);

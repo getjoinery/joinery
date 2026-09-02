@@ -58,6 +58,12 @@ pub struct KnownLocal {
     /// that same path: the file there is the live one's, and this entry has
     /// nothing on this disk at all.
     pub server_deleted: bool,
+    /// The bytes are known to stand somewhere else on this disk: a claimant
+    /// waiting for a vault key holds them, and this record is the source it
+    /// replaces. Its path then proves nothing -- a file standing there is
+    /// the source only if it is the same inode brought back, and otherwise
+    /// a stranger the user saved under the old name.
+    pub held: bool,
 }
 
 /// What the scan concluded about one tracked file.
@@ -145,6 +151,18 @@ pub fn pair(known: &[KnownLocal], observed: &[ObservedFile]) -> ScanOutcome {
         let Some(obs) = by_path.get(k.path.as_str()) else {
             continue;
         };
+        // A held record's bytes are somewhere else, so the path alone is not
+        // it. Read by path, a stranger saved under the old name became the
+        // held file edited: its bytes went up as a version of a file whose
+        // real bytes were waiting in a vault this device cannot open, the
+        // hold lapsed, and nothing said so. The inode brought back is the
+        // file; anything else at the path is a creation. A held record with
+        // no fingerprint -- its upload finished while the user was already
+        // moving it -- has nothing to match and pairs by path with nobody;
+        // the bytes brought back are still found by hash in the round below.
+        if k.held && k.fingerprint.is_none_or(|fp| fp.file_id != obs.fingerprint.file_id) {
+            continue;
+        }
         let i = index_of[obs.path.as_str()];
         settled[n] = true;
         if claimed[i] {
@@ -285,7 +303,7 @@ mod tests {
             path: path.into(),
             fingerprint: Some(fp(file_id, 10, 100)),
             sha256: Some(sha.into()),
-            server_deleted: false,
+            server_deleted: false, held: false,
         }
     }
 
@@ -512,7 +530,7 @@ mod tests {
                 path: "a.txt".into(),
                 fingerprint: None,
                 sha256: None,
-                server_deleted: false,
+                server_deleted: false, held: false,
             }],
             &[observed("elsewhere.txt", 900, "sha-x")],
         );
@@ -538,7 +556,7 @@ mod tests {
             &[
                 known(2, "shared.txt", 200, "sha-live"),
                 KnownLocal {
-                    server_deleted: true,
+                    server_deleted: true, held: false,
                     ..known(1, "shared.txt", 100, "sha-old")
                 },
             ],

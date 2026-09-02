@@ -454,7 +454,7 @@ fn trace(world: &World, tag: &str) {
                 continue;
             }
             println!(
-                "  {} entry {watch}: remote={:?}/{:?} synced={:?}/{:?} status={:?} deleted={}",
+                "  {} entry {watch}: remote={:?}/{:?} synced={:?}/{:?} status={:?} deleted={} fp={:?}",
                 d.name,
                 e.remote.parent,
                 e.remote.name,
@@ -462,12 +462,58 @@ fn trace(world: &World, tag: &str) {
                 e.synced_placement.as_ref().map(|p| p.name.clone()),
                 e.status,
                 e.remote_deleted,
+                e.synced_fingerprint.map(|f| f.file_id),
             );
+        }
+        // Where the watched entity's agreed inode actually stands on this disk.
+        if let Some(fp) = d
+            .store
+            .get_entry(jd_core::model::EntityId::file(watch))
+            .ok()
+            .flatten()
+            .and_then(|e| e.synced_fingerprint)
+        {
+            let at: Vec<String> = d
+                .fs
+                .all_paths()
+                .into_iter()
+                .filter(|p| d.fs.file_id_of(p) == Some(fp.file_id))
+                .collect();
+            println!("  {} inode {} of {watch} stands at {at:?}", d.name, fp.file_id);
+        }
+        // The watched entity's queued ops, and every record whose name
+        // carries the needle -- which is how a path on the disk is found to
+        // belong to a record other than the one being watched.
+        for op in d.store.queued_ops().unwrap() {
+            if op.entity.server_id == watch {
+                println!(
+                    "  {} op {} {} attempts={} err={:?}",
+                    d.name, op.kind, op.params, op.attempts, op.last_error
+                );
+            }
+        }
+        if std::env::var("ENTRIES").is_ok() {
+            for e in d.store.every_entry().unwrap() {
+                if e.id.server_id != watch && e.remote.name.contains(&needle) {
+                    println!(
+                        "  {} also {:?} {}: remote={:?}/{:?} synced={:?}/{:?} status={:?} deleted={}",
+                        d.name,
+                        e.id.entity_type,
+                        e.id.server_id,
+                        e.remote.parent,
+                        e.remote.name,
+                        e.synced_placement.as_ref().map(|p| p.parent),
+                        e.synced_placement.as_ref().map(|p| p.name.clone()),
+                        e.status,
+                        e.remote_deleted,
+                    );
+                }
+            }
         }
         let paths: Vec<String> = jd_sim::scenario::disk_tree(d)
             .into_iter()
-            .map(|(p, _)| p)
-            .filter(|p| p.contains(&needle))
+            .filter(|(p, _)| p.contains(&needle))
+            .map(|(p, h)| format!("{p} #{:?} {}", d.fs.file_id_of(&p), h.map(|h| h[..8].to_string()).unwrap_or_default()))
             .collect();
         println!("  {} disk: {:?}", d.name, paths);
     }
@@ -2357,13 +2403,18 @@ fn scratch_onekey_trace() {
     let vault = Vault::OneKeyHolder;
     let world = sweep_world(seed, &refs, steps, chaos, vault);
     drive(&world, seed, steps, chaos, sweep_root(vault), vault, false, Names::Ordinary);
-    for round in 0..8 {
+    // `ROUNDS` settle rounds after the workload, the watched entity printed
+    // after each pass, so a record that goes stale during the settle can be
+    // seen going stale.
+    let rounds: usize = std::env::var("ROUNDS").unwrap_or("8".into()).parse().unwrap();
+    for round in 0..rounds {
         for d in &world.devices {
             world.clock.advance_secs(20 * 60);
             let out = world.pass(d);
             if std::env::var("OPS").is_ok() {
                 println!("  ROUND {round} {} plan={:?} exec={:?}", d.name, out.round.plan, out.exec);
             }
+            trace(&world, &format!("round {round} after {}", d.name));
         }
     }
 }
