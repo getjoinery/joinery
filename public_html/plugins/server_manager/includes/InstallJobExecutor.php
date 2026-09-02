@@ -25,6 +25,8 @@
  * It writes the same mjb_output / mjb_status contract the agent's runner wrote,
  * so JobResultProcessor::process_install_node reads a completed job unchanged.
  *
+ * @version 1.3 - processes the job result itself once the job is finished, as the channel endpoint does
+ *                for an agent-run job; a retried install otherwise completes and clears nothing
  * @version 1.2 - waits for the target to answer SSH before the first remote step: a provider reports
  *                'running' before sshd listens, and the install starts seconds after that
  * @version 1.1 - a job whose parameters ask for from_backup or bare-metal is refused up front
@@ -195,6 +197,19 @@ class InstallJobExecutor {
 		}
 
 		$this->finish($job, $ok, $fail_message);
+
+		// The runner contract ends with the result PROCESSED, not merely
+		// written. For an agent-run job the channel endpoint does that on
+		// receipt; here the executor is the one who knows the job is done. The
+		// provision pipeline also processes an unprocessed result when it is
+		// watching the job, but a retry from the node page is watched by
+		// nothing — it completed and cleared no install state until this.
+		$job->load();
+		try {
+			JobResultProcessor::process($job);
+		} catch (\Throwable $e) {
+			error_log('InstallJobExecutor: result processing for job #' . $job->key . ' failed: ' . $e->getMessage());
+		}
 	}
 
 	/**

@@ -10,6 +10,16 @@
  *
  * CLI only. Runs outside any web request on purpose — an install takes minutes,
  * and a deploy restarts PHP-FPM.
+ *
+ * The lock lives under the site's own logs directory, not the system temp
+ * dir: a lock file in /tmp belongs to whoever created it first, and a worker
+ * run by hand as one user would then lock the cron's user out for good — and
+ * silently, since 'cannot open the lock' would read as 'already running'.
+ * Those two are told apart below: one is a quiet exit, the other an error.
+ *
+ * @version 1.2 - logs each claim, finish and empty-queue check with a timestamp, so a worker that
+ *                holds the lock without working can be seen doing it
+ * @version 1.1 - lock under the site's logs dir; an unopenable lock is an error, not 'already running'
  */
 
 if (php_sapi_name() !== 'cli') {
@@ -28,16 +38,39 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/includes/Install
 // Single instance. A second worker spawned while one is running exits quietly
 // rather than racing it (the DB claim would keep them correct anyway; this just
 // keeps one worker's log coherent).
-$lock_path = sys_get_temp_dir() . '/joinery_install_executor.lock';
+$lock_path = PathHelper::getSiteRoot() . '/logs/install_executor.lock';
 $lock = @fopen($lock_path, 'c');
-if ($lock === false || !flock($lock, LOCK_EX | LOCK_NB)) {
+if ($lock === false) {
+	$owner = file_exists($lock_path) ? (posix_getpwuid((int)fileowner($lock_path))['name'] ?? (string)fileowner($lock_path)) : 'nobody';
+	$me = posix_getpwuid(posix_geteuid())['name'] ?? (string)posix_geteuid();
+	$msg = "install executor: cannot open the lock file {$lock_path} as {$me} (owned by {$owner}); "
+		. "queued installs will not run until it is writable by the scheduled-task user";
+	error_log($msg);
+	fwrite(STDERR, $msg . "\n");
+	exit(1);
+}
+// Whoever created it, the next user must be able to open it: an operator's
+// hand run must never lock the scheduled-task user out.
+@chmod($lock_path, 0666);
+if (!flock($lock, LOCK_EX | LOCK_NB)) {
 	fwrite(STDERR, "install executor already running; nothing to do\n");
 	exit(0);
 }
 
 $ran = 0;
+$say = function ($line) { echo gmdate('Y-m-d H:i:s'), ' ', $line, "\n"; flush(); };
+$say('worker started (pid ' . getmypid() . ')');
 try {
-	while (InstallJobExecutor::run_once()) {
+	while (true) {
+		$job = InstallJobExecutor::claim_next();
+		if ($job === null) {
+			$say('queue empty; exiting after ' . $ran . ' job(s)');
+			break;
+		}
+		$say('claimed job #' . $job->key . ' for node #' . (int)$job->get('mjb_mgn_node_id'));
+		(new InstallJobExecutor())->execute($job);
+		$job->load();
+		$say('finished job #' . $job->key . ': ' . $job->get('mjb_status'));
 		$ran++;
 	}
 } catch (Throwable $e) {
