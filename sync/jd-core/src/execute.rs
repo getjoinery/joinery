@@ -185,20 +185,33 @@ pub fn journal(
     key_for: &mut dyn FnMut() -> String,
 ) -> Result<Vec<i64>, ExecError> {
     let mut ids = Vec::new();
+    let ordered = plan.ordered();
+    // Every move's key is minted before any park is written down, because a
+    // park is NAMED after the move that finishes it. `move_remote` knows its
+    // own park by `swap_name(its key)` and completes the dance from there; a
+    // park named any other way reads, once it has been recorded, as somebody
+    // else's move of the same file, and the finisher is dropped as overtaken
+    // -- with the file left on the server under the engine's own name for
+    // ever. Estate seed 8060024, with the two ops running back to back.
+    let keys: Vec<String> = ordered.iter().map(|_| key_for()).collect();
 
     // Parking first. A cycle's victim has to be out of its slot before any of
     // the moves that want it can run, and the moves are journaled below in the
     // order the planner ranked them.
-    for (entity, scratch) in &plan.broken_cycles {
-        let side = plan
-            .ops
-            .iter()
-            .find(|o| o.entity == *entity)
-            .map(|o| match o.action {
+    for entity in &plan.broken_cycles {
+        let finisher = ordered.iter().position(|o| o.entity == *entity);
+        let side = finisher
+            .map(|i| match ordered[i].action {
                 Action::ApplyRemoteMove { .. } => "park_local",
                 _ => "park_remote",
             })
             .unwrap_or("park_remote");
+        let scratch = match finisher {
+            Some(i) => crate::order::swap_name(&keys[i]),
+            // Nothing planned to finish it. The planner does not produce this;
+            // the name still has to be unique.
+            None => crate::order::swap_name(&key_for()),
+        };
         ids.push(store.queue_op(
             side,
             *entity,
@@ -207,7 +220,7 @@ pub fn journal(
         )?);
     }
 
-    for op in plan.ordered() {
+    for (op, key) in ordered.iter().zip(keys) {
         let (kind, mut params) = encode(&op.action);
         // Where the thing is right now, recorded while it is still known. A
         // file the user moved on this computer is not at the agreed placement,
@@ -216,7 +229,7 @@ pub fn journal(
         if let Some(from) = &op.from {
             params["from"] = place(from);
         }
-        ids.push(store.queue_op(kind, op.entity, &params.to_string(), &key_for())?);
+        ids.push(store.queue_op(kind, op.entity, &params.to_string(), &key)?);
     }
     Ok(ids)
 }
@@ -2809,6 +2822,11 @@ fn move_remote(
     // The scratch name carries the key of the op that minted it, so the op can
     // recognise its own work and finish it. Checked before the guard, because
     // the guard is what destroys it.
+    //
+    // The planner's park is the same step taken early: `journal` names a
+    // cycle-breaking park after the key of the move that finishes it, so the
+    // finisher arrives here looking at a name that is its own -- whether the
+    // park ran a moment ago or a pass boundary lies between them.
     let ours_to_finish = entry.remote.name == crate::order::swap_name(&op.idempotency_key);
     if !ours_to_finish && from.is_some_and(|f| entry.remote != f) {
         return Ok(OpOutcome::Overtaken(
@@ -2933,12 +2951,18 @@ fn move_remote(
                 "an encrypted file cannot be parked under a scratch name".into(),
             ));
         }
+        let scratch = crate::order::swap_name(&op.idempotency_key);
+        // Already standing aside under this op's own name: the planner's park,
+        // being finished now. Asking the server for the name it has is noise.
+        if entry.remote.name == scratch {
+            return Ok(());
+        }
         env.api.action_idempotent(
             "drive_rename",
             json!({
                 "entity_type": t,
                 "entity_id": op.entity.server_id,
-                "name": crate::order::swap_name(&op.idempotency_key),
+                "name": scratch,
             }),
             &format!("{}-park", op.idempotency_key),
         )?;
@@ -3051,16 +3075,24 @@ fn move_remote(
         }
         None => entry.remote = to,
     }
-    entry.synced_placement = Some(entry.remote.clone());
-    // A rename this device derived from its own disk says the file wears the
-    // new name byte for byte, and the server now calls it that too. Any
-    // spelling written down earlier is not a fact about the disk any more.
-    // Kept, it would send the next scan looking for the file under a name it
-    // no longer has -- and edited bytes are then found by neither path nor
-    // content, which reads as a deletion plus a stranger. A reparent alone
-    // changes no name and keeps its mapping.
-    if renaming {
-        entry.local_name = None;
+    // A park is one step inside another operation, not a place the two sides
+    // agreed on, and it is recorded as `remote` alone: that IS where the server
+    // has the file. Written into the agreement it would take the real name
+    // with it, and the recovery in `pass` that puts an abandoned park back
+    // "where both sides last agreed" would find only the scratch name there.
+    // The disk still wears the real name too, so the spelling stays.
+    if op.kind != "park_remote" {
+        entry.synced_placement = Some(entry.remote.clone());
+        // A rename this device derived from its own disk says the file wears
+        // the new name byte for byte, and the server now calls it that too.
+        // Any spelling written down earlier is not a fact about the disk any
+        // more. Kept, it would send the next scan looking for the file under a
+        // name it no longer has -- and edited bytes are then found by neither
+        // path nor content, which reads as a deletion plus a stranger. A
+        // reparent alone changes no name and keeps its mapping.
+        if renaming {
+            entry.local_name = None;
+        }
     }
     if entry.status == LocalStatus::Synced || entry.synced_content.is_some() {
         entry.status = LocalStatus::Synced;

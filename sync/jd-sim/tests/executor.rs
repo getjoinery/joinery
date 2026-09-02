@@ -102,8 +102,7 @@ fn fresh(id: EntityId, parent: Option<i64>, name: &str, status: LocalStatus) -> 
 /// Journal one action and run it, returning what the pass did.
 fn do_one(device: &Device, entity: EntityId, action: Action) -> jd_core::ExecReport {
     let items = vec![PlanItem::new(entity, action, 0)];
-    let mut tokens = |e: EntityId| format!("t{}", e.server_id);
-    let p = plan(items, &jd_vfs::Personality::linux(), &mut tokens);
+    let p = plan(items, &jd_vfs::Personality::linux());
     {
         let mut keys = device.key_source();
         journal(&device.store, &p, &mut keys).expect("journal");

@@ -252,10 +252,9 @@ impl Daemon {
             vault: self.vault.as_ref(),
         };
         let mut keys = jd_proto::Client::new_idempotency_key;
-        let mut tokens = |id: jd_core::EntityId| format!("{}", id.server_id.abs());
 
         self.last_poll_ms = now_ms();
-        match run_pass(&env, &ctx, DeletePolicy::Guard, &mut keys, &mut tokens) {
+        match run_pass(&env, &ctx, DeletePolicy::Guard, &mut keys) {
             Ok(outcome) => {
                 self.last_pass_ms = Some(now_ms());
                 self.blocker = if outcome.root_unavailable {

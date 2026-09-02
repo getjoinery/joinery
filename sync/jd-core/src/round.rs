@@ -86,7 +86,6 @@ pub fn run_round(
     synced_total: usize,
     ctx: &Context,
     policy: DeletePolicy,
-    token_for: &mut dyn FnMut(EntityId) -> String,
 ) -> RoundOutcome {
     let mut out = RoundOutcome::default();
     let mut resolved: Vec<(RoundInput, Vec<Action>)> = Vec::new();
@@ -166,7 +165,7 @@ pub fn run_round(
         }
     }
 
-    out.plan = plan(items, &ctx.personality, token_for);
+    out.plan = plan(items, &ctx.personality);
     out
 }
 
@@ -261,10 +260,6 @@ mod tests {
         }
     }
 
-    fn tokens() -> impl FnMut(EntityId) -> String {
-        |e: EntityId| format!("t{}", e.server_id)
-    }
-
     /// n entries deleted on one side.
     ///
     /// Note which direction each produces, because it is the opposite of the
@@ -317,21 +312,18 @@ mod tests {
                 depth: 0,
             },
         ];
-        let mut t = tokens();
-        let out = run_round(inputs, 100, &ctx(), DeletePolicy::Guard, &mut t);
+        let out = run_round(inputs, 100, &ctx(), DeletePolicy::Guard);
         assert_eq!(out.plan.ops.len(), 2);
         assert!(!out.needs_confirmation());
     }
 
     #[test]
     fn a_routine_number_of_deletes_just_happens() {
-        let mut t = tokens();
         let out = run_round(
             deleted_on(5, Side::ThisComputer),
             500,
             &ctx(),
             DeletePolicy::Guard,
-            &mut t,
         );
         assert!(!out.needs_confirmation());
         assert_eq!(out.plan.ops.len(), 5);
@@ -341,13 +333,11 @@ mod tests {
     fn a_wholesale_local_wipe_is_held_back_for_a_person() {
         // What an unmounted volume, or ransomware, looks like from here: every
         // local file gone, which would propagate as trashing the whole Drive.
-        let mut t = tokens();
         let out = run_round(
             deleted_on(200, Side::ThisComputer),
             400,
             &ctx(),
             DeletePolicy::Guard,
-            &mut t,
         );
 
         assert!(out.needs_confirmation());
@@ -362,13 +352,11 @@ mod tests {
     #[test]
     fn the_guard_works_in_the_other_direction_too() {
         // A server-side accident that would wipe this computer.
-        let mut t = tokens();
         let out = run_round(
             deleted_on(200, Side::Server),
             400,
             &ctx(),
             DeletePolicy::Guard,
-            &mut t,
         );
         assert_eq!(out.paused[0].direction, DeleteDirection::Local);
         assert!(out.plan.is_empty());
@@ -376,13 +364,11 @@ mod tests {
 
     #[test]
     fn approval_lets_the_same_round_through_unchanged() {
-        let mut t = tokens();
         let out = run_round(
             deleted_on(200, Side::ThisComputer),
             400,
             &ctx(),
             DeletePolicy::Approved,
-            &mut t,
         );
         assert!(!out.needs_confirmation());
         assert_eq!(out.plan.ops.len(), 200);
@@ -399,8 +385,7 @@ mod tests {
             depth: 0,
         });
 
-        let mut t = tokens();
-        let out = run_round(inputs, 400, &ctx(), DeletePolicy::Guard, &mut t);
+        let out = run_round(inputs, 400, &ctx(), DeletePolicy::Guard);
 
         assert_eq!(out.paused.len(), 1);
         assert_eq!(out.paused[0].direction, DeleteDirection::Remote);
@@ -423,8 +408,7 @@ mod tests {
             depth: 0,
         });
 
-        let mut t = tokens();
-        let out = run_round(inputs, 400, &ctx(), DeletePolicy::Guard, &mut t);
+        let out = run_round(inputs, 400, &ctx(), DeletePolicy::Guard);
 
         assert!(out.needs_confirmation());
         assert_eq!(out.plan.ops.len(), 1);
@@ -443,8 +427,7 @@ mod tests {
             },
             depth: 0,
         }];
-        let mut t = tokens();
-        let out = run_round(inputs, 10, &ctx(), DeletePolicy::Guard, &mut t);
+        let out = run_round(inputs, 10, &ctx(), DeletePolicy::Guard);
 
         assert_eq!(out.issues.len(), 1);
         assert_eq!(out.issues[0].0, EntityId::file(1));
@@ -470,8 +453,7 @@ mod tests {
                 depth: 0,
             },
         ];
-        let mut t = tokens();
-        let out = run_round(inputs, 10, &ctx(), DeletePolicy::Guard, &mut t);
+        let out = run_round(inputs, 10, &ctx(), DeletePolicy::Guard);
         assert_eq!(out.plan.broken_cycles.len(), 1);
     }
 
@@ -501,16 +483,14 @@ mod tests {
                 depth: 0,
             },
         ];
-        let mut t = tokens();
-        let out = run_round(inputs, 10, &ctx(), DeletePolicy::Guard, &mut t);
+        let out = run_round(inputs, 10, &ctx(), DeletePolicy::Guard);
         let stages: Vec<Stage> = out.plan.ordered().iter().map(|o| o.stage).collect();
         assert_eq!(stages, vec![Stage::CreateFolders, Stage::Transfer]);
     }
 
     #[test]
     fn an_empty_round_is_empty() {
-        let mut t = tokens();
-        let out = run_round(vec![], 0, &ctx(), DeletePolicy::Guard, &mut t);
+        let out = run_round(vec![], 0, &ctx(), DeletePolicy::Guard);
         assert!(out.is_empty() && !out.needs_confirmation());
     }
 

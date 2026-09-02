@@ -4527,6 +4527,472 @@ fn a_folder_made_in_a_vault_with_no_key_here_waits_and_mints_nothing() {
     jd_sim::scenario::assert_no_ciphertext_on_a_keyless_disk(&world);
 }
 
+/// Renaming an empty vault folder keeps it a vault.
+///
+/// A folder with nothing inside cannot be matched by its contents, so the
+/// scanner read the rename as one folder removed and another created. For a
+/// plain folder that loses nothing. For a vault it trashed the vault on the
+/// server and minted a plain folder under the vault's new name -- and the next
+/// file the user saved there went up in the clear, on every device, with
+/// nothing saying so. Found by staging the Defect L open note.
+#[test]
+fn renaming_an_empty_vault_folder_keeps_it_a_vault() {
+    let vault = SimVault::new(9_225);
+    let mut world = World::new(9_225, &["holder"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+
+    let vid = world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some());
+    let holder = world.device("holder");
+    assert!(holder.fs.exists("Private"), "the holder has the vault on its disk");
+
+    holder.fs.user_rename("Private", "Secret");
+    assert!(world.settle().is_some());
+
+    let stat = world
+        .server
+        .action(
+            "drive_stat",
+            &serde_json::json!({ "entities": [{ "entity_type": "folder", "entity_id": vid }], "urls": false }),
+        )
+        .unwrap();
+    let item = &stat["items"][0];
+    assert_eq!(item["deleted"], false, "the vault was trashed for a rename: {stat}");
+    assert_eq!(item["name"], "Secret", "the vault was not renamed: {stat}");
+    assert_eq!(item["encrypted"], true);
+    let tree = world.server.tree();
+    assert_eq!(
+        tree.keys().collect::<Vec<_>>(),
+        vec!["Secret"],
+        "a second folder was minted for the rename: {tree:?}"
+    );
+    assert!(holder.fs.exists("Secret"), "the holder's own directory is gone");
+    // Nothing to tell the user: the rename was theirs and it was done.
+    assert!(
+        holder.store.open_issues().unwrap().is_empty(),
+        "the rename raised an issue: {:?}",
+        holder.store.open_issues().unwrap()
+    );
+
+    // And what the user saves into it next is still private.
+    let body = b"meant to be private";
+    holder.fs.user_write("Secret/note.txt", body);
+    committed.note("Secret/note.txt", body);
+    assert!(world.settle().is_some());
+    let tree = world.server.tree();
+    assert!(
+        tree.keys().any(|p| p.starts_with("Secret/")),
+        "the file never went up: {tree:?}"
+    );
+    assert!(
+        !tree.contains_key("Secret/note.txt"),
+        "the file went up in the clear: {tree:?}"
+    );
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// Renaming a vault whose files all live in subfolders keeps it a vault too.
+///
+/// The commonest shape of a vault: folders inside, files inside those, nothing
+/// loose at the top. Matched by its direct files alone the root has none, and
+/// the empty-folder rule above does not apply either, because the directory
+/// beside it is full of files the engine knows. The folder scan must credit a
+/// folder with every file beneath it, at its relative path, so the root pairs
+/// first and the folders inside resolve under it.
+#[test]
+fn renaming_a_vault_folder_whose_files_are_in_subfolders_keeps_it_a_vault() {
+    let vault = SimVault::new(9_226);
+    let mut world = World::new(9_226, &["holder"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+
+    let vid = world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some());
+    let holder = world.device("holder");
+    holder.fs.user_mkdir("Private/Sub");
+    let body = b"deep inside the vault";
+    holder.fs.user_write("Private/Sub/f.txt", body);
+    committed.note("Private/Sub/f.txt", body);
+    assert!(world.settle().is_some());
+    assert!(world.server.tree().contains_key("Private/Sub"));
+
+    holder.fs.user_rename("Private", "Secret");
+    committed.note("Secret/Sub/f.txt", body);
+    assert!(world.settle().is_some());
+
+    let stat = world
+        .server
+        .action(
+            "drive_stat",
+            &serde_json::json!({ "entities": [{ "entity_type": "folder", "entity_id": vid }], "urls": false }),
+        )
+        .unwrap();
+    let item = &stat["items"][0];
+    assert_eq!(item["deleted"], false, "the vault was trashed for a rename: {stat}");
+    assert_eq!(item["name"], "Secret", "the vault was not renamed: {stat}");
+    let tree = world.server.tree();
+    assert!(
+        tree.contains_key("Secret/Sub") && tree.keys().any(|p| p.starts_with("Secret/Sub/")),
+        "the folder inside did not follow: {tree:?}"
+    );
+    assert!(
+        !tree.keys().any(|p| p.starts_with("Private")),
+        "a folder survived under the old name: {tree:?}"
+    );
+    assert!(
+        holder.store.open_issues().unwrap().is_empty(),
+        "the rename raised an issue: {:?}",
+        holder.store.open_issues().unwrap()
+    );
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// A folder waiting for a key follows the vault folder it was made in when
+/// that folder is renamed on both sides before the key arrives.
+///
+/// The guest's held folder records a placement under the vault folder's id.
+/// The holder renames the vault folder on the server, the guest's user renames
+/// the directory of that name on the disk to match, and only then does the key
+/// arrive. The held folder and the file inside it must go up under the new
+/// name, not be looked for under a directory that is no longer there.
+#[test]
+fn a_folder_waiting_for_a_key_follows_a_vault_folder_renamed_meanwhile() {
+    let vault = SimVault::new(9_223);
+    let mut world = World::new(9_223, &["holder", "guest"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some());
+
+    let guest = world.device("guest");
+    guest.fs.user_mkdir("Private");
+    guest.fs.user_mkdir("Private/Notes");
+    let body = b"held under a folder about to be renamed";
+    guest.fs.user_write("Private/Notes/todo.txt", body);
+    assert!(world.settle().is_some(), "the guest goes quiet with the folder held");
+    assert!(!world.server.tree().contains_key("Private/Notes"));
+
+    // The vault folder is renamed on the server by its holder...
+    world.device("holder").fs.user_rename("Private", "Secret");
+    assert!(world.settle().is_some());
+    // What the guest does in this window is Defect R, pinned red below in
+    // `a_keyless_guests_vault_directory_survives_the_vault_being_renamed`.
+    // ...and the guest's user renames the directory of that name to match.
+    guest.fs.user_rename("Private", "Secret");
+    assert!(world.settle().is_some(), "still quiet, still keyless");
+    committed.note("Secret/Notes/todo.txt", body);
+
+    world.give_vault("guest", &vault);
+    assert!(world.settle().is_some(), "the key arrives and the held folder goes up");
+    let tree = world.server.tree();
+    // Encrypted, so the file is under the server's placeholder name.
+    assert!(
+        tree.contains_key("Secret/Notes") && tree.keys().any(|p| p.starts_with("Secret/Notes/")),
+        "the held folder did not follow the renamed vault folder: {tree:?}"
+    );
+    assert!(
+        !tree.contains_key("Secret/Notes/todo.txt"),
+        "the file went up in the clear: {tree:?}"
+    );
+    assert!(
+        !tree.keys().any(|p| p.starts_with("Private")),
+        "something went up under the old name: {tree:?}"
+    );
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// Two vault files whose private names collide on a case-folding disk: the
+/// loser already on that disk is renamed there, not left under the winner's
+/// name.
+///
+/// The server never sees a vault file's name and so cannot refuse the
+/// duplicate; the naming pass re-maps the loser to a numbered name. When the
+/// loser is the device's own file, already standing on the disk under the
+/// contested name, the re-map has to move the file too -- or the winner lands
+/// beside it under a name the volume folds onto it, and one of the two is the
+/// other's conflict copy for ever.
+#[test]
+fn a_vault_files_case_twin_already_on_a_folding_disk_is_renamed_there() {
+    let vault = SimVault::new(9_228);
+    let mut world = World::of(
+        9_228,
+        &[("a", jd_sim::Platform::MacOs), ("b", jd_sim::Platform::MacOs)],
+    );
+    world.give_vault("a", &vault);
+    world.give_vault("b", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some());
+
+    let lower = b"the one that got the lower id";
+    let upper = b"the one that lost the name";
+    world.device("a").fs.user_write("Private/notes.txt", lower);
+    world.device("b").fs.user_write("Private/Notes.txt", upper);
+    committed.note("Private/notes.txt", lower);
+    committed.note("Private/Notes.txt", upper);
+    assert!(world.settle().is_some(), "two private names that fold together must settle");
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+
+    for name in ["a", "b"] {
+        let disk = disk_tree(world.device(name));
+        let files: Vec<&String> = disk.keys().filter(|p| p.starts_with("Private/")).collect();
+        assert_eq!(files.len(), 2, "{name} should hold both files: {disk:?}");
+        assert!(
+            disk.values().flatten().any(|h| *h == jd_sim::sha256_hex(lower))
+                && disk.values().flatten().any(|h| *h == jd_sim::sha256_hex(upper)),
+            "{name} is missing one of the two contents: {disk:?}"
+        );
+        assert!(
+            !disk.keys().any(|p| p.contains("conflicted copy")),
+            "{name} turned a case twin into a conflict copy: {disk:?}"
+        );
+    }
+    assert_eq!(
+        world.server.tree().keys().filter(|p| p.starts_with("Private/")).count(),
+        2,
+        "the server should hold exactly two files: {:?}",
+        world.server.tree()
+    );
+}
+
+/// Two empty vaults leave their places at once, beside one new directory:
+/// neither is guessed to be it, and the user is told.
+///
+/// The user deletes vault A and renames vault B to C in one pass. Read by
+/// position alone, A -- first in path order -- would be the one paired with
+/// C: A's deletion undone, its sharing carried onto the folder the user thinks
+/// is B, and B trashed. So with two claimants for one parent the rule stands
+/// down, C is what a plain folder would be, and an issue says so, because
+/// silence here is the very thing the rule exists to prevent.
+#[test]
+fn two_empty_vaults_leaving_at_once_are_not_guessed_at() {
+    let vault = SimVault::new(9_231);
+    let mut world = World::new(9_231, &["holder"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+
+    let a = world.server.seed_encrypted_folder(None, "A");
+    let b = world.server.seed_encrypted_folder(None, "B");
+    assert!(world.settle().is_some());
+    let holder = world.device("holder");
+    holder.fs.user_remove("A");
+    holder.fs.user_rename("B", "C");
+    assert!(world.settle().is_some());
+
+    let stat = |id: i64| {
+        world
+            .server
+            .action(
+                "drive_stat",
+                &serde_json::json!({ "entities": [{ "entity_type": "folder", "entity_id": id }], "urls": false }),
+            )
+            .unwrap()["items"][0]
+            .clone()
+    };
+    assert_eq!(stat(a)["deleted"], true, "the user's deletion of A was undone: {}", stat(a));
+    assert_ne!(stat(a)["name"], "C", "A was guessed to be the renamed one: {}", stat(a));
+    assert_ne!(stat(b)["name"], "C", "B was guessed to be the renamed one: {}", stat(b));
+    let said: Vec<String> = holder
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .map(|i| i.detail)
+        .collect();
+    assert!(
+        said.iter().any(|d| d.contains("cannot be told")),
+        "nothing told the user the rename could not be read: {said:?}"
+    );
+    assert_converged(&world);
+}
+
+/// ...and the same when the ambiguity is on the other side: one vault gone
+/// beside two new directories. Whichever side is plural, the user hears it.
+#[test]
+fn an_empty_vault_leaving_beside_two_new_folders_is_not_guessed_at() {
+    let vault = SimVault::new(9_233);
+    let mut world = World::new(9_233, &["holder"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+
+    let vid = world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some());
+    let holder = world.device("holder");
+    holder.fs.user_rename("Private", "Secret");
+    holder.fs.user_mkdir("Other");
+    assert!(world.settle().is_some());
+
+    let said: Vec<String> = holder
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .map(|i| i.detail)
+        .collect();
+    assert!(
+        said.iter().any(|d| d.contains("cannot be told")),
+        "nothing told the user the rename could not be read: {said:?}"
+    );
+    let stat = world
+        .server
+        .action(
+            "drive_stat",
+            &serde_json::json!({ "entities": [{ "entity_type": "folder", "entity_id": vid }], "urls": false }),
+        )
+        .unwrap();
+    assert_ne!(stat["items"][0]["name"], "Other", "the vault was guessed onto the wrong folder: {stat}");
+    assert_converged(&world);
+}
+
+/// RED, open (Defect Q, still open on this axis): a plain folder whose only
+/// content is an empty vault, renamed, loses the vault.
+///
+/// `Plain/Private` is an empty vault. The user renames `Plain` to `Renamed`.
+/// `Plain` has no file beneath it to be matched by, and the vault rule asks
+/// for a candidate whose parent is the vault's agreed parent, which `Renamed`
+/// is not yet. Both folders are trashed, `Renamed/Private` is minted plain,
+/// and the next file saved there goes up in the clear -- the Defect Q loss one
+/// level down. Pairing `Plain` with `Renamed` by the shape inside is the trade
+/// declined for plain folders. Owner's call; ignored so the suite stays green.
+#[test]
+#[ignore]
+fn renaming_a_plain_folder_whose_only_content_is_an_empty_vault_keeps_the_vault() {
+    let vault = SimVault::new(9_232);
+    let mut world = World::new(9_232, &["holder"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+
+    let pid = world.server.seed_folder(None, "Plain");
+    let vid = world.server.seed_encrypted_folder(Some(pid), "Private");
+    assert!(world.settle().is_some());
+    let holder = world.device("holder");
+    assert!(holder.fs.exists("Plain/Private"));
+
+    holder.fs.user_rename("Plain", "Renamed");
+    assert!(world.settle().is_some());
+    let stat = world
+        .server
+        .action(
+            "drive_stat",
+            &serde_json::json!({ "entities": [{ "entity_type": "folder", "entity_id": vid }], "urls": false }),
+        )
+        .unwrap();
+    assert_eq!(stat["items"][0]["deleted"], false, "the vault was trashed for its parent's rename: {stat}");
+
+    let body = b"meant to be private";
+    holder.fs.user_write("Renamed/Private/note.txt", body);
+    committed.note("Renamed/Private/note.txt", body);
+    assert!(world.settle().is_some());
+    let tree = world.server.tree();
+    assert!(
+        !tree.contains_key("Renamed/Private/note.txt"),
+        "the file went up in the clear: {tree:?}"
+    );
+    assert_nothing_lost(&world, &committed);
+}
+
+/// RED, Defect R, unfixed: a keyless guest's hand-made vault directory must
+/// stay the vault's when the holder renames the vault on the server.
+///
+/// The guest's `Private` directory is the vault folder only by name: nothing is
+/// written down about it. When the server calls the vault `Secret`, the
+/// directory stops matching, is adopted as a new plain folder of the old name,
+/// the held claimants under it are swept as pointing at nothing, and the files
+/// the user put there believing them private go up in the clear. Recording the
+/// directory as the held folder's agreed placement would keep the tie, but a
+/// held folder with an agreement reads as deleted when its directory goes, and
+/// a guest that removes its placeholder and later gets the key would then trash
+/// the vault. That choice is not made here. Ignored so the suite stays green;
+/// run it by name to see the leak.
+#[test]
+#[ignore]
+fn a_keyless_guests_vault_directory_survives_the_vault_being_renamed() {
+    let vault = SimVault::new(9_227);
+    let mut world = World::new(9_227, &["holder", "guest"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some());
+
+    let guest = world.device("guest");
+    guest.fs.user_mkdir("Private");
+    guest.fs.user_mkdir("Private/Notes");
+    guest.fs.user_write("Private/Notes/todo.txt", b"believed private");
+    assert!(world.settle().is_some(), "the guest goes quiet with the folder held");
+    assert_eq!(world.server.tree().keys().collect::<Vec<_>>(), vec!["Private"]);
+
+    world.device("holder").fs.user_rename("Private", "Secret");
+    assert!(world.settle().is_some());
+    let tree = world.server.tree();
+    assert!(
+        !tree.contains_key("Private/Notes/todo.txt"),
+        "the guest pushed the held file in the clear: {tree:?}"
+    );
+    assert_eq!(
+        tree.keys().collect::<Vec<_>>(),
+        vec!["Secret"],
+        "the guest minted a plain folder for its vault directory: {tree:?}"
+    );
+}
+
+/// A folder waiting for a key that the user renames while it waits goes up
+/// under the name it has when the key arrives.
+///
+/// Nothing keyless applies a rename to a held entry, so the record says
+/// `Notes` while the directory says `Memos`. The key arriving must not send
+/// the engine looking for `Notes`, which is no longer there.
+#[test]
+fn a_folder_waiting_for_a_key_renamed_while_it_waits_goes_up_under_its_new_name() {
+    let vault = SimVault::new(9_224);
+    let mut world = World::new(9_224, &["holder", "guest"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some());
+
+    let guest = world.device("guest");
+    guest.fs.user_mkdir("Private");
+    guest.fs.user_mkdir("Private/Notes");
+    let body = b"held, then renamed, then released";
+    guest.fs.user_write("Private/Notes/todo.txt", body);
+    assert!(world.settle().is_some(), "the guest goes quiet with the folder held");
+
+    guest.fs.user_rename("Private/Notes", "Private/Memos");
+    assert!(world.settle().is_some(), "still quiet, still keyless");
+    committed.note("Private/Memos/todo.txt", body);
+
+    world.give_vault("guest", &vault);
+    assert!(world.settle().is_some(), "the key arrives and the held folder goes up");
+    let tree = world.server.tree();
+    // Encrypted, so the file is under the server's placeholder name;
+    // `assert_nothing_lost` checks the bytes are there under whatever name.
+    assert!(
+        tree.contains_key("Private/Memos") && tree.keys().any(|p| p.starts_with("Private/Memos/")),
+        "the held folder did not go up under its current name: {tree:?}"
+    );
+    assert!(
+        !tree.contains_key("Private/Notes"),
+        "the folder went up under the name it no longer has: {tree:?}"
+    );
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
 /// ...and the wait ends the way a file's does: the key arrives, the folder
 /// goes up.
 #[test]
@@ -5554,6 +6020,150 @@ fn an_upload_of_bytes_the_server_already_has_adopts_rather_than_duplicates() {
     assert_nothing_lost(&world, &committed);
 }
 
+/// A rename cycle's park is finished by the move that planned it.
+///
+/// Swapping two names has no order of renames that works, so the planner parks
+/// one file under a scratch name and the file's own move takes it from there.
+/// The park is journaled as a step of its own and records, correctly, that the
+/// server now has the file under the scratch name. The finisher must read that
+/// as its own half-finished dance, not as somebody else having moved the file
+/// out from under it -- which is what a move whose starting point has changed
+/// otherwise means, and which drops the op.
+///
+/// Estate seed 8060024: the finisher was dropped as overtaken, and the file
+/// stood on the server under the engine's own name for ever.
+#[test]
+fn a_cycle_park_is_finished_by_the_move_that_planned_it() {
+    // A Mac, so that `x.txt` and `X.txt` are one slot: the two moves below
+    // each want the slot the other is leaving, which no order of renames can
+    // do, and the planner parks one. (On Linux the spellings are two slots and
+    // there is no cycle to break.) One device only: a second device would see
+    // the abandoned park on the server and put it back itself, and this is
+    // about the device that made it finishing it.
+    let world = World::of(9_220, &[("laptop", jd_sim::Platform::MacOs)]);
+    let mut committed = Committed::default();
+    let laptop = world.device("laptop");
+
+    let a = b"the contents of A";
+    let b = b"the contents of B";
+    laptop.fs.user_mkdir("One");
+    laptop.fs.user_mkdir("Two");
+    laptop.fs.user_write("One/x.txt", a);
+    laptop.fs.user_write("Two/y.txt", b);
+    committed.note("One/x.txt", a);
+    committed.note("Two/y.txt", b);
+    assert!(world.settle().is_some(), "both files go up first");
+
+    laptop.fs.user_rename("One/x.txt", "Two/held");
+    laptop.fs.user_rename("Two/y.txt", "One/X.txt");
+    laptop.fs.user_rename("Two/held", "Two/Y.txt");
+    committed.note("One/X.txt", b);
+    committed.note("Two/Y.txt", a);
+
+    assert!(world.settle().is_some(), "the park must not wedge the device");
+    assert_converged(&world);
+    let tree = world.server.tree();
+    assert!(
+        !tree.keys().any(|p| p.contains(".jd-")),
+        "the park was never finished: {tree:?}"
+    );
+    assert_eq!(
+        tree.get("One/X.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(b)),
+        "One/X.txt should now hold B: {tree:?}"
+    );
+    assert_eq!(
+        tree.get("Two/Y.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(a)),
+        "Two/Y.txt should now hold A: {tree:?}"
+    );
+    // Finished by the move that planned it, not put back by the recovery for
+    // a park nobody came back for.
+    let said: Vec<String> = laptop
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .map(|i| i.detail)
+        .collect();
+    assert!(
+        !said.iter().any(|d| d.contains("unfinished operation")),
+        "the dance was finished by the fallback, not by its own move: {said:?}"
+    );
+    assert_nothing_lost(&world, &committed);
+}
+
+/// A park writes down where the server has the file, and nothing else.
+///
+/// The park is one step inside another operation. If it were recorded as the
+/// placement both sides agreed on, an abandoned park would have no real name
+/// left to be put back under: the recovery that does that reads the agreement,
+/// finds the scratch name there too, and can only say so. So a park op that
+/// nothing follows -- the finisher withdrawn, dropped, or never journaled -- is
+/// still put back under the name the two sides last agreed.
+#[test]
+fn a_park_op_does_not_overwrite_the_agreed_placement() {
+    use jd_core::model::{EntityId, Placement};
+
+    let world = World::new(9_221, &["laptop"]);
+    let laptop = world.device("laptop");
+    let mut committed = Committed::default();
+
+    let src = world.server.seed_folder(None, "Source");
+    let dst = world.server.seed_folder(None, "Dest");
+    let body = b"parked and abandoned";
+    let fid = world.server.seed_file(Some(src), "report.txt", body);
+    assert!(world.settle().is_some());
+    committed.note("Source/report.txt", body);
+
+    // The user's move has already happened here, as it had in the seed: the
+    // park was one step of pushing it up.
+    laptop.fs.user_rename("Source/report.txt", "Dest/renamed.txt");
+    committed.note("Dest/renamed.txt", body);
+
+    // The planner's park, journaled on its own: whatever was going to finish
+    // it is not in the journal.
+    let scratch = jd_core::order::swap_name("key-of-a-move-that-never-came");
+    laptop
+        .store
+        .queue_op(
+            "park_remote",
+            EntityId::file(fid),
+            &serde_json::json!({ "name": scratch }).to_string(),
+            "key-park-alone",
+        )
+        .unwrap();
+
+    // One pass: the park runs, and nothing else touches the entry.
+    world.pass(laptop);
+    let e = laptop.store.get_entry(EntityId::file(fid)).unwrap().unwrap();
+    assert_eq!(e.remote.name, scratch, "the park should have landed");
+    assert_eq!(
+        e.synced_placement,
+        Some(Placement { parent: Some(src), name: "report.txt".into() }),
+        "a park is not an agreement: the agreed placement must survive it"
+    );
+
+    assert!(world.settle().is_some());
+    assert_converged(&world);
+
+    let tree = world.server.tree();
+    assert!(
+        !tree.keys().any(|p| p.contains(".jd-")),
+        "the park stood: {tree:?}"
+    );
+    // Put back under the agreed name, and from there the user's move goes up
+    // as any other would.
+    assert!(
+        tree.contains_key("Dest/renamed.txt"),
+        "the move the user made was discarded: {tree:?}"
+    );
+    let e = laptop.store.get_entry(EntityId::file(fid)).unwrap().unwrap();
+    assert_eq!(e.remote, Placement { parent: Some(dst), name: "renamed.txt".into() });
+    assert_eq!(e.synced_placement, Some(e.remote.clone()));
+    assert_nothing_lost(&world, &committed);
+}
+
 /// Diagnostic: the silent case — the server wears a scratch name and the disk
 /// has nothing to argue with. No op, and no local move to drive a repair.
 #[test]
@@ -5619,6 +6229,95 @@ fn a_park_interrupted_by_a_kill_is_resumed_to_its_destination() {
     assert!(
         !tree.keys().any(|p| p.contains(".jd-")),
         "an engine-internal name survived to convergence: {tree:?}"
+    );
+    assert_nothing_lost(&world, &committed);
+}
+
+/// A local park that a kill left standing costs a re-download, never the file.
+///
+/// The server moved the file and this device applies the move locally; the
+/// planner parked the file under a scratch name on the disk to break a cycle,
+/// and the process died before the move that finishes it. The park is recorded
+/// as the agreement -- that is how the finisher knows where the file is -- and
+/// the server still calls the file by its real name, so nothing on the server
+/// side says a park is standing.
+///
+/// What happens next is not pretty, and this pins that it is not harmful: the
+/// abandoned-park sweep at the top of the next pass trashes the parked file
+/// (nothing on the server wears the name), the naming pass judges the agreed
+/// name, finds the reserved prefix, gives the local copy up and cancels the
+/// finisher, and the pass after that materializes the file again under the
+/// server's name. The feared reading -- an empty slot taken for the user
+/// deleting the file, and that sent up -- never happens, because the naming
+/// verdict lands before reconcile can look. Pinned so it stays that way.
+#[test]
+fn a_local_park_a_kill_left_standing_costs_a_redownload_not_the_file() {
+    use jd_core::model::{EntityId, LocalStatus, Placement};
+
+    let world = World::new(9_222, &["laptop"]);
+    let laptop = world.device("laptop");
+    let mut committed = Committed::default();
+
+    let src = world.server.seed_folder(None, "Source");
+    let body = b"parked on the disk, then the lights went out";
+    let fid = world.server.seed_file(Some(src), "report.txt", body);
+    assert!(world.settle().is_some());
+    committed.note("Source/report.txt", body);
+
+    // The server's move, made elsewhere.
+    world
+        .server
+        .action(
+            "drive_rename",
+            &serde_json::json!({ "entity_type": "file", "entity_id": fid, "name": "renamed.txt" }),
+        )
+        .unwrap();
+    committed.note("Source/renamed.txt", body);
+
+    // What the kill left: the disk file parked, the park written into the
+    // agreement, the server's placement known, and the finisher still in the
+    // journal.
+    let key = "key-local-park-then-killed";
+    let scratch = jd_core::order::swap_name(key);
+    laptop.fs.user_rename("Source/report.txt", &format!("Source/{scratch}"));
+    let mut e = laptop.store.get_entry(EntityId::file(fid)).unwrap().unwrap();
+    e.remote = Placement { parent: Some(src), name: "renamed.txt".into() };
+    e.synced_placement = Some(Placement { parent: Some(src), name: scratch.clone() });
+    e.status = LocalStatus::Synced;
+    laptop.store.put_entry(&e).unwrap();
+    laptop
+        .store
+        .queue_op(
+            "move_local",
+            EntityId::file(fid),
+            &serde_json::json!({
+                "parent": src, "name": "renamed.txt",
+                "from": { "parent": src, "name": "report.txt" }
+            })
+            .to_string(),
+            key,
+        )
+        .unwrap();
+
+    assert!(world.settle().is_some());
+    assert_converged(&world);
+
+    let tree = world.server.tree();
+    assert_eq!(
+        tree.get("Source/renamed.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(body)),
+        "the server copy was trashed on the strength of the swept park: {tree:?}"
+    );
+    let disk = disk_tree(laptop);
+    assert_eq!(
+        disk.get("Source/renamed.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(body)),
+        "the disk should hold the file under the server's name: {disk:?}"
+    );
+    assert!(
+        !laptop.fs.all_paths().iter().any(|p| p.contains(".jd-")),
+        "the park was left standing: {:?}",
+        laptop.fs.all_paths()
     );
     assert_nothing_lost(&world, &committed);
 }

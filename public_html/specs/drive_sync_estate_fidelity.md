@@ -965,11 +965,11 @@ The seed's exact loop needs the device's own pushed folder renamed on the
 server, which the new rule makes impossible, so the seed itself is the pin for
 the loop.
 
-Still open on this axis: a parked entry whose local placement has drifted from
-its directory (a locked vault whose folder was renamed on the server and on the
-disk in the meantime) is the same drift by another route. It no longer loops,
-but when the vault unlocks the recovered entry looks for a directory that is
-not there.
+The drift this left open -- a held folder whose directory is renamed, or whose
+vault folder is renamed on both sides, before the key arrives -- was staged
+and does not reproduce: `a_folder_waiting_for_a_key_follows_a_vault_folder_renamed_meanwhile`
+and `a_folder_waiting_for_a_key_renamed_while_it_waits_goes_up_under_its_new_name`
+both pass and now pin it. Staging the first of them found Defect Q instead.
 
 ---
 
@@ -1073,6 +1073,207 @@ are each red with their own fix removed.
 
 ---
 
+## Defect P — the park that nobody recognised as their own
+
+Estate v12 (shift 8,000,000, the first estate on the Defect N/O tree), seed
+8060024 in the long-hostile two-device arm: converged with the server holding
+`Sub 1 (75) (75b)/Sub 19/.jd-swap-laptop-914`. Reproduced on a clean build of
+HEAD, and the mechanism is as old as the planner's cycle breaker; nothing in
+Defects K to O touches it. Rare in the workload because a rename cycle is
+rare in it: this one was a cross-folder swap of two files that only became a
+cycle because one of the two names was spelled in decomposed form.
+
+**What the user loses.** A file left on the server under the engine's own
+scratch name, for ever. Every other device sees a dotfile it is told not to
+sync; the device that made it sits parked and quiet.
+
+**The mechanism, in two halves.**
+
+The planner breaks a rename cycle by parking one mover under
+`.jd-swap-{token}`, and the mover's own move finishes the dance from there.
+The park was journaled as an operation of its own, named by a token the
+planner minted, and `move_remote` recognised a park as its own only when the
+scratch name carried *its* idempotency key -- the rule written for the park it
+takes itself, inside one operation, when both intermediate orders are refused.
+The planner's park never satisfied it. So the finisher found `remote` under a
+name that was not where it had been planned from, read that as somebody else
+having moved the file, and dropped itself as overtaken. No pass boundary was
+needed; the two ops ran back to back and the second stood down.
+
+That alone would have been repaired: the recovery in `pass` for a park nobody
+comes back for puts the file back where both sides last agreed. But the park
+runs through `move_remote`, whose success path records the destination as the
+agreement -- so after a park the agreement *was* the scratch name. The recovery
+found nothing real to put the file back under and could only say so; the
+naming pass then judged the agreed name, found the reserved prefix, gave up the
+local copy, and parked the entry `Unsyncable(ReservedPrefix)`. Sixty-nine
+passes of silence in the seed.
+
+**The fixes.**
+
+- The journal names a cycle-breaking park after the key of the move that
+  finishes it. That is the only name the finisher can recognise, and it is the
+  same name `move_remote` would mint for its own in-flight park, so the two
+  parks are one rule. The planner no longer mints scratch names at all:
+  `Plan::broken_cycles` is a list of entities and `token_for` is gone from
+  `plan`, `run_round` and `run_pass` -- a token the journal would then ignore
+  had no reason to exist.
+- A `park_remote` records where the server has the file and nothing else. The
+  agreement survives the park, which is what the abandoned-park recovery reads.
+  A local park is deliberately unchanged: its finisher looks for the parked
+  file by the agreement, and a kill cannot land between two local operations
+  in the simulator, so that window is open and named below rather than half
+  closed here.
+- `move_remote`'s in-flight park stands down when the entry already wears this
+  op's scratch name.
+
+`a_cycle_park_is_finished_by_the_move_that_planned_it` (a case-folding swap
+across two folders on one Mac, the only device -- a second device would see
+the abandoned park and put it back itself) fails with the journal naming the
+park off the finisher's key, at the same assertion the estate seed failed.
+`a_park_op_does_not_overwrite_the_agreed_placement` runs one pass over a park
+journaled on its own and fails with the park recording the agreement.
+
+---
+
+## Defect Q — the vault that was renamed out of existence
+
+Found while staging the Defect L open note, not by the estate: the workload
+never renames a vault's root folder, and had it done so no oracle would have
+minded, because what follows is not a loss. It is worse than one.
+
+**What the user loses.** Their vault. Rename an empty vault folder on the
+device that holds the key and the server trashes the vault and gains a plain
+folder under the new name. The user sees the folder they renamed, where they
+put it, called what they called it. Every file they save into it from then on
+goes up in the clear, on every device, and nothing anywhere says so.
+
+**The mechanism, in two halves, on the holder alone.**
+
+A folder is found on the disk by what is inside it: a directory nothing tracks
+that holds files the engine knows by their identity on the volume is the
+folder those files were in. The scanner says in its own words that an empty
+folder cannot be matched, that it reads as one removed and one created, and
+that "nothing is lost by that -- an empty folder holds nothing". For a vault
+folder the last part is false. Its emptiness is not nothing: the encryption
+is the thing. So the rename of an empty vault read as trash the vault, create
+a plain folder.
+
+Fixing that alone did not rename the vault; it merely stopped trashing it. The
+folder scan's answer -- the user renamed the vault -- was then thrown away by
+the vault-edge check, which judges a move by whether the destination parent's
+protection matches the entry's own. A vault root is an encrypted folder in a
+plain parent; that is what a vault root IS. So every rename of one read as a
+move out of the vault, was refused as out of reach, and raised an issue
+telling the user to change the folder's protection level first. The server
+refuses only a reparent across the edge; it takes a rename.
+
+**The fixes.**
+
+- `detect_folder_moves` credits every folder above a file with it, at the
+  file's path relative to that folder. A rename keeps the shape inside, so
+  `Sub/f.txt` under the new name is the same evidence `f.txt` would be. Until
+  this the matcher knew only a folder's direct files, so the commonest shape
+  of a folder -- subfolders and nothing loose -- could not be matched at all:
+  the subfolders paired, their parent did not, and the parent was trashed.
+  The review of the first version of this fix traced that on a vault
+  (`renaming_a_vault_folder_whose_files_are_in_subfolders_keeps_it_a_vault`
+  was red), and it was true of plain folders too, which lost their identity
+  on every such rename.
+- `detect_folder_moves`, for the vault that is empty even of that: an
+  encrypted folder gone from its path, that stood on this disk
+  (`synced_placement` set, the same line the folder-deleted reading draws),
+  with exactly one unaccounted directory beside where it stood holding nothing
+  the engine knows, is that folder renamed. One missing vault and one such
+  directory per parent, or nothing: several candidates, or several vaults
+  gone from the same parent at once, gets what a plain folder gets -- and
+  says so in an issue naming the folders, whichever side is plural, because
+  what follows is a vault trashed and a plain folder under a name the user
+  gave a vault, and guessing instead would undo the user's deletion of one
+  vault and carry its grants onto the folder they kept
+  (`two_empty_vaults_leaving_at_once_are_not_guessed_at` and
+  `an_empty_vault_leaving_beside_two_new_folders_is_not_guessed_at`, both
+  from the review).
+  The materialized condition is load-bearing:
+  without it a vault the server has announced and nothing has created here
+  yet paired with the user's next new folder, and what they put in that
+  folder went up encrypted under the vault's name
+  (`a_folder_dragged_into_a_vault_takes_its_files_in_with_it` caught it). A
+  wrong pairing -- the user deleted the empty vault and made a plain folder
+  beside it in the same pass -- keeps the new folder's bytes private, and
+  carries the vault's sharing grants onto a folder the user meant as new.
+  That is the direction chosen, and it is a trade, not a free one.
+- `crossing_a_vault_edge`: a move whose destination parent is the agreed
+  parent crosses nothing and is not judged.
+
+`renaming_an_empty_vault_folder_keeps_it_a_vault` is red with either of the
+last two removed: without the scan rule the vault is trashed, without the edge
+rule it survives under its old name with the rename refused. It also checks
+no issue was raised, the holder's directory stands, and a file saved into the
+renamed vault goes up under the server's placeholder name, not in the clear.
+
+**Still open on this axis.** A plain empty folder renamed is still trash plus
+create, by design, and a vault folder with several new empty siblings made in
+the same pass falls back to that. The rule pairs by position and emptiness,
+not by name; a directory identity from the filesystem -- an inode for
+directories -- would settle both properly, and that is a filesystem-layer
+change not made here. A vault root reparented from one plain parent to
+another is still refused as out of reach, though the server would take it.
+
+The review found the same loss one level up, and it is open: a PLAIN folder
+whose only content is an empty vault, renamed. The plain folder has no file
+beneath it to be matched by, and the vault rule wants a candidate whose
+parent is the vault's agreed parent, which the renamed plain folder is not
+yet. Both are trashed, the vault's name is minted plain under the new parent,
+and the next file saved there goes up in the clear. Pairing the plain parent
+by the shape inside it -- a vault of that name at that relative path -- is
+the identity-by-shape trade declined for plain folders above; the owner
+decides whether a vault inside changes that. Pinned red, ignored, as
+`renaming_a_plain_folder_whose_only_content_is_an_empty_vault_keeps_the_vault`.
+
+---
+
+## Defect R — the keyless guest whose vault directory stopped being the vault (OPEN)
+
+Found by the Defect Q review, staged, red, and not fixed here because the fix
+is a design choice.
+
+**What the user loses.** Privacy, from the device that has no key. A guest
+with no vault key makes a directory of the vault's name and puts files in it;
+the engine holds them (Defect L), waiting for a key. The holder then renames
+the vault on the server. On the guest's next pass the directory no longer
+matches the vault by name, is adopted as a NEW plain folder under the old
+name, the held claimants under it are swept as pointing at nothing, and the
+files go up in the clear -- into a plain folder the user never asked for,
+beside the vault they thought they were using.
+
+**The mechanism.** A keyless device never materializes a vault folder, so the
+folder's record carries no agreement; its local path is derived from the
+server's name alone. The user's directory is the vault's only while the names
+match. Nothing is written down when the match is made.
+
+**The choice, with the obvious fix probed and rejected.** Recording the
+directory as the held folder's agreed placement at the moment it is matched
+does keep the tie: under that patch the red pin passes and the whole suite
+stays green. It was then probed the other way: the guest makes the
+placeholder, removes it again (it never held a byte of the vault), and later
+gets the key. Traced: the vault is trashed on the server for everyone, and
+worse, the holder's file inside it comes back at the drive root in the clear
+-- the guest's pass reads the folder as deleted and materializes the released
+file in the same pass, the file lands with no folder to stand in, and is
+adopted as a new plain file at the root. Deleting the vault outright from a
+key-holding device, by contrast, is clean today (probed too: both disks and
+the server end empty).
+
+So the tie cannot be the ordinary agreement. Either the deleted reading
+learns that a folder never materialized with content cannot be deleted from
+here, or the directory is tied to the held folder by a record that is not an
+agreement. Owner's call. Pinned red, ignored, as
+`a_keyless_guests_vault_directory_survives_the_vault_being_renamed`.
+
+
+---
+
 ## A redundancy removed, and no hole closed
 
 Worth writing down because it was nearly recorded as a defect, and it is not
@@ -1119,9 +1320,11 @@ answer was one layer further down.
   folder's sibling set and carrying a second, target-side mapping, at which
   point the forward derivation should be removed in the same change, not
   before.
-- **Nothing renames a file already on disk when naming re-maps it.** Reachable
-  when `duplicate_losers` re-maps an already-materialized file. Separate from
-  everything above, and still unfixed.
+- **A file already on disk IS renamed when naming re-maps it.** Recorded here
+  earlier as unfixed; staged on 2026-09-02 with two Mac holders writing
+  `notes.txt` and `Notes.txt` into one vault, and the loser's own disk copy is
+  moved to `Notes (2).txt` on both devices. Pinned by
+  `a_vault_files_case_twin_already_on_a_folding_disk_is_renamed_there`.
 - **A user file colliding with an escape is renamed to a conflict copy.** The
   consequence of defect B's fix, and the right trade — `make_room` exists to
   keep a copy rather than destroy one — but it is a conflict name for something
@@ -1253,3 +1456,28 @@ answer was one layer further down.
   ask it.
 - The mock's restore still does not model the platform's selective-restore
   cutoff or its re-root-and-rename-on-collision.
+- **A local park a kill leaves standing is re-downloaded rather than
+  finished.** `park_local` runs through `move_local`, which writes the scratch
+  placement into `synced_placement`; the finisher then finds the parked file
+  by that agreement, so the write is load-bearing there in a way the remote
+  one (Defect P) was not. After a real process death between the local park
+  and its finisher, the next pass's `observe` trashes the parked file (nothing
+  on the server wears the name), the naming pass judges the agreed name, finds
+  the reserved prefix, gives the local copy up and cancels the finisher, and
+  the pass after materializes the file again under the server's name. A
+  re-download, not a loss, and
+  `a_local_park_a_kill_left_standing_costs_a_redownload_not_the_file` stages
+  the aftermath and pins that the feared reading -- the empty slot taken for a
+  deletion and sent up -- does not happen. Counting the agreement's scratch
+  name as live in the sweep was tried and changes nothing: the naming verdict
+  gives the copy up anyway. Finishing the park instead would mean the naming
+  pass not judging an entry whose finisher is still queued. The simulator
+  stages deaths only at network calls and a local move makes none, so no seed
+  reaches this on its own.
+- **A peer's abandoned-park recovery has no grace period.** Any device that
+  polls between a park and its finisher sees the scratch name with a real
+  agreement of its own and puts the file back, under the parker's feet; the
+  parker's finisher then finds the file moved and is dropped, and the dance is
+  re-planned. It converges, with an "unfinished operation" issue on the peer
+  for a park that was never abandoned. Raised by the Defect P review;
+  pre-existing.

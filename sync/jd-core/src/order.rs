@@ -101,10 +101,12 @@ pub const SWAP_PREFIX: &str = ".jd-swap-";
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Plan {
     pub ops: Vec<PlannedOp>,
-    /// Entities that had to be parked under a scratch name to break a cycle,
-    /// with the name used. The executor moves each to its real destination once
-    /// the rest of the cycle has moved.
-    pub broken_cycles: Vec<(EntityId, String)>,
+    /// Entities that have to be parked under a scratch name to break a cycle.
+    /// The journal names the scratch after the key of the move that finishes
+    /// the dance, so that move can recognise its own park and complete it, and
+    /// the executor moves each to its real destination once the rest of the
+    /// cycle has moved.
+    pub broken_cycles: Vec<EntityId>,
 }
 
 impl Plan {
@@ -128,13 +130,7 @@ impl Plan {
 /// not produce an error — it produces two renames into one name, and the second
 /// quietly replaces the first.
 ///
-/// `token_for` supplies the random part of a scratch name; it is a parameter so
-/// a simulated run reproduces exactly from its seed.
-pub fn plan(
-    items: Vec<PlanItem>,
-    personality: &jd_vfs::Personality,
-    token_for: &mut dyn FnMut(EntityId) -> String,
-) -> Plan {
+pub fn plan(items: Vec<PlanItem>, personality: &jd_vfs::Personality) -> Plan {
     let mut plan = Plan::default();
 
     // Which entities need parking to break a rename cycle.
@@ -164,9 +160,7 @@ pub fn plan(
         };
 
         if parked.contains(&item.entity) {
-            let token = token_for(item.entity);
-            let name = swap_name(&token);
-            plan.broken_cycles.push((item.entity, name.clone()));
+            plan.broken_cycles.push(item.entity);
         }
 
         plan.ops.push(PlannedOp {
@@ -351,10 +345,6 @@ mod tests {
         }
     }
 
-    fn tokens() -> impl FnMut(EntityId) -> String {
-        |e: EntityId| format!("t{}", e.server_id)
-    }
-
     #[test]
     fn folders_are_created_before_the_files_that_go_in_them() {
         let items = vec![
@@ -367,8 +357,7 @@ mod tests {
                 0,
             ),
         ];
-        let mut t = tokens();
-        let p = plan(items, &jd_vfs::Personality::linux(), &mut t);
+        let p = plan(items, &jd_vfs::Personality::linux());
         let order = p.ordered();
         assert_eq!(order[0].stage, Stage::CreateFolders);
         assert_eq!(order[1].stage, Stage::Transfer);
@@ -392,8 +381,7 @@ mod tests {
                 0,
             ),
         ];
-        let mut t = tokens();
-        let p = plan(items, &jd_vfs::Personality::linux(), &mut t);
+        let p = plan(items, &jd_vfs::Personality::linux());
         let order = p.ordered();
         assert_eq!(order[0].entity, EntityId::folder(1));
         assert_eq!(order[1].entity, EntityId::folder(2));
@@ -406,8 +394,7 @@ mod tests {
             PlanItem::new(EntityId::folder(2), Action::TrashRemote, 1),
             PlanItem::new(EntityId::file(3), Action::TrashRemote, 2),
         ];
-        let mut t = tokens();
-        let p = plan(items, &jd_vfs::Personality::linux(), &mut t);
+        let p = plan(items, &jd_vfs::Personality::linux());
         let order: Vec<EntityId> = p.ordered().iter().map(|o| o.entity).collect();
         assert_eq!(
             order,
@@ -423,8 +410,7 @@ mod tests {
             PlanItem::new(EntityId::folder(1), Action::TrashLocal, 1),
             PlanItem::new(EntityId::file(2), Action::TrashLocal, 1),
         ];
-        let mut t = tokens();
-        let p = plan(items, &jd_vfs::Personality::linux(), &mut t);
+        let p = plan(items, &jd_vfs::Personality::linux());
         let order: Vec<EntityId> = p.ordered().iter().map(|o| o.entity).collect();
         assert_eq!(order, vec![EntityId::file(2), EntityId::folder(1)]);
     }
@@ -442,8 +428,7 @@ mod tests {
                 0,
             ),
         ];
-        let mut t = tokens();
-        let p = plan(items, &jd_vfs::Personality::linux(), &mut t);
+        let p = plan(items, &jd_vfs::Personality::linux());
         let stages: Vec<Stage> = p.ordered().iter().map(|o| o.stage).collect();
         assert_eq!(
             stages,
@@ -461,8 +446,7 @@ mod tests {
             0,
         )
         .moving(placement(None, "a.txt"), placement(None, "b.txt"))];
-        let mut t = tokens();
-        let p = plan(items, &jd_vfs::Personality::linux(), &mut t);
+        let p = plan(items, &jd_vfs::Personality::linux());
         assert!(p.broken_cycles.is_empty());
     }
 
@@ -488,8 +472,7 @@ mod tests {
             )
             .moving(placement(None, "B"), placement(None, "C")),
         ];
-        let mut t = tokens();
-        let p = plan(items, &jd_vfs::Personality::linux(), &mut t);
+        let p = plan(items, &jd_vfs::Personality::linux());
         assert!(p.broken_cycles.is_empty(), "a chain is not a cycle");
     }
 
@@ -514,12 +497,10 @@ mod tests {
             )
             .moving(placement(None, "B"), placement(None, "A")),
         ];
-        let mut t = tokens();
-        let p = plan(items, &jd_vfs::Personality::linux(), &mut t);
+        let p = plan(items, &jd_vfs::Personality::linux());
         assert_eq!(p.broken_cycles.len(), 1);
         // Deterministic victim, so two devices break the same swap identically.
-        assert_eq!(p.broken_cycles[0].0, EntityId::file(1));
-        assert!(p.broken_cycles[0].1.starts_with(".jd-swap-"));
+        assert_eq!(p.broken_cycles[0], EntityId::file(1));
     }
 
     #[test]
@@ -550,10 +531,9 @@ mod tests {
             )
             .moving(placement(None, "B"), placement(None, "C")),
         ];
-        let mut t = tokens();
-        let p = plan(items, &jd_vfs::Personality::linux(), &mut t);
+        let p = plan(items, &jd_vfs::Personality::linux());
         assert_eq!(p.broken_cycles.len(), 1);
-        assert_eq!(p.broken_cycles[0].0, EntityId::file(1));
+        assert_eq!(p.broken_cycles[0], EntityId::file(1));
     }
 
     #[test]
@@ -599,8 +579,7 @@ mod tests {
             )
             .moving(placement(None, "B"), placement(None, "C")),
         ];
-        let mut t = tokens();
-        let p = plan(items, &jd_vfs::Personality::linux(), &mut t);
+        let p = plan(items, &jd_vfs::Personality::linux());
         assert_eq!(move_order(&p), vec![EntityId::file(2), EntityId::file(1)]);
     }
 
@@ -626,9 +605,8 @@ mod tests {
             )
             .moving(placement(None, "B"), placement(None, "A")),
         ];
-        let mut t = tokens();
-        let p = plan(items, &jd_vfs::Personality::linux(), &mut t);
-        assert_eq!(p.broken_cycles[0].0, EntityId::file(1));
+        let p = plan(items, &jd_vfs::Personality::linux());
+        assert_eq!(p.broken_cycles[0], EntityId::file(1));
         assert_eq!(move_order(&p), vec![EntityId::file(2), EntityId::file(1)]);
     }
 
@@ -662,8 +640,7 @@ mod tests {
             )
             .moving(placement(None, "B"), placement(None, "C")),
         ];
-        let mut t = tokens();
-        let p = plan(items, &jd_vfs::Personality::linux(), &mut t);
+        let p = plan(items, &jd_vfs::Personality::linux());
         let order = move_order(&p);
         let at = |e: EntityId| order.iter().position(|o| *o == e).unwrap();
         // 3 leaves C before 2 wants it. 3 can go first because the slot it
@@ -684,8 +661,7 @@ mod tests {
             0,
         )
         .moving(placement(None, "a.txt"), placement(Some(5), "fresh.txt"))];
-        let mut t = tokens();
-        let p = plan(items, &jd_vfs::Personality::linux(), &mut t);
+        let p = plan(items, &jd_vfs::Personality::linux());
         assert!(p.broken_cycles.is_empty());
     }
 }

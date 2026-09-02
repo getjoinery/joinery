@@ -28,7 +28,6 @@
 use std::collections::BTreeMap;
 
 use jd_core::execute::ExecEnv;
-use jd_core::model::EntityId;
 use jd_core::pass::run_pass;
 use jd_core::reconcile::Context;
 use jd_core::round::DeletePolicy;
@@ -577,14 +576,13 @@ impl World {
         let now = device.now();
         let e: ExecEnv = env(device, &now);
         let mut keys = device.key_source();
-        let mut tokens = |id: EntityId| format!("{}-{}", device.name, id.server_id.abs());
         // The pass can be stopped dead part-way through, which is what a real
         // kill does and what nothing here could stage before. Only the death is
         // caught: an assertion that fires inside a pass is a finding, and
         // swallowing it would be the harness hiding the thing it exists to
         // show, so anything else is re-raised exactly as it was.
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            run_pass(&e, &ctx, DeletePolicy::Guard, &mut keys, &mut tokens)
+            run_pass(&e, &ctx, DeletePolicy::Guard, &mut keys)
         }));
         match outcome {
             Ok(o) => o,

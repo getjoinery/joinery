@@ -70,15 +70,14 @@ impl PassOutcome {
 
 /// Run one pass.
 ///
-/// `token_for` supplies scratch names for rename cycles and `key_for` supplies
-/// idempotency keys; both are parameters so a simulated run reproduces exactly
-/// from its seed.
+/// `key_for` supplies idempotency keys; it is a parameter so a simulated run
+/// reproduces exactly from its seed. Scratch names for rename cycles are
+/// derived from those keys by the journal.
 pub fn run_pass(
     env: &ExecEnv,
     ctx: &Context,
     policy: DeletePolicy,
     key_for: &mut dyn FnMut() -> String,
-    token_for: &mut dyn FnMut(EntityId) -> String,
 ) -> Result<PassOutcome, ExecError> {
     let mut out = PassOutcome::default();
     if env.vfs.root().is_none() {
@@ -832,7 +831,7 @@ pub fn run_pass(
 
     // ---- decide, journal, do -------------------------------------------------
     let synced_total = env.store.synced_count()?;
-    out.round = run_round(inputs, synced_total, ctx, policy, token_for);
+    out.round = run_round(inputs, synced_total, ctx, policy);
     for (id, issue) in &out.round.issues {
         env.store.raise_issue(
             Some(*id),
@@ -1628,11 +1627,22 @@ fn detect_folder_moves(
             continue;
         };
         known_file_ids.insert(fingerprint.file_id);
-        if let Some((dir, name)) = path.rsplit_once('/') {
+        // Every folder above the file is credited with it, at the path
+        // relative to that folder. A folder is found by what it holds, and a
+        // folder whose files all sit in folders of its own holds them just
+        // the same: a rename keeps the shape inside, so `Sub/f.txt` under the
+        // new name is the same evidence `f.txt` would be. Credited with its
+        // direct files only, the commonest shape of a folder -- subfolders
+        // and nothing loose -- could not be matched at all, and a vault of
+        // that shape was trashed for a rename (Defect Q).
+        let mut cut = path.rfind('/');
+        while let Some(i) = cut {
+            let dir = &path[..i];
             children
                 .entry(dir.to_string())
                 .or_default()
-                .push((name.to_string(), fingerprint.file_id));
+                .push((path[i + 1..].to_string(), fingerprint.file_id));
+            cut = dir.rfind('/');
         }
     }
 
@@ -1825,6 +1835,119 @@ fn detect_folder_moves(
             }
         }
     }
+
+    // An empty folder cannot be matched by what is inside it, and for a plain
+    // folder that is the end of it: one removed, one created, nothing lost.
+    // An ENCRYPTED folder is not nothing when it is empty. The encryption is
+    // the thing, and reading its rename as trash plus create trashes the
+    // vault on the server and mints a plain folder under the name the user
+    // just gave their vault -- into which everything they save next goes up
+    // in the clear, on every device, with nothing saying so.
+    //
+    // So an encrypted folder gone from its path, with exactly one unaccounted
+    // directory standing beside where it stood that holds nothing the engine
+    // knows, is that folder renamed. A wrong pairing here errs the safe way:
+    // a folder the user meant as plain stays a vault. The ambiguous case --
+    // several such directories, or none -- gets what a plain folder gets.
+    //
+    // Only a vault folder that stood on THIS disk. One the server has told us
+    // about and nothing has created here yet is not missing, it is not yet
+    // downloaded -- and pairing it with a directory the user just made would
+    // hand their new plain folder the vault's identity and send what they put
+    // in it up encrypted under the vault's name. Same line the folder-deleted
+    // reading draws, for the same reason.
+    // Shallowest first, so a renamed vault is placed before a folder inside it.
+    let mut empty_and_encrypted: Vec<(String, EntityId)> = Vec::new();
+    for (old_path, id) in missing.iter() {
+        if claimed.contains(id) || children.contains_key(old_path) {
+            continue;
+        }
+        if env
+            .store
+            .get_entry(*id)?
+            .is_some_and(|e| e.is_encrypted && e.synced_placement.is_some())
+        {
+            empty_and_encrypted.push((old_path.clone(), *id));
+        }
+    }
+    empty_and_encrypted.sort_by_key(|(p, _)| (depth_of(p), p.clone()));
+    // One missing vault per parent, or none. Two that left their places at
+    // once beside one new directory cannot be told apart, and pairing either
+    // would undo the user's deletion of the other and carry its grants onto
+    // the folder they kept. So neither is paired -- and because that is the
+    // very reading this rule exists to prevent, it is said out loud.
+    let mut agreed_parents: HashMap<EntityId, Option<i64>> = HashMap::new();
+    for (_, id) in &empty_and_encrypted {
+        if let Some(e) = env.store.get_entry(*id)? {
+            agreed_parents.insert(
+                *id,
+                e.synced_placement.as_ref().map(|p| p.parent).unwrap_or(e.remote.parent),
+            );
+        }
+    }
+    let mut per_parent: HashMap<Option<i64>, usize> = HashMap::new();
+    for parent in agreed_parents.values() {
+        *per_parent.entry(*parent).or_default() += 1;
+    }
+    for (old_path, id) in empty_and_encrypted {
+        let Some(entry) = env.store.get_entry(id)? else {
+            continue;
+        };
+        let agreed_parent = agreed_parents[&id];
+        let several = per_parent.get(&agreed_parent).copied().unwrap_or(0) > 1;
+        let beside: Vec<&&String> = candidates
+            .iter()
+            .filter(|d| {
+                if taken.contains(*d) || !holds_nothing_known(d) {
+                    return false;
+                }
+                let parent_here = match d.rsplit_once('/') {
+                    None => Some(None),
+                    Some((p, _)) => folder_ids.get(p).map(|id| Some(*id)),
+                };
+                parent_here == Some(agreed_parent)
+            })
+            .collect();
+        if beside.is_empty() {
+            // Nothing it could be. The ordinary deleted reading, which needs
+            // no announcement of its own.
+            continue;
+        }
+        if several || beside.len() > 1 {
+            // Ambiguous on either side: several vaults gone from this parent,
+            // or several new directories beside where this one stood. Said
+            // out loud, whichever side is plural, because what follows is a
+            // vault trashed and a plain folder under a name the user gave a
+            // vault -- the very reading this rule exists to prevent.
+            let names: Vec<&str> = beside.iter().map(|d| d.as_str()).collect();
+            env.store.raise_issue(
+                Some(id),
+                "reconcile",
+                &format!(
+                    "the protected folder {} left its place, and which new folder here \
+                     it became -- {} -- cannot be told{}; it is read as deleted and the \
+                     new folder is plain. If it was renamed, restore it from the trash \
+                     and move it back",
+                    old_path,
+                    names.join(", "),
+                    if several { ", another protected folder left at the same time" } else { "" }
+                ),
+                (env.now_ms)() as i64,
+            )?;
+            continue;
+        }
+        let candidate = beside[0];
+        claimed.push(id);
+        taken.insert(candidate);
+        scan.present.insert(id);
+        folder_ids.insert((*candidate).clone(), id.server_id);
+        folder_ids.remove(&old_path);
+        if let Some(placement) = placement_of(candidate, folder_ids) {
+            if entry.synced_placement.as_ref() != Some(&placement) {
+                scan.moves.insert(id, placement);
+            }
+        }
+    }
     Ok(scan)
 }
 
@@ -1894,9 +2017,9 @@ enum Crossing {
 ///
 /// Only a move counts. A local edit, a delete or a creation all stay where they
 /// are, and a creation is decided by the path it appeared at rather than by any
-/// journey. Compared against the entry's OWN protection rather than the
-/// agreement's parent, because that is what the server compares against when it
-/// refuses.
+/// journey. A rename inside the same parent is no journey either. A reparent is
+/// compared against the entry's OWN protection rather than the agreement's
+/// parent, because that is what the server compares against when it refuses.
 ///
 /// **A folder only on the way IN.** Dragging a plaintext folder into a vault is
 /// not merely a stuck move: until it is converted the user is looking at a
@@ -1924,6 +2047,20 @@ fn crossing_a_vault_edge(
         Delta::Moved { to } | Delta::MovedAndEdited { to, .. } => to,
         _ => return Ok(None),
     };
+    // A rename in place crosses nothing. A vault's own root folder is
+    // encrypted and stands in a plain parent -- that is what a vault root IS
+    // -- so judged by its destination parent alone every rename of it read as
+    // a move out of the vault, was refused here, and the folder scan's answer
+    // that the user had renamed the vault was thrown away. The server refuses
+    // a reparent across the edge; it takes a rename.
+    let agreed_parent = entry
+        .synced_placement
+        .as_ref()
+        .map(|p| p.parent)
+        .unwrap_or(entry.remote.parent);
+    if to.parent == agreed_parent {
+        return Ok(None);
+    }
     let destination = match to.parent {
         None => false,
         Some(id) => match env.store.get_entry(EntityId::folder(id))? {
