@@ -1,7 +1,7 @@
 # Spec: An IMAP-source domain is not a hosted domain
 
-**Status:** Draft (awaiting implementation)
-**Version:** 1.0
+**Status:** BUILT. Work item A landed 2026-08-21 (commit 7893ef77, mailbox 1.96.0); work items B–D and the §9 resolutions landed 2026-09-02 (mailbox 1.107.0). Acceptance §8 items 1–8 are covered by `plugins/mailbox/tests/imap_source_boundaries_test.php` where they can be asserted without a live provider; items 3–4 (a real Gmail send with the feed on and off) remain a live check.
+**Version:** 1.1
 **Area:** `plugins/mailbox` (domain model, transport, setup), core account-security guards (`logic/register_logic.php`, `logic/security_logic.php`, `logic/account_edit_logic.php`), `plugins/messenger`, `includes/joinery_direct`, core setup wizard (`includes/SetupSteps.php`)
 **Related:** `docs/joinery_direct.md`, `plugins/mailbox/docs/overview.md`, `specs/messenger_reachability_states.md`
 
@@ -108,11 +108,23 @@ On a deployment whose only mail configuration is one connected Gmail account:
 
 Tests: a `db`-tier suite provisioning an IMAP-source domain + alias + disabled feed and asserting the guard answers (registration allowed, `forHostedAlias` refusal, `ensureFor` refusal, `localDomain` null, wizard status), plus a unit test pinning `is_authoritative()`.
 
-## 9. Open questions (decide before or during build)
+## 9. Open questions — RESOLVED (owner, 2026-09-02)
 
-1. **Member self-service**: connect/reconnect/re-auth of an IMAP account requires permission 10 (`admin_mailbox_connect_logic.php:70`, `admin_mailbox_imap_edit_logic.php:45`). A member whose Gmail token expires can watch failures but not fix them. Product decision — self-service reconnect for a granted member, or keep operator-only? Not blocking the boundary work.
-2. **Vault window coupling**: a connected-account alias raised to Private feeds the platform-wide unlock-window cap via `maxSecurityLevelForUser()` (`plugins/mailbox/includes/bootstrap.php:70-88`). Arguably correct (the user chose Private); confirm it is intended for IMAP aliases or exclude them from the cap walk.
-3. **`+`-tagged addresses** cannot be provisioned as mailboxes (`inbound_email_alias_class.php:73-76` local-part regex). Widen the regex for IMAP-source aliases, or document the limit.
+1. **Member self-service reconnect: operator-only for now.** Connect, reconnect
+   and re-auth of an IMAP account stay behind permission 10
+   (`admin_mailbox_connect_logic.php:67`, `admin_mailbox_imap_edit_logic.php:45`).
+   A member-side reconnect flow is its own feature, specified separately in
+   `specs/DEFERRED_member_imap_reconnect.md` and deferred.
+2. **Vault window coupling: keep as is.** A connected-account alias raised to
+   Private tightens the member's platform-wide unlock window like any other
+   Private mailbox. The mirrored mail is sealed under the same key as hosted
+   mail, so the window that protects it is the same window. No change to
+   `maxSecurityLevelForUser()` or the cap walk.
+3. **`+`-tagged addresses: document the limit only.** The alias local-part
+   regex (`inbound_email_alias_class.php:73`) stays as it is. Gmail delivers a
+   plus-tagged address to the base mailbox, so connecting the base address
+   covers it; the limit is stated in `plugins/mailbox/docs/overview.md` and in
+   the connect form's error text.
 
 ## 10. Out of scope
 

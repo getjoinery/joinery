@@ -31,6 +31,12 @@
  * The expensive work (provider API lookups, the record plan) runs only when
  * its stage renders — the step's status closure stays cheap.
  *
+ * @version 3.2
+ * @changelog 3.2 - The prove stage's receiving checklist lists every store
+ *   mailbox (SetupSteps::receivingMailboxes): a connected account reads
+ *   "connected account" with a green dot while its feed is on and "connection
+ *   paused" when not — never "waiting for DNS". The DNS-plan block stays keyed
+ *   to a hosted From domain (specs/imap_source_domain_boundaries.md §6.2).
  * @version 3.1
  * @changelog 3.1 - The move-your-DNS offer only renders for a domain that
  *   serves nothing but this site (DnsRelocation::foreignUse) — a lived-in
@@ -161,26 +167,21 @@ if ($setup_send_stage === 'dns' && $setup_send_domain !== '' && class_exists('In
 	});
 }
 
-// ---- The receiving half: the From address's mailbox, read fresh ----
-// null = mailbox plugin off, no domain row yet, or an IMAP-source domain
-// (its mail arrives by pull — no MX to wait for). Otherwise the domain's
-// stored DNS verdict and the store-mode addresses on it, for the prove
-// stage's checklist and the DNS intro's honesty about what the records do.
-$setup_send_rcv = null;
-if ($setup_send_stage !== 'form' && $setup_send_domain !== '' && class_exists('InboundEmailSetupCheck')) {
-	$setup_send_rcv_model = InboundEmailDomain::GetByDomain($setup_send_domain);
-	if ($setup_send_rcv_model && $setup_send_rcv_model->get('ied_is_enabled')
-			&& !$setup_send_rcv_model->get('ied_is_imap_source')) {
-		$setup_send_rcv = array('status' => (string)$setup_send_rcv_model->get('ied_setup_status'),
-			'addresses' => array());
-		$setup_send_rcv_aliases = new MultiInboundEmailAlias(array(
-			'domain_id' => (int)$setup_send_rcv_model->key,
-			'delivery_mode' => InboundEmailAlias::MODE_STORE,
-			'enabled' => true, 'deleted' => false,
-		));
-		foreach ($setup_send_rcv_aliases as $setup_send_rcv_alias) {
-			$setup_send_rcv['addresses'][] = $setup_send_rcv_alias->get_full_address();
-		}
+// ---- The receiving half: every store mailbox, read fresh ----
+// The same list the step's status grades (SetupSteps::receivingMailboxes):
+// each mailbox with whether it can receive and why. A hosted domain waits
+// on its DNS verdict; a connected account is receiving while its feed is on
+// — the account is the arrangement, there is no MX to wait for. Empty with
+// the mailbox plugin off or no mailbox yet. The DNS-plan block below is a
+// separate question: does the From domain, if hosted here, still need records.
+$setup_send_rcv = array();
+$setup_send_rcv_dns_pending = false;
+if ($setup_send_stage !== 'form' && class_exists('InboundEmailSetupCheck')) {
+	$setup_send_rcv = SetupSteps::receivingMailboxes();
+	if ($setup_send_domain !== '') {
+		$setup_send_rcv_model = InboundEmailDomain::GetByDomain($setup_send_domain);
+		$setup_send_rcv_dns_pending = ($setup_send_rcv_model && $setup_send_rcv_model->is_authoritative()
+			&& (string)$setup_send_rcv_model->get('ied_setup_status') !== 'ok');
 	}
 }
 
@@ -237,22 +238,21 @@ if ($setup_send_stage === 'prove') {
 	</div>
 <?php
 	// Receiving rides the same step: each mailbox address with its verdict,
-	// and — while the domain's DNS still pends — the records that get it
-	// there. DNS still propagating is an amber wait, never a block.
-	if ($setup_send_rcv !== null && $setup_send_rcv['addresses']) {
-		$setup_send_rcv_ok = ($setup_send_rcv['status'] === 'ok');
+	// and — while a hosted From domain's DNS still pends — the records that
+	// get it there. DNS still propagating is an amber wait, never a block.
+	if ($setup_send_rcv) {
 ?>
 	<ul class="setup-checklist jy-mt-2">
-<?php foreach ($setup_send_rcv['addresses'] as $setup_send_rcv_addr) { ?>
+<?php foreach ($setup_send_rcv as $setup_send_rcv_row) { ?>
 		<li>
-			<span class="setup-dot <?php echo $setup_send_rcv_ok ? 'green' : 'amber'; ?>"></span>
-			<span><?php echo htmlspecialchars($setup_send_rcv_addr); ?></span>
-			<span class="jy-muted"><?php echo $setup_send_rcv_ok ? 'receiving mail at this site' : 'waiting for DNS'; ?></span>
+			<span class="setup-dot <?php echo $setup_send_rcv_row['ok'] ? 'green' : 'amber'; ?>"></span>
+			<span><?php echo htmlspecialchars($setup_send_rcv_row['address']); ?></span>
+			<span class="jy-muted"><?php echo htmlspecialchars($setup_send_rcv_row['note']); ?></span>
 		</li>
 <?php } ?>
 	</ul>
 <?php
-		if (!$setup_send_rcv_ok) {
+		if ($setup_send_rcv_dns_pending) {
 			$setup_send_rcv_plan = _setup_wizard_dns_plan($setup_send_domain);
 			if ($setup_send_rcv_plan !== null && !$setup_send_rcv_plan->isEmpty()) {
 ?>

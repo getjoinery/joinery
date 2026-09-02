@@ -31,11 +31,19 @@
  *  - InboundEmailSetupCheck::runDomainChecks(): nothing to say about an
  *    IMAP-source domain — no DNS grading, no Direct plan, no identity mint;
  *  - mailbox_receive_mode(): an IMAP-source row does not decide the receive
- *    topology.
+ *    topology;
+ *  - transport (§5): OutboundTransport::forHostedAlias() refuses an address on
+ *    an IMAP-source domain, and MailboxSender::sendCapabilityFor() names the
+ *    disabled feed BEFORE a send — with no fallthrough to platform egress;
+ *  - the Setup tab's Sending row for a pulled-in mailbox reads the same answer;
+ *  - the wizard's receiving list (§6): a connected account is "connected
+ *    account" while its feed is on and "connection paused" when off;
+ *  - provisioning (§9.3): a plus-tagged address is refused as a connected
+ *    mailbox, naming the base address, and leaves no domain row behind.
  *
  * Run: php tests/run.php db --filter=imap_source_boundaries
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -197,5 +205,93 @@ if (!$pre_receiving) {
 } else {
 	check(true, 'pre-existing receiving domains present — receive-mode delta not assertable here');
 }
+
+section('Transport: a connected mailbox never leaks to platform egress');
+require_once(PathHelper::getIncludePath('includes/OutboundTransport.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSender.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
+$refusal = OutboundTransport::forHostedAlias('isb-feed@' . $imap_name);
+check($refusal->error !== null && stripos($refusal->error, 'connected account') !== false,
+	'forHostedAlias() refuses an IMAP-source address, naming the connected account',
+	'the backstop: even a caller that skips the preflight cannot reach platform egress');
+check($refusal->transport === null, 'and configures no transport for it');
+$hosted_ok = OutboundTransport::forHostedAlias('isb-local@' . $hosted_name);
+check($hosted_ok->error === null, 'a hosted alias still resolves a transport');
+
+$feed_alias = null;
+$feed_aliases = new MultiInboundEmailAlias(array('domain_id' => (int)$imap->key, 'deleted' => false));
+foreach ($feed_aliases as $candidate) {
+	if ($candidate->get('iea_alias') === 'isb-feed') { $feed_alias = $candidate; break; }
+}
+check($feed_alias !== null, 'the IMAP-source mailbox fixture exists');
+
+$cap = MailboxSender::sendCapabilityFor($feed_alias);
+check(!$cap['ok'] && stripos((string)$cap['error'], 'no connected account') !== false,
+	'a pulled-in mailbox with no feed at all cannot send, and says so');
+
+// A feed in the state every feed is born in: disabled.
+$feed = new InboundImapAccount(NULL);
+$feed->set('iia_provider_key', 'gmail');
+$feed->set('iia_iea_inbound_email_alias_id', (int)$feed_alias->key);
+$feed->set('iia_username', 'isb-feed@' . $imap_name);
+$feed->set('iia_label', 'isb fixture');
+$feed->set('iia_imap_host', 'imap.gmail.com');
+$feed->set('iia_imap_port', 993);
+$feed->set('iia_imap_encryption', InboundImapAccount::ENC_SSL);
+$feed->set('iia_auth_method', InboundImapAccount::AUTH_PASSWORD);
+$feed->set('iia_is_enabled', false);
+$feed->save();
+harness_register_row('iia_inbound_imap_accounts', 'iia_inbound_imap_account_id', (int)$feed->key);
+
+$cap = MailboxSender::sendCapabilityFor($feed_alias);
+check(!$cap['ok'] && stripos((string)$cap['error'], 'currently disabled') !== false,
+	'a disabled feed is named as the reason the mailbox cannot send',
+	'the same words the compose banner shows and the send refuses with');
+check($cap['transport'] === null, 'no transport is configured for a disabled feed — no fallthrough');
+
+// The Setup tab's Sending row reads the same answer.
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/mailbox_setup_scope.php'));
+$scoped = mailbox_setup_scoped_rows((int)$feed_alias->key);
+$sending = null;
+foreach ((array)($scoped['forwarding'] ?? array()) as $row) {
+	if ($row['id'] === 'imap.sending') { $sending = $row; break; }
+}
+check($sending !== null && $sending['status'] === InboundEmailSetupCheck::WARN,
+	'the Setup tab shows a Sending row for the pulled-in mailbox, amber while the feed is off');
+check(mailbox_setup_verdict($scoped)['status'] === 'attention',
+	'so the mailbox verdict does not read green');
+
+section('Wizard receiving list: a connected account is the arrangement');
+require_once(PathHelper::getIncludePath('includes/SetupSteps.php'));
+$rows = array();
+foreach (SetupSteps::receivingMailboxes() as $row) {
+	$rows[$row['address']] = $row;
+}
+$feed_address = 'isb-feed@' . $imap_name;
+check(isset($rows[$feed_address]) && $rows[$feed_address]['connected'] && !$rows[$feed_address]['ok']
+		&& $rows[$feed_address]['note'] === 'connection paused',
+	'a connected account with its feed off reads "connection paused", never "waiting for DNS"');
+$feed->set('iia_is_enabled', true);
+$feed->save();
+$rows = array();
+foreach (SetupSteps::receivingMailboxes() as $row) {
+	$rows[$row['address']] = $row;
+}
+check(isset($rows[$feed_address]) && $rows[$feed_address]['ok']
+		&& $rows[$feed_address]['note'] === 'connected account',
+	'with the feed on it reads "connected account" and counts as receiving');
+$hosted_address = 'isb-local@' . $hosted_name;
+check(isset($rows[$hosted_address]) && !$rows[$hosted_address]['connected']
+		&& $rows[$hosted_address]['note'] === 'waiting for DNS',
+	'a hosted mailbox without a DNS verdict still waits for DNS');
+
+section('Provisioning: a plus-tagged address is refused, leaving nothing behind');
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/provisioning.php'));
+$plus_domain = 'isb-plus-' . $tag . '.example';
+$plus = mailbox_provision_mailbox($plus_domain, 'someone+tag', $user_id, true);
+check($plus['error'] !== null && strpos($plus['error'], 'someone@' . $plus_domain) !== false,
+	'a plus-tagged connect is refused and names the base address to connect instead');
+check(InboundEmailDomain::GetByDomain($plus_domain) === false,
+	'and no provider domain row was created for the refused connect');
 
 harness_finish();

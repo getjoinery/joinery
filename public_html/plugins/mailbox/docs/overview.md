@@ -295,6 +295,24 @@ The feed is created **disabled** and starts fetching when the configure step is
 finished, so an abandoned flow leaves a mailbox that is visibly not enabled rather than
 one quietly collecting mail nobody finished asking for.
 
+**A connected account is not a hosted domain.** Connecting `name@gmail.com` creates a
+domain row for `gmail.com` marked as an IMAP source — bookkeeping for the mailbox, never
+an identity this deployment owns (`InboundEmailDomain::is_authoritative()` answers no).
+Nothing treats it as hosted here: anyone can still register or set a recovery address
+`@gmail.com`, no DNS is checked or prescribed for it, no Joinery Direct signing identity
+is minted for it, and the messenger does not treat its addresses as local. Mail from the
+mailbox leaves **only** through the connected account's own SMTP: when the feed is
+disabled, unauthorized, or a generic IMAP host with no SMTP, the reader's compose shows
+the reason before anything is written, the Setup tab's Sending row says the same, and a
+send refuses with the same words — it never falls through to the site's provider or the
+relay (`MailboxSender::sendCapabilityFor()` is the one answer all three read). The setup
+wizard's Email step counts a syncing connected account as a complete receiving
+arrangement ("connected account", green), and "connection paused" when the feed is off.
+
+**Plus-tagged addresses cannot be connected.** A mailbox local part admits no `+`, so
+`name+tag@gmail.com` is refused with the base address named; connect `name@gmail.com` —
+the provider delivers the tagged form to the same inbox, so nothing is lost.
+
 **The configure step asks about sync too.** The discovery connection that lists the
 server's folders also detects its sync capabilities, so when the server can keep two
 copies in step the wizard offers the same **Keep in step with the original** choice
@@ -4175,8 +4193,9 @@ to Trash (the locator follows, so it is never re-pushed); a message arriving in 
 on the source soft-deletes the local row at ingest. Archiving (the `iem_is_archived`
 column) is distinct from deletion and stays local.
 
-**Compose / Sent** (the **“Enable compose / Sent sync”** toggle, with the reader’s
-reply/forward feature): the source Sent folder is ingested like any tracked folder,
+**Compose / Sent** (the **“Enable compose / Sent sync”** toggle, on by default in the
+connect wizard whenever sync is on, with the reader’s reply/forward feature): the
+source Sent folder is ingested like any tracked folder,
 so mail sent from the native client appears in Joinery. When a feed’s SMTP does not
 auto-file sent mail (self-hosted / generic), Joinery `APPEND`s the sent copy to the
 source Sent folder itself. Sent dedup is **by Message-ID only**: a compose send always

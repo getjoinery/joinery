@@ -16,6 +16,9 @@
  * file only creates aliases, it never edits an existing alias's
  * destinations or delivery mode.
  *
+ * @version 1.3 - a plus-tagged address (name+tag@…) is refused as a connected
+ *                mailbox with the fix named: connect the base address, which
+ *                receives the tagged form too (specs/imap_source_domain_boundaries.md §9.3)
  * @version 1.2 - a domain can be created as an IMAP source in its creating save,
  *                so a partially failed provisioning never leaves it hosted-shaped
  * @version 1.1 - the protected-mailbox grant rule is checked against the union
@@ -105,15 +108,6 @@ function mailbox_provision_mailbox(string $domain_name, string $local_part, int 
 		'grant_added' => false,
 	);
 
-	$domain_step = mailbox_provision_domain($domain_name, $imap_source);
-	if ($domain_step['error'] !== null) {
-		$result['error'] = $domain_step['error'];
-		return $result;
-	}
-	$domain = $domain_step['domain'];
-	$result['domain'] = $domain;
-	$result['domain_created'] = $domain_step['created'];
-
 	// People often paste the whole address; keep the local part before the @.
 	$local_part = strtolower(trim($local_part));
 	$at = strpos($local_part, '@');
@@ -124,6 +118,26 @@ function mailbox_provision_mailbox(string $domain_name, string $local_part, int 
 		$result['error'] = 'Enter the mailbox address (the part before the @).';
 		return $result;
 	}
+	// A plus-tagged address cannot be a mailbox here (the alias local part
+	// admits no '+'). For a connected account that is no loss — the provider
+	// delivers name+tag@ to name@ — so the refusal names the base address as
+	// the thing to connect. Checked before any row exists, so a refused
+	// connect leaves no half-made provider domain behind.
+	if ($imap_source && strpos($local_part, '+') !== false) {
+		$base = substr($local_part, 0, strpos($local_part, '+')) . '@' . strtolower(trim($domain_name));
+		$result['error'] = 'A plus-tagged address cannot be connected as a mailbox. Connect ' . $base
+			. ' instead — mail sent to the tagged address arrives there too.';
+		return $result;
+	}
+
+	$domain_step = mailbox_provision_domain($domain_name, $imap_source);
+	if ($domain_step['error'] !== null) {
+		$result['error'] = $domain_step['error'];
+		return $result;
+	}
+	$domain = $domain_step['domain'];
+	$result['domain'] = $domain;
+	$result['domain_created'] = $domain_step['created'];
 	if ($user_id <= 0) {
 		$result['error'] = 'A user to grant the mailbox to is required.';
 		return $result;

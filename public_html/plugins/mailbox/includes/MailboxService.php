@@ -49,6 +49,10 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.36 - each mailbox in the switcher payload carries send_ok /
+ *                 send_error (MailboxSender::sendCapabilityFor), so the reader
+ *                 can say a mailbox cannot send BEFORE a message is written
+ *                 (specs/imap_source_domain_boundaries.md §5.2)
  * @version 1.35
  * @changelog 1.35 - the reader's per-page cost on a large mailbox: the Inbox
  *   list and rail counts read the mailbox-scoped indexes instead of scanning
@@ -579,6 +583,16 @@ class MailboxService {
 				// so, because restore and delete-forever act locally — the copy in the
 				// provider's own Trash goes on the provider's schedule.
 				$mailboxes[count($mailboxes) - 1]['has_feed'] = $info['has_feed'];
+				// Whether a compose from this mailbox can leave at all, decided by
+				// the same code the send runs, so the compose banner and the send
+				// refusal never disagree. Configures a transport, opens nothing.
+				try {
+					$capability = MailboxSender::sendCapabilityFor($a);
+				} catch (Throwable $e) {
+					$capability = array('ok' => false, 'error' => $e->getMessage());
+				}
+				$mailboxes[count($mailboxes) - 1]['send_ok'] = $capability['ok'];
+				$mailboxes[count($mailboxes) - 1]['send_error'] = $capability['ok'] ? '' : (string)$capability['error'];
 			}
 		}
 

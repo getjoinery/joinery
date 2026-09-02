@@ -32,6 +32,12 @@
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
+ * @version 1.12
+ * @changelog 1.12 - The Email step counts a connected account as receiving:
+ *   green needs every enabled store mailbox either on a domain whose DNS
+ *   verdict is ok or on a connected account whose feed is enabled, and the
+ *   copy says which arrangement is in place. The header pill honors a
+ *   dismissed wizard (specs/imap_source_domain_boundaries.md §6).
  * @version 1.11
  * @changelog 1.11 - Backups step copy says the key turns on nightly backups —
  *   activation is automatic, so the copy names the payoff rather than the key
@@ -280,8 +286,9 @@ class SetupSteps {
 
 	/**
 	 * "Finish setup — n of m" counts for the header pill, or null when there
-	 * is nothing left to show. Cached in the session for PILL_TTL seconds so
-	 * the header never runs the predicates on every page view.
+	 * is nothing left to show — every step green, or the wizard dismissed.
+	 * Cached in the session for PILL_TTL seconds so the header never runs the
+	 * predicates on every page view.
 	 */
 	public static function pillCounts(): ?array {
 		if (PHP_SAPI === 'cli') {
@@ -297,6 +304,12 @@ class SetupSteps {
 		}
 		$viewer = self::viewerUser();
 		if (!$viewer || !$viewer->key) {
+			return null;
+		}
+		// A dismissed wizard is a decision: nothing is counted against the
+		// header from then on, exactly as the login interrupt already honors.
+		if ($viewer->get('usr_setup_dismissed_time')) {
+			$_SESSION[self::SESSION_PILL] = array('time' => time(), 'done' => 0, 'total' => 0, 'complete' => true);
 			return null;
 		}
 		$total = 0;
@@ -323,6 +336,72 @@ class SetupSteps {
 		self::$steps = [];
 		self::$viewer_user = null;
 		self::$viewer_loaded = false;
+	}
+
+	/**
+	 * Every enabled store mailbox with whether it can receive, and why. A
+	 * hosted domain receives once its DNS verdict is ok; a connected account
+	 * (IMAP-source domain) receives while its feed is enabled — the account is
+	 * the arrangement, there is no DNS to wait for. The Email step's status,
+	 * copy and checklist all read this one list. Empty without the mailbox
+	 * plugin.
+	 *
+	 * @return array<int, array{address: string, ok: bool, connected: bool, note: string}>
+	 */
+	public static function receivingMailboxes(): array {
+		if (!class_exists('InboundEmailAlias')) {
+			return array();
+		}
+		$out = array();
+		$domains = array();
+		$feeds = array();
+		$aliases = new MultiInboundEmailAlias(array(
+			'delivery_mode' => InboundEmailAlias::MODE_STORE,
+			'enabled' => true,
+			'deleted' => false,
+		), array('iea_alias' => 'ASC'));
+		foreach ($aliases as $alias) {
+			$domain_id = (int)$alias->get('iea_ied_inbound_email_domain_id');
+			if (!isset($domains[$domain_id])) {
+				$domains[$domain_id] = new InboundEmailDomain($domain_id, TRUE);
+			}
+			$domain = $domains[$domain_id];
+			if (!$domain->key || $domain->get('ied_delete_time') || !$domain->get('ied_is_enabled')) {
+				continue;
+			}
+			$address = $alias->get('iea_alias') . '@' . $domain->get('ied_domain');
+			if ($domain->is_imap_source()) {
+				$alias_id = (int)$alias->key;
+				if (!isset($feeds[$alias_id])) {
+					$bound = new MultiInboundImapAccount(array('alias_id' => $alias_id, 'deleted' => false));
+					$feeds[$alias_id] = false;
+					foreach ($bound as $feed) {
+						if ($feed->get('iia_is_enabled')) {
+							$feeds[$alias_id] = true;
+							break;
+						}
+					}
+				}
+				$out[] = array('address' => $address, 'ok' => $feeds[$alias_id], 'connected' => true,
+					'note' => $feeds[$alias_id] ? 'connected account' : 'connection paused');
+				continue;
+			}
+			$ok = ((string)$domain->get('ied_setup_status') === 'ok');
+			$out[] = array('address' => $address, 'ok' => $ok, 'connected' => false,
+				'note' => $ok ? 'receiving mail at this site' : 'waiting for DNS');
+		}
+		return $out;
+	}
+
+	/** Addresses of enabled store mailboxes on a connected account whose feed is on. */
+	public static function connectedAccountAddresses(): array {
+		$out = array();
+		foreach (self::receivingMailboxes() as $row) {
+			if ($row['connected'] && $row['ok']) {
+				$out[] = $row['address'];
+			}
+		}
+		return $out;
 	}
 
 	/** Register the core steps. Runs once when this file loads. */
@@ -524,7 +603,13 @@ class SetupSteps {
 					// sit above the accurate one.
 					return '';
 				}
-				return "Your site sends mail — receipts, reminders and sign-in codes all have a way out, and a test delivery has been confirmed.";
+				$line = "Your site sends mail — receipts, reminders and sign-in codes all have a way out, and a test delivery has been confirmed.";
+				$connected = SetupSteps::connectedAccountAddresses();
+				if ($connected) {
+					$line .= ' ' . implode(', ', $connected) . (count($connected) === 1 ? ' is' : ' are')
+						. ' connected, so mail arrives here from that account — no DNS to wait for.';
+				}
+				return $line;
 			},
 			'render_file' => 'includes/setup_steps/mail_send.php',
 			'home_url' => '/admin/admin_settings_email',
@@ -538,24 +623,18 @@ class SetupSteps {
 				if ($last === '') {
 					return SetupSteps::STATUS_AMBER;
 				}
-				// Receiving rides the same step: once a mailbox exists, green
-				// additionally means a receiving domain's DNS verdict is ok —
-				// until then the step stays amber, exactly as arriving mail
-				// does. Without the mailbox plugin there is nothing to wait on.
+				// Receiving rides the same step: once mailboxes exist, green
+				// additionally means every one of them can receive — a hosted
+				// domain by its DNS verdict, a connected account by its feed
+				// being enabled (a syncing account IS the receiving
+				// arrangement; there is no MX to wait for). Until then the step
+				// stays amber, exactly as arriving mail does. Without the
+				// mailbox plugin there is nothing to wait on.
 				if (class_exists('InboundEmailAlias')) {
-					$aliases = new MultiInboundEmailAlias(array(
-						'delivery_mode' => InboundEmailAlias::MODE_STORE,
-						'enabled' => true,
-						'deleted' => false,
-					));
-					if ($aliases->count_all() > 0) {
-						$domains = new MultiInboundEmailDomain(array('enabled' => true, 'deleted' => false));
-						foreach ($domains as $domain) {
-							if ((string)$domain->get('ied_setup_status') === 'ok') {
-								return SetupSteps::STATUS_GREEN;
-							}
+					foreach (SetupSteps::receivingMailboxes() as $row) {
+						if (!$row['ok']) {
+							return SetupSteps::STATUS_AMBER;
 						}
-						return SetupSteps::STATUS_AMBER;
 					}
 				}
 				return SetupSteps::STATUS_GREEN;

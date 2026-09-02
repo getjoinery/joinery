@@ -1,7 +1,7 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.26
+ * Vanilla CSS, no framework. @version 2.27
  */
 
 /* Every size the reader renders text at, in one ladder. Nothing in this file
@@ -669,6 +669,13 @@
 .mbx-compose-error {
 	margin: 12px 16px 0;
 	background: #fef0ee; border: 1px solid #f1c4bf; color: #b42318;
+	border-radius: 5px; padding: 8px 11px; font-size: var(--mbx-text-base);
+}
+/* The send-capability preflight: amber, not red — nothing has failed yet,
+   the mailbox simply cannot send until its connected account is put right. */
+.mbx-compose-preflight {
+	margin: 12px 16px 0;
+	background: #fef0c7; border: 1px solid #f5d38a; color: #93370d;
 	border-radius: 5px; padding: 8px 11px; font-size: var(--mbx-text-base);
 }
 /* The FormWriter form lives inside the panel. */
