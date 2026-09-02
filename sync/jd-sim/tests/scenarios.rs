@@ -4459,6 +4459,166 @@ fn a_file_dragged_into_a_vault_with_no_key_here_waits_instead_of_trashing_it() {
     assert_nothing_lost(&world, &committed);
 }
 
+/// A FOLDER made inside a vault this device cannot open waits for a key, as a
+/// file made there does, and is not pushed to the server.
+///
+/// Pushed, it was created, parked `PendingKey` by naming on the next pass, and
+/// from then on its record and the directory drifted apart -- nothing keyless
+/// ever applies a rename to a parked entry. Rename the directory to a name the
+/// server already holds and the directory is adopted again as a brand-new
+/// folder every pass: the create is refused over the name, the executor steps
+/// aside with a conflict name, and the server gains one more folder per pass
+/// for ever. Estate seed 6092348.
+#[test]
+fn a_folder_made_in_a_vault_with_no_key_here_waits_and_mints_nothing() {
+    let vault = SimVault::new(9_214);
+    let mut world = World::new(9_214, &["holder", "guest"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some());
+
+    // The guest has no vault folder of its own, so the user makes one of that
+    // name and a folder inside it.
+    let guest = world.device("guest");
+    guest.fs.user_mkdir("Private");
+    guest.fs.user_mkdir("Private/Sub");
+    assert!(world.settle().is_some(), "a device that cannot encrypt still goes quiet");
+    assert!(
+        !world.server.tree().contains_key("Private/Sub"),
+        "a keyless device pushed a folder into the vault: {:?}",
+        world.server.tree()
+    );
+    let waiting = guest
+        .store
+        .every_entry()
+        .unwrap()
+        .into_iter()
+        .find(|e| e.remote.name == "Sub")
+        .expect("the folder is owned, not ignored");
+    assert_eq!(waiting.status, jd_core::model::LocalStatus::PendingKey);
+
+    // The holder makes a folder of the name the guest is about to use.
+    world.device("holder").fs.user_mkdir("Private/Sub renamed");
+    assert!(world.settle().is_some());
+    assert!(world.server.tree().contains_key("Private/Sub renamed"));
+
+    // The guest renames its own directory onto that name. Same slot on the
+    // server, different owner.
+    guest.fs.user_rename("Private/Sub", "Private/Sub renamed");
+    assert!(
+        world.settle().is_some(),
+        "the guest adopts its directory once, not once per pass"
+    );
+    let folders: Vec<String> = world
+        .server
+        .tree()
+        .into_iter()
+        .filter(|(p, h)| h.is_none() && p.starts_with("Private/"))
+        .map(|(p, _)| p)
+        .collect();
+    assert_eq!(
+        folders,
+        vec!["Private/Sub renamed".to_string()],
+        "the server gained folders nobody asked for"
+    );
+    assert_converged(&world);
+    jd_sim::scenario::assert_no_ciphertext_on_a_keyless_disk(&world);
+}
+
+/// ...and the wait ends the way a file's does: the key arrives, the folder
+/// goes up.
+#[test]
+fn a_folder_waiting_for_a_key_goes_up_when_the_key_arrives() {
+    let vault = SimVault::new(9_215);
+    let mut world = World::new(9_215, &["holder", "guest"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some());
+
+    let guest = world.device("guest");
+    guest.fs.user_mkdir("Private");
+    guest.fs.user_mkdir("Private/Notes");
+    let body = b"a note the guest cannot make private yet";
+    guest.fs.user_write("Private/Notes/todo.txt", body);
+    committed.note("Private/Notes/todo.txt", body);
+    assert!(world.settle().is_some());
+    assert!(!world.server.tree().contains_key("Private/Notes"));
+
+    world.give_vault("guest", &vault);
+    assert!(world.settle().is_some(), "with a key the wait ends");
+    let tree = world.server.tree();
+    assert!(
+        tree.contains_key("Private/Notes"),
+        "the folder never went up once the key arrived: {tree:?}"
+    );
+    // Encrypted, so under the server's placeholder name rather than its own;
+    // `assert_nothing_lost` checks the bytes are there under whatever name.
+    assert!(
+        tree.keys().any(|p| p.starts_with("Private/Notes/")),
+        "the file inside never went up once the key arrived: {tree:?}"
+    );
+    assert_nothing_lost(&world, &committed);
+    assert_converged(&world);
+}
+
+/// Dragged in, then the bytes brought back OUT under a new name while something
+/// else is saved at the vault path.
+///
+/// The hold on the original rests on its path being empty, which is what reads
+/// as a move into the vault. Once the original's bytes are found on the disk
+/// again the premise is gone: what waits inside is a new file, and the original
+/// is an ordinary file that moved. Held anyway, the scan paired the original
+/// with its file every pass and the pairing was thrown away every pass -- a
+/// file claimed by nobody, for ever. Estate seed 6091570.
+#[test]
+fn a_file_brought_back_out_of_a_vault_under_a_new_name_is_not_held_hostage() {
+    let vault = SimVault::new(9_216);
+    let mut world = World::new(9_216, &["holder", "guest"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+
+    world.server.seed_encrypted_folder(None, "Private");
+    let body = b"in, out again under another name";
+    world.device("guest").fs.user_write("memo.txt", body);
+    committed.note("memo.txt", body);
+    assert!(world.settle().is_some(), "the plaintext file goes up first");
+
+    let guest = world.device("guest");
+    guest.fs.user_mkdir("Private");
+    guest.fs.user_rename("memo.txt", "Private/memo.txt");
+    assert!(world.settle().is_some(), "the drag in settles");
+
+    guest.fs.user_rename("Private/memo.txt", "memo-again.txt");
+    let other = b"a different note, waiting for a key";
+    guest.fs.user_write("Private/memo.txt", other);
+    committed.note("memo-again.txt", body);
+    assert!(world.settle().is_some());
+
+    let server = world.server.tree();
+    assert!(
+        server.contains_key("memo-again.txt"),
+        "the original never moved on the server: {server:?}"
+    );
+    assert!(
+        !server.contains_key("memo.txt"),
+        "the old copy should be gone once the move completed: {server:?}"
+    );
+    assert!(
+        !server.contains_key("Private/memo.txt"),
+        "a keyless device sent a file into the vault: {server:?}"
+    );
+    // The file inside is owned and waiting; the file outside is owned and
+    // synced. Nothing on this disk is claimed by nobody.
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
 /// Dragged in, then dragged back out again before any key arrives.
 ///
 /// The hold on the server's copy has to be a fact that lapses, not a state

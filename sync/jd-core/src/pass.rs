@@ -200,18 +200,32 @@ pub fn run_pass(
     // unsyncable is not re-reported every pass, so reading that list as the full
     // set withdraws a complaint that is still true. A Mac holding one of two
     // case-clashing siblings caught exactly that.
+    //
+    // The same goes for a complaint whose PARTICULARS have ended. The rival a
+    // parked file clashes with can be renamed while the clash itself stays --
+    // a case twin becoming a normalization twin -- and naming re-raises the
+    // verdict with the new name in it. The old sentence names a file that is
+    // no longer there; two open complaints about one parked file, the older
+    // one now false, is the same permanent warning by another route.
+    //
+    // This rests on every "unsyncable" issue carrying the reason in one shape,
+    // `{reason:?}`, whoever raised it -- naming here, or a park operation that
+    // gave up a copy. What a park DID (moved a copy to the trash) is an event,
+    // reported under its own kind, and nothing here touches events.
     {
-        let unsyncable_now: std::collections::HashSet<EntityId> = all_entries(env)?
+        let unsyncable_now: std::collections::HashMap<EntityId, String> = all_entries(env)?
             .into_iter()
-            .filter(|e| matches!(e.status, LocalStatus::Unsyncable(_)))
-            .map(|e| e.id)
+            .filter_map(|e| match &e.status {
+                LocalStatus::Unsyncable(reason) => Some((e.id, format!("{reason:?}"))),
+                _ => None,
+            })
             .collect();
         for issue in env.store.open_issues()? {
             if issue.kind != "unsyncable" {
                 continue;
             }
             let Some(id) = issue.entity else { continue };
-            if !unsyncable_now.contains(&id) {
+            if unsyncable_now.get(&id) != Some(&issue.detail) {
                 env.store.dismiss_issue(issue.issue_id)?;
             }
         }
@@ -246,6 +260,19 @@ pub fn run_pass(
         let id = EntityId::folder(env.store.next_provisional_id()?);
         let mut entry = blank(id, &placement);
         entry.is_encrypted = parent_is_encrypted(env, placement.parent)?;
+        // A folder made inside a vault this device cannot open waits for a
+        // key, exactly as a file made there does (below). Pushed instead, it
+        // is created on the server, parked `PendingKey` by naming on the next
+        // pass, and from then on its record and this directory drift apart --
+        // nothing keyless ever applies a rename to a parked entry -- so the
+        // directory is adopted again as a brand-new folder, the create is
+        // refused over the name its own twin holds, the executor steps aside
+        // with a conflict name, and the server gains one more folder per
+        // pass for ever. A device that never goes quiet, minting folders
+        // nobody asked for.
+        if entry.is_encrypted && env.vault.is_none() {
+            entry.status = LocalStatus::PendingKey;
+        }
         env.store.put_entry(&entry)?;
         folder_ids.insert(dir.clone(), id.server_id);
         out.local_creations += 1;
@@ -531,7 +558,34 @@ pub fn run_pass(
         // and re-uploads after. A remote delete still gets through, exactly as
         // it does for the three skips above.
         if !entry.remote_deleted && held_for_replacement.contains(&entry.id) {
-            continue;
+            // The hold rests on the source path being EMPTY -- that is what
+            // reads as the user having moved the file in. When the scan finds
+            // this entry's own file on this disk anyway, at its path or moved
+            // to another, the premise is gone: the user kept a copy outside
+            // the vault, or brought the bytes back out under a new name and
+            // saved something else at the vault path. The bytes waiting inside
+            // are then a new file, not this one's replacement, and holding
+            // this one hostage to them leaves a real file claimed by nobody --
+            // the scan pairs it with this entry every pass, the pairing is
+            // thrown away here, and nothing ever scans, sends, moves or
+            // removes it. Estate seed 6091570.
+            //
+            // So the hold lapses: the claimant stands on its own, and this
+            // entry goes on as the file it is.
+            let alive = matches!(
+                scan.change_for(entry.id),
+                Some(c) if !matches!(c, crate::scan::LocalChange::Deleted)
+            );
+            if !alive {
+                continue;
+            }
+            for mut claimant in all_entries(env)?
+                .into_iter()
+                .filter(|e| e.replaces == Some(entry.id))
+            {
+                claimant.replaces = None;
+                env.store.put_entry(&claimant)?;
+            }
         }
         if !entry.remote_deleted && written_off.contains(&entry.id) {
             continue;
@@ -569,24 +623,61 @@ pub fn run_pass(
             // locally is worked out separately.
             None => folder_delta(&entry, &folders),
         };
-        // A move that arrives exactly where the agreement already puts it is not
-        // a move.
+        // A move that arrives at the slot the agreement already puts it in is
+        // not a move. Three ways that happens, and what the record needs from
+        // each is different.
         //
-        // The scan works in paths and the agreement works in placements, and the
-        // two come apart when a FOLDER has been displaced: every file inside it
-        // is at a new path while its parent and name -- which is all a placement
-        // is -- have not changed at all. Read as a move it becomes a request to
-        // the server to put the file exactly where the server already has it:
-        // accepted, applied, and derived again from the same disk on the next
-        // pass, for as long as the folder stays where it is. One file, one
-        // round-trip, every pass, and a device that is never quiet.
+        // The scan works in paths and the agreement works in placements, and
+        // the two come apart when a FOLDER has been displaced: every file
+        // inside it is at a new path while its parent and name -- which is all
+        // a placement is -- have not changed at all. Read as a move it becomes
+        // a request to the server to put the file exactly where the server
+        // already has it: accepted, applied, and derived again from the same
+        // disk on the next pass, for as long as the folder stays where it is.
+        // One file, one round-trip, every pass, and a device that is never
+        // quiet. The file wears the name the record says it wears -- the LOCAL
+        // name, where one is recorded, because that is the spelling a volume
+        // that decomposes or escapes actually holds -- and the record is right.
+        //
+        // The second is a RESPELLING the server cannot grant. Two spellings of
+        // one word are two files on the server and one slot on a volume that
+        // folds them, and both are legal: a device that composes on the way
+        // out can upload the composed twin of a name minted decomposed. So this
+        // device can end up agreeing on one spelling while its disk holds the
+        // other, and the scan reports a rename the user never made. Pushed, it
+        // is refused for ever -- the byte-name belongs to a different live
+        // file, so the answer is `name_taken`, the op is dropped, the record is
+        // untouched, and the next pass derives exactly the same move. Two
+        // estate seeds sat there, one raising an issue on every pass. There is
+        // nothing to send: the file is where the agreement says, only its
+        // spelling differs, and this filesystem cannot tell the two apart. So
+        // the spelling is written down as what it is -- a local name, the field
+        // for exactly this -- and the placement stays the server's.
+        //
+        // The third is the way back: the disk has returned to the server's own
+        // spelling. Not a rename either, but the mapping that said otherwise
+        // has to come off the record, because a record that still names the
+        // old spelling pairs the file by content alone, and the next edit at
+        // that path reads as a deletion.
+        //
+        // A respell onto a FREE name is none of these. It is an ordinary rename
+        // and still goes up: the user renaming `report.txt` to `Report.txt` on
+        // a case-folding volume means it, and the server can grant it.
         let local = match local {
-            Delta::Moved { ref to } if entry.synced_placement.as_ref() == Some(to) => Delta::None,
-            Delta::MovedAndEdited { ref to, ref content }
-                if entry.synced_placement.as_ref() == Some(to) =>
-            {
-                Delta::Edited {
-                    content: content.clone(),
+            Delta::Moved { ref to } | Delta::MovedAndEdited { ref to, .. } => {
+                match same_slot_spelling(env, &entry, to, &busy)? {
+                    Some(spelling) => {
+                        if spelling != entry.local_name {
+                            let mut respelled = entry.clone();
+                            respelled.local_name = spelling;
+                            env.store.put_entry(&respelled)?;
+                        }
+                        match local {
+                            Delta::MovedAndEdited { content, .. } => Delta::Edited { content },
+                            _ => Delta::None,
+                        }
+                    }
+                    None => local,
                 }
             }
             other => other,
@@ -1084,6 +1175,73 @@ pub(crate) fn absorb_remote(
         }
     }
     Ok(())
+}
+
+/// Does this "move" leave the entry in the slot the agreement already gives
+/// it -- and if so, what local name should the record carry?
+///
+/// `None`: a real move, which goes up. `Some(spelling)`: not a move; `spelling`
+/// is the local name the record should hold, `None` there meaning the disk
+/// spells the name exactly as the server does.
+///
+/// The parent must be the same. Then, in order: byte-equal to the name the
+/// record already describes (`effective_local_name`, so an escaped or
+/// decomposed mapping counts) -- a displaced folder, nothing to change;
+/// byte-equal to the server's own spelling -- a mapping gone stale, to be
+/// cleared; and only then the fold test: a name this volume cannot tell from
+/// the agreed one, whose exact byte-name already belongs to a live entry that
+/// is not on its way somewhere else and is not materialized here -- that is
+/// what makes the server's refusal permanent rather than a race worth
+/// retrying, and if the holder IS on this disk the two are fighting over one
+/// slot, which is a naming clash for naming to park. Anything else is a rename
+/// the server can grant, and it goes up.
+///
+/// Deliberately not restricted to a normalization difference. What decides this
+/// is whether the name can be had, not which axis the two spellings differ on:
+/// a case respell onto a free name goes up like any other rename, and a case
+/// respell onto a name a live twin holds would loop exactly as these did.
+fn same_slot_spelling(
+    env: &ExecEnv,
+    entry: &Entry,
+    to: &Placement,
+    busy: &[EntityId],
+) -> Result<Option<Option<String>>, ExecError> {
+    let Some(agreed) = entry.synced_placement.as_ref() else {
+        return Ok(None);
+    };
+    if agreed.parent != to.parent {
+        return Ok(None);
+    }
+    if to.name == entry.effective_local_name() {
+        return Ok(Some(entry.local_name.clone()));
+    }
+    if to.name == agreed.name {
+        return Ok(Some(None));
+    }
+    let personality = env.vfs.personality();
+    if jd_vfs::comparison_key(&agreed.name, &personality)
+        != jd_vfs::comparison_key(&to.name, &personality)
+    {
+        return Ok(None);
+    }
+    for other in all_entries(env)? {
+        if other.id == entry.id || other.remote_deleted {
+            continue;
+        }
+        // An entry with work outstanding may be vacating this very name, and
+        // waiting one pass for it is not a livelock. If its op never lands,
+        // this rename goes up and is refused for as long as that op is stuck --
+        // the loop this exists to end, but gated on another entity's visibly
+        // stuck work rather than on nothing.
+        if busy.contains(&other.id) {
+            continue;
+        }
+        if other.remote.parent != to.parent || other.remote.name != to.name {
+            continue;
+        }
+        return Ok((!other.holds_a_local_file()).then(|| Some(to.name.clone())));
+    }
+    Ok(None)
 }
 
 /// Learn an encrypted file's real name and content id from its metadata blob.
