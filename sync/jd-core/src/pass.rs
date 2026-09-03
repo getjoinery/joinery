@@ -112,6 +112,9 @@ pub fn run_pass(
         absorb_remote(env, *id, state)?;
     }
 
+    // ---- files this device can open now that it holds the key ---------------
+    open_what_the_key_unlocks(env)?;
+
     // ---- nothing left with no way back to the root --------------------------
     //
     // First, because everything below finds entries by walking down from the
@@ -160,6 +163,24 @@ pub fn run_pass(
     }
     if !still_stranded {
         env.store.withdraw_issues("store_inconsistent")?;
+    }
+    // A folder trash that was waiting on a parked child says so with a state
+    // issue, withdrawn by the trash itself when it proceeds. The folder can
+    // also stop being trashable without that trash ever running again --
+    // forgotten with an ancestor, or restored on the server -- and forgetting
+    // an entry does not take its issues with it. Then the sentence is false
+    // and it goes here.
+    for issue in env.store.open_issues()? {
+        if issue.kind != "trash_waits" {
+            continue;
+        }
+        let stands = match issue.entity {
+            Some(id) => env.store.get_entry(id)?.is_some_and(|e| e.remote_deleted),
+            None => false,
+        };
+        if !stands {
+            env.store.dismiss_issue(issue.issue_id)?;
+        }
     }
 
     // ---- one directory, one entry; one file, one entry ----------------------
@@ -230,6 +251,14 @@ pub fn run_pass(
         }
     }
 
+    // ---- a directory standing in for a vault this device cannot open --------
+    //
+    // Before the disk is walked, for the same reason naming runs before it:
+    // the scan pairs what is on disk against where the engine believes each
+    // entry is, and a stand-in the server has renamed is renamed here first so
+    // that belief and the disk agree.
+    placeholders_follow_the_server(env)?;
+
     // ---- what this computer did --------------------------------------------
     let observed = observe(env)?;
     let known = known_local(env)?;
@@ -249,8 +278,73 @@ pub fn run_pass(
     // see any more.
     let folders = detect_folder_moves(env, &observed, &dirs_on_disk, &mut folder_ids)?;
 
+    // The recorded paths of the folders not yet on this disk in their own
+    // right, keyed the way the disk keys names. A directory is matched to
+    // such a folder by that key and not by spelling: on a disk that folds
+    // case, a stand-in the user respelled is the same directory, and read
+    // raw it was adopted as a new plain folder beside a vault of the same
+    // name, with everything under it sent up in the clear.
+    let personality = env.vfs.personality();
+    let fold = |path: &str| -> String {
+        path.split('/')
+            .map(|c| jd_vfs::comparison_key(c, &personality))
+            .collect::<Vec<_>>()
+            .join("/")
+    };
+    // Two such folders folding to one key -- the server keeps names by exact
+    // spelling, so `Private` and `private` can share a parent -- match
+    // nothing by key: a pick between them would be a pick by hash order,
+    // and a directory tied to two vaults at once.
+    let mut unmaterialized_by_key: HashMap<String, Option<(String, i64)>> = HashMap::new();
+    for (path, id) in &folder_ids {
+        if env
+            .store
+            .get_entry(EntityId::folder(*id))?
+            .is_some_and(|e| e.synced_placement.is_none())
+        {
+            unmaterialized_by_key
+                .entry(fold(path))
+                .and_modify(|slot| *slot = None)
+                .or_insert(Some((path.clone(), *id)));
+        }
+    }
     for dir in &dirs_on_disk {
-        if folder_ids.contains_key(dir) {
+        let matched = match folder_ids.get(dir) {
+            Some(&id) => Some((dir.clone(), id)),
+            None => unmaterialized_by_key.get(&fold(dir)).cloned().flatten(),
+        };
+        if let Some((recorded, id)) = matched {
+            // A directory at the derived path of a vault folder this device
+            // cannot open is the user's placeholder for that vault, and it is
+            // tied to the folder here, by identity, the first time it is
+            // seen. Left tied by name alone, the holder renaming the vault
+            // on the server turned this directory into a new plain folder
+            // of the old name and sent what the user saved in it up in the
+            // clear -- see `Entry::stand_in`.
+            let id = EntityId::folder(id);
+            if let Some(mut entry) = env.store.get_entry(id)? {
+                if entry.status == LocalStatus::PendingKey
+                    && !entry.id.is_provisional()
+                    && entry.synced_placement.is_none()
+                    && entry.stand_in.is_none()
+                {
+                    entry.stand_in = placement_of(dir, &folder_ids);
+                    env.store.put_entry(&entry)?;
+                } else if recorded != *dir && entry.stand_in.is_some() {
+                    // The same directory, respelled by the user. The record
+                    // takes the disk's spelling, so every later path read
+                    // matches exactly.
+                    if let Some(leaf) = dir.rsplit('/').next() {
+                        if let Some(stand_in) = entry.stand_in.as_mut() {
+                            stand_in.name = leaf.to_string();
+                        }
+                    }
+                    env.store.put_entry(&entry)?;
+                }
+            }
+            if recorded != *dir {
+                folder_ids.insert(dir.clone(), id.server_id);
+            }
             continue;
         }
         let Some(placement) = placement_of(dir, &folder_ids) else {
@@ -276,6 +370,8 @@ pub fn run_pass(
         folder_ids.insert(dir.clone(), id.server_id);
         out.local_creations += 1;
     }
+    let mut folders = folders;
+    folders.place_deferred(env, &folder_ids)?;
     // Slots already spoken for by an entry whose bytes have not arrived yet.
     //
     // `known_local` deliberately leaves those entries out -- there is no local
@@ -413,8 +509,73 @@ pub fn run_pass(
         .filter_map(|e| e.replaces)
         .collect();
 
+    // ---- a stand-in whose vault was trashed on the server -------------------
+    //
+    // After the walk, so that what is held under it is what is on the disk
+    // now, and before the round, which skips what this parks.
+    park_stand_ins_of_trashed_vaults(env, &observed)?;
+    // Everything under a folder parked out of scope is parked with it. A
+    // claimant released by a key that arrives while its folder is still in
+    // the trash would otherwise be planned as an upload into a trashed
+    // parent, refused, and planned again every pass.
+    let shadowed: std::collections::HashSet<i64> = {
+        let mut set = std::collections::HashSet::new();
+        for e in all_entries(env)? {
+            if e.id.entity_type == EntityType::Folder
+                && (e.status == LocalStatus::OutOfScope
+                    || e.local_placement().parent.is_some_and(|p| set.contains(&p)))
+            {
+                set.insert(e.id.server_id);
+            }
+        }
+        set
+    };
+
     for entry in all_entries(env)? {
-        if entry.status == LocalStatus::OutOfScope || busy.contains(&entry.id) {
+        if busy.contains(&entry.id) {
+            continue;
+        }
+        // Nothing on the server, and now nothing on the disk either: there is
+        // no third place for it to be, so it is forgotten.
+        //
+        // Checked BEFORE the skips below rather than after, because every one
+        // of them is a reason to wait and waiting needs a file to wait for. An
+        // entry parked, or holding a slot for a key, whose file the user has
+        // since taken away would otherwise sit in the store for its whole life
+        // -- and anything derived from its existence sits with it. That is not
+        // hypothetical: the hold one of these puts on the server copy it is
+        // going to replace lapses only when it goes, so a file dragged into a
+        // vault and straight back out again would never move at all.
+        //
+        // The skip for a parked vault folder counts as one of those skips. A
+        // file the user saved inside a keyless placeholder after its vault was
+        // trashed upstream, and took away again, is a record with no file
+        // behind it and no server that ever heard of it -- under the park it
+        // sat for good, with the round never looking. Estate seed 15091598.
+        // Only an operation in flight comes first: a record whose upload is
+        // mid-air is forgotten when the upload reports, not here.
+        if entry.id.is_provisional() {
+            let gone = match relative_path(env, &entry)? {
+                // The sweep at the top of the pass has already removed anything
+                // with no way back to the root; belt and braces.
+                None => true,
+                Some(path) => match entry.id.entity_type {
+                    EntityType::File => !observed.iter().any(|o| o.path == path),
+                    EntityType::Folder => !dirs_on_disk.contains(&path),
+                },
+            };
+            if gone {
+                // Created and removed again before it ever reached the server.
+                // There is nothing to tell anyone about -- and for a folder that
+                // means everything inside it too, or its children are left
+                // pointing at a parent that is not there any more.
+                env.store.delete_subtree(entry.id)?;
+                continue;
+            }
+        }
+        if entry.status == LocalStatus::OutOfScope
+            || entry.local_placement().parent.is_some_and(|p| shadowed.contains(&p))
+        {
             continue;
         }
         // A name this filesystem cannot hold. There is no local file, so there
@@ -451,6 +612,31 @@ pub fn run_pass(
                     // but never settling either. Doctrine already answers it:
                     // park is a naming verdict, and a give-up that is not about
                     // the name goes BESIDE the agreement rather than into it.
+                    //
+                    // The agreed PARENT may be gone as well: trashed on the
+                    // server and forgotten here, with only this agreement
+                    // still naming it. A put-back into it cannot succeed, and
+                    // against a server that refuses in prose alone it is worse
+                    // than refused -- "that folder is in the trash" reads as
+                    // possibly-about-the-name, the move parks the folder as its
+                    // last resort, is refused again, and is withdrawn with the
+                    // park standing; every device then rescues that park into
+                    // the same trashed parent, minting a fresh scratch name
+                    // each pass. Estate seed 16062180, three devices, for
+                    // ever. So the put-back goes where the server has the
+                    // folder now, under the agreed name, when the agreed
+                    // parent is no longer a live folder in this store.
+                    let live = |p: i64| -> Result<bool, ExecError> {
+                        Ok(env
+                            .store
+                            .get_entry(EntityId::folder(p))?
+                            .is_some_and(|f| !f.remote_deleted))
+                    };
+                    let parent = match agreed.parent {
+                        None => None,
+                        Some(p) if live(p)? => Some(p),
+                        Some(_) => entry.remote.parent,
+                    };
                     let taken: std::collections::HashSet<String> = env
                         .store
                         .every_entry()?
@@ -459,7 +645,7 @@ pub fn run_pass(
                             e.id != entry.id
                                 && !e.remote_deleted
                                 && !e.id.is_provisional()
-                                && e.remote.parent == agreed.parent
+                                && e.remote.parent == parent
                         })
                         .map(|e| e.remote.name)
                         .collect();
@@ -473,7 +659,9 @@ pub fn run_pass(
                         "move_remote",
                         entry.id,
                         &serde_json::json!({
-                            "parent": agreed.parent, "name": wanted,
+                            "parent": parent, "name": wanted,
+                            // The disk has not moved; the pass brings it along.
+                            "disk_follows": true,
                         })
                         .to_string(),
                         &key_for(),
@@ -506,36 +694,6 @@ pub fn run_pass(
                 ),
                 (env.now_ms)() as i64,
             )?;
-        }
-        // Nothing on the server, and now nothing on the disk either: there is
-        // no third place for it to be, so it is forgotten.
-        //
-        // Checked BEFORE the skips below rather than after, because every one
-        // of them is a reason to wait and waiting needs a file to wait for. An
-        // entry parked, or holding a slot for a key, whose file the user has
-        // since taken away would otherwise sit in the store for its whole life
-        // -- and anything derived from its existence sits with it. That is not
-        // hypothetical: the hold one of these puts on the server copy it is
-        // going to replace lapses only when it goes, so a file dragged into a
-        // vault and straight back out again would never move at all.
-        if entry.id.is_provisional() {
-            let gone = match relative_path(env, &entry)? {
-                // The sweep at the top of the pass has already removed anything
-                // with no way back to the root; belt and braces.
-                None => true,
-                Some(path) => match entry.id.entity_type {
-                    EntityType::File => !observed.iter().any(|o| o.path == path),
-                    EntityType::Folder => !dirs_on_disk.contains(&path),
-                },
-            };
-            if gone {
-                // Created and removed again before it ever reached the server.
-                // There is nothing to tell anyone about -- and for a folder that
-                // means everything inside it too, or its children are left
-                // pointing at a parent that is not there any more.
-                env.store.delete_subtree(entry.id)?;
-                continue;
-            }
         }
         if matches!(entry.status, LocalStatus::Unsyncable(_)) && !entry.remote_deleted {
             continue;
@@ -1573,6 +1731,293 @@ fn follow_the_server(env: &ExecEnv, entry: &Entry) -> Result<(), ExecError> {
 
 /// What happened to a tracked folder on this computer since the last agreement.
 ///
+/// A vault folder trashed on the server while this device, which cannot open
+/// it, holds files in the directory standing in for it.
+///
+/// The ordinary reading of an unmaterialized folder's deletion is to forget
+/// it -- and forgetting the folder forgets the claimants under it, leaves the
+/// directory and the user's never-uploaded files on the disk, and the next
+/// pass adopts the lot as a plain folder and uploads every file in the clear.
+/// The files were put there as private; a deletion made elsewhere is no
+/// permission to publish them. So the folder is parked out of scope instead:
+/// the tie stays, the directory is not adopted, the claimants stay held, and
+/// the user is told.
+///
+/// Decided every pass, after the disk has been walked and before the round,
+/// from what the walk found under the directory -- not from the store.
+/// Nothing under a stand-in has ever been sent (a keyless device downloads
+/// nothing into a vault), so every file there is the user's and unsent,
+/// whether it was saved there and has a claimant, or was moved there from a
+/// synced path and gets its claimant in the round loop, after this decision.
+/// Counting entries missed the second kind, and a folder was forgotten on the
+/// very pass that found the file moved into it. Reading the disk also asks
+/// nothing of a placeholder the user has replaced with a file of the same
+/// name, which a stat under it would refuse.
+///
+/// With files held: parked and said. With none: back to waiting, the
+/// complaint withdrawn, and the empty placeholder goes with the vault --
+/// trashed here as a materialized empty vault folder would be -- before the
+/// round forgets the folder. Left standing it was adopted as a plain folder
+/// of the vault's name, everything saved into it went up in the clear, and
+/// the holder's restore then met a plain sibling of the same name. Restored
+/// from the trash, a parked folder goes back to waiting for a key the same
+/// way.
+fn park_stand_ins_of_trashed_vaults(
+    env: &ExecEnv,
+    observed: &[ObservedFile],
+) -> Result<(), ExecError> {
+    let Some(root) = env.vfs.root() else {
+        return Ok(());
+    };
+    for mut entry in all_entries(env)? {
+        if entry.id.entity_type != EntityType::Folder || entry.stand_in.is_none() {
+            continue;
+        }
+        let parked = entry.status == LocalStatus::OutOfScope;
+        let here = relative_path(env, &entry)?;
+        // Compared the way the disk compares, component by component. The
+        // recorded path is the folder's spelling and the scan's paths are
+        // the disk's, and on a disk that folds case the two can differ for
+        // one directory: read raw, a placeholder the user had respelled
+        // counted as empty and was trashed with the user's files in it.
+        let personality = env.vfs.personality();
+        let under = |path: &str, dir: &str| -> bool {
+            let mut file = path.split('/');
+            for want in dir.split('/') {
+                match file.next() {
+                    Some(have)
+                        if jd_vfs::comparison_key(have, &personality)
+                            == jd_vfs::comparison_key(want, &personality) => {}
+                    _ => return false,
+                }
+            }
+            file.next().is_some()
+        };
+        let held = match (&here, entry.remote_deleted) {
+            (Some(here), true) => observed.iter().filter(|o| under(&o.path, here)).count(),
+            _ => 0,
+        };
+        // What the disk's own listing says, which is wider than the scan: a
+        // symlink, a file that vanished mid-walk. A placeholder holding only
+        // those is not empty, and letting its tie lapse had it adopted as a
+        // plain folder of the vault's name on the next pass.
+        let dir = here.as_ref().map(|h| root.join(h));
+        let dir_stands = dir.as_ref().is_some_and(|d| env.vfs.read_dir(d).is_ok());
+        let dir_empty = match &dir {
+            Some(d) if dir_stands => dir_is_empty(env, d)?,
+            _ => true,
+        };
+        let should_park = entry.remote_deleted && dir_stands && (held > 0 || !dir_empty);
+        if should_park && !parked {
+            entry.status = LocalStatus::OutOfScope;
+            env.store.put_entry(&entry)?;
+            env.store.raise_issue(
+                Some(entry.id),
+                "vault_deleted_upstream",
+                &format!(
+                    "the protected folder {} was deleted on the server while this device, \
+                     which cannot open it, holds files in its directory; they stay here and \
+                     are not uploaded. Restore the folder from the trash to keep them \
+                     protected, or move them out to sync them as ordinary files",
+                    entry.remote.name
+                ),
+                (env.now_ms)() as i64,
+            )?;
+        } else if !should_park && parked {
+            entry.status = LocalStatus::PendingKey;
+            env.store.put_entry(&entry)?;
+            for issue in env.store.open_issues()? {
+                if issue.kind == "vault_deleted_upstream" && issue.entity == Some(entry.id) {
+                    env.store.dismiss_issue(issue.issue_id)?;
+                }
+            }
+        }
+        if entry.remote_deleted && !should_park {
+            // Gone, or empty by the disk's own account to any depth. An empty
+            // placeholder goes with its vault; the tie lapses either way and
+            // the round forgets the folder.
+            if let Some(d) = &dir {
+                if dir_stands && dir_empty {
+                    env.vfs.trash(d)?;
+                }
+            }
+            entry.stand_in = None;
+            env.store.put_entry(&entry)?;
+        }
+    }
+    Ok(())
+}
+
+/// Nothing at all under this directory, to any depth.
+fn dir_is_empty(env: &ExecEnv, path: &std::path::Path) -> Result<bool, ExecError> {
+    let Ok(entries) = env.vfs.read_dir(path) else {
+        return Ok(false);
+    };
+    for child in entries {
+        if child.kind != jd_vfs::EntryKind::Directory {
+            return Ok(false);
+        }
+        if !dir_is_empty(env, &path.join(&child.name))? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Open the encrypted files this device absorbed before it had the key.
+///
+/// A file's real name and content id live in metadata only the key opens, and
+/// the feed mentions each file once. A device that heard about a file while
+/// keyless recorded the grant and the placeholder name and nothing else, and
+/// nothing came back to it: the key arrived, the folder was materialized, and
+/// every file inside stayed parked `PendingKey` for good -- the second laptop
+/// linked, the vault unlocked on it, and the files never came down.
+///
+/// So the files whose grant this key opens, and whose metadata has not been
+/// read, are asked about again. One batched stat, and only while there is
+/// something to open: a file whose metadata will not open is asked about every
+/// pass, which is bounded and visible, where a file never asked about is
+/// neither.
+fn open_what_the_key_unlocks(env: &ExecEnv) -> Result<(), ExecError> {
+    let Some(vault) = env.vault else {
+        return Ok(());
+    };
+    let waiting: Vec<EntityId> = all_entries(env)?
+        .into_iter()
+        .filter(|e| {
+            e.id.entity_type == EntityType::File
+                && e.is_encrypted
+                && !e.remote_deleted
+                && !e.id.is_provisional()
+                && e.content_id.is_none()
+                && e.wrapped_file_key
+                    .as_deref()
+                    .is_some_and(|w| vault.open_file_key(w).is_ok())
+        })
+        .map(|e| e.id)
+        .collect();
+    if waiting.is_empty() {
+        return Ok(());
+    }
+    for (id, state) in stat_all(env, &waiting)? {
+        absorb_remote(env, id, &state)?;
+        // The grant opens and the metadata still does not: a blob this build
+        // cannot read, or none stored. Asked about again every pass, which is
+        // bounded, and said once, which is what makes it visible.
+        if env.store.get_entry(id)?.is_some_and(|e| e.content_id.is_none()) {
+            env.store.raise_issue(
+                Some(id),
+                "metadata_unreadable",
+                "this device holds the key to this file but cannot read its name and \
+                 content id from the server's copy; it waits, and is asked about again \
+                 each pass",
+                (env.now_ms)() as i64,
+            )?;
+        } else {
+            // A state, not an event: it ends when the metadata opens.
+            for issue in env.store.open_issues()? {
+                if issue.kind == "metadata_unreadable" && issue.entity == Some(id) {
+                    env.store.dismiss_issue(issue.issue_id)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A directory standing in for a vault this device cannot open follows the
+/// server, exactly as a materialized folder would.
+///
+/// The tie (`Entry::stand_in`) names the directory; this keeps it where the
+/// server has the folder. Renamed on the server, the directory is renamed
+/// here, and the files held under it resolve to their new paths through it
+/// before the disk is walked. Removed by the user, the tie lapses: the
+/// directory never held a byte of the vault, so there is nothing to delete
+/// anywhere and nothing to tell anyone. Materialized for real, the agreement
+/// is the tie from then on.
+///
+/// Done in the pass rather than as a journaled operation because it needs no
+/// journal: a death between the rename and the record leaves the directory at
+/// the server's path, where the next pass finds it at the folder's derived
+/// path and ties it again from nothing.
+///
+/// Where something already stands at the server's path: a folder this device
+/// tracks keeps the tie waiting, since its own record says where it goes;
+/// anything else is moved aside under a conflict name first, as anything in
+/// the way of a synced copy is.
+fn placeholders_follow_the_server(env: &ExecEnv) -> Result<(), ExecError> {
+    let Some(root) = env.vfs.root() else {
+        return Ok(());
+    };
+    let tracked = folder_paths(env)?;
+    // Parents before children, so a stand-in inside a stand-in resolves its
+    // path through a parent already moved.
+    for mut entry in all_entries(env)? {
+        if entry.stand_in.is_none() {
+            continue;
+        }
+        if entry.synced_placement.is_some() {
+            entry.stand_in = None;
+            env.store.put_entry(&entry)?;
+            continue;
+        }
+        if entry.remote_deleted {
+            // Trashed on the server. With files held under the stand-in the
+            // folder was parked out of scope when the deletion was absorbed,
+            // and the tie is what keeps that directory from being adopted as
+            // a plain folder; without them it is forgotten and the directory
+            // is the user's own.
+            continue;
+        }
+        let Some(here) = relative_path(env, &entry)? else {
+            entry.stand_in = None;
+            env.store.put_entry(&entry)?;
+            continue;
+        };
+        if env.vfs.read_dir(&root.join(&here)).is_err() {
+            entry.stand_in = None;
+            env.store.put_entry(&entry)?;
+            continue;
+        }
+        let there = {
+            let mut probe = entry.clone();
+            probe.stand_in = None;
+            relative_path(env, &probe)?
+        };
+        let Some(there) = there else {
+            continue;
+        };
+        if here == there {
+            continue;
+        }
+        let to = root.join(&there);
+        // A respelling of the same slot -- a case-only rename on a folding
+        // disk -- finds the stand-in itself at the destination. Compared raw
+        // it read as something in the way, was moved aside under a conflict
+        // name, and the tie then lapsed on a directory that had merely
+        // changed case: the files under it went up in the clear.
+        let respell = crate::execute::same_slot(&here, &there, &env.vfs.personality());
+        if !respell {
+            if tracked.contains_key(&there) {
+                // A folder this device tracks holds the name. Its own record
+                // says where it is going; the tie stays and this waits.
+                continue;
+            }
+            // Whatever else stands there is nothing this store can account
+            // for -- a directory the user just made, a file -- and it is
+            // moved aside under a conflict name, as anything in the way of a
+            // synced copy is. Left in place it would be adopted as a folder
+            // of its own, refused by the server for the name the vault holds,
+            // and the record and the directory would part company for ever.
+            crate::execute::make_room(env, &to, None)?;
+        }
+        env.vfs.rename(&root.join(&here), &to)?;
+        entry.stand_in = Some(entry.remote.clone());
+        env.store.put_entry(&entry)?;
+    }
+    Ok(())
+}
+
 /// The delete branch is guarded on the folder having been *materialized*. A
 /// folder the server told us about but which has never been created here has no
 /// local presence to have lost, and reading its absence as a deletion would
@@ -1604,6 +2049,63 @@ struct FolderScan {
     /// path, or under a new one. Anything materialized and *not* in here is
     /// gone, and that is how a folder deleted locally reaches the server.
     present: std::collections::HashSet<EntityId>,
+    /// Tracked folders found under a directory nothing is tracking yet, and
+    /// the path they were found at. Their placement cannot be written until
+    /// that directory has an identity, which it gets when the untracked
+    /// directories are adopted; `place_deferred` finishes the job then.
+    ///
+    /// The shape: `A/B/f.txt`, with `A` renamed to `X` and `B` to `C` in one
+    /// go. `B` is found under `X/C` by its file, but `X` is nobody yet, so
+    /// there is no parent id to place `B` under. Left unplaced, `B` was read
+    /// as still at `A/B`, `A` went as deleted and took `B` with it, and the
+    /// folder the user renamed was trashed and minted again -- its grants
+    /// gone, for a rename of the folder above it.
+    deferred: Vec<(EntityId, String)>,
+}
+
+impl FolderScan {
+    /// Write the placement of every folder found under a directory that has
+    /// since been given an identity.
+    fn place_deferred(&mut self, env: &ExecEnv, folder_ids: &HashMap<String, i64>) -> Result<(), ExecError> {
+        for (id, path) in std::mem::take(&mut self.deferred) {
+            let Some(placement) = placement_of(&path, folder_ids) else {
+                // The directory it was found under still has no identity --
+                // refused adoption for a name this disk cannot hold, say. The
+                // folder is on the disk, so its record stands, and every
+                // folder it is still recorded under stands with it: reading
+                // one of those as deleted would trash it on the server and
+                // take this folder down in the cascade.
+                let mut parent = env
+                    .store
+                    .get_entry(id)?
+                    .map(|e| e.local_placement().parent)
+                    .unwrap_or(None);
+                let mut guard = 0;
+                while let Some(p) = parent {
+                    self.present.insert(EntityId::folder(p));
+                    guard += 1;
+                    if guard > 512 {
+                        break;
+                    }
+                    parent = env
+                        .store
+                        .get_entry(EntityId::folder(p))?
+                        .map(|f| f.local_placement().parent)
+                        .unwrap_or(None);
+                }
+                continue;
+            };
+            let unchanged = env
+                .store
+                .get_entry(id)?
+                .and_then(|e| e.synced_placement)
+                .is_some_and(|p| p == placement);
+            if !unchanged {
+                self.moves.insert(id, placement);
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Work out which folders on disk are tracked folders that were renamed.
@@ -1865,19 +2367,24 @@ fn detect_folder_moves(
             if old_path != **candidate {
                 folder_ids.remove(&old_path);
             }
-            if let Some(placement) = placement_of(candidate, folder_ids) {
-                // Only a real change is reported. A folder inside a renamed parent
-                // reaches here too, and its own placement — this parent, this name —
-                // has not moved at all; saying it did would queue a rename to where
-                // it already is.
-                let entry = env.store.get_entry(id)?;
-                let unchanged = entry
-                    .as_ref()
-                    .and_then(|e| e.synced_placement.clone())
-                    .is_some_and(|p| p == placement);
-                if !unchanged {
-                    scan.moves.insert(id, placement);
+            match placement_of(candidate, folder_ids) {
+                Some(placement) => {
+                    // Only a real change is reported. A folder inside a renamed parent
+                    // reaches here too, and its own placement — this parent, this name —
+                    // has not moved at all; saying it did would queue a rename to where
+                    // it already is.
+                    let entry = env.store.get_entry(id)?;
+                    let unchanged = entry
+                        .as_ref()
+                        .and_then(|e| e.synced_placement.clone())
+                        .is_some_and(|p| p == placement);
+                    if !unchanged {
+                        scan.moves.insert(id, placement);
+                    }
                 }
+                // Under a directory nobody is yet: placed once that directory
+                // has been adopted (`place_deferred`).
+                None => scan.deferred.push((id, (*candidate).clone())),
             }
         }
     }
@@ -2187,6 +2694,7 @@ fn blank(id: EntityId, placement: &Placement) -> Entry {
         status: LocalStatus::PendingUpload,
         wrapped_file_key: None,
         replaces: None,
+        stand_in: None,
     }
 }
 
@@ -2337,6 +2845,7 @@ fn merge_duplicate_folders(env: &ExecEnv) -> Result<usize, ExecError> {
             }
             if let Some(&id) = real.get(&(e.remote.parent, e.remote.name.clone())) {
                 env.store.merge_folder(e.id, EntityId::folder(id))?;
+                crate::execute::redirect_queued_parent(env, e.id.server_id, id)?;
                 this_round += 1;
             }
         }

@@ -182,6 +182,31 @@ pub struct Entry {
     /// pass, lapses by itself the moment this entry stops being provisional,
     /// and disappears with this entry if the user moves the file back out.
     pub replaces: Option<EntityId>,
+    /// The directory on this disk that stands in for a vault folder this
+    /// device cannot open.
+    ///
+    /// A device with no key never materializes a vault folder, so the folder
+    /// has no agreement here and no local name of its own. Nothing stops the
+    /// user making a directory of the vault's name and saving into it, and the
+    /// engine holds what they save there for a key (`PendingKey`). Until this
+    /// was recorded, that directory was the vault's only while the two names
+    /// matched: the holder renaming the vault on the server turned the user's
+    /// directory into a brand-new plain folder of the old name, and the files
+    /// they believed private went up in the clear.
+    ///
+    /// Set the first time a directory is found at the folder's derived path
+    /// while the folder waits for a key. From then on the directory IS the
+    /// folder's, by identity rather than by name: the pass renames it after the
+    /// server (`placeholders_follow_the_server`), and files under it resolve
+    /// their paths through it.
+    ///
+    /// Deliberately not the agreement. A folder with an agreed placement whose
+    /// directory goes has been deleted by the user, and that is pushed to the
+    /// server; a stand-in directory that goes has merely stopped standing in
+    /// -- the user removed a placeholder that never held a byte of the vault --
+    /// and the tie lapses with nothing said to anyone. Cleared the moment the
+    /// folder is materialized for real, when the agreement takes over.
+    pub stand_in: Option<Placement>,
 }
 
 impl Entry {
@@ -194,10 +219,15 @@ impl Entry {
     /// that as a local move in the opposite direction, and pushes it back. Two
     /// devices then rename the same file at each other forever.
     ///
-    /// Falls back to the remote placement only when nothing has been agreed
-    /// yet, where it is not a second opinion but the only one.
+    /// Falls back to a stand-in directory when nothing has been agreed but a
+    /// directory is standing in for a vault folder this device cannot open
+    /// (see `stand_in`), and to the remote placement only when there is
+    /// neither, where it is not a second opinion but the only one.
     pub fn local_placement(&self) -> &Placement {
-        self.synced_placement.as_ref().unwrap_or(&self.remote)
+        self.synced_placement
+            .as_ref()
+            .or(self.stand_in.as_ref())
+            .unwrap_or(&self.remote)
     }
 
     /// The name this entry is materialized under locally.

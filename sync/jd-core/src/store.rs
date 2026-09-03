@@ -32,7 +32,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::model::{ContentId, EntityId, EntityType, Entry, LocalStatus, Placement};
 
 /// Bumped when the schema changes in a way an older engine could misread.
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 6;
 
 /// What makes a written-off note apply *right now*, as one SQL predicate over
 /// `entries e` joined to `unreadable u`.
@@ -186,6 +186,8 @@ impl Store {
                 synced_remote_size     INTEGER,
                 replaces_type          TEXT,
                 replaces_id            INTEGER,
+                stand_in_parent_id     INTEGER,
+                stand_in_name          TEXT,
                 PRIMARY KEY (entity_type, server_id)
             );
             CREATE INDEX IF NOT EXISTS entries_parent ON entries (parent_folder_id);
@@ -275,6 +277,8 @@ impl Store {
             ("synced_remote_size", "INTEGER"),
             ("replaces_type", "TEXT"),
             ("replaces_id", "INTEGER"),
+            ("stand_in_parent_id", "INTEGER"),
+            ("stand_in_name", "TEXT"),
         ] {
             store.add_column_if_missing("entries", column, ddl)?;
         }
@@ -368,8 +372,8 @@ impl Store {
                 synced_name, synced_fp_size, synced_fp_mtime_ns, synced_fp_file_id,
                 local_status, unsyncable_reason, wrapped_file_key,
                 content_id, synced_remote_sha256, synced_remote_size,
-                replaces_type, replaces_id
-             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26)
+                replaces_type, replaces_id, stand_in_parent_id, stand_in_name
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28)
              ON CONFLICT(entity_type, server_id) DO UPDATE SET
                 parent_folder_id = excluded.parent_folder_id,
                 remote_name = excluded.remote_name,
@@ -394,7 +398,9 @@ impl Store {
                 synced_remote_sha256 = excluded.synced_remote_sha256,
                 synced_remote_size = excluded.synced_remote_size,
                 replaces_type = excluded.replaces_type,
-                replaces_id = excluded.replaces_id",
+                replaces_id = excluded.replaces_id,
+                stand_in_parent_id = excluded.stand_in_parent_id,
+                stand_in_name = excluded.stand_in_name",
             params![
                 e.id.entity_type.to_string(),
                 e.id.server_id,
@@ -422,6 +428,8 @@ impl Store {
                 e.synced_remote_content.as_ref().map(|c| c.size as i64),
                 e.replaces.map(|r| r.entity_type.to_string()),
                 e.replaces.map(|r| r.server_id),
+                e.stand_in.as_ref().and_then(|p| p.parent),
+                e.stand_in.as_ref().map(|p| p.name.clone()),
             ],
         )?;
         Ok(())
@@ -437,7 +445,7 @@ impl Store {
                         synced_name, synced_fp_size, synced_fp_mtime_ns, synced_fp_file_id,
                         local_status, unsyncable_reason, wrapped_file_key,
                         content_id, synced_remote_sha256, synced_remote_size,
-                        replaces_type, replaces_id
+                        replaces_type, replaces_id, stand_in_parent_id, stand_in_name
                    FROM entries WHERE entity_type = ?1 AND server_id = ?2",
                 params![id.entity_type.to_string(), id.server_id],
                 row_to_entry,
@@ -743,7 +751,7 @@ impl Store {
                           synced_name, synced_fp_size, synced_fp_mtime_ns, synced_fp_file_id,
                           local_status, unsyncable_reason, wrapped_file_key,
                           content_id, synced_remote_sha256, synced_remote_size,
-                          replaces_type, replaces_id
+                          replaces_type, replaces_id, stand_in_parent_id, stand_in_name
                      FROM entries
                     ORDER BY entity_type, server_id";
         let mut stmt = self.conn.prepare(sql)?;
@@ -763,7 +771,7 @@ impl Store {
                           synced_name, synced_fp_size, synced_fp_mtime_ns, synced_fp_file_id,
                           local_status, unsyncable_reason, wrapped_file_key,
                           content_id, synced_remote_sha256, synced_remote_size,
-                          replaces_type, replaces_id
+                          replaces_type, replaces_id, stand_in_parent_id, stand_in_name
                      FROM entries
                     WHERE parent_folder_id IS ?1
                     ORDER BY entity_type, server_id";
@@ -1022,6 +1030,40 @@ impl Store {
             out.push(r?);
         }
         Ok(out)
+    }
+
+    /// One op as it stands now, or `None` if it has been dropped.
+    ///
+    /// The queue runner reads it fresh before running it: an op earlier in the
+    /// same run can rewrite a later one's parameters (a folder taking its real
+    /// id redirects the moves into it), and a copy taken at the start of the
+    /// run would carry the stale ones.
+    pub fn get_op(&self, op_id: i64) -> StoreResult<Option<Op>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT op_id, kind, entity_type, server_id, params, state,
+                        idempotency_key, attempts, next_retry_time, last_error
+                   FROM ops WHERE op_id = ?1",
+                params![op_id],
+                |r| {
+                    Ok(Op {
+                        op_id: r.get(0)?,
+                        kind: r.get(1)?,
+                        entity: EntityId {
+                            entity_type: parse_entity_type(&r.get::<_, String>(2)?),
+                            server_id: r.get(3)?,
+                        },
+                        params: r.get(4)?,
+                        state: OpState::parse(&r.get::<_, String>(5)?),
+                        idempotency_key: r.get(6)?,
+                        attempts: r.get(7)?,
+                        next_retry_time: r.get(8)?,
+                        last_error: r.get(9)?,
+                    })
+                },
+            )
+            .optional()?)
     }
 
     fn ops_in_state(&self, state: OpState) -> StoreResult<Vec<Op>> {
@@ -1529,6 +1571,14 @@ fn row_to_entry(r: &rusqlite::Row<'_>) -> rusqlite::Result<Entry> {
             }),
             _ => None,
         },
+        // The parent is `None` at the root, so the name alone says whether a
+        // stand-in is recorded.
+        stand_in: r
+            .get::<_, Option<String>>(27)?
+            .map(|name| Placement {
+                parent: r.get::<_, Option<i64>>(26).unwrap_or(None),
+                name,
+            }),
     })
 }
 
@@ -1631,6 +1681,7 @@ mod tests {
             status: LocalStatus::Synced,
             wrapped_file_key: None,
             replaces: None,
+            stand_in: None,
         }
     }
 

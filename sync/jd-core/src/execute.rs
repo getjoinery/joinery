@@ -281,7 +281,16 @@ pub fn run_queued(env: &ExecEnv) -> Result<ExecReport, ExecError> {
     let now = (env.now_ms)() as i64;
     let mut report = ExecReport::default();
 
-    for op in env.store.queued_ops()? {
+    for queued in env.store.queued_ops()? {
+        // Read again, not run from the copy: an op earlier in this run can
+        // have rewritten this one's parameters (`redirect_queued_parent`),
+        // or dropped it.
+        let Some(op) = env.store.get_op(queued.op_id)? else {
+            continue;
+        };
+        if op.state != OpState::Queued {
+            continue;
+        }
         if op.next_retry_time.map(|t| t > now).unwrap_or(false) {
             report.deferred += 1;
             continue;
@@ -735,6 +744,7 @@ fn path_for(env: &ExecEnv, p: &Placement) -> Result<Placed, ExecError> {
         status: LocalStatus::Synced,
         wrapped_file_key: None,
         replaces: None,
+        stand_in: None,
     };
     local_path(env, &probe)
 }
@@ -1136,7 +1146,7 @@ fn names_the_server_has(env: &ExecEnv, parent: Option<i64>) -> Result<Vec<String
         .collect())
 }
 
-fn make_room(
+pub(crate) fn make_room(
     env: &ExecEnv,
     path: &std::path::Path,
     incoming: Option<&str>,
@@ -2488,6 +2498,7 @@ fn preserve_local_as(env: &ExecEnv, op: &Op, params: &Value) -> Result<OpOutcome
         status: LocalStatus::PendingUpload,
         wrapped_file_key: None,
         replaces: None,
+        stand_in: None,
     };
     env.store.put_entry(&rescued)?;
 
@@ -2541,6 +2552,46 @@ fn held_by_a_rename_this_device_owes(
     Ok(env.store.queued_ops()?.iter().any(|op| {
         holders.contains(&op.entity) && matches!(op.kind.as_str(), "move_remote" | "park_remote")
     }))
+}
+
+/// A provisional folder has just taken its real id: point every queued
+/// operation that named the provisional id as a parent at the real one.
+///
+/// A move into a folder created moments earlier in the same round carries the
+/// provisional id in its journaled destination, and the executor cannot send
+/// that. Dropped and re-planned a pass later it would usually be harmless,
+/// except that the round goes on: a delete of the folder the thing is leaving
+/// runs after the moves, the server's cascade takes the thing with it, and a
+/// folder the user merely renamed alongside its parent is trashed and minted
+/// again with its grants gone. Redirected here, the move runs in its turn.
+///
+/// Safe under the idempotency rule -- a key promises the request behind it
+/// does not change -- because an operation naming a provisional parent has
+/// never been sent: it is turned back before the call.
+pub(crate) fn redirect_queued_parent(env: &ExecEnv, old: i64, new: i64) -> Result<(), ExecError> {
+    for op in env.store.queued_ops()? {
+        let Ok(mut params) = serde_json::from_str::<Value>(&op.params) else {
+            continue;
+        };
+        let mut changed = false;
+        if params.get("parent").and_then(Value::as_i64) == Some(old) {
+            params["parent"] = json!(new);
+            changed = true;
+        }
+        if params
+            .get("from")
+            .and_then(|f| f.get("parent"))
+            .and_then(Value::as_i64)
+            == Some(old)
+        {
+            params["from"]["parent"] = json!(new);
+            changed = true;
+        }
+        if changed {
+            env.store.set_op_params(op.op_id, &params.to_string())?;
+        }
+    }
+    Ok(())
 }
 
 fn create_remote_folder(
@@ -2642,6 +2693,7 @@ fn create_remote_folder(
             Err(e) => return Err(e.into()),
         }
     };
+    let planned_name = placement.name.clone();
     let placement = Placement {
         name: wanted,
         parent: placement.parent,
@@ -2659,6 +2711,22 @@ fn create_remote_folder(
             "the entry is no longer tracked".into(),
         ));
     };
+    // The folder landed under a name other than the one the directory here
+    // wears. The disk follows, as it does for a file that lands beside an
+    // occupant: left under the planned name, the record says one thing and
+    // the directory another, the next pass reads the folder as gone from its
+    // path and trashes it, adopts the directory as new, and lands it beside
+    // again -- a folder minted on the server every pass, for ever.
+    if placement.name != planned_name {
+        if let (Placed::At(from), Placed::At(to)) =
+            (local_path(env, &entry)?, path_for(env, &placement)?)
+        {
+            if from != to && env.vfs.read_dir(&from).is_ok() {
+                make_room(env, &to, None)?;
+                env.vfs.rename(&from, &to)?;
+            }
+        }
+    }
     let target = EntityId::folder(new_id);
     if target != entry.id {
         // The id may already be in this store, and then re-keying onto it is
@@ -2679,9 +2747,11 @@ fn create_remote_folder(
         // with four uploads and a folder stacked up behind it.
         if env.store.get_entry(target)?.is_some() {
             env.store.merge_folder(entry.id, target)?;
+            redirect_queued_parent(env, entry.id.server_id, new_id)?;
             return Ok(OpOutcome::Done);
         }
         env.store.rekey_entry(entry.id, target)?;
+        redirect_queued_parent(env, entry.id.server_id, new_id)?;
         entry.id = target;
     }
     entry.remote = placement;
@@ -2729,6 +2799,37 @@ fn create_local_folder(
     // moving that aside would rename the tree out from under itself every pass.
     if env.vfs.fingerprint(&path)?.is_some() {
         make_room(env, &path, None)?;
+    }
+    // A directory has been standing in for this folder while the device had
+    // no key (`Entry::stand_in`). It is this folder, and what the user saved
+    // under it is this folder's: a second directory made beside it would
+    // leave those files in a plain folder of the old name. So the stand-in
+    // becomes the folder, renamed to where the server has it when the two
+    // still differ -- the pass keeps them the same, and they differ here only
+    // while something else stands at the server's path.
+    if let Some(entry) = env.store.get_entry(op.entity)? {
+        if entry.stand_in.is_some() && entry.synced_placement.is_none() {
+            if let Placed::At(from) = local_path(env, &entry)? {
+                if from != path && env.vfs.read_dir(&from).is_ok() {
+                    // A respelling of the same slot -- a case-only rename on
+                    // a folding disk -- finds the stand-in itself at the
+                    // destination, which is not something in the way.
+                    let respell = same_slot(
+                        &from.to_string_lossy(),
+                        &path.to_string_lossy(),
+                        &env.vfs.personality(),
+                    );
+                    if !respell && env.vfs.read_dir(&path).is_ok() {
+                        return Ok(OpOutcome::Retry(format!(
+                            "{} stands where the vault's directory {} must go",
+                            path.display(),
+                            from.display(),
+                        )));
+                    }
+                    env.vfs.rename(&from, &path)?;
+                }
+            }
+        }
     }
     match env.vfs.create_dir(&path) {
         // A folder that was already there is `Ok`: the call underneath is
@@ -2793,6 +2894,7 @@ fn create_local_folder(
     // planned on the next pass.
     agree(&mut entry, None, None);
     entry.synced_placement = Some(placement);
+    entry.stand_in = None;
     env.store.put_entry(&entry)?;
     Ok(OpOutcome::Done)
 }
@@ -3096,7 +3198,21 @@ fn move_remote(
     // with it, and the recovery in `pass` that puts an abandoned park back
     // "where both sides last agreed" would find only the scratch name there.
     // The disk still wears the real name too, so the spelling stays.
-    if op.kind != "park_remote" {
+    //
+    // The same for a put-back the pass queued for an abandoned park: it is a
+    // rename on the SERVER, of something the disk has not followed -- the
+    // park may stand in another folder from the one the agreement names, or
+    // go back under the next free name. Written into the agreement it says
+    // the directory is already there, and the pass then reads the directory
+    // where it really is as the user moving it back (or, once its parent's
+    // trash has taken it, as the user deleting it: the server's copy followed
+    // into the trash, estate seed 16062180). Recorded as `remote` alone, the
+    // ordinary local move brings the disk along next pass.
+    let disk_follows = serde_json::from_str::<Value>(&op.params)
+        .ok()
+        .and_then(|p| p.get("disk_follows").and_then(Value::as_bool))
+        .unwrap_or(false);
+    if op.kind != "park_remote" && !disk_follows {
         entry.synced_placement = Some(entry.remote.clone());
         // A rename this device derived from its own disk says the file wears
         // the new name byte for byte, and the server now calls it that too.
@@ -3402,7 +3518,7 @@ fn move_local(
 /// to two spellings, and `resolve_siblings` groups them by exactly this key.
 /// Comparing the strings raw would answer "different slot" for the very
 /// collisions that put a stranger's file in front of a park.
-fn same_slot(a: &str, b: &str, personality: &jd_vfs::Personality) -> bool {
+pub(crate) fn same_slot(a: &str, b: &str, personality: &jd_vfs::Personality) -> bool {
     let (mut a, mut b) = (a.split('/'), b.split('/'));
     loop {
         match (a.next(), b.next()) {
@@ -3914,6 +4030,63 @@ fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             env.store.delete_subtree(op.entity)?;
             return Ok(OpOutcome::Done);
         }
+        // Not while something inside this directory belongs elsewhere on the
+        // server. The trash below takes what is under the directory now; the
+        // rescue before it saves only what never reached the server; and a
+        // child the server has MOVED OUT -- live, under another folder, its
+        // local copy still here because its new name cannot be placed on this
+        // disk yet -- is neither. Trashed with the parent, its record stands
+        // with an agreement and no directory, the next pass reads that as the
+        // user deleting it, and the server's copy goes to the trash after the
+        // local one. The server-side trash already waits for a move still on
+        // its way out; this is the same rule for a move still on its way in,
+        // kept across the passes until the child can be placed. Estate seed
+        // 16062180, by way of a peer's abandoned park.
+        for e in env.store.every_entry()? {
+            if e.id == op.entity || e.id.is_provisional() || e.remote_deleted {
+                continue;
+            }
+            if !local_chain_passes(env, &e, op.entity.server_id)? {
+                continue;
+            }
+            if sits_under(env, e.id, op.entity.server_id)? {
+                continue;
+            }
+            // A child that can move on its own -- a park being put back, a
+            // move still queued -- clears in a pass or two, and the wait is
+            // nobody's business. A child parked for good as far as this
+            // device can see (no key for it, out of scope, a name this disk
+            // cannot hold) holds the folder here until that ends, and a wait
+            // with no end in sight and nothing said is the silent-busy shape
+            // this engine refuses. Said as a state: raised while the trash
+            // waits, and withdrawn below the moment it stops waiting.
+            //
+            // Parked anywhere on its way up to this folder: a file inside a
+            // subfolder waiting for a key is itself Synced, and it is the
+            // subfolder that cannot move.
+            if local_chain_parked(env, &e, op.entity.server_id)? {
+                env.store.raise_issue(
+                    Some(op.entity),
+                    "trash_waits",
+                    &format!(
+                        "{} was deleted on the server, but {} inside it now lives elsewhere on \
+                         the server and cannot be moved there on this device yet; the folder \
+                         stays until it can",
+                        entry.remote.name, e.remote.name
+                    ),
+                    (env.now_ms)() as i64,
+                )?;
+            }
+            return Ok(OpOutcome::Retry(format!(
+                "something inside it now lives elsewhere on the server and has not been moved here yet ({})",
+                e.id.server_id
+            )));
+        }
+        for issue in env.store.open_issues()? {
+            if issue.kind == "trash_waits" && issue.entity == Some(op.entity) {
+                env.store.dismiss_issue(issue.issue_id)?;
+            }
+        }
         if let Some(parent) = path.parent() {
             let rescued = rescue_unsynced(env, &path, parent)?;
             if !rescued.is_empty() {
@@ -3995,6 +4168,25 @@ fn trash_remote(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         }
         return Ok(OpOutcome::Done);
     }
+    // A folder is not trashed while something inside it is still on its way
+    // out. The server's cascade takes whatever is under the folder at the
+    // moment of the trash, and a move that has not landed yet -- refused for
+    // now, or waiting on a folder still being created -- leaves its entity
+    // under this one. Deletes run last in a round for exactly this reason;
+    // this is the same rule, kept across the retries the round cannot see.
+    if op.entity.entity_type == EntityType::Folder {
+        for queued in env.store.queued_ops()? {
+            if queued.kind != "move_remote" || queued.op_id == op.op_id {
+                continue;
+            }
+            if sits_under(env, queued.entity, op.entity.server_id)? {
+                return Ok(OpOutcome::Retry(format!(
+                    "something inside it is still being moved out ({})",
+                    queued.entity.server_id
+                )));
+            }
+        }
+    }
     let body = json!({
         "entity_type": op.entity.entity_type.to_string(),
         "entity_id": op.entity.server_id,
@@ -4012,6 +4204,76 @@ fn trash_remote(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     // so there is nothing under here left to agree about.
     forget_here(env)?;
     Ok(OpOutcome::Done)
+}
+
+/// Is this entity, as the server has it, somewhere under this folder?
+/// Does this entry's LOCAL placement -- the agreement, or the placeholder tie,
+/// or failing both the server's word -- lie under `folder`? The local twin of
+/// `sits_under`, which asks the same of where the server has it.
+fn local_chain_passes(env: &ExecEnv, entry: &Entry, folder: i64) -> Result<bool, ExecError> {
+    let mut parent = entry.local_placement().parent;
+    let mut guard = 0;
+    while let Some(p) = parent {
+        if p == folder {
+            return Ok(true);
+        }
+        guard += 1;
+        if guard > 512 {
+            return Err(ExecError::Contract("folder tree has a loop in it".into()));
+        }
+        parent = match env.store.get_entry(EntityId::folder(p))? {
+            Some(f) => f.local_placement().parent,
+            None => None,
+        };
+    }
+    Ok(false)
+}
+
+/// Is this entry, or any folder on its local chain below `folder`, parked --
+/// anything but `Synced`, so waiting for a key, out of scope, or unsyncable?
+fn local_chain_parked(env: &ExecEnv, entry: &Entry, folder: i64) -> Result<bool, ExecError> {
+    if entry.status != LocalStatus::Synced {
+        return Ok(true);
+    }
+    let mut parent = entry.local_placement().parent;
+    let mut guard = 0;
+    while let Some(p) = parent {
+        if p == folder {
+            break;
+        }
+        guard += 1;
+        if guard > 512 {
+            return Err(ExecError::Contract("folder tree has a loop in it".into()));
+        }
+        parent = match env.store.get_entry(EntityId::folder(p))? {
+            Some(f) if f.status != LocalStatus::Synced => return Ok(true),
+            Some(f) => f.local_placement().parent,
+            None => None,
+        };
+    }
+    Ok(false)
+}
+
+fn sits_under(env: &ExecEnv, id: EntityId, folder: i64) -> Result<bool, ExecError> {
+    let Some(entry) = env.store.get_entry(id)? else {
+        return Ok(false);
+    };
+    let mut parent = entry.remote.parent;
+    let mut guard = 0;
+    while let Some(p) = parent {
+        if p == folder {
+            return Ok(true);
+        }
+        guard += 1;
+        if guard > 512 {
+            return Err(ExecError::Contract("folder tree has a loop in it".into()));
+        }
+        parent = match env.store.get_entry(EntityId::folder(p))? {
+            Some(f) => f.remote.parent,
+            None => None,
+        };
+    }
+    Ok(false)
 }
 
 /// The two sides already hold the same thing. Record the agreement and move no

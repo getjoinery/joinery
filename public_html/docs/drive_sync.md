@@ -255,6 +255,20 @@ surviving into the next one — where the loser is parked, visibly, under
 issue, and `unsyncable` is the one kind a pass withdraws again once the state
 ends.
 
+A scratch name (`.jd-swap-…`) is a different kind of park: one step inside one
+operation, never a placement anyone agreed on. The planner mints one to break a
+rename cycle and a remote move mints one as its last resort when both orders of
+rename-and-reparent are refused; the operation that minted it knows its own park
+by its key and finishes from there, and the park is recorded as `remote` alone.
+A park nobody is coming back for — its operation withdrawn, or dropped after a
+kill — is put back by the next pass under the name both sides last agreed, or
+the next free one there, and said as a `reconcile` issue. It goes back into
+the agreed folder while that folder is still a live folder in this store, and
+beside where the server has it now when the agreed folder is gone. The put-back
+is a rename on the server of something the disk has not followed, so it too is
+recorded as `remote` alone, and the ordinary local move brings the directory
+along on the pass after.
+
 One shape of it is the client's own bookkeeping rather than anything the user
 can act on, and is repaired without being shown. A device that creates a file or
 folder gives it a provisional identity before the server has named it; if the
@@ -345,7 +359,32 @@ folders can be looking at a thousand of them, and a thousand identical alerts
 would bury everything that does need a person. It is counted instead: the tray
 and `joinery-drive status` say how many items are waiting for a key, and
 `status` states plainly whether encrypted folders can be opened on this device.
-An entry leaves `pending_key` by itself the moment the key arrives.
+An entry leaves `pending_key` by itself the moment the key arrives. A file the
+device heard about while it had no key holds only the grant and the server's
+placeholder name, because the feed mentions each file once; when the key
+arrives, the files whose grant it opens are asked about again in one batched
+stat and opened from the answer.
+
+A device with no key never materializes a vault folder, but nothing stops the
+user making a directory of the vault's name and saving into it; what they save
+there is held for a key. That directory is the vault's by identity, not by
+name: the first time it is found at the folder's path it is recorded as the
+folder's **stand-in** (`stand_in` on the entry, kept apart from the agreed
+placement), and from then on it follows the server — renamed here when the
+vault is renamed or moved there, with the held files resolving their paths
+through it — and becomes the folder's directory when the key arrives. The
+tie is deliberately not an agreement: a stand-in the user removes never held a
+byte of the vault, so its going deletes nothing anywhere and the tie simply
+lapses, where a materialized folder's directory going is the user deleting it.
+Something else standing where the server has the vault is moved aside under a
+conflict name first, unless it is a folder this device tracks, whose own record
+says where it goes. A vault trashed on the server while files are held under
+its stand-in is parked out of scope rather than forgotten: the directory is not
+adopted, the files stay held and unsent, and the user is told; restored from
+the trash, it goes back to waiting for a key. An empty placeholder of a trashed
+vault is trashed with it, as a materialized empty vault folder is. On a disk
+that folds case, a stand-in the user respells is the same directory: the walk
+matches it by the disk's comparison key and the record takes the new spelling.
 
 **Renaming** an encrypted file is a metadata re-encrypt, not a rename. The
 current blob is fetched, decrypted, its name field changed, and the result
@@ -369,8 +408,10 @@ it in the clear at the old path.
 
 A vault folder dragged *out* is not converted: that would publish its contents
 in the clear on the strength of a drag. The client leaves the server's copy
-encrypted where it is, and raises an issue naming the folder and asking for its
-protection level to be changed first. The two sides then disagree about where
+encrypted where it is, and raises an issue naming the folder. A folder inside a
+vault is asked to have its protection level changed first; a vault root is told
+that a vault sits only at the drive root or inside another vault, which is the
+server's rule (`protection_boundary`). The two sides then disagree about where
 that folder lives until the user acts — deliberately, and visibly, rather than
 by a conversion nobody asked for. A device holding no vault key converts
 nothing in either direction — the entry waits in `pending_key` rather than
@@ -570,6 +611,18 @@ here: the same index walk that carries the delete trashes this device's copy of
 the folder, and work inside it the server never took is rescued out first and
 raised as `rescued_from_trash`. Reading the refusal as a failure instead would
 retry it forever against a folder that is not coming back.
+
+That local trash waits for one thing: a child the server has moved elsewhere
+whose directory is still inside the folder here, because its new name cannot
+be placed on this disk yet. It is neither what the server took nor what the
+server never had, and trashing it with the parent would leave a record with an
+agreement and no directory, which the next pass reads as the user deleting it.
+The trash is retried until the child has been moved here, the same rule the
+server-side trash applies to a move still on its way out. When the child cannot
+move on this device until something else changes — no key for it here, out of
+scope, a name this disk cannot hold — the wait is said as a `trash_waits`
+issue naming the folder and the child, and withdrawn the moment the trash goes
+through.
 
 A `file_trashed` refusal answers the same question one level down: the file
 this is a new version OF has gone to the trash. An operation planned before

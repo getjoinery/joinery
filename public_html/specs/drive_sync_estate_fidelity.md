@@ -1229,20 +1229,21 @@ vault sits only at the drive root or inside another vault, and that the
 server kept it where it was. Pinned by
 `moving_a_vault_root_into_a_plain_folder_is_refused_and_said`.
 
-The review found the same loss one level up, and it is open: a PLAIN folder
-whose only content is an empty vault, renamed. The plain folder has no file
-beneath it to be matched by, and the vault rule wants a candidate whose
-parent is the vault's agreed parent, which the renamed plain folder is not
-yet. Both are trashed, the vault's name is minted plain under the new parent,
-and the next file saved there goes up in the clear. Pairing the plain parent
-by the shape inside it -- a vault of that name at that relative path -- is
-the identity-by-shape trade declined for plain folders above; the owner
-decides whether a vault inside changes that. Pinned red, ignored, as
-`renaming_a_plain_folder_whose_only_content_is_an_empty_vault_keeps_the_vault`.
+The review then asked the same question one level up -- a PLAIN folder whose
+only content is an empty vault, renamed -- and it does not arise: the server
+takes a protection level only at the root and a folder below inherits its
+parent's (`drive_folder_create_logic`), so the parent of a vault is the root
+or another vault. The sim's `seed_encrypted_folder` refuses a plain parent
+now, so no scenario can be built on a state the platform cannot reach. The
+reachable shape, a vault whose only content is an empty vault, keeps both
+identities through a rename: the outer is placed first and the inner is
+found beside where it stood inside the outer's new directory. Pinned by
+`renaming_a_vault_whose_only_content_is_an_empty_vault_keeps_both`.
 
-The same trade, plain folders only, one axis over: a parent and the folder
-inside it renamed in one go. `A/B/f.txt`, `A` renamed to `X` and `B` to `C`
-before a pass. `B` is found under `X/C` by its file. `A` is credited with
+The same trade, plain folders only, one axis over, is DECIDED (owner,
+2026-09-02): a parent and the folder inside it renamed in one go.
+`A/B/f.txt`, `A` renamed to `X` and `B` to `C` before a pass. `B` is found
+under `X/C` by its file and keeps its identity. `A` is credited with
 `B/f.txt`, but the relative path changed with `B`'s name, so nothing under
 `X` matches it: `A` is trashed, `X` is minted plain, `C` is moved into it.
 Nothing is lost and the trees agree; what was granted on `A` is gone with it.
@@ -1250,10 +1251,15 @@ The rule that would find `A` -- pair a missing folder with the one new
 directory its relocated child folders now share -- cannot tell this shape
 from the user moving `B` into a brand-new `X` and deleting `A`, and in that
 reading it carries `A`'s grants onto a folder the user made fresh. Trashing
-on rename loses grants; pairing on deletion leaks them. Owner's call. Pinned
-red, ignored, as
-`renaming_a_folder_and_its_subfolder_together_keeps_both_identities` and
-`renaming_a_folder_and_its_subfolder_with_the_old_name_rebuilt_keeps_both_identities`.
+on rename loses grants; pairing on deletion leaks them. A grant lost is
+visible and given again; a grant leaked is neither. Trashing stays.
+
+Pinning the decision found that `B` was being trashed too (Defect V below):
+its move into `X` could not be placed while `X` had no identity, and the
+trash of `A` then took `B` with it. Pinned green, as decided, by
+`renaming_a_folder_and_its_subfolder_together_keeps_the_subfolder_and_remints_the_parent`
+and `renaming_a_folder_and_its_subfolder_with_the_old_name_rebuilt_keeps_the_subfolder`
+(the rebuilt `A` is `A`: a folder standing at its path is not deleted).
 Probed green in the same session, on the staged tree, and kept as pins:
 an empty vault renamed by case only on a folding disk; a file saved into
 the renamed vault before the pass; one holder renaming the empty vault while
@@ -1264,44 +1270,267 @@ which is not paired with it.
 
 ---
 
-## Defect R — the keyless guest whose vault directory stopped being the vault (OPEN)
+## Defect R — the keyless guest whose vault directory stopped being the vault
 
-Found by the Defect Q review, staged, red, and not fixed here because the fix
-is a design choice.
+Found by the Defect Q review; fixed 2026-09-02 evening on the owner's call.
 
-**What the user loses.** Privacy, from the device that has no key. A guest
+**What the user lost.** Privacy, from the device that has no key. A guest
 with no vault key makes a directory of the vault's name and puts files in it;
 the engine holds them (Defect L), waiting for a key. The holder then renames
 the vault on the server. On the guest's next pass the directory no longer
-matches the vault by name, is adopted as a NEW plain folder under the old
-name, the held claimants under it are swept as pointing at nothing, and the
-files go up in the clear -- into a plain folder the user never asked for,
+matched the vault by name, was adopted as a NEW plain folder under the old
+name, the held claimants under it were swept as pointing at nothing, and the
+files went up in the clear -- into a plain folder the user never asked for,
 beside the vault they thought they were using.
 
 **The mechanism.** A keyless device never materializes a vault folder, so the
-folder's record carries no agreement; its local path is derived from the
-server's name alone. The user's directory is the vault's only while the names
-match. Nothing is written down when the match is made.
+folder's record carried no agreement; its local path was derived from the
+server's name alone. The user's directory was the vault's only while the
+names matched. Nothing was written down when the match was made.
 
-**The choice, with the obvious fix probed and rejected.** Recording the
-directory as the held folder's agreed placement at the moment it is matched
-does keep the tie: under that patch the red pin passes and the whole suite
-stays green. It was then probed the other way: the guest makes the
-placeholder, removes it again (it never held a byte of the vault), and later
-gets the key. Traced: the vault is trashed on the server for everyone, and
-worse, the holder's file inside it comes back at the drive root in the clear
--- the guest's pass reads the folder as deleted and materializes the released
-file in the same pass, the file lands with no folder to stand in, and is
-adopted as a new plain file at the root. Deleting the vault outright from a
-key-holding device, by contrast, is clean today (probed too: both disks and
-the server end empty).
+**The choice, and why the obvious fix was wrong.** Recording the directory as
+the held folder's agreed placement keeps the tie, and was probed: the guest
+makes the placeholder, removes it again (it never held a byte of the vault),
+and later gets the key. Under that patch the vault is trashed on the server
+for everyone, and the holder's file inside it comes back at the drive root in
+the clear. So the tie cannot be the agreement.
 
-So the tie cannot be the ordinary agreement. Either the deleted reading
-learns that a folder never materialized with content cannot be deleted from
-here, or the directory is tied to the held folder by a record that is not an
-agreement. Owner's call. Pinned red, ignored, as
-`a_keyless_guests_vault_directory_survives_the_vault_being_renamed`.
+**The fix.** The tie is its own record, `Entry::stand_in`: the placement of
+the directory standing in for a vault folder this device cannot open. Set
+the first time a directory is found at the folder's derived path while the
+folder waits for a key; read by `local_placement` when nothing has been
+agreed, so the files held under it resolve their paths through it; never
+read as an agreement, so the folder-deleted reading (which keys on
+`synced_placement`) cannot fire on it. From then on:
 
+- **The directory follows the server** (`placeholders_follow_the_server`,
+  before the disk is walked, for the reason naming runs there). Renamed or
+  moved on the server, the directory is renamed here and the held files stay
+  held under the vault's current name. Parents before children, so a stand-in
+  inside a stand-in resolves through a parent already moved. Not journaled,
+  because it needs no journal: a death between the rename and the record
+  leaves the directory at the server's path, where the next pass finds it at
+  the folder's derived path and ties it again from nothing.
+- **Removed by the user, the tie lapses.** The directory never held a byte of
+  the vault, so nothing is deleted anywhere and nothing is said to anyone.
+- **Materialized for real, the agreement takes over.** `create_local_folder`
+  turns the stand-in into the folder -- renaming it to the server's path if
+  the two still differ -- rather than making a second directory beside it,
+  and clears the tie.
+- **Something in the way at the server's path.** A folder this device tracks
+  keeps the tie waiting (its own record says where it goes). Anything else --
+  a directory the user just made, a file -- is moved aside under a conflict
+  name first, as anything in the way of a synced copy is. Left in place it
+  was adopted as a folder of its own, refused by the server for the name the
+  vault holds, and the record and the directory parted company for ever
+  (Defect U). A respelling of the same slot -- a case-only rename on a disk
+  that folds case -- is neither: compared raw, the stand-in found ITSELF at
+  the destination, was moved aside under a conflict name, and the tie lapsed
+  on a directory that had merely changed case, with its files then adopted
+  plain. Both rename sites compare with `same_slot` (the executor's
+  per-component `comparison_key` test) and rename in place. Review finding;
+  pinned on macOS by
+  `a_case_only_vault_rename_on_a_folding_disk_respells_the_guests_placeholder`.
+- **Trashed on the server while files are held under it.** The ordinary
+  reading of an unmaterialized folder's deletion is to forget it, which
+  forgot the claimants, left the directory and the user's never-uploaded
+  files on the disk, and the next pass adopted the lot as a plain folder and
+  uploaded every file in the clear. A deletion made elsewhere is no
+  permission to publish them. `park_stand_ins_of_trashed_vaults`, every
+  pass, after the disk has been walked and before the round: a trashed
+  folder with files held under its stand-in is parked `OutOfScope` (skipped
+  by the round, so nothing forgets it; the tie keeps the directory from
+  being adopted; the claimants stay held) and the user is told
+  (`vault_deleted_upstream`); with none held it goes back to waiting, the
+  complaint is withdrawn, and the ordinary deletion reading forgets it in
+  that pass's round. Restored from the trash, it goes back to waiting for a
+  key the same way. Decided after the walk and from what is on the disk
+  now, for two reasons the second review found: decided when the deletion
+  was absorbed, a guest whose daemon was down while it saved into the
+  placeholder had no claimants yet, and the folder was forgotten on the very
+  pass that minted them; and a user who followed the complaint left a
+  folder parked for ever. What is held is read from the walk -- the files
+  the scan found under the stand-in's path -- not from the store. Nothing
+  under a stand-in has ever been sent, so every file there is the user's and
+  unsent, whether it was saved there and has a claimant or was moved there
+  from a synced path and gets its claimant in the round loop, after the
+  decision; counting entries missed the second kind (third review), and a
+  folder was forgotten on the very pass that found the file moved into it,
+  with the plaintext source then moved into a plain folder of the vault's
+  name. Reading the walk also asks nothing of a placeholder the user has
+  replaced with a file of the same name, which a stat under it refused and
+  failed the whole pass on. Everything under a parked folder is skipped by
+  the round with it (`shadowed`), so a claimant released by a key that
+  arrives while the folder is still trashed is not planned as an upload into
+  a trashed parent and refused every pass. An EMPTY placeholder of a trashed
+  vault goes with the vault -- trashed here, as a materialized empty vault
+  folder would be -- before the round forgets the folder; left standing it
+  became a plain folder of the vault's name, everything saved into it went
+  up in the clear, and the holder's restore met a plain sibling of the same
+  name. The held count compares paths the way the disk does, component by
+  component through `comparison_key`: read raw, a placeholder the user had
+  respelled by case on a folding disk counted as empty and was trashed with
+  the user's files in it (fourth review). "Empty" is the disk's own listing
+  to any depth (`dir_is_empty`), not the scan's, since the scan leaves out
+  what it cannot sync -- a symlink, a file that vanished mid-walk -- and a
+  placeholder holding only those is not empty: it stays parked and tied
+  (fifth review: with the tie dropped it was adopted as a plain folder of
+  the vault's name on the next pass). Pinned by
+  `a_vault_trashed_upstream_keeps_the_guests_held_files_unsent_and_says_so`,
+  `a_vault_trashed_while_the_guest_was_down_still_parks_and_the_complaint_clears`,
+  `a_key_arriving_while_the_vault_is_trashed_waits_quietly_for_the_restore`,
+  `a_synced_file_moved_into_a_placeholder_of_a_trashed_vault_is_held_not_forgotten`,
+  `an_empty_placeholder_of_a_trashed_vault_goes_with_it`,
+  `an_empty_placeholder_with_empty_subfolders_goes_with_its_vault`,
+  `a_placeholder_replaced_by_a_file_while_its_vault_is_trashed_does_not_break_the_pass`
+  and `a_parked_placeholder_respelled_by_case_on_a_folding_disk_keeps_its_files`.
+- **Respelled by the user on a folding disk.** The walk matches a directory
+  to a folder not yet on the disk in its own right by the disk's comparison
+  key, not by spelling: matched raw, a stand-in the user had respelled by
+  case was adopted as a new plain folder beside the vault and everything
+  under it went up in the clear. Matched, the record takes the disk's
+  spelling. Two such folders folding to one key -- the server keeps names
+  by exact spelling, so `Private` and `private` can share a parent -- match
+  nothing by key, since a pick between them would be a pick by hash order
+  and a directory tied to two vaults at once. Pinned by
+  `a_placeholder_respelled_by_case_on_a_folding_disk_stays_the_vaults`.
+- **A held file taken away again.** A file the guest saves inside its
+  placeholder is a local-only record waiting for a key; when the vault is
+  parked the round skips everything under it, and the check that forgets a
+  local-only record whose file is gone from the disk ran below that skip. So
+  a file saved under the placeholder -- before the trash or after the park --
+  and removed again left a record with no file behind it and no server that
+  ever heard of it, for good. The forget check runs before the park skip;
+  only an operation in flight comes ahead of it. Estate seed 15091598, pinned
+  by `a_file_removed_from_a_parked_placeholder_is_forgotten`.
+
+The store gains two columns (`stand_in_parent_id`, `stand_in_name`; schema
+version 6).
+
+**Pins.** `a_keyless_guests_vault_directory_survives_the_vault_being_renamed`
+(the rename, then the key: the files go up encrypted under the new name);
+`a_keyless_guest_removing_its_placeholder_deletes_nothing` (the probe that
+rejected the agreement, now green);
+`a_placeholder_whose_new_name_is_taken_here_waits_and_then_follows` (the
+user's plain folder is moved aside, the placeholder follows, the key
+arrives, nothing ever in the clear);
+`a_nested_placeholder_follows_each_rename_above_and_of_it`.
+
+**Noted, pre-existing, outside this defect.** `create_local_folder` records
+the plan's spelling as the agreement without reading the disk's: on a
+folding disk, a directory the user made as `docs` before the server's `Docs`
+arrived is agreed as `Docs`, and the next walk reads a case rename the user
+never made (or, empty, a deletion). The same read-back `same_slot_spelling`
+makes would close it. And the scan does not ignore `.DS_Store`, so a
+placeholder Finder has touched counts as holding a file.
+
+**Still open on this axis.** A placeholder whose ANCESTOR the user renames
+(not respells) while it is parked: only a vault inside a vault has such an
+ancestor, the outer placeholder's tie lapses on the rename (the case below),
+and the inner's path then leads nowhere, so it reads as held-nothing and is
+forgotten. The same loss as the case below, by way of the parent.
+
+Two stand-ins whose names the holder swaps on
+the server: each finds the other's record holding the name it wants and
+both wait, and when the key arrives neither can be materialized where the
+server has it. The materialized path breaks this cycle with a scratch park;
+the stand-in path has none. Nothing goes up in the clear. Pinned red,
+ignored, as `two_stand_ins_whose_names_are_swapped_on_the_server_follow`.
+
+The guest renames its own placeholder while
+keyless. The tie names the directory by path, and a directory has no
+identity of its own to be found by once it leaves that path; the files held
+under it have never been uploaded, so there is no agreed fingerprint or
+content to find them by either. The renamed directory is adopted as a plain
+folder of the new name and the held files go up in the clear under it -- the
+same reading as the user dragging them out of the vault, which from the
+outside it is. Directory identity from the filesystem, or a fingerprint
+recorded for a held claimant, would settle it; neither is made here. Pinned
+red, ignored, as `a_keyless_guest_renaming_its_placeholder_keeps_the_tie`.
+
+---
+
+## Defect T — the device keyed later never opened the files it already knew
+
+Found pinning Defect R: the guest that removes its placeholder and later
+gets the key never received the holder's file.
+
+**What the user lost.** Availability, on every device linked second. A
+file's real name and content id live in metadata only the key opens, and the
+feed mentions each file once. A device that heard about a file while keyless
+recorded the grant and the placeholder name and nothing else, and nothing
+came back to it: the key arrived, the folder was materialized, and every
+file inside stayed parked `PendingKey` for good. Link a second laptop, unlock
+the vault on it, and the vault's files never come down. Independent of
+Defect R; it needs only a key that arrives after the feed.
+
+**The fix.** `open_what_the_key_unlocks`, after the feed is absorbed: the
+encrypted files whose grant this key opens and whose metadata has never been
+read are asked about again in one batched stat, and absorbed, which opens
+them. Bounded: a file whose grant opens but whose metadata still will not is
+asked about every pass and said once (`metadata_unreadable`, withdrawn the
+pass it opens), which is visible, where a file never asked about is neither.
+
+**Pin.** `a_device_given_the_vault_later_opens_the_files_it_already_knew`.
+
+---
+
+## Defect U — a folder landing under a conflict name left its directory behind
+
+Found pinning Defect R's occupied-name case.
+
+**The mechanism.** `create_remote_folder` answers a `name_taken` refusal by
+creating the folder under a conflict name, and recorded that name as the
+agreement while the directory on disk kept the planned one. The next pass
+read the folder as gone from its path and trashed it, adopted the directory
+as new, and landed it beside again: a folder minted on the server every
+pass, for ever, and a device that never went quiet. Unreachable while every
+name the server refuses is one this store can fold into (two devices making
+one folder name at once fold the provisional into the real folder when it
+arrives -- pinned green by
+`two_devices_making_one_folder_name_at_once_keep_both_files`); reachable
+the moment the name is held by something this store cannot fold into, which
+a stand-in's server name is.
+
+**The fix.** The disk follows, as it does for a file that lands beside an
+occupant: the directory is renamed to the conflict name when the create
+lands under one.
+
+---
+
+## Defect V — a folder trashed while its contents were still moving out
+
+Found pinning the parent-and-subfolder decision: `B` was trashed along with
+`A`, not merely re-minted.
+
+**The mechanism.** `B`'s move into `X` was journaled with `X`'s provisional
+id as its destination, since `X` had no identity until the untracked
+directories were adopted (the move itself could not even be placed until
+then: `FolderScan::deferred`, resolved by `place_deferred` after adoption).
+`X` was created first in the round and took a real id, but the move still
+named the provisional one, was turned back as overtaken, and the round went
+on: the trash of `A` ran after the moves, and the server's cascade took `B`
+with it. Deletes run last in a round so that a folder is empty before it
+goes; a move that had not landed left it not empty.
+
+**The fix.** Three parts, each a rule in its own right. A provisional folder
+taking its real id redirects every queued operation that named it as a
+parent (`redirect_queued_parent`), so the move runs in its turn -- safe under
+the idempotency rule because an operation naming a provisional parent has
+never been sent. Both places a provisional folder takes a real id do it: the
+create landing, and `merge_duplicate_folders` folding it into a folder the
+feed brought (a create whose answer was lost reaches the fold; pinned by
+`a_folded_provisional_parent_still_receives_the_move_into_it`). The queue
+runner reads each op fresh before running it (`Store::get_op`), since an op
+earlier in the run can now rewrite a later one. And `trash_remote` will not
+trash a folder while a queued move's entity still sits under it, which holds
+across the retries a round cannot see.
+
+A folder found under a directory that never gets an identity -- refused
+adoption for a name this disk cannot hold -- cannot be placed at all. It is
+on the disk, so its record stands, and `place_deferred` marks every folder
+it is still recorded under as present with it: reading one of those as
+deleted would trash it on the server and take this folder in the cascade.
 
 ---
 
@@ -1424,6 +1653,102 @@ pins the plain shape -- the same lost answer with the file left where the
 user put it -- as green on one and two devices: reconcile's same-target rule
 writes the agreement there. The move op itself still reads its own landed
 move as somebody else's and stands down; that costs a pass, not the record.
+
+## Defect W — the abandoned park put back into a folder that was gone
+
+Estate v20, seed 16062180 (`longhostile-mixed`: mac, pc, hfs; a server that
+refuses in prose alone). Three devices, never settling, over one folder.
+
+**Shape.** mac moved `Sub 4/Sub 22` (508) into `Sub 4 (56) (56b)` (511)
+under a name pc had already created there, and its move parked 508 under
+`.jd-swap-mac-…` as the last resort, then lost its answer. mac's trash of
+`Sub 4` (502) landed the same round. pc and disk then saw a park nobody was
+coming back for and put it back "where both sides last agreed": (502,
+`Sub 22`). 502 was in the server's trash and forgotten in every store. The
+put-back's rename was refused (`Sub 22` taken in 511), its reparent was
+refused with "that folder is in the trash" -- in prose, which reads as
+possibly-about-the-name -- so the put-back parked 508 again under its own
+key, was refused again, and was withdrawn with the park standing. Every
+device rescued that park, into the same trashed parent, every pass: a fresh
+scratch name per device per pass, for ever.
+
+**Three roots, each pinned red on its own.**
+
+- **The put-back aimed at a parent that was gone.** The rescue reads the
+  agreement's parent as the destination without asking whether that folder
+  is still a live folder in this store. It is not, here: trashed on the
+  server and forgotten, with only this agreement naming it. The put-back
+  now goes where the server has the folder NOW when the agreed parent is
+  not live (missing, or marked deleted), under the agreed name or the next
+  free one among that parent's known children. Pinned by
+  `a_park_whose_agreed_parent_is_gone_is_put_back_beside_where_it_stands`,
+  which runs with and without the prose-only server and never settled
+  before.
+- **The put-back was written as an agreement.** It is queued as a
+  `move_remote`, and a completed `move_remote` records the new placement as
+  agreed with the disk -- true for a move derived from this disk, false for
+  a put-back: the directory has not moved, and beside where it stands is a
+  different folder from the one the agreement names. Written, the record
+  said the directory was already there; the pass read the directory where
+  it really was as the user moving it back, and once its parent's trash had
+  taken it, as the user deleting it, and the server's copy followed into
+  the trash. The rescue's op carries `disk_follows`, and `move_remote` then
+  records `remote` alone, as it does for a park; the ordinary local move
+  brings the directory along next pass. Both pins go red without it (the
+  folder ends in the server's trash).
+- **The local trash took a child that lives elsewhere on the server.** A
+  folder's local trash rescues what never reached the server and lets what
+  the server took go with it. A child the server has MOVED OUT -- live,
+  under another folder, its directory still here because its new name (a
+  scratch name, until the put-back) cannot be placed yet -- is neither, and
+  went into the local trash with the parent, leaving a record with an
+  agreement and no directory. `trash_local` now waits, as `trash_remote`
+  already does for a move on its way out, while any tracked live entry's
+  LOCAL placement chain passes through the folder and its server placement
+  does not (`local_chain_passes`, the twin of `sits_under`). Pinned by
+  `a_folder_the_server_moved_out_of_a_trashed_parent_is_not_trashed_with_it`
+  (the child arrives under a scratch name; without the guard its file is
+  pulled out to the root as unsynced and the folder is trashed on the
+  server).
+
+**Considered and not done.** A move that parks as its last resort and is
+then withdrawn (a refusal that was never about the name, on a prose-only
+server) leaves its park standing until the next pass puts it back; undoing
+the park before withdrawing was built and dropped, because the simulator
+has no hook to trash a folder between the feed read and the op run, so it
+could not be pinned red on its own, and the rescue already owns that park.
+The cost is one pass and a scratch name peers may see between passes.
+
+**Review round (public-html-74), 2026-09-03.** All four fixes (B1 and W a/b/c)
+graded genuine and root-fixed; two non-blocking gaps, both closed:
+
+- *The fallback parent may itself be in the trash* (feed marks the row it
+  names, the cascade is silent, the child reads live until its parent's
+  local trash asks the server). Read further: a put-back beside where the
+  folder stands is a rename alone, never a reparent, so it cannot reach the
+  last-resort park; it is refused and withdrawn, one pass, no scratch name.
+  A skip for that case was built, could not be made red, and was dropped.
+  Pinned as a guard by
+  `no_put_back_is_queued_into_a_folder_that_is_itself_in_the_trash`: no
+  scratch name of this device's is ever minted and nothing is queued.
+- *The local trash guard can wait for good in silence.* A child parked as
+  far as this device can see (waiting for a key, out of scope, a name this
+  disk cannot hold) holds its trashed parent here until that ends, and a
+  queued `trash_local` retries with no ceiling and raises nothing. The wait
+  is the right trade (trashing the child's copy is the loss this guard
+  exists to refuse), and it is now said: `trash_local` raises a state issue
+  `trash_waits` naming the folder and the child when anything on the
+  child's local chain up to the folder is not `Synced`
+  (`local_chain_parked`), dismisses it the moment the trash proceeds, and
+  the top of every pass dismisses one whose folder is forgotten or no
+  longer deleted (forgetting an entry does not take its issues with it).
+  Pinned by the ordinary shape the reviewer named, with no scratch name in
+  it: `a_locked_vaults_folder_trash_waits_for_a_child_the_server_moved_out`
+  -- this device's vault locked (`World::lock_vault`, new in the sim), a
+  peer moves `Private/A/Sub` to `Private/B` and trashes `A`; the trash
+  waits and says so, the unlock finishes the move, nothing is lost. Before
+  the guard, `Sub` went to the local trash with `A` and its server copy
+  followed on unlock.
 
 ## Still open on this axis
 

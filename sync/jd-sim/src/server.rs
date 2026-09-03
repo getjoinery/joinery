@@ -866,6 +866,25 @@ impl MockServer {
 
     /// Seed an encrypted vault folder.
     pub fn seed_encrypted_folder(&self, parent: Option<i64>, name: &str) -> i64 {
+        // The real server takes a protection level only at the root; a folder
+        // under a parent inherits the parent's, and raising it part-way down
+        // a tree is refused (`drive_folder_create_logic`). A vault under a
+        // plain folder is a state the server cannot be talked into, and a
+        // scenario built on one proves nothing about the platform.
+        if let Some(p) = parent {
+            let plain = self
+                .state
+                .lock()
+                .unwrap()
+                .folders
+                .get(&p)
+                .is_some_and(|f| !f.encrypted);
+            assert!(
+                !plain,
+                "a vault folder can sit only at the drive root or inside another vault; \
+                 folder {p} is plain"
+            );
+        }
         let id = self.seed_folder(parent, name);
         let mut st = self.state.lock().unwrap();
         if let Some(f) = st.folders.get_mut(&id) {

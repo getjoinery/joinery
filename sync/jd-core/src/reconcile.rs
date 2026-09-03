@@ -479,6 +479,7 @@ mod tests {
             is_encrypted: false,
             content_id: None,
             replaces: None,
+            stand_in: None,
             synced_remote_content: None,
             synced_content: Some(content(sha, 10)),
             synced_placement: Some(placement(None, name)),
