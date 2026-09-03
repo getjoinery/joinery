@@ -654,7 +654,7 @@ read live from disk) — no activation or `update_database` step.
 Plugins declare menu contributions in `plugin.json` under three keys:
 
 - `adminMenu` — items in the admin sidebar (`/admin/*`).
-- `profileMenu` — items in the member section nav (the horizontal nav across the member area) and the logged-out auth links.
+- `profileMenu` — items in the member section nav (the horizontal nav across the member area; on a phone it folds behind a hamburger at the left of the header) and the logged-out auth links.
 - `settingsMenu` — sections in the member settings hub's left rail (`/profile/settings`).
 
 All three keys are synced into the same `amu_admin_menus` table, distinguished by an `amu_location` column (`admin_sidebar` / `user_dropdown` / `member_settings`). The system automatically creates menu rows on activation, updates them on sync, and removes them on deactivation/uninstall. This is the only supported way to register plugin menus — do not INSERT into `amu_admin_menus` from migrations.

@@ -88,21 +88,40 @@
  * list header — the mailbox and folder the list is showing, and the way into
  * the drawer. On a desktop the rail highlight says the same thing, so the bar
  * does not exist there. */
-.mbx-scope {
+.mbx-scope-row {
 	display: none;
-	width: 100%;
+	align-items: center;
+	border-bottom: 1px solid #e4e7eb;
+	background: #f7f9fb;
+}
+.mbx-scope {
+	display: flex;
+	flex: 1 1 auto;
+	min-width: 0;
 	align-items: center;
 	gap: 10px;
 	padding: 10px 14px;
 	border: none;
-	border-bottom: 1px solid #e4e7eb;
-	background: #f7f9fb;
+	background: none;
 	color: #1f2933;
 	font-size: var(--mbx-text-base);
 	text-align: left;
 	cursor: pointer;
 }
-.mbx-scope-icon { flex: 0 0 auto; font-size: var(--mbx-text-lg); color: #6b7280; line-height: 1; }
+/* The page's app-bar actions (AI, Actions) live here on a phone, as icons. */
+.mbx-scope-actions { display: flex; align-items: center; gap: 4px; padding-right: 8px; flex: 0 0 auto; }
+/* Monochrome, and one look for all three whatever class the host gave them:
+ * white, a hairline border, a dark glyph. */
+.mbx-scope-actions .btn {
+	padding: 4px 6px; line-height: 1;
+	background: #fff; border: 1px solid #cfd6dd; color: #1f2933; border-radius: 6px;
+}
+.mbx-scope-actions .btn:hover { background: #f1f3f5; color: #111827; }
+.mbx-scope-actions .btn svg { width: 20px; height: 20px; display: block; }
+.mbx-reader.search-open .mbx-scope-search { background: #e5e7eb; border-color: #9ca3af; }
+/* The scope row's unread count is monochrome too. */
+#mbx-scope-unread { background: #374151; }
+.mbx-scope-caret { flex: 0 0 auto; color: #6b7280; font-size: var(--mbx-text-sm); }
 .mbx-scope-text { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 6px; overflow: hidden; }
 .mbx-scope-mailbox { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mbx-scope-folder { flex: 0 0 auto; color: #6b7280; font-size: var(--mbx-text-sm); }
@@ -465,6 +484,8 @@
 }
 
 .mbx-list-footer { padding: 10px 14px; text-align: center; }
+/* With nothing to load the footer is a blank strip under the list; it goes. */
+.mbx-list-footer:has(> .mbx-more[hidden]) { display: none; }
 .mbx-more {
 	border: 1px solid #cfd6dd; background: #fff; border-radius: 5px;
 	padding: 6px 14px; cursor: pointer; font-size: var(--mbx-text-base);
@@ -821,10 +842,13 @@
 	.mbx-reader.rail-open .mbx-scrim { opacity: 1; visibility: visible; transition: opacity .2s ease; }
 	.mbx-rail-close { display: inline-flex; }
 
-	/* The scope bar stands in for the rail highlight. Hidden while reading:
-	 * the conversation header names its own context. */
-	.mbx-scope { display: flex; }
-	.mbx-reader.reading .mbx-scope { display: none; }
+	/* The scope row stands in for the rail highlight and carries the page's
+	 * actions, so the app bar above the reader has nothing left to say and
+	 * goes (the reader JS moves the actions and marks the bar). Hidden while
+	 * reading: the conversation header names its own context. */
+	.mbx-scope-row { display: flex; }
+	.mbx-reader.reading .mbx-scope-row { display: none; }
+	.jy-app-bar.mbx-app-bar-moved { display: none; }
 
 	/* Too narrow for three things on one row: search drops to its own full-width
 	 * line under the toolbar and the buttons, which then take only the width
@@ -832,6 +856,36 @@
 	.mbx-list-header .mbx-searchbar { order: 3; flex: 1 1 100%; max-width: none; margin: 0; }
 	.mbx-list-header .mbx-list-tools { flex: 1 1 auto; }
 	.mbx-list-header .mbx-list-header-actions { flex: 0 0 auto; }
+	/* The search line is hidden until the scope row's search icon reveals it. */
+	.mbx-list-header .mbx-searchbar { display: none; }
+	.mbx-reader.search-open .mbx-list-header .mbx-searchbar { display: block; }
+	/* No section headings (Unread / Starred / Everything else): the order is
+	 * the same, the labels cost rows. */
+	.mbx-section { display: none; }
+
+	/* The list header only exists for a selection's tools or an open search;
+	 * otherwise the rows start straight under the scope row. Select-all and
+	 * Refresh are gone (rows tick individually; pull-to-refresh reloads). */
+	.mbx-list-header { display: none; }
+	.mbx-reader.search-open .mbx-list-header,
+	.mbx-list-header:has(#mbx-bulk:not([hidden])) { display: flex; }
+	.mbx-selectall, #mbx-refresh { display: none; }
+	/* New message floats over the foot of the list as a pill (the reader JS
+	 * moves it out of the header). It lives inside the list view, so it is
+	 * gone while reading. */
+	.mbx-new-btn.mbx-fab {
+		position: fixed;
+		right: 16px;
+		bottom: 16px;
+		z-index: 50;
+		padding: 12px 18px;
+		border-radius: 999px;
+		font-size: var(--mbx-text-base);
+		background: #fff; color: #111827; border: 1px solid #cfd6dd;
+		box-shadow: 0 4px 14px rgba(16, 24, 40, .28);
+	}
+	.mbx-new-btn.mbx-fab:hover { background: #f1f3f5; }
+	.mbx-scope-text .mbx-level-badge { margin-left: 4px; }
 
 	/* Two-line rows. The desktop row's fixed sender column leaves nothing for
 	 * the subject at phone width, so sender and time take line one, subject and

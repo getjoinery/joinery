@@ -228,6 +228,29 @@ body.jy-default blockquote {
   border-bottom-color: var(--jy-color-primary);
   font-weight: 600;
 }
+/* On a phone the member section nav folds behind the hamburger at the left
+   of the header (.jy-member-menu-toggle): a panel under the header, one link
+   per line, shown by the `open` class that script.js toggles. */
+@media (max-width: 768px) {
+  .jy-default .jy-member-subnav {
+    display: none;
+    position: fixed;
+    top: 61px;
+    left: 0;
+    right: 0;
+    z-index: 99;
+    box-shadow: var(--jy-shadow-md);
+  }
+  .jy-default .jy-member-subnav.open { display: block; }
+  .jy-member-subnav-inner { flex-direction: column; gap: 0; padding: var(--jy-space-2) 0; overflow: visible; }
+  .jy-member-subnav-link {
+    display: block;
+    padding: var(--jy-space-3) var(--jy-space-5);
+    border-bottom: none;
+    font-size: var(--jy-text-base);
+  }
+  .jy-member-subnav-link.active { background: var(--jy-color-surface); }
+}
 
 .jy-nav-links {
   display: flex;
@@ -505,11 +528,16 @@ body.jy-default blockquote {
      text at the edge if the site name is long. */
   .jy-header-inner { padding: 0 var(--jy-space-4); gap: var(--jy-space-3); }
   .jy-logo { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; font-size: var(--jy-text-lg); }
+  /* The site name trims with an ellipsis rather than a cut letter. */
+  .jy-logo-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .jy-header-right { gap: var(--jy-space-2); flex: 0 0 auto; }
   .jy-header-icons { gap: var(--jy-space-1); }
   .jy-header-icons .jy-user-name { display: none; }
   .jy-user-dropdown-toggle { padding: var(--jy-space-2); }
   .jy-header-icons .jy-header-admin-link { padding-left: var(--jy-space-1); padding-right: var(--jy-space-1); }
+  /* A phone has no room for a footer under an app surface; the page ends
+     where its content does. */
+  .jy-site-footer { display: none; }
   .jy-nav-links {
     display: none;
     position: absolute;
@@ -584,6 +612,17 @@ body.jy-default:has(.page-content--app) .jy-site-footer { margin-top: 0; }
 }
 body.jy-default .jy-app-bar h1 { font-size: var(--jy-text-xl); font-weight: 600; margin: 0; }
 .jy-app-bar-action { flex-shrink: 0; }
+/* An app-bar action may carry both an icon and a label (.jy-btn-icon /
+   .jy-btn-label): the label shows on a desktop, the icon alone on a phone. */
+.jy-btn-icon { display: none; }
+.jy-btn-icon svg { width: 20px; height: 20px; display: block; }
+@media (max-width: 768px) {
+  .jy-btn-icon { display: inline-flex; }
+  .jy-btn-icon + .jy-btn-label { display: none; }
+  .jy-actions-dropdown > summary:has(.jy-btn-icon)::after { content: none; }
+  /* An app surface takes the whole screen: no reading-column padding. */
+  .page-content--app { padding: 0; }
+}
 .jy-page-header { margin-bottom: var(--jy-space-6); }
 .jy-page-header h1 { margin-bottom: var(--jy-space-2); }
 .page-subtitle { color: var(--jy-color-text-muted); font-size: var(--jy-text-lg); margin-top: var(--jy-space-2); }

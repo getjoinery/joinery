@@ -138,18 +138,26 @@ class PublicPage extends PublicPageBase {
 <?php if ($this->show_site_chrome()): ?>
 <header class="jy-site-header header-light">
     <div class="jy-header-inner">
+        <?php
+        $menu_data = $this->get_menu_data();
+        // The public marketing menu belongs to the public site; member
+        // pages are an app surface and the member section nav is the nav.
+        $show_marketing_nav = !$this->in_member_area();
+        // On a phone the member section nav folds behind this button at the
+        // left of the header (the kit shows it below 768px only). The nav
+        // itself renders after the header; script.js opens and closes it.
+        if (!$show_marketing_nav && $this->member_subnav_items($menu_data)):
+        ?>
+        <button class="jy-menu-toggle jy-member-menu-toggle" type="button" aria-label="Toggle section menu" aria-expanded="false" aria-controls="jy-member-subnav">
+            <span></span><span></span><span></span>
+        </button>
+        <?php endif; ?>
         <a href="/" class="jy-logo">
             <?php $this->get_logo(); ?>
         </a>
         <div class="jy-header-right">
-            <?php
-            $menu_data = $this->get_menu_data();
-            // The public marketing menu belongs to the public site; member
-            // pages are an app surface and the member section nav is the nav.
-            $show_marketing_nav = !$this->in_member_area();
-            if ($show_marketing_nav):
-            ?>
-            <nav class="jy-nav-links" aria-label="Main navigation">
+            <?php if ($show_marketing_nav): ?>
+            <nav class="jy-nav-links" id="jy-nav-links" aria-label="Main navigation">
                 <?php
                 foreach ($menu_data['main_menu'] as $menu_item) {
                     $active_class = !empty($menu_item['is_active']) ? ' class="active"' : '';
@@ -174,7 +182,7 @@ class PublicPage extends PublicPageBase {
                 <?php $this->top_right_menu(); ?>
             </div>
             <?php if ($show_marketing_nav): ?>
-            <button class="jy-menu-toggle" aria-label="Toggle navigation menu" aria-expanded="false">
+            <button class="jy-menu-toggle" type="button" aria-label="Toggle navigation menu" aria-expanded="false" aria-controls="jy-nav-links">
                 <span></span><span></span><span></span>
             </button>
             <?php endif; ?>
@@ -219,7 +227,7 @@ class PublicPage extends PublicPageBase {
 ?>
     <script src="/assets/js/joinery-validate.js?v=<?php echo $this->asset_mtime('assets/js/joinery-validate.js'); ?>"></script>
     <script src="/assets/js/file-thumb.js?v=<?php echo $this->asset_mtime('assets/js/file-thumb.js'); ?>"></script>
-    <script src="/assets/js/script.js"></script>
+    <script src="/assets/js/script.js?v=<?php echo $this->asset_mtime('assets/js/script.js'); ?>"></script>
 </body>
 </html>
 <?php

@@ -5,6 +5,7 @@
  * as the admin mount (includes/mailbox_reader_mount.php); this page supplies the
  * theme chrome, the member attachment endpoint, and no detail-page deep links.
  *
+ * @version 1.5.0 - the Actions button carries an icon for the phone layout
  * @version 1.4.0
  */
 
@@ -29,8 +30,13 @@ $hoptions['app'] = true;
 // Actions menu, matching the calendar's. Importing old mail is a LINK rather
 // than a modal because it is a multi-step run — pick an archive, wait for it to
 // be read, then choose what to bring — where the calendar's is one file input.
+// The summary carries an icon and a label: the kit shows the label on a
+// desktop and the icon alone on a phone (.jy-btn-icon / .jy-btn-label).
 $hoptions['header_action'] = '<details class="jy-ui jy-actions-dropdown">'
-	. '<summary class="btn btn-secondary">Actions</summary>'
+	. '<summary class="btn btn-secondary" aria-label="Actions" title="Actions">'
+	. '<span class="jy-btn-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+	. '<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg></span>'
+	. '<span class="jy-btn-label">Actions</span></summary>'
 	. '<div class="jy-actions-menu">'
 	. '<a href="/profile/mailbox/import">Import old mail from another provider&hellip;</a>'
 	. '</div></details>';
