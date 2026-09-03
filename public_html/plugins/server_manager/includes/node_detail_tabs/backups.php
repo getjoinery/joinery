@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.7 - a failing fleet backup links the failed job next to its reason
  * @version 1.6 - the backup-target line and recoverable box resolve the shelf via get_target(), the
  *                same fallback the job builder uses, so a node that names no target but backs up to the
  *                sole enabled shelf reads as cloud-backed instead of "Local only"
@@ -160,7 +161,11 @@
 		$health = NodeMonitorHealth::fleet_backup_health($node, $policy);
 		echo '<p class="' . ($health['is_problem'] ? 'text-danger' : 'text-muted') . '">'
 		   . '<strong>' . htmlspecialchars($health['label']) . ':</strong> '
-		   . htmlspecialchars($health['detail']) . '</p>';
+		   . htmlspecialchars($health['detail'])
+		   . (!empty($health['job_id'])
+		       ? ' <a href="/admin/server_manager/job_detail?job_id=' . (int)$health['job_id'] . '">See the failed job.</a>'
+		       : '')
+		   . '</p>';
 
 		echo '<p class="text-muted">Encrypted on the node, sealed to the node\'s own verified recovery key '
 		   . htmlspecialchars(RecoveryKeyFleet::short($rk_node['fingerprint'])) . '&hellip; and to the '

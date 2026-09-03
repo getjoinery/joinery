@@ -25,6 +25,9 @@
  * happen, which publish_upgrade.php treats as a reason to refuse the release
  * rather than ship a bundle it already knows is stale.
  *
+ * @version 1.8 - manifest.json records the public key the bundle was built with (signing_public_key),
+ *                stamped onto an unchanged bundle too where the source is here, and bundleSigningKey()
+ *                reads it back: it is how a publish knows whether this site may sign a tree manifest
  * @version 1.7 - a built result reports the version now in the bundle, not the one it replaced
  * @version 1.6 - rrmdir reports whether the tree is actually gone, and the caller names the real
  *                cause. A root-owned agent_dist.old left by a publish that ran as root could not
@@ -111,6 +114,16 @@ class AgentDistPublisher {
 			}
 
 			if ($agent_version === $bundled_version && self::artifactsPresent($dist_dir, $manifest)) {
+				// A bundle at the source's version on the box that holds the
+				// source was built here, with this site's key. Say so in the
+				// manifest if it predates the record, so the answer to "may this
+				// site sign" is read, not inferred, from here on.
+				if (empty($manifest['signing_public_key'])) {
+					$keys = self::ensureKeys($full_site_dir . '/config');
+					$manifest['signing_public_key'] = $keys['public_b64'];
+					file_put_contents($dist_dir . '/manifest.json',
+						json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+				}
 				$msg = "Agent artifact: v{$agent_version} already bundled - unchanged";
 				$say($msg);
 				return $result(self::STATUS_SKIPPED, $msg, $agent_version, $bundled_version);
@@ -174,7 +187,8 @@ class AgentDistPublisher {
 			}
 
 			$manifest_json = json_encode(
-				array('version' => $agent_version, 'binaries' => $binaries),
+				array('version' => $agent_version, 'binaries' => $binaries,
+				      'signing_public_key' => $keys['public_b64']),
 				JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES
 			);
 			if (file_put_contents($staging . '/manifest.json', $manifest_json . "\n") === false) {
@@ -249,6 +263,16 @@ class AgentDistPublisher {
 		if ($raw === false) { return null; }
 		$m = json_decode($raw, true);
 		return is_array($m) ? $m : null;
+	}
+
+	/**
+	 * The public key compiled into the agent bundle this site ships, base64,
+	 * or null when the bundle predates the record (or there is no bundle).
+	 */
+	public static function bundleSigningKey($full_site_dir) {
+		$manifest = self::readManifest($full_site_dir . '/public_html/agent_dist');
+		$key = is_array($manifest) ? trim((string)($manifest['signing_public_key'] ?? '')) : '';
+		return $key !== '' ? $key : null;
 	}
 
 	/** True when every binary the manifest names exists on disk. */

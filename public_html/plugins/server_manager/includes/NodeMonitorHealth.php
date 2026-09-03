@@ -13,6 +13,9 @@
  * It also surfaces backup recovery problems (backup_recovery_problems), in the
  * same shape, so an unrecoverable-backup node is as visible as broken monitoring.
  *
+ * @version 1.10 - a failed fleet backup is reported from the run history: since when it has been
+ *                 failing, how many runs, when it last worked, and the reason the node gave —
+ *                 backup_run_summary() over backup_runs_from_here() — with the failed job linked
  * @version 1.9 - fleet_backup_health leads with whether the node holds a verified recovery key of
  *                its own: backups seal to the node's key, read there, so a node without one will
  *                never back up and says so on the first pass instead of ageing into "never"
@@ -391,10 +394,19 @@ class NodeMonitorHealth {
 		$window = ($policy['frequency'] === 'weekly') ? (9 * 86400) : (2 * 86400);
 
 		if ($outcome !== 'success') {
-			return self::result('backups', 'Last backup failed',
-				'The most recent backup taken from here failed (' . self::humanize($age) . ' ago). '
-				. 'A node whose backups have been failing for a month looks identical to a healthy one '
-				. 'unless somebody is told.', true);
+			// The stamp says it failed; the runs say since when, how often, and
+			// why. A node whose backups have been failing for a month must not
+			// read like one that failed once last night, and the reason the node
+			// gave is the thing an operator needs in order to fix it.
+			$summary = isset($node->key) && $node->key
+				? self::backup_run_summary(self::backup_runs_from_here((int)$node->key))
+				: self::backup_run_summary(array());
+			$r = self::result('backups', 'Last backup failed',
+				self::failed_backup_detail($summary, $age), true);
+			if (!empty($summary['job_id'])) {
+				$r['job_id'] = $summary['job_id'];
+			}
+			return $r;
 		}
 
 		// The node's report and the bucket disagree. The report says the last
@@ -427,6 +439,103 @@ class NodeMonitorHealth {
 
 		return self::result('backups', 'Backed up',
 			'Last backup ' . self::humanize($age) . ' ago.', false);
+	}
+
+	/** The sentence the card shows for a failing fleet backup, from the run summary. */
+	private static function failed_backup_detail(array $summary, $age): string {
+		if ($summary['failures'] === 0) {
+			return 'The most recent backup taken from here failed (' . self::humanize($age) . ' ago).';
+		}
+		if ($summary['failures'] === 1) {
+			$text = 'The most recent backup taken from here failed (' . self::humanize($age) . ' ago).';
+		} else {
+			$text = 'Every backup taken from here since ' . self::local($summary['since']) . ' has failed ('
+				. $summary['failures'] . ' runs).';
+		}
+		$text .= $summary['last_success'] !== null
+			? ' The last one that worked was ' . self::local($summary['last_success']) . ' ('
+				. self::humanize(time() - strtotime($summary['last_success'] . ' UTC')) . ' ago).'
+			: ' None taken from here has ever worked.';
+		if ($summary['reason'] !== '') {
+			$text .= ' The node said: ' . $summary['reason'];
+		}
+		return $text;
+	}
+
+	/** A stored UTC time in the operator's timezone, the way the rest of the admin shows one. */
+	private static function local(string $utc): string {
+		return LibraryFunctions::convert_time($utc, 'UTC',
+			SessionControl::get_instance()->get_timezone(), 'M j, Y g:i A T');
+	}
+
+	/**
+	 * This management node's backup runs of one node, newest first, as the
+	 * rows backup_run_summary() reads: id, outcome, time, message.
+	 *
+	 * Read from the job table rather than the node's stamp because the stamp
+	 * holds one outcome and the question is a history. Each row's outcome is
+	 * what process_backup_run recorded — 'success', 'skipped', or a failure —
+	 * and a terminal job the sweep has not read yet has no outcome at all.
+	 */
+	public static function backup_runs_from_here(int $node_id, int $limit = 60): array {
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare(
+			'SELECT mjb_id, mjb_status, mjb_result, mjb_error_message, mjb_completed_time, mjb_create_time '
+			. 'FROM mjb_management_jobs '
+			. 'WHERE mjb_mgn_node_id = ? AND mjb_job_type = ? AND mjb_delete_time IS NULL '
+			. "AND mjb_status IN ('completed', 'failed') "
+			. 'ORDER BY mjb_id DESC LIMIT ' . (int)$limit
+		);
+		$q->execute(array($node_id, 'backup_run'));
+		$rows = array();
+		foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+			$result = is_string($row['mjb_result']) ? json_decode($row['mjb_result'], true) : $row['mjb_result'];
+			$outcome = is_array($result) && isset($result['backup_status']) ? (string)$result['backup_status'] : '';
+			$message = is_array($result) && !empty($result['message'])
+				? (string)$result['message'] : trim((string)$row['mjb_error_message']);
+			$time = (string)($row['mjb_completed_time'] ?: $row['mjb_create_time']);
+			$rows[] = array(
+				'id'      => (int)$row['mjb_id'],
+				'outcome' => $outcome,
+				'time'    => preg_match('/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/', $time, $m) ? $m[1] : $time,
+				'message' => $message,
+			);
+		}
+		return $rows;
+	}
+
+	/**
+	 * What a run history says about the current failure, pure so it can be
+	 * asserted directly:
+	 *
+	 *   failures     consecutive failed runs since the last success
+	 *   since        start of the oldest of those runs
+	 *   last_success time of the newest run that worked, or null
+	 *   reason       the newest failed run's message
+	 *   job_id       that run's job, for the link
+	 *
+	 * Rows are newest first. 'skipped' runs and rows with no outcome (a job the
+	 * sweep has not read) are neither success nor failure and are stepped over;
+	 * everything else that is not 'success' is a failure, which is exactly how
+	 * the node stamp reads them.
+	 */
+	public static function backup_run_summary(array $rows): array {
+		$summary = array('failures' => 0, 'since' => null, 'last_success' => null, 'reason' => '', 'job_id' => null);
+		foreach ($rows as $row) {
+			$outcome = (string)($row['outcome'] ?? '');
+			if ($outcome === '' || $outcome === 'skipped') continue;
+			if ($outcome === 'success') {
+				$summary['last_success'] = (string)$row['time'];
+				break;
+			}
+			$summary['failures']++;
+			$summary['since'] = (string)$row['time'];
+			if ($summary['job_id'] === null) {
+				$summary['job_id'] = (int)$row['id'];
+				$summary['reason'] = trim((string)($row['message'] ?? ''));
+			}
+		}
+		return $summary;
 	}
 
 	private static function result($state, $label, $detail, $is_problem): array {

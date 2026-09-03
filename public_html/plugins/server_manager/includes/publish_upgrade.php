@@ -666,18 +666,31 @@
 			copy($sql_source, $core_temp_dir . '/maintenance_scripts/install_tools/joinery-install.sql.gz');
 		}
 
-		// Signed tree manifest (component G): two explicit writes, each with a
-		// root matching what it describes. The staging tree is what ships and is
-		// deleted after the tar; without the second write over the live tree the
-		// publishing plane would be the one machine in the fleet whose own
-		// script-invoking primitives never verify. A manifest that cannot be
-		// written or signed aborts the publish — an archive without one silently
-		// disables script primitives on every node that takes it.
+		// Signed tree manifest (component G). Whether this site signs at all is
+		// the agent bundle's call — TreeManifestPublisher::authority() — because
+		// the agent verifies against the key that built it, not the key in this
+		// site's config. A site that may sign writes twice, each with a root
+		// matching what it describes: the staging tree that ships and is deleted
+		// after the tar, and its own live tree, so the publishing plane is not
+		// the one machine in the fleet whose own script primitives never verify.
+		// A site that may NOT sign carries the manifest it received forward into
+		// the archive and leaves its live tree exactly as upstream delivered it;
+		// re-signing that tree with a key its own agent does not hold is how a
+		// republishing site stops being able to back itself up. A manifest that
+		// cannot be written, signed or carried aborts the publish — an archive
+		// without one silently disables script primitives on every node that
+		// takes it.
 		try {
-			$manifest_keys = AgentDistPublisher::ensureKeys($full_site_dir . '/config');
-			$staged_manifest = TreeManifestPublisher::write($core_temp_dir, $core_temp_dir, $manifest_keys);
-			publish_output("Core tree manifest signed ({$staged_manifest['files']} files)");
-			TreeManifestPublisher::write($full_site_dir, $full_site_dir, $manifest_keys);
+			$manifest_authority = TreeManifestPublisher::authority($full_site_dir);
+			publish_output($manifest_authority['reason']);
+			$staged_manifest = TreeManifestPublisher::publish_artifact(
+				$core_temp_dir, $core_temp_dir, $manifest_authority, $full_site_dir);
+			publish_output($staged_manifest['carried']
+				? "Core tree manifest carried forward as received ({$staged_manifest['files']} files)"
+				: "Core tree manifest signed ({$staged_manifest['files']} files)");
+			if ($manifest_authority['may_sign']) {
+				TreeManifestPublisher::write($full_site_dir, $full_site_dir, $manifest_authority['keys']);
+			}
 		} catch (Exception $e) {
 			publish_output("ERROR: core tree manifest failed: " . $e->getMessage());
 			exit(1);
@@ -836,8 +849,10 @@
 			// theme directory after the version decision, so it records the
 			// theme.json bytes that actually ship; the tar below archives the
 			// live directory, so the manifest ships and this box keeps its copy.
+			// A site that may not sign ships the manifest already in that
+			// directory, the one that arrived with the theme.
 			try {
-				TreeManifestPublisher::write($theme_dir, $full_site_dir, $manifest_keys);
+				TreeManifestPublisher::publish_artifact($theme_dir, $full_site_dir, $manifest_authority);
 			} catch (Exception $e) {
 				publish_output("ERROR: tree manifest failed for theme {$theme_name}: " . $e->getMessage());
 				publish_output("A release must carry every manifest it promises. Removing the release row for {$version} so this version can be republished once the cause is fixed.");
@@ -942,7 +957,7 @@
 			// Per-artifact signed manifest (component G) — same shape and same
 			// failure posture as the theme write above.
 			try {
-				TreeManifestPublisher::write($plugin_dir, $full_site_dir, $manifest_keys);
+				TreeManifestPublisher::publish_artifact($plugin_dir, $full_site_dir, $manifest_authority);
 			} catch (Exception $e) {
 				publish_output("ERROR: tree manifest failed for plugin {$plugin_name}: " . $e->getMessage());
 				publish_output("A release must carry every manifest it promises. Removing the release row for {$version} so this version can be republished once the cause is fixed.");

@@ -187,8 +187,22 @@ $res = AgentDistPublisher::publish($site_b, null);
 check($res['status'] === AgentDistPublisher::STATUS_SKIPPED,
 	'source version == bundled version -> skipped',
 	'got ' . var_export($res['status'], true));
-check(file_get_contents($dist_b . '/manifest.json') === $before_b,
-	'skipped leaves agent_dist byte-identical');
+// The one thing a skip may add: the key the bundle was built with, when the
+// manifest predates that record. A bundle at the source's version on the box
+// that holds the source was built here, so the record is this site's key.
+$after_b = json_decode(file_get_contents($dist_b . '/manifest.json'), true);
+$own_pub_b = trim(file_get_contents($site_b . '/config/agent_signing_key.pub'));
+check(($after_b['signing_public_key'] ?? '') === $own_pub_b,
+	'skipped stamps the missing signing_public_key with this site\'s key');
+check($after_b['version'] === '2.0.0' && $after_b['binaries'] === json_decode($before_b, true)['binaries'],
+	'and changes nothing else in the manifest');
+check(AgentDistPublisher::bundleSigningKey($site_b) === $own_pub_b,
+	'bundleSigningKey() reads it back');
+$stamped_b = file_get_contents($dist_b . '/manifest.json');
+$res = AgentDistPublisher::publish($site_b, null);
+check($res['status'] === AgentDistPublisher::STATUS_SKIPPED
+	&& file_get_contents($dist_b . '/manifest.json') === $stamped_b,
+	'a second skip leaves agent_dist byte-identical');
 
 // -- rebuild owed but the build breaks: failed, and nothing is disturbed -----
 // main.go declares a newer version and does not compile, which is the shape of

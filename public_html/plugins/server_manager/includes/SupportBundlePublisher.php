@@ -40,6 +40,8 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.2 - a site that may not sign tree manifests (TreeManifestPublisher::authority) does not
+ *                rebuild the bundle; the one received from upstream carries forward
  * @version 1.1 - first live consumer: the Docker host's decommission_site runs the bundled
  *                remove_account.sh, so hasConsumer() is true and the publish pipeline builds
  *                the bundle
@@ -129,6 +131,17 @@ class SupportBundlePublisher {
 				return self::result('carried', $msg, self::installedVersion($dist_dir), 0);
 			}
 
+			// The bundle is signed with the key its consumers' agents carry, and
+			// a site that did not build that agent does not hold it. Such a site
+			// ships the bundle it received, which rides in agent_dist already.
+			$authority = TreeManifestPublisher::authority($full_site_dir);
+			if (!$authority['may_sign']) {
+				$msg = 'Support bundle: not rebuilt - ' . $authority['reason'] . '; the bundle received from '
+					. 'upstream carries forward';
+				$say($msg);
+				return self::result('carried', $msg, self::installedVersion($dist_dir), 0);
+			}
+
 			if (!is_dir($dist_dir) && !mkdir($dist_dir, 0755, true)) {
 				throw new Exception("cannot create {$dist_dir}");
 			}
@@ -152,11 +165,10 @@ class SupportBundlePublisher {
 				chmod($target, 0755);
 			}
 
-			$keys = AgentDistPublisher::ensureKeys($full_site_dir . '/config');
 			// Signed with the staging directory as its own root, so the paths
 			// recorded are exactly the site-root-relative ones the primitives
 			// declare — the bundle root stands in for a site root.
-			$manifest = TreeManifestPublisher::write($staging, $staging, $keys);
+			$manifest = TreeManifestPublisher::write($staging, $staging, $authority['keys']);
 
 			$version = substr(hash_file('sha256', $manifest['manifest']), 0, 16);
 			$current = self::installedVersion($dist_dir);

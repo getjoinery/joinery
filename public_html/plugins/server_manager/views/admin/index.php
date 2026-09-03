@@ -3,6 +3,7 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.18 - a failing fleet backup links the failed job next to its reason
  * @version 1.17 - agent update state fetch_failed: the artifact could not be fetched and the agent is retrying
  * @version 1.16 - recovery-readiness attention line (never-verified/stale must-save secrets) linking to the readiness page
  * @version 1.16 - the backup alert is recovery-key setup only; per-node escrow rows are gone
@@ -262,6 +263,9 @@ if ($agent_online) {
 				<a href="<?php echo htmlspecialchars($p['link']); ?>" class="alert-link"><?php echo htmlspecialchars($p['name'] ?: $p['slug']); ?></a>
 				&mdash; <strong><?php echo htmlspecialchars($p['health']['label']); ?>.</strong>
 				<?php echo htmlspecialchars($p['health']['detail']); ?>
+				<?php if (!empty($p['health']['job_id'])): ?>
+					<a href="/admin/server_manager/job_detail?job_id=<?php echo (int)$p['health']['job_id']; ?>" class="alert-link">See the failed job.</a>
+				<?php endif; ?>
 			</li>
 		<?php endforeach; ?>
 	</ul>
