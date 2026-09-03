@@ -43,6 +43,21 @@
  * source's own word for "not mail yet"; Joinery keeps its own drafts as
  * iem_direction='draft' rows and never wants the source's.
  *
+ * Every cycle is timed. The ingestor keeps a ledger of where the wall clock
+ * went (connect, prepare, pull, each folder's seek / fetch / store, push) that
+ * the run record, iia_last_status and the cron log all carry, so a fetch that
+ * took two minutes says which two minutes. A cycle may also carry a deadline
+ * (setDeadline): work stops between folders and between messages once it
+ * passes, the cursor stays below the first message not walked, and what is
+ * left is counted as deferred — the next poll takes it. That is how an
+ * interactive fetch (the reader's Refresh, the admin's Fetch now) stays inside
+ * the time a browser, and the proxy in front of it, will wait.
+ *
+ * @version 1.18
+ * @changelog 1.18 - timing ledger and deadline (specs/mailbox_refresh_budget.md):
+ *   client() laps connect, ingestFolder laps seek/fetch/store per folder, the
+ *   run record and status carry describeTiming(); pastDeadline() stops the walk
+ *   between folders and messages, counting the rest as deferred.
  * @version 1.17
  * @changelog 1.17 - skip \Draft-flagged messages at ingest, counted in the run
  *   record's own bucket (specs/bugfix_imap_draft_ingest.md). fetchWindow asks
@@ -176,6 +191,81 @@ class ImapIngestor {
 	/** @var ImapClient|null */
 	private $client = null;
 
+	/** @var array The timing ledger: phase => seconds, and 'folders' => name => phase => seconds. */
+	private $timing = array('folders' => array());
+	/** @var float|null Absolute microtime() the cycle must stop at; null is unbounded. */
+	private $deadline = null;
+	/** @var bool Set once the deadline stopped work early. */
+	private $budgetExhausted = false;
+	/** @var float Seconds the last ingestOne spent in its transaction (read by ingestFolder). */
+	private $lastStoreSeconds = 0.0;
+
+	// ── Timing and the deadline ────────────────────────────────────────────
+
+	/**
+	 * Bound the cycle. Work stops between folders and between messages once the
+	 * deadline passes; nothing already started is cut. The scheduled poller runs
+	 * unbounded (null); the interactive paths pass ImapFetch's budget.
+	 */
+	public function setDeadline(?float $deadline): void {
+		$this->deadline = $deadline;
+	}
+
+	public function pastDeadline(): bool {
+		return $this->deadline !== null && microtime(true) >= $this->deadline;
+	}
+
+	/** Did the deadline stop this cycle before it finished? */
+	public function budgetExhausted(): bool {
+		return $this->budgetExhausted;
+	}
+
+	/** Record seconds spent in a cycle phase (accumulating on repeats). */
+	public function lap(string $phase, float $seconds): void {
+		$this->timing[$phase] = ($this->timing[$phase] ?? 0.0) + $seconds;
+	}
+
+	/** Record seconds spent in one phase of one folder's ingest. */
+	private function lapFolder(string $folder, string $phase, float $seconds): void {
+		$this->timing['folders'][$folder][$phase] =
+			($this->timing['folders'][$folder][$phase] ?? 0.0) + $seconds;
+	}
+
+	/** The ledger so far: phase => seconds, 'folders' => name => phase => seconds. */
+	public function timing(): array {
+		return $this->timing;
+	}
+
+	/**
+	 * The ledger as one line a person reads: "took 4.2s: connect 0.5s, pull 1.1s,
+	 * INBOX 2.1s (seek 0.3s, fetch 1.2s, store 0.6s), push 0.1s". Folder detail is
+	 * shown when $folderDetail — the status column is 500 characters, the run
+	 * record is not. Pure.
+	 */
+	public static function describeTiming(array $timing, float $total, bool $folderDetail = true): string {
+		$fmt = function (float $s): string { return number_format($s, 1) . 's'; };
+		$parts = array();
+		foreach ($timing as $phase => $seconds) {
+			if ($phase === 'folders' || $phase === 'ingest') { continue; }
+			if ($phase === 'push') { continue; } // after the folders, below
+			$parts[] = $phase . ' ' . $fmt((float)$seconds);
+		}
+		foreach ((array)($timing['folders'] ?? array()) as $name => $phases) {
+			$phases = (array)$phases;
+			$sum = 0.0; $inner = array();
+			foreach ($phases as $phase => $seconds) {
+				$sum += (float)$seconds;
+				$inner[] = $phase . ' ' . $fmt((float)$seconds);
+			}
+			$parts[] = $name . ' ' . $fmt($sum)
+				. ($folderDetail && count($inner) > 1 ? ' (' . implode(', ', $inner) . ')' : '');
+		}
+		if (isset($timing['push'])) {
+			$parts[] = 'push ' . $fmt((float)$timing['push']);
+		}
+		return 'took ' . $fmt($total) . ($parts ? ': ' . implode(', ', $parts) : '');
+	}
+
 	/**
 	 * @param InboundImapAccount $account
 	 * @param ImapClient|null $client Inject a fake client for testing (the §6.2
@@ -226,10 +316,12 @@ class ImapIngestor {
 			$params['password'] = $password;
 		}
 
+		$connectStarted = microtime(true);
 		try {
 			$socket = new Horde_Imap_Client_Socket($params);
 			$socket->login();
 		} catch (Horde_Imap_Client_Exception $e) {
+			$this->lap('connect', microtime(true) - $connectStarted);
 			// An OAuth account whose token the server rejects needs reconnection.
 			if ($this->account->isOAuth() && $e->getCode() === Horde_Imap_Client_Exception::LOGIN_AUTHENTICATIONFAILED) {
 				$this->account->markNeedsReauth();
@@ -242,8 +334,10 @@ class ImapIngestor {
 			throw new ImapIngestorException('IMAP login failed: ' . $e->getMessage()
 				. ($detail !== '' ? ' (' . $detail . ')' : ''));
 		} catch (Throwable $e) {
+			$this->lap('connect', microtime(true) - $connectStarted);
 			throw new ImapIngestorException('IMAP connection failed: ' . $e->getMessage());
 		}
+		$this->lap('connect', microtime(true) - $connectStarted);
 
 		// Let modseqs flow: Horde refuses to put HIGHESTMODSEQ in a STATUS (and
 		// answers 0 without asking the server) unless CONDSTORE is marked enabled,
@@ -479,6 +573,7 @@ class ImapIngestor {
 			$this->account->recordStatus($res['status']);
 		}
 
+		$res['timing'] = $this->timing;
 		$this->recordRun($res);
 		return $res;
 	}
@@ -510,15 +605,25 @@ class ImapIngestor {
 		}
 
 		$totalStored = 0; $totalDedup = 0; $totalSeen = 0; $totalFailed = 0; $totalOutOfScope = 0;
-		$totalSourceDraft = 0;
+		$totalSourceDraft = 0; $totalDeferred = 0; $deferredFolders = 0;
 		$parts = array(); $failedDetail = array();
 		foreach ($folders as $folder) {
+			$folderName = (string)$folder->get('iif_name');
+			if ($this->pastDeadline()) {
+				// Out of time: this folder waits for the next poll, whole. Its
+				// cursor is untouched, so nothing is skipped — only later.
+				$this->budgetExhausted = true;
+				$deferredFolders++;
+				$parts[] = $folderName . ': deferred (time budget)';
+				continue;
+			}
 			try {
 				$res = $this->ingestFolder($folder, $maxPerRun, $folder->isMembership(), $alias, $domain, $recipient);
 				$totalStored += $res['stored']; $totalDedup += $res['dedup']; $totalSeen += $res['seen'];
 				$totalFailed += $res['failed'];
 				$totalOutOfScope += $res['out_of_scope'];
 				$totalSourceDraft += intval($res['source_draft'] ?? 0);
+				$totalDeferred += intval($res['deferred'] ?? 0);
 				$failedDetail = array_merge($failedDetail, $res['failed_detail']);
 				$parts[] = $res['status'];
 			} catch (Throwable $e) {
@@ -531,15 +636,19 @@ class ImapIngestor {
 			}
 		}
 
-		$statusMsg = 'Ingested ' . count($folders) . ' folder(s): ' . $totalStored . ' stored, '
+		$statusMsg = 'Ingested ' . (count($folders) - $deferredFolders) . ' of ' . count($folders)
+			. ' folder(s): ' . $totalStored . ' stored, '
 			. $totalDedup . ' duplicate, ' . $totalFailed . ' failed'
 			. ($totalOutOfScope ? ', ' . $totalOutOfScope . ' out of scope' : '')
 			. ($totalSourceDraft ? ', ' . $totalSourceDraft . ' source draft' : '')
+			. ($totalDeferred ? ', ' . $totalDeferred . ' deferred' : '')
+			. ($deferredFolders ? ', ' . $deferredFolders . ' folder(s) deferred to the next poll' : '')
 			. '. ' . implode(' | ', $parts);
 		$this->account->recordStatus($statusMsg);
 		return array('stored' => $totalStored, 'dedup' => $totalDedup, 'seen' => $totalSeen,
 			'failed' => $totalFailed, 'out_of_scope' => $totalOutOfScope,
 			'source_draft' => $totalSourceDraft,
+			'deferred' => $totalDeferred, 'deferred_folders' => $deferredFolders,
 			'failed_detail' => $failedDetail, 'status' => $statusMsg);
 	}
 
@@ -574,6 +683,7 @@ class ImapIngestor {
 			$alias, $domain, $recipient): array {
 		$client = $this->client();
 		$folderName = (string)$folder->get('iif_name');
+		$seekStarted = microtime(true);
 
 		$status = $client->status(
 			$folderName,
@@ -631,6 +741,7 @@ class ImapIngestor {
 		// window search jumps deserts — see nextOccupiedWindow.
 		list($lastSeenUid, $windowEnd, $uids, $metaFetch) =
 			$this->nextOccupiedWindow($client, $folderName, $lastSeenUid, $highUid, max(1, $maxPerRun));
+		$this->lapFolder($folderName, 'seek', microtime(true) - $seekStarted);
 
 		$router = new InboundEmailRouter();
 
@@ -646,9 +757,19 @@ class ImapIngestor {
 		$seedHighUid = intval($folder->get('iif_seed_high_uid'));
 
 		$stored = 0; $dedup = 0; $seen = 0; $failed = 0; $outOfScope = 0; $sourceDraft = 0;
+		$deferred = 0;
 		$failedDetail = array();
 		$maxUid = $windowEnd;
 		foreach ($uids as $uid) {
+			if ($this->pastDeadline()) {
+				// Out of time: hold the cursor below this UID so the next poll
+				// starts here. Not walked, so not seen — the reconciliation in
+				// the run record balances without them.
+				$this->budgetExhausted = true;
+				$deferred = count($uids) - $seen;
+				$maxUid = min($maxUid, $uid - 1);
+				break;
+			}
 			$seen++;
 			$data = $metaFetch[$uid] ?? null;
 			if ($data === null) {
@@ -676,6 +797,7 @@ class ImapIngestor {
 				continue;
 			}
 
+			$messageStarted = microtime(true);
 			try {
 				$result = $this->ingestOne($client, $folder, $uid, $data, $router,
 					$alias, $domain, $recipient, $serverUidValidity, $recordMembership);
@@ -686,6 +808,13 @@ class ImapIngestor {
 				$failedDetail[] = array('uid' => $uid, 'folder' => $folderName, 'reason' => $e->getMessage());
 				$maxUid = min($maxUid, $uid - 1);
 			}
+			// The network half (bodies, inline images) and the stored half
+			// (the transaction) are lapped separately; a failure mid-way lands
+			// in whichever half it reached.
+			$storeSeconds = $this->lastStoreSeconds;
+			$this->lastStoreSeconds = 0.0;
+			$this->lapFolder($folderName, 'fetch', max(0.0, microtime(true) - $messageStarted - $storeSeconds));
+			$this->lapFolder($folderName, 'store', $storeSeconds);
 		}
 
 		$folder->set('iif_last_seen_uid', max($lastSeenUid, $maxUid));
@@ -694,10 +823,12 @@ class ImapIngestor {
 
 		return array('stored' => $stored, 'dedup' => $dedup, 'seen' => $seen,
 			'failed' => $failed, 'out_of_scope' => $outOfScope, 'source_draft' => $sourceDraft,
+			'deferred' => $deferred,
 			'failed_detail' => $failedDetail,
 			'status' => $folderName . ': ' . $stored . ' stored, ' . $dedup . ' dup, ' . $failed . ' failed'
 				. ($outOfScope ? ', ' . $outOfScope . ' out of scope' : '')
-				. ($sourceDraft ? ', ' . $sourceDraft . ' source draft' : ''));
+				. ($sourceDraft ? ', ' . $sourceDraft . ' source draft' : '')
+				. ($deferred ? ', ' . $deferred . ' deferred (time budget)' : ''));
 	}
 
 	// ── Run record ─────────────────────────────────────────────────────────
@@ -731,6 +862,19 @@ class ImapIngestor {
 				&& $summary['unaccounted'] === 0) {
 			return;
 		}
+
+		// Where the clock went, on its own line of the note — so a run that
+		// stored one message in two minutes says which two minutes.
+		$timing = (array)($res['timing'] ?? array());
+		$total = 0.0;
+		foreach ($timing as $phase => $seconds) {
+			if ($phase === 'folders') {
+				foreach ((array)$seconds as $phases) { $total += array_sum((array)$phases); }
+			} else {
+				$total += (float)$seconds;
+			}
+		}
+		$summary['note'] .= "\n  " . self::describeTiming($timing, $total);
 
 		MailRunRecord::write(self::RUN_EVENT, $summary, (array)($res['failed_detail'] ?? array()),
 			function (array $f): string {
@@ -1195,6 +1339,7 @@ class ImapIngestor {
 			$db->beginTransaction();
 		}
 
+		$storeStarted = microtime(true);
 		try {
 			$outcome = $this->ingestOneStored($folder, $uid, $data, $router,
 				$alias, $domain, $recipient, $serverUidValidity, $recordMembership,
@@ -1202,8 +1347,10 @@ class ImapIngestor {
 			if ($owns_tx) {
 				$db->commit();
 			}
+			$this->lastStoreSeconds = microtime(true) - $storeStarted;
 			return $outcome;
 		} catch (Throwable $e) {
+			$this->lastStoreSeconds = microtime(true) - $storeStarted;
 			// Roll the whole message back and let it out. ingestFolder counts it as
 			// a failure and holds the cursor below this UID, so the next poll
 			// retries it — which is also how an InboundStoreCollisionException
