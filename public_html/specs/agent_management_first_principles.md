@@ -161,8 +161,8 @@ status**; the spec named is where its design lives.
 | 2b | Restore readiness — make the gap visible | `restore_readiness.md` | Follows 2a; does not gate it |
 | 2c | Delete the three SSH restore builders | this table | **UNBLOCKED 2026-08-30** by the live restore. They were kept only until one had been done over the channel; they are already unreachable, refusing through `refuse_dead_restore_transport()`. Homeless otherwise: their spec is in `implemented/` and must not be edited |
 | 2d | Deferred destructive approval | `deferred_destructive_approval.md` | The approval window is bounded by how long a node can afford to be deaf, not by what a person needs. Raised to 60m as an interim |
-| 3 | The plane-side executor (WP1+WP2) | `plane_side_executor.md` | **BLOCKING.** Twelve operations have no transport since SSH was removed |
-| 4 | Keyless provisioning | `keyless_provisioning.md` | Needs only executor WP1, not the whole executor |
+| 3 | The plane-side executor | `plane_side_executor.md` (design only; not endorsed as-is) | **ROLLED BACK 2026-08-31 and not rebuilt.** Round 1 (WP1+WP2 on three operations) was built, reviewed and deleted in full, spec included: it put the health check back on SSH from the plane, one layer above the agent whose whole design is health check plus predetermined fix. What survives is the minimal install-only `InstallJobExecutor` that item 4 needed (an `ssh`-over-sealed-password runner for `install_node`, routed by the `queued` status, zero agent change). The twelve operations that lost their transport are a list of things to disposition, not an executor's to-do list, and item 6 dispositioned them: `check_status` is a native primitive; the disposable trio gets health check plus reprovision and no agent; `provision_ssl` and fleet seeding crossed to the agent; `enable_agent` and `discover_nodes` are deleted. What is left of "executor" is item 7's two gates, `publish_upgrade` and Docker-host certificate issuance |
+| 4 | Keyless provisioning | `keyless_provisioning.md` | **BUILT 2026-09-03, live gate open.** Provision over a sealed install password, host agent on every docker machine, the install password retired once every agent on the machine is admitted (the executor completes the retire job only after the machine refused the password), join approval checked with the provider. Owed: one live run per shape to `retired` |
 | 5 | Credential custody — delete the shared key | `fleet_ssh_credential_custody.md` | WP1 done; WP3–WP5 gated on item 2 |
 | 6 | SSH is one bootstrap, run once | `ssh_single_bootstrap.md` | Managed domains crossed 2026-09-01. What remains: collapse `install_node` to one session, clone instead of scp for from-backup, certificates and fleet seeding to the agent, delete `enable_agent` and `discover_nodes`. Gates jeremytunnell's key and the four keyless boxes' certificates |
 | 7 | Retire the local queue | `agent_local_queue_retirement.md` | Last, not first — thirteen operations still depend on it |
@@ -171,8 +171,9 @@ status**; the spec named is where its design lives.
 **Why item 7 is last, which is the reversal this family keeps re-deriving.** The
 local queue is the largest hole in the platform — a web-tier database write is
 management-node root — so it looks like it should be first. The 2026-08-30 audit
-found thirteen operations still riding it: seven are deletions, four move to the
-executor item 3 builds, and two are gates of their own. Flipping the flag before
+found thirteen operations still riding it: seven are deletions, four were the
+pre-pairing installs that item 6 collapsed into one bootstrap session, and two
+are gates of their own. Flipping the flag before
 those land does not close a hole; it breaks the fleet and gets flipped back.
 
 **Item 2a is next, and it is one operation.** Everything downstream of the
@@ -240,12 +241,14 @@ annexes.
 
 - A backup that exists only in the bucket is brought back to its own node and
   restored, end to end, on a real node. *(item 2)*
-- Every operation in the executor's table dispatches and completes. *(item 3)*
+- No operation other than `install_node` opens an SSH session from the plane,
+  and `install_node` opens exactly one. *(items 3 and 6)*
 - A provisioning password authenticates an install without ever being written to
   a machine. *(item 4)*
 - `config/provisioning_key` does not exist, and no node's `mgn_ssh_key_path`
   names a fleet-shared key. *(item 5)*
-- The executor runs as the site user and no step it runs is privileged. *(item 3)*
+- The install runner runs as the site user and no step it runs is privileged
+  on the management node. *(item 3)*
 - The agent's `local` step type is gone, it holds no database credential, and
   inserting a row into `mjb_management_jobs` by hand executes nothing. *(item 7)*
 

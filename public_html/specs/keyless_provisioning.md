@@ -1,8 +1,10 @@
 # Keyless provisioning — we never put a key on a machine we create
 
-**Status: PART-BUILT 2026-09-01. The executor-independent work and a minimal
-bootstrap executor are done and tested; wiring the host-agent join and the burn
-are the next build.** Direction settled by owner 2026-08-30.
+**Status: BUILT 2026-09-03, live gate open.** WP1, WP4 and the host link
+landed 2026-09-01; WP2/WP3 (retiring the install password) and WP5 (approval
+checked with the provider, the join's address verified) landed 2026-09-03 —
+see "Built" below. What remains is one live run per shape on a real instance.
+Direction settled by owner 2026-08-30.
 Pulled out of `fleet_ssh_credential_custody.md`, which had this wrong.
 
 **The bootstrap executor (owner 2026-09-01: "simplest functional, then iterate").**
@@ -28,8 +30,8 @@ status the node agent's `pending`-only claim never matches. Scope: fresh docker;
   *site* path now honours `--enable-agent` inside the container — it was
   silently dropped before, so a container came up unmanageable. `host-harden`
   takes `--agent-managed`: a keyless machine whose access path is its joined
-  agent can be hardened (the burn), which its empty `authorized_keys` otherwise
-  refuses.
+  agent can be hardened (retiring the install password), which its empty
+  `authorized_keys` otherwise refuses.
 - **WP5 (host link at approval).** `ManagedHost::link_host_node()` (class 1.2),
   called from `AgentChannelEndpoint::approveJoin`, names a machine-posture node
   as its host's own agent (`mgh_mgn_host_node_id`) when a placement record for
@@ -65,13 +67,46 @@ status the node agent's `pending`-only claim never matches. Scope: fresh docker;
   from getjoinery's release channel, not this plane's; a parked provision
   already emails the buyer a re-connect link.
 
-**NOT built:** the actual burn (WP2/WP3: `host-harden --agent-managed`
-over the password at approval, then erase `cvp_root_pass_sealed`) and WP5's
-provider re-check + source-IP match — the IP match is deferred until
-`ajr_source_ip` gets trusted-proxy handling (it is bare `REMOTE_ADDR` today,
-wrong behind Cloudflare). WP2's prose still says "burn at end of install"; the
-design section §4 (burn plane-driven at approval, not on "running") is correct
-and supersedes it.
+**Built 2026-09-03 — retiring the install password (WP2/WP3) and WP5.**
+`cvp_install_password` (provision class 1.5) is `held` from the moment the
+password is sealed. `ProvisionCustomerCloud` 2.0 works `done` provisions in a
+held state each pass: `machine_agents()` requires every agent the install put
+on the machine to be admitted — the site node's, and on a docker box the
+host's own agent named through the placement record — then queues a
+`retire_install_password` job (`JobCommandBuilder::build_retire_install_password`
+1.54: one ssh session, `install.sh -y -q host-harden --agent-managed` from the
+release the bootstrap left under `/opt/joinery-install`, then `sshd -T` must
+read `passwordauthentication no`). The job is a bootstrap type
+(`ManagementJob::BOOTSTRAP_JOB_TYPES`, 1.14: created `queued`, claimed only by
+`InstallJobExecutor` 1.5), and the executor completes it only after a fresh
+login with the password was answered "Permission denied" — a login that still
+works, or no answer inside the budget, fails the job. The next pass erases
+`cvp_root_pass_sealed` on a completed job (`retired`); on a failed job it
+keeps the password, writes the reason on the row, emails ops
+(`retire_failed`), and a re-run of the job from its detail page is watched
+for. A provision that fails with a live instance keeps its password until the
+install is complete (owner, 2026-09-03). The dashboard's provisions table
+keeps a finished provision listed until its password is retired and says
+where it stands (`install_password_summary`).
+
+WP5: the join endpoint records `SessionControl::get_client_ip(true)` (the
+Cloudflare header only from a verified edge — the dev plane sits behind
+Cloudflare, so bare `REMOTE_ADDR` was an edge address and could never match).
+`CustomerCloudProvision::for_machine_address()` names the provision whose
+instance the join came from; the join card shows provision, instance, age and
+the password's state; `approve_join` runs
+`ProvisionCustomerCloud::join_approval_check()`, which refuses unless the node
+is the provision's site or a host record at its address, and the provider
+reports the instance `running` at exactly the join's address. A second join
+from that address for a node whose agent is already admitted is refused and
+logged as an alarm. The design section step 4 (retirement is plane-driven
+once the agent is admitted, not on "running") is the authority.
+
+**Live gate, owed:** one real instance per shape (docker site, bare, bare
+metal) run through join approval to `retired`, with a hand login attempt over
+the old password refused afterwards; and one deliberate failure (approve
+against a wrong node, and a provider that reports the instance stopped)
+refused with its reason on the tab.
 
 > **Status and ordering live in `agent_management_first_principles.md`.**
 > This spec is an annex: it carries the design and nothing else. If this
@@ -104,10 +139,13 @@ one line later. Keep it for the length of the install instead:
 3. **Pair.** The install enables the agent and records the management node's
    URL as a join request; the agent mints its own keypair on the machine and
    asks to enrol. A human approves at the plane.
-4. **Then burn the bridge, and not before.** The burn is **plane-driven, at
-   approval** — not at the end of the install. Once a human approves the join,
-   the executor uses the still-sealed password one last time to disable root
-   password login, and only then is the sealed password erased.
+4. **Then retire the install password, and not before.** Retirement is
+   **plane-driven, once the agent is admitted** — not at the end of the install.
+   Once a human approves the join, the executor uses the still-sealed password
+   one last time to disable root password login on the machine, and only then
+   is the sealed password erased. The word is deliberate: the password is not
+   revoked or destroyed by some ceremony, it is retired — no longer accepted by
+   the machine, no longer held by the plane.
 
 Step 4 comes after step 3 for a reason, and the trigger must be **paired**, not
 **running**. Approval is asynchronous and can be hours away; a box whose join is
@@ -277,9 +315,10 @@ whether `rebuildInstance` — which also accepts `authorized_keys`
 (`LinodeComputeDriver:60-78`), today only from `RelayCloudProvisioner:293`
 — stays relay-only.
 
-**WP2 — Close the machine when the agent is ADMITTED.** The burn is
-plane-driven at approval, not at the end of the install — a running agent is
-not an admitted one (see the design section, step 4). Once a human approves the
+**WP2 — Retire the install password when the agent is ADMITTED: the machine
+stops accepting it.** Retirement is plane-driven once the agent is admitted,
+not at the end of the install — a running agent is not an admitted one (see
+the design section, step 4). Once a human approves the
 join, the executor uses the still-sealed password one last time to disable root
 password login. The install-script half is done: `host-harden --agent-managed`
 gives the empty-`authorized_keys` refusal the fourth answer (a keyless machine
@@ -287,8 +326,8 @@ whose access path is its joined agent is not orphaned). The safety check exists
 to prevent orphaning a machine; an admitted agent is a truthful answer that it
 is not orphaned.
 
-**WP3 — Erase the password.** At the approval-time burn, once root password
-login is disabled, erase the sealed password from the provision row. After WP2
+**WP3 — Retire the install password: the plane stops holding it.** Once root
+password login is disabled, erase the sealed password from the provision row. After WP2
 and WP3 nothing anywhere can log into that machine but its owner and its agent.
 A provision that ends with *no instance created* erases it immediately (there
 is no machine it opens) — built. A provision that fails with a *live* instance
@@ -299,8 +338,8 @@ keeps it for manual recovery: an owner call on WP3's list, not settled here.
 *The unit of this rule is the machine, not the site.* Found in review, and it is
 the finding that changes the shape of the work. On a Docker-mode provision — the
 default for a customer VPS — the sited agent lives **inside the container**; its
-join path reads `stg_settings`, which exists only in the site. After the burn,
-the **host** has no key (never placed), no password login (disabled), and no
+join path reads `stg_settings`, which exists only in the site. Once the
+install password is retired, the **host** has no key (never placed), no password login (disabled), and no
 agent. "The agent is the access path" is then untrue of the machine itself, and
 every future `on_host` operation for that node — reverse-proxy changes, container
 rebuild, Docker repair, and certificate issuance for a direct-served customer

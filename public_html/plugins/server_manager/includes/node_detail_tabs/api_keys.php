@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.6 - a join from a machine this plane provisioned names its provision, instance and age on
+ *                the card, and where the install password stands; approval checks it with the provider
  * @version 1.5 - switched-off nodes read as switched off, not as broken: the going-quiet stamp is
  *                compared against the last poll rather than cleared, so a returning node needs no write
  * @version 1.4 - turn the agent on for a node from here, over the SSH this plane already has:
@@ -162,6 +164,26 @@
 			   . ' <span class="text-muted small">(' . htmlspecialchars((string)$jr->get('ajr_source_ip'))
 			   . ', ' . htmlspecialchars($jr->get_local('ajr_create_time')) . ')</span></div>';
 			echo '<div class="my-2">Key fingerprint: <code style="font-size:1.1em;">' . htmlspecialchars($fpr) . '</code></div>';
+			// A join from an address this plane provisioned a machine at is that
+			// machine asking to be managed. Say which provision, and that
+			// approval will check the claim with the provider before binding.
+			$join_prov = class_exists('CustomerCloudProvision')
+				? CustomerCloudProvision::for_machine_address((string)$jr->get('ajr_source_ip')) : null;
+			if ($join_prov) {
+				$prov_age = $join_prov->get('cvp_create_time')
+					? max(0, (int)floor((time() - strtotime($join_prov->get('cvp_create_time') . ' UTC')) / 60)) : null;
+				$machine_ids = class_exists('ProvisionCustomerCloud') ? ProvisionCustomerCloud::machine_node_ids($join_prov) : [];
+				$is_machine_node = in_array((int)$node->key, $machine_ids, true);
+				echo '<div class="small mb-2">This address is <strong>provision #' . (int)$join_prov->key . '</strong> ('
+				   . htmlspecialchars($join_prov->get('cvp_domain')) . '): instance '
+				   . htmlspecialchars((string)$join_prov->get('cvp_instance_id'))
+				   . ($prov_age !== null ? ', created ' . ($prov_age >= 120 ? round($prov_age / 60) . ' h' : $prov_age . ' min') . ' ago' : '')
+				   . '. Install password: ' . htmlspecialchars(ProvisionCustomerCloud::install_password_summary($join_prov)) . '. '
+				   . ($is_machine_node
+						? 'Approving here asks the provider to confirm the instance is running at this address first.'
+						: '<strong>This node is neither that provision\'s site nor a host record at its address</strong> — approval here will be refused.')
+				   . '</div>';
+			}
 			echo '<div class="small mb-2">Approve <strong>only</strong> if this exactly matches the fingerprint shown on the node\'s own '
 			   . 'Management Node page. The name and address above are claims anyone could make; the fingerprint is the identity.</div>';
 			if ($session->get_permission() >= 10) {

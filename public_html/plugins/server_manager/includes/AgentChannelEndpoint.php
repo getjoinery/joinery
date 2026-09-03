@@ -36,6 +36,9 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.11 - a join records the client address the plane can vouch for (SessionControl::get_client_ip
+ *                 for auth: the Cloudflare header only from a verified edge), so a join from a
+ *                 provisioned machine can be matched to its instance and checked with the provider
  * @version 1.10 - the channel fills the api_agent bucket it is checked against: one request-log
  *                 row per request at shutdown, carrying the outcome, for everything except a
  *                 successful claim (the steady-state poll). The bucket had no writer, so the
@@ -381,7 +384,11 @@ class AgentChannelEndpoint {
 		$request->set('ajr_claimed_name', $in['claimed_name']);
 		$request->set('ajr_public_key', $in['agent_public_key']);
 		$request->set('ajr_fingerprint', AgentJoinRequest::fingerprint($public_key));
-		$request->set('ajr_source_ip', substr((string)($_SERVER['REMOTE_ADDR'] ?? ''), 0, 64));
+		// The address approval compares against the provider's record of the
+		// machine, so it has to be one this plane can vouch for: behind
+		// Cloudflare REMOTE_ADDR is an edge, and the client header is trusted
+		// only when the TCP peer is a verified edge (the for-auth mode).
+		$request->set('ajr_source_ip', substr((string)SessionControl::get_client_ip(true), 0, 64));
 		$request->set('ajr_agent_version', (string)($in['agent_version'] ?? ''));
 		$request->set('ajr_status', AgentJoinRequest::STATUS_PENDING);
 		$request->save();

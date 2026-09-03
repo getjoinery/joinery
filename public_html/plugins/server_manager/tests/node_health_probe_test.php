@@ -136,6 +136,7 @@ section('What SSH still owns');
 // and discover_nodes were deleted outright.
 $expected_ssh_only = array(
 	'install_node',
+	'retire_install_password',   // the bootstrap's closing session: host-harden over the same sealed password, once the machine's agents are admitted
 	'provision_relay',
 	'rebuild_relay',
 	'relay_add_tenant',

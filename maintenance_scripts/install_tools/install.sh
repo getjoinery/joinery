@@ -1753,8 +1753,8 @@ do_host_harden() {
     for arg in "$@"; do
         case "$arg" in
             # The machine's access path is its joined agent, not an SSH key.
-            # Asserted by the caller (the plane's approval-time burn, once the
-            # agent's join has been approved) — an agent that has been ADMITTED
+            # Asserted by the caller (the plane retiring the install password
+            # once the agent's join has been approved) — an agent that has been ADMITTED
             # is a truthful answer that disabling password login orphans nobody.
             --agent-managed) AGENT_MANAGED=1 ;;
             *) consume_global_flag "$arg" || { print_error "Unknown option for host-harden: $arg"; exit 1; } ;;

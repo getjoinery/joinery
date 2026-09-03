@@ -23,6 +23,15 @@
  *                     is the standard pipeline)
  *   failed          - terminal; cvp_error says why. Admin alert sent.
  *
+ * Alongside the status, cvp_install_password tracks the one credential a
+ * keyless provision ever has (specs/keyless_provisioning.md): held while the
+ * machine still accepts it and this row still holds it, retiring while the
+ * retire_install_password job runs, retired once neither is true, or
+ * retire_failed when the job could not prove the machine refuses it (the
+ * password is kept, so the machine stays reachable).
+ *
+ * @version 1.5 - cvp_install_password: the install password's lifecycle, held → retiring → retired,
+ *                and the 'open' filter that keeps a done provision on the dashboard until it is retired
  * @version 1.4 - cvp_clone_key_sealed (the key a from_backup provision armed its source with) and
  *                cvp_fleet_seed_state (fleet seeding waits for the node's agent to pair)
  * @version 1.3
@@ -75,10 +84,21 @@ class CustomerCloudProvision extends SystemBase {
 		'cvp_port'                   => array('type'=>'int4', 'is_nullable'=>false, 'default'=>8080),
 		// The instance's root password, sealed (SecretBox) for the length of the
 		// install only. It is the sole credential for a keyless provision — no
-		// SSH key is ever placed on a machine we create — and it is erased by
-		// the burn step the moment the agent's join is approved. NULL means
-		// either a pre-keyless provision or a provision whose bridge is burned.
+		// SSH key is ever placed on a machine we create — and it is erased when
+		// the install password is retired, once the agent's join is approved.
+		// NULL means either a pre-keyless provision or a provision whose install
+		// password has been retired.
 		'cvp_root_pass_sealed'       => array('type'=>'text'),
+		// The install password's lifecycle. held: the machine accepts it and
+		// this row holds it (from the moment it is sealed, through the install,
+		// until every agent the install put on the machine has been admitted).
+		// retiring: the retire_install_password job is queued or running.
+		// retired: the machine refuses it and this row no longer holds it.
+		// retire_failed: the job could not prove the machine refuses it, so the
+		// password is KEPT and cvp_error says why; re-running the job from its
+		// detail page retries. NULL: a provision that predates keyless
+		// provisioning, or one that never had an instance to hold a password for.
+		'cvp_install_password'       => array('type'=>'varchar(16)', 'allowed_values'=>array('held', 'retiring', 'retired', 'retire_failed')),
 		// from_backup: the export key this provision armed its SOURCE with
 		// (clone_export_arm), sealed for the length of the provision. The
 		// target presents it over HTTPS; the plane disarms the source and
@@ -138,6 +158,33 @@ class CustomerCloudProvision extends SystemBase {
 		}
 	}
 
+	/** The provision statuses still working toward a running site, or stuck. */
+	const OPEN_STATUSES = array('pending_connect', 'ready', 'booting', 'installing', 'failed');
+
+	/** The install-password states in which the plane still holds a password. */
+	const PASSWORD_HELD_STATES = array('held', 'retiring', 'retire_failed');
+
+	/**
+	 * The provision whose instance lives at this address, or null. Used when a
+	 * join request arrives: a request from a provision's own instance address
+	 * is that machine asking to be managed, and approval can check the claim
+	 * against the provider. Newest first, so a re-provision of the same
+	 * address names the current row.
+	 */
+	public static function for_machine_address(string $ip) {
+		$ip = trim($ip);
+		if ($ip === '') {
+			return null;
+		}
+		$rows = new MultiCustomerCloudProvision(['instance_ip' => $ip, 'deleted' => false], ['cvp_id' => 'DESC']);
+		foreach ($rows as $row) {
+			if (trim((string)$row->get('cvp_instance_id')) !== '') {
+				return $row;
+			}
+		}
+		return null;
+	}
+
 	/**
 	 * Record a terminal failure. Saves.
 	 */
@@ -186,6 +233,26 @@ class MultiCustomerCloudProvision extends SystemMultiBase {
 				return "'" . preg_replace('/[^a-z_]/', '', $s) . "'";
 			}, $this->options['fleet_seed_states']);
 			$filters['cvp_fleet_seed_state'] = "IN (" . implode(',', $quoted) . ")";
+		}
+
+		if (isset($this->options['install_password_states']) && is_array($this->options['install_password_states']) && count($this->options['install_password_states'])) {
+			$quoted = array_map(function ($s) {
+				return "'" . preg_replace('/[^a-z_]/', '', $s) . "'";
+			}, $this->options['install_password_states']);
+			$filters['cvp_install_password'] = "IN (" . implode(',', $quoted) . ")";
+		}
+
+		if (isset($this->options['instance_ip'])) {
+			$filters['cvp_instance_ip'] = [$this->options['instance_ip'], PDO::PARAM_STR];
+		}
+
+		// Everything an operator still has a reason to watch: a provision working
+		// toward a site (or stuck), and a finished one whose install password
+		// this plane still holds.
+		if (!empty($this->options['open'])) {
+			$statuses = "'" . implode("','", CustomerCloudProvision::OPEN_STATUSES) . "'";
+			$held = "'" . implode("','", CustomerCloudProvision::PASSWORD_HELD_STATES) . "'";
+			$filters['(cvp_status'] = "IN ({$statuses}) OR cvp_install_password IN ({$held}))";
 		}
 
 

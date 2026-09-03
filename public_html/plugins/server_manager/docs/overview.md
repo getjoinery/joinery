@@ -360,7 +360,8 @@ Only after the answer verifies does the host run the bundled, self-verifying `re
 | `restore_chain` | Restore a node from an incremental backup chain — what the fleet's scheduled backups actually produce. Fetches the chain manifest, recovers the chain key on the node from the node's own `backup_site_key`, downloads every artifact the manifest names up to the chosen run, then runs `restore_chain.sh`, which verifies each artifact against its recorded size and hash **before writing anything** and applies them in order | **Yes** |
 | `apply_update` | Run `upgrade.php` on target | **Yes** |
 | `publish_upgrade` | Run `publish_upgrade.php` locally on management node (in plugin) | No |
-| `install_node` | The one SSH session in a machine's life: fetch the release, `install.sh docker` (host agent), `install.sh site … --enable-agent` (a clone adds `--clone-from` and pulls the source over HTTPS). Run by `InstallJobExecutor` on the plane | No (target must be clean) |
+| `install_node` | The bootstrap SSH session: fetch the release, `install.sh docker` (host agent), `install.sh site … --enable-agent` (a clone adds `--clone-from` and pulls the source over HTTPS). Run by `InstallJobExecutor` on the plane over the provision's sealed install password | No (target must be clean) |
+| `retire_install_password` | The bootstrap's closing session, once every agent the install put on the machine is admitted: `install.sh host-harden --agent-managed` over the same password, so the machine stops accepting it. `InstallJobExecutor` completes the job only after a fresh login with the password is refused; the provision pipeline then erases the sealed password | No |
 | `provision_certificate` | Issue the node's certificate as a primitive on the **issuer**: the node itself on bare metal, its host's own agent for a container (`for_node_id` names the site). Driven by `ProvisionPendingSsl`, which observes a certificate the machine already reports before asking | No |
 | `clone_export_arm` | Hand the SOURCE of a clone one export key for the length of a provision (empty disarms). The setting name is compiled into `utils/clone_export_arm.php` on the source | No |
 | `fleet_enroll` | Seed a new site's fleet-service URL and API key pair (three settings; the names are compiled into `utils/fleet_enroll.php`). The secret is blanked from the job row once the node answers | No || `backup_run` | This management node's own backup of a node. The node runs its backup engine — chain, envelope, upload, local sweep — with the bucket and a write-only credential supplied for that run and never stored there. What opens the archive is not supplied: the node seals to the recovery key it holds and has verified | No |
@@ -523,10 +524,34 @@ account link — a fresh grant resumes it automatically.
 
 **Customer-owned node semantics:** the resulting node is a normal
 `ManagedNode` (installs, upgrades, uptime checks, SSL all apply). Provisioning
-is keyless — the instance is created with a one-time root password sealed onto
-the provision row (`cvp_root_pass_sealed`) and no SSH key of ours, so
+is keyless — the instance is created with an install password sealed onto the
+provision row (`cvp_root_pass_sealed`) and no SSH key of ours, so
 `mgn_ssh_key_path` is empty; the machine is managed by its own agent, which
-joins at install and whose join a human approves here. A docker provision's
+joins at install and whose join a human approves here.
+
+**The install password is retired, not kept.** `cvp_install_password` tracks
+it: `held` from the moment it is sealed; once the provision is `done` and
+every agent the install put on the machine has been admitted (the site's
+agent, and on a docker box the host's own agent too), the provisioning task
+queues a `retire_install_password` job, which runs `install.sh host-harden
+--agent-managed` over the password (`retiring`). The executor completes that
+job only after it tried the password again and the machine refused it; the
+next pass erases the sealed password (`retired`). A job that could not prove
+the refusal fails, the password is kept (`retire_failed`, reason on the row,
+ops emailed), and re-running the job from its detail page tries again. A
+provision that fails with a live instance keeps its password too: the
+password goes only when the install is complete. The dashboard's provisions
+table keeps a finished provision on the board until its password is retired,
+and says where it stands.
+
+**A join from a provisioned machine is checked with the provider.** The join
+records the client address this plane can vouch for (behind Cloudflare, the
+client header only from a verified edge). When that address is a provision's
+instance, the join card names the provision, instance and age; approval asks
+the provider for the instance and refuses unless it is `running` at that
+address and the node being approved is the provision's site or a host record
+at its address. A second join from that address after the node's agent is
+admitted is refused and logged as an alarm. A docker provision's
 container gets `mgn_mgh_host_id` (its placement record, minted at booting), and
 the host's own agent, once approved, is named in `mgh_mgn_host_node_id`. The
 server is the customer's property: cancelling their subscription stops
@@ -534,7 +559,8 @@ management, never touches the instance.
 
 The install itself runs from this management node, not from a node agent: a
 machine we just created has no agent yet. `ManagementJob::createJob` creates
-every `install_node` job in status `queued`, which the agent channel's claim
+every bootstrap job (`ManagementJob::BOOTSTRAP_JOB_TYPES`: `install_node` and
+`retire_install_password`) in status `queued`, which the agent channel's claim
 (`pending` only) never matches; the `Run Install Jobs` scheduled task spawns
 `plugins/server_manager/utils/run_install_executor.php` (detached, single
 instance, log at `logs/install_executor.log`), and `InstallJobExecutor` claims

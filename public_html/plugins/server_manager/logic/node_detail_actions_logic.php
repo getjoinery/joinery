@@ -19,6 +19,9 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.23 - approve_join checks a join from a provisioned machine with the provider before binding:
+ *                 the instance must be running at the join's address, and the node must be that
+ *                 machine's site or host (specs/keyless_provisioning.md WP5)
  * @version 1.22 - review fixes: retry_install refuses a keyless bare-metal retry (one-shot) and a clone whose key
  *                 was released; the SSL button observes a certificate the machine already holds before asking
  * @version 1.21 - SSH is one bootstrap (specs/ssh_single_bootstrap.md): provision_ssl always starts the
@@ -521,9 +524,29 @@ class NodeDetailActions {
 					return $base_url . '&tab=api_keys';
 				}
 				if ($node->get('mgn_agent_public_key')) {
+					// A second identity from a machine this plane provisioned, after
+					// its agent was admitted, is something on that box minting a new
+					// agent. First join wins; this one is refused and logged as an alarm.
+					if (class_exists('CustomerCloudProvision')
+							&& CustomerCloudProvision::for_machine_address((string)$request->get('ajr_source_ip'))) {
+						error_log('ALARM agent join: a second join request from provisioned address '
+							. $request->get('ajr_source_ip') . ' for node #' . $node->key . ' (' . $node->get('mgn_name')
+							. '), which already has a connected agent. Request #' . $request->key . ' refused.');
+					}
 					self::fail($session, $page_regex,
 						'This node already has a connected agent. Disconnect it first if you mean to replace it.');
 					return $base_url . '&tab=api_keys';
+				}
+				// A join from a machine this plane created is checked with the
+				// provider before a fingerprint comparison stands alone: the
+				// instance must be running at the join's address, and this node
+				// must be that machine's site or its host record.
+				if (class_exists('ProvisionCustomerCloud')) {
+					$approval = (new ProvisionCustomerCloud())->join_approval_check((string)$request->get('ajr_source_ip'), $node);
+					if (!$approval['ok']) {
+						self::fail($session, $page_regex, 'Join not approved. ' . $approval['reason']);
+						return $base_url . '&tab=api_keys';
+					}
 				}
 				require_once(PathHelper::getIncludePath('plugins/server_manager/includes/AgentChannelEndpoint.php'));
 				$linked_host = AgentChannelEndpoint::approveJoin($request, $node);

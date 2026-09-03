@@ -3,6 +3,8 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.19 - a finished provision stays on the board while this plane still holds its install
+ *                 password, and every row says where that password stands
  * @version 1.18 - a failing fleet backup links the failed job next to its reason
  * @version 1.17 - agent update state fetch_failed: the artifact could not be fetched and the agent is retrying
  * @version 1.16 - recovery-readiness attention line (never-verified/stale must-save secrets) linking to the readiness page
@@ -83,11 +85,12 @@ $recent_jobs->load();
 // Agent heartbeat
 $agent = AgentHeartbeat::getLatest();
 
-// Cloud provisions still working toward a running site (or stuck)
+// Cloud provisions still working toward a running site (or stuck), and finished
+// ones whose install password this plane still holds (specs/keyless_provisioning.md)
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
 $inflight_provisions = new MultiCustomerCloudProvision([
-	'statuses' => ['pending_connect', 'ready', 'booting', 'installing', 'failed'],
-	'deleted'  => false,
+	'open'    => true,
+	'deleted' => false,
 ], ['cvp_id' => 'DESC']);
 $inflight_provisions->load();
 
@@ -292,17 +295,20 @@ if ($agent_online) {
 	<div class="card-body py-2">
 		<strong>Cloud provisions:</strong>
 		<table class="table table-sm mb-0 mt-2">
-			<thead><tr><th>Domain</th><th>Origin</th><th>Status</th><th>Instance</th><th>Detail</th></tr></thead>
+			<thead><tr><th>Domain</th><th>Origin</th><th>Status</th><th>Instance</th><th>Install password</th><th>Detail</th></tr></thead>
 			<tbody>
 			<?php foreach ($inflight_provisions as $prov):
 				$pstatus = $prov->get('cvp_status');
-				$badge = ($pstatus === 'failed') ? 'danger' : (($pstatus === 'pending_connect') ? 'warning' : 'info');
+				$badge = ($pstatus === 'failed') ? 'danger' : (($pstatus === 'pending_connect') ? 'warning' : (($pstatus === 'done') ? 'success' : 'info'));
+				$pw_state = (string)$prov->get('cvp_install_password');
+				$pw_class = ($pw_state === 'retired') ? 'text-success' : (($pw_state === 'retire_failed') ? 'text-danger' : 'text-muted');
 			?>
 				<tr>
 					<td><?php echo htmlspecialchars($prov->get('cvp_domain')); ?></td>
 					<td><?php echo htmlspecialchars($prov->get('cvp_origin') ?: 'order'); ?></td>
 					<td><span class="badge bg-<?php echo $badge; ?>"><?php echo htmlspecialchars($pstatus); ?></span></td>
 					<td><?php echo htmlspecialchars(trim(($prov->get('cvp_instance_type') ?: '') . ' ' . ($prov->get('cvp_region') ?: '')) ?: '—'); ?></td>
+					<td class="<?php echo $pw_class; ?> small"><?php echo htmlspecialchars(ProvisionCustomerCloud::install_password_summary($prov)); ?></td>
 					<td class="text-muted"><?php echo htmlspecialchars(mb_substr((string)$prov->get('cvp_error'), 0, 120) ?: '—'); ?></td>
 				</tr>
 			<?php endforeach; ?>

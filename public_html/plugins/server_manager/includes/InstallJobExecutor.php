@@ -1,19 +1,25 @@
 <?php
 /**
- * InstallJobExecutor — the plane-side bootstrap runner for install_node jobs.
+ * InstallJobExecutor — the plane-side bootstrap runner.
  *
  * A machine we create has no agent yet, so its first install cannot travel the
- * agent channel. This runs that one job from the plane, over the root password
- * the provision sealed onto its row (specs/keyless_provisioning.md) — the
- * minimal capability that lets everything after it (the agent joins, is
- * approved, takes over) happen.
+ * agent channel. This runs the bootstrap from the plane, over the install
+ * password the provision sealed onto its row (specs/keyless_provisioning.md) —
+ * the minimal capability that lets everything after it (the agent joins, is
+ * approved, takes over) happen — and, once the agent is admitted, the one job
+ * that retires that same password.
  *
  * Deliberately narrow, so it can never grow into a general executor by accident:
  *
- *   - It runs ONE job type, install_node, and nothing else. install_node jobs
- *     are created in status 'queued' (ManagementJob::createJob), which the
+ *   - It runs the bootstrap job types (ManagementJob::BOOTSTRAP_JOB_TYPES:
+ *     install_node and retire_install_password) and nothing else. Both are
+ *     created in status 'queued' (ManagementJob::createJob), which the
  *     node-agent local queue's claim ('pending' only) never matches, so the
  *     two never contend for the same job.
+ *   - A retire_install_password job is not done when its steps succeed. The
+ *     executor then tries the password once more and requires the machine to
+ *     REFUSE it; only a refusal completes the job, and only a completed job
+ *     lets the provision pipeline erase the password. A doubt keeps it.
  *   - It runs two step types: 'local' steps here on the plane, 'ssh' steps
  *     on the target over the sealed password. build_install_node emits one of
  *     each — the release pre-flight, then the single bootstrap session — for
@@ -26,6 +32,8 @@
  * It writes the same mjb_output / mjb_status contract the agent's runner wrote,
  * so JobResultProcessor::process_install_node reads a completed job unchanged.
  *
+ * @version 1.5 - retire_install_password: the second bootstrap job type, claimed the same way, and
+ *                completed only after a fresh login with the password is refused by the machine
  * @version 1.4 - every install shape runs: the shape refusal and the scp/other-node refusals are gone,
  *                since the bootstrap is one session and a clone travels over HTTPS
  * @version 1.3 - processes the job result itself once the job is finished, as the channel endpoint does
@@ -44,6 +52,10 @@ class InstallJobExecutor {
 	const SSH_READY_TIMEOUT_SECONDS = 300;
 	/** Seconds between readiness probes. */
 	const SSH_READY_PROBE_INTERVAL = 10;
+	/** How long a retire job waits for the machine to refuse the password it just retired. */
+	const REFUSAL_CONFIRM_TIMEOUT_SECONDS = 90;
+	/** Seconds between refusal probes. */
+	const REFUSAL_PROBE_INTERVAL = 5;
 
 	/**
 	 * Atomically claim the oldest queued install_node job. Returns a
@@ -55,9 +67,10 @@ class InstallJobExecutor {
 		$db = DbConnector::get_instance()->get_db_link();
 		$db->beginTransaction();
 		try {
+			$types = "'" . implode("','", ManagementJob::BOOTSTRAP_JOB_TYPES) . "'";
 			$sel = $db->query(
 				"SELECT mjb_id FROM mjb_management_jobs " .
-				"WHERE mjb_status = 'queued' AND mjb_job_type = 'install_node' " .
+				"WHERE mjb_status = 'queued' AND mjb_job_type IN ({$types}) " .
 				"AND mjb_delete_time IS NULL " .
 				"ORDER BY mjb_id ASC LIMIT 1 FOR UPDATE SKIP LOCKED"
 			);
@@ -92,11 +105,17 @@ class InstallJobExecutor {
 	}
 
 	/**
-	 * Run a claimed install_node job to completion, writing output and the
+	 * Run a claimed bootstrap job to completion, writing output and the
 	 * terminal status. Never throws for a step failure — it records it and
 	 * fails the job, the way the node runner did.
 	 */
 	public function execute($job) {
+		$type = (string)$job->get('mjb_job_type');
+		if (!in_array($type, ManagementJob::BOOTSTRAP_JOB_TYPES, true)) {
+			$this->finish($job, false, "The bootstrap executor runs only " . implode(' and ', ManagementJob::BOOTSTRAP_JOB_TYPES)
+				. " jobs; '{$type}' is not one of them.");
+			return;
+		}
 		$node = new ManagedNode((int)$job->get('mjb_mgn_node_id'), TRUE);
 		if (!$node->key) {
 			$this->finish($job, false, 'The install job names no live target node.');
@@ -182,6 +201,18 @@ class InstallJobExecutor {
 			}
 		}
 
+		// Retiring the password is proven by the machine, not by the step's exit
+		// code: a fresh login with the password has to be refused. A machine that
+		// still accepts it, or one that cannot be asked, fails the job — and a
+		// failed job keeps the password, which is the safe side of this doubt.
+		if ($ok && $type === 'retire_install_password') {
+			$refusal = $this->confirm_password_refused($job, $ctx, max(0, $total - 1));
+			if ($refusal !== '') {
+				$ok = false;
+				$fail_message = $refusal;
+			}
+		}
+
 		$this->finish($job, $ok, $fail_message);
 
 		// The runner contract ends with the result PROCESSED, not merely
@@ -234,6 +265,50 @@ class InstallJobExecutor {
 	private function ssh_ready_timeout() {
 		$env = getenv('JOINERY_INSTALL_SSH_READY_TIMEOUT');
 		return ($env !== false && (int)$env > 0) ? (int)$env : self::SSH_READY_TIMEOUT_SECONDS;
+	}
+
+	/** The refusal-confirmation budget in seconds; tests shorten it through the environment. */
+	private function refusal_confirm_timeout() {
+		$env = getenv('JOINERY_INSTALL_REFUSAL_CONFIRM_TIMEOUT');
+		return ($env !== false && (int)$env > 0) ? (int)$env : self::REFUSAL_CONFIRM_TIMEOUT_SECONDS;
+	}
+
+	/**
+	 * Try the install password once more and require the machine to refuse it.
+	 * Returns '' when the machine said "Permission denied" — the only answer
+	 * that proves password login is off — and otherwise a failure message.
+	 *
+	 * sshd is restarted by host-harden moments before this, so the first probe
+	 * may not connect at all; that is a wait, not a verdict. A probe that logs
+	 * in is a verdict: the password still works and the job must fail. A probe
+	 * that never gets an answer inside the budget is a doubt, and a doubt fails
+	 * the job too — nothing erases a password the machine was not seen to refuse.
+	 */
+	private function confirm_password_refused($job, $ctx, $step_index) {
+		$started = time();
+		$budget = $this->refusal_confirm_timeout();
+		$this->append($job, "\n=== Confirming the machine refuses the install password ===\n", $step_index);
+		$last = '';
+		while (true) {
+			$probe = array('type' => 'ssh', 'cmd' => 'echo STILL_ACCEPTED', 'timeout' => 30);
+			list($out, $code) = $this->run_step($probe, $ctx);
+			if ($code === 0 && strpos($out, 'STILL_ACCEPTED') !== false) {
+				$this->append($job, "[the machine STILL ACCEPTED the install password]\n", $step_index);
+				return 'The machine still accepted the install password after host-harden; the password is kept. '
+					. 'Check sshd_config on the machine (PasswordAuthentication, PermitRootLogin) and re-run this job.';
+			}
+			if (stripos($out, 'Permission denied') !== false) {
+				$this->append($job, "[the machine refused the install password: retired]\n", $step_index);
+				return '';
+			}
+			$last = trim((string)$out);
+			if (time() - $started >= $budget) {
+				$this->append($job, "[could not get an answer from the machine: " . $last . "]\n", $step_index);
+				return 'Could not confirm that the machine refuses the install password (no answer within '
+					. $budget . 's: ' . $last . '); the password is kept. Re-run this job once the machine answers.';
+			}
+			sleep(min(self::REFUSAL_PROBE_INTERVAL, max(1, $budget - (time() - $started))));
+		}
 	}
 
 	/**

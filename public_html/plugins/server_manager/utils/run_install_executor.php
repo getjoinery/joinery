@@ -1,9 +1,10 @@
 <?php
 /**
- * run_install_executor.php — drain the queued install_node jobs.
+ * run_install_executor.php — drain the queued bootstrap jobs.
  *
  * A short-lived worker: take a single-instance lock, run every queued
- * install_node bootstrap job to completion one at a time (InstallJobExecutor),
+ * bootstrap job (install_node, retire_install_password) to completion one at
+ * a time (InstallJobExecutor),
  * then exit. Meant to be poked by the RunInstallJobs scheduled task each tick;
  * the lock makes an extra poke while one is already running a no-op, so the
  * task never has to track it.

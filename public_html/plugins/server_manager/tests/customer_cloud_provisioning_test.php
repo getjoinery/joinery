@@ -73,6 +73,7 @@ class CustomerCloudProvisioningTest {
 			$this->test_consumer();
 			$this->test_reverse_dns();
 			$this->test_keyless_provisioning();
+			$this->test_install_password_retirement();
 		} catch (Exception $e) {
 			check(false, 'uncaught exception', $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
 		} finally {
@@ -373,6 +374,165 @@ class CustomerCloudProvisioningTest {
 		$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_id IN (?, ?)')->execute([$clone_node_id, $src_unpaired->key]);
 		$db->prepare('DELETE FROM mgh_managed_hosts WHERE mgh_host IN (?, ?)')->execute([$clone_ip, '198.51.100.9']);
 		$db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_id = ?')->execute([$clone->key]);
+	}
+
+	private function test_install_password_retirement() {
+		section('Retiring the install password: every agent on the machine admitted, then the machine\'s word');
+
+		$suffix = substr(bin2hex(random_bytes(4)), 0, 8);
+		$fake = new KeylessProbeDriver();
+		$probe = new KeylessProbeProvision();
+		$probe->fakeDriver = $fake;
+		$db = $this->db;
+
+		$prov = new CustomerCloudProvision(NULL);
+		$prov->set('cvp_origin', 'admin');
+		$prov->set('cvp_usr_user_id', $this->user_id);
+		$prov->set('cvp_domain', 'retire-' . $suffix . '.example.com');
+		$prov->set('cvp_slug', 'retire-' . $suffix);
+		$prov->set('cvp_sitename', 'retire' . $suffix);
+		$prov->set('cvp_docker_mode', 'docker');
+		$prov->set('cvp_install_mode', 'fresh');
+		$prov->set('cvp_port', random_int(8100, 8999));
+		$prov->set('cvp_status', 'ready');
+		$prov->save();
+
+		// Held from the moment it is sealed.
+		$probe->probeReady($prov);
+		$prov->load();
+		check($prov->get('cvp_install_password') === 'held', 'the install password is held from the moment it is sealed');
+		$ip = '198.51.100.' . random_int(20, 240);
+		$fake->getInstanceResult = ['id' => '77009', 'ip' => $ip, 'status' => 'running'];
+		$probe->probeBooting($prov);
+		$prov->load();
+		$site_id = (int)$prov->get('cvp_mgn_node_id');
+		$site = new ManagedNode($site_id, TRUE);
+		check($site_id > 0 && $prov->get('cvp_status') === 'installing', 'the install is dispatched', (string)$probe->lastFailReason);
+		check(CustomerCloudProvision::for_machine_address($ip) !== null
+			&& (int)CustomerCloudProvision::for_machine_address($ip)->key === (int)$prov->key,
+			'the provision is found by its instance address');
+
+		// Only a DONE provision retires. Stand in for the install finishing.
+		$prov->set('cvp_status', 'done');
+		$prov->save();
+
+		// A docker box: the host's own agent must be admitted, then the site's.
+		check($probe->probeInstallPassword($prov) === 0 && $prov->get('cvp_install_password') === 'held',
+			'nothing happens while the host agent has not joined');
+		$agents = ProvisionCustomerCloud::machine_agents($prov, $site);
+		check(!$agents['ready'] && strpos($agents['reason'], 'host') !== false,
+			'and the reason names the host agent', $agents['reason']);
+		check(strpos(ProvisionCustomerCloud::install_password_summary($prov), 'Held') === 0,
+			'the dashboard line says the password is held and what it waits for');
+
+		// The host's own agent joins: a machine-posture node at the address,
+		// linked to the placement record at approval.
+		$host_node = new ManagedNode(NULL);
+		$host_node->set('mgn_name', 'HarnessTest retire host ' . $suffix);
+		$host_node->set('mgn_slug', 'retire-' . $suffix . '-host');
+		$host_node->set('mgn_host', $ip);
+		$host_node->set('mgn_skip_joinery_checks', true);
+		$host_node->set('mgn_uptime_enabled', false);
+		$host_node->save();
+		$host_node->load();
+		$linked = ManagedHost::link_host_node($host_node);
+		check($linked !== null, 'the host node links to the placement record');
+		$host_node->set('mgn_agent_public_key', base64_encode(str_repeat("\x0f", 32)));
+		$host_node->save();
+		$agents = ProvisionCustomerCloud::machine_agents($prov, $site);
+		check(!$agents['ready'] && strpos($agents['reason'], 'site') !== false,
+			'with the host admitted, the site\'s agent is what is waited for', $agents['reason']);
+		check($probe->probeInstallPassword($prov) === 0, 'still nothing dispatched');
+
+		$site->set('mgn_agent_public_key', base64_encode(str_repeat("\x0d", 32)));
+		$site->save();
+		check($probe->probeInstallPassword($prov) === 1, 'once both agents are admitted the pass advances');
+		$prov->load();
+		check($prov->get('cvp_install_password') === 'retiring', 'the provision is retiring');
+		$rjob = ManagementJob::latestForNode($site_id, 'retire_install_password');
+		$rcmd = $rjob ? json_decode((string)$rjob->get('mjb_commands'), true) : null;
+		check($rjob && $rjob->get('mjb_status') === 'queued'
+			&& strpos((string)($rcmd['steps'][0]['cmd'] ?? ''), 'host-harden --agent-managed') !== false,
+			'a queued retire_install_password job exists for the site node, running host-harden --agent-managed');
+		check($probe->probeInstallPassword($prov) === 0, 'while the job is queued the pass waits');
+
+		// The job fails: the password is kept, the reason is on the row, ops
+		// are told once.
+		$db->prepare("UPDATE mjb_management_jobs SET mjb_status = 'failed', mjb_error_message = 'the machine still accepted the install password' WHERE mjb_id = ?")
+			->execute([$rjob->key]);
+		check($probe->probeInstallPassword($prov) === 1, 'a failed job advances the provision');
+		$prov->load();
+		check($prov->get('cvp_install_password') === 'retire_failed', 'to retire_failed');
+		check(trim((string)$prov->get('cvp_root_pass_sealed')) !== '', 'and the password is KEPT');
+		check(strpos((string)$prov->get('cvp_error'), 'kept') !== false
+			&& strpos((string)$prov->get('cvp_error'), 'job #' . $rjob->key . ' ') !== false,
+			'the row says it is kept and names the job', (string)$prov->get('cvp_error'));
+		check(count($probe->notices) === 1 && strpos($probe->notices[0]['subject'], 'not retired') !== false,
+			'ops are told once');
+		check($probe->probeInstallPassword($prov) === 0 && count($probe->notices) === 1,
+			'the next pass does not re-alert the same failure');
+		$open_ids = [];
+		foreach (new MultiCustomerCloudProvision(['open' => true, 'deleted' => false]) as $o) { $open_ids[] = (int)$o->key; }
+		check(in_array((int)$prov->key, $open_ids, true), 'a done provision whose password is still held stays on the dashboard');
+
+		// A re-run of the job (its detail page) that completes retires it.
+		$rerun = ManagementJob::createJob($site_id, 'retire_install_password',
+			JobCommandBuilder::build_retire_install_password($site), ['provision_id' => (int)$prov->key], null);
+		$db->prepare("UPDATE mjb_management_jobs SET mjb_status = 'completed', mjb_output = 'INSTALL_PASSWORD_RETIRED' WHERE mjb_id = ?")
+			->execute([$rerun->key]);
+		check($probe->probeInstallPassword($prov) === 1, 'a completed re-run advances the provision');
+		$prov->load();
+		check($prov->get('cvp_install_password') === 'retired' && trim((string)$prov->get('cvp_root_pass_sealed')) === ''
+			&& $prov->get('cvp_error') === null,
+			'to retired: the sealed password is erased and the row is clean');
+		check(ProvisionCustomerCloud::install_password_summary($prov) === 'Retired', 'the dashboard line says Retired');
+		$open_ids = [];
+		foreach (new MultiCustomerCloudProvision(['open' => true, 'deleted' => false]) as $o) { $open_ids[] = (int)$o->key; }
+		check(!in_array((int)$prov->key, $open_ids, true), 'and it leaves the dashboard');
+
+		// A machine with one agent (bare, or bare metal) waits for that one only.
+		$bare = new CustomerCloudProvision(NULL);
+		$bare->set('cvp_install_mode', 'bare');
+		$bare->set('cvp_docker_mode', 'docker');
+		$bare_agents = ProvisionCustomerCloud::machine_agents($bare, $host_node);
+		check($bare_agents['ready'], 'a bare instance needs only its own agent admitted');
+		$bare->set('cvp_install_mode', 'fresh');
+		$bare->set('cvp_docker_mode', 'bare-metal');
+		$bm_agents = ProvisionCustomerCloud::machine_agents($bare, $host_node);
+		check($bm_agents['ready'], 'a bare-metal site needs only its own agent admitted');
+
+		// WP5 — approval is checked with the provider. The site node and the
+		// host node are the machine; anything else is refused; the provider
+		// must report the instance running at the join's address.
+		$fake->getInstanceResult = ['id' => '77009', 'ip' => $ip, 'status' => 'running'];
+		$ok = $probe->join_approval_check($ip, $site);
+		check($ok['ok'] && (int)$ok['provision']->key === (int)$prov->key, 'a join from the instance address approves against the site node', $ok['reason']);
+		$ok = $probe->join_approval_check($ip, $host_node);
+		check($ok['ok'], 'and against the host node at that address', $ok['reason']);
+		$stranger = new ManagedNode(NULL);
+		$stranger->set('mgn_name', 'HarnessTest stranger ' . $suffix);
+		$stranger->set('mgn_slug', 'retire-' . $suffix . '-stranger');
+		$stranger->set('mgn_host', '203.0.113.' . random_int(2, 250));
+		$stranger->set('mgn_uptime_enabled', false);
+		$stranger->save();
+		$stranger->load();
+		$no = $probe->join_approval_check($ip, $stranger);
+		check(!$no['ok'] && strpos($no['reason'], 'neither') !== false, 'a node that is not the machine is refused, saying so');
+		$fake->getInstanceResult = ['id' => '77009', 'ip' => $ip, 'status' => 'offline'];
+		$no = $probe->join_approval_check($ip, $site);
+		check(!$no['ok'] && strpos($no['reason'], 'not running') !== false, 'an instance the provider says is not running is refused');
+		$fake->getInstanceResult = ['id' => '77009', 'ip' => '198.51.100.1', 'status' => 'running'];
+		$no = $probe->join_approval_check($ip, $site);
+		check(!$no['ok'] && strpos($no['reason'], 'came from') !== false, 'an address the provider does not confirm is refused');
+		$none = $probe->join_approval_check('203.0.113.250', $stranger);
+		check($none['ok'] && $none['provision'] === null, 'a join from an address this plane never provisioned has nothing to check');
+
+		// Cleanup: jobs, then the nodes (site first: its FK points at the host record), host record, provision.
+		$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_node_id IN (?, ?, ?)')->execute([$site_id, $host_node->key, $stranger->key]);
+		$db->prepare('UPDATE mgh_managed_hosts SET mgh_mgn_host_node_id = NULL WHERE mgh_host = ?')->execute([$ip]);
+		$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_id IN (?, ?, ?)')->execute([$site_id, $host_node->key, $stranger->key]);
+		$db->prepare('DELETE FROM mgh_managed_hosts WHERE mgh_host = ?')->execute([$ip]);
+		$db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_id = ?')->execute([$prov->key]);
 	}
 
 	private function test_account_tokens() {
@@ -741,18 +901,22 @@ class KeylessProbeDriver implements CloudComputeProvider {
 	}
 }
 
-/** Runs handle_ready/handle_booting against a fake driver, no OAuth, no network. */
+/** Runs the pipeline's handlers against a fake driver, no OAuth, no network. */
 class KeylessProbeProvision extends ProvisionCustomerCloud {
 	public $fakeDriver;
 	public $lastFailReason;
+	public $notices = [];
 	protected function get_driver($provision) { return $this->fakeDriver; }
+	protected function resolve_driver($provision): array { return ['driver' => $this->fakeDriver, 'reason' => '', 'park' => false]; }
 	// Record the failure instead of emailing the ops address from a test.
 	protected function alert_and_fail($provision, $reason) {
 		$this->lastFailReason = $reason;
 		$provision->fail($reason);
 	}
+	protected function notify_ops(string $subject, string $body): void { $this->notices[] = ['subject' => $subject, 'body' => $body]; }
 	public function probeReady($p) { return $this->handle_ready($p); }
 	public function probeBooting($p) { return $this->handle_booting($p); }
+	public function probeInstallPassword($p) { return $this->handle_install_password($p); }
 }
 
 (new CustomerCloudProvisioningTest())->run();
