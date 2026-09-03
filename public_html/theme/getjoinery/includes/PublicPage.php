@@ -232,6 +232,7 @@ class PublicPage extends PublicPageBase {
             '/page/leave-gmail'           => 'Leave Gmail',
             '/page/nextcloud-alternative' => 'Nextcloud Alternative',
             '/page/families'              => 'For Families',
+            '/page/small-business'        => 'For Small Businesses',
             '/page/why'                   => 'Why Joinery',
             '/page/about'                 => 'About',
         ];

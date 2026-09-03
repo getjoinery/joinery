@@ -3,9 +3,8 @@
  * API Logic Endpoint
  *
  * Dispatches the two HTTP faces of an action's logic function, both opted in by
- * the same metadata companion — {action}_logic_descriptor() (canonical; rich
- * metadata including a typed `input` schema) or {action}_logic_api() (legacy
- * minimal form, honored until every action carries a descriptor):
+ * the same metadata companion, {action}_logic_descriptor() (rich metadata
+ * including a typed `input` schema):
  *
  *   - Action  — POST /api/v1/action/{name}: runs {action}_logic() and returns
  *               the translated LogicResult. When the metadata declares an
@@ -31,7 +30,9 @@
  * actions via the theme chain; {plugin}/{action} names resolve to a plugin's
  * logic directory).
  *
- * @version 1.5.0
+ * @version 1.5.1
+ * @changelog 1.5.1 - Header and boundary-validation comments describe the
+ *   descriptor as the only metadata companion (specs/logic_api_descriptor_migration.md).
  * @changelog 1.5.0 - Feature gating (specs/api_action_feature_gate.md): a
  *   descriptor's requires_setting names a setting that must be on for the
  *   action to exist. Enforced in resolveAction()/resolveForm() — before auth
@@ -245,8 +246,8 @@ class ApiLogicEndpoint {
 		// Idempotency-Key (or no credential to scope it to).
 		$idem_ctx = self::idempotencyResolve($action_label, $api_user, $api_entry, $raw_input);
 
-		// Boundary validation: when the metadata declares an input schema
-		// (descriptors do; legacy _logic_api() has none), coerce and validate
+		// Boundary validation: when the descriptor declares an input schema,
+		// coerce and validate
 		// the request against it — an invalid request exits 422 without
 		// claiming an Idempotency-Key or simulating a session. Coerced values
 		// (typed, defaults applied) overlay the raw ones; fields the schema
