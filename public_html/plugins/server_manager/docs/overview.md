@@ -303,6 +303,8 @@ The request names a **kind** from a closed set and, for a binary, an **architect
 
 A script-invoking primitive verifies its script against the signed release manifest before running it as root. On a site that manifest is `RELEASE_MANIFEST` and `RELEASE_MANIFEST.sig` at the site root, beside `public_html`; `install.sh` places it there when it lays down a fresh site (bare metal and the Docker image alike, from whichever archive it actually applied) and `upgrade.php` replaces it on every upgrade. A site tree without it refuses every script primitive, `apply_update` included. On a machine with no site there is no release manifest, so there is nothing to verify against and no script primitive can run at all — which would leave the machine's whole vocabulary in embedded Go.
 
+**Only the site that built the shipped agent signs.** The agent verifies against the key compiled into its binary, so the key that built the bundle in `agent_dist/` is the only one whose signatures any node will accept; `agent_dist/manifest.json` records it as `signing_public_key`. `TreeManifestPublisher::authority()` compares that key with the site's own `config/agent_signing_key` and the publish signs only when they are the same (a bundle that predates the record counts as built here when the agent source is on the box). A site that received its agent from upstream — getjoinery, republishing for the beta testers — holds a different key, and a manifest it signed is one its own agent and every node it serves would refuse. Such a site carries forward the manifest it received: into the core archive from its own site root, and for each theme and plugin from the directory that ships, leaving its live tree exactly as upstream delivered it. The support bundle is not rebuilt there either; the received one rides along in `agent_dist/`. A received manifest that turns out to be signed with the site's own key, or that does not verify against the bundle's key, aborts the publish and says so, rather than republishing a tree nothing can run.
+
 The support bundle closes that. A publish builds `public_html/agent_dist/support_bundle.tar.gz`: a small tree carrying the scripts those machines' primitives invoke, at site-root-relative paths, with its own `RELEASE_MANIFEST` and `.sig` signed by the release key. A siteless machine fetches it over the same artifact endpoint, verifies the signature against its baked-in key, checks every listed file's hash **and** that the tree holds nothing the manifest does not list, then unpacks it root-owned to `/opt/joinery-agent/tree`. Script primitives resolve against that tree when there is no site root; a machine with a site root uses the site root, and a machine with neither refuses as it always has.
 
 The bundle's contents are a deliberate list in `SupportBundlePublisher`, not a directory sweep — every entry is a script some primitive names, and adding one is a visible decision. The Docker host is its consumer: `decommission_site` runs the bundled `remove_account.sh`. A script that sources another needs that sibling in the list at the same relative path. Binaries the scripts invoke ship under `bin/` with one file per architecture (`bin/<tool>-linux-amd64`, `bin/<tool>-linux-arm64`) and the script selecting on `uname -m`: one bundle carries both, so no machine can end up holding one built for the wrong architecture.
@@ -1097,6 +1099,16 @@ columns instead of visiting nodes.
 here failed, or whose backups have stopped arriving within its schedule's window.
 The alarm is "my backups of this node are broken", not "this node is
 unprotected", which is not this management node's call to make.
+
+A failed run is reported from the run history, not from the stamp alone. The
+line says since when the runs have been failing and how many, when the last one
+worked, and the reason the node gave — a refusal's reason is recorded on the
+run's result by `process_backup_run` — and links the failed job. The summary is
+`NodeMonitorHealth::backup_run_summary()` over the node's `backup_run` jobs
+(`backup_runs_from_here()`), counting back to the last success and stepping over
+skipped runs and jobs the sweep has not read. A run with no `BACKUP_TIME` line is
+stamped at its job's completion time, so a refusal read by the sweep hours later
+still says when it happened.
 
 **The node's word is cross-checked against the bucket.** The retention pass
 lists each node's shelf with this management node's own credential before every

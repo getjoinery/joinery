@@ -390,4 +390,15 @@ check(JobResultProcessor::parse_backup_run_verdict('', 'failed')['status'] === '
 check(JobResultProcessor::parse_backup_run_verdict('nothing useful here', 'completed')['status'] === 'unknown',
 	'a completed job with no BACKUP_RESULT is unknown, not silently success');
 
+// When the run happened. A refused job has no BACKUP_TIME, and the sweep may
+// not read it until someone opens the dashboard hours later; the stamp must be
+// the job's completion time, never the moment it was read.
+$v = JobResultProcessor::parse_backup_run_verdict('', 'failed');
+check(JobResultProcessor::backup_run_stamp_time($v, '2026-09-03 04:45:12.677727') === '2026-09-03 04:45:12',
+	'a run with no BACKUP_TIME is stamped at the job completion time, to the second');
+check(JobResultProcessor::backup_run_stamp_time(array('time' => '2026-08-29 05:00:16'), '2026-08-29 05:01:00') === '2026-08-29 05:00:16',
+	'a run that said when it started keeps that time');
+check(preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', JobResultProcessor::backup_run_stamp_time($v, '')) === 1,
+	'a job with neither still gets a well-formed stamp');
+
 harness_finish();

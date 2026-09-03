@@ -5,6 +5,9 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.21 - process_backup_run stamps a run with no BACKUP_TIME at the job's own completion
+ *                 time, never at the moment the sweep happened to read it, and records the node's
+ *                 refusal reason as the run's message so the health card can repeat it
  * @version 1.20 - SSH is one bootstrap (specs/ssh_single_bootstrap.md): process_provision_ssl and
  *                 process_discover_nodes are gone with their builders; process_provision_certificate
  *                 stamps the node the job was FOR (for_node_id — a container's certificate is issued
@@ -758,8 +761,13 @@ class JobResultProcessor {
 	 * The time comes from the node's BACKUP_TIME line for the same reason: it is
 	 * when the run STARTED, as the node's own history records it — the identical
 	 * value a status check would later copy — so the stamp means one thing
-	 * whichever path wrote it. Falling back to now() only covers a node whose
-	 * runner predates the line.
+	 * whichever path wrote it. A run that never said when it started (the node
+	 * refused it, or the runner predates the line) is stamped at the job's own
+	 * completion time — see backup_run_stamp_time().
+	 *
+	 * A refused run carries its reason in mjb_error_message and nothing in its
+	 * output; that reason becomes the run's message, so the one line that says
+	 * WHY a backup did not happen is on the result the health card reads.
 	 */
 	private static function process_backup_run($job) {
 		$verdict = self::parse_backup_run_verdict(
@@ -771,13 +779,16 @@ class JobResultProcessor {
 		$result = ['backup_status' => $status];
 		if ($verdict['message'] !== '') {
 			$result['message'] = $verdict['message'];
+		} elseif ($status !== 'success' && trim((string)$job->get('mjb_error_message')) !== '') {
+			$result['message'] = trim((string)$job->get('mjb_error_message'));
 		}
 
 		$node_id = $job->get('mjb_mgn_node_id');
 		if ($node_id && $status !== 'skipped') {
 			try {
 				$node = new ManagedNode($node_id, TRUE);
-				$node->set('mgn_last_backup_time', $verdict['time'] !== '' ? $verdict['time'] : gmdate('Y-m-d H:i:s'));
+				$node->set('mgn_last_backup_time',
+					self::backup_run_stamp_time($verdict, (string)$job->get('mjb_completed_time')));
 				$node->set('mgn_last_backup_outcome', ($status === 'success') ? 'success' : 'failed');
 				$node->save();
 			} catch (Exception $e) {
@@ -788,6 +799,24 @@ class JobResultProcessor {
 
 		$job->set('mjb_result', json_encode($result));
 		$job->save();
+	}
+
+	/**
+	 * When to say a run happened. The node's BACKUP_TIME line when it gave one;
+	 * otherwise the job's completion time, which is when the plane learned the
+	 * outcome. Never now(): the sweep processes a refused job on whatever page
+	 * view comes next, and a stamp taken then reads on the dashboard as a backup
+	 * that failed the moment the operator looked, hours after it actually did.
+	 * Pure, so the fold test can pin it.
+	 */
+	public static function backup_run_stamp_time(array $verdict, string $completed_time): string {
+		if (!empty($verdict['time'])) {
+			return $verdict['time'];
+		}
+		if (preg_match('/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/', $completed_time, $m)) {
+			return $m[1];
+		}
+		return gmdate('Y-m-d H:i:s');
 	}
 
 	/**

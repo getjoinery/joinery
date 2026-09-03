@@ -139,4 +139,85 @@ check(strpos($written_body, $after) === false,
 
 exec('rm -rf ' . escapeshellarg($root));
 
+section('Only the site that built the shipped agent may sign');
+
+// The agent verifies against the key compiled into its binary. A site that
+// received its agent from upstream holds upstream's key in that binary and its
+// own key in config/; a manifest it signs is one its own agent refuses.
+$own = 'OWN_KEY_B64'; $upstream = 'UPSTREAM_KEY_B64';
+check(TreeManifestPublisher::maySign($own, $own, false)['may_sign'],
+	'a bundle built with this site\'s key: sign');
+check(!TreeManifestPublisher::maySign($upstream, $own, true)['may_sign'],
+	'a bundle built with another site\'s key: never sign, even with the source on this box');
+check(TreeManifestPublisher::maySign(null, $own, true)['may_sign'],
+	'a bundle that predates the key record, on the box that holds the source: it was built here, sign');
+check(!TreeManifestPublisher::maySign(null, $own, false)['may_sign'],
+	'a bundle that predates the key record, on a box without the source: it was received, do not sign');
+
+section('A site that may not sign carries the received manifest forward');
+
+$upstream_keys = tm_keys();
+$own_keys      = tm_keys();
+$authority = array(
+	'may_sign'       => false,
+	'keys'           => null,
+	'own_public_b64' => base64_encode($own_keys['public']),
+	'bundle_key_b64' => base64_encode($upstream_keys['public']),
+	'reason'         => 'test: cannot sign',
+);
+
+// The live tree, exactly as upstream delivered it: upstream's signed manifest at the root.
+$site = tm_tree(array('public_html/utils/upgrade.php' => "<?php // upgrade\n"));
+TreeManifestPublisher::write($site, $site, $upstream_keys);
+$received = file_get_contents($site . '/RELEASE_MANIFEST');
+// The staged core tree that will ship.
+$staged = tm_tree(array('public_html/utils/upgrade.php' => "<?php // upgrade\n"));
+
+$r = TreeManifestPublisher::publish_artifact($staged, $staged, $authority, $site);
+check($r['carried'] === true, 'the result says the manifest was carried, not signed');
+check(file_get_contents($staged . '/RELEASE_MANIFEST') === $received,
+	'the staged archive ships upstream\'s manifest byte for byte');
+check(sodium_crypto_sign_verify_detached(
+		base64_decode(trim(file_get_contents($staged . '/RELEASE_MANIFEST.sig'))),
+		$received, $upstream_keys['public']),
+	'and upstream\'s signature, which the shipped agent verifies');
+check(file_get_contents($site . '/RELEASE_MANIFEST') === $received,
+	'the live tree is left exactly as delivered');
+
+// The state that broke getjoinery: a manifest this site signed itself, sitting
+// in its live tree. Carrying it forward would republish the breakage.
+TreeManifestPublisher::write($site, $site, $own_keys);
+$threw = '';
+try { TreeManifestPublisher::publish_artifact($staged, $staged, $authority, $site); }
+catch (Exception $e) { $threw = $e->getMessage(); }
+check(strpos($threw, 'own key') !== false,
+	'a manifest signed with this site\'s own key is refused, naming the cause', $threw);
+
+// A manifest signed by neither key is not upstream's either.
+TreeManifestPublisher::write($site, $site, tm_keys());
+$threw = '';
+try { TreeManifestPublisher::publish_artifact($staged, $staged, $authority, $site); }
+catch (Exception $e) { $threw = $e->getMessage(); }
+check(strpos($threw, 'does not verify') !== false,
+	'a manifest the shipped agent would not verify is refused', $threw);
+
+// Nothing received at all: there is nothing honest to ship.
+unlink($site . '/RELEASE_MANIFEST'); unlink($site . '/RELEASE_MANIFEST.sig');
+$threw = '';
+try { TreeManifestPublisher::publish_artifact($staged, $staged, $authority, $site); }
+catch (Exception $e) { $threw = $e->getMessage(); }
+check(strpos($threw, 'no received manifest') !== false,
+	'with no received manifest the publish refuses rather than shipping unsigned', $threw);
+
+// A site that may sign still signs, with its own key.
+$r = TreeManifestPublisher::publish_artifact($staged, $staged, array(
+	'may_sign' => true, 'keys' => $own_keys, 'own_public_b64' => base64_encode($own_keys['public']),
+	'bundle_key_b64' => base64_encode($own_keys['public']), 'reason' => 'test: may sign'));
+check($r['carried'] === false && sodium_crypto_sign_verify_detached(
+		base64_decode(trim(file_get_contents($staged . '/RELEASE_MANIFEST.sig'))),
+		file_get_contents($staged . '/RELEASE_MANIFEST'), $own_keys['public']),
+	'a site that may sign writes a fresh manifest under its own key');
+
+exec('rm -rf ' . escapeshellarg($site) . ' ' . escapeshellarg($staged));
+
 harness_finish();

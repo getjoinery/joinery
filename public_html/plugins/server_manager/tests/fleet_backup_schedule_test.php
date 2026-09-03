@@ -289,4 +289,42 @@ $h = NodeMonitorHealth::fleet_backup_health($health_node(array(
 check(!$h['is_problem'],
 	'a shelf not listed since the claimed run casts no verdict', $h['label']);
 
+section('A failing node is reported from its run history, not just its stamp');
+
+// Newest first, as backup_runs_from_here() returns them. Two refusals, a skip
+// in between (stepped over), then the run that worked.
+$rows = array(
+	array('id' => 40, 'outcome' => 'error',   'time' => '2026-09-02 04:45:12', 'message' => 'Refused by the node: tree manifest signature does not verify'),
+	array('id' => 39, 'outcome' => 'skipped', 'time' => '2026-09-01 12:00:00', 'message' => ''),
+	array('id' => 38, 'outcome' => 'error',   'time' => '2026-08-31 04:45:20', 'message' => 'Refused by the node: tree manifest signature does not verify'),
+	array('id' => 37, 'outcome' => 'success', 'time' => '2026-08-30 23:20:23', 'message' => 'Backed up'),
+	array('id' => 36, 'outcome' => 'error',   'time' => '2026-08-29 04:45:00', 'message' => 'older failure, before the success'),
+);
+$sum = NodeMonitorHealth::backup_run_summary($rows);
+check($sum['failures'] === 2, 'failures are counted back to the last success only', $sum['failures']);
+check($sum['since'] === '2026-08-31 04:45:20', 'since is the oldest failure in the streak', $sum['since']);
+check($sum['last_success'] === '2026-08-30 23:20:23', 'the last success is named', $sum['last_success']);
+check($sum['job_id'] === 40 && strpos($sum['reason'], 'Refused by the node') === 0,
+	'the reason and the job come from the newest failure', var_export($sum, true));
+
+// A job the sweep has not read yet has no outcome and casts no vote.
+$sum = NodeMonitorHealth::backup_run_summary(array(
+	array('id' => 41, 'outcome' => '', 'time' => '2026-09-03 04:45:00', 'message' => ''),
+	array('id' => 40, 'outcome' => 'error', 'time' => '2026-09-02 04:45:12', 'message' => 'x'),
+));
+check($sum['failures'] === 1 && $sum['job_id'] === 40, 'an unread job is stepped over', var_export($sum, true));
+
+$sum = NodeMonitorHealth::backup_run_summary(array());
+check($sum['failures'] === 0 && $sum['last_success'] === null && $sum['reason'] === '',
+	'no history summarises to nothing, not to an error');
+
+// Without a job history to hand (the stand-in has no key), the failed stamp
+// is still an alarm and still says when.
+$h = NodeMonitorHealth::fleet_backup_health($health_node(array(
+	'mgn_last_backup_outcome' => 'failed',
+)), $policy);
+check($h['is_problem'] && $h['label'] === 'Last backup failed', 'a failed stamp is a problem', $h['label']);
+check(strpos($h['detail'], 'failed (') !== false && strpos($h['detail'], 'ago)') !== false,
+	'and the detail says how long ago', $h['detail']);
+
 harness_finish();
