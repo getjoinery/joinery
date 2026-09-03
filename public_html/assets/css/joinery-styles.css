@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   Joinery Default UI Kit  ·  custom.css  ·  v2.10.0
+   Joinery Default UI Kit  ·  custom.css  ·  v2.10.1
    Pure Slate design. Themeable values live in --jy-* tokens on
    :root so branded themes can override them without understanding
    internals. Component rules are scoped under .jy-ui to prevent
@@ -498,7 +498,18 @@ body.jy-default blockquote {
 
 @media (max-width: 768px) {
   .jy-menu-toggle { display: flex; }
-  .jy-header-right { gap: var(--jy-space-2); }
+  /* The header fits the phone instead of pushing the page wide. The controls
+     on the right keep their size (a clipped button is a control lost); the
+     account name goes, so the avatar alone opens the dropdown; padding and
+     gaps tighten; and the logo is the one thing that yields, clipping its
+     text at the edge if the site name is long. */
+  .jy-header-inner { padding: 0 var(--jy-space-4); gap: var(--jy-space-3); }
+  .jy-logo { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; font-size: var(--jy-text-lg); }
+  .jy-header-right { gap: var(--jy-space-2); flex: 0 0 auto; }
+  .jy-header-icons { gap: var(--jy-space-1); }
+  .jy-header-icons .jy-user-name { display: none; }
+  .jy-user-dropdown-toggle { padding: var(--jy-space-2); }
+  .jy-header-icons .jy-header-admin-link { padding-left: var(--jy-space-1); padding-right: var(--jy-space-1); }
   .jy-nav-links {
     display: none;
     position: absolute;
@@ -545,6 +556,9 @@ body.jy-default blockquote {
    flex column so the app page can grow, and the app's main component
    (a flex child of .page-content--app) stretches to the fold. */
 body.jy-default:has(.page-content--app) { display: flex; flex-direction: column; min-height: 100vh; }
+/* dvh tracks the visible screen on a phone as the browser toolbar comes and
+   goes; 100vh above is the fallback for browsers without it. */
+body.jy-default:has(.page-content--app) { min-height: 100dvh; }
 /* Grow-only fill: min-height stays auto at every level, so a page taller than
    the viewport (e.g. the calendar with its edit form open) scrolls normally
    instead of collapsing. Self-scrolling components (the mailbox reader) opt

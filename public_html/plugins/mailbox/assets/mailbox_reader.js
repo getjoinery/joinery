@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.54
+ * No framework. @version 2.55
  *
  * The conversation list updates in place after mutations
  * (specs/implemented/mailbox_reader_list_persistence.md): actions that take rows out of
@@ -22,6 +22,7 @@
 
 	var state = {
 		aliasId: null,        // null = all accessible (or "All mail" for superadmin)
+		folderLabel: 'Inbox', // the open folder's name, as the phone scope bar shows it
 		allAccess: false,
 		filter: 'all',        // retained for the list endpoint; sectioned view shows all
 		lastSection: null,    // last section header emitted (for sectioned rendering)
@@ -305,8 +306,10 @@
 		highlightMailbox();
 		renderFolderRail();
 		// The switcher data is what says how a mailbox is protected, so the chip
-		// beside the list title can only be right once this has run.
+		// beside the list title can only be right once this has run. The phone
+		// scope bar's unread count comes from the same data, so it follows too.
 		updateLevelChip();
+		renderScopeBar();
 
 		// New message is only ever composable when the viewer has at least one
 		// accessible mailbox to send as (canCompose, mirrored client-side).
@@ -324,6 +327,48 @@
 		var list = $('#mbx-threads');
 		if (list) list.setAttribute('aria-label', state.listContext || 'Conversations');
 		updateLevelChip();
+		renderScopeBar();
+	}
+
+	// ---- phone scope bar + rail drawer (specs/mailbox_reader_phone_layout.md) ----
+	// Below the phone breakpoint the rail is a drawer and the scope bar is what
+	// the rail highlight is on a desktop: the mailbox and folder the list shows.
+	// It is fed from the state the rail already keeps, so it can never disagree
+	// with it. The elements exist in every layout; CSS decides whether they show.
+	function renderScopeBar() {
+		var bar = $('#mbx-scope');
+		if (!bar) return;
+		$('#mbx-scope-mailbox').textContent = state.mailboxLabel || 'All mail';
+		$('#mbx-scope-folder').textContent = state.folderLabel || 'Inbox';
+		// Unread follows the switcher data, exactly as the rail badge does; an
+		// unmatched pseudo-box is not in that list and shows no count.
+		var unread = 0;
+		state.mailboxes.forEach(function (m) {
+			if (String(m.alias_id) === String(state.aliasId)) { unread = m.unread || 0; }
+		});
+		var badge = $('#mbx-scope-unread');
+		badge.hidden = !(unread > 0);
+		badge.textContent = unread > 0 ? String(unread) : '';
+	}
+
+	function railOpen() {
+		return $('#mbx-reader').classList.contains('rail-open');
+	}
+
+	function openRail() {
+		if (railOpen()) { return; }
+		$('#mbx-reader').classList.add('rail-open');
+		$('#mbx-scope').setAttribute('aria-expanded', 'true');
+		enterHistory('mbxRail');   // phone Back closes the drawer, not the reader
+	}
+
+	// Idempotent: a pick inside the drawer closes it directly AND hands back the
+	// history entry, whose popstate closes it again a moment later.
+	function closeRail(fromHistory) {
+		if (!railOpen()) { return; }
+		$('#mbx-reader').classList.remove('rail-open');
+		$('#mbx-scope').setAttribute('aria-expanded', 'false');
+		if (!fromHistory) { leaveHistory('mbxRail'); }
 	}
 
 	function updateLevelChip() {
@@ -456,6 +501,7 @@
 
 	function selectFolder(folderId, name) {
 		closeThread();                    // leave any open conversation → show the list
+		closeRail();                      // a pick from the phone drawer closes it
 		state.draftsView = false;
 		state.inboxView = false;
 		state.spamView = false;
@@ -481,6 +527,7 @@
 		} else {
 			state.folderId = folderId;    // null = All Mail; a number = a tracked folder
 		}
+		state.folderLabel = state.inboxView ? 'Inbox' : (name || 'All Mail');
 		// Inbox is the mailbox's default, so its title is just the mailbox; the other
 		// views append their name.
 		setListContext((state.mailboxLabel || 'All mail')
@@ -509,6 +556,7 @@
 
 	function selectMailbox(aliasId, label) {
 		closeThread();                    // leave any open conversation → show the list
+		closeRail();                      // a pick from the phone drawer closes it
 		rememberMailbox(aliasId);
 		state.aliasId = aliasId;
 		state.draftsView = false;
@@ -518,6 +566,7 @@
 		state.sentView = false;
 		state.trashView = false;
 		state.mailboxLabel = label || 'All mail';
+		state.folderLabel = 'Inbox';
 		setListContext(state.mailboxLabel);
 		highlightMailbox();
 		renderFolderRail();
@@ -823,6 +872,7 @@
 				closeAllFolderPanels();
 				closeAllKebabs();
 				panel.hidden = !willOpen;
+				if (willOpen) { keepPanelOnScreen(panel); }
 			});
 		var panel = el('div', 'mbx-folder-panel');
 		panel.hidden = true;
@@ -1367,7 +1417,7 @@
 
 	// ---- reading pane (right) ----
 	function openThread(t, rowEl) {
-		enterReadingHistory();   // give Back something to return to
+		enterHistory('mbxReading');   // give Back something to return to
 		state.threadKey = t.thread_key;
 		state.openThread = t;
 		Array.prototype.forEach.call(document.querySelectorAll('.mbx-thread-item'), function (n) {
@@ -1656,6 +1706,7 @@
 			closeAllFolderPanels();
 			closeAllKebabs();
 			panel.hidden = !willOpen;
+			if (willOpen) { keepPanelOnScreen(panel); }
 		});
 		panel.addEventListener('click', function (e) { e.stopPropagation(); });
 		wrap.appendChild(btn);
@@ -1667,6 +1718,21 @@
 		Array.prototype.forEach.call(document.querySelectorAll('.mbx-folder-panel'), function (p) {
 			p.hidden = true;
 		});
+	}
+
+	// A dropdown panel hangs from the left edge of its button. On a phone a
+	// button in the right half of the row hangs its panel past the screen edge,
+	// so once shown the panel is measured and slid left just far enough to fit,
+	// never past the screen's left edge (specs/mailbox_reader_phone_layout.md).
+	function keepPanelOnScreen(panel) {
+		panel.style.left = '';
+		var margin = 8;
+		var rect = panel.getBoundingClientRect();
+		var limit = document.documentElement.clientWidth - margin;
+		var shift = 0;
+		if (rect.right > limit) { shift = limit - rect.right; }
+		if (rect.left + shift < margin) { shift = margin - rect.left; }
+		if (shift) { panel.style.left = shift + 'px'; }
 	}
 
 	// SPF/DKIM/DMARC verdicts are READ from the message's Authentication-Results
@@ -1753,7 +1819,7 @@
 		var wrap = el('div', 'mbx-message' + (outbound ? ' mbx-outbound' : '') + (expanded ? '' : ' mbx-collapsed'));
 
 		var head = el('div', 'mbx-message-head');
-		var left = el('div');
+		var left = el('div', 'mbx-message-left');
 		var from = el('div', 'mbx-message-from', senderFull(m.sender));
 		if (outbound) from.appendChild(el('span', 'mbx-sent-tag', 'Sent'));
 		left.appendChild(from);
@@ -3409,7 +3475,7 @@
 
 	// Render the reading pane as just the composer (a draft has no conversation).
 	function showDraftComposer(data) {
-		enterReadingHistory();   // a full-pane view, so Back returns from it too
+		enterHistory('mbxReading');   // a full-pane view, so Back returns from it too
 		$('#mbx-reader').classList.add('reading');
 		$('#mbx-read-pane').scrollTop = 0;
 		var pane = $('#mbx-thread');
@@ -3649,48 +3715,61 @@
 		});
 		// Hand the history entry back unless Back is what closed us — otherwise it
 		// lingers and the next Back press is spent going nowhere.
-		if (!fromHistory) { leaveReadingHistory(); }
+		if (!fromHistory) { leaveHistory('mbxReading'); }
 	}
 
-	// ---- browser history: Back leaves the conversation, not the reader ----
-	// Opening a conversation replaces the list with it, so Back should undo that
-	// step — the browser button, a phone's hardware back, an edge-swipe. Reading
-	// pushes a marked history entry to have something to go back TO; the entry
-	// carries no URL change, because a thread key is not a route the server can
-	// serve and a reload must land on the list rather than on a conversation the
-	// URL promises and the page cannot restore.
-	function readingEntryActive() {
-		return !!(window.history.state && window.history.state.mbxReading);
+	// ---- browser history: Back undoes the last in-reader step, not the reader ----
+	// Opening a conversation replaces the list with it, and on a phone opening
+	// the drawer covers it, so Back should undo that step — the browser button,
+	// a phone's hardware back, an edge-swipe. Each step pushes a history entry
+	// marked with its name ('mbxReading', 'mbxRail') to have something to go
+	// back TO; the entry carries no URL change, because a thread key is not a
+	// route the server can serve and a reload must land on the list rather than
+	// on a conversation the URL promises and the page cannot restore.
+	var HISTORY_MARKERS = ['mbxReading', 'mbxRail'];
+
+	function historyEntryActive(marker) {
+		return !!(window.history.state && window.history.state[marker]);
 	}
 
-	function enterReadingHistory() {
-		if (readingEntryActive()) { return; }   // already inside one — reopening in place
-		try { window.history.pushState({ mbxReading: true }, ''); } catch (e) {}
+	function enterHistory(marker) {
+		if (historyEntryActive(marker)) { return; }   // already inside one — reopening in place
+		var entry = {};
+		entry[marker] = true;
+		try { window.history.pushState(entry, ''); } catch (e) {}
 	}
 
-	function leaveReadingHistory() {
-		if (readingEntryActive()) {
+	function leaveHistory(marker) {
+		if (historyEntryActive(marker)) {
 			try { window.history.back(); } catch (e) {}
 		}
 	}
 
 	// ---- wiring ----
 	function init() {
-		// A reload while reading keeps the entry we pushed but lands on the list, so
-		// clear the marker first — otherwise the reader would think it is one Back
-		// away from a conversation that is no longer open, and spend that press.
-		if (readingEntryActive()) {
+		// A reload while reading (or with the drawer open) keeps the entry we
+		// pushed but lands on the list, so clear the marker first — otherwise the
+		// reader would think it is one Back away from a view that is no longer
+		// open, and spend that press.
+		if (HISTORY_MARKERS.some(historyEntryActive)) {
 			try { window.history.replaceState(null, ''); } catch (e) {}
 		}
 
-		// Back (browser button, phone back key, edge-swipe) off a reading entry
-		// returns to the list. Any other entry is not ours — let it navigate.
+		// Back (browser button, phone back key, edge-swipe) off one of our entries
+		// undoes that step: the drawer closes, the conversation returns to the
+		// list. Any other entry is not ours — let it navigate.
 		window.addEventListener('popstate', function (e) {
-			var goingToReading = !!(e.state && e.state.mbxReading);
-			if (!goingToReading && $('#mbx-reader').classList.contains('reading')) {
-				closeThread(true);
-			}
+			var entry = e.state || {};
+			var reader = $('#mbx-reader');
+			if (!entry.mbxRail && reader.classList.contains('rail-open')) { closeRail(true); }
+			if (!entry.mbxReading && reader.classList.contains('reading')) { closeThread(true); }
 		});
+
+		// Phone drawer: the scope bar opens it; its close button and the scrim
+		// close it. Picking a mailbox or folder closes it from inside select*().
+		$('#mbx-scope').addEventListener('click', openRail);
+		$('#mbx-rail-close').addEventListener('click', function () { closeRail(); });
+		$('#mbx-scrim').addEventListener('click', function () { closeRail(); });
 
 		// Debounced search.
 		var searchTimer = null;

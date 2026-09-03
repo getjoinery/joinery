@@ -2594,6 +2594,29 @@ deliberately does not carry the button: its all-access view spans mailboxes
 the viewer holds no grant on, and admins manage recipes on the dashboard. See
 `plugins/joinery_ai/docs/overview.md` § The area AI panel.
 
+### Phone layout
+
+Below 768px (the kit's header breakpoint) the reader shows one pane at a
+time. The conversation list is the default screen; an opened conversation
+replaces it, with its own Back arrow; the rail is a drawer that slides over
+the list on request. A **scope bar** above the list header names the mailbox
+and folder the list is showing with the mailbox's unread count — it is fed
+from the same state as the rail highlight — and tapping it opens the drawer.
+Picking a mailbox or folder in the drawer closes it; so does its close button,
+a tap on the scrim, or Back.
+
+Back (the browser button, a phone's hardware key, an edge-swipe) undoes the
+last in-reader step: it closes the drawer if one is open, otherwise it returns
+an open conversation to the list, and only then leaves the page. Each step
+pushes a marked history entry (`mbxRail`, `mbxReading`) with no URL change; a
+reload lands on the list.
+
+Rows are two lines on a phone: sender and time, then subject and snippet. The
+row markup is the desktop row's, placed by CSS grid. The contacts panel is not
+shown below 1100px. The native apps load this page in their webview in app
+display mode (no site header), where the scope bar is the only mailbox
+switcher.
+
 ### Mailbox-per-address model
 
 **A mailbox IS an address (alias).** `beth@` and `legal@` are two mailboxes
