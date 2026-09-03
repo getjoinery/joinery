@@ -37,6 +37,9 @@
  * mailbox is open. See plugins/mailbox/docs/overview.md § The list toolbar and
  * multi-select.
  *
+ * @version 1.21.0 - phone layout (specs/mailbox_reader_phone_layout.md): the
+ *                  rail carries a drawer close button, a scrim sits beside it,
+ *                  and a scope bar heads the list view
  * @version 1.20.0 - a compose preflight banner (#mbx-compose-preflight) sits
  *   above the form: a mailbox that cannot send says so before a word is written
  *   (specs/imap_source_domain_boundaries.md §5.2)
@@ -117,12 +120,18 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 	echo '<script>window.MAILBOX_READER = ' . json_encode($config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ';</script>';
 	?>
 <div id="mbx-reader" class="mbx-reader">
-	<aside class="mbx-rail">
+	<aside class="mbx-rail" id="mbx-rail" aria-label="Mailboxes">
 		<div class="mbx-rail-section">
-			<h2 class="mbx-rail-title">Mailboxes</h2>
+			<div class="mbx-rail-head">
+				<h2 class="mbx-rail-title">Mailboxes</h2>
+				<!-- Phone only: the rail is a drawer there, and this closes it. -->
+				<button type="button" class="mbx-rail-close" id="mbx-rail-close" aria-label="Close mailbox list">&times;</button>
+			</div>
 			<ul id="mbx-mailboxes" class="mbx-mailbox-list"></ul>
 		</div>
 	</aside>
+	<!-- Phone only: the scrim behind the open drawer; a tap on it closes the drawer. -->
+	<div class="mbx-scrim" id="mbx-scrim" aria-hidden="true"></div>
 
 	<section class="mbx-main"><?php
 	// Compose panel — a real FormWriter form rendered once, hidden; the reader's
@@ -234,6 +243,18 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 			?>
 		</div>
 		<div class="mbx-list-view" id="mbx-list-view">
+			<!-- Phone only (specs/mailbox_reader_phone_layout.md): the mailbox and
+			     folder the list is showing, and the button that opens the rail as a
+			     drawer. The reader JS keeps its text in step with the rail. -->
+			<button type="button" class="mbx-scope" id="mbx-scope"
+				aria-haspopup="true" aria-expanded="false" aria-controls="mbx-rail">
+				<span class="mbx-scope-icon" aria-hidden="true">&#9776;</span>
+				<span class="mbx-scope-text">
+					<span class="mbx-scope-mailbox" id="mbx-scope-mailbox"></span>
+					<span class="mbx-scope-folder" id="mbx-scope-folder"></span>
+				</span>
+				<span class="mbx-badge" id="mbx-scope-unread" hidden></span>
+			</button>
 			<div class="mbx-list-header">
 				<!-- Toolbar over the list, Gmail's placement: the select-all box and
 				     its selection menu, then Refresh, then the bulk actions that

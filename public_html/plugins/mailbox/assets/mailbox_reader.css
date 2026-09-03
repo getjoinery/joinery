@@ -1,7 +1,7 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.27
+ * Vanilla CSS, no framework. @version 2.28
  */
 
 /* Every size the reader renders text at, in one ladder. Nothing in this file
@@ -73,6 +73,41 @@
 	font-weight: 600;
 }
 .mbx-mailbox-list { list-style: none; margin: 0; padding: 0; }
+/* The rail's title row also carries the drawer's close button on a phone. */
+.mbx-rail-head { display: flex; align-items: center; justify-content: space-between; }
+.mbx-rail-close {
+	display: none;
+	border: none; background: none; cursor: pointer; color: #6b7280;
+	font-size: var(--mbx-text-xl); line-height: 1; padding: 2px 6px; margin: -6px -6px 0 0;
+	border-radius: 4px;
+}
+.mbx-rail-close:hover { background: #e9eef3; color: #111827; }
+/* Scrim behind the phone drawer; nothing on a desktop, where there is no drawer. */
+.mbx-scrim { display: none; }
+/* Scope bar (specs/mailbox_reader_phone_layout.md): phone-only, above the
+ * list header — the mailbox and folder the list is showing, and the way into
+ * the drawer. On a desktop the rail highlight says the same thing, so the bar
+ * does not exist there. */
+.mbx-scope {
+	display: none;
+	width: 100%;
+	align-items: center;
+	gap: 10px;
+	padding: 10px 14px;
+	border: none;
+	border-bottom: 1px solid #e4e7eb;
+	background: #f7f9fb;
+	color: #1f2933;
+	font-size: var(--mbx-text-base);
+	text-align: left;
+	cursor: pointer;
+}
+.mbx-scope-icon { flex: 0 0 auto; font-size: var(--mbx-text-lg); color: #6b7280; line-height: 1; }
+.mbx-scope-text { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 6px; overflow: hidden; }
+.mbx-scope-mailbox { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mbx-scope-folder { flex: 0 0 auto; color: #6b7280; font-size: var(--mbx-text-sm); }
+.mbx-scope-folder::before { content: '\203A\00a0'; }
+
 .mbx-mailbox {
 	display: flex;
 	align-items: center;
@@ -498,8 +533,13 @@
 	cursor: pointer;
 	font-size: var(--mbx-text-base);
 }
-.mbx-message-from { font-weight: 600; color: #1f2933; }
-.mbx-message-meta { color: #6b7280; font-size: var(--mbx-text-sm); }
+/* The sender block yields before the time and menu do: a flex child will not
+ * shrink below its longest word by default, and on a phone that word is a full
+ * address — the head would push its right side out of the card and hand the
+ * whole reading pane a sideways scroll. */
+.mbx-message-left { flex: 1 1 auto; min-width: 0; }
+.mbx-message-from { font-weight: 600; color: #1f2933; overflow-wrap: anywhere; }
+.mbx-message-meta { color: #6b7280; font-size: var(--mbx-text-sm); overflow-wrap: anywhere; }
 
 /* Authentication line. A message nothing checked is the ordinary case for
    imported and IMAP-collected mail, so it stays neutral grey — only a verdict
@@ -739,17 +779,88 @@
 }
 
 /* ---- Responsive: rail moves above the main pane on narrow screens ---- */
-@media (max-width: 760px) {
-	.mbx-reader { flex-direction: column; height: auto; min-height: 70vh; }
-	.mbx-rail { flex-basis: auto; border-right: none; border-bottom: 1px solid #e4e7eb; }
-	/* While reading on a small screen, hide the rail so the message gets full width. */
-	.mbx-reader.reading .mbx-rail { display: none; }
+/* ---- Phone layout (specs/mailbox_reader_phone_layout.md) ----
+ * Below the kit's header breakpoint the reader shows one pane at a time: the
+ * list by default, an opened conversation in its place, and the rail only on
+ * request, as a drawer over the list. The reader keeps filling the viewport
+ * and scrolling inside itself; only what lives inside that height changes. */
+@media (max-width: 768px) {
+	/* The rail leaves the flex row and becomes a drawer: off-canvas until
+	 * .rail-open, then full height with its own scroll. In the row it is
+	 * content-sized and cannot shrink, which is what squeezed the list to
+	 * nothing on a phone. */
+	.mbx-rail {
+		position: fixed;
+		top: 0; left: 0; bottom: 0;
+		height: 100vh;
+		height: 100dvh;
+		width: min(320px, 85vw);
+		flex: none;
+		overflow-y: auto;
+		box-shadow: 0 0 24px rgba(16, 24, 40, .18);
+		z-index: 1000;
+		transform: translateX(-100%);
+		visibility: hidden;
+		transition: transform .2s ease, visibility 0s linear .2s;
+	}
+	.mbx-reader.rail-open .mbx-rail {
+		transform: none;
+		visibility: visible;
+		transition: transform .2s ease;
+	}
+	.mbx-scrim {
+		display: block;
+		position: fixed;
+		inset: 0;
+		background: rgba(16, 24, 40, .4);
+		z-index: 999;
+		opacity: 0;
+		visibility: hidden;
+		transition: opacity .2s ease, visibility 0s linear .2s;
+	}
+	.mbx-reader.rail-open .mbx-scrim { opacity: 1; visibility: visible; transition: opacity .2s ease; }
+	.mbx-rail-close { display: inline-flex; }
+
+	/* The scope bar stands in for the rail highlight. Hidden while reading:
+	 * the conversation header names its own context. */
+	.mbx-scope { display: flex; }
+	.mbx-reader.reading .mbx-scope { display: none; }
+
 	/* Too narrow for three things on one row: search drops to its own full-width
 	 * line under the toolbar and the buttons, which then take only the width
 	 * they need instead of half the row each. */
 	.mbx-list-header .mbx-searchbar { order: 3; flex: 1 1 100%; max-width: none; margin: 0; }
 	.mbx-list-header .mbx-list-tools { flex: 1 1 auto; }
 	.mbx-list-header .mbx-list-header-actions { flex: 0 0 auto; }
+
+	/* Two-line rows. The desktop row's fixed sender column leaves nothing for
+	 * the subject at phone width, so sender and time take line one, subject and
+	 * snippet line two; the checkbox, star and verified mark span both. The
+	 * markup is the desktop row's — each piece is placed by name. */
+	.mbx-thread-item {
+		display: grid;
+		grid-template-columns: auto auto auto minmax(0, 1fr) auto auto;
+		grid-template-areas:
+			"check star mark from clip time"
+			"check star mark mid  mid  mid";
+		column-gap: 0;
+		row-gap: 2px;
+		align-items: center;
+		padding: 9px 12px;
+	}
+	.mbx-thread-check { grid-area: check; margin-right: var(--mbx-row-gap); }
+	.mbx-thread-star  { grid-area: star;  margin-right: var(--mbx-row-gap); }
+	.mbx-direct-mark  { grid-area: mark; }
+	.mbx-thread-from  { grid-area: from; flex: none; }
+	.mbx-thread-mid   { grid-area: mid; }
+	.mbx-thread-clip  { grid-area: clip; margin-left: var(--mbx-row-gap); }
+	.mbx-thread-time  { grid-area: time; margin-left: var(--mbx-row-gap); }
+
+	.mbx-thread { padding: 12px 14px; }
+
+	/* Floating panels never run past the screen edge. */
+	.mbx-select-panel, .mbx-folder-panel, .mbx-kebab-menu { max-width: calc(100vw - 2rem); }
+}
 }
 
 /* Locked-state unlock affordances (specs/mailbox_security_levels.md § 4.1):
