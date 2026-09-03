@@ -209,6 +209,15 @@ impl World {
         }
     }
 
+    /// Lock one device's vault: the key is gone until `give_vault` again.
+    pub fn lock_vault(&mut self, device_name: &str) {
+        self.devices
+            .iter_mut()
+            .find(|d| d.name == device_name)
+            .unwrap_or_else(|| panic!("no device called {device_name}"))
+            .lock_vault();
+    }
+
     pub fn device(&self, name: &str) -> &Device {
         self.devices
             .iter()

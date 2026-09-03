@@ -640,6 +640,7 @@ mod tests {
             status: LocalStatus::PendingDownload,
             wrapped_file_key: None,
             replaces: None,
+            stand_in: None,
         }
     }
 

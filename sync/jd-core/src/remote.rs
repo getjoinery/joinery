@@ -205,6 +205,7 @@ mod tests {
             status: LocalStatus::Synced,
             wrapped_file_key: None,
             replaces: None,
+            stand_in: None,
         }
     }
 

@@ -119,6 +119,12 @@ impl Device {
         );
     }
 
+    /// Take the key away again: the vault is locked on this device from the
+    /// next pass on, exactly as a device linked without one.
+    pub fn lock_vault(&mut self) {
+        self.vault = None;
+    }
+
     pub fn vault(&self) -> Option<&Vault> {
         self.vault.as_ref()
     }
