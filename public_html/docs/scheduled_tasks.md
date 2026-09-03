@@ -413,7 +413,9 @@ Returns `sct_task_config` as an associative array.
 - Updates `scheduled_tasks_last_cron_run` setting (heartbeat)
 - Loads active, non-deleted tasks
 - Runs due tasks and updates their status
-- Outputs timestamped results to stdout (logged by cron)
+- Outputs timestamped results to stdout (logged by cron). Every line is stamped
+  when it is written, and the `Result:` line carries the task's elapsed seconds
+  (`Result: success (3.0s) — …`), so the log shows how long each task took
 
 ### Failure containment
 

@@ -6,6 +6,8 @@
  * (begin an OAuth2 consent flow through the OAuth2 Core for Gmail/Microsoft
  * accounts). Loads the accounts plus their bound-alias labels for display.
  *
+ * @version 1.6 - Fetch now runs inside ImapFetch's interactive budget; what it
+ *   could not finish is left due for the scheduled poller and said so
  * @version 1.5 - Fetch now runs the full ImapFetch cycle, so a sync-enabled
  *   account's manual fetch pulls flags and pushes changes exactly as the
  *   scheduled poller does, not just an ingest poll
@@ -75,8 +77,16 @@ function admin_mailbox_imap_logic(array $input): LogicResult {
 					$level = DisplayMessage::MESSAGE_WARNING;
 				} else {
 					try {
-						$res = ImapFetch::run($account, 50);
+						$res = ImapFetch::run($account, 50,
+							microtime(true) + ImapFetch::INTERACTIVE_BUDGET_SECONDS);
 						$msg = 'Fetch complete. ' . ($res['status'] ?? '');
+						if (!empty($res['budget_exhausted'])) {
+							ImapFetch::leaveDue($account);
+							$msg = 'Fetched for ' . ImapFetch::INTERACTIVE_BUDGET_SECONDS
+								. ' seconds and stopped; the scheduled poll finishes the rest at its next run. '
+								. ($res['status'] ?? '');
+							$level = DisplayMessage::MESSAGE_WARNING;
+						}
 					} catch (ImapFetchBusyException $e) {
 						// A double click, or the scheduled poller mid-run. The
 						// fetch the operator wants is the one already happening.

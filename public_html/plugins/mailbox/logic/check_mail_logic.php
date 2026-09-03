@@ -26,6 +26,14 @@
  * pull holds a per-relay advisory lock, the IMAP ingest a per-account one —
  * so a click can never race the scheduled passes.
  *
+ * Time: a click is answered inside ImapFetch::INTERACTIVE_BUDGET_SECONDS. The
+ * IMAP lane hands every account the same absolute deadline; a fetch the
+ * deadline stops (or an account it never reached) is left due, so the
+ * scheduled poller finishes it at its next tick instead of one interval
+ * later. The response says what was deferred and how long each lane took
+ * (specs/mailbox_refresh_budget.md).
+ *
+ * @version 1.2.0 - the click has a time budget; deferred work is handed to the poller
  * @version 1.1.0 - the IMAP lane: Refresh fetches the viewer's feeds too
  * @version 1.0.0
  */
@@ -47,10 +55,17 @@ function check_mail_logic(array $input): LogicResult {
 		return LogicResult::error('No mailbox access.');
 	}
 
-	return LogicResult::render(array(
-		'relay' => _check_mail_relay(),
-		'imap'  => _check_mail_imap($viewer),
-	));
+	$deadline = microtime(true) + ImapFetch::INTERACTIVE_BUDGET_SECONDS;
+
+	$started = microtime(true);
+	$relay = _check_mail_relay();
+	$relay['took_ms'] = (int)round((microtime(true) - $started) * 1000);
+
+	$started = microtime(true);
+	$imap = _check_mail_imap($viewer, $deadline);
+	$imap['took_ms'] = (int)round((microtime(true) - $started) * 1000);
+
+	return LogicResult::render(array('relay' => $relay, 'imap' => $imap));
 }
 
 /** The relay-spool lane: pull sealed blobs off the fronting relay now. */
@@ -95,10 +110,12 @@ function _check_mail_relay(): array {
 /**
  * The IMAP lane: fetch the enabled feeds bound to the viewer's accessible
  * mailboxes, bypassing the scheduled poll interval. Most-starved first, capped
- * per click so a fleet of feeds cannot hold one refresh hostage. Per-account
- * failures never fail the action — the click's job is the mail it CAN get.
+ * per click so a fleet of feeds cannot hold one refresh hostage, and every
+ * account shares one absolute $deadline. Per-account failures never fail the
+ * action — the click's job is the mail it CAN get; what it could not get in
+ * time is left due for the poller and counted as deferred.
  */
-function _check_mail_imap(MailboxViewer $viewer): array {
+function _check_mail_imap(MailboxViewer $viewer, ?float $deadline = null): array {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
 
 	$accounts = new MultiInboundImapAccount(
@@ -112,7 +129,7 @@ function _check_mail_imap(MailboxViewer $viewer): array {
 
 	$accessible = $viewer->isAllAccess() ? null : array_flip($viewer->accessibleAliasIds());
 
-	$fetched = 0; $stored = 0; $skipped = 0; $errors = 0;
+	$fetched = 0; $stored = 0; $skipped = 0; $errors = 0; $deferred = 0;
 	$max_accounts = 5;
 
 	foreach ($accounts as $account) {
@@ -126,6 +143,12 @@ function _check_mail_imap(MailboxViewer $viewer): array {
 		if (!$account->isConnectable()) {
 			continue;
 		}
+		if ($deadline !== null && microtime(true) >= $deadline) {
+			// The click's time is spent. This account was not touched, so it
+			// is as due as it was — the poller's next tick takes it.
+			$deferred++;
+			continue;
+		}
 		if (!_check_mail_imap_claim(intval($account->key))) {
 			$skipped++; // fetched within the last few seconds, or claimed by another click
 			continue;
@@ -133,8 +156,14 @@ function _check_mail_imap(MailboxViewer $viewer): array {
 
 		$fetched++;
 		try {
-			$result = ImapFetch::run($account, 50);
+			$result = ImapFetch::run($account, 50, $deadline);
 			$stored += intval($result['stored'] ?? 0);
+			if (!empty($result['budget_exhausted'])) {
+				// The claim above stamped the account as just polled; undo that
+				// so the poller finishes the cycle at its next tick.
+				$deferred++;
+				ImapFetch::leaveDue($account);
+			}
 		} catch (ImapFetchBusyException $e) {
 			// The scheduled poller (or another fetch) already has this account —
 			// the fetch this click wanted is the one running.
@@ -147,7 +176,8 @@ function _check_mail_imap(MailboxViewer $viewer): array {
 		}
 	}
 
-	return array('fetched' => $fetched, 'stored' => $stored, 'skipped' => $skipped, 'errors' => $errors);
+	return array('fetched' => $fetched, 'stored' => $stored, 'skipped' => $skipped, 'errors' => $errors,
+		'deferred' => $deferred);
 }
 
 /**

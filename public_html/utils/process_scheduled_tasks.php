@@ -15,6 +15,8 @@
  * stop the tasks ordered after it, and it cannot leave its row showing a stale
  * last-run-success.
  *
+ * @version 2.2 - every line is stamped when it is written and the Result line
+ *   carries the task's elapsed seconds, so the log shows how long each task took
  * @version 2.1
  * @changelog 2.1 - the runner measures its own tick spacing into
  *   scheduled_tasks_cron_observed_interval, so pages can predict the next pass.
@@ -36,8 +38,13 @@ require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskRegistry.php'));
 
-$timestamp = date('Y-m-d H:i:s');
+$timestamp = date('Y-m-d H:i:s');   // the pass's start, for the heartbeat
 echo "[$timestamp] Scheduled tasks cron runner started\n";
+
+/** The clock now — each line is stamped when it is written, so a slow task shows its length. */
+function cron_stamp(): string {
+	return date('Y-m-d H:i:s');
+}
 
 // The id of the task currently executing, read by the shutdown handler below.
 // Null whenever the runner is between tasks.
@@ -130,7 +137,8 @@ foreach ($tasks as $task) {
 		continue;
 	}
 
-	echo "[$timestamp] Running task: $task_name ($task_class)\n";
+	echo "[" . cron_stamp() . "] Running task: $task_name ($task_class)\n";
+	$task_started = microtime(true);
 
 	// Acquire a per-task advisory lock so a long-running task can't be
 	// re-entered by the next cron tick. hashtext() is deterministic, so
@@ -144,10 +152,10 @@ foreach ($tasks as $task) {
 		$lock_row = $lock_q->fetch(PDO::FETCH_ASSOC);
 		$lock_acquired = !empty($lock_row['got']);
 	} catch (PDOException $e) {
-		echo "[$timestamp]   WARNING: Could not acquire advisory lock: " . $e->getMessage() . "\n";
+		echo "[" . cron_stamp() . "]   WARNING: Could not acquire advisory lock: " . $e->getMessage() . "\n";
 	}
 	if (!$lock_acquired) {
-		echo "[$timestamp]   skipped: already running\n";
+		echo "[" . cron_stamp() . "]   skipped: already running\n";
 		$tasks_skipped++;
 		continue;
 	}
@@ -205,7 +213,8 @@ foreach ($tasks as $task) {
 			}
 			$task->save();
 
-			echo "[$timestamp]   Result: $status" . ($message ? " — $message" : "") . "\n";
+			echo "[" . cron_stamp() . "]   Result: $status (" . number_format(microtime(true) - $task_started, 1) . "s)"
+				. ($message ? " — $message" : "") . "\n";
 
 			if ($status === 'success') {
 				$tasks_run++;
@@ -224,10 +233,10 @@ foreach ($tasks as $task) {
 							ScheduledTaskRegistry::metadataFor($task_class),
 							is_array($ui_recipe_ids) ? $ui_recipe_ids : []);
 						foreach ($fired as $chained_name) {
-							echo "[$timestamp]   Chained recipe: $chained_name\n";
+							echo "[" . cron_stamp() . "]   Chained recipe: $chained_name\n";
 						}
 					} catch (Throwable $chain_e) {
-						echo "[$timestamp]   Chain error: " . $chain_e->getMessage() . "\n";
+						echo "[" . cron_stamp() . "]   Chain error: " . $chain_e->getMessage() . "\n";
 					}
 				}
 			} elseif ($status === 'skipped') {
@@ -240,7 +249,8 @@ foreach ($tasks as $task) {
 			// an upgrade removed, or a ParseError in the task file is an Error
 			// and would otherwise be an uncaught fatal — killing the process
 			// mid-loop and silently skipping every task ordered after this one.
-			echo "[$timestamp]   " . get_class($e) . ": " . $e->getMessage() . "\n";
+			echo "[" . cron_stamp() . "]   " . get_class($e) . " (" . number_format(microtime(true) - $task_started, 1) . "s): "
+				. $e->getMessage() . "\n";
 			$task->set('sct_last_run_time', 'now()');
 			$task->set('sct_last_run_status', 'error');
 			$task->set('sct_last_run_message', mb_substr($e->getMessage(), 0, 500));
@@ -259,4 +269,4 @@ foreach ($tasks as $task) {
 	}
 }
 
-echo "[$timestamp] Completed: $tasks_run run, $tasks_skipped skipped, $tasks_errored errors\n";
+echo "[" . cron_stamp() . "] Completed: $tasks_run run, $tasks_skipped skipped, $tasks_errored errors\n";

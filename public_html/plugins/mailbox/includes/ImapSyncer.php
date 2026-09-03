@@ -28,6 +28,9 @@
  *
  * See specs/two_way_imap_sync.md and specs/inbound_email_labels.md.
  *
+ * @version 2.2 - pull honours the ingestor's deadline (stops between folders,
+ *   reporting the rest as deferred) and laps its time into the ingestor's
+ *   ledger; push laps too (specs/mailbox_refresh_budget.md)
  * @version 2.1 - a modseq of 0 is "unknown", never a cursor: pull skips a folder
  *   whose server reports no HIGHESTMODSEQ, and a stored cursor <= 0 re-baselines
  *   instead of reconciling — CHANGEDSINCE 0 is dropped by the client library,
@@ -110,8 +113,15 @@ class ImapSyncer {
 	 * change made during the pull window is caught next cycle (loop avoidance).
 	 */
 	public function pull(): array {
-		$flags = 0; $vanished = 0; $folders = 0;
+		$started = microtime(true);
+		$flags = 0; $vanished = 0; $folders = 0; $deferred = 0;
 		foreach ($this->trackedFolders() as $folder) {
+			if ($this->ingestor->pastDeadline()) {
+				// Out of time: the folder's cursor is untouched, so the next
+				// cycle reconciles from where this one would have.
+				$deferred++;
+				continue;
+			}
 			try {
 				$res = $this->pullFolder($folder);
 				$flags += $res['flags']; $vanished += $res['vanished']; $folders++;
@@ -120,7 +130,8 @@ class ImapSyncer {
 					. ' (account ' . $this->account->key . '): ' . $e->getMessage());
 			}
 		}
-		return array('folders' => $folders, 'flags' => $flags, 'vanished' => $vanished);
+		$this->ingestor->lap('pull', microtime(true) - $started);
+		return array('folders' => $folders, 'flags' => $flags, 'vanished' => $vanished, 'deferred' => $deferred);
 	}
 
 	private function pullFolder(InboundImapFolder $folder): array {
@@ -303,10 +314,12 @@ class ImapSyncer {
 	 * clearing dirty; loop avoidance then makes the re-read a value-equal no-op.
 	 */
 	public function push(int $maxPerRun): array {
+		$started = microtime(true);
 		$created = $this->createPendingFolders();
 		$flags = $this->pushFlags($maxPerRun);
 		$membership = $this->pushMembership($maxPerRun);
 		$trashed = $this->pushTrash($maxPerRun);
+		$this->ingestor->lap('push', microtime(true) - $started);
 		return array('created' => $created, 'flags' => $flags, 'membership' => $membership, 'trashed' => $trashed);
 	}
 

@@ -2091,6 +2091,18 @@ on each account's last-poll time collapses rapid clicks to one fetch; the
 per-account advisory fetch lock inside `ImapIngestor::poll()` keeps a click
 and the scheduled poller off the same account at once.
 
+**A click is answered in bounded time.** A browser, and the proxy in front of
+it, waits only so long for a request, so the IMAP lane hands every account one
+absolute deadline, `ImapFetch::INTERACTIVE_BUDGET_SECONDS` after the click.
+A cycle stops between folders and between messages once it passes — nothing
+already started is cut — with the folder cursor held below the first message
+not walked, so nothing is skipped, only left. An account the deadline stopped,
+or one the lane never reached, is left **due** (`ImapFetch::leaveDue` clears its
+last-poll stamp) so the scheduled poller finishes it at its next tick rather
+than a full interval later. The response reports each lane's `took_ms` and the
+IMAP lane's `deferred` count. The admin **Fetch now** action runs under the
+same budget and says when it stopped early.
+
 Degradation is safe: relay down → senders' MTAs retry for days; tunnel down → the
 relay keeps spooling sealed blobs until the next pull. Neither loses mail.
 
@@ -3887,7 +3899,16 @@ Two on-demand paths sit beside it, both running the same `ImapFetch::run` cycle:
 the reader's Refresh button (`mailbox/check_mail`, the viewer's own feeds) and
 the admin **Fetch now** row action. Every path funnels through the per-account
 advisory fetch lock inside `ImapIngestor::poll()`, so concurrent fetches on one
-account fail fast rather than racing the cursors.
+account fail fast rather than racing the cursors. The on-demand paths run under
+`ImapFetch::INTERACTIVE_BUDGET_SECONDS` (see the reader's Refresh, above); the
+poller runs unbounded.
+**Every cycle is timed.** The ingestor keeps a ledger of where the wall clock
+went — connect, prepare, pull, each folder's seek / fetch / store, push — and
+`ImapFetch::run` writes it into `iia_last_status` after the counts
+(`… · took 4.2s: connect 0.5s, pull 1.1s, INBOX 2.1s, All Mail 1.8s, push 0.1s`),
+so the last fetch of any feed says which seconds it spent where. The run record
+carries the same ledger with per-folder detail, and a fetch that failed reports
+how long it ran before it did.
 **Feed health is announced, once.** Every fetch path reports its outcome to the
 account (`InboundImapAccount::observeFetchOutcome()`), which keeps the last
 announced state on the row (`iia_health_state`, `iia_consecutive_failures`,
@@ -4006,6 +4027,13 @@ Two things make an otherwise-silent loss visible:
   exactly this reason: provable-on-purpose, never unaccounted.
 - **A UID the server returned no data for** is a counted failure rather than a
   skip, so the reconciliation above stays honest.
+
+The note's last line is the cycle's timing ledger (`took 4.2s: connect 0.5s,
+pull 1.1s, INBOX 2.1s (seek 0.3s, fetch 1.2s, store 0.6s), …`): seek is the
+STATUS and window walk, fetch the bodies and inline images, store the
+transaction. A run that stored one message in two minutes says which two
+minutes. Messages a deadline left unwalked are `deferred`, never `seen`, so the
+reconciliation still balances.
 
 An **idle poll writes nothing** — a mailbox polled every five minutes forever would
 otherwise bury the runs that matter under thousands of no-op rows. A backfill leaves
