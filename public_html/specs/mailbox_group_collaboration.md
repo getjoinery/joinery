@@ -13,6 +13,11 @@ signatures, rich-text compose, the member-context panel) has been **carved out**
 individual track — those serve the single-user focus and are not gated on the team
 work below. See "Carved out" at the end.
 
+**Reconfirmed deferred 2026-09-02.** A small-business shared-mailbox inventory
+(see "Small-business needs inventory" below) found the built set acceptable for
+now. Nothing here is scheduled; the inventory exists so the gaps are not
+rediscovered from scratch.
+
 **Firm constraint — group mailboxes are Standard-level only.** The email
 security levels (`mailbox_security_levels.md`) above Standard rest on a
 one-operator, one-key model; a shared mailbox would require multi-recipient
@@ -20,6 +25,36 @@ sealing, per-member key ceremonies, and member-revocation re-sealing. That is
 a deliberate non-goal: a domain hosting a group mailbox stays at Standard, and
 this spec's design assumes plaintext-at-rest semantics. If team + encryption
 is ever wanted, it is a new spec, not an extension of this one.
+
+## Small-business needs inventory (2026-09-02)
+
+What a small business wanting shared mailboxes (`info@`, `support@`) needs, and
+where each stands. "Built" means shipped and documented in
+`plugins/mailbox/docs/overview.md`.
+
+| # | Need | Status |
+|---|------|--------|
+| N1 | Several people read and reply from one address | Built (grants; every send goes out as the alias) |
+| N2 | See at a glance what a colleague already handled | Built (read/star/archive live on the message row, shared by all grantees) |
+| N3 | Know who is handling a conversation (assignment) | Not built — Phase 1 |
+| N4 | Mark a conversation open, waiting, or done | Not built — Phase 1 (only archive exists) |
+| N5 | Avoid two people answering the same email | Not built — Phase 2 (collision) |
+| N6 | Internal note on a thread the customer never sees | Not built — Phase 2 |
+| N7 | Know which teammate sent a given reply | Not built — Phase 5 (outbound rows record no sending user) |
+| N8 | Saved replies for common questions | Not built — Phase 3 |
+| N9 | Be told when new mail lands in the shared box | Not built — Phase 5 (no push, no in-app notification at ingest) |
+| N10 | Auto-reply / out-of-office on the shared address | Not built — Phase 4 |
+| N11 | Add or remove a teammate without an admin | Not built — Phase 5 (grants change only on the admin alias editor) |
+| N12 | Read-only or reply-only access | Not built — Phase 5 (a grant is all-or-nothing) |
+| N13 | Tags, folders, rules, search, spam, mobile, several addresses | Built (global labels + reader Labels menu, per-mailbox/domain filters with Gmail import, FTS search, rspamd, iOS/Android kits, aliases) |
+| N14 | Volume and response-time reporting | Not built — Phase 4 |
+
+Also built and relevant to a team: per-grantee signatures, private drafts
+(co-grantees cannot see them), per-person contacts per mailbox, and
+distribution lists (a forward-mode alias to up to ten destinations, or
+forward-and-store to keep a team copy). The From name on every reply is the
+alias description, never the teammate's name — correct for a shared address,
+and the reason N7 needs its own record.
 
 ## Context
 
@@ -141,6 +176,35 @@ Server-side filters/rules (a Sieve-equivalent for store/forward mailboxes) are
 already split out and built: `specs/implemented/inbound_email_filters.md`
 (Gmail-parity filters).
 
+### 5. Access and awareness (recorded 2026-09-02, not in the original plan)
+
+Four needs the inventory surfaced that none of the phases above cover. None
+are scheduled.
+
+- **Sender attribution (N7).** An outbound row carries no user id, so a
+  shared mailbox cannot say which teammate sent a reply. Add a sent-by user
+  column on the message row (the draft author column is cleared on send and
+  must not be reused for this), written by `MailboxSender` for every mode,
+  and show the name on the open message in the reader. Cheap, and useful
+  before any of Phase 1.
+- **New-mail notifications (N9).** Nothing tells a grantee that mail arrived.
+  The push content contract per security level is already written in the
+  overview (Standard full, Private sender + subject, Fortress generic) but
+  no push package exists and ingest writes no `ntf_notifications` row.
+  *Build-generally check:* the core notification system plus its preferences
+  table is the home; ingest fires one notification per grantee, respecting a
+  per-mailbox opt-out.
+- **Self-service teammate management (N11).** Grants change only on the admin
+  alias editor. A business owner who is not a site admin cannot add a
+  teammate. Needs a mailbox-owner notion (or a domain-owner one) and a
+  member-side grant editor that goes through
+  `InboundEmailMailboxGrant::sync_for_alias()` so the one-holder rule on
+  sealing mailboxes still holds.
+- **Access levels (N12).** A grant means read and send. Read-only (an
+  auditor, a trainee) and reply-only are not expressible. Add a level on the
+  grant row, enforced in `MailboxViewer::canCompose()` and the send path;
+  the alias editor and the member editor above expose it.
+
 ## Build-generally notes
 
 Per the platform's "build abstractions, not product-specific code" principle, flag —
@@ -153,6 +217,8 @@ mailbox-only:
   consumer (support tickets, etc.) reuses them. Decide once, at Phase 1 start.
 - **Canned responses** may overlap with the email-template system; check before
   adding a parallel store.
+- **Notifications (Phase 5)** belong on the core notification system, not a
+  mailbox-local table.
 
 ## Carved out → individual track
 

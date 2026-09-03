@@ -1,6 +1,18 @@
 # Descriptor migration — retire `_logic_api()`
 
-**Status:** Not started.
+**Status:** PARTLY DONE (checked 2026-09-02). Steps 1 and 3 are complete: no
+logic file defines `_logic_api()`, `ApiLogicEndpoint::resolveMeta()` reads
+descriptors only, the docs mention no legacy companion, and
+`tests/unit/core_api_mechanical_test.php` fails on any file that reintroduces
+one. **Acceptance item 2 is NOT met:** of 226 descriptors, 106 declare no
+`input` schema, and 83 of those belong to logic that reads request input
+(mailbox send/draft/thread/contacts, checkout and cart, chat, devices and
+blocks, and most passkey and vault ceremonies). The remaining work is those
+83 schemas, authored in batches by area with the functional API suites run
+after each; the passkey and vault batch touches sign-in and unlock paths and
+is not to be rushed. The 23 schema-less descriptors whose logic reads no
+input (status reads, option issuers, catalog lists) are complete as they are.
+Inventory command for the remainder is in step 1b below.
 
 **Prerequisite (done):** the REST API consumes descriptors natively with
 `_logic_api()` as a fallback — see
@@ -50,6 +62,23 @@ This is judgment work, not find-and-replace:
 - **Batching:** migrate in reviewable batches (e.g. 10 files), running the
   relevant functional tests after each batch. The `tests/functional/api/`
   suites exercise several of these actions end-to-end.
+
+### 1b — Input schemas for descriptors that still lack one
+
+A descriptor without `input` gets no boundary validation and discovery shows
+`input: null`. Find the ones whose logic reads request input:
+
+```bash
+for f in logic/*.php plugins/*/logic/*.php; do
+  grep -q '_logic_descriptor' "$f" || continue
+  grep -q "'input'" "$f" && continue
+  grep -qE '\$(post|get|input|data)\[' "$f" && echo "$f"
+done
+```
+
+Write each schema from what the logic actually reads: optional when unsure,
+never a type the callers do not already send. Batch by area and run
+`php tests/run.php db --changed` after each batch.
 
 ### 2 — Metadata-loss diff pass
 
