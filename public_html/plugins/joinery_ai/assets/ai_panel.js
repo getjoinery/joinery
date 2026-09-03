@@ -27,7 +27,7 @@
  * future task composer (renders nothing until that feature exists). The AI
  * button carries a pending-actions count badge.
  *
- * Vanilla JS, jy-ui styling, no framework. @version 1.1.1
+ * Vanilla JS, jy-ui styling, no framework. @version 1.2.0
  */
 (function () {
 	'use strict';
@@ -46,9 +46,21 @@
 		if (!area || !anchor) return;
 
 		// ---- the AI button (with the pending-actions count badge) ----
-		var btn = el('button', 'btn btn-secondary aip-open-btn', 'AI');
+		// Icon and label both present: the kit shows the label on a desktop and
+		// the icon alone on a phone (.jy-btn-icon / .jy-btn-label).
+		var btn = el('button', 'btn btn-secondary aip-open-btn');
 		btn.type = 'button';
 		btn.setAttribute('aria-haspopup', 'dialog');
+		btn.setAttribute('aria-label', 'AI');
+		btn.title = 'AI';
+		var icon = el('span', 'jy-btn-icon');
+		icon.setAttribute('aria-hidden', 'true');
+		icon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"'
+			+ ' stroke-linecap="round" stroke-linejoin="round">'
+			+ '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/>'
+			+ '<path d="M19 15.5l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9z"/></svg>';
+		btn.appendChild(icon);
+		btn.appendChild(el('span', 'jy-btn-label', 'AI'));
 		var badge = el('span', 'aip-badge');
 		badge.hidden = true;
 		btn.appendChild(badge);

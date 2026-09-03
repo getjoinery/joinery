@@ -351,6 +351,58 @@
 		badge.textContent = unread > 0 ? String(unread) : '';
 	}
 
+	// On a phone the page's app-bar actions (the AI button, the Actions menu)
+	// sit on the scope row instead of under a page title, and the app bar is
+	// marked so the CSS can drop it. The nodes themselves move — the AI panel
+	// keeps its anchor — and move back when the viewport widens again. The
+	// same hook places the two list-header pieces that outlive the header on a
+	// phone (the header itself only shows for a selection or an open search):
+	// New message becomes a floating pill at the foot of the list, and the
+	// protection chip joins the scope row.
+	var PHONE = window.matchMedia ? window.matchMedia('(max-width: 768px)') : null;
+	function placeAppBarActions() {
+		var phone = !!(PHONE && PHONE.matches);
+		var bar = document.querySelector('.jy-app-bar');
+		var source = bar && bar.querySelector('.jy-app-bar-action');
+		var slot = $('#mbx-scope-actions');
+		if (source && slot) {
+			var search = $('#mbx-scope-search');
+			var moved = Array.prototype.filter.call(phone ? source.childNodes : slot.childNodes,
+				function (n) { return n !== search; });
+			moved.forEach(function (n) { (phone ? slot : source).appendChild(n); });
+			// The search icon sits immediately left of the Actions menu.
+			var actions = slot.querySelector('.jy-actions-dropdown');
+			if (search && actions) { slot.insertBefore(search, actions); }
+			bar.classList.toggle('mbx-app-bar-moved', phone);
+		}
+		var newBtn = $('#mbx-new-message');
+		if (newBtn) {
+			(phone ? $('#mbx-list-view') : document.querySelector('.mbx-list-header-actions')).appendChild(newBtn);
+			newBtn.classList.toggle('mbx-fab', phone);
+		}
+		var chip = $('#mbx-level-chip');
+		if (chip) {
+			(phone ? document.querySelector('.mbx-scope-text') : $('.mbx-list-tools')).appendChild(chip);
+		}
+	}
+
+	// Phone: the search line is folded away until asked for. Closing it with a
+	// term in the box cancels the search — a hidden filter would leave the list
+	// silently narrowed.
+	function toggleSearch() {
+		var reader = $('#mbx-reader');
+		var open = !reader.classList.contains('search-open');
+		reader.classList.toggle('search-open', open);
+		$('#mbx-scope-search').setAttribute('aria-pressed', open ? 'true' : 'false');
+		var input = $('#mbx-search');
+		if (open) { input.focus(); return; }
+		if (input.value || state.search) {
+			input.value = '';
+			state.search = '';
+			loadThreads(true);
+		}
+	}
+
 	function railOpen() {
 		return $('#mbx-reader').classList.contains('rail-open');
 	}
@@ -3770,6 +3822,13 @@
 		$('#mbx-scope').addEventListener('click', openRail);
 		$('#mbx-rail-close').addEventListener('click', function () { closeRail(); });
 		$('#mbx-scrim').addEventListener('click', function () { closeRail(); });
+		placeAppBarActions();
+		$('#mbx-scope-search').addEventListener('click', toggleSearch);
+		if (PHONE) {
+			var onPhoneChange = function () { placeAppBarActions(); };
+			if (PHONE.addEventListener) { PHONE.addEventListener('change', onPhoneChange); }
+			else if (PHONE.addListener) { PHONE.addListener(onPhoneChange); }
+		}
 
 		// Debounced search.
 		var searchTimer = null;

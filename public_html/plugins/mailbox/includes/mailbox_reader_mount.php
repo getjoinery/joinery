@@ -245,16 +245,26 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 		<div class="mbx-list-view" id="mbx-list-view">
 			<!-- Phone only (specs/mailbox_reader_phone_layout.md): the mailbox and
 			     folder the list is showing, and the button that opens the rail as a
-			     drawer. The reader JS keeps its text in step with the rail. -->
-			<button type="button" class="mbx-scope" id="mbx-scope"
-				aria-haspopup="true" aria-expanded="false" aria-controls="mbx-rail">
-				<span class="mbx-scope-icon" aria-hidden="true">&#9776;</span>
-				<span class="mbx-scope-text">
-					<span class="mbx-scope-mailbox" id="mbx-scope-mailbox"></span>
-					<span class="mbx-scope-folder" id="mbx-scope-folder"></span>
-				</span>
-				<span class="mbx-badge" id="mbx-scope-unread" hidden></span>
-			</button>
+			     drawer. The reader JS keeps its text in step with the rail, and moves
+			     the page's app-bar actions (AI, Actions) into the slot beside it. -->
+			<div class="mbx-scope-row">
+				<button type="button" class="mbx-scope" id="mbx-scope"
+					aria-haspopup="true" aria-expanded="false" aria-controls="mbx-rail">
+					<span class="mbx-scope-text">
+						<span class="mbx-scope-mailbox" id="mbx-scope-mailbox"></span>
+						<span class="mbx-scope-folder" id="mbx-scope-folder"></span>
+						<span class="mbx-scope-caret" aria-hidden="true">&#9662;</span>
+					</span>
+					<span class="mbx-badge" id="mbx-scope-unread" hidden></span>
+				</button>
+				<div class="mbx-scope-actions" id="mbx-scope-actions">
+					<!-- Reveals the search line under the row; the reader JS keeps it
+					     immediately left of the Actions menu once that has moved here. -->
+					<button type="button" class="btn btn-secondary mbx-scope-search" id="mbx-scope-search"
+						aria-label="Search mail" title="Search mail" aria-pressed="false"
+						aria-controls="mbx-search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
+				</div>
+			</div>
 			<div class="mbx-list-header">
 				<!-- Toolbar over the list, Gmail's placement: the select-all box and
 				     its selection menu, then Refresh, then the bulk actions that

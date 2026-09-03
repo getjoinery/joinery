@@ -2623,8 +2623,17 @@ an open conversation to the list, and only then leaves the page. Each step
 pushes a marked history entry (`mbxRail`, `mbxReading`) with no URL change; a
 reload lands on the list.
 
-Rows are two lines on a phone: sender and time, then subject and snippet. The
-row markup is the desktop row's, placed by CSS grid. The contacts panel is not
+The page title, the page padding and the site footer are absent on a phone:
+the reader takes the whole screen. Search, the AI button and the Actions menu
+sit as icons at the right of the scope bar (the reader moves the app bar's
+action nodes there, and back, as the viewport crosses the breakpoint); the
+search icon reveals the search line under the row, and closing it with a term
+in the box cancels the search. The scope bar reads as a dropdown (a caret after
+the folder name) and carries the protection chip; the member section nav is
+behind the header's hamburger. The list toolbar appears only for a selection
+(its bulk actions) or an open search — there is no select-all or Refresh on a
+phone — and New message floats as a pill over the foot of the list. Rows are two lines on a phone: sender and time, then subject and
+snippet. The row markup is the desktop row's, placed by CSS grid. The contacts panel is not
 shown below 1100px. The native apps load this page in their webview in app
 display mode (no site header), where the scope bar is the only mailbox
 switcher.

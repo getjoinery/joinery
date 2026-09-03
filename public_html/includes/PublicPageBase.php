@@ -242,7 +242,8 @@ abstract class PublicPageBase {
 		}
 
 		$request_path = $this->request_path();
-		echo '<div class="jy-member-subnav"><nav class="jy-member-subnav-inner" aria-label="Profile sections">';
+		// The id is what the header's phone hamburger (aria-controls) opens.
+		echo '<div class="jy-member-subnav" id="jy-member-subnav"><nav class="jy-member-subnav-inner" aria-label="Profile sections">';
 		foreach ($items as $item) {
 			$active = ($item['link'] === $request_path) ? ' active' : '';
 			echo '<a href="' . htmlspecialchars($item['link'], ENT_QUOTES, 'UTF-8') . '" class="jy-member-subnav-link' . $active . '">' . htmlspecialchars($item['label'], ENT_QUOTES, 'UTF-8') . '</a>';

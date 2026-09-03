@@ -5,12 +5,25 @@
 
 document.addEventListener('DOMContentLoaded', () => {
 
-    // ===== Mobile menu toggle =====
-    const toggle = document.querySelector('.menu-toggle');
-    const nav = document.querySelector('.nav-links');
-    if (toggle && nav) {
-        toggle.addEventListener('click', () => nav.classList.toggle('open'));
-    }
+    // ===== Mobile menu toggles =====
+    // The public site's nav hamburger and the member area's section-nav
+    // hamburger share one contract: the button names its panel with
+    // aria-controls, and the panel is shown by the `open` class. An outside
+    // tap or Escape closes it.
+    document.querySelectorAll('.jy-menu-toggle, .menu-toggle').forEach(toggle => {
+        const id = toggle.getAttribute('aria-controls');
+        const nav = (id && document.getElementById(id)) || document.querySelector('.jy-nav-links, .nav-links');
+        if (!nav) return;
+        const set = open => {
+            nav.classList.toggle('open', open);
+            toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        };
+        toggle.addEventListener('click', e => { e.stopPropagation(); set(!nav.classList.contains('open')); });
+        document.addEventListener('click', e => {
+            if (nav.classList.contains('open') && !nav.contains(e.target)) set(false);
+        });
+        document.addEventListener('keydown', e => { if (e.key === 'Escape') set(false); });
+    });
 
     // ===== Sticky header on scroll =====
     const header = document.querySelector('.site-header:not(.header-light)');

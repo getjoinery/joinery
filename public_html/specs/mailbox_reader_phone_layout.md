@@ -272,3 +272,50 @@ scroll (`.mbx-message-left`); and the folder/label panels hang from the left
 edge of their button, so one under a right-side button ran off screen — a
 measured slide-left after showing (`keepPanelOnScreen`) replaced the spec's
 CSS-only clamp, which cannot know where the button is.
+
+## Adjustments 2026-09-03 (owner feel-out)
+
+- The page heading ("Email") goes on a phone. The reader moves the app bar's
+  action nodes onto the scope row (`placeAppBarActions`, on load and on every
+  breakpoint crossing) and marks the bar `mbx-app-bar-moved`, which hides it.
+- AI and Actions are icons on a phone and words on a desktop. The kit owns the
+  pair: an app-bar action carries `.jy-btn-icon` + `.jy-btn-label`; below
+  768px the icon shows alone and the Actions caret is dropped. The AI button
+  (joinery_ai `ai_panel.js` 1.2.0) and the mailbox view's Actions summary both
+  render the pair.
+- The kit footer is hidden below 768px on every page it renders.
+- Verified at 390 wide: app bar and footer `display:none`, AI at 271–305 and
+  Actions at 309–343 on the scope row, both menus open inside the screen,
+  document scrollWidth 375. Desktop at 1024: heading, labels and footer back.
+- Second round: the app page is full-bleed on a phone (`.page-content--app`
+  padding 0 below 768px, kit) so the reader runs edge to edge from the subnav
+  to the bottom of the screen; the search line is folded away behind a search
+  icon on the scope row, immediately left of Actions (`toggleSearch`: opening
+  focuses the box, closing with a term in it cancels the search). Verified at
+  390 wide: reader 0–375 × 110–844, search filter 32→8 rows and back on close.
+- Third round: section headings (Unread / Starred / Everything else) hidden
+  on a phone; the list footer collapses when Load more is hidden, which was a
+  20px blank strip under the last row. Reproduced in real WebKit (Playwright
+  WebKit 18.2 on the Mac mini, iPhone 14 profile, 390×664): the reader spans
+  110–664 and the rows now run to 664.
+- Fourth round: the member section nav (Dashboard / Email / Messages …) folds
+  behind a hamburger at the left of the header below 768px — a fixed panel
+  under the header, one link per line, opened by `script.js` through the
+  button's aria-controls; the same script finally wires the public site's
+  nav hamburger, which had no handler (script.js looked for the pre-kit
+  `.menu-toggle` / `.nav-links` classes). The scope bar drops the ☰ for a
+  caret after the folder name. Verified at 390: toggle at 16–52, panel 61–624
+  with 11 links, outside tap closes it, reader now starts at 61; public-site
+  hamburger opens its nav 60–208; desktop 1024 unchanged.
+- Fifth round: on a phone the list toolbar shows only for a selection (its
+  bulk actions and count) or an open search; select-all and Refresh are gone
+  (pull-to-refresh reloads); New message floats as a pill over the foot of
+  the list (`.mbx-fab`, moved into the list view by `placeAppBarActions` so
+  it is absent while reading); the protection chip joins the scope row.
+  Verified at 390: rows start at 102 straight under the scope row, pill at
+  216–359 × 786–828, toolbar 102–156 with bulk tools when a row is ticked and
+  gone again when unticked; desktop 1024 unchanged.
+- Sixth round: the scope row's three buttons, the New message pill and the
+  scope-row unread count are monochrome (white / hairline border / dark
+  glyph; count on dark grey). The rail's own blue badges and the row
+  checkbox accent are untouched.
