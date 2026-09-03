@@ -5,6 +5,9 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.54 - build_retire_install_password: the bootstrap's closing session, once every agent the
+ *                 install put on the machine is admitted — host-harden --agent-managed over the sealed
+ *                 password, so the machine stops accepting it (specs/keyless_provisioning.md WP2)
  * @version 1.53 - the bootstrap passes --upgrade-server=<this plane> with the site install, so the core
  *                 overlay, the downloads, upgrade_source and the container's agent all come from the plane
  *                 whose release the box fetched (found live: the default overlaid getjoinery.com's core and
@@ -2888,6 +2891,40 @@ class JobCommandBuilder {
 		// at install time would put this management node's key in a slot whose
 		// custodian is somebody else.
 		return $steps;
+	}
+
+	/**
+	 * Retire the install password: the closing half of the bootstrap.
+	 *
+	 * A keyless machine accepts its install password until this runs. Once
+	 * every agent the install put on the machine has been admitted, the plane
+	 * uses that password one last time to run install.sh host-harden
+	 * --agent-managed, which disables password login (and does the fail2ban,
+	 * swap and journal hardening a fresh box is owed). The flag is the truthful
+	 * answer to host-harden's lockout check: the joined agent is the access
+	 * path, so refusing password login orphans nobody.
+	 *
+	 * One ssh session, run by InstallJobExecutor over the sealed password. The
+	 * executor then proves the machine refuses the password before the
+	 * provision pipeline erases it — this step's own check (sshd -T) is the
+	 * first half of that proof, the refused probe is the second.
+	 *
+	 * The release the bootstrap extracted stays under /opt/joinery-install, so
+	 * the install.sh that ran the install is the one that hardens the box.
+	 */
+	public static function build_retire_install_password($node) {
+		$lines = [];
+		$lines[] = 'set -eo pipefail';
+		$lines[] = 'TOOLS=$(ls -dt /opt/joinery-install/*/maintenance_scripts/install_tools 2>/dev/null | head -1)';
+		$lines[] = 'if [ -z "$TOOLS" ] || [ ! -f "$TOOLS/install.sh" ]; then echo "RETIRE_FAILED=no extracted release under /opt/joinery-install"; exit 1; fi';
+		$lines[] = 'cd "$TOOLS"';
+		$lines[] = './install.sh -y -q host-harden --agent-managed';
+		$lines[] = 'if sshd -T 2>/dev/null | grep -qi "^passwordauthentication no"; then echo INSTALL_PASSWORD_RETIRED; else echo "RETIRE_FAILED=sshd still accepts passwords after host-harden"; exit 1; fi';
+
+		return [
+			['type' => 'ssh', 'label' => 'Retire the install password: the machine stops accepting it',
+				'cmd' => implode("\n", $lines), 'timeout' => 900],
+		];
 	}
 
 	/**

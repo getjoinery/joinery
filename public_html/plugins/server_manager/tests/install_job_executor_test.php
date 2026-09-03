@@ -21,6 +21,7 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nod
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/InstallJobExecutor.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
 
 $db = DbConnector::get_instance()->get_db_link();
@@ -225,6 +226,69 @@ if ($we_hold) { flock($held, LOCK_UN); }
 if ($held !== false) { fclose($held); }
 $perms = substr(sprintf('%o', fileperms($lock_path)), -3);
 check($perms === '666', 'the lock file is openable by any user, so a hand run never locks the cron user out', $perms);
+
+// ---------------------------------------------------------------------------
+section('retire_install_password is the second bootstrap job, and a doubt keeps the password');
+
+// The closing half of the bootstrap (specs/keyless_provisioning.md WP2/WP3):
+// queued like install_node, claimed by nobody but this executor, and not
+// finished on its own exit code — the machine has to refuse the password.
+$retire_pw = 'Aa1!' . bin2hex(random_bytes(10));
+$node7 = ije_node('ijetest-retire-' . $suffix, $retire_pw);
+$built = JobCommandBuilder::build_retire_install_password($node7);
+check(count($built) === 1 && ($built[0]['type'] ?? '') === 'ssh',
+	'retiring the password is one ssh session');
+check(strpos($built[0]['cmd'], 'host-harden --agent-managed') !== false
+	&& strpos($built[0]['cmd'], 'sshd -T') !== false
+	&& strpos($built[0]['cmd'], '/opt/joinery-install/') !== false,
+	'it runs host-harden --agent-managed from the release the bootstrap left, and reads sshd back');
+$rjob = ManagementJob::createJob($node7->key, 'retire_install_password', $built, array('provision_id' => 0), null);
+$made_jobs[] = $rjob->key;
+$rjob->load();
+check($rjob->get('mjb_status') === 'queued', 'a retire_install_password job starts queued, like install_node');
+check(in_array('retire_install_password', ManagementJob::BOOTSTRAP_JOB_TYPES, true)
+	&& count(ManagementJob::BOOTSTRAP_JOB_TYPES) === 2,
+	'the bootstrap set is exactly install_node and retire_install_password');
+
+// A job outside that set is refused by the executor by name, so a bootstrap
+// runner handed anything else fails loudly instead of running it.
+$bad = ManagementJob::createJob($node7->key, 'check_status',
+	array(array('type' => 'local', 'label' => 'x', 'cmd' => 'echo never')), array(), null);
+$made_jobs[] = $bad->key;
+$db->prepare("UPDATE mjb_management_jobs SET mjb_status = 'running' WHERE mjb_id = ?")->execute([$bad->key]);
+(new InstallJobExecutor())->execute($bad);
+$bad->load();
+check($bad->get('mjb_status') === 'failed'
+	&& strpos((string)$bad->get('mjb_error_message'), 'retire_install_password') !== false,
+	'a job of another type is refused, naming the bootstrap set');
+
+// The harden step "succeeds" (a local echo stands in for it), but the
+// machine at TEST-NET never answers the refusal probe. No answer is a doubt,
+// a doubt fails the job, and a failed job leaves the password on the row.
+putenv('JOINERY_INSTALL_REFUSAL_CONFIRM_TIMEOUT=2');
+$doubt = ManagementJob::createJob($node7->key, 'retire_install_password',
+	array(array('type' => 'local', 'label' => 'Retire the install password', 'cmd' => 'echo INSTALL_PASSWORD_RETIRED')),
+	array('provision_id' => 0), null);
+$made_jobs[] = $doubt->key;
+$t0 = microtime(true);
+(new InstallJobExecutor())->execute($doubt);
+$took = microtime(true) - $t0;
+putenv('JOINERY_INSTALL_REFUSAL_CONFIRM_TIMEOUT');
+$doubt->load();
+check($doubt->get('mjb_status') === 'failed', 'a retire job whose refusal cannot be confirmed FAILS, even though its steps passed');
+check(strpos((string)$doubt->get('mjb_error_message'), 'Could not confirm') !== false
+	&& strpos((string)$doubt->get('mjb_error_message'), 'password is kept') !== false,
+	'and says the password is kept and why', (string)$doubt->get('mjb_error_message'));
+check(strpos((string)$doubt->get('mjb_output'), 'Confirming the machine refuses the install password') !== false,
+	'the output shows the confirmation attempt, so a watcher knows what the job was waiting on');
+$result = json_decode((string)$doubt->get('mjb_result'), true);
+check(is_array($result) && $result['retired'] === false, 'the recorded result says not retired');
+$sealed_q = $db->prepare('SELECT cvp_root_pass_sealed FROM cvp_customer_cloud_provisions WHERE cvp_mgn_node_id = ?');
+$sealed_q->execute([$node7->key]);
+$sealed_still = (string)$sealed_q->fetchColumn();
+check($sealed_still !== '' && (new SecretBox())->open($sealed_still)['value'] === $retire_pw,
+	'the sealed password is still on the provision row — nothing erased it');
+check($took < 90, 'the confirmation budget is honoured', round($took) . 's');
 
 // ---------------------------------------------------------------------------
 section('Cleanup');

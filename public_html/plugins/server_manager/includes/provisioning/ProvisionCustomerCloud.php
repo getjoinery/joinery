@@ -15,7 +15,9 @@
  *                 source to report armed) -> create ManagedNode + install_node
  *                 job (InstallJobExecutor runs it, plane-side) -> installing
  *   installing -> drive JobResultProcessor on the finished job -> done | failed
- *   done       -> fleet seeding, once the node's agent has paired (below)
+ *   done       -> fleet seeding, once the node's agent has paired (below), and
+ *                 retiring the install password, once every agent the install
+ *                 put on the machine has been admitted (below)
  *
  * The install job is ONE SSH session — the bootstrap (specs/ssh_single_bootstrap.md).
  * Every shape travels it: fresh, from_backup (a clone the new machine pulls
@@ -38,14 +40,31 @@
  * Keyless: a machine we create never receives an SSH key. The instance is
  * born with a root password we seal onto the provision row
  * (cvp_root_pass_sealed), which the install executor uses to authenticate for
- * the length of the install and which the approval-time burn erases once the
- * node's agent has joined. See specs/keyless_provisioning.md.
+ * the length of the install and which is retired (the machine stops accepting
+ * it, then the row stops holding it) once the node's agent has joined. See specs/keyless_provisioning.md.
+ *
+ * Retiring the install password (cvp_install_password): held from the moment
+ * it is sealed. When the provision is done and every agent the install put on
+ * the machine has been admitted — the site's agent, and on a docker box the
+ * host's own agent too — a retire_install_password job (InstallJobExecutor,
+ * one ssh session: host-harden --agent-managed) turns password login off, and
+ * the executor completes the job only after the machine REFUSED the password.
+ * That completed job is what lets this task erase the sealed password:
+ * retired. A failed job keeps the password (retire_failed, cvp_error says
+ * why): a machine that might still need it stays reachable, and re-running
+ * the job from its detail page tries again. A provision that fails with a
+ * live instance keeps its password for the same reason — the owner's call,
+ * 2026-09-03: the password goes only when the install is complete.
  *
  * Settings (Server Manager plugin settings):
  *   server_manager_customer_cloud_region  default region
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 2.0 - retiring the install password (specs/keyless_provisioning.md WP2/WP3/WP5): held from
+ *                sealing, a retire_install_password job once every agent on the machine is admitted,
+ *                erased only after the executor saw the machine refuse it; join_approval_check asks
+ *                the provider whether a join really comes from a provision's running instance
  * @version 1.9 - review fixes: one clone per source at a time, arm once (not on every transient tick),
  *                disarm only when the source's latest arm is ours, blank the bootstrap's clone key at
  *                completion, and a failed provision releases its source after CLONE_ARM_TTL_DAYS
@@ -98,7 +117,17 @@ class ProvisionCustomerCloud {
 		));
 		$seeding->load();
 
-		if (count($actionable) === 0 && count($seeding) === 0) {
+		// Done provisions whose install password this plane still holds: waiting
+		// for the machine's agents to be admitted, or for the retire job to
+		// answer.
+		$retiring = new MultiCustomerCloudProvision(array(
+			'statuses'                => array('done'),
+			'install_password_states' => CustomerCloudProvision::PASSWORD_HELD_STATES,
+			'deleted'                 => false,
+		));
+		$retiring->load();
+
+		if (count($actionable) === 0 && count($seeding) === 0 && count($retiring) === 0) {
 			return ['status' => 'success', 'message' => 'No customer-cloud provisions to advance.'];
 		}
 
@@ -127,8 +156,15 @@ class ProvisionCustomerCloud {
 				$this->errors[] = "Provision #{$provision->key} ({$provision->get('cvp_domain')}): seeding: " . $e->getMessage();
 			}
 		}
+		foreach ($retiring as $provision) {
+			try {
+				$advanced += $this->handle_install_password($provision);
+			} catch (Exception $e) {
+				$this->errors[] = "Provision #{$provision->key} ({$provision->get('cvp_domain')}): install password: " . $e->getMessage();
+			}
+		}
 
-		$msg = "Customer-cloud: {$advanced} provision(s) advanced of " . (count($actionable) + count($seeding)) . " actionable.";
+		$msg = "Customer-cloud: {$advanced} provision(s) advanced of " . (count($actionable) + count($seeding) + count($retiring)) . " actionable.";
 		if ($this->errors) {
 			$msg .= ' ' . count($this->errors) . ' error(s): ' . implode('; ', array_slice($this->errors, 0, 3));
 			if (count($this->errors) > 3) $msg .= ' …';
@@ -170,6 +206,7 @@ class ProvisionCustomerCloud {
 		$box = new SecretBox();
 		$provision->set('cvp_root_pass_sealed',
 			$box->seal('cvp_customer_cloud_provisions.cvp_root_pass_sealed', $root_pass));
+		$provision->set('cvp_install_password', 'held');
 		$provision->save();
 
 		try {
@@ -397,8 +434,8 @@ class ProvisionCustomerCloud {
 		$node->set('mgn_host',          $instance['ip']);
 		$node->set('mgn_ssh_user',      'root');
 		// Keyless: no key path. The install executor authenticates with the
-		// sealed root password on the provision row; after the burn nothing but
-		// the machine's owner and its agent can reach it.
+		// sealed root password on the provision row; once that install password
+		// is retired nothing but the machine's owner and its agent can reach it.
 		$node->set('mgn_ssh_key_path',  null);
 		$node->set('mgn_ssh_port',      22);
 		$node->set('mgn_install_state', 'installing');
@@ -717,24 +754,41 @@ class ProvisionCustomerCloud {
 	 * no usable grant exists.
 	 */
 	protected function get_driver($provision) {
+		$resolved = $this->resolve_driver($provision);
+		if ($resolved['driver'] !== null) {
+			return $resolved['driver'];
+		}
+		if ($resolved['park']) {
+			$this->park_for_reconnect($provision, $resolved['reason']);
+		} else {
+			$this->errors[] = "Provision #{$provision->key}: " . $resolved['reason'];
+		}
+		return null;
+	}
+
+	/**
+	 * Resolve the compute driver for a provision's linked account without
+	 * changing the provision: ['driver' => provider|null, 'reason' => why not,
+	 * 'park' => whether the buyer has to re-grant]. get_driver() is the
+	 * pipeline's view (it parks the provision); join approval uses this
+	 * directly, because a refused approval must not move a provision.
+	 */
+	protected function resolve_driver($provision): array {
 		$account_id = (int)$provision->get('cvp_cca_account_id');
 		$account = $account_id ? new CustomerCloudAccount($account_id, TRUE) : null;
 		if (!$account || !$account->key || $account->get('cca_status') !== 'active') {
-			$this->park_for_reconnect($provision, 'Account link missing or not active.');
-			return null;
+			return ['driver' => null, 'reason' => 'Account link missing or not active.', 'park' => true];
 		}
 
 		$token = $account->getToken();
 		if ($token === null) {
-			$this->park_for_reconnect($provision, 'No stored token on the account link.');
-			return null;
+			return ['driver' => null, 'reason' => 'No stored token on the account link.', 'park' => true];
 		}
 
 		$client = new OAuth2Client();
 		$provider_class = OAuth2ProviderRegistry::get($account->get('cca_provider'));
 		if ($provider_class === null) {
-			$this->errors[] = "Provision #{$provision->key}: unknown provider '{$account->get('cca_provider')}'.";
-			return null;
+			return ['driver' => null, 'reason' => "unknown provider '{$account->get('cca_provider')}'.", 'park' => false];
 		}
 
 		try {
@@ -742,8 +796,7 @@ class ProvisionCustomerCloud {
 		} catch (OAuth2Exception $e) {
 			$account->set('cca_status', 'refresh_failed');
 			$account->save();
-			$this->park_for_reconnect($provision, 'Token refresh failed: ' . $e->getMessage());
-			return null;
+			return ['driver' => null, 'reason' => 'Token refresh failed: ' . $e->getMessage(), 'park' => true];
 		}
 
 		if ($fresh->getAccessToken() !== $token->getAccessToken()) {
@@ -751,7 +804,233 @@ class ProvisionCustomerCloud {
 			$account->save();
 		}
 
-		return new LinodeComputeDriver($fresh->getAccessToken());
+		return ['driver' => new LinodeComputeDriver($fresh->getAccessToken()), 'reason' => '', 'park' => false];
+	}
+
+	// ── Retiring the install password (specs/keyless_provisioning.md WP2/WP3) ──
+
+	/**
+	 * held -> retiring once every agent the install put on the machine has
+	 * been admitted; retiring -> retired | retire_failed by the job's answer.
+	 * A retire_failed provision watches for a re-run of the job.
+	 */
+	protected function handle_install_password($provision) {
+		$state = (string)$provision->get('cvp_install_password');
+		$node_id = (int)$provision->get('cvp_mgn_node_id');
+		$node = $node_id ? new ManagedNode($node_id, TRUE) : null;
+		if (!$node || !$node->key || $node->get('mgn_delete_time')) {
+			if ($state === 'retire_failed') {
+				return 0;
+			}
+			$this->fail_retire($provision, 'The provision\'s node no longer exists, so nothing can reach the machine to retire its install password.');
+			return 1;
+		}
+
+		if ($state === 'held') {
+			$agents = self::machine_agents($provision, $node);
+			if (!$agents['ready']) {
+				return 0;
+			}
+			ManagementJob::createJob($node->key, 'retire_install_password',
+				JobCommandBuilder::build_retire_install_password($node),
+				['provision_id' => (int)$provision->key], null);
+			$provision->set('cvp_install_password', 'retiring');
+			$provision->set('cvp_error', null);
+			$provision->save();
+			return 1;
+		}
+
+		// retiring, or retire_failed: the newest job decides.
+		$job = ManagementJob::latestForNode($node->key, 'retire_install_password');
+		if (!$job) {
+			$provision->set('cvp_install_password', 'held');
+			$provision->save();
+			return 1;
+		}
+		$status = (string)$job->get('mjb_status');
+		if ($status === 'completed') {
+			$provision->set('cvp_root_pass_sealed', null);
+			$provision->set('cvp_install_password', 'retired');
+			$provision->set('cvp_error', null);
+			$provision->save();
+			error_log('ProvisionCustomerCloud: install password retired for provision #'
+				. $provision->key . ' (' . $provision->get('cvp_domain') . '), job #' . $job->key);
+			return 1;
+		}
+		if ($status === 'failed') {
+			// The failure already recorded names its job; a re-run that fails
+			// again is a new job and is recorded (and alerted) afresh.
+			if ($state === 'retire_failed' && strpos((string)$provision->get('cvp_error'), 'job #' . $job->key . ' ') !== false) {
+				return 0;
+			}
+			$this->fail_retire($provision, 'Retire job #' . $job->key . ' failed: ' . trim((string)$job->get('mjb_error_message')));
+			return 1;
+		}
+		return 0; // queued or running
+	}
+
+	/**
+	 * Which agents must be admitted before the install password can go, and
+	 * whether they are: ['ready' => bool, 'reason' => what is still waited for].
+	 * The unit is the machine: a docker box runs the site's agent in the
+	 * container and the host's own agent beside it, and the password is the
+	 * only way to reach either until both are admitted.
+	 */
+	public static function machine_agents($provision, $node): array {
+		$docker_mode  = $provision->get('cvp_docker_mode')  ?: 'docker';
+		$install_mode = $provision->get('cvp_install_mode') ?: 'fresh';
+		$required = [];
+		if ($docker_mode === 'docker' && $install_mode !== 'bare') {
+			$required[] = ['node' => $node, 'role' => 'the site\'s agent'];
+			$host_id = (int)$node->get('mgn_mgh_host_id');
+			$host = $host_id ? new ManagedHost($host_id, TRUE) : null;
+			$host_node = ($host && $host->key) ? $host->host_node() : null;
+			if (!$host_node) {
+				return ['ready' => false, 'reason' => 'waiting for the host\'s own agent to be admitted (its join names the machine as ' . $provision->get('cvp_slug') . '-host)'];
+			}
+			$required[] = ['node' => $host_node, 'role' => 'the host\'s own agent'];
+		} else {
+			$required[] = ['node' => $node, 'role' => 'the machine\'s agent'];
+		}
+		foreach ($required as $r) {
+			if (trim((string)$r['node']->get('mgn_agent_public_key')) === '') {
+				return ['ready' => false, 'reason' => 'waiting for ' . $r['role'] . ' to be admitted'];
+			}
+		}
+		return ['ready' => true, 'reason' => ''];
+	}
+
+	/**
+	 * The nodes a provision's machine may legitimately join as: its site node,
+	 * and on a docker box the machine-posture node at its address (the host).
+	 */
+	public static function machine_node_ids($provision): array {
+		$ids = [];
+		$site_id = (int)$provision->get('cvp_mgn_node_id');
+		if ($site_id) {
+			$ids[] = $site_id;
+		}
+		$ip = trim((string)$provision->get('cvp_instance_ip'));
+		if ($ip !== '') {
+			foreach (new MultiManagedNode(['host' => $ip, 'deleted' => false]) as $n) {
+				if (trim((string)$n->get('mgn_container_name')) === '' && trim((string)$n->get('mgn_web_root')) === '') {
+					$ids[] = (int)$n->key;
+				}
+			}
+		}
+		return array_values(array_unique($ids));
+	}
+
+	/**
+	 * One line for the dashboard: where the install password stands.
+	 */
+	public static function install_password_summary($provision): string {
+		$state = (string)$provision->get('cvp_install_password');
+		$status = (string)$provision->get('cvp_status');
+		switch ($state) {
+			case 'held':
+				if ($status === 'done') {
+					$node_id = (int)$provision->get('cvp_mgn_node_id');
+					$node = $node_id ? new ManagedNode($node_id, TRUE) : null;
+					if ($node && $node->key && !$node->get('mgn_delete_time')) {
+						$agents = self::machine_agents($provision, $node);
+						return 'Held — ' . ($agents['ready'] ? 'retiring on the next pass' : $agents['reason']);
+					}
+					return 'Held — the node record is gone';
+				}
+				if ($status === 'failed') {
+					return 'Held — kept while the install is unfinished, so the machine stays reachable';
+				}
+				return 'Held for the install';
+			case 'retiring':      return 'Retiring — the machine is being told to stop accepting it';
+			case 'retired':       return 'Retired';
+			case 'retire_failed': return 'NOT retired — kept so the machine stays reachable; see detail';
+		}
+		return '—';
+	}
+
+	/**
+	 * A join request from a provision's own instance address is that machine
+	 * asking to be managed, and the plane created the machine — so before a
+	 * human's fingerprint comparison stands alone, the claim is checked
+	 * against the provider (specs/keyless_provisioning.md WP5): the instance
+	 * must be running and its current address must be the join's source.
+	 *
+	 * Returns ['provision' => row|null, 'ok' => bool, 'reason' => string,
+	 * 'instance' => provider record|null]. No provision at that address means
+	 * nothing to check (ok). Never moves the provision.
+	 */
+	public function join_approval_check(string $source_ip, $node): array {
+		$provision = CustomerCloudProvision::for_machine_address($source_ip);
+		if (!$provision) {
+			return ['provision' => null, 'ok' => true, 'reason' => '', 'instance' => null];
+		}
+		$out = ['provision' => $provision, 'ok' => false, 'reason' => '', 'instance' => null];
+
+		if (!in_array((int)$node->key, self::machine_node_ids($provision), true)) {
+			$out['reason'] = "This join comes from provision #{$provision->key}'s machine ({$provision->get('cvp_domain')}), "
+				. 'but this node is neither that provision\'s site nor a host record at its address. '
+				. 'Approve it against the right node, or reject it.';
+			return $out;
+		}
+
+		$resolved = $this->resolve_driver($provision);
+		if ($resolved['driver'] === null) {
+			$out['reason'] = "Cannot ask the provider about provision #{$provision->key}'s instance: {$resolved['reason']} "
+				. 'Re-connect the cloud account at /profile/server_manager/connect_cloud, then approve.';
+			return $out;
+		}
+		try {
+			$instance = $resolved['driver']->getInstance((string)$provision->get('cvp_instance_id'));
+		} catch (CloudComputeException $e) {
+			$out['reason'] = "The provider could not report instance {$provision->get('cvp_instance_id')}: " . $e->getMessage();
+			return $out;
+		}
+		$out['instance'] = $instance;
+		if (($instance['status'] ?? '') !== 'running') {
+			$out['reason'] = "Instance {$provision->get('cvp_instance_id')} is '" . ($instance['status'] ?? 'unknown')
+				. "' at the provider, not running. A join from a machine the provider says is not running is not that machine.";
+			return $out;
+		}
+		if (trim((string)($instance['ip'] ?? '')) !== $source_ip) {
+			$out['reason'] = "The provider says instance {$provision->get('cvp_instance_id')} is at "
+				. ($instance['ip'] ?? '?') . ", but this join came from {$source_ip}.";
+			return $out;
+		}
+		$out['ok'] = true;
+		return $out;
+	}
+
+	/** retire_failed: keep the password, say why on the row, and tell ops. */
+	private function fail_retire($provision, string $reason): void {
+		$provision->set('cvp_install_password', 'retire_failed');
+		$provision->set('cvp_error', 'Install password NOT retired — kept so the machine stays reachable. '
+			. $reason . ' Re-run the job from its detail page to try again.');
+		$provision->save();
+		$line = 'Install password not retired for ' . $provision->get('cvp_domain') . ': ' . $reason;
+		error_log('ProvisionCustomerCloud: ' . $line);
+		$this->errors[] = "Provision #{$provision->key}: {$line}";
+		$this->notify_ops('[customer-cloud] Install password not retired: ' . $provision->get('cvp_domain'),
+			"The site is up, but the plane could not retire the machine's install password.\n\n"
+			. "Domain: " . $provision->get('cvp_domain') . "\n"
+			. "Instance: " . $provision->get('cvp_instance_id') . " (" . $provision->get('cvp_instance_ip') . ")\n"
+			. "Reason: " . $reason . "\n\n"
+			. "The password is still sealed on the provision row, so the machine still accepts it and this "
+			. "plane still holds it. Re-run the retire_install_password job from its detail page once the "
+			. "cause is fixed.\n");
+	}
+
+	/** Mail the ops address; a send failure is logged, never thrown. */
+	protected function notify_ops(string $subject, string $body): void {
+		$to = $this->resolve_alert_recipient();
+		if (!$to) {
+			return;
+		}
+		try {
+			EmailSender::quickSend($to, $subject, $body);
+		} catch (\Throwable $e) {
+			error_log('ProvisionCustomerCloud: alert send failed: ' . $e->getMessage());
+		}
 	}
 
 	/**
@@ -786,7 +1065,7 @@ class ProvisionCustomerCloud {
 	}
 
 	/**
-	 * The bridge credentials — the sealed root password, and a clone's export
+	 * The install credentials — the sealed root password, and a clone's export
 	 * key — exist for a running instance, and only for the length of its
 	 * install. When a provision ends (or parks) with no instance created,
 	 * there is no machine they open — so they are released now rather than
@@ -801,6 +1080,7 @@ class ProvisionCustomerCloud {
 		if (trim((string)$provision->get('cvp_root_pass_sealed')) !== '') {
 			$provision->set('cvp_root_pass_sealed', null);
 		}
+		$provision->set('cvp_install_password', null);
 		$this->release_clone_source($provision);
 	}
 

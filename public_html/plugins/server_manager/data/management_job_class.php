@@ -2,6 +2,8 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.14 - BOOTSTRAP_JOB_TYPES: retire_install_password joins install_node as a job the plane
+ *                 runs itself over the provision's sealed password, so both start 'queued'
  * @version 1.13 - rerun(): a new job carrying this job's work in whichever shape it has. A
  *                  primitive job re-run through createJob(steps) lost its envelope and
  *                  completed green having done nothing; rerun() copies the envelope
@@ -82,6 +84,16 @@ class ManagementJob extends SystemBase {
 	];
 
 	/**
+	 * The jobs the plane runs itself, over a keyless provision's sealed install
+	 * password, because the machine has no admitted agent to run them: the
+	 * bootstrap install, and the retirement of that same password once the
+	 * agent is admitted. InstallJobExecutor claims exactly these and nothing
+	 * else; they start 'queued', a status the node agent's claim ('pending'
+	 * only) never matches, so the two never fight over a job.
+	 */
+	const BOOTSTRAP_JOB_TYPES = array('install_node', 'retire_install_password');
+
+	/**
 	 * Create a new job from a command builder result.
 	 */
 	static function createJob($node_id, $job_type, $steps, $parameters, $created_by) {
@@ -112,13 +124,11 @@ class ManagementJob extends SystemBase {
 		$job = new ManagementJob(NULL);
 		$job->set('mjb_mgn_node_id', $node_id);
 		$job->set('mjb_job_type', $job_type);
-		// install_node is a bootstrap: it runs before the target has an agent,
-		// over the provision's sealed root password, and so is executed by the
-		// plane-side InstallJobExecutor — not the node-agent local queue. It
-		// starts 'queued', a status the agent's claim ('pending' only) never
-		// matches, so the two never fight over the same job. Everything else is
-		// 'pending' as before.
-		$job->set('mjb_status', $job_type === 'install_node' ? 'queued' : 'pending');
+		// A bootstrap job (see BOOTSTRAP_JOB_TYPES) is executed by the plane-side
+		// InstallJobExecutor over the provision's sealed install password, not by
+		// a node agent, and starts 'queued' so no agent ever claims it. Everything
+		// else is 'pending'.
+		$job->set('mjb_status', in_array($job_type, self::BOOTSTRAP_JOB_TYPES, true) ? 'queued' : 'pending');
 		$job->set('mjb_commands', json_encode(['steps' => $steps]));
 		$job->set('mjb_parameters', $parameters ? json_encode($parameters) : null);
 		// Progress counts the main phase only: teardown appends never advance

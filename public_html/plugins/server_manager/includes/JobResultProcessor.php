@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.22 - process_retire_install_password records whether the machine retired its install
+ *                 password; the provision pipeline reads the job's status and erases the password
  * @version 1.21 - process_backup_run stamps a run with no BACKUP_TIME at the job's own completion
  *                 time, never at the moment the sweep happened to read it, and records the node's
  *                 refusal reason as the run's message so the health card can repeat it
@@ -976,6 +978,24 @@ class JobResultProcessor {
 	private static function record_apply_update_result($job, array $result) {
 		$result['processed_time'] = gmdate('Y-m-d H:i:s');
 		$job->set('mjb_result', json_encode($result));
+		$job->save();
+	}
+
+	/**
+	 * retire_install_password: the closing half of the bootstrap. The
+	 * executor completes this job only after the machine refused the
+	 * password, so a completed job means retired. The provision pipeline
+	 * (ProvisionCustomerCloud) is what erases the sealed password from the
+	 * row; this only records the outcome on the job.
+	 */
+	private static function process_retire_install_password($job) {
+		$output = (string)$job->get('mjb_output');
+		$retired = $job->get('mjb_status') === 'completed' && strpos($output, 'INSTALL_PASSWORD_RETIRED') !== false;
+		$reason = '';
+		if (!$retired) {
+			$reason = preg_match('/^RETIRE_FAILED=(.+)$/m', $output, $m) ? trim($m[1]) : (string)$job->get('mjb_error_message');
+		}
+		$job->set('mjb_result', json_encode(['retired' => $retired, 'reason' => $reason]));
 		$job->save();
 	}
 

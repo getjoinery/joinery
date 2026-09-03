@@ -29,6 +29,8 @@
  *
  * Run: php plugins/server_manager/tests/agent_channel_test.php
  *
+ * @version 1.4 - a join records the address the plane can vouch for (the Cloudflare header only from
+ *                a verified edge), pinned here because approval compares it to the provider's record
  * @version 1.3 - either side can end the pairing: forgetAgent() is the one convergence point for
  *                the plane-side Disconnect and the node-initiated leave
  * @version 1.2 - connected = routed: the per-node cutover flag is gone (hard cutover, owner-set)
@@ -140,6 +142,26 @@ check($jr->get('ajr_status') === AgentJoinRequest::STATUS_APPROVED
 $stored = json_encode($node->export_as_array());
 check(strpos($stored, base64_encode(sodium_crypto_sign_secretkey($keypair))) === false,
 	'The private half appears nowhere on the stored node row');
+
+// ---------------------------------------------------------------------------
+section('A join records the client address the plane can vouch for');
+
+// Approval compares the join's address with the provider's record of the
+// provisioned instance (keyless_provisioning.md WP5), so the address must be
+// one a direct-to-origin request cannot spoof with a header: the for-auth
+// client-ip mode, which honours CF-Connecting-IP only from a verified edge.
+$saved_server = $_SERVER;
+$_SERVER['REMOTE_ADDR'] = '203.0.113.7';
+$_SERVER['HTTP_CF_CONNECTING_IP'] = '198.51.100.5';
+check(SessionControl::get_client_ip(true) === '203.0.113.7',
+	'A client header from a peer that is not a Cloudflare edge is ignored');
+$_SERVER['REMOTE_ADDR'] = '104.16.1.1';
+check(SessionControl::get_client_ip(true) === '198.51.100.5',
+	'From a verified Cloudflare edge the client header is the address');
+$_SERVER = $saved_server;
+$endpoint_src = file_get_contents(PathHelper::getIncludePath('plugins/server_manager/includes/AgentChannelEndpoint.php'));
+check(preg_match("/ajr_source_ip'.*get_client_ip\(true\)/", $endpoint_src) === 1,
+	'The join endpoint records exactly that address');
 
 // ---------------------------------------------------------------------------
 section('The canonical signed message matches the agent byte for byte');
