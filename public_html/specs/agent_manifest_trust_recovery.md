@@ -1,5 +1,7 @@
 # Manifest trust recovery, and saying so out loud
 
+**Status:** D is built (server_manager 1.21.8). A is not started.
+
 ## The problem
 
 A node can reach a state where the management system can no longer do anything
@@ -128,24 +130,46 @@ repeat), transport failures are retried, and the attempt is logged once rather
 than every cycle. Recovery is attempted on the same idle cadence as the
 self-update check, never inside a job.
 
-## D — naming the state
+## D — naming the state — BUILT
 
-Independent of A, and worth landing on its own.
+A node that cannot verify its own scripts is not "a node with some failing
+jobs". It is a node that can no longer be managed, and nothing said so.
 
-The agent knows the moment it refuses for this reason. That fact is currently
-visible only as individual failed jobs.
+**Built plane-side, from refusals the plane already receives**, rather than from
+a new field on the agent's claim. The claim body was the first design and was
+rejected while building: it needs a new agent across the fleet, and the nodes
+most likely to be in this state are the ones furthest behind (open question 4).
+A visibility fix that requires a current agent misses its own target. Every
+refusal already arrives with its reason, so no agent change is needed and the
+surface works on the fleet as it stands today.
 
-- **Report it.** The claim body already carries the node's own account of itself
-  (`primitives`, `bundle_version`, `agent_version`) behind the `extrasDropped`
-  compatibility path. Add `script_trust`: whether the site manifest verifies,
-  and if not, which artifact failed and why.
-- **Store it** on the node record, with the time it was first observed.
-- **Show it.** A node that cannot verify its own scripts is not "a node with
-  some failing jobs" — it is a node that can no longer be managed, and the
-  dashboard should say that in those words, with how long it has been true.
-  Fleet health should surface it the way it surfaces backup failures.
+- `NodeMonitorHealth::classify_script_trust()` reads a refusal reason and
+  returns `untrusted_manifest`, `untrusted_file`, or NULL for a refusal that
+  says nothing about trust. Matching is on the agent's own wording, and the
+  file-mismatch wording is tested first because it also contains the word
+  *manifest*.
+- `NodeMonitorHealth::note_script_trust()` is called from
+  `AgentChannelEndpoint` on every terminal result, so the state is current the
+  moment a node refuses. First-seen survives the nightly re-refusals; how long a
+  node has been unmanageable is the number that makes it urgent.
+- Stored on the node: `mgn_script_trust`, `_since`, `_reason`, `_job_type`.
+- **Clearing keys on the node's own history, not on a list of script
+  primitives.** The plane holds no such list and must not invent one — it does
+  not get to guess a node's vocabulary. A job type that has refused *here* on
+  trust grounds, completing now, is the node's own evidence.
+- `script_trust_problems()` puts it at the top of the dashboard, above the
+  backup alarm, because a node in this state cannot be repaired through the
+  agent at all and its failing backups are a symptom.
 
-D is what makes A's failure visible too. If a recovery attempt keeps failing —
+No backfill: state accrues from new results. Backfilling would mark a node red
+for refusals it has since recovered from.
+
+**Still open in D:** the agent-reported variant remains the better long-run
+answer for one case this cannot see — a node that is refusing but has no job
+dispatched to it, and so never tells the plane anything. Worth revisiting once
+the fleet's agents are current.
+
+D is also what makes A's failure visible. If a recovery attempt keeps failing —
 the plane has no manifest for that version, the tree has genuinely diverged —
 the node must not sit silently in a loop nobody can see.
 

@@ -62,6 +62,8 @@
  *                (hard cutover, owner-set) — approving the join is the routing decision
  * @version 1.2 - enrollment is a node-initiated join with no shared secret (Phase 1.5, A6):
  *                join + join_status replace pair, and the pairing-token machinery is deleted
+ * @version 1.2 - a refusal that means the node can no longer verify its own scripts is recorded
+ *                on the node as it arrives, not left to be read off individual job failures
  * @version 1.1 - the node's outcome is recorded verbatim in mjb_agent_outcome, so a refusal is
  *                countable without matching error-message text
  * @version 1.0
@@ -835,6 +837,19 @@ class AgentChannelEndpoint {
 				: ($reason !== '' ? $reason : 'The primitive failed on the node.'));
 		}
 		$job->save();
+
+		// A refusal on trust grounds is a fact about the NODE, not about this job.
+		// Recorded here, as it arrives, because the alternative is what actually
+		// happened to getjoinery: the reason sat in mjb_error_message on four
+		// nightly backup failures and two upgrades over four days, and no surface
+		// ever said the node had stopped being manageable.
+		try {
+			require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeMonitorHealth.php'));
+			NodeMonitorHealth::note_script_trust($node, $job);
+		} catch (Throwable $e) {
+			error_log('AgentChannelEndpoint: could not record script trust for job '
+				. $job->key . ': ' . $e->getMessage());
+		}
 
 		// Fold the result into the node's own columns NOW, rather than leaving it
 		// for whoever next opens a page.

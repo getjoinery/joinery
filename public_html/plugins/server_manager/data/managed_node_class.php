@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.12 - mgn_script_trust and its companions: whether the node can verify its own scripts,
+ *                  recorded on the node instead of being left to be read off individual job failures
  * @version 1.11 - mgn_agent_primitives and mgn_agent_bundle_version: the node reports what it can
  *                 do and which signed script tree it holds, on every claim. A version number is a
  *                 guess about vocabulary; the machine's own list is not
@@ -83,6 +85,35 @@ class ManagedNode extends SystemBase {
 		// of the one question a dashboard has to answer without visiting anyone.
 		'mgn_last_backup_time'    => array('type'=>'timestamp(6)'),
 		'mgn_last_backup_outcome' => array('type'=>'varchar(20)'),
+
+		// Can this node run script primitives at all?
+		//
+		// The agent verifies every site script against a signed manifest before
+		// running it as root. When that verification cannot be done, EVERY script
+		// primitive is refused at once — apply_update included, which is what makes
+		// the state self-sustaining rather than self-correcting. It is recorded on
+		// the node because it is a property of the node, not of the jobs that keep
+		// failing because of it: reading it off individual job failures is what let
+		// getjoinery sit refused for four days.
+		//
+		// '' or 'ok'          - nothing has refused on trust grounds
+		// 'untrusted_manifest'- the signed manifest is missing, unsigned or signed
+		//                       by a key this agent does not carry. RECOVERABLE:
+		//                       a correct manifest fixes it.
+		// 'untrusted_file'    - a file does not match its signed hash. NOT the same
+		//                       problem and NOT recoverable by re-delivering a
+		//                       manifest; it means the file on disk is not the file
+		//                       that was published.
+		// The two are kept apart because the remedies are opposites — see
+		// specs/agent_manifest_trust_recovery.md.
+		'mgn_script_trust'        => array('type'=>'varchar(24)'),
+		'mgn_script_trust_since'  => array('type'=>'timestamp(6)'),
+		'mgn_script_trust_reason' => array('type'=>'text'),
+		// The job type whose refusal set the state. Clearing keys on it: a later
+		// job of a type that once refused on trust grounds and now completes is
+		// the node's own proof that it can verify scripts again. The plane holds
+		// no list of which primitives are script-backed and must not invent one.
+		'mgn_script_trust_job_type' => array('type'=>'varchar(50)'),
 
 		// The bucket's own testimony about this node's shelf: when this management
 		// node last listed it, and the newest object write it saw. Stamped by
