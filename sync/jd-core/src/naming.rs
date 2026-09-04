@@ -135,12 +135,12 @@ fn duplicate_losers(
         group.sort_by_key(|e| (e.id.is_provisional(), e.id.server_id));
         let mut assigned: Vec<String> = Vec::new();
         for loser in group.into_iter().skip(1) {
-            let name = &competing_placement(loser).name;
+            let name = competing_placement(loser).name;
             // From 2, the way a person counts copies. Bounded for the same
             // reason the conflict-copy search is: a folder that defeats this
             // has something else wrong with it.
             let free = (2..=1000).find_map(|n| {
-                let candidate = jd_vfs::numbered_name(name, n);
+                let candidate = jd_vfs::numbered_name(&name, n);
                 let key = jd_vfs::comparison_key(&candidate, personality);
                 (!taken.contains(&key) && !assigned.contains(&key)).then_some(candidate)
             });
@@ -179,12 +179,36 @@ fn duplicate_losers(
 ///
 /// `PendingDownload` deliberately still counts as holding its old spot: those
 /// bytes are on their way to that path.
-fn competing_placement(entry: &Entry) -> &crate::model::Placement {
-    if entry.holds_a_local_file() {
-        entry.local_placement()
-    } else {
-        &entry.remote
+fn competing_placement(entry: &Entry) -> crate::model::Placement {
+    // Parked locally under a scratch name: it holds that name and no other.
+    // Judged by its agreement it would still claim the slot it stepped out
+    // of -- the slot it stepped out of FOR something else.
+    if let Some(scratch) = entry
+        .local_name
+        .as_deref()
+        .filter(|n| n.starts_with(crate::order::SWAP_PREFIX))
+    {
+        return crate::model::Placement {
+            parent: entry.local_placement().parent,
+            name: scratch.to_string(),
+        };
     }
+    if entry.holds_a_local_file() {
+        entry.local_placement().clone()
+    } else {
+        entry.remote.clone()
+    }
+}
+
+/// Is this entry standing aside under a local scratch name, mid-operation?
+/// Naming leaves it alone: the operation that parked it is the only thing
+/// that will ever put it back, and a verdict on the scratch name would park
+/// the entry and sweep the directory it stepped into.
+fn parked_locally(entry: &Entry) -> bool {
+    entry
+        .local_name
+        .as_deref()
+        .is_some_and(|n| n.starts_with(crate::order::SWAP_PREFIX))
 }
 
 
@@ -207,6 +231,19 @@ pub fn apply_naming(
     root_prefix_bytes: usize,
 ) -> Result<NamingOutcome, ExecError> {
     let mut out = NamingOutcome::default();
+    // Entries an operation is in the middle of, which the verdict below leaves
+    // alone. A rename cycle parks its victim under a scratch name on the
+    // server and queues the move that finishes it; between the park and the
+    // finish the entry's agreement still names the slot it is LEAVING, and a
+    // file another device has just created under that name reads here as a
+    // duplicate the entry must lose. Giving up its copy clears the agreement,
+    // the finisher finds nothing to finish, and the file is left on the server
+    // under the engine's own name with no recorded name to put it back to --
+    // while this device uploads the same bytes again as a new file. The round
+    // already skips busy entries; the verdict waits a pass, and is usually moot
+    // by then. Estate seed 17121565.
+    let busy: std::collections::HashSet<EntityId> =
+        env.store.entities_with_open_ops()?.into_iter().collect();
 
     // Group by the folder each entry sits in *locally*. The last-agreed parent,
     // not the remote one: while a remote move is known but not yet applied the
@@ -245,6 +282,26 @@ pub fn apply_naming(
         let resolved = jd_vfs::resolve_siblings(&names, personality);
         let pairs: Vec<(Entry, jd_vfs::Resolved)> =
             siblings.into_iter().zip(resolved).collect();
+        // Names held here by something on its way OUT: a materialized entry
+        // the server has moved elsewhere, not yet applied. It still competes
+        // for the slot, because the directory is still there -- but an entry
+        // that has never been materialized and wants that slot is not a
+        // duplicate of it; it is next in line. Parked as a duplicate it never
+        // gets created, the leaver's move into it never lands, and the two
+        // wait on each other for ever. The round orders them: the leaver
+        // steps aside under a scratch name, the newcomer is created, the
+        // leaver moves in. Estate seed 22081285.
+        let leaving: std::collections::HashSet<String> = pairs
+            .iter()
+            .filter(|(e, _)| e.holds_a_local_file())
+            .filter(|(e, _)| {
+                let competing = competing_placement(e);
+                e.remote.parent != competing.parent
+                    || jd_vfs::comparison_key(&e.remote.name, personality)
+                        != jd_vfs::comparison_key(&competing.name, personality)
+            })
+            .map(|(e, _)| jd_vfs::comparison_key(&competing_placement(e).name, personality))
+            .collect();
         // Decided over the whole folder, before any single entry is judged: who
         // keeps a duplicated name depends on who else is holding it.
         let renamed = duplicate_losers(&pairs, personality);
@@ -255,6 +312,13 @@ pub fn apply_naming(
             .unwrap_or(0);
 
         for (entry, r) in pairs {
+            // Only while the operation that parked it is still open. A park
+            // nobody is coming back for -- a kill dropped its finisher -- is
+            // judged, parked for its reserved prefix, swept, and the entry
+            // re-downloaded; that is the abandoned-park path and it stays.
+            if parked_locally(&entry) && busy.contains(&entry.id) {
+                continue;
+            }
             let (local_name, verdict) = match r.outcome {
                 LocalName::AsIs(name) => {
                     // Equal to the server's spelling in the common case. Not
@@ -286,6 +350,29 @@ pub fn apply_naming(
                 LocalName::Escaped { local, .. } => {
                     out.escaped += 1;
                     (Some(local), None)
+                }
+                // Asked of the STATUS, which means this arm does not fire on
+                // the pass that first sees the newcomer: a folder the server
+                // has only just announced still holds a local file by this
+                // test, so it is parked as a duplicate once, and this recovers
+                // it on the pass after. It reads like a rule that prevents the
+                // park and it is a rule that undoes one.
+                //
+                // Left that way on purpose. Asked of the agreement instead --
+                // `synced_placement.is_none()`, which is what "never
+                // materialized here" really means -- the arm fires a pass
+                // earlier and swallows duplicate verdicts that two pins depend
+                // on: a file parked mid-swap is no longer disowned-checked
+                // (9_280) and a park mid-replacement loses its create's
+                // refusal (9_285), both red. The one-pass park costs nothing
+                // now that the executor refuses to adopt a directory another
+                // folder still holds -- the create waits, nothing is taken
+                // over, and the park is undone next pass.
+                LocalName::Unsyncable(UnsyncableReason::DuplicateName { with })
+                    if !entry.holds_a_local_file()
+                        && leaving.contains(&jd_vfs::comparison_key(&with, personality)) =>
+                {
+                    (entry.local_name.clone(), None)
                 }
                 LocalName::Unsyncable(reason) => (entry.local_name.clone(), Some(reason)),
             };
@@ -365,6 +452,28 @@ pub fn apply_naming(
             // not been flipped here and will not be.
             let mut releasing = false;
             match verdict {
+                // Mid-operation: the op that parked it finishes it, and a
+                // COLLISION verdict read against the slot it is leaving would
+                // release the copy that op is about to place. Judged again
+                // next pass. Only collisions: a verdict about the entry's own
+                // name -- the reserved prefix of a local park a kill left
+                // standing, say -- is about what is on this disk now and has
+                // to stand, or the entry reads as deleted once that park is
+                // swept and the server copy goes with it.
+                //
+                // The same for an entry wearing a scratch name on the server
+                // with no operation open on it: the pass's put-back owns it,
+                // and that put-back is queued after this verdict and answered
+                // before the next, so it is never open when naming looks.
+                Some(reason)
+                    if (busy.contains(&entry.id) || jd_vfs::is_internal(&entry.remote.name))
+                        && entry.holds_a_local_file()
+                        && matches!(
+                            reason,
+                            UnsyncableReason::CaseClash { .. }
+                                | UnsyncableReason::UnicodeClash { .. }
+                                | UnsyncableReason::DuplicateName { .. }
+                        ) => {}
                 Some(reason) => {
                     // A materialized entry cannot be parked by changing a
                     // status. There is a file on the disk, and giving it up has

@@ -80,6 +80,14 @@ impl PlanItem {
         self.move_to = Some(to);
         self
     }
+
+    /// Something that will occupy a slot without leaving one: a folder being
+    /// created here. It waits for whoever holds that slot to move out, and a
+    /// move into it waits for it to exist.
+    pub fn arriving(mut self, to: Placement) -> Self {
+        self.move_to = Some(to);
+        self
+    }
 }
 
 /// A scratch name nothing else will ever want. The `.jd-` prefix is refused for
@@ -130,15 +138,25 @@ impl Plan {
 /// not produce an error — it produces two renames into one name, and the second
 /// quietly replaces the first.
 ///
-pub fn plan(items: Vec<PlanItem>, personality: &jd_vfs::Personality) -> Plan {
+pub fn plan(items: Vec<PlanItem>, personality: &jd_vfs::Personality, parents: &FolderParents) -> Plan {
     let mut plan = Plan::default();
 
-    // Which entities need parking to break a rename cycle.
-    let waits_for = dependency_graph(&items, personality);
-    let parked = find_cycle_breakers(&waits_for);
+    // Which entities need parking to break a rename cycle, and which moves
+    // cannot run this round at all.
+    let (waits_for, impossible) = dependency_graph(&items, personality, parents);
+    // Only something with a place to leave can be parked.
+    let parkable: HashSet<EntityId> = items
+        .iter()
+        .filter(|i| i.move_from.is_some())
+        .map(|i| i.entity)
+        .collect();
+    let parked = find_cycle_breakers(&waits_for, &parkable);
     let move_rank = move_ranks(&waits_for, &parked);
 
     for item in &items {
+        if impossible.contains(&item.entity) {
+            continue;
+        }
         let stage = stage_for(&item.action);
         // Deletes run deepest-first and files before folders, so nothing is
         // removed while something still lives inside it. Everything else runs
@@ -210,12 +228,35 @@ fn slot(p: &Placement, personality: &jd_vfs::Personality) -> (Option<i64>, Strin
 /// Who has to get out of whose way.
 ///
 /// A move *into* a slot depends on whatever currently occupies that slot
-/// leaving first. That single edge per mover is the whole graph — a slot has at
-/// most one occupant, so nothing can wait on two things at once.
+/// leaving first. There are two more edges now: a move into a folder being
+/// created this round waits for the create, and a move into what is currently
+/// its own subtree waits for the folder above it to leave.
+///
+/// A mover can be under more than one of them, and this map holds ONE — the
+/// last derived, which is ancestry over create over slot. That is a known
+/// hole and not a claim that one edge suffices: a mover left waiting only on
+/// its create can be ranked ahead of the occupant whose slot it needs, and
+/// the move then arrives at a name something else is still wearing. It is
+/// bounded, because the executor refuses such an arrival rather than
+/// overwriting anything and the next round derives the ordering again against
+/// a changed world — but the order this produces is not the order it reads as
+/// producing. Multi-edge is the fix: ranks take the highest blocker, and the
+/// cycle search walks a graph rather than a chain. Spec, "Still open".
+/// Where every folder currently sits, on each side: the folder's id to its
+/// parent's (`None` at the root). `local` is this disk's layout, `remote` the
+/// server's. A move that changes a folder's ancestry is ordered against these,
+/// because a name slot is not the only thing a move can wait on.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FolderParents {
+    pub local: HashMap<i64, Option<i64>>,
+    pub remote: HashMap<i64, Option<i64>>,
+}
+
 fn dependency_graph(
     items: &[PlanItem],
     personality: &jd_vfs::Personality,
-) -> HashMap<EntityId, EntityId> {
+    parents: &FolderParents,
+) -> (HashMap<EntityId, EntityId>, HashSet<EntityId>) {
     // Who currently sits in each slot, among the entities that are moving.
     let mut occupant: HashMap<(Option<i64>, String), EntityId> = HashMap::new();
     for item in items {
@@ -235,7 +276,85 @@ fn dependency_graph(
             }
         }
     }
-    waits_for
+
+    // A move into a folder being created this round waits for the create: the
+    // destination does not exist yet. With the create itself waiting for the
+    // mover -- the mover's directory holds the name the new folder needs, a
+    // folder replaced on the server by a namesake and moved inside it -- that
+    // is a cycle, and the mover is the one parked: it steps aside under a
+    // scratch name, the folder is created, and it moves in.
+    // Estate seed 22081285.
+    let creating: HashMap<i64, EntityId> = items
+        .iter()
+        .filter(|i| matches!(i.action, Action::CreateLocalFolder { .. }))
+        .map(|i| (i.entity.server_id, i.entity))
+        .collect();
+    for item in items {
+        if !matches!(item.action, Action::ApplyRemoteMove { .. }) {
+            continue;
+        }
+        if let Some(parent) = item.move_to.as_ref().and_then(|t| t.parent) {
+            if let Some(create) = creating.get(&parent) {
+                waits_for.insert(item.entity, *create);
+            }
+        }
+    }
+
+    // Ancestry. A folder moved into what is currently its own subtree -- the
+    // server swapped a parent and its child, say: the child moved out, then
+    // the parent moved in under it -- cannot go until the folder it is going
+    // into has left. The tree it is being brought to is a tree, so some move
+    // on the way up from the destination takes that folder out; the mover
+    // waits for the nearest one. With nothing on that chain moving, the move
+    // is impossible this round and is left out; the next round derives it
+    // again once the chain has changed. Applied out of order it asked the disk
+    // to move a directory into itself, which no filesystem does, and recorded
+    // an agreement with a loop in it that every later pass refused to touch:
+    // the device went quiet with two folders each agreed inside the other.
+    // Estate seed 21093056.
+    let movers: HashSet<EntityId> = items
+        .iter()
+        .filter(|i| i.move_to.is_some() && i.entity.entity_type == EntityType::Folder)
+        .map(|i| i.entity)
+        .collect();
+    let mut impossible: HashSet<EntityId> = HashSet::new();
+    for item in items {
+        if item.entity.entity_type != EntityType::Folder {
+            continue;
+        }
+        let Some(to) = &item.move_to else { continue };
+        let map = match item.action {
+            Action::ApplyRemoteMove { .. } => &parents.local,
+            Action::ApplyLocalMove { .. } => &parents.remote,
+            _ => continue,
+        };
+        let mut cur = to.parent;
+        let mut nearest_mover: Option<EntityId> = None;
+        let mut guard = 0;
+        while let Some(p) = cur {
+            if p == item.entity.server_id {
+                match nearest_mover {
+                    Some(m) => {
+                        waits_for.insert(item.entity, m);
+                    }
+                    None => {
+                        impossible.insert(item.entity);
+                    }
+                }
+                break;
+            }
+            let pid = EntityId::folder(p);
+            if nearest_mover.is_none() && movers.contains(&pid) {
+                nearest_mover = Some(pid);
+            }
+            guard += 1;
+            if guard > 512 {
+                break;
+            }
+            cur = map.get(&p).copied().flatten();
+        }
+    }
+    (waits_for, impossible)
 }
 
 /// The order the moves actually run in.
@@ -297,7 +416,10 @@ fn move_ranks(
 /// Follow the dependencies; any cycle needs exactly one member parked to break
 /// it, and the member is chosen deterministically (lowest id) so every device
 /// breaks the same cycle the same way.
-fn find_cycle_breakers(waits_for: &HashMap<EntityId, EntityId>) -> HashSet<EntityId> {
+fn find_cycle_breakers(
+    waits_for: &HashMap<EntityId, EntityId>,
+    parkable: &HashSet<EntityId>,
+) -> HashSet<EntityId> {
     let mut breakers = HashSet::new();
     let mut settled: HashSet<EntityId> = HashSet::new();
 
@@ -316,7 +438,9 @@ fn find_cycle_breakers(waits_for: &HashMap<EntityId, EntityId>) -> HashSet<Entit
                 // onward is in it. Park its lowest-id member — a stable choice,
                 // so two devices resolving the same swap agree.
                 let at = path.iter().position(|e| *e == cur).unwrap_or(0);
-                if let Some(victim) = path[at..].iter().copied().min() {
+                // Among those that can step aside: a folder being created has
+                // nowhere to go, so a cycle through one parks the mover.
+                if let Some(victim) = path[at..].iter().copied().filter(|e| parkable.contains(e)).min() {
                     breakers.insert(victim);
                 }
                 break;
@@ -338,6 +462,32 @@ mod tests {
     use super::*;
     use crate::model::Placement;
 
+    /// A parent moved into its own child waits for the child to move out,
+    /// and with the child not moving at all the parent's move is left out.
+    #[test]
+    fn a_folder_moving_into_its_own_subtree_waits_for_the_subtree_to_leave() {
+        // Folder 1 holds folder 2 locally. The server has 2 at the root and 1
+        // inside 2.
+        let mut parents = FolderParents::default();
+        parents.local.insert(1, None);
+        parents.local.insert(2, Some(1));
+        let items = vec![
+            PlanItem::new(EntityId::folder(1), Action::ApplyRemoteMove { to: placement(Some(2), "A") }, 0)
+                .moving(placement(None, "A"), placement(Some(2), "A")),
+            PlanItem::new(EntityId::folder(2), Action::ApplyRemoteMove { to: placement(None, "B") }, 1)
+                .moving(placement(Some(1), "B"), placement(None, "B")),
+        ];
+        let p = plan(items, &jd_vfs::Personality::linux(), &parents);
+        let order: Vec<EntityId> = p.ordered().iter().map(|o| o.entity).collect();
+        assert_eq!(order, vec![EntityId::folder(2), EntityId::folder(1)], "{p:?}");
+        assert!(p.broken_cycles.is_empty());
+
+        let items = vec![PlanItem::new(EntityId::folder(1), Action::ApplyRemoteMove { to: placement(Some(2), "A") }, 0)
+            .moving(placement(None, "A"), placement(Some(2), "A"))];
+        let p = plan(items, &jd_vfs::Personality::linux(), &parents);
+        assert!(p.ops.is_empty(), "a move into its own subtree with nothing leaving was planned: {p:?}");
+    }
+
     fn placement(parent: Option<i64>, name: &str) -> Placement {
         Placement {
             parent,
@@ -357,7 +507,7 @@ mod tests {
                 0,
             ),
         ];
-        let p = plan(items, &jd_vfs::Personality::linux());
+        let p = plan(items, &jd_vfs::Personality::linux(), &FolderParents::default());
         let order = p.ordered();
         assert_eq!(order[0].stage, Stage::CreateFolders);
         assert_eq!(order[1].stage, Stage::Transfer);
@@ -381,7 +531,7 @@ mod tests {
                 0,
             ),
         ];
-        let p = plan(items, &jd_vfs::Personality::linux());
+        let p = plan(items, &jd_vfs::Personality::linux(), &FolderParents::default());
         let order = p.ordered();
         assert_eq!(order[0].entity, EntityId::folder(1));
         assert_eq!(order[1].entity, EntityId::folder(2));
@@ -394,7 +544,7 @@ mod tests {
             PlanItem::new(EntityId::folder(2), Action::TrashRemote, 1),
             PlanItem::new(EntityId::file(3), Action::TrashRemote, 2),
         ];
-        let p = plan(items, &jd_vfs::Personality::linux());
+        let p = plan(items, &jd_vfs::Personality::linux(), &FolderParents::default());
         let order: Vec<EntityId> = p.ordered().iter().map(|o| o.entity).collect();
         assert_eq!(
             order,
@@ -410,7 +560,7 @@ mod tests {
             PlanItem::new(EntityId::folder(1), Action::TrashLocal, 1),
             PlanItem::new(EntityId::file(2), Action::TrashLocal, 1),
         ];
-        let p = plan(items, &jd_vfs::Personality::linux());
+        let p = plan(items, &jd_vfs::Personality::linux(), &FolderParents::default());
         let order: Vec<EntityId> = p.ordered().iter().map(|o| o.entity).collect();
         assert_eq!(order, vec![EntityId::file(2), EntityId::folder(1)]);
     }
@@ -428,7 +578,7 @@ mod tests {
                 0,
             ),
         ];
-        let p = plan(items, &jd_vfs::Personality::linux());
+        let p = plan(items, &jd_vfs::Personality::linux(), &FolderParents::default());
         let stages: Vec<Stage> = p.ordered().iter().map(|o| o.stage).collect();
         assert_eq!(
             stages,
@@ -446,7 +596,7 @@ mod tests {
             0,
         )
         .moving(placement(None, "a.txt"), placement(None, "b.txt"))];
-        let p = plan(items, &jd_vfs::Personality::linux());
+        let p = plan(items, &jd_vfs::Personality::linux(), &FolderParents::default());
         assert!(p.broken_cycles.is_empty());
     }
 
@@ -472,7 +622,7 @@ mod tests {
             )
             .moving(placement(None, "B"), placement(None, "C")),
         ];
-        let p = plan(items, &jd_vfs::Personality::linux());
+        let p = plan(items, &jd_vfs::Personality::linux(), &FolderParents::default());
         assert!(p.broken_cycles.is_empty(), "a chain is not a cycle");
     }
 
@@ -497,7 +647,7 @@ mod tests {
             )
             .moving(placement(None, "B"), placement(None, "A")),
         ];
-        let p = plan(items, &jd_vfs::Personality::linux());
+        let p = plan(items, &jd_vfs::Personality::linux(), &FolderParents::default());
         assert_eq!(p.broken_cycles.len(), 1);
         // Deterministic victim, so two devices break the same swap identically.
         assert_eq!(p.broken_cycles[0], EntityId::file(1));
@@ -531,7 +681,7 @@ mod tests {
             )
             .moving(placement(None, "B"), placement(None, "C")),
         ];
-        let p = plan(items, &jd_vfs::Personality::linux());
+        let p = plan(items, &jd_vfs::Personality::linux(), &FolderParents::default());
         assert_eq!(p.broken_cycles.len(), 1);
         assert_eq!(p.broken_cycles[0], EntityId::file(1));
     }
@@ -579,7 +729,7 @@ mod tests {
             )
             .moving(placement(None, "B"), placement(None, "C")),
         ];
-        let p = plan(items, &jd_vfs::Personality::linux());
+        let p = plan(items, &jd_vfs::Personality::linux(), &FolderParents::default());
         assert_eq!(move_order(&p), vec![EntityId::file(2), EntityId::file(1)]);
     }
 
@@ -605,7 +755,7 @@ mod tests {
             )
             .moving(placement(None, "B"), placement(None, "A")),
         ];
-        let p = plan(items, &jd_vfs::Personality::linux());
+        let p = plan(items, &jd_vfs::Personality::linux(), &FolderParents::default());
         assert_eq!(p.broken_cycles[0], EntityId::file(1));
         assert_eq!(move_order(&p), vec![EntityId::file(2), EntityId::file(1)]);
     }
@@ -640,7 +790,7 @@ mod tests {
             )
             .moving(placement(None, "B"), placement(None, "C")),
         ];
-        let p = plan(items, &jd_vfs::Personality::linux());
+        let p = plan(items, &jd_vfs::Personality::linux(), &FolderParents::default());
         let order = move_order(&p);
         let at = |e: EntityId| order.iter().position(|o| *o == e).unwrap();
         // 3 leaves C before 2 wants it. 3 can go first because the slot it
@@ -661,7 +811,7 @@ mod tests {
             0,
         )
         .moving(placement(None, "a.txt"), placement(Some(5), "fresh.txt"))];
-        let p = plan(items, &jd_vfs::Personality::linux());
+        let p = plan(items, &jd_vfs::Personality::linux(), &FolderParents::default());
         assert!(p.broken_cycles.is_empty());
     }
 }

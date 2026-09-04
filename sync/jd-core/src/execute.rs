@@ -543,8 +543,12 @@ fn perform(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
                 Some(e) => e,
                 None => return Ok(OpOutcome::Overtaken("the entry is gone".into())),
             };
+            // In place: a local park is a rename inside the folder the
+            // directory is in NOW, not the one the server has it in -- that
+            // one may not exist here yet, which can be the very reason for
+            // the park.
             let to = Placement {
-                parent: entry.remote.parent,
+                parent: entry.local_placement().parent,
                 name: read_place(&params)?.name,
             };
             move_local(env, op, to, None)
@@ -2831,6 +2835,46 @@ fn create_local_folder(
             }
         }
     }
+    // A directory standing here that another folder still holds is not this
+    // one's to adopt. `create_dir` below is content to find a directory
+    // already at the path, and for a stand-in, or a re-run of this very op,
+    // that is exactly right. It is wrong when the directory belongs to a
+    // DIFFERENT tracked folder whose own move has not run yet: the server
+    // renamed that folder and gave its old name to a new one, and the new one
+    // reaches the disk first. Adopting agrees this entry lives in the other's
+    // directory; the other's rename then carries that directory away, this
+    // entry reads as locally deleted, and the folder the user made is trashed
+    // on the server -- with the two entries agreeing on one directory in the
+    // meantime.
+    //
+    // What kept the create from being planned at all used to be a naming
+    // verdict: the newcomer lost the name as a duplicate and was parked. That
+    // verdict is gone deliberately -- it deadlocked against the leaver's own
+    // move -- so the invariant it was carrying by accident is stated here
+    // instead, in the layer that owns the question of whether a directory is
+    // this folder's. The file case one block up is the same question in the
+    // other voice: a FILE in the way is moved aside because nothing else is
+    // coming for it; a tracked FOLDER in the way is waited for, because
+    // something is. Estate seed 22081285, reviewer probe p1b.
+    if env.vfs.read_dir(&path).is_ok() {
+        for other in env.store.every_entry()? {
+            if other.id == op.entity
+                || other.id.entity_type != EntityType::Folder
+                || other.remote_deleted
+                || !other.holds_a_local_file()
+            {
+                continue;
+            }
+            if let Ok(Placed::At(theirs)) = local_path(env, &other) {
+                if theirs == path {
+                    return Ok(OpOutcome::Retry(format!(
+                        "{} is still held by another folder; waiting for it to move",
+                        path.display(),
+                    )));
+                }
+            }
+        }
+    }
     match env.vfs.create_dir(&path) {
         // A folder that was already there is `Ok`: the call underneath is
         // `create_dir_all`, which is content to find its work done. Creating a
@@ -2944,7 +2988,33 @@ fn move_remote(
     // cycle-breaking park after the key of the move that finishes it, so the
     // finisher arrives here looking at a name that is its own -- whether the
     // park ran a moment ago or a pass boundary lies between them.
-    let ours_to_finish = entry.remote.name == crate::order::swap_name(&op.idempotency_key);
+    //
+    // And the same for a move HALF done. Rename and reparent are two calls,
+    // and this op can die, or lose its answer, between them: the server then
+    // holds the entity under the new name in the old folder, or under the old
+    // name in the new one. Both are this op's own work, one call from
+    // finished. Read as somebody else's move it stood down, the next pass
+    // re-derived the move from the disk against a record whose agreement was
+    // now a pass stale, and naming disowned the record for a name it no longer
+    // held: the same bytes uploaded again beside the half-moved copy.
+    // Pinned by `a_half_applied_move_is_finished_as_ours_after_a_kill`.
+    //
+    // Only on a retry, and only HALF done. A first attempt has done nothing
+    // yet, so a half-shape it meets is somebody else's move that merely looks
+    // like one -- a peer moving the file into the same folder under its old
+    // name -- and that is the overtaken case below, exactly as before. And a
+    // move the server has already completed (a lost answer to a move that
+    // changed only the folder, say, where the half IS the whole) has nothing
+    // left to finish: proceeding would write the agreement here, blind to
+    // what stands at the new path on this disk, which the ordinary path
+    // looks at before it agrees to anything.
+    let ours_to_finish = entry.remote.name == crate::order::swap_name(&op.idempotency_key)
+        || (op.attempts > 0
+            && entry.remote != to
+            && from.as_ref().is_some_and(|f| {
+                entry.remote == Placement { parent: f.parent, name: to.name.clone() }
+                    || entry.remote == Placement { parent: to.parent, name: f.name.clone() }
+            }));
     if !ours_to_finish && from.is_some_and(|f| entry.remote != f) {
         return Ok(OpOutcome::Overtaken(
             "the server has moved it since this was planned".into(),
@@ -3296,7 +3366,16 @@ fn move_local(
     // been at for hours.
     let planned_at = planned.as_ref().and_then(Placed::path).cloned();
     let agreed_at = agreed.path().cloned();
+    // A parked entry is at its scratch name and nowhere else: the path the
+    // plan named is the one it stepped out of, and something else may be
+    // standing there by now -- the folder it stepped aside FOR. Its record
+    // says where it is; that is read first.
+    let parked = entry
+        .local_name
+        .as_deref()
+        .is_some_and(|n| n.starts_with(crate::order::SWAP_PREFIX));
     let from = match (planned_at, agreed_at) {
+        (_, Some(a)) if parked && is_at(env, op.entity.entity_type, &a)? => a,
         (Some(p), _) if is_at(env, op.entity.entity_type, &p)? => p,
         (_, Some(a)) if is_at(env, op.entity.entity_type, &a)? => a,
         (Some(p), _) => p,
@@ -3378,6 +3457,66 @@ fn move_local(
     // Source gone AND the destination occupied is the replay's signature. While
     // the source is still on disk this cannot fire, so an unrelated rival
     // holding the destination name is still moved aside exactly as before.
+    // Into a folder that is not on this disk yet. Its path would resolve by
+    // the server's name alone, which is whatever directory happens to wear
+    // that name here -- this entry's own, when the server replaced the folder
+    // with a namesake and moved this one inside it. Nothing to do until the
+    // folder exists, and waiting here keeps this entry busy so the round
+    // never plans the park that would let the folder be created: the op
+    // stands down and the next round plans both, in order.
+    //
+    // Not for an entry whose park is this plan's own: the folder's create is
+    // queued ahead of this finisher, and if the create is still being retried
+    // the finisher waits with it. Standing down would leave the park with no
+    // operation open on it, which reads as abandoned: judged, swept, and the
+    // folder downloaded again.
+    //
+    // Asked of the PLAN, not of the disk. The scratch name appears only once
+    // the park has landed, and park, create and finisher are three ops that
+    // fail independently -- refuse the park's rename once and this finisher
+    // runs first, sees an ordinary name, stands down as overtaken and is
+    // dropped; the park lands a pass later with nothing left to finish it.
+    // For a file the give-up that follows costs a re-download, which is the
+    // case it was designed for. For a FOLDER it trashes the directory with
+    // everything inside it, and the next scan pushes every child's deletion
+    // to the server. So a park still queued counts exactly as much as one
+    // already worn. Reviewer probe p2.
+    let park_queued = env
+        .store
+        .queued_ops()?
+        .iter()
+        .any(|o| o.kind == "park_local" && o.entity == entry.id);
+    let parked_here = park_queued
+        || entry
+            .local_name
+            .as_deref()
+            .is_some_and(|n| n.starts_with(crate::order::SWAP_PREFIX));
+    if let Some(p) = to.parent {
+        if let Some(parent) = env.store.get_entry(EntityId::folder(p))? {
+            if parent.synced_placement.is_none() && parent.stand_in.is_none() {
+                if parked_here {
+                    return Ok(OpOutcome::Retry(
+                        "the folder it is going into is not on this disk yet".into(),
+                    ));
+                }
+                return Ok(OpOutcome::Overtaken(
+                    "the folder it is going into is not on this disk yet; planning again".into(),
+                ));
+            }
+        }
+    }
+    // A folder cannot be moved into its own subtree: the server's tree got
+    // there by moving what is inside it out first, and this device applies
+    // that move first too. Asked out of order -- the planner orders moves by
+    // ancestry, this is the belt to its braces -- it waits for the subtree
+    // to move out rather than asking the disk for something no filesystem
+    // does, and rather than writing an agreement that says a folder sits
+    // inside itself. Estate seed 21093056.
+    if entry.id.entity_type == EntityType::Folder && from != dest && dest.starts_with(&from) {
+        return Ok(OpOutcome::Retry(
+            "it is being moved into its own subtree; waiting for what is inside to move out".into(),
+        ));
+    }
     let landed = from != dest
         && !is_at(env, entry.id.entity_type, &from)?
         && is_at(env, entry.id.entity_type, &dest)?;
@@ -3432,11 +3571,21 @@ fn move_local(
         .file_name()
         .and_then(|n| n.to_str())
         .map(|n| n.to_string());
-    entry.local_name = match landed_as {
-        Some(ref n) if *n != to.name => Some(n.clone()),
-        _ => None,
-    };
-    entry.synced_placement = Some(to);
+    if op.kind == "park_local" {
+        // A park is one step inside another operation, not a place the two
+        // sides agreed on: recorded as the spelling this disk holds and
+        // nothing else, as a remote park is recorded as `remote` alone. Into
+        // the agreement, the scratch name became the entry's real name --
+        // naming judged it unholdable, parked the entry, and swept the
+        // directory it had just stepped aside into. Estate seed 22081285.
+        entry.local_name = landed_as;
+    } else {
+        entry.local_name = match landed_as {
+            Some(ref n) if *n != to.name => Some(n.clone()),
+            _ => None,
+        };
+        entry.synced_placement = Some(to);
+    }
     // A fingerprint is only ever recorded about bytes that have been looked at.
     //
     // This runs moments before the download guard uses it, and that guard has
