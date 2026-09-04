@@ -213,7 +213,7 @@ class FilterImportTest {
 		section('Label resolution + dedup signature (DB)');
 		require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_labels_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/mailbox/logic/admin_mailbox_filters_logic.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/logic/mailbox_filters_logic.php'));
 
 		// Reuse an existing label by name; create a new one; both find-or-create.
 		$name = 'ImportTest_' . substr(md5(uniqid('', true)), 0, 8);

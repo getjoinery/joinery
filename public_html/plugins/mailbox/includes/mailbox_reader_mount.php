@@ -90,7 +90,6 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 		'draftGetUrl'       => '/api/v1/action/mailbox/draft_get',
 		'draftDeleteUrl'    => '/api/v1/action/mailbox/draft_delete',
 		'draftAttachmentDeleteUrl' => '/api/v1/action/mailbox/draft_attachment_delete',
-		'signatureSaveUrl'  => '/api/v1/action/mailbox/signature_save',
 		'messageSourceUrl'  => '/api/v1/action/mailbox/message_source',
 		'attachmentTextUrl' => '/api/v1/action/mailbox/attachment_text',
 		// .eml download + print sheet. One grant-scoped endpoint for both mounts:

@@ -23,7 +23,7 @@ harness_boot();
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_filter_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_labels_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/logic/admin_mailbox_filters_logic.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/logic/mailbox_filters_logic.php'));
 
 class FilterImportDeleteDisabledTest {
 	private $db;

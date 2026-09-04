@@ -468,8 +468,9 @@ class MailboxService {
 
 		// The aliases the viewer actually holds a GRANT for (a personal signature
 		// lives on a grant). For a plain member this equals the accessible set; for
-		// an all-access superadmin it is the subset they are truly a member of, so
-		// the reader shows the signature gear only where a signature can be set.
+		// an all-access superadmin it is the subset they are truly a member of —
+		// the mailboxes they can sign as, and the ones the signature settings page
+		// offers.
 		$own_alias_ids = array();
 		foreach (InboundEmailMailboxGrant::alias_ids_for_user($this->viewer->getUserId()) as $gid) {
 			$own_alias_ids[intval($gid)] = true;
@@ -567,7 +568,8 @@ class MailboxService {
 					'total'          => $row ? intval($row['total']) : 0,
 					// The viewer's own compose signature for this mailbox (§ Phase 3),
 					// inserted client-side on compose open. Personal per grant. `own`
-					// marks a mailbox the viewer is a member of (a signature can be set).
+					// marks a mailbox the viewer is a member of, and so one they can
+					// set a signature for.
 					'own'            => isset($own_alias_ids[$aid]),
 					'signature'      => isset($own_alias_ids[$aid])
 						? InboundEmailMailboxGrant::signatureFor($this->viewer->getUserId(), $aid) : '',

@@ -475,7 +475,7 @@ refused unless the owner has an **open unlock window** — proof of active,
 in-the-moment consent to the routing change, not just a permission check.
 
 This is enforced where the mutation happens (`plugins/mailbox/logic/
-admin_mailbox_filters_logic.php`'s `_filter_require_unlock()`,
+mailbox_filters_logic.php`'s `_filter_require_unlock()`,
 `admin_mailbox_alias_logic.php`'s `_mailbox_alias_require_unlock()`), not as
 a new platform mechanism: both call the existing `VaultUnlock::isOpen($owner_id)`.
 Because that check is scoped to the *calling* session, it can only ever be
