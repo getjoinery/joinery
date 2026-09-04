@@ -303,10 +303,19 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 			<div class="mbx-thread" id="mbx-thread"></div>
 		</div>
 	</section>
-	<!-- Member-context panel (§ Phase 5): who the correspondent is on this platform.
-	     Admin-only, lazy-filled on thread open, collapsible, hidden below a width
-	     breakpoint. The reader JS shows/populates it. -->
-	<aside class="mbx-context" id="mbx-context" hidden></aside>
+	<!-- The right column: one slot a plugin docks a panel into (the joinery_ai
+	     panel today), and the reader's own member-context panel (§ Phase 5) —
+	     who the correspondent is on this platform, admin-only and lazy-filled on
+	     thread open. Each panel collapses on its own; the column shows while
+	     either has something and becomes a labelled spine when both are
+	     collapsed. A docked panel marks itself data-collapsed and fires
+	     'joinerypanelcontent' when what it holds changes, which is the whole
+	     contract between the column and whatever is in it. Hidden below a width
+	     breakpoint. -->
+	<aside class="mbx-context" id="mbx-context" hidden>
+		<div class="mbx-context-slot" id="mbx-context-ai"></div>
+		<div class="mbx-context-slot" id="mbx-context-people" hidden></div>
+	</aside>
 </div>
 <!-- WebAuthn helper for the in-reader vault unlock ceremony (locked-state contract).
      Not deferred: it must define window.JoineryPasskeys before the reader script

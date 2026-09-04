@@ -23,7 +23,7 @@ class AiPanelConfirmRequired extends Exception {}
  * refused here, server-side, so the panel's grayed control is a rendering of
  * server truth.
  *
- * @version 1.1
+ * @version 1.3
  */
 class AiPanelService {
 
@@ -324,6 +324,111 @@ class AiPanelService {
             'last_run'       => 'Not set up yet',
             'dashboard_url'  => null,
         ];
+    }
+
+    /**
+     * The user's recipe runs in flight — what the panel's job count and its
+     * "Working now" list are built from, oldest first.
+     *
+     * Three states, because "has not started" has two very different reasons:
+     * `running` (a worker holds it), `queued` (waiting for a free worker slot)
+     * and `waiting` — a fully-sealed recipe, whose run only the owner's own
+     * unlocked browser session can perform, so it sits there until they come
+     * back (specs/implemented/in_window_deferred_work.md). Every line is
+     * server-rendered, like every other fact the panel shows.
+     *
+     * Ownership IS the scoping, as everywhere else in this service: runs of
+     * recipes belonging to $user_id, nobody else's.
+     *
+     * @return array{count:int, jobs:array<int, array{name:string, state:string, label:string}>}
+     */
+    public static function jobs(int $user_id, int $limit = 8): array {
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_class.php'));
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeVaultScope.php'));
+
+        $db = DbConnector::get_instance()->get_db_link();
+        $q = $db->prepare(
+            "SELECT r.rcr_run_id, r.rcr_status, r.rcr_started_time, p.rcp_recipe_id, p.rcp_name
+               FROM rcr_recipe_runs r
+               JOIN rcp_recipes p ON p.rcp_recipe_id = r.rcr_rcp_recipe_id
+              WHERE r.rcr_delete_time IS NULL
+                AND p.rcp_delete_time IS NULL
+                AND p.rcp_owner_user_id = ?
+                AND r.rcr_status IN (?, ?)
+              ORDER BY r.rcr_started_time ASC");
+        $q->execute([$user_id, RecipeRun::STATUS_RUNNING, RecipeRun::STATUS_PENDING]);
+        $rows = $q->fetchAll(PDO::FETCH_ASSOC);
+
+        $jobs = [];
+        foreach ($rows as $row) {
+            if (count($jobs) >= $limit) break;
+            $recipe = new Recipe((int)$row['rcp_recipe_id'], true);
+            $running = ((string)$row['rcr_status'] === RecipeRun::STATUS_RUNNING);
+            $state = 'running';
+            $label = 'Running now';
+            if (!$running) {
+                $in_window = ($recipe->key && !RecipeVaultScope::cronRunnable($recipe));
+                $state = $in_window ? 'waiting' : 'queued';
+                $label = $in_window
+                    ? 'Waiting for your unlocked session'
+                    : 'Queued';
+            }
+            $jobs[] = [
+                'name'     => (string)$row['rcp_name'],
+                'state'    => $state,
+                'label'    => $label,
+                'progress' => self::progressLine($recipe, (int)$row['rcr_run_id'], $running),
+            ];
+        }
+
+        return ['count' => count($rows), 'jobs' => $jobs];
+    }
+
+    /**
+     * How far through its queue a run is: "4 done, 11 to go" while it works,
+     * "11 to go" before it starts. Empty string when the job cannot answer —
+     * a run whose recipe or job has gone, or a count that throws — because a
+     * missing number is better than a wrong one.
+     *
+     * The remaining count is the job's own countWork(), the same cheap indexed
+     * query the schedulers ask; the done count is this run's rows in the item
+     * log, which is where the runner records every item it has finished with.
+     * Both are per RUN, not per recipe, so two runs of the same recipe never
+     * report each other's progress.
+     */
+    private static function progressLine(Recipe $recipe, int $run_id, bool $running): string {
+        if (!$recipe->key) {
+            return '';
+        }
+        $job = RecipeVaultScope::jobFor($recipe);
+        if ($job === null) {
+            return '';
+        }
+        try {
+            $left = $job->countWork(RecipeVaultScope::configFor($recipe), $recipe);
+        } catch (\Throwable $e) {
+            // A binding that cannot be counted right now (an unreadable source,
+            // a config the job rejects) is not worth an error on a panel.
+            error_log('AiPanelService: progress count failed for recipe '
+                . (int)$recipe->key . ': ' . $e->getMessage());
+            return '';
+        }
+
+        $done = self::runItemsDone($run_id);
+        $parts = [];
+        if ($running && $done > 0) {
+            $parts[] = $done . ' done';
+        }
+        $parts[] = $left . ' to go';
+        return implode(', ', $parts);
+    }
+
+    /** How many items this run has finished with, whatever the outcome. */
+    private static function runItemsDone(int $run_id): int {
+        $db = DbConnector::get_instance()->get_db_link();
+        $q = $db->prepare('SELECT count(*) FROM aip_recipe_item_log WHERE aip_rcr_run_id = ?');
+        $q->execute([$run_id]);
+        return (int)$q->fetchColumn();
     }
 
     /** "Last ran 20 minutes ago" / "Running now" / "Has not run yet". */

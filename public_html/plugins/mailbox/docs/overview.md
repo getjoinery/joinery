@@ -2600,11 +2600,14 @@ The mounts differ only in chrome and endpoint URLs (handed to the JS via
 `window.MAILBOX_READER`); the endpoints themselves scope every read and write
 via `MailboxViewer`.
 
-The **member mount only** also carries an **AI** button beside the gear when
-the joinery_ai plugin is active: it mounts that plugin's area AI panel
-(`JoineryAiPanel.mount`), a drawer where the signed-in user switches their AI
-recipes on or off for the mailbox open in the rail. The reader exposes the
-host surface the panel reads — `window.MailboxReader.currentAddress()` plus a
+The **member mount only** also mounts the joinery_ai area AI panel
+(`JoineryAiPanel.mount`) into the right column's top slot, where the signed-in
+user sees what the AI is doing for that mailbox, approves what it is waiting
+on, and switches their AI recipes on or off for the mailbox open in the rail.
+Below 1100px the reader has no right column: the panel moves itself into a
+slide-over, and an **AI** button appears beside the gear to open it. At widths
+that have the column there is no button — the panel is already on the page. The reader exposes the host surface the panel
+reads — `window.MailboxReader.currentAddress()` plus a
 `joineryareacontextchange` event on every rail switch. The admin mount
 deliberately does not carry the button: its all-access view spans mailboxes
 the viewer holds no grant on, and admins manage recipes on the dashboard. See
@@ -3111,16 +3114,31 @@ display name the import never carried. An add that cannot be written — a seale
 vault window has closed has nowhere to put the address — returns false, so the reader reports
 a failed add instead of appearing to have saved it.
 
+### The right column
+
+The aside on the right is a stack of panels, one per slot: `#mbx-context-ai`, which a
+plugin docks its own panel into (the joinery_ai panel, when that plugin is active), and
+`#mbx-context-people`, the reader's own contact panel below it. The column shows while
+**either** slot holds something and narrows to a labelled spine only when **every** panel
+in it is collapsed, so one open panel keeps the column its full width. It is not shown
+below 1100px at all.
+
+A docked panel and the column know two things about each other and nothing else: the panel
+marks its root `data-collapsed` and fires a bubbling `joinerypanelcontent` event when what
+it holds changes; the column answers by setting `data-spine` on each slot when it has
+narrowed. That is the whole contract — see `plugins/joinery_ai/docs/overview.md` § The area
+AI panel.
+
 ### Contact panel
 
-The right-hand aside is where contacts live — the left rail lists **where mail lives**, and
-a contact store belongs to a mailbox rather than sitting beside one. The panel has two
-states over the same element:
+The reader's own panel in that column is where contacts live — the left rail lists **where
+mail lives**, and a contact store belongs to a mailbox rather than sitting beside one. The
+panel has two states over the same element:
 
 - **On the list view** — the selected mailbox's contact manager (add, delete, and import a
   vCard / Google CSV via `mailbox/contacts_import`, all landing in that mailbox).
-  **Collapsed to a labelled spine by default**, since it is reference material rather than
-  the task at hand; the open/closed choice is remembered across visits. A view with no one
+  **Collapsed by default**, since it is reference material rather than the task at hand;
+  the open/closed choice is remembered across visits. A view with no one
   mailbox behind it (All mail, or an unmatched box) has no single store to show, so the
   panel steps aside entirely.
 - **On an open conversation** — the correspondent's card, expanded

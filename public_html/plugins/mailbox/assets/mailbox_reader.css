@@ -1,7 +1,7 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.33
+ * Vanilla CSS, no framework. @version 2.35
  */
 
 /* Every size the reader renders text at, in one ladder. Nothing in this file
@@ -1384,31 +1384,51 @@
 	gap: .35rem;
 	margin-bottom: .5rem;
 }
-/* Collapsed: the title turns on its side so the spine reads as a labelled edge
-   rather than a blank gutter. */
-.mbx-context-collapsed .mbx-context-head {
+/* A header that leads with its collapse control reads left-to-right: the caret,
+   then what it opens. Space-between is for the counterparty card's header,
+   whose close button belongs at the far edge. */
+.mbx-context-head:has(.mbx-context-toggle) { justify-content: flex-start; }
+/* One slot per panel. A rule between them, never above the first or below the
+   last, so the column reads as stacked panels rather than boxed ones. */
+.mbx-context-slot + .mbx-context-slot {
+	margin-top: .75rem;
+	padding-top: .75rem;
+	border-top: 1px solid #e4e7eb;
+}
+.mbx-context.mbx-context-collapsed .mbx-context-slot + .mbx-context-slot {
+	margin-top: .5rem;
+	padding-top: .5rem;
+}
+/* Spine mode belongs to the COLUMN, not to a panel: one collapsed panel beside
+   an open one is just a header row. Only when every panel is collapsed does the
+   column narrow, and then each title turns on its side so the spine reads as a
+   labelled edge rather than a blank gutter. */
+.mbx-context.mbx-context-collapsed .mbx-context-head {
 	flex-direction: column;
 	justify-content: flex-start;
 	margin-bottom: 0;
 }
-.mbx-context-collapsed .mbx-context-title {
+.mbx-context.mbx-context-collapsed .mbx-context-title {
 	writing-mode: vertical-rl;
 	margin-top: .5rem;
 	font-size: var(--mbx-text-sm);
 	color: #52606d;
 	white-space: nowrap;
 }
+/* Matches the disclosure control a docked plugin panel draws in this same
+   column (.aip-head-toggle): a plain triangle, no box. */
 .mbx-context-toggle {
-	border: 1px solid #e4e7eb;
-	background: #fff;
-	color: #52606d;
-	border-radius: 6px;
+	border: 0;
+	background: none;
+	/* The same token the docked panel's own toggle resolves, so the two
+	   triangles are the same grey under any theme. */
+	color: var(--jy-color-text-muted, #667085);
 	cursor: pointer;
-	font-size: var(--mbx-text-base);
+	font-size: .85rem;
 	line-height: 1;
-	padding: .2rem .35rem;
+	padding: 0 .15rem;
 }
-.mbx-context-toggle:hover { background: #eef2ff; border-color: #2563eb; color: #2563eb; }
+.mbx-context-toggle:hover { color: #2563eb; }
 .mbx-context-title { font-weight: 600; color: #111827; }
 .mbx-context-card {
 	background: #fff;
