@@ -18,7 +18,7 @@
 use std::collections::HashMap;
 
 use crate::model::{Delta, EntityId, Entry};
-use crate::order::{plan, Plan, PlanItem};
+use crate::order::{plan, FolderParents, Plan, PlanItem};
 use crate::reconcile::{is_mass_delete, reconcile, Action, Context, Issue};
 
 /// Which direction a paused delete would have gone.
@@ -86,6 +86,7 @@ pub fn run_round(
     synced_total: usize,
     ctx: &Context,
     policy: DeletePolicy,
+    parents: &FolderParents,
 ) -> RoundOutcome {
     let mut out = RoundOutcome::default();
     let mut resolved: Vec<(RoundInput, Vec<Action>)> = Vec::new();
@@ -161,11 +162,16 @@ pub fn run_round(
             if let (Some(from), Some(to)) = (current, move_target(&action)) {
                 item = item.moving(from, to);
             }
+            // A folder being created on this disk wants a slot too, and a
+            // move whose destination is that folder wants it to exist first.
+            if let Action::CreateLocalFolder { placement } = &action {
+                item = item.arriving(placement.clone());
+            }
             items.push(item);
         }
     }
 
-    out.plan = plan(items, &ctx.personality);
+    out.plan = plan(items, &ctx.personality, parents);
     out
 }
 
@@ -313,7 +319,7 @@ mod tests {
                 depth: 0,
             },
         ];
-        let out = run_round(inputs, 100, &ctx(), DeletePolicy::Guard);
+        let out = run_round(inputs, 100, &ctx(), DeletePolicy::Guard, &FolderParents::default());
         assert_eq!(out.plan.ops.len(), 2);
         assert!(!out.needs_confirmation());
     }
@@ -325,6 +331,7 @@ mod tests {
             500,
             &ctx(),
             DeletePolicy::Guard,
+            &FolderParents::default(),
         );
         assert!(!out.needs_confirmation());
         assert_eq!(out.plan.ops.len(), 5);
@@ -339,6 +346,7 @@ mod tests {
             400,
             &ctx(),
             DeletePolicy::Guard,
+            &FolderParents::default(),
         );
 
         assert!(out.needs_confirmation());
@@ -358,6 +366,7 @@ mod tests {
             400,
             &ctx(),
             DeletePolicy::Guard,
+            &FolderParents::default(),
         );
         assert_eq!(out.paused[0].direction, DeleteDirection::Local);
         assert!(out.plan.is_empty());
@@ -370,6 +379,7 @@ mod tests {
             400,
             &ctx(),
             DeletePolicy::Approved,
+            &FolderParents::default(),
         );
         assert!(!out.needs_confirmation());
         assert_eq!(out.plan.ops.len(), 200);
@@ -386,7 +396,7 @@ mod tests {
             depth: 0,
         });
 
-        let out = run_round(inputs, 400, &ctx(), DeletePolicy::Guard);
+        let out = run_round(inputs, 400, &ctx(), DeletePolicy::Guard, &FolderParents::default());
 
         assert_eq!(out.paused.len(), 1);
         assert_eq!(out.paused[0].direction, DeleteDirection::Remote);
@@ -409,7 +419,7 @@ mod tests {
             depth: 0,
         });
 
-        let out = run_round(inputs, 400, &ctx(), DeletePolicy::Guard);
+        let out = run_round(inputs, 400, &ctx(), DeletePolicy::Guard, &FolderParents::default());
 
         assert!(out.needs_confirmation());
         assert_eq!(out.plan.ops.len(), 1);
@@ -428,7 +438,7 @@ mod tests {
             },
             depth: 0,
         }];
-        let out = run_round(inputs, 10, &ctx(), DeletePolicy::Guard);
+        let out = run_round(inputs, 10, &ctx(), DeletePolicy::Guard, &FolderParents::default());
 
         assert_eq!(out.issues.len(), 1);
         assert_eq!(out.issues[0].0, EntityId::file(1));
@@ -454,7 +464,7 @@ mod tests {
                 depth: 0,
             },
         ];
-        let out = run_round(inputs, 10, &ctx(), DeletePolicy::Guard);
+        let out = run_round(inputs, 10, &ctx(), DeletePolicy::Guard, &FolderParents::default());
         assert_eq!(out.plan.broken_cycles.len(), 1);
     }
 
@@ -484,14 +494,14 @@ mod tests {
                 depth: 0,
             },
         ];
-        let out = run_round(inputs, 10, &ctx(), DeletePolicy::Guard);
+        let out = run_round(inputs, 10, &ctx(), DeletePolicy::Guard, &FolderParents::default());
         let stages: Vec<Stage> = out.plan.ordered().iter().map(|o| o.stage).collect();
         assert_eq!(stages, vec![Stage::CreateFolders, Stage::Transfer]);
     }
 
     #[test]
     fn an_empty_round_is_empty() {
-        let out = run_round(vec![], 0, &ctx(), DeletePolicy::Guard);
+        let out = run_round(vec![], 0, &ctx(), DeletePolicy::Guard, &FolderParents::default());
         assert!(out.is_empty() && !out.needs_confirmation());
     }
 

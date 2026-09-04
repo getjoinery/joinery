@@ -9033,3 +9033,421 @@ fn a_locked_vaults_folder_trash_waits_for_a_child_the_server_moved_out() {
     assert_converged(&world);
     assert_nothing_lost(&world, &committed);
 }
+
+/// A file parked mid-swap is not disowned for the name it is leaving.
+///
+/// The desktop swaps two files across two folders; the planner parks one
+/// under a scratch name on the server, the park is recorded, and the move
+/// that finishes it is refused by a server hiccup and left queued for the
+/// next pass. The laptop then creates a new file under the parked file's old
+/// name. On the desktop's next pass the parked file's agreement still names
+/// that slot, naming read the newcomer as a duplicate the parked file must
+/// lose, gave up its copy and its agreement, the finisher had nothing left to
+/// finish, and the same bytes went up again as a new file with the park
+/// stranded on the server for good. An entry mid-operation is left to that
+/// operation. Estate seed 17121565.
+#[test]
+fn a_file_parked_mid_swap_is_not_disowned_for_the_name_it_is_leaving() {
+    let mut exercised = 0;
+    // The hiccup has to land on the finisher and not on the park: searched
+    // over the fault rate, deterministic from the world's seed.
+    for (seed, rate) in (0..12u64).flat_map(|k| (1..20u64).map(move |r| (9_280 + k, r * 50))) {
+        let world = World::of(
+            seed,
+            // The laptop holds both spellings, so its newcomer under the old
+            // name collides with nothing there; the desktop folds, which is
+            // what makes the swap a cycle.
+            &[("laptop", jd_sim::Platform::Linux), ("desktop", jd_sim::Platform::MacOs)],
+        );
+        let mut committed = Committed::default();
+        let laptop = world.device("laptop");
+        let desktop = world.device("desktop");
+        let one = b"the contents of A";
+        let two = b"the contents of B";
+        desktop.fs.user_mkdir("One");
+        desktop.fs.user_mkdir("Two");
+        desktop.fs.user_write("One/x.txt", one);
+        desktop.fs.user_write("Two/y.txt", two);
+        // Only the desktop syncs before the swap: the laptop has never seen
+        // these files, as the seed's laptop had not, so its newcomer lands
+        // where nothing of A's stands.
+        for _ in 0..4 {
+            world.pass(desktop);
+        }
+        assert_eq!(world.server.tree().len(), 4, "{:?}", world.server.tree());
+
+        // The same shape as the peer put-back pin: each file lands in the
+        // other's folder under a case variant of its name, which on a folding
+        // disk is the other's slot, so the two moves wait on each other and
+        // the planner parks one.
+        desktop.fs.user_rename("One/x.txt", "Two/held");
+        desktop.fs.user_rename("Two/y.txt", "One/X.txt");
+        desktop.fs.user_rename("Two/held", "Two/Y.txt");
+        committed.note("One/X.txt", two);
+        committed.note("Two/Y.txt", one);
+        desktop.net.set_faults(NetFaults { server_5xx: rate, ..NetFaults::none() });
+        world.pass(desktop);
+        desktop.net.set_faults(NetFaults::none());
+
+        // The seed's shape and only that: the park stands and is recorded,
+        // its finisher is still queued, and the other file has not moved.
+        let tree = world.server.tree();
+        let entries = desktop.store.every_entry().unwrap();
+        let victim = entries.iter().find(|e| e.remote.name.starts_with(".jd-swap-"));
+        let finisher_queued = victim.is_some_and(|v| {
+            desktop.store.queued_ops().unwrap().iter().any(|o| o.entity == v.id && o.kind == "move_remote")
+        });
+        let leaving: Option<String> = victim
+            .filter(|_| finisher_queued && tree.contains_key("Two/y.txt"))
+            .and_then(|v| {
+                let agreed = v.synced_placement.clone()?;
+                let folder = entries
+                    .iter()
+                    .find(|e| e.id.entity_type == jd_core::EntityType::Folder && Some(e.id.server_id) == agreed.parent)?;
+                Some(format!("{}/{}", folder.remote.name, agreed.name))
+            });
+        let Some(path) = leaving else {
+            continue;
+        };
+        exercised += 1;
+        // A file the laptop's user already had under that name.
+        let three = b"a newcomer under the name being left";
+        let folder = path.split('/').next().unwrap().to_string();
+        laptop.fs.user_mkdir(&folder);
+        laptop.fs.user_write(&path, three);
+        committed.note(&path, three);
+        for _ in 0..3 {
+            world.pass(laptop);
+        }
+        world.pass(desktop);
+        world.pass(desktop);
+        assert!(world.settle().is_some(), "rate={rate}: did not settle");
+        let tree = world.server.tree();
+        assert!(!tree.keys().any(|p| p.contains(".jd-")), "rate={rate}: park stranded: {tree:?}");
+        let copies = |body: &[u8]| tree.values().flatten().filter(|h| **h == jd_sim::sha256_hex(body)).count();
+        assert_eq!(copies(one), 1, "rate={rate}: A uploaded again: {tree:?}");
+        assert_eq!(copies(two), 1, "rate={rate}: B uploaded again: {tree:?}");
+        assert_converged(&world);
+        assert_nothing_lost(&world, &committed);
+        if exercised >= 3 {
+            break;
+        }
+    }
+    assert!(exercised > 0, "no fault rate left a recorded park with its finisher queued; the pin exercised nothing");
+}
+
+/// A move that dies between its rename-first half and its reparent is not
+/// recognised as its own on resume: the entry's server placement no longer
+/// matches `from`, the op is dropped as somebody else's move, and the next
+/// pass re-derives the move from the disk -- against a newcomer that clashes
+/// by case with the destination on this folding disk, so the file lands as a
+/// conflict copy while its half-moved server copy stands: the same bytes
+/// twice on the server. Found beside estate seed 17121565; not that defect.
+#[test]
+fn a_half_applied_move_is_finished_as_ours_after_a_kill() {
+    let world = World::of(
+        9_281,
+        &[("laptop", jd_sim::Platform::Linux), ("desktop", jd_sim::Platform::MacOs)],
+    );
+    let mut committed = Committed::default();
+    let laptop = world.device("laptop");
+    let desktop = world.device("desktop");
+    let one = b"the contents of A";
+    let two = b"the contents of B";
+    desktop.fs.user_mkdir("One");
+    desktop.fs.user_mkdir("Two");
+    desktop.fs.user_write("One/x.txt", one);
+    desktop.fs.user_write("Two/y.txt", two);
+    for _ in 0..4 {
+        world.pass(desktop);
+    }
+    desktop.fs.user_rename("One/x.txt", "Two/held");
+    desktop.fs.user_rename("Two/y.txt", "One/X.txt");
+    desktop.fs.user_rename("Two/held", "Two/Y.txt");
+    committed.note("One/X.txt", two);
+    committed.note("Two/Y.txt", one);
+    desktop.net.arm_death(2);
+    world.pass(desktop);
+    let tree = world.server.tree();
+    assert!(tree.keys().any(|p| p.contains(".jd-swap-")) && tree.contains_key("Two/X.txt"), "not the half-moved shape: {tree:?}");
+    let three = b"a newcomer under the name being left";
+    laptop.fs.user_mkdir("One");
+    laptop.fs.user_write("One/x.txt", three);
+    committed.note("One/x.txt", three);
+    for _ in 0..3 {
+        world.pass(laptop);
+    }
+    assert!(world.settle().is_some());
+    let tree = world.server.tree();
+    let copies = |body: &[u8]| tree.values().flatten().filter(|h| **h == jd_sim::sha256_hex(body)).count();
+    assert_eq!(copies(two), 1, "B on the server twice: {tree:?}");
+    assert_eq!(copies(one), 1, "A on the server twice: {tree:?}");
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// A parent and its child swapped on the server: the child moved out to the
+/// root, then the parent moved in under it. Both arrive in one feed. Applied
+/// as they came, the parent's move asked the disk to move a directory into
+/// itself and recorded an agreement with a loop in it; every later pass
+/// refused to touch the loop and the device went quiet with two folders each
+/// agreed inside the other. The child's move is applied first.
+/// Estate seed 21093056.
+#[test]
+fn a_parent_swapped_under_its_own_child_on_the_server_is_applied_child_first() {
+    let world = World::new(9_283, &["laptop"]);
+    let laptop = world.device("laptop");
+    let mut committed = Committed::default();
+    let a = world.server.seed_folder(None, "A");
+    let b = world.server.seed_folder(Some(a), "B");
+    let body = b"deep inside";
+    world.server.seed_file(Some(b), "note.txt", body);
+    assert!(world.settle().is_some());
+    committed.note("A/B/note.txt", body);
+
+    let act = |name: &str, body: serde_json::Value| world.server.action(name, &body).unwrap();
+    act("drive_move", serde_json::json!({ "entity_type": "folder", "entity_id": b, "parent_id": null }));
+    act("drive_move", serde_json::json!({ "entity_type": "folder", "entity_id": a, "parent_id": b }));
+    committed.note("B/note.txt", body);
+
+    assert!(world.settle().is_some(), "the swap never settled");
+    let disk = disk_tree(laptop);
+    assert!(disk.contains_key("B/A"), "{disk:?}");
+    assert!(disk.contains_key("B/note.txt"), "{disk:?}");
+    assert!(!disk.keys().any(|p| p.starts_with("A/")), "{disk:?}");
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// A folder replaced on the server by a new folder of its own name, and moved
+/// inside it: the old one renamed, the new one created at its old slot, the
+/// old one moved under the new one, all in one feed. On this disk the old
+/// directory holds the name the new folder needs, and the old folder's move
+/// needs the new folder to exist: the old folder has to step aside under a
+/// scratch name, the new one is created, and the old one moves in.
+/// Estate seed 22081285.
+#[test]
+fn a_folder_replaced_by_a_namesake_and_moved_inside_it_steps_aside_first() {
+    let world = World::new(9_284, &["laptop"]);
+    let laptop = world.device("laptop");
+    let mut committed = Committed::default();
+    let old = world.server.seed_folder(None, "X");
+    let body = b"kept through the replacement";
+    world.server.seed_file(Some(old), "note.txt", body);
+    assert!(world.settle().is_some());
+
+    let act = |name: &str, body: serde_json::Value| world.server.action(name, &body).unwrap();
+    act("drive_rename", serde_json::json!({ "entity_type": "folder", "entity_id": old, "name": "Y" }));
+    let new = world.server.seed_folder(None, "X");
+    act("drive_move", serde_json::json!({ "entity_type": "folder", "entity_id": old, "parent_id": new }));
+    committed.note("X/Y/note.txt", body);
+
+    assert!(world.settle().is_some(), "never settled");
+    let disk = disk_tree(laptop);
+    assert!(disk.contains_key("X/Y/note.txt"), "{disk:?}");
+    assert!(!disk.keys().any(|p| p.contains(".jd-")), "{disk:?}");
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// The same replacement, with the new folder's create refused once by the
+/// disk after the park has landed. The parked directory stands across a pass
+/// with its finisher still queued: naming leaves it alone (it competes for
+/// its scratch name and nothing else) instead of judging the scratch name
+/// unholdable and sweeping the directory into the trash, and the finisher
+/// waits for the create rather than standing down. Next pass the create
+/// lands and the folder moves in; nothing is swept or downloaded again.
+#[test]
+fn a_park_mid_replacement_survives_its_create_being_refused_once() {
+    let world = World::new(9_285, &["laptop"]);
+    let laptop = world.device("laptop");
+    let mut committed = Committed::default();
+    let old = world.server.seed_folder(None, "X");
+    let body = b"kept through the replacement";
+    world.server.seed_file(Some(old), "note.txt", body);
+    assert!(world.settle().is_some());
+
+    let act = |name: &str, body: serde_json::Value| world.server.action(name, &body).unwrap();
+    act("drive_rename", serde_json::json!({ "entity_type": "folder", "entity_id": old, "name": "Y" }));
+    let new = world.server.seed_folder(None, "X");
+    act("drive_move", serde_json::json!({ "entity_type": "folder", "entity_id": old, "parent_id": new }));
+    committed.note("X/Y/note.txt", body);
+
+    // The first pass reads the change; the second parks, and its create of
+    // the new folder is refused once.
+    world.pass(laptop);
+    laptop.fs.fail_next(FsOp::CreateDir, Some("X"), FailureKind::Io, 1);
+    world.pass(laptop);
+    assert!(
+        laptop.fs.all_paths().iter().any(|p| p.contains(".jd-swap-")),
+        "the park did not stand: {:?}",
+        laptop.fs.all_paths()
+    );
+    world.pass(laptop);
+    world.pass(laptop);
+    assert!(world.settle().is_some(), "never settled");
+    let disk = disk_tree(laptop);
+    assert!(disk.contains_key("X/Y/note.txt"), "{disk:?}");
+    assert!(!disk.keys().any(|p| p.contains(".jd-")), "park left: {disk:?}");
+    let issues = laptop.store.open_issues().unwrap();
+    assert!(!issues.iter().any(|i| i.kind == "parked"), "the park was swept: {issues:?}");
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// The server renames a folder and gives its old name to a new one, and the
+/// disk is slow to apply the rename -- so the new folder's create runs while
+/// the old folder's directory is still standing at the name.
+///
+/// `create_dir` is content to find a directory already there, which is right
+/// for a stand-in and right for a re-run, and wrong here: the directory
+/// belongs to a folder that has not moved yet. Adopted, the two entries agree
+/// on one directory; the older one's rename then carries it away, the newer
+/// reads as locally deleted, and the folder the user made is trashed on the
+/// server. The create waits instead.
+#[test]
+fn a_new_folder_does_not_adopt_the_directory_of_the_one_it_replaced() {
+    use jd_core::model::EntityId;
+    let world = World::new(9_286, &["laptop"]);
+    let laptop = world.device("laptop");
+    let mut committed = Committed::default();
+    let old = world.server.seed_folder(None, "X");
+    let body = b"kept through the rename";
+    world.server.seed_file(Some(old), "note.txt", body);
+    assert!(world.settle().is_some());
+
+    let act = |name: &str, body: serde_json::Value| world.server.action(name, &body).unwrap();
+    act("drive_rename", serde_json::json!({ "entity_type": "folder", "entity_id": old, "name": "Y" }));
+    committed.note("Y/note.txt", body);
+    // Three refusals: the rename is still being retried when the newcomer's
+    // create is decided a pass later.
+    laptop.fs.fail_next(FsOp::Rename, None, FailureKind::Io, 3);
+    world.pass(laptop);
+    let new = world.server.seed_folder(None, "X");
+
+    assert!(world.settle().is_some(), "never settled");
+    let disk = disk_tree(laptop);
+    assert!(disk.contains_key("Y/note.txt"), "{disk:?}");
+    let eo = laptop.store.get_entry(EntityId::folder(old)).unwrap().unwrap();
+    let en = laptop
+        .store
+        .get_entry(EntityId::folder(new))
+        .unwrap()
+        .expect("the folder the user made was trashed with its entry");
+    assert_eq!(eo.synced_placement.as_ref().map(|p| p.name.as_str()), Some("Y"), "{eo:?}");
+    assert_eq!(en.synced_placement.as_ref().map(|p| p.name.as_str()), Some("X"), "{en:?}");
+    assert_eq!(world.server.live_counts(), (2, 1));
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// The replacement again, with the PARK's rename refused once instead of the
+/// create. Park, create and finisher are three ops of one operation and they
+/// fail independently: the finisher runs first, and the scratch name it looks
+/// for is not on the disk yet.
+///
+/// Asked of the disk it stood down as overtaken and was dropped, and the park
+/// landed a pass later with nothing coming for it -- then the give-up meant
+/// for a file trashed the directory and took note.txt to the server's trash
+/// with it. Asked of the PLAN, the finisher sees its own park still queued
+/// and waits.
+#[test]
+fn a_finisher_waits_for_its_own_park_before_the_park_has_landed() {
+    let world = World::new(9_287, &["laptop"]);
+    let laptop = world.device("laptop");
+    let mut committed = Committed::default();
+    let old = world.server.seed_folder(None, "X");
+    let body = b"kept through the replacement";
+    world.server.seed_file(Some(old), "note.txt", body);
+    assert!(world.settle().is_some());
+
+    let act = |name: &str, body: serde_json::Value| world.server.action(name, &body).unwrap();
+    act("drive_rename", serde_json::json!({ "entity_type": "folder", "entity_id": old, "name": "Y" }));
+    let new = world.server.seed_folder(None, "X");
+    act("drive_move", serde_json::json!({ "entity_type": "folder", "entity_id": old, "parent_id": new }));
+    committed.note("X/Y/note.txt", body);
+
+    world.pass(laptop);
+    laptop.fs.fail_next(FsOp::Rename, None, FailureKind::Io, 1);
+
+    assert!(world.settle().is_some(), "never settled");
+    let disk = disk_tree(laptop);
+    assert!(disk.contains_key("X/Y/note.txt"), "{disk:?}");
+    assert!(!disk.keys().any(|p| p.contains(".jd-")), "park left: {disk:?}");
+    let issues = laptop.store.open_issues().unwrap();
+    assert!(
+        !issues.iter().any(|i| i.kind == "parked" || i.kind == "kept_aside"),
+        "the park was swept: {issues:?}"
+    );
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// The park stands -- the new folder's create refused once -- and then the
+/// replacement is undone on the server: the old folder is moved back out to
+/// the root under another name and the namesake is trashed, so the folder the
+/// finisher was going to put the park into no longer exists.
+///
+/// This is the state a local park is most exposed in, and it is the pin that
+/// stands in for a rescue that is deliberately not built. A finisher can leave
+/// the queue without finishing -- withdrawn on a 4xx, overtaken when what it
+/// needs is gone -- and were it to do so here, the parked directory would be
+/// left wearing a scratch name with nothing coming for it, and the give-up
+/// meant for a file would trash it with everything inside. What prevents that
+/// is not a cap on attempts but the park's own busy-ness: the exits that drop
+/// a finisher all need the entry or its destination parent forgotten, and
+/// nothing forgets an entity while its ops are queued. That is a property of
+/// this function's exits and nothing enforces it, so it is pinned here by its
+/// consequence rather than by its shape. The clock has to move: ops in retry
+/// backoff do not run, and a pass loop that does not advance it measures the
+/// backoff instead of the engine.
+#[test]
+fn a_park_whose_destination_is_trashed_keeps_its_finisher_and_its_files() {
+    let world = World::new(9_288, &["laptop"]);
+    let laptop = world.device("laptop");
+    let mut committed = Committed::default();
+    let old = world.server.seed_folder(None, "X");
+    let body = b"kept through the replacement";
+    world.server.seed_file(Some(old), "note.txt", body);
+    assert!(world.settle().is_some());
+
+    let act = |name: &str, body: serde_json::Value| world.server.action(name, &body).unwrap();
+    act("drive_rename", serde_json::json!({ "entity_type": "folder", "entity_id": old, "name": "Y" }));
+    let new = world.server.seed_folder(None, "X");
+    act("drive_move", serde_json::json!({ "entity_type": "folder", "entity_id": old, "parent_id": new }));
+
+    world.pass(laptop);
+    laptop.fs.fail_next(FsOp::CreateDir, Some("X"), FailureKind::Io, 1);
+    world.pass(laptop);
+    assert!(
+        laptop.fs.all_paths().iter().any(|p| p.contains(".jd-swap-")),
+        "the park did not stand: {:?}",
+        laptop.fs.all_paths()
+    );
+
+    // The undo, while the park stands: out of the namesake, the namesake
+    // deleted, and the folder renamed where the park cannot follow it.
+    act("drive_move", serde_json::json!({ "entity_type": "folder", "entity_id": old, "parent_id": null }));
+    act("drive_rename", serde_json::json!({ "entity_type": "folder", "entity_id": old, "name": "Z" }));
+    act("drive_trash", serde_json::json!({ "entity_type": "folder", "entity_id": new }));
+    committed.note("Z/note.txt", body);
+
+    for _ in 0..40 {
+        world.clock.advance_secs(20 * 60);
+        let out = world.pass(laptop);
+        if out.quiet() && laptop.store.queued_ops().unwrap().is_empty() {
+            break;
+        }
+    }
+    assert!(world.settle().is_some(), "never settled");
+    let tree = world.server.tree();
+    assert_eq!(
+        tree.get("Z/note.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(body)),
+        "note.txt is not live on the server: {tree:?}"
+    );
+    let disk = disk_tree(laptop);
+    assert!(!disk.keys().any(|p| p.contains(".jd-")), "park left: {disk:?}");
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}

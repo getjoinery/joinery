@@ -1003,7 +1003,28 @@ pub fn run_pass(
 
     // ---- decide, journal, do -------------------------------------------------
     let synced_total = env.store.synced_count()?;
-    out.round = run_round(inputs, synced_total, ctx, policy);
+    // Where every folder sits now, on each side, for the planner to order
+    // moves that change ancestry. Every tracked folder, not only this round's
+    // inputs: a chain runs through folders nothing is happening to. The local
+    // side prefers what the scan found over the agreement, because a folder
+    // the user moved is where they put it.
+    let mut parents = crate::order::FolderParents::default();
+    for e in all_entries(env)? {
+        if e.id.entity_type != EntityType::Folder || e.remote_deleted {
+            continue;
+        }
+        parents.local.insert(e.id.server_id, e.local_placement().parent);
+        parents.remote.insert(e.id.server_id, e.remote.parent);
+    }
+    for input in &inputs {
+        if input.entry.id.entity_type != EntityType::Folder {
+            continue;
+        }
+        if let Some(p) = input.local.placement() {
+            parents.local.insert(input.entry.id.server_id, p.parent);
+        }
+    }
+    out.round = run_round(inputs, synced_total, ctx, policy, &parents);
     for (id, issue) in &out.round.issues {
         env.store.raise_issue(
             Some(*id),
@@ -1534,12 +1555,34 @@ fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
     // Every scratch name the store still has a live entity for. Built once:
     // asking per file would be a query per directory entry, and the answer
     // cannot change inside one walk.
+    //
+    // Both kinds of park. A remote park is the entry's server name; a LOCAL
+    // park -- the directory stepped aside so a namesake could be created at
+    // its name -- is the spelling on this disk, with the finisher that moves
+    // it on still queued. Counted by server names alone, a live local park
+    // read as litter and was trashed with everything inside it, one pass
+    // after it was made. A local park with nothing queued on it is the
+    // abandoned kind and is still swept. Estate seed 22081285.
+    let busy_now: std::collections::HashSet<EntityId> =
+        env.store.entities_with_open_ops()?.into_iter().collect();
     let live_swap_names: std::collections::HashSet<String> = env
         .store
         .every_entry()?
         .into_iter()
-        .filter(|e| !e.remote_deleted && e.remote.name.starts_with(crate::order::SWAP_PREFIX))
-        .map(|e| e.remote.name)
+        .filter(|e| !e.remote_deleted)
+        .flat_map(|e| {
+            let remote = e
+                .remote
+                .name
+                .starts_with(crate::order::SWAP_PREFIX)
+                .then(|| e.remote.name.clone());
+            let local = e
+                .local_name
+                .as_deref()
+                .filter(|n| n.starts_with(crate::order::SWAP_PREFIX) && busy_now.contains(&e.id))
+                .map(str::to_owned);
+            remote.into_iter().chain(local)
+        })
         .collect();
     let mut guard = 0;
     let now_ns = (env.now_ms)().saturating_mul(1_000_000);

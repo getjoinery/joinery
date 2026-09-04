@@ -78,6 +78,14 @@ const SERVE_TIMEOUT: Duration = Duration::from_secs(15);
 /// drain takes what is there and stops. Waiting the full serve timeout for a
 /// body nobody is sending would hold the control thread, and hold the caller
 /// too, since it is waiting on the close to know the answer is complete.
+///
+/// This is the whole bound on the drain. Time is what a caller can cost the
+/// daemon, and this is all of it: a caller claiming four gigabytes gets the
+/// same fifth of a second as one claiming four bytes, and anything it has not
+/// delivered by then was not in the receive buffer and cannot cause the reset.
+/// A byte cap in its place is the wrong bound — a body just over the cap would
+/// leave its tail unread and turn the close into exactly the reset the drain
+/// exists to prevent.
 const DRAIN_TIMEOUT: Duration = Duration::from_millis(200);
 
 /// Where a client finds the running daemon.
@@ -182,7 +190,7 @@ impl ControlServer {
 
     fn serve_stream(
         &self,
-        mut stream: TcpStream,
+        stream: TcpStream,
         handle: &mut dyn FnMut(&Request) -> (u16, Value),
     ) -> std::io::Result<()> {
         // Without these, one connection can hold the control thread forever:
@@ -193,7 +201,12 @@ impl ControlServer {
         let _ = stream.set_read_timeout(Some(SERVE_TIMEOUT));
         let _ = stream.set_write_timeout(Some(SERVE_TIMEOUT));
 
-        let mut reader = BufReader::new(stream.try_clone()?);
+        // One socket, read and written through the same handle. A duplicate for
+        // the reader would look harmless, but on Windows a read timeout belongs
+        // to the handle it was set on, not to the connection: the drain's
+        // shorter timeout set on the original would leave the duplicate waiting
+        // out the full serve timeout for bytes nobody is sending.
+        let mut reader = BufReader::new(stream);
         let (status, body, undrained) = match read_request(&mut reader, &self.token) {
             Ok(request) => {
                 let (status, body) = handle(&request);
@@ -205,16 +218,15 @@ impl ControlServer {
         // Answer first. The refusal was decided before the body was looked at,
         // so making the caller wait for bytes we are going to throw away would
         // be delaying an answer we already have.
-        write_response(&mut stream, status, &body)?;
+        write_response(reader.get_mut(), status, &body)?;
 
         // Then drain, purely so the close is clean. Closing a socket with unread
-        // data in its receive buffer sends RST instead of FIN, and on macOS that
-        // RST discards the answer already sitting in the caller's buffer — the
-        // refusal arrives as no answer at all, which every caller reads as "the
-        // daemon is not running".
-        let _ = stream.set_read_timeout(Some(DRAIN_TIMEOUT));
+        // data in its receive buffer sends RST instead of FIN, and on macOS and
+        // Windows that RST discards the answer already sitting in the caller's
+        // buffer — the refusal arrives as no answer at all, which every caller
+        // reads as "the daemon is not running".
         discard_body(&mut reader, undrained);
-        let _ = stream.shutdown(std::net::Shutdown::Both);
+        let _ = reader.get_ref().shutdown(std::net::Shutdown::Both);
         Ok(())
     }
 
@@ -305,22 +317,25 @@ fn read_request(reader: &mut BufReader<TcpStream>, token: &str) -> Result<Reques
 ///
 /// Necessary, not merely polite, and the reason is a genuine difference between
 /// operating systems. Closing a socket that still has unread data in its receive
-/// buffer makes the kernel send RST instead of FIN — and on macOS that RST
-/// **discards the response already sitting in the client's buffer**. So a
-/// refused request arrived at the caller as no answer at all, which every caller
-/// reads as "the daemon is not running": exactly the distinction this channel
-/// exists to keep. Linux is more forgiving and never showed it.
+/// buffer makes the kernel send RST instead of FIN — and on macOS and Windows
+/// that RST **discards the response already sitting in the client's buffer**.
+/// So a refused request arrived at the caller as no answer at all, which every
+/// caller reads as "the daemon is not running": exactly the distinction this
+/// channel exists to keep. Linux is more forgiving and never showed it.
 ///
-/// Bounded twice over: by [`MAX_REQUEST_BODY`], so a caller claiming four gigabytes gets
-/// no more of the daemon's attention than one claiming four bytes, and by the
-/// socket's [`DRAIN_TIMEOUT`], so one claiming four gigabytes and sending two
-/// bytes gets none of its patience either. A read that times out ends the drain,
-/// because anything still to come was not in the buffer and cannot cause the
-/// reset this exists to prevent.
+/// Bounded by [`DRAIN_TIMEOUT`] as a deadline on the whole drain, which is the
+/// only bound that serves the purpose: everything the caller has delivered by
+/// then is gone from the buffer, and anything still to come was never in it. A
+/// read that times out, fails, or reaches end of stream ends the drain.
 fn discard_body(reader: &mut BufReader<TcpStream>, declared: usize) {
-    let mut scratch = [0u8; 4096];
-    let mut left = declared.min(MAX_REQUEST_BODY);
+    let mut scratch = [0u8; 64 * 1024];
+    let mut left = declared;
+    let deadline = std::time::Instant::now() + DRAIN_TIMEOUT;
     while left > 0 {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() || reader.get_ref().set_read_timeout(Some(remaining)).is_err() {
+            return;
+        }
         let want = left.min(scratch.len());
         match reader.read(&mut scratch[..want]) {
             Ok(0) | Err(_) => return,

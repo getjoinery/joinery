@@ -1750,6 +1750,369 @@ graded genuine and root-fixed; two non-blocking gaps, both closed:
   the guard, `Sub` went to the local trash with `A` and its server copy
   followed on unlock.
 
+## Defect X — the file disowned for the name it was leaving, and the move that did not know its own half
+
+Estate v21, seed 17121565 (`hostilename-kill`: two Linux devices, chaos,
+kills). At convergence the server held `Sub 37 renamed/.jd-swap-desktop-…`
+with the same bytes as `Report 27.docx` beside it, and both devices carried
+a `reconcile` issue saying there was no recorded name to put it back to.
+
+**Shape.** The desktop renamed a file into a rename cycle; the planner parked
+it under a scratch name on the server and its finishing move was refused by a
+server hiccup and left queued. Before the retry, the laptop created a file
+under the parked file's OLD name. On the desktop's next pass the parked
+file's agreement still named that slot, the in-place naming verdict read the
+newcomer as a duplicate the parked file must lose, gave up its local copy and
+cleared its agreement, the finisher found nothing to finish, and the desktop
+uploaded the same bytes again as a new file. The park stood for good.
+
+**Two roots, each pinned red on its own.**
+
+- **Naming released an entry mid-operation.** The round loop already leaves
+  busy entries to their operation; the naming verdict did not, and read a
+  collision against the slot the entry was leaving. `apply_naming` now
+  leaves a materialized entry with an open operation alone (the verdict
+  waits a pass, and is usually moot by then). The same guard on
+  `judge_destinations` was built, made no pin red, and was dropped. The
+  guard covers collision verdicts only (duplicate, case and Unicode clashes):
+  a verdict about the entry's own name, such as the reserved prefix of a
+  local park a kill left standing, is about this disk now and has to stand,
+  or the entry reads as deleted once that park is swept and the server copy
+  goes with it (`a_local_park_a_kill_left_standing_costs_a_redownload_not_the_file`
+  went red under the broad guard). **Pinned by the seed itself**, in the
+  gate script (red with the guard reverted, green with it) and not by a
+  scenario: isolating it needs the finisher held open across two passes
+  while the newcomer is downloaded to the slot it names, and the simulator's
+  fault knobs cannot hold one operation open that long deterministically (a
+  lost answer closes on the next pass; a rate is blind). Three scenario
+  shapes were tried and each was green without the guard for a reason of its
+  own: the record heals once the server has done the move, or the newcomer
+  is not yet materialized when the verdict runs.
+  `a_file_parked_mid_swap_is_not_disowned_for_the_name_it_is_leaving` keeps
+  the combined shape (park recorded, finisher refused by a searched 5xx
+  rate, the laptop's newcomer), which the second root below carries.
+
+  **Second sighting, estate v23 seed 19124426** (`winname-kill`: Linux box,
+  Windows pc): the same disowning by way of the PUT-BACK rather than a
+  finisher. The box's own cycle park stood after a kill dropped the
+  finisher; the pass's put-back was refused twice by chaos and once by the
+  name, and between passes no operation was open on the entry, so the busy
+  guard never saw it: the cycle partner's agreement and disk file were at
+  the parked file's slot, the verdict made the parked file the loser, and
+  its agreement was cleared. A scratch-named entry with no operation open is
+  the put-back's, and the put-back is queued after naming and answered
+  before the next pass, so it is never open when naming looks. The guard
+  now also covers an entry whose server name is a scratch name. Pinned by
+  the seed in the gate script; a deterministic scenario needs the
+  same-folder swap read as a rename cycle, which the workload reaches and a
+  hand-written swap through a held name does not (the scan reads it as two
+  content edits) -- two shapes tried, neither exercised the park.
+- **A half-applied move was not its own.** `move_remote` is rename then
+  reparent (or the reverse), two calls; a death or a lost answer between them
+  leaves the entity under the new name in the old folder or the old name in
+  the new one, and the resumed op read that as somebody else's move and stood
+  down. The next pass re-derived the move from the disk against a record a
+  pass stale, and naming disowned it: the bytes uploaded again beside the
+  half-moved copy. Either half is now recognised as this op's own, exactly as
+  its scratch-name park already was, and the op finishes from there -- on a
+  retry only, and only while the move is still half done. A first attempt
+  has done nothing, so a half-shape it meets is a peer's move that merely
+  looks like one, and stands down as before. A move the server has already
+  completed (a lost answer to a move that changed only the folder, where the
+  half is the whole) has nothing to finish, and proceeding wrote the
+  agreement blind to what stood at the new path on this disk
+  (`a_held_file_does_not_take_over_a_stranger_at_the_servers_new_path` went
+  red under each of the two broader conditions). Pinned by
+  `a_half_applied_move_is_finished_as_ours_after_a_kill` (found while
+  pinning the first root: the death one call later).
+
+## Defect Y — a parent moved under its own child, applied in the wrong order
+
+Estate v25, seed 21093056 (`hunt-platform-longhostile`: mac, pc, and a
+decomposing disk). The disk device never settled, and at the end it reported
+itself quiet with two folders each agreed inside the other.
+
+**Shape.** Another device swapped a parent and its child on the server: the
+child (`Sub 22`) moved out to the grandparent, then the parent (`Contested
+Folder`) moved in under it. The disk device read both moves in one feed and
+planned both `ApplyRemoteMove`s at the same rank. The parent's ran first,
+while the child still sat inside it on the disk: a directory moved into
+itself. The simulated filesystem allowed it and the record agreed to it; the
+child's move then failed with `folder tree has a loop in it`, was withdrawn,
+and was never planned again, because every path under the loop refused to
+resolve. Quiet, and wrong.
+
+**Three parts.**
+
+- **The simulator lied.** `MemFs::rename` moved a directory into its own
+  subtree. Every real filesystem refuses that (`EINVAL`), so the disaster
+  could not happen on a real disk in this form; it now refuses too, and with
+  only that the seed still never settles, because the parent's refused move
+  is retried first every round and the child's, ranked beside it, never
+  gets its turn. Pinned by
+  `a_parent_swapped_under_its_own_child_on_the_server_is_applied_child_first`
+  (red on the pristine tree: never settled).
+- **The planner orders moves by name slot only.** A move whose destination
+  is inside the mover's own subtree now waits for the nearest move on the
+  chain up from the destination that takes that folder out, and a move with
+  nothing on the chain moving is left out of the round (`FolderParents`,
+  built by the pass from every tracked folder's placement on each side and
+  handed to `plan`). Pinned by the planner unit test
+  `a_folder_moving_into_its_own_subtree_waits_for_the_subtree_to_leave`, and
+  by that test ALONE: with this part removed and the other two kept, the
+  scenario pin above is green and only the unit test goes red. So the scenario
+  pins the simulator's refusal and the `move_local` guard, not the ordering,
+  and the "never settled with only the simulator fixed" claim made for it here
+  was about a tree that also lacked the guard. Re-checked 2026-09-04.
+- **`move_local` refuses the shape itself** (`Retry`, waiting for the
+  subtree to move out) before asking the disk or writing an agreement.
+  Described here first as an unpinned belt to the planner's braces; it is the
+  opposite. Removing the ordering leaves the scenario pin green, so this guard
+  and the simulator's refusal are what that pin actually rests on. It stands
+  between a wrong parents map and a record with a loop in it, and it is not
+  redundant with the ordering it was meant to be redundant with.
+
+The same swap made by the user on this disk and pushed to the server was
+tried as a pin and is green on the pristine tree (the server refuses the
+crossing and the round re-derives), so it was not kept.
+
+## Defect Z — a folder replaced by a namesake and moved inside it
+
+Estate v26, seeds 22081285 (`killplat-mac-pc`) and 22081684
+(`killplat-mac-hfs`): kills, no network chaos. Found the day Defect Y's
+belt-and-braces guard went in, and it was that guard's forever-wait that
+surfaced it -- the same shape reached the same deadlock before, through the
+simulator's permissive rename.
+
+**Shape.** Another device replaced a folder on the server with a new folder
+of the same name and moved the old one inside it (renamed): three changes in
+one feed. On this disk the old directory wears the name the new folder needs,
+and the old folder's move needs the new folder to exist. Naming parked the
+new folder as a duplicate of the old one's agreed name, so it was never
+created; the old folder's queued move waited for it, keeping the entry busy so
+no round could plan anything else; both waited on each other for ever. Pinned
+by `a_folder_replaced_by_a_namesake_and_moved_inside_it_steps_aside_first`
+(red before: never settled), and by both seeds in the gate script.
+
+**The resolution is a park.** The old folder steps aside under a scratch
+name, the new folder is created at the freed name, the old one moves in. That
+already existed for a cycle of renames; it was not reachable for a
+create-versus-move cycle, and a local park was recorded wrong. Six parts,
+each shown load-bearing for the pin unless noted:
+
+- **Naming: an entrant does not lose to a leaver.** A materialized entry the
+  server has moved elsewhere still competes for its old slot (its directory
+  is still there), but an entry never materialized that wants that slot is
+  next in line, not a duplicate. Parked, it is never created. The verdict is
+  dropped for that pair; the round orders them.
+- **The planner sees a create as an arrival.** `CreateLocalFolder` takes a
+  slot (`PlanItem::arriving`); it waits for the mover holding that slot, and a
+  move into a folder being created waits for the create. That closes the
+  cycle, and the cycle breaker picks its victim among the PARKABLE members
+  only (those with somewhere to leave) -- a folder being created has nowhere
+  to go.
+- **A queued move into a folder not yet on this disk stands down**
+  (`Overtaken`) instead of waiting: its destination path would resolve by the
+  server's name alone to whatever directory wears that name here -- its own
+  -- and waiting keeps the entry busy so the round never plans the park.
+  Defect Y's Retry guard was the forever-wait that found this.
+- **A local park is in place.** `park_local` renamed within the entry's
+  REMOTE parent, which is the folder that does not exist yet; it renames
+  within the folder the directory is in now.
+- **A local park is recorded as the spelling on disk, never the
+  agreement**, as a remote park is recorded as `remote` alone. Into the
+  agreement, the scratch name became the entry's real name: naming judged it
+  unholdable, parked the entry, and swept the directory it had just stepped
+  into. With it, a parked entry competes for its scratch name and no other
+  (`competing_placement`), naming leaves it alone entirely
+  (`parked_locally`, while the finisher is open -- a park nobody is coming
+  back for is still judged, swept and re-downloaded, the abandoned-park
+  path), and its finisher reads the parked path first rather than the
+  pre-park path something else now stands at.
+- **The walk's litter sweep knows a live local park.** It counted live
+  scratch names by server names alone, so a local park with its finisher
+  queued read as litter and was trashed with everything inside it one pass
+  after it was made. A local park with an operation open on it is live; one
+  with nothing queued is the abandoned kind and is still swept.
+- **A parked entry's finisher waits for the create** it is queued behind
+  (`Retry`) rather than standing down when the folder is not on this disk
+  yet: standing down left the park with no operation open, which reads as
+  abandoned.
+
+Estate v26 also flagged `night-long-2dev` seed 22035030 on the tree before
+this defect; it settles on the tree with it and is in the gate script.
+
+The last three are pinned together by
+`a_park_mid_replacement_survives_its_create_being_refused_once` (the new
+folder's create refused once by the disk after the park lands: red without
+any one of them, the directory swept or the file gone), the others by the
+first pin. The busy gate on the naming skip cannot be exercised by a death,
+because the park, the create and the move make no network call between
+them and the simulator's deaths land on network calls.
+
+### Review round (2026-09-04)
+
+The fix above was reviewed before it was committed, and two of its seams were
+holes. Both reproduce on this tree and both are GREEN on a pristine HEAD: as
+first built, the cure cost more than the deadlock it cured. The shapes are
+ordinary -- rename a folder, then make a new folder with the old name.
+
+**The newcomer adopted the leaver's directory.** Dropping the duplicate
+verdict removed a wait, and nothing in the executor replaced it.
+`create_local_folder` treats a directory standing at its path as its own --
+right for a stand-in, right for a re-run of the same op, wrong for a directory
+another tracked folder still holds. With the old folder's rename slow to land,
+the create adopted the old directory, both entries agreed on the one
+directory, and the leaver's rename then carried it away; the newcomer read as
+locally deleted and the folder the user had just made was trashed on the
+server, entry and all. Fixed where the question belongs: a create waits while
+another live folder entry's local path resolves to the directory in its way.
+The file case one block above says the same thing in the other voice -- a FILE
+in the way is moved aside, because nothing else is coming for it; a tracked
+FOLDER is waited for, because something is. Pinned by
+`a_new_folder_does_not_adopt_the_directory_of_the_one_it_replaced`.
+
+**The finisher asked the disk instead of the plan.** Park, create and finisher
+are three ops of one operation and they fail independently. The finisher
+decided whether it was parked by looking for the scratch name on the disk, so
+a park whose rename was refused once had not landed when the finisher ran: it
+stood down as overtaken and was dropped, and the park landed a pass later with
+nothing coming for it. The abandoned-park give-up then trashed the directory
+with the file inside it, and the next scan sent that deletion to the server.
+The finisher now counts a park still QUEUED exactly as much as one already
+worn. Pinned by `a_finisher_waits_for_its_own_park_before_the_park_has_landed`.
+
+**A put-back for local parks was built and removed.** The remote mirror
+exists: an entry left wearing a scratch name on the server with no operation
+open is put back to its agreed name. The local one was written and then taken
+out again, and the argument for taking it out needs stating carefully, because
+the obvious version of it is wrong.
+
+A finisher CAN leave the queue without finishing. There is no cap on attempts,
+but the error classification withdraws an op on any 4xx that is not 404, 409,
+423 or 429 and on a contract or unknown-op error, and overtakes it on a 404, a
+missing local path or a destination whose ancestor is no longer tracked; and
+`move_local` has early exits of its own. So "nothing withdraws an op" is false
+and is not the reason.
+
+The reason is narrower: every one of those exits needs the parked entry, or
+the folder it is going into, to be FORGOTTEN rather than merely trashed or
+renamed -- and nothing forgets an entity while it has ops queued, which a park
+and its finisher both are. Attempts to construct the state failed on both
+sides of the review: the server undoing the replacement under a standing park,
+with the namesake trashed and with it kept, converges with the file live and
+no scratch name left. The instrumented put-back fired zero times, which is
+true but weaker evidence than it looks -- a pass loop that does not advance the
+clock leaves ops in retry backoff, so part of that zero is the harness rather
+than the engine.
+
+An unreachable rescue for a folder is worse than none, because it reads as
+cover for a case nobody has proven. What replaces it is the pin
+`a_park_whose_destination_is_trashed_keeps_its_finisher_and_its_files`, which
+holds the exposed state -- park standing, destination gone -- and fails if a
+later edit to `move_local` lets a finisher out while its park stands. If a
+shape is ever found that does leave a local FOLDER park with no operation
+open, the give-up path is the thing to change rather than a rescue bolted
+beside it: its safety argument is a file's -- the server still holds the bytes,
+so the cost is a re-download -- and that has never been true of a subtree.
+
+`create_local_folder` does not check `remote_deleted` on its own entry, so a
+create for a folder the server has already trashed builds the directory anyway
+and the following pass takes it away again. Harmless, and noted so the next
+reader does not take it for a hole.
+
+**The leaver rule fires a pass late, on purpose.** The rule that keeps an
+entrant from losing to a leaver asks the entry's STATUS, and a folder the
+server has only just announced still holds a local file by that test. So the
+newcomer is parked as a duplicate once and the rule undoes it on the pass
+after: it reads like a rule that prevents the park and it is a rule that
+undoes one. Asked of the agreement instead -- `synced_placement.is_none()`,
+which is what "never materialized here" really means -- it fires a pass
+earlier and swallows verdicts two pins depend on (9_280 and 9_285, both seen
+red that way). The one-pass park costs nothing now that the executor refuses
+to adopt a directory another folder still holds.
+
+## Defect AA -- a folder rename undone for the folder's contents
+
+Pre-existing: red on a pristine HEAD as well as on the tree above, so it is
+not Defect Z's and not this round's to fix. Recorded here so it is not found a
+third time.
+
+**Shape** (traced; the mechanism below is read, not executed). One device, no
+faults, no kills. The server renames folder `X` to `Y` and creates a new
+folder `X` in the same feed -- nothing moves into anything. The device settles
+with `note.txt`, which was inside the renamed folder, sitting inside the NEW
+folder on BOTH the server and the disk; `Y` is left empty, and the entry
+raises `DeleteLostToEdit{Local}`. Both sides agree, so convergence is
+satisfied and the estate oracle passes it: the file is in the wrong folder,
+consistently, everywhere. The user renamed a folder and made another with the
+old name, and their file followed the name rather than the folder.
+
+## Windows, on a real NTFS disk
+
+A Windows 11 ARM64 test VM (UTM on the Mac mini; see the memory note
+`reference_windows_test_vm_on_mini`) first built the workspace on 2026-09-03.
+The `cfg(windows)` paths in jd-vfs and jd-platform had never been compiled
+anywhere. The whole workspace builds natively with no errors or warnings, and
+every crate's own tests pass there: jd-vfs on real NTFS, jd-core,
+jd-platform, jd-proto, jd-crypto, jd-daemon, jd-shell.
+
+**Defect, found by the jd-platform tests on Windows, fixed in
+`jd-platform/src/control.rs`** (two roots, one fix):
+
+- The control server read through a `try_clone` of the socket. On Windows a
+  read timeout belongs to the handle it was set on, not to the connection,
+  so the 200 ms drain timeout set on the original never reached the reader,
+  and a caller claiming four gigabytes held the control thread for the full
+  15 s serve timeout. One socket now, read and written through the same
+  handle.
+- The body drain stopped at the 64 KB request cap, so an over-cap body left
+  its tail unread, the close sent RST, and Windows (like macOS) discarded
+  the refusal already in the client's buffer: the refusal arrived as no
+  answer, which every caller reads as "the daemon is not running". The drain
+  is bounded by the wall-clock deadline alone, which is the only bound that
+  serves its purpose.
+
+Pinned by the existing jd-platform control tests, which fail on Windows
+without it and pass on both operating systems with it. The Windows toolchain
+needs the VC LLVM Clang component (ring assembles its ARM64 code with clang);
+the mini's `post-install.ps1` includes it.
+
+**Live pairing, 2026-09-04.** The VM's daemon is linked to
+dev.getjoinery.com as device `WINTEST` (admin account, plaintext only) and
+runs under a full-logon scheduled task so the Credential Manager holds the
+keys. Probes against the real disk and the real server, all as designed with
+nothing raised:
+
+- Files created on NTFS upload; a file on the server downloads.
+- Server renames to names Windows cannot hold land escaped on NTFS
+  (`CON.docx` → `%43ON.docx`, `hello:from windows.txt` →
+  `hello%3Afrom windows.txt`), no issue raised, status up to date.
+- A local rename of an escaped file to a plain name reaches the server as
+  that plain name.
+- A folder chain past the 260-character limit (356 characters) is created on
+  NTFS through extended-length paths, and a file written inside it uploads.
+- A file held open with no sharing while the server renames it: the daemon
+  reports "Syncing — 1 to go" and waits, and the rename lands when the lock
+  releases.
+- A case-only rename on the case-insensitive disk (`Report Q3.docx` →
+  `report q3.docx`) reaches the server as the new spelling.
+- An EICAR test file written into the sync root with Defender's real-time
+  protection on was not quarantined and uploaded like any other file; no
+  Defender interference was observed in this session.
+
+With a second real device (`DEVBOX-LINUX`, a Linux daemon on the dev box
+linked to the same account): an edit made on Linux arrives on Windows; a
+file deleted on Linux goes to the Windows Recycle Bin (the shell API reached
+through the extended-length path conversion); files named `CON.txt` and
+`a:b.txt` created on Linux land on Windows as `%43ON.txt` and `a%3Ab.txt`.
+The reverse holds too: an edit, a delete of an escaped-name file, and a rename
+of one made on Windows reach Linux as the plain names. A file edited on both
+devices in the same window keeps both versions, the loser beside the winner
+as `… (conflicted copy 2026-09-04 from WINTEST).txt`, and the Windows daemon
+raises the conflict as an issue. The pair (`WINTEST` on the VM,
+`DEVBOX-LINUX` on the dev box) stays linked for further real-disk work.
+
 ## Still open on this axis
 
 - **`path_for`'s forward derivation is still weaker than naming.** Destination
@@ -1773,6 +2136,21 @@ graded genuine and root-fixed; two non-blocking gaps, both closed:
 ---
 
 ## Still open
+
+- **The planner remembers one reason to wait, and there are three.**
+  `waits_for` is one blocker per mover, and three kinds of edge now write to
+  it: the slot the mover is moving into is occupied, its destination folder is
+  being created this round, and the folder it is moving into is still inside
+  it. Later edges overwrite earlier ones (ancestry over create over slot), so
+  a mover under two constraints keeps one. Bounded -- the executor refuses an
+  arrival at an occupied name rather than overwriting anything, and the next
+  round derives the ordering again -- but the order produced is not the order
+  the code reads as producing, and the comment that said one edge was the whole
+  graph has been corrected rather than left to mislead. The fix is a multi-edge
+  map: ranks take the highest blocker, and the cycle search walks a graph
+  instead of a chain. Held back as its own change, because it is surgery on the
+  ordering core and an estate cannot tell its faults from a Z fault if both
+  land together.
 
 - **The `.jd-*` user-file class is still not swept.** The engine's answer is
   defined — refuse the name, park `Unsyncable(ReservedPrefix)` — but on a real

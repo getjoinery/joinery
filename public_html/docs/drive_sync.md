@@ -255,11 +255,46 @@ surviving into the next one — where the loser is parked, visibly, under
 issue, and `unsyncable` is the one kind a pass withdraws again once the state
 ends.
 
+Moves are ordered by what they wait on. A rename into a name another mover
+still holds waits for that mover; a folder moved into what is currently its own
+subtree (a parent swapped under its child) waits for the move that takes that
+folder out, and with nothing on that chain moving it is left out of the round
+until the chain changes. The local move refuses the same shape itself rather
+than asking the disk for a directory to move into itself. A folder being
+created on this disk takes a slot the same way a move does: it waits for the
+mover holding that slot, and a move into it waits for it to exist. When those
+two wait on each other (the server replaced a folder with a namesake and moved
+the old one inside it) the mover is parked under a scratch name in place, the
+folder is created, and the mover moves in. A local park is recorded as the
+spelling on disk, never as the agreement, and naming leaves a parked entry
+alone.
+
+A create claims a directory already standing at its path — a stand-in it was
+handed, or its own earlier attempt — and waits while that directory is one
+another live folder still holds, so the folder replacing a namesake never
+takes over the directory of the folder it replaces. A file in the way is moved
+aside instead, because nothing else is coming for it. The park, the create and
+the move that finishes them are three operations that fail one at a time, and
+the finisher counts its park from the moment it is queued rather than from the
+moment it lands: a park whose rename is refused keeps the finisher that is
+going to put it back.
+
 A scratch name (`.jd-swap-…`) is a different kind of park: one step inside one
 operation, never a placement anyone agreed on. The planner mints one to break a
 rename cycle and a remote move mints one as its last resort when both orders of
 rename-and-reparent are refused; the operation that minted it knows its own park
 by its key and finishes from there, and the park is recorded as `remote` alone.
+A move is two calls, rename and reparent, and an op retried between them
+recognises its own half-done work the same way: the new name in the old folder,
+or the old name in the new one, is its own and it finishes from there rather
+than standing down as somebody else's move. A first attempt claims nothing, and
+a move the server has already completed has nothing left to finish; both fall
+to the ordinary path. While an operation is open on an entry, or the entry
+wears a scratch name on the server and the pass's put-back owns it, naming
+leaves that entry's collisions alone: its agreement still names the slot it is
+leaving, and a duplicate or clash read against that slot would release the copy
+the operation is about to place. A verdict about the entry's own name still
+stands.
 A park nobody is coming back for — its operation withdrawn, or dropped after a
 kill — is put back by the next pass under the name both sides last agreed, or
 the next free one there, and said as a `reconcile` issue. It goes back into

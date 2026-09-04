@@ -769,6 +769,18 @@ impl Vfs for MemFs {
         let Some(source) = st.nodes.get(&f).cloned() else {
             return Err(VfsError::NotFound(from.to_path_buf()));
         };
+        // A directory does not move into itself. Every real filesystem refuses
+        // it (`EINVAL`), and a mock that allowed it produced a tree with a loop
+        // in it that the engine then read back as its own agreement.
+        if matches!(source, Node::Dir) && t.starts_with(&format!("{f}/")) {
+            return Err(VfsError::Io {
+                path: to.to_path_buf(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "cannot move a directory into itself",
+                ),
+            });
+        }
         // A directory does not silently land on top of another one. Renaming
         // over a non-empty directory is `ENOTEMPTY` on every real filesystem
         // this runs on, and a file and a directory never replace each other at
