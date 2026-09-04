@@ -67,8 +67,7 @@ to make a deferred answer safe:
 - **What the operator sees for a job that is waiting.** Today "awaiting
   approval" is invisible on the dashboard, because the job simply looks claimed
   and slow. Deferred, it becomes a state that can last a working day and must be
-  legible from the fleet list — closely related to `restore_readiness.md`, and
-  worth building alongside it.
+  legible from the fleet list.
 
 ## What this fixes beyond the window
 
@@ -103,5 +102,4 @@ to make a deferred answer safe:
 
 - `implemented/restore_dispatch_approval_mechanism.md` — the mechanism this
   defers, including why the plane is absent from the approval path
-- `restore_readiness.md` — the other half of making a restore's state visible
 - `agent_management_first_principles.md` — programme

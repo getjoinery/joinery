@@ -157,14 +157,13 @@ status**; the spec named is where its design lives.
 | # | Item | Spec | State |
 |---|---|---|---|
 | 1 | Destructive approval on the node | `implemented/restore_dispatch_approval_mechanism.md` | **BUILT + DEPLOYED 2026-08-30.** Fleet 9/9 on agent 1.13.0; gate open on every paired node |
-| 2a | Prove one restore end to end | `restore_readiness.md` (acceptance) | **NEXT, and small.** Precondition arrives on its own with the next scheduled backup |
-| 2b | Restore readiness — make the gap visible | `restore_readiness.md` | Follows 2a; does not gate it |
+| 2a | Prove one restore end to end | this table | **DONE 2026-08-30** on joinerydemo: backup to the bucket, `download_backup`, `restore_database`, approved on the node's own site with its recovery key, site serving afterwards |
 | 2c | Delete the three SSH restore builders | this table | **UNBLOCKED 2026-08-30** by the live restore. They were kept only until one had been done over the channel; they are already unreachable, refusing through `refuse_dead_restore_transport()`. Homeless otherwise: their spec is in `implemented/` and must not be edited |
 | 2d | Deferred destructive approval | `deferred_destructive_approval.md` | The approval window is bounded by how long a node can afford to be deaf, not by what a person needs. Raised to 60m as an interim |
 | 3 | The plane-side executor | `plane_side_executor.md` (design only; not endorsed as-is) | **ROLLED BACK 2026-08-31 and not rebuilt.** Round 1 (WP1+WP2 on three operations) was built, reviewed and deleted in full, spec included: it put the health check back on SSH from the plane, one layer above the agent whose whole design is health check plus predetermined fix. What survives is the minimal install-only `InstallJobExecutor` that item 4 needed (an `ssh`-over-sealed-password runner for `install_node`, routed by the `queued` status, zero agent change). The twelve operations that lost their transport are a list of things to disposition, not an executor's to-do list, and item 6 dispositioned them: `check_status` is a native primitive; the disposable trio gets health check plus reprovision and no agent; `provision_ssl` and fleet seeding crossed to the agent; `enable_agent` and `discover_nodes` are deleted. What is left of "executor" is item 7's two gates, `publish_upgrade` and Docker-host certificate issuance |
 | 4 | Keyless provisioning | `keyless_provisioning.md` | **BUILT 2026-09-03, live gate open.** Provision over a sealed install password, host agent on every docker machine, the install password retired once every agent on the machine is admitted (the executor completes the retire job only after the machine refused the password), join approval checked with the provider. Owed: one live run per shape to `retired` |
-| 5 | Credential custody — delete the shared key | `fleet_ssh_credential_custody.md` | WP1 done; WP3–WP5 gated on item 2 |
-| 6 | SSH is one bootstrap, run once | `ssh_single_bootstrap.md` | Managed domains crossed 2026-09-01. What remains: collapse `install_node` to one session, clone instead of scp for from-backup, certificates and fleet seeding to the agent, delete `enable_agent` and `discover_nodes`. Gates jeremytunnell's key and the four keyless boxes' certificates |
+| 5 | Credential custody — delete the shared key | `implemented/fleet_ssh_credential_custody.md` | WP1 done; WP2 superseded by item 4; WP3–WP5 unblocked by 2a, not started |
+| 6 | SSH is one bootstrap, run once | `implemented/ssh_single_bootstrap.md` | **DONE 2026-09-02**, live-verified on every shape: one install job = local preflight + one ssh session; certificates and fleet seeding over the agent; `enable_agent` and `discover_nodes` deleted |
 | 7 | Retire the local queue | `agent_local_queue_retirement.md` | Last, not first — thirteen operations still depend on it |
 | 8 | Per-node hardening | — | A per-node ceremony, not a fleet event. `environment_build_surface_reduction.md` rides alongside |
 
@@ -176,18 +175,17 @@ pre-pairing installs that item 6 collapsed into one bootstrap session, and two
 are gates of their own. Flipping the flag before
 those land does not close a hole; it breaks the fleet and gets flipped back.
 
-**Item 2a is next, and it is one operation.** Everything downstream of the
-restore round assumes a restore works, and nobody has run one. Item 5 must not
-proceed before it: deleting the shared SSH key removes the fallback, and doing
-that while the replacement has never been exercised is the trade this programme
-exists to avoid making by accident.
+**Item 2a gated item 5.** Deleting the shared SSH key removes the fallback,
+and doing that while the replacement had never been exercised is the trade this
+programme exists to avoid making by accident. The live restore has been run, so
+item 5 is open.
 
-**2a and 2b are separated deliberately, after review.** It is tempting to say
-readiness unblocks item 5. It does not — the live restore does, and its only
-precondition is one ledgered backup, which the next scheduled run provides. What
-readiness answers is the permanent case: a fresh node, a rotated recovery key, a
-ledger whose permissions were broken. Those are nodes that believe they are
-protected and are not, and no scheduled run heals them.
+**Restore readiness (a "can this node be restored" report) was cancelled
+2026-09-04, not deferred.** Each case it would have reported is covered
+elsewhere: a fresh node is ledgered by its first scheduled backup; a rotated
+recovery key shows on every status check through `recovery_key_report`; the
+ledger directory is pinned to 700/600 and excluded from the permissions sweep
+(`fix_permissions.sh` 3.1). Do not re-derive it as a gap.
 
 ## What we are deliberately not building
 
@@ -236,11 +234,11 @@ annexes.
   carry one.
 - Every paired node runs an agent that reports its own vocabulary, and routing
   is decided from that report rather than from a version guess.
+- A backup that exists only in the bucket is brought back to its own node and
+  restored, end to end, on a real node. *(item 2a, joinerydemo 2026-08-30)*
 
 **Not met:**
 
-- A backup that exists only in the bucket is brought back to its own node and
-  restored, end to end, on a real node. *(item 2)*
 - No operation other than `install_node` opens an SSH session from the plane,
   and `install_node` opens exactly one. *(items 3 and 6)*
 - A provisioning password authenticates an install without ever being written to
@@ -288,7 +286,6 @@ acceptance list of its own.
 | `ssh_single_bootstrap.md` | The disposition of every remaining SSH reach: the one bootstrap session, and what goes to the agent or is deleted |
 | `fleet_ssh_credential_custody.md` | The full `config/provisioning_key` consumer inventory, and jeremytunnell's particulars |
 | `agent_local_queue_retirement.md` | The thirteen-operation audit, with the two gates and seven deletions |
-| `restore_readiness.md` | The gap item 2 closes |
 | `environment_build_surface_reduction.md` | Image and installer surface; independent of all of the above |
 | `r5_cutover_inventory.md` | **Superseded snapshot.** Kept for its measurements, not its open questions |
 
