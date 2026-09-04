@@ -272,6 +272,45 @@ check(jrp_call('halted_at_self_update', array('')) === false,
 	'empty output is not treated as a self-update halt');
 
 // ---------------------------------------------------------------------------
+section('Why a node is still behind');
+
+// A refusal never reaches the upgrader at all. Reporting it as "upgrade
+// finished but the node is still on X" describes a working upgrader that came
+// up short, which is the opposite of what happened, and buries the one line
+// that says how to fix it.
+$refusal = 'Refused by the node: primitive "apply_update" refused: no script from this '
+	. 'release can be verified before running as root: tree manifest signature does not '
+	. 'verify against the compiled-in release key';
+$v = jrp_call('behind_verdict', array('refused', $refusal, '', '0.8.356', '0.8.370'));
+check($v['reason'] === $refusal, 'a refused upgrade keeps the reason the node gave', $v['reason']);
+check($v['rewrite_message'] === false, 'the node-written message is left alone');
+check($v['node_outcome'] === 'refused', 'the result records that the node refused');
+
+// Same for a primitive that ran and failed.
+$v = jrp_call('behind_verdict', array('failed', 'php: out of memory', '', '0.8.356', '0.8.370'));
+check($v['reason'] === 'php: out of memory', 'a failed upgrade keeps the reason the node gave');
+check($v['rewrite_message'] === false, 'a failed run keeps its own message too');
+
+// A refusal with nothing said still names the node as the source, rather than
+// blaming an upgrader that was never reached.
+$v = jrp_call('behind_verdict', array('refused', '', '', '0.8.356', '0.8.370'));
+check(strpos($v['reason'], 'refused') !== false && strpos($v['reason'], '0.8.370') !== false,
+	'a silent refusal still says the node refused and names the target', $v['reason']);
+check($v['rewrite_message'] === true, 'a silent refusal gets a message written for it');
+
+// The node said it completed, and the version did not move: that IS the
+// upgrader coming up short, and the probe's verdict is the right one.
+$v = jrp_call('behind_verdict', array('completed', '', '', '0.8.356', '0.8.370'));
+check(strpos($v['reason'], 'Upgrade finished') === 0,
+	'a completed job that did not move the version reports the version verdict', $v['reason']);
+check($v['node_outcome'] === '', 'a completed job records no node outcome');
+
+$v = jrp_call('behind_verdict',
+	array('completed', '', "  SELF-UPDATE COMPLETE — PLEASE RE-RUN THE UPGRADE\n", '0.8.356', '0.8.370'));
+check(strpos($v['reason'], 'second pass') !== false,
+	'a two-pass halt still says a second pass is needed', $v['reason']);
+
+// ---------------------------------------------------------------------------
 section('End to end');
 
 // A completed check_status job should leave the node carrying what it reported.

@@ -5,6 +5,9 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.23 - process_apply_update keeps the node's own refusal or failure reason instead of
+ *                 replacing it with the version verdict; the probe only confirms the version
+ *                 did not move.
  * @version 1.22 - process_retire_install_password records whether the machine retired its install
  *                 password; the provision pipeline reads the job's status and erases the password
  * @version 1.21 - process_backup_run stamps a run with no BACKUP_TIME at the job's own completion
@@ -942,15 +945,52 @@ class JobResultProcessor {
 		$result['upgraded'] = !$is_behind;
 
 		if ($is_behind) {
-			$result['reason'] = self::halted_at_self_update($job->get('mjb_output') ?: '')
-				? 'Upgrade stopped after refreshing its own deployment tooling. '
-					. 'The node is still on ' . $version . ' and needs a second pass to reach ' . $target . '.'
-				: 'Upgrade finished but the node is still on ' . $version . ', not ' . $target . '.';
+			$node_said = (string)$job->get('mjb_agent_outcome');
+			$verdict = self::behind_verdict($node_said, (string)$job->get('mjb_error_message'),
+				(string)$job->get('mjb_output'), $version, $target);
+			$result['reason'] = $verdict['reason'];
+			if ($verdict['node_outcome'] !== '') { $result['node_outcome'] = $verdict['node_outcome']; }
+			if ($verdict['rewrite_message']) { $job->set('mjb_error_message', $verdict['reason']); }
 			$job->set('mjb_status', 'failed');
-			$job->set('mjb_error_message', $result['reason']);
 		}
 
 		self::record_apply_update_result($job, $result);
+	}
+
+	/**
+	 * Why is the node still behind, in one sentence for the job record?
+	 *
+	 * What the node itself said outranks the probe. A node that refused the
+	 * primitive, or ran it and failed, has already given the reason the upgrade
+	 * did not happen; replacing that with 'still on X, not Y' swaps a cause for
+	 * a symptom and sends whoever reads the job hunting a broken upgrader
+	 * instead of the refusal that stopped it before it started. On those the
+	 * probe only confirms the version did not move, and the stored message is
+	 * left exactly as the node wrote it.
+	 */
+	private static function behind_verdict(string $node_outcome, string $node_message,
+		string $output, string $version, string $target): array {
+		if ($node_outcome === 'refused' || $node_outcome === 'failed') {
+			$message = trim($node_message);
+			if ($message !== '') {
+				return ['reason' => $message, 'node_outcome' => $node_outcome, 'rewrite_message' => false];
+			}
+			return [
+				'reason' => 'The node reported ' . $node_outcome . ' and is still on '
+					. $version . ', not ' . $target . '.',
+				'node_outcome'    => $node_outcome,
+				'rewrite_message' => true,
+			];
+		}
+
+		return [
+			'reason' => self::halted_at_self_update($output)
+				? 'Upgrade stopped after refreshing its own deployment tooling. '
+					. 'The node is still on ' . $version . ' and needs a second pass to reach ' . $target . '.'
+				: 'Upgrade finished but the node is still on ' . $version . ', not ' . $target . '.',
+			'node_outcome'    => '',
+			'rewrite_message' => true,
+		];
 	}
 
 	/**
