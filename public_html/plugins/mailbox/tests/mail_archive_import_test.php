@@ -30,7 +30,9 @@
  *
  * Run: php tests/run.php db --filter=mail_archive_import
  *
- * @version 1.3
+ * @version 1.4
+ * @changelog 1.4 - Teardown matches labels on an id floor rather than getByName(),
+ *   so the labels undo soft-deleted no longer survive as tombstones.
  * @changelog 1.3 - D2: every duplicate names which message it duplicated, and a
  *   cross-mailbox collision says so in a reason the reconciliation recognises.
  */
@@ -55,6 +57,8 @@ class MailArchiveImportTest {
 	private $file_ids = array();
 	private $run_ids = array();
 	private $fixtures;
+	// Highest label id before this run. Everything above it, this run minted.
+	private $label_id_floor = 0;
 
 	function __construct() {
 		$this->db = DbConnector::get_instance()->get_db_link();
@@ -91,6 +95,10 @@ class MailArchiveImportTest {
 	private function setUp() {
 		$this->preClean();
 		$this->suffix = substr(md5(uniqid('mai', true)), 0, 8);
+		// Taken before anything imports: an id, not a clock, so no timezone or
+		// server-time assumption sits between this and teardown.
+		$this->label_id_floor = (int)$this->db->query(
+			'SELECT COALESCE(MAX(ilb_inbound_email_label_id), 0) FROM ilb_inbound_email_labels')->fetchColumn();
 
 		$domain = new InboundEmailDomain(NULL);
 		$domain->set('ied_domain', 'import-test-' . $this->suffix . '.example');
@@ -906,20 +914,35 @@ class MailArchiveImportTest {
 			}
 			// Labels this import invented, so a re-run starts from the same place.
 			// Anything still holding mail is somebody's real filing and stays.
+			//
+			// The lookup cannot go through getByName(): undo soft-deletes the
+			// labels it emptied (MailArchiveImporter::removeEmptyLabels), and
+			// getByName() sees live rows only, so every run this suite undid left
+			// its label standing as a tombstone that nothing could find again.
+			// Matching on the id floor instead is also what keeps a real person's
+			// label of the same name safe — 'Receipts' is an ordinary thing to
+			// call a label — since only rows this run minted sit above it.
+			$named = $this->db->prepare('SELECT ilb_inbound_email_label_id FROM ilb_inbound_email_labels
+				WHERE ilb_name = ? AND ilb_inbound_email_label_id > ?');
+			$held = $this->db->prepare('SELECT 1 FROM ilm_inbound_label_members
+				WHERE ilm_ilb_inbound_email_label_id = ? LIMIT 1');
 			foreach ($invented as $name) {
-				$label = InboundEmailLabel::getByName($name);
-				if ($label === null || !$label->key) {
-					continue;
-				}
-				$stmt = $this->db->prepare('SELECT 1 FROM ilm_inbound_label_members
-					WHERE ilm_ilb_inbound_email_label_id = ? LIMIT 1');
-				$stmt->execute(array(intval($label->key)));
-				if ($stmt->fetchColumn() === false) {
-					$this->db->exec('DELETE FROM ilb_inbound_email_labels
-						WHERE ilb_inbound_email_label_id = ' . intval($label->key));
+				$named->execute(array($name, $this->label_id_floor));
+				foreach ($named->fetchAll(PDO::FETCH_COLUMN) as $lid) {
+					$held->execute(array(intval($lid)));
+					if ($held->fetchColumn() !== false) {
+						continue; // still filing somebody's mail
+					}
+					$label = new InboundEmailLabel(intval($lid), TRUE);
+					if ($label->key) { $label->permanent_delete(); }
 				}
 			}
-		} catch (\Throwable $e) {}
+		} catch (\Throwable $e) {
+			// A teardown that cannot clean up is this suite's OWN failure. Left
+			// silent, its debris reds referential_integrity later with no leaker
+			// named; red HERE, in the suite that knows whose rows they are.
+			check(false, 'fixtures cleaned up at teardown', $e->getMessage());
+		}
 	}
 
 	/**

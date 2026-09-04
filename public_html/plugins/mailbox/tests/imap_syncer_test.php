@@ -24,7 +24,7 @@
  *
  * Run: php plugins/mailbox/tests/imap_syncer_test.php  (requires schema synced).
  *
- * @version 2.2
+ * @version 2.3
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -267,19 +267,28 @@ class ImapSyncerTest {
 	// ── fixtures ────────────────────────────────────────────────────────────
 
 	private function setUp() {
-		$this->preClean();
 		$this->suffix = substr(md5(uniqid('syn', true)), 0, 8);
 
+		// Fixtures carry the harness naming ('harnesstest-' hostnames,
+		// 'harnesstest_' address parts) so the three safety nets see them: the
+		// registered teardown below takes this run's rows, the boot-time sweep
+		// takes what a KILLED run left, and referential_integrity reds on any
+		// that survive. A suite that names its rows something else is invisible
+		// to all three and leaks in silence.
 		$domain = new InboundEmailDomain(NULL);
-		$domain->set('ied_domain', 'sync-test-' . $this->suffix . '.example');
+		$domain->set('ied_domain', 'harnesstest-' . $this->suffix . '.example');
 		$domain->set('ied_is_enabled', true);
 		$domain->set('ied_is_imap_source', true);
 		$domain->save();
 		$this->domain_id = intval($domain->key);
+		// One registration is enough: the domain's permanent_delete() cascades
+		// through messages, the alias, its feed, that feed's folders and their
+		// seed proofs and label memberships.
+		harness_register_model('InboundEmailDomain', $this->domain_id);
 
 		$a = new InboundEmailAlias(NULL);
 		$a->set('iea_ied_inbound_email_domain_id', $this->domain_id);
-		$a->set('iea_alias', 'in' . $this->suffix);
+		$a->set('iea_alias', 'harnesstest_in' . $this->suffix);
 		$a->set('iea_delivery_mode', InboundEmailAlias::MODE_STORE);
 		$a->set('iea_is_enabled', true);
 		$a->prepare(); $a->save();
@@ -290,7 +299,7 @@ class ImapSyncerTest {
 		$acc->set('iia_provider_key', 'imap_generic');
 		$acc->set('iia_imap_host', 'imap.test');
 		$acc->set('iia_iea_inbound_email_alias_id', $this->alias->key);
-		$acc->set('iia_username', 'me@sync-test.example');
+		$acc->set('iia_username', 'harnesstest_me@sync-test.example');
 		$acc->set('iia_is_enabled', true);
 		$acc->set('iia_supports_condstore', true); // the sync gate
 		$acc->set('iia_supports_qresync', true);   // fast VANISHED path (toggled off in the fallback test)
@@ -300,47 +309,6 @@ class ImapSyncerTest {
 		$this->account = new InboundImapAccount($acc->key, TRUE);
 
 		$this->out('  fixtures ready (suffix ' . $this->suffix . ')');
-	}
-
-	private function preClean() {
-		try {
-			$dids = $this->db->query("SELECT ied_inbound_email_domain_id FROM ied_inbound_email_domains
-				WHERE ied_domain LIKE 'sync-test-%'")->fetchAll(PDO::FETCH_COLUMN);
-			foreach ($dids as $did) { $this->purgeDomain(intval($did)); }
-		} catch (\Throwable $e) {}
-	}
-
-	private function purgeDomain(int $did) {
-		$aids = $this->db->query("SELECT iea_inbound_email_alias_id FROM iea_inbound_email_aliases
-			WHERE iea_ied_inbound_email_domain_id = " . $did)->fetchAll(PDO::FETCH_COLUMN);
-		$accIds = $this->db->query("SELECT iia_inbound_imap_account_id FROM iia_inbound_imap_accounts
-			WHERE iia_iea_inbound_email_alias_id IN (" . ($aids ? implode(',', array_map('intval', $aids)) : 'NULL') . ")")->fetchAll(PDO::FETCH_COLUMN);
-		$mids = $this->db->query("SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
-			WHERE iem_ied_inbound_email_domain_id = " . $did)->fetchAll(PDO::FETCH_COLUMN);
-		if ($mids) {
-			$min = implode(',', array_map('intval', $mids));
-			$this->db->exec("DELETE FROM ilm_inbound_label_members WHERE ilm_iem_inbound_email_message_id IN ($min)");
-		}
-		if ($accIds) {
-			$ain = implode(',', array_map('intval', $accIds));
-			// Drop the labels these test folders were bound to (and their memberships) so
-			// test labels never leak into a real mailbox's label rail.
-			$lids = $this->db->query("SELECT iif_ilb_inbound_email_label_id FROM iif_inbound_imap_folders
-				WHERE iif_iia_inbound_imap_account_id IN ($ain) AND iif_ilb_inbound_email_label_id IS NOT NULL")
-				->fetchAll(PDO::FETCH_COLUMN);
-			if ($lids) {
-				$lin = implode(',', array_map('intval', $lids));
-				$this->db->exec("DELETE FROM ilm_inbound_label_members WHERE ilm_ilb_inbound_email_label_id IN ($lin)");
-				$this->db->exec("DELETE FROM ilb_inbound_email_labels WHERE ilb_inbound_email_label_id IN ($lin)");
-			}
-			$this->db->exec("DELETE FROM iif_inbound_imap_folders WHERE iif_iia_inbound_imap_account_id IN ($ain)");
-		}
-		$this->db->exec("DELETE FROM isp_inbound_imap_seed_proofs WHERE isp_iia_inbound_imap_account_id IN (SELECT iia_inbound_imap_account_id FROM iia_inbound_imap_accounts WHERE iia_iea_inbound_email_alias_id IN (" . ($aids ? implode(',', array_map('intval', $aids)) : 'NULL)') . ")");
-		$this->db->exec("DELETE FROM iif_inbound_imap_folders WHERE iif_iia_inbound_imap_account_id IN (SELECT iia_inbound_imap_account_id FROM iia_inbound_imap_accounts WHERE iia_iea_inbound_email_alias_id IN (" . ($aids ? implode(',', array_map('intval', $aids)) : 'NULL)') . ")");
-		$this->db->exec("DELETE FROM iia_inbound_imap_accounts WHERE iia_iea_inbound_email_alias_id IN (" . ($aids ? implode(',', array_map('intval', $aids)) : 'NULL') . ")");
-		$this->db->exec("DELETE FROM iem_inbound_email_messages WHERE iem_ied_inbound_email_domain_id = " . $did);
-		$this->db->exec("DELETE FROM iea_inbound_email_aliases WHERE iea_ied_inbound_email_domain_id = " . $did);
-		$this->db->exec("DELETE FROM ied_inbound_email_domains WHERE ied_inbound_email_domain_id = " . $did);
 	}
 
 	private function makeFolder(string $name, ?string $role, int $uidvalidity = 1, ?int $modseq = 5): InboundImapFolder {
@@ -1007,8 +975,37 @@ class ImapSyncerTest {
 		return MailboxViewer::forUser(1, 10);
 	}
 
+	/**
+	 * Labels are the one thing the domain cascade cannot take: ilb_name is
+	 * globally unique, so a folder binding is a reference to a shared label,
+	 * not ownership of it (iif_ilb_inbound_email_label_id is a 'null' rule).
+	 * A fixture's 'Work' label left standing joins a real mailbox's label rail.
+	 * Read the bindings here, while the folder rows still exist — the
+	 * registered domain delete runs after this, at harness_finish().
+	 */
 	private function tearDown() {
-		try { if ($this->domain_id) { $this->purgeDomain(intval($this->domain_id)); } } catch (\Throwable $e) {}
+		if (!$this->account || !$this->account->key) { return; }
+		try {
+			$q = $this->db->prepare("SELECT DISTINCT iif_ilb_inbound_email_label_id
+				FROM iif_inbound_imap_folders
+				WHERE iif_iia_inbound_imap_account_id = ? AND iif_ilb_inbound_email_label_id IS NOT NULL");
+			$q->execute(array(intval($this->account->key)));
+			$lids = $q->fetchAll(PDO::FETCH_COLUMN);
+		} catch (\Throwable $e) {
+			check(false, 'fixture label bindings readable at teardown', $e->getMessage());
+			return;
+		}
+		foreach ($lids as $lid) {
+			// A teardown that cannot delete its own fixture is this suite's
+			// failure, and it is named here — left as a warning it would red
+			// referential_integrity later with no leaker named.
+			try {
+				$label = new InboundEmailLabel(intval($lid), TRUE);
+				if ($label->key) { $label->permanent_delete(); }
+			} catch (\Throwable $e) {
+				check(false, 'fixture label ' . intval($lid) . ' deleted at teardown', $e->getMessage());
+			}
+		}
 	}
 }
 
