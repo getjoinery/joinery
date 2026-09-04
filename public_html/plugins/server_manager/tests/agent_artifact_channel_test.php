@@ -150,11 +150,10 @@ section('The artifact request is a closed set, and names no path');
 // The node picks from a compiled-in list of KINDS and, for a binary, an
 // architecture matched against a pattern. It never names a file, so nothing it
 // sends is resolved as a path on this plane.
-$spec = [
-	'node_id'  => ['type' => 'int', 'required' => true],
-	'kind'     => ['type' => 'string', 'required' => true, 'max' => 32],
-	'platform' => ['type' => 'string', 'max' => 32, 'pattern' => '/^linux-[a-z0-9]{3,12}$/'],
-];
+// The endpoint's own spec, not a copy of it. A copy can agree with itself while
+// disagreeing with the code, which is the one failure a path-safety test must
+// not have.
+$spec = AgentChannelEndpoint::artifact_request_spec();
 
 check(AgentChannelEndpoint::validation_error(
 		['node_id' => 1, 'kind' => 'agent_binary', 'platform' => 'linux-amd64'], $spec) === null,
@@ -171,10 +170,27 @@ check(AgentChannelEndpoint::validation_error(
 	'a node that could name a file could name any file; the plane names it from its own manifest');
 
 $kinds = AgentChannelEndpoint::ARTIFACT_KINDS;
-check($kinds === ['agent_manifest', 'agent_binary', 'bundle_manifest', 'bundle_body'],
-	'the artifact kinds are exactly the four the agent asks for',
+check($kinds === ['agent_manifest', 'agent_binary', 'bundle_manifest', 'bundle_body', 'release_manifest'],
+	'the artifact kinds are exactly the five the agent asks for',
 	'the agent and the plane agree by convention here, the way the primitive vocabulary does; '
 	. 'a kind on one side and not the other is a request that silently 400s: ' . implode(',', $kinds));
+
+// release_manifest is the one kind whose whole purpose is to reach a node that
+// can do nothing else. A node in that state names an artifact and a version;
+// everything about resolving those to a file happens on this side.
+check(AgentChannelEndpoint::validation_error(
+		['node_id' => 1, 'kind' => 'release_manifest', 'owner' => '', 'version' => '0.8.370'], $spec) === null,
+	'a release manifest request names an owner and a version');
+check(AgentChannelEndpoint::validation_error(
+		['node_id' => 1, 'kind' => 'release_manifest', 'path' => '/etc/passwd'], $spec) !== null,
+	'a release manifest request that names a path is refused as an undeclared field',
+	'the node never names a path here either');
+
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/ReleaseManifestSource.php'));
+check(ReleaseManifestSource::valid_owner('../../etc') === false,
+	'and a traversal owner is refused before anything is resolved');
+check(ReleaseManifestSource::valid_version('../0.8.370') === false,
+	'and so is a traversal version');
 
 // ======================================================================
 section('The support bundle is signed with the release key and is byte-stable');

@@ -175,6 +175,57 @@ check(empty($node->get('mgn_script_trust_since')), 'and the first-seen stamp is 
 check((string)$node->get('mgn_script_trust_reason') === '', 'and the stale reason is dropped');
 
 // ---------------------------------------------------------------------------
+section('What a node volunteers on its poll');
+
+// The case a refusal cannot reach: a node that is refusing but has no job
+// dispatched to it. It polls every cycle, so the poll is the one moment it can
+// say so for itself.
+$quiet = st_node();
+NodeMonitorHealth::note_reported_script_trust($quiet, 'untrusted_manifest');
+$quiet->save();
+$quiet->load();
+check($quiet->get('mgn_script_trust') === 'untrusted_manifest',
+	'a node that reports it cannot verify scripts is marked without any job at all');
+check(!empty($quiet->get('mgn_script_trust_since')), 'and its first-seen is stamped');
+check(stripos((string)$quiet->get('mgn_script_trust_reason'), 'on its poll') !== false,
+	'and the reason says the node volunteered it', $quiet->get('mgn_script_trust_reason'));
+
+// The node's own account outranks a stale refusal, in both directions — that is
+// what lets it recover without being sent a job of the right type first.
+$recovered = st_node();
+NodeMonitorHealth::note_script_trust($recovered, st_job($recovered, 'apply_update', 'refused', $MANIFEST_BAD_KEY));
+$recovered->load();
+check($recovered->get('mgn_script_trust') === 'untrusted_manifest', 'marked from a refusal first');
+NodeMonitorHealth::note_reported_script_trust($recovered, 'ok');
+$recovered->save();
+$recovered->load();
+check($recovered->get('mgn_script_trust') === 'ok',
+	'a node reporting ok clears a state set by an earlier refusal');
+check(empty($recovered->get('mgn_script_trust_since')), 'and releases the first-seen stamp');
+
+// A reason already recorded from a refusal is the more useful of the two and is
+// kept rather than replaced by the generic poll wording.
+$keeps = st_node();
+NodeMonitorHealth::note_script_trust($keeps, st_job($keeps, 'backup_run', 'refused', $MANIFEST_NONE));
+$keeps->load();
+NodeMonitorHealth::note_reported_script_trust($keeps, 'untrusted_manifest');
+$keeps->save();
+$keeps->load();
+check($keeps->get('mgn_script_trust_reason') === $MANIFEST_NONE,
+	'a reason from a refusal survives a later poll that says the same thing');
+
+// Anything that is not one of the three answers is not an answer. An older
+// agent sends nothing at all, and nothing must never read as healthy.
+$untouched = st_node();
+NodeMonitorHealth::note_reported_script_trust($untouched, 'healthy');
+NodeMonitorHealth::note_reported_script_trust($untouched, '');
+NodeMonitorHealth::note_reported_script_trust($untouched, 'ok; DROP TABLE');
+$untouched->save();
+$untouched->load();
+check((string)$untouched->get('mgn_script_trust') === '',
+	'an answer outside the closed set moves nothing');
+
+// ---------------------------------------------------------------------------
 section('What the dashboard is told');
 
 $bad = st_node();

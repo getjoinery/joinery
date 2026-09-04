@@ -1,6 +1,7 @@
 # Manifest trust recovery, and saying so out loud
 
-**Status:** D is built (server_manager 1.21.8). A is not started.
+**Status:** BUILT. A and D both, plane side (server_manager 1.21.9) and agent
+side (agent 1.18.0). Live verification outstanding — see Acceptance.
 
 ## The problem
 
@@ -70,7 +71,7 @@ So the machinery for this spec is not new. A siteless machine can already obtain
 a verified script tree from nothing. A machine *with* a site cannot obtain a
 verified manifest for the tree it already has. This spec closes that asymmetry.
 
-## A — recovering trust
+## A — recovering trust — BUILT
 
 ### Trigger
 
@@ -127,8 +128,10 @@ minute and no human.
 Mirroring the self-update path: a manifest that fails verification is not
 retried until the offered bytes change (hash the fetched manifest, back off on a
 repeat), transport failures are retried, and the attempt is logged once rather
-than every cycle. Recovery is attempted on the same idle cadence as the
-self-update check, never inside a job.
+than every cycle. Recovery runs on its own ten-minute ticker under the job lock,
+never inside a job — a slower clock than the self-update check, because a node
+in this state stays broken until somebody publishes something and asking every
+minute would not make that happen sooner.
 
 ## D — naming the state — BUILT
 
@@ -164,14 +167,48 @@ surface works on the fleet as it stands today.
 No backfill: state accrues from new results. Backfilling would mark a node red
 for refusals it has since recovered from.
 
-**Still open in D:** the agent-reported variant remains the better long-run
-answer for one case this cannot see — a node that is refusing but has no job
-dispatched to it, and so never tells the plane anything. Worth revisiting once
-the fleet's agents are current.
+**The agent-reported variant is also built** (agent 1.18.0): a node reports
+`script_trust` on every poll, which covers the case refusals cannot — a node
+refusing with nothing dispatched to it. Its own report wins over a stale refusal
+in both directions. An absent report is left alone: an older agent and a
+siteless machine both look like that, and neither is good news.
 
 D is also what makes A's failure visible. If a recovery attempt keeps failing —
 the plane has no manifest for that version, the tree has genuinely diverged —
 the node must not sit silently in a loop nobody can see.
+
+## What was built
+
+Agent side (1.18.0):
+- `ArtifactManifests.Usable()` — reporting on the MANIFEST alone, which is what
+  keeps recovery structurally unable to fire on a modified file.
+- The verifier cache is keyed on the manifest file's identity (size, mtime,
+  mode, inode) rather than held for the life of the process. One agent build
+  spans many core releases, so a cached parse meant a routine upgrade was read
+  as every file having been modified since release — tampering, reported to the
+  dashboard as such — and a manifest broken under a running agent stayed
+  invisible while the node reported itself healthy.
+- `manifestheal.go` — the healer: checks every 10 minutes, on the job lock,
+  fetches under its own 8 MiB cap (the ordinary 64 KiB job cap cannot carry a
+  186 KiB manifest), verifies against the compiled-in key, and lands each file
+  through `os.CreateTemp` with mode and ownership set on the descriptor, never
+  by path — the site root is web-writable on a real node, so a root write by
+  path there is a web-to-root escalation. Refused bytes are not re-judged until
+  what is offered changes.
+- `release_manifest` artifact kind and `releaseManifestRequestBody()`.
+- `RemoteSource.scriptTrust()` — the node's own answer, on every poll.
+- One verifier shared by the executor and the healer, threaded through the two
+  late-join paths so a join completed mid-process does not create a second
+  opinion.
+
+Plane side (1.21.9):
+- `ReleaseManifestSource` — streams the signed pair out of a published archive,
+  core or plugin or theme; resolves owner and version against this plane's own
+  layout and never joins either onto a path.
+- `AgentChannelEndpoint` 1.4 — the `release_manifest` kind, and `script_trust`
+  accepted on the claim. `artifact_request_spec()` is public so the path-safety
+  test checks the spec the endpoint enforces rather than a copy.
+- `NodeMonitorHealth::note_reported_script_trust()`.
 
 ## Open questions
 

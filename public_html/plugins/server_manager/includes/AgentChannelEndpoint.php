@@ -62,6 +62,11 @@
  *                (hard cutover, owner-set) — approving the join is the routing decision
  * @version 1.2 - enrollment is a node-initiated join with no shared secret (Phase 1.5, A6):
  *                join + join_status replace pair, and the pairing-token machinery is deleted
+ * @version 1.4 - a node reports script_trust on every poll, so one that is refusing with no job
+ *                dispatched to it is still visible; absent stays absent and never reads as healthy
+ * @version 1.3 - release_manifest artifact kind: a node whose signed tree manifest has become
+ *                unusable fetches a good one over the channel and verifies it against its own
+ *                compiled-in key, instead of needing a human on the box (spec: manifest trust recovery)
  * @version 1.2 - a refusal that means the node can no longer verify its own scripts is recorded
  *                on the node as it arrives, not left to be read off individual job failures
  * @version 1.1 - the node's outcome is recorded verbatim in mjb_agent_outcome, so a refusal is
@@ -108,7 +113,8 @@ class AgentChannelEndpoint {
 	 * names one of these and nothing else, so nothing it sends is ever resolved
 	 * as a path on this plane.
 	 */
-	const ARTIFACT_KINDS = ['agent_manifest', 'agent_binary', 'bundle_manifest', 'bundle_body'];
+	const ARTIFACT_KINDS = ['agent_manifest', 'agent_binary', 'bundle_manifest', 'bundle_body',
+		'release_manifest'];
 
 	/** Chunk size for streaming an artifact out. Bounds this plane's memory, not the transfer. */
 	const ARTIFACT_CHUNK_BYTES = 262144;
@@ -563,6 +569,10 @@ class AgentChannelEndpoint {
 			'primitives'     => ['type' => 'string', 'max' => self::MAX_VOCABULARY_BYTES,
 			                     'pattern' => '/^[a-z0-9_,]*$/'],
 			'bundle_version' => ['type' => 'string', 'max' => 32, 'pattern' => '/^[a-z0-9]*$/'],
+			// The node's own answer to whether it can verify the scripts it
+			// would run as root. A closed set, matched not interpolated.
+			'script_trust'   => ['type' => 'string', 'max' => 24,
+				'pattern' => '/^(ok|untrusted_manifest|untrusted_file)?$/'],
 		]);
 		if ((int)$in['node_id'] !== (int)$node->key) {
 			api_error('The signed identity and the stated node do not match.', 'AuthenticationError', 401);
@@ -605,6 +615,18 @@ class AgentChannelEndpoint {
 			&& (string)$in['bundle_version'] !== (string)$node->get('mgn_agent_bundle_version')) {
 			$node->set('mgn_agent_bundle_version', (string)$in['bundle_version']);
 		}
+
+		// The node saying, unprompted, whether it can verify its own scripts.
+		//
+		// This is the case a refusal cannot cover: a node that is refusing but
+		// has no job dispatched to it never gets to say so, and the poll is the
+		// one moment it speaks for itself. An ABSENT field is an older agent or
+		// a machine with no site tree, and must never be read as good news —
+		// only an explicit answer moves the column, in either direction.
+		if (array_key_exists('script_trust', $in) && (string)$in['script_trust'] !== '') {
+			NodeMonitorHealth::note_reported_script_trust($node, (string)$in['script_trust']);
+		}
+
 		$node->save();
 
 		// A claim that never came back would otherwise hold this node's
@@ -939,16 +961,33 @@ class AgentChannelEndpoint {
 	 * because they are the expensive ones, and each is recorded: a read is
 	 * loud (§3.5.6).
 	 */
-	private static function handle_artifact($body) {
-		$node = self::authenticate_node('/api/v1/agent/artifact', self::body_hash());
-
-		$in = self::validate($body, [
+	/**
+	 * Every field the artifact endpoint accepts, and nothing else.
+	 *
+	 * Public and in one place because the test that pins this endpoint's path
+	 * safety has to check the SAME spec the endpoint enforces. A second copy in
+	 * a test file is a copy that can agree with itself while disagreeing with
+	 * the code — which is the one failure a path-safety test must not have.
+	 */
+	public static function artifact_request_spec(): array {
+		return [
 			'node_id'  => ['type' => 'int', 'required' => true],
 			'kind'     => ['type' => 'string', 'required' => true, 'max' => 32],
 			// The architecture this build runs on. Matched, not interpolated —
 			// it selects a manifest entry and never reaches the filesystem.
 			'platform' => ['type' => 'string', 'max' => 32, 'pattern' => '/^linux-[a-z0-9]{3,12}$/'],
-		]);
+			// Which artifact's manifest, and at which version ('' is core).
+			// Both are re-checked by ReleaseManifestSource before either is
+			// resolved to anything; neither is ever joined onto a path here.
+			'owner'    => ['type' => 'string', 'max' => 128],
+			'version'  => ['type' => 'string', 'max' => 24],
+		];
+	}
+
+	private static function handle_artifact($body) {
+		$node = self::authenticate_node('/api/v1/agent/artifact', self::body_hash());
+
+		$in = self::validate($body, self::artifact_request_spec());
 		if ((int)$in['node_id'] !== (int)$node->key) {
 			api_error('The signed identity and the stated node do not match.', 'AuthenticationError', 401);
 		}
@@ -961,6 +1000,9 @@ class AgentChannelEndpoint {
 		$dist_dir = PathHelper::getIncludePath('agent_dist');
 
 		switch ($kind) {
+			case 'release_manifest':
+				self::serve_release_manifest((string)($in['owner'] ?? ''), (string)($in['version'] ?? ''));
+				break;
 			case 'agent_manifest':
 				self::serve_agent_manifest($dist_dir);
 				break;
@@ -976,6 +1018,56 @@ class AgentChannelEndpoint {
 				self::serve_bundle_body($dist_dir);
 				break;
 		}
+	}
+
+	/**
+	 * The signed release manifest for an artifact at a version, so a node whose
+	 * own copy has become unusable can get a good one without a human on the box.
+	 *
+	 * This is the whole of the plane's part in manifest recovery, and it is
+	 * deliberately small. It serves bytes that were signed by a key this plane
+	 * does not hold; the node refuses them unless they verify against the key
+	 * compiled into its own binary. A hostile plane here costs a node one wasted
+	 * fetch — exactly the position the agent-binary path already puts it in.
+	 *
+	 * The node names an OWNER and a VERSION. It never names a path, and nothing
+	 * it sends reaches the filesystem: ReleaseManifestSource resolves both
+	 * against this plane's own layout, or answers that it has nothing.
+	 *
+	 * Not metered as a body. A manifest is a few hundred kilobytes at most and
+	 * is fetched by a node that is, by definition, unable to do anything else —
+	 * rate-limiting the one call that could un-wedge it would be the wrong
+	 * bucket to put it in. It is still logged.
+	 */
+	private static function serve_release_manifest($owner, $version) {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/ReleaseManifestSource.php'));
+
+		$owner   = trim((string)$owner);
+		$version = trim((string)$version);
+		if (!ReleaseManifestSource::valid_owner($owner) || !ReleaseManifestSource::valid_version($version)) {
+			api_error('A release manifest request must name a known artifact and a version.',
+				'ValidationError', 400);
+		}
+
+		RequestLogger::log('api_agent_artifact', 'release_manifest ' . ($owner !== '' ? $owner : 'core')
+			. ' ' . $version, true);
+
+		$pair = ReleaseManifestSource::read($owner, $version);
+		if ($pair === null) {
+			// Nothing to offer. An ordinary answer: the archive may have been
+			// pruned by retention, or predate signed manifests. The node needs
+			// to tell that apart from a transport failure, so it is a success
+			// with nothing in it rather than a 404.
+			api_success(['available' => false], '', 200);
+		}
+
+		api_success([
+			'available' => true,
+			'owner'     => $owner,
+			'version'   => $version,
+			'manifest'  => $pair['manifest'],
+			'signature' => $pair['signature'],
+		], '', 200);
 	}
 
 	/**
