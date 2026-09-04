@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.58
+ * No framework. @version 2.60
  *
  * The conversation list updates in place after mutations
  * (specs/implemented/mailbox_reader_list_persistence.md): actions that take rows out of
@@ -2769,14 +2769,54 @@
 		return isNaN(d.getTime()) ? iso : d.toLocaleDateString();
 	}
 
+	// ---- the right column ----
+	//
+	// Two panels stacked: whatever a plugin has docked in the top slot (the
+	// joinery_ai panel today) and the reader's own Contact/Contacts panel below.
+	// Neither knows about the other. The column shows while EITHER holds
+	// something, and collapses to a labelled spine only when every panel in it
+	// is collapsed — so one open panel keeps the column its full width.
+	//
+	// A docked panel's whole contract: mark its root data-collapsed="true" while
+	// collapsed, and fire a bubbling 'joinerypanelcontent' event whenever what it
+	// holds changes.
+	function peopleSlot() { return $('#mbx-context-people'); }
+
+	function syncContextColumn() {
+		var aside = $('#mbx-context');
+		if (!aside) return;
+		var slots = aside.querySelectorAll('.mbx-context-slot');
+		var filled = false;
+		var allCollapsed = true;
+		Array.prototype.forEach.call(slots, function (slot) {
+			if (slot.hidden || !slot.childElementCount) return;
+			filled = true;
+			// The reader's own panel says it is collapsed with the class it has
+			// always used; a docked panel says so with the data attribute.
+			var collapsed = slot.classList.contains('mbx-context-collapsed')
+				|| !!slot.querySelector('[data-collapsed="true"]');
+			if (!collapsed) allCollapsed = false;
+		});
+		aside.hidden = !filled;
+		var spine = filled && allCollapsed;
+		aside.classList.toggle('mbx-context-collapsed', spine);
+		// The other half of the contract: a docked panel is told when the column
+		// it lives in has narrowed to a spine, so it can turn its own header on
+		// its side the way the reader's does. It cannot read our classes, and
+		// should not have to.
+		Array.prototype.forEach.call(slots, function (slot) {
+			slot.setAttribute('data-spine', spine ? 'true' : 'false');
+		});
+	}
+
 	// Lazily fetch + render who the thread's counterparty is: their entry in the
 	// caller's contact store, plus (admin only, CFG.canSeeContext) their account here.
 	// The client sends a message id (never an address), so the endpoint can't be a
 	// membership oracle.
 	function loadSenderContext(messages) {
-		var panel = $('#mbx-context');
+		var panel = peopleSlot();
 		if (!panel) return;
-		if (!CFG.canSeeContext) { panel.hidden = true; return; }
+		if (!CFG.canSeeContext) { hidePeoplePanel(); return; }
 		var target = lastInboundOrLast(messages);
 		// Nothing to say about a counterparty here (no message, mail belonging to no
 		// mailbox, or a discarded conversation the endpoint declines to describe):
@@ -2789,13 +2829,21 @@
 	}
 
 	function fetchSenderContext(mid) {
-		var panel = $('#mbx-context');
 		joineryApi.post(CFG.senderContextUrl, { message_id: String(mid) }).then(function (data) {
 			data = data || {};
-			if (data.locked) { if (panel) panel.hidden = true; return; }
+			if (data.locked) { hidePeoplePanel(); return; }
 			contextCache[mid] = data;
 			renderSenderContext(data);
-		}).catch(function () { if (panel) panel.hidden = true; });
+		}).catch(function () { hidePeoplePanel(); });
+	}
+
+	/** Nothing to say about a person here — this panel steps out of the column. */
+	function hidePeoplePanel() {
+		var panel = peopleSlot();
+		if (!panel) return;
+		panel.hidden = true;
+		panel.innerHTML = '';
+		syncContextColumn();
 	}
 
 	function contextSection(t) { return el('div', 'mbx-context-section', t); }
@@ -2817,7 +2865,7 @@
 	}
 
 	function renderSenderContext(data) {
-		var panel = $('#mbx-context');
+		var panel = peopleSlot();
 		if (!panel) return;
 		// The counterparty card is the reason the panel is open, so it always shows
 		// expanded — the collapsed spine belongs to the list view's contacts mode.
@@ -2937,6 +2985,7 @@
 				data.conversations.count + ' conversation' + (data.conversations.count === 1 ? '' : 's')));
 		}
 		panel.hidden = false;
+		syncContextColumn();
 	}
 
 	// ---- contacts (§ Phase 4): autocomplete + management ----
@@ -3051,7 +3100,7 @@
 	// Point the aside at whatever the reader is currently showing. Called on every
 	// mailbox switch and whenever a thread opens or closes.
 	function refreshContactsPanel() {
-		var panel = $('#mbx-context');
+		var panel = peopleSlot();
 		if (!panel) return;
 		// A thread is open — the counterparty card owns the panel (loadSenderContext
 		// paints it); leave it alone.
@@ -3059,7 +3108,7 @@
 		// No real mailbox selected (All mail, or an unmatched box) means no one contact
 		// store to show, so the panel steps aside entirely.
 		if (!isRealMailbox(state.aliasId)) {
-			panel.hidden = true;
+			hidePeoplePanel();
 			return;
 		}
 		panel.hidden = false;
@@ -3067,7 +3116,7 @@
 	}
 
 	function renderContactsPanel() {
-		var panel = $('#mbx-context');
+		var panel = peopleSlot();
 		if (!panel) return;
 		var aliasId = state.aliasId;
 		var open = contactsPanelOpen();
@@ -3077,7 +3126,9 @@
 		// The spine: always present, and the only thing rendered when collapsed. It is
 		// the affordance that says the panel exists at all.
 		var head = el('div', 'mbx-context-head');
-		var toggle = el('button', 'mbx-context-toggle', open ? '›' : '‹');
+		// The same disclosure triangle a docked panel uses: both panels in this
+		// column open downward, so both say so the same way.
+		var toggle = el('button', 'mbx-context-toggle', open ? '\u25be' : '\u25b8');
 		toggle.type = 'button';
 		toggle.title = open ? 'Hide contacts' : 'Show contacts';
 		toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -3088,6 +3139,7 @@
 		head.appendChild(toggle);
 		head.appendChild(el('span', 'mbx-context-title', 'Contacts'));
 		panel.appendChild(head);
+		syncContextColumn();
 		if (!open) return;
 
 		var body = el('div', 'mbx-context-body');
@@ -3778,6 +3830,14 @@
 		$('#mbx-rail-close').addEventListener('click', function () { closeRail(); });
 		$('#mbx-scrim').addEventListener('click', function () { closeRail(); });
 		placeAppBarActions();
+		// A plugin panel docked in the right column tells the column when what it
+		// holds changes; the column decides from that whether to show at all and
+		// whether it is down to a spine.
+		var contextAside = $('#mbx-context');
+		if (contextAside) {
+			contextAside.addEventListener('joinerypanelcontent', syncContextColumn);
+		}
+		syncContextColumn();
 		$('#mbx-scope-search').addEventListener('click', toggleSearch);
 		if (PHONE) {
 			var onPhoneChange = function () { placeAppBarActions(); };

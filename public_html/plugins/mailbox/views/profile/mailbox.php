@@ -5,7 +5,8 @@
  * as the admin mount (includes/mailbox_reader_mount.php); this page supplies the
  * theme chrome, the member attachment endpoint, and no detail-page deep links.
  *
- * @version 1.8.0 - the gear menu carries Filters, Email settings and Import
+ * @version 1.9.0 - the AI panel docks in the reader's right column
+ * @version 1.8.0
  * @version 1.5.0
  * @version 1.4.0
  */
@@ -85,7 +86,12 @@ if (!$has_mailboxes) {
 			getContext: function () {
 				return { mailbox: window.MailboxReader ? window.MailboxReader.currentAddress() : '' };
 			},
-			anchor: document.getElementById('mbx-ai-panel-anchor')
+			anchor: document.getElementById('mbx-ai-panel-anchor'),
+			// The reader's right column: the panel docks above the contact panel
+			// and shares the column with it. The reader drops that column below
+			// 1100px, and the panel notices and moves into its own slide-over, so
+			// the AI button keeps working on a phone.
+			container: document.getElementById('mbx-context-ai')
 		});
 		</script>
 		<?php

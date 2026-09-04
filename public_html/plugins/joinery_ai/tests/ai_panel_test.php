@@ -25,7 +25,7 @@
  *
  * Run: php tests/run.php db --only=plugins/joinery_ai/tests/ai_panel_test.php
  *
- * @version 1.0
+ * @version 1.1
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 require_once(__DIR__ . '/../../../tests/lib/logic.php');
@@ -384,6 +384,100 @@ foreach ($cards as $c) {
 check($dup === 1, 'the panel shows the instance once — its template card is gone');
 
 // -----------------------------------------------------------------------------
+section('What the AI is doing: in-flight runs and the counts on the panel');
+
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/aip_recipe_item_log_class.php'));
+
+/** A run row in a given state, for the jobs list to find. */
+function aip_run(int $recipe_id, string $status): RecipeRun {
+	$run = new RecipeRun(NULL);
+	$run->set('rcr_rcp_recipe_id', $recipe_id);
+	$run->set('rcr_status', $status);
+	$run->save();
+	$run->load();
+	harness_register_row('rcr_recipe_runs', 'rcr_run_id', intval($run->key));
+	return $run;
+}
+
+$jobs = AiPanelService::jobs($member_id);
+check(($jobs['count'] ?? null) === 0, 'no runs in flight, no jobs', var_export($jobs, true));
+
+// A recipe of its own for this section: the toggles above have been moving
+// $recipe's binding around, and progress is counted against whatever a recipe
+// is bound to right now.
+$busy_alias = aip_alias(intval($standard->key), 'busy', $member_id);
+$busy_addr = $busy_alias->get_full_address();
+$busy = aip_recipe($member_id, array($busy_addr));
+$busy_first = aip_message(intval($standard->key), intval($busy_alias->key), 'first waiting', '-10');
+aip_message(intval($standard->key), intval($busy_alias->key), 'second waiting', '-5');
+
+$run_running = aip_run(intval($busy->key), RecipeRun::STATUS_RUNNING);
+aip_run(intval($busy->key), RecipeRun::STATUS_PENDING);
+aip_run(intval($busy->key), RecipeRun::STATUS_SUCCESS);   // finished: not in flight
+aip_run(intval($foreign->key), RecipeRun::STATUS_RUNNING);  // somebody else's
+
+$jobs = AiPanelService::jobs($member_id);
+check(($jobs['count'] ?? null) === 2,
+	'in flight means running or pending, and only the caller\'s own',
+	var_export($jobs['count'] ?? null, true));
+
+$labels = array();
+foreach ($jobs['jobs'] as $job) { $labels[$job['state']] = $job['label']; }
+check(($labels['running'] ?? '') === 'Running now',
+	'a claimed run says it is running', var_export($labels, true));
+check(($labels['queued'] ?? '') === 'Queued',
+	'a run waiting for a worker says it is queued', var_export($labels, true));
+
+// How far through its queue each run is. countWork() answers what is left; the
+// item log answers what this run has already finished with, so two runs of the
+// same recipe never report each other's progress.
+$jobs = AiPanelService::jobs($member_id);
+$by_state = array();
+foreach ($jobs['jobs'] as $job) { $by_state[$job['state']] = $job; }
+check(($by_state['queued']['progress'] ?? '') === '2 to go',
+	'a queued run says how many items are waiting for it',
+	var_export($by_state['queued']['progress'] ?? null, true));
+check(($by_state['running']['progress'] ?? '') === '2 to go',
+	'a run that has finished nothing yet says only what is left',
+	var_export($by_state['running']['progress'] ?? null, true));
+
+// One item finished under the running run: its line now carries both halves,
+// and the queued run's line does not move.
+$running_run = null;
+foreach ($jobs['jobs'] as $i => $job) { if ($job['state'] === 'running') { $running_run = $i; } }
+$log = new AipRecipeItemLog(NULL);
+$log->set('aip_rcp_recipe_id', intval($busy->key));
+// The real item key — the message id — so the job's own count stops seeing it.
+$log->set('aip_item_key', (string)$busy_first);
+$log->set('aip_rcr_run_id', intval($run_running->key));
+$log->set('aip_status', AipRecipeItemLog::STATUS_DONE);
+$log->save();
+$log->load();
+harness_register_row('aip_recipe_item_log', 'aip_log_id', intval($log->key));
+
+$jobs = AiPanelService::jobs($member_id);
+$by_state = array();
+foreach ($jobs['jobs'] as $job) { $by_state[$job['state']] = $job; }
+check(($by_state['running']['progress'] ?? '') === '1 done, 1 to go',
+	'a working run says what it has finished and what is left',
+	var_export($by_state['running']['progress'] ?? null, true));
+check(($by_state['queued']['progress'] ?? '') === '1 to go',
+	'and the queued run counts the same remaining work, not the other run\'s',
+	var_export($by_state['queued']['progress'] ?? null, true));
+
+// A fully-sealed recipe's pending run is not queued for any worker — it waits
+// for the owner's own unlocked session, and the line has to say so or the job
+// looks stuck.
+aip_run(intval($sealed_only->key), RecipeRun::STATUS_PENDING);
+$jobs = AiPanelService::jobs($member_id);
+$waiting = array_values(array_filter($jobs['jobs'], function ($j) { return $j['state'] === 'waiting'; }));
+check(count($waiting) === 1 && $waiting[0]['label'] === 'Waiting for your unlocked session',
+	'an in-window run says what it is waiting for', var_export($jobs['jobs'], true));
+check(($jobs['count'] ?? null) === 3, 'and it still counts as in flight',
+	var_export($jobs['count'] ?? null, true));
+
+// -----------------------------------------------------------------------------
 section('The API actions answer through the real logic wrappers');
 
 $_SESSION['loggedin'] = 1;
@@ -400,5 +494,16 @@ $r = harness_call_logic('plugins/joinery_ai/logic/ai_panel_toggle_logic.php',
 		'recipe_id' => intval($recipe->key), 'enabled' => '1'));
 check($r->error === null && ($r->data['card']['covered'] ?? null) === true,
 	'ai_panel_toggle round-trips through the logic wrapper', var_export($r->error, true));
+
+// One call feeds both of the panel's counts, so they can never disagree.
+$r = harness_call_logic('plugins/joinery_ai/logic/ai_status_logic.php',
+	'ai_status_logic', array());
+check($r->error === null && ($r->data['job_count'] ?? null) === 3,
+	'ai_status counts the caller\'s runs in flight', var_export($r->data['job_count'] ?? $r->error, true));
+check($r->error === null && count($r->data['jobs'] ?? array()) === 3,
+	'and lists them', var_export($r->error, true));
+check($r->error === null && ($r->data['pending_count'] ?? null) === 0
+	&& is_array($r->data['actions'] ?? null),
+	'and answers the queued-actions half in the same call', var_export($r->error, true));
 
 harness_finish();

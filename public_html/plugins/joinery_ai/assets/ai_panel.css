@@ -1,6 +1,7 @@
 /**
- * Area AI panel — slide-over drawer styling (ai_panel.js). jy-ui vocabulary,
- * vanilla CSS, no framework. @version 1.1.0
+ * Area AI panel (ai_panel.js) — the same panel docked in a host's sidebar or
+ * carried by the slide-over, so both are styled from one place. jy-ui
+ * vocabulary, vanilla CSS, no framework. @version 2.3.0
  */
 
 .jy-ui.aip-overlay {
@@ -30,12 +31,28 @@
 .aip-head {
 	display: flex;
 	align-items: center;
-	justify-content: space-between;
+	gap: 0.4rem;
 	padding: 0.9rem 1.1rem;
 	border-bottom: 1px solid var(--jy-color-border, #dfe3e8);
 }
+.aip-panel .aip-title { flex: 1 1 auto; }
+.aip-head-counts {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+	flex: 0 0 auto;
+}
+.aip-head-toggle {
+	border: 0;
+	background: none;
+	padding: 0 0.15rem;
+	font-size: 0.85rem;
+	line-height: 1;
+	cursor: pointer;
+	color: var(--jy-color-text-muted, #667085);
+}
 
-.aip-title {
+.aip-panel .aip-title {
 	margin: 0;
 	font-size: 1.05rem;
 	font-weight: 600;
@@ -76,99 +93,20 @@
 	background: var(--jy-color-surface, #f7f8fa);
 }
 
-.aip-card-row {
-	display: flex;
-	align-items: flex-start;
-	gap: 0.75rem;
-}
-
-.aip-card-info {
-	flex: 1;
-	min-width: 0;
-}
-
-.aip-card-name {
+.aip-panel .aip-card-name {
 	margin: 0 0 0.15rem;
 	font-size: 0.95rem;
 	font-weight: 600;
 }
 
-.aip-card-status,
-.aip-card-run,
-.aip-card-also {
+.aip-panel .aip-card-status {
 	margin: 0 0 0.1rem;
 	font-size: 0.8rem;
 	color: var(--jy-color-text-muted, #667085);
 }
 
-.aip-card-blocked .aip-card-name,
-.aip-card-blocked .aip-card-status {
-	color: var(--jy-color-text-muted, #667085);
-}
-
-.aip-card-blocked-text {
-	margin: 0.5rem 0 0;
-	font-size: 0.8rem;
-	color: var(--jy-color-text-muted, #667085);
-}
-
-/* The on/off switch. */
-.aip-toggle {
-	position: relative;
-	flex: 0 0 auto;
-	display: inline-block;
-	width: 2.4rem;
-	height: 1.35rem;
-	cursor: pointer;
-}
-
-.aip-toggle input {
-	position: absolute;
-	opacity: 0;
-	width: 100%;
-	height: 100%;
-	margin: 0;
-	cursor: pointer;
-}
-
-.aip-toggle-track {
-	position: absolute;
-	inset: 0;
-	border-radius: 999px;
-	background: var(--jy-color-border-strong, #c8ccd4);
-	transition: background 0.15s ease;
-	pointer-events: none;
-}
-
-.aip-toggle-track::after {
-	content: '';
-	position: absolute;
-	top: 2px;
-	left: 2px;
-	width: calc(1.35rem - 4px);
-	height: calc(1.35rem - 4px);
-	border-radius: 50%;
-	background: #fff;
-	transition: transform 0.15s ease;
-}
-
-.aip-toggle input:checked + .aip-toggle-track {
-	background: var(--jy-color-primary, #5b7a99);
-}
-
-.aip-toggle input:checked + .aip-toggle-track::after {
-	transform: translateX(1.05rem);
-}
-
-.aip-toggle input:disabled + .aip-toggle-track {
-	opacity: 0.45;
-}
-
-.aip-toggle input:disabled {
-	cursor: not-allowed;
-}
-
-/* The AI button's pending-actions badge. */
+/* The pending-actions count: a blue circle, on the button and in the panel
+   header. Blue rather than red — it is a request for a decision, not a fault. */
 .aip-open-btn {
 	position: relative;
 }
@@ -181,7 +119,7 @@
 	height: 1.1rem;
 	padding: 0 0.25rem;
 	border-radius: 999px;
-	background: #c0392b;
+	background: #1d63d1;
 	color: #fff;
 	font-size: 0.68rem;
 	font-weight: 700;
@@ -190,7 +128,7 @@
 }
 
 /* Waiting for you: pending queued actions. */
-.aip-waiting-title {
+.aip-panel .aip-waiting-title {
 	margin: 1rem 0 0.5rem;
 	font-size: 0.8rem;
 	font-weight: 700;
@@ -246,3 +184,163 @@
 	justify-content: flex-end;
 	gap: 0.5rem;
 }
+
+
+/* ---------------------------------------------------------------------------
+   Docked in a host's sidebar. The panel gives up the drawer's chrome — no
+   shadow, no fixed height, header flush with the column — and scrolls with the
+   column rather than inside itself, so two docked panels read as one list
+   rather than two windows.
+   --------------------------------------------------------------------------- */
+.aip-panel-docked {
+	display: block;
+	background: none;
+}
+.aip-panel-docked .aip-head {
+	padding: 0 0 0.4rem;
+	border-bottom: 0;
+}
+/* Docked, the title is one of the host column's panel headings — same size,
+   weight, colour and line box as the ones beside it, or the column reads as
+   two designs stacked. */
+.aip-panel.aip-panel-docked .aip-title {
+	font-size: 0.875rem;
+	line-height: 1.6;
+	color: #111827;
+}
+.aip-panel-docked .aip-body {
+	padding: 0;
+	overflow: visible;
+}
+.aip-panel-docked .aip-card {
+	padding: 0.5rem 0;
+}
+/* Collapsed to its header: the column may then be down to a spine, and the
+   host turns the title on its side. */
+.aip-panel-docked[data-collapsed="true"] .aip-head {
+	padding-bottom: 0;
+}
+
+/* Working now: what the AI is doing, one line each. */
+.aip-panel .aip-section-title {
+	margin: 0.6rem 0 0.35rem;
+	font-size: 0.8rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: var(--jy-color-text-muted, #667085);
+}
+.aip-job {
+	display: flex;
+	flex-direction: column;
+	gap: 0.1rem;
+	padding: 0.3rem 0;
+	font-size: 0.85rem;
+}
+.aip-panel .aip-job-name { color: var(--jy-color-text, #1f2933); }
+.aip-panel .aip-job-state { font-size: 0.75rem; color: var(--jy-color-text-muted, #667085); }
+/* A run nobody is holding up reads calm; one that cannot move without the
+   person says so in the same colour their pending actions use. */
+.aip-panel .aip-job-running .aip-job-state { color: #067647; }
+.aip-panel .aip-job-waiting .aip-job-state { color: #1d63d1; }
+
+/* The two counts. Jobs in flight is progress — a plain number, no alarm. The
+   blue circle is a request: something is stopped until the person answers. */
+.aip-jobs {
+	min-width: 1.1rem;
+	height: 1.1rem;
+	color: #111827;
+	font-size: 0.72rem;
+	font-weight: 700;
+	line-height: 1.1rem;
+	text-align: center;
+}
+/* The kit's .btn sets its own display, which would defeat the hidden
+   attribute's UA display:none — the same trap the overlay has above. The
+   button is hidden wherever the panel is docked, so this has to actually
+   hide it. */
+.aip-open-btn[hidden] { display: none !important; }
+
+.aip-open-btn .aip-jobs {
+	position: absolute;
+	top: -0.4rem;
+	left: -0.4rem;
+}
+.aip-badge-inline {
+	position: static;
+}
+
+/* The host says the column is down to a spine (data-spine on the slot the panel
+   was docked into): the header turns on its side, exactly as the host's own
+   panels do, and the counts stack under it — a spine still has to be able to
+   say that something is waiting. */
+[data-spine="true"] .aip-panel-docked .aip-head {
+	flex-direction: column;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0;
+}
+[data-spine="true"] .aip-panel-docked .aip-title {
+	writing-mode: vertical-rl;
+	margin-top: 0.5rem;
+	font-size: 0.8125rem;
+	line-height: 1;
+	color: #52606d;
+	white-space: nowrap;
+}
+[data-spine="true"] .aip-panel-docked .aip-head-counts {
+	flex-direction: column;
+}
+
+/* Automations, one row each: name and status on the first line, what it does
+   under it, then the link that changes the status. No card, no switch, no
+   section to open first — a list of things you turn on and off. */
+.aip-panel .aip-recipe {
+	padding: 0.5rem 0;
+	border-top: 1px solid var(--jy-color-border, #dfe3e8);
+}
+.aip-panel .aip-recipe-head {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 0.5rem;
+}
+.aip-panel .aip-recipe-name {
+	font-size: 0.9rem;
+	font-weight: 600;
+	color: var(--jy-color-text, #1f2933);
+	min-width: 0;
+}
+.aip-panel .aip-recipe-status {
+	flex: 0 0 auto;
+	font-size: 0.7rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--jy-color-text-muted, #667085);
+}
+.aip-panel .aip-recipe-status.is-on { color: #067647; }
+.aip-panel .aip-recipe-job,
+.aip-panel .aip-recipe-meta,
+.aip-panel .aip-recipe-blocked {
+	margin: 0.1rem 0 0;
+	font-size: 0.75rem;
+	color: var(--jy-color-text-muted, #667085);
+}
+.aip-panel .aip-recipe-actions {
+	display: flex;
+	gap: 0.75rem;
+	margin: 0.25rem 0 0;
+}
+.aip-panel .aip-link {
+	padding: 0;
+	border: 0;
+	background: none;
+	font-size: 0.75rem;
+	font-family: inherit;
+	color: var(--jy-color-primary, #2563eb);
+	cursor: pointer;
+	text-decoration: none;
+}
+.aip-panel .aip-link:hover { text-decoration: underline; }
+.aip-panel .aip-link[disabled] { color: var(--jy-color-text-muted, #667085); cursor: default; }

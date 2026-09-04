@@ -447,12 +447,34 @@ those recipes keep running unattended on their schedule.
 ## The area AI panel
 
 An area page (the mail reader; the calendar and drive pages mount the same
-thing later) carries an **AI** button opening a slide-over drawer: one card per
-relevant recipe of the signed-in user, each with an on/off toggle meaning
-"runs on the context currently open" — the mailbox selected in the reader's
-rail. The drawer's layout reserves a pinned composer slot at its bottom edge
-for a future "ask AI to do something" strip; nothing renders there until that
-feature exists.
+thing later) carries the AI panel: what the AI is doing for the signed-in user
+in that area, what it needs them to answer, and one row per relevant recipe
+saying whether it is **On** or **Off** for the context currently open — the
+mailbox selected in the reader's rail — with the link that changes that. Its layout reserves a pinned composer
+slot at the bottom edge for a future "ask AI to do something" strip; nothing
+renders there until that feature exists.
+
+**Where it lives.** Given a `container`, the panel is **docked** in it — in the
+mail reader that is the right-hand column, above the contact panel, a second
+panel in the same column rather than a layer over the page. A host that drops
+that column at narrow widths costs nothing: the panel notices its slot is not
+being rendered and moves into a slide-over that the **AI** button opens, so the
+surface is never unreachable. A host that passes no container gets the
+slide-over always.
+
+**Two counts.** Whichever of the two surfaces is in view — the panel header
+when docked, the **AI** button when not — carries the same pair: **jobs in
+flight** as a plain number, and **actions waiting on the person** as a blue
+circle. Deliberately different shapes: one is progress, the other is a request.
+Both come from one call, `joinery_ai/ai_status`, so they cannot disagree with
+the lists below them.
+
+**One surface at a time.** Where the panel is docked the button hides itself —
+the panel is already on the page, with its own header and its own counts, and a
+button that opens what is already open is a second copy of it. Where the panel
+has nowhere to dock (a host column dropped at narrow widths), the button comes
+back as the way in. A collapsed panel still shows its header and counts, so
+collapsing never brings the button back.
 
 **The component.** `plugins/joinery_ai/assets/ai_panel.js` + `ai_panel.css` —
 vanilla JS/CSS, jy-ui styling. Host contract:
@@ -463,12 +485,22 @@ JoineryAiPanel.mount({
     getContext: function () {               // called on open and on refresh
         return { mailbox: state.currentAddress };
     },
-    anchor: headerElement                   // the AI button renders inside it
+    anchor: headerElement,                  // the AI button renders inside it
+    container: sidebarSlot                  // optional: dock the panel in here
 });
 ```
 
 Hosts dispatch `joineryareacontextchange` on `document` when their context
-moves (the reader's rail switching mailboxes); an open drawer refreshes.
+moves (the reader's rail switching mailboxes); a visible panel refreshes.
+
+The docking contract is two attributes and one event, and nothing either side
+knows about the other:
+
+- the panel marks its root `data-collapsed="true"` while collapsed, and fires a
+  bubbling **`joinerypanelcontent`** event whenever what it holds changes — a
+  host column decides its own visibility and width from that;
+- the host sets **`data-spine="true"`** on the slot when its column has narrowed
+  to a labelled spine, and the panel turns its own header on its side to match.
 
 **Area relevance is a job opt-in.** A pipeline job appears in a panel only by
 implementing `AreaScopedJobInterface` (`area()`, `coversContext()`,
@@ -480,8 +512,8 @@ back through `validateConfig()`. The three email jobs implement it through
 `$context = ['mailbox' => $address]`. Agent-mode recipes have no context
 binding and never appear.
 
-**Two API actions** (`plugins/joinery_ai/logic/`, called over `/api/v1` with
-the browser-session credential; both member-callable — ownership scoping is
+**Three API actions** (`plugins/joinery_ai/logic/`, called over `/api/v1` with
+the browser-session credential; all member-callable — ownership scoping is
 the authorization, there is no permission gate):
 
 - **`joinery_ai/ai_panel_state`** (read) — the caller's own area recipes as
@@ -500,6 +532,18 @@ the authorization, there is no permission gate):
   (`rcp_enabled`) is dashboard-only, and the panel's grayed "Set to run
   manually only — give it a schedule on the recipes dashboard" control is a
   rendering of that server truth.
+- **`joinery_ai/ai_status`** (read) — both halves of the panel header in one
+  call: the caller's recipe runs in flight (`AiPanelService::jobs()`, each line
+  saying whether it is running, queued for a worker, or waiting for the owner's
+  own unlocked session, which is the one wait a worker can never end) and their
+  pending queued actions as the same cards `ai_actions_list` renders. Each run
+  also carries how far through its queue it is — *4 done, 11 to go* — the left
+  half from this run's rows in the item log and the right from the job's own
+  `countWork()`, the same cheap indexed count the schedulers ask. Both are per
+  RUN, so two runs of one recipe never report each other's progress, and a job
+  that cannot answer says nothing rather than guessing. Polled on
+  a slow heartbeat while the panel is on screen, so a panel left open all day
+  is not still showing this morning's queue.
 
 **Templates and per-user instances.** A recipe runs as its owner — the grant
 check, the vault window, the taint acceptance and the token cap are all the
@@ -519,11 +563,19 @@ panel when the joinery_ai plugin is active. The admin oversight reader does
 not — its all-access view spans mailboxes the viewer holds no grant on, and
 admins manage recipes on the dashboard.
 
-**Waiting for you.** Below the recipe cards the drawer lists the user's
-pending queued actions ([Proposed actions](#proposed-actions)) with
-approve/decline on each, and the AI button carries a pending-count badge —
-the panel is the whole AI surface for the area: standing automations above,
-pending actions below, the composer slot at the bottom.
+**The order on the panel** is the order the work reaches the person: **Working
+now** (the runs in flight), then **Waiting for you** — the pending queued
+actions ([Proposed actions](#proposed-actions)) with approve/decline on each —
+then the recipes, then the composer slot. Progress first, then what is stopped
+until they answer, then the settings behind both.
+
+The recipes are a flat, unlabelled list, one row each: name and **On**/**Off**
+for the open context, what the job does, when it last ran, and the links that
+act on it — *Turn on* / *Turn off* (the `ai_panel_toggle` call, confirm dialog
+and all) and, for a viewer who has the recipes dashboard, *Edit*. No card, no
+switch, no heading and no section to open first: each row says what it is and
+whether it is on, and a panel sharing a column with the host's own panels cannot
+afford a level of nesting that carries nothing.
 
 ## Proposed actions
 
