@@ -1,7 +1,7 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.28
+ * Vanilla CSS, no framework. @version 2.30
  */
 
 /* Every size the reader renders text at, in one ladder. Nothing in this file
@@ -48,6 +48,7 @@
 .mbx-reader {
 	--mbx-row-gap:  10px;
 	--mbx-check-w:  18px;
+	--mbx-check-hit: 32px;
 	--mbx-star-w:   18px;
 	--mbx-from-w:   calc(13 * var(--mbx-text-base));
 }
@@ -355,15 +356,35 @@
  * pointer, so hover must not be able to hide it. */
 .mbx-thread-item.selected,
 .mbx-thread-item.selected:hover { background: #fdf3d6; }
-/* Select box, first column, above-baseline with the rest of the row. */
+/* Select box, first column, above-baseline with the rest of the row.
+ *
+ * The box is small; the target around it is not. A circle the size of a toolbar
+ * button is centred on the box and takes the click, so ticking a row does not
+ * ask for pointer precision — and it shows itself on hover, the way Gmail's
+ * does. The circle is drawn out of flow, so it adds no column width and no row
+ * height: it fits inside the row's own padding and never overlaps the row above
+ * or below, and the checkbox stays painted on top of it. */
 .mbx-thread-check {
 	flex: 0 0 var(--mbx-check-w);
+	position: relative;
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	align-self: center;
-	cursor: default;
+	cursor: pointer;
 }
+.mbx-thread-check::before {
+	content: '';
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	width: var(--mbx-check-hit);
+	height: var(--mbx-check-hit);
+	margin: calc(var(--mbx-check-hit) / -2) 0 0 calc(var(--mbx-check-hit) / -2);
+	border-radius: 50%;
+}
+.mbx-thread-check:hover::before { background: rgba(32, 33, 36, .09); }
+.mbx-thread-check .mbx-check-input { position: relative; z-index: 1; }
 /* Fixed width, not the glyph's own, so stars line up down the column. */
 .mbx-thread-star {
 	flex: 0 0 var(--mbx-star-w);
@@ -502,8 +523,25 @@
 .mbx-thread-back:hover { background: #eef1f4; color: #111827; }
 .mbx-thread-back .mbx-back-arrow { font-size: var(--mbx-text-xl); line-height: 1; }
 .mbx-thread-header { margin-bottom: 14px; }
+/* Subject line: the subject takes the width it needs, the star sits at the far
+ * right of the same line (Gmail), staying put as the subject wraps. */
+.mbx-thread-title { display: flex; align-items: flex-start; gap: 10px; }
+.mbx-thread-title h1 { flex: 1 1 auto; min-width: 0; }
 .mbx-reader .mbx-thread-header h1 { font-size: var(--mbx-text-2xl); margin: 0 0 6px; color: #111827; }
-.mbx-thread-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+/* The open conversation's star — the list column's glyph and colours, in a
+ * round hit area the size of a toolbar button. */
+.mbx-thread-starbtn {
+	flex: 0 0 auto;
+	display: inline-flex; align-items: center; justify-content: center;
+	width: 32px; height: 32px; padding: 0;
+	border: none; background: none; border-radius: 50%;
+	color: #c4c9d0; font-size: var(--mbx-text-2xl); line-height: 1; cursor: pointer;
+}
+.mbx-thread-starbtn:hover { background: #eef1f4; }
+.mbx-thread-starbtn.on { color: #f5b400; }
+/* The open conversation's actions are the list toolbar's icon buttons, so the
+ * row spaces them the way the toolbar does. */
+.mbx-thread-actions { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; margin-top: 8px; }
 .mbx-action {
 	border: 1px solid #cfd6dd; background: #fff; color: #374151;
 	border-radius: 5px; padding: 5px 11px; cursor: pointer; font-size: var(--mbx-text-sm);

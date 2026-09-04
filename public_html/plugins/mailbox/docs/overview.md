@@ -3235,7 +3235,7 @@ A message ingested into a folder whose `iif_role` is `junk` is marked
 
 **Reader.** The default inbox (and the mailbox unread badges) exclude `spam`-verdict
 rows; a **Spam** entry in the per-mailbox folder rail shows only them. Per
-conversation, **Mark as spam** (inbox) / **Not spam** (Spam view) set the verdict
+conversation, **Report spam** (inbox) / **Not spam** (Spam view) set the verdict
 directly.
 
 ### Content scanner (rspamd)
@@ -3381,7 +3381,7 @@ wipe — the failure degrades to "the filter is temporarily less sharp," never "
 data lost." A redis volume mount is an optional deploy-layer optimization, never a
 correctness requirement.
 
-**Spam/ham feedback (Bayes training).** A reader correction (**Mark as spam** / **Not
+**Spam/ham feedback (Bayes training).** A reader correction (**Report spam** / **Not
 spam**) is the whole trigger — there is no separate "report" control. Flipping
 `iem_spam_verdict` leaves the row *diverged* from `iem_learned_verdict` (the marker of
 what was last taught). The **`LearnSpamFeedback`** scheduled task (every cron pass, gated
@@ -4211,9 +4211,9 @@ multi-folder host or a `MOVE` on a classic one-folder host; removing is `STORE
 \Deleted` + `EXPUNGE`; deleting is a `MOVE`/`COPY` to Trash. Operators pick which
 folders are tracked on the mailbox editor; special-use folders are pre-selected.
 
-**Changing labels from the reader.** The open-thread toolbar has a **Move ▾**
-(exclusive feeds) / **Labels ▾** (non-exclusive feeds, e.g. Gmail) control: pick a
-folder to relocate the thread, or toggle label checkboxes. Each change applies or
+**Changing labels from the reader.** The open-thread toolbar has a **Move to** (folder
+icon, exclusive feeds) / **Labels** (tag icon, non-exclusive feeds, e.g. Gmail) control:
+pick a folder to relocate the thread, or toggle label checkboxes. Each change applies or
 removes the custom-label membership (`MailboxService::setMembership`, via the
 `set_membership` action); when the label is bound to a Two-way feed the next sync
 pushes the change to the source, and an unbound (local) label is pure membership that
