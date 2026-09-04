@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.55
+ * No framework. @version 2.57
  *
  * The conversation list updates in place after mutations
  * (specs/implemented/mailbox_reader_list_persistence.md): actions that take rows out of
@@ -1363,7 +1363,17 @@
 				e.stopPropagation();
 				onRowCheckClick(t, li, e);
 			});
-			check.addEventListener('click', function (e) { e.stopPropagation(); });
+			// The target is the circle around the box, not the 13-pixel box itself
+			// (see .mbx-thread-check): a click anywhere in it ticks the row, carrying
+			// shiftKey so a range select works from the padding too. A click on the
+			// box itself never reaches here — its own handler stops it — so this
+			// cannot double-toggle.
+			check.addEventListener('click', function (e) {
+				e.stopPropagation();
+				if (e.target === cb) return;
+				cb.checked = !cb.checked;
+				onRowCheckClick(t, li, e);
+			});
 			check.appendChild(cb);
 			li.appendChild(check);
 		}
@@ -1557,18 +1567,24 @@
 		back.addEventListener('click', function () { closeThread(); });
 		header.appendChild(back);
 
-		header.appendChild(el('h1', null, t.subject || '(no subject)'));
+		// The subject, with the conversation's star at the right end of its line.
+		// A star is the one thing here you set ON a conversation rather than do to
+		// it, so it sits apart from the row of actions below.
+		var titleRow = el('div', 'mbx-thread-title');
+		titleRow.appendChild(el('h1', null, t.subject || '(no subject)'));
+		if (!state.trashView) { titleRow.appendChild(threadStarBtn(t)); }
+		header.appendChild(titleRow);
 
 		var actions = el('div', 'mbx-thread-actions');
 		if (state.trashView) {
 			// A discarded conversation has two things it can do: come back, or go for
 			// good. Read/star/archive/spam are all refused server-side while it sits
 			// here, so offering them would be offering nothing.
-			actions.appendChild(actionBtn('Restore', false, function () {
+			actions.appendChild(toolBtn('restore', 'Restore', false, function () {
 				apiAction({ action: 'restore', threadKey: t.thread_key, aliasId: state.aliasId })
 					.then(function () { closeThread(); refreshMailboxes(); removeThreadRows([t.thread_key]); });
 			}));
-			actions.appendChild(actionBtn('Delete forever', true, function () {
+			actions.appendChild(toolBtn('trash', 'Delete forever', true, function () {
 				apiAction({ action: 'purge', threadKey: t.thread_key, aliasId: state.aliasId })
 					.then(function () { closeThread(); refreshMailboxes(); removeThreadRows([t.thread_key]); });
 			}));
@@ -1577,25 +1593,17 @@
 			renderThreadMessages(pane, t, messages);
 			return;
 		}
-		actions.appendChild(actionBtn('Mark unread', false, function () {
-			apiAction({ action: 'mark_unread', threadKey: t.thread_key, aliasId: state.aliasId })
-				.then(function () { refreshMailboxes(); refreshThreads(); });
-		}));
-		actions.appendChild(actionBtn(t.any_starred ? 'Unstar' : 'Star', false, function () {
-			var turnOn = !t.any_starred;
-			apiAction({ action: turnOn ? 'star' : 'unstar', threadKey: t.thread_key, aliasId: state.aliasId })
-				.then(function () { t.any_starred = turnOn; refreshMailboxes(); refreshThreads(); });
-		}));
-		actions.appendChild(actionBtn('Delete', true, function () {
-			apiAction({ action: 'delete', threadKey: t.thread_key, aliasId: state.aliasId })
-				.then(function () { closeThread(); refreshMailboxes(); removeThreadRows([t.thread_key]); });
-		}));
+		// The same controls the list toolbar offers, drawn with the same icons and
+		// laid out in the same order — one row of actions to learn, whether you are
+		// acting on a tickbox selection or on the conversation you have open.
+
 		// Archive ("Skip the Inbox") / Move to Inbox — symmetric with star/spam, which
 		// also have manual + filter-driven paths. Hidden in the Spam view (a spam
 		// message archives nowhere useful).
 		if (!state.spamView) {
 			var archived = !!t.any_archived;
-			actions.appendChild(actionBtn(archived ? 'Move to Inbox' : 'Archive', false, function () {
+			actions.appendChild(toolBtn(archived ? 'inbox' : 'archive',
+				archived ? 'Move to Inbox' : 'Archive', false, function () {
 				apiAction({ action: archived ? 'unarchive' : 'archive', threadKey: t.thread_key, aliasId: state.aliasId })
 					.then(function () {
 						t.any_archived = !archived;
@@ -1609,10 +1617,24 @@
 			}));
 		}
 		// Spam correction: in the Spam view, restore to the inbox; elsewhere, mark spam.
-		actions.appendChild(actionBtn(state.spamView ? 'Not spam' : 'Mark as spam', false, function () {
+		actions.appendChild(toolBtn(state.spamView ? 'notspam' : 'spam',
+			state.spamView ? 'Not spam' : 'Report spam', false, function () {
 			apiAction({ action: state.spamView ? 'mark_not_spam' : 'mark_spam',
 				threadKey: t.thread_key, aliasId: state.aliasId })
 				.then(function () { closeThread(); refreshMailboxes(); removeThreadRows([t.thread_key]); });
+		}));
+		actions.appendChild(toolBtn('trash', 'Delete', true, function () {
+			apiAction({ action: 'delete', threadKey: t.thread_key, aliasId: state.aliasId })
+				.then(function () { closeThread(); refreshMailboxes(); removeThreadRows([t.thread_key]); });
+		}));
+
+		actions.appendChild(el('span', 'mbx-tool-sep'));
+
+		// Opening a conversation marked it read, so the only direction left is back
+		// to unread — the list's one read/unread control, pointing the one way.
+		actions.appendChild(toolBtn('mailUnread', 'Mark as unread', false, function () {
+			apiAction({ action: 'mark_unread', threadKey: t.thread_key, aliasId: state.aliasId })
+				.then(function () { refreshMailboxes(); refreshThreads(); });
 		}));
 		// Move (exclusive feed) / Labels (non-exclusive) — drives membership sync.
 		var threadAlias = null;
@@ -1620,7 +1642,10 @@
 			if (messages[mi].alias_id != null) { threadAlias = messages[mi].alias_id; break; }
 		}
 		var folderCtl = threadAlias != null ? buildFolderControl(t, threadAlias) : null;
-		if (folderCtl) actions.appendChild(folderCtl);
+		if (folderCtl) {
+			actions.appendChild(el('span', 'mbx-tool-sep'));
+			actions.appendChild(folderCtl);
+		}
 		header.appendChild(actions);
 		pane.appendChild(header);
 
@@ -1662,17 +1687,32 @@
 		return b;
 	}
 
-	function actionBtn(label, danger, onClick) {
-		var b = el('button', 'mbx-action' + (danger ? ' danger' : ''), label);
+	// The conversation's star, at the top right of the reading pane. Same glyph
+	// and same colours as the list's star column, so a starred conversation looks
+	// starred whichever surface you are looking at it on.
+	function threadStarBtn(t) {
+		var b = el('button', 'mbx-thread-starbtn', '\u2605');
 		b.type = 'button';
-		b.addEventListener('click', onClick);
+		var sync = function () {
+			b.classList.toggle('on', !!t.any_starred);
+			b.title = t.any_starred ? 'Unstar' : 'Star';
+			b.setAttribute('aria-label', b.title);
+			b.setAttribute('aria-pressed', t.any_starred ? 'true' : 'false');
+		};
+		sync();
+		b.addEventListener('click', function (e) {
+			e.stopPropagation();
+			var turnOn = !t.any_starred;
+			apiAction({ action: turnOn ? 'star' : 'unstar', threadKey: t.thread_key, aliasId: state.aliasId })
+				.then(function () { t.any_starred = turnOn; sync(); refreshMailboxes(); refreshThreads(); });
+		});
 		return b;
 	}
 
 	/**
 	 * Build the Move/Labels control for the open thread. Exclusive feeds get a
-	 * single-pick "Move ▾" (choosing a folder relocates the thread); non-exclusive
-	 * feeds (Gmail) get "Labels ▾" with a checkbox per folder (toggling adds/removes
+	 * single-pick folder button (choosing a folder relocates the thread); non-exclusive
+	 * feeds (Gmail) get a label button with a checkbox per folder (toggling adds/removes
 	 * the label). Each change calls set_membership; two-way sync pushes it upstream.
 	 * Returns null when the mailbox has no tracked folders.
 	 */
@@ -1681,8 +1721,8 @@
 		if (!info.folders.length) return null;
 
 		var wrap = el('div', 'mbx-folder-ctl');
-		var btn = el('button', 'mbx-action', info.exclusive ? 'Move ▾' : 'Labels ▾');
-		btn.type = 'button';
+		var btn = toolBtn(info.exclusive ? 'folder' : 'tag',
+			info.exclusive ? 'Move to' : 'Labels', false, function () { togglePanel(); });
 		var panel = el('div', 'mbx-folder-panel');
 		panel.hidden = true;
 
@@ -1748,18 +1788,17 @@
 		newRow.appendChild(addBtn);
 		panel.appendChild(newRow);
 
-		// Toggle open; stopPropagation so the document handler (which dismisses open
-		// panels) doesn't immediately re-close it. Clicks inside the panel are
-		// likewise contained so ticking labels / typing a new name keeps it open —
-		// it closes on an outside click or Esc, like the kebab menu.
-		btn.addEventListener('click', function (e) {
-			e.stopPropagation();
+		// Toggle open. toolBtn stops the click propagating, so the document handler
+		// (which dismisses open panels) doesn't immediately re-close it. Clicks inside
+		// the panel are likewise contained so ticking labels / typing a new name keeps
+		// it open — it closes on an outside click or Esc, like the kebab menu.
+		function togglePanel() {
 			var willOpen = panel.hidden;
 			closeAllFolderPanels();
 			closeAllKebabs();
 			panel.hidden = !willOpen;
 			if (willOpen) { keepPanelOnScreen(panel); }
-		});
+		}
 		panel.addEventListener('click', function (e) { e.stopPropagation(); });
 		wrap.appendChild(btn);
 		wrap.appendChild(panel);
@@ -2824,10 +2863,11 @@
 		if (!panel) return;
 		if (!CFG.canSeeContext) { panel.hidden = true; return; }
 		var target = lastInboundOrLast(messages);
-		// Nothing to say about a counterparty here (no message, or mail belonging to no
-		// mailbox): the panel goes back to the mailbox's contacts rather than blanking,
-		// so the column does not appear and vanish as threads open.
-		if (!target || target.alias_id == null) { refreshContactsPanel(); return; }
+		// Nothing to say about a counterparty here (no message, mail belonging to no
+		// mailbox, or a discarded conversation the endpoint declines to describe):
+		// the panel goes back to the mailbox's contacts rather than blanking, so the
+		// column does not appear and vanish as threads open.
+		if (!target || target.alias_id == null || state.trashView) { refreshContactsPanel(); return; }
 		var mid = target.id;
 		if (contextCache[mid]) { renderSenderContext(contextCache[mid]); return; }
 		fetchSenderContext(mid);
