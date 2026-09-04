@@ -13,6 +13,9 @@
  * It also surfaces backup recovery problems (backup_recovery_problems), in the
  * same shape, so an unrecoverable-backup node is as visible as broken monitoring.
  *
+ * @version 1.11 - script trust: classify_script_trust() tells a manifest that cannot be used from a
+ *                  file that does not match it, note_script_trust() records the state on the node as
+ *                  the refusal arrives, and script_trust_problems() puts it on the dashboard
  * @version 1.10 - a failed fleet backup is reported from the run history: since when it has been
  *                 failing, how many runs, when it last worked, and the reason the node gave —
  *                 backup_run_summary() over backup_runs_from_here() — with the failed job linked
@@ -354,6 +357,178 @@ class NodeMonitorHealth {
 			];
 		}
 		return $problems;
+	}
+
+	/**
+	 * Does this refusal mean the node can no longer verify its own scripts?
+	 *
+	 * The agent refuses a script primitive when it cannot prove the file it is
+	 * about to run as root is the file the publisher signed. Two very different
+	 * things produce that refusal, and reading them as one is the mistake worth
+	 * designing against:
+	 *
+	 *   - THE MANIFEST is missing, unsigned, unparseable, or signed by a key this
+	 *     agent does not carry. Nothing is known about any file, so everything is
+	 *     refused. Delivering a correct manifest fixes it.
+	 *   - A FILE does not match its signed hash, or is not listed at all. The
+	 *     manifest is fine and is doing its job: the file on disk is not the file
+	 *     that was published. Delivering a manifest would paper over exactly the
+	 *     event the check exists to catch.
+	 *
+	 * Returns NULL for any other refusal — a node declining a primitive it does
+	 * not carry, a policy refusal — which must not colour the node red for this.
+	 *
+	 * Matching is on the agent's own wording. That is a coupling, and the honest
+	 * failure mode of getting it wrong is a state that is not reported, never one
+	 * that is reported falsely: an unmatched refusal is simply not a trust event.
+	 */
+	public static function classify_script_trust(string $reason): ?string {
+		if ($reason === '') { return null; }
+
+		// A modified or unlisted file. Checked FIRST: this wording also travels
+		// inside a refusal that mentions verification, and mistaking it for a
+		// manifest problem would recommend the one remedy that must not be
+		// applied to it.
+		if (stripos($reason, 'has been modified since release') !== false
+			|| stripos($reason, 'does not match its signed hash') !== false
+			|| stripos($reason, 'is not in the signed release manifest') !== false) {
+			return 'untrusted_file';
+		}
+
+		// The manifest itself could not be used. Both the "no manifest at all"
+		// and the "signature does not verify" wordings carry this phrase.
+		if (stripos($reason, 'can be verified before running as root') !== false) {
+			return 'untrusted_manifest';
+		}
+
+		return null;
+	}
+
+	/**
+	 * Record what a finished job says about this node's ability to run scripts.
+	 *
+	 * Called on every terminal agent result, so the state is current the moment a
+	 * node refuses rather than the next time somebody reads a job.
+	 *
+	 * CLEARING keys on the job type that refused, not on a list of which
+	 * primitives are script-backed. The plane holds no such list and must not
+	 * invent one — it does not get to guess a node vocabulary (the first
+	 * apply_update rollout is the standing lesson). A job type that once refused
+	 * here on trust grounds, completing now, is the node's own evidence that it
+	 * can verify scripts again, and that evidence needs no list to read.
+	 */
+	public static function note_script_trust($node, $job): void {
+		if (!$node || !$node->key) { return; }
+		$outcome = (string)$job->get('mjb_agent_outcome');
+		$type    = (string)$job->get('mjb_job_type');
+
+		if ($outcome === 'refused') {
+			$state = self::classify_script_trust((string)$job->get('mjb_error_message'));
+			if ($state === null) { return; }
+			// Keep the first sighting: how long a node has been unmanageable is
+			// the number that makes it urgent, and re-stamping it on every
+			// nightly refusal would report every such node as new today.
+			if ((string)$node->get('mgn_script_trust') !== $state) {
+				$node->set('mgn_script_trust_since', gmdate('Y-m-d H:i:s'));
+			}
+			$node->set('mgn_script_trust', $state);
+			$node->set('mgn_script_trust_reason', (string)$job->get('mjb_error_message'));
+			$node->set('mgn_script_trust_job_type', $type);
+			$node->save();
+			return;
+		}
+
+		if ($outcome !== 'completed') { return; }
+		$current = (string)$node->get('mgn_script_trust');
+		if ($current === '' || $current === 'ok') { return; }
+
+		// Only this node's own history clears it, and only a job type that has
+		// actually refused here on trust grounds. A completed ssl_probe proves
+		// nothing about script verification.
+		if (!self::type_ever_trust_refused((int)$node->key, $type)) { return; }
+
+		$node->set('mgn_script_trust', 'ok');
+		$node->set('mgn_script_trust_since', null);
+		$node->set('mgn_script_trust_reason', '');
+		$node->set('mgn_script_trust_job_type', '');
+		$node->save();
+	}
+
+	/** Has this job type ever refused on this node for a trust reason? */
+	private static function type_ever_trust_refused(int $node_id, string $type): bool {
+		if ($node_id <= 0 || $type === '') { return false; }
+		$db = DbConnector::get_instance()->get_db_link();
+		$sql = 'SELECT mjb_error_message FROM mjb_management_jobs
+				WHERE mjb_mgn_node_id = ? AND mjb_job_type = ? AND mjb_agent_outcome = ?
+				ORDER BY mjb_id DESC LIMIT 50';
+		$stmt = $db->prepare($sql);
+		$stmt->execute([$node_id, $type, 'refused']);
+		foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $message) {
+			if (self::classify_script_trust((string)$message) !== null) { return true; }
+		}
+		return false;
+	}
+
+	/**
+	 * Nodes that can no longer run script primitives, in the shape problems()
+	 * returns so the dashboard renders them beside everything else.
+	 *
+	 * This is its own surface rather than a line on the backup card because it is
+	 * not a backup problem. Backups are one of the things it breaks; upgrades,
+	 * certificate provisioning and restores are the others, and a node in this
+	 * state cannot be repaired through the agent at all.
+	 */
+	public static function script_trust_problems(): array {
+		$nodes = new MultiManagedNode(['deleted' => false], ['mgn_name' => 'ASC'], 1000, 0);
+
+		$problems = [];
+		foreach ($nodes as $node) {
+			$state = (string)$node->get('mgn_script_trust');
+			if ($state !== 'untrusted_manifest' && $state !== 'untrusted_file') { continue; }
+			$problems[] = [
+				'node'   => $node,
+				'slug'   => $node->get('mgn_slug'),
+				'name'   => $node->get('mgn_name'),
+				'id'     => $node->key,
+				'link'   => '/admin/server_manager/node_detail?mgn_id=' . (int)$node->key,
+				'health' => self::script_trust_health($node),
+			];
+		}
+		return $problems;
+	}
+
+	/** Where one node's script trust stands, phrased for someone who has to act. */
+	public static function script_trust_health($node): array {
+		$state = (string)$node->get('mgn_script_trust');
+		if ($state !== 'untrusted_manifest' && $state !== 'untrusted_file') {
+			return self::result('ok', 'Scripts verify', '', false);
+		}
+
+		$since = $node->get('mgn_script_trust_since');
+		$for   = '';
+		if ($since) {
+			$age = time() - strtotime($since . ' UTC');
+			if ($age > 0) { $for = ' for ' . self::humanize($age); }
+		}
+
+		$reason = trim((string)$node->get('mgn_script_trust_reason'));
+		$type   = (string)$node->get('mgn_script_trust_job_type');
+
+		if ($state === 'untrusted_file') {
+			return self::result('script_trust', 'A file on this node does not match the release' . $for,
+				'The signed manifest is good and a file on disk does not match it, so the agent will '
+				. 'not run it as root. This is not fixed by re-delivering a manifest — find out why the '
+				. 'file differs before anything else.'
+				. ($type !== '' ? ' First seen refusing: ' . $type . '.' : '')
+				. ($reason !== '' ? ' The node said: ' . $reason : ''), true);
+		}
+
+		return self::result('script_trust', 'This node can no longer be managed' . $for,
+			'Its agent cannot verify the scripts it would run as root, so it refuses every script '
+			. 'primitive — upgrades and backups included. It cannot repair itself through the agent, '
+			. 'because the upgrade that would fix it is refused by the same check.'
+			. ($type !== '' ? ' First seen refusing: ' . $type . '.' : '')
+			. ($reason !== '' ? ' The node said: ' . $reason : ''), true);
 	}
 
 	/** Where one node's fleet backups stand. */

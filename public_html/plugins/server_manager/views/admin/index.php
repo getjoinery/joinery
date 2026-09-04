@@ -3,6 +3,8 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.20 - nodes that can no longer verify their own scripts are named at the top of the
+ *                  board; a node in that state cannot be repaired through the agent at all
  * @version 1.19 - a finished provision stays on the board while this plane still holds its install
  *                 password, and every row says where that password stands
  * @version 1.18 - a failing fleet backup links the failed job next to its reason
@@ -105,6 +107,11 @@ $recovery_problems = NodeMonitorHealth::backup_recovery_problems();
 // switched off was switched off on purpose. What stops a node falling through
 // unnoticed is that fleet backups default to on, not a detector for indecision.
 $fleet_backup_problems = NodeMonitorHealth::fleet_backup_problems();
+
+// Nodes whose agent can no longer verify the scripts it would run as root. Read
+// off the node columns, which the channel endpoint stamps as each refusal
+// arrives — no probing and no job scan on a page view.
+$script_trust_problems = NodeMonitorHealth::script_trust_problems();
 
 // Recovery readiness: must-save secrets never verified or verified too long
 // ago. One line; the details live on the readiness page.
@@ -245,6 +252,26 @@ if ($agent_online) {
 				<?php if (!empty($p['link'])): ?>
 					<a href="<?php echo htmlspecialchars($p['link']); ?>" class="alert-link">Set it up</a>.
 				<?php endif; ?>
+			</li>
+		<?php endforeach; ?>
+	</ul>
+</div>
+<?php endif; ?>
+
+<?php // A node whose agent can no longer verify the scripts it would run as
+      // root refuses every script primitive at once. First on the board because
+      // it is not one more failing job: the node cannot be repaired through the
+      // agent at all, since the upgrade that would fix it is refused by the same
+      // check, and its failing backups below are a symptom of this. ?>
+<?php if (!empty($script_trust_problems)): ?>
+<div class="alert alert-danger" role="alert">
+	<strong>Nodes that can no longer be managed.</strong>
+	<ul class="mb-0 mt-2">
+		<?php foreach ($script_trust_problems as $p): ?>
+			<li>
+				<a href="<?php echo htmlspecialchars($p['link']); ?>" class="alert-link"><?php echo htmlspecialchars($p['name'] ?: $p['slug']); ?></a>
+				&mdash; <strong><?php echo htmlspecialchars($p['health']['label']); ?>.</strong>
+				<?php echo htmlspecialchars($p['health']['detail']); ?>
 			</li>
 		<?php endforeach; ?>
 	</ul>
