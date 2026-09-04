@@ -528,12 +528,14 @@ theme alert at the top of the content area (`admin_header()`), and
 Admin logic files and views must not call `get_messages()`,
 `clear_clearable_messages()`, or render message alerts themselves.
 
-The `page_regex` is passed straight to `preg_match()` against the request
-URI, so it must be a **valid, delimited PCRE** — an undelimited path string
-(e.g. `'/plugins/foo/admin/'`, where everything after the second `/` parses
-as pattern modifiers) makes `preg_match()` error out and the message is
-silently never shown. Use `~` delimiters for paths with slashes:
-plugin pages save with `'~/plugins/{plugin}/admin/~'`.
+The `page_regex` decides which page shows the message, matched against the
+request URI. A **valid, delimited PCRE** is used as given — use `~`
+delimiters for paths with slashes, as plugin pages do with
+`'~/plugins/{plugin}/admin/~'`. Anything that does not compile as a pattern
+is read as the URL it looks like and becomes a pattern anchored on that
+URL's path, so passing `'/admin/admin_items?id=4'` shows the message on
+`/admin/admin_items` whatever its query string. Pass a real pattern when the
+match has to be broader than one path.
 
 A logic file surfaces a message in one of two ways:
 

@@ -44,12 +44,38 @@ class DisplayMessage {
 	function __construct($message, $message_title, $page_regex=NULL, $display_type=DisplayMessage::MESSAGE_ANNOUNCEMENT, $display_location=DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, $identifier=NULL, $clearable=TRUE) {
 		$this->message = $message;
 		$this->message_title = $message_title;
-		$this->page_regex = $page_regex;
+		$this->page_regex = self::normalize_page_regex($page_regex);
 		$this->display_type = $display_type;
 		$this->display_location = $display_location;
 		$this->identifier = $identifier;
 		$this->clearable = $clearable;
 		$this->shown = FALSE;
+	}
+
+	/**
+	 * The page filter, as a pattern get_messages() can actually match with.
+	 *
+	 * The field is a regex, but "show this on that page" is naturally written
+	 * as the page's own URL — and an undelimited string is not a pattern:
+	 * preg_match refuses it, so the message matches nothing, is never shown,
+	 * is never spent, and warns once per page load for the rest of the
+	 * session. A value that does not compile is therefore read as the URL it
+	 * looks like, and becomes a pattern anchored on that URL's path — the
+	 * query string names which row or mailbox, and must not have to match.
+	 */
+	public static function normalize_page_regex($page_regex) {
+		if ($page_regex === NULL || $page_regex === '') {
+			return $page_regex;
+		}
+		$pattern = (string)$page_regex;
+		if (@preg_match($pattern, '') !== FALSE) {
+			return $pattern;
+		}
+		$path = (string)parse_url($pattern, PHP_URL_PATH);
+		if ($path === '') {
+			$path = $pattern;
+		}
+		return '~^' . preg_quote($path, '~') . '~';
 	}
 
 	function get_message_class() {
@@ -866,7 +892,10 @@ class SessionControl{
 				continue;
 			}
 
-			if($current_message->page_regex && !preg_match($current_message->page_regex, $page_url)) {
+			// Normalized again on the way out: a message stored by an older
+			// session still carries whatever it was handed.
+			if($current_message->page_regex
+					&& !preg_match(DisplayMessage::normalize_page_regex($current_message->page_regex), $page_url)) {
 				continue;
 			}
 			if($display_location && $current_message->display_location != $display_location) {

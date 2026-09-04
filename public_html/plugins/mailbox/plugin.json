@@ -1,7 +1,7 @@
 {
     "name": "Mailbox",
     "description": "Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS",
-    "version": "1.109.2",
+    "version": "1.112.0",
     "author": "Joinery",
     "license": "PolyForm-Noncommercial-1.0.0",
     "status": "stable",
@@ -55,13 +55,12 @@
     ],
     "settingsMenu": [
         {
-            "slug": "mailbox-import",
-            "title": "Mail Import",
-            "url": "/profile/mailbox/import",
+            "slug": "mailbox-settings",
+            "title": "Email",
+            "url": "/profile/mailbox/settings",
             "icon": "envelope",
             "permission": 0,
-            "order": 90,
-            "settingActivate": "mailbox_import_enabled"
+            "order": 88
         }
     ],
     "provisioners": [

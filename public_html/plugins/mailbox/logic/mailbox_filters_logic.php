@@ -1,26 +1,38 @@
 <?php
 /**
- * Logic for the Filters tab (Gmail-parity inbound rules).
+ * Logic for the Filters surfaces (Gmail-parity inbound rules) — one function,
+ * two mounts.
  *
  * Three jobs: render the list of filters; drive the two-step create/edit flow
  * (criteria -> actions, mirroring Gmail); and handle the single-button enable
- * toggle and delete. Staff-only (permission >= 5). The rule engine itself lives
- * on InboundEmailFilter; this file is just CRUD + the wizard plumbing.
+ * toggle and delete. The rule engine itself lives on InboundEmailFilter; this
+ * file is just CRUD + the wizard plumbing.
+ *
+ * The admin tab manages every mailbox on the deployment; the member page at
+ * /profile/mailbox/filters manages the mailboxes that member holds. That is the
+ * only difference between the two, and it is decided in one place — which
+ * scopes the mailbox picker offers, which in turn is what a filter must be in
+ * for this mount to touch it. Members are never offered a domain-wide bucket: a
+ * rule that acts on every mailbox in a domain is an operator's to write.
  *
  * The list is scoped to one mailbox at a time (a mailbox, or a domain-wide
- * bucket) via a mailbox picker; create/edit is pre-scoped to that selection.
- * Only mailboxes where filters can fire (locally-stored, non-IMAP) are offered.
+ * bucket) via that picker; create/edit is pre-scoped to the selection. Only
+ * mailboxes where filters can fire (locally-stored, non-IMAP) are offered.
  *
  * @see specs/implemented/inbound_email_filters.md
  * @see specs/inbound_email_filter_import.md
- * @version 1.5
+ * @version 2.0
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
 
 const FILTER_UNIT_MULTIPLIERS = array('B' => 1, 'KB' => 1024, 'MB' => 1048576);
 
-function admin_mailbox_filters_logic(array $input): LogicResult {
+/**
+ * @param array $mount base: the mount's own URL; operator: TRUE for the admin
+ *                     tab (staff, every mailbox), FALSE for the member page.
+ */
+function mailbox_filters_logic(array $input, array $mount = array()): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_filter_class.php'));
@@ -31,11 +43,33 @@ function admin_mailbox_filters_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_labels_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$settings = Globalvars::get_instance();
 
-	$list_url = '/plugins/mailbox/admin/admin_mailbox_filters';
+	$list_url = (string)($mount['base'] ?? '/plugins/mailbox/admin/admin_mailbox_filters');
+	$operator = !empty($mount['operator']);
+	if ($operator) {
+		$session->check_permission(5);
+		$viewer = null;
+	} else {
+		if (!intval($session->get_user_id())) {
+			return LogicResult::redirect('/login?return=' . urlencode($list_url));
+		}
+		$viewer = MailboxViewer::fromSession($session);
+	}
 	$op = isset($input['op']) ? (string)$input['op'] : '';
+
+	$scope = _filter_scope_options($viewer);
+
+	// What this mount may touch: a filter is reachable only when its own scope is
+	// one the picker offers. On the admin tab that is every filter; on the member
+	// page it is the member's own mailboxes, so an id typed into the URL reaches
+	// nothing of anybody else's.
+	$in_reach = function (string $scope_value) use ($scope) {
+		return $scope_value !== '' && isset($scope['options'][$scope_value]);
+	};
+	$filter_in_reach = function (InboundEmailFilter $f) use ($in_reach) {
+		return $f->key && $in_reach(_filter_model_scope($f));
+	};
 
 	// Return to the mailbox the operator was viewing after an action.
 	$scoped_list = function (string $scope) use ($list_url) {
@@ -46,10 +80,10 @@ function admin_mailbox_filters_logic(array $input): LogicResult {
 	// --- single-button actions: enable toggle + delete ---
 	if ($op === 'toggle' && !empty($input['id'])) {
 		$f = new InboundEmailFilter(intval($input['id']), TRUE);
-		if ($f->key) {
+		if ($filter_in_reach($f)) {
 			$locked_msg = _filter_require_unlock($f->get('fil_iea_inbound_email_alias_id'));
 			if ($locked_msg !== null) {
-				_filter_flash($session, $locked_msg, $scoped_list($return_scope));
+				_filter_flash($session, $locked_msg, $scoped_list($return_scope), 'Nothing changed');
 				return LogicResult::redirect($scoped_list($return_scope));
 			}
 			// Flip the bool directly (no prepare(), so criteria validation does not
@@ -61,19 +95,17 @@ function admin_mailbox_filters_logic(array $input): LogicResult {
 	}
 	if ($op === 'delete' && !empty($input['id'])) {
 		$f = new InboundEmailFilter(intval($input['id']), TRUE);
-		if ($f->key) {
+		if ($filter_in_reach($f)) {
 			$locked_msg = _filter_require_unlock($f->get('fil_iea_inbound_email_alias_id'));
 			if ($locked_msg !== null) {
-				_filter_flash($session, $locked_msg, $scoped_list($return_scope));
+				_filter_flash($session, $locked_msg, $scoped_list($return_scope), 'Nothing changed');
 				return LogicResult::redirect($scoped_list($return_scope));
 			}
 			$f->soft_delete();
+			_filter_flash($session, 'Filter deleted.', $scoped_list($return_scope));
 		}
-		_filter_flash($session, 'Filter deleted.', $scoped_list($return_scope));
 		return LogicResult::redirect($scoped_list($return_scope));
 	}
-
-	$scope = _filter_scope_options();
 
 	// The import submits are checked BEFORE the op=import render branch: the
 	// forms post back to the page's own URL, which still carries ?op=import in
@@ -151,6 +183,12 @@ function admin_mailbox_filters_logic(array $input): LogicResult {
 	if (isset($input['save_filter'])) {
 		$values = _filter_collect_input($input);
 		try {
+			if (!$in_reach($values['scope'])) {
+				throw new InboundEmailFilterException('Choose which mailbox this filter applies to.');
+			}
+			if ($values['id'] && !$filter_in_reach(new InboundEmailFilter(intval($values['id']), TRUE))) {
+				throw new InboundEmailFilterException('That filter is not one of yours to edit.');
+			}
 			$filter = _filter_save($values, $scope['alias_domain']);
 			_filter_flash($session, 'Filter saved.', $scoped_list($values['scope']));
 			return LogicResult::redirect($scoped_list($values['scope']));
@@ -175,6 +213,9 @@ function admin_mailbox_filters_logic(array $input): LogicResult {
 	if (isset($input['continue_btn'])) {
 		$values = _filter_collect_input($input);
 		$err = _filter_validate_criteria($values);
+		if ($err === null && !$in_reach($values['scope'])) {
+			$err = 'Choose which mailbox this filter applies to.';
+		}
 		if ($err !== null) {
 			return LogicResult::render(array(
 				'mode'          => 'form',
@@ -203,7 +244,11 @@ function admin_mailbox_filters_logic(array $input): LogicResult {
 	// --- new / edit: render step 1 ---
 	if ($op === 'new' || $op === 'edit') {
 		if ($op === 'edit' && !empty($input['id'])) {
-			$values = _filter_values_from_model(new InboundEmailFilter(intval($input['id']), TRUE));
+			$f = new InboundEmailFilter(intval($input['id']), TRUE);
+			if (!$filter_in_reach($f)) {
+				return LogicResult::redirect($list_url);
+			}
+			$values = _filter_values_from_model($f);
 		} else {
 			// A new filter is pre-scoped to the mailbox the operator is viewing.
 			$values = _filter_blank_values();
@@ -234,6 +279,7 @@ function admin_mailbox_filters_logic(array $input): LogicResult {
 		'active_scope'       => $active_scope,
 		'active_scope_label' => $scope['options'][$active_scope] ?? '',
 		'rows'               => _filter_list_rows($active_scope),
+		'operator'           => $operator,
 		'session'            => $session,
 		'settings'           => $settings,
 	));
@@ -282,10 +328,10 @@ function _filter_require_unlock($alias_id): ?string {
 	return null;
 }
 
-/** Save a DisplayMessage flash for the next page load. */
-function _filter_flash(SessionControl $session, string $msg, string $url): void {
+/** Save a DisplayMessage flash for the next page load, shown on the list it names. */
+function _filter_flash(SessionControl $session, string $msg, string $url, string $title = 'Saved'): void {
 	$session->save_message(new DisplayMessage(
-		$msg, 'Saved', $url,
+		$msg, $title, $url,
 		DisplayMessage::MESSAGE_ANNOUNCEMENT,
 		DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 	));
@@ -302,7 +348,13 @@ function _filter_flash(SessionControl $session, string $msg, string $url): void 
  *
  * Returns ['options'=>[value=>label], 'alias_domain'=>[alias_id=>domain_id]].
  */
-function _filter_scope_options(): array {
+function _filter_scope_options($viewer = null): array {
+	// No viewer means the operator mount: every mailbox, every domain bucket. A
+	// viewer narrows the list to the mailboxes they hold — and drops the
+	// domain-wide buckets, which act on mail that is not theirs.
+	$all_access = ($viewer === null) || $viewer->isAllAccess();
+	$held = $all_access ? null : array_flip(array_map('intval', $viewer->accessibleAliasIds()));
+
 	$options = array();
 	$alias_domain = array();
 	$domains = new MultiInboundEmailDomain(array('deleted' => false), array('ied_domain' => 'ASC'));
@@ -320,13 +372,16 @@ function _filter_scope_options(): array {
 			if (!_filter_alias_is_filterable($alias)) {
 				continue;
 			}
+			if ($held !== null && !isset($held[intval($alias->key)])) {
+				continue;
+			}
 			$alias_opts['alias:' . $alias->key] = $alias->get('iea_alias') . '@' . $dname;
 			$alias_domain[intval($alias->key)] = intval($domain->key);
 		}
 
 		// Domain-wide bucket only if the domain stores locally-received mail.
 		$catchall_stores = ($domain->get('ied_catch_all_mode') === InboundEmailDomain::CATCHALL_STORE);
-		if ($alias_opts || $catchall_stores) {
+		if ($all_access && ($alias_opts || $catchall_stores)) {
 			$options['domain:' . $domain->key] = 'All mailboxes in ' . $dname;
 		}
 		foreach ($alias_opts as $k => $label) {
@@ -444,6 +499,13 @@ function _filter_forward_ack_domain(string $scope): string {
 	return '';
 }
 
+/** A stored filter's scope value ('alias:N' for a mailbox rule, 'domain:N' for a domain-wide one). */
+function _filter_model_scope(InboundEmailFilter $f): string {
+	return ($f->get('fil_iea_inbound_email_alias_id') !== null)
+		? 'alias:' . intval($f->get('fil_iea_inbound_email_alias_id'))
+		: 'domain:' . intval($f->get('fil_ied_inbound_email_domain_id'));
+}
+
 /** Reconstruct the editable value set from a stored filter (edit prefill). */
 function _filter_values_from_model(InboundEmailFilter $f): array {
 	$v = _filter_blank_values();
@@ -451,9 +513,7 @@ function _filter_values_from_model(InboundEmailFilter $f): array {
 		return $v;
 	}
 	$v['id'] = intval($f->key);
-	$v['scope'] = ($f->get('fil_iea_inbound_email_alias_id') !== null)
-		? 'alias:' . intval($f->get('fil_iea_inbound_email_alias_id'))
-		: 'domain:' . intval($f->get('fil_ied_inbound_email_domain_id'));
+	$v['scope'] = _filter_model_scope($f);
 	foreach (array('fil_name', 'fil_match_from', 'fil_match_to', 'fil_match_subject',
 			'fil_match_has_words', 'fil_match_excludes', 'fil_action_forward_to') as $col) {
 		$v[$col] = (string)$f->get($col);

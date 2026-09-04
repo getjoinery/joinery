@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   Joinery Default UI Kit  ·  custom.css  ·  v2.10.1
+   Joinery Default UI Kit  ·  custom.css  ·  v2.11.0
    Pure Slate design. Themeable values live in --jy-* tokens on
    :root so branded themes can override them without understanding
    internals. Component rules are scoped under .jy-ui to prevent
@@ -443,7 +443,10 @@ body.jy-default blockquote {
 }
 
 /* Actions dropdown — generic <details>/<summary> menu for row or panel
-   actions. Markup:
+   actions. Anything inside the menu is a menu item, a .btn included: a
+   single-button FormWriter form is how a menu item that mutates something is
+   written, and its submit button arrives carrying the button classes.
+   Markup:
      <details class="jy-actions-dropdown">
        <summary class="btn btn-secondary">Actions</summary>
        <div class="jy-actions-menu">
@@ -474,7 +477,9 @@ body.jy-default blockquote {
    somewhere else. They look identical, so the choice is about what the item
    does, not how it should appear. */
 .jy-actions-menu button,
-.jy-actions-menu a {
+.jy-actions-menu a,
+.jy-actions-menu button.btn,
+.jy-actions-menu a.btn {
   display: block;
   width: 100%;
   padding: var(--jy-space-2) var(--jy-space-4);
@@ -482,6 +487,7 @@ body.jy-default blockquote {
   background: none;
   font-family: var(--jy-font-sans);
   font-size: var(--jy-text-sm);
+  font-weight: 400;
   color: var(--jy-color-text);
   text-align: left;
   white-space: nowrap;
@@ -489,7 +495,9 @@ body.jy-default blockquote {
   text-decoration: none;
 }
 .jy-actions-menu button:hover,
-.jy-actions-menu a:hover {
+.jy-actions-menu a:hover,
+.jy-actions-menu button.btn:hover,
+.jy-actions-menu a.btn:hover {
   background: var(--jy-color-surface);
   color: var(--jy-color-primary);
 }

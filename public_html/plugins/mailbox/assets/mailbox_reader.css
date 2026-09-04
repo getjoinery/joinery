@@ -1,7 +1,7 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.30
+ * Vanilla CSS, no framework. @version 2.33
  */
 
 /* Every size the reader renders text at, in one ladder. Nothing in this file
@@ -1175,20 +1175,7 @@
 
 /* ── compose maturity: signatures (§ Phase 3) ──────────────────────────────── */
 .mbx-mailbox { position: relative; }
-.mbx-sig-gear {
-	background: none;
-	border: none;
-	padding: 0 4px;
-	margin-left: auto;
-	font-size: var(--mbx-text-sm);
-	line-height: 1;
-	color: #9aa5b1;
-	cursor: pointer;
-	opacity: 0;
-	transition: opacity .12s;
-}
-.mbx-mailbox:hover .mbx-sig-gear { opacity: 1; }
-.mbx-sig-gear:hover { color: #2563eb; }
+/* The signature as it sits in a composed message. */
 .mbx-sig-block { color: #52606d; }
 
 .mbx-modal-overlay {
@@ -1212,6 +1199,30 @@
 .mbx-modal-title { margin: 0 0 .15rem; font-size: var(--mbx-text-lg); color: #111827; }
 .mbx-modal-help { margin: 0 0 .75rem; font-size: var(--mbx-text-sm); color: #6b7280; }
 .mbx-sig-editor { min-height: 120px; max-height: 300px; }
+
+/* ---------------------------------------------------------------------------
+   The Email settings section (/profile/mailbox/settings) — one signature card
+   per mailbox, outside .mbx-reader, borrowing the reader's editor styling so a
+   signature is written in the same box it will be shown in.
+   --------------------------------------------------------------------------- */
+.mbx-settings-links { list-style: none; margin: 0; padding: 0; }
+.mbx-settings-links li { margin: 0 0 .75rem; }
+.mbx-settings-links li:last-child { margin-bottom: 0; }
+.mbx-settings-links a { font-weight: 600; }
+.mbx-settings-links span { display: block; font-size: var(--mbx-text-sm); }
+
+.mbx-sig-card { margin: 1.25rem 0 .5rem; }
+/* Two classes deep, because the page is inside a theme that has its own idea
+   of what an h2 and a p look like. */
+.mbx-sig-card .mbx-sig-address {
+	margin: 0 0 .4rem;
+	font-size: var(--mbx-text-md);
+	font-weight: 600;
+	color: #111827;
+}
+.mbx-sig-card .mbx-sig-note { margin: .4rem 0 0; font-size: var(--mbx-text-sm); }
+.mbx-sig-card .mbx-sig-note.is-ok { color: #067647; }
+.mbx-sig-card .mbx-sig-note.is-error { color: #b42318; }
 
 /* "Show original": raw RFC822, so it is read as code — monospace, wrapped at
  * word boundaries (headers run long), and scrolled inside the modal rather
@@ -1490,3 +1501,13 @@
 @media (max-width: 1100px) {
 	.mbx-context { display: none !important; }
 }
+
+/* ---------------------------------------------------------------------------
+   The mailbox gear — the page-chrome settings menu, which lives outside
+   .mbx-reader. The kit's app-bar buttons show a label on a desktop and their
+   icon only on a phone; a gear IS the label, so it shows at every width and
+   carries no caret.
+   --------------------------------------------------------------------------- */
+.mbx-gear > summary .jy-btn-icon { display: inline-flex; }
+.mbx-gear > summary .jy-btn-label { display: none; }
+.mbx-gear > summary::after { content: none; }

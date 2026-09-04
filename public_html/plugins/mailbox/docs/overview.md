@@ -2590,13 +2590,17 @@ The reader has **two mounts** of one shared UI
   A member with no grants gets a short "no mailboxes are assigned to your
   account" state. Attachment chips point at the member endpoint. The
   plugin's `profileMenu` declares the "Email" entry that puts the page in the
-  member menu on every theme and in the apps' navigation.
+  member menu on every theme and in the apps' navigation. A **gear** at the
+  right of the page header holds what the mailbox needs that is neither reading
+  nor writing mail: **Filters** (`/profile/mailbox/filters`), **Email settings**
+  (`/profile/mailbox/settings`) and **Import old mail**
+  (`/profile/mailbox/import`).
 
 The mounts differ only in chrome and endpoint URLs (handed to the JS via
 `window.MAILBOX_READER`); the endpoints themselves scope every read and write
 via `MailboxViewer`.
 
-The **member mount only** also carries an **AI** button beside Actions when
+The **member mount only** also carries an **AI** button beside the gear when
 the joinery_ai plugin is active: it mounts that plugin's area AI panel
 (`JoineryAiPanel.mount`), a drawer where the signed-in user switches their AI
 recipes on or off for the mailbox open in the rail. The reader exposes the
@@ -2624,7 +2628,7 @@ pushes a marked history entry (`mbxRail`, `mbxReading`) with no URL change; a
 reload lands on the list.
 
 The page title, the page padding and the site footer are absent on a phone:
-the reader takes the whole screen. Search, the AI button and the Actions menu
+the reader takes the whole screen. Search, the AI button and the gear menu
 sit as icons at the right of the scope bar (the reader moves the app bar's
 action nodes there, and back, as the viewport crosses the breakpoint); the
 search icon reveals the search line under the row, and closing it with a term
@@ -3055,10 +3059,17 @@ sent message is explicitly re-indexed on the next fold so it becomes searchable.
 
 Each grantee sets a per-mailbox compose signature (`ieg_signature` on the grant —
 sanitized HTML, **not sealed**: a signature is a cleartext template on every outgoing
-message). A gear on each of the viewer's own mailboxes opens a small editor
-(`mailbox/signature_save`, own grant only). The `mailboxes` payload carries each
-mailbox's signature; on compose open the client inserts it into the editor above the
-quote, where the user sees and can edit it before sending — the server does no injection.
+message). They are written on the **Email** settings section
+(`/profile/mailbox/settings`, the plugin's one row in the member settings rail
+and a gear-menu item on the mailbox): one rich editor per mailbox the member
+holds a grant on, saving through
+`mailbox/signature_save` (own grant only), which sanitizes the HTML and answers
+with what it stored — so the editor shows what a message will actually carry.
+A mailbox two people share carries a signature for each of them.
+
+The `mailboxes` payload carries each mailbox's signature; on compose open the client
+inserts it into the editor above the quote, where the user sees and can edit it before
+sending — the server does no injection.
 
 ### Contacts + recipient autocomplete
 
@@ -3639,15 +3650,26 @@ authoritative instead of inferring them from prose.
 
 ## Filters
 
-Operator-defined rules that match incoming mail and apply actions to it
-automatically — the inbound-email equivalent of Gmail's *Filters and Blocked
-Addresses*. Managed under the **Filters** admin tab (between Accounts and Logs),
+Rules that match incoming mail and apply actions to it automatically — the
+inbound-email equivalent of Gmail's *Filters and Blocked Addresses*. Managed
 **one mailbox at a time**: a mailbox picker scopes the list, and *Create filter*
-is pre-scoped to the picked mailbox. The picker also offers each domain's *All
-mailboxes in `<domain>`* bucket for managing domain-wide rules. It lists **only
-mailboxes where filters can actually fire** — those that store locally-received
-mail (delivery mode store / forward-and-store, and not IMAP-backed); IMAP-polled
-and pure-forward mailboxes are omitted because the filter hook never runs for them.
+is pre-scoped to the picked mailbox. The picker lists **only mailboxes where
+filters can actually fire** — those that store locally-received mail (delivery
+mode store / forward-and-store, and not IMAP-backed); IMAP-polled and
+pure-forward mailboxes are omitted because the filter hook never runs for them.
+
+**Two mounts, one code path.** The **Filters** admin tab (between Accounts and
+Logs) is the operator surface: every mailbox on the deployment, plus each
+domain's *All mailboxes in `<domain>`* bucket for domain-wide rules. The member
+page at `/profile/mailbox/filters`, reached from the gear menu on the mailbox and
+from the Email settings section, offers the mailboxes that member holds grants
+for and no domain buckets —
+a rule that acts on every mailbox in a domain is an operator's to write. A filter
+can only be opened, toggled, deleted or saved from a mount whose picker offers
+its scope, so an id typed into the member URL reaches nothing of anybody else's.
+Both mounts render `includes/mailbox_filters_panel.php` from
+`logic/mailbox_filters_logic.php`; the mount passes its own base URL and whether
+it is the operator surface.
 
 **Scope.** Filters run on **freshly-received** mail only — the Postfix milter path
 and the provider-webhook path, both of which funnel through
@@ -3737,7 +3759,7 @@ the actions taken.
 
 **Importing from Gmail.** The Filters list has an **Import filters** button that
 ingests Gmail's `mailFilters.xml` export (*Gmail → Settings → Filters and Blocked
-Addresses → Export*) into the picked mailbox. The operator uploads the file and sees a
+Addresses → Export*) into the picked mailbox. The file is uploaded and answered with a
 **preview** — one row per Gmail filter with its synthesized name, mapped criteria,
 mapped actions, and a *Skipped* column for anything that has no platform equivalent —
 then confirms to create the checked rows. An imported filter is an ordinary

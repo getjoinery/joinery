@@ -5,7 +5,8 @@
  * as the admin mount (includes/mailbox_reader_mount.php); this page supplies the
  * theme chrome, the member attachment endpoint, and no detail-page deep links.
  *
- * @version 1.5.0 - the Actions button carries an icon for the phone layout
+ * @version 1.8.0 - the gear menu carries Filters, Email settings and Import
+ * @version 1.5.0
  * @version 1.4.0
  */
 
@@ -27,22 +28,26 @@ $hoptions = array(
 $page->public_header($hoptions, NULL);
 
 $hoptions['app'] = true;
-// Actions menu, matching the calendar's. Importing old mail is a LINK rather
-// than a modal because it is a multi-step run — pick an archive, wait for it to
-// be read, then choose what to bring — where the calendar's is one file input.
-// The summary carries an icon and a label: the kit shows the label on a
-// desktop and the icon alone on a phone (.jy-btn-icon / .jy-btn-label).
-$hoptions['header_action'] = '<details class="jy-ui jy-actions-dropdown">'
-	. '<summary class="btn btn-secondary" aria-label="Actions" title="Actions">'
+// The gear: everything about this mailbox that is not reading or writing mail.
+// Filters are rules the member sets for their own mailboxes; Email settings is
+// the same section the settings rail lists, where the signature is written; and
+// importing old mail is a LINK rather than a modal because it is a multi-step
+// run — pick an archive, wait for it to be read, then choose what to bring.
+$hoptions['header_action'] = '<details class="jy-ui jy-actions-dropdown mbx-gear">'
+	. '<summary class="btn btn-secondary" aria-label="Settings" title="Settings">'
 	. '<span class="jy-btn-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-	. '<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg></span>'
-	. '<span class="jy-btn-label">Actions</span></summary>'
+	. '<circle cx="12" cy="12" r="3"/>'
+	. '<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>'
+	. '</svg></span>'
+	. '<span class="jy-btn-label">Settings</span></summary>'
 	. '<div class="jy-actions-menu">'
+	. '<a href="/profile/mailbox/filters">Filters</a>'
+	. '<a href="/profile/mailbox/settings">Email settings</a>'
 	. '<a href="/profile/mailbox/import">Import old mail from another provider&hellip;</a>'
 	. '</div></details>';
 
 // The area AI panel (joinery_ai's general component): an AI button beside
-// Actions opening the recipes drawer for the mailbox open in the rail. Only
+// the gear opening the recipes drawer for the mailbox open in the rail. Only
 // this member mount carries it — the admin oversight reader spans mailboxes
 // the viewer holds no grant on, so it deliberately does not. With the plugin
 // inactive the button simply doesn't exist.

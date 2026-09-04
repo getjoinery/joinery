@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.57
+ * No framework. @version 2.58
  *
  * The conversation list updates in place after mutations
  * (specs/implemented/mailbox_reader_list_persistence.md): actions that take rows out of
@@ -283,7 +283,7 @@
 		// each mailbox (renderFolderRail), and Contacts is the right-hand panel — both
 		// belong to a mailbox, so neither is a sibling of one.
 		state.mailboxes.forEach(function (m) {
-			list.appendChild(mailboxItem(m.address, m.alias_id, m.unread, m.folders, m.own));
+			list.appendChild(mailboxItem(m.address, m.alias_id, m.unread, m.folders));
 		});
 		// Unmatched, ONE BOX PER DOMAIN: catch-all mail seals to its domain's owner, so
 		// a single lumped box could hold mail sealed to several different people and
@@ -449,24 +449,12 @@
 		return aliasId != null && aliasId !== '' && !isNaN(Number(aliasId)) && Number(aliasId) > 0;
 	}
 
-	function mailboxItem(label, aliasId, unread, folders, own) {
+	function mailboxItem(label, aliasId, unread, folders) {
 		var li = el('li', 'mbx-mailbox');
 		li.dataset.alias = (aliasId == null ? '' : String(aliasId));
 		li._folders = folders || [];
 		var addr = el('span', 'mbx-mailbox-addr', label);
 		li.appendChild(addr);
-		// Signature gear (§ Phase 3) — only on mailboxes the viewer is a member of
-		// (a signature lives on a grant), never the superadmin's all-access extras.
-		// isRealMailbox excludes every pseudo-box (the unmatched:{domain} entries),
-		// which have no grant and so can carry no signature.
-		if (own && isRealMailbox(aliasId)) {
-			var gear = el('button', 'mbx-sig-gear', '⚙');
-			gear.type = 'button';
-			gear.title = 'Edit signature';
-			gear.setAttribute('aria-label', 'Edit signature');
-			gear.addEventListener('click', function (e) { e.stopPropagation(); openSignatureEditor(aliasId); });
-			li.appendChild(gear);
-		}
 		var badge = el('span', 'mbx-badge' + (unread ? '' : ' zero'), String(unread || 0));
 		li.appendChild(badge);
 		li.addEventListener('click', function () { selectMailbox(aliasId, label); });
@@ -2625,81 +2613,8 @@
 		}
 	}
 
-	// ---- signatures (§ Phase 3) ----
 	function mailboxById(aliasId) {
 		return state.mailboxes.filter(function (m) { return String(m.alias_id) === String(aliasId); })[0] || null;
-	}
-
-	// Run a formatting command against a specific editor (main composer or the
-	// signature modal), keeping the caret inside it.
-	function execCmdOn(editorEl, cmd) {
-		editorEl.focus();
-		if (cmd === 'createLink') {
-			var url = window.prompt('Link URL:', 'https://');
-			if (!url) return;
-			if (!/^(https?:\/\/|mailto:)/i.test(url)) { url = 'https://' + url; }
-			document.execCommand('createLink', false, url);
-		} else {
-			document.execCommand(cmd, false, null);
-		}
-	}
-
-	// A small toolbar for a contenteditable — the compose toolbar minus images
-	// (a signature carries none).
-	function buildMiniToolbar(editorEl) {
-		var tb = el('div', 'mbx-toolbar');
-		[['bold', 'B'], ['italic', 'I'], ['underline', 'U'],
-		 ['insertUnorderedList', '• List'], ['insertOrderedList', '1. List'],
-		 ['createLink', '🔗'], ['removeFormat', '✕']].forEach(function (c) {
-			var b = el('button', 'mbx-tb', c[1]);
-			b.type = 'button';
-			b.addEventListener('mousedown', function (e) { e.preventDefault(); });
-			b.addEventListener('click', function (e) { e.preventDefault(); execCmdOn(editorEl, c[0]); });
-			tb.appendChild(b);
-		});
-		return tb;
-	}
-
-	// The signature editor modal, opened from a mailbox's gear. Saves to the
-	// caller's own grant; the server sanitizes (images stripped) and echoes it back.
-	function openSignatureEditor(aliasId) {
-		var mb = mailboxById(aliasId);
-		if (!mb) return;
-
-		var overlay = el('div', 'mbx-modal-overlay');
-		var modal = el('div', 'mbx-modal');
-		modal.appendChild(el('h3', 'mbx-modal-title', 'Signature — ' + mb.address));
-		modal.appendChild(el('p', 'mbx-modal-help', 'Inserted at the bottom of every new message from this mailbox.'));
-
-		var editor = el('div', 'mbx-rich mbx-sig-editor');
-		editor.contentEditable = 'true';
-		editor.innerHTML = mb.signature || '';
-		modal.appendChild(buildMiniToolbar(editor));
-		modal.appendChild(editor);
-
-		var actions = el('div', 'mbx-modal-actions');
-		var cancel = el('button', 'mbx-action', 'Cancel');
-		cancel.type = 'button';
-		cancel.addEventListener('click', function () { closeModal(overlay); });
-		var save = el('button', 'mbx-action mbx-primary', 'Save');
-		save.type = 'button';
-		save.addEventListener('click', function () {
-			save.disabled = true;
-			joineryApi.post(CFG.signatureSaveUrl, { alias_id: String(aliasId), signature: editor.innerHTML })
-				.then(function (data) {
-					data = data || {};
-					mb.signature = data.signature || '';
-					closeModal(overlay);
-				}).catch(function () { save.disabled = false; alert('Could not save the signature.'); });
-		});
-		actions.appendChild(cancel);
-		actions.appendChild(save);
-		modal.appendChild(actions);
-
-		overlay.appendChild(modal);
-		overlay.addEventListener('click', function (e) { if (e.target === overlay) closeModal(overlay); });
-		document.body.appendChild(overlay);
-		editor.focus();
 	}
 
 	function closeModal(overlay) {

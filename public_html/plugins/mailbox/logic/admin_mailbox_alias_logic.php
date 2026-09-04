@@ -199,7 +199,7 @@ function admin_mailbox_alias_logic(array $input): LogicResult {
 
 /**
  * Vault-gated settings pull-forward — see the identical guard in
- * admin_mailbox_filters_logic.php for the full rationale. A destination or
+ * mailbox_filters_logic.php for the full rationale. A destination or
  * delivery-mode change reroutes this mailbox's future mail before it is ever
  * sealed, so it requires an open unlock window — which, since
  * VaultUnlock::isOpen() is scoped to the calling session, only the mailbox
