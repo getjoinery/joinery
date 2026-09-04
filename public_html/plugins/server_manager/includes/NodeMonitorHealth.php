@@ -13,6 +13,8 @@
  * It also surfaces backup recovery problems (backup_recovery_problems), in the
  * same shape, so an unrecoverable-backup node is as visible as broken monitoring.
  *
+ * @version 1.12 - note_reported_script_trust(): a node volunteers its own answer on every poll,
+ *                  which is the only way to see one that is refusing with no job dispatched to it
  * @version 1.11 - script trust: classify_script_trust() tells a manifest that cannot be used from a
  *                  file that does not match it, note_script_trust() records the state on the node as
  *                  the refusal arrives, and script_trust_problems() puts it on the dashboard
@@ -452,6 +454,49 @@ class NodeMonitorHealth {
 		$node->set('mgn_script_trust_reason', '');
 		$node->set('mgn_script_trust_job_type', '');
 		$node->save();
+	}
+
+	/**
+	 * Record what a node says about itself on its poll.
+	 *
+	 * Distinct from note_script_trust(), which reads a refusal. This is the node
+	 * volunteering the answer, which covers the case a refusal cannot: a node
+	 * that is refusing but has no job dispatched to it never produces one.
+	 *
+	 * A node's own account of itself is the better evidence and wins, in both
+	 * directions — including clearing a state set from an old refusal, which is
+	 * the node saying it can verify scripts again without having to be sent a
+	 * job of the right type first. Only the caller decides whether it was said
+	 * at all; an absent answer never reaches here.
+	 *
+	 * Does not save. The claim handler saves the node once, after folding
+	 * everything the poll reported.
+	 */
+	public static function note_reported_script_trust($node, string $reported): void {
+		if (!$node || !$node->key) { return; }
+		if (!in_array($reported, ['ok', 'untrusted_manifest', 'untrusted_file'], true)) { return; }
+
+		$current = (string)$node->get('mgn_script_trust');
+		if ($reported === 'ok') {
+			if ($current === '' || $current === 'ok') { return; }
+			$node->set('mgn_script_trust', 'ok');
+			$node->set('mgn_script_trust_since', null);
+			$node->set('mgn_script_trust_reason', '');
+			$node->set('mgn_script_trust_job_type', '');
+			return;
+		}
+
+		if ($current !== $reported) {
+			$node->set('mgn_script_trust_since', gmdate('Y-m-d H:i:s'));
+			$node->set('mgn_script_trust', $reported);
+			// Its own report carries no wording. A reason already recorded from
+			// a refusal is the more useful of the two and is kept; otherwise say
+			// plainly where this came from rather than leaving it blank.
+			if (trim((string)$node->get('mgn_script_trust_reason')) === '') {
+				$node->set('mgn_script_trust_reason',
+					'The node reported on its poll that it cannot verify its own scripts.');
+			}
+		}
 	}
 
 	/** Has this job type ever refused on this node for a trust reason? */
