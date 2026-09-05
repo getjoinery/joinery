@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 # reconcile_site.sh - a site's SHAPE: read it, or make a site match this machine's
+# Version: 1.2.2 - the sudo probe lists the rules and requires NOPASSWD: ALL (see backup_files.sh 1.1.2)
 # Version: 1.2.1 - the sudo capability probe asks with -v instead of running true,
 #                  which sudo mails root about when the account may not. Same
 #                  change in the sibling scripts.
@@ -142,11 +143,12 @@ if [ ! -f "$CONFIG" ]; then
     exit 1
 fi
 
-# -v asks the question without making the escalation attempt sudo mails root about;
-# see backup_files.sh for why. Same test as the sibling scripts use.
+# Lists the rules and requires NOPASSWD: ALL — an account holding one narrow
+# NOPASSWD rule validates with -v and is then refused the real command; see
+# backup_files.sh 1.1.2. Listing sends none of the mail an attempt would.
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then
-    if command -v sudo > /dev/null 2>&1 && sudo -n -v 2>/dev/null; then
+    if command -v sudo > /dev/null 2>&1 && sudo -n -l 2>/dev/null | grep -Eq 'NOPASSWD:([[:space:]]*[A-Z]+:)*[[:space:]]*ALL([[:space:]]|$)'; then
         SUDO="sudo"
     fi
 fi

@@ -263,4 +263,53 @@ BackupRunner::sweep_local(array(
 check(is_dir($deep),
 	'and only under the base: stage_chain never writes one inside a profile directory');
 
+// ── A full backup of nothing is said out loud ───────────────────────────────
+section('A full a tenth the size of the last one is flagged, kept, and measured against');
+
+require_once(PathHelper::getIncludePath('data/backup_history_class.php'));
+require_once(PathHelper::getIncludePath('includes/BackupProfile.php'));
+$size_slug = 'sizetest-' . substr(bin2hex(random_bytes(3)), 0, 6);
+$size_plan = array('slug' => $size_slug, 'profile' => BackupProfile::SITE);
+$size_row = function (int $files_bytes, int $level, string $when, string $outcome = 'success') use ($size_slug) {
+	$row = new BackupHistory(NULL);
+	$row->set('bkh_type', 'project');
+	$row->set('bkh_slug', $size_slug);
+	$row->set('bkh_profile', BackupProfile::SITE);
+	$row->set('bkh_outcome', $outcome);
+	$row->set('bkh_start_time', $when);
+	$row->set('bkh_finish_time', $when);
+	$row->set_artifacts(array(
+		array('kind' => 'files', 'name' => 'files.tar.gz.enc', 'bytes' => $files_bytes, 'level' => $level),
+		array('kind' => 'db', 'name' => 'db.sql.gz.enc', 'bytes' => 5000, 'level' => $level),
+	));
+	$row->save();
+	harness_register_row('bkh_backup_history', 'bkh_id', $row->key);
+	return $row;
+};
+
+check(BackupRunner::full_size_warning($size_plan, 32, 0) === '',
+	'the first full ever has nothing to be measured against');
+
+$size_row(800000000, 0, '2026-08-25 06:00:00');
+$size_row(3000000, 1, '2026-08-26 06:00:00');   // an incremental: small by nature, never the yardstick
+check(BackupRunner::full_size_warning($size_plan, 750000000, 0) === '',
+	'a full near the previous full passes');
+check(BackupRunner::full_size_warning($size_plan, 80000001, 0) === '',
+	'just over a tenth passes');
+$w = BackupRunner::full_size_warning($size_plan, 32, 0);
+check($w !== '' && strpos($w, '32 B') !== false && strpos($w, 'last time') !== false,
+	'a 32-byte full against 800 MB is flagged, naming both sizes', $w);
+check(strpos(BackupRunner::full_size_warning($size_plan, 80000000, 0), 'against') !== false,
+	'exactly a tenth is flagged');
+
+// The yardstick is the previous FULL, not an incremental, and not a failed run.
+$size_row(2, 0, '2026-08-27 06:00:00', 'failed');
+check(BackupRunner::full_size_warning($size_plan, 750000000, 0) === '',
+	'a failed run is not the yardstick');
+$shrunk = $size_row(50000000, 0, '2026-08-28 06:00:00');
+check(BackupRunner::full_size_warning($size_plan, 45000000, 0) === '',
+	'after a real shrink, the next full is measured against the new size');
+check(BackupRunner::full_size_warning($size_plan, 45000000, (int)$shrunk->key) !== '',
+	'the row being recorded is excluded from its own comparison');
+
 harness_finish();

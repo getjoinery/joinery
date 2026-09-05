@@ -13,6 +13,8 @@
  * It also surfaces backup recovery problems (backup_recovery_problems), in the
  * same shape, so an unrecoverable-backup node is as visible as broken monitoring.
  *
+ * @version 1.13 - fleet backup outcome 'warning': the node kept a full backup a tenth the size of
+ *                 its last one; the card says so with the node's own words instead of a green tick
  * @version 1.12 - note_reported_script_trust(): a node volunteers its own answer on every poll,
  *                  which is the only way to see one that is refusing with no job dispatched to it
  * @version 1.11 - script trust: classify_script_trust() tells a manifest that cannot be used from a
@@ -612,6 +614,25 @@ class NodeMonitorHealth {
 
 		$age = time() - strtotime($last . ' UTC');
 		$window = ($policy['frequency'] === 'weekly') ? (9 * 86400) : (2 * 86400);
+
+		if ($outcome === 'warning') {
+			// The node kept the run but does not vouch for it: its files archive
+			// was a tenth the size of the previous full, or smaller. Not a green
+			// tick, and not "failed" either — the archive exists. Said in the
+			// node's own words, which name both sizes.
+			$summary = isset($node->key) && $node->key
+				? self::backup_run_summary(self::backup_runs_from_here((int)$node->key))
+				: self::backup_run_summary(array());
+			$r = self::result('backups', 'Last backup is suspiciously small',
+				'The most recent backup taken from here (' . self::humanize($age) . ' ago) completed, but '
+				. ($summary['reason'] !== '' ? 'the node said: ' . $summary['reason']
+					: 'its files archive was a tenth the size of the previous full, or smaller. Check it before trusting it.'),
+				true);
+			if (!empty($summary['job_id'])) {
+				$r['job_id'] = $summary['job_id'];
+			}
+			return $r;
+		}
 
 		if ($outcome !== 'success') {
 			// The stamp says it failed; the runs say since when, how often, and

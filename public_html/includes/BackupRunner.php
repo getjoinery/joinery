@@ -33,6 +33,11 @@
  * profile sweeps its own working directory by age, because the machine holding
  * the files is the only one that can.
  *
+ * @version 1.11 - a full backup a tenth the size of the previous full is recorded with a WARNING
+ *                 in its message and returned as one (the task message, the BACKUP_WARNING line a
+ *                 management node reads). The run is real, so it is kept; what must not happen is
+ *                 a backup of nothing counting as a backup: a week of 32-byte "successes" on the
+ *                 dev box (2026-09-05) was visible only as a number nobody was reading
  * @version 1.10 - sweep_local also removes staged chain restores nobody came back for. A
  *                 staged-and-unapproved chain left the whole chain on the node, plus the
  *                 recovered chain.key beside it, with nothing to remove either
@@ -673,6 +678,10 @@ class BackupRunner {
 			throw $e;
 		}
 
+		$warning = ($level === 0)
+			? self::full_size_warning($plan, (int)$artifacts['files']['bytes'], (int)$history->key)
+			: '';
+
 		$history->set('bkh_chain_id', $chain_id);
 		$history->set('bkh_chain_seq', $seq);
 		$history->set_artifacts($uploaded);
@@ -680,7 +689,8 @@ class BackupRunner {
 		$history->set('bkh_outcome', 'success');
 		$history->set('bkh_finish_time', gmdate('Y-m-d H:i:s'));
 		$history->set('bkh_message', ($level === 0 ? 'Full' : 'Incremental') . ' run ' . $seq . ' of ' . $chain_id
-			. ($reason !== '' ? ' (new chain: ' . $reason . ')' : ''));
+			. ($reason !== '' ? ' (new chain: ' . $reason . ')' : '')
+			. ($warning !== '' ? ' — WARNING: ' . $warning : ''));
 		$history->save();
 
 		if ($plan['delete_local']) {
@@ -702,7 +712,49 @@ class BackupRunner {
 		if ($pruned) { $msg .= "; pruned {$pruned} old backup" . ($pruned === 1 ? '' : 's'); }
 		if ($swept)  { $msg .= "; swept {$swept} local file" . ($swept === 1 ? '' : 's'); }
 
+		if ($warning !== '') {
+			return array('status' => 'success', 'message' => 'WARNING: ' . $warning . ' — ' . $msg, 'warning' => $warning);
+		}
 		return array('status' => 'success', 'message' => $msg);
+	}
+
+	/**
+	 * A full backup a tenth the size of the previous full, or smaller, is not
+	 * proof of a problem — a site can shrink — but it is exactly what a backup
+	 * of nothing looks like, and one of those was reported as success every
+	 * night for a week before anyone read the number. So the run is kept (the
+	 * archive is real) and the size is said out loud, on the run's own record,
+	 * on the task message, and on the management node's card for this node.
+	 * The comparison is with the previous full only, so a site that really did
+	 * shrink is flagged once and then measured against its new size.
+	 *
+	 * Returns '' when there is nothing to say.
+	 */
+	public static function full_size_warning(array $plan, int $bytes, int $exclude_history_id): string {
+		$previous = self::previous_full_bytes($plan, $exclude_history_id);
+		if ($previous <= 0 || $bytes * 10 > $previous) {
+			return '';
+		}
+		$pct = $previous > 0 ? round($bytes * 100 / $previous, $bytes * 100 < $previous ? 2 : 0) : 0;
+		return 'this full backup is ' . self::human($bytes) . ' of files against ' . self::human($previous)
+			. ' last time (' . $pct . '%). Check the archive before trusting it';
+	}
+
+	/** Bytes of the files archive in the most recent successful full of this slug and profile. */
+	private static function previous_full_bytes(array $plan, int $exclude_history_id): int {
+		$rows = new MultiBackupHistory(
+			array('outcome' => 'success', 'deleted' => false, 'slug' => $plan['slug'], 'type' => 'project',
+			      'profile' => $plan['profile']),
+			array('bkh_start_time' => 'DESC'), 20, 0);
+		foreach ($rows as $r) {
+			if ((int)$r->key === $exclude_history_id) { continue; }
+			foreach ($r->artifacts() as $a) {
+				if (($a['kind'] ?? '') === 'files' && (int)($a['level'] ?? -1) === 0) {
+					return (int)($a['bytes'] ?? 0);
+				}
+			}
+		}
+		return 0;
 	}
 
 	/**

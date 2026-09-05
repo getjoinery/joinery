@@ -29,6 +29,9 @@
  *
  * Run: php plugins/server_manager/tests/agent_channel_test.php
  *
+ * @version 1.5 - a join with no node record is approved by making the record from the request
+ *                (AgentChannelEndpoint::adoptJoin), and a join from this machine's own address is the plane
+ *                joining itself: named for the site, carrying the site URL, host and web root
  * @version 1.4 - a join records the address the plane can vouch for (the Cloudflare header only from
  *                a verified edge), pinned here because approval compares it to the provider's record
  * @version 1.3 - either side can end the pairing: forgetAgent() is the one convergence point for
@@ -520,6 +523,106 @@ $container->save();
 $made_nodes[] = $container->key;
 check(ManagedHost::link_host_node($container) === null,
 	'A node with a web root is a site, not a host — it links nothing');
+
+section('A join with no node record is approved by making the record from the request');
+
+$adopt_pair = sodium_crypto_sign_keypair();
+$adopt_pub  = sodium_crypto_sign_publickey($adopt_pair);
+$adopt_jr = new AgentJoinRequest();
+$adopt_jr->set('ajr_claimed_name', 'agtest-Fresh Box.local');
+$adopt_jr->set('ajr_public_key', base64_encode($adopt_pub));
+$adopt_jr->set('ajr_fingerprint', AgentJoinRequest::fingerprint($adopt_pub));
+$adopt_jr->set('ajr_source_ip', '203.0.113.77');
+$adopt_jr->set('ajr_agent_version', '1.17.2');
+$adopt_jr->set('ajr_status', AgentJoinRequest::STATUS_PENDING);
+$adopt_jr->save();
+$made_join_requests[] = $adopt_jr->key;
+
+check(AgentChannelEndpoint::isThisMachine('203.0.113.77') === false, 'A TEST-NET address is not this machine');
+check(AgentChannelEndpoint::isThisMachine('127.0.0.1') === true, 'The loopback address is this machine');
+
+// Only a host row the adoption MINTED is this test's to delete: ensure_for_node
+// links an existing row at the same address when there is one.
+$hosts_before = array_map('intval', $db->query('SELECT mgh_id FROM mgh_managed_hosts')->fetchAll(PDO::FETCH_COLUMN));
+$adopted = AgentChannelEndpoint::adoptJoin($adopt_jr);
+$adopt_node = $adopted['node'];
+$made_nodes[] = $adopt_node->key;
+if ($adopt_node->get('mgn_mgh_host_id') && !in_array((int)$adopt_node->get('mgn_mgh_host_id'), $hosts_before, true)) {
+	$made_hosts[] = (int)$adopt_node->get('mgn_mgh_host_id');
+}
+$adopt_jr->load();
+check($adopted['self'] === false, 'A join from elsewhere is not the plane itself');
+check($adopt_node->get('mgn_name') === 'agtest-Fresh Box.local', 'The record is named what the machine called itself');
+check($adopt_node->get('mgn_slug') === 'agtest-fresh-box-local', 'The slug is derived from that name', $adopt_node->get('mgn_slug'));
+check($adopt_node->get('mgn_host') === '203.0.113.77', 'The host is the address the join came from');
+check($adopt_node->get('mgn_site_url') === null || $adopt_node->get('mgn_site_url') === '', 'No site URL is invented for a machine that did not say one');
+check((bool)$adopt_node->get('mgn_enabled') === true, 'The record is enabled: the agent is what makes it manageable');
+check($adopt_node->get('mgn_agent_public_key') === base64_encode($adopt_pub), 'Approval bound the requesting key to the new record');
+check($adopt_jr->get('ajr_status') === AgentJoinRequest::STATUS_APPROVED
+	&& (int)$adopt_jr->get('ajr_mgn_node_id') === (int)$adopt_node->key, 'The request records the node it made');
+check(!empty($adopt_node->get('mgn_mgh_host_id')), 'The record has a placement (host) row like a hand-made node');
+
+$second = AgentChannelEndpoint::freeSlug('agtest-Fresh Box.local');
+check($second === 'agtest-fresh-box-local-2', 'A second machine with the same name gets the next free slug', $second);
+
+try {
+	AgentChannelEndpoint::adoptJoin($adopt_jr);
+	check(false, 'An already-approved request cannot be adopted twice');
+} catch (Exception $e) {
+	check(strpos($e->getMessage(), 'no longer pending') !== false, 'An already-approved request cannot be adopted twice', $e->getMessage());
+}
+
+// The plane joining itself: a request from one of this machine's own addresses.
+$self_pair = sodium_crypto_sign_keypair();
+$self_pub  = sodium_crypto_sign_publickey($self_pair);
+$self_jr = new AgentJoinRequest();
+$self_jr->set('ajr_claimed_name', 'agtest-localhost');
+$self_jr->set('ajr_public_key', base64_encode($self_pub));
+$self_jr->set('ajr_fingerprint', AgentJoinRequest::fingerprint($self_pub));
+$self_jr->set('ajr_source_ip', '127.0.0.1');
+$self_jr->set('ajr_status', AgentJoinRequest::STATUS_PENDING);
+$self_jr->save();
+$made_join_requests[] = $self_jr->key;
+
+$own_url = rtrim((string)LibraryFunctions::get_absolute_url(), '/');
+$own_host = (string)parse_url($own_url, PHP_URL_HOST);
+$hosts_before = array_map('intval', $db->query('SELECT mgh_id FROM mgh_managed_hosts')->fetchAll(PDO::FETCH_COLUMN));
+$self_adopted = AgentChannelEndpoint::adoptJoin($self_jr);
+$self_node = $self_adopted['node'];
+$made_nodes[] = $self_node->key;
+if ($self_node->get('mgn_mgh_host_id') && !in_array((int)$self_node->get('mgn_mgh_host_id'), $hosts_before, true)) {
+	$made_hosts[] = (int)$self_node->get('mgn_mgh_host_id');
+}
+check($self_adopted['self'] === true, 'A join from this machine\'s own address is the plane joining itself');
+check($self_node->get('mgn_name') === $own_host, 'It is named for this site, not for what the machine called itself', $self_node->get('mgn_name'));
+check($self_node->get('mgn_site_url') === $own_url, 'It carries this site\'s URL, which is how the plane finds itself', (string)$self_node->get('mgn_site_url'));
+check($self_node->get('mgn_host') === $own_host, 'Its host is this site\'s hostname');
+check($self_node->get('mgn_web_root') === PathHelper::getRootDir(), 'Its web root is this site\'s');
+check($self_node->get('mgn_agent_public_key') === base64_encode($self_pub), 'The key is bound the same way');
+
+// An expired request is refused, not adopted.
+$old_pair = sodium_crypto_sign_keypair();
+$old_pub  = sodium_crypto_sign_publickey($old_pair);
+$old_jr = new AgentJoinRequest();
+$old_jr->set('ajr_claimed_name', 'agtest-late');
+$old_jr->set('ajr_public_key', base64_encode($old_pub));
+$old_jr->set('ajr_fingerprint', AgentJoinRequest::fingerprint($old_pub));
+$old_jr->set('ajr_source_ip', '203.0.113.78');
+$old_jr->set('ajr_status', AgentJoinRequest::STATUS_PENDING);
+$old_jr->save();
+$made_join_requests[] = $old_jr->key;
+$old_jr->set('ajr_create_time', gmdate('Y-m-d H:i:s', time() - AgentJoinRequest::TTL_SECONDS - 60));
+$old_jr->save();
+$old_jr->load();
+try {
+	AgentChannelEndpoint::adoptJoin($old_jr);
+	check(false, 'An expired request is refused');
+} catch (Exception $e) {
+	check(strpos($e->getMessage(), 'expired') !== false, 'An expired request is refused, and says to run the join again', $e->getMessage());
+}
+$late_left = 0;
+foreach (new MultiManagedNode(['slug' => 'agtest-late', 'deleted' => false]) as $x) { $late_left++; }
+check($late_left === 0, 'A refused adoption makes no node record');
 
 section('Cleanup');
 

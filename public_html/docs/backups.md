@@ -674,6 +674,29 @@ path. `restore_chain.sh` applies a chain in order. Both take an explicit
 directory override so the incremental and deletion-replay behaviour is tested
 against a throwaway tree rather than a live site.
 
+Three guards keep a files archive honest:
+
+- **Elevation is a rule, not a credential.** An unprivileged run uses `sudo`
+  only when `sudo -n -l` shows a `NOPASSWD: ALL` rule. An account holding one
+  narrow rule can validate and still be refused the real command, and a refused
+  `sudo tar` exits 1 with no output — the same status tar gives for a file that
+  changed while being read. Listing the rules sends none of the mail an
+  attempt does. `tests/backups/backup_files_sudo_gate.sh` holds every shape.
+- **An archive of nothing is never a backup.** Fewer than 64 bytes is refused
+  and deleted whatever tar's exit status said: an envelope around an empty
+  stream is 32 bytes, and a gzipped tar holding even one entry is longer.
+- **A full a tenth the size of the previous full is said out loud.** The run
+  is kept — the archive is real — but its history row, the task message and
+  the `BACKUP_WARNING` line a management node reads all carry the two sizes.
+  The comparison is with the previous full only, so a site that really did
+  shrink is flagged once and then measured against its new size
+  (`BackupRunner::full_size_warning()`).
+
+One file is left out of an unprivileged run on purpose, and announced: the
+release signing key on a publishing box, `config/agent_signing_key`, is
+readable by root only. The root-run manager backup of that box carries it. Any
+other unreadable file fails the run rather than being skipped.
+
 | Script | What it does |
 |---|---|
 | `reconcile_site.sh` | A site's shape, read both ways: `--print-shape` records it for a backup, the default mode makes a restored site agree with the machine it landed on |

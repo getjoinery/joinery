@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 # restore_project.sh - Complete project restore script
+# Version: 1.5.3 - the sudo probe lists the rules and requires NOPASSWD: ALL (see backup_files.sh 1.1.2)
 # Version: 1.5.2 - the interactive replace branch carries config/backup-ledger across the move.
 #                  It moved the whole tree aside and made a fresh directory, so this machine's
 #                  record of what it uploaded went with it and every later restore refused
@@ -261,11 +262,10 @@ PROJECT_DIR="/var/www/html/${PROJECT_NAME}"
 # backup restored into a container hit, after the database had already loaded.
 # Same test as backup_files.sh, backup_project.sh, reconcile_site.sh and
 # restore_chain.sh use.
-# -v asks the question without making the escalation attempt sudo mails root about;
-# see backup_files.sh for why.
+# Lists the rules and requires NOPASSWD: ALL; see backup_files.sh 1.1.2 for why -v was wrong.
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then
-    if command -v sudo > /dev/null 2>&1 && sudo -n -v 2>/dev/null; then
+    if command -v sudo > /dev/null 2>&1 && sudo -n -l 2>/dev/null | grep -Eq 'NOPASSWD:([[:space:]]*[A-Z]+:)*[[:space:]]*ALL([[:space:]]|$)'; then
         SUDO="sudo"
     fi
 fi

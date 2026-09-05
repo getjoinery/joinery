@@ -8,6 +8,8 @@
  * @version 1.23 - process_apply_update keeps the node's own refusal or failure reason instead of
  *                 replacing it with the version verdict; the probe only confirms the version
  *                 did not move.
+ * @version 1.23 - backup_run: a BACKUP_WARNING line (a full a tenth the size of the last one) stamps
+ *                 the node's outcome 'warning' and carries the text, so the fleet card says it
  * @version 1.22 - process_retire_install_password records whether the machine retired its install
  *                 password; the provision pipeline reads the job's status and erases the password
  * @version 1.21 - process_backup_run stamps a run with no BACKUP_TIME at the job's own completion
@@ -780,8 +782,16 @@ class JobResultProcessor {
 			(string)$job->get('mjb_status')
 		);
 		$status = $verdict['status'];
+		// A run the node kept but does not vouch for. It is not a success the
+		// card may rest on, and not a failure either: the archive exists.
+		if ($status === 'success' && $verdict['warning'] !== '') {
+			$status = 'warning';
+		}
 
 		$result = ['backup_status' => $status];
+		if ($verdict['warning'] !== '') {
+			$result['warning'] = $verdict['warning'];
+		}
 		if ($verdict['message'] !== '') {
 			$result['message'] = $verdict['message'];
 		} elseif ($status !== 'success' && trim((string)$job->get('mjb_error_message')) !== '') {
@@ -794,7 +804,8 @@ class JobResultProcessor {
 				$node = new ManagedNode($node_id, TRUE);
 				$node->set('mgn_last_backup_time',
 					self::backup_run_stamp_time($verdict, (string)$job->get('mjb_completed_time')));
-				$node->set('mgn_last_backup_outcome', ($status === 'success') ? 'success' : 'failed');
+				$node->set('mgn_last_backup_outcome',
+					($status === 'success') ? 'success' : (($status === 'warning') ? 'warning' : 'failed'));
 				$node->save();
 			} catch (Exception $e) {
 				error_log('JobResultProcessor: could not stamp the backup outcome for node '
@@ -868,7 +879,12 @@ class JobResultProcessor {
 			$message = trim($m[1]);
 		}
 
-		return ['status' => $status, 'time' => $time, 'message' => $message];
+		$warning = '';
+		if (preg_match('/^BACKUP_WARNING=(.+)$/m', $output, $m)) {
+			$warning = trim($m[1]);
+		}
+
+		return ['status' => $status, 'time' => $time, 'message' => $message, 'warning' => $warning];
 	}
 
 	/**

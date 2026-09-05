@@ -36,6 +36,9 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.12 - adoptJoin(): a join for a machine with no node record is approved by making the
+ *                 record from the request, then approveJoin() as ever; a join from this machine's
+ *                 own address is the plane joining itself, named for the site and carrying its URL
  * @version 1.11 - a join records the client address the plane can vouch for (SessionControl::get_client_ip
  *                 for auth: the Cloudflare header only from a verified edge), so a join from a
  *                 provisioned machine can be matched to its instance and checked with the provider
@@ -447,6 +450,101 @@ class AgentChannelEndpoint {
 			}
 		}
 		return $payload;
+	}
+
+	/**
+	 * Approve a join for a machine that has no node record, by making the
+	 * record from the request. A join already carries everything the record
+	 * needs: the name the machine calls itself, the address it asked from, its
+	 * agent version and its key — so the dashboard banner can approve it without
+	 * a hand-typed Connect Site first. Then approveJoin(), exactly as for a
+	 * hand-made node.
+	 *
+	 * A request from one of this machine's own addresses is this management
+	 * node's own agent asking to be managed like any other node — the posture
+	 * item 7 of the agent programme needs (specs/agent_local_queue_retirement.md
+	 * "G1 — decided"). It is named for the site, carries the site URL the plane
+	 * uses to find itself, and needs no per-deployment exception.
+	 *
+	 * Refused, and left to a node page: a join from an address this plane
+	 * provisioned a machine at — that approval is checked with the provider
+	 * against the provision's own node.
+	 *
+	 * Returns ['node' => ManagedNode, 'self' => bool, 'host' => ManagedHost|null].
+	 */
+	public static function adoptJoin($request): array {
+		if ($request->get('ajr_status') !== AgentJoinRequest::STATUS_PENDING) {
+			throw new Exception('That join request is no longer pending.');
+		}
+		if ($request->is_expired()) {
+			throw new Exception('That join request has expired. Run the join again on the machine.');
+		}
+		$ip = (string)$request->get('ajr_source_ip');
+		$provision = self::provisionForAddress($ip);
+		if ($provision) {
+			throw new Exception('This join comes from provision #' . (int)$provision->key . '\'s machine ('
+				. $provision->get('cvp_domain') . '). Approve it from that provision\'s node, where the claim is checked with the provider first.');
+		}
+
+		$self = self::isThisMachine($ip);
+		$own_url = rtrim((string)LibraryFunctions::get_absolute_url(), '/');
+		$own_host = (string)(parse_url($own_url, PHP_URL_HOST) ?: '');
+
+		$claimed = trim((string)$request->get('ajr_claimed_name'));
+		$name = $self && $own_host !== '' ? $own_host : $claimed;
+		if ($name === '') { $name = 'node-' . substr((string)$request->get('ajr_fingerprint'), 0, 8); }
+
+		$node = new ManagedNode(NULL);
+		$node->set('mgn_name', mb_substr($name, 0, 100));
+		$node->set('mgn_slug', self::freeSlug($name));
+		$node->set('mgn_host', $self && $own_host !== '' ? $own_host : $ip);
+		$node->set('mgn_site_url', $self ? $own_url : null);
+		$node->set('mgn_enabled', true);
+		$node->set('mgn_skip_joinery_checks', false);
+		$node->set('mgn_uptime_enabled', false);
+		if ($self) {
+			$node->set('mgn_web_root', PathHelper::getRootDir());
+			$node->set('mgn_notes', 'This management node itself. Its agent runs the plane-side jobs the local queue used to.');
+		}
+		$node->prepare();
+		$node->save();
+		$node->load();
+		ManagedHost::ensure_for_node($node);
+
+		$host = self::approveJoin($request, $node);
+		return ['node' => $node, 'self' => $self, 'host' => $host];
+	}
+
+	/** True when the address a join came from is one of this machine's own. */
+	public static function isThisMachine(string $ip): bool {
+		$ip = strtolower(trim($ip));
+		if ($ip === '' || !function_exists('net_get_interfaces')) { return false; }
+		foreach ((net_get_interfaces() ?: []) as $iface) {
+			foreach (($iface['unicast'] ?? []) as $u) {
+				if (strtolower((string)($u['address'] ?? '')) === $ip) { return true; }
+			}
+		}
+		return false;
+	}
+
+	/** The provision whose machine a join's address belongs to, or null. */
+	public static function provisionForAddress(string $ip) {
+		return class_exists('CustomerCloudProvision') ? CustomerCloudProvision::for_machine_address($ip) : null;
+	}
+
+	/** A slug no live node holds, derived from a name. */
+	public static function freeSlug(string $name): string {
+		$base = trim(preg_replace('/-+/', '-', preg_replace('/[^a-z0-9-]/', '-', strtolower($name))), '-');
+		if ($base === '') { $base = 'node'; }
+		$base = substr($base, 0, 40);
+		$slug = $base;
+		for ($n = 2; $n < 100; $n++) {
+			$taken = false;
+			foreach (new MultiManagedNode(['slug' => $slug, 'deleted' => false]) as $ex) { $taken = true; }
+			if (!$taken) { return $slug; }
+			$slug = $base . '-' . $n;
+		}
+		throw new Exception('Could not find a free slug for ' . $name . '.');
 	}
 
 	/**

@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 
 # backup_files.sh - Archive a project's files, optionally as an incremental
+# Version: 1.1.2 - the sudo probe asks for the RULE, not the credential: `sudo -n -v` succeeds for an
+#                  account holding any NOPASSWD rule, however narrow, after which `sudo tar` is refused
+#                  with exit 1 and no output — which 1.1.0 read as tar's own "a file changed" status,
+#                  so the run shipped a 32-byte envelope around nothing and reported success (a week
+#                  of empty site backups on the dev box, found 2026-09-05). Now `sudo -n -l` must show
+#                  a NOPASSWD: ALL rule before sudo is used, and an archive too small to hold even one
+#                  entry fails the run instead of being reported as a backup. An unprivileged run
+#                  leaves config/agent_signing_key (root-only by design on a publishing box) out
+#                  of the archive and says so, rather than failing every night or lying.
 # Version: 1.1.1 - the sudo capability probe asks with -v instead of running true. Running a
 #                  command is an escalation attempt sudo mails root about when the account
 #                  may not, so every nightly backup on a box whose web user has no sudo sent
@@ -50,7 +59,7 @@
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.1.1"
+SCRIPT_VERSION="1.1.2"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 print_info()    { echo -e "${BLUE}[INFO]${NC} $1" >&2; }
@@ -148,18 +157,32 @@ if [ -n "$SNAR" ]; then
     TAR_ARGS+=(--listed-incremental="$SNAR")
 fi
 
+# The release signing key on a publishing box is readable by root only, on
+# purpose (specs/agent_local_queue_retirement.md, "G1 — decided"): the web user
+# must never be able to sign code. An unprivileged run therefore cannot carry
+# it, and that is not the silent partial backup the doctrine forbids — it is
+# one named file, left out on purpose and said out loud. The root-run manager
+# backup of this same box carries it, as does the agent_signing escrow row.
+SIGNING_KEY="${PROJECT_DIR}/config/agent_signing_key"
+if [ "$(id -u)" -ne 0 ] && [ -e "$SIGNING_KEY" ] && [ ! -r "$SIGNING_KEY" ]; then
+    print_warning "config/agent_signing_key is root-only and this run is not root: left out of this archive (the root-run manager backup carries it)"
+    TAR_ARGS+=(--exclude='agent_signing_key')
+fi
+
 # The tree holds files the invoking account is not meant to read (config/ keys
 # are 600 and web-user owned). Elevate the read if we can; say so plainly if we
 # cannot, because a silently partial backup is worse than a failed one.
 #
-# The question is asked with -v rather than by running a command. Both return the
-# same status, but running one is an escalation ATTEMPT, and sudo mails root about
-# an attempt by an account that may not (mail_no_user is on by default) — so the
-# probe alone sent a "SECURITY information" alert on every run where the answer
-# was no. -l and -v are documented as exempt from that mail, for exactly this.
+# The question is "may this account run ANYTHING as root without a password",
+# and it is asked by listing the rules (`sudo -n -l`) and looking for NOPASSWD:
+# ALL. `sudo -n -v` is not that question: it validates for an account holding
+# any NOPASSWD rule at all, so on a box where the web user may run one helper
+# as root it said yes, and the `sudo tar` that followed was refused. Listing is
+# still not an escalation attempt, so it sends none of the "SECURITY
+# information" mail that running a command would (mail_no_user is on by default).
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then
-    if command -v sudo >/dev/null 2>&1 && sudo -n -v 2>/dev/null; then
+    if command -v sudo >/dev/null 2>&1 && sudo -n -l 2>/dev/null | grep -Eq 'NOPASSWD:([[:space:]]*[A-Z]+:)*[[:space:]]*ALL([[:space:]]|$)'; then
         SUDO="sudo"
     else
         print_warning "No passwordless sudo — reading as $(whoami); an unreadable file will fail this backup"
@@ -220,6 +243,15 @@ fi
 chmod 600 "$ARCHIVE" 2>/dev/null || true
 
 BYTES=$(stat -c %s "$ARCHIVE" 2>/dev/null || echo 0)
+# A gzipped tar holding even one entry is longer than this; an openssl envelope
+# around an empty stream is 32 bytes. Whatever produced fewer bytes than that
+# was not tar archiving this tree, whatever its exit status said — and a backup
+# of nothing must never be recorded as a backup.
+if [ "$BYTES" -lt 64 ]; then
+    print_error "Archive is ${BYTES} bytes — nothing was archived (tar exit ${TAR_RC}). Refusing to record an empty backup."
+    rm -f "$ARCHIVE"
+    exit 1
+fi
 SHA=$(sha256sum "$ARCHIVE" | cut -d' ' -f1)
 
 print_success "Wrote $(basename "$ARCHIVE")"

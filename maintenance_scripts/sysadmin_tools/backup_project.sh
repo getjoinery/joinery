@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 # backup_project.sh - Complete project backup script
+# Version: 2.6.3 - the sudo probe lists the rules and requires NOPASSWD: ALL; -v said yes to an
+#                  account allowed one helper, and the rsync it then ran under sudo was refused
 # Version: 2.6.2 - the sudo capability probe asks with -v instead of running true,
 #                  which sudo mails root about when the account may not. Same
 #                  change in the sibling scripts.
@@ -416,11 +418,12 @@ mkdir -p "${TEMP_DIR}/${BACKUP_NAME}/project_files"
 # Ownership inside the archive is not load-bearing: restore_project.sh re-derives
 # it by running fix_permissions.sh, which re-pins the relay key itself.
 #
-# -v asks the question without making the escalation attempt sudo mails root about;
-# see backup_files.sh for why. Same test as the sibling scripts use.
+# Lists the rules and requires NOPASSWD: ALL — an account holding one narrow
+# NOPASSWD rule validates with -v and is then refused the real command; see
+# backup_files.sh 1.1.2. Listing sends none of the mail an attempt would.
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then
-    if command -v sudo >/dev/null 2>&1 && sudo -n -v 2>/dev/null; then
+    if command -v sudo >/dev/null 2>&1 && sudo -n -l 2>/dev/null | grep -Eq 'NOPASSWD:([[:space:]]*[A-Z]+:)*[[:space:]]*ALL([[:space:]]|$)'; then
         SUDO="sudo"
     else
         print_warning "No passwordless sudo — copying as $(whoami); any unreadable file will fail the backup"
