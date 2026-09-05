@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 # restore_chain.sh - Restore a project from an incremental backup chain
+# Version: 1.3.1 - the sudo probe lists the rules and requires NOPASSWD: ALL (see backup_files.sh 1.1.2)
 # Version: 1.3.0 - config/backup-ledger is held across the extraction. The incremental extract
 #                  replays deletions, and the directory is absent from the listings of runs
 #                  taken before it existed — so a chain restore DELETED the record every later
@@ -258,11 +259,12 @@ if [ "$FORCE" != true ]; then
     [[ $REPLY =~ ^[Yy]$ ]] || { print_info "Cancelled."; exit 0; }
 fi
 
-# -v asks the question without making the escalation attempt sudo mails root about;
-# see backup_files.sh for why. Same test as the sibling scripts use.
+# Lists the rules and requires NOPASSWD: ALL — an account holding one narrow
+# NOPASSWD rule validates with -v and is then refused the real command; see
+# backup_files.sh 1.1.2. Listing sends none of the mail an attempt would.
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then
-    if command -v sudo >/dev/null 2>&1 && sudo -n -v 2>/dev/null; then SUDO="sudo"; fi
+    if command -v sudo >/dev/null 2>&1 && sudo -n -l 2>/dev/null | grep -Eq 'NOPASSWD:([[:space:]]*[A-Z]+:)*[[:space:]]*ALL([[:space:]]|$)'; then SUDO="sudo"; fi
 fi
 
 mkdir -p "$PARENT"

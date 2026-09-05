@@ -3,6 +3,11 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.21 - an agent asking to join is announced at the top of the board and can be approved or
+ *                  rejected right there: approval makes the node record from the request
+ *                  (AgentChannelEndpoint::adoptJoin), and a join from this machine's own address is recognised as
+ *                  this management node joining itself. Before this a join request was visible only
+ *                  inside a node's API Keys tab, and a machine with no record had no page to approve from
  * @version 1.20 - nodes that can no longer verify their own scripts are named at the top of the
  *                  board; a node in that state cannot be repaired through the agent at all
  * @version 1.19 - a finished provision stays on the board while this plane still holds its install
@@ -30,10 +35,48 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/data/agent_heart
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAssets.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/AgentChannelEndpoint.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(10);
 $session->set_return();
+
+// Approve or reject a join request from the banner. Approval makes the node
+// record from the request and binds the key to it — the same act as approval
+// on a node's API Keys tab, without the hand-typed record first.
+if ($_POST && in_array($_POST['action'] ?? '', ['adopt_join', 'reject_join'], true)) {
+	$page_regex = '/\/admin\/server_manager/';
+	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager'); exit; }
+	$jr = new AgentJoinRequest((int)($_POST['ajr_id'] ?? 0), TRUE);
+	if (!$jr->key || $jr->get('ajr_delete_time')) {
+		$session->save_message(new DisplayMessage('That join request no longer exists.', 'Error', $page_regex,
+			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		header('Location: /admin/server_manager'); exit;
+	}
+	if ($_POST['action'] === 'reject_join') {
+		$jr->set('ajr_status', AgentJoinRequest::STATUS_REJECTED);
+		$jr->save();
+		$session->save_message(new DisplayMessage('Join request from ' . $jr->get('ajr_claimed_name') . ' rejected.',
+			'Rejected', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		header('Location: /admin/server_manager'); exit;
+	}
+	try {
+		$adopted = AgentChannelEndpoint::adoptJoin($jr);
+		$node_url = '/admin/server_manager/node_detail?mgn_id=' . (int)$adopted['node']->key;
+		$session->save_message(new DisplayMessage(
+			'Agent connected. ' . $jr->get('ajr_claimed_name') . ' (key '
+			. AgentJoinRequest::display_fingerprint((string)$jr->get('ajr_fingerprint')) . ') is now the agent of '
+			. $adopted['node']->get('mgn_name') . ($adopted['self'] ? ', which is this management node itself' : '')
+			. '; it will pick the approval up on its next check.'
+			. ($adopted['host'] ? ' It is this host\'s own agent, so host-scope work routes to it.' : ''),
+			'Success', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		header('Location: ' . $node_url); exit;
+	} catch (Exception $e) {
+		$session->save_message(new DisplayMessage('Join not approved. ' . $e->getMessage(), 'Error', $page_regex,
+			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		header('Location: /admin/server_manager'); exit;
+	}
+}
 
 // Process completed jobs that haven't had their results parsed yet.
 // Skip nodes that are soft-deleted to avoid spawning chained jobs against
@@ -112,6 +155,20 @@ $fleet_backup_problems = NodeMonitorHealth::fleet_backup_problems();
 // off the node columns, which the channel endpoint stamps as each refusal
 // arrives — no probing and no job scan on a page view.
 $script_trust_problems = NodeMonitorHealth::script_trust_problems();
+
+// Agents asking to join. A join is approved on the API Keys tab of the node
+// it belongs to, and that node may not exist yet (a machine that joins before
+// it is added here has no page at all). So the request is announced where the
+// operator lands, with the nodes it could be approved on and the way to make
+// one — otherwise the only trace is a command on the machine waiting for an
+// answer nobody knows they owe.
+$pending_joins = class_exists('AgentJoinRequest') ? AgentJoinRequest::pending() : [];
+$agentless_nodes = [];
+if ($pending_joins) {
+	foreach (new MultiManagedNode(['enabled' => true, 'deleted' => false], ['mgn_name' => 'ASC']) as $candidate) {
+		if (!$candidate->get('mgn_agent_public_key')) { $agentless_nodes[] = $candidate; }
+	}
+}
 
 // Recovery readiness: must-save secrets never verified or verified too long
 // ago. One line; the details live on the readiness page.
@@ -272,6 +329,63 @@ if ($agent_online) {
 				<a href="<?php echo htmlspecialchars($p['link']); ?>" class="alert-link"><?php echo htmlspecialchars($p['name'] ?: $p['slug']); ?></a>
 				&mdash; <strong><?php echo htmlspecialchars($p['health']['label']); ?>.</strong>
 				<?php echo htmlspecialchars($p['health']['detail']); ?>
+			</li>
+		<?php endforeach; ?>
+	</ul>
+</div>
+<?php endif; ?>
+
+<?php // An agent is waiting to be let in. Above the failures because it is the
+      // one thing here that is waiting on a person, and it expires. ?>
+<?php if (!empty($pending_joins)): ?>
+<div class="alert alert-warning" role="alert">
+	<strong><?php echo count($pending_joins) === 1 ? 'An agent is asking to join.' : count($pending_joins) . ' agents are asking to join.'; ?></strong>
+	Approving here creates the node record from the request and binds the agent to it.
+	Approve <strong>only</strong> if the fingerprint is exactly the one the machine printed &mdash; the name and address are claims, the fingerprint is the identity.
+	<ul class="mb-0 mt-2">
+		<?php foreach ($pending_joins as $jr):
+			$jr_age = max(0, (int)floor((time() - strtotime($jr->get('ajr_create_time') . ' UTC')) / 60));
+			$jr_left = max(0, (int)floor((AgentJoinRequest::TTL_SECONDS - (time() - strtotime($jr->get('ajr_create_time') . ' UTC'))) / 60)); ?>
+			<li>
+				<strong><?php echo htmlspecialchars($jr->get('ajr_claimed_name')); ?></strong>
+				<span class="text-muted small">(<?php echo htmlspecialchars((string)$jr->get('ajr_source_ip')); ?>,
+					agent v<?php echo htmlspecialchars((string)$jr->get('ajr_agent_version')); ?>,
+					<?php echo $jr_age === 0 ? 'just now' : $jr_age . ' min ago'; ?>; expires in <?php echo $jr_left; ?> min)</span>
+				&mdash; key <code><?php echo htmlspecialchars(AgentJoinRequest::display_fingerprint((string)$jr->get('ajr_fingerprint'))); ?></code>
+				<?php $jr_fpr = AgentJoinRequest::display_fingerprint((string)$jr->get('ajr_fingerprint'));
+				      $jr_self = AgentChannelEndpoint::isThisMachine((string)$jr->get('ajr_source_ip'));
+				      $jr_prov = AgentChannelEndpoint::provisionForAddress((string)$jr->get('ajr_source_ip')); ?>
+				<div class="small mt-1">
+					<?php if ($jr_self): ?>
+						<strong>This is this management node's own machine</strong> asking to be managed like any other node.
+						Approving names the record after this site and lets its agent take over the plane-side work.
+					<?php elseif ($jr_prov): ?>
+						This address is <strong>provision #<?php echo (int)$jr_prov->key; ?></strong> (<?php echo htmlspecialchars($jr_prov->get('cvp_domain')); ?>).
+						Approve it from that provision's node, where the claim is checked with the provider first
+						<?php if ($agentless_nodes): ?>&mdash;
+							<?php $first = true; foreach ($agentless_nodes as $cand): ?><?php echo $first ? '' : ', '; $first = false; ?><a href="/admin/server_manager/node_detail?mgn_id=<?php echo (int)$cand->key; ?>&amp;tab=api_keys" class="alert-link"><?php echo htmlspecialchars($cand->get('mgn_name') ?: $cand->get('mgn_slug')); ?></a><?php endforeach; ?><?php endif; ?>.
+					<?php else: ?>
+						Approving makes a node record named <strong><?php echo htmlspecialchars($jr->get('ajr_claimed_name')); ?></strong> at <?php echo htmlspecialchars((string)$jr->get('ajr_source_ip')); ?>; the site URL and the rest can be filled in on the node afterwards.
+						<?php if ($agentless_nodes): ?>To bind it to a record that already exists instead, approve from that node's API Keys tab:
+							<?php $first = true; foreach ($agentless_nodes as $cand): ?><?php echo $first ? '' : ', '; $first = false; ?><a href="/admin/server_manager/node_detail?mgn_id=<?php echo (int)$cand->key; ?>&amp;tab=api_keys" class="alert-link"><?php echo htmlspecialchars($cand->get('mgn_name') ?: $cand->get('mgn_slug')); ?></a><?php endforeach; ?>.<?php endif; ?>
+					<?php endif; ?>
+				</div>
+				<div class="mt-2">
+					<?php if (!$jr_prov): ?>
+					<form method="post" action="/admin/server_manager" id="adopt_join_<?php echo (int)$jr->key; ?>" style="display:inline;margin-right:6px;">
+						<input type="hidden" name="action" value="adopt_join">
+						<input type="hidden" name="ajr_id" value="<?php echo (int)$jr->key; ?>">
+						<?php echo SmAdminCsrf::field(); ?>
+						<button type="button" class="btn btn-sm btn-primary" onclick="JoineryModal.confirm(<?php echo htmlspecialchars(json_encode(($jr_self ? 'Connect this management node\'s own agent' : 'Connect ' . $jr->get('ajr_claimed_name')) . '? Confirm the fingerprint ' . $jr_fpr . ' matches what the machine printed first.'), ENT_QUOTES); ?>, function(){ document.getElementById('adopt_join_<?php echo (int)$jr->key; ?>').submit(); })">Approve</button>
+					</form>
+					<?php endif; ?>
+					<form method="post" action="/admin/server_manager" id="reject_join_<?php echo (int)$jr->key; ?>" style="display:inline;">
+						<input type="hidden" name="action" value="reject_join">
+						<input type="hidden" name="ajr_id" value="<?php echo (int)$jr->key; ?>">
+						<?php echo SmAdminCsrf::field(); ?>
+						<button type="button" class="btn btn-sm btn-outline-danger" onclick="JoineryModal.confirm(<?php echo htmlspecialchars(json_encode('Reject this join request?'), ENT_QUOTES); ?>, function(){ document.getElementById('reject_join_<?php echo (int)$jr->key; ?>').submit(); })">Reject</button>
+					</form>
+				</div>
 			</li>
 		<?php endforeach; ?>
 	</ul>

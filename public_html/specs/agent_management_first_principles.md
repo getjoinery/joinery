@@ -129,7 +129,7 @@ pairs at birth (`install.sh --enable-agent`, fingerprint-compared approval).
 |---|---|---|
 | Management node | Node public keys, per-node write-only backup slots, its own site | Any SSH private key the job system can use; any node's recovery key; anything that opens a customer machine |
 | Managed node | Its own Ed25519 identity (0600 root), its own proven recovery **public** key (which is also what approvals are sealed to), root-owned policy, and its own upload ledger of what it sent to the bucket | A database credential (dies with the local queue; one transient exception: a host-posture agent staging a decommission approval holds the victim's DB credential in memory for the life of the connection — never at rest, never its own; `docker_host_agent.md`); any fleet-shared secret; the recovery **private** key, which only a human has |
-| Publisher (dev box) | The release signing key (0600, offsite in its own sealed backup) | — custody is the only defense; a compromised publisher is stated game-over |
+| Publisher (dev box, getjoinery) | The release signing key (`600 root:root` once item 7 lands — read only inside the agent's `publish_upgrade` primitive; carried offsite by the root-run manager backup and the `agent_signing` escrow row) | A copy of that key readable by the web tier or by the operator's login: a stolen operator SSH key must not be the fleet trust root. Custody is the only defense; a compromised publisher root is stated game-over |
 | Operator (human) | SSH keys to our own machines (internal/BYO only) — the ones already there stay, unchanged; the backup recovery private key that answers a destructive approval | — |
 | A provisioned customer machine | Nothing of ours, ever — no key is placed at creation (`keyless_provisioning.md`) | Any SSH key of ours, at any point, for any duration |
 
@@ -145,9 +145,13 @@ operator deletes the machine at the provider by hand and then removes the
 record from the dashboard; the platform never calls a provider's delete —
 owner 2026-09-05 — but ONE Joinery site among several on a shared machine
 is removed by the HOST's agent, which is not dying: `decommission_site`, per
-`docker_host_agent.md`, owner 2026-08-31),
-`publish_upgrade` (publisher-local), and the relay operations (dead code at
-cutover).
+`docker_host_agent.md`, owner 2026-08-31), and the relay operations (dead code
+at cutover). `publish_upgrade` was on this list as "publisher-local" and
+**comes off it (owner, 2026-09-05)**: it is the one job the local queue truly
+executes, its script needs the release signing key, and the only thing that
+may read that key is root — so it becomes a primitive of the plane's own
+agent, run on the plane's own node row (`agent_local_queue_retirement.md`
+§ "G1 — decided").
 
 **The standing acceptance test** (owner, 2026-08-28, restated as the bar for
 "the agent is capable"): *a maintenance task that requires a shell on a
@@ -172,7 +176,7 @@ status**; the spec named is where its design lives.
 | 4 | Keyless provisioning | `keyless_provisioning.md` | **BUILT 2026-09-03, live gate open.** Provision over a sealed install password, host agent on every docker machine, the install password retired once every agent on the machine is admitted (the executor completes the retire job only after the machine refused the password), join approval checked with the provider. Owed: one live run per shape to `retired` |
 | 5 | Credential custody — the platform holds no SSH key | `implemented/fleet_ssh_credential_custody.md` | **DONE 2026-09-05.** WP1 done; WP2 superseded by item 4. **WP3 CLOSED 2026-09-05 with nothing to build:** the container case is done (`decommission_site` on the host agent); a whole machine is deleted at its provider BY HAND and its record removed from the dashboard afterwards, and that stays manual — the platform never deletes a cloud machine programmatically (owner). "Permanently delete" on the dashboard remains the way to remove one Joinery site from a shared machine. The dashboard already says so on a dedicated machine's Overview tab. **WP4 DONE 2026-09-05 — the whole of item 5, all of it on the management node, no managed node changes:** the platform forgot `config/provisioning_key`: no PHP reads it any more (measured 2026-09-05); what remains is the pin in `fix_permissions.sh`, the entry in `installer_contract_test.php`, and the key pair sitting in `config/` where the web user can read it. The pair moved to the operator's `~/.ssh/joinery_provisioning_key` as a troubleshooting key (`fix_permissions.sh` 3.2 dropped the pin; installer contract test and plugin doc no longer name it) — it was verified by hand to still reach jeremytunnell, nothing on jeremytunnell changed, and jeremytunnell's `mgn_ssh_key_path` was repointed to the new file so the interim reachability check does not go blind. Tree-wide, only specs still name `config/provisioning_key`. Readers of `mgn_ssh_key_path` (`has_ssh()`, the node form, `PollHostingOrders`, the relay copy) die with item 7's `ssh` step type. **WP5 (rekey jeremytunnell) WITHDRAWN** by owner 2026-09-05: no key is removed from or replaced on any current site. The annex still lists WP5; this table wins |
 | 6 | SSH is one bootstrap, run once | `implemented/ssh_single_bootstrap.md` | **DONE 2026-09-02**, live-verified on every shape: one install job = local preflight + one ssh session; certificates and fleet seeding over the agent; `enable_agent` and `discover_nodes` deleted |
-| 7 | Retire the local queue | `agent_local_queue_retirement.md` | Last, not first — thirteen operations still depend on it |
+| 7 | Retire the local queue | `agent_local_queue_retirement.md` | **IN PROGRESS from 2026-09-05.** G2 closed with item 6 WP3. **G1 decided 2026-09-05 (owner):** `publish_upgrade` becomes a primitive of the plane's own agent, the plane pairs to itself, and the release signing key goes `600 root:root` — the `www-data` executor from item 4 cannot read the key and never will, and a cron worker was refused as a second installed component. Order: WP2b primitive + chown-on-exit + key pin + dashboard dispatch, WP2c self-pair (hand step on dev and getjoinery), WP3 flip `LocalJobs` false, WP4 delete the queue and the `local`/`ssh`/`scp` step types (which deletes the last readers of `mgn_ssh_key_path`) |
 | 8 | Per-node hardening | `environment_build_surface_reduction.md` | The image and install surface work only. **It removes no SSH key from any current site** — the existing keys are the human troubleshooting door and stay (owner, 2026-09-05). The move of getjoinery to its own box is no longer part of this item; it was motivated by SSH removal |
 
 **Why item 7 is last, which is the reversal this family keeps re-deriving.** The
@@ -273,6 +277,9 @@ annexes.
   on the management node. *(item 3)*
 - The agent's `local` step type is gone, it holds no database credential, and
   inserting a row into `mjb_management_jobs` by hand executes nothing. *(item 7)*
+- A publish from the dashboard runs as the `publish_upgrade` primitive of the
+  plane's own agent, and `config/agent_signing_key` is `600 root:root` on every
+  publishing box — no site process and no operator login can read it. *(item 7)*
 
 ## One reversal inside an implemented spec
 

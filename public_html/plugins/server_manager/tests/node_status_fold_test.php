@@ -398,6 +398,18 @@ check(JobResultProcessor::backup_run_stamp_time($v, '2026-09-03 04:45:12.677727'
 	'a run with no BACKUP_TIME is stamped at the job completion time, to the second');
 check(JobResultProcessor::backup_run_stamp_time(array('time' => '2026-08-29 05:00:16'), '2026-08-29 05:01:00') === '2026-08-29 05:00:16',
 	'a run that said when it started keeps that time');
+
+// A run the node kept but does not vouch for: the files archive was a tenth
+// the size of the previous full, or smaller. It arrives as BACKUP_WARNING and
+// must not read as a plain success — that is how a week of 32-byte backups
+// went unnoticed.
+$warned = "[2026-09-05 06:00:56 UTC] site success: WARNING: this full backup is 32 B of files against 828.5 MB last time (0%). Check the archive before trusting it — Full backup (32 B of files) in chain-x to B2\n"
+	. "BACKUP_RESULT=success\nBACKUP_TIME=2026-09-05 06:00:06\nBACKUP_WARNING=this full backup is 32 B of files against 828.5 MB last time (0%). Check the archive before trusting it\n";
+$v = JobResultProcessor::parse_backup_run_verdict(json_encode(['api_version' => '1.0', 'data' => ['output' => $warned]]), 'completed');
+check($v['status'] === 'success' && strpos($v['warning'], '32 B') !== false,
+	'a BACKUP_WARNING line is read alongside the verdict, through the envelope', var_export($v, true));
+check(JobResultProcessor::parse_backup_run_verdict($runner, 'completed')['warning'] === '',
+	'a run with no warning line carries an empty warning');
 check(preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', JobResultProcessor::backup_run_stamp_time($v, '')) === 1,
 	'a job with neither still gets a well-formed stamp');
 

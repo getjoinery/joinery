@@ -1140,7 +1140,10 @@ columns instead of visiting nodes.
 
 **The dashboard alarms only on this management node's own runs** —
 `NodeMonitorHealth::fleet_backup_problems()` raises a node whose last backup from
-here failed, or whose backups have stopped arriving within its schedule's window.
+here failed, whose backups have stopped arriving within its schedule's window,
+or whose last full backup was a tenth the size of the previous one or smaller
+(outcome `warning`, from the node's own `BACKUP_WARNING` line: the run is kept,
+the card says "Last backup is suspiciously small" with both sizes).
 The alarm is "my backups of this node are broken", not "this node is
 unprotected", which is not this management node's call to make.
 

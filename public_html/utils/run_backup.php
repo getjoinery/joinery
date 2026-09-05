@@ -33,6 +33,8 @@
  * Concurrency is handled by the runner itself: a run that finds another in
  * progress — either profile — reports itself skipped rather than racing it.
  *
+ * @version 1.3 - BACKUP_WARNING line: a run the engine kept but does not vouch for (a full a tenth
+ *                the size of the last one) says so where a management node can read it
  * @version 1.2 - a manager-profile run no longer accepts a recovery key on stdin; encryption is
  *                pinned to this site's own proven key and a supplied one is refused
  * @version 1.1 - --profile, manager-profile config read from stdin, and the machine-readable
@@ -104,5 +106,8 @@ echo '[' . gmdate('Y-m-d H:i:s') . ' UTC] ' . $profile . ' '
 // "when was this node last backed up" means one thing however it was learned.
 echo 'BACKUP_RESULT=' . ($result['status'] ?? 'error') . "\n";
 echo 'BACKUP_TIME=' . $started . "\n";
+if (!empty($result['warning'])) {
+	echo 'BACKUP_WARNING=' . str_replace(array("\r", "\n"), ' ', (string)$result['warning']) . "\n";
+}
 
 exit((($result['status'] ?? '') === 'error') ? 1 : 0);

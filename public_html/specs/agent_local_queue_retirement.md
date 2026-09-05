@@ -7,6 +7,11 @@ Written 2026-08-30. WP2 is done and found two real gates; see "WP2 — the audit
 done" below. The earlier status line ("gated on nothing but its own audit") is
 withdrawn.
 
+**2026-09-05: G1 decided.** `publish_upgrade` becomes a primitive of the
+plane's own agent — see "G1 — decided" below. G2 closed with
+`ssh_single_bootstrap.md` WP3 (certificate issuance goes to the host's agent).
+What remains of this spec is build work, listed under "Work".
+
 ## What changed on 2026-08-30
 
 SSH and SCP were deleted from the agent as a deliberate forcing function — 397
@@ -96,7 +101,7 @@ its live use measured against the job table.
 
 | Operation | Steps | Live use | Disposition |
 |---|---|---|---|
-| `publish_upgrade` | local | 33 runs / 14d, last 08-28 | **Re-home plane-side (G1)** |
+| `publish_upgrade` | local | 33 runs / 14d, last 08-28 | **A primitive of the plane's own agent** (G1, decided 2026-09-05; see below) |
 | `provision_ssl` | local + ssh | issuance only; no renewal traffic | To the agent via the host node — G2 is open now that hosts run an agent. `ssh_single_bootstrap.md` |
 | `install_node` | local + ssh + scp | last 08-09 | The one bootstrap, on `InstallJobExecutor`; collapses to one session. `ssh_single_bootstrap.md` |
 | `discover_nodes` | local + ssh | last 04-20 | **Delete.** `ssh_single_bootstrap.md` |
@@ -121,6 +126,78 @@ in the table that the local queue is genuinely the executor for rather than
 merely the dispatcher. It needs a plane-side executor — the build run in PHP,
 or a plane-side worker — before `cfg.LocalJobs` can go false. Without one, the
 flip stops all publishing.
+
+### G1 — decided (owner, 2026-09-05)
+
+**The fact that decides it.** A publish signs the tree manifest and the agent
+bundle with the release signing key, `config/agent_signing_key`. That key is
+readable by the site owner account only, on purpose: a web-tier compromise
+must never be able to sign code. `InstallJobExecutor` is spawned by cron and
+by the web tier, so it runs as `www-data` and cannot read the key — measured
+2026-09-05: `AgentDistPublisher::ensureKeys()` throws "cannot read" before
+anything is written. So the executor item 4 built is not G1's answer, and a
+`www-data` worker of any shape never can be. What can read the key is root,
+and the thing that already runs as root on every box with a fixed vocabulary
+is the agent.
+
+**The design.**
+
+- **`publish_upgrade` is a primitive** (`ClassOperate`) of the agent, run by
+  the plane's own agent on the plane's own node row. Two bounded parameters:
+  `version` (optional, `^\d+\.\d+(\.\d+)?$`) and `notes` (required, a
+  length-bounded string; release notes carry newlines and quotes, so no
+  pattern). Script: `/usr/bin/php public_html/plugins/server_manager/includes/publish_upgrade.php`
+  with args `{version}` `{notes}` — argv, never a shell, never a stored
+  command string. Timeout long enough for a Go build plus the deploy tier.
+  The agent verifies the script against the signed manifest before running
+  it, like every script primitive. The dashboard's Publish form files that
+  job (`createFromBuild`) against the plane's own node and lands on the job
+  page as today; the delay is the agent's poll interval, about fifteen seconds.
+- **The plane pairs to itself.** The management node has no row for itself
+  today (`joinery-agent status` on dev: "Connected to: nothing"). It joins its
+  own site (`joinery-agent join --management-node=<own URL>`) and is approved
+  on its own dashboard, the same flow as every node. The plane finds itself by
+  `mgn_site_url` equal to its own site URL. This was already WP3's premise.
+- **The signing key goes to `600 root:root`**, pinned that way by
+  `fix_permissions.sh` (today it pins `600 user1:user1`). Root is then the
+  only reader, and root reads it only inside the primitive. A stolen operator
+  SSH key (the ones that stay on our sites) gives a shell whose sudo asks for a
+  password, so it can no longer copy the fleet trust root. The CLI fallback
+  becomes `sudo php plugins/server_manager/includes/publish_upgrade.php ...`.
+  Minting on first use happens as root, so a new publishing box needs nothing.
+- **Root-owned leftovers.** A root publish creates files in the tree (release
+  archives, the agent bundle directory, publish logs, the re-signed manifest).
+  The publish, when it runs as root, gives every file it CREATES the owner and
+  group of that file's parent directory before it exits; files it rewrites keep
+  their owner. `AgentDistPublisher` 1.6 is the record of what an un-chowned
+  leftover did. No configuration: the parent directory already says who owns
+  the tree.
+- **The key's backup** is the site's own project backup of `config/`, plus the
+  `bke_backup_key_escrow` row of kind `agent_signing` (one exists from
+  2026-07-24; nothing writes it any more). Once the plane is paired to itself
+  its manager-profile backup is a `backup_run` primitive and runs as root, so
+  it carries the root-only key; the site-profile backup that cron runs as
+  `www-data` cannot read the key today either (mode 600), so nothing is lost
+  that was there. See B2 in the programme memory for the defect found in that
+  backup on 2026-09-05.
+
+**What it costs, said once.**
+
+- Editing `publish_upgrade.php` itself: the agent refuses a script whose hash
+  is not in the signed manifest, and the manifest is re-signed by a publish. So
+  the first publish after a change to that one file is by hand under sudo; the
+  button works again after it. Every other file changes freely.
+- getjoinery publishes too. It pairs to itself the same way, once, by hand.
+- The signing oracle stays: whoever can queue a publish gets the on-disk tree
+  signed, automated or by hand, because the tree is writable by `www-data` on
+  a publishing box. That is item 8's tree-ownership work, not this spec's.
+
+**What was rejected.** A `www-data` worker (cannot read the key, and making
+the key readable by `www-data` hands the fleet trust root to the web tier); a
+root or site-user cron worker (a second scheduled component to install and
+configure on every publishing box, when the agent is already there and already
+root); handing the dashboard off to a hand-run command (drops the button and
+the job history for no custody gain the agent path does not also give).
 
 **G2 — container nodes cannot ISSUE certificates over the channel.**
 *(Opened 2026-09-01: a Docker host is a paired machine-posture node
@@ -220,12 +297,12 @@ own Management Node page, and the plane needs no shell on it), and
 paper — it also installs a restricted pull key on relay *shards*, tracked as a
 separate question in `keyless_provisioning.md`.
 
-Note the direction of the dependency: `keyless_provisioning.md` WP1 needs G1's
-plane-side executor, because provisioning authenticates with the instance's root
-password and the Go agent's SSH client does public keys only. Same executor,
-sequenced after. Those need
-a plane-side executor. **This is a dependency, not a gate**, and it is the same
-executor G1 needs.
+`keyless_provisioning.md` WP1 needed a plane-side runner for the one
+bootstrap session, because provisioning authenticates with the instance's root
+password and the Go agent's SSH client does public keys only. That runner
+exists (`InstallJobExecutor`, item 4) and is **not** G1's answer: it runs as
+`www-data` and cannot read the release signing key. G1 is the agent's own
+primitive; see "G1 — decided".
 
 **Two are already superseded.** `backup_database` and `backup_project` keep
 POST handlers at `node_detail_actions_logic.php:206` and `:219`, but nothing
@@ -290,7 +367,24 @@ just this spec), the decision must stop being rediscoverable-as-open.
 **WP2 — Audit the `local` step. DONE** — see the section above. Thirteen
 operations; two gates, one hard dependency, seven deletions.
 
-**WP3 — Flip `cfg.LocalJobs` false** (behind G1, G2 and the custody runner) on the management node, which pairs to
+**WP2b — `publish_upgrade` as a primitive** (G1). In order: the primitive in
+the agent (`primitives/operate_publish_upgrade.go`, registered like
+`backup_run`); the chown-on-exit rule in `publish_upgrade.php` for a root run;
+`fix_permissions.sh` pins the signing key `600 root:root` and the key on dev
+and getjoinery is re-owned by hand; the Publish form dispatches
+`createFromBuild` against the plane's own node when that node reports the
+primitive, and says plainly what to do when there is no such node yet; the
+old `build_publish_upgrade` local step and its `createJob(null, …)` caller are
+deleted, not kept as a fallback. Then a hand publish under sudo ships the agent
+that carries the primitive, the plane's own agent self-updates to it, and the
+button works from then on.
+
+**WP2c — Pair the plane to itself.** `joinery-agent join --management-node=<own URL>`
+on dev and on getjoinery, approved on each one's own dashboard. A hand step,
+once per publishing box; item 4's join approval is the mechanism.
+
+**WP3 — Flip `cfg.LocalJobs` false** (behind WP2b and WP2c; G2 closed with
+item 6) on the management node, which is now paired to
 itself. `main.go:289` already contemplates this: "A control plane paired to
 itself runs both job sources in one process."
 
