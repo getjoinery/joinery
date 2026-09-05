@@ -9451,3 +9451,218 @@ fn a_park_whose_destination_is_trashed_keeps_its_finisher_and_its_files() {
     assert_converged(&world);
     assert_nothing_lost(&world, &committed);
 }
+
+/// A file whose folder is parked for a case clash does not land in the twin's
+/// directory.
+///
+/// On a volume that folds case, two server folders named `readme` and `README`
+/// are one slot. Naming parks the second `Unsyncable(CaseClash)` and raises an
+/// issue, which is right: the user has to say which one they meant. What is not
+/// right is pouring the parked folder's contents into the surviving folder --
+/// a parked folder has no directory but still has a NAME, so its children
+/// resolve onto the twin's path and materialize there. The user then sees one
+/// folder holding both folders' files with nothing saying so, and deleting it
+/// takes the parked folder's files too.
+#[test]
+fn a_child_of_a_case_clashed_folder_does_not_land_in_the_twin() {
+    let world = World::of(9_291, &[("mac", jd_sim::Platform::MacOs)]);
+    let mac = world.device("mac");
+    let mut committed = Committed::default();
+
+    let lower = b"child of the lowercase folder";
+    let upper = b"child of the uppercase folder";
+    let a = world.server.seed_folder(None, "readme");
+    world.server.seed_file(Some(a), "a.txt", lower);
+    let b = world.server.seed_folder(None, "README");
+    world.server.seed_file(Some(b), "b.txt", upper);
+    committed.note("readme/a.txt", lower);
+
+    assert!(world.settle().is_some(), "never settled");
+
+    // One of the two is parked, and the user is told.
+    let parked = [a, b].into_iter().find(|id| {
+        mac.store
+            .get_entry(jd_core::model::EntityId::folder(*id))
+            .unwrap()
+            .is_some_and(|e| e.synced_placement.is_none())
+    });
+    let parked = parked.expect("one twin must be parked on a folding volume");
+    let issues = mac.store.open_issues().unwrap();
+    assert!(
+        issues.iter().any(|i| i.kind == "unsyncable"),
+        "the user was never told about the clash: {issues:?}"
+    );
+
+    // Its child must not be sitting inside the folder that won the slot.
+    let orphan = if parked == b { upper } else { lower };
+    let want = jd_sim::sha256_hex(orphan);
+    let disk = disk_tree(mac);
+    assert!(
+        !disk.values().any(|h| h.as_deref() == Some(want.as_str())),
+        "a file from the parked folder landed in the twin's directory: {:?}",
+        disk.keys().collect::<Vec<_>>()
+    );
+    assert_nothing_lost(&world, &committed);
+}
+
+/// A FOLDER whose name Windows cannot hold carries its escape to everything
+/// inside it.
+///
+/// Coverage, not a regression pin: every escape test here is about a leaf file,
+/// and no sweep arm can mint a folder name that needs escaping -- folders are
+/// only ever `Sub {step}`, `Shared` or `Contested Folder`. A folder's name is
+/// escaped by the same function as a file's, but a folder is also a path
+/// component for everything beneath it, so the escape has to be carried by
+/// every child's path and read back the same way when the user writes into the
+/// directory themselves.
+#[test]
+fn a_folder_windows_cannot_name_carries_its_escape_to_its_children() {
+    let world = World::of(9_292, &[("pc", jd_sim::scenario::Platform::Windows)]);
+    let pc = world.device("pc");
+    let mut committed = Committed::default();
+
+    let body = b"inside a folder Windows cannot name";
+    let con = world.server.seed_folder(None, "CON");
+    world.server.seed_file(Some(con), "note.txt", body);
+    let deeper = world.server.seed_folder(Some(con), "Sub 1");
+    let deep_body = b"two levels under it";
+    world.server.seed_file(Some(deeper), "deep.txt", deep_body);
+
+    assert!(world.settle().is_some(), "never settled");
+    let disk = disk_tree(pc);
+    eprintln!("DISK {:?}", disk.keys().collect::<Vec<_>>());
+    eprintln!("ISSUES {:?}", pc.store.open_issues().unwrap());
+    committed.note("CON/note.txt", body);
+    committed.note("CON/Sub 1/deep.txt", deep_body);
+    assert_converged(&world);
+
+    // The user adds a file inside the escaped directory. It must go into the
+    // server folder that directory stands for, not into a new folder named
+    // after the escape.
+    let made = b"made by the user inside the escaped directory";
+    pc.fs.user_write("%43ON/made.txt", made);
+    committed.note("CON/made.txt", made);
+    assert!(world.settle().is_some(), "never settled after the user wrote in it");
+    eprintln!("DISK2 {:?}", disk_tree(pc).keys().collect::<Vec<_>>());
+    eprintln!("ISSUES2 {:?}", pc.store.open_issues().unwrap());
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// The same as the case clash, one fold along: two folders whose names differ
+/// only in Unicode normalization.
+///
+/// `UnicodeClash` and `CaseClash` are different verdicts from naming but the
+/// same situation on the disk -- one slot, two records -- so the children of
+/// whichever one parks must be held either way. Kept because it is the shape
+/// that proves the hold is about having no directory rather than about case.
+#[test]
+fn a_child_of_a_unicode_clashed_folder_does_not_land_in_the_twin() {
+    let world = World::of(9_294, &[("mac", jd_sim::Platform::MacOs)]);
+    let mac = world.device("mac");
+    let mut committed = Committed::default();
+
+    let composed: &[u8] = b"child of the composed folder";
+    let decomposed: &[u8] = b"child of the decomposed folder";
+    let a = world.server.seed_folder(None, "caf\u{e9}");
+    world.server.seed_file(Some(a), "a.txt", composed);
+    let b = world.server.seed_folder(None, "cafe\u{301}");
+    world.server.seed_file(Some(b), "b.txt", decomposed);
+
+    assert!(world.settle().is_some(), "never settled");
+    let parked = [a, b]
+        .into_iter()
+        .find(|id| {
+            mac.store
+                .get_entry(jd_core::model::EntityId::folder(*id))
+                .unwrap()
+                .is_some_and(|e| e.synced_placement.is_none())
+        })
+        .expect("one twin must be parked on a folding volume");
+    let orphan = if parked == b { decomposed } else { composed };
+    let kept = if parked == b { composed } else { decomposed };
+    let want = jd_sim::sha256_hex(orphan);
+    let disk = disk_tree(mac);
+    assert!(
+        !disk.values().any(|h| h.as_deref() == Some(want.as_str())),
+        "a file from the parked folder landed in the twin's directory: {:?}",
+        disk.keys().collect::<Vec<_>>()
+    );
+    let want_kept = jd_sim::sha256_hex(kept);
+    assert!(
+        disk.values().any(|h| h.as_deref() == Some(want_kept.as_str())),
+        "the folder that won the slot lost its own child: {:?}",
+        disk.keys().collect::<Vec<_>>()
+    );
+    let _ = &mut committed;
+    assert_nothing_lost(&world, &committed);
+}
+
+/// A folder parked behind a FILE of the same name does not put its children in
+/// the file's place.
+///
+/// No sweep arm can mint this -- files are `doc-{i}.txt` and folders are
+/// `Sub {step}`, so a file and a folder never share a name at all. On the
+/// server they are different kinds and both exist happily; on any disk, of any
+/// platform, they are one slot. This is the shape that shows the hold is not a
+/// case-folding curiosity: no folding is involved and the name is identical.
+#[test]
+fn a_folder_parked_behind_a_file_of_the_same_name_holds_its_children() {
+    let world = World::of(9_295, &[("box", jd_sim::scenario::Platform::Linux)]);
+    let box_dev = world.device("box");
+    let mut committed = Committed::default();
+
+    // The file gets there first and materializes, so it holds the slot.
+    let file_body = b"the file called Notes";
+    world.server.seed_file(None, "Notes", file_body);
+    assert!(world.settle().is_some(), "the file materializes");
+    committed.note("Notes", file_body);
+
+    // Then a FOLDER of the same name arrives, with something inside it.
+    let folder = world.server.seed_folder(None, "Notes");
+    let inner = b"inside the folder called Notes";
+    world.server.seed_file(Some(folder), "inner.txt", inner);
+
+    assert!(world.settle().is_some(), "never settled");
+    let want_inner = jd_sim::sha256_hex(inner);
+    assert!(
+        !disk_tree(box_dev)
+            .values()
+            .any(|h| h.as_deref() == Some(want_inner.as_str())),
+        "the parked folder child landed anyway: {:?}",
+        disk_tree(box_dev).keys().collect::<Vec<_>>()
+    );
+    eprintln!("DISK {:?}", disk_tree(box_dev).keys().collect::<Vec<_>>());
+    eprintln!("ISSUES {:?}", box_dev.store.open_issues().unwrap());
+    let _ = &mut committed;
+    assert_nothing_lost(&world, &committed);
+}
+
+/// A FOLDER the user named to look like one of the engine's own conflict copies
+/// is left alone.
+///
+/// Coverage, not a regression pin. The hostile sweep arm mints this shape for
+/// files -- a user really does copy a conflict file or restore one from a
+/// backup -- but folders are only ever `Sub {step}`, so a folder wearing the
+/// shape has never been exercised anywhere. The name is the user's and has to
+/// survive a round trip to a second device untouched.
+#[test]
+fn a_folder_named_like_a_conflict_copy_keeps_its_name() {
+    let world = World::of(9_296, &[("mac", jd_sim::Platform::MacOs), ("pc", jd_sim::Platform::Windows)]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    let mut committed = Committed::default();
+
+    let body = b"inside a folder that looks like a conflict copy";
+    let name = "Sub 1 (conflicted copy 2026-07-31 from mac)";
+    mac.fs.user_mkdir(name);
+    mac.fs.user_write(&format!("{name}/note.txt"), body);
+    committed.note(&format!("{name}/note.txt"), body);
+
+    assert!(world.settle().is_some(), "never settled");
+    eprintln!("MAC {:?}", disk_tree(mac).keys().collect::<Vec<_>>());
+    eprintln!("PC  {:?}", disk_tree(pc).keys().collect::<Vec<_>>());
+    eprintln!("ISSUES {:?}", mac.store.open_issues().unwrap());
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}

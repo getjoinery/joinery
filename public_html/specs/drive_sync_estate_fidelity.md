@@ -2048,6 +2048,168 @@ satisfied and the estate oracle passes it: the file is in the wrong folder,
 consistently, everywhere. The user renamed a folder and made another with the
 old name, and their file followed the name rather than the folder.
 
+## Defect AB -- the parked twin's files poured into the folder that won the slot
+
+**Shape** (traced and reproduced). One Mac, no faults, no kills. The server
+holds two folders in the same parent whose names differ only in case --
+`readme` and `README` -- each with a file in it. The volume folds case, so the
+two are one slot. Naming does the right thing: the second parks
+`Unsyncable(CaseClash)` with an issue raised, because only the user can say
+which one they meant.
+
+Its FILE does not stop. A parked folder has no directory but still has a name,
+and a child's path is built by walking parent names, so `README/b.txt`
+resolves to `readme/b.txt` and materializes there. The device settles with one
+folder on the disk holding both folders' contents, nothing saying so, and an
+issue that describes the folder clash and not the merge. Deleting the folder
+takes the parked folder's files with it; a later local edit inside it is
+attributed to the wrong folder.
+
+Nothing is lost, both sides agree about every file, and the estate oracle
+passes it -- the same way it passed Defect AA. This was found by asking what
+the sweeps could not mint rather than by a seed: the workload names folders
+`Sub {step}`, `Shared` and `Contested Folder`, so **no arm can produce two
+folders whose names are case twins**, and no number of seeds would have
+reached it.
+
+**Fix.** The naming pass already parks everything under a folder parked out of
+scope (`shadowed`). It now does the same for a folder parked with no directory
+of any kind: its children are skipped for exactly as long as it is, and the
+parent's issue stays the only thing the user is asked to act on.
+
+The condition is "no directory" because that is the whole reason to hold a
+child -- there is nowhere right for it to go. A parked folder that DOES have a
+directory holds the user's files for real and its children must not be held.
+No construction found so far reaches that case: a folder stranded under a
+scratch name is put back rather than parked, and a naming clash parks the
+entrant, which never had a directory. So the condition states the reason and
+nothing pins it -- a test written for it passed with the condition removed and
+was dropped rather than kept as false protection.
+
+The same hole is reachable with no folding at all, on every platform: a FILE
+called `Notes` that already holds the slot and a FOLDER called `Notes` arriving
+after it. The folder parks `DuplicateName`, and without the fix its child was
+written into the place the user's file occupies. No sweep arm can mint that
+either -- files are `doc-{i}.txt` and folders are `Sub {step}`, so the two
+never share a name.
+
+Pinned three times, all red without the fix:
+`a_child_of_a_case_clashed_folder_does_not_land_in_the_twin` and
+`a_child_of_a_unicode_clashed_folder_does_not_land_in_the_twin` and
+`a_folder_parked_behind_a_file_of_the_same_name_holds_its_children`. The second
+is the same situation through a different verdict -- `UnicodeClash` rather than
+`CaseClash` -- and the third has no folding in it at all, which together show
+the hold is about a parent having no directory rather than about case.
+
+**Still open:** the workload cannot mint a case-twin FOLDER at all, and cannot
+mint a folder name that needs escaping either -- folders are only ever
+`Sub {step}`, `Shared` or `Contested Folder`. Closing that means another sweep
+arm, which changes the draw sequence and re-rolls every pinned seed, so it is a
+deliberate cost to pay rather than a free addition. Two halves were checked by hand instead
+and are both sound. A folder the user named to look like one of the engine's
+own conflict copies survives a round trip to a second device untouched, with
+nothing raised (`a_folder_named_like_a_conflict_copy_keeps_its_name`) -- the
+hostile arm mints that shape for files only. And the escape half: a server folder named `CON` lands on Windows as
+`%43ON`, its children and grandchildren resolve inside it, the server is never
+told the escape is a rename, and a file the user writes into that directory
+uploads into the folder it stands for. Covered by
+`a_folder_windows_cannot_name_carries_its_escape_to_its_children`.
+
+## Defect AC -- a folder waiting for a namesake's subtree to empty
+
+Found by estate v30, one seed in 4,100 of its arm
+(`hunt-longhostile-2dev/26090313`, two Linux devices, 80 steps, chaos, no
+kills). Pre-existing: the same seed fails identically on the tree before
+`6ef36a51`.
+
+**Shape** (traced and reproduced). Folder 520 is `PendingDownload` with nothing
+agreed -- no directory of its own anywhere on the disk. Its old placement, root
+`Sub 44 renamed`, has since been taken over by a different folder, 501. The
+queued `move_local` for 520 names that old path as its source, and the source
+test asks the disk whether a directory stands there. One does: 501's. A
+directory carries no identity, so the move adopts it, sees its own destination
+`Sub 44 renamed/Sub 6` sitting underneath, and refuses as a move into its own
+subtree -- then waits for contents to leave a folder that was never its. Three
+hundred and forty-one attempts and no way out. Forever-loop shape 1: a retry
+whose premise expired.
+
+**Fix.** Before any test is made against `from`, ask whose directory it is --
+and ask a RECORD, because the disk cannot answer. If another folder holds a
+directory by its own agreement at exactly this path, it owns what stands there
+and this move stands down; the next round decides again from the whole tree.
+This is the same question `create_local_folder` asks before adopting a
+directory, in the layer that can see the answer.
+
+Pinned by the seed, in the gate script. Three narrower-looking fixes were tried
+and abandoned, all plausible and all wrong:
+
+- "a folder with no recorded placement has no directory, so it cannot be
+  moved" -- broke `a_folder_the_server_moved_stops_saying_it_is_waiting_for_bytes`,
+  where the directory is genuinely the folder's and only the record has lagged.
+- "if another tracked folder's record puts it at my source path, stand down",
+  filtered on `holds_a_local_file` and applied whether or not the move was a
+  real move -- five failures: during a park and replace another folder standing
+  at the source is ordinary. The shape was right; the filter and the missing
+  `from != dest` guard were not.
+- "if this folder's own path is already the destination and the destination is
+  there, the move landed" -- **this one passed every gate and was still
+  wrong**, caught in review by public-html-0e. For an entry with nothing agreed
+  `local_path` falls back to the REMOTE placement, so its own path IS the
+  destination by construction: the test collapsed to "is a directory there",
+  the very question a directory cannot answer, and the comment claiming the
+  record as tiebreak described a check the code never made. What it read was a
+  directory `download` had minted on the way to a file (B3 below). Proof:
+  adding a parent-materialized gate to `download` makes the seed loop again at
+  349 attempts under that fix, and settle under this one.
+
+## The oracle is blind to custody
+
+The estate oracle proves two things: both sides converge, and no bytes are
+lost. Custody -- which folder a file belongs to, and which record owns a
+directory -- is neither. Defects AA, AB and AC are all custody defects, and
+every one of them passes the oracle: the bytes are right, both sides agree, and
+the file is in the wrong folder consistently everywhere. That is why the whole
+family was found by reading the code and probing rather than by running seeds,
+and why a clean estate of forty thousand seeds said nothing about it.
+
+The check the sweep is missing, alongside `assert_no_entry_is_stranded`: every
+materialized child sits inside a directory that some FOLDER record holds, and
+no two folder records resolve to one directory. Until it exists, this class
+will keep being found by hand. Named by public-html-0e, 2026-09-05.
+
+## Still open, found by review probes (2026-09-05, public-html-0e)
+
+All three are pre-existing and none is caused by the AB or AC fixes. Recorded
+here so they are not rediscovered a fourth time.
+
+**B1 -- a child the server moves INTO a parked folder loops for ever.** The
+hold added for Defect AB keys on the folder a child is LEAVING
+(`local_placement().parent`), so a child whose new parent is the parked folder
+is not held: the round plans a `move_local` into it, the parent gate answers
+Overtaken, the record is unchanged, and it is planned again every pass --
+forever-loop shape 2, never quiet. `shadowed` has the same blind spot for
+`OutOfScope`. The fix consistent with "children wait with the parent" is to
+hold an entry whose REMOTE parent is in the set as well as its local one.
+
+**B2 -- `unmaterialize_and_park` abandons a FOLDER's directory and lies about
+it.** `vfs.fingerprint` of a directory is None, so the park never moves the
+directory: it clears `synced_placement`, sets `Unsyncable`, and raises "moved
+to the trash" while nothing was trashed. The record then says there is no
+directory while the directory stands at the old name with the children inside
+it. On HEAD a later edit to one of those children is uploaded as a NEW file in
+a NEW server folder and the original is deleted server-side; with the AB hold
+in place the edit is never synced at all and the device reports itself quiet.
+Neither is right, and this is the state that makes AB's `no_directory`
+condition unpinnable today.
+
+**B3 -- `download` has no parent-materialized gate and MINTS the parent
+directory.** `create_local_folder` and `move_local` both refuse to act when the
+parent is not on this disk; `download` does not, and committing a file creates
+its missing parents under whatever name the parent record wears. This is the
+file half of Defect AB -- reachable with a merely `PendingDownload` parent, not
+only an `Unsyncable` one -- and it is what the abandoned third AC fix was
+unknowingly reading.
+
 ## Windows, on a real NTFS disk
 
 A Windows 11 ARM64 test VM (UTM on the Mac mini; see the memory note
