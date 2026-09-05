@@ -19,6 +19,12 @@
  *
  * Test seams: $driver_factory here, and the command runner on RelaySsh::$runner.
  *
+ * @version 2.0 - completeBirth(): a relay born from user-data reports in over HTTPS
+ *                (specs/relay_without_a_shell.md); the plane pins its identity only
+ *                after the provider's address answers a pinned ping, then writes the
+ *                row, pushes the map as the GATE, requests reverse DNS and marks the
+ *                run done. registerBornRelay() is the row for such a relay: an
+ *                identity pin and a public address, no tunnel, no ssh fields
  * @version 1.9 - the provisioning bundle carries provisioning/bin/, the prebuilt
  *                relay-sealer binaries, and no longer carries the sealer's Go source.
  *                The relay does not install a Go toolchain or compile anything;
@@ -44,7 +50,11 @@
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provision_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySsh.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayClient.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_compute/LinodeComputeDriver.php'));
+
+/** A birth report the plane will not act on. The message is safe to answer with. */
+class RelayBirthRefused extends Exception {}
 
 class RelayCloudProvisioner {
 
@@ -506,6 +516,154 @@ class RelayCloudProvisioner {
 			return 'relay upgraded (relay row #' . intval($relay->key) . ')';
 		}
 		return 'relay provisioned (relay row #' . intval($relay->key) . ')';
+	}
+
+	// ------------------------------------------------------------------- birth
+
+	/**
+	 * A relay born from user-data has reported in. RelayBirthEndpoint has
+	 * already checked the token, the address and the report's own signature;
+	 * this is steps 3 and 4 of the spec's birth sequence, and it is where the
+	 * plane first TRUSTS the identity:
+	 *
+	 *   3. a pinned GET /relay/ping to the provider's address with the reported
+	 *      fingerprint - only when that answers is the pin written, the row
+	 *      updated, the map hash cleared and the fragment pushed. The push is
+	 *      the gate: a run whose fragment did not land is not done.
+	 *   4. reverse DNS is requested, the run is done, its credentials erased.
+	 *
+	 * Throws RelayBirthRefused with a plain reason when the relay cannot be
+	 * believed or the map did not land; the run stays where it was, so the
+	 * relay's retries (the first-boot script posts six times) get another go.
+	 *
+	 * @param array $report the verified report: run_id, public_ip, identity_public_key,
+	 *                      identity_fingerprint, relay_version, postfix, listener_443
+	 */
+	public function completeBirth(RelayCloudProvision $run, array $report): MailboxRelay {
+		$public_ip = trim((string)$report['public_ip']);
+		$fingerprint = trim((string)$report['identity_fingerprint']);
+		$mail_hostname = strtolower(trim((string)$run->get('rcp_mail_hostname')));
+
+		// 3a. Does the machine at the provider's address hold the key the report
+		//     carried? Signed as tenant main with this deployment's client identity,
+		//     which the user-data put in the relay's registry.
+		$probe = new RelayClient($public_ip, $fingerprint, 'main', RelayClientIdentity::KIND_CLIENT);
+		try {
+			$ping = $probe->ping();
+		} catch (RelayClientException $e) {
+			throw new RelayBirthRefused('The relay at ' . $public_ip . ' did not answer a pinned ping ('
+				. $e->failure_class . '): ' . $e->getMessage());
+		}
+		$reported = (string)($ping['identity']['identity_fingerprint'] ?? '');
+		if ($reported !== '' && $reported !== $fingerprint) {
+			throw new RelayBirthRefused('The relay answered with a different identity than its report carried.');
+		}
+
+		// 3b. The row: the pin and the address. Nothing about a tunnel.
+		$had_row = $this->existingRowFor($run) !== null;
+		$relay = $this->registerBornRelay($run, $public_ip, $fingerprint, (string)$report['identity_public_key'], $mail_hostname);
+
+		// 3c. The map push is the gate. A relay with no fragment routes nothing,
+		//     and the hash-skip would read an unchanged fragment as delivered.
+		$relay->set('mrl_map_content_hash', null);
+		$relay->save();
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayMapSync.php'));
+		$push = RelayMapSync::push($relay, true);
+		if (($push['status'] ?? '') !== 'success') {
+			// A refused birth leaves no relay behind: a row minted for this
+			// report is removed, so the deployment does not gain an enabled relay
+			// nothing has routed to, and the relay's next report starts clean. An
+			// upgrade's existing row keeps the new pin - the machine did answer.
+			if (!$had_row) {
+				$relay->permanent_delete();
+			}
+			throw new RelayBirthRefused('The relay answered, but the address list did not land on it: '
+				. (string)($push['message'] ?? 'unknown reason'));
+		}
+
+		// The relay's health, from the ping already in hand: stored so the Setup
+		// tab reads the born relay's state the moment the run finishes.
+		try {
+			$relay->pollHealth();
+		} catch (\Throwable $e) {
+			error_log('RelayCloudProvisioner: post-birth health poll failed: ' . $e->getMessage());
+		}
+
+		// 4. Reverse DNS through the provider API. Providers require the forward
+		//    A record first, which is usually unpublished at this moment - a
+		//    refusal is expected and the Setup tab's PTR check carries the
+		//    instruction from here.
+		if ((string)$run->get('rcp_instance_id') !== '') {
+			try {
+				$this->driverFor($run)->setReverseDns((string)$run->get('rcp_instance_id'), $public_ip, $mail_hostname);
+			} catch (\Throwable $e) {
+				error_log('RelayCloudProvisioner: setReverseDns deferred (' . $e->getMessage()
+					. ') - expected until the mail hostname A record resolves.');
+			}
+		}
+
+		$run->spendRunToken();
+		$run->set('rcp_mrl_mailbox_relay_id', intval($relay->key));
+		$run->set('rcp_status', 'done');
+		$run->set('rcp_error', null);
+		$run->eraseCredentials();
+		$run->save();
+		return $relay;
+	}
+
+	/**
+	 * The MailboxRelay row for a relay without a shell. Reuses the row an
+	 * upgrade names, or the row whose instance id this is (never a second row
+	 * for one machine); otherwise a fresh one, born enabled. Carries the
+	 * identity pin and the public address; none of the tunnel or ssh fields,
+	 * which stay empty and so keep every RelaySsh path off this row.
+	 */
+	public function registerBornRelay(RelayCloudProvision $run, string $public_ip, string $fingerprint,
+			string $identity_public_key, string $mail_hostname): MailboxRelay {
+		$relay = $this->existingRowFor($run);
+		if ($relay === null) {
+			$relay = new MailboxRelay(NULL);
+			// Born enabled: it starts pulling and receives its address list
+			// immediately, so it is ready before any MX points at it.
+			$relay->set('mrl_is_enabled', true);
+		}
+		$relay->set('mrl_name', $mail_hostname);
+		$relay->set('mrl_public_ip', substr($public_ip, 0, 64));
+		$relay->set('mrl_identity_fingerprint', substr($fingerprint, 0, 64));
+		$relay->set('mrl_identity_public_key', substr($identity_public_key, 0, 64));
+		$relay->set('mrl_tenant_slug', 'main');
+		$relay->set('mrl_mx_hostname', substr($mail_hostname, 0, 255));
+		$relay->set('mrl_authserv_id', substr($mail_hostname, 0, 255));
+		$relay->set('mrl_spool_path', '/var/spool/joinery-relay/main');
+		// An updated relay is a new machine with a new identity: the pin above
+		// replaced the old one, and any tunnel-era fields a predecessor row
+		// carried are cleared so nothing reads this row as a tunnel relay.
+		foreach (array('mrl_host', 'mrl_ssh_user', 'mrl_ssh_key_path', 'mrl_wg_public_key', 'mrl_wg_endpoint', 'mrl_wg_ip') as $field) {
+			$relay->set($field, null);
+		}
+		$relay->set('mrl_last_health_failure', null);
+		$relay->set('mrl_cloud_provider', (string)$run->get('rcp_provider'));
+		$relay->set('mrl_cloud_instance_id', (string)$run->get('rcp_instance_id'));
+		$relay->save();
+		$relay->ensureTransportKeypair();
+		return $relay;
+	}
+
+	/**
+	 * The relay row a run already belongs to: the one an upgrade names, or the
+	 * one carrying this run's instance id. Null for a first birth.
+	 */
+	private function existingRowFor(RelayCloudProvision $run): ?MailboxRelay {
+		$relay = $run->isUpgrade() ? $run->relay() : null;
+		if ($relay === null && (string)$run->get('rcp_instance_id') !== '') {
+			$existing = new MultiMailboxRelay(array('deleted' => false));
+			foreach ($existing as $row) {
+				if ((string)$row->get('mrl_cloud_instance_id') === (string)$run->get('rcp_instance_id')) {
+					return $row;
+				}
+			}
+		}
+		return $relay;
 	}
 
 	// --------------------------------------------------------------- plumbing

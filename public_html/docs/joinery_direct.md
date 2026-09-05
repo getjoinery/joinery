@@ -331,19 +331,26 @@ SRV record pointing at the origin box would advertise in public DNS exactly the
 address the relay exists to conceal, so the target is the relay — the same
 posture MX already takes.
 
-The relay serves the channel from the same Go binary that seals its mail, in a
-third mode (`relay-sealer direct-serve`), installed as the `joinery-direct`
-service by `provision_relay.sh` from **relay version 2.5**:
+The relay serves the channel from the same Go binary that seals its mail. A
+relay built by `provision_relay.sh` 3.0 runs `relay-sealer relay-serve` as the
+`joinery-relay-serve` service: one listener on 443 whose certificate is chosen
+by SNI, the mail hostname's ACME certificate for Direct callers and the relay's
+own identity certificate for its plane. A relay built by 2.x runs
+`relay-sealer direct-serve` as the `joinery-direct` service, with the egress
+listener bound to its WireGuard address. Either way:
 
 - **Inbound, `:443`** — the public endpoint. TLS is terminated in-process with an
   ACME certificate obtained over TLS-ALPN-01 on that same port; there is no web
   server and no certbot on the machine, because the relay's smallness is the
   security property. A verified delivery is written to the tenant's spool as a
   `.direct` container beside the `.seal` blobs mail already uses, and travels the
-  WireGuard pull that already exists — no new transport and no new credential.
-- **Outbound, tunnel-only** — an egress listener on the WireGuard address. The
-  box builds and signs a complete request and the relay makes it, so the
-  recipient sees the relay's address and never the box's.
+  same pull mail does — no new transport and no new credential.
+- **Outbound** — `POST /egress`. The box builds and signs a complete request and
+  the relay makes it, so the recipient sees the relay's address and never the
+  box's. On a 3.0 relay the route is on the public listener and carries the
+  tenant's signed envelope (`RelayProtocol`); on a 2.x relay it is reachable only
+  over the tunnel. The target rules (no private, loopback, link-local or
+  reserved address; port 443 only) are the same on both.
 
 The split is **relay transports, box authenticates and authorizes**. Freshness,
 replay, manifest bounds, rate limits and spool caps let the relay refuse obvious
@@ -380,7 +387,8 @@ the relay's `direct_protocol.go` would not throw anywhere — every delivery wou
 simply fail verification, which a sender reads as "unreachable" and downgrades to
 the fallback. `plugins/mailbox/tests/direct_wire_gate.sh` has PHP emit the signing
 bytes and Go emit them for the same deliberately awkward fixture and diffs the
-two, on every `safe` run.
+two, on every `safe` run. The same gate pins the relay API's signed request
+envelope and birth report (`RelayProtocol.php` against `relay_protocol.go`).
 
 A tenant whose relay is behind simply has no capability record published yet, so
 senders fall back and nothing breaks. Publishing the SRV record is the last step
@@ -465,8 +473,10 @@ and a mark.
 - The safe outbound path every SRV target is reached through:
   `includes/SafeHttpClient.php`.
 - The relay's side: `plugins/mailbox/provisioning/relay-sealer/direct_*.go`
-  (endpoint, capability lookup, state, crypto, spool artifact, egress), installed
-  as the `joinery-direct` service by `provision_relay.sh`.
+  (endpoint, capability lookup, state, crypto, spool artifact, egress), served by
+  `relay-serve` (the `joinery-relay-serve` service on a 3.0 relay, beside the
+  signed `/relay/` API in `relay_*.go`) or by `direct-serve` (the `joinery-direct`
+  service on a 2.x relay).
 - The box's side of the relay path: `DirectRelayEgress` (outbound, registered
   into `JoineryDirect`), `DirectRelayIngest` (inbound, called by
   `RelaySpoolConsumer` for `.direct` entries), and the Direct block of the

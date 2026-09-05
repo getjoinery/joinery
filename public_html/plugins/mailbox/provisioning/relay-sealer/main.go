@@ -37,6 +37,18 @@
 // a tunnel-only egress listener that sends a tenant's own box-signed requests
 // out from the relay's address. See direct_serve.go.
 //
+// The RELAY API (specs/relay_without_a_shell.md) is the same listener with the
+// plane's routes added and no tunnel:
+//
+//	relay-sealer relay-serve --hostname <mail hostname>     the listener (unprivileged)
+//	relay-sealer apply-requests                             root: react to filed requests
+//	relay-sealer collect-status                             root: privileged ping facts, on a timer
+//	relay-sealer tenant-add|tenant-set-domains|tenant-remove   root: the registry, by hand or by the build
+//	relay-sealer identity-init                              create the identity key + certificate
+//	relay-sealer birth-report                               sign and post the birth report
+//
+// See relay_serve.go, relay_apply.go, relay_identity.go, relay_birth.go.
+//
 // Exit codes follow Postfix pipe conventions:
 //
 //	0  = delivered / accepted (sealed + spooled, or forwarded, or silently discarded)
@@ -79,6 +91,26 @@ func main() {
 	// merge-maps is — an SMTP recipient is always an address, never a bare word.
 	if len(os.Args) > 1 && os.Args[1] == "direct-serve" {
 		os.Exit(runDirectServe())
+	}
+	// The relay API (specs/relay_without_a_shell.md): one listener on 443 that
+	// serves Direct AND the signed /relay/ routes the plane pulls, pushes and
+	// pings through, plus the root-side verbs that react to what the listener
+	// files. All dispatched on a literal first argument, as above.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "relay-serve":
+			os.Exit(runRelayServe())
+		case "apply-requests":
+			os.Exit(runApplyRequests())
+		case "collect-status":
+			os.Exit(runCollectStatus())
+		case "tenant-add", "tenant-set-domains", "tenant-remove":
+			os.Exit(runTenantCommand(os.Args[1], os.Args[2:]))
+		case "identity-init":
+			os.Exit(runIdentityInit())
+		case "birth-report":
+			os.Exit(runBirthReport())
+		}
 	}
 	os.Exit(run())
 }

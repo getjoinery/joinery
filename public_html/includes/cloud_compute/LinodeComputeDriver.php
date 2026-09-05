@@ -6,6 +6,12 @@
  * instances it creates are billed by Linode to the customer. Requires the
  * 'linodes:read_write' OAuth scope.
  *
+ * @version 1.3 - user_data (the Metadata service; cloud-init, base64) and a StackScript
+ *                fallback on createInstance/rebuildInstance, regionSupportsMetadata(),
+ *                ensureStackScript() - how a relay is born configured
+ *                (specs/relay_without_a_shell.md). No root password when user-data
+ *                is the whole mechanism: the driver mints one the platform never
+ *                sees, because the API insists on one.
  * @version 1.2 - rebuildInstance().
  */
 
@@ -34,7 +40,7 @@ class LinodeComputeDriver implements CloudComputeProvider {
 	}
 
 	public function createInstance(array $opts): array {
-		foreach (array('label', 'region', 'type', 'image', 'root_pass') as $required) {
+		foreach (array('label', 'region', 'type', 'image') as $required) {
 			if (empty($opts[$required])) {
 				throw new CloudComputeException('createInstance missing required option: ' . $required);
 			}
@@ -44,12 +50,13 @@ class LinodeComputeDriver implements CloudComputeProvider {
 			'region'    => $opts['region'],
 			'type'      => $opts['type'],
 			'image'     => $opts['image'],
-			'root_pass' => $opts['root_pass'],
+			'root_pass' => self::rootPassword($opts),
 			'booted'    => true,
 		);
 		if (!empty($opts['authorized_keys'])) {
 			$body['authorized_keys'] = array_values($opts['authorized_keys']);
 		}
+		$this->applyFirstBoot($body, $opts);
 		return $this->normalize($this->request('POST', 'linode/instances', $body));
 	}
 
@@ -58,23 +65,93 @@ class LinodeComputeDriver implements CloudComputeProvider {
 	}
 
 	public function rebuildInstance(string $instance_id, array $opts): array {
-		foreach (array('image', 'root_pass') as $required) {
-			if (empty($opts[$required])) {
-				throw new CloudComputeException('rebuildInstance missing required option: ' . $required);
-			}
+		if (empty($opts['image'])) {
+			throw new CloudComputeException('rebuildInstance missing required option: image');
 		}
 		$body = array(
 			'image'     => $opts['image'],
-			'root_pass' => $opts['root_pass'],
+			'root_pass' => self::rootPassword($opts),
 			'booted'    => true,
 		);
 		if (!empty($opts['authorized_keys'])) {
 			$body['authorized_keys'] = array_values($opts['authorized_keys']);
 		}
+		$this->applyFirstBoot($body, $opts);
 		// Linode keeps the Linode object and its IPv4 across a rebuild; only the
 		// disks and configuration profiles are replaced.
 		return $this->normalize($this->request('POST',
 			'linode/instances/' . rawurlencode($instance_id) . '/rebuild', $body));
+	}
+
+	/**
+	 * Does a region offer the Metadata service, which is what carries cloud-init
+	 * user-data? Regions without it take the StackScript fallback.
+	 */
+	public function regionSupportsMetadata(string $region): bool {
+		$info = $this->request('GET', 'regions/' . rawurlencode($region));
+		$capabilities = isset($info['capabilities']) && is_array($info['capabilities']) ? $info['capabilities'] : array();
+		return in_array('Metadata', $capabilities, true);
+	}
+
+	/**
+	 * Find this account's private StackScript by label, or create it. Returns
+	 * its id. The script's content is compared and updated when it drifted, so
+	 * a release that changes the first-boot template reaches the next run.
+	 *
+	 * @param string[] $images the image ids the script may run on
+	 */
+	public function ensureStackScript(string $label, string $script, array $images): string {
+		$filter = json_encode(array('label' => $label, 'mine' => true));
+		$listing = $this->request('GET', 'linode/stackscripts', null, array('X-Filter' => $filter));
+		foreach ((array)($listing['data'] ?? array()) as $existing) {
+			if ((string)($existing['label'] ?? '') !== $label) {
+				continue;
+			}
+			$id = (string)($existing['id'] ?? '');
+			if ($id !== '' && ((string)($existing['script'] ?? '') !== $script
+					|| array_values((array)($existing['images'] ?? array())) !== array_values($images))) {
+				$this->request('PUT', 'linode/stackscripts/' . rawurlencode($id),
+					array('script' => $script, 'images' => array_values($images)));
+			}
+			if ($id !== '') {
+				return $id;
+			}
+		}
+		$created = $this->request('POST', 'linode/stackscripts', array(
+			'label'       => $label,
+			'description' => 'Joinery relay first boot (specs/relay_without_a_shell.md); managed by the plane.',
+			'images'      => array_values($images),
+			'is_public'   => false,
+			'script'      => $script,
+		));
+		return (string)($created['id'] ?? '');
+	}
+
+	/**
+	 * user_data goes to the Metadata service base64-encoded; a StackScript rides
+	 * as its id plus the UDF values. Both are fields of the same create/rebuild
+	 * call, so neither is a provider process of its own.
+	 */
+	private function applyFirstBoot(array &$body, array $opts): void {
+		if (!empty($opts['user_data'])) {
+			$body['metadata'] = array('user_data' => base64_encode((string)$opts['user_data']));
+		}
+		if (!empty($opts['stackscript_id'])) {
+			$body['stackscript_id'] = (int)$opts['stackscript_id'];
+			$body['stackscript_data'] = (array)($opts['stackscript_data'] ?? array());
+		}
+	}
+
+	/**
+	 * The API requires a root password on create and rebuild. When the caller
+	 * has none to give - a relay is reached only through its own API and the
+	 * platform records no root password - one is minted here and forgotten.
+	 */
+	private static function rootPassword(array $opts): string {
+		if (!empty($opts['root_pass'])) {
+			return (string)$opts['root_pass'];
+		}
+		return 'Aa1!' . bin2hex(random_bytes(20));
 	}
 
 	public function deleteInstance(string $instance_id): void {
@@ -118,12 +195,12 @@ class LinodeComputeDriver implements CloudComputeProvider {
 	 * with the Linode error reason on failure. A 401 is surfaced with a
 	 * distinguishable message so callers can mark the grant revoked.
 	 */
-	private function request(string $method, string $path, ?array $body = null): array {
+	private function request(string $method, string $path, ?array $body = null, array $extra_headers = array()): array {
 		$options = array(
-			'headers' => array(
+			'headers' => array_merge(array(
 				'Authorization' => 'Bearer ' . $this->access_token,
 				'Accept'        => 'application/json',
-			),
+			), $extra_headers),
 		);
 		if ($body !== null) {
 			$options['json'] = $body;

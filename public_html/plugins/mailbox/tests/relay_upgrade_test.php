@@ -147,55 +147,72 @@ class RelayUpgradeTest {
 	/**
 	 * The shard case is a cross-tenant leak, not a cosmetic difference: several
 	 * deployments share a shard's Postfix queue, so its depth is a readout of every
-	 * other tenant's mail volume. Asserted by running the real tenant shell at both
-	 * tenant counts.
+	 * other tenant's mail volume. Asserted by running the real relay listener at
+	 * both tenant counts, with a collector file that claims a queue.
 	 */
 	private function assertQueueGate() {
-		$shell = $this->extractTenantShell();
-		if ($shell === null) {
+		require_once(__DIR__ . '/lib/relay_ping_probe.php');
+		$binary = RelayPingProbe::binary();
+		if ($binary === null) {
+			harness_skip('queue depth is gated on a fleet-of-one',
+				'no prebuilt relay-sealer for this machine and no go toolchain');
 			return;
 		}
-
-		$home = sys_get_temp_dir() . '/joinery_relay_home_' . getmypid();
-		@mkdir($home . '/tenants/main', 0777, true);
-		$script = $this->writeShellWithHome($shell, $home);
-
-		$one = $this->runPing($script, 'main');
-		check(is_array($one), 'the ping answers JSON with one tenant',
-			'answered: ' . substr((string)json_encode($one), 0, 200));
-		if (is_array($one)) {
-			check(array_key_exists('queue', $one),
-				'a fleet-of-one reports its queue depth — an upgrade destroys it, so it must be visible');
-			check(is_int($one['queue'] ?? null) || is_numeric($one['queue'] ?? null),
-				'the queue depth is a number');
-			check(($one['sole'] ?? null) === true, 'a fleet-of-one reports sole = true');
+		$probe = new RelayPingProbe($binary);
+		check($probe->addTenant('main'), 'tenant main registers');
+		// What root's collector would have written: a queue of three.
+		$probe->writePrivileged(array(
+			'collected_utc' => gmdate('c'),
+			'services' => array('rspamd' => array('active' => 'active')),
+			'milters' => array('rspamd' => true, 'opendkim' => true, 'opendmarc' => true),
+			'contract_ok' => true,
+			'postfix' => array('connections_1h' => 0, 'queue_depth' => 3, 'accepted' => 1, 'rejected' => 0, 'deferred' => 0, 'bounced' => 0),
+			'tenant_count' => 1,
+		));
+		if (!$probe->start()) {
+			check(false, 'the relay listener starts', (string)@file_get_contents($probe->home . '/serve.log'));
+			$probe->stop();
+			return;
 		}
+		try {
+			$one = $probe->ping('main');
+			check(is_array($one), 'the ping answers JSON with one tenant');
+			if (is_array($one)) {
+				check(array_key_exists('queue', $one),
+					'a fleet-of-one reports its queue depth — an upgrade destroys it, so it must be visible');
+				check(is_int($one['queue'] ?? null) || is_numeric($one['queue'] ?? null),
+					'the queue depth is a number');
+				check(($one['sole'] ?? null) === true, 'a fleet-of-one reports sole = true');
+				check(array_key_exists('spool', $one), 'a fleet-of-one reports its spool group');
+			}
 
-		@mkdir($home . '/tenants/other', 0777, true);
-		$two = $this->runPing($script, 'main');
-		check(is_array($two), 'the ping still answers JSON with two tenants');
-		if (is_array($two)) {
-			check(!array_key_exists('queue', $two),
-				'a SHARED shard reports no queue depth — one tenant\'s volume is not another\'s to read');
-			// The wipe guard, asserted against a real second tenant on disk. This
-			// is the answer that stops one tenant destroying another's mail.
-			check(($two['sole'] ?? null) === false, 'a SHARED shard reports sole = false');
-			// The gate must not cost the rest of the answer.
-			check(array_key_exists('services', $two) && array_key_exists('milters', $two),
-				'withholding the queue leaves the service liveness intact');
+			check($probe->addTenant('other', 'other.test'), 'a second tenant registers');
+			$two = $probe->ping('main');
+			check(is_array($two), 'the ping still answers JSON with two tenants');
+			if (is_array($two)) {
+				check(!array_key_exists('queue', $two),
+					'a SHARED shard reports no queue depth — one tenant\'s volume is not another\'s to read');
+				check(!array_key_exists('spool', $two), 'a SHARED shard reports no spool group');
+				// The wipe guard, asserted against a real second tenant on disk. This
+				// is the answer that stops one tenant destroying another's mail.
+				check(($two['sole'] ?? null) === false, 'a SHARED shard reports sole = false');
+				// The gate must not cost the rest of the answer.
+				check(array_key_exists('services', $two) && array_key_exists('milters', $two),
+					'withholding the queue leaves the service liveness intact');
+			}
+
+			// No registry at all: the tenant's key is gone with it, so the relay
+			// cannot even authenticate the asker. "Cannot tell" is not an answer
+			// that authorises a wipe — it is no answer, and readHealth reads it as
+			// unreachable, which offers nothing.
+			$probe->dropRegistry();
+			list($code, $raw) = $probe->pingRaw('main');
+			check($code === 401, 'a relay with no tenant registry refuses the ping outright', 'code ' . $code);
+			$none = MailboxRelay::readHealth($raw, 1);
+			check($none['sole'] === null, 'an unanswered ping leaves sole null, never true');
+		} finally {
+			$probe->stop();
 		}
-
-		// No registry at all — an unreadable or missing tenant directory must
-		// answer false, never true: "cannot tell" may not authorise a wipe.
-		$this->rmTree($home . '/tenants');
-		$none = $this->runPing($script, 'main');
-		if (is_array($none)) {
-			check(($none['sole'] ?? null) === false,
-				'a relay with no readable tenant registry reports sole = false');
-		}
-
-		@unlink($script);
-		$this->rmTree($home);
 	}
 
 	/**
@@ -448,43 +465,6 @@ class RelayUpgradeTest {
 	}
 
 	// ----------------------------------------------------------------- helpers
-
-	/** The tenant shell, lifted out of the provisioning script that writes it. */
-	private function extractTenantShell(): ?string {
-		$source = (string)@file_get_contents(
-			PathHelper::getIncludePath('plugins/mailbox/provisioning/provision_relay.sh'));
-		if ($source === '') {
-			check(false, 'provision_relay.sh is readable');
-			return null;
-		}
-		if (!preg_match('/^if write_if_changed "\$\{TENANT_SHELL\}" 755 <<\'TENANTSHELL\'\n(.*?)\nTENANTSHELL$/ms', $source, $m)) {
-			check(false, 'the tenant shell can be extracted from provision_relay.sh');
-			return null;
-		}
-		return $m[1];
-	}
-
-	/**
-	 * Write the shell to a temp file with its relay home repointed, so the tenant
-	 * registry can be staged without a relay.
-	 */
-	private function writeShellWithHome(string $shell, string $home): string {
-		$shell = preg_replace('#^RELAY_HOME="/opt/joinery-relay"$#m',
-			'RELAY_HOME=' . escapeshellarg($home), $shell, 1);
-		$path = tempnam(sys_get_temp_dir(), 'joinery_upgrade_shell_');
-		file_put_contents($path, $shell);
-		return $path;
-	}
-
-	/** Run one ping and decode it, or null if it did not answer JSON. */
-	private function runPing(string $script, string $slug): ?array {
-		$out = array();
-		$code = 0;
-		exec('SSH_ORIGINAL_COMMAND=joinery-ping bash ' . escapeshellarg($script)
-			. ' ' . escapeshellarg($slug) . ' 2>&1', $out, $code);
-		$decoded = json_decode(trim(implode("\n", $out)), true);
-		return is_array($decoded) ? $decoded : null;
-	}
 
 	private function rmTree(string $dir): void {
 		if (!is_dir($dir)) {

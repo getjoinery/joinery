@@ -483,30 +483,6 @@
 			exit(1);
 		}
 
-		// The support bundle rides beside the agent artifact: the signed script
-		// tree a machine with NO SITE resolves its primitives against. Built
-		// here, while the tree is the tree that is about to ship and before the
-		// core manifest is written, so the tarball is itself covered by the core
-		// manifest.
-		//
-		// SHELVED 2026-08-28 — no siteless consumer on the current rollout path
-		// (relay agent-free; getjoinery/jeremytunnell move as full-site nodes);
-		// reactivate only if shared-host in-place hardening is chosen. The
-		// builder and its tests stand and are green — the pipeline simply does
-		// not call it, because a mechanism that runs on every publish and is
-		// consumed by nobody is a mechanism nobody watches. The switch is
-		// SupportBundlePublisher::hasConsumer(), and it is documented there.
-		//
-		// When it does run again: a bundle problem is a warning rather than a
-		// refusal, unlike a stale agent. A stale agent runs on every node in the
-		// fleet; a stale bundle affects only machines with no site, and carrying
-		// the previous one forward leaves those machines exactly where they were
-		// rather than blocking a release the rest of the fleet needs.
-		if (SupportBundlePublisher::hasConsumer()) {
-			publish_output("Bundling agent support bundle...");
-			$support_bundle = SupportBundlePublisher::publish($full_site_dir, 'publish_output');
-		}
-
 		// =====================================================
 		// Cross-compile the relay sealer into the mailbox plugin
 		// =====================================================
@@ -538,6 +514,28 @@
 				publish_output("Fix the sealer build and publish again. Nothing has been written.");
 				exit(1);
 			}
+		}
+
+		// The support bundle rides beside the agent artifact: the signed script
+		// tree a machine with NO SITE resolves its primitives against. Built
+		// here, while the tree is the tree that is about to ship and before the
+		// core manifest is written, so the tarball is itself covered by the core
+		// manifest.
+		//
+		// The switch is SupportBundlePublisher::hasConsumer(), documented there.
+		//
+		// Runs AFTER the relay sealer build above: the bundle carries the
+		// prebuilt sealer binaries (the relay is born from this bundle), so
+		// they must be current before they are tarred.
+		//
+		// A bundle problem is a warning rather than a refusal, unlike a stale
+		// agent. A stale agent runs on every node in the
+		// fleet; a stale bundle affects only machines with no site, and carrying
+		// the previous one forward leaves those machines exactly where they were
+		// rather than blocking a release the rest of the fleet needs.
+		if (SupportBundlePublisher::hasConsumer()) {
+			publish_output("Bundling agent support bundle...");
+			$support_bundle = SupportBundlePublisher::publish($full_site_dir, 'publish_output');
 		}
 
 		// Write the new version to public_html/VERSION so it ships in the tarball and

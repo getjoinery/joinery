@@ -17,6 +17,9 @@
  *   - The relay reconcile scheduled task (cron, operator context) dispatches
  *     the flagged jobs, reconciles finished ones, and re-checks entitlement.
  *
+ * @version 1.4 - enrollment carries the tenant's relay client public key; applyTenant()
+ *                drives a shard without a shell through its operator-signed tenant
+ *                routes, and a tunnel shard through the job path (specs/relay_without_a_shell.md)
  * @version 1.3
  */
 
@@ -62,29 +65,45 @@ class FleetService {
 	 * as-is so a retried enroll never double-allocates. Throws
 	 * FleetServiceException with a user-facing message on any refusal.
 	 */
-	public static function enroll(int $user_id, string $wg_public_key, string $pull_public_key): MailboxFleetSlot {
+	/**
+	 * Enroll a tenant. $keys carries the tenant's relay client public key
+	 * (`public_key`, Ed25519, base64 - what a shard without a shell holds in its
+	 * registry) and, for a tunnel shard, the legacy `wg_public_key` and
+	 * `pull_public_key`. The public key is required; the tunnel keys are
+	 * accepted when given and validated when present.
+	 */
+	public static function enroll(int $user_id, array $keys): MailboxFleetSlot {
 		if (!self::enabled()) {
 			throw new FleetServiceException('The hosted relay fleet is not accepting enrollments.');
 		}
 		if (!self::entitled($user_id)) {
 			throw new FleetServiceException('Your subscription does not include a hosted relay slot.');
 		}
-		if (!preg_match('#^[A-Za-z0-9+/]{43}=$#', $wg_public_key)) {
+		$public_key = trim((string)($keys['public_key'] ?? ''));
+		$wg_public_key = trim((string)($keys['wg_public_key'] ?? ''));
+		$pull_public_key = trim((string)($keys['pull_public_key'] ?? ''));
+		$decoded = base64_decode($public_key, true);
+		if ($decoded === false || strlen($decoded) !== SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES) {
+			throw new FleetServiceException('public_key is not a valid Ed25519 public key.');
+		}
+		if ($wg_public_key !== '' && !preg_match('#^[A-Za-z0-9+/]{43}=$#', $wg_public_key)) {
 			throw new FleetServiceException('wg_public_key is not a valid WireGuard public key.');
 		}
-		if (!preg_match('/^(ssh-ed25519|ssh-rsa|ecdsa-[a-z0-9-]+) [A-Za-z0-9+\/=]+( [^\s]+)?$/', trim($pull_public_key))) {
+		if ($pull_public_key !== '' && !preg_match('/^(ssh-ed25519|ssh-rsa|ecdsa-[a-z0-9-]+) [A-Za-z0-9+\/=]+( [^\s]+)?$/', $pull_public_key)) {
 			throw new FleetServiceException('pull_public_key is not a valid SSH public key.');
 		}
 
 		$existing = MailboxFleetSlot::activeForUser($user_id);
 		if ($existing !== null) {
-			// Refresh the keys (a re-enroll after the tenant regenerated either
-			// key re-provisions on the next reconcile pass).
-			$changed = trim($wg_public_key) !== trim((string)$existing->get('mft_wg_public_key'))
-				|| trim($pull_public_key) !== trim((string)$existing->get('mft_pull_public_key'));
+			// Refresh the keys (a re-enroll after the tenant regenerated a key
+			// re-registers it on the next reconcile pass).
+			$changed = $public_key !== trim((string)$existing->get('mft_public_key'))
+				|| $wg_public_key !== trim((string)$existing->get('mft_wg_public_key'))
+				|| $pull_public_key !== trim((string)$existing->get('mft_pull_public_key'));
 			if ($changed) {
-				$existing->set('mft_wg_public_key', trim($wg_public_key));
-				$existing->set('mft_pull_public_key', trim($pull_public_key));
+				$existing->set('mft_public_key', $public_key);
+				$existing->set('mft_wg_public_key', $wg_public_key);
+				$existing->set('mft_pull_public_key', $pull_public_key);
 				$existing->set('mft_status', MailboxFleetSlot::STATUS_PROVISIONING);
 				$existing->set('mft_last_job_id', null);
 				$existing->save();
@@ -102,8 +121,9 @@ class FleetService {
 		$slot->set('mft_usr_user_id', $user_id);
 		$slot->set('mft_status', MailboxFleetSlot::STATUS_PROVISIONING);
 		$slot->set('mft_tunnel_ip', self::allocateTunnelIp($shard));
-		$slot->set('mft_wg_public_key', trim($wg_public_key));
-		$slot->set('mft_pull_public_key', trim($pull_public_key));
+		$slot->set('mft_public_key', $public_key);
+		$slot->set('mft_wg_public_key', $wg_public_key);
+		$slot->set('mft_pull_public_key', $pull_public_key);
 		$slot->save();
 
 		// Slug + MX hostname derive from the slot id (stable, unique, short).
@@ -175,6 +195,9 @@ class FleetService {
 			// is a per-tenant name and never appears on a stamp.
 			'authserv_id'     => (string)$shard->get('mfs_hostname'),
 			'shard_public_ip' => (string)$shard->get('mfs_public_ip'),
+			// A shard without a shell: the identity pin the tenant connects with.
+			// Empty on a tunnel shard, whose coordinates are the two lines below.
+			'identity_fingerprint' => (string)$shard->get('mfs_identity_fingerprint'),
 			'wg_endpoint'     => (string)$shard->get('mfs_wg_endpoint'),
 			'wg_public_key'   => (string)$shard->get('mfs_wg_public_key'),
 			'tunnel_ip'       => (string)$slot->get('mft_tunnel_ip'),
@@ -357,6 +380,69 @@ class FleetService {
 			$slot->set('mft_needs_domain_sync', false);
 			$slot->save();
 		}
+	}
+
+	// ---------------------------------------- tenant lifecycle (cron only)
+
+	/**
+	 * Perform one tenant lifecycle act for a slot: add_tenant | set_domains |
+	 * remove_tenant. On a shard without a shell this is one operator-signed
+	 * request to the shard's tenant routes and the slot's status moves on the
+	 * verdict, here and now. On a tunnel shard it is a dispatched job that
+	 * reconcile() folds in later. Returns true when the act was performed or
+	 * dispatched.
+	 */
+	public static function applyTenant(MailboxFleetSlot $slot, string $kind, array $extra = array()): bool {
+		$shard = new MailboxFleetShard(intval($slot->get('mft_mfs_shard_id')), TRUE);
+		if (trim((string)$shard->get('mfs_identity_fingerprint')) === '') {
+			return self::dispatchJob($slot, $kind, $extra) !== null;
+		}
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayClient.php'));
+		$slug = (string)$slot->get('mft_slug');
+		$client = RelayClient::forOperator((string)$shard->get('mfs_public_ip'), (string)$shard->get('mfs_identity_fingerprint'));
+		try {
+			switch ($kind) {
+				case 'add_tenant':
+					$verdict = $client->tenantAdd($slug, (string)$slot->get('mft_public_key'), $slot->verifiedDomains(), array(
+						'forward_hourly_limit' => intval($slot->get('mft_forward_hourly_limit')),
+						'spool_max_mib'        => intval($slot->get('mft_spool_max_mib')),
+						'spool_max_entries'    => intval($slot->get('mft_spool_max_entries')),
+					));
+					if (($verdict['status'] ?? '') === 'ok'
+							&& (string)$slot->get('mft_status') === MailboxFleetSlot::STATUS_PROVISIONING) {
+						$slot->set('mft_status', MailboxFleetSlot::STATUS_ACTIVE);
+						$slot->save();
+					}
+					break;
+				case 'set_domains':
+					$verdict = $client->tenantSetDomains($slug, $slot->verifiedDomains());
+					if (($verdict['status'] ?? '') === 'ok' && (bool)$slot->get('mft_needs_domain_sync')) {
+						$slot->set('mft_needs_domain_sync', false);
+						$slot->save();
+					}
+					break;
+				case 'remove_tenant':
+					$verdict = $client->tenantRemove($slug);
+					if (($verdict['status'] ?? '') === 'ok'
+							&& (string)$slot->get('mft_status') === MailboxFleetSlot::STATUS_RELEASED) {
+						$slot->set('mft_status', MailboxFleetSlot::STATUS_EVICTED);
+						$slot->save();
+					}
+					break;
+				default:
+					return false;
+			}
+		} catch (RelayClientException $e) {
+			error_log('FleetService: ' . $kind . ' for slot ' . $slot->key . ' failed (' . $e->failure_class . '): ' . $e->getMessage());
+			return false;
+		}
+		if (($verdict['status'] ?? '') !== 'ok') {
+			// A refusal (an undrained spool on remove, a bad domain) is the
+			// shard's answer; the next reconcile pass asks again.
+			error_log('FleetService: shard answered ' . $kind . ' for slot ' . $slot->key . ' with '
+				. (string)($verdict['status'] ?? '?') . ': ' . (string)($verdict['reason'] ?? ''));
+		}
+		return true;
 	}
 
 	// ------------------------------------------------- job dispatch (cron only)

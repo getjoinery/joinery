@@ -224,69 +224,75 @@ class RelayHealthTest {
 	}
 
 	/**
-	 * Extract joinery-tenant-shell from provision_relay.sh, run its ping, and read
-	 * the answer with the same parser production uses.
+	 * Start the REAL relay listener on a loopback port, ask it for its ping the
+	 * way the plane will (a signed request, the identity pinned), and read the
+	 * answer with the same parser production uses.
 	 */
 	private function assertPingShape() {
-		$script = PathHelper::getIncludePath('plugins/mailbox/provisioning/provision_relay.sh');
-		$source = (string)@file_get_contents($script);
-		check($source !== '', 'provision_relay.sh is readable');
-		if ($source === '') {
+		require_once(__DIR__ . '/lib/relay_ping_probe.php');
+		$binary = RelayPingProbe::binary();
+		if ($binary === null) {
+			harness_skip('the relay listener answers the shape this code parses',
+				'no prebuilt relay-sealer for this machine and no go toolchain');
 			return;
 		}
-
-		if (!preg_match('/^if write_if_changed "\$\{TENANT_SHELL\}" 755 <<\'TENANTSHELL\'\n(.*?)\nTENANTSHELL$/ms', $source, $m)) {
-			check(false, 'the tenant shell can be extracted from provision_relay.sh');
+		$probe = new RelayPingProbe($binary);
+		check($probe->addTenant('example'), 'a tenant can be registered on the probe relay');
+		if (!$probe->start()) {
+			check(false, 'the relay listener starts on a loopback port',
+				(string)@file_get_contents($probe->home . '/serve.log'));
+			$probe->stop();
 			return;
 		}
-		$shell = $m[1];
-		check(strpos($shell, 'joinery-ping)') !== false, 'the tenant shell still has a ping verb');
+		try {
+			list($code, $raw) = $probe->pingRaw('example');
+			check($code === 200, 'a signed, pinned ping answers 200', 'code ' . $code . ': ' . substr($raw, 0, 300));
 
-		$tmp = tempnam(sys_get_temp_dir(), 'joinery_tenant_shell_');
-		file_put_contents($tmp, $shell);
+			$health = MailboxRelay::readHealth($raw, 0);
+			check($health['state'] !== MailboxRelay::HEALTH_UNREADABLE,
+				'the relay answers a payload readHealth() understands', 'answered: ' . substr($raw, 0, 300));
+			check($health['state'] !== MailboxRelay::HEALTH_LEGACY,
+				'the shipped relay answers health, not PONG');
 
-		$out = array();
-		$code = 0;
-		exec('SSH_ORIGINAL_COMMAND=joinery-ping bash ' . escapeshellarg($tmp) . ' example 2>&1', $out, $code);
-		@unlink($tmp);
+			$decoded = json_decode(trim($raw), true);
+			check(is_array($decoded), 'the answer is one JSON object');
+			if (!is_array($decoded)) {
+				return;
+			}
+			foreach (array('status', 'services', 'milters', 'contract', 'provisioned', 'slug', 'sole') as $key) {
+				check(array_key_exists($key, $decoded), 'the answer carries ' . $key);
+			}
+			$this->eq('example', (string)($decoded['slug'] ?? ''), 'the answer names the tenant it answered for');
+			foreach (array('rspamd', 'opendkim', 'opendmarc') as $svc) {
+				check(array_key_exists($svc, (array)$decoded['services']), 'services report ' . $svc);
+				check(array_key_exists($svc, (array)$decoded['milters']), 'milters report ' . $svc);
+			}
+			check(is_bool($decoded['contract']), 'the contract check is a boolean, so PHP never parses rspamd config');
+			// Before root's collector has run once, the relay must not look
+			// healthy: it cannot vouch for a scanner it has not observed.
+			check(($decoded['services']['rspamd'] ?? '') === 'unknown',
+				'a relay whose collector has not run reports its scanner as unknown, never active');
 
-		$raw = implode("\n", $out);
-		check($code === 0, 'ping exits clean', 'exit ' . $code . ': ' . $raw);
+			// Multi-tenancy: several deployments share a shard, so one tenant's mail
+			// volume must never ride out in another tenant's health answer. The
+			// spool group is the gated exception: present on a fleet of one, absent
+			// on a shard (exercised at both counts in relay_upgrade_test).
+			foreach (array('messages', 'count', 'tenants', 'recipients') as $leak) {
+				check(stripos(json_encode(array_keys($decoded)), $leak) === false,
+					'the answer carries no ' . $leak . ' field — service state is not tenant data');
+			}
+			check(($decoded['sole'] ?? null) === true && array_key_exists('spool', $decoded),
+				'a fleet of one reports its own spool');
 
-		$health = MailboxRelay::readHealth($raw, $code);
-		check($health['state'] !== MailboxRelay::HEALTH_UNREADABLE,
-			'the shell answers a payload readHealth() understands', 'answered: ' . substr($raw, 0, 300));
-		check($health['state'] !== MailboxRelay::HEALTH_LEGACY,
-			'the shipped shell answers health, not PONG');
-
-		$decoded = json_decode(trim($raw), true);
-		check(is_array($decoded), 'the answer is one JSON object');
-		if (!is_array($decoded)) {
-			return;
+			// The other window into a relay: a wrong pin never reaches the request.
+			list(, , $errno) = $probe->request('GET', '/relay/ping', '', 'example',
+				'sha256//AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=');
+			check($errno === 90, 'a wrong identity pin fails the connection itself (curl 90)', 'errno ' . $errno);
+			list($code) = $probe->request('GET', '/relay/ping', '', 'stranger');
+			check($code === 401, 'an unregistered tenant is refused', 'code ' . $code);
+		} finally {
+			$probe->stop();
 		}
-		foreach (array('status', 'services', 'milters', 'contract', 'provisioned', 'slug') as $key) {
-			check(array_key_exists($key, $decoded), 'the answer carries ' . $key);
-		}
-		$this->eq('example', (string)($decoded['slug'] ?? ''), 'the answer names the tenant it answered for');
-		foreach (array('rspamd', 'opendkim', 'opendmarc') as $svc) {
-			check(array_key_exists($svc, (array)$decoded['services']), 'services report ' . $svc);
-			check(array_key_exists($svc, (array)$decoded['milters']), 'milters report ' . $svc);
-		}
-		check(is_bool($decoded['contract']), 'the contract check is a boolean, so PHP never parses rspamd config');
-
-		// Multi-tenancy: several deployments share a shard, so one tenant's mail
-		// volume must never ride out in another tenant's health answer.
-		foreach (array('spool', 'messages', 'count', 'tenants', 'recipients') as $leak) {
-			check(stripos(json_encode(array_keys($decoded)), $leak) === false,
-				'the answer carries no ' . $leak . ' field — service state is not tenant data');
-		}
-		// Queue depth is the one measured exception, and it is GATED, not excepted:
-		// emitted only where the relay has exactly one tenant, so the queue being
-		// reported is wholly the asker's. This extraction runs with no relay home,
-		// so the tenant count is zero and the key must be absent. The gate itself is
-		// exercised at both counts in relay_upgrade_test.
-		check(!array_key_exists('queue', $decoded),
-			'no queue depth without a tenant registry proving a fleet-of-one');
 	}
 
 	/**

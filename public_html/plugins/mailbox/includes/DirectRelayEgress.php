@@ -15,15 +15,18 @@
  * stronger position than a relay that can only forward — and this design
  * deliberately refuses it.
  *
- * The channel is the WireGuard tunnel that already exists for pulling mail: no
- * new credential, no new listener on the box, no port opened anywhere. Reaching
- * the relay's egress listener at all requires a WireGuard peer key the relay
- * issued, which is the same boundary the spool pull already trusts.
+ * The channel is whatever the relay's pull uses. A relay with an identity pin
+ * takes `POST /egress` on its public listener, signed with the relay client
+ * identity and pinned to the relay's key (RelayClient); a tunnel relay takes it
+ * on its WireGuard address, where reaching the address is the authentication.
+ * Neither adds a credential the relay could use to act as this deployment.
  *
+ * @version 1.1 - the relay API path (specs/relay_without_a_shell.md)
  * @version 1.0
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayClient.php'));
 require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectProtocol.php'));
 
 class DirectRelayEgress {
@@ -36,13 +39,16 @@ class DirectRelayEgress {
 	const TARGET_HEADER = 'X-Joinery-Direct-Target';
 	const STATUS_HEADER = 'X-Joinery-Direct-Status';
 
-	/** @var string The relay's tunnel address. */
+	/** @var string The relay's tunnel address ('' on a relay reached over its API). */
 	private $tunnel;
+	/** @var MailboxRelay|null the relay, when it is reached over its API */
+	private $relay;
 	/** @var int */
 	private $timeout;
 
-	private function __construct(string $tunnel, int $timeout) {
+	private function __construct(string $tunnel, ?MailboxRelay $relay, int $timeout) {
 		$this->tunnel = $tunnel;
+		$this->relay = $relay;
 		$this->timeout = $timeout;
 	}
 
@@ -63,11 +69,17 @@ class DirectRelayEgress {
 		if ($relay === null || !$relay->get('mrl_is_enabled')) {
 			return null;
 		}
+		if ($relay->usesRelayApi()) {
+			if (trim((string)$relay->get('mrl_public_ip')) === '') {
+				return null;
+			}
+			return new self('', $relay, $timeout);
+		}
 		$tunnel = trim((string)$relay->get('mrl_wg_ip'));
 		if ($tunnel === '') {
 			return null;
 		}
-		return new self($tunnel, $timeout);
+		return new self($tunnel, null, $timeout);
 	}
 
 	/**
@@ -84,6 +96,17 @@ class DirectRelayEgress {
 	 * @return array{status:int,body:string}|null null when the relay could not be reached
 	 */
 	public function post(string $url, string $body, string $content_type): ?array {
+		if ($this->relay !== null) {
+			try {
+				return $this->relay->withApi(function (RelayClient $c) use ($url, $body, $content_type) {
+					return $c->egress($url, $body, $content_type);
+				});
+			} catch (\Throwable $e) {
+				// Unreachable, refused, or the signature was refused: one answer to
+				// the caller, which takes the other path.
+				return null;
+			}
+		}
 		$endpoint = 'http://' . $this->tunnel . ':' . self::EGRESS_PORT . self::EGRESS_PATH;
 
 		$ch = curl_init();

@@ -28,6 +28,10 @@
  * own spool subdirectory and the ack is the tenant shell's joinery-ack verb —
  * ids only, no paths, no root.
  *
+ * @version 1.11 - a relay with an identity pin is pulled over its own API
+ *   (RelayClient: list, fetch to the staging directory, ack); a tunnel relay
+ *   keeps the rsync path. The ingest between the two is untouched
+ *   (specs/relay_without_a_shell.md)
  * @version 1.10 - the transport-key store path runs the deliverability report
  *   detector before storeMessage (specs/deliverability_report_ingest.md): the
  *   relay pull reaches storeMessage without passing processEmail, so this is
@@ -53,6 +57,7 @@
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySsh.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayClient.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/SRSRewriter.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
@@ -85,7 +90,11 @@ class RelaySpoolConsumer {
 	 * ['status'=>'success'|'error'|'skipped', 'message'=>..., 'stored'=>int, 'pending'=>int, 'acked'=>int].
 	 */
 	public function pull(int $max = self::DEFAULT_MAX): array {
-		if (RelaySsh::host($this->relay) === '') {
+		if ($this->relay->usesRelayApi()) {
+			if (trim((string)$this->relay->get('mrl_public_ip')) === '') {
+				return array('status' => 'skipped', 'message' => 'relay has no public address yet');
+			}
+		} elseif (RelaySsh::host($this->relay) === '') {
 			return array('status' => 'skipped', 'message' => 'relay has no tunnel host yet');
 		}
 
@@ -118,18 +127,29 @@ class RelaySpoolConsumer {
 		}
 
 		try {
-			// Copy-only pull of complete entries; the tmp/ working dir is excluded so
-			// a half-written entry is never seen.
-			$cmd = RelaySsh::rsyncCommand(
-				$this->relay,
-				$stage . '/',
-				$spool_path . '/',
-				true, // download
-				array('--exclude=tmp/', "--include=*.seal", "--include=*.direct", "--include=*.meta", "--exclude=*")
-			);
-			list($code, $out) = RelaySsh::run($cmd);
-			if ($code !== 0) {
-				return array('status' => 'error', 'message' => 'rsync pull failed: ' . $out);
+			if ($this->relay->usesRelayApi()) {
+				// The relay lists complete entries only (artifact + .meta present),
+				// oldest first; each is fetched into the same staging directory the
+				// rsync path filled, so everything below this point is one code path.
+				try {
+					$this->fetchOverApi($stage, $max);
+				} catch (RelayClientException $e) {
+					return array('status' => 'error', 'message' => 'relay API pull failed (' . $e->failure_class . '): ' . $e->getMessage());
+				}
+			} else {
+				// Copy-only pull of complete entries; the tmp/ working dir is excluded so
+				// a half-written entry is never seen.
+				$cmd = RelaySsh::rsyncCommand(
+					$this->relay,
+					$stage . '/',
+					$spool_path . '/',
+					true, // download
+					array('--exclude=tmp/', "--include=*.seal", "--include=*.direct", "--include=*.meta", "--exclude=*")
+				);
+				list($code, $out) = RelaySsh::run($cmd);
+				if ($code !== 0) {
+					return array('status' => 'error', 'message' => 'rsync pull failed: ' . $out);
+				}
 			}
 
 			// Two artifact kinds share one spool and one listing: `.seal` is a
@@ -464,10 +484,65 @@ class RelaySpoolConsumer {
 	}
 
 	/**
-	 * Delete the durably-stored entries on the relay — the ack. Batched into one
-	 * ssh round trip via the tenant shell's joinery-ack verb (ids only; the
-	 * shell resolves them inside this tenant's spool and rejects anything with a
-	 * path separator). Returns the count acked.
+	 * Fetch up to $max complete entries off the relay API into the staging
+	 * directory: the artifact (.seal or .direct) and its .meta, paged oldest
+	 * first, on one keep-alive connection. A fetch that fails mid-entry removes
+	 * what it wrote, so a torn pair is never staged.
+	 */
+	private function fetchOverApi(string $stage, int $max): void {
+		// The listing is where a pin mismatch surfaces; withApi re-fetches a
+		// hosted slot's coordinates once and retries. The fetches below reuse the
+		// client the retry settled on.
+		$client = null;
+		$first = $this->relay->withApi(function (RelayClient $c) use (&$client) {
+			$client = $c;
+			return $c->spoolList('', 1);
+		});
+		if (empty($first['entries'])) {
+			return;
+		}
+		$after = '';
+		$fetched = 0;
+		while ($fetched < $max) {
+			$page = $client->spoolList($after, min(200, $max - $fetched));
+			if (empty($page['entries'])) {
+				break;
+			}
+			foreach ($page['entries'] as $entry) {
+				$id = (string)($entry['id'] ?? '');
+				$kind = (string)($entry['kind'] ?? '');
+				if (!preg_match('/^[A-Za-z0-9._-]+$/', $id) || !in_array($kind, array('seal', 'direct'), true)) {
+					continue;
+				}
+				$client->spoolFetch($id, $kind, $stage . '/' . $id . '.' . $kind);
+				try {
+					$client->spoolFetch($id, 'meta', $stage . '/' . $id . '.meta');
+				} catch (RelayClientException $e) {
+					// A .direct needs no sidecar (its container is self-describing);
+					// a .seal without one is a torn pair and is left for the next pull.
+					if ($kind === 'seal') {
+						@unlink($stage . '/' . $id . '.seal');
+						continue;
+					}
+				}
+				$after = $id;
+				$fetched++;
+				if ($fetched >= $max) {
+					break;
+				}
+			}
+			if (empty($page['more'])) {
+				break;
+			}
+		}
+	}
+
+	/**
+	 * Delete the durably-stored entries on the relay — the ack. Over the relay
+	 * API it is one signed POST; over the tunnel it is one ssh round trip via
+	 * the tenant shell's joinery-ack verb. Ids only, either way: the relay
+	 * resolves them inside this tenant's spool and rejects anything with a path
+	 * separator. Returns the count acked.
 	 */
 	private function ack(string $spool_path, array $spool_ids): int {
 		if (empty($spool_ids)) {
@@ -481,6 +556,18 @@ class RelaySpoolConsumer {
 		}
 		if (empty($ids)) {
 			return 0;
+		}
+		if ($this->relay->usesRelayApi()) {
+			try {
+				$acked = 0;
+				foreach (array_chunk($ids, 400) as $chunk) {
+					$acked += $this->relay->withApi(function (RelayClient $c) use ($chunk) { return $c->spoolAck($chunk); });
+				}
+				return $acked;
+			} catch (RelayClientException $e) {
+				error_log('RelaySpoolConsumer: ack failed (' . $e->failure_class . '): ' . $e->getMessage());
+				return 0;
+			}
 		}
 		$remote_cmd = 'joinery-ack ' . implode(' ', $ids);
 		list($code, $out) = RelaySsh::run(RelaySsh::sshCommand($this->relay, $remote_cmd));

@@ -131,12 +131,12 @@
             "script": "provisioning/provision_spam_scanner.sh"
         },
         {
-            "key": "relay_tunnel",
-            "label": "Hardened relay tunnel",
-            "details": "When sent mail leaves through the relay, compose sends travel over WireGuard. Runs a real SMTP submission handshake over the tunnel (EHLO, MAIL FROM, RCPT to a reserved domain, QUIT — nothing is sent): port 25 listens in both modes, so only accepting relay of an external recipient proves the submission listener is open. Fails until a relay provisioned inbound-only is rebuilt to carry sent mail. No-op when sent mail leaves through a provider, and on colocated deployments.",
+            "key": "relay_reachable",
+            "label": "Hardened relay reachable",
+            "details": "A relay without a shell answers one pinned, signed health ping over its own HTTPS API; the failure class (refused, unreachable, pin mismatch, signature refused) names what stopped it. A tunnel relay is checked over WireGuard with a real SMTP submission handshake (EHLO, MAIL FROM, RCPT to a reserved domain, QUIT — nothing is sent) when sent mail leaves through it. No-op on colocated deployments.",
             "check": {
                 "type": "code",
-                "call": "InboundEmailHealth::checkRelayTunnel"
+                "call": "InboundEmailHealth::checkRelayReachable"
             },
             "script": "provisioning/provision_relay.sh"
         },
@@ -801,6 +801,18 @@
             "feature": "Mailbox connect wizard",
             "kind": "ephemeral",
             "locator": "session:mailbox_imap_connect_stash"
+        },
+        {
+            "label": "Relay client identity secret key",
+            "feature": "Relay API (relay without a shell)",
+            "kind": "regenerable-breaks-things",
+            "locator": "rci_relay_client_identities.rci_sealed_secret_key"
+        },
+        {
+            "label": "Relay run token",
+            "feature": "Relay cloud provisioning",
+            "kind": "ephemeral",
+            "locator": "rcp_relay_cloud_provisions.rcp_sealed_run_token"
         }
     ]
 }

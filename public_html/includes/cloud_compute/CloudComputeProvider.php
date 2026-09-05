@@ -27,8 +27,15 @@ interface CloudComputeProvider {
 	 *   region          string  provider region id (required)
 	 *   type            string  provider plan/type id (required)
 	 *   image           string  provider image id (required)
-	 *   root_pass       string  root password (required; generate, do not store)
+	 *   root_pass       string  root password (generate, do not store; a driver
+	 *                           mints one when absent and the provider insists)
 	 *   authorized_keys array   SSH public keys to install for root
+	 *   user_data       string  first-boot script (cloud-init user-data) the
+	 *                           instance runs once, as root - how a relay is
+	 *                           born configured (specs/relay_without_a_shell.md)
+	 *   stackscript_id  string  provider-side first-boot script for a region
+	 *                           whose metadata service cannot carry user_data
+	 *   stackscript_data array  its named fields
 	 *
 	 * @return array Normalized instance array.
 	 * @throws CloudComputeException on any API failure.
@@ -58,8 +65,10 @@ interface CloudComputeProvider {
 	 *
 	 * $opts:
 	 *   image           string  provider image id (required)
-	 *   root_pass       string  root password (required; generate, do not store)
+	 *   root_pass       string  root password (as createInstance)
 	 *   authorized_keys array   SSH public keys to install for root
+	 *   user_data, stackscript_id, stackscript_data   as createInstance: a
+	 *                           relay's update is a re-image with fresh user-data
 	 *
 	 * @return array Normalized instance array.
 	 * @throws CloudComputeException on any API failure.

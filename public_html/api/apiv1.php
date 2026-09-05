@@ -313,6 +313,21 @@ if (strtolower(explode('/', trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH
 	// dispatchPreAuth() always exits.
 }
 
+// Relay birth channel (/api/v1/relay/*): a relay born from first-boot user-data
+// fetches its bundle and posts its birth report here
+// (specs/relay_without_a_shell.md). Its credential is a one-time run token plus
+// a signature by the relay's own identity key, never an API key, so like the
+// agent channel it authenticates itself before the key-header requirement
+// below. Present only where the mailbox plugin is active; metered in its own
+// bucket by the endpoint.
+if (strtolower(explode('/', trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/'))[2] ?? '') === 'relay') {
+	if (!class_exists('RelayBirthEndpoint')) {
+		api_error('Not found', 'ActionError', 404);
+	}
+	RelayBirthEndpoint::dispatchPreAuth(explode('/', trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/')));
+	// dispatchPreAuth() always exits.
+}
+
 // Rate limiting: general API requests (configurable, default 1000/hour per IP)
 $api_rate_limit = (int)($settings->get_setting('api_rate_limit_requests') ?: 1000);
 $api_rate_window = (int)($settings->get_setting('api_rate_limit_window') ?: 3600);

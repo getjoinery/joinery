@@ -1948,30 +1948,79 @@ A deployment runs one of three receive topologies:
   edge-sealed ingest and hidden origin with zero extra infrastructure. See
   [Hosted relay fleet](#hosted-relay-fleet).
 
-The relay runs Postfix + verify milters + a small Go sealing binary + WireGuard,
-and nothing else — no PHP, no database, no web, no application. It accepts mail,
+The relay runs Postfix + verify milters + a small Go sealing binary, and
+nothing else — no PHP, no database, no web, no application. It accepts mail,
 verifies it, **seals it to the recipient's public key at the moment of
-acceptance**, and spools ciphertext. Each tenant's Joinery box dials out over
-WireGuard and pulls its own sealed blobs. Its own IP appears in no mail DNS.
+acceptance**, and spools ciphertext. Each tenant's plane pulls its own sealed
+blobs. Its own IP appears in no mail DNS.
 
-**It also serves Joinery Direct** for its tenants, from the same binary in a
-third mode. At Fortress the relay has to: an SRV record pointing at the origin
-box would advertise the address the relay exists to conceal. It terminates the
-public endpoint on 443 (with an ACME certificate obtained in-process — still no
-web server), writes verified deliveries into the same spool as `.direct`
-entries, and offers a tunnel-only egress listener so a tenant's box-signed
-request leaves from the relay's address. The relay authenticates and never
-signs; the box authorizes at unlock. See
-[Joinery Direct](../../../docs/joinery_direct.md).
+There are two relay shapes in the field, told apart by the `mrl_` row:
+
+- **A relay without a shell** (`provision_relay.sh` 3.0,
+  `specs/relay_without_a_shell.md`): two listeners, Postfix on 25 and the
+  sealer binary's `relay-serve` mode on 443, and no other way in — no sshd, no
+  WireGuard, no tenant Unix accounts, no sudoers rules, and no credential held
+  by the platform. It is born configured by its provider's first-boot
+  user-data (`provisioning/relay_first_boot.sh`, rendered by the plane), fetches
+  the release's support bundle from the plane, builds itself, generates an
+  Ed25519 identity whose SPKI fingerprint the plane pins, and reports in over
+  HTTPS. From then on the plane reaches it only through the signed `/relay/`
+  API (`RelayProtocol`): spool listing, fetch and ack, fragment push with the
+  merge verdict in the response, the health ping, Direct egress, and the
+  operator-signed tenant routes. Every operation on the machine is a provider
+  act: **create**, and **update** (drain the spool through the API, then
+  re-image the same instance from the current bundle). The row carries
+  `mrl_identity_fingerprint`, and that column is the switch: `RelayClient`
+  (one pinned curl handle, `CURLOPT_PINNEDPUBLICKEY`, every request signed
+  with the deployment's **relay client identity**, `RelayClientIdentity`, an
+  Ed25519 key sealed at rest like a Direct identity) serves the spool pull, the
+  map push, the health ping and Direct egress for such a row. A failure is
+  classed - refused, unreachable, timeout, pin mismatch, signature refused -
+  and the class is recorded on the row (`mrl_last_health_failure`) because it
+  is the diagnosis. A hosted slot whose shard was updated sees a pin mismatch,
+  re-fetches its coordinates from the fleet once, and heals on the same pull.
+
+  **Birth.** The plane renders `relay_first_boot.sh` (`RelayFirstBoot`) into
+  the provider's user-data (Linode Metadata; a StackScript with the same
+  fields in a region without it) with the plane URL, a one-time run token, the
+  bundle's sha256 and the deployment's client public key. The relay fetches
+  the run's own copy of the bundle (`GET /api/v1/relay/bundle`), builds
+  itself, and posts a signed birth report (`POST /api/v1/relay/born`,
+  `RelayBirthEndpoint`). The plane believes the report only when the token is
+  live and unspent, the report names AND arrives from the address the
+  provider gave, its signature verifies against the identity key it carries,
+  and a pinned ping to that address answers; then the row is written, the map
+  push is the gate, reverse DNS is requested and the run is done
+  (`RelayCloudProvisioner::completeBirth`).
+- **A tunnel relay** (`provision_relay.sh` 2.x): WireGuard between the plane and
+  the relay carries the spool pull (rsync over ssh as a restricted forced-command
+  tenant account), the map push, the health ping and Direct egress. The row
+  carries `mrl_wg_public_key` and the plane speaks to it through `RelaySsh`.
+
+**It also serves Joinery Direct** for its tenants, from the same binary. At
+Fortress the relay has to: an SRV record pointing at the origin box would
+advertise the address the relay exists to conceal. It terminates the public
+endpoint on 443 (with an ACME certificate obtained in-process — still no web
+server), writes verified deliveries into the same spool as `.direct` entries,
+and proxies a tenant's box-signed egress request so it leaves from the relay's
+address. The relay authenticates and never signs; the box authorizes at
+unlock. See [Joinery Direct](../../../docs/joinery_direct.md).
 
 **The relay stack is tenancy-native, and a self-hosted relay is a fleet of
-one.** Every tenant on a relay has its own spool subdirectory (setgid,
-tenant-group readable — the cross-tenant isolation boundary), its own
-restricted SSH pull account locked to a forced-command shell, its own WireGuard
-peer at an allocated tunnel address, and its own root-owned domain allowlist.
-A self-hosted relay is simply a relay on which the add-tenant operation has run
-once (slug `main`, allowlist `*`); a fleet shard is one on which it has run per
-enrolled tenant. One codebase, one code path — N=1 is the degenerate case.
+one.** Every tenant on a relay has its own spool subdirectory, its own
+root-owned registry entry (domain allowlist, shard-policy limits, and on a 3.0
+relay its Ed25519 public key; on a 2.x relay a restricted SSH pull account and
+a WireGuard peer). A self-hosted relay is simply a relay with one tenant (slug
+`main`, allowlist `*`, created by the build); a fleet shard is one with a tenant
+per enrolment. One codebase, one code path — N=1 is the degenerate case.
+
+**Health is the only window into a 3.0 relay.** There is no door, so
+`GET /relay/ping` carries everything a person would have learned from a shell,
+under one rule: service state is not tenant data, and anything per-tenant
+(spool, Postfix message counts, the journal excerpt) is reported only when the
+relay has exactly one tenant. A root timer on the relay collects the
+privileged facts every thirty seconds; the listener, which never gains root,
+merges them with what it measures itself.
 
 Once a relay fronts a deployment it is the MX for **all** that deployment's
 hosted domains (a mixed MX would leak the origin). The security level controls
@@ -1979,11 +2028,15 @@ where mail is *sealed*, never where it is *routed*.
 
 ### The sealing binary
 
-`provisioning/relay-sealer/` is a single static Go binary built and installed by
+`provisioning/relay-sealer/` is a single static Go binary, prebuilt at publish
+into `provisioning/bin/relay-sealer-<uname -m>` and installed by
 `provision_relay.sh` to `/opt/joinery-relay/relay-sealer`. It replaces the PHP
 pipe on the MX path as the Postfix `joinery` transport (raw on stdin,
 `${recipient} ${sender}` as argv). The same binary is the relay's **map merge
-unit** (`relay-sealer merge-maps` — see [Map sync](#map-sync-fragment-push--shard-side-merge)).
+unit** (`relay-sealer merge-maps` — see [Map sync](#map-sync-fragment-push--shard-side-merge)),
+its API listener (`relay-serve`), the root applier and collector behind that
+listener (`apply-requests`, `collect-status`), and its birth report
+(`birth-report`); the binary's README documents each mode.
 For each accepted message it:
 
 - Looks up the recipient's public key + routing in the merged `routing.json` (no
@@ -2015,16 +2068,17 @@ For each accepted message it:
 The relay holds no database, so `RelayMapExporter` compiles this tenant's
 routing — its domains, recipients, forwarding domains, and per-tenant identity
 (SRS secret, forward From identity, transport key) — into **one JSON fragment**,
-and `RelayMapSync` rsyncs it into the tenant's own drop area over the restricted
-tenant account (never root, never `/etc/postfix`), then triggers the relay's
-merge with the tenant shell's `joinery-merge` verb and reads the validation
-verdict in-band. IMAP-source domains are excluded — their mail arrives by IMAP
+and `RelayMapSync` pushes it to the relay — into the tenant's own drop area over
+the restricted tenant account on a 2.x relay, then the tenant shell's
+`joinery-merge` verb; as a signed `PUT /relay/fragment` on a 3.0 relay, where a
+root path unit performs the merge — and reads the validation verdict in-band.
+Never root, never `/etc/postfix`. IMAP-source domains are excluded — their mail arrives by IMAP
 poll, not MX, and listing them would make the relay wrongly authoritative for
 e.g. `gmail.com`, looping forwards to addresses there back into the sealer
 instead of out over SMTP.
 
-The relay-side merge (`relay-sealer merge-maps`, root, triggered — never a
-resident daemon) is **where the domain-claim boundary is mechanically
+The relay-side merge (`relay-sealer merge-maps`, root, triggered by the path
+unit or the tenant shell — never a resident daemon) is **where the domain-claim boundary is mechanically
 enforced**: every domain a fragment names must sit inside that tenant's
 root-owned allowlist (`/opt/joinery-relay/tenants/<slug>/allowed_domains` — `*`
 on a self-hosted fleet of one, the explicit TXT-verified list on a fleet
@@ -2060,12 +2114,14 @@ surface that cannot render the middle grade still treats it as unmet.
 ### Spool pull + deferred ingest
 
 The pull (`RelaySpoolConsumer`, phase 2 of the `MailboxRelayReconcile`
-scheduled task) dials out over WireGuard as the deployment's restricted tenant
-account, `rsync`s new entries from **its own spool subdirectory** copy-only,
-stores each durably keyed on the spool id (an idempotent re-pull is a no-op),
-and acks the entries it stored with the tenant shell's `joinery-ack` verb (ids
-only — the shell resolves them inside the tenant's spool and rejects anything
-with a path separator) — the delete-after-store is the ack. Standard/Private
+scheduled task) dials out to the relay and copies new entries from **its own
+spool subdirectory** (over WireGuard as the restricted tenant account with
+`rsync` on a 2.x relay; as signed `GET /relay/spool` and per-entry fetches on a
+3.0 relay), stores each durably keyed on the spool id (an idempotent re-pull is
+a no-op), and acks the entries it stored (the tenant shell's `joinery-ack` verb,
+or `POST /relay/spool/ack`; ids only — the relay resolves them inside the
+tenant's spool and rejects anything with a path separator) — the
+delete-after-store is the ack. Standard/Private
 blobs are opened at pull with the ambient transport key and run through today's
 ingest. Fortress blobs cannot be opened while the owner is logged out, so they
 land as **pending-parse** rows: operational metadata + the sealed blob, so
@@ -2103,8 +2159,9 @@ than a full interval later. The response reports each lane's `took_ms` and the
 IMAP lane's `deferred` count. The admin **Fetch now** action runs under the
 same budget and says when it stopped early.
 
-Degradation is safe: relay down → senders' MTAs retry for days; tunnel down → the
-relay keeps spooling sealed blobs until the next pull. Neither loses mail.
+Degradation is safe: relay down → senders' MTAs retry for days; the plane unable
+to reach the relay → the relay keeps spooling sealed blobs until the next pull.
+Neither loses mail.
 
 ### Outbound sending
 

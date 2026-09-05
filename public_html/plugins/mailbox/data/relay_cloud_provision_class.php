@@ -70,6 +70,15 @@ class RelayCloudProvision extends SystemBase {
 		'rcp_sealed_token'    => array('type'=>'text'),
 		'rcp_sealed_ssh_key'  => array('type'=>'text'),
 		'rcp_ssh_public_key'  => array('type'=>'text'),
+		// A relay born from user-data (specs/relay_without_a_shell.md): the
+		// one-time run token the first-boot script presents to fetch the bundle
+		// and post the birth report, sealed like the provider token and erased
+		// with it; when it stops being valid; whether the birth report spent it;
+		// and the sha256 of the run's own copy of the support bundle.
+		'rcp_sealed_run_token' => array('type'=>'text'),
+		'rcp_run_token_expires'=> array('type'=>'timestamp(6)'),
+		'rcp_run_token_spent'  => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
+		'rcp_bundle_sha256'    => array('type'=>'varchar(64)'),
 		'rcp_error'           => array('type'=>'text'),
 		'rcp_create_time'     => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'rcp_update_time'     => array('type'=>'timestamp(6)'),
@@ -120,9 +129,96 @@ class RelayCloudProvision extends SystemBase {
 	 * Grant-per-act custody: every terminal state erases the in-flight
 	 * credentials. Saves.
 	 */
+	/**
+	 * Mint the one-time run token: 32 random bytes, hex. Sealed on the row;
+	 * returned once so the caller can put it in the user-data. Live until
+	 * $expires (the boot timeout), or until the birth report spends it.
+	 */
+	public function issueRunToken(int $ttl_seconds): string {
+		$token = bin2hex(random_bytes(32));
+		require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
+		$this->set('rcp_sealed_run_token',
+			(new SecretBox())->seal('rcp_relay_cloud_provisions.rcp_sealed_run_token', $token));
+		$this->set('rcp_run_token_expires', gmdate('Y-m-d H:i:s', time() + max(60, $ttl_seconds)));
+		$this->set('rcp_run_token_spent', false);
+		return $token;
+	}
+
+	/**
+	 * Is $presented this run's live, unspent token? Constant-time compare; a
+	 * run that is done or failed, or whose token expired, never matches.
+	 */
+	public function runTokenMatches(string $presented): bool {
+		$presented = trim($presented);
+		if ($presented === '' || !$this->isLive() || (bool)$this->get('rcp_run_token_spent')) {
+			return false;
+		}
+		$expires = (string)$this->get('rcp_run_token_expires');
+		if ($expires === '' || strtotime($expires . ' UTC') < time()) {
+			return false;
+		}
+		$sealed = (string)$this->get('rcp_sealed_run_token');
+		if ($sealed === '') {
+			return false;
+		}
+		require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
+		$opened = (new SecretBox())->open($sealed);
+		if ($opened['value'] === null) {
+			return false;
+		}
+		return hash_equals((string)$opened['value'], $presented);
+	}
+
+	/** The birth report spends the token: nothing presents it twice. */
+	public function spendRunToken(): void {
+		$this->set('rcp_run_token_spent', true);
+	}
+
+	/**
+	 * Where this run's own copy of the support bundle lives. A publish keeps
+	 * only one bundle on a deployment, so the run copies the bytes it was
+	 * created against and serves THAT copy, whatever lands in agent_dist later.
+	 */
+	public function bundlePath(): string {
+		return PathHelper::getSiteRoot() . '/relay_runs/' . intval($this->key) . '/support_bundle.tar.gz';
+	}
+
+	/**
+	 * Copy the deployment's support bundle onto the run and record its sha256.
+	 * Returns the hash. Throws when there is no bundle to copy: a run with no
+	 * bundle would be a relay that fails half an hour later on a box nobody can
+	 * log into.
+	 */
+	public function copyBundle(): string {
+		$source = PathHelper::getIncludePath('agent_dist/support_bundle.tar.gz');
+		if (!is_file($source)) {
+			throw new RuntimeException('This deployment carries no support bundle (agent_dist/support_bundle.tar.gz); '
+				. 'a relay is born from it, so none can be created until a release that ships one is installed.');
+		}
+		$dest = $this->bundlePath();
+		if (!is_dir(dirname($dest)) && !mkdir(dirname($dest), 0750, true)) {
+			throw new RuntimeException('Cannot create the run directory ' . dirname($dest));
+		}
+		if (!copy($source, $dest)) {
+			throw new RuntimeException('Cannot copy the support bundle onto run ' . $this->key);
+		}
+		$sha = hash_file('sha256', $dest);
+		$this->set('rcp_bundle_sha256', $sha);
+		return $sha;
+	}
+
+	/** Remove the run's bundle copy and its directory (a terminal state). */
+	public function eraseBundle(): void {
+		$dest = $this->bundlePath();
+		@unlink($dest);
+		@rmdir(dirname($dest));
+	}
+
 	public function eraseCredentials(): void {
 		$this->set('rcp_sealed_token', null);
 		$this->set('rcp_sealed_ssh_key', null);
+		$this->set('rcp_sealed_run_token', null);
+		$this->eraseBundle();
 		$this->save();
 	}
 

@@ -16,6 +16,9 @@
  * registration while a slot exists. The Setup tab's ownership row re-verifies
  * them on every check pass — publishing the TXT record is all the user does.
  *
+ * @version 1.4 - enrollment sends the relay client public key; a shard's identity pin is
+ *                applied as the coordinates and the tunnel steps are skipped
+ *                (specs/relay_without_a_shell.md)
  * @version 1.3
  */
 
@@ -46,21 +49,19 @@ class FleetClient {
 	 * fleet returns the existing slot).
 	 */
 	public function enroll(): array {
+		// The one key every shard needs: this deployment's relay client identity,
+		// minted on first use. The tunnel keys ride along only when this box has
+		// them, for a shard that still peers over WireGuard.
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_client_identity_class.php'));
+		$keys = array('public_key' => RelayClientIdentity::publicKey(RelayClientIdentity::KIND_CLIENT));
 		$wg_pubkey = trim((string)$this->settings->get_setting('mailbox_relay_wg_public_key'));
-		if ($wg_pubkey === '') {
-			throw new FleetClientException(
-				'No main-box WireGuard key — run provision_relay_main.sh (sudo) on this server first.');
-		}
 		$pull_pubkey = trim((string)@file_get_contents(RelaySsh::pullKeyPath() . '.pub'));
-		if ($pull_pubkey === '') {
-			throw new FleetClientException(
-				'No relay pull key — run provision_relay_main.sh (sudo) on this server first.');
+		if ($wg_pubkey !== '' && $pull_pubkey !== '') {
+			$keys['wg_public_key'] = $wg_pubkey;
+			$keys['pull_public_key'] = $pull_pubkey;
 		}
 
-		$data = $this->call('fleet_enroll', array(
-			'wg_public_key'   => $wg_pubkey,
-			'pull_public_key' => $pull_pubkey,
-		));
+		$data = $this->call('fleet_enroll', $keys);
 		$this->applyCoordinates($data);
 		// Every already-registered hosted domain gets its ownership challenge
 		// filed now, so the Setup tab's ownership rows carry a publishable
@@ -149,9 +150,22 @@ class FleetClient {
 		$relay->set('mrl_mx_hostname', substr((string)($c['mx_hostname'] ?? ''), 0, 255));
 		$relay->set('mrl_authserv_id', substr((string)($c['authserv_id'] ?? ''), 0, 255));
 		$relay->set('mrl_fleet_slot_id', intval($c['slot_id'] ?? 0) ?: null);
+		$relay->set('mrl_public_ip', substr((string)($c['shard_public_ip'] ?? ''), 0, 64));
+
+		// A shard without a shell: the pin is the whole coordinate set. The
+		// tenant reaches it over its API at the public address; nothing below
+		// about tunnels applies, and a changed pin (the shard was updated) is
+		// simply written - the next pull uses it.
+		$pin = trim((string)($c['identity_fingerprint'] ?? ''));
+		if ($pin !== '') {
+			$relay->set('mrl_identity_fingerprint', substr($pin, 0, 64));
+			$relay->set('mrl_spool_path', substr((string)($c['spool_path'] ?? ''), 0, 500));
+			$relay->save();
+			return $relay;
+		}
+
 		// The tunnel: the shard listens at .1; we dial out to its endpoint.
 		$relay->set('mrl_host', (string)($c['relay_tunnel_ip'] ?? '10.99.0.1'));
-		$relay->set('mrl_public_ip', substr((string)($c['shard_public_ip'] ?? ''), 0, 64));
 		$relay->set('mrl_wg_endpoint', substr((string)($c['wg_endpoint'] ?? ''), 0, 255));
 		$relay->set('mrl_wg_public_key', substr((string)($c['wg_public_key'] ?? ''), 0, 255));
 		$relay->set('mrl_wg_ip', (string)($c['relay_tunnel_ip'] ?? '10.99.0.1'));

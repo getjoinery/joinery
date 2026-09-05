@@ -16,8 +16,8 @@
  *
  * The relay outbound checks are MODE-aware (specs/mailbox_relay_inbound_only.md):
  * with the relay smarthost off (the default) compose rides the provider's API, so
- * checkOutboundTransportClass + checkOutboundOriginLeak apply and checkRelayTunnel
- * is a no-op; with smarthost on, checkRelayTunnel applies and the two provider
+ * checkOutboundTransportClass + checkOutboundOriginLeak apply and checkRelayReachable
+ * is a ping; with smarthost on, checkRelayReachable applies and the two provider
  * checks are no-ops. The check list always matches the chosen path.
  *
  * @version 1.17 - checkSearchIndexEngine() probes the index's real table shape
@@ -50,7 +50,7 @@ class InboundEmailHealth {
         // Relay-fronted deployment (specs/…hardened_ingest_relay § Phase 8/9): the
         // MTA runs on the relay, not here — the main box's local port 25 is not a
         // health requirement. The relay's own port 25 / milters / tunnel are covered
-        // by checkRelayTunnel. Setting-aware inversion
+        // by checkRelayReachable. Setting-aware inversion
         // (specs/mailbox_listener_decommission.md): once the listener is recorded as
         // decommissioned, an ANSWERING port 25 is the failure — the attack surface
         // the decommission removed has come back.
@@ -396,25 +396,47 @@ class InboundEmailHealth {
     // ---------------------------------------------------- hardened ingest relay
 
     /**
-     * The relay accepts compose submission over the WireGuard tunnel. Port 25
-     * listens on the relay in BOTH outbound modes (it is the same smtpd that
-     * receives inbound mail), so a bare TCP connect proves nothing about
-     * submission — the difference between the modes is whether permit_mynetworks
-     * trusts the tunnel subnet to relay. This check therefore runs a real SMTP
-     * dialogue: EHLO, MAIL FROM:<>, RCPT TO a reserved .invalid domain (never in
-     * relay_domains, never deliverable), then QUIT without DATA. A 250 at RCPT
-     * means the submission listener is open; a refusal means the relay was
-     * provisioned inbound-only and needs a Rebuild to honor smarthost mode.
+     * Is the relay reachable the way this deployment reaches it?
      *
-     * SMARTHOST MODE ONLY: the tunnel carries compose submission only when the
-     * relay smarthost is opted in (specs/mailbox_relay_inbound_only.md). In the
-     * default provider mode nothing submits over the tunnel, so this is a no-op —
-     * checkOutboundTransportClass covers that path instead. Also a no-op on
-     * colocated deployments.
+     * A relay with an identity pin answers a pinned, signed GET /relay/ping
+     * (specs/relay_without_a_shell.md); the ping is the only window into it, so
+     * this check is also what refreshes the stored answer the Setup tab renders.
+     *
+     * A tunnel relay is reached over WireGuard, and the one thing a bare
+     * connect cannot prove there is compose submission: port 25 listens in BOTH
+     * outbound modes, so the check runs a real SMTP dialogue - EHLO, MAIL
+     * FROM:<>, RCPT TO a reserved .invalid domain (never in relay_domains, never
+     * deliverable), then QUIT without DATA. A 250 at RCPT means the submission
+     * listener is open. Smarthost mode only; a no-op otherwise, and on colocated
+     * deployments.
      */
-    public static function checkRelayTunnel() {
+    public static function checkRelayReachable() {
         $relay = self::activeRelay();
-        if ($relay === null || self::relayOutboundMode() !== 'smarthost') {
+        if ($relay === null) {
+            return;
+        }
+        if ($relay->usesRelayApi()) {
+            // A relay without a shell: one pinned, signed GET /relay/ping. The
+            // failure class is the diagnosis - a dead machine, an updated one
+            // whose pin has not landed here, or a clock or key problem - and the
+            // ping's stored answer is what the Setup tab renders.
+            $health = $relay->pollHealth();
+            if ($health['state'] === MailboxRelay::HEALTH_UNREACHABLE) {
+                throw new ProvisioningCheckFailed('The relay at ' . $relay->get('mrl_public_ip')
+                    . ' did not answer its API (' . (string)($health['failure'] ?? 'unreachable') . '): '
+                    . (string)$health['detail']);
+            }
+            return;
+        }
+        self::checkRelayTunnel($relay);
+    }
+
+    /**
+     * The tunnel relay's reachability: a real SMTP submission dialogue over
+     * WireGuard, which only means anything in smarthost mode.
+     */
+    private static function checkRelayTunnel(MailboxRelay $relay) {
+        if (self::relayOutboundMode() !== 'smarthost') {
             return;
         }
         $host = trim((string)$relay->get('mrl_host'));

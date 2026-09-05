@@ -35,6 +35,9 @@
  * enrollment instead of self-provisioned ones. Either way this row remains the
  * deployment's ONE relay, so active() stays a singleton.
  *
+ * @version 1.5 - the relay API: mrl_identity_fingerprint is the per-row switch between
+ *                RelayClient (pinned HTTPS, signed requests) and RelaySsh; pollHealth()
+ *                records the failure class (specs/relay_without_a_shell.md)
  * @version 1.4 - readHealth() carries the relay's Postfix queue depth (NULL when
  *                unknown, never 0); provisionedVersion() and queuedCount()
  *                (specs/mailbox_relay_upgrade_without_server_manager.md)
@@ -45,6 +48,7 @@
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayClient.php'));
 
 class MailboxRelayException extends SystemBaseException {}
 
@@ -96,6 +100,17 @@ class MailboxRelay extends SystemBase {
 		'mrl_authserv_id'        => array('type'=>'varchar(255)'),
 		// WireGuard: the relay's public key + listen endpoint (host:port), and the
 		// tunnel IP assigned to the relay. Joinery always initiates the peering.
+		// A relay without a shell (specs/relay_without_a_shell.md): the SPKI
+		// fingerprint the plane pins on every connection, and the Ed25519 key the
+		// birth report was signed with. A row with a fingerprint speaks the relay
+		// API through RelayClient; a row without one and with a WireGuard key
+		// speaks ssh through RelaySsh. That column IS the cutover switch.
+		'mrl_identity_fingerprint' => array('type'=>'varchar(64)'),
+		'mrl_identity_public_key'  => array('type'=>'varchar(64)'),
+		// The class of the last ping failure (RelayClient::FAIL_*), '' after a
+		// success: distinguishes a dead machine from an updated one whose pin has
+		// not landed from a clock problem.
+		'mrl_last_health_failure'  => array('type'=>'varchar(32)'),
 		'mrl_wg_public_key'      => array('type'=>'varchar(255)'),
 		'mrl_wg_endpoint'        => array('type'=>'varchar(255)'),
 		'mrl_wg_ip'              => array('type'=>'varchar(64)'),
@@ -357,17 +372,106 @@ class MailboxRelay extends SystemBase {
 	 * its age is shown.
 	 */
 	public function pollHealth(bool $store = true): array {
-		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySsh.php'));
-		list($code, $out) = RelaySsh::run(RelaySsh::sshCommand($this, 'joinery-ping'));
-		$health = self::readHealth((string)$out, (int)$code);
+		$failure = '';
+		if ($this->usesRelayApi()) {
+			try {
+				$ping = $this->withApi(function (RelayClient $c) { return $c->ping(); });
+				$health = self::readHealth(json_encode($ping), 0);
+				// The whole object is kept, so the Setup tab renders every group
+				// the relay reported and a person diagnosing it never wishes for a
+				// shell.
+				$health['ping'] = $ping;
+			} catch (RelayClientException $e) {
+				$failure = $e->failure_class;
+				$health = self::readHealth('', 1);
+				$health['state'] = self::HEALTH_UNREACHABLE;
+				$health['failure'] = $failure;
+				$health['detail'] = RelayClient::describeFailure($failure) . ' (' . $e->getMessage() . ')';
+			}
+		} else {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySsh.php'));
+			list($code, $out) = RelaySsh::run(RelaySsh::sshCommand($this, 'joinery-ping'));
+			$health = self::readHealth((string)$out, (int)$code);
+		}
 		$health['checked_time'] = gmdate('Y-m-d H:i:s');
 
-		if ($store && $health['state'] !== self::HEALTH_UNREACHABLE) {
-			$this->set('mrl_last_health_json', json_encode($health));
-			$this->set('mrl_last_health_time', $health['checked_time']);
+		if ($store) {
+			if ($health['state'] !== self::HEALTH_UNREACHABLE) {
+				$this->set('mrl_last_health_json', json_encode($health));
+				$this->set('mrl_last_health_time', $health['checked_time']);
+			}
+			// The failure class is recorded on every poll, success included, so
+			// '' means the last ping worked and anything else names what stopped it.
+			if ($this->usesRelayApi() && (string)$this->get('mrl_last_health_failure') !== $failure) {
+				$this->set('mrl_last_health_failure', $failure);
+			}
 			$this->save();
 		}
 		return $health;
+	}
+
+	/**
+	 * Does this row speak the relay API? A relay born from user-data reported
+	 * an identity, and the plane pinned it; a tunnel relay never had one.
+	 */
+	public function usesRelayApi(): bool {
+		return trim((string)$this->get('mrl_identity_fingerprint')) !== '';
+	}
+
+	/**
+	 * A pin mismatch on a HOSTED relay usually means the shard was updated and
+	 * carries a new identity: re-fetch the slot's coordinates from the fleet
+	 * once, which rewrites the pin, and say whether it changed. A self-hosted
+	 * relay has nobody to ask - its pin changes only through its own update run.
+	 */
+	public function recoverIdentityPin(): bool {
+		if (!(bool)$this->get('mrl_is_hosted')) {
+			return false;
+		}
+		$before = (string)$this->get('mrl_identity_fingerprint');
+		try {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetClient.php'));
+			$fleet = new FleetClient();
+			if (!$fleet->configured()) {
+				return false;
+			}
+			$fleet->status(); // applies the coordinates to this row
+		} catch (\Throwable $e) {
+			error_log('MailboxRelay: coordinate re-fetch after a pin mismatch failed: ' . $e->getMessage());
+			return false;
+		}
+		$fresh = new MailboxRelay(intval($this->key), TRUE);
+		$after = (string)$fresh->get('mrl_identity_fingerprint');
+		if ($after !== '' && $after !== $before) {
+			$this->set('mrl_identity_fingerprint', $after);
+			$this->set('mrl_public_ip', (string)$fresh->get('mrl_public_ip'));
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Run one relay API call, retrying ONCE after a pin mismatch that a
+	 * coordinate re-fetch resolved. Every consumer goes through this so a slot
+	 * whose shard was updated heals on its next pull without a push.
+	 */
+	public function withApi(callable $fn) {
+		try {
+			return $fn($this->client());
+		} catch (RelayClientException $e) {
+			if ($e->failure_class !== RelayClient::FAIL_PIN_MISMATCH || !$this->recoverIdentityPin()) {
+				throw $e;
+			}
+			return $fn($this->client());
+		}
+	}
+
+	/** The pinned, signing client for this relay. Only meaningful when usesRelayApi(). */
+	public function client(): RelayClient {
+		if (!$this->usesRelayApi()) {
+			throw new MailboxRelayException('MailboxRelay: this relay has no identity pin; it is not reached over the relay API.');
+		}
+		return RelayClient::forRelay($this);
 	}
 
 	/** The cached health answer, or null if this relay has never answered one. */
