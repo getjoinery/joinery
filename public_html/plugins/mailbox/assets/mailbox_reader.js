@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.60
+ * No framework. @version 2.61
  *
  * The conversation list updates in place after mutations
  * (specs/implemented/mailbox_reader_list_persistence.md): actions that take rows out of
@@ -897,12 +897,15 @@
 	 * Move/Labels for the selection. Same panel as the open conversation's control
 	 * (shared markup and CSS), with one difference: a selection has no single
 	 * membership to show, so every box starts unticked and a tick means "put all of
-	 * these in that folder". Returns null when there is nowhere to move to.
+	 * these in that folder". Returns null outside a single mailbox's scope.
+	 *
+	 * A mailbox with no labels yet still gets the control: the panel's New label…
+	 * field is the only place a label is made, so hiding the button on an empty
+	 * mailbox is hiding the way to fill it.
 	 */
 	function bulkFolderControl() {
 		if (state.aliasId == null || isNaN(Number(state.aliasId))) return null;
 		var info = mailboxFolders(state.aliasId);
-		if (!info.folders.length) return null;
 
 		var keys = selectedKeys();
 		var wrap = el('div', 'mbx-folder-ctl');
@@ -1702,11 +1705,13 @@
 	 * single-pick folder button (choosing a folder relocates the thread); non-exclusive
 	 * feeds (Gmail) get a label button with a checkbox per folder (toggling adds/removes
 	 * the label). Each change calls set_membership; two-way sync pushes it upstream.
-	 * Returns null when the mailbox has no tracked folders.
+	 *
+	 * A mailbox with no labels yet still gets the control, holding only its New
+	 * label… field — the field is the one way to make the first label, so the
+	 * button has to be there before there is anything to list.
 	 */
 	function buildFolderControl(t, aliasId) {
 		var info = mailboxFolders(aliasId);
-		if (!info.folders.length) return null;
 
 		var wrap = el('div', 'mbx-folder-ctl');
 		var btn = toolBtn(info.exclusive ? 'folder' : 'tag',
