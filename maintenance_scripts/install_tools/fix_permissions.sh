@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#VERSION 3.2 - config/provisioning_key is no longer pinned or pruned: the platform holds no SSH
+#              key, so nothing in config/ is one (specs/agent_management_first_principles.md
+#              item 5). An operator's troubleshooting key lives in that operator's ~/.ssh.
 #VERSION 3.1 - config/backup-ledger is pruned from the sweep and pinned to 700/600. The sweep
 #              made it 770 (prod) or 777 (dev), so anyone with a shell could rewrite the one
 #              file a restore consults to decide whether bytes are this machine's own
@@ -107,7 +110,6 @@ PINNED=(
     "$SITE_ROOT/config/relay_pull_key"
     "$SITE_ROOT/config/backup_site_key"
     "$SITE_ROOT/config/agent_signing_key"
-    "$SITE_ROOT/config/provisioning_key"
     "$SITE_ROOT/config/admin_credentials.txt"
 )
 
@@ -209,28 +211,9 @@ if [ -f "$SIGNING_KEY" ]; then
     chmod 600 "$SIGNING_KEY"
 fi
 
-# The fleet provisioning SSH key (mgn_ssh_key_path) — reaches every managed
-# node as root, so the sweep must not leave it world-readable. It stops at 640
-# www-data:user1 rather than 600 because two callers ssh'd with it: the agent as
-# root, and node_exec.php as the developer account. OpenSSH's strict-permissions
-# check only applies to key files the caller owns, so group-read on a
-# www-data-owned file is what let user1 use it at all.
-#
-# node_exec.php is now retired (A1), leaving root the only caller — and root
-# reads the file whatever its mode. So 600 is available, and would take the
-# fleet's SSH key out of group-read entirely. It is NOT changed here: narrowing
-# a key every managed node trusts belongs in its own deliberate change with the
-# fleet watched afterwards, not as a footnote to deleting a script.
-PROVISIONING_KEY="$SITE_ROOT/config/provisioning_key"
-if [ -f "$PROVISIONING_KEY" ]; then
-    echo "  Pinning key $PROVISIONING_KEY to 640 www-data:user1..."
-    chown www-data:user1 "$PROVISIONING_KEY"
-    chmod 640 "$PROVISIONING_KEY"
-fi
-
 # The install-time admin password, for whoever can already reach the server as
 # root. The sweep above would hand it to the web server user and, in dev mode,
-# to everyone — so re-pin it last, in both modes, same as the SSH key.
+# to everyone — so re-pin it last, in both modes.
 CRED_FILE="$SITE_ROOT/config/admin_credentials.txt"
 if [ -f "$CRED_FILE" ]; then
     echo "  Pinning $CRED_FILE to 600 root:root..."

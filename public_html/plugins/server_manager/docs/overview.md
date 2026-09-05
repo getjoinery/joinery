@@ -498,13 +498,11 @@ Linode OAuth app. When the store
 is a remote site rather than the management node itself, the service key is
 minted on the store site and its values entered in the API settings fields.
 
-The customer-cloud provisioning keypair (the public half is installed on
-created instances; the private half is the management node's only access to
-them) is generated automatically at plugin activation
-(`activate.php` → `ProvisioningSetup::ensureSshKey()`), defaulting to
-`{site root}/config/provisioning_key`. The page's **Generate provisioning
-key** button runs the same idempotent action for management nodes activated
-before the key existed; an existing key or custom path is never overwritten.
+The management node holds no SSH key. A machine it creates gets a one-time
+root password that the install job uses for its single bootstrap session and
+that is retired once the machine's agents are admitted; nothing of the
+platform's is ever placed on the machine. The install runner never reads a
+key file, and `config/` on the management node contains none.
 
 ### Customer-Cloud Fulfillment
 

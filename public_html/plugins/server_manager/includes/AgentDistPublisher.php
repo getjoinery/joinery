@@ -17,7 +17,7 @@
  *   the existing agent_dist carries forward unchanged. Publishing never
  *   breaks; the agent version simply does not advance.
  * - Signing keypair is generated on first use at {site}/config/
- *   agent_signing_key(.pub) — zero-config, same pattern as provisioning_key.
+ *   agent_signing_key(.pub) — zero-config, minted on first use.
  *
  * publish() never throws, so a broken agent build cannot abort an unrelated
  * platform publish. It returns a status instead and leaves the policy to the
