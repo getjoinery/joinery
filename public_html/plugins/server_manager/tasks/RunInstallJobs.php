@@ -2,9 +2,10 @@
 /**
  * RunInstallJobs - Poke the plane-side install executor each tick.
  *
- * A machine we create has no agent for its first install, so that one job
- * (install_node) is run from the plane over the provision's sealed root
- * password by InstallJobExecutor (specs/keyless_provisioning.md). Those jobs
+ * A machine we create has no agent for its first install, so that job
+ * (install_node), and the retire_install_password job that closes the
+ * bootstrap, are run from the plane over the provision's sealed root password
+ * by InstallJobExecutor (specs/keyless_provisioning.md). Those jobs
  * are created in status 'queued', which the node-agent local queue never
  * claims.
  *
@@ -14,6 +15,9 @@
  * returns at once. The worker takes a single-instance lock, so a spawn while
  * one is already running is harmless.
  *
+ * @version 1.1 - Counts every BOOTSTRAP_JOB_TYPES job, not just install_node: a queued
+ *                retire_install_password job with no install alongside it never woke the
+ *                worker, so no password was ever retired.
  * @version 1.0
  */
 
@@ -23,13 +27,14 @@ class RunInstallJobs implements ScheduledTaskInterface {
 
 	public function run(array $config) {
 		$db = DbConnector::get_instance()->get_db_link();
+		$types = "'" . implode("','", ManagementJob::BOOTSTRAP_JOB_TYPES) . "'";
 		$queued = (int)$db->query(
 			"SELECT COUNT(*) FROM mjb_management_jobs " .
-			"WHERE mjb_status = 'queued' AND mjb_job_type = 'install_node' AND mjb_delete_time IS NULL"
+			"WHERE mjb_status = 'queued' AND mjb_job_type IN ({$types}) AND mjb_delete_time IS NULL"
 		)->fetchColumn();
 
 		if ($queued === 0) {
-			return array('status' => 'success', 'message' => 'No queued install jobs.');
+			return array('status' => 'success', 'message' => 'No queued bootstrap jobs.');
 		}
 
 		$worker = PathHelper::getIncludePath('plugins/server_manager/utils/run_install_executor.php');
