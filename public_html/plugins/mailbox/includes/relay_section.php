@@ -16,6 +16,10 @@
  * @version 2.1 - relay version line and the upgrade affordance, which differs by
  *                what the platform can reach (job / cloud wipe / the customer's
  *                own box / operator-managed shard)
+ * @version 2.1 - a relay without a shell (specs/relay_without_a_shell.md): identity pin and
+ *                last-ping class in place of tunnel rows, the whole ping behind a disclosure,
+ *                Update wording, a Delete confirm that names the machine and the MX, the
+ *                no-relay notice with both ways out, and no tunnel-identity gates
  * @version 2.0 - relay scanner health: last answer + Check spam scanning now
  */
 
@@ -83,9 +87,9 @@ function mailbox_relay_upgrade_control(int $relay_id, array $up): string {
 			. 'relay and would be lost.</span>';
 	}
 
-	$confirm = 'Rebuild this relay now? It is drained of stored mail first, then wiped and rebuilt. '
-		. 'It stops accepting mail for several minutes — senders retry, so nothing bounces. '
-		. 'Its address does not change.';
+	$confirm = 'Update this relay now? It is drained of stored mail first, then the same server is re-imaged '
+		. 'from this site\'s current release and is born again. It stops accepting mail for several minutes — '
+		. 'senders retry, so nothing bounces. Its address does not change.';
 	$ack = '';
 	if ($sole === null) {
 		// Too old to answer. The platform will not decide this on the customer's
@@ -104,10 +108,10 @@ function mailbox_relay_upgrade_control(int $relay_id, array $up): string {
 		. '<input type="hidden" name="mrl_mailbox_relay_id" value="' . $relay_id . '">'
 		. '<input type="hidden" name="action" value="relay_upgrade">'
 		. $ack
-		. '<button type="submit" class="btn btn-sm btn-warning">Upgrade relay</button>'
+		. '<button type="submit" class="btn btn-sm btn-warning">Update relay</button>'
 		. '</form> '
-		. '<span class="text-muted small">Drains the relay, then rebuilds it from this site\'s current '
-		. 'code. It stops accepting mail for several minutes; senders retry and its address does not '
+		. '<span class="text-muted small">Drains the relay, then re-images the same server from this site\'s '
+		. 'current release. It stops accepting mail for several minutes; senders retry and its address does not '
 		. 'change.' . $warn . '</span></div>';
 }
 
@@ -120,6 +124,16 @@ function mailbox_relay_section_render($page, array $v): void {
 	// One plain line per relay — name (ip), status, health. The technical
 	// facts and the lifecycle actions live behind its details disclosure.
 	if (empty($v['relays'])) {
+		if (!empty($v['mx_points_at_gone_relay'])) {
+			// The world still sends mail to a relay this deployment no longer
+			// has. Neither way out is taken automatically - both change where
+			// the world sends mail - so both are offered, in one place.
+			echo '<p class="text-danger"><strong>Mail is addressed to a relay this deployment no longer has.</strong> '
+				. 'The cutover is recorded complete, so your domains\' MX records point at a relay, and no relay is '
+				. 'enabled here. Two ways out: create a relay below (its address becomes the new MX target), or '
+				. 'repoint every hosted domain\'s MX at this server and turn its mail listener back on in the '
+				. 'Local mail listener box.</p>';
+		}
 		echo mailbox_hosted_relay_offered()
 			? '<p>No relay yet. Get one below — a hosted relay slot, or one you run yourself.</p>'
 			: '<p>No relay yet. Set one up below on a server you control.</p>';
@@ -158,8 +172,17 @@ function mailbox_relay_section_render($page, array $v): void {
 			echo '<details style="margin-top:.4rem;"><summary>Details &amp; actions</summary>';
 			echo '<div style="margin-top:.5rem;">';
 			echo '<table class="table" style="max-width:560px;"><tbody>';
-			echo '<tr><th style="width:45%;">Tunnel address (private)</th><td>' . htmlspecialchars((string)$relay->get('mrl_host')) . '</td></tr>';
-			echo '<tr><th>WireGuard key</th><td><code>' . htmlspecialchars(substr((string)$relay->get('mrl_wg_public_key'), 0, 16)) . '…</code></td></tr>';
+			if ($relay->usesRelayApi()) {
+				echo '<tr><th style="width:45%;">Identity pin</th><td><code>' . htmlspecialchars((string)$relay->get('mrl_identity_fingerprint')) . '</code></td></tr>';
+				$failure = trim((string)$relay->get('mrl_last_health_failure'));
+				echo '<tr><th>Last ping</th><td>' . ($failure === ''
+					? '<span class="text-success">answered</span>'
+					: '<span class="text-danger">' . htmlspecialchars($failure) . '</span> — '
+						. htmlspecialchars(RelayClient::describeFailure($failure))) . '</td></tr>';
+			} else {
+				echo '<tr><th style="width:45%;">Tunnel address (private)</th><td>' . htmlspecialchars((string)$relay->get('mrl_host')) . '</td></tr>';
+				echo '<tr><th>WireGuard key</th><td><code>' . htmlspecialchars(substr((string)$relay->get('mrl_wg_public_key'), 0, 16)) . '…</code></td></tr>';
+			}
 			echo '<tr><th>Address-list version</th><td>v' . (int)$relay->get('mrl_map_version') . '</td></tr>';
 			echo '<tr><th>Last address-list push</th><td>' . (htmlspecialchars((string)$relay->get('mrl_last_push_time')) ?: '—') . '</td></tr>';
 			echo '<tr><th>Last mail pull</th><td>' . (htmlspecialchars((string)$relay->get('mrl_last_pull_time')) ?: '—') . '</td></tr>';
@@ -176,6 +199,14 @@ function mailbox_relay_section_render($page, array $v): void {
 				echo '<tr><th>Relay version</th><td>' . htmlspecialchars((string)$up['describe']) . '</td></tr>';
 			}
 			echo '</tbody></table>';
+			// Health is the only window into a relay without a shell: every group
+			// the relay reported, as it reported it, behind a disclosure.
+			if ($relay->usesRelayApi() && $scanner !== null && is_array($scanner['ping'] ?? null)) {
+				echo '<details style="margin-bottom:.5rem;"><summary>Everything the relay reported at its last ping</summary>'
+					. '<pre style="max-height:24rem;overflow:auto;font-size:.8rem;">'
+					. htmlspecialchars(json_encode($scanner['ping'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES))
+					. '</pre></details>';
+			}
 			echo mailbox_relay_action_button($rid, $enabled ? 'disable' : 'enable', $enabled ? 'Disable' : 'Enable');
 			// Rebuild renders only where a job can actually land: the button used to
 			// appear on cloud relays too, and dead-ended on "Select a managed node".
@@ -188,9 +219,13 @@ function mailbox_relay_section_render($page, array $v): void {
 			if (!empty($up['offers']) || ($up['route'] ?? '') === 'hosted') {
 				echo mailbox_relay_upgrade_control($rid, $up);
 			}
+			$machine = (string)$relay->get('mrl_public_ip') ?: $name;
 			$delete_confirm = ((string)$relay->get('mrl_cloud_instance_id') !== '')
-				? 'Remove this relay from your mail setup? The server itself keeps running (and billing) at your cloud provider until you delete it there.'
-				: 'Remove this relay?';
+				? 'Remove the relay at ' . $machine . ' from your mail setup? The server itself keeps running, and billing, '
+					. 'at your cloud provider until you delete it there. Your domains\' MX records still point at it: '
+					. 'create a new relay, or repoint the MX at this server and turn its mail listener on.'
+				: 'Remove the relay at ' . $machine . '? Your domains\' MX records still point at it: create a new relay, '
+					. 'or repoint the MX at this server and turn its mail listener on.';
 			echo mailbox_relay_action_button($rid, 'delete', 'Delete', 'btn-danger', $delete_confirm);
 			echo '</div></details>';
 			echo '</div>';
@@ -227,12 +262,7 @@ function mailbox_relay_section_render($page, array $v): void {
 	} elseif ($v['fleet_error'] !== '') {
 		echo '<p class="text-danger">' . htmlspecialchars($v['fleet_error']) . '</p>';
 	} elseif (is_array($v['fleet_status']) && empty($v['fleet_status']['enrolled'])) {
-		if ($v['main_wg_public_key'] === '') {
-			echo '<p>Before enrolling, give this box its tunnel identity. Run once as root:</p>'
-				. '<pre><code>sudo bash plugins/mailbox/provisioning/provision_relay_main.sh</code></pre>';
-		} else {
-			echo mailbox_relay_action_button(0, 'fleet_enroll', 'Enroll for a hosted relay slot', 'btn-primary');
-		}
+		echo mailbox_relay_action_button(0, 'fleet_enroll', 'Enroll for a hosted relay slot', 'btn-primary');
 	} elseif (is_array($v['fleet_status'])) {
 		$coords = $v['fleet_status']['coordinates'] ?? array();
 		echo '<p><strong>Slot:</strong> ' . htmlspecialchars((string)($coords['slug'] ?? ''))
@@ -277,19 +307,20 @@ function mailbox_relay_section_render($page, array $v): void {
 	$cloud_run_live = !empty($v['cloud_run']) && $v['cloud_run']->isLive();
 	if (empty($v['relays']) || $cloud_run_live) {
 	echo '<h5 class="mt-3">' . ($cloud_run_live && !empty($v['relays']) ? 'Relay cloud act' : 'Run your own relay') . '</h5>';
-	if ($v['main_wg_public_key'] === '' || empty($v['pull_key_ready'])) {
-		echo '<p>The main box has no relay identity yet — the tunnel and the mail pull cannot work without it. Run once as root:</p>'
-			. '<pre><code>sudo bash plugins/mailbox/provisioning/provision_relay_main.sh</code></pre>'
-			. '<p>Then reload this page.</p>';
-	} else {
-		// The cloud path: this deployment creates and builds the relay in the
-		// customer's own cloud account (specs/mailbox_relay_cloud_provisioning.md).
+	{
+		// The cloud path: this deployment creates the relay in the customer's
+		// own cloud account and the relay builds itself from first-boot
+		// user-data, then reports in over HTTPS (specs/relay_without_a_shell.md).
+		// Nothing on this box has to be prepared first: the deployment's relay
+		// client identity is minted when the run starts.
 		$run = $v['cloud_run'] ?? null;
 		$run_status = $run ? (string)$run->get('rcp_status') : '';
 		$status_lines = array(
 			'ready'          => 'Creating the server in your account…',
+			'draining'       => 'Emptying the relay\'s spool before it is re-imaged…',
+			'rebuilding'     => 'Re-imaging the relay from the current release…',
 			'booting'        => 'Server created in your account — waiting for it to boot…',
-			'provisioning'   => 'Building the relay on your new server (this takes several minutes)…',
+			'provisioning'   => 'The new server is building itself and will report in when it is done (several minutes)…',
 		);
 
 		if ($run !== null && $run->isLive()) {

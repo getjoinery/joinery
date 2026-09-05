@@ -180,6 +180,27 @@
 						: 'Connect ' . htmlspecialchars($node->get('mgn_name')) . '\'s agent&hellip;';
 				?></a></li>
 			<?php endif; ?>
+			<?php
+			// A disposable relay (specs/relay_without_a_shell.md): no shell, no
+			// agent, no key. Its whole vocabulary is Update and Delete, and both
+			// are the mailbox plugin's acts on its Setup tab, where the relay's
+			// row lives; this card only points at them. Present only while the
+			// mailbox plugin is active and a relay row names this node.
+			$disposable_relay = null;
+			if ($node->get('mgn_is_relay') && !$is_removed && PluginHelper::isPluginActive('mailbox') && class_exists('MailboxRelay')) {
+				foreach (new MultiMailboxRelay(array('deleted' => false)) as $candidate) {
+					if (intval($candidate->get('mrl_mgn_managed_node_id')) === intval($node->key) && $candidate->usesRelayApi()) {
+						$disposable_relay = $candidate;
+						break;
+					}
+				}
+			}
+			if ($disposable_relay !== null): ?>
+				<li><span class="dropdown-item-text text-muted small d-block px-3" style="max-width:22rem;white-space:normal;">Disposable relay: no shell, no agent. It is updated by re-imaging and removed by deleting its row; the machine itself is deleted at the provider by hand.</span></li>
+				<li><a class="dropdown-item" href="/plugins/mailbox/admin/admin_mailbox_setup#relay-section">Update relay&hellip;</a></li>
+				<li><a class="dropdown-item text-danger" href="/plugins/mailbox/admin/admin_mailbox_setup#relay-section">Delete relay&hellip;</a></li>
+				<li><hr class="dropdown-divider"></li>
+			<?php endif; ?>
 			<li><hr class="dropdown-divider"></li>
 			<?php if (!$is_removed): ?>
 				<li>

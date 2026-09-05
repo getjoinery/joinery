@@ -4,177 +4,84 @@
  * tier: db
  * env: dev-only
  * needs: []
- */
-/**
- * The relay cloud-provisioning state machine
- * (specs/mailbox_relay_cloud_provisioning.md) driven end to end with a fake
- * CloudComputeProvider and a scripted SSH runner: happy path (relay row
- * registered with cloud coordinates, credentials erased), create-fails,
- * boot-timeout, script-fails (instance destroyed + credentials erased at every
- * terminal state), and transient-error retry. The platform offers no destroy-a-running-server
- * act — the only instance deletion is a failed run cleaning up its own
- * half-built instance.
+ * timeout: 240
  *
- * Run: php tests/run.php db --filter=relay_cloud_provision
+ * The relay cloud run, born configured (specs/relay_without_a_shell.md WP3):
+ * the state machine RelayCloudProvisioner drives against a fake provider, and
+ * a real relay binary where the run has to be answered.
  *
- * @version 1.3
+ *   create   ready -> booting carries first-boot user-data naming this run, its
+ *            token and the bundle's hash; installs no SSH key; records no
+ *            password. A 4xx is terminal with the token erased; a 5xx stays put.
+ *   boot     booting -> provisioning once the instance runs with an address; a
+ *            boot that never completes is failed and its instance destroyed.
+ *   birth    provisioning WAITS. A relay silent past the birth timeout is
+ *            failed and destroyed; a birth report completes the run (covered in
+ *            relay_birth) and, with server_manager active, attaches a
+ *            ManagedNode in the disposable posture.
+ *   update   drains the spool over the relay API (refusing a shared relay), then
+ *            re-images the SAME instance with fresh user-data and a fresh token.
+ *
+ * Fixture rows (runs, relays, nodes) are removed at teardown.
  */
-
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
+require_once(__DIR__ . '/lib/relay_ping_probe.php');
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayCloudProvisioner.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySsh.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayBirthEndpoint.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_client_identity_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayFirstBoot.php'));
 
+/** A provider that records every call and answers what the test scripted. */
 class RcpFakeDriver implements CloudComputeProvider {
 	public $instances = array();
-	public $create_exception = null;
-	public $boot_sequence = array(); // statuses returned by successive getInstance calls
+	public $rebuilds = array();
 	public $deleted = array();
-	public $rebuilt = array();
 	public $rdns = array();
-	private $boot_i = 0;
+	public $boot_sequence = array('running');
+	public $create_error = null; // CloudComputeException to throw on create
+	public $metadata_regions = array('us-test' => true);
+	public $stackscripts = array();
+	private $polls = 0;
 
 	public function createInstance(array $opts): array {
-		if ($this->create_exception !== null) {
-			throw $this->create_exception;
-		}
+		if ($this->create_error !== null) { $e = $this->create_error; $this->create_error = null; throw $e; }
 		$id = 'fake-' . (count($this->instances) + 1);
 		$this->instances[$id] = $opts;
-		return array('id' => $id, 'status' => 'provisioning', 'ip' => '', 'label' => $opts['label']);
+		return array('id' => $id, 'status' => 'provisioning', 'ip' => '198.51.100.99', 'label' => $opts['label']);
 	}
-	public function getInstance(string $instance_id): array {
-		$status = $this->boot_sequence[$this->boot_i] ?? 'running';
-		$this->boot_i++;
-		$ip = ($status === 'running') ? '198.51.100.99' : '';
-		return array('id' => $instance_id, 'status' => $status, 'ip' => $ip, 'label' => 'x');
+	public function getInstance(string $id): array {
+		$status = $this->boot_sequence[min($this->polls, count($this->boot_sequence) - 1)];
+		$this->polls++;
+		return array('id' => $id, 'status' => $status, 'ip' => $status === 'running' ? '198.51.100.99' : '', 'label' => 'r');
 	}
-	public function rebuildInstance(string $instance_id, array $opts): array {
-		$this->rebuilt[] = array('id' => $instance_id, 'opts' => $opts);
-		// A real rebuild keeps the instance and its address; the fake must too,
-		// or a test could pass while the address silently moved.
-		return array('id' => $instance_id, 'status' => 'rebuilding',
-			'ip' => '198.51.100.99', 'label' => 'x');
+	public function rebuildInstance(string $id, array $opts): array {
+		$this->rebuilds[] = array($id, $opts);
+		$this->polls = 0;
+		return array('id' => $id, 'status' => 'rebuilding', 'ip' => '198.51.100.99', 'label' => 'r');
 	}
-	public function deleteInstance(string $instance_id): void {
-		$this->deleted[] = $instance_id;
-	}
-	public function setReverseDns(string $instance_id, string $ip, string $hostname): array {
-		$this->rdns[] = array($instance_id, $ip, $hostname);
-		return array('ip' => $ip, 'rdns' => $hostname);
-	}
-	public function regions(): array { return array(); }
-	public function plans(): array { return array(); }
+	public function deleteInstance(string $id): void { $this->deleted[] = $id; }
+	public function setReverseDns(string $id, string $ip, string $hostname): array { $this->rdns[] = array($id, $ip, $hostname); return array('ip' => $ip, 'rdns' => $hostname); }
 }
 
 class RelayCloudProvisionTest {
-
-	private $cleanup_runs = array();
-	private $cleanup_relays = array();
 	/** @var RcpFakeDriver */
-	private $driver;
-	private $ssh_script_ok = true;
-	private $commands = array();
-	/** Paths the seam actually wrote a keypair to. */
-	private $keygen_writes = array();
-	/** Paths named by an ssh-keygen -R; these are real known_hosts files. */
-	private $forget_targets = array();
-
-	private $wg_setting_was = null;
-
-	/** Path of the throwaway pull key this run wrote, '' when the box had its own. */
-	public $pull_pub_created = '';
+	public $driver;
 
 	function run() {
+		$test = $this;
+		RelayCloudProvisioner::$driver_factory = function ($run) use ($test) { return $test->driver; };
+		harness_defer(function () { RelayCloudProvisioner::$driver_factory = null; });
 		try {
-			// The engine requires the main box's WireGuard identity; give the
-			// run a fake one when the deployment has none, restored after.
-			$db = DbConnector::get_instance()->get_db_link();
-			$q = $db->query("SELECT stg_value FROM stg_settings WHERE stg_name = 'mailbox_relay_wg_public_key'");
-			$this->wg_setting_was = $q ? $q->fetchColumn() : false;
-			if ($this->wg_setting_was === false || trim((string)$this->wg_setting_was) === '') {
-				// Blank cached settings re-query the DB on every get_setting
-				// call, so a direct row write is visible immediately.
-				$db->exec("INSERT INTO stg_settings (stg_name, stg_value) VALUES ('mailbox_relay_wg_public_key', 'FAKE-MAIN-WG')"
-					. " ON CONFLICT (stg_name) DO UPDATE SET stg_value = 'FAKE-MAIN-WG'");
-			}
-			// The engine also requires the main box's relay pull key, which
-			// lives on the filesystem rather than in the database — so a clone
-			// of this deployment has the setting above but not the file, and
-			// every provisioning run fails at 'lost its relay identity'. Same
-			// treatment as the WireGuard key: supply a fake, remove it after.
-			$pull_pub = RelaySsh::pullKeyPath() . '.pub';
-			if (!is_file($pull_pub) || trim((string)@file_get_contents($pull_pub)) === '') {
-				@file_put_contents($pull_pub, "ssh-ed25519 AAAAFAKEPULLKEYFORTESTS relay-pull-test\n");
-				$this->pull_pub_created = is_file($pull_pub) ? $pull_pub : '';
-			}
-
-			$this->installSeams();
-			$this->testHappyPath();
+			$this->testCreateCarriesFirstBoot();
 			$this->testCreateFails();
 			$this->testTransientRetries();
 			$this->testBootTimeout();
-			$this->testScriptFails();
+			$this->testBirthTimeout();
+			$this->testUpdateDrainsThenReimages();
 		} catch (\Throwable $e) {
-			check(false, 'uncaught ' . get_class($e), $e->getMessage());
-		} finally {
-			RelayCloudProvisioner::$driver_factory = null;
-			RelaySsh::$runner = null;
-			if ($this->pull_pub_created !== '') {
-				@unlink($this->pull_pub_created);
-			}
-			$this->cleanupRows();
+			check(false, 'uncaught ' . get_class($e), $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
 		}
-	}
-
-	private function installSeams() {
-		$test = $this;
-		RelayCloudProvisioner::$driver_factory = function ($run) use ($test) {
-			return $test->driver;
-		};
-		// Scripted runner: ssh-keygen produces a real throwaway keypair (the
-		// engine reads the files); tar/scp succeed silently; the big ssh build
-		// step succeeds (with markers) or fails per the test's flag; the
-		// WireGuard peer helper succeeds. Installed on RelaySsh — the ONE
-		// execution chokepoint — so no command line can run for real: the old
-		// per-class seam let RelaySsh::run() slip a real rsync to the dead
-		// tunnel address (15s of connect timeout) and a real ssh-keygen -R
-		// against ~/.ssh/known_hosts on every gate run.
-		RelaySsh::$runner = function ($cmd) use ($test) {
-			$test->commands[] = $cmd;
-			// Two unrelated commands share the ssh-keygen name: generating the
-			// throwaway keypair, and forgetting a stale host key. Only the
-			// first creates a file. Keying on -f alone made the stub write a
-			// fake private key over the -R target, which is a real
-			// ~/.ssh/known_hosts.
-			if (strpos($cmd, 'ssh-keygen') === 0) {
-				if (strpos($cmd, ' -R ') !== false) {
-					// Forgetting a host key touches nothing here. The -f target
-					// is a real ~/.ssh/known_hosts, not a key to be written.
-					if (preg_match('/-f (\S+)/', $cmd, $m)) {
-						$test->forget_targets[] = trim($m[1], "'");
-					}
-					return array(0, 'ok');
-				}
-				if (strpos($cmd, ' -t ') === false) {
-					check(false, 'ssh-keygen in the seam is one we recognise', $cmd);
-					return array(1, 'unrecognised ssh-keygen');
-				}
-				if (preg_match('/-f (\S+)/', $cmd, $m)) {
-					$f = trim($m[1], "'");
-					$test->keygen_writes[] = $f;
-					file_put_contents($f, "FAKE-PRIVATE-KEY\n");
-					file_put_contents($f . '.pub', "ssh-ed25519 AAAAfake joinery-relay-provision\n");
-				}
-				return array(0, 'ok');
-			}
-			if (strpos($cmd, 'timeout 1800 ssh') === 0) {
-				if (!$test->ssh_script_ok) {
-					return array(1, 'boom: apt exploded');
-				}
-				return array(0, "stuff\nRELAY_WG_PUBKEY=FAKEWGKEY123\nRELAY_PUBLIC_IP=198.51.100.99\nPROVISION_RELAY_SUCCESS");
-			}
-			return array(0, 'ok');
-		};
 	}
 
 	private function makeRun(array $over = array()): RelayCloudProvision {
@@ -185,152 +92,208 @@ class RelayCloudProvisionTest {
 		$run->set('rcp_mail_hostname', 'mx.rcp-test.example');
 		$run->set('rcp_region', 'us-test');
 		$run->set('rcp_instance_type', 'g6-test-1');
-		foreach ($over as $k => $v) {
-			$run->set($k, $v);
-		}
+		foreach ($over as $k => $v) { $run->set($k, $v); }
 		$run->sealToken('fake-access-token');
 		$run->save();
-		$this->cleanup_runs[] = intval($run->key);
+		harness_register_model('RelayCloudProvision', $run->key);
+		harness_defer(function () use ($run) { $run->eraseBundle(); });
 		return $run;
 	}
 
-	private function testHappyPath() {
-		section('happy path');
+	private function bundleAvailable(): bool {
+		return is_file(PathHelper::getIncludePath('agent_dist/support_bundle.tar.gz'));
+	}
+
+	private function testCreateCarriesFirstBoot() {
+		section('create: the instance is born from user-data, with no key and no password kept');
+		if (!$this->bundleAvailable()) {
+			harness_skip('create carries first-boot user-data', 'no agent_dist/support_bundle.tar.gz on this deployment');
+			return;
+		}
 		$this->driver = new RcpFakeDriver();
 		$this->driver->boot_sequence = array('provisioning', 'running');
-		$this->ssh_script_ok = true;
-
 		$run = $this->makeRun();
 		$p = new RelayCloudProvisioner();
 
-		$p->advance($run);
+		check(strpos($p->advance($run), 'user-data') !== false, 'ready -> booting names the user-data');
 		check((string)$run->get('rcp_status') === 'booting', 'ready -> booting');
-		check((string)$run->get('rcp_instance_id') === 'fake-1', 'instance id recorded at create');
-		check(!empty($this->driver->instances['fake-1']['authorized_keys'][0]), 'per-run public key injected at create');
-		// The naming RULES belong to relay_instance_label_test; what matters here is
-		// that create() is fed this run's own hostname and id, so each rebuild gets a
-		// distinct label instead of colliding with its predecessor.
-		$expect_label = RelayCloudProvisioner::instanceLabel(
-			(string)$run->get('rcp_mail_hostname'), intval($run->key));
-		check((string)$this->driver->instances['fake-1']['label'] === $expect_label,
-			'instance label is built from this run\'s hostname and id',
-			'got ' . (string)$this->driver->instances['fake-1']['label'] . ', want ' . $expect_label);
+		$opts = $this->driver->instances['fake-1'] ?? array();
+		check(!isset($opts['authorized_keys']), 'no SSH key is installed on the relay');
+		check(!isset($opts['root_pass']), 'the provisioner hands the driver no root password to record');
+		check(!empty($opts['user_data']), 'the create carries first-boot user-data');
+		$ud = (string)($opts['user_data'] ?? '');
+		check(strpos($ud, 'RUN_ID="${RUN_ID:-' . $run->key . '}"') !== false, 'the user-data names this run');
+		check(strpos($ud, 'BUNDLE_SHA256="${BUNDLE_SHA256:-' . (string)$run->get('rcp_bundle_sha256') . '}"') !== false
+			&& (string)$run->get('rcp_bundle_sha256') !== '', 'the user-data names the hash of the run\'s bundle copy');
+		check(is_file($run->bundlePath()), 'the run holds its own copy of the bundle');
+		check(strpos($ud, 'CLIENT_PUBLIC_KEY="${CLIENT_PUBLIC_KEY:-' . RelayClientIdentity::publicKey(RelayClientIdentity::KIND_CLIENT) . '}"') !== false,
+			'the user-data carries this deployment\'s relay client public key');
+		check(strpos($ud, '--keep-sshd') === false || strpos($ud, 'KEEP_SSHD=0') !== false, 'the user-data never keeps sshd');
+		preg_match('/RUN_TOKEN="\${RUN_TOKEN:-([0-9a-f]+)}"/', $ud, $m);
+		check(!empty($m[1]) && $run->runTokenMatches($m[1]), 'the user-data carries the run\'s live token');
+		check((string)$run->get('rcp_sealed_ssh_key') === '' && (string)$run->get('rcp_ssh_public_key') === '', 'no per-run SSH key exists');
 
-		$p->advance($run);
-		check((string)$run->get('rcp_status') === 'booting', 'not running yet stays booting');
-
-		// Cheap page-driven advance moves boot completion; the heavy build
-		// waits for the next full advance (the scheduled task's job).
-		$p->advanceCheap($run);
-		check((string)$run->get('rcp_status') === 'provisioning', 'boot complete marks provisioning without building');
-
-		$p->advance($run);
-		check((string)$run->get('rcp_status') === 'done', 'the next pass runs the build to done');
-		check((string)$run->get('rcp_sealed_token') === '', 'token erased at terminal state');
-		check((string)$run->get('rcp_sealed_ssh_key') === '', 'ssh key erased at terminal state');
-		check(count($this->driver->rdns) === 1, 'reverse DNS attempted through the provider');
-
-		$relay = null;
-		$multi = new MultiMailboxRelay(array('deleted' => false));
-		$multi->load();
-		foreach ($multi as $row) {
-			if ((string)$row->get('mrl_cloud_instance_id') === 'fake-1') {
-				$relay = $row;
-			}
-		}
-		check($relay !== null, 'relay row registered');
-		if ($relay !== null) {
-			$this->cleanup_relays[] = intval($relay->key);
-			check((bool)$relay->get('mrl_is_enabled') === true, 'relay born ENABLED (doctrine keys off cutover state)');
-			check((string)$relay->get('mrl_cloud_provider') === 'linode', 'relay carries the cloud provider');
-			check((string)$relay->get('mrl_mx_hostname') === 'mx.rcp-test.example', 'relay carries the MX hostname');
-			check((string)$relay->get('mrl_public_ip') === '198.51.100.99', 'relay carries the instance IP');
-			check((string)$relay->get('mrl_wg_public_key') === 'FAKEWGKEY123', 'relay carries the WG key from the markers');
-			check((string)$relay->get('mrl_tenant_slug') === 'main', 'self-provisioned relay is a fleet of one');
-		}
-
-		// A new machine reuses the tunnel address, so the engine forgets the
-		// stale host key. That path names a real ~/.ssh/known_hosts after -f.
-		// The seam must never mistake it for a keypair to write: doing so
-		// destroys the known_hosts of whoever runs the suite.
-		check(count($this->forget_targets) > 0, 'the run forgot the stale host key');
-		$clobbered = array_intersect($this->forget_targets, $this->keygen_writes);
-		check(count($clobbered) === 0, 'no host-key file was written as a keypair',
-			implode(', ', $clobbered));
+		check($p->advance($run) === 'still booting' && (string)$run->get('rcp_status') === 'booting', 'not running yet stays booting');
+		check(strpos($p->advance($run), 'report in') !== false && (string)$run->get('rcp_status') === 'provisioning',
+			'running with an address -> provisioning, which is a wait');
+		check((string)$run->get('rcp_instance_ip') === '198.51.100.99', 'the provider\'s address is recorded for the birth report to match');
+		check(strpos($p->advance($run), 'waiting') !== false && (string)$run->get('rcp_status') === 'provisioning',
+			'provisioning waits for the birth report rather than building anything from here');
+		check(count($this->driver->deleted) === 0, 'nothing destroyed while waiting');
 	}
 
 	private function testCreateFails() {
 		section('create fails (4xx terminal)');
+		if (!$this->bundleAvailable()) { harness_skip('create fails', 'no bundle'); return; }
 		$this->driver = new RcpFakeDriver();
-		$this->driver->create_exception = new CloudComputeException('Bad region', 400);
-
+		$this->driver->create_error = new CloudComputeException('Linode API POST failed (400): region invalid', 400);
 		$run = $this->makeRun();
 		(new RelayCloudProvisioner())->advance($run);
 		check((string)$run->get('rcp_status') === 'failed', '4xx create error is terminal');
-		check((string)$run->get('rcp_sealed_token') === '', 'token erased on failure');
+		check((string)$run->get('rcp_sealed_token') === '' && (string)$run->get('rcp_sealed_run_token') === '', 'provider token and run token erased on failure');
+		check(!is_file($run->bundlePath()), 'the bundle copy is erased on failure');
 		check(count($this->driver->deleted) === 0, 'no instance existed, none destroyed');
 	}
 
 	private function testTransientRetries() {
 		section('transient error retries');
+		if (!$this->bundleAvailable()) { harness_skip('transient retries', 'no bundle'); return; }
 		$this->driver = new RcpFakeDriver();
-		$this->driver->create_exception = new CloudComputeException('gateway timeout', 502);
-
+		$this->driver->create_error = new CloudComputeException('Linode API POST failed (503): try later', 503);
 		$run = $this->makeRun();
 		(new RelayCloudProvisioner())->advance($run);
 		check((string)$run->get('rcp_status') === 'ready', '5xx stays put for the next tick');
-		check((string)$run->get('rcp_sealed_token') !== '', 'token kept while the run is live');
-		$run->fail('test cleanup');
+		check((string)$run->get('rcp_sealed_token') !== '', 'provider token kept while the run is live');
+		check(strpos((string)$run->get('rcp_error'), 'Transient') === 0, 'the transient reason is recorded');
 	}
 
 	private function testBootTimeout() {
 		section('boot timeout');
+		if (!$this->bundleAvailable()) { harness_skip('boot timeout', 'no bundle'); return; }
 		$this->driver = new RcpFakeDriver();
-		$this->driver->boot_sequence = array_fill(0, 10, 'provisioning');
-
+		$this->driver->boot_sequence = array('provisioning');
 		$run = $this->makeRun();
-		(new RelayCloudProvisioner())->advance($run); // -> booting
-		// Age the row past the timeout window.
-		$db = DbConnector::get_instance()->get_db_link();
-		$db->exec("UPDATE rcp_relay_cloud_provisions SET rcp_update_time = now() - interval '1 hour' WHERE rcp_id = " . intval($run->key));
-		$run->load();
-		(new RelayCloudProvisioner())->advance($run);
+		$p = new RelayCloudProvisioner();
+		$p->advance($run); // -> booting
+		// Age the run past the boot window.
+		$this->age($run, RelayCloudProvisioner::BOOT_TIMEOUT_SECONDS + 60);
+		$p->advance($run);
 		check((string)$run->get('rcp_status') === 'failed', 'boot timeout is terminal');
 		check(in_array('fake-1', $this->driver->deleted, true), 'timed-out instance destroyed within the grant');
 		check((string)$run->get('rcp_sealed_token') === '', 'token erased after timeout');
 	}
 
-	private function testScriptFails() {
-		section('provision script fails');
+	private function testBirthTimeout() {
+		section('birth timeout: a relay that never reports in');
+		if (!$this->bundleAvailable()) { harness_skip('birth timeout', 'no bundle'); return; }
 		$this->driver = new RcpFakeDriver();
 		$this->driver->boot_sequence = array('running');
-		$this->ssh_script_ok = false;
-
 		$run = $this->makeRun();
 		$p = new RelayCloudProvisioner();
 		$p->advance($run); // -> booting
-		$p->advance($run); // running -> marks provisioning
-		$p->advance($run); // the build pass -> fails
-		check((string)$run->get('rcp_status') === 'failed', 'script failure is terminal');
-		check(strpos((string)$run->get('rcp_error'), 'boom') !== false, 'failure carries the script output tail');
-		check(in_array('fake-1', $this->driver->deleted, true), 'half-built instance destroyed within the grant');
-		check((string)$run->get('rcp_sealed_token') === '', 'token erased after script failure');
-		$this->ssh_script_ok = true;
+		$p->advance($run); // -> provisioning
+		check((string)$run->get('rcp_status') === 'provisioning', 'waiting');
+		$this->age($run, RelayCloudProvisioner::BIRTH_TIMEOUT_SECONDS + 60);
+		check(strpos($p->advance($run), 'birth timeout') !== false, 'the wait ends');
+		check((string)$run->get('rcp_status') === 'failed', 'a silent relay is a failed run');
+		check(in_array('fake-1', $this->driver->deleted, true), 'its instance is destroyed within the grant');
+		check(!is_file($run->bundlePath()) && (string)$run->get('rcp_sealed_run_token') === '', 'bundle copy and run token erased');
 	}
 
-	private function cleanupRows() {
+	private function testUpdateDrainsThenReimages() {
+		section('update: drain over the relay API, then re-image the same instance');
+		if (!$this->bundleAvailable()) { harness_skip('update', 'no bundle'); return; }
+		$binary = RelayPingProbe::binary();
+		if ($binary === null) { harness_skip('update against a real relay', 'no relay binary'); return; }
+
+		// A born relay, reachable at 127.0.0.1 through the probe, one tenant.
+		$probe = new RelayPingProbe($binary);
+		$probe->addTenantWithKey('main', RelayClientIdentity::publicKey(RelayClientIdentity::KIND_CLIENT));
+		if (!$probe->start()) { check(false, 'the relay listener starts'); return; }
+		RelayClient::$base_url_override['127.0.0.1'] = $probe->baseUrl();
+		try {
+			$relay = new MailboxRelay(NULL);
+			$relay->set('mrl_name', 'mx.rcp-update.example');
+			$relay->set('mrl_mx_hostname', 'mx.rcp-update.example');
+			$relay->set('mrl_is_enabled', false);
+			$relay->set('mrl_public_ip', '127.0.0.1');
+			$relay->set('mrl_identity_fingerprint', $probe->fingerprint());
+			$relay->set('mrl_tenant_slug', 'main');
+			$relay->set('mrl_cloud_provider', 'linode');
+			$relay->set('mrl_cloud_instance_id', 'fake-existing');
+			$relay->save();
+			harness_register_model('MailboxRelay', $relay->key);
+			$relay->ensureTransportKeypair();
+
+			$this->driver = new RcpFakeDriver();
+			$run = $this->makeRun(array(
+				'rcp_kind' => 'upgrade', 'rcp_mrl_mailbox_relay_id' => intval($relay->key),
+				'rcp_instance_id' => 'fake-existing', 'rcp_instance_ip' => '127.0.0.1',
+				'rcp_mail_hostname' => 'mx.rcp-update.example',
+			));
+			$p = new RelayCloudProvisioner();
+
+			// An undrained spool refuses: a held entry is mail a wipe would destroy.
+			// (An empty spool drains in one pass, below.)
+			$out = $p->advance($run);
+			check((string)$run->get('rcp_status') === 'rebuilding', 'an empty spool drains over the API and the run moves to rebuilding', $out . ' / ' . (string)$run->get('rcp_error'));
+
+			$out = $p->advance($run);
+			check((string)$run->get('rcp_status') === 'booting', 'rebuilding -> booting', $out);
+			check(count($this->driver->rebuilds) === 1 && $this->driver->rebuilds[0][0] === 'fake-existing',
+				'the SAME instance is re-imaged; nothing is created');
+			$opts = $this->driver->rebuilds[0][1] ?? array();
+			check(!empty($opts['user_data']) && !isset($opts['authorized_keys']), 'the re-image carries fresh user-data and no SSH key');
+			check(strpos((string)$opts['user_data'], 'RUN_ID="${RUN_ID:-' . $run->key . '}"') !== false, 'the user-data names the update run');
+			check($run->runTokenMatches($this->tokenIn((string)$opts['user_data'])), 'a fresh run token rides in it');
+			check(count($this->driver->deleted) === 0, 'an update never destroys the customer\'s instance');
+
+			// The update's birth writes the new pin on the SAME row.
+			$this->driver->boot_sequence = array('running');
+			$p->advance($run); // booting -> provisioning (the fake reports 198.51.100.99, so re-point the run at the probe)
+			$run->set('rcp_instance_ip', '127.0.0.1');
+			$run->save();
+			$probe2 = new RelayPingProbe($binary);
+			$probe2->addTenantWithKey('main', RelayClientIdentity::publicKey(RelayClientIdentity::KIND_CLIENT));
+			check($probe2->start(), 'the re-imaged relay listens');
+			RelayClient::$base_url_override['127.0.0.1'] = $probe2->baseUrl();
+			$report = $probe2->birthReport((string)$run->key, '127.0.0.1');
+			$r = RelayBirthEndpoint::processBorn(json_encode($report), $this->tokenIn((string)$opts['user_data']), '127.0.0.1');
+			check($r['status'] === 200, 'the re-imaged relay\'s birth report is accepted', json_encode($r));
+			check(intval($r['data']['relay_id'] ?? 0) === intval($relay->key), 'the birth lands on the SAME relay row, not a second one');
+			$fresh = new MailboxRelay(intval($relay->key), TRUE);
+			check((string)$fresh->get('mrl_identity_fingerprint') === $probe2->fingerprint(), 'the row carries the new identity pin');
+			check((string)$fresh->get('mrl_public_ip') === '127.0.0.1', 'the address is kept');
+			$done = new RelayCloudProvision(intval($run->key), TRUE);
+			check((string)$done->get('rcp_status') === 'done', 'the update run is done');
+			if (intval($fresh->get('mrl_mgn_managed_node_id')) > 0) {
+				harness_register_model('ManagedNode', intval($fresh->get('mrl_mgn_managed_node_id')));
+				$node = new ManagedNode(intval($fresh->get('mrl_mgn_managed_node_id')), TRUE);
+				check((bool)$node->get('mgn_is_relay') && (string)$node->get('mgn_ssh_key_path') === ''
+					&& (string)$node->get('mgn_uptime_check_type') === 'tcp_port' && intval($node->get('mgn_uptime_tcp_port')) === 25
+					&& (string)$node->get('mgn_agent_public_key') === '',
+					'with server_manager active the relay is a ManagedNode in the disposable posture: relay, no key, no agent, tcp/25 probe');
+			} else {
+				check(!PluginHelper::isPluginActive('server_manager'), 'no ManagedNode only when server_manager is inactive');
+			}
+			$fresh->set('mrl_is_enabled', false);
+			$fresh->save();
+			$probe2->stop();
+		} finally {
+			$probe->stop();
+		}
+	}
+
+	/** Back-date a run's last transition, as a long wait would; save() would stamp now. */
+	private function age(RelayCloudProvision $run, int $seconds): void {
 		$db = DbConnector::get_instance()->get_db_link();
-		if ($this->wg_setting_was === false || trim((string)$this->wg_setting_was) === '') {
-			$was = ($this->wg_setting_was === false) ? '' : (string)$this->wg_setting_was;
-			$stmt = $db->prepare("UPDATE stg_settings SET stg_value = ? WHERE stg_name = 'mailbox_relay_wg_public_key'");
-			$stmt->execute(array($was));
-		}
-		foreach ($this->cleanup_runs as $id) {
-			try { $db->exec("DELETE FROM rcp_relay_cloud_provisions WHERE rcp_id = " . intval($id)); } catch (\Throwable $e) {}
-		}
-		foreach ($this->cleanup_relays as $id) {
-			try { $db->exec("DELETE FROM mrl_mailbox_relays WHERE mrl_mailbox_relay_id = " . intval($id)); } catch (\Throwable $e) {}
-		}
+		$stmt = $db->prepare('UPDATE rcp_relay_cloud_provisions SET rcp_update_time = ? WHERE rcp_id = ?');
+		$stmt->execute(array(gmdate('Y-m-d H:i:s', time() - $seconds), intval($run->key)));
+		$run->set('rcp_update_time', gmdate('Y-m-d H:i:s', time() - $seconds));
+	}
+
+	private function tokenIn(string $user_data): string {
+		return preg_match('/RUN_TOKEN="\${RUN_TOKEN:-([0-9a-f]+)}"/', $user_data, $m) ? $m[1] : '';
 	}
 }
 

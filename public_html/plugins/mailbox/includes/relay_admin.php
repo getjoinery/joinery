@@ -16,6 +16,8 @@
  * @version 2.1 - the health battery carries a pending grade
  *                (ProvisioningCheckPending): a converging alias map renders as
  *                an amber wait on the relay card, not a red failure
+ * @version 2.1 - a relay without a shell: Update wording, checkRelayReachable on the receiving
+ *                card, the no-relay notice (specs/relay_without_a_shell.md)
  * @version 2.0 - relay_upgrade action + per-relay upgrade standing; Rebuild is
  *                gated on a managed node that actually resolves
  *                (specs/mailbox_relay_upgrade_without_server_manager.md)
@@ -133,7 +135,7 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 			// The button is not rendered for these, so reaching here means a stale
 			// page or a hand-posted form. Refuse rather than guess a route.
 			admin_mailbox_relay_flash($session,
-				'This relay is not one this site can rebuild for you.', 'Cannot upgrade');
+				'This relay is not one this site can update for you.', 'Cannot update');
 			return LogicResult::redirect($self_url);
 		}
 		if (RelayCloudProvision::live() !== null) {
@@ -148,8 +150,8 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 		$sole = $vars['sole'];
 		if ($sole === false) {
 			admin_mailbox_relay_flash($session,
-				'This relay serves other deployments as well as this one. Rebuilding it would destroy '
-				. 'their mail and their configuration.', 'Cannot upgrade a shared relay');
+				'This relay serves other deployments as well as this one. Re-imaging it would destroy '
+				. 'their mail and their configuration.', 'Cannot update a shared relay');
 			return LogicResult::redirect($self_url);
 		}
 		if ($sole === null && empty($input['shared_ack'])) {
@@ -157,7 +159,7 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 			// it does not decide — but it does not proceed silently either.
 			admin_mailbox_relay_flash($session,
 				'This relay is too old to say whether other deployments share it. Confirm you know it '
-				. 'serves only this site before rebuilding.', 'Confirmation needed');
+				. 'serves only this site before updating it.', 'Confirmation needed');
 			return LogicResult::redirect($self_url);
 		}
 
@@ -167,15 +169,16 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 		$run->set('rcp_provider', (string)$relay->get('mrl_cloud_provider'));
 		$run->set('rcp_instance_id', (string)$relay->get('mrl_cloud_instance_id'));
 		$run->set('rcp_instance_ip', (string)$relay->get('mrl_public_ip'));
-		// The rebuild re-runs provision_relay.sh, which needs the same hostname the
-		// relay already answers to: it is the milters' AuthservID and the HELO name,
-		// so a different value here would silently change what the relay is.
+		// The re-image builds the relay again under the same hostname it already
+		// answers to: it is the milters' AuthservID and the HELO name, so a
+		// different value here would silently change what the relay is.
 		$run->set('rcp_mail_hostname', (string)$relay->get('mrl_mx_hostname')
 			?: (string)$relay->get('mrl_name'));
 		$run->save();
 		admin_mailbox_relay_flash($session,
-			'Approve access to your cloud account to continue. The relay is drained first, then rebuilt — '
-			. 'it stops accepting mail for several minutes, and senders retry.');
+			'Approve access to your cloud account to continue. The relay is drained first, then the same '
+			. 'server is re-imaged and born again from the current release — it stops accepting mail for '
+			. 'several minutes, and senders retry.');
 		return LogicResult::redirect($self_url);
 	}
 
@@ -269,8 +272,8 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 		$run->set('rcp_error', null);
 		$run->save();
 		admin_mailbox_relay_flash($session,
-			'Provisioning started — the server is created in your account and built automatically. '
-			. 'This page shows progress; the whole run takes several minutes.');
+			'Provisioning started — the server is created in your account and builds itself from its first boot, '
+			. 'then reports in here. This page shows progress; the whole run takes several minutes.');
 		return LogicResult::redirect($self_url);
 	}
 
@@ -487,6 +490,10 @@ function admin_mailbox_relay_tenant_vars(): array {
 		'fleet_error'           => $fleet_error,
 		'cloud_run'             => RelayCloudProvision::latest(),
 		'cloud_oauth_configured'=> admin_mailbox_relay_linode_oauth_configured(),
+		// No enabled relay, but the cutover was recorded complete: the world
+		// still sends this deployment's mail to a relay it no longer has.
+		'mx_points_at_gone_relay' => ($active === null
+			&& (string)$settings->get_setting('mailbox_relay_cutover_complete') === '1'),
 	);
 }
 

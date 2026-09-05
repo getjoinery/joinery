@@ -71,7 +71,7 @@ class RelayUpgradeTest {
 		section('An upgrade updates its relay rather than minting a second');
 		$this->assertNoSecondRelayRow();
 
-		section('The rebuilt machine is a new host key');
+		section('The re-imaged machine is a new identity on the same row');
 		$this->assertHostKeyForgotten();
 
 		section('The shard version comes from the job marker');
@@ -265,7 +265,7 @@ class RelayUpgradeTest {
 			'a shared relay is offered no upgrade control at all');
 		$admin = (string)@file_get_contents(
 			PathHelper::getIncludePath('plugins/mailbox/includes/relay_admin.php'));
-		check(preg_match('/\$sole\s*===\s*false.*?Cannot upgrade a shared relay/s', $admin) === 1,
+		check(preg_match('/\$sole\s*===\s*false.*?Cannot update a shared relay/s', $admin) === 1,
 			'a hand-posted upgrade of a shared relay is refused server-side');
 		check(preg_match('/\$sole\s*===\s*null\s*&&\s*empty\(\$input\[.shared_ack.\]\)/', $admin) === 1,
 			'a relay that cannot answer needs an explicit acknowledgement, not a default');
@@ -400,7 +400,7 @@ class RelayUpgradeTest {
 	private function assertNoSecondRelayRow() {
 		$source = (string)@file_get_contents(
 			PathHelper::getIncludePath('plugins/mailbox/includes/RelayCloudProvisioner.php'));
-		check(preg_match('/function registerRelayRow.*?isUpgrade\(\)\s*\?\s*\$run->relay\(\)/s', $source) === 1,
+		check(preg_match('/function existingRowFor.*?isUpgrade\(\)\s*\?\s*\$run->relay\(\)/s', $source) === 1,
 			'an upgrade resolves its relay from the run, not by scanning instance ids');
 
 		// The run row has to be able to name it.
@@ -414,18 +414,20 @@ class RelayUpgradeTest {
 	}
 
 	/**
-	 * A rebuilt machine reuses the tunnel address with a brand-new SSH host key.
-	 * Without forgetting the old one every connection fails with REMOTE HOST
-	 * IDENTIFICATION HAS CHANGED — which looks like an attack, not an upgrade.
+	 * A re-imaged machine keeps its address and arrives with a brand-new
+	 * identity. The birth writes the new pin on the SAME row and clears every
+	 * tunnel-era field a predecessor carried, so nothing reads the row as a
+	 * tunnel relay and no stale pin or host key is trusted.
 	 */
 	private function assertHostKeyForgotten() {
 		$source = (string)@file_get_contents(
 			PathHelper::getIncludePath('plugins/mailbox/includes/RelayCloudProvisioner.php'));
-		check(preg_match('/\$is_new_machine\s*=\s*\(\$relay === null\)\s*\|\|\s*\$run->isUpgrade\(\)/', $source) === 1,
-			'an upgrade counts as a new machine for host-key purposes');
-		check(preg_match('/\$is_new_machine.*?forgetHostKey/s', $source) === 1,
-			'a new machine forgets the previous host key');
-		check(method_exists('RelaySsh', 'forgetHostKey'), 'RelaySsh::forgetHostKey exists to be called');
+		check(preg_match('/function registerBornRelay.*?mrl_identity_fingerprint.*?\$fingerprint/s', $source) === 1,
+			'the birth writes the reported identity pin on the row');
+		check(preg_match('/function registerBornRelay.*?mrl_wg_public_key.*?set\(\$field, null\)/s', $source) === 1,
+			'a predecessor\'s tunnel fields are cleared, so the row is never read as a tunnel relay');
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySsh.php'));
+		check(method_exists('RelaySsh', 'forgetHostKey'), 'RelaySsh::forgetHostKey exists for the tunnel relays that remain');
 	}
 
 	// ----------------------------------------------------------- shard version

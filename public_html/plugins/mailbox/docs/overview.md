@@ -2384,24 +2384,29 @@ does until mail already looks wrong.
   way the credential is sealed onto the run and nothing is configured
   beforehand. The platform never deletes a customer's running server —
   removing a cloud relay's instance happens at the provider, by the customer;
-  a relay's Delete here removes only the deployment's row (and says so). The `AdvanceRelayCloudProvisions` scheduled task drives the
-  `RelayCloudProvision` state machine: create the instance on the customer's
-  account (`includes/cloud_compute/` — `LinodeComputeDriver`, per-run SSH key
-  injected), wait for boot (the cheap transitions — create, boot poll — also advance on
-  every Setup page load, so a watching admin is never waiting on cron), run
-  the same tarball → `provision_relay.sh` →
-  add-tenant `main` → markers sequence over root SSH
-  (`RelayCloudProvisioner`), register the `MailboxRelay` row **born enabled**
-  (pulling and address-list pushes start immediately, so the relay is ready
-  before any MX points at it; Disable is an emergency stop, and doctrine
-  effects key off the recorded cutover verdict, not this flag — carrying
-  `mrl_cloud_provider`/`mrl_cloud_instance_id`), peer the main
-  box's WireGuard, and attempt reverse DNS through the provider API (refused
-  until the hostname's A record resolves; the PTR check carries it from
-  there). **Grant-per-act custody**: the token and per-run SSH key live
-  SecretBox-sealed on the run row and are erased at every terminal state; a
-  failed run destroys the instance it created within the same grant.
-  Requires only the main box's relay identity (`provision_relay_main.sh`).
+  a relay's Delete here removes only the deployment's row (and says so, naming
+  the machine and the MX that still points at it). The relay reconcile task
+  drives the `RelayCloudProvision` state machine, **born configured**
+  (`RelayCloudProvisioner`): `ready` copies the support bundle onto the run,
+  mints a one-time run token, renders `relay_first_boot.sh` (`RelayFirstBoot`)
+  and creates the instance with it as user-data (the Metadata service, or the
+  plane's private StackScript with the same fields in a region without it) -
+  no SSH key installed, no root password recorded; `booting` polls for running
+  plus an address (both cheap steps also advance on every Setup page load);
+  `provisioning` waits for the birth report. The relay fetches the run's bundle
+  copy, builds itself, posts its signed report, and `completeBirth()` pins the
+  identity only after the provider's address answers a pinned ping, registers
+  the `MailboxRelay` row **born enabled** (pulling and address-list pushes start
+  immediately, so the relay is ready before any MX points at it; Disable is an
+  emergency stop, and doctrine effects key off the recorded cutover verdict, not
+  this flag - carrying `mrl_cloud_provider`/`mrl_cloud_instance_id` and
+  `mrl_identity_fingerprint`), pushes the address list as the gate, attempts
+  reverse DNS through the provider API (refused until the hostname's A record
+  resolves; the PTR check carries it from there) and, with Server Manager
+  active, attaches a `ManagedNode` in the disposable posture. A relay silent
+  past the birth timeout is failed and its instance destroyed within the grant.
+  **Grant-per-act custody**: the provider token, the run token and the bundle
+  copy live on the run row and are erased at every terminal state.
 - **A Server Manager node** (operator deployments): picks a managed node and
   fires a `provision_relay` job (`JobCommandBuilder::build_provision_relay`);
   the job result processor registers the `MailboxRelay` row, born enabled the
@@ -2421,24 +2426,24 @@ predates the version marker and reads as unknown, which offers the upgrade. A
 relay **newer** than the deployment offers nothing: the deployment is the thing
 to update.
 
-**Nobody holds a shell credential to a cloud relay, by design.** Provisioning
-sets a random root password that is never stored, injects a per-run key that
-`eraseCredentials()` wipes at the run's terminal state, and
-`provision_relay.sh` leaves sshd key-only (`PasswordAuthentication no`,
-`PermitRootLogin prohibit-password`). What survives is the tenant pull key, locked
-to the `joinery-tenant-shell` forced command. So a relay cannot be logged in to
-and patched — its contents are replaced instead.
+**Nobody holds a shell credential to a cloud relay, by design.** A relay born
+from user-data has no sshd at all (the first-boot script removes it), no
+tenant accounts and no sudoers rules; the platform installs no key and records
+no root password, and the account holder's only door is the provider's own
+console. A tunnel relay built by 2.x keeps a key-only sshd reachable through
+the tenant pull key alone. Either way a relay cannot be logged in to and
+patched - its contents are replaced instead.
 
 The route depends on what the platform can reach:
 
 | Relay origin | Upgrade route |
 |---|---|
-| Cloud (the customer's own account) | An **upgrade run** — the same grant-per-act ceremony as provisioning, with two states in front: **draining**, then **rebuilding** |
+| Cloud (the customer's own account) | **Update** — the same grant-per-act ceremony as provisioning, with two states in front: **draining** over the relay API, then **rebuilding**, which re-images the same instance with fresh user-data and a fresh run token; the relay is born again and its new identity pin lands on the same row |
 | Server Manager managed node | **Rebuild** — a `rebuild_relay` job over root SSH. Rendered only when `mrl_mgn_managed_node_id` resolves to a live node |
 | Run by hand | The Relay section states the version and says to re-run `provision_relay.sh`. That customer built the box and is the one who can act on it |
 | Hosted fleet slot | Operator-managed. The slot says so and offers no control |
 
-**An upgrade run drains before it wipes.** The rebuild destroys every byte on the
+**An update drains before it wipes.** The re-image destroys every byte on the
 machine, so `handleDraining()` pulls the spool until it is empty, and refuses to
 advance if anything is **held** (a blob whose owner is not yet resolvable,
 deliberately left un-acked) or if successive passes stop making progress. An
