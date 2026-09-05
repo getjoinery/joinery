@@ -213,18 +213,27 @@ ok('no sealer source is not a failure',
     $r2['status'] === RelaySealerPublisher::STATUS_ABSENT, $r2['status']);
 
 // ---------------------------------------------------------------------------
-section('The delivery paths carry bin/');
+section('The delivery path carries bin/');
 
-$provisioner = (string)@file_get_contents(
-    PathHelper::getIncludePath('plugins/mailbox/includes/RelayCloudProvisioner.php'));
-ok('RelayCloudProvisioner tars bin/ with the script',
-    strpos($provisioner, "' bin provision_relay.sh'") !== false);
-ok('  and refuses up front when this install carries none',
-    strpos($provisioner, "glob(\$provisioning_dir . '/bin/relay-sealer-*')") !== false);
+// A relay is born from the support bundle (specs/relay_without_a_shell.md): the
+// bundle carries the script and both binaries, and a run refuses to start when
+// the deployment has no bundle to copy.
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SupportBundlePublisher.php'));
+$declared = SupportBundlePublisher::declaredContents();
+ok('the support bundle carries provision_relay.sh',
+    in_array('public_html/plugins/mailbox/provisioning/provision_relay.sh', $declared, true));
+foreach ($arches as $machine) {
+    ok('  and bin/relay-sealer-' . $machine . ', by its uname -m name',
+        in_array('public_html/plugins/mailbox/provisioning/bin/relay-sealer-' . $machine, $declared, true));
+}
 // The relay has no compiler, so it has no use for the sealer's Go source, and a
 // mail machine that carries source is one somebody will eventually build on.
 ok('  and does NOT ship the sealer Go source to the relay',
-    strpos($provisioner, 'relay-sealer provision_relay.sh') === false);
+    count(preg_grep('#provisioning/relay-sealer/#', $declared)) === 0);
+$run_model = (string)@file_get_contents(
+    PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provision_class.php'));
+ok('a run refuses to start when this deployment carries no bundle',
+    strpos($run_model, 'carries no support bundle') !== false);
 
 // ---------------------------------------------------------------------------
 section('This tree, as it stands');

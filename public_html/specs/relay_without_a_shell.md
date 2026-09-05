@@ -25,7 +25,20 @@ dispatched before key auth), `RelayCloudProvisioner::completeBirth` and
 driver's `user_data`, `regionSupportsMetadata` and StackScript fallback,
 `RelayFirstBoot` rendering both forms, and fleet enrollment by public key with
 the tenant routes behind `FleetService::applyTenant`. Tests drive every consumer
-and the birth channel against the real relay binary. WP3 to WP5 not started.
+and the birth channel against the real relay binary.
+
+WP3 built 2026-09-05: `RelayCloudProvisioner` 2.1 without the SSH leg - `ready`
+creates with user-data (Metadata, or the plane's StackScript), `booting` polls,
+`provisioning` waits for the birth report with a birth timeout that destroys the
+instance, update drains over the API then re-images the same instance with
+fresh user-data; `completeBirth` attaches a `ManagedNode` in the disposable
+posture when Server Manager is active, whose node card points at Update and
+Delete on the Setup tab; the Delete confirm names the machine and the MX; with
+no relay after a recorded cutover, `checkInboundMailServer` and the Relay
+section say the MX points at a relay this deployment no longer has and offer
+both ways out; the Setup tab no longer requires the main box's tunnel identity.
+Node 1800 on dev is replaced in WP5. WP4 (deletions) and WP5 (live gate) not
+started.
 The Q1 consequence for `OutboundTransport` (the smarthost branch giving way to
 the origin-leak probe verdict) lands with WP4's deletions. Two details
 differ from the text below and the text is not yet updated: the bundle names

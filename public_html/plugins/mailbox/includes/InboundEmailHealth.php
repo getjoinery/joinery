@@ -21,6 +21,9 @@
  * checks are no-ops. The check list always matches the chosen path.
  *
  * @version 1.17 - checkSearchIndexEngine() probes the index's real table shape
+ * @version 1.17 - checkRelayReachable() (a pinned ping on a relay without a shell); with
+ *                 no relay after a recorded cutover, checkInboundMailServer says the MX
+ *                 points at a relay this deployment no longer has (specs/relay_without_a_shell.md)
  * @version 1.16 - checkSealingMailboxHolders(): a protected mailbox with nobody
  *                 to seal to is held mail, so it is named loudly and early
  * @version 1.15 - checkRelayMapFresh() grades a differing map: pending
@@ -54,8 +57,21 @@ class InboundEmailHealth {
         // (specs/mailbox_listener_decommission.md): once the listener is recorded as
         // decommissioned, an ANSWERING port 25 is the failure — the attack surface
         // the decommission removed has come back.
+        $settings = Globalvars::get_instance();
+        if (self::activeRelay() === null
+                && (string)$settings->get_setting('mailbox_relay_cutover_complete') === '1') {
+            // The world still sends this deployment's mail to a relay it no longer
+            // has: the cutover was recorded complete, so the MX points at a relay,
+            // and no enabled relay row remains (Deleted, or the machine is gone).
+            // Nothing is changed automatically - both ways out change where the
+            // world sends mail - but the check says so in one sentence.
+            throw new ProvisioningCheckFailed(
+                'Mail is addressed to a relay this deployment no longer has: the cutover is recorded '
+                . 'complete, but no relay is enabled. Create a relay on the Setup tab, or repoint every '
+                . 'hosted domain\'s MX at this server and turn its mail listener on.');
+        }
         if (self::activeRelay() !== null) {
-            $recorded = strtolower(trim((string)Globalvars::get_instance()->get_setting('mailbox_local_listener')));
+            $recorded = strtolower(trim((string)$settings->get_setting('mailbox_local_listener')));
             if ($recorded === 'decommissioned') {
                 $sock = @stream_socket_client('tcp://127.0.0.1:25', $errno, $errstr, 2);
                 if ($sock) {

@@ -160,6 +160,13 @@ if ($relay_id > 0) {
 	check(intval($relay->get('mrl_map_version')) >= 1 && is_array($probe2->acceptedFragment('main')), 'the map push was the gate: the relay holds the fragment');
 	check($relay->lastHealth() !== null, 'the born relay\'s health is stored from the ping in hand');
 	check((string)$relay->get('mrl_transport_public_key') !== '', 'the transport keypair exists');
+	if (intval($relay->get('mrl_mgn_managed_node_id')) > 0) {
+		harness_register_model('ManagedNode', intval($relay->get('mrl_mgn_managed_node_id')));
+		$node = new ManagedNode(intval($relay->get('mrl_mgn_managed_node_id')), TRUE);
+		check((bool)$node->get('mgn_is_relay') && (string)$node->get('mgn_ssh_key_path') === ''
+			&& (string)$node->get('mgn_uptime_check_type') === 'tcp_port',
+			'with server_manager active the born relay is a ManagedNode in the disposable posture');
+	}
 }
 $done = new RelayCloudProvision(intval($run_id), TRUE);
 check((string)$done->get('rcp_status') === 'done', 'the run is done');

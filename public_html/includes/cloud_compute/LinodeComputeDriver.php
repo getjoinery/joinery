@@ -7,7 +7,9 @@
  * 'linodes:read_write' OAuth scope.
  *
  * @version 1.3 - user_data (the Metadata service; cloud-init, base64) and a StackScript
- *                fallback on createInstance/rebuildInstance, regionSupportsMetadata(),
+ *                fallback; regions() (the token step called it and no driver had it, so a
+ *                bad token was never caught)
+ *                on createInstance/rebuildInstance, regionSupportsMetadata(),
  *                ensureStackScript() - how a relay is born configured
  *                (specs/relay_without_a_shell.md). No root password when user-data
  *                is the whole mechanism: the driver mints one the platform never
@@ -81,6 +83,23 @@ class LinodeComputeDriver implements CloudComputeProvider {
 		// disks and configuration profiles are replaced.
 		return $this->normalize($this->request('POST',
 			'linode/instances/' . rawurlencode($instance_id) . '/rebuild', $body));
+	}
+
+	/**
+	 * The regions this account may create in: id => label. Also the cheapest
+	 * live check that a token works, which is what the Setup tab's token step
+	 * uses it for.
+	 */
+	public function regions(): array {
+		$listing = $this->request('GET', 'regions');
+		$out = array();
+		foreach ((array)($listing['data'] ?? array()) as $region) {
+			$id = (string)($region['id'] ?? '');
+			if ($id !== '') {
+				$out[$id] = (string)($region['label'] ?? $id);
+			}
+		}
+		return $out;
 	}
 
 	/**

@@ -1,24 +1,37 @@
 <?php
 /**
  * RelayCloudProvisioner - turns a just-in-time provider token into a running
- * relay on the customer's own cloud account
- * (specs/mailbox_relay_cloud_provisioning.md).
+ * relay on the customer's own cloud account, born configured
+ * (specs/relay_without_a_shell.md; the run model from
+ * specs/implemented/mailbox_relay_cloud_provisioning.md).
  *
- * Advances RelayCloudProvision runs. Reuses the platform's cloud machinery:
- * CloudComputeProvider / LinodeComputeDriver (includes/cloud_compute/) for the
- * instance lifecycle, provision_relay.sh for the relay build (the same
- * tarball -> scp -> skeleton -> add-tenant 'main' -> markers sequence the
- * server_manager provision job runs), RelaySsh::run for execution, and the
- * customer-cloud failure policy (401 terminal here — grant-per-act has no
- * re-connect parking; 4xx terminal; 5xx/network retry next tick).
+ * Advances RelayCloudProvision runs. The provider (CloudComputeProvider /
+ * LinodeComputeDriver, includes/cloud_compute/) creates or re-images the
+ * instance with first-boot user-data rendered by RelayFirstBoot; the relay
+ * fetches the run's own copy of the support bundle from this plane, builds
+ * itself with provision_relay.sh, and posts a signed birth report that
+ * RelayBirthEndpoint hands to completeBirth(). Nothing here logs in to the
+ * machine: no SSH key is installed, no root password is recorded, and the plane
+ * holds no credential for the relay, ever.
  *
- * Grant-per-act custody: the provider token and the per-run root SSH key live
- * SecretBox-sealed on the run row and are erased at every terminal state. A
- * failed run destroys the instance it created within the same grant — the
- * customer is never left paying for a half-built box.
+ * Grant-per-act custody: the provider token and the one-time run token live
+ * SecretBox-sealed on the run row, with the run's bundle copy beside it, and
+ * all three are erased at every terminal state. A failed PROVISION destroys the
+ * instance it created within the same grant; a failed UPDATE destroys nothing,
+ * because the instance is the customer's existing relay. Failure policy: 4xx
+ * terminal (grant-per-act has no re-connect parking), 5xx/network retry next tick.
  *
- * Test seams: $driver_factory here, and the command runner on RelaySsh::$runner.
+ * Test seam: $driver_factory.
  *
+ * @version 2.1 - BORN CONFIGURED (specs/relay_without_a_shell.md WP3). ready creates the
+ *                instance with first-boot user-data (the run's bundle copy, a one-time
+ *                run token, this deployment's client public key); booting polls;
+ *                provisioning WAITS for the birth report, and a relay that has not
+ *                reported by the boot timeout is failed and its instance destroyed.
+ *                An update drains over the API, then re-images the same instance with
+ *                fresh user-data. The SSH leg is gone: no per-run key, no scp, no
+ *                remote script, no root password recorded. When server_manager is
+ *                active the born relay is a ManagedNode in the disposable posture
  * @version 2.0 - completeBirth(): a relay born from user-data reports in over HTTPS
  *                (specs/relay_without_a_shell.md); the plane pins its identity only
  *                after the provider's address answers a pinned ping, then writes the
@@ -49,8 +62,8 @@
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provision_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySsh.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayClient.php'));
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_compute/LinodeComputeDriver.php'));
 
 /** A birth report the plane will not act on. The message is safe to answer with. */
@@ -59,6 +72,16 @@ class RelayBirthRefused extends Exception {}
 class RelayCloudProvisioner {
 
 	const BOOT_TIMEOUT_SECONDS = 1800; // instance create -> running + IP
+	// running + IP -> the birth report. The build installs packages on a fresh
+	// image and posts once sshd is gone; a relay silent for this long after its
+	// boot is not coming.
+	const BIRTH_TIMEOUT_SECONDS = 1800;
+	// The run token outlives both windows, so a report that arrives late but
+	// inside the birth window never finds its token already expired.
+	const RUN_TOKEN_TTL_SECONDS = self::BOOT_TIMEOUT_SECONDS + self::BIRTH_TIMEOUT_SECONDS + 600;
+	// The private StackScript the plane keeps on the account for regions whose
+	// Metadata service cannot carry user-data.
+	const STACKSCRIPT_LABEL = 'joinery-relay-first-boot';
 	const LABEL_MAX_LENGTH = 64;       // provider cap on an instance label (Linode)
 	// Drain passes allowed before an upgrade gives up. Each is a network round
 	// trip, so this is a bound on one cron tick, not a patience setting: a spool
@@ -92,9 +115,10 @@ class RelayCloudProvisioner {
 			case 'booting':
 				return $this->handleBooting($run);
 			case 'provisioning':
-				// A crash mid-SSH leaves this state behind; rerunning the
-				// idempotent script is safe, so treat it like booting-complete.
-				return $this->handleProvision($run);
+				// The relay is building itself and will report in over HTTPS
+				// (RelayBirthEndpoint -> completeBirth). Nothing to do but wait,
+				// and give up when it has been too long.
+				return $this->awaitBirth($run);
 			default:
 				return 'nothing to do';
 		}
@@ -133,29 +157,34 @@ class RelayCloudProvisioner {
 
 	// ------------------------------------------------------------ transitions
 
-	/** ready -> booting: create the instance on the customer's account. */
+	/**
+	 * ready -> booting: create the instance on the customer's account, born
+	 * configured. The user-data carries the plane's URL, this run's id and
+	 * one-time token, the sha256 of the run's own bundle copy, the mail
+	 * hostname and this deployment's relay client public key - public keys and
+	 * a token that dies with the boot, nothing else. No SSH key is installed and
+	 * no root password is recorded: the platform holds no credential for the
+	 * machine, and never will.
+	 */
 	private function handleReady(RelayCloudProvision $run): string {
-		$driver = $this->driverFor($run);
-
-		// Per-run root key: generated once, public half injected at create,
-		// private half sealed on the row until the run ends.
-		if ((string)$run->get('rcp_ssh_public_key') === '') {
-			list($private_key, $public_key) = $this->generateSshKeypair();
-			$run->sealSshKey($private_key);
-			$run->set('rcp_ssh_public_key', $public_key);
-			$run->save();
+		try {
+			$first_boot = $this->prepareFirstBoot($run);
+		} catch (\Throwable $e) {
+			// Nothing was created at the provider; the run's copy, if any, goes.
+			$run->eraseBundle();
+			$run->fail('Could not prepare the relay\'s first boot: ' . $e->getMessage());
+			return 'first boot not prepared - failed';
 		}
 
+		$driver = $this->driverFor($run);
 		try {
-			$instance = $driver->createInstance(array(
-				'label'           => self::instanceLabel(
-					(string)$run->get('rcp_mail_hostname'), intval($run->key)),
-				'region'          => (string)$run->get('rcp_region'),
-				'type'            => (string)$run->get('rcp_instance_type'),
-				'image'           => self::INSTANCE_IMAGE,
-				'root_pass'       => 'Aa1!' . bin2hex(random_bytes(20)), // never stored
-				'authorized_keys' => array((string)$run->get('rcp_ssh_public_key')),
-			));
+			$opts = array(
+				'label'  => self::instanceLabel((string)$run->get('rcp_mail_hostname'), intval($run->key)),
+				'region' => (string)$run->get('rcp_region'),
+				'type'   => (string)$run->get('rcp_instance_type'),
+				'image'  => self::INSTANCE_IMAGE,
+			);
+			$instance = $driver->createInstance($opts + $this->firstBootOptions($driver, (string)$run->get('rcp_region'), $first_boot));
 		} catch (CloudComputeException $e) {
 			return $this->handleComputeFailure($run, $e, 'create');
 		}
@@ -165,7 +194,70 @@ class RelayCloudProvisioner {
 		$run->set('rcp_status', 'booting');
 		$run->set('rcp_error', null);
 		$run->save();
-		return 'instance created, booting';
+		return 'instance created with first-boot user-data, booting';
+	}
+
+	/**
+	 * Everything a birth needs from this side, staged on the run: the bundle
+	 * copy and its hash, a fresh one-time token, and the rendered first-boot
+	 * script. Returns ['user_data' => rendered script, 'fields' => the values]
+	 * so the caller can hand either form to the provider.
+	 */
+	private function prepareFirstBoot(RelayCloudProvision $run): array {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayFirstBoot.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_client_identity_class.php'));
+		$plane = rtrim((string)LibraryFunctions::get_absolute_url(), '/');
+		if ($plane === '' || stripos($plane, 'https://') !== 0) {
+			throw new RuntimeException('this deployment has no https URL for the relay to fetch its bundle from and report to');
+		}
+		$sha = $run->copyBundle();
+		$token = $run->issueRunToken(self::RUN_TOKEN_TTL_SECONDS);
+		$run->save();
+		$mail_hostname = strtolower(trim((string)$run->get('rcp_mail_hostname')));
+		$fields = array(
+			'plane'             => $plane,
+			'run_id'            => (string)$run->key,
+			'run_token'         => $token,
+			'bundle_sha256'     => $sha,
+			'mail_hostname'     => $mail_hostname,
+			'authserv_id'       => $mail_hostname,
+			'client_public_key' => RelayClientIdentity::publicKey(RelayClientIdentity::KIND_CLIENT),
+			'skeleton_only'     => '0',
+		);
+		return array('user_data' => RelayFirstBoot::render($fields), 'fields' => $fields);
+	}
+
+	/**
+	 * The provider options that carry the first boot: user_data where the
+	 * region's Metadata service takes it, the plane's private StackScript with
+	 * the same fields as UDF values where it does not. Neither is a provider
+	 * process of its own; both are fields of the create or rebuild call.
+	 */
+	private function firstBootOptions(CloudComputeProvider $driver, string $region, array $first_boot): array {
+		$metadata = true;
+		if ($driver instanceof LinodeComputeDriver) {
+			try {
+				$metadata = $driver->regionSupportsMetadata($region);
+			} catch (\Throwable $e) {
+				// Unknown: try the Metadata service, which most regions have; a
+				// region that lacks it ignores user_data and the birth times out
+				// with the provider's console log saying why.
+				$metadata = true;
+			}
+		}
+		if ($metadata) {
+			return array('user_data' => $first_boot['user_data']);
+		}
+		if (!($driver instanceof LinodeComputeDriver)) {
+			return array('user_data' => $first_boot['user_data']);
+		}
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayFirstBoot.php'));
+		$id = $driver->ensureStackScript(self::STACKSCRIPT_LABEL, RelayFirstBoot::stackScript(), array(self::INSTANCE_IMAGE));
+		$data = array();
+		foreach ($first_boot['fields'] as $name => $value) {
+			$data[strtoupper($name)] = (string)$value;
+		}
+		return array('stackscript_id' => $id, 'stackscript_data' => $data);
 	}
 
 	/**
@@ -275,34 +367,32 @@ class RelayCloudProvisioner {
 	}
 
 	/**
-	 * UPGRADE ONLY. rebuilding -> booting: replace the instance's contents.
-	 *
-	 * The instance and its public IPv4 survive, which is the whole point: the
-	 * address is what an MX record points at, so a rebuild is downtime while a
-	 * destroy-and-create would be a DNS change.
+	 * UPDATE ONLY. rebuilding -> booting: re-image the same instance with fresh
+	 * user-data and a fresh run token. The instance and its public IPv4 survive,
+	 * which is the whole point: the address is what an MX record points at, so
+	 * an update is minutes of downtime while a destroy-and-create would be a
+	 * DNS change. The relay is born again from the current bundle and reports
+	 * in with a new identity; the birth writes the new pin on the same row.
 	 */
 	private function handleRebuilding(RelayCloudProvision $run): string {
 		$instance_id = (string)$run->get('rcp_instance_id');
 		if ($instance_id === '') {
-			$run->fail('This upgrade has no provider instance to rebuild.');
-			return 'no instance — failed';
+			$run->fail('This update has no provider instance to re-image.');
+			return 'no instance - failed';
 		}
-
-		// A fresh per-run key, injected as the new image lands. The old machine's
-		// authorized_keys went with its disks, so nothing outlives this run.
-		if ((string)$run->get('rcp_ssh_public_key') === '') {
-			list($private_key, $public_key) = $this->generateSshKeypair();
-			$run->sealSshKey($private_key);
-			$run->set('rcp_ssh_public_key', $public_key);
-			$run->save();
-		}
-
 		try {
-			$instance = $this->driverFor($run)->rebuildInstance($instance_id, array(
-				'image'           => self::INSTANCE_IMAGE,
-				'root_pass'       => 'Aa1!' . bin2hex(random_bytes(20)), // never stored
-				'authorized_keys' => array((string)$run->get('rcp_ssh_public_key')),
-			));
+			$first_boot = $this->prepareFirstBoot($run);
+		} catch (\Throwable $e) {
+			$run->eraseBundle();
+			$run->fail('Could not prepare the relay\'s first boot: ' . $e->getMessage());
+			return 'first boot not prepared - failed';
+		}
+
+		$driver = $this->driverFor($run);
+		try {
+			$instance = $driver->rebuildInstance($instance_id,
+				array('image' => self::INSTANCE_IMAGE)
+				+ $this->firstBootOptions($driver, (string)$run->get('rcp_region'), $first_boot));
 		} catch (CloudComputeException $e) {
 			return $this->handleComputeFailure($run, $e, 'rebuild');
 		}
@@ -313,10 +403,10 @@ class RelayCloudProvisioner {
 		$run->set('rcp_status', 'booting');
 		$run->set('rcp_error', null);
 		$run->save();
-		return 'instance rebuilding, booting';
+		return 'instance re-imaging with fresh user-data, booting';
 	}
 
-	/** booting -> provisioning (and straight into the SSH build). */
+	/** booting -> provisioning: the instance runs; now its first boot builds it. */	/** booting -> provisioning (and straight into the SSH build). */
 	private function handleBooting(RelayCloudProvision $run): string {
 		$driver = $this->driverFor($run);
 		try {
@@ -339,20 +429,20 @@ class RelayCloudProvisioner {
 		$run->set('rcp_instance_ip', (string)$instance['ip']);
 		$run->set('rcp_status', 'provisioning');
 		$run->save();
-		return 'boot complete — the build starts on the next task pass';
+		return 'boot complete - waiting for the relay to build itself and report in';
 	}
 
 	/**
 	 * Advance only the CHEAP transitions (create the instance, poll the boot)
-	 * — safe inside a page load, so the Setup page moves the run along while
-	 * the admin watches. The long SSH build stays with the scheduled task.
+	 * - safe inside a page load, so the Setup page moves the run along while
+	 * the admin watches. The birth wait stays with the scheduled task.
 	 */
 	public function advanceCheap(RelayCloudProvision $run): string {
 		switch ((string)$run->get('rcp_status')) {
 			case 'ready':
 				// PROVISION ONLY. handleReady() CREATES an instance, which for an
-				// upgrade would leave the customer paying for a second machine
-				// while their relay carried on untouched. An upgrade's first step
+				// update would leave the customer paying for a second machine
+				// while their relay carried on untouched. An update's first step
 				// is the drain, which is a loop of network round trips and has no
 				// business inside a page load.
 				return $run->isUpgrade() ? 'nothing cheap to do' : $this->handleReady($run);
@@ -367,155 +457,22 @@ class RelayCloudProvisioner {
 	}
 
 	/**
-	 * provisioning -> done|failed: the relay build over root SSH — the same
-	 * sequence as the server_manager provision job, minus the Go agent.
+	 * provisioning: the relay is building itself from the bundle it fetched and
+	 * will post its birth report to RelayBirthEndpoint, which completes the run
+	 * through completeBirth(). This side only keeps time: a relay that has not
+	 * reported by the birth timeout is failed and its instance destroyed within
+	 * the grant, as a boot timeout is. Its console log at the provider says why.
 	 */
-	private function handleProvision(RelayCloudProvision $run): string {
-		$ip = (string)$run->get('rcp_instance_ip');
-		$mail_hostname = strtolower(trim((string)$run->get('rcp_mail_hostname')));
-		$settings = Globalvars::get_instance();
-
-		$pull_pubkey = trim((string)@file_get_contents(RelaySsh::pullKeyPath() . '.pub'));
-		$main_wg_pubkey = trim((string)$settings->get_setting('mailbox_relay_wg_public_key'));
-		if ($pull_pubkey === '' || $main_wg_pubkey === '') {
-			// Checked before the run starts; a hole here means the main box
-			// changed underneath the run — terminal, with cleanup.
+	private function awaitBirth(RelayCloudProvision $run): string {
+		$since = $run->get('rcp_update_time') ?: $run->get('rcp_create_time');
+		if ($since && (time() - strtotime($since . ' UTC')) > self::BIRTH_TIMEOUT_SECONDS) {
 			$this->destroyInstanceQuietly($run);
-			$run->fail('The main box lost its relay identity mid-run (pull key or WireGuard key missing) — '
-				. 'run provision_relay_main.sh and retry.');
-			return 'main-box identity missing — failed';
+			$run->eraseBundle();
+			$run->fail('The relay did not report in within ' . intval(self::BIRTH_TIMEOUT_SECONDS / 60)
+				. ' minutes of booting. Its first-boot log at the provider says what stopped it.');
+			return 'birth timeout - failed';
 		}
-
-		$key_file = $this->writeKeyFile($run);
-		try {
-			// 1. Package the provisioning bundle locally.
-			$provisioning_dir = PathHelper::getIncludePath('plugins/mailbox/provisioning');
-			$transfer_id = substr(md5(uniqid(mt_rand(), true)), 0, 12);
-			$tarball = sys_get_temp_dir() . "/joinery-relay-{$transfer_id}.tgz";
-			$remote_tarball = "/tmp/joinery-relay-{$transfer_id}.tgz";
-			$remote_dir = "/tmp/joinery-relay-{$transfer_id}";
-			// The relay has no compiler: provision_relay.sh installs a PREBUILT
-			// sealer from bin/relay-sealer-<uname -m>, cross-compiled into this
-			// plugin at publish time by RelaySealerPublisher. Checked here rather
-			// than left to tar, because "bin: Cannot stat" thirty minutes into a
-			// customer's provisioning run does not say what to do about it.
-			if (!glob($provisioning_dir . '/bin/relay-sealer-*')) {
-				$this->failWithCleanup($run,
-					'This install carries no prebuilt relay-sealer binaries ('
-					. $provisioning_dir . '/bin/). The mailbox plugin ships them; '
-					. 'upgrade to a release built by a publish that produced them, or build one '
-					. 'by hand with provisioning/relay-sealer/build.sh.');
-				return 'sealer binaries missing';
-			}
-			// The bundle carries the binaries and the script, and NOT the sealer's
-			// Go source: nothing on the relay reads it now that the compiler is
-			// gone, and shipping source to a mail machine is the last reason
-			// anyone would think it needs a toolchain.
-			list($code, $out) = $this->run(
-				'tar czf ' . escapeshellarg($tarball) . ' -C ' . escapeshellarg($provisioning_dir)
-				. ' bin provision_relay.sh');
-			if ($code !== 0) {
-				$this->failWithCleanup($run, 'Packaging the provisioning bundle failed: ' . $out);
-				return 'bundle failed';
-			}
-
-			// 2. Deliver it (accept-new: a freshly created instance has no known host key).
-			list($code, $out) = $this->run(
-				'scp ' . $this->sshOptions($key_file) . ' ' . escapeshellarg($tarball)
-				. ' ' . escapeshellarg('root@' . $ip . ':' . $remote_tarball));
-			@unlink($tarball);
-			if ($code !== 0) {
-				$this->failWithCleanup($run, 'Uploading the provisioning bundle failed: ' . $out);
-				return 'upload failed';
-			}
-
-			$smarthost = (strtolower(trim((string)$settings->get_setting('mailbox_relay_outbound_mode'))) === 'smarthost');
-
-			// 3. Skeleton + 4. add THIS deployment as tenant 'main' (a
-			// self-hosted relay is a fleet of one) + 5. markers.
-			$remote = 'rm -rf ' . escapeshellarg($remote_dir) . ' && mkdir -p ' . escapeshellarg($remote_dir)
-				. ' && tar xzf ' . escapeshellarg($remote_tarball) . ' -C ' . escapeshellarg($remote_dir)
-				. ' && cd ' . escapeshellarg($remote_dir)
-				. ' && bash provision_relay.sh ' . escapeshellarg($mail_hostname) . ($smarthost ? ' smarthost' : '')
-				. ' && bash provision_relay.sh add-tenant main --pull-pubkey ' . escapeshellarg($pull_pubkey)
-				. ' --tunnel-ip 10.99.0.2 --domains ' . escapeshellarg('*')
-				. ' --wg-pubkey ' . escapeshellarg($main_wg_pubkey)
-				. ' && echo RELAY_WG_PUBKEY=$(cat /etc/wireguard/relay_public.key 2>/dev/null)'
-				. ' && echo RELAY_PUBLIC_IP=$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || hostname -I | awk \'{print $1}\')'
-				. ' && postfix status >/dev/null 2>&1 && echo PROVISION_RELAY_SUCCESS';
-			list($code, $out) = $this->run(
-				'timeout 1800 ssh ' . $this->sshOptions($key_file) . ' ' . escapeshellarg('root@' . $ip)
-				. ' ' . escapeshellarg($remote));
-
-			if ($code !== 0 || strpos($out, 'PROVISION_RELAY_SUCCESS') === false) {
-				$this->failWithCleanup($run, 'provision_relay.sh did not complete: ' . mb_substr($out, -1500));
-				return 'provision script failed';
-			}
-		} finally {
-			@unlink($key_file);
-		}
-
-		$wg_pubkey = $this->extractMarker($out, 'RELAY_WG_PUBKEY');
-		$public_ip = $this->extractMarker($out, 'RELAY_PUBLIC_IP') ?: $ip;
-
-		$relay = $this->registerRelayRow($run, $public_ip, $wg_pubkey, $mail_hostname);
-
-		// Peer the relay on the MAIN box's WireGuard interface — the other half
-		// of the tunnel (root helper + sudoers installed by
-		// provision_relay_main.sh). Best-effort: on failure the tunnel health
-		// checks go red and the log says what to run.
-		if ($wg_pubkey !== '') {
-			list($peer_code, $peer_out) = $this->run(
-				'sudo -n /usr/local/sbin/joinery-relay-peer ' . escapeshellarg($wg_pubkey)
-				. ' ' . escapeshellarg($public_ip . ':51820'));
-			if ($peer_code !== 0) {
-				error_log('RelayCloudProvisioner: main-box WireGuard peer add failed (' . $peer_code . '): '
-					. $peer_out . ' — run plugins/mailbox/provisioning/provision_relay_main.sh');
-			}
-		}
-
-		// The freshly built relay holds NO tenant fragment — alias routing and
-		// the whole Direct config ride the map push, and the hash-skip that
-		// makes the periodic push cheap would read an unchanged fragment as
-		// already delivered, leaving the relay blank forever. Clear the stored
-		// hash FIRST, so even if this immediate push fails (the tunnel may still
-		// be handshaking), every reconcile pass retries until one lands.
-		$relay->set('mrl_map_content_hash', null);
-		$relay->save();
-		try {
-			RelayMapSync::push($relay, true);
-		} catch (\Throwable $e) {
-			error_log('RelayCloudProvisioner: post-provision map push failed: ' . $e->getMessage()
-				. ' — the relay routes nothing until the reconcile lands one.');
-		}
-
-		// Reverse DNS through the provider API. Providers require the forward
-		// A record first, which is usually unpublished at this moment — a
-		// refusal is expected and the Setup tab's PTR check carries the
-		// instruction from here.
-		try {
-			$this->driverFor($run)->setReverseDns((string)$run->get('rcp_instance_id'), $public_ip, $mail_hostname);
-		} catch (\Throwable $e) {
-			error_log('RelayCloudProvisioner: setReverseDns deferred (' . $e->getMessage()
-				. ') — expected until the mail hostname A record resolves.');
-		}
-
-		$run->set('rcp_status', 'done');
-		$run->set('rcp_error', null);
-		$run->eraseCredentials();
-
-		// The rebuilt relay reports its new version on the next health poll; ask
-		// now so the Relay section reads "current" the moment the run finishes
-		// rather than at the next reconcile pass.
-		if ($run->isUpgrade()) {
-			try {
-				$relay->pollHealth();
-			} catch (\Throwable $e) {
-				error_log('RelayCloudProvisioner: post-upgrade health poll failed: ' . $e->getMessage());
-			}
-			return 'relay upgraded (relay row #' . intval($relay->key) . ')';
-		}
-		return 'relay provisioned (relay row #' . intval($relay->key) . ')';
+		return 'waiting for the birth report';
 	}
 
 	// ------------------------------------------------------------------- birth
@@ -602,6 +559,11 @@ class RelayCloudProvisioner {
 			}
 		}
 
+		// Server Manager shows the relay when it is active: a ManagedNode in the
+		// DISPOSABLE posture - no agent, no key path, no SSH fields - monitored
+		// by the plane-side tcp/25 probe, with Update and Delete as its only acts.
+		$this->attachManagedNode($relay);
+
 		$run->spendRunToken();
 		$run->set('rcp_mrl_mailbox_relay_id', intval($relay->key));
 		$run->set('rcp_status', 'done');
@@ -609,6 +571,53 @@ class RelayCloudProvisioner {
 		$run->eraseCredentials();
 		$run->save();
 		return $relay;
+	}
+
+	/**
+	 * The relay as a ManagedNode, when server_manager is active. Disposable:
+	 * mgn_is_relay, no agent, no key path, tcp/25 uptime probe, app health
+	 * checks skipped. Reuses the node the row already names; otherwise a fresh
+	 * one under the mail hostname. Never a reason to refuse a birth: a failure
+	 * here is logged and the relay is complete without its dashboard card.
+	 */
+	public function attachManagedNode(MailboxRelay $relay): void {
+		if (!PluginHelper::isPluginActive('server_manager') || !class_exists('ManagedNode')) {
+			return;
+		}
+		try {
+			$node = null;
+			$node_id = intval($relay->get('mrl_mgn_managed_node_id'));
+			if ($node_id > 0) {
+				$node = new ManagedNode($node_id, TRUE);
+				if (!$node->key || (string)$node->get('mgn_delete_time') !== '') {
+					$node = null;
+				}
+			}
+			$hostname = (string)$relay->get('mrl_mx_hostname') ?: (string)$relay->get('mrl_name');
+			if ($node === null) {
+				$node = new ManagedNode(NULL);
+				$node->set('mgn_name', substr('Relay ' . $hostname, 0, 100));
+				$node->set('mgn_slug', class_exists('AgentChannelEndpoint')
+					? AgentChannelEndpoint::freeSlug('relay-' . $hostname)
+					: substr('relay-' . preg_replace('/[^a-z0-9-]+/', '-', strtolower($hostname)) . '-' . intval($relay->key), 0, 50));
+			}
+			$node->set('mgn_host', substr((string)$relay->get('mrl_public_ip'), 0, 255));
+			$node->set('mgn_is_relay', true);
+			$node->set('mgn_skip_joinery_checks', true);
+			$node->set('mgn_enabled', true);
+			$node->set('mgn_ssh_key_path', null);
+			$node->set('mgn_uptime_enabled', true);
+			$node->set('mgn_uptime_check_type', 'tcp_port');
+			$node->set('mgn_uptime_tcp_port', 25);
+			$node->set('mgn_notes', 'Disposable relay (specs/relay_without_a_shell.md): no shell, no agent. '
+				. 'Its only acts are Update and Delete on the mailbox Setup tab.');
+			$node->save();
+			$relay->set('mrl_mgn_managed_node_id', intval($node->key));
+			$relay->save();
+		} catch (\Throwable $e) {
+			error_log('RelayCloudProvisioner: could not attach a ManagedNode to relay ' . intval($relay->key)
+				. ': ' . $e->getMessage());
+		}
 	}
 
 	/**
@@ -669,81 +678,6 @@ class RelayCloudProvisioner {
 	// --------------------------------------------------------------- plumbing
 
 	/**
-	 * Register the MailboxRelay row for the freshly built relay — the same
-	 * shape the server_manager job path registers, node-less, carrying the
-	 * cloud coordinates Rebuild/Destroy target. Left DISABLED: enabling is an
-	 * explicit admin act once the Setup checks go green.
-	 */
-	private function registerRelayRow(RelayCloudProvision $run, string $public_ip, string $wg_pubkey, string $mail_hostname): MailboxRelay {
-		// An upgrade names its relay outright. Trusting that over the instance-id
-		// scan is what guarantees an upgrade can never mint a SECOND relay row —
-		// two rows for one machine would split the alias map and the spool pull
-		// between two identities, and the relay would half-work in a way that
-		// looks like a network fault.
-		$relay = $run->isUpgrade() ? $run->relay() : null;
-		if ($relay === null) {
-			$existing = new MultiMailboxRelay(array('deleted' => false));
-			$existing->load();
-			foreach ($existing as $row) {
-				if ((string)$row->get('mrl_cloud_instance_id') === (string)$run->get('rcp_instance_id')) {
-					$relay = $row;
-					break;
-				}
-			}
-		}
-		// No row for this instance means the tunnel address is changing hands:
-		// a different machine is about to answer on 10.99.0.1 with its own SSH
-		// host key, and the previous relay's key must be forgotten or every
-		// connection fails with REMOTE HOST IDENTIFICATION HAS CHANGED.
-		// An upgrade finds its own row (same instance id) but is still a different
-		// machine: the rebuild replaced every disk, including the SSH host key,
-		// and it answers on the same tunnel address. Without forgetting the old
-		// key every connection fails with REMOTE HOST IDENTIFICATION HAS CHANGED.
-		$is_new_machine = ($relay === null) || $run->isUpgrade();
-		if ($relay === null) {
-			$relay = new MailboxRelay(NULL);
-			// Born enabled: the relay starts pulling and receives its address
-			// list immediately, so it is ready before any MX points at it.
-			// Doctrine consequences (outbound enforcement, origin-hidden) key
-			// off the recorded cutover state, not this flag — Disable remains
-			// as an emergency stop only.
-			$relay->set('mrl_is_enabled', true);
-		}
-		$relay->set('mrl_name', $mail_hostname);
-		$relay->set('mrl_host', '10.99.0.1'); // the relay's fixed tunnel address
-		$relay->set('mrl_public_ip', $public_ip);
-		$relay->set('mrl_tenant_slug', 'main');
-		$relay->set('mrl_mx_hostname', substr($mail_hostname, 0, 255));
-		// provision_relay.sh sets the milters' AuthservID to this same hostname, so
-		// it is what the relay's Authentication-Results stamps carry. Recorded
-		// explicitly rather than inferred from the MX name, which is only the same
-		// value on a self-hosted relay.
-		$relay->set('mrl_authserv_id', substr($mail_hostname, 0, 255));
-		$relay->set('mrl_ssh_user', 'jt-main');
-		$relay->set('mrl_ssh_port', 22);
-		$pull_key = RelaySsh::pullKeyPath();
-		if (is_file($pull_key)) {
-			$relay->set('mrl_ssh_key_path', $pull_key);
-		}
-		$relay->set('mrl_spool_path', '/var/spool/joinery-relay/main');
-		if ($wg_pubkey !== '') {
-			$relay->set('mrl_wg_public_key', substr($wg_pubkey, 0, 255));
-		}
-		$relay->set('mrl_wg_endpoint', $public_ip . ':51820');
-		$relay->set('mrl_wg_ip', '10.99.0.1');
-		$relay->set('mrl_cloud_provider', (string)$run->get('rcp_provider'));
-		$relay->set('mrl_cloud_instance_id', (string)$run->get('rcp_instance_id'));
-		$relay->save();
-		if ($is_new_machine) {
-			RelaySsh::forgetHostKey((string)$relay->get('mrl_host'));
-		}
-		// Mint the ambient transport keypair now so the first map push can seal
-		// Standard/Private mail immediately once enabled.
-		$relay->ensureTransportKeypair();
-		return $relay;
-	}
-
-	/**
 	 * Compute-API failure policy (grant-per-act variant): 401 and other 4xx
 	 * are terminal (a fresh retry brings a fresh grant); 5xx/network stay put
 	 * and retry next tick. A terminal failure cleans up any created instance.
@@ -801,49 +735,5 @@ class RelayCloudProvisioner {
 		return new LinodeComputeDriver($token);
 	}
 
-	private function run(string $cmd): array {
-		return RelaySsh::run($cmd);
-	}
-
-	private function sshOptions(string $key_file): string {
-		return '-i ' . escapeshellarg($key_file)
-			. ' -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null'
-			. ' -o ConnectTimeout=20 -o BatchMode=yes';
-	}
-
-	/** Write the sealed run key to a 0600 temp file; caller unlinks. */
-	private function writeKeyFile(RelayCloudProvision $run): string {
-		$key = $run->unsealSshKey();
-		$file = tempnam(sys_get_temp_dir(), 'jyrck');
-		file_put_contents($file, $key);
-		chmod($file, 0600);
-		return $file;
-	}
-
-	/** @return array{0:string,1:string} [private_pem, public_openssh] */
-	private function generateSshKeypair(): array {
-		$file = tempnam(sys_get_temp_dir(), 'jyrcg');
-		@unlink($file); // ssh-keygen refuses an existing file
-		list($code, $out) = $this->run(
-			'ssh-keygen -t ed25519 -N ' . escapeshellarg('') . ' -C joinery-relay-provision -f ' . escapeshellarg($file));
-		if ($code !== 0) {
-			throw new RelayCloudProvisionException('ssh-keygen failed: ' . $out);
-		}
-		$private = (string)file_get_contents($file);
-		$public = trim((string)file_get_contents($file . '.pub'));
-		@unlink($file);
-		@unlink($file . '.pub');
-		if ($private === '' || $public === '') {
-			throw new RelayCloudProvisionException('ssh-keygen produced an empty keypair.');
-		}
-		return array($private, $public);
-	}
-
-	private function extractMarker(string $output, string $marker): string {
-		if (preg_match('/^' . preg_quote($marker, '/') . '=(.*)$/m', $output, $m)) {
-			return trim($m[1]);
-		}
-		return '';
-	}
 }
 ?>
