@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.1 - Publish release on this node: for a node whose agent carries the publish_upgrade
+ *                primitive, the version it runs and release notes, dispatched as the node's own
+ *                agent's job (specs/publish_as_node_action.md)
  * @version 1.0
  */
 
@@ -60,4 +63,32 @@
 	</div>
 <?php
 	$page->end_box();
+
+	// A node that carries the publisher builds and signs its own release, as
+	// its own agent. This is how a management node that is itself a node of
+	// this one (a relay serving releases to its fleet) gets published: from
+	// here, by the plane that manages it, with no shell on either machine.
+	if (JobCommandBuilder::has_primitive($node, 'publish_upgrade')) {
+		$running = (string)$node->get('mgn_joinery_version');
+		$pub_major = $pub_minor = $pub_patch = 0;
+		if (preg_match('/^(\d+)\.(\d+)\.(\d+)$/', $running, $pm)) {
+			$pub_major = (int)$pm[1]; $pub_minor = (int)$pm[2]; $pub_patch = (int)$pm[3];
+		}
+		$page->begin_box(['title' => 'Publish Release on This Node']);
+		echo '<p class="text-muted">Builds and signs release archives from the tree this node runs, as a job of '
+			. 'its own agent. The version defaults to what the node is running, which is what a site that received '
+			. 'its code republishes; the node refuses a number it may not mint.</p>';
+		$pub_form = $page->getFormWriter('publish_on_node_form');
+		$pub_form->begin_form();
+		$pub_form->hiddeninput('action', '', ['value' => 'publish_upgrade']);
+		$pub_form->hiddeninput(SmAdminCsrf::FIELD, '', ['value' => SmAdminCsrf::token()]);
+		$pub_form->numberinput('version_major', 'Major', ['required' => true, 'value' => $pub_major, 'min' => 0]);
+		$pub_form->numberinput('version_minor', 'Minor', ['required' => true, 'value' => $pub_minor, 'min' => 0]);
+		$pub_form->numberinput('version_patch', 'Patch', ['required' => true, 'value' => $pub_patch, 'min' => 0]);
+		$pub_form->textarea('release_notes', 'Release notes', ['required' => true, 'rows' => 3,
+			'placeholder' => 'What this release carries...']);
+		$pub_form->submitbutton('btn_publish_on_node', 'Publish on ' . htmlspecialchars($node_name));
+		$pub_form->end_form();
+		$page->end_box();
+	}
 

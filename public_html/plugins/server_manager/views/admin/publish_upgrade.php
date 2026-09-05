@@ -6,12 +6,26 @@
  * Lists published upgrade archives (with delete), and provides the
  * Publish New Upgrade form with optional version override.
  *
+ * A publish is a job of this management node's OWN agent: the plane pairs to
+ * itself, and the form dispatches the publish_upgrade primitive to that node.
+ * There is no plane-local queue and no other transport — the signing key is
+ * root-only, and the root agent is its one reader.
+ *
+ * @version 1.9 - a site that is another management node's node says so, naming that node from its
+ *                own agent's credential: its releases are a node action there
+ *                (specs/publish_as_node_action.md)
+ * @version 1.8.1 - the no-self-node advice leads with the Management Node page, which files the join
+ *                  with no shell; the CLI form is the aside
+ * @version 1.8 - publishing dispatches to the plane's own node (ManagedNode::self_node()) as the
+ *                publish_upgrade primitive; the page says what to do when there is no such node
+ *                or its agent is too old (specs/agent_local_queue_retirement.md, G1)
  * @version 1.7
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('data/upgrades_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/UpgradeRetention.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAdminCsrf.php'));
@@ -129,11 +143,48 @@ if ($_POST && ($_POST['action'] ?? '') === 'publish_upgrade') {
 		$params['patch'] = intval($_POST['version_patch']);
 	}
 	if ($release_notes) {
-		$steps = JobCommandBuilder::build_publish_upgrade($params);
-		$job = ManagementJob::createJob(null, 'publish_upgrade', $steps, $params, $session->get_user_id());
+		$self = ManagedNode::self_node();
+		try {
+			if (!$self) {
+				throw new Exception(publish_self_pairing_advice());
+			}
+			$built = JobCommandBuilder::build_publish_upgrade($self, $params);
+		} catch (Exception $e) {
+			$session->save_message(new DisplayMessage(
+				$e->getMessage(), 'Cannot publish', $page_regex,
+				DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+			));
+			header('Location: /admin/server_manager/publish_upgrade');
+			exit;
+		}
+		$job = ManagementJob::createFromBuild($self->key, 'publish_upgrade', $built, $params, $session->get_user_id());
 		header('Location: /admin/server_manager/job_detail?job_id=' . $job->key);
 		exit;
 	}
+}
+
+/**
+ * What an operator does when this management node has no record of itself.
+ * Publishing runs on this machine's own agent, so the plane has to be a node
+ * of itself first — unless it is already a node of ANOTHER management node,
+ * in which case that node publishes it, from its node detail page, and this
+ * page says which one. One agent holds one credential; a site cannot be its
+ * own node and someone else's.
+ */
+function publish_self_pairing_advice() {
+	$own_url = rtrim((string)LibraryFunctions::get_absolute_url(), '/');
+	$manager = ManagedNode::managed_by();
+	if ($manager !== null) {
+		return 'This site is managed by ' . htmlspecialchars($manager) . ', and a release is built by a '
+			. 'site\'s own agent at the request of the management node that manages it. Publish this site '
+			. 'from that management node: open this site\'s node detail page there, Updates tab, '
+			. 'Publish Release on This Node.';
+	}
+	return 'This management node has no record of itself, and a publish runs as a job of this '
+		. 'machine\'s own agent. Connect this site to itself: on the Management Node page '
+		. '(/admin/admin_management_node) enter ' . $own_url . ' and connect, then approve the request '
+		. 'at the top of the Server Manager dashboard. No shell is needed. (The same ask from a shell '
+		. 'is: sudo /usr/local/bin/joinery-agent join --management-node=' . $own_url . '.)';
 }
 
 // ── Load upgrade history ──
@@ -197,6 +248,24 @@ if ($current !== '' && preg_match('/^(\d+)\.(\d+)\.(\d+)$/', $current, $m)) {
 	$next_major = 0;
 	$next_minor = 8;
 	$next_patch = 1;
+}
+
+// Can this dashboard publish at all? Publishing is a job of this management
+// node's own agent, so the plane needs a record of itself whose agent carries
+// the primitive. Decided here so the page says what to do instead of offering
+// a form whose submit is refused.
+$self_node = ManagedNode::self_node();
+$cannot_publish = '';
+if (!$self_node) {
+	$cannot_publish = publish_self_pairing_advice();
+} elseif (!JobCommandBuilder::has_primitive($self_node, 'publish_upgrade')) {
+	$cannot_publish = 'This management node is paired to itself as '
+		. htmlspecialchars($self_node->get('mgn_name')) . ', but its agent ('
+		. htmlspecialchars((string)$self_node->get('mgn_agent_version') ?: 'not reporting')
+		. ') does not carry the publish primitive yet. Publish once from a shell — sudo /usr/bin/php '
+		. htmlspecialchars(PathHelper::getRootDir()) . '/plugins/server_manager/includes/publish_upgrade.php '
+		. '\'release notes\' — and the agent updates itself to the release that carries it, about a '
+		. 'minute after the publish finishes.';
 }
 
 // On a site running exactly what upstream delivered, the number is not the
@@ -345,14 +414,17 @@ $page->end_box();
 $pageoptions = ['title' => 'Publish New Upgrade'];
 $page->begin_box($pageoptions);
 ?>
-<?php if ($may_mint): ?>
-<p class="text-muted">Build upgrade archives from the current management node source code. The version numbers default to the auto-detected next patch; override if you need a specific version.</p>
+<?php if ($cannot_publish): ?>
+<div class="jy-callout jy-callout-warning"><?php echo $cannot_publish; ?></div>
+<?php elseif ($may_mint): ?>
+<p class="text-muted">Build upgrade archives from the current management node source code, as a job of this node's own agent (<?php echo htmlspecialchars($self_node->get('mgn_name')); ?>). The version numbers default to the auto-detected next patch; override if you need a specific version.</p>
 <?php else: ?>
 <div class="jy-callout jy-callout-info">This deployment is running exactly the version upstream
 delivered (<?php echo htmlspecialchars($current); ?>), so it republishes that version rather than
 minting a new number. Upgrade it first to serve newer code.</div>
 <?php endif; ?>
 <?php
+if (!$cannot_publish) {
 $formwriter = $page->getFormWriter('publish_form');
 $formwriter->begin_form();
 $formwriter->hiddeninput('action', '', ['value' => 'publish_upgrade']);
@@ -382,6 +454,7 @@ $formwriter->textarea('release_notes', 'Release notes', [
 ]);
 $formwriter->submitbutton('btn_submit', $may_mint ? 'Publish Upgrade' : 'Republish ' . htmlspecialchars($current));
 $formwriter->end_form();
+}
 ?>
 <a href="/admin/server_manager" class="btn btn-link">Cancel</a>
 <?php

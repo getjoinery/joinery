@@ -5,6 +5,8 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.5 - the output box and the poll offset read $job->transcript(), so a script primitive's
+ *                transcript is shown as text rather than as the envelope it travels in
  * @version 1.4 - re-run goes through ManagementJob::rerun(), so a primitive job re-runs its primitive
  * @version 1.3 - structured result display redacted too
  * @version 1.2
@@ -243,7 +245,7 @@ $status_class = match($job->get('mjb_status')) {
 <div class="card mb-3">
 	<div class="card-header"><strong>Output</strong></div>
 	<div class="card-body">
-		<pre id="job-output" class="svm-logbox"><?php echo htmlspecialchars(SmSecretRedactor::redact($job->get('mjb_output') ?: 'Waiting for output...')); ?></pre>
+		<pre id="job-output" class="svm-logbox"><?php echo htmlspecialchars(SmSecretRedactor::redact($job->transcript() ?: 'Waiting for output...')); ?></pre>
 	</div>
 </div>
 
@@ -300,7 +302,7 @@ if ($commands_data && isset($commands_data['steps'])) {
 	var outputEl = document.getElementById('job-output');
 	var statusEl = document.getElementById('job-status');
 	var progressEl = document.getElementById('job-progress');
-	var offset = <?php echo strlen($job->get('mjb_output') ?: ''); ?>;
+	var offset = <?php echo strlen(SmSecretRedactor::redact($job->transcript() ?: '')); ?>;
 	var polling = true;
 
 	function poll() {

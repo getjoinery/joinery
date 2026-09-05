@@ -28,7 +28,7 @@ The agent ships inside the platform release. Publishing an upgrade bundles a sig
 - `joinery-agent-linux-amd64.gz` / `joinery-agent-linux-arm64.gz` — the binaries
 - `joinery-agent.service` — the systemd unit
 
-On the publishing management node, `publish_upgrade.php` cross-compiles both architectures from the checkout named by the `server_manager_agent_source_path` setting (default `/home/user1/joinery-agent`) whenever the source version differs from the bundled one, and signs them with the key at `{site root}/config/agent_signing_key` (generated on first publish; the `.pub` sibling holds the base64 public key that gets baked into the built agent).
+On the publishing management node, `publish_upgrade.php` cross-compiles both architectures from the checkout named by the `server_manager_agent_source_path` setting (default `/home/user1/joinery-agent`) whenever the source version differs from the bundled one, and signs them with the key at `{site root}/config/agent_signing_key` (generated on first publish; the `.pub` sibling holds the base64 public key that gets baked into the built agent). The key is `600 root:root`, pinned by `fix_permissions.sh`: a publish is a job of the management node's own agent, which runs as root, so root is the key's only reader and an operator login on the box cannot copy it. A publish that runs as root gives every file it creates the owner and group of that file's parent directory before it exits, so nothing root-owned is left in the tree.
 
 Bundling is the first thing a publish does, before the VERSION file, the archives or the release row, because its outcome decides whether the release happens at all:
 
@@ -214,7 +214,7 @@ The dashboard shows:
 
 - **Agent Status** -- online/offline indicator with version and last heartbeat time
 - **Managed Nodes** -- cards with health-based status dots (green=healthy, yellow=warning, red=problem, gray=no data), key metrics, and action buttons
-- **Publish Upgrade** -- build upgrade archives from management node source code (node-independent)
+- **Publish Upgrade** -- build upgrade archives from management node source code, as a job of the management node's own agent
 - **Recent Jobs** -- latest 20 jobs across all nodes
 
 Health dot colors reflect actual server health, not check recency:
@@ -379,7 +379,7 @@ Only after the answer verifies does the host run the bundled, self-verifying `re
 | `restore_project` | Restore a full project `.tar.gz` (files + DB) in place on an existing node, then reconcile it to that machine. Runs `restore_project.sh --force --domain <domain>`, which cascades `--non-interactive` into `restore_database.sh`. Pre-restore snapshots of DB and files written to `/backups/auto_pre_project_restore_*`. Every file in the archive must exist under the project directory afterwards or the restore fails and names what is missing | **Yes** |
 | `restore_chain` | Restore a node from an incremental backup chain — what the fleet's scheduled backups actually produce. Fetches the chain manifest, recovers the chain key on the node from the node's own `backup_site_key`, downloads every artifact the manifest names up to the chosen run, then runs `restore_chain.sh`, which verifies each artifact against its recorded size and hash **before writing anything** and applies them in order | **Yes** |
 | `apply_update` | Run `upgrade.php` on target | **Yes** |
-| `publish_upgrade` | Run `publish_upgrade.php` locally on management node (in plugin) | No |
+| `publish_upgrade` | Build and sign a release from a node's own tree, as a primitive of that node's **own** agent, dispatched by the management node that manages it (node detail, Updates tab, for any node whose agent reports the primitive). A management node that manages itself is the same case pointed at its own record: it connects to itself from its Management Node page, approves the request on its own dashboard, and `ManagedNode::self_node()` is the row its Publish page dispatches to. A management node that is another plane's node is published from that plane, and its Publish page says so (`ManagedNode::managed_by()`). See `specs/publish_as_node_action.md` | No |
 | `install_node` | The bootstrap SSH session: fetch the release, `install.sh docker` (host agent), `install.sh site … --enable-agent` (a clone adds `--clone-from` and pulls the source over HTTPS). Run by `InstallJobExecutor` on the plane over the provision's sealed install password | No (target must be clean) |
 | `retire_install_password` | The bootstrap's closing session, once every agent the install put on the machine is admitted: `install.sh host-harden --agent-managed` over the same password, so the machine stops accepting it. `InstallJobExecutor` completes the job only after a fresh login with the password is refused; the provision pipeline then erases the sealed password | No |
 | `provision_certificate` | Issue the node's certificate as a primitive on the **issuer**: the node itself on bare metal, its host's own agent for a container (`for_node_id` names the site). Driven by `ProvisionPendingSsl`, which observes a certificate the machine already reports before asking | No |
@@ -1210,7 +1210,8 @@ alive.
 
 The **agent signing key** (the fleet trust root) needs no separate recovery record:
 it lives at `config/agent_signing_key`, inside the project tree that the site's own
-encrypted project backup carries.
+root-run manager backup carries (the key is root-only, so a backup taken as any
+other user leaves it out and says so).
 
 ## How It Works: Smart Plugin, Dumb Agent
 

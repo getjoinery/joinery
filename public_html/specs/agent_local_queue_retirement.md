@@ -144,9 +144,11 @@ is the agent.
 
 - **`publish_upgrade` is a primitive** (`ClassOperate`) of the agent, run by
   the plane's own agent on the plane's own node row. Two bounded parameters:
-  `version` (optional, `^\d+\.\d+(\.\d+)?$`) and `notes` (required, a
-  length-bounded string; release notes carry newlines and quotes, so no
-  pattern). Script: `/usr/bin/php public_html/plugins/server_manager/includes/publish_upgrade.php`
+  `version` (required, `^\d+\.\d+\.\d+$` — required rather than optional
+  because the publisher reads its first argument as a number only when it
+  looks like one, so a version that is always present keeps argv
+  unambiguous; the form always has one) and `notes` (required, bounded at
+  4000 characters; release notes carry newlines and quotes, so no pattern). Script: `/usr/bin/php public_html/plugins/server_manager/includes/publish_upgrade.php`
   with args `{version}` `{notes}` — argv, never a shell, never a stored
   command string. Timeout long enough for a Go build plus the deploy tier.
   The agent verifies the script against the signed manifest before running
@@ -367,7 +369,23 @@ just this spec), the decision must stop being rediscoverable-as-open.
 **WP2 — Audit the `local` step. DONE** — see the section above. Thirteen
 operations; two gates, one hard dependency, seven deletions.
 
-**WP2b — `publish_upgrade` as a primitive** (G1). In order: the primitive in
+**WP2b — `publish_upgrade` as a primitive** (G1). **DONE on dev 2026-09-05:**
+0.8.371 (hand, sudo) shipped agent 1.19.0; 0.8.372 (hand, sudo) re-signed the
+publisher after its last edit; **0.8.373 was published from the dashboard as
+job 11519 of node 24776** — the first release built as a job of the plane's own
+agent, key `600 root:root`, 22 created paths adopted, nothing root-owned left.
+The job page shows a script primitive's transcript rather than its envelope
+(`ManagementJob::transcript()`). getjoinery is dev's node and so cannot also be its own: it is
+published from dev's node detail page as the same primitive
+(`publish_as_node_action.md`, the general rule). Built: agent 1.19.0 carries the primitive (and the fix for a CLI join on a
+site machine, which the staged-join watcher now finishes on both postures — dev
+had to restart its agent after pairing to itself); `publish_upgrade.php` adopts
+the files a root run creates; `fix_permissions.sh` 3.3 pins the key
+`600 root:root`; the Publish form dispatches to `ManagedNode::self_node()` and
+says what to do when it cannot; the local step and `createJob(null, …)` are
+gone. Left: the hand steps — re-own the key on dev, one publish under sudo to
+ship 1.19.0 and re-sign the publisher, then the same on getjoinery after it
+pairs to itself. In order: the primitive in
 the agent (`primitives/operate_publish_upgrade.go`, registered like
 `backup_run`); the chown-on-exit rule in `publish_upgrade.php` for a root run;
 `fix_permissions.sh` pins the signing key `600 root:root` and the key on dev

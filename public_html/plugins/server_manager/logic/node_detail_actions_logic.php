@@ -19,6 +19,10 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.24 - publish_upgrade: build and sign a release on the node, as the node's own agent. A
+ *                 plane that is another plane's node is published from here; a plane that manages
+ *                 itself is published from its Publish page through the same builder
+ *                 (specs/publish_as_node_action.md)
  * @version 1.23 - approve_join checks a join from a provisioned machine with the provider before binding:
  *                 the instance must be running at the join's address, and the node must be that
  *                 machine's site or host (specs/keyless_provisioning.md WP5)
@@ -91,6 +95,7 @@ class NodeDetailActions {
 		'save_backup_policy'       => 'backups',
 		'apply_update'             => 'updates',
 		'apply_update_all_on_host' => 'updates',
+		'publish_upgrade'          => 'updates',
 		'retry_install'            => 'overview',
 		'provision_ssl'            => 'overview',
 		'run_plugin_installers'    => 'overview',
@@ -281,6 +286,22 @@ class NodeDetailActions {
 				// build_backup_run grew its primitive branch.
 				$built = JobCommandBuilder::build_apply_update($node);
 				$job = ManagementJob::createFromBuild($node->key, 'apply_update', $built, [], $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'publish_upgrade': {
+				// The node builds and signs its own release, as its own agent.
+				// The builder refuses a node without the primitive and says
+				// why; the publisher on the node keeps every rule about the
+				// number (may this site mint it, duplicate, downgrade).
+				$params = [
+					'release_notes' => trim((string)($_POST['release_notes'] ?? '')),
+					'major'         => $_POST['version_major'] ?? null,
+					'minor'         => $_POST['version_minor'] ?? null,
+					'patch'         => $_POST['version_patch'] ?? null,
+				];
+				$built = JobCommandBuilder::build_publish_upgrade($node, $params);
+				$job = ManagementJob::createFromBuild($node->key, 'publish_upgrade', $built, $params, $uid);
 				return self::jobUrl($job);
 			}
 

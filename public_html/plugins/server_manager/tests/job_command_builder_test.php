@@ -772,21 +772,42 @@ foreach (JobCommandBuilder::build_install_node($clone_docker_target, array(
 }
 check($install_teardown === 0, 'install_node emits no teardown step');
 
-// Rule 2 (deliverables): the publish-upgrade job exists to place release
-// archives in the upgrade repository — nothing about it may be teardown.
-$pub_steps = JobCommandBuilder::build_publish_upgrade(array('release_notes' => 'harness test'));
-$pub_has_teardown = false;
-foreach ($pub_steps as $step) {
-	if (!empty($step['teardown'])) { $pub_has_teardown = true; }
-}
-check(!$pub_has_teardown, 'publish_upgrade emits no teardown step — its archives are the deliverable');
+// Rule 2 (deliverables): a publish is a job of the management node's OWN agent
+// — the plane paired to itself — and it carries exactly the version and the
+// notes. There is no local step, no shell string and no other transport: the
+// signing key is root-only and the root agent is its one reader.
+$publisher = jcb_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x0e", 32)),
+	'mgn_agent_version' => '1.19.0', 'mgn_agent_primitives' => 'check_status,publish_upgrade'));
+$pub_params = array('release_notes' => 'harness test', 'major' => 0, 'minor' => 8, 'patch' => 371);
+$pub_built = JobCommandBuilder::build_publish_upgrade($publisher, $pub_params);
+check(($pub_built['primitive'] ?? '') === 'publish_upgrade', 'publish_upgrade is a primitive envelope, not a step list');
+check(($pub_built['params']['version'] ?? '') === '0.8.371', 'the envelope names the version exactly');
+check(($pub_built['params']['notes'] ?? '') === 'harness test', 'the envelope carries the release notes');
+check(array_keys($pub_built['params']) === array('version', 'notes'),
+      'the envelope carries nothing else — no path, no key, no flag', json_encode($pub_built['params']));
 
-// The step runs on whichever management node builds the release. getjoinery
-// publishes as well as dev, so a path from the machine this was written on is a
-// job that fails at `cd` on every other site.
-$pub_cmd = isset($pub_steps[0]['cmd']) ? $pub_steps[0]['cmd'] : '';
-check(strpos($pub_cmd, 'cd ' . escapeshellarg(PathHelper::getRootDir()) . ' ') === 0,
-      'publish_upgrade cds to the running site web root, not a hardcoded one');
+$pub_refused = '';
+try {
+	JobCommandBuilder::build_publish_upgrade($publisher, array('release_notes' => 'no number'));
+} catch (Exception $e) { $pub_refused = $e->getMessage(); }
+check($pub_refused !== '', 'a publish without a full version number is refused at build time', $pub_refused);
+
+$pub_no_channel = jcb_node(array('mgn_agent_version' => '1.19.0'));
+$pub_refused = '';
+try {
+	JobCommandBuilder::build_publish_upgrade($pub_no_channel, $pub_params);
+} catch (Exception $e) { $pub_refused = $e->getMessage(); }
+check(strpos($pub_refused, 'cannot publish') !== false,
+      'a node with no agent channel cannot publish, and the refusal says so', $pub_refused);
+
+$pub_old_agent = jcb_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x0f", 32)),
+	'mgn_agent_version' => '1.17.2', 'mgn_agent_primitives' => 'check_status,apply_update'));
+$pub_refused = '';
+try {
+	JobCommandBuilder::build_publish_upgrade($pub_old_agent, $pub_params);
+} catch (Exception $e) { $pub_refused = $e->getMessage(); }
+check(strpos($pub_refused, '1.17.2') !== false,
+      'an agent that does not report the primitive is refused, naming its version', $pub_refused);
 
 require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
 $bkt = new BackupTarget(NULL);

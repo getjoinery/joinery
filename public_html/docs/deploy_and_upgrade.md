@@ -267,13 +267,15 @@ On any node detail page (`/admin/server_manager/node_detail?mgn_id=N`), the **Up
 **Location:** `plugins/server_manager/includes/publish_upgrade.php`
 **Access:** Requires the Server Manager plugin to be active. Superadmin only (permission level 10).
 
-**Preferred usage:** Use the **Publish Upgrade** form on the Server Manager dashboard (`/admin/server_manager`). Enter release notes and submit — the plugin creates a job that builds all archives.
+**Preferred usage:** Use the **Publish Upgrade** form on the Server Manager dashboard (`/admin/server_manager`). Enter release notes and submit — the plugin dispatches a `publish_upgrade` job to the management node's own agent, which builds all archives as root. The management node is a node of itself for this: on its own Management Node page (`/admin/admin_management_node`) it connects to its own URL, and the request is approved at the top of its own Server Manager dashboard — no shell involved (`sudo /usr/local/bin/joinery-agent join --management-node=<own URL>` files the same ask from a terminal). The form says so when that has not happened yet.
 
-**CLI usage:**
+**CLI usage** (root, because the signing key at `config/agent_signing_key` is `600 root:root`):
 ```bash
-php plugins/server_manager/includes/publish_upgrade.php "release notes here"
+sudo /usr/bin/php plugins/server_manager/includes/publish_upgrade.php "release notes here"
 # Auto-detects the next version number
 ```
+
+A publish that runs as root gives every file it creates the owner and group of the file's parent directory before it exits, so the tree is left as it was found apart from the new release.
 
 > **Note:** The legacy location `utils/publish_upgrade.php` still exists for backward compatibility during the Phase 1 transition. It will be removed in a future release once all remote nodes have been upgraded.
 
@@ -801,11 +803,11 @@ forgotten there.
 
 `getjoinery.com` serves stable releases. It is a site rather than a flag on a row: no schema, no promotion state to forget, and it reuses the chaining `utils/latest_release` already implements.
 
-A release reaches it by being published *there*, and `publish_upgrade.php` builds its archive from the tree of the site it runs on. So promotion is three steps, done by hand:
+A release reaches it by being published *there*, and `publish_upgrade.php` builds its archive from the tree of the site it runs on. getjoinery is a node of dev, so all three steps are buttons on dev's dashboard, and root is never logged in anywhere:
 
-1. Publish on dev.
-2. `upgrade.php` brings getjoinery to that build.
-3. Publish on getjoinery.
+1. Publish on dev (Upgrades page).
+2. Apply Update on the getjoinery node (node detail, Updates tab).
+3. Publish Release on This Node, on the same tab. getjoinery's own agent builds the archive from the tree it now runs (`specs/publish_as_node_action.md`).
 
 **Only the site that authored the code may mint a release number.** `DeploymentHelper::mayMintReleaseVersion()` answers that from a local fact — whether the running `VERSION` is still exactly what `upgrade_received_version` says upstream delivered — and the publisher asks before anything else: a site running what it was handed republishes that number, and refuses a version that differs from it. So step 3 takes release notes and nothing more; the number is already decided by what step 2 delivered.
 
@@ -813,7 +815,7 @@ The question is deliberately local. Asking which site is the origin would mean e
 
 ```bash
 # on getjoinery, after upgrade.php brings it to 0.8.199
-php plugins/server_manager/includes/publish_upgrade.php "release notes"
+sudo /usr/bin/php plugins/server_manager/includes/publish_upgrade.php "release notes"
 # -> Republishing 0.8.199 -- this deployment is running exactly what it received, not new work.
 ```
 

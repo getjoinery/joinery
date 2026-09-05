@@ -23,6 +23,9 @@
 	// Resolved here, in the scope that owns $full_site_dir, so the log helpers
 	// below never have to assume this file was included at global scope.
 	$GLOBALS['publish_log_dir'] = $full_site_dir . '/logs/publish';
+	// When this run began, so a root run can tell the files it created from
+	// the ones it found. See publish_adopt_created_files().
+	$GLOBALS['publish_started_at'] = time();
 
 	// =====================================================
 	// CLI MODE: parse arguments and populate $_REQUEST
@@ -163,9 +166,69 @@
 	// are the runs whose explanation is otherwise lost with the terminal.
 	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/PublishLog.php'));
 	PublishLog::start($GLOBALS['publish_log_dir']);
-	register_shutdown_function(function () {
+	register_shutdown_function(function () use ($full_site_dir) {
+		// Adopt before the log is written so the count is in the log, then
+		// once more for the log file itself, which a root run has just created.
+		publish_adopt_created_files($full_site_dir, $GLOBALS['publish_started_at']);
 		PublishLog::write(error_get_last());
+		publish_adopt_created_files($full_site_dir, $GLOBALS['publish_started_at'], false);
 	});
+
+	/**
+	 * A root run leaves nothing root-owned behind.
+	 *
+	 * A publish runs as root when it is a job of this management node's own
+	 * agent, and root is the one reader of the signing key. Every file it
+	 * creates in the tree — release archives, the agent bundle, publish logs,
+	 * the re-signed manifests, the install SQL — would otherwise belong to
+	 * root, and the web tier and the deploy user could read but never replace
+	 * or remove them: retention could not reclaim an archive, the next
+	 * hand publish as user1 could not overwrite the manifest. So before it
+	 * exits, a root run gives every file and directory it CREATED the owner
+	 * and group of that file's parent directory. Files it rewrote keep their
+	 * owner (a rewrite keeps the inode). No configuration: the parent already
+	 * says who owns the tree. config/ is left alone, because the one root-only
+	 * file in the tree lives there on purpose.
+	 *
+	 * "Created by this run" is: owned by root, and newer than the run's start.
+	 * Parents are adopted before their children so a new directory's files
+	 * take the owner the directory has just been given.
+	 */
+	function publish_adopt_created_files($site_root, $started_at, $record = true) {
+		if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
+			return 0;
+		}
+		$cmd = sprintf(
+			'find %s -xdev \( -type f -o -type d \) -user root -newermt %s -not -path %s -not -path %s 2>/dev/null',
+			escapeshellarg($site_root),
+			escapeshellarg('@' . (int)($started_at - 1)),
+			escapeshellarg($site_root . '/config'),
+			escapeshellarg($site_root . '/config/*')
+		);
+		$paths = [];
+		exec($cmd, $paths);
+		$paths = array_filter(array_map('trim', $paths));
+		usort($paths, function ($a, $b) { return strlen($a) - strlen($b); });
+		$adopted = 0;
+		foreach ($paths as $path) {
+			if ($path === $site_root) {
+				continue;
+			}
+			$parent = dirname($path);
+			$uid = fileowner($parent);
+			$gid = filegroup($parent);
+			if ($uid === false || $gid === false || $uid === 0) {
+				continue;
+			}
+			if (@chown($path, $uid) && @chgrp($path, $gid)) {
+				$adopted++;
+			}
+		}
+		if ($adopted > 0 && $record) {
+			PublishLog::record("Root run: {$adopted} created path(s) given their parent directory's owner.");
+		}
+		return $adopted;
+	}
 
 	// Output helper: strips HTML for CLI, flushes for web
 	function publish_output($text) {

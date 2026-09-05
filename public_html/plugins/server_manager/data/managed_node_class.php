@@ -2,6 +2,10 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.14 - managed_by(): which management node this site's own agent is connected to, from the
+ *                 agent_join_state setting; a plane that is another plane's node publishes from there
+ * @version 1.13 - self_node(): the management node's record of itself, found by its own site URL.
+ *                 The plane pairs to itself so its own work (publishing) is a job of its own agent.
  * @version 1.12 - mgn_script_trust and its companions: whether the node can verify its own scripts,
  *                  recorded on the node instead of being left to be read off individual job failures
  * @version 1.11 - mgn_agent_primitives and mgn_agent_bundle_version: the node reports what it can
@@ -226,6 +230,51 @@ class ManagedNode extends SystemBase {
 		'mgn_update_time'         => array('type'=>'timestamp(6)'),
 		'mgn_delete_time'         => array('type'=>'timestamp(6)'),
 	);
+
+	/**
+	 * This management node's record of itself, or null when it has none.
+	 *
+	 * A management node pairs to its own site the way any node does
+	 * (`joinery-agent join --management-node=<own URL>`, approved on its own
+	 * dashboard), and the row that makes is the one whose site URL is this
+	 * site's own. Work the plane does on its own machine — publishing a
+	 * release — is dispatched to that row's agent, so the plane never needs
+	 * a job queue of its own.
+	 */
+	public static function self_node() {
+		$own_url = rtrim((string)LibraryFunctions::get_absolute_url(), '/');
+		if ($own_url === '') {
+			return null;
+		}
+		foreach ([$own_url, $own_url . '/'] as $url) {
+			$nodes = new MultiManagedNode(['mgn_site_url' => $url, 'deleted' => false]);
+			foreach ($nodes as $node) {
+				return $node;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * The management node this site's own agent is connected to, or null when
+	 * this site is managed by nobody. Read from the join state the agent
+	 * writes for the Management Node page: a site that is another plane's node
+	 * cannot also be its own, so its releases are published from that plane's
+	 * node detail page, and this is how the Publish page knows to say so.
+	 */
+	public static function managed_by() {
+		$state = json_decode((string)Globalvars::get_instance()->get_setting('agent_join_state'), true);
+		return self::managed_by_from(is_array($state) ? $state : null);
+	}
+
+	/** The rule managed_by() applies, over the decoded state, so it can be tested without settings. */
+	public static function managed_by_from($state) {
+		if (!is_array($state) || ($state['status'] ?? '') !== 'connected') {
+			return null;
+		}
+		$url = rtrim(trim((string)($state['url'] ?? '')), '/');
+		return $url === '' ? null : $url;
+	}
 
 	function prepare() {
 		// Normalize slug to lowercase alphanumeric + hyphens

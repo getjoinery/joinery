@@ -131,4 +131,54 @@ try {
 	}
 }
 
+section('managed_by_from() names the plane this site is a node of, and nothing else');
+
+check(ManagedNode::managed_by_from(['status' => 'connected', 'url' => 'https://dev.getjoinery.com/', 'node_id' => 33])
+      === 'https://dev.getjoinery.com', 'a connected state names its management node, without the trailing slash');
+check(ManagedNode::managed_by_from(['status' => 'pending', 'url' => 'https://dev.getjoinery.com']) === null,
+      'a join still pending is not a manager yet');
+check(ManagedNode::managed_by_from(['status' => 'rejected', 'url' => 'https://dev.getjoinery.com']) === null,
+      'a rejected join is no manager');
+check(ManagedNode::managed_by_from(['status' => 'connected']) === null, 'connected with no URL names nobody');
+check(ManagedNode::managed_by_from(null) === null, 'no state is managed by nobody');
+
+section('transcript() shows a script primitive\'s output as text, and leaves everything else alone');
+
+// What the plane stores for a script primitive: the envelope it built from the
+// node's result on the first line, then the agent's log. What a person should
+// see is the transcript, then the log.
+$script_job = new ManagementJob(NULL);
+$script_job->set('mjb_output', json_encode(['api_version' => '1.0', 'data' => [
+	'output' => "Line one\nRESULT: PASS\n", 'output_bytes' => 21,
+]]) . "\n\n=== Agent log ===\nclaimed job 1\n");
+$shown = $script_job->transcript();
+check(strpos($shown, "Line one\nRESULT: PASS\n") === 0, 'the transcript comes first, as text', $shown);
+check(strpos($shown, 'api_version') === false, 'the envelope itself is not shown');
+check(strpos($shown, "=== Agent log ===\nclaimed job 1") !== false, 'the agent log follows the transcript untouched');
+
+$cut_job = new ManagementJob(NULL);
+$cut_job->set('mjb_output', json_encode(['api_version' => '1.0', 'data' => [
+	'output' => 'head', 'output_bytes' => 900000, 'output_truncated' => true,
+]]) . "\n");
+check(strpos($cut_job->transcript(), '[Output truncated by the agent — 900000 bytes were produced.]') !== false,
+      'a capped transcript says how much the agent produced', $cut_job->transcript());
+
+// A structured result (check_status, list_backups) has no transcript; its
+// fields are shown as readable JSON so the page still says what came back.
+$data_job = new ManagementJob(NULL);
+$data_job->set('mjb_output', json_encode(['api_version' => '1.0', 'data' => ['disk_pct' => 41, 'load' => '0.3']]) . "\n");
+check(strpos($data_job->transcript(), "\"disk_pct\": 41") !== false, 'a structured result is shown as readable JSON', $data_job->transcript());
+
+// A step job's output was never an envelope and is returned as it is.
+$step_job = new ManagementJob(NULL);
+$step_job->set('mjb_output', "$ ls\nfile\n");
+check($step_job->transcript() === "$ ls\nfile\n", 'a step job\'s output is returned unchanged');
+
+$odd_job = new ManagementJob(NULL);
+$odd_job->set('mjb_output', "{not json\nmore\n");
+check($odd_job->transcript() === "{not json\nmore\n", 'output that merely starts with a brace is returned unchanged');
+
+$empty_job = new ManagementJob(NULL);
+check($empty_job->transcript() === '', 'no output reads as no output');
+
 harness_finish();
