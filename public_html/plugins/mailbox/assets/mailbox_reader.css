@@ -1,7 +1,7 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.35
+ * Vanilla CSS, no framework. @version 2.36
  */
 
 /* Every size the reader renders text at, in one ladder. Nothing in this file
@@ -566,6 +566,9 @@
 .mbx-folder-opt:hover { background: #f1f3f5; }
 .mbx-folder-opt.current { font-weight: 600; background: #e3eefb; }
 .mbx-folder-newrow { display: flex; gap: 4px; padding: 6px; border-top: 1px solid #eef0f2; margin-top: 2px; }
+/* On a mailbox with no labels yet the field is the whole panel, so the rule that
+ * separates it from the list above has nothing to separate. */
+.mbx-folder-newrow:first-child { border-top: none; margin-top: 0; }
 .mbx-folder-newinput {
 	flex: 1 1 auto; min-width: 0; border: 1px solid #cfd6dd; border-radius: 5px;
 	padding: 5px 8px; font-size: var(--mbx-text-sm);

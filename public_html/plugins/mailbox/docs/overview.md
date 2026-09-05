@@ -4260,7 +4260,9 @@ pushes the change to the source, and an unbound (local) label is pure membership
 never touches a remote.
 
 **Creating a label/folder.** The same control has a **New label… / New folder…**
-field. Creating one makes an `ilb_` label; on a mailbox with an IMAP feed it also makes
+field, and is present on every mailbox — one with no labels yet shows the button
+with just that field, since it is the one place a first label is made. Creating
+one makes an `ilb_` label; on a mailbox with an IMAP feed it also makes
 a tracked binding flagged `iif_pending_remote_create` (the remote folder does not
 exist yet) and files the thread into it. The folder is materialized on the source
 **during the sync push** — `ImapSyncer` issues the IMAP `CREATE`, clears the pending
