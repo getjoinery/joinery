@@ -55,6 +55,10 @@ class MailboxFleetSlot extends SystemBase {
 		// tenant shell by add-tenant).
 		'mft_wg_public_key'         => array('type'=>'varchar(255)'),
 		'mft_pull_public_key'       => array('type'=>'text'),
+		// The tenant's relay client public key (Ed25519, base64): what a shard
+		// without a shell holds in its registry in place of a pull key and a
+		// WireGuard peer (specs/relay_without_a_shell.md).
+		'mft_public_key'            => array('type'=>'varchar(64)'),
 		// Shard-policy limits written into the tenant's root-owned limits.json.
 		'mft_forward_hourly_limit'  => array('type'=>'int4', 'is_nullable'=>false, 'default'=>200),
 		'mft_spool_max_mib'         => array('type'=>'int4', 'is_nullable'=>false, 'default'=>512),

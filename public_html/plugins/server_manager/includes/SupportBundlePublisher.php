@@ -40,6 +40,8 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.3 - carries the relay build: provision_relay.sh and the prebuilt sealer binaries
+ *                (specs/relay_without_a_shell.md); the publish builds the sealer first
  * @version 1.2 - a site that may not sign tree manifests (TreeManifestPublisher::authority) does not
  *                rebuild the bundle; the one received from upstream carries forward
  * @version 1.1 - first live consumer: the Docker host's decommission_site runs the bundled
@@ -79,14 +81,18 @@ class SupportBundlePublisher {
 	 * that sibling here too, at the same relative path. The layout inside the
 	 * bundle is the layout the scripts expect to find themselves in.
 	 *
-	 * No relay content belongs here. The relay is not a managed machine (owner,
-	 * 2026-08-28): its whole management surface is a plane-side port probe and
-	 * complete reprovisioning, so it runs no agent and invokes no primitive. The
-	 * prebuilt relay-sealer reaches it through the provisioning tarball instead.
+	 * Two consumers. The Docker host: decommission_site runs remove_account.sh,
+	 * and setup_ssl.sh waits for the certificate round. And the RELAY
+	 * (specs/relay_without_a_shell.md): a relay runs no agent and invokes no
+	 * primitive, but it is born from this bundle - its first-boot script fetches
+	 * the bundle from the plane, checks the sha256 the plane put in the
+	 * user-data, and runs provision_relay.sh out of it with the prebuilt sealer
+	 * beside it. The relay does not verify the signature (it has no compiled-in
+	 * key); for the relay the plane IS the trust root, and the spec says so.
 	 *
-	 * The consumer is the Docker host: decommission_site runs
-	 * remove_account.sh today, and setup_ssl.sh waits for the certificate
-	 * round.
+	 * The sealer binaries are built by RelaySealerPublisher, which the publish
+	 * pipeline runs BEFORE this publisher so the bundle carries the binaries
+	 * that match this release's sealer source.
 	 */
 	private static $contents = array(
 		'maintenance_scripts/sysadmin_tools/setup_ssl.sh',
@@ -95,6 +101,11 @@ class SupportBundlePublisher {
 		'maintenance_scripts/install_tools/install.sh',
 		// decommission_site (self-verifying; sources nothing).
 		'maintenance_scripts/sysadmin_tools/remove_account.sh',
+		// The relay build, and the sealer it installs - one binary per
+		// `uname -m` name, which is how provision_relay.sh finds its own.
+		'public_html/plugins/mailbox/provisioning/provision_relay.sh',
+		'public_html/plugins/mailbox/provisioning/bin/relay-sealer-x86_64',
+		'public_html/plugins/mailbox/provisioning/bin/relay-sealer-aarch64',
 	);
 
 	/**

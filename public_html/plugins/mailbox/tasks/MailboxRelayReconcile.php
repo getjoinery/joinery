@@ -288,19 +288,19 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 			// 2. Dispatch pending work.
 			if ($status === MailboxFleetSlot::STATUS_PROVISIONING) {
 				// No job yet, or the last add-tenant failed — (re)dispatch.
-				if (FleetService::dispatchJob($slot, 'add_tenant') !== null) {
+				if (FleetService::applyTenant($slot, 'add_tenant')) {
 					$dispatched++;
 				}
 				continue;
 			}
 			if ($status === MailboxFleetSlot::STATUS_RELEASED) {
-				if (FleetService::dispatchJob($slot, 'remove_tenant') !== null) {
+				if (FleetService::applyTenant($slot, 'remove_tenant')) {
 					$dispatched++;
 				}
 				continue;
 			}
 			if ((bool)$slot->get('mft_needs_domain_sync')) {
-				if (FleetService::dispatchJob($slot, 'set_domains') !== null) {
+				if (FleetService::applyTenant($slot, 'set_domains')) {
 					$dispatched++;
 				}
 				continue;
@@ -329,7 +329,7 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 							$slot->set('mft_status', MailboxFleetSlot::STATUS_SUSPENDED);
 							$slot->set('mft_needs_domain_sync', true); // empties the shard allowlist
 							$slot->save();
-							FleetService::dispatchJob($slot, 'set_domains');
+							FleetService::applyTenant($slot, 'set_domains');
 							$dispatched++;
 							$suspended++;
 						}
@@ -346,7 +346,7 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 					$slot->set('mft_entitlement_lapse_time', null);
 					$slot->set('mft_needs_domain_sync', true);
 					$slot->save();
-					FleetService::dispatchJob($slot, 'set_domains');
+					FleetService::applyTenant($slot, 'set_domains');
 					$dispatched++;
 					$notes[] = 'slot ' . $slot->key . ' reactivated';
 				}

@@ -959,8 +959,15 @@ function admin_mailbox_relay_health(): array {
 		'checkRelayMapFresh'      => 'Address list current',
 		'checkOriginHidden'       => 'Server address hidden',
 	);
+	$active_relay = MailboxRelay::active();
+	if ($active_relay !== null && $active_relay->usesRelayApi()) {
+		// A relay without a shell: whether it answers its API is the first fact.
+		$run = array('checkRelayReachable' => 'Relay reachable') + $run;
+	}
 	if ($mode === 'smarthost') {
-		$run['checkRelayTunnel'] = 'Sending tunnel';
+		if ($active_relay === null || !$active_relay->usesRelayApi()) {
+			$run['checkRelayReachable'] = 'Sending tunnel';
+		}
 	} else {
 		$run['checkOutboundTransportClass'] = 'Sending route hides your address';
 		$run['checkOutboundOriginLeak']     = 'No leaks in sent mail';
@@ -1054,7 +1061,14 @@ function admin_mailbox_relay_check_rows(string $advanced_url = ''): array {
 	// them on a card headed "Relay" would claim the relay is doing a job it is
 	// not doing.
 	$receiving_checks = array('checkRelaySpoolDraining', 'checkRelaySpoolHeld', 'checkRelayMapFresh', 'checkOriginHidden');
-	$sending_checks   = $smarthost ? array('checkRelayTunnel') : array();
+	$sending_checks   = array();
+	if ($active->usesRelayApi()) {
+		// A relay without a shell is reached over its own API; whether it
+		// answers is the first fact about receiving.
+		array_unshift($receiving_checks, 'checkRelayReachable');
+	} elseif ($smarthost) {
+		$sending_checks = array('checkRelayReachable');
+	}
 
 	$health = admin_mailbox_relay_health();
 	$name = trim((string)$active->get('mrl_name')) ?: trim((string)$active->get('mrl_mx_hostname'));

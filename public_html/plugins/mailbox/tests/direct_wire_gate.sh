@@ -6,7 +6,8 @@
 # needs: []
 # timeout: 180
 #
-# Joinery Direct's PHP/Go interop, and the relay binary's own unit tests.
+# Joinery Direct's PHP/Go interop, the relay API's signed envelope, and the
+# relay binary's own unit tests.
 #
 # This is the drift nothing else catches. An instance signature is only worth
 # anything if both ends agree BYTE FOR BYTE on what was covered, and a
@@ -18,9 +19,11 @@
 #
 # So the real gate lives beside the Go source (direct_wire_gate.sh): PHP emits
 # the signing bytes and Go emits them for the same deliberately awkward fixture,
-# and the two are diffed. This wrapper runs it — and the relay's Go tests — from
-# the platform's own runner, so the check is part of `run.php safe` rather than
-# something somebody remembers to do.
+# and the two are diffed. The same gate pins the relay API's request envelope
+# and birth report (RelayProtocol.php against relay_protocol.go), whose drift
+# would fail every spool pull just as silently. This wrapper runs it — and the
+# relay's Go tests — from the platform's own runner, so the check is part of
+# `run.php safe` rather than something somebody remembers to do.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -49,7 +52,7 @@ else
 fi
 
 if (cd "${SEALER}" && go test ./... >/dev/null 2>&1); then
-    ok "the relay's Go tests pass (wire forms, freshness, caps, decoys, sessions)"
+    ok "the relay's Go tests pass (wire forms, freshness, caps, decoys, sessions, relay routes)"
 else
     bad "the relay's Go tests failed"
     (cd "${SEALER}" && go test ./... 2>&1 | tail -20)
@@ -65,7 +68,7 @@ if [ "${GATE_CODE}" -eq 0 ] && echo "${GATE_OUT}" | grep -q "RESULT: PASS"; then
 elif echo "${GATE_OUT}" | grep -q "^SKIP:"; then
     echo "  SKIP: the interop gate could not run here"
 else
-    bad "the interop gate failed — every Direct delivery would fail verification"
+    bad "the interop gate failed — every Direct delivery or relay pull would fail verification"
 fi
 
 echo
