@@ -2796,6 +2796,25 @@ fn create_local_folder(
         Placed::At(p) => p,
         Placed::Not(why) => return Ok(why.outcome()),
     };
+    // The folder this one goes into has to be on this disk as ITSELF. A path
+    // is derived from the parent's NAME, and a parent with no directory of its
+    // own -- parked as a duplicate, or simply not created yet -- still has a
+    // name, so the child lands inside whatever directory wears it: the
+    // directory of the folder its parent is waiting to replace. Two server
+    // folders then share one directory, everything made below goes into a
+    // stranger's, and a later move of one under the other is refused as a
+    // folder moving into its own subtree -- which by then is true, and the
+    // refusal is right. `move_local` has always made this test; the create
+    // never did. Estate v29 seeds 25040644 and 25043283.
+    if let Some(p) = placement.parent {
+        if let Some(parent) = env.store.get_entry(EntityId::folder(p))? {
+            if parent.synced_placement.is_none() && parent.stand_in.is_none() {
+                return Ok(OpOutcome::Overtaken(
+                    "the folder it is going into is not on this disk yet; planning again".into(),
+                ));
+            }
+        }
+    }
     // A file holding the name this folder needs is moved aside, exactly as one
     // holding a file's name is -- `make_room` is the same answer to the same
     // question, and it keeps the user's copy under a conflict name rather than
@@ -2865,10 +2884,34 @@ fn create_local_folder(
             {
                 continue;
             }
+            // A provisional is not a rival. It is this device's own record for
+            // a directory the server has not seen yet, and the folder arriving
+            // from the server may be that same directory coming back with an
+            // id on it -- which is why adopting it is right. Refusing left the
+            // pass minting a fresh provisional for the same directory every
+            // time round, and uploading a new conflict copy of it each pass.
+            // The directory this guard protects is one a SERVER-BACKED folder
+            // holds. Estate v28 seed 24042460.
+            if other.id.is_provisional() {
+                continue;
+            }
             if let Ok(Placed::At(theirs)) = local_path(env, &other) {
                 if theirs == path {
-                    return Ok(OpOutcome::Retry(format!(
-                        "{} is still held by another folder; waiting for it to move",
+                    // Not this folder's directory, and not this operation's
+                    // problem to solve. Standing down re-derives the plan next
+                    // pass, which is where the answer comes from: naming keeps
+                    // the name for an entrant whose rival is on its way out,
+                    // and gives the entrant a name of its own when the rival
+                    // is staying. Waiting here instead cost three attempts at
+                    // guessing who was coming back -- a settled folder that
+                    // was never leaving, a provisional being uploaded that
+                    // could not leave, and a leaver stuck behind one of those
+                    // -- each a fresh forever-loop. The executor knows a
+                    // directory is not its own; it does not know who will
+                    // eventually own the name. Estate v28 seeds 24079086 and
+                    // 24042460.
+                    return Ok(OpOutcome::Overtaken(format!(
+                        "{} belongs to another folder; deciding again from what is there now",
                         path.display(),
                     )));
                 }

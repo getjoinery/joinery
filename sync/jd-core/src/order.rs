@@ -300,6 +300,28 @@ fn dependency_graph(
         }
     }
 
+    // A folder created inside a folder that is also being created this round
+    // waits for that create. Without the edge, a cycle that closes through
+    // ancestry is invisible to the search: a mover holds the slot an ancestor's
+    // create needs, and the mover's own destination is a create beneath that
+    // ancestor. Nobody is parked, every operation stands down politely, and the
+    // round makes no progress for ever -- the tidy kind of forever-loop, with
+    // an empty queue and nothing to look at. Taken only when nothing already
+    // blocks this create: a slot it must wait for outranks an ancestor it must
+    // wait for. Estate v29 seeds 25040644 and 25043283.
+    for item in items {
+        if !matches!(item.action, Action::CreateLocalFolder { .. }) {
+            continue;
+        }
+        if let Some(parent) = item.move_to.as_ref().and_then(|t| t.parent) {
+            if let Some(create) = creating.get(&parent) {
+                if !waits_for.contains_key(&item.entity) {
+                    waits_for.insert(item.entity, *create);
+                }
+            }
+        }
+    }
+
     // Ancestry. A folder moved into what is currently its own subtree -- the
     // server swapped a parent and its child, say: the child moved out, then
     // the parent moved in under it -- cannot go until the folder it is going
@@ -461,6 +483,50 @@ fn find_cycle_breakers(
 mod tests {
     use super::*;
     use crate::model::Placement;
+
+    /// A cycle that closes through ancestry: the mover holds the name an
+    /// ancestor's create needs, and the mover is going into a folder created
+    /// beneath that ancestor. Each step waits for the next and the last waits
+    /// for the mover. Without the create-under-a-create edge the search walks
+    /// to a create and stops, sees no cycle, parks nobody, and the round
+    /// stands still for ever with an empty queue and nothing to look at.
+    #[test]
+    fn a_cycle_that_closes_through_a_create_under_a_create_parks_the_mover() {
+        // 501 holds the root name that 508's create needs, and is moving into
+        // 507 -- created under 506, created under 508.
+        let items = vec![
+            PlanItem::new(
+                EntityId::folder(501),
+                Action::ApplyRemoteMove { to: placement(Some(507), "Sub 2") },
+                0,
+            )
+            .moving(placement(None, "Sub 2"), placement(Some(507), "Sub 2")),
+            PlanItem::new(
+                EntityId::folder(508),
+                Action::CreateLocalFolder { placement: placement(None, "Sub 2") },
+                1,
+            )
+            .arriving(placement(None, "Sub 2")),
+            PlanItem::new(
+                EntityId::folder(506),
+                Action::CreateLocalFolder { placement: placement(Some(508), "Contested Folder") },
+                2,
+            )
+            .arriving(placement(Some(508), "Contested Folder")),
+            PlanItem::new(
+                EntityId::folder(507),
+                Action::CreateLocalFolder { placement: placement(Some(506), "Sub 11") },
+                3,
+            )
+            .arriving(placement(Some(506), "Sub 11")),
+        ];
+        let p = plan(items, &jd_vfs::Personality::linux(), &FolderParents::default());
+        assert_eq!(
+            p.broken_cycles,
+            vec![EntityId::folder(501)],
+            "the mover holding the name was not parked: {p:?}"
+        );
+    }
 
     /// A parent moved into its own child waits for the child to move out,
     /// and with the child not moving at all the parent's move is left out.
