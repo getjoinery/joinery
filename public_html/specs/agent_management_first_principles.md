@@ -35,6 +35,10 @@ key on that node's own site, so even a fully compromised management node
 cannot destroy anything. Customers' machines carry zero
 credentials of ours and have no back door; our own machines keep sshd for a
 human with a personal key, as a safety net — not as a management channel.
+**Every piece of this is built as if those keys did not exist: nothing in
+the job system, the deploy scripts or the tests may read one. The keys
+already on our own sites stay where they are, for a human troubleshooting
+by hand (owner, 2026-09-05).**
 
 That is the whole design. Everything below is that paragraph made precise.
 
@@ -126,7 +130,7 @@ pairs at birth (`install.sh --enable-agent`, fingerprint-compared approval).
 | Management node | Node public keys, per-node write-only backup slots, its own site | Any SSH private key the job system can use; any node's recovery key; anything that opens a customer machine |
 | Managed node | Its own Ed25519 identity (0600 root), its own proven recovery **public** key (which is also what approvals are sealed to), root-owned policy, and its own upload ledger of what it sent to the bucket | A database credential (dies with the local queue; one transient exception: a host-posture agent staging a decommission approval holds the victim's DB credential in memory for the life of the connection — never at rest, never its own; `docker_host_agent.md`); any fleet-shared secret; the recovery **private** key, which only a human has |
 | Publisher (dev box) | The release signing key (0600, offsite in its own sealed backup) | — custody is the only defense; a compromised publisher is stated game-over |
-| Operator (human) | Personal per-node SSH keys (internal/BYO only), the backup recovery private key that answers a destructive approval | — |
+| Operator (human) | SSH keys to our own machines (internal/BYO only) — the ones already there stay, unchanged; the backup recovery private key that answers a destructive approval | — |
 | A provisioned customer machine | Nothing of ours, ever — no key is placed at creation (`keyless_provisioning.md`) | Any SSH key of ours, at any point, for any duration |
 
 **Operations:** every steady-state maintenance operation is a primitive.
@@ -136,10 +140,12 @@ SSL probes, agent restart, recovery-key report, and the three restores.
 What deliberately never becomes a primitive: provisioning-time operations
 (`install_node` runs before pairing and is the one SSH session a machine
 ever gets from the plane; `enable_agent` and `discover_nodes` are deleted —
-the machine's owner enrolls it from its own page; `ssh_single_bootstrap.md`), `decommission_node` for a whole machine (a provider API
-call on the customer's grant, not a script on a dying box — but a container
-site on a shared host is removed by the HOST's agent, which is not dying:
-`decommission_site`, per `docker_host_agent.md`, owner 2026-08-31),
+the machine's owner enrolls it from its own page; `ssh_single_bootstrap.md`), `decommission_node` for a whole machine (**manual, permanently**: the
+operator deletes the machine at the provider by hand and then removes the
+record from the dashboard; the platform never calls a provider's delete —
+owner 2026-09-05 — but ONE Joinery site among several on a shared machine
+is removed by the HOST's agent, which is not dying: `decommission_site`, per
+`docker_host_agent.md`, owner 2026-08-31),
 `publish_upgrade` (publisher-local), and the relay operations (dead code at
 cutover).
 
@@ -147,7 +153,9 @@ cutover).
 "the agent is capable"): *a maintenance task that requires a shell on a
 production install is a vocabulary gap to close, never a runbook step.*
 That test — not a date, not a version — is what "when the agent is capable,
-remove the keys" means.
+remove the keys" means. **Removing the keys means the job system stops
+needing them, not that they leave the machines: existing keys on current
+sites stay for hand troubleshooting (owner, 2026-09-05).**
 
 ## The programme
 
@@ -162,10 +170,10 @@ status**; the spec named is where its design lives.
 | 2d | Deferred destructive approval | `deferred_destructive_approval.md` | The approval window is bounded by how long a node can afford to be deaf, not by what a person needs. Raised to 60m as an interim |
 | 3 | The plane-side executor | `plane_side_executor.md` (design only; not endorsed as-is) | **ROLLED BACK 2026-08-31 and not rebuilt.** Round 1 (WP1+WP2 on three operations) was built, reviewed and deleted in full, spec included: it put the health check back on SSH from the plane, one layer above the agent whose whole design is health check plus predetermined fix. What survives is the minimal install-only `InstallJobExecutor` that item 4 needed (an `ssh`-over-sealed-password runner for `install_node`, routed by the `queued` status, zero agent change). The twelve operations that lost their transport are a list of things to disposition, not an executor's to-do list, and item 6 dispositioned them: `check_status` is a native primitive; the disposable trio gets health check plus reprovision and no agent; `provision_ssl` and fleet seeding crossed to the agent; `enable_agent` and `discover_nodes` are deleted. What is left of "executor" is item 7's two gates, `publish_upgrade` and Docker-host certificate issuance |
 | 4 | Keyless provisioning | `keyless_provisioning.md` | **BUILT 2026-09-03, live gate open.** Provision over a sealed install password, host agent on every docker machine, the install password retired once every agent on the machine is admitted (the executor completes the retire job only after the machine refused the password), join approval checked with the provider. Owed: one live run per shape to `retired` |
-| 5 | Credential custody — delete the shared key | `implemented/fleet_ssh_credential_custody.md` | WP1 done; WP2 superseded by item 4; WP3–WP5 unblocked by 2a, not started |
+| 5 | Credential custody — the platform holds no SSH key | `implemented/fleet_ssh_credential_custody.md` | **DONE 2026-09-05.** WP1 done; WP2 superseded by item 4. **WP3 CLOSED 2026-09-05 with nothing to build:** the container case is done (`decommission_site` on the host agent); a whole machine is deleted at its provider BY HAND and its record removed from the dashboard afterwards, and that stays manual — the platform never deletes a cloud machine programmatically (owner). "Permanently delete" on the dashboard remains the way to remove one Joinery site from a shared machine. The dashboard already says so on a dedicated machine's Overview tab. **WP4 DONE 2026-09-05 — the whole of item 5, all of it on the management node, no managed node changes:** the platform forgot `config/provisioning_key`: no PHP reads it any more (measured 2026-09-05); what remains is the pin in `fix_permissions.sh`, the entry in `installer_contract_test.php`, and the key pair sitting in `config/` where the web user can read it. The pair moved to the operator's `~/.ssh/joinery_provisioning_key` as a troubleshooting key (`fix_permissions.sh` 3.2 dropped the pin; installer contract test and plugin doc no longer name it) — it was verified by hand to still reach jeremytunnell, nothing on jeremytunnell changed, and jeremytunnell's `mgn_ssh_key_path` was repointed to the new file so the interim reachability check does not go blind. Tree-wide, only specs still name `config/provisioning_key`. Readers of `mgn_ssh_key_path` (`has_ssh()`, the node form, `PollHostingOrders`, the relay copy) die with item 7's `ssh` step type. **WP5 (rekey jeremytunnell) WITHDRAWN** by owner 2026-09-05: no key is removed from or replaced on any current site. The annex still lists WP5; this table wins |
 | 6 | SSH is one bootstrap, run once | `implemented/ssh_single_bootstrap.md` | **DONE 2026-09-02**, live-verified on every shape: one install job = local preflight + one ssh session; certificates and fleet seeding over the agent; `enable_agent` and `discover_nodes` deleted |
 | 7 | Retire the local queue | `agent_local_queue_retirement.md` | Last, not first — thirteen operations still depend on it |
-| 8 | Per-node hardening | — | A per-node ceremony, not a fleet event. `environment_build_surface_reduction.md` rides alongside |
+| 8 | Per-node hardening | `environment_build_surface_reduction.md` | The image and install surface work only. **It removes no SSH key from any current site** — the existing keys are the human troubleshooting door and stay (owner, 2026-09-05). The move of getjoinery to its own box is no longer part of this item; it was motivated by SSH removal |
 
 **Why item 7 is last, which is the reversal this family keeps re-deriving.** The
 local queue is the largest hole in the platform — a web-tier database write is
@@ -175,10 +183,11 @@ pre-pairing installs that item 6 collapsed into one bootstrap session, and two
 are gates of their own. Flipping the flag before
 those land does not close a hole; it breaks the fleet and gets flipped back.
 
-**Item 2a gated item 5.** Deleting the shared SSH key removes the fallback,
-and doing that while the replacement had never been exercised is the trade this
-programme exists to avoid making by accident. The live restore has been run, so
-item 5 is open.
+**Item 2a gated item 5.** Taking the shared key away from the job system
+removes its fallback, and doing that while the replacement had never been
+exercised is the trade this programme exists to avoid making by accident. The
+live restore has been run, so item 5 is open. The key itself remains a human's
+troubleshooting door; only the platform stops holding it.
 
 **Restore readiness (a "can this node be restored" report) was cancelled
 2026-09-04, not deferred.** Each case it would have reported is covered
@@ -199,6 +208,17 @@ Recorded so nobody re-derives these as gaps:
 - **No skeleton key, no escrow, no break-glass on customer nodes** — a
   plane that can open customer machines is the target we refuse to become.
 - **No agent on the disposable trio.** Settled; stop re-opening.
+- **No programmatic deletion of a whole cloud machine, ever** (owner,
+  2026-09-05). `CloudComputeProvider::deleteInstance()` exists for the
+  provision pipeline to clean up a machine it created and failed to finish,
+  and nothing else. Retiring a machine is a hand operation at the provider.
+  Removing one Joinery site from a shared machine is a different thing and
+  stays on the dashboard (`decommission_site`, via the host's agent).
+- **No removal or replacement of SSH keys on current sites** (owner,
+  2026-09-05). They are used for troubleshooting by hand and stay. The work
+  is built as if they did not exist — no job, script or test may depend on
+  one — which is a different thing from taking them away. Do not re-derive
+  a per-node rekey or key-removal ceremony as a gap.
 - **No "the served page verifies itself"** — a check living in the attacked
   domain is a ring, not a layer (§3.7). Future mechanisms must shrink a
   cell of the limits table, never shuffle trust between rows.
@@ -236,6 +256,9 @@ annexes.
   is decided from that report rather than from a version guess.
 - A backup that exists only in the bucket is brought back to its own node and
   restored, end to end, on a real node. *(item 2a, joinerydemo 2026-08-30)*
+- No platform code, deploy script or test reads an SSH private key, and
+  `config/` on the management node holds none. Keys on current sites are
+  untouched. *(item 5, 2026-09-05)*
 
 **Not met:**
 
@@ -243,8 +266,9 @@ annexes.
   and `install_node` opens exactly one. *(items 3 and 6)*
 - A provisioning password authenticates an install without ever being written to
   a machine. *(item 4)*
-- `config/provisioning_key` does not exist, and no node's `mgn_ssh_key_path`
-  names a fleet-shared key. *(item 5)*
+- `mgn_ssh_key_path` has no reader. *(item 7; the item 5 half — no platform
+  code, deploy script or test reads an SSH private key, `config/` holds
+  none, keys on current sites untouched — was met 2026-09-05)*
 - The install runner runs as the site user and no step it runs is privileged
   on the management node. *(item 3)*
 - The agent's `local` step type is gone, it holds no database credential, and

@@ -855,7 +855,7 @@ check($excl_at !== false && $negate_at !== false && $excl_at < $negate_at,
 $fixture = sys_get_temp_dir() . '/joinery_cfgfix_' . getmypid();
 @mkdir($fixture, 0700, true);
 $live_files = ['Globalvars_site.php', 'agent_signing_key', 'backup_site_key',
-               'cloudflare_dns_token', 'provisioning_key', 'relay_pull_key.pub'];
+               'cloudflare_dns_token', 'relay_pull_key.pub'];
 foreach (array_merge($live_files, ['default_Globalvars_site.php']) as $f) {
     file_put_contents($fixture . '/' . $f, 'x');
 }
