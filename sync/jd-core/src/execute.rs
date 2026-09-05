@@ -3555,6 +3555,48 @@ fn move_local(
     // to move out rather than asking the disk for something no filesystem
     // does, and rather than writing an agreement that says a folder sits
     // inside itself. Estate seed 21093056.
+    //
+    // But first: whose directory is that? `from` was chosen because a directory
+    // stands at that path, and a directory carries no identity to check -- so
+    // when a namesake has taken the old name over, `from` is the NAMESAKE's
+    // directory and every test from here down is made against it. The subtree
+    // refusal reads this folder as moving inside itself and waits for contents
+    // that are not its to leave; the rename, if it got that far, would carry
+    // the namesake's directory away.
+    //
+    // The disk cannot answer it, so a record is asked, exactly as
+    // `create_local_folder` asks before adopting a directory: a folder that
+    // holds a directory by its own agreement, at this path, owns what stands
+    // here. Overtaken rather than retried, because no amount of waiting hands
+    // the directory over -- only the next round, deciding again from the whole
+    // tree, can place this entity.
+    //
+    // Estate v30 seed 26090313 sat on the subtree refusal at three hundred and
+    // forty-one attempts. Asking the disk instead ("is the destination already
+    // there?") looked like it fixed the seed and did not: for an entry with
+    // nothing agreed, `local_path` falls back to the REMOTE placement, so its
+    // own path IS the destination by construction and the test collapsed to
+    // "is a directory there" -- the very question that cannot be answered.
+    // What it read was a directory `download` had minted on the way to a file.
+    if entry.id.entity_type == EntityType::Folder && from != dest {
+        for other in env.store.every_entry()? {
+            if other.id == entry.id
+                || other.id.entity_type != EntityType::Folder
+                || other.remote_deleted
+                || (other.synced_placement.is_none() && other.stand_in.is_none())
+            {
+                continue;
+            }
+            if let Placed::At(theirs) = local_path(env, &other)? {
+                if theirs == from {
+                    return Ok(OpOutcome::Overtaken(format!(
+                        "{} belongs to another folder; deciding again from what is there now",
+                        from.display(),
+                    )));
+                }
+            }
+        }
+    }
     if entry.id.entity_type == EntityType::Folder && from != dest && dest.starts_with(&from) {
         return Ok(OpOutcome::Retry(
             "it is being moved into its own subtree; waiting for what is inside to move out".into(),

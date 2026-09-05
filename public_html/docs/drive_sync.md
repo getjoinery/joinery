@@ -195,6 +195,19 @@ mangled name reads as a rename on the next scan and gets pushed to the server,
 renaming the user's file on every device they own. Refusing leaves the file
 exactly where it was, and says so.
 
+This is not only about folded spellings. A file and a folder of the same name
+are one slot on every disk, whatever it folds, and the same rule settles it:
+whichever is already here claims it and the other parks.
+
+A parked FOLDER takes what is inside it with it. Its children are held for
+exactly as long as it is: a parked folder has no directory of its own but still
+has a name, and a child left in the round would resolve onto whatever directory
+won the slot and land inside it -- one folder holding two folders' contents,
+with nothing on the disk saying so. The folder's own issue is the only thing
+the user is asked to act on, and the clash clearing releases the whole subtree
+at once. A parked folder that has a directory of its own is not held this way:
+what is inside it is genuinely there.
+
 Which sibling wins: anything already on this disk claims first, then the lowest
 server id. The consequence, stated honestly — two devices that downloaded a
 clashing pair in different orders keep different members of it. Both remain on

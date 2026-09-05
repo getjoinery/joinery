@@ -531,6 +531,42 @@ pub fn run_pass(
         set
     };
 
+    // Everything under a folder that is parked with no directory is parked with
+    // it. A parked folder still has a NAME, and a child's path is built by
+    // walking parent names -- so a child left in the round resolves onto
+    // whatever directory won the slot and materializes INSIDE it. On a volume
+    // that folds case that is how `readme` ends up holding the contents of
+    // `README` as well, with nothing on the disk saying so and a delete of the
+    // one taking the other's files with it.
+    //
+    // The parent's own issue is the whole story and the only thing the user can
+    // act on, so nothing extra is raised here: the children simply wait with it,
+    // exactly as the folder does, and the clash clearing lets them all through.
+    //
+    // Only when there is no directory, because that is the whole reason to hold
+    // a child: there is nowhere right for it to go. A parked folder that DOES
+    // have a directory -- one stranded under a scratch name, say -- holds the
+    // user's files for real, and holding its children would stall them for
+    // nothing. No construction found so far reaches that case: a stranded park
+    // is put back rather than parked, and a naming clash parks the entrant,
+    // which never had a directory. The condition states the reason rather than
+    // guarding an observed case, and nothing pins it.
+    let parked_without_a_directory: std::collections::HashSet<i64> = {
+        let mut set = std::collections::HashSet::new();
+        for e in all_entries(env)? {
+            if e.id.entity_type != EntityType::Folder {
+                continue;
+            }
+            let no_directory = e.synced_placement.is_none() && e.stand_in.is_none();
+            if (matches!(e.status, LocalStatus::Unsyncable(_)) && no_directory)
+                || e.local_placement().parent.is_some_and(|p| set.contains(&p))
+            {
+                set.insert(e.id.server_id);
+            }
+        }
+        set
+    };
+
     for entry in all_entries(env)? {
         if busy.contains(&entry.id) {
             continue;
@@ -575,6 +611,10 @@ pub fn run_pass(
         }
         if entry.status == LocalStatus::OutOfScope
             || entry.local_placement().parent.is_some_and(|p| shadowed.contains(&p))
+            || entry
+                .local_placement()
+                .parent
+                .is_some_and(|p| parked_without_a_directory.contains(&p))
         {
             continue;
         }
