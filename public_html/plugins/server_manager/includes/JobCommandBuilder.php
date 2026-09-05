@@ -5,6 +5,10 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.55 - build_publish_upgrade is a primitive of the management node's OWN agent: the
+ *                 plane pairs to itself and the Publish form dispatches to that node. The local
+ *                 step that ran the publisher out of the plane-local queue is gone
+ *                 (specs/agent_local_queue_retirement.md, G1).
  * @version 1.54 - build_retire_install_password: the bootstrap's closing session, once every agent the
  *                 install put on the machine is admitted — host-harden --agent-managed over the sealed
  *                 password, so the machine stops accepting it (specs/keyless_provisioning.md WP2)
@@ -236,6 +240,10 @@ class JobCommandBuilder {
 		// confirm buys a guaranteed refusal.
 		'managed_domain_prepare' => '1.14.0',
 		'managed_domain_notice'  => '1.14.0',
+		// The management node's own release build, on its own agent. New in
+		// 1.19.0; the plane's node reports its vocabulary, so this floor is
+		// only ever consulted for an agent too old to report one.
+		'publish_upgrade' => '1.19.0',
 		// Removing a container site from its host, dispatched to the HOST's
 		// own machine-posture agent. Its own floor rather than the restore
 		// family's: the restore verifier (1.13.0) must not vouch for a
@@ -1434,21 +1442,49 @@ class JobCommandBuilder {
 	 * If major/minor/patch are in $params, passes them as an explicit version arg;
 	 * otherwise the CLI auto-detects the next version.
 	 */
-	public static function build_publish_upgrade($params) {
-		$notes = escapeshellarg($params['release_notes']);
-		$version_arg = '';
-		if (isset($params['major'], $params['minor'], $params['patch'])) {
-			$version = intval($params['major']) . '.' . intval($params['minor']) . '.' . intval($params['patch']);
-			$version_arg = escapeshellarg($version) . ' ';
+	/**
+	 * Build and sign a release from this management node's own tree, as a job
+	 * of this management node's OWN agent.
+	 *
+	 * $node is the plane's record of itself (ManagedNode::self_node()). There
+	 * is no other transport: the publisher reads the fleet trust root at
+	 * config/agent_signing_key, which is 600 root:root on a publishing box, so
+	 * the only process that can run it is the root agent — and the only way to
+	 * ask that agent is the same signed, vocabulary-bound channel every other
+	 * node is asked through. A plane with no record of itself, or whose own
+	 * agent predates the primitive, cannot publish from the dashboard and is
+	 * told so here rather than handed a job that fails later.
+	 */
+	public static function build_publish_upgrade($node, $params) {
+		if (!self::has_primitive($node, 'publish_upgrade')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot publish: that needs this management node's own "
+				. 'agent at ' . self::PRIMITIVE_MIN_AGENT_VERSION['publish_upgrade'] . ' or later, paired to '
+				. 'this site. Its agent is ' . ((string)$node->get('mgn_agent_version') ?: 'not reporting') . '.');
 		}
-		// The publish runs on whichever site is building the release, which is not
-		// always the one this was written on: getjoinery publishes too, and its web
-		// root is its own. Ask for the running site's path rather than naming one.
-		$web_root = escapeshellarg(PathHelper::getRootDir());
-		return [
-			['type' => 'local', 'label' => 'Publish upgrade',
-			 'cmd' => "cd {$web_root} && php plugins/server_manager/includes/publish_upgrade.php {$version_arg}{$notes}"],
-		];
+		return self::build_publish_upgrade_primitive($node, $params);
+	}
+
+	/**
+	 * Primitive path: the version and the notes, exactly as the operator typed
+	 * them. The version is required on the wire — the publisher reads its first
+	 * argument as a number only when it looks like one, and a job should say
+	 * what it publishes rather than have the node guess. The publisher keeps
+	 * every rule about the number (may this box mint it, is it a duplicate, is
+	 * it lower than VERSION); this only bounds the shape.
+	 */
+	public static function build_publish_upgrade_primitive($node, $params = []) {
+		if (!isset($params['major'], $params['minor'], $params['patch'])) {
+			throw new Exception('A publish names its version: major, minor and patch are all required.');
+		}
+		$notes = trim((string)($params['release_notes'] ?? ''));
+		if ($notes === '') {
+			throw new Exception('A publish carries release notes.');
+		}
+		return ['primitive' => 'publish_upgrade', 'params' => [
+			'version' => intval($params['major']) . '.' . intval($params['minor']) . '.' . intval($params['patch']),
+			'notes'   => $notes,
+		]];
 	}
 
 	// ── Backup target helpers ──

@@ -2,6 +2,10 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.16 - transcript(): the output as a person reads it. A script primitive's result reaches
+ *                 mjb_output as an envelope with the transcript inside as one JSON string; the job
+ *                 page and the live poll show the transcript, not the envelope
+ * @version 1.15 - publish_upgrade has a claim budget: it is a primitive of the plane's own agent
  * @version 1.14 - BOOTSTRAP_JOB_TYPES: retire_install_password joins install_node as a job the plane
  *                 runs itself over the provision's sealed password, so both start 'queued'
  * @version 1.13 - rerun(): a new job carrying this job's work in whichever shape it has. A
@@ -175,6 +179,11 @@ class ManagementJob extends SystemBase {
 		// start a second upgrade on a node mid-deploy, which is the worst
 		// moment on the list to do it twice.
 		'apply_update'          => 4200,
+		// 20m + slack. The management node's own release build: the deploy
+		// gate, an agent cross-compile when its source moved, the archives,
+		// the signed manifests. Requeuing one mid-run would start a second
+		// publish of the same number over the first.
+		'publish_upgrade'       => 1500,
 		// The three restores, budgeted before they are dispatchable
 		// (specs/restore_over_agent_primitives.md). Deliberately generous:
 		// the safety property is one-directional — a plane budget longer than
@@ -402,6 +411,50 @@ class ManagementJob extends SystemBase {
 			$commands = json_decode($commands, true);
 		}
 		return is_array($commands) && isset($commands['primitive']);
+	}
+
+	/**
+	 * The job's output as a person reads it.
+	 *
+	 * For a primitive job, mjb_output is the envelope this plane built from
+	 * the node's result — {api_version, data} on the first line, then the
+	 * agent's log — and the processors read it in that shape. A script
+	 * primitive (an upgrade, a backup, a publish) returns its whole transcript
+	 * as data.output, so showing the envelope shows a page of text as one
+	 * JSON string with every newline as a backslash-n. This returns the
+	 * transcript itself, followed by any other result fields as readable JSON
+	 * and the agent log as it was, and returns a step job's output untouched.
+	 * Reading only; nothing here changes what is stored.
+	 */
+	function transcript() {
+		$raw = (string)$this->get('mjb_output');
+		if ($raw === '' || $raw[0] !== '{') {
+			return $raw;
+		}
+		$nl = strpos($raw, "\n");
+		$first = $nl === false ? $raw : substr($raw, 0, $nl);
+		$rest = $nl === false ? '' : substr($raw, $nl + 1);
+		$decoded = json_decode($first, true);
+		if (!is_array($decoded) || !isset($decoded['api_version']) || !array_key_exists('data', $decoded)) {
+			return $raw;
+		}
+		$data = is_array($decoded['data']) ? $decoded['data'] : [];
+		$text = '';
+		if (isset($data['output']) && is_string($data['output'])) {
+			$text = $data['output'];
+			if ($text !== '' && substr($text, -1) !== "\n") {
+				$text .= "\n";
+			}
+			if (!empty($data['output_truncated'])) {
+				$text .= '[Output truncated by the agent — ' . (int)($data['output_bytes'] ?? 0)
+					. " bytes were produced.]\n";
+			}
+			unset($data['output'], $data['output_bytes'], $data['output_truncated']);
+		}
+		if (!empty($data)) {
+			$text .= json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
+		}
+		return $text . $rest;
 	}
 
 	/**

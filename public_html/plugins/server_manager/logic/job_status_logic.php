@@ -5,6 +5,7 @@
  * Input: job_id, output_offset. Returns status, new output tail, step counts,
  * and (once the job settles) the processed result. Superadmin only (floor 10).
  *
+ * @version 1.3.0 - polls $job->transcript(), the same text the job page renders, so offsets agree
  * @version 1.2.0 - full-output redaction with offsets in redacted coordinates (no chunk-boundary leak)
  * @version 1.1.0
  */
@@ -34,7 +35,7 @@ function job_status_logic(array $input): LogicResult {
 	// deterministic, so redacted offsets are stable across polls; the one edge
 	// (a secret only half-written at the previous poll) can reflow a few
 	// display characters, never leak.
-	$full_output = SmSecretRedactor::redact($job->get('mjb_output') ?: '');
+	$full_output = SmSecretRedactor::redact($job->transcript() ?: '');
 	$new_output = '';
 	if ($output_offset < strlen($full_output)) {
 		$new_output = substr($full_output, $output_offset);

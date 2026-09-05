@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+#VERSION 3.3 - config/agent_signing_key is pinned 600 root:root. Publishing is a job of the
+#              management node's own agent, which runs as root, so root is the key's only
+#              reader; an operator login on the box can no longer copy the fleet trust root
+#              (specs/agent_local_queue_retirement.md, G1). The CLI publish is sudo.
 #VERSION 3.2 - config/provisioning_key is no longer pinned or pruned: the platform holds no SSH
 #              key, so nothing in config/ is one (specs/agent_management_first_principles.md
 #              item 5). An operator's troubleshooting key lives in that operator's ~/.ssh.
@@ -199,15 +203,16 @@ if [ -d "$LEDGER_DIR" ]; then
 fi
 
 # The agent release signing key — the fleet trust root. Anyone who can read it
-# can sign agent updates that every node installs and runs as root, so the sweep
-# must never leave it readable beyond its owner. Publishing runs as user1 at the
-# CLI or as root via an agent job, so ownership goes back to user1 (the sweep's
-# chown -R made it www-data); the web stack never reads it (the health panel
-# only calls is_file). Exists only on the publishing box.
+# can sign agent updates that every node installs and runs as root. Publishing
+# is a job of this management node's own agent, which runs as root, so root is
+# the only reader the key needs: 600 root:root, and an operator's login on this
+# box cannot copy it. The web stack never reads it (the health panel only calls
+# is_file), and the CLI publish is `sudo php .../publish_upgrade.php`. Exists
+# only on the publishing box.
 SIGNING_KEY="$SITE_ROOT/config/agent_signing_key"
 if [ -f "$SIGNING_KEY" ]; then
-    echo "  Pinning key $SIGNING_KEY to 600 user1:user1..."
-    chown user1:user1 "$SIGNING_KEY"
+    echo "  Pinning key $SIGNING_KEY to 600 root:root..."
+    chown root:root "$SIGNING_KEY"
     chmod 600 "$SIGNING_KEY"
 fi
 
