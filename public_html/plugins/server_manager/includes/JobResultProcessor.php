@@ -47,6 +47,9 @@
  *                 install records the ACTUAL published container port (CONTAINER_PORT readback)
  * @version 1.11 - the relay job handlers are gone (specs/relay_without_a_shell.md WP4): a relay
  *                 registers itself through its birth report, never through a job
+ * @version 1.11 - the hosted tier's two settings writers: process_hosted_mail_settings blanks the
+ *                 SMTP password once the node has answered, process_hosted_plan_notice puts the
+ *                 banner job in the sweep so it is not re-filed every tick
  * @version 1.10 - processable_types() drives the dashboard sweep (P-17: relay/ssl/backup results no longer skipped)
  */
 
@@ -1150,6 +1153,17 @@ class JobResultProcessor {
 			$host_ip = (string)$node->get('mgn_host');
 		}
 
+		// A site whose DNS this plane published needs no A-record instruction,
+		// and a site whose admin password this plane sealed needs a link to
+		// where it can be read — once. Both are true of a hosted provision and
+		// neither is true of a bring-your-own one, so the two emails differ.
+		$provision = null;
+		if (class_exists('CustomerCloudProvision')) {
+			$provision = CustomerCloudProvision::latest_for_node($node->key);
+		}
+		$hosted = $provision !== null && $provision->is_operator_hosted();
+		$sites_url = trim((string)$settings->get_setting('server_manager_hosted_manage_url'));
+
 		$client = new GetJoineryApiClient($api_url, $pub_key, $sec_key);
 		$client->post('QueuedEmail', [
 			'equ_from'      => $from_email,
@@ -1157,7 +1171,10 @@ class JobResultProcessor {
 			'equ_to'        => $admin_email,
 			'equ_to_name'   => $user_name,
 			'equ_subject'   => 'Your site is ready: ' . $domain,
-			'equ_body'      => self::build_welcome_email_body($domain, $host_ip, $user_name),
+			'equ_body'      => $hosted
+				? self::build_hosted_welcome_email_body($domain, $user_name, $sites_url,
+					$provision->admin_password_state() === 'sealed')
+				: self::build_welcome_email_body($domain, $host_ip, $user_name),
 			'equ_status'    => 2, // READY_TO_SEND
 		]);
 	}
@@ -1182,6 +1199,46 @@ class JobResultProcessor {
 <h3>Log in</h3>
 <p>After DNS resolves, your admin panel is at:<br>
 <a href="{$login_url}">{$login_url}</a></p>
+
+<p style="color:#666;font-size:.9em">Questions? Reply to this email or contact support@getjoinery.com.</p>
+<p>— The Get Joinery Team</p>
+</body></html>
+HTML;
+	}
+
+	/**
+	 * The hosted welcome: the site's address, and where the first password is.
+	 *
+	 * THE PASSWORD IS NOT IN THIS EMAIL. Email is a copy that lives in somebody
+	 * else's system indefinitely, and this one is going to an address that was
+	 * typed at a checkout. The password is shown once, behind a sign-in, on the
+	 * buyer's own sites page — which erases it as it shows it.
+	 */
+	private static function build_hosted_welcome_email_body($domain, $user_name, $sites_url, $has_password) {
+		$name      = htmlspecialchars($user_name);
+		$dom       = htmlspecialchars($domain);
+		$login_url = htmlspecialchars('https://' . $domain . '/admin');
+		$sites     = htmlspecialchars($sites_url);
+
+		$password_block = $has_password && $sites_url !== ''
+			? "<h3>Your password</h3>\n<p>For safety it is not in this email. Sign in to your account "
+				. "and open <a href=\"{$sites}\">your sites</a> — it is shown there once, and your site "
+				. "will ask you to choose your own as soon as you use it.</p>"
+			: "<h3>Your password</h3>\n<p>Use the <strong>Forgot password</strong> link at "
+				. "<a href=\"{$login_url}\">{$login_url}</a> with this email address to set one.</p>";
+
+		return <<<HTML
+<html><body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px;color:#333">
+<h2 style="color:#1a1a1a">Your site is ready!</h2>
+<p>Hi {$name},</p>
+<p>Your site is live at <strong><a href="https://{$dom}">https://{$dom}</a></strong>. The server, its
+email and its offsite backups are all set up and running — there is no DNS record to add and nothing
+to install.</p>
+
+<h3>Log in</h3>
+<p><a href="{$login_url}">{$login_url}</a> — your username is this email address.</p>
+
+{$password_block}
 
 <p style="color:#666;font-size:.9em">Questions? Reply to this email or contact support@getjoinery.com.</p>
 <p>— The Get Joinery Team</p>
@@ -1430,6 +1487,48 @@ HTML;
 		self::blank_secret_params($job, ['secret_key']);
 		$job->set('mjb_result', json_encode([
 			'seeded' => ($job->get('mjb_status') === 'completed' && strpos($text, 'FLEET_ENROLL=ok') !== false),
+		]));
+		$job->save();
+	}
+
+	/**
+	 * hosted_mail_settings: the site was given its mail credentials, or not.
+	 *
+	 * The SMTP password rode the job row to the node. Once the node has
+	 * answered — either way — it is blanked here, so the plaintext does not
+	 * outlive the job that delivered it. The plane keeps no copy: the next
+	 * attempt mints a fresh credential rather than re-sending this one, which
+	 * is a better property than a password sitting in a job table.
+	 */
+	private static function process_hosted_mail_settings($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		$text = is_array($data) && isset($data['output'])
+			? (string)$data['output'] : (string)($job->get('mjb_output') ?: '');
+		self::blank_secret_params($job, ['password']);
+		$job->set('mjb_result', json_encode([
+			'configured' => ($job->get('mjb_status') === 'completed'
+				&& strpos($text, 'HOSTED_MAIL_SETTINGS=ok') !== false),
+		]));
+		$job->save();
+	}
+
+	/**
+	 * hosted_plan_notice: intentionally thin, like managed_domain_notice.
+	 *
+	 * There is nothing to fold — the script writes five settings and says so.
+	 * The handler exists so processable_types() lists the type deliberately
+	 * rather than by omission: without one the dashboard sweep skips it, a
+	 * terminal job keeps mjb_result NULL for ever, and HostedTrialWatch — which
+	 * decides whether to re-push by looking for the last COMPLETED notice job —
+	 * would re-file the same banner on every tick.
+	 */
+	private static function process_hosted_plan_notice($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		$text = is_array($data) && isset($data['output'])
+			? (string)$data['output'] : (string)($job->get('mjb_output') ?: '');
+		$job->set('mjb_result', json_encode([
+			'shown' => ($job->get('mjb_status') === 'completed'
+				&& strpos($text, 'HOSTED_PLAN_NOTICE=ok') !== false),
 		]));
 		$job->save();
 	}

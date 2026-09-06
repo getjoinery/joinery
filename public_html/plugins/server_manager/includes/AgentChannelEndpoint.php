@@ -753,7 +753,7 @@ class AgentChannelEndpoint {
 		// credential and read as a node-side fault.
 		$params = $commands['params'] ?? null;
 		try {
-			$params = self::resolve_credential_slots($params);
+			$params = self::resolve_credential_slots($params, $job);
 		} catch (\Throwable $e) {
 			$job->set('mjb_status', 'failed');
 			$job->set('mjb_error_message',
@@ -805,17 +805,21 @@ class AgentChannelEndpoint {
 	 * so an emptied slot fails visibly rather than running with a more
 	 * powerful credential than intended.
 	 */
-	private static function resolve_credential_slots($params) {
+	private static function resolve_credential_slots($params, $job = null) {
 		if (!is_array($params)) {
 			return $params;
 		}
 		foreach ($params as $key => $value) {
-			if (!is_string($value) || !preg_match('/^__SM_(NODE_)?CREDS_(\d+)__$/', $value, $m)) {
+			if (!is_string($value) || !preg_match('/^__SM_(RUN_|NODE_)?CREDS_(\d+)__$/', $value, $m)) {
 				continue;
 			}
 			$target = new BackupTarget((int)$m[2], TRUE);
 			if (!$target->key) {
 				throw new Exception('backup target ' . (int)$m[2] . ' does not exist');
+			}
+			if ($m[1] === 'RUN_') {
+				$params[$key] = base64_encode(json_encode(self::mint_run_credentials($target, $params, $job)));
+				continue;
 			}
 			$creds = ($m[1] === 'NODE_') ? $target->get_node_credentials() : $target->get_credentials();
 			if (empty($creds)) {
@@ -825,6 +829,79 @@ class AgentChannelEndpoint {
 			$params[$key] = base64_encode(json_encode($creds));
 		}
 		return $params;
+	}
+
+	/**
+	 * Mint the key this ONE run gets: pinned to the node's own prefix,
+	 * write-only, expiring with the job.
+	 *
+	 * PICKUP IS THE RIGHT MOMENT. A key's lifetime starts when it is created,
+	 * and the moment that matters is when the agent actually holds it — a key
+	 * minted at build time and then queued for an hour would arrive expired and
+	 * read as a bucket error rather than as a stale credential.
+	 *
+	 * THE PREFIX COMES FROM THE JOB'S OWN CONFIG, not from a fresh lookup. The
+	 * job already names the path prefix and the slug it will write under, so a
+	 * key derived from anything else could be pinned to a directory the run
+	 * does not use — a key that looks scoped and grants nothing.
+	 *
+	 * NO FALLBACK. A target that declares it can mint and then cannot is a
+	 * configuration fault, and the fix is a master key that may create keys.
+	 * Quietly handing out the fleet-wide credential instead would defeat the
+	 * only thing this is for, on the one machine — somebody else's — where it
+	 * matters most.
+	 */
+	private static function mint_run_credentials($target, array $params, $job): array {
+		require_once(PathHelper::getIncludePath('includes/B2Client.php'));
+
+		$prefix = trim((string)($params['path_prefix'] ?? ''), '/');
+		$slug   = trim((string)($params['slug'] ?? ''));
+		if ($slug === '' || !preg_match('/^[A-Za-z0-9_-]+$/', $slug)) {
+			throw new Exception('a per-run key needs the slug the run writes under, and this job names none');
+		}
+		$bucket = trim((string)$target->get('bkt_bucket'));
+		if ($bucket === '') {
+			throw new Exception('backup target "' . $target->get('bkt_name') . '" names no bucket');
+		}
+		$name_prefix = ($prefix === '' ? '' : $prefix . '/') . $slug . '/';
+
+		$creds = $target->get_credentials();
+		if (empty($creds['access_key']) || empty($creds['secret_key'])) {
+			throw new Exception('backup target "' . $target->get('bkt_name')
+				. '" has no master credential to mint a per-run key with');
+		}
+
+		$client = new B2Client((string)$creds['access_key'], (string)$creds['secret_key']);
+		$minted = $client->createKey(
+			$client->bucketId($bucket),
+			$name_prefix,
+			// Write-only, exactly as the shared node credential was: a node can
+			// add its archives and can never remove any, so a compromised node
+			// cannot erase the fleet's backups.
+			array('writeFiles'),
+			self::run_key_lifetime($job),
+			'joinery-run-' . $slug . '-' . (int)($job ? $job->key : 0));
+
+		return $client->s3CredentialFor($minted);
+	}
+
+	/**
+	 * How long a minted key lives: the job's own budget plus a margin.
+	 *
+	 * Derived from the claim budget rather than fixed, because the thing the
+	 * key has to outlast is the upload — and a key that expires mid-upload
+	 * reads at the node as a bucket error, which is the least diagnosable
+	 * failure this design could produce.
+	 */
+	private static function run_key_lifetime($job): int {
+		$budget = 0;
+		if ($job) {
+			$budget = (int)ManagementJob::claimBudgetSeconds($job);
+		}
+		if ($budget <= 0) {
+			$budget = 3 * 3600;
+		}
+		return min(86400 * 7, $budget + 3600);
 	}
 
 	private static function params_as_object($params) {

@@ -204,23 +204,7 @@ check(($doubled['memory_total_mb'] ?? null) === 1000,
 	var_export($doubled['memory_total_mb'] ?? null, true));
 
 // ---------------------------------------------------------------------------
-section('Markers and SSL tokens');
-
-check(jrp_call('extract_marker', array("TENANT_SLUG=main\n", 'TENANT_SLUG')) === 'main',
-	'a marker value is extracted');
-check(jrp_call('extract_marker', array("noise\nTENANT_SLUG=main\nmore noise\n", 'TENANT_SLUG')) === 'main',
-	'a marker is found among other output');
-check(jrp_call('extract_marker', array("TENANT_SLUG=first\nTENANT_SLUG=second\n", 'TENANT_SLUG')) === 'second',
-	'the last occurrence of a marker wins, so a retried step supersedes the first');
-check(jrp_call('extract_marker', array("OTHER=x\n", 'TENANT_SLUG')) === '',
-	'an absent marker yields an empty string rather than null');
-check(jrp_call('extract_marker', array('', 'TENANT_SLUG')) === '',
-	'no output yields no marker');
-
-// A marker name must match at the start of a line: a value mentioning the key
-// must not be mistaken for the key itself.
-check(jrp_call('extract_marker', array("SOME_TENANT_SLUG=wrong\n", 'TENANT_SLUG')) === '',
-	'a marker name embedded in a longer name does not match');
+section('SSL tokens');
 
 $ssl = jrp_call('parse_ssl_tokens', array("SSL_CERT_FOUND domain=example.test expiry=Aug 30 12:00:00 2026 GMT\n"));
 check(is_array($ssl) && $ssl['found'] === true, 'a found certificate is recognised');

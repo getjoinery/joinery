@@ -118,11 +118,15 @@ class PollHostingOrders {
 			// orders become a provision row (worked by ProvisionCustomerCloud);
 			// anything else falls through to shared-host fulfillment below.
 			$fulfillment = '';
+			// Which account the server is born on is the PRODUCT's decision,
+			// carried in the same reference the fulfillment picker stored.
+			$hosting_mode = 'customer';
 			$product_id  = (int)($order_item['odi_pro_product_id'] ?? 0);
 			if ($product_id) {
 				$product = $client->get('Product/' . $product_id);
 				if (is_array($product)) {
 					$fulfillment = (string)($product['pro_fulfillment_provider'] ?? '');
+					$hosting_mode = ((int)($product['pro_fulfillment_ref'] ?? 0) === 1) ? 'operator' : 'customer';
 				}
 			}
 
@@ -137,12 +141,18 @@ class PollHostingOrders {
 				$provision->set('cvp_usr_user_id', $user_id);
 				$provision->set('cvp_domain',      $domain);
 				$provision->set('cvp_slug',        $slug);
+				$provision->set('cvp_hosting_mode', $hosting_mode);
 				$provision->set('cvp_buyer_email', $admin_email);
 				$provision->set('cvp_buyer_name',  $user_name);
 
-				// If the buyer already granted access, skip the Connect wait.
-				$account = CustomerCloudAccount::get_for_user($user_id, 'linode');
-				if ($account !== null && $account->get('cca_status') === 'active') {
+				if ($hosting_mode === 'operator') {
+					// Hosted: nothing to connect and nobody to ask. The instance
+					// is created on the operator's own account on the next tick.
+					$provision->set('cvp_status', 'ready');
+					$provision->set('cvp_mail_state', 'pending');
+				} elseif (($account = CustomerCloudAccount::get_for_user($user_id, 'linode')) !== null
+						&& $account->get('cca_status') === 'active') {
+					// The buyer already granted access — skip the Connect wait.
 					$provision->set('cvp_cca_account_id', $account->key);
 					$provision->set('cvp_status', 'ready');
 				} else {

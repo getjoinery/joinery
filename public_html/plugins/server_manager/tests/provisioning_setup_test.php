@@ -229,7 +229,16 @@ section('CustomerCloudFulfillment provider');
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/fulfillment_providers/CustomerCloudFulfillment.php'));
 $provider = new CustomerCloudFulfillment();
 check($provider->key() === 'customer_cloud', 'provider key matches the poll-task fork value');
-check(count($provider->options()) === 1, 'single picker option (no per-ref entity)');
+// Two references, and what they mean. Whose cloud account the server is born
+// on is the PRODUCT's decision — a buyer never chooses between them, because
+// they are two products with two prices and two arrangements.
+$picker = $provider->options();
+check(count($picker) === 2, 'two picker options, one per hosting mode', implode(' | ', $picker));
+check(CustomerCloudFulfillment::mode_for_ref(0) === 'customer'
+	&& CustomerCloudFulfillment::mode_for_ref(1) === 'operator',
+	'reference 0 is the buyer\'s own account, 1 is the operator\'s');
+check(CustomerCloudFulfillment::mode_for_ref(99) === 'customer',
+	'an unrecognised reference falls back to the buyer\'s own account, never to ours');
 
 // Unconfigured case FIRST: Globalvars caches non-blank settings on first
 // read, so the blank-setting check must run before the configured one.

@@ -19,9 +19,25 @@
  * provision rows and is the sole creation path when the store is a remote
  * site (where this provider is not registered).
  *
+ * WHOSE ACCOUNT THE SERVER IS BORN ON IS THE PRODUCT'S DECISION, NOT THE
+ * BUYER'S. The picker offers two references and the product stores the one it
+ * was set to:
+ *
+ *   0  the buyer's own cloud account. They connect it, the provider bills
+ *      them, and none of the operator's keys are involved. This is the
+ *      bring-your-own product, unchanged.
+ *   1  the operator's account. The plane's own token creates the instance,
+ *      there is no Connect page and no grant to wait for, and the hosted legs
+ *      — mail on our provider, the trial clock, the allowance banners — apply
+ *      (specs/hosted_trial_provisioning.md §4.1).
+ *
+ * A buyer never chooses between them, because they are two products with two
+ * prices and two arrangements, not one product with a switch.
+ *
  * Registered from server_manager's serve.php when the store plugin is
  * present.
  *
+ * @version 1.3 - a second option: the server is created on the OPERATOR's account (hosted)
  * @version 1.2
  */
 require_once(PathHelper::getIncludePath('plugins/store/includes/FulfillmentRegistry.php'));
@@ -36,8 +52,20 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 		return 'Customer cloud server';
 	}
 
+	/** The reference a product stores for the operator-hosted mode. */
+	const REF_CUSTOMER = 0;
+	const REF_OPERATOR = 1;
+
 	public function options(): array {
-		return array(0 => 'Create the server in the buyer\'s own cloud account');
+		return array(
+			self::REF_CUSTOMER => 'Create the server in the buyer\'s own cloud account',
+			self::REF_OPERATOR => 'Create the server on the operator\'s account (hosted)',
+		);
+	}
+
+	/** Which hosting mode a stored reference means. */
+	public static function mode_for_ref(int $ref): string {
+		return ($ref === self::REF_OPERATOR) ? 'operator' : 'customer';
 	}
 
 	public function extraRequirements(Product $product, int $ref): array {
@@ -64,7 +92,7 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 		// A failure here must never break the purchase — the poll task
 		// re-derives everything from the order and creates the row itself.
 		try {
-			$provision = $this->create_provision($user, $order_item);
+			$provision = $this->create_provision($user, $order_item, self::mode_for_ref($ref));
 		} catch (\Throwable $e) {
 			error_log('CustomerCloudFulfillment: provision creation failed for order item #'
 				. $order_item->key . ' (' . $e->getMessage() . ') — Poll Hosting Orders will pick it up.');
@@ -82,7 +110,7 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 	 * from the order's stored checkout answers. Returns null (defer to the
 	 * poll task) when the domain is unreadable or a row already exists.
 	 */
-	private function create_provision(User $user, OrderItem $order_item): ?CustomerCloudProvision {
+	private function create_provision(User $user, OrderItem $order_item, string $hosting_mode = 'customer'): ?CustomerCloudProvision {
 		if (!$order_item->key || !$user->key) {
 			return null;
 		}
@@ -128,17 +156,29 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 		$provision->set('cvp_usr_user_id', (int)$user->key);
 		$provision->set('cvp_domain', $domain);
 		$provision->set('cvp_slug', $slug);
+		$provision->set('cvp_hosting_mode', $hosting_mode);
 		$provision->set('cvp_buyer_email', (string)$user->get('usr_email'));
 		$provision->set('cvp_buyer_name',
 			trim((string)$user->get('usr_first_name') . ' ' . (string)$user->get('usr_last_name')));
 
-		// A buyer who already granted access skips the Connect wait entirely.
-		$account = CustomerCloudAccount::get_for_user((int)$user->key, 'linode');
-		if ($account !== null && $account->get('cca_status') === 'active') {
-			$provision->set('cvp_cca_account_id', $account->key);
+		if ($hosting_mode === 'operator') {
+			// Nothing to connect and nobody to ask: the instance is created on
+			// the operator's own account with the operator's own token. The
+			// buyer paid and the pipeline starts on the next tick.
 			$provision->set('cvp_status', 'ready');
+			// The hosted legs are owed from birth. Marking them pending here,
+			// rather than when the site comes up, is what makes an operator
+			// able to see a hosted provision whose mail never got set up.
+			$provision->set('cvp_mail_state', 'pending');
 		} else {
-			$provision->set('cvp_status', 'pending_connect');
+			// A buyer who already granted access skips the Connect wait entirely.
+			$account = CustomerCloudAccount::get_for_user((int)$user->key, 'linode');
+			if ($account !== null && $account->get('cca_status') === 'active') {
+				$provision->set('cvp_cca_account_id', $account->key);
+				$provision->set('cvp_status', 'ready');
+			} else {
+				$provision->set('cvp_status', 'pending_connect');
+			}
 		}
 		$provision->save();
 		$provision->load();

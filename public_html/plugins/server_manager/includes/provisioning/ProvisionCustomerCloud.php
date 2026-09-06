@@ -61,6 +61,9 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 2.1 - operator hosting mode (specs/hosted_trial_provisioning.md §4.1): a hosted provision
+ *                resolves its driver from the plane's own cloud token instead of a buyer grant, and
+ *                the bootstrap carries the buyer's admin email and a sealed first password
  * @version 2.0 - retiring the install password (specs/keyless_provisioning.md WP2/WP3/WP5): held from
  *                sealing, a retire_install_password job once every agent on the machine is admitted,
  *                erased only after the executor saw the machine refuse it; join_approval_check asks
@@ -468,13 +471,40 @@ class ProvisionCustomerCloud {
 			ManagedHost::ensure_for_node($node);
 		}
 
+		// The site's admin account is the buyer's, and it is born with a
+		// password THIS plane generated — sealed here, handed to the install
+		// over the bootstrap session's stdin, and shown to the buyer once on
+		// their own sites page. Sealed BEFORE the job exists, for the same
+		// reason the root password is: a crash between the two must never
+		// leave an install running with a credential nobody recorded.
+		// Already-revealed means the buyer has it and the site forces a change
+		// at first login; a retry then installs without one.
+		// A CLONE is excluded, and that is not a detail: _site_init.sh skips the
+		// admin reset entirely for a clone ("they carry the source site's real
+		// accounts, not the seeded default"), so a password minted here would
+		// never be applied — and the buyer's sites page would offer to reveal a
+		// password that opens nothing.
+		$admin_email = trim((string)$provision->get('cvp_buyer_email'));
+		$wants_admin_password = ($admin_email !== '' && !$is_bare
+			&& $install_mode !== 'from_backup'
+			&& $provision->admin_password_state() !== 'revealed');
+		if ($wants_admin_password && $provision->admin_password_state() === 'none') {
+			$admin_pass = self::mint_admin_password();
+			$provision->set('cvp_admin_pass_sealed', (new SecretBox())->seal(
+				'cvp_customer_cloud_provisions.cvp_admin_pass_sealed', $admin_pass));
+			$provision->save();
+		}
+
 		$job_params = [
 			'mode'        => $install_mode,
 			'sitename'    => $sitename,
 			'domain'      => $domain,
 			'docker_mode' => $docker_mode,
-			'admin_email' => $provision->get('cvp_buyer_email'),
+			'admin_email' => $admin_email,
 			'user_name'   => $provision->get('cvp_buyer_name'),
+			// A flag, never the password: the executor looks it up. See
+			// JobCommandBuilder::build_install_node.
+			'admin_password_stdin' => $wants_admin_password,
 		];
 		if ($clone !== null) {
 			$job_params['source_node_id'] = (int)$provision->get('cvp_source_node_id');
@@ -774,6 +804,21 @@ class ProvisionCustomerCloud {
 	 * directly, because a refused approval must not move a provision.
 	 */
 	protected function resolve_driver($provision): array {
+		// Hosted: the instance is created on the OPERATOR's account, with a
+		// token this plane holds. There is no buyer grant, nothing to refresh
+		// and nothing to park for — a missing token is an operator's
+		// configuration gap, not something the buyer can act on, so it is
+		// reported rather than mailed to them.
+		if ($provision->is_operator_hosted()) {
+			$token = self::operator_compute_token();
+			if ($token === '') {
+				return ['driver' => null, 'park' => false, 'reason' =>
+					'This is a hosted provision, and no operator cloud token is configured. Set '
+					. '"Operator cloud token" on the Provisioning Setup page; the pipeline resumes on its own.'];
+			}
+			return ['driver' => new LinodeComputeDriver($token), 'reason' => '', 'park' => false];
+		}
+
 		$account_id = (int)$provision->get('cvp_cca_account_id');
 		$account = $account_id ? new CustomerCloudAccount($account_id, TRUE) : null;
 		if (!$account || !$account->key || $account->get('cca_status') !== 'active') {
@@ -805,6 +850,27 @@ class ProvisionCustomerCloud {
 		}
 
 		return ['driver' => new LinodeComputeDriver($fresh->getAccessToken()), 'reason' => '', 'park' => false];
+	}
+
+	/**
+	 * The operator's own cloud token, unsealed, or '' when none is configured.
+	 *
+	 * It stays on the plane and never reaches a machine this plane creates —
+	 * that is rule 3 of the hosted design, and it is why the hosted path builds
+	 * its driver here rather than seeding anything on the box.
+	 */
+	public static function operator_compute_token(): string {
+		$sealed = trim((string)Globalvars::get_instance()->get_setting(
+			'server_manager_operator_cloud_token', false, true));
+		if ($sealed === '') {
+			return '';
+		}
+		$opened = (new SecretBox())->open($sealed);
+		if ($opened['state'] !== 'ok') {
+			error_log('ProvisionCustomerCloud: the operator cloud token cannot be unsealed.');
+			return '';
+		}
+		return trim((string)$opened['value']);
 	}
 
 	// ── Retiring the install password (specs/keyless_provisioning.md WP2/WP3) ──
@@ -867,6 +933,23 @@ class ProvisionCustomerCloud {
 			return 1;
 		}
 		return 0; // queued or running
+	}
+
+	/**
+	 * The site admin account's first password.
+	 *
+	 * Long and mixed, because it is typed by nobody: the buyer reads it once,
+	 * signs in with it, and the site immediately makes them choose their own
+	 * (reset_admin_password.php sets usr_force_password_change). Shaped to pass
+	 * an ordinary complexity rule so the install never has to argue with one.
+	 */
+	public static function mint_admin_password(): string {
+		$alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+		$out = '';
+		for ($i = 0; $i < 20; $i++) {
+			$out .= $alphabet[random_int(0, strlen($alphabet) - 1)];
+		}
+		return 'Jy' . $out . '!7';
 	}
 
 	/**
@@ -1042,6 +1125,20 @@ class ProvisionCustomerCloud {
 	private function handle_compute_failure($provision, CloudComputeException $e, $phase) {
 		$code = (int)$e->getCode();
 		if ($code === 401) {
+			// A hosted provision has no grant to revoke and no buyer who could
+			// re-grant one: the token is the operator's. Parking it at
+			// pending_connect would strand it forever behind a page nobody will
+			// visit. It stays where it is, says why, and resumes on its own once
+			// the token is fixed — which is the only action that helps.
+			if ($provision->is_operator_hosted()) {
+				$reason = 'The operator cloud token was rejected by the provider (401) during ' . $phase
+					. '. Replace it on the Provisioning Setup page; this provision resumes on its own.';
+				$provision->set('cvp_error', mb_substr($reason, 0, 4000));
+				$provision->save();
+				$this->errors[] = "Provision #{$provision->key}: {$reason}";
+				$this->notify_ops('[hosted] Operator cloud token rejected: ' . $provision->get('cvp_domain'), $reason . "\n");
+				return 0;
+			}
 			$account_id = (int)$provision->get('cvp_cca_account_id');
 			if ($account_id) {
 				$account = new CustomerCloudAccount($account_id, TRUE);

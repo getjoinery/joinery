@@ -11,7 +11,7 @@
  * the Mailbox Reader's thread-key index is created here (same pattern as the
  * server_manager plugin's index migration).
  *
- * @version 1.27.0
+ * @version 1.28.0
  */
 return [
 	[
@@ -898,4 +898,20 @@ return [
 		},
 	],
 
+	[
+		// The relay's ssh era ended (specs/relay_without_a_shell.md): the plane
+		// speaks only the pinned relay API, sent mail leaves through the
+		// provider rather than a smarthost, and the WireGuard key the plane used
+		// to hold for the relay is gone with it. Neither setting is declared
+		// any more; drop the rows a deployment seeded before that.
+		'id' => 'stg_003_drop_relay_ssh_era_settings',
+		'version' => '1.113.2',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$stmt = $dblink->prepare("DELETE FROM stg_settings WHERE stg_name = ?");
+			foreach (array('mailbox_relay_outbound_mode', 'mailbox_relay_wg_public_key') as $name) {
+				$stmt->execute(array($name));
+			}
+		},
+	],
 ];

@@ -2695,6 +2695,36 @@
       "default": "",
       "managed": true,
       "helptext": "A known constant sealed at key-mint time. On a mass decrypt failure it separates a single corrupt secret (canary still opens) from a wrong key (canary itself fails). Machine-written by SecretBox::provisionCanary; never rendered."
+    },
+    {
+      "name": "hosted_plan_state",
+      "default": "",
+      "managed": true,
+      "helptext": "Where this deployment's hosting stands with the operator that runs it: trial, subscribed, grace or shutdown. Empty on every deployment nobody hosts, which is what keeps HostedPlanNotice silent. Written by the management node through the hosted_plan_notice primitive, whose node-side script owns these five names."
+    },
+    {
+      "name": "hosted_plan_until_time",
+      "default": "",
+      "managed": true,
+      "helptext": "The date the current hosting state runs to — when the free trial converts, or when a grace period ends. Written by the management node."
+    },
+    {
+      "name": "hosted_plan_notice",
+      "default": "",
+      "managed": true,
+      "helptext": "One sentence the operator wants the site's admins to read about its hosting, or empty. Written by the management node."
+    },
+    {
+      "name": "hosted_plan_allowances",
+      "default": "",
+      "managed": true,
+      "helptext": "This deployment's hosting allowances and how much of each is used, as a JSON list. Rendered by HostedPlanNotice; empty renders no usage. Written by the management node."
+    },
+    {
+      "name": "hosted_plan_manage_url",
+      "default": "",
+      "managed": true,
+      "helptext": "Where the site's owner manages their hosting with the operator. Written by the management node."
     }
   ],
   "_sealed_secrets_comment": "Every kind of value SecretBox seals is declared here (and in each plugin.json). This is what makes SecretBox::seal() refuse an unregistered value and what the reconciler and import scrub walk. Distinct from a setting's secret:true, which only masks a form field. locator is code-free: a setting name for a singleton, table.column for a row-scoped kind. See includes/SealedSecretsDeclarations.php.",

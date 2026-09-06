@@ -22,6 +22,8 @@
  * incrementals whose full is gone, which is not a smaller backup — it is no
  * backup, and it looks like a restore point right up until someone needs it.
  *
+ * @version 1.1 - the pass also sizes the shelf, from the listing it already takes: the hosted
+ *                tier's storage allowance needs no meter of its own
  * @version 1.0
  */
 
@@ -48,13 +50,21 @@ class FleetBackupRetention {
 	 * on the shelf is the one failure the node's own reporting can never admit
 	 * to.
 	 *
+	 * It also SIZES the shelf, from the same listing. That figure is what the
+	 * hosted tier's storage allowance is measured against, and taking it here
+	 * is why the allowance needs no meter of its own: the pass already walks the
+	 * whole prefix and the provider already returns each object's size, so the
+	 * number is free, is taken with the one credential that can see the whole
+	 * shelf, and is measured AFTER the prune — which is what the customer is
+	 * actually keeping.
+	 *
 	 * @return array{kept:int, pruned:int, deleted_objects:int, error:string,
-	 *               listed:bool, newest_object_time:string}
+	 *               listed:bool, newest_object_time:string, bytes:int}
 	 */
 	public static function prune($node, $target, $keep) {
 		$keep = max(1, (int)$keep);
 		$result = array('kept' => 0, 'pruned' => 0, 'deleted_objects' => 0, 'error' => '',
-			'listed' => false, 'newest_object_time' => '');
+			'listed' => false, 'newest_object_time' => '', 'bytes' => 0);
 
 		try {
 			$creds  = $target->get_credentials();
@@ -80,6 +90,7 @@ class FleetBackupRetention {
 			$result['kept'] = min(count($groups), $keep);
 
 			$surplus = array_slice(array_values($groups), $keep);
+			$pruned_keys = array();
 			foreach ($surplus as $group) {
 				foreach ($group['keys'] as $key) {
 					$resp = S3Signer::delete($creds, $bucket, '/' . ltrim($key, '/'));
@@ -89,9 +100,15 @@ class FleetBackupRetention {
 						throw new Exception('HTTP ' . $status . ' deleting ' . $key);
 					}
 					$result['deleted_objects']++;
+					$pruned_keys[$key] = true;
 				}
 				$result['pruned']++;
 			}
+			// Sized from what is LEFT, so the figure is what this node is
+			// keeping rather than what it briefly held. Objects the provider
+			// reported no size for count as nothing: an under-count trips an
+			// allowance late, and an invented number trips it wrongly.
+			$result['bytes'] = self::total_bytes($objects, $pruned_keys);
 		} catch (Throwable $e) {
 			// A shelf that could not be pruned is not a reason to skip the backup
 			// that was about to run. Too many restore points is a bill; no backup
@@ -169,6 +186,21 @@ class FleetBackupRetention {
 	 */
 	private static function stamp_of($name) {
 		return preg_match('/\d{8}_\d{6}/', (string)$name, $m) ? $m[0] : '00000000_000000';
+	}
+
+	/**
+	 * The bytes a listing accounts for, ignoring the keys just deleted.
+	 */
+	public static function total_bytes(array $objects, array $skip_keys = array()) {
+		$total = 0;
+		foreach ($objects as $obj) {
+			if (!is_array($obj)) { continue; }
+			$key = (string)($obj['key'] ?? $obj['Key'] ?? '');
+			if ($key !== '' && isset($skip_keys[$key])) { continue; }
+			$size = $obj['size'] ?? $obj['Size'] ?? null;
+			if (is_numeric($size)) { $total += (int)$size; }
+		}
+		return $total;
 	}
 
 	/**

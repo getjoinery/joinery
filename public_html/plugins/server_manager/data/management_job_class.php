@@ -232,6 +232,19 @@ class ManagementJob extends SystemBase {
 		return min(array_merge([self::CLAIM_TIMEOUT_SECONDS], self::PRIMITIVE_CLAIM_BUDGETS));
 	}
 
+	/**
+	 * The claim budget for one job, in seconds.
+	 *
+	 * Public because a credential minted for a run has to outlast the run, and
+	 * this is the number that says how long that is. Deriving it any other way
+	 * would be a second copy of these budgets that drifts from the one the
+	 * scheduler enforces — and a key that expires mid-upload reads at the node
+	 * as a bucket error, the least diagnosable failure available.
+	 */
+	public static function claimBudgetSeconds($job): int {
+		return (int)self::claim_budget_for($job->get('mjb_commands'));
+	}
+
 	/** The claim budget for a job, read from the primitive it names. */
 	private static function claim_budget_for($commands) {
 		if (is_string($commands)) {

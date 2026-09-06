@@ -32,6 +32,8 @@
  *                 agent chain (a container's certificate is issued on its host); enable_agent is gone
  * @version 1.20 - comment truth: apply_update_all_on_host queues primitives only; an unpaired
  *                 sibling throws and is logged, since the SSH fallback no longer exists
+ * @version 1.20 - retry_install re-derives whether the bootstrap carries the site admin password from
+ *                 the provision row, so a retry after the buyer revealed it still installs
  * @version 1.19 - the backup_database and backup_project actions are gone with their builders;
  *                 backup_run is the one backup a node detail page dispatches
  * @version 1.18 - the three restore actions dispatch through createFromBuild. Their builders now
@@ -392,7 +394,16 @@ class NodeDetailActions {
 						'This clone\'s export key was released when its provision finished; provision a new clone instead.');
 					return $base_url;
 				}
-				$steps = JobCommandBuilder::build_install_node($node, $params ?: []);
+				// The admin password rides the bootstrap's stdin and exists only
+				// while the provision still seals one. Re-derived rather than
+				// carried forward from the stored parameters: a retry after the
+				// buyer revealed it (the reveal erases it in the same request)
+				// would otherwise ask for a password nothing can supply and fail
+				// the whole install. Without one the site mints its own, and the
+				// buyer's forgot-password is the way in.
+				$params = $params ?: [];
+				$params['admin_password_stdin'] = CustomerCloudProvision::holds_admin_password((int)$node->key);
+				$steps = JobCommandBuilder::build_install_node($node, $params);
 				$node->set('mgn_install_state', 'installing');
 				$node->save();
 				$job = ManagementJob::createJob($node->key, 'install_node', $steps, $params, $uid);

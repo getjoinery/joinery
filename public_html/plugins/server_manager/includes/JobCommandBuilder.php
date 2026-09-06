@@ -19,6 +19,13 @@
  * @version 1.52 - review fixes: the release lands under /opt/joinery-install (not /tmp, which Ubuntu empties
  *                 at boot); the bare-metal prerequisite block has no password harvest and cannot mask
  *                 a failed password generation under set -e
+ * @version 1.53 - the hosted tier's two compiled-names settings writers: build_hosted_mail_settings
+ *                 (the nine mail names) and build_hosted_plan_notice (the five banner names). No
+ *                 general settings writer exists — one was built for this feature and removed,
+ *                 because a primitive that can NAME a setting can redirect any managed site's mail
+ * @version 1.52 - build_install_node names the buyer's address (--admin-email) and declares that the
+ *                 bootstrap session's stdin carries the site admin account's first password, so a
+ *                 provisioned site is one its buyer can log into (specs/hosted_trial_provisioning.md B1)
  * @version 1.51 - SSH is one bootstrap, run once (specs/ssh_single_bootstrap.md): build_install_node is
  *                 one remote command (fetch, docker + host agent, site with the universal vhost; a clone
  *                 pulls over HTTPS with --clone-from); build_provision_ssl, proto_patch_cmd,
@@ -256,6 +263,10 @@ class JobCommandBuilder {
 		// seeding fleet credentials. New in 1.17.0.
 		'clone_export_arm' => '1.17.0',
 		'fleet_enroll'     => '1.17.0',
+		// The hosted tier's two, new in 1.20.0 and the same compiled-names
+		// shape as the three above.
+		'hosted_mail_settings' => '1.20.0',
+		'hosted_plan_notice'   => '1.20.0',
 	];
 
 	/**
@@ -1988,19 +1999,36 @@ class JobCommandBuilder {
 	/**
 	 * The credential placeholder a NODE-bound step carries for this target.
 	 *
-	 * A target can hold a second, write-only credential (bkt_node_credentials).
-	 * When it does, node-bound steps carry __SM_NODE_CREDS_<id>__ and the node
-	 * is handed a key that can add objects to the shelf but never delete —
-	 * a compromised node then cannot erase the fleet's backups. The main
-	 * (delete-capable) credential stays on the management node for retention and
-	 * listings. When no node credential is configured, the main token is
-	 * emitted and behaviour is unchanged.
+	 * Three answers, strongest first.
+	 *
+	 * __SM_RUN_CREDS_<id>__ — the target's provider can mint a key scoped to
+	 * one bucket, one name prefix, one capability and a lifetime, so the node
+	 * is handed a key minted at pickup that can add objects under ITS OWN
+	 * prefix, write-only, expiring with the run. A key read off a node then
+	 * opens that node's directory for an hour, rather than the fleet's shelf
+	 * forever.
+	 *
+	 * __SM_NODE_CREDS_<id>__ — no minting, but the target holds a second,
+	 * write-only credential (bkt_node_credentials). The node can add objects
+	 * and never delete, so a compromised node cannot erase the fleet's
+	 * backups. It is shared across the fleet, which is what minting fixes.
+	 *
+	 * __SM_CREDS_<id>__ — neither. The main credential is emitted and
+	 * behaviour is unchanged. The main (delete-capable) credential otherwise
+	 * stays on the management node for retention and listings.
 	 *
 	 * The choice is made at build time, where the data lives; the agent stays
 	 * strict and resolves exactly the slot the token names. A node token built
 	 * while the slot was filled fails visibly if the slot is later cleared.
 	 */
 	private static function creds_token($target) {
+		// Best first: a key minted for THIS run, pinned to this node's own
+		// prefix and expiring with the job. The other two hand every node in
+		// the fleet the same key, which on a machine somebody else administers
+		// is a key that can write the whole fleet's shelf.
+		if ($target->can_mint_run_keys()) {
+			return '__SM_RUN_CREDS_' . (int)$target->key . '__';
+		}
 		$slot = $target->has_node_credentials() ? '__SM_NODE_CREDS_' : '__SM_CREDS_';
 		return $slot . (int)$target->key . '__';
 	}
@@ -2612,6 +2640,137 @@ class JobCommandBuilder {
 		]];
 	}
 
+	/**
+	 * Hand a hosted site the outbound mail credentials its operator minted.
+	 *
+	 * NINE VALUES CROSS, AND NOT THE SETTING NAMES. Those are compiled into
+	 * utils/hosted_mail_settings.php on the node. That is not tidiness: a
+	 * primitive that could name a setting could name the mail settings on ANY
+	 * node this plane manages, and a site whose outbound mail can be redirected
+	 * is a site whose password-reset email can be redirected. A general
+	 * settings writer was built for this feature and removed for that reason.
+	 *
+	 * Every value is sent every time, including empties, so a value this plane
+	 * stops sending is CLEARED. That exists so a REPLACEMENT credential fully
+	 * supersedes the one before it — NOT so a site can be blanked. Do not write
+	 * a caller that clears these to hand a site back: the off-ramp is the owner
+	 * typing their own provider's credentials into these same fields, and a
+	 * push of empties arriving afterwards would wipe what they typed and stop
+	 * their site sending. The operator's side of a hand-back is closing the
+	 * subaccount at the provider.
+	 */
+	public static function build_hosted_mail_settings($node, $params) {
+		if (!self::has_primitive($node, 'hosted_mail_settings')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot be given its mail credentials: its agent does "
+				. "not offer the hosted_mail_settings primitive. Apply an update to the node; there is "
+				. "no SSH route for this.");
+		}
+		return self::build_hosted_mail_settings_primitive($node, $params);
+	}
+
+	public static function build_hosted_mail_settings_primitive($node, $params) {
+		$service = trim((string)($params['service'] ?? ''));
+		if (!in_array($service, array('smtp', ''), true)) {
+			throw new Exception("Mail service '{$service}' is not one this platform can set remotely.");
+		}
+		$host = strtolower(trim((string)($params['host'] ?? '')));
+		if ($service !== '' && $host === '') {
+			throw new Exception('Turning mail on needs a host to send through; half a configuration '
+				. 'fails every send with an authentication error rather than the truth.');
+		}
+		// The same bounds the node applies, refused here so a bad value fails
+		// where the row that holds it can be looked at.
+		foreach (array('host' => $host,
+				'helo' => strtolower(trim((string)($params['helo'] ?? ''))),
+				'hostname' => strtolower(trim((string)($params['hostname'] ?? '')))) as $field => $value) {
+			if ($value !== '' && !preg_match('/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/', $value)) {
+				throw new Exception("The mail {$field} '{$value}' is not a hostname.");
+			}
+		}
+		$port = (int)($params['port'] ?? 0);
+		if ($port < 0 || $port > 65535) {
+			throw new Exception('A mail port is 0 to 65535.');
+		}
+		$sender = trim((string)($params['sender'] ?? ''));
+		if ($sender !== '' && !filter_var($sender, FILTER_VALIDATE_EMAIL)) {
+			throw new Exception("The bounce address '{$sender}' is not an address.");
+		}
+		$password = (string)($params['password'] ?? '');
+		if (preg_match('/[^\x20-\x7e]/', $password)) {
+			throw new Exception('A mail password is printable text on one line.');
+		}
+
+		return ['primitive' => 'hosted_mail_settings', 'params' => [
+			'service'  => $service,
+			'host'     => $host,
+			'port'     => $port,
+			'username' => trim((string)($params['username'] ?? '')),
+			'password' => $password,
+			'sender'   => $sender,
+			'helo'     => strtolower(trim((string)($params['helo'] ?? ''))),
+			'hostname' => strtolower(trim((string)($params['hostname'] ?? ''))),
+		]];
+	}
+
+	/**
+	 * Set the five hosting-banner facts on a site this operator hosts.
+	 *
+	 * The same shape as build_managed_domain_notice, and inert in the same way:
+	 * every value here renders as escaped text on an admin page, so the worst
+	 * this can do is say something misleading about somebody's billing. The
+	 * mail credentials are deliberately NOT carried here.
+	 *
+	 * An empty state is a real value and is what renders nothing — it is how a
+	 * box returns to silence when its hosting ends.
+	 */
+	public static function build_hosted_plan_notice($node, $params) {
+		if (!self::has_primitive($node, 'hosted_plan_notice')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot be told about its hosting: its agent does not "
+				. "offer the hosted_plan_notice primitive. Apply an update to the node; there is no SSH "
+				. "route for this.");
+		}
+		return self::build_hosted_plan_notice_primitive($node, $params);
+	}
+
+	public static function build_hosted_plan_notice_primitive($node, $params) {
+		$state = trim((string)($params['state'] ?? ''));
+		if (!in_array($state, self::HOSTED_PLAN_STATES, true)) {
+			throw new Exception("Hosting state '{$state}' is not one the banner renders.");
+		}
+		$until = trim((string)($params['until_time'] ?? ''));
+		if ($until !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}:\d{2})?$/', $until)) {
+			throw new Exception('The date ' . $until . ' is not one this notice can carry.');
+		}
+		$url = trim((string)($params['manage_url'] ?? ''));
+		if ($url !== '' && !preg_match('#^https://[A-Za-z0-9.\-/_]+$#', $url)) {
+			throw new Exception('The hosting management link must be an https address with no query string.');
+		}
+		foreach (array('notice' => (string)($params['notice'] ?? ''),
+				'allowances' => (string)($params['allowances'] ?? '')) as $field => $value) {
+			if (preg_match('/[\x00-\x1f\x7f]/', $value)) {
+				throw new Exception("The banner's {$field} carries a control character or a line break.");
+			}
+		}
+
+		return ['primitive' => 'hosted_plan_notice', 'params' => [
+			'state'      => $state,
+			'until_time' => $until,
+			'notice'     => (string)($params['notice'] ?? ''),
+			'allowances' => (string)($params['allowances'] ?? ''),
+			'manage_url' => $url,
+		]];
+	}
+
+	/**
+	 * The BILLING states the hosting banner renders, plus the empty one that
+	 * renders nothing. Sending suspension and a paused shelf are not among
+	 * them — they are independent of whether the customer is paying, and both
+	 * arrive as the notice sentence instead.
+	 */
+	const HOSTED_PLAN_STATES = ['trial', 'subscribed', 'grace', 'shutdown', ''];
+
 	public static function is_cloudflare_domain($domain) {
 		try {
 			$ips = DnsResolver::getA($domain);
@@ -2749,9 +2908,27 @@ class JobCommandBuilder {
 	 * rather than read back. The published port is read back: install.sh
 	 * moves off a pinned port that is busy, and prints CONTAINER_PORT=N.
 	 *
+	 * THE BUYER'S ADMIN ACCOUNT IS BORN HERE OR NOT AT ALL. admin_email names
+	 * the address the site's admin account is created with (install.sh's
+	 * --admin-email, which reaches _site_init.sh as JOINERY_ADMIN_EMAIL), and
+	 * admin_password_stdin says the executor will hand the account's first
+	 * password to the bootstrap session on STDIN. Without both, the site is
+	 * born with the installer's default address and a random password written
+	 * to a file on a machine the buyer cannot reach — a site nobody can log
+	 * into (specs/hosted_trial_provisioning.md §4.1, B1).
+	 *
+	 * The password is not a parameter of this method and never appears in the
+	 * command string: mjb_commands is readable on the plane and job output is
+	 * logged. It rides the session's stdin the way the root password rides
+	 * SSHPASS — the first line of the remote script reads it into the
+	 * environment install.sh already looks in, and `set -e` turns a missing
+	 * one into a failed job rather than a silent fallback to a password
+	 * nobody holds.
+	 *
 	 * $params: mode (fresh|from_backup|bare), sitename, domain, docker_mode
-	 * (docker|bare-metal); for from_backup: clone_from (the source site's
-	 * https address) and clone_key (the key the source was armed with).
+	 * (docker|bare-metal), admin_email, admin_password_stdin; for from_backup:
+	 * clone_from (the source site's https address) and clone_key (the key the
+	 * source was armed with).
 	 */
 	public static function build_install_node($node, $params) {
 		$mode     = (string)($params['mode'] ?? 'fresh');
@@ -2777,6 +2954,18 @@ class JobCommandBuilder {
 				throw new Exception('install_node needs the domain the site will answer on.');
 			}
 		}
+
+		// The buyer's address becomes the site's admin account. A bare box has
+		// no site and therefore no account; anywhere else a malformed address
+		// is refused here rather than travelling to install.sh, which would
+		// take it and create an account nobody can receive mail at.
+		$admin_email = strtolower(trim((string)($params['admin_email'] ?? '')));
+		if ($admin_email !== '' && !filter_var($admin_email, FILTER_VALIDATE_EMAIL)) {
+			throw new Exception("install_node: '{$admin_email}' is not an address the site's admin account can be created with.");
+		}
+		$admin_flags = ($admin_email !== '' && $mode !== 'bare')
+			? ' --admin-email=' . escapeshellarg($admin_email) : '';
+		$admin_password_stdin = !empty($params['admin_password_stdin']) && $mode !== 'bare';
 
 		// Per-job path, and NOT under /tmp: the extracted release stays on the
 		// machine (the deferred-SSL timer may run its setup_ssl.sh until the
@@ -2856,6 +3045,15 @@ class JobCommandBuilder {
 		// only past the last one.
 		$lines = [];
 		$lines[] = 'set -eo pipefail';
+		// The admin password, first, from stdin — before anything can print.
+		// `read` fails at EOF, and under `set -e` that fails the whole job:
+		// an install that was meant to carry the buyer's password must not
+		// quietly fall back to one only the machine knows.
+		if ($admin_password_stdin) {
+			$lines[] = 'IFS= read -r JOINERY_ADMIN_PASSWORD';
+			$lines[] = 'test -n "$JOINERY_ADMIN_PASSWORD"';
+			$lines[] = 'export JOINERY_ADMIN_PASSWORD';
+		}
 		$lines[] = 'command -v curl >/dev/null || { apt-get update -qq && apt-get install -y -qq curl; }';
 		$lines[] = "rm -rf {$remote_install_dir} && mkdir -p {$remote_install_dir}";
 		$lines[] = "curl -sL {$release_url_esc} | tar xz -C {$remote_install_dir}";
@@ -2887,7 +3085,7 @@ class JobCommandBuilder {
 			// container. Invisible on the production plane, where the two
 			// are the same machine.
 			$lines[] = "./install.sh -y -q site --docker {$sitename_esc} - {$domain_esc}{$port_arg}"
-				         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$plane_url_esc}{$clone_flags}";
+				         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$plane_url_esc}{$admin_flags}{$clone_flags}";
 			}
 		} else {
 			// Bare metal: prerequisites, then the site. install.sh server
@@ -2913,14 +3111,21 @@ class JobCommandBuilder {
 			         . ' ./install.sh -y -q server;'
 			         . ' fi';
 			$lines[] = "./install.sh -y -q site --bare-metal {$sitename_esc} --password-file=/root/.joinery_postgres_password {$domain_esc}"
-			         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$plane_url_esc}{$clone_flags}";
+			         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$plane_url_esc}{$admin_flags}{$clone_flags}";
 		}
 		$lines[] = 'echo INSTALL_SUCCESS';
 
 		// Docker plus a base-image build plus a site, or a bare-metal server
 		// setup, in one run: ninety minutes is a ceiling on a wedged install.
-		$steps[] = ['type' => 'ssh', 'label' => 'Bootstrap: install, then the agent asks to join',
+		$step = ['type' => 'ssh', 'label' => 'Bootstrap: install, then the agent asks to join',
 			'cmd' => implode("\n", $lines), 'timeout' => 5400];
+		if ($admin_password_stdin) {
+			// A NAME, not the value: the executor looks the password up from the
+			// provision row and writes it to this session's stdin. The stored
+			// step therefore carries no secret.
+			$step['stdin'] = 'admin_password';
+		}
+		$steps[] = $step;
 
 		// A new site is NOT given a recovery key here. It is covered from birth by
 		// this management node's own backups, which carry their key with each run;

@@ -208,6 +208,10 @@ if ($_POST && isset($_POST['bkt_name'])) {
 		];
 	}
 	$target->set('bkt_credentials', json_encode($creds));
+	// Only B2 can mint; anywhere else the flag is off whatever the box said,
+	// so a provider change does not leave a target claiming a capability its
+	// provider has not got.
+	$target->set('bkt_mint_run_keys', $provider === 'b2' && !empty($_POST['bkt_mint_run_keys']));
 
 	// Node (write-only) credential — an optional second key handed to nodes
 	// during a backup run in place of the delete-capable one above. Same
@@ -506,6 +510,7 @@ if ($target !== null) {
 			document.getElementById('nodeCredB2').hidden     = p !== 'b2';
 			document.getElementById('nodeCredS3').hidden     = p !== 's3';
 			document.getElementById('nodeCredLinode').hidden = p !== 'linode';
+			document.getElementById('mintRunKeys').hidden   = p !== 'b2';
 		",
 	]);
 	$formwriter->textinput('bkt_bucket', 'Bucket Name', [
@@ -576,6 +581,26 @@ if ($target !== null) {
 			'helptext' => 'Nodes go back to being handed the main key during a run.',
 		]);
 	}
+
+	// ── Per-run minted keys ──
+	//
+	// The strongest of the three arrangements, and the default where the
+	// provider can do it. Both credentials above are shared: every node in the
+	// fleet is handed the same one, so a key read off any node opens the whole
+	// shelf. A minted key opens one node's own directory, write-only, for the
+	// length of one run.
+	echo '<div id="mintRunKeys"' . ($current_provider === 'b2' ? '' : ' hidden') . '>';
+	$formwriter->checkboxinput('bkt_mint_run_keys', 'Mint a key for each run', [
+		'checked' => (bool)($target->key ? $target->get('bkt_mint_run_keys') : false),
+		'helptext' => 'Each backup run is handed a key created for it, pinned to that node\'s own '
+			. 'directory in this bucket, write-only, expiring with the run — so a key read off a '
+			. 'machine somebody else administers opens their directory for an hour rather than the '
+			. 'whole fleet\'s shelf forever. <strong>Check first that the main key above is allowed '
+			. 'to create keys</strong> (writeKeys, listKeys, deleteKeys): a key that cannot mint '
+			. 'fails every run rather than falling back, which is deliberate — a silent fall back to '
+			. 'the shared key would defeat the point. Off, runs use the node credential above.',
+	]);
+	echo '</div>';
 
 	$formwriter->checkboxinput('bkt_enabled', 'Enabled', [
 		'checked' => (bool)($target->key ? $target->get('bkt_enabled') : true),

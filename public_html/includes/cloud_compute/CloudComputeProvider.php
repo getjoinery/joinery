@@ -14,6 +14,8 @@
  *   ip     string  first public IPv4, '' until assigned
  *   label  string  provider-side label
  *
+ * @version 1.2 - shutdownInstance()/bootInstance()/getTransfer(): the plane's only lever over a
+ *                hosted instance is power, and the account's transfer pool is what it watches.
  * @version 1.1 - rebuildInstance(): replace an instance's contents in place.
  */
 
@@ -81,6 +83,41 @@ interface CloudComputeProvider {
 	 * @throws CloudComputeException on any API failure.
 	 */
 	public function deleteInstance(string $instance_id): void;
+
+	/**
+	 * Power an instance off, keeping it and its address.
+	 *
+	 * This is the strongest thing the platform does to a cloud instance on its
+	 * own. Deletion is a person at the provider, always: an unpaid subscription
+	 * or an abuse threshold is a billing fact, and no billing fact should be
+	 * able to destroy somebody's data unattended. A shut-down instance still
+	 * bills, and that is the price of the rule.
+	 *
+	 * @throws CloudComputeException on any API failure.
+	 */
+	public function shutdownInstance(string $instance_id): void;
+
+	/**
+	 * Power an instance back on. The other half of shutdownInstance — a
+	 * customer who pays after a suspension gets their machine back without a
+	 * person at the provider.
+	 *
+	 * @throws CloudComputeException on any API failure.
+	 */
+	public function bootInstance(string $instance_id): void;
+
+	/**
+	 * The ACCOUNT's outbound transfer for the current billing period.
+	 *
+	 * Account-wide rather than per-instance because that is how the pool is
+	 * actually billed: instances contribute to one allowance and overage is
+	 * charged against the pool, so a per-customer figure would be a number with
+	 * no bill behind it.
+	 *
+	 * @return array {used_gb: float, quota_gb: float, billable_gb: float}
+	 * @throws CloudComputeException on any API failure.
+	 */
+	public function getTransfer(): array;
 
 	/**
 	 * Set the reverse-DNS (PTR) hostname on one of the instance's IPs.

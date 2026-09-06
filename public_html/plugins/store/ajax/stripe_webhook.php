@@ -183,6 +183,12 @@ try {
 
                 if ($order_items->count() > 0) {
                     $order_item = $order_items->get(0);
+                    // Was this line in trouble before this charge landed? Read
+                    // BEFORE the status is overwritten: a recovery is only a
+                    // recovery relative to the state it recovered from, and
+                    // every ordinary renewal is already active.
+                    $was_in_trouble = in_array((string)$order_item->get('odi_subscription_status'),
+                        array('past_due', 'unpaid', 'incomplete'), true);
                     $order_item->set('odi_subscription_status', 'active');
 
                     if ($invoice->lines && $invoice->lines->data) {
@@ -195,7 +201,25 @@ try {
                     }
 
                     $order_item->save();
-                    error_log("Stripe webhook: payment succeeded for subscription $subscription_id");
+
+                    // A failed charge broadcasts subscription.payment_failed, so
+                    // whatever started a clock on that has to be able to hear the
+                    // charge that fixed it. Without this, nothing on the platform
+                    // can clear a grace period: subscription.expired carries only
+                    // user and tier ids, and a successful invoice dispatched
+                    // nothing at all.
+                    if ($was_in_trouble) {
+                        require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
+                        SignalBus::dispatch('subscription.payment_recovered', array(
+                            'order_item_id'            => $order_item->key,
+                            'user_id'                  => $order_item->get('odi_usr_user_id'),
+                            'provider'                 => 'stripe',
+                            'provider_subscription_id' => $subscription_id,
+                        ));
+                    }
+
+                    error_log("Stripe webhook: payment succeeded for subscription $subscription_id"
+                        . ($was_in_trouble ? ' (recovered)' : ''));
                 }
             }
             break;

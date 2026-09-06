@@ -22,6 +22,8 @@
  *                secret (Phase 1.5, A6); pending requests live in ajr_agent_join_requests
  * @version 1.6 - agent channel: node-generated public key (a verifier, never a credential), one-time
  *                pairing token hash + expiry, paired/last-poll stamps, per-node cutover flag
+ * @version 1.6 - mgn_backup_shelf_bytes: what the node's shelf holds, summed from the listing the
+ *                retention pass already takes
  * @version 1.5 - mgn_backup_shelf_checked_time / mgn_backup_shelf_newest_time: the bucket's own
  *                testimony about the fleet-backup shelf, so a node claiming success while nothing
  *                lands is catchable
@@ -127,6 +129,12 @@ class ManagedNode extends SystemBase {
 		// reporting success while nothing actually lands.
 		'mgn_backup_shelf_checked_time' => array('type'=>'timestamp(6)'),
 		'mgn_backup_shelf_newest_time'  => array('type'=>'timestamp(6)'),
+		// How much this node's shelf holds, in bytes, as of that same check.
+		// Summed from the listing the retention pass already takes rather than
+		// measured separately: the pass walks the whole prefix every cycle and
+		// the provider returns each object's size, so the figure is free and is
+		// taken with the one credential that can see the whole shelf.
+		'mgn_backup_shelf_bytes'        => array('type'=>'int8'),
 		// Compared against the newest escrow row to detect a manually regenerated
 		// (un-escrowed) node key.
 		'mgn_enabled'             => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),

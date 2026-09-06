@@ -15,6 +15,9 @@
  * seals; get_credentials() unseals. A legacy plaintext credential object reads
  * back unchanged, so existing rows migrate the next time they are saved.
  *
+ * @version 2.4 - bkt_mint_run_keys / can_mint_run_keys(): where the provider allows it, a node-bound
+ *                run is handed a key minted for that run and pinned to that node's own prefix
+ *                instead of the one write-only credential the whole fleet shares
  * @version 2.3 - bkt_node_credentials: a second, write-only credential handed to nodes during
  *                a backup run in place of the main (delete-capable) key. Optional — when empty,
  *                node-bound jobs carry the main credential as before. Sealed the same way.
@@ -45,6 +48,18 @@ class BackupTarget extends SystemBase {
 		'bkt_credentials'      => array('type'=>'jsonb'),
 		'bkt_node_credentials' => array('type'=>'jsonb'),
 		'bkt_enabled'         => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),
+		// Whether a node-bound run gets a key MINTED for it — pinned to that
+		// node's own prefix, write-only, expiring with the run — instead of the
+		// one write-only credential every node in the fleet otherwise shares.
+		//
+		// OFF until an operator turns it on, and that default is load-bearing.
+		// Minting needs a master key the provider will let create keys, and
+		// whether a given account's key can is not knowable from here. A target
+		// switched on by default would try to mint on the next cycle and, where
+		// the key cannot, fail EVERY node's backup — trading a working fleet for
+		// a better credential nobody asked for yet. The Remote Backup page says
+		// what it needs; flipping it is a decision with a check behind it.
+		'bkt_mint_run_keys'   => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'bkt_create_time'     => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'bkt_update_time'     => array('type'=>'timestamp(6)'),
 		'bkt_delete_time'     => array('type'=>'timestamp(6)'),
@@ -107,6 +122,21 @@ class BackupTarget extends SystemBase {
 	 */
 	function has_node_credentials() {
 		return !empty(self::creds_to_array($this->get('bkt_node_credentials')));
+	}
+
+	/**
+	 * Can this target mint a key for one run, scoped to one node's prefix?
+	 *
+	 * Provider-dependent and deliberately narrow: B2 pins an application key to
+	 * a bucket, a name prefix, a capability list and a lifetime in one call.
+	 * Amazon's equivalent is an STS session policy and is not built. A target
+	 * that cannot mint keeps handing nodes the stored write-only credential,
+	 * which is what the fleet had before and is unchanged by any of this.
+	 */
+	function can_mint_run_keys() {
+		return $this->get('bkt_provider') === 'b2'
+			&& !empty($this->get('bkt_mint_run_keys'))
+			&& !empty(self::creds_to_array($this->get('bkt_credentials')));
 	}
 
 	private function unseal_column($column) {

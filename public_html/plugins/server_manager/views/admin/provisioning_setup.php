@@ -7,6 +7,7 @@
  * item shows its live state with a one-click action where the platform can
  * do the work itself.
  *
+ * @version 1.3 - the hosted-tier card, and the products section names both fulfillment references
  * @version 1.2 - the domain-registration card
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -25,6 +26,7 @@ $cloud = $status['cloud'];
 $shared = $status['shared_hosts'];
 $agent = $status['agent'];
 $domains = $status['domains'];
+$hosted = $status['hosted'];
 
 function smps_badge(bool $ok, string $ok_label = 'OK', string $bad_label = 'Missing', string $bad_color = 'warning'): string {
 	return $ok
@@ -292,14 +294,108 @@ echo $fw_domains->end_form();
 
 <hr>
 
-<h4>9. Products</h4>
-<p>Per hosting product (product edit page): for <strong>customer-cloud</strong>
-fulfillment pick <em>Customer cloud server</em> under Purchase grants — that is
-the entire setup (the domain question is asked automatically) — and put the
-Connect link
-(<code><?= htmlspecialchars($api['is_self'] ? '' : rtrim($api['url'], '/')) ?>/profile/server_manager/connect_cloud</code>)
-in the after-purchase message. For <strong>shared-host</strong> products,
-attach the domain question as a requirement instead.</p>
+<h4>9. Hosted tier</h4>
+<p>The second hosting product: the server is created on <strong>this
+operator's</strong> cloud account, its outbound mail goes through this
+operator's SMTP2GO account, and its backups land on this fleet's shelf. The
+buyer connects nothing and pastes nothing. Leave this card empty and the hosted
+product simply cannot be fulfilled — the bring-your-own-cloud product is
+unaffected.</p>
+<table class="table table-sm svm-status-table">
+	<tr>
+		<th>Can fulfil a hosted order</th>
+		<td>
+			<?= smps_badge($hosted['ready'], 'Yes', 'No', 'warning') ?>
+			— both the cloud token and the SMTP2GO key are needed. A hosted site without mail is a
+			site whose owner cannot reset their own password.
+		</td>
+	</tr>
+	<tr>
+		<th>Allowances</th>
+		<td>
+			<?= (int)$hosted['send_allowance'] ?> sends a month and
+			<?= (int)$hosted['shelf_allowance_gb'] ?> GB of backup shelf per customer.
+			Exceeding one is an off-ramp to the customer's own account, never a bigger plan —
+			the referral links below are what the site's banner offers, and only once the
+			allowance is actually near.
+		</td>
+	</tr>
+	<tr>
+		<th>If a payment fails</th>
+		<td>
+			<?= (int)$hosted['grace_days'] ?> days of grace, then the instance is
+			<em>shut down</em> and a deletion task is raised for a person — this platform never
+			deletes a cloud instance itself. The backups are kept
+			<?= (int)$hosted['shelf_days'] ?> days from the failed payment.
+		</td>
+	</tr>
+</table>
+<?php
+$fw_hosted = $page->getFormWriter('form_hosted');
+echo $fw_hosted->begin_form();
+echo '<input type="hidden" name="action" value="save_hosted">';
+$fw_hosted->passwordinput('operator_cloud_token', 'Operator cloud token', [
+	'helptext' => ($hosted['token_present']
+		? 'A token is stored. Leave blank to keep it; enter a new one to replace it.'
+		: 'A Linode personal access token scoped linodes:read_write.')
+		. ' It stays on this management node — no machine this plane creates ever receives it.']);
+$fw_hosted->passwordinput('smtp2go_api_key', 'SMTP2GO master API key', [
+	'helptext' => ($hosted['smtp2go_present']
+		? 'A key is stored. Leave blank to keep it; enter a new one to replace it.'
+		: 'The master key every customer subaccount is administered with.')
+		. ' Only a per-customer SMTP user ever reaches a customer\'s box.']);
+$fw_hosted->passwordinput('smtp2go_webhook_secret', 'SMTP2GO webhook secret', [
+	'helptext' => ($hosted['webhook_present']
+		? 'A secret is stored. Leave blank to keep it; enter a new one to replace it.'
+		: 'Set the same value as the basic-auth password on the SMTP2GO webhook.')
+		. ' SMTP2GO does not sign its webhooks, so a spoofed one can move a banner and never a cap.']);
+$fw_hosted->textinput('send_allowance', 'Sends per month, per customer',
+	['value' => $hosted['send_allowance'],
+	 'helptext' => 'Set as the monthly limit on every customer subaccount. The provider counts and enforces it.']);
+$fw_hosted->textinput('shelf_allowance_gb', 'Backup shelf per customer (GB)',
+	['value' => $hosted['shelf_allowance_gb'],
+	 'helptext' => 'Measured from the listing the retention pass already takes; runs stop at 100%.']);
+$fw_hosted->textinput('trial_days', 'Free trial length (days, 0 for none)',
+	['value' => $hosted['trial_days'],
+	 'helptext' => 'Zero means hosting is billed from checkout and a new site opens as subscribed. Otherwise it must match the trial period on the product, and it is what a new site counts down to before its subscription has told us a date.']);
+$fw_hosted->textinput('grace_days', 'Grace after a failed payment (days)',
+	['value' => $hosted['grace_days']]);
+$fw_hosted->textinput('shelf_days', 'Backup shelf kept after non-payment (days)',
+	['value' => $hosted['shelf_days']]);
+$fw_hosted->textinput('manage_url', 'Where customers manage their hosting',
+	['value' => $hosted['manage_url'],
+	 'helptext' => 'The https address of the buyer\'s sites page on the store, pushed to each hosted '
+		. 'site as its Manage hosting link. Usually '
+		. htmlspecialchars(($api['is_self'] ? '' : rtrim($api['url'], '/')) . '/profile/server_manager') . '.']);
+$fw_hosted->textinput('smtp2go_referral_url', 'SMTP2GO referral URL',
+	['value' => $hosted['smtp2go_referral_url'],
+	 'helptext' => 'Offered to a customer whose send allowance is nearly gone.']);
+$fw_hosted->textinput('storage_referral_url', 'Backup storage referral URL',
+	['value' => $hosted['storage_referral_url'],
+	 'helptext' => 'Offered to a customer whose backup shelf is nearly full.']);
+$fw_hosted->submitbutton('btn_save_hosted', 'Save hosted tier settings');
+echo $fw_hosted->end_form();
+?>
+
+<hr>
+
+<h4>10. Products</h4>
+<p>Per hosting product (product edit page): pick <em>Customer cloud server</em>
+under Purchase grants — that is the entire setup, and the domain question is
+asked automatically. The reference you pick beside it decides <strong>whose
+account the server is born on</strong>:</p>
+<ul>
+	<li><strong>Create the server in the buyer's own cloud account</strong> — the buyer connects
+		their own provider account and is billed by it directly. Put the Connect link
+		(<code><?= htmlspecialchars($api['is_self'] ? '' : rtrim($api['url'], '/')) ?>/profile/server_manager/connect_cloud</code>)
+		in the after-purchase message.</li>
+	<li><strong>Create the server on the operator's account (hosted)</strong> — this card's
+		settings apply. There is no Connect page: the buyer pays and the site appears. Give the
+		product a subscription version with a trial period, and the setup fee as a one-time line
+		in the same cart.</li>
+</ul>
+<p>For <strong>shared-host</strong> products, attach the domain question as a
+requirement instead.</p>
 <p>To sell the buyer their domain in the same click, also tick
 <strong>Managed domain</strong> under <em>Info to collect before purchase</em>.
 It works with either fulfillment mode, and replaces the domain question for

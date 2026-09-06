@@ -675,6 +675,25 @@
                 "link_template": "/plugins/store/admin/admin_orders"
             }
         },
+        "subscription.payment_recovered": {
+            "label": "Subscription payment recovered",
+            "description": "A recurring charge that had failed has now succeeded, so the subscription is active again.",
+            "category": "Subscriptions",
+            "payload": {
+                "order_item_id": "Order item id",
+                "user_id": "Subscriber user id",
+                "provider": "Payment provider (stripe / paypal)",
+                "provider_subscription_id": "Provider-side subscription id"
+            },
+            "notify": {
+                "ntf_type": "subscription",
+                "supports_topic": true,
+                "default_email": false,
+                "title_template": "Subscription payment recovered",
+                "body_template": "A recurring payment that had failed has now succeeded ({provider} subscription {provider_subscription_id}).",
+                "link_template": "/plugins/store/admin/admin_orders"
+            }
+        },
         "subscription.expired": {
             "label": "Subscription expired",
             "description": "A subscription or tier lapsed.",
