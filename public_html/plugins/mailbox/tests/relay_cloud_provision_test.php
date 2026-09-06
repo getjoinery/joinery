@@ -34,6 +34,17 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayFirstBoot
 
 /** A provider that records every call and answers what the test scripted. */
 class RcpFakeDriver implements CloudComputeProvider {
+	// Power and the account's transfer pool (CloudComputeProvider 1.2). Recorded
+	// rather than refused: a test that shuts an instance down should be able to
+	// see that it did.
+	public $shutdowns = array();
+	public $boots = array();
+	public $transfer = array('used_gb' => 0.0, 'quota_gb' => 1000.0, 'billable_gb' => 0.0);
+
+	public function shutdownInstance(string $instance_id): void { $this->shutdowns[] = $instance_id; }
+	public function bootInstance(string $instance_id): void { $this->boots[] = $instance_id; }
+	public function getTransfer(): array { return $this->transfer; }
+
 	public $instances = array();
 	public $rebuilds = array();
 	public $deleted = array();

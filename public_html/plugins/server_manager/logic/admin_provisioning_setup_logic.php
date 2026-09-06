@@ -68,6 +68,37 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 					ProvisioningSetup::writeSecret('server_manager_namecheap_api_key', $key);
 				}
 				$message = 'Domain registrar settings saved.';
+			} elseif ($action === 'save_hosted') {
+				ProvisioningSetup::writeSetting('server_manager_hosted_send_allowance',
+					(string)max(0, (int)($input['send_allowance'] ?? 0)));
+				ProvisioningSetup::writeSetting('server_manager_hosted_shelf_allowance_gb',
+					(string)max(0, (int)($input['shelf_allowance_gb'] ?? 0)));
+				ProvisioningSetup::writeSetting('server_manager_hosted_trial_days',
+					(string)max(0, (int)($input['trial_days'] ?? 0)));
+				ProvisioningSetup::writeSetting('server_manager_hosted_grace_days',
+					(string)max(0, (int)($input['grace_days'] ?? 0)));
+				ProvisioningSetup::writeSetting('server_manager_hosted_shelf_days',
+					(string)max(0, (int)($input['shelf_days'] ?? 0)));
+				ProvisioningSetup::writeSetting('server_manager_hosted_manage_url',
+					trim($input['manage_url'] ?? ''));
+				ProvisioningSetup::writeSetting('server_manager_smtp2go_referral_url',
+					trim($input['smtp2go_referral_url'] ?? ''));
+				ProvisioningSetup::writeSetting('server_manager_storage_referral_url',
+					trim($input['storage_referral_url'] ?? ''));
+				// Blank means "leave the stored credential alone" — these fields
+				// never show a value, so blank cannot mean "erase it" without
+				// erasing it every time the rest of the card is saved.
+				foreach (array(
+					'operator_cloud_token'   => 'server_manager_operator_cloud_token',
+					'smtp2go_api_key'        => 'server_manager_smtp2go_api_key',
+					'smtp2go_webhook_secret' => 'server_manager_smtp2go_webhook_secret',
+				) as $field => $setting) {
+					$value = trim($input[$field] ?? '');
+					if ($value !== '') {
+						ProvisioningSetup::writeSecret($setting, $value);
+					}
+				}
+				$message = 'Hosted tier settings saved.';
 			} else {
 				$error = 'Unknown action.';
 			}

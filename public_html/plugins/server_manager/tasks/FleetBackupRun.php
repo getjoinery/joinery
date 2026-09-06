@@ -20,6 +20,8 @@
  *     slow node gets fewer backups rather than a queue;
  *   - no more than N run at once across the whole fleet.
  *
+ * @version 1.2 - dispatch is gated on the node's own verified recovery key: a node without one is
+ *                reported as awaiting it, not dispatched at and failed every cycle
  * @version 1.1 - build_backup_run() returns a primitive envelope only; an unpaired node throws
  *                and lands in problems[]
  * @version 1.0
@@ -28,6 +30,7 @@
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetBackupPolicy.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetBackupRetention.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/RecoveryKeyFleet.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
 
@@ -65,6 +68,20 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 			// on every pass trains an operator to stop reading the report.
 			if (trim((string)$node->get('mgn_web_root')) === '') {
 				$skipped[] = $slug . ' (hosts no Joinery site)';
+				continue;
+			}
+
+			// A node with no verified recovery key of its own takes no backups,
+			// for anybody — the node refuses, and the builder refuses before it.
+			// That is a real state and the ordinary one for a fresh box, so it
+			// is a SKIP here rather than a dispatch that fails every cycle,
+			// writes a problem line into every fleet report, and trains an
+			// operator to stop reading them. The gap itself is still reported —
+			// once, and where it can be acted on — by the node's own health
+			// (NodeMonitorHealth::fleet_backup_health, which leads with it).
+			$rk = RecoveryKeyFleet::node_state($node);
+			if ($rk['state'] !== 'n/a' && !RecoveryKeyFleet::has_own_key($rk)) {
+				$skipped[] = $slug . ' (awaiting its recovery key)';
 				continue;
 			}
 
@@ -111,6 +128,10 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 							$node->set('mgn_backup_shelf_checked_time', $now);
 							$node->set('mgn_backup_shelf_newest_time',
 								$pruned['newest_object_time'] !== '' ? $pruned['newest_object_time'] : null);
+							// What the node is KEEPING, from that same listing. The hosted
+							// tier's storage allowance is measured against this figure and
+							// needs no meter of its own.
+							$node->set('mgn_backup_shelf_bytes', (int)($pruned['bytes'] ?? 0));
 							$node->save();
 						} catch (Throwable $e) {
 							error_log('FleetBackupRun: could not stamp the shelf check for node '

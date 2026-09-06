@@ -18,6 +18,32 @@ builds on), `managed_domain_registration.md` (the domain leg),
 pattern), `subdomain_sandbox_tier.md` (the free try-it tier — separate, not a
 funnel into this).
 
+> **Owner decisions, 2026-09-06 evening — these supersede the status line,
+> §1, §6, §10 Q2/Q4/Q5 and §12 wherever they differ. The code was changed
+> the same day to match.**
+>
+> - **Two things on sale, not three.** *Self-hosted*: free, the StackScript is
+>   the easy route. *Managed*: **$12.99/mo, no free trial, no setup line**,
+>   billed from checkout. The $39.99 bring-your-own-cloud install is
+>   **retired from sale** (deactivated on its product page); the `customer`
+>   hosting mode stays in the code. Reasoning: people either will open the
+>   other accounts, in which case the free install is easy, or they won't, in
+>   which case an automatic install on *their* cloud helps nobody.
+> - **No platform-side sending-health enforcement.** The complaint and bounce
+>   thresholds, the SMTP-user removal, `htr_sending_suspended_time` and the
+>   `hosted.sending_suspended` signal are gone. The provider's monthly limit
+>   on the subaccount and its own abuse controls are the whole of it; the
+>   webhook feeds only the banner's sent count.
+> - **"Automatic disaster recovery" is not claimed** until it exists. The copy
+>   says we rebuild the site from its backups if needed, which the customer
+>   approves with their recovery key (no skeleton key, ever).
+> - `server_manager_hosted_trial_days` defaults to **0**; a new site's row
+>   opens `subscribed`. The `trial` state remains for a deployment that
+>   configures one.
+> - Open, A1: a departing Managed customer needs a way to take their backup
+>   shelf and restore onto a self-install. The "move to your own cloud" off-ramp
+>   in §7 named a product that is no longer sold.
+
 ## 1. What this does for the buyer
 
 Someone pays $39.99 on getjoinery.com, types the domain they want, and a few
@@ -246,14 +272,30 @@ date, usage against each allowance, the own-account links, and any active
 suspension notice. Rendered to permission 5+ only. The customer cannot edit a
 managed setting.
 
-**The push is one general primitive, not two new ones** (review F8/G2). The
-only settings-pushing primitive today is `managed_domain_notice`, which takes
-exactly domain/expiry/state/url. Instead: a `settings_converge` primitive
-carrying a map, allowlisted on the node to settings declared `managed:true`
-in `settings.json` — the declaration IS the allowlist, so the `smtp_*`
-settings §4.3 pushes gain the flag. It serves the domain notice, the hosted
-banners, the SMTP push and whatever comes next; `managed_domain_notice` is
-re-pointed to it later. One Go change and one release.
+~~**The push is one general primitive, not two new ones** (review F8/G2).~~
+**REVERSED BY THE OWNER, 2026-09-06, during the build.** The general
+`settings_converge` primitive was built as specified here and then removed. Two
+things came out in review that this paragraph had not weighed:
+
+1. `managed:true` cannot be the allowlist. It means "never rendered on a form",
+   so marking the `smtp_*` settings managed would have removed the SMTP fields
+   from every self-hosted site's settings page — and editing those fields IS the
+   email off-ramp in §7.
+2. A general map-taking primitive lets the plane NAME a setting, which means it
+   can set `smtp_*` on **every** node it manages — BYO-cloud and self-hosted
+   sites included — and a site whose outbound mail can be redirected is a site
+   whose password-reset email can be redirected. That is a quiet capability,
+   unlike the loud ones (`apply_update`, the restores) a managed node already
+   grants, and it was a new grant on boxes nobody is hosting.
+
+**What is built instead:** two compiled-name primitives in the shape
+`managed_domain_notice` and `fleet_enroll` already use — `hosted_mail_settings`
+(nine names in `utils/hosted_mail_settings.php`) and `hosted_plan_notice` (five
+names in `utils/hosted_plan_notice.php`). Values cross; names do not. There is
+no general settings writer on the channel, which is the property the platform
+had before this feature and now still has. The cost is one small node script per
+new pushed set — deliberately, so that widening the plane's reach is always a
+reviewed commit rather than a parameter.
 
 ## 5. Provisioning orchestration
 
@@ -286,7 +328,7 @@ enforce and nothing listed here. What follows is the set of limits a customer
 | Limit | Signal | Warn | Act | Lever |
 |---|---|---|---|---|
 | Sending volume | SMTP2GO counts month-to-date against the subaccount `limit` of 1,000 | Banner at 80%, from the webhook count, with the own-account link | Provider refuses at the allowance (+10%) until the month rolls | The `limit` itself |
-| Complaints and bounces | Webhook events `spam`, `bounce`, `reject` per `auth` | — | Sending stops at the threshold; operator alert; repeat → shutdown | Remove the SMTP user, then close the subaccount; instance shutdown |
+| ~~Complaints and bounces~~ | ~~Webhook events `spam`, `bounce`, `reject` per `auth`~~ | — | ~~Sending stops at the threshold; operator alert; repeat → shutdown~~ | **Removed 2026-09-06: the provider's own controls.** |
 | Storage size | Sum of the prefix listing the retention pass already takes (R1) | Banner at 80% with the own-bucket link | Runs stop at 100%; the node's fleet policy is set off and history records why | Stop minting the per-run key |
 | Disk | The existing `disk_usage_percent` on the node row (check_status / management stats), already badged at 80/90% on the node overview | The same 80% figure on the customer's banner, with the move offer | Nothing automatic — a full disk stops the site on its own | None; the off-ramp is the lever |
 | Outbound bandwidth | ONE operator alert at 80% of the ACCOUNT transfer pool (Linode account transfer endpoint); no per-customer meter (review C2 — worst case $1.25 and only if the pool is exhausted) | — | Operator looks | None |
@@ -432,8 +474,8 @@ published shared-plan price, not re-fetched (the pricing page did not render).
 | Sends | 1,000/mo, enforced by SMTP2GO | Own SMTP2GO account (§7) |
 | Backup shelf | 10 GB | Own bucket (§7) |
 | Outbound transfer | none per customer; operator alert at 80% of the account pool | — |
-| Complaint rate | 0.1% over 7 days, min 100 sends | Sending removed; abuse path |
-| Bounce rate | 5% over 7 days, min 100 sends | Same |
+| ~~Complaint rate~~ | ~~0.1% over 7 days, min 100 sends~~ | **Removed 2026-09-06** — the provider's own controls act on the subaccount |
+| ~~Bounce rate~~ | ~~5% over 7 days, min 100 sends~~ | Same |
 
 A personal user sends well under 20 a day, about 600 a month; 1,000 leaves
 room and is small enough that a spammer trips the complaint threshold long

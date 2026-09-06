@@ -25,12 +25,56 @@ A **profile** (`includes/BackupProfile.php`) is the unit that keeps them apart:
 | Triggered by | the `Backup` scheduled task | the management node's `FleetBackupRun` |
 | Executed by | `BackupRunner` on the machine | `BackupRunner` on the machine |
 | Recovery key | the site's own `backup_recovery_public_key` | the site's own `backup_recovery_public_key` |
-| Bucket credentials | stored on the machine | supplied per run, never stored; write-only via the target's node credential |
+| Bucket credentials | stored on the machine | supplied per run, never stored; write-only, and minted for that one run where the provider allows it |
 | Prunes the shelf | the site | the management node |
 | Depends on | nothing | the management node being alive at the scheduled moment |
 
 Both run the same engine, so chains, envelopes, deletion replay and history are
 written once and behave identically for both.
+
+### The credential a run is handed
+
+A manager run needs a credential to write with, and it is chosen at build time
+from three, strongest first:
+
+- **A key minted for that run.** Where the target's provider can pin a key to
+  one bucket, one name prefix, one capability and a lifetime — Backblaze B2
+  does, in one call — the node is handed a key created when the job is picked
+  up, allowed only to add objects under **its own** prefix, expiring with the
+  run. A key read off a machine somebody else administers then opens that
+  machine's own directory for an hour, rather than the fleet's whole shelf
+  indefinitely. **Off until an operator turns it on**, per target, on the Remote
+  Backup page — minting needs a master key the provider will let create keys,
+  and a target switched on without one fails every run rather than falling back.
+- **The target's write-only node credential.** A second stored key allowed to
+  add objects and not to delete any. Shared across the fleet, which is what
+  minting improves on.
+- **The target's main credential.** Where neither of the above is configured.
+
+Minting happens at PICKUP rather than at build, because a key's lifetime starts
+when it is created and the moment that matters is when the agent actually holds
+it; a key minted an hour earlier would arrive expired and read at the node as a
+bucket error. Its lifetime is derived from the job's own claim budget, so it
+outlasts the upload it exists for. A target that declares it can mint and then
+cannot fails the job with the provider's reason — it never falls back to the
+shared key, because a silent downgrade would defeat the only thing minting is
+for, on exactly the machines where it matters.
+
+Restores need no minted key at all: the management node signs one object key
+per artifact and the node receives the signature, so no bucket credential of
+any kind travels for a read.
+
+**Two things to settle before switching minting on for a real fleet**, neither
+of which has been exercised yet:
+
+- **Key lifetime and cleanup.** Nothing deletes a minted key early; each one is
+  expected to expire on its own. Whether the provider removes expired keys, and
+  what its per-account key ceiling is, decides whether a fleet of forty nodes
+  backing up nightly accumulates keys faster than they lapse.
+- **Cost per pickup.** Minting adds three provider round trips to the job
+  hand-out request (authorize, look the bucket up, create the key), and the
+  bucket is looked up afresh every run. Fine for a fleet of tens; worth caching
+  the bucket id if job pickup ever starts timing out.
 
 **The recovery key is the one thing a management node does not supply.** It says
 where a backup goes and hands over a write-only credential to put it there; what

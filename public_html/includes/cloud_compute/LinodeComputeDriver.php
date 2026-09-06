@@ -6,6 +6,9 @@
  * instances it creates are billed by Linode to the customer. Requires the
  * 'linodes:read_write' OAuth scope.
  *
+ * @version 1.4 - shutdownInstance()/bootInstance() (POST …/shutdown, …/boot) and getTransfer()
+ *                (GET account/transfer): the hosted tier's only automatic lever is power, and
+ *                the transfer figure it watches is the account pool's, not an instance's.
  * @version 1.3 - user_data (the Metadata service; cloud-init, base64) and a StackScript
  *                fallback; regions() (the token step called it and no driver had it, so a
  *                bad token was never caught)
@@ -175,6 +178,27 @@ class LinodeComputeDriver implements CloudComputeProvider {
 
 	public function deleteInstance(string $instance_id): void {
 		$this->request('DELETE', 'linode/instances/' . rawurlencode($instance_id));
+	}
+
+	public function shutdownInstance(string $instance_id): void {
+		$this->request('POST', 'linode/instances/' . rawurlencode($instance_id) . '/shutdown');
+	}
+
+	public function bootInstance(string $instance_id): void {
+		$this->request('POST', 'linode/instances/' . rawurlencode($instance_id) . '/boot');
+	}
+
+	/**
+	 * The account's transfer pool for the current billing period. Linode
+	 * reports it in GB as used / quota / billable.
+	 */
+	public function getTransfer(): array {
+		$t = $this->request('GET', 'account/transfer');
+		return array(
+			'used_gb'     => (float)($t['used'] ?? 0),
+			'quota_gb'    => (float)($t['quota'] ?? 0),
+			'billable_gb' => (float)($t['billable'] ?? 0),
+		);
 	}
 
 	public function setReverseDns(string $instance_id, string $ip, string $hostname): array {

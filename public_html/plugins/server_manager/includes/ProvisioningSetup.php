@@ -389,6 +389,37 @@ class ProvisioningSetup {
 	}
 
 	/**
+	 * The hosted tier's configuration, for the setup page.
+	 *
+	 * Every credential is reported as present-or-absent and never returned:
+	 * this array reaches a template, and a credential that reaches a template
+	 * ends up in a page source sooner or later.
+	 *
+	 * `ready` is the honest answer to "can a hosted order be fulfilled right
+	 * now" — the compute token creates the instance and the SMTP2GO key sets up
+	 * its mail, and a hosted site without mail is a site whose owner cannot
+	 * reset their own password.
+	 */
+	public static function hostedStatus(): array {
+		$token   = trim(self::readSecret('server_manager_operator_cloud_token')) !== '';
+		$smtp2go = trim(self::readSecret('server_manager_smtp2go_api_key')) !== '';
+		return array(
+			'token_present'         => $token,
+			'smtp2go_present'       => $smtp2go,
+			'webhook_present'       => trim(self::readSecret('server_manager_smtp2go_webhook_secret')) !== '',
+			'send_allowance'        => self::readSetting('server_manager_hosted_send_allowance'),
+			'shelf_allowance_gb'    => self::readSetting('server_manager_hosted_shelf_allowance_gb'),
+			'trial_days'            => self::readSetting('server_manager_hosted_trial_days'),
+			'grace_days'            => self::readSetting('server_manager_hosted_grace_days'),
+			'shelf_days'            => self::readSetting('server_manager_hosted_shelf_days'),
+			'manage_url'            => self::readSetting('server_manager_hosted_manage_url'),
+			'smtp2go_referral_url'  => self::readSetting('server_manager_smtp2go_referral_url'),
+			'storage_referral_url'  => self::readSetting('server_manager_storage_referral_url'),
+			'ready'                 => $token && $smtp2go,
+		);
+	}
+
+	/**
 	 * Full pipeline status for the setup page: each checklist item with
 	 * enough detail to render a state badge and decide which action to
 	 * offer. Read-only; the probe only runs when credentials are present.
@@ -448,6 +479,7 @@ class ProvisioningSetup {
 				'enabled_count' => (int)$provisioning_hosts->count_all(),
 			),
 			'domains' => self::domainStatus(),
+			'hosted'  => self::hostedStatus(),
 			'cloud' => array(
 				'oauth_configured' => $oauth_configured,
 				'referral_url' => self::readSetting('server_manager_linode_referral_url'),

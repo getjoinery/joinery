@@ -198,6 +198,54 @@ deployment that did not buy a domain this way has. Declaring them `managed`
 is what keeps a local admin from editing a value only the management node can
 know. See [Server Manager § Managed Domain Registration](../plugins/server_manager/docs/overview.md).
 
+### Settings a management node writes
+
+A deployment somebody else looks after carries settings its own admins do not
+decide: the managed-domain notice, the hosting banner, the mail credentials the
+management node minted for it. Each set is written by its own primitive, and
+each of those carries **values only** — the setting names live in a script on
+the node (`utils/managed_domain_notice.php`, `utils/hosted_plan_notice.php`,
+`utils/hosted_mail_settings.php`, `utils/fleet_enroll.php`), where the
+management node cannot reach them.
+
+**There is no general settings writer, and that is the design.** A primitive
+that took a name and a value would let whatever is on the other end of that
+channel write any row in `stg_settings` — which is where the credentials are,
+and where the mail settings are. A site whose outbound mail can be redirected is
+a site whose password-reset email can be redirected, so the ability to *name* a
+setting is the ability to take over accounts on every node a management node
+manages. Each new set of pushed settings therefore costs a small node-side
+script and an entry in the agent's vocabulary. That cost is the feature.
+
+**What that bounds, and what it does not.** Compiled names decide *which*
+settings a management node can write. They do not decide *which nodes* it can
+write them on: any deployment whose agent offers a primitive can be handed that
+primitive's values by the management node it joined — a site the operator hosts,
+a site on the buyer's own cloud account, or a site somebody self-hosts and
+enrolled for management. The `hosted_mail_settings` primitive is the one where
+that matters, because pointing a site's outbound mail somewhere else also points
+its password-reset email somewhere else.
+
+That reach is accepted deliberately. Enrolling a node already grants its
+management node `apply_update`, the three restores and `decommission_site` — the
+power to replace the site's code outright, which subsumes redirecting its mail.
+The distinction weighed against it is that those powers are loud and a
+redirected mail server is quiet, and the judgement made was that a node's
+operator has already extended total trust to the management node it joined. It
+is written down here so the acceptance is explicit rather than assumed.
+
+Two consequences worth knowing:
+
+- **A pushed setting is not automatically off-limits locally.** The mail
+  settings are ordinary, editable fields: an owner who outgrows a hosted
+  allowance moves to their own mail account by editing them. The operator writes
+  them once; the owner owns them. Only the `hosted_plan_*` banner values are
+  also `managed`, because nothing local has an opinion about them.
+- **Every push converges rather than merges.** A value the management node stops
+  sending is *cleared*, which is what retires a stale banner and what hands a
+  site back to its owner's own mail account. A setting the primitive does not
+  carry is never touched.
+
 ### Registrar credentials
 
 The domain-registration leg's credentials

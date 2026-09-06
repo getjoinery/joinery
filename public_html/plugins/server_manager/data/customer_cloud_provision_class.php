@@ -30,6 +30,10 @@
  * retire_failed when the job could not prove the machine refuses it (the
  * password is kept, so the machine stays reachable).
  *
+ * @version 1.6 - hosted tier (specs/hosted_trial_provisioning.md): cvp_hosting_mode chooses whose cloud
+ *                account the instance is born on, cvp_admin_pass_sealed carries the buyer's first
+ *                admin password until they reveal it once, and the mail leg's SMTP2GO identifiers
+ *                and state ride the row beside the compute ones
  * @version 1.5 - cvp_install_password: the install password's lifecycle, held → retiring → retired,
  *                and the 'open' filter that keeps a done provision on the dashboard until it is retired
  * @version 1.4 - cvp_clone_key_sealed (the key a from_backup provision armed its source with) and
@@ -45,6 +49,8 @@ class CustomerCloudProvision extends SystemBase {
 	public static $prefix = 'cvp';
 	public static $tablename = 'cvp_customer_cloud_provisions';
 	public static $pkey_column = 'cvp_id';
+
+	public static $json_vars = array('cvp_mail_records');
 
 	protected static $foreign_key_actions = array(
 		'cvp_usr_user_id'    => array('action' => 'prevent', 'message' => 'this user has cloud provisions - deprovision them first'),
@@ -108,6 +114,38 @@ class CustomerCloudProvision extends SystemBase {
 		// channel, so it waits for the node's agent to pair: pending →
 		// dispatched → done | failed. NULL means no seeding applies.
 		'cvp_fleet_seed_state'       => array('type'=>'varchar(12)', 'allowed_values'=>array('pending', 'dispatched', 'done', 'failed')),
+		// Whose cloud account the instance is created on, decided by the
+		// PRODUCT and never by the buyer (specs/hosted_trial_provisioning.md
+		// §4.1). customer: the buyer granted us access to their own account
+		// and the provider bills them. operator: the plane's own token creates
+		// it on our account, there is no Connect wait, and the hosted legs —
+		// mail, trial, banners — apply.
+		'cvp_hosting_mode'           => array('type'=>'varchar(10)', 'is_nullable'=>false, 'default'=>'customer', 'allowed_values'=>array('customer', 'operator')),
+		// The site admin account's first password, sealed. Generated on the
+		// plane, handed to the install over the bootstrap session's stdin (it
+		// never appears in the job's stored steps or its output), and shown to
+		// the buyer ONCE on their own sites page — which erases it in the same
+		// request and stamps cvp_admin_pass_revealed_time. The site forces a
+		// password change at first login, and once the mail leg is done the
+		// site's own forgot-password covers a lost reveal.
+		'cvp_admin_pass_sealed'      => array('type'=>'text'),
+		'cvp_admin_pass_revealed_time' => array('type'=>'timestamp(6)'),
+		// The hosted mail leg's provider-side identifiers (SMTP2GO), and where
+		// the leg stands. NULL state means the leg does not apply (a
+		// customer-cloud provision, or one whose mail is not ours to set up).
+		'cvp_smtp2go_subaccount_id'  => array('type'=>'varchar(64)'),
+		'cvp_smtp2go_domain_id'      => array('type'=>'varchar(64)'),
+		'cvp_smtp2go_user_id'        => array('type'=>'varchar(64)'),
+		'cvp_mail_state'             => array('type'=>'varchar(24)', 'allowed_values'=>array(
+			'pending', 'subaccount_created', 'domain_added', 'records_published',
+			'domain_verified', 'smtp_user_created', 'done', 'failed')),
+		// The DNS records the sending domain needs, as the provider described
+		// them. Kept on the row because they outlive the call that produced
+		// them: where the plane does not hold the zone, these are what the
+		// customer (or the operator) has to publish, and the leg says so
+		// instead of pretending the domain is set up.
+		'cvp_mail_records'           => array('type'=>'jsonb'),
+		'cvp_mail_error'             => array('type'=>'text'),
 		'cvp_error'                  => array('type'=>'text'),
 		'cvp_create_time'            => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'cvp_update_time'            => array('type'=>'timestamp(6)'),
@@ -150,6 +188,10 @@ class CustomerCloudProvision extends SystemBase {
 		if ($install_mode === 'bare' && $origin !== 'admin') {
 			throw new CustomerCloudProvisionException('Bare provisions must be admin-origin.');
 		}
+		$hosting_mode = $this->get('cvp_hosting_mode') ?: 'customer';
+		if (!in_array($hosting_mode, array('customer', 'operator'), true)) {
+			throw new CustomerCloudProvisionException("Unknown hosting mode '{$hosting_mode}'.");
+		}
 		if (empty($this->get('cvp_usr_user_id'))) {
 			throw new CustomerCloudProvisionException('User is required.');
 		}
@@ -183,6 +225,50 @@ class CustomerCloudProvision extends SystemBase {
 			}
 		}
 		return null;
+	}
+
+	/** Is this provision's instance created on the operator's own account? */
+	public function is_operator_hosted(): bool {
+		return ($this->get('cvp_hosting_mode') ?: 'customer') === 'operator';
+	}
+
+	/**
+	 * Where the buyer's first admin password stands:
+	 *   none      never minted (a bare instance, or a provision that predates it)
+	 *   sealed    minted and still readable — the buyer can reveal it once
+	 *   revealed  shown once and erased; the site's forgot-password is the way back
+	 */
+	public function admin_password_state(): string {
+		if (trim((string)$this->get('cvp_admin_pass_sealed')) !== '') {
+			return 'sealed';
+		}
+		return $this->get('cvp_admin_pass_revealed_time') ? 'revealed' : 'none';
+	}
+
+	/**
+	 * The newest live provision for a node, or null. The install password, the
+	 * admin password and the hosting mode all live on the provision rather than
+	 * the node, so anything working on a node's install has to find its row.
+	 */
+	public static function latest_for_node($node_id) {
+		$node_id = (int)$node_id;
+		if (!$node_id) {
+			return null;
+		}
+		$rows = new MultiCustomerCloudProvision(['node_id' => $node_id, 'deleted' => false], ['cvp_id' => 'DESC']);
+		foreach ($rows as $row) {
+			return $row;
+		}
+		return null;
+	}
+
+	/**
+	 * Does this node's provision still seal an admin password the install can
+	 * be handed? A retry after the buyer revealed it installs without one.
+	 */
+	public static function holds_admin_password($node_id): bool {
+		$provision = self::latest_for_node($node_id);
+		return $provision !== null && $provision->admin_password_state() === 'sealed';
 	}
 
 	/**
@@ -240,6 +326,17 @@ class MultiCustomerCloudProvision extends SystemMultiBase {
 				return "'" . preg_replace('/[^a-z_]/', '', $s) . "'";
 			}, $this->options['install_password_states']);
 			$filters['cvp_install_password'] = "IN (" . implode(',', $quoted) . ")";
+		}
+
+		if (isset($this->options['hosting_mode'])) {
+			$filters['cvp_hosting_mode'] = [$this->options['hosting_mode'], PDO::PARAM_STR];
+		}
+
+		if (isset($this->options['mail_states']) && is_array($this->options['mail_states']) && count($this->options['mail_states'])) {
+			$quoted = array_map(function ($s) {
+				return "'" . preg_replace('/[^a-z_]/', '', $s) . "'";
+			}, $this->options['mail_states']);
+			$filters['cvp_mail_state'] = "IN (" . implode(',', $quoted) . ")";
 		}
 
 		if (isset($this->options['instance_ip'])) {

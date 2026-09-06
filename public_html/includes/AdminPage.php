@@ -112,6 +112,12 @@ class AdminPage extends PublicPage {
 		// registrar account before it expires. Silent everywhere else.
 		echo ManagedDomainNotice::render();
 
+		// A deployment somebody else hosts says so where its admins look: what
+		// the arrangement is, when the next date falls, and where an allowance
+		// is running out. Admin pages only — this reaches permission 5 and
+		// above by virtue of where it renders. Silent everywhere else.
+		echo HostedPlanNotice::render();
+
 		return true;
 	}
 

@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.21.10",
+  "version": "1.22.2",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -91,7 +91,8 @@
     "monitoring": "Monitoring",
     "publishing": "Publishing",
     "backups": "Backups",
-    "domains": "Domain registration"
+    "domains": "Domain registration",
+    "hosted": "Hosted tier"
   },
   "settings": [
     {
@@ -319,6 +320,100 @@
       "default": "0",
       "managed": true,
       "helptext": "High-water mark over order items already checked for a paid domain year that produced no registration. Written by ManagedDomainWatch so each such order is reported once."
+    },
+    {
+      "name": "server_manager_operator_cloud_token",
+      "default": "",
+      "secret": true,
+      "group": "hosted",
+      "label": "Operator cloud token",
+      "helptext": "The Linode personal access token (scope linodes:read_write) hosted instances are created on. Set it on the Provisioning Setup page, which seals it at rest. It stays on this management node and never reaches a machine this plane creates."
+    },
+    {
+      "name": "server_manager_smtp2go_api_key",
+      "default": "",
+      "secret": true,
+      "group": "hosted",
+      "label": "SMTP2GO master API key",
+      "helptext": "The master key every hosted customer's subaccount is administered with. Set it on the Provisioning Setup page, which seals it at rest. Only a per-customer SMTP user ever reaches a customer's box."
+    },
+    {
+      "name": "server_manager_smtp2go_webhook_secret",
+      "default": "",
+      "secret": true,
+      "group": "hosted",
+      "label": "SMTP2GO webhook secret",
+      "helptext": "The basic-auth password this plane requires on the SMTP2GO event webhook. SMTP2GO does not sign its webhooks, so this plus the provider's own address range is the whole check — and webhook counts only ever move a banner, never a cap."
+    },
+    {
+      "name": "server_manager_hosted_send_allowance",
+      "default": "1000",
+      "group": "hosted",
+      "label": "Sends per month, per customer",
+      "type": "number",
+      "helptext": "Set as the monthly limit on every hosted customer's SMTP2GO subaccount, at creation and whenever this changes. The provider counts and enforces it; the platform is not in the send path."
+    },
+    {
+      "name": "server_manager_hosted_shelf_allowance_gb",
+      "default": "10",
+      "group": "hosted",
+      "label": "Backup shelf per customer (GB)",
+      "type": "number",
+      "helptext": "How much of the fleet shelf a hosted customer's backups may occupy before their runs stop. Measured from the listing the retention pass already takes."
+    },
+    {
+      "name": "server_manager_hosted_trial_days",
+      "default": "0",
+      "group": "hosted",
+      "label": "Free trial length (days, 0 for none)",
+      "type": "number",
+      "helptext": "How long hosting is free before the subscription starts charging. Zero means there is no trial: hosting is billed from checkout and a new site opens as subscribed. With a trial, the trial itself is the Stripe subscription's own trial period, set on the product; this is what the site's banner counts down when no subscription date is known yet, and it must match."
+    },
+    {
+      "name": "server_manager_hosted_grace_days",
+      "default": "30",
+      "group": "hosted",
+      "label": "Grace after a failed payment (days)",
+      "type": "number",
+      "helptext": "How long a hosted site keeps running after a charge fails. At the end the instance is shut down by API and a deletion task is raised for a person — the platform never deletes a cloud instance itself."
+    },
+    {
+      "name": "server_manager_hosted_shelf_days",
+      "default": "90",
+      "group": "hosted",
+      "label": "Backup shelf kept after non-payment (days)",
+      "type": "number",
+      "helptext": "How long a shut-down customer's backups stay on the shelf before the retention pass prunes them. Counted from the failed payment, not the shutdown."
+    },
+    {
+      "name": "server_manager_hosted_manage_url",
+      "default": "",
+      "group": "hosted",
+      "type": "text",
+      "label": "Where customers manage their hosting",
+      "helptext": "The https address of the buyer's own sites page on the store — pushed to each hosted site's banner as its Manage hosting link. Usually https://<store>/profile/server_manager."
+    },
+    {
+      "name": "server_manager_smtp2go_referral_url",
+      "default": "",
+      "group": "hosted",
+      "type": "text",
+      "label": "SMTP2GO referral URL",
+      "helptext": "Where a customer who outgrows the send allowance opens their own SMTP2GO account. Shown on their banner only when that allowance is near."
+    },
+    {
+      "name": "server_manager_storage_referral_url",
+      "default": "",
+      "group": "hosted",
+      "type": "text",
+      "label": "Backup storage referral URL",
+      "helptext": "Where a customer who outgrows the backup shelf opens their own bucket. Shown on their banner only when that allowance is near."
+    },
+    {
+      "name": "server_manager_hosted_transfer_alerted_time",
+      "default": "",
+      "managed": true,
+      "helptext": "When the operator was last told the account's outbound transfer pool passed 80%. Written by the hosted watch so one alert is sent per billing period, not one per tick."
     }
   ],
   "sealed_secrets": [
@@ -364,6 +459,82 @@
       "feature": "Customer cloud provisioning",
       "kind": "ephemeral",
       "locator": "cvp_customer_cloud_provisions.cvp_clone_key_sealed"
+    },
+    {
+      "label": "Operator cloud token",
+      "feature": "Hosted tier",
+      "kind": "operator",
+      "locator": "server_manager_operator_cloud_token"
+    },
+    {
+      "label": "SMTP2GO master API key",
+      "feature": "Hosted tier",
+      "kind": "operator",
+      "locator": "server_manager_smtp2go_api_key"
+    },
+    {
+      "label": "SMTP2GO webhook secret",
+      "feature": "Hosted tier",
+      "kind": "regenerable-breaks-things",
+      "locator": "server_manager_smtp2go_webhook_secret"
+    },
+    {
+      "label": "Hosted site's first admin password",
+      "feature": "Hosted tier",
+      "kind": "ephemeral",
+      "locator": "cvp_customer_cloud_provisions.cvp_admin_pass_sealed"
     }
-  ]
+  ],
+  "signals": {
+    "hosted.deletion_required": {
+      "label": "Hosted instance needs deleting by a person",
+      "description": "A hosted site's grace period ran out. The platform has powered its instance off — the strongest thing it does on its own — and somebody has to delete it at the provider to stop the bill.",
+      "category": "Hosting",
+      "payload": {
+        "provision_id": "Customer cloud provision id",
+        "domain": "The site's domain",
+        "instance_id": "Provider instance id",
+        "buyer_email": "The customer's address",
+        "shelf_ends_time": "When this customer's backups are pruned (UTC)"
+      },
+      "notify": {
+        "ntf_type": "system",
+        "supports_topic": true,
+        "default_email": true,
+        "title_template": "Delete the hosted instance for {domain}",
+        "body_template": "Hosting for {domain} ended unpaid. Instance {instance_id} is powered off and still billing until somebody deletes it at the provider. Their backups are kept until {shelf_ends_time}.",
+        "link_template": "/admin/server_manager"
+      }
+    },
+    "hosted.transfer_pool_high": {
+      "label": "Cloud transfer pool is nearly used up",
+      "description": "The operator's account-wide outbound transfer allowance passed its warning mark. Transfer is pooled across the account, so there is no per-customer number and no per-customer action — this is one look, not an alarm per site.",
+      "category": "Hosting",
+      "payload": {
+        "used_gb": "Gigabytes used this billing period",
+        "quota_gb": "Gigabytes in the pool",
+        "percent": "Percentage used"
+      },
+      "notify": {
+        "ntf_type": "system",
+        "supports_topic": true,
+        "default_email": true,
+        "title_template": "Cloud transfer pool at {percent}%",
+        "body_template": "{used_gb} GB of the account's {quota_gb} GB outbound transfer pool is used this period. Overage is billed per gigabyte.",
+        "link_template": "/admin/server_manager"
+      }
+    }
+  },
+  "signalSubscribers": {
+    "hosted_trial": {
+      "file": "includes/HostedTrialSignals.php",
+      "class": "HostedTrialSignals",
+      "method": "handle_signal",
+      "signals": [
+        "subscription.payment_failed",
+        "subscription.payment_recovered",
+        "subscription.cancelled"
+      ]
+    }
+  }
 }

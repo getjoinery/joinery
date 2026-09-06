@@ -28,10 +28,20 @@
  *     and no step addressed to another machine (specs/ssh_single_bootstrap.md).
  *   - The password is unsealed only in memory and handed to ssh through the
  *     SSHPASS environment variable, never on a command line.
+ *   - A step may declare `stdin` => 'admin_password'. That is a NAME, not a
+ *     value: the executor unseals the site admin account's first password from
+ *     the provision row and writes it to that session's stdin, where the
+ *     bootstrap's first line reads it into JOINERY_ADMIN_PASSWORD. Same reason
+ *     as SSHPASS — mjb_commands is readable on the plane and job output is
+ *     logged, so the one place a secret may travel is a pipe. A step that asks
+ *     for it and cannot get it FAILS: an install that was meant to carry the
+ *     buyer's password must not silently fall back to one nobody holds.
  *
  * It writes the same mjb_output / mjb_status contract the agent's runner wrote,
  * so JobResultProcessor::process_install_node reads a completed job unchanged.
  *
+ * @version 1.6 - a step may ask for the site admin password on stdin, unsealed from the provision row
+ *                and written to that one session (specs/hosted_trial_provisioning.md B1)
  * @version 1.5 - retire_install_password: the second bootstrap job type, claimed the same way, and
  *                completed only after a fresh login with the password is refused by the machine
  * @version 1.4 - every install shape runs: the shape refusal and the scp/other-node refusals are gone,
@@ -137,6 +147,9 @@ class InstallJobExecutor {
 			'port'     => (int)($node->get('mgn_ssh_port') ?: 22),
 			'user'     => (string)($node->get('mgn_ssh_user') ?: 'root'),
 			'password' => $password,
+			// Unsealed once, for the length of this job, and only used by a step
+			// that declared it needs it. Absent is the ordinary case.
+			'admin_password' => $this->resolve_admin_password($node),
 		);
 		if ($ctx['host'] === '') {
 			$this->finish($job, false, 'The target node has no host address.');
@@ -325,6 +338,22 @@ class InstallJobExecutor {
 		}
 
 		if ($type === 'ssh') {
+			// A step that named a secret for its stdin gets it, or fails. The
+			// only name is the admin password; anything else is a builder defect
+			// and is refused rather than run without what it asked for.
+			$stdin = null;
+			$wants = (string)($step['stdin'] ?? '');
+			if ($wants !== '') {
+				if ($wants !== 'admin_password') {
+					return array('', 1, "unknown stdin source '{$wants}'");
+				}
+				if (trim((string)($ctx['admin_password'] ?? '')) === '') {
+					return array('', 1, 'this install asks for the site admin password on stdin, and the '
+						. 'provision row holds none that can be read back — the site would be born with a '
+						. 'password nobody has');
+				}
+				$stdin = $ctx['admin_password'] . "\n";
+			}
 			$ssh = 'sshpass -e ssh'
 				. ' -o StrictHostKeyChecking=accept-new'
 				. ' -o UserKnownHostsFile=/dev/null'
@@ -332,7 +361,7 @@ class InstallJobExecutor {
 				. ' -p ' . escapeshellarg((string)$ctx['port'])
 				. ' ' . escapeshellarg($ctx['user'] . '@' . $ctx['host'])
 				. ' ' . escapeshellarg((string)($step['cmd'] ?? ''));
-			list($out, $code) = $this->shell($ssh, array('SSHPASS' => $ctx['password']), $timeout);
+			list($out, $code) = $this->shell($ssh, array('SSHPASS' => $ctx['password']), $timeout, $stdin);
 			return array($out, $code, $code !== 0 ? "ssh step exited {$code}" : '');
 		}
 
@@ -344,7 +373,7 @@ class InstallJobExecutor {
 	 * captured output. Extra environment (SSHPASS) is passed to the child only,
 	 * never exported here or placed on a command line.
 	 */
-	private function shell($cmd, array $env_extra, $timeout_secs) {
+	private function shell($cmd, array $env_extra, $timeout_secs, $stdin = null) {
 		$timeout_secs = max(1, (int)$timeout_secs);
 		$wrapped = 'timeout ' . $timeout_secs . ' bash -c ' . escapeshellarg($cmd . ' 2>&1');
 
@@ -354,9 +383,18 @@ class InstallJobExecutor {
 		foreach ($env_extra as $k => $v) { $env[$k] = $v; }
 
 		$descriptors = array(1 => array('pipe', 'w'), 2 => array('pipe', 'w'));
+		if ($stdin !== null) { $descriptors[0] = array('pipe', 'r'); }
 		$proc = @proc_open($wrapped, $descriptors, $pipes, null, $env);
 		if (!is_resource($proc)) {
 			return array('could not start a subprocess for this step', 127);
+		}
+		// Written and closed before the output is read. Everything that travels
+		// this way is one short line — well under a pipe buffer — so there is no
+		// deadlock to interleave against, and closing is what lets the remote
+		// `read` return instead of waiting for a line that never comes.
+		if ($stdin !== null) {
+			fwrite($pipes[0], $stdin);
+			fclose($pipes[0]);
 		}
 		$out = stream_get_contents($pipes[1]);
 		$err = stream_get_contents($pipes[2]);
@@ -371,9 +409,25 @@ class InstallJobExecutor {
 	 * it cannot be read back.
 	 */
 	private function resolve_password($node) {
+		return $this->unseal_provision_column($node, 'cvp_root_pass_sealed');
+	}
+
+	/**
+	 * The site admin account's first password, unsealed, or null when the
+	 * provision holds none — a bare instance, a provision that predates the
+	 * column, or one whose buyer already revealed it (the reveal erases it).
+	 */
+	private function resolve_admin_password($node) {
+		return $this->unseal_provision_column($node, 'cvp_admin_pass_sealed');
+	}
+
+	/** One sealed column of the node's newest live provision, opened, or null. */
+	private function unseal_provision_column($node, string $column) {
+		// The column name is a literal from this file's own two callers, never
+		// anything that arrived from outside.
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare(
-			"SELECT cvp_root_pass_sealed FROM cvp_customer_cloud_provisions " .
+			"SELECT {$column} FROM cvp_customer_cloud_provisions " .
 			"WHERE cvp_mgn_node_id = ? AND cvp_delete_time IS NULL " .
 			"ORDER BY cvp_id DESC LIMIT 1"
 		);

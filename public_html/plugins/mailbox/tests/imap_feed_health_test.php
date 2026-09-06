@@ -132,7 +132,11 @@ check(strpos($threw, (string)$account->get('iia_username')) !== false && strpos(
 $account->observeFetchOutcome(true, '', 0, false);
 $threw = '';
 try { InboundEmailHealth::checkImapFeeds(); } catch (ProvisioningCheckFailed $e) { $threw = $e->getMessage(); }
-check($threw === '', 'a recovered feed passes it');
+// The check is sitewide, and this deployment may carry a real feed that is
+// broken for real — so the assertion is that THIS account is no longer named,
+// not that nothing at all is wrong on the site.
+check(strpos($threw, (string)$account->get('iia_username')) === false,
+	'a recovered feed passes it', $threw);
 
 section('A disabled feed takes part in no transitions');
 $account->set('iia_is_enabled', false);
