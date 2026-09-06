@@ -54,6 +54,20 @@ function admin_help_logic(array $input): LogicResult {
 		}
 	}
 
+	// The docs are source files that ship inside the release archive, so an edit
+	// made on a site that consumes releases is overwritten by its next upgrade
+	// with nothing to show for it. Only the origin -- the deployment the code is
+	// written on -- offers the editor, and only to a superadmin.
+	$edit_url = '';
+	if (empty($error) && DeploymentHelper::isOriginNode() && $session->get_permission() >= 10) {
+		// No ?doc= is the Overview, which renders docs/index.md.
+		$edit_key = empty($selected_doc) ? 'index' : $selected_doc;
+		$resolved = DocsScanner::resolve_path($edit_key, $docs_dir);
+		if ($resolved['error'] === '') {
+			$edit_url = '/admin/admin_help_edit?doc=' . $edit_key;
+		}
+	}
+
 	$page_vars = array();
 	$page_vars['settings'] = $settings;
 	$page_vars['session'] = $session;
@@ -64,6 +78,7 @@ function admin_help_logic(array $input): LogicResult {
 	$page_vars['error'] = $error;
 	$page_vars['meta_description'] = $meta_description;
 	$page_vars['base_url'] = $base_url;
+	$page_vars['edit_url'] = $edit_url;
 
 	return LogicResult::render($page_vars);
 }

@@ -17,6 +17,7 @@ $session = $page_vars['session'];
 $doc_tree = $page_vars['doc_tree'];
 $selected_doc = $page_vars['selected_doc'];
 $rendered_html = $page_vars['rendered_html'];
+$edit_url = $page_vars['edit_url'];
 $page_title = $page_vars['page_title'];
 $error = $page_vars['error'];
 $base_url = $page_vars['base_url'];
@@ -44,7 +45,7 @@ $page->admin_header(
 	<?php echo DocsScanner::get_layout_css(); ?>
 </style>
 <?php
-echo DocsScanner::render_viewer($doc_tree, $selected_doc, $rendered_html, $error, $base_url);
+echo DocsScanner::render_viewer($doc_tree, $selected_doc, $rendered_html, $error, $base_url, $edit_url);
 
 $page->admin_footer();
 ?>

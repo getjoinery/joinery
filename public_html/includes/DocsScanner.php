@@ -4,8 +4,8 @@
  *
  * Used by both the admin help viewer (adm/admin_help.php) and the public
  * documentation page (views/documentation.php). All scanning, title/description
- * extraction, doc loading (with path-traversal protection), and auto-generated
- * landing markup live here so the two viewers stay in lock-step.
+ * extraction, doc loading and saving (with path-traversal protection), and
+ * auto-generated landing markup live here so the two viewers stay in lock-step.
  */
 
 class DocsScanner {
@@ -257,8 +257,12 @@ class DocsScanner {
 	}
 
 	/**
-	 * Validate and load a doc file by its slug. Returns
-	 * ['content' => string, 'title' => string, 'description' => string, 'error' => string].
+	 * Resolve a doc key to an absolute .md path inside an allowed docs root.
+	 *
+	 * The one place a doc key becomes a filesystem path, so a read and a write
+	 * are guarded by the same rules rather than by two copies that can drift.
+	 * Returns ['path' => string, 'error' => string]; path is empty when error
+	 * is set.
 	 *
 	 * Core keys: each path segment must match ^[a-zA-Z0-9_-]+$, max one
 	 * subdirectory deep, realpath must resolve inside $docs_dir.
@@ -267,7 +271,7 @@ class DocsScanner {
 	 * each slug segment must match ^[a-zA-Z0-9_-]+$; realpath must resolve
 	 * inside that plugin's docs/ directory.
 	 */
-	public static function load_doc($doc_key, $docs_dir) {
+	public static function resolve_path($doc_key, $docs_dir) {
 		$segments = explode('/', $doc_key);
 
 		if (count($segments) >= 2 && $segments[0] === 'plugin') {
@@ -275,74 +279,116 @@ class DocsScanner {
 			$slug_segments = array_slice($segments, 2);
 
 			if (empty($slug_segments) || count($slug_segments) > 2) {
-				return array('content' => '', 'title' => '', 'description' => '', 'error' => 'Invalid document path.');
+				return array('path' => '', 'error' => 'Invalid document path.');
 			}
 
 			if (!preg_match('/^[a-zA-Z0-9_-]+$/', $plugin_name)) {
-				return array('content' => '', 'title' => '', 'description' => '', 'error' => 'Invalid plugin name.');
+				return array('path' => '', 'error' => 'Invalid plugin name.');
 			}
 
 			foreach ($slug_segments as $seg) {
 				if (!preg_match('/^[a-zA-Z0-9_-]+$/', $seg)) {
-					return array('content' => '', 'title' => '', 'description' => '', 'error' => 'Invalid document name.');
+					return array('path' => '', 'error' => 'Invalid document name.');
 				}
 			}
 
-			$plugin_docs_dir = PathHelper::getIncludePath('plugins/' . $plugin_name . '/docs');
+			$base_dir = PathHelper::getIncludePath('plugins/' . $plugin_name . '/docs');
 			$relative_path = implode('/', $slug_segments) . '.md';
-			$filepath = $plugin_docs_dir . '/' . $relative_path;
-
-			$real_docs = realpath($plugin_docs_dir);
-			$real_file = realpath($filepath);
-
-			if ($real_file === false || $real_docs === false || strpos($real_file, $real_docs . DIRECTORY_SEPARATOR) !== 0) {
-				return array('content' => '', 'title' => '', 'description' => '', 'error' => 'Document not found.');
+		} else {
+			if (count($segments) > 2) {
+				return array('path' => '', 'error' => 'Invalid document path.');
 			}
 
-			if (!is_readable($filepath)) {
-				return array('content' => '', 'title' => '', 'description' => '', 'error' => 'Document is not readable.');
+			foreach ($segments as $seg) {
+				if (!preg_match('/^[a-zA-Z0-9_-]+$/', $seg)) {
+					return array('path' => '', 'error' => 'Invalid document name.');
+				}
 			}
 
-			$basename = pathinfo($filepath, PATHINFO_FILENAME);
-			return array(
-				'content' => file_get_contents($filepath),
-				'title' => self::extract_title($filepath, $basename),
-				'description' => self::extract_description($filepath),
-				'error' => '',
-			);
+			$base_dir = $docs_dir;
+			$relative_path = implode('/', $segments) . '.md';
 		}
 
-		if (count($segments) > 2) {
-			return array('content' => '', 'title' => '', 'description' => '', 'error' => 'Invalid document path.');
-		}
+		$filepath = $base_dir . '/' . $relative_path;
 
-		foreach ($segments as $seg) {
-			if (!preg_match('/^[a-zA-Z0-9_-]+$/', $seg)) {
-				return array('content' => '', 'title' => '', 'description' => '', 'error' => 'Invalid document name.');
-			}
-		}
-
-		$relative_path = implode('/', $segments) . '.md';
-		$filepath = $docs_dir . '/' . $relative_path;
-
-		$real_docs = realpath($docs_dir);
+		$real_docs = realpath($base_dir);
 		$real_file = realpath($filepath);
 
 		if ($real_file === false || $real_docs === false || strpos($real_file, $real_docs . DIRECTORY_SEPARATOR) !== 0) {
-			return array('content' => '', 'title' => '', 'description' => '', 'error' => 'Document not found.');
+			return array('path' => '', 'error' => 'Document not found.');
 		}
 
 		if (!is_readable($filepath)) {
-			return array('content' => '', 'title' => '', 'description' => '', 'error' => 'Document is not readable.');
+			return array('path' => '', 'error' => 'Document is not readable.');
 		}
 
+		return array('path' => $filepath, 'error' => '');
+	}
+
+	/**
+	 * Validate and load a doc file by its slug. Returns
+	 * ['content' => string, 'title' => string, 'description' => string, 'error' => string].
+	 */
+	public static function load_doc($doc_key, $docs_dir) {
+		$resolved = self::resolve_path($doc_key, $docs_dir);
+		if ($resolved['error'] !== '') {
+			return array('content' => '', 'title' => '', 'description' => '', 'error' => $resolved['error']);
+		}
+
+		$filepath = $resolved['path'];
 		$basename = pathinfo($filepath, PATHINFO_FILENAME);
+
 		return array(
 			'content' => file_get_contents($filepath),
 			'title' => self::extract_title($filepath, $basename),
 			'description' => self::extract_description($filepath),
 			'error' => '',
 		);
+	}
+
+	/**
+	 * Overwrite an existing doc with new content. Returns '' on success, or a
+	 * sentence saying why nothing was written.
+	 *
+	 * Only files that already exist are written: a key naming nothing resolves
+	 * to an error, so this never creates a file and never needs write access to
+	 * the directory itself.
+	 *
+	 * $expected_hash is sha1() of the content the editor was opened on. When it
+	 * no longer matches what is on disk, the file changed underneath the editor
+	 * -- a shell edit, a git checkout, a second tab -- and the save is refused
+	 * rather than silently discarding that change. Pass '' to skip the check.
+	 */
+	public static function save_doc($doc_key, $docs_dir, $content, $expected_hash = '') {
+		$resolved = self::resolve_path($doc_key, $docs_dir);
+		if ($resolved['error'] !== '') {
+			return $resolved['error'];
+		}
+
+		$filepath = $resolved['path'];
+
+		if (!is_writable($filepath)) {
+			return 'This file is not writable by the web server, so nothing was saved.';
+		}
+
+		if (trim((string)$content) === '') {
+			return 'Refusing to save an empty document.';
+		}
+
+		if ($expected_hash !== '' && sha1((string)file_get_contents($filepath)) !== $expected_hash) {
+			return 'This file changed on disk after you opened it, so nothing was saved. Your text is still below; open the file again to see the version that is there now.';
+		}
+
+		// A textarea posts CRLF; the docs are LF files under git, and without
+		// this every save would rewrite every line of the file.
+		$content = str_replace("\r\n", "\n", (string)$content);
+		$content = rtrim($content, "\n") . "\n";
+
+		if (file_put_contents($filepath, $content, LOCK_EX) === false) {
+			return 'Could not write the file.';
+		}
+
+		return '';
 	}
 
 	/**
@@ -390,7 +436,7 @@ class DocsScanner {
 	 * admin help page and the public documentation page; they only differ
 	 * in the surrounding page chrome and the $base_url.
 	 */
-	public static function render_viewer($doc_tree, $selected_doc, $rendered_html, $error, $base_url) {
+	public static function render_viewer($doc_tree, $selected_doc, $rendered_html, $error, $base_url, $edit_url = '') {
 		$base = htmlspecialchars($base_url);
 		$out = '<div class="docs-layout">';
 
@@ -420,6 +466,10 @@ class DocsScanner {
 		if (!empty($error)) {
 			$out .= '<div class="docs-error">' . htmlspecialchars($error) . '</div>';
 		} else {
+			if (!empty($edit_url)) {
+				$out .= '<div class="docs-edit-bar"><a class="btn btn-sm btn-outline-secondary" href="'
+					. htmlspecialchars($edit_url) . '">Edit this page</a></div>';
+			}
 			$out .= $rendered_html;
 		}
 		$out .= '</main>';
@@ -455,6 +505,7 @@ class DocsScanner {
 			.docs-landing-title a:hover { text-decoration: underline; }
 			.docs-landing-desc { margin: 0; font-size: 0.875rem; color: #555; }
 			.docs-landing-group { margin-top: 2rem; padding-bottom: 0.3em; border-bottom: 1px solid #eee; }
+			.docs-edit-bar { display: flex; justify-content: flex-end; margin-bottom: 0.5rem; }
 			.docs-error { padding: 1rem; border: 1px solid #f5c2c7; background: #f8d7da; color: #842029; border-radius: 4px; }
 			@media (max-width: 900px) {
 				.docs-layout { grid-template-columns: 1fr; }

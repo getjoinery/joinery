@@ -199,6 +199,11 @@ class MarkdownRenderer {
             .markdown-content h2 { border-bottom: 1px solid #eee; padding-bottom: 0.3em; }
             .markdown-content table { margin: 1em 0; }
             .markdown-content ul, .markdown-content ol { margin: 0.5em 0; padding-left: 2em; }
+            /* Stated rather than inherited: the admin theme resets list markers
+               globally, which left every numbered step in the docs unnumbered. */
+            .markdown-content ul { list-style: disc; }
+            .markdown-content ol { list-style: decimal; }
+            .markdown-content li { list-style: inherit; }
         ';
     }
 }
