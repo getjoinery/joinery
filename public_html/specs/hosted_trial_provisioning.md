@@ -4,8 +4,13 @@
 for outbound mail; one hosted tier on a 1 GB Nanode, 60-day free trial then
 $9.99/mo at the same allowances; relay only on a buyer-supplied VPS; B2
 shelf; backups amber until the owner's key ceremony; 30 days grace then
-shutdown, shelf kept 90 days. Engineering items E1–E7 settled (§13). Ready
-to build (§11); owner account setup in §13 runs alongside.
+deletion, shelf pruned at 90. Reviewed by `public-html-36` 2026-09-06 (24
+findings folded in; §14). D5 and D6 closed by the owner the same day. **All
+decisions taken. Ready to build (§11).**
+
+**The timeline, in one line (owner, 2026-09-06):** $39.99 buys 60 days free,
+then $9.99/mo; the instance is deleted 30 days after non-payment; the backup
+shelf is deleted 90 days after non-payment.
 **Companions:** `automatic_install_mail_topology.md` (the checkout question this
 builds on), `managed_domain_registration.md` (the domain leg),
 `keyless_provisioning.md` (no key of ours ever lands on a machine we create),
@@ -91,11 +96,20 @@ green only after that. That is the honest state; we do not hold their DNS.
 - Instance type and region come from settings, never from the buyer.
 - The root password is generated, sealed on the row, and retired after the
   agent joins — exactly as the keyless design already does.
-- The buyer's getjoinery email becomes the site admin (`--admin-email`, an
-  installer seam that exists and is unused by the job). The admin password is
-  generated on the plane, passed as `JOINERY_ADMIN_PASSWORD`, sealed on the
+- The buyer's getjoinery email becomes the site admin. B1 is smaller than
+  first written (review F1): `ProvisionCustomerCloud` already puts
+  `admin_email` in the install job params and the welcome email reads it;
+  `install.sh`/`_site_init.sh` already carry `--admin-email` and
+  `JOINERY_ADMIN_PASSWORD` into the container; `reset_admin_password.php`
+  already sets `usr_force_password_change`. The only gap is
+  `JobCommandBuilder::build_install_node` never emitting them on the
+  install line. The admin password is generated on the plane, sealed on the
   provision row, and revealed once on the buyer's page — erased in the same
-  request (E7).
+  request (E7). **It must never appear in the stored step text**
+  (`mjb_steps` is readable on the plane and job output is logged): hand it
+  to the install the way `InstallJobExecutor` hands the root password —
+  unsealed in memory into the child's environment, never in the command
+  string.
 
 ### 4.2 Domain and DNS
 
@@ -121,18 +135,20 @@ Every API call below is made with the plane's master key and carries
 - **SMTP user** (`POST /v3/users/smtp/add`, `subaccount_id`): one per
   customer, inside their subaccount. Its username and password are what
   reach the box, pushed over the channel as the site's SMTP settings
-  (`email_service = smtp`, host `mail.smtp2go.com`, port 587). The platform's
-  existing `SmtpProvider` sends; no new provider class.
+  (`email_service = smtp`, host `mail.smtp2go.com`, port 587) by the
+  `settings_converge` primitive (§4.6). The platform's existing
+  `SmtpProvider` sends; no new provider class. Bounce/complaint counting
+  stays a server_manager counter per subaccount: core has no sender-event
+  handling and no suppression list, and building one here would have no
+  second consumer (review G5).
 - `defaultemail` = `hello@mail.<domain>`; Reply-To = `info@<domain>`.
-- **Daily cap by rolling limit.** SMTP2GO enforces a subaccount's `limit`
-  against month-to-date usage and has no daily field. So a daily plane job
-  reads each subaccount's month-to-date sends (email-history summary per
-  subaccount, or the per-credential webhook `auth` field) and sets
-  `limit = sent_this_month + daily_allowance`; on the 1st it sets
-  `limit = daily_allowance`. The provider then hard-stops at the day's
-  allowance and the plane is never in the send path. A missed plane day caps
-  the customer at yesterday's figure — fails safe. SMTP2GO permits a 10%
-  overrun past `limit`; the allowance is chosen with that in mind.
+- **Send cap: monthly, 1,000 (D5, owner).** SMTP2GO enforces a
+  subaccount's `limit` against month-to-date usage. There is no account-wide
+  default for subaccounts; the plane sets the same `limit` on every
+  subaccount from one plugin setting (the allowance in §12), at creation and
+  whenever the setting changes. No daily job. The spammer case is covered by
+  the complaint/bounce threshold at 100 sends plus SMTP2GO's own abuse
+  controls. SMTP2GO permits a 10% overrun past `limit`.
 - **Kill switch:** "Close a subaccount" (reopen exists). Removing the SMTP
   user is the softer step.
 - **Webhooks** are scoped per sending credential and carry `auth` naming it,
@@ -163,32 +179,65 @@ web root, retention already runs on the plane, and the wizard's Backups step
 already reads green from manager-profile history rows
 (`BackupHistory::manager_coverage()`).
 
-What the hosted tier changes:
+What the hosted tier changes — and each change is fleet-wide, not a hosted
+special case (review G1, G4, R1):
 
-- **A per-node, per-run credential instead of the target's one shared
-  write-only key.** Today a target holds a single `bkt_node_credentials`
-  handed to every node; on a customer's box that key could write anywhere in
-  the fleet bucket. The plane instead mints, at dispatch, a B2 key pinned to
-  `{prefix}/{slug}/` with `writeFiles` only and a lifetime of a few hours
-  (`b2_create_key`, `validDurationInSeconds`), and passes it as the run's
-  credential. The box holds nothing between runs and nothing it could reuse.
-  The existing per-run placeholder mechanism carries it.
+- **Per-run minted keys as a target capability.** Today a target holds one
+  `bkt_node_credentials` handed to every node, resolved at job PICKUP by
+  `AgentChannelEndpoint::resolve_credential_slots` from the stored slot;
+  nothing mints. On a customer's box that shared key could write anywhere in
+  the fleet bucket. Change: a target whose provider can mint scoped keys (B2
+  now; S3 later via STS session policies) gets a third placeholder,
+  `__SM_RUN_CREDS_<id>__`, resolved at pickup by minting a key pinned to
+  `{prefix}/{slug}/`, `writeFiles` only, whose lifetime is derived from the
+  backup step's timeout (review C5 — a key that expires mid-upload reads as
+  a bucket error). `FleetBackupRun` mints for any target that can and falls
+  back to `bkt_node_credentials` for any that cannot. Every fleet node on B2
+  stops holding a standing key; hosted nodes need nothing special. Pickup is
+  the right moment because the lifetime starts when the agent holds it.
+  **New code:** a small native B2 client (`b2_authorize_account`,
+  `b2_create_key`, `b2_delete_key`) — storage today is S3-only
+  (`CloudStorageS3Driver`, `S3Signer`; `bkt_provider = b2` means B2's
+  S3-compatible endpoint). **Verify before building** (review F7): that a
+  `namePrefix`-restricted application key is honoured over the S3-compatible
+  endpoint the run will use, and the account's application-key count limit
+  and whether expired keys are removed automatically (one key per node per
+  run).
+- **Dispatch gate on the recovery key.** `FleetBackupPolicy::eligible_nodes`
+  filters only on web root, skip-checks and install state, so a node whose
+  key is unverified fails its run at `BackupRunner` every cycle, writes a
+  problem line into every fleet report and trips the backup-overdue alarm —
+  true today for any fresh node. The plane already holds the verified
+  fingerprint (`mgn_backup_recovery_fpr`, folded by `JobResultProcessor`).
+  Gate dispatch on it and report "awaiting recovery key" as a skip, not a
+  problem (review F5/G4).
 - **Backups stay amber until the recovery-key ceremony** (Q3): a machine
   with no verified key of its own refuses to back up at all, by design. The
   banner says so; the wizard step is the one ceremony.
-- **Size allowance** = keep-N chains on the plane's retention pass (already
-  built) plus the prefix measurement from §6.
-- **Restore** is the existing restore-over-agent path; the read credential
-  it needs is minted the same way, read-only, short-lived, prefix-pinned.
+- **Size is free.** `FleetBackupRetention::prune` already lists the node's
+  whole prefix every cycle and `S3Signer::list` returns each object's size;
+  the shelf figure is a sum in that pass, stamped on the node beside
+  `mgn_backup_shelf_checked_time`. No separate measurement, no meter column.
+- **Restore** is the existing restore-over-agent path; its read credential
+  is minted the same way, read-only, short-lived, prefix-pinned.
 
 ### 4.6 Trial state and banners
 
 Trial start, end, plan, and enforcement verdicts live on the plane in a new
 `hosted_trial` row per provision. The box learns only what it needs to render:
-`managed:true` settings pushed over the channel (the `ManagedDomainNotice`
-pattern) carrying the hosting end date, usage against each allowance, the
-own-account links, and any active suspension notice. Rendered to permission 5+ only. The customer cannot edit a
+`managed:true` settings pushed over the channel carrying the hosting end
+date, usage against each allowance, the own-account links, and any active
+suspension notice. Rendered to permission 5+ only. The customer cannot edit a
 managed setting.
+
+**The push is one general primitive, not two new ones** (review F8/G2). The
+only settings-pushing primitive today is `managed_domain_notice`, which takes
+exactly domain/expiry/state/url. Instead: a `settings_converge` primitive
+carrying a map, allowlisted on the node to settings declared `managed:true`
+in `settings.json` — the declaration IS the allowlist, so the `smtp_*`
+settings §4.3 pushes gain the flag. It serves the domain notice, the hosted
+banners, the SMTP push and whatever comes next; `managed_domain_notice` is
+re-pointed to it later. One Go change and one release.
 
 ## 5. Provisioning orchestration
 
@@ -220,17 +269,16 @@ enforce and nothing listed here. What follows is the set of limits a customer
 
 | Limit | Signal | Warn | Act | Lever |
 |---|---|---|---|---|
-| Sending volume, daily | SMTP2GO counts month-to-date against the subaccount `limit`, which the plane rolls forward daily (§4.3) | Banner at 80% of the day's allowance, from the webhook count, with the own-account link | Provider refuses at the allowance (+10%) until the plane rolls the limit forward next day | The `limit` itself; the plane only moves it |
+| Sending volume | SMTP2GO counts month-to-date against the subaccount `limit` of 1,000 | Banner at 80%, from the webhook count, with the own-account link | Provider refuses at the allowance (+10%) until the month rolls | The `limit` itself |
 | Complaints and bounces | Webhook events `spam`, `bounce`, `reject` per `auth` | — | Sending stops at the threshold; operator alert; repeat → shutdown | Remove the SMTP user, then close the subaccount; instance shutdown |
-| Storage size | Prefix listing on the plane's retention pass | Banner at 80% with the own-bucket link | Runs stop at 100%; the node's fleet policy is set off and history records why | Stop minting the per-run key |
-| Site data on disk | Node's own disk usage, reported by the agent's check_status | Banner at 80% with the move offer | Nothing automatic — a full disk stops the site on its own | None; the off-ramp is the lever |
-| Outbound bandwidth | Instance transfer figure from the Linode API (the pool is account-wide, so this is the only per-customer view) | Banner at 80% with the move-to-your-own-Linode offer | Shutdown at 100% until the month rolls | Instance shutdown, reversible |
-| Trial end | Plane clock plus the Stripe subscription state | Banner from two weeks out | Shutdown at end plus grace | Instance shutdown; deletion is a person at the provider |
-| Failed charge | Stripe webhook | Banner for the 30-day grace | Shutdown at day 30; shelf kept 90 more days | Same |
+| Storage size | Sum of the prefix listing the retention pass already takes (R1) | Banner at 80% with the own-bucket link | Runs stop at 100%; the node's fleet policy is set off and history records why | Stop minting the per-run key |
+| Disk | The existing `disk_usage_percent` on the node row (check_status / management stats), already badged at 80/90% on the node overview | The same 80% figure on the customer's banner, with the move offer | Nothing automatic — a full disk stops the site on its own | None; the off-ramp is the lever |
+| Outbound bandwidth | ONE operator alert at 80% of the ACCOUNT transfer pool (Linode account transfer endpoint); no per-customer meter (review C2 — worst case $1.25 and only if the pool is exhausted) | — | Operator looks | None |
+| Trial end | Stripe charges at day 60; the plane only watches the signals | Banner from two weeks out | Nothing — a successful charge continues hosting | — |
+| Non-payment | `subscription.payment_failed` (day 0) | Banner for 30 days | Day 30: instance shut down and an operator deletion task queued; day 90: shelf pruned | Shutdown by API; deletion by a person at the provider; prune by the plane's retention pass |
 
-Only the storage and bandwidth caps are plane-enforced without a provider
-backstop (no storage provider caps a prefix; Linode has no per-instance cap).
-Both are metered with margin.
+Only the storage cap is plane-enforced without a provider backstop (no
+storage provider caps a prefix); it is metered with margin.
 
 ## 7. Lifecycle and the off-ramps
 
@@ -247,22 +295,29 @@ Both are metered with margin.
     site-profile target form; both profiles may run side by side). The
     plane sets the node's fleet policy off and, after the retention window,
     prunes the prefix.
-  - *Compute or bandwidth* → move to your own Linode. Images cannot cross
+  - *Compute or disk* → move to your own Linode. Images cannot cross
     Linode accounts, so the move is a new bring-your-own provision with
-    `install_mode = from_backup` reading this node's shelf (the existing
-    path), through the Linode referral link already held as a setting. When
-    the new box is live and DNS moved, the hosted instance is shut down and
-    queued for manual deletion.
+    `install_mode = from_backup`, which is a **live clone** (review F3): the
+    plane arms the hosted node's `clone_export_arm` primitive and the new
+    box pulls DB, uploads, themes and plugins over HTTPS from it. It runs
+    while the hosted box is up, needs no shelf and never touches the
+    customer's recovery key. Through the Linode referral link already held
+    as a setting. When the new box is live and DNS moved, the hosted
+    instance is shut down and queued for manual deletion.
 - **Convert:** Stripe charges at trial end; webhook
   flips `hosted_trial` to `subscribed`; the countdown banner clears. The
   allowances do not change.
-- **Lapse:** charge fails → 30 days of grace with the banner up (Stripe's
-  retries run inside it; a successful retry cancels everything) → instance
-  shutdown via API (reversible) → the backup shelf is kept for **90 days**
-  after shutdown, then an operator task to delete the instance at the
-  provider and prune the prefix. A customer who pays inside the 90 days is
-  restored from the shelf, not lost. The grace month is paid for by the
-  $39.99 setup fee.
+- **Non-payment (D6, owner):** day 0 the charge fails and the banner goes
+  up (Stripe's retries run inside the window; `subscription.payment_recovered`
+  cancels everything). **Day 30: the instance is shut down by API and an
+  operator deletion task is queued** — deletion itself stays a person at the
+  provider (§2 rule 4), so "deleted 30 days after non-payment" is the day
+  the task is raised, and the instance stops billing when the operator acts
+  on it. **Day 90: the shelf is pruned** by the plane's retention pass.
+  Between day 30 and 90 a returning customer is restored by a fresh install
+  plus restore-over-agent, which needs THEIR recovery key; a customer who
+  never did the ceremony has no shelf and is not recoverable — accepted by
+  the owner. The grace month is paid for by the $39.99 setup fee.
 - **Abuse:** complaint threshold → SMTP user removed immediately, operator
   alert; repeated → subaccount closed and instance shutdown. Never deletion.
 
@@ -272,9 +327,10 @@ Both are metered with margin.
   (erased on reveal), `cvp_smtp2go_subaccount_id`,
   `cvp_smtp2go_domain_id`, `cvp_smtp2go_user_id`, per-leg state columns.
 - New `htr_hosted_trials`: provision id, start, end, state
-  (`trial|subscribed|grace|suspended|shutdown`), allowances, meters (sends
-  today/month, complaints, storage bytes, transfer bytes), last-measured
-  stamps, last `limit` written, Stripe subscription id.
+  (`trial|subscribed|grace|suspended|shutdown`), complaint/bounce counts,
+  Stripe subscription id. Nothing else (review C6): shelf bytes live on the
+  node row, sends live at SMTP2GO, disk is `disk_usage_percent`, there is no
+  transfer column.
 - Plugin settings: operator Linode token (sealed), SMTP2GO master key
   (sealed), SMTP2GO referral URL, storage master credential (sealed, the
   existing target), trial length, the allowances in §12, instance type and
@@ -307,9 +363,9 @@ Both are metered with margin.
   the ceremony, by design.** `BackupRecoveryKey` (1.2) accepts the public key
   from this site alone and refuses to seal until the owner has opened a
   challenge with the private half, so neither a plane-held interim key nor a
-  plane-generated key shown on the order page can exist. The plane pre-seeds
-  everything else (target, write-only key, scheduled task); the first backup
-  runs the moment the wizard's one-ceremony Backups step passes. The banner
+  plane-generated key shown on the order page can exist. Nothing is seeded
+  on the box (§4.5); the first fleet manager run happens the cycle after
+  the wizard's one-ceremony Backups step passes. The banner
   says: your backups start when you create your recovery key.
 - ~~Q5. Grace period.~~ **Decided 2026-09-06: 30 days of grace after a
   failed charge, then shutdown; the backup shelf is kept for 90 days after
@@ -320,22 +376,27 @@ Both are metered with margin.
 - ~~Q6. Instance plan.~~ **Decided 2026-09-06: 1 GB Nanode.** Memory is not
   the constraint (a full site with Postgres runs at 105–290 MB on the shared
   host; the July proof ran on a Nanode). Disk is: 25 GB less ~5 GB system
-  leaves ~18 GB for mail and Drive, so site data gets its own 15 GB
-  allowance with the same 80% banner and the move-to-your-own-Linode
-  off-ramp (§12). The backup shelf stays at 10 GB; chains compress well
+  leaves ~18 GB for mail and Drive. The disk allowance is simply "disk at
+  80%" — the existing `disk_usage_percent` badge — not a separate site-data
+  figure (review C3). The backup shelf stays at 10 GB; chains compress well
   below live size.
 
 ## 11. Build order
 
-1. B1 login fix (admin email + sealed password through the install job) —
-   independent of everything else and owed on today's path too.
-2. Operator hosting mode in the provisioner.
-3. Mail leg (subaccount, sender domain, SMTP user, settings push, webhook
-   meter, rolling-limit job).
-4. Backup leg: per-run prefix-pinned key minting in the fleet dispatch,
-   plane-side size meter. No node-side work.
-5. Trial row, Stripe subscription linkage, banners, shutdown action.
-6. Live gate on a fresh install, then the purchase-path verification campaign.
+1. B1 login fix: `build_install_node` emits `--admin-email` and hands the
+   password through the executor's environment. Owed on today's path too.
+2. Three small fleet-wide fixes the later legs depend on (review):
+   `subscription.payment_recovered` in the store (G3); the recovery-key
+   dispatch gate in `FleetBackupPolicy` (G4); the `settings_converge`
+   primitive + agent release (G2).
+3. Operator hosting mode in the provisioner; E3's driver methods.
+4. Mail leg (subaccount, sender domain, SMTP user, settings push, webhook
+   counter; the limit job only if D5 = rolling).
+5. Backup leg: B2 native client, `__SM_RUN_CREDS_` minting at pickup as a
+   target capability, shelf-size sum in the prune pass. No node-side work.
+6. Trial row, signal subscribers, banners, shutdown action, your-sites page.
+7. Test-mode order proving the setup line charges under a trial (E6); live
+   gate on a fresh install; then the purchase-path verification campaign.
 
 ## 12. Limits and cost per user
 
@@ -351,33 +412,34 @@ published shared-plan price, not re-fetched (the pricing page did not render).
 | Resource | Allowance | When exceeded |
 |---|---|---|
 | Instance | 1 GB Nanode, 25 GB disk | Move to your own Linode (§7) |
-| Site data on disk | 15 GB (mail + Drive + database) | Banner at 80%; move to your own Linode (§7) |
-| Sends per day | 100 (≈3,000/mo) | Own SMTP2GO account (§7) |
+| Disk | 80% of the 25 GB disk (≈15 GB of site data after the system) | Banner at 80%; move to your own Linode (§7) |
+| Sends | 1,000/mo, enforced by SMTP2GO | Own SMTP2GO account (§7) |
 | Backup shelf | 10 GB | Own bucket (§7) |
-| Outbound transfer | 250 GB/mo | Shutdown until the month rolls; move offer |
+| Outbound transfer | none per customer; operator alert at 80% of the account pool | — |
 | Complaint rate | 0.1% over 7 days, min 100 sends | Sending removed; abuse path |
 | Bounce rate | 5% over 7 days, min 100 sends | Same |
 
-A personal user sends well under 20 a day; 100 is generous and still small
-enough that a spammer cannot do damage before the first day's cap lands.
+A personal user sends well under 20 a day, about 600 a month; 1,000 leaves
+room and is small enough that a spammer trips the complaint threshold long
+before the cap matters.
 
 ### Cost per user per month
 
 | Line | At every cap | Typical |
 |---|---|---|
 | Compute | $5.00 | $5.00 |
-| Email | 3,000 × $0.00075 = $2.25 | 600 × $0.00075 = $0.45 |
+| Email | 1,000 × $0.00075 = $0.75 | 600 × $0.00075 = $0.45 |
 | Backup shelf | 10 GB × $0.00695 = $0.07 | 2 GB = $0.01 |
 | Transfer, within the account pool | $0.00 | $0.00 |
-| Transfer, worst case if the pool is exhausted | 250 GB × $0.005 = $1.25 | — |
+| Transfer, worst case if the account pool is exhausted | ≈250 GB × $0.005 = $1.25 | — |
 | Domain (one-time on its own line, ≈$12/yr) | — | — |
-| **Total** | **$7.32** (**$8.57** with the pool exhausted) | **$5.46** |
+| **Total** | **$5.82** (**$7.07** with the pool exhausted) | **$5.46** |
 
 Typical assumes 20 sends a day, a 2 GB shelf and 20 GB of transfer.
 
 Fixed overhead not in the per-user lines: the SMTP2GO plan itself. Starter
-($10) covers three users at their cap or about 16 typical users; Professional
-($75) covers 33 at their cap or about 160 typical. Divide the plan fee by the
+($10) covers ten users at their cap or about 16 typical users; Professional
+($75) covers 100 at their cap or about 160 typical. Divide the plan fee by the
 live customer count for the true per-user figure.
 No startup-credit programme exists at SMTP2GO (checked 2026-09-06). Two
 discounts do: the **MSP partner programme** cuts our master-account bill by
@@ -424,22 +486,29 @@ coexist.
   `GET …/transfer`). The plane's lever is shutdown; `deleteInstance` stays
   as is — its only caller is `RelayCloudProvisioner` cleaning up a relay
   run that never came up, and the hosted path never calls it.
-- ~~E4. Disk signal.~~ **Settled 2026-09-06: a health document on every
-  Joinery site.** A small endpoint reporting disk, memory and version,
-  guarded by a per-node token in its URL and stored as
-  `mgn_health_check_url`; `RunNodeUptimeChecks` already reads such documents
-  each tick and `NodeHealthProbe` already folds `disk_usage_percent` onto
-  the node. No jobs; the disk banner is another folded figure under the 80%
-  rule in §6.
-- ~~E5. Subscription linkage.~~ **Settled 2026-09-06.** The store's Stripe
-  webhook already marks the order item `past_due` / `canceled` and
-  broadcasts `subscription.payment_failed`, `subscription.cancelled`,
-  `subscription.expired` and `subscription.started` on `SignalBus` with the
-  order item id. Server Manager declares `signalSubscribers` in its
-  `plugin.json`: payment_failed starts the 30-day grace clock on the
-  provision found by `cvp_external_order_item_id`; cancelled/expired end
-  hosting; started clears a recovered grace. No Stripe code in the plane.
-  Depends on E6: the provision's order item IS the subscription line.
+- ~~E4. Disk signal.~~ **Withdrawn 2026-09-06 (review F2).** I proposed a
+  new health document; three transports already exist. Every site serves
+  `/api/v1/management/stats` (disk, memory, load, version) behind the
+  management API auth; the agent's `check_status` primitive collects the
+  same and `JobResultProcessor` folds it into `mgn_last_status_data`; the
+  node overview already badges disk at 80/90%. `NodeHealthProbe`'s health
+  document is for non-agent boxes (DNS, relay). A hosted node is agented,
+  so the figure is already on the row. No endpoint, no token, no work.
+- ~~E5. Subscription linkage.~~ **Settled 2026-09-06, corrected by review
+  F4.** The store's Stripe webhook marks the order item `past_due` /
+  `canceled` and broadcasts `subscription.payment_failed` and
+  `subscription.cancelled` on `SignalBus` with the order item id. Two
+  signals I named cannot do the job: `subscription.expired` carries only
+  user/tier ids (dispatched for tiers by `TierBilling`), and
+  `subscription.started` fires only at checkout — `invoice.payment_succeeded`
+  sets the item active and dispatches nothing, so today nothing can clear a
+  grace. Fix in the store, generally: dispatch
+  `subscription.payment_recovered` (with order_item_id) from
+  `invoice.payment_succeeded` (G3). Then Server Manager declares
+  `signalSubscribers`: payment_failed starts the grace clock on the provision
+  found by `cvp_external_order_item_id`; cancelled ends hosting;
+  payment_recovered clears the grace. Depends on E6: the provision's order
+  item IS the subscription line.
 - ~~E6. Cart shape.~~ **Decided 2026-09-06: one product.** The $9.99/mo
   subscription with a 60-day trial (`prv_trial_period_days`) carries the
   `customer_cloud` fulfilment, so the provision points at the subscription
@@ -456,6 +525,15 @@ coexist.
   forces a password change on first login, and once the mail leg is done
   the site's own forgot-password covers a lost reveal.
 
+### Reopened by the review — closed by the owner 2026-09-06
+
+- ~~D5.~~ **Monthly cap, 1,000 sends/mo, set on every subaccount from one
+  plugin setting.** No rolling daily job (review C1 accepted).
+- ~~D6.~~ **Deletion 30 days after non-payment; shelf deleted 90 days after
+  non-payment.** Shutdown by API at day 30 with the deletion task queued for
+  a person (rule 4 stands); a late payer is restored from the shelf with
+  their own key; no ceremony, no shelf — accepted.
+
 ### Owner account setup owed
 
 - SMTP2GO: account (free tier to build against), master API key, MSP
@@ -469,6 +547,20 @@ coexist.
   plane's IP allowlisted, sandbox rehearsal, then the managed-domain
   requirement attached to the product on getjoinery.
 - `automatic_install_mail_topology.md` §8 defaults, if D2 keeps the relay.
+
+## 14. Review record (public-html-36, 2026-09-06)
+
+Twenty-four findings, all folded in above; where the reviewer graded a
+claim *instinct* it is marked as a verification item, not a fact. Withdrawn
+by the review: E4 (health document — three transports exist), the
+per-customer bandwidth meter and shutdown (C2), the separate 15 GB site-data
+allowance (C3), the `hosted_trial` meter columns (C6), and "restored from
+the shelf" as written (F3). Generalised by the review: per-run minted keys
+as a target capability (G1), `settings_converge` (G2),
+`subscription.payment_recovered` (G3), the recovery-key dispatch gate (G4).
+Confirmed accurate: the driver seam, `deleteInstance`'s single caller, the
+referral setting, PTR under an operator token, the mixed-cart Checkout
+shape (F9). Reopened for the owner and closed the same day: D5, D6.
 
 ## Appendix A — outbound provider comparison (verified 2026-09-06)
 
