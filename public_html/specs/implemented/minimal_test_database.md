@@ -1,7 +1,8 @@
 # Minimal test database
 
-**Status:** built 2026-08-15. Open: `update_database` to land migration 174
-(the menu gate on existing installs), and a live check of the debug-off refusal.
+**Status:** built 2026-08-15; implemented 2026-09-06. Migration 174 landed through
+`update_database` (178 applied 2026-09-02). The live check of the debug-off refusal
+is queued in the live verification batch.
 
 Two things the design did not anticipate, both found while building and both
 handled in the code:

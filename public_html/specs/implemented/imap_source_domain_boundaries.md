@@ -1,6 +1,6 @@
 # Spec: An IMAP-source domain is not a hosted domain
 
-**Status:** BUILT. Work item A landed 2026-08-21 (commit 7893ef77, mailbox 1.96.0); work items B–D and the §9 resolutions landed 2026-09-02 (mailbox 1.107.0). Acceptance §8 items 1–8 are covered by `plugins/mailbox/tests/imap_source_boundaries_test.php` where they can be asserted without a live provider; items 3–4 (a real Gmail send with the feed on and off) remain a live check.
+**Status:** BUILT. Work item A landed 2026-08-21 (commit 7893ef77, mailbox 1.96.0); work items B–D and the §9 resolutions landed 2026-09-02 (mailbox 1.107.0). Acceptance §8 items 1–8 are covered by `plugins/mailbox/tests/imap_source_boundaries_test.php` where they can be asserted without a live provider; items 3–4 (a real Gmail send with the feed on and off) remain a live check, queued in the live verification batch. Implemented 2026-09-06.
 **Version:** 1.1
 **Area:** `plugins/mailbox` (domain model, transport, setup), core account-security guards (`logic/register_logic.php`, `logic/security_logic.php`, `logic/account_edit_logic.php`), `plugins/messenger`, `includes/joinery_direct`, core setup wizard (`includes/SetupSteps.php`)
 **Related:** `docs/joinery_direct.md`, `plugins/mailbox/docs/overview.md`, `specs/messenger_reachability_states.md`

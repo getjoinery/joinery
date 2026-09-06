@@ -462,16 +462,21 @@ declares in `pro_fulfillment_provider`:
   least-loaded provisioning-enabled `ManagedHost`, assigns the next Docker
   port, and dispatches an `install_node` job. The buyer's site is a container
   on infrastructure the operator owns.
-- **`customer_cloud`**: the buyer's site runs on a server in **their own
-  cloud account**, billed to them by the provider — see below. A product opts
-  in by picking **Customer cloud server** in the product-edit Purchase grants
-  picker (`CustomerCloudFulfillment`, registered with the store's
-  FulfillmentRegistry from serve.php); that stamps the provider value and
-  contributes the domain question as a checkout requirement automatically.
+- **`customer_cloud`**: the buyer's site runs on its own cloud instance. A
+  product opts in by picking **Customer cloud server** in the product-edit
+  Purchase grants picker (`CustomerCloudFulfillment`, registered with the
+  store's FulfillmentRegistry from serve.php); that stamps the provider value
+  and contributes the domain question as a checkout requirement automatically.
+  The reference picked beside it decides **whose cloud account the server is
+  born on**, and it is the product's decision rather than the buyer's:
+  - *the buyer's own account* — they connect it, the provider bills them, and
+    none of the operator's keys are involved. See below.
+  - *the operator's account (hosted)* — the operator's own token creates it,
+    there is no Connect page, and the mail, billing and banner legs apply. See
+    **[Hosted tier](hosted_tier.md)**.
 
-Both modes end the same way: `install_node` completes, the welcome email goes
-out with DNS instructions, and `ProvisionPendingSsl` turns HTTPS on once DNS
-resolves.
+Every mode ends the same way: `install_node` completes, the welcome email goes
+out, and `ProvisionPendingSsl` turns HTTPS on once DNS resolves.
 
 A hosting product can also sell the buyer their **domain name** in the same
 click — see **Managed domain registration** below. That leg is orthogonal to
@@ -503,6 +508,63 @@ root password that the install job uses for its single bootstrap session and
 that is retired once the machine's agents are admitted; nothing of the
 platform's is ever placed on the machine. The install runner never reads a
 key file, and `config/` on the management node contains none.
+
+### What stays manual
+
+The Provisioning page reports these, and cannot do them:
+
+0. **Job agent.** Every job the pipeline creates sits pending until a
+   joinery-agent polling this site's queue claims it. Install the agent on
+   the management node's host (`sudo bash joinery-agent-installer.sh --config
+   <Globalvars_site.php path>`, built from the agent repo's
+   `build_installer.sh`); hosts without systemd are detected and supervised
+   via cron. The page's agent badge must show Online before anything below
+   can execute.
+1. **Per hosting product.** For customer-cloud fulfilment, pick **Customer
+   cloud server** under Purchase grants; that stamps the provider and asks the
+   domain question at checkout. For a buyer-account product, put the Connect
+   link (`https://<management-node-host>/profile/server_manager/connect_cloud`)
+   in the after-purchase message; the Connect page is deliberately in no
+   member menu. For shared-host products, attach the domain question as a
+   requirement instead — the attachment is what makes an order a hosting
+   order. To sell the domain in the same click, see **Managed domain
+   registration** below.
+2. **Shared-host fulfilment only.** Opt at least one managed host in from the
+   dashboard (Edit → Max Sites + Provisioning Enabled). Its IP is sent to
+   customers as the DNS A-record target, so it must be routable.
+3. **Buyer-account fulfilment only.** Register the OAuth client in Linode
+   Cloud Manager (Profile → OAuth Apps → Create OAuth App, **not** public,
+   callback `https://<management-node-host>/oauth_callback`) and enter the
+   client id and secret at **Admin → System → OAuth Providers**. The referral
+   URL from Cloud Manager → Profile → Referrals goes in the page's field.
+
+### Verifying end to end
+
+1. Place a test order for a hosting product with a test domain.
+2. Wait up to 15 minutes for the next provisioning run.
+3. A new node appears under **Admin → Server Manager** at
+   `install_state = installing` (shared host), or the buyer's Connect page
+   shows progress (buyer account), or the buyer's sites page does (hosted).
+4. When the install job completes, the welcome email reaches the buyer.
+5. Point the test domain's A record at the node IP.
+6. The node's SSL badge flips from `pending` to `active` on the next
+   Provision Pending SSL run once certbot succeeds.
+
+### Failure modes
+
+| Symptom | Likely cause |
+|---|---|
+| No node appears after 15 min | API credentials wrong (the page's probe badge), or the question not attached to the product — check the provisioning task's last run in Scheduled Tasks |
+| Node stuck at `install_failed` | The install job failed — open the job, fix the host, Retry |
+| SSL stuck at `pending` for hours | DNS not pointing at the node — `dig domain.com` |
+| SSL badge `failed` | ~16 hours of certbot failures — job output names rate limits or DNS |
+| Welcome email not received | The store's queued email queue; `welcome_from_email` must be SPF/DKIM-authorised |
+| Domain field says registration is unavailable | No registrar credentials, or no domain-year product selected — the page's Sellable badge names which |
+| Domain row `pending` with a transient error | The registrar is refusing or unreachable; the queue page shows its words. An IP-allowlist error names the address to add |
+| Domain row `failed` | Terminal — name taken or refused. Resolve with the buyer, then Retry from the Domains page |
+| `[managed-domain] Paid but never registered: order N` | The buyer kept the domain line and dropped the hosting line. Refund the domain line, or register and file the row by hand. Reported once per order |
+| Domain row `failed` saying the order did not pay for it | The domain-year line was removed or repriced in the cart. Nothing was registered — settle the difference, then Retry |
+| Domain registered but mail records never publish | The box's mailbox provisioning refused, or the mail leg stopped — the row's error says which. A DKIM key not yet generated keeps the step open on purpose |
 
 ### Customer-Cloud Fulfillment
 

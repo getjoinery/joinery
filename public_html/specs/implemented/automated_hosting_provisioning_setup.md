@@ -9,8 +9,9 @@
 > Nodes that already hold a key are dealt with manually — there is no automated
 > retirement path, deliberately.
 
-**Status (updated 2026-07-18): activation is now a guided admin page, not a
-manual checklist.** The management node's **Server Manager → Provisioning** page
+**Status: implemented 2026-09-06.** The operator runbook below lives in
+`plugins/server_manager/docs/overview.md` § Hosting Provisioning.
+**Activation is a guided admin page, not a manual checklist.** The management node's **Server Manager → Provisioning** page
 (`/admin/server_manager/provisioning_setup`) shows the live state of every
 pipeline requirement and does the automatable work itself
 (`ProvisioningSetup` engine, `plugins/server_manager/includes/`). What

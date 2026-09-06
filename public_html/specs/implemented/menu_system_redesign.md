@@ -1,6 +1,6 @@
 # Menu System Redesign
 
-**Status: BUILT 2026-07-30 — implemented with the § 6 defaults; owner is evaluating on dev before this moves to implemented/.**
+**Status: BUILT 2026-07-30 with the § 6 defaults; accepted by the owner 2026-09-06.**
 
 ## 1. Problem
 

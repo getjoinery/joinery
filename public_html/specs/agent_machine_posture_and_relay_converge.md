@@ -1,6 +1,8 @@
 # Machine posture, relay convergence, and Docker hosts (WP4)
 
-**Status: MIGRATION AT A RESTING MILESTONE (2026-08-28). R1 BUILT AND LIVE
+**Status: DEFERRED 2026-09-06 (owner) — the milestone below stands; R3–R5 are not scheduled and this spec will not complete as written.**
+
+**Migration at a resting milestone (2026-08-28). R1 BUILT AND LIVE
 (agent 1.10.0, fleet-wide). Vocabulary-on-claim BUILT AND LIVE (agent 1.11.0).
 R2 support bundle + artifact channel BUILT AND GREEN but SHELVED DORMANT — no
 siteless consumer on the chosen rollout path; its publish wiring is inert; it
