@@ -370,6 +370,36 @@ $queued = $email->queue();                            // int: recipients on the 
 
 ### Email Services
 
+**SMTP2GO Configuration:**
+```php
+// Settings
+smtp2go_api_key = "api-abc123..."   // the only setting; the sending domain is the From address's
+```
+
+The API key is created in SMTP2GO under **Sending → API Keys**, where each key
+carries per-endpoint permissions listed by group (SMTP2GO's own index at
+`https://api.smtp2go.com/v3/api/index` is the authority on the grouping). Two
+groups matter:
+
+| Group | Endpoints used | Without it |
+|---|---|---|
+| **Emails** | `/email/send`, `/email/batch` | Nothing sends. |
+| **Sender Domains** | `/domain/add`, `/domain/view`, `/domain/verify` | Sending works; the domain and its records are added in the SMTP2GO dashboard by hand. |
+
+`Smtp2GoProvider::validateApiConnection()` asks `/api_keys/permissions`
+(answerable by every key, whatever its scope) and names both what a narrow key
+cannot do and the group to switch on — the group name, because that is the
+label the operator is looking at.
+
+SMTP2GO **refuses to send from a sender domain the account does not hold**, so
+registration is part of setup rather than a refinement. It asks for three
+CNAMEs and no SPF term: DKIM at its own selector
+(`s1234567._domainkey.example.com`), a return path at an `em######` subdomain,
+and — only with link tracking on — a tracking host. Because the return path
+lives on a subdomain of the sending domain, SPF is evaluated against a record
+SMTP2GO maintains behind that CNAME, so `getSpfMechanism()` returns `''` and
+the From domain needs no `include:`.
+
 **Mailgun Configuration:**
 ```php
 // Settings
@@ -593,6 +623,7 @@ transports from one place.
 | Postmark | Yes (`cid:`-prefixed ContentID) |
 | Mailjet | Yes (`InlinedAttachments` + ContentID) |
 | Mailgun | Yes (`inline` part, filename = the cid) |
+| SMTP2GO | Yes (`inlines` part, filename = the cid) |
 | Resend | **Degrades** — no Content-ID field in the API |
 | Brevo | **Degrades** — no Content-ID field in the API |
 

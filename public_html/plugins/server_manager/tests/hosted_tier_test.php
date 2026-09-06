@@ -519,44 +519,53 @@ check($phrase->invoke(null, gmdate('Y-m-d H:i:s', time() - 864000)) === '',
 // ---------------------------------------------------------------------------
 section('Reading the provider\'s DNS records in the shape it actually answers');
 
-// The domain endpoints answer with FIELD PAIRS, not typed triples: a domain
-// object carrying dkim_selector + dkim_value, rpath_domain + rpath_value, and a
-// trackers list. Read only for triples, every real response yields nothing —
-// and the leg would register a sending domain, publish no records, never
-// verify, and leave the customer's mail unsigned while every dashboard read
-// green.
-$flatten = (new ReflectionClass('Smtp2GoClient'))->getMethod('flattenRecords');
-$flatten->setAccessible(true);
+// The domain endpoints (add / view / verify) all answer in one shape: the
+// domain object nested under domains[].domain, with the trackers beside it.
+// EVERY RECORD IS A CNAME — dkim_value is the target of a CNAME at the
+// provider's selector, not a DKIM key to publish as TXT — and the return-path
+// host is built from rpath_selector, which is a LABEL and not a hostname.
+// Read wrongly, this leg registers a sending domain, publishes records that
+// resolve to nothing, never verifies, and leaves the customer's mail unsigned
+// while every dashboard reads green.
+//
+// ONE READER ANSWERS FOR THE WHOLE PLATFORM (Smtp2GoProvider, exercised in
+// full by tests/email/provider_dkim_test.php). A hosted customer's sending
+// domain and a self-hosted site's are the same thing at the provider, so what
+// is asserted here is that this leg reads through it and not around it.
+$answer = array('domains' => array(array(
+	'domain' => array(
+		'fulldomain'     => 'mail.example.com',
+		'dkim_selector'  => 's1234567',
+		'dkim_verified'  => true,
+		'dkim_value'     => 'dkim.smtp2go.net',
+		'rpath_selector' => 'em1234',
+		'rpath_verified' => true,
+		'rpath_value'    => 'return.smtp2go.net',
+	),
+	'trackers' => array(array(
+		'fulldomain'  => 'link.mail.example.com',
+		'cname_value' => 'track.smtp2go.net',
+		'enabled'     => true,
+	)),
+)));
 
-$pairs = array('data' => array('domains' => array(array(
-	'fulldomain'    => 'mail.example.com',
-	'dkim_selector' => 's1',
-	'dkim_value'    => 'k=rsa; p=MIIBI',
-	'rpath_domain'  => 'em1234.mail.example.com',
-	'rpath_value'   => 'return.smtp2go.net',
-	'trackers'      => array(array('subdomain' => 'link.mail.example.com',
-		'cname_expected' => 'track.smtp2go.net')),
-))));
-$got = $flatten->invoke(null, $pairs, '');
+$entry = Smtp2GoProvider::entryFor($answer, 'mail.example.com');
+$records = Smtp2GoProvider::recordsOf($entry);
 $by_name = array();
-foreach ($got as $r) { $by_name[$r['name']] = $r; }
+foreach ($records as $r) { $by_name[$r['name']] = $r; }
 
-check(count($got) === 3, 'all three records are read out of the pair shape', json_encode(array_keys($by_name)));
-check(($by_name['s1._domainkey.mail.example.com']['type'] ?? '') === 'TXT',
-	'DKIM becomes a TXT at selector._domainkey.<domain>');
-check(($by_name['em1234.mail.example.com']['type'] ?? '') === 'CNAME',
-	'the return path becomes a CNAME');
-check(($by_name['link.mail.example.com']['value'] ?? '') === 'track.smtp2go.net',
-	'and the tracker CNAME points where the provider said');
+check(count($records) === 3, 'all three records are read out of the answer',
+	json_encode(array_keys($by_name)));
+check(($by_name['s1234567._domainkey.mail.example.com']['type'] ?? '') === 'CNAME',
+	'DKIM is a CNAME at selector._domainkey.<domain>, never a TXT key');
+check(($by_name['em1234.mail.example.com']['value'] ?? '') === 'return.smtp2go.net',
+	'the return path is built from rpath_selector, without which the domain never verifies');
+check(Smtp2GoProvider::stateOf($entry) === 'active',
+	'and a domain whose DKIM and return path both resolve reads as verified');
 
-// The typed shape still works, so a response that does carry types is not lost.
-$typed = array('dns_records' => array(array('type' => 'TXT', 'host' => 'x.example.com', 'value' => 'v=spf1')));
-$got2 = $flatten->invoke(null, $typed, '');
-check(count($got2) === 1 && $got2[0]['name'] === 'x.example.com',
-	'a typed triple is still read');
-
-check($flatten->invoke(null, array('domains' => array(array('fulldomain' => 'mail.example.com'))), '') === array(),
-	'a domain with no record fields yields nothing — which the leg treats as a failure, not a pass');
+check(Smtp2GoProvider::recordsOf(Smtp2GoProvider::entryFor(array('domains' => array()), 'mail.example.com'))
+	=== array(),
+	'a domain the account does not hold yields nothing — which this leg treats as a failure, not a pass');
 
 // ---------------------------------------------------------------------------
 section('Cleanup');

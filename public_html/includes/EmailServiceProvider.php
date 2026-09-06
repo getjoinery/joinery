@@ -11,7 +11,7 @@
  * This file also declares the optional RawMessageRelay, ApiSubmissionRelay,
  * DkimRecordSource, and SendingDomainRegistrar capabilities (below).
  *
- * @version 1.5
+ * @version 1.6
  */
 interface EmailServiceProvider {
     /**
@@ -144,16 +144,24 @@ interface ApiSubmissionRelay extends RawMessageRelay {
  * it — opendkim owns their signing.
  *
  * Providers that implement it: Mailgun (sending DNS records from the domains
- * API), SES (Easy DKIM CNAME tokens from GetEmailIdentity).
+ * API), SES (Easy DKIM CNAME tokens from GetEmailIdentity), SMTP2GO (the
+ * sender-domain CNAMEs from the domain API).
  *
- * @version 1.0
+ * @version 1.1
  */
 interface DkimRecordSource {
     /**
      * The DKIM DNS records the provider requires for $domain, from the
      * provider's API. Never throws.
      *
-     * @return array{status:string, records:array<int,array{type:string,name:string,value:string}>}
+     * @return array{status:string, records:array<int,array{type:string,name:string,value:string,purpose?:string}>}
+     *   Each record may carry a `purpose` naming what it is for in the
+     *   operator's words ('DKIM', 'Return-Path', 'Link tracking'); callers
+     *   read 'DKIM' when it is absent. A provider whose sending domain needs
+     *   more than a signing record (SMTP2GO requires a return-path CNAME
+     *   before it will verify the domain at all) reports every record it
+     *   requires here — a caller that published only the _domainkey one would
+     *   wait for ever on a domain that can never verify.
      *   status:
      *     'ok'             — $domain is registered with the provider; records
      *                        lists what must be published (may be empty when the
@@ -179,7 +187,8 @@ interface DkimRecordSource {
  * Providers that implement it: Mailgun (domains API, with DKIM authority
  * forced to the created domain itself so keys are issued for the subdomain
  * rather than inherited from its parent — inherited authority breaks strict
- * DMARC alignment).
+ * DMARC alignment), SMTP2GO (domain/add, which is not optional there: it
+ * refuses to send from a sender domain the account does not hold).
  *
  * @version 1.0
  */

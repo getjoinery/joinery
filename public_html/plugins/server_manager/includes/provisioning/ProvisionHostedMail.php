@@ -207,7 +207,7 @@ class ProvisionHostedMail {
 			$this->fail_leg($provision,
 				'The provider registered the sending domain but this platform could not read any DNS '
 				. 'records out of its answer. Nothing was published, so mail from this site would be '
-				. 'unsigned. Capture the domain/add response and check Smtp2GoClient::flattenRecords '
+				. 'unsigned. Capture the domain/add response and check Smtp2GoProvider::recordsOf '
 				. 'against it before retrying.');
 			return 1;
 		}
