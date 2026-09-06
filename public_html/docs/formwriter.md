@@ -412,6 +412,37 @@ $formwriter->textarea('description', 'Description', [
 ]);
 ```
 
+### Markdown editor (`markdownmode`)
+
+A textbox with `markdownmode` renders a markdown editing surface instead of a
+bare textarea: a formatting toolbar, keyboard shortcuts (Ctrl/Cmd+B, +I, +K),
+list continuation on Enter, and a live preview.
+
+```php
+$formwriter->textbox('doc_content', 'Markdown', [
+    'rows'          => 34,
+    'markdownmode'  => 'yes',
+    'markdown_mode' => 'split',   // 'write' (default), 'split' or 'preview'
+]);
+```
+
+The field's value stays markdown source. Nothing is round-tripped through HTML,
+so a save rewrites only the text the author actually changed — which is what
+keeps a diff readable when the field is backed by a file under version control.
+
+The preview is rendered by the server, through the `markdown_preview` API
+action and `MarkdownRenderer`, so an author sees exactly what the finished page
+will show. There is no second markdown grammar in JavaScript to drift out of
+step with the PHP one.
+
+`markdownmode` and `htmlmode` are mutually exclusive — a textarea edits one
+language or the other, and asking for both throws.
+
+Assets (`assets/css/markdown-editor.css`, `assets/js/markdown-editor.js`) are
+emitted once per request however many markdown fields a page carries, and the
+script self-initializes from data attributes, so a page carrying one needs no
+inline `<script>`.
+
 ### Checkbox
 
 ```php
@@ -911,7 +942,7 @@ It lives on `FormWriterV2Base`, so the `FormWriterV2HTML5` renderer inherits it 
 | `int` | number input |
 | `bool` | checkbox |
 | `select` | select (`options` from the entry) |
-| `text` | textbox (plain multiline; pass `htmlmode` for rich text) |
+| `text` | textbox (plain multiline; pass `htmlmode` for rich text, or `markdownmode` for markdown) |
 | `date` | date input |
 
 Per-entry extras pass straight through: `required` (toggles the required attribute), `label`, `placeholder`, and `help` (rendered as helptext). API/AI consumers ignore the FormWriter-only hints.

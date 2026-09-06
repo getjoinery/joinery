@@ -1,0 +1,99 @@
+/**
+ * Joinery markdown editor — styles for the FormWriter markdownmode surface.
+ * Vanilla CSS, no framework. Pairs with assets/js/markdown-editor.js.
+ *
+ * @version 1.0.0
+ */
+
+.jy-md {
+	border: 1px solid #d5d9de;
+	border-radius: 6px;
+	background: #fff;
+	overflow: hidden;
+}
+
+.jy-md-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 2px;
+	padding: 6px;
+	border-bottom: 1px solid #e5e5e5;
+	background: #f7f8f9;
+}
+
+.jy-md-toolbar button {
+	min-width: 30px;
+	height: 28px;
+	padding: 0 7px;
+	border: 1px solid transparent;
+	border-radius: 4px;
+	background: transparent;
+	color: #3b4148;
+	font: inherit;
+	font-size: 13px;
+	line-height: 1;
+	cursor: pointer;
+}
+
+.jy-md-toolbar button:hover { background: #e8ebee; }
+.jy-md-toolbar button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 1px; }
+.jy-md-toolbar button.is-active { background: #e8f0fe; border-color: #c6dafc; color: #1a73e8; }
+
+.jy-md-toolbar .jy-md-bold { font-weight: 700; }
+.jy-md-toolbar .jy-md-italic { font-style: italic; }
+.jy-md-toolbar .jy-md-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+.jy-md-sep {
+	width: 1px;
+	height: 18px;
+	margin: 0 4px;
+	background: #dcdfe3;
+}
+
+.jy-md-modes { margin-left: auto; display: flex; gap: 2px; }
+
+.jy-md-panes { display: flex; align-items: stretch; }
+
+.jy-md-panes > textarea {
+	flex: 1 1 100%;
+	min-width: 0;
+	min-height: 320px;
+	margin: 0;
+	padding: 12px 14px;
+	border: 0;
+	border-radius: 0;
+	background: #fff;
+	color: #222;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	font-size: 13.5px;
+	line-height: 1.6;
+	resize: vertical;
+}
+
+.jy-md-panes > textarea:focus { outline: none; box-shadow: none; }
+
+.jy-md-preview {
+	flex: 1 1 50%;
+	min-width: 0;
+	padding: 12px 18px;
+	overflow-y: auto;
+	background: #fff;
+	border-left: 1px solid #e5e5e5;
+}
+
+.jy-md-preview > :first-child { margin-top: 0; }
+
+/* Three view modes, driven by data-mode on the wrapper. */
+.jy-md[data-mode="write"] .jy-md-preview { display: none; }
+.jy-md[data-mode="split"] > .jy-md-panes > textarea { flex-basis: 50%; }
+.jy-md[data-mode="preview"] > .jy-md-panes > textarea { display: none; }
+.jy-md[data-mode="preview"] .jy-md-preview { border-left: 0; }
+
+@media (max-width: 800px) {
+	.jy-md[data-mode="split"] > .jy-md-panes { flex-direction: column; }
+	.jy-md[data-mode="split"] .jy-md-preview {
+		border-left: 0;
+		border-top: 1px solid #e5e5e5;
+	}
+}

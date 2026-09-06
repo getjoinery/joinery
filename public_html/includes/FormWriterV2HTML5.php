@@ -5,7 +5,8 @@
  * Pure HTML5 form generation with semantic markup and no CSS framework dependencies.
  * Provides accessible, standards-compliant forms that any theme can style.
  *
- * @version 2.3.0
+ * @version 2.4.0
+ * @changelog 2.4.0 - textbox markdownmode option: toolbar + server-rendered live preview (assets/js/markdown-editor.js)
  * @changelog 2.3.0 - renderTextInput emits the help_modal trigger/template (text, password and number fields)
  * @changelog 2.2.0 - Phase 2: shared AJAX script, visibility moved to base, buildCommonAttributes in renderTextInput
  * @changelog 2.1.0 - Refactored to prepare/render split: output*() in base, render*() here
@@ -810,6 +811,16 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
         // gave a rich editor in one writer and a plain textarea in the other.
         $htmlmode = $options['htmlmode'] ?? 'no';
         $htmlmode = ($htmlmode === true || $htmlmode === 'yes') ? 'yes' : 'no';
+        // Markdown editing surface: a toolbar and a server-rendered live
+        // preview around this same textarea. The field's value stays markdown
+        // source -- nothing is round-tripped through HTML -- so a save rewrites
+        // only what the author changed. Mutually exclusive with htmlmode, which
+        // edits HTML.
+        $markdownmode = $options['markdownmode'] ?? 'no';
+        $markdownmode = ($markdownmode === true || $markdownmode === 'yes') ? 'yes' : 'no';
+        if ($markdownmode === 'yes' && $htmlmode === 'yes') {
+            throw new Exception("FormWriter: field '{$name}' asks for both htmlmode and markdownmode; a textarea edits one language or the other.");
+        }
         $class = $options['class'] ?? 'form-control';
         $id = $options['id'] ?? $name;
 
@@ -936,6 +947,10 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
             </style>';
         }
 
+        if ($markdownmode === 'yes') {
+            self::emitMarkdownEditorAssets();
+        }
+
         // Output textarea
         $html = '<div id="' . htmlspecialchars($name) . '_container" class="form-group">';
 
@@ -945,6 +960,10 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
                 $html .= ' <span aria-label="required">*</span>';
             }
             $html .= '</label>';
+        }
+
+        if ($markdownmode === 'yes') {
+            $html .= self::markdownEditorChrome($options);
         }
 
         $html .= '<textarea';
@@ -977,6 +996,11 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
         $html .= htmlspecialchars($value);
         $html .= '</textarea>';
 
+        if ($markdownmode === 'yes') {
+            $html .= '<div class="jy-md-preview markdown-content" data-jy-md-preview></div>';
+            $html .= '</div></div>';   // .jy-md-panes, .jy-md
+        }
+
         if ($has_errors) {
             $html .= '<div id="' . htmlspecialchars($name) . '_error" class="form-error">';
             $html .= '<ul class="error-list">';
@@ -994,6 +1018,95 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
         $html .= '</div>';
 
         echo $html;
+    }
+
+    /**
+     * The markdown editor's stylesheet and script, emitted once per request
+     * however many markdown fields a page carries.
+     *
+     * The script self-initializes from the data attributes below rather than
+     * from an inline call, so a page carrying a markdown field needs no inline
+     * <script> and stays clean under a strict Content-Security-Policy.
+     */
+    private static function emitMarkdownEditorAssets() {
+        static $emitted = false;
+        if ($emitted) {
+            return;
+        }
+        $emitted = true;
+
+        require_once(PathHelper::getIncludePath('includes/MarkdownRenderer.php'));
+
+        $css = PathHelper::getIncludePath('assets/css/markdown-editor.css');
+        $js = PathHelper::getIncludePath('assets/js/markdown-editor.js');
+
+        echo '<link rel="stylesheet" href="/assets/css/markdown-editor.css?v='
+            . (is_file($css) ? filemtime($css) : '1') . '">';
+        // The preview pane renders what MarkdownRenderer produces, so it needs
+        // the same .markdown-content rules the finished page uses.
+        echo '<style>' . MarkdownRenderer::get_css() . '</style>';
+        echo '<script src="/assets/js/markdown-editor.js?v='
+            . (is_file($js) ? filemtime($js) : '1') . '" defer></script>';
+    }
+
+    /**
+     * The wrapper and toolbar that sit around a markdown textarea. The closing
+     * tags are emitted after the textarea by textbox().
+     *
+     * @param array $options Field options; 'markdown_mode' picks the starting
+     *                       view ('write', 'split' or 'preview').
+     */
+    private static function markdownEditorChrome($options) {
+        $initial = $options['markdown_mode'] ?? 'write';
+        if (!in_array($initial, array('write', 'split', 'preview'), true)) {
+            $initial = 'write';
+        }
+
+        $buttons = array(
+            array('bold', 'B', 'Bold', 'jy-md-bold', 'Bold (Ctrl+B)'),
+            array('italic', 'I', 'Italic', 'jy-md-italic', 'Italic (Ctrl+I)'),
+            array('code', '<>', 'Inline code', 'jy-md-mono', 'Inline code'),
+            array(null, null, null, null, null),
+            array('h1', 'H1', 'Heading 1', '', 'Heading 1'),
+            array('h2', 'H2', 'Heading 2', '', 'Heading 2'),
+            array('h3', 'H3', 'Heading 3', '', 'Heading 3'),
+            array(null, null, null, null, null),
+            array('ul', '&bull; List', 'Bulleted list', '', 'Bulleted list'),
+            array('ol', '1. List', 'Numbered list', '', 'Numbered list'),
+            array('quote', '&ldquo;', 'Quote', '', 'Block quote'),
+            array(null, null, null, null, null),
+            array('link', 'Link', 'Link', '', 'Link (Ctrl+K)'),
+            array('codeblock', 'Code block', 'Code block', '', 'Code block'),
+            array('table', 'Table', 'Table', '', 'Table'),
+        );
+
+        $html = '<div class="jy-md" data-jy-markdown-editor data-mode="' . htmlspecialchars($initial) . '"'
+            . ' data-jy-md-initial-mode="' . htmlspecialchars($initial) . '">';
+        $html .= '<div class="jy-md-toolbar" role="toolbar" aria-label="Markdown formatting">';
+
+        foreach ($buttons as $button) {
+            list($action, $face, $label, $class, $title) = $button;
+            if ($action === null) {
+                $html .= '<span class="jy-md-sep" aria-hidden="true"></span>';
+                continue;
+            }
+            $html .= '<button type="button" class="' . htmlspecialchars($class) . '"'
+                . ' data-jy-md-action="' . htmlspecialchars($action) . '"'
+                . ' title="' . htmlspecialchars($title) . '"'
+                . ' aria-label="' . htmlspecialchars($label) . '">' . $face . '</button>';
+        }
+
+        $html .= '<span class="jy-md-modes">';
+        foreach (array('write' => 'Write', 'split' => 'Split', 'preview' => 'Preview') as $mode => $face) {
+            $html .= '<button type="button" data-jy-md-mode="' . $mode . '"'
+                . ' aria-pressed="' . ($mode === $initial ? 'true' : 'false') . '"'
+                . ' title="' . $face . ' view">' . $face . '</button>';
+        }
+        $html .= '</span>';
+
+        $html .= '</div><div class="jy-md-panes">';
+
+        return $html;
     }
 
     /**
