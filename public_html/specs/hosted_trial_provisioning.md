@@ -38,9 +38,13 @@ Today's flow instead makes the buyer open a Linode account with a card, grant us
 access on the Connect page, set an A record by hand, and then cannot log in at
 all — the install job never passes the buyer's email or a password to the
 installer, so the admin account is born with the installer default and a random
-password in a file on a box nobody can read (B1 below). This spec replaces that
-flow for the hosted path and keeps the bring-your-own-cloud path as the advanced
-choice.
+password in a file on a box nobody can read (B1 below).
+
+**The bring-your-own-cloud install stays on sale, unchanged** (owner,
+2026-09-06): $39.99 one-time, the buyer connects their own Linode, the
+instance is theirs and billed to them, none of our SMTP2GO or storage keys
+are involved, no $9.99 subscription and no trial. It gains only the B1 login
+fix. The hosted tier is a second product beside it, not a replacement.
 
 ## 2. Doctrine
 
@@ -63,9 +67,14 @@ Four rules, all inherited, none new:
 
 ## 3. Buyer journey (end state)
 
-1. Product page: domain field with live availability and price (the managed
-   domain requirement, already built), or "I already own this domain".
-   Email topology question per `automatic_install_mail_topology.md`.
+1. Product page. Two products on getjoinery: **Automatic Install, hosted**
+   ($39.99 setup + $9.99/mo after 60 days, on our accounts — this spec) and
+   **Automatic Install, your own cloud** ($39.99 one-time, today's product
+   9, unchanged). Both carry the domain field with live availability and
+   price (the managed domain requirement, already built) or "I already own
+   this domain". Email topology question per
+   `automatic_install_mail_topology.md` on the your-own-cloud product only
+   (D2).
 2. Checkout: one payment. The hosting line is a subscription with a trial
    period, so Stripe collects the card now and charges nothing until the
    trial ends. The domain line is one-time, as today.
@@ -88,11 +97,18 @@ green only after that. That is the honest state; we do not hold their DNS.
 
 ### 4.1 Compute — Linode, our account
 
-- `cvp_hosting_mode` = `operator` | `customer`. `customer` is today's path,
-  unchanged. `operator` resolves the compute driver from a plane-held token
-  (setting `server_manager_operator_linode_token`, sealed) instead of a buyer
-  grant. `resolve_driver()` branches on the mode; everything after
-  `handle_ready()` is the same pipeline.
+- `cvp_hosting_mode` = `operator` | `customer`, **chosen by the product,
+  not the buyer.** `CustomerCloudFulfillment::options()` today offers one
+  option, "Create the server in the buyer's own cloud account", and a product
+  stores the chosen index in `pro_fulfillment_ref`. Add a second option,
+  "Create the server on the operator's account (hosted)"; `fulfill()`
+  writes the mode from the ref. `customer` is today's path, unchanged.
+  `operator` resolves the compute driver from a plane-held token (setting
+  `server_manager_operator_linode_token`, sealed) instead of a buyer grant
+  and skips the Connect wait (`ready` at once). `resolve_driver()` branches
+  on the mode; everything after `handle_ready()` is the same pipeline. The
+  mail leg (§4.3), the fleet-shelf allowance (§4.5), the trial row and the
+  banners (§4.6) run for `operator` provisions only.
 - Instance type and region come from settings, never from the buyer.
 - The root password is generated, sealed on the row, and retired after the
   agent joins — exactly as the keyless design already does.
@@ -509,14 +525,16 @@ coexist.
   found by `cvp_external_order_item_id`; cancelled ends hosting;
   payment_recovered clears the grace. Depends on E6: the provision's order
   item IS the subscription line.
-- ~~E6. Cart shape.~~ **Decided 2026-09-06: one product.** The $9.99/mo
-  subscription with a 60-day trial (`prv_trial_period_days`) carries the
-  `customer_cloud` fulfilment, so the provision points at the subscription
+- ~~E6. Cart shape.~~ **Decided 2026-09-06: one product per hosting
+  mode.** *Hosted:* a NEW product — the $9.99/mo subscription with a 60-day
+  trial (`prv_trial_period_days`) carries the `customer_cloud` fulfilment
+  with the operator option, so the provision points at the subscription
   line; the $39.99 setup is a one-time line in the same cart (Stripe only —
   mixed carts already exclude PayPal). **Verify first in test mode on dev:**
   a subscription-mode Checkout session with a trial still charges the
-  one-time setup line at signup. Product 9 on getjoinery is reshaped, not
-  duplicated.
+  one-time setup line at signup. *Your own cloud:* product 9 stays exactly
+  as it is — $39.99 one-time, customer option, no subscription, no signals
+  to subscribe to.
 - ~~E7. Showing the admin password once.~~ **Settled 2026-09-06: reveal
   once, then erase.** The buyer's `/profile/server_manager` page becomes
   "your sites" (the Connect section renders only for bring-your-own
