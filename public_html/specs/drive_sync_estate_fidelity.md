@@ -2061,9 +2061,13 @@ Its FILE does not stop. A parked folder has no directory but still has a name,
 and a child's path is built by walking parent names, so `README/b.txt`
 resolves to `readme/b.txt` and materializes there. The device settles with one
 folder on the disk holding both folders' contents, nothing saying so, and an
-issue that describes the folder clash and not the merge. Deleting the folder
-takes the parked folder's files with it; a later local edit inside it is
-attributed to the wrong folder.
+issue that describes the folder clash and not the merge.
+
+**And it does not stay local.** The child's record is rewritten to the folder it
+landed in and that is pushed up: the run ends with the SERVER holding
+`readme/b.txt` and `README` empty. The file has been reassigned to a different
+folder for every device the user owns, permanently, and deleting the surviving
+folder now takes it with them.
 
 Nothing is lost, both sides agree about every file, and the estate oracle
 passes it -- the same way it passed Defect AA. This was found by asking what
@@ -2162,6 +2166,100 @@ and abandoned, all plausible and all wrong:
   adding a parent-materialized gate to `download` makes the seed loop again at
   349 attempts under that fix, and settle under this one.
 
+## Defect AD -- swapping two folder names carries a vault's contents out in the clear
+
+**Severity: a file the user put in a vault reaches the server as plaintext,
+under its real name, as the result of an ordinary rename.** Pre-existing:
+reproduces identically on `6ef36a51^`, before any of this round's changes. NOT
+FIXED -- recorded here for a decision, because the fix touches how renames are
+detected.
+
+**Shape** (traced and reproduced). One device. An encrypted folder `Private`
+holding `memo.txt`, an ordinary folder `Public` holding `notes.txt`, both
+settled. The user swaps the two names the way anybody would, and the way a file
+manager does it: `Private` to a scratch name, `Public` to `Private`, the scratch
+name to `Public`. No file is touched. After settling, the server holds
+`Public/memo.txt` -- the vault file's real name and its plaintext bytes -- while
+`notes.txt` has been encrypted into the vault it never belonged to.
+
+**Mechanism.** The engine resolves a name swap as CONTENTS MOVING BETWEEN
+FOLDERS rather than as two folders being renamed. Probed directly on a plain
+pair with subtrees: after a swap, both folder entities keep their original
+names, and every file plus a whole subfolder is re-parented from one to the
+other. So the vault folder entity stays where it is wearing its own name, the
+memo is re-parented into the plain folder, and is then uploaded exactly as any
+file arriving in a non-vault folder is -- in the clear.
+
+**Scope, established by probe rather than assumed.** Two neighbouring shapes are
+both CORRECT, which is what makes the defect narrow and precise:
+
+- A vault folder renamed out of the way, settled, and its old name then taken by
+  a plain folder: safe. Identity survives, the memo stays encrypted under the
+  new name. So the engine tracks identity through a rename perfectly well -- it
+  loses it only when both names are occupied.
+- A plain folder moved INTO a vault: safe. Its contents are encrypted on the way
+  up.
+
+The trigger is a swap that completes between syncs, so the engine only ever sees
+the end state, in which each name is held by the other folder's contents.
+
+**Why no seed could find it.** The workload refuses to generate vault-edge
+crossings on purpose -- "the server refuses an in-place crossing and the client
+cannot yet make one for itself, so generating one would test a feature nobody
+has written". That guard rail has a hole in it: the user never crosses the edge,
+a folder rename carries them across. No sweep arm swaps two names either, for
+the separate reason that a swap takes a scratch name and two renames and no arm
+does that.
+
+Probes, red until this is fixed:
+`probe_a_vault_folder_and_a_plain_folder_trade_names`. Green companions that
+establish the scope: `probe_a_plain_folder_taking_a_vault_folders_old_name`,
+`probe_a_plain_folder_moved_into_a_vault`,
+`probe_two_folders_trade_names_with_subtrees`,
+`probe_two_folders_trade_names_with_a_peer_watching`,
+`probe_a_file_and_a_folder_trade_names`.
+
+## Defect AE -- a folder-name swap made elsewhere is silently undone
+
+**Blocks Defect AD.** Pre-existing, at HEAD, with nothing local involved.
+
+**Shape** (traced and reproduced, probe
+`a_folder_name_swap_made_on_the_server_survives`). One device, settled. The user
+swaps two folder names somewhere else -- another device, or the web UI -- so the
+server holds the swap before this device syncs:
+
+    server before sync:  A/b.txt   B/a.txt
+    server after sync:   A/a.txt   B/b.txt
+
+The device put its own stale layout back and undid the rename, raising nothing.
+`assert_converged` and `assert_nothing_lost` both pass: the two sides agree
+perfectly on the wrong answer, which is the AA/AB/AC blindness again on the
+plainest possible input -- no vault, no local action, no chaos, one device.
+
+**Why it blocks AD.** AD's fix is to read a local swap as two renames instead of
+as a mass file move. The reading can be made correct -- it was built, and traced
+to `intended={A -> B, B -> A}` with exactly the two renames emitted -- but the
+renames are then handed to machinery that cannot apply a rename cycle. With the
+detection in place the same server-side case fails DIFFERENTLY: conflict copies,
+parked issues and `MoveRaceServerWon` instead of a silent revert. Neither is
+right, so the detection was reverted rather than shipped. Until two cyclic
+folder renames can be applied -- from the feed and from a local scan -- no
+amount of better detection fixes AD.
+
+**Open question for whoever takes it:** is this the cycle-breaker machinery that
+already parks file swaps (`SWAP_PREFIX`, `find_cycle_breakers`), simply never
+reached for folders arriving from the feed? Or is a folder rename cycle a
+different animal because the park is itself a server-side rename? The detection
+experiment produced a `.jd-swap-` park that was then reported as an unfinished
+operation and put back under a conflict name, which reads like the machinery is
+reached and does not complete. Not traced, not asserted.
+
+**Decision already taken, for when this is unblocked.** Where the client cannot
+tell a folder rename from a mass file move, the owner chose the RENAME reading:
+publish nothing, and raise an issue naming both folders ("Private and Plain
+traded names; the vault is now called Plain"). The catch accepted with it is
+that a vault can end up wearing the other folder's name until the user acts.
+
 ## The oracle is blind to custody
 
 The estate oracle proves two things: both sides converge, and no bytes are
@@ -2172,10 +2270,86 @@ the file is in the wrong folder consistently everywhere. That is why the whole
 family was found by reading the code and probing rather than by running seeds,
 and why a clean estate of forty thousand seeds said nothing about it.
 
-The check the sweep is missing, alongside `assert_no_entry_is_stranded`: every
-materialized child sits inside a directory that some FOLDER record holds, and
-no two folder records resolve to one directory. Until it exists, this class
-will keep being found by hand. Named by public-html-0e, 2026-09-05.
+Named by public-html-0e, 2026-09-05. Building it was attempted the same day and
+the attempt is what pinned down why it is hard.
+
+**A custody oracle cannot be built from runtime state.** Three formulations were
+tried against the Defect AB world with the fix reverted, and each one passed
+while the defect was present:
+
+- *no two folder records claim one directory* -- the parked rival holds no
+  directory at all, so only one record ever claims the slot.
+- *nothing materialized hangs off a parent that holds no directory* -- the
+  child's record is rewritten to the folder it actually landed in, so its
+  parent is the winner and perfectly materialized.
+- *an entry is filed under the folder the server says* -- and this is the one
+  that settles it: **the device pushes the misplacement to the server.** Left
+  unfixed, the run ends with the server itself holding `readme/b.txt` and
+  `README` empty. The file is reassigned to a different folder for every
+  device, permanently, and there is no disagreement left anywhere to detect.
+
+So the oracle has to remember what the workload INTENDED, the way `Committed`
+remembers bytes: every file the workload creates records the server id of the
+folder it was created in, every folder move carries that forward, and the check
+after settling is that each file still belongs to the folder it was put in.
+That is a change to the workload, not an assertion that can be bolted on after
+it.
+
+What is in the sweep today is `assert_no_two_records_on_one_directory`, the
+first formulation above -- kept because it is true and free, labelled in its own
+doc comment as NOT a custody check, because it has never fired on a known
+defect. Until the intent-tracking oracle exists, a green estate remains no
+evidence at all about this class.
+
+**Intent tracking costs no seed re-roll.** This is worth stating next to the
+other outstanding workload question, because the two have very different
+prices. Adding a sweep ARM -- for the case-twin and escape-needing folder names
+no seed can mint -- changes `rng.below(20)` and re-rolls every pinned seed into
+a different world. Intent tracking draws no random numbers: it records what the
+workload was already doing, alongside the `Committed` bookkeeping that already
+runs. Every pinned seed keeps its meaning. So of the two, this is the one to
+build first.
+
+**Built on 2026-09-05, and it does not work. Here is exactly why, so the next
+attempt starts further along.**
+
+The bookkeeping half is fine and was not the problem. User actions were recorded
+at the four `MemFs` entry points (`user_write`, `user_mkdir`, `user_rename`,
+`user_remove`) and shared across the devices of one world, so the log is the
+order the user acted in across all their computers -- no instrumentation in the
+twenty-odd workload arms, where a missed site would have meant a hole. Replaying
+that log gives each directory a synthetic id, carries it through the renames and
+moves the user performs, and records for each file the id of the directory it
+was created in. Directory identity survives renames, which is the whole point:
+an oracle that identified a folder by its name would be blind to precisely the
+family it is hunting.
+
+**The check then needs to find each file again after settling, and there is no
+handle that works.** Three were tried, and each is defeated by a deliberate
+feature of the workload:
+
+- **By content hash.** Defeated by the copy arm, which exists to make two files
+  with byte-identical content, and by edits: when the original is edited, the
+  only file left carrying those bytes is the copy, so the original's custody
+  resolves onto a file the user put somewhere else. Every seed tried failed
+  this way, including seeds with no defect in them.
+- **By content hash, excluding engine-made files.** Conflict copies are
+  recognisable by name and were excluded. It does not help: the collisions that
+  matter are between two files the USER made.
+- **By path.** A file the engine has relocated is exactly a file whose path no
+  longer matches, so it reads as absent and is skipped -- and a relocated file
+  is the entire defect. The check becomes tautological for everything it can
+  see and blind to everything it is for.
+
+**What is left is entity identity.** The server's own file id is the only handle
+that survives a rename, a copy with the same bytes, and a relocation. Getting it
+means the workload learning the id of each file it creates, which means observing
+sync state mid-workload -- a bigger change than the oracle itself, and one that
+would have to avoid disturbing the draw sequence. That is the next attempt, and
+it should not be started until someone has decided that cost is worth paying.
+
+Reverted rather than shipped: an oracle that fails healthy seeds is worse than
+none, because it trains everyone to ignore it.
 
 ## Still open, found by review probes (2026-09-05, public-html-0e)
 
