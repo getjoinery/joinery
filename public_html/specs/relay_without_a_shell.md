@@ -37,8 +37,24 @@ Delete on the Setup tab; the Delete confirm names the machine and the MX; with
 no relay after a recorded cutover, `checkInboundMailServer` and the Relay
 section say the MX points at a relay this deployment no longer has and offer
 both ways out; the Setup tab no longer requires the main box's tunnel identity.
-Node 1800 on dev is replaced in WP5. WP4 (deletions) and WP5 (live gate) not
-started.
+Node 1800 on dev is replaced in WP5.
+
+WP4 built 2026-09-06 (owner's call, ahead of the live gate; testing day
+2026-09-06): the ssh era is deleted. `RelaySsh`, the five relay job builders and
+the result-processor handlers, `provision_relay_main.sh`'s tunnel half (it now
+installs only the listener and DKIM helpers), the tunnel and ssh columns on the
+relay, node, shard and slot rows, the `mailbox_relay_wg_public_key` and
+`mailbox_relay_outbound_mode` settings, the Setup tab's tunnel rows and job
+forms, the smarthost branch everywhere (Q1: `OutboundTransport` allows a
+hidden-origin send through an API provider by construction or through SMTP once
+the origin-leak probe has cleared it, `InboundEmailHealth::hiddenOriginSendAllowed`),
+and the sealer's `direct-serve` mode. A relay row without an identity pin is
+unreachable and says so. A fleet shard is born like any relay, skeleton only,
+from the fleet console; there is no shard update path (a shard holds every
+tenant's undrained mail; a new shard is born and tenants move). Cutover step 2
+has NOT run: jeremytunnell's tunnel relay becomes unreachable by the plane
+when this ships, so its spool is drained and a born relay created first, and
+step 3 (the main box's tunnel, by hand as root) follows. WP5 not started.
 The Q1 consequence for `OutboundTransport` (the smarthost branch giving way to
 the origin-leak probe verdict) lands with WP4's deletions. Two details
 differ from the text below and the text is not yet updated: the bundle names

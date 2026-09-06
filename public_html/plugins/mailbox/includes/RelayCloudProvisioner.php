@@ -23,6 +23,9 @@
  *
  * Test seam: $driver_factory.
  *
+ * @version 2.2 - a fleet shard is born the same way, skeleton only (rcp_mfs_shard_id): the
+ *                operator identity's key rides in its user-data and its birth lands on the
+ *                MailboxFleetShard row (specs/relay_without_a_shell.md WP4)
  * @version 2.1 - BORN CONFIGURED (specs/relay_without_a_shell.md WP3). ready creates the
  *                instance with first-boot user-data (the run's bundle copy, a one-time
  *                run token, this deployment's client public key); booting polls;
@@ -221,9 +224,16 @@ class RelayCloudProvisioner {
 			'bundle_sha256'     => $sha,
 			'mail_hostname'     => $mail_hostname,
 			'authserv_id'       => $mail_hostname,
-			'client_public_key' => RelayClientIdentity::publicKey(RelayClientIdentity::KIND_CLIENT),
 			'skeleton_only'     => '0',
 		);
+		if ($run->isShard()) {
+			// A fleet shard: no tenant main; the operator identity's public key
+			// answers to the tenant routes, and tenants arrive through enrollment.
+			$fields['skeleton_only'] = '1';
+			$fields['operator_public_key'] = RelayClientIdentity::publicKey(RelayClientIdentity::KIND_OPERATOR);
+		} else {
+			$fields['client_public_key'] = RelayClientIdentity::publicKey(RelayClientIdentity::KIND_CLIENT);
+		}
 		return array('user_data' => RelayFirstBoot::render($fields), 'fields' => $fields);
 	}
 
@@ -502,9 +512,11 @@ class RelayCloudProvisioner {
 		$mail_hostname = strtolower(trim((string)$run->get('rcp_mail_hostname')));
 
 		// 3a. Does the machine at the provider's address hold the key the report
-		//     carried? Signed as tenant main with this deployment's client identity,
-		//     which the user-data put in the relay's registry.
-		$probe = new RelayClient($public_ip, $fingerprint, 'main', RelayClientIdentity::KIND_CLIENT);
+		//     carried? Signed as the party the user-data put in the relay's
+		//     registry: tenant main with the client identity, or the operator.
+		$probe = $run->isShard()
+			? RelayClient::forOperator($public_ip, $fingerprint)
+			: new RelayClient($public_ip, $fingerprint, 'main', RelayClientIdentity::KIND_CLIENT);
 		try {
 			$ping = $probe->ping();
 		} catch (RelayClientException $e) {
@@ -514,6 +526,10 @@ class RelayCloudProvisioner {
 		$reported = (string)($ping['identity']['identity_fingerprint'] ?? '');
 		if ($reported !== '' && $reported !== $fingerprint) {
 			throw new RelayBirthRefused('The relay answered with a different identity than its report carried.');
+		}
+
+		if ($run->isShard()) {
+			return $this->completeShardBirth($run, $public_ip, $fingerprint, (string)$report['identity_public_key'], (string)($report['relay_version'] ?? ''));
 		}
 
 		// 3b. The row: the pin and the address. Nothing about a tunnel.
@@ -621,11 +637,97 @@ class RelayCloudProvisioner {
 	}
 
 	/**
+	 * A fleet shard has reported in. No MailboxRelay row (the operator is not a
+	 * tenant of its own shard) and no map push (tenants push their own
+	 * fragments through the shard's tenant routes once enrolled): the shard row
+	 * takes the pin and the address and becomes active, so assignShard() will
+	 * place tenants on it. Reverse DNS is requested as for any relay.
+	 */
+	private function completeShardBirth(RelayCloudProvision $run, string $public_ip, string $fingerprint,
+			string $identity_public_key, string $relay_version): MailboxRelay {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_fleet_shard_class.php'));
+		$shard = new MailboxFleetShard(intval($run->get('rcp_mfs_shard_id')), TRUE);
+		if (!$shard->key) {
+			throw new RelayBirthRefused('The shard this run was for no longer exists.');
+		}
+		$shard->set('mfs_public_ip', substr($public_ip, 0, 64));
+		$shard->set('mfs_identity_fingerprint', substr($fingerprint, 0, 64));
+		$shard->set('mfs_cloud_provider', (string)$run->get('rcp_provider'));
+		$shard->set('mfs_cloud_instance_id', (string)$run->get('rcp_instance_id'));
+		$shard->set('mfs_region', (string)$run->get('rcp_region'));
+		if ($relay_version !== '') {
+			$shard->set('mfs_provisioned_version', substr($relay_version, 0, 20));
+		}
+		$shard->set('mfs_is_active', true);
+		$shard->save();
+
+		if ((string)$run->get('rcp_instance_id') !== '') {
+			try {
+				$this->driverFor($run)->setReverseDns((string)$run->get('rcp_instance_id'), $public_ip, (string)$shard->get('mfs_hostname'));
+			} catch (\Throwable $e) {
+				error_log('RelayCloudProvisioner: shard setReverseDns deferred (' . $e->getMessage() . ')');
+			}
+		}
+		$this->attachShardNode($shard);
+
+		$run->spendRunToken();
+		$run->set('rcp_status', 'done');
+		$run->set('rcp_error', null);
+		$run->eraseCredentials();
+		$run->save();
+
+		// The endpoint answers with a relay-shaped record; a shard has none, so a
+		// detached row carries the two facts the caller reports.
+		$answer = new MailboxRelay(NULL);
+		$answer->set('mrl_identity_fingerprint', $fingerprint);
+		$answer->set('mrl_public_ip', $public_ip);
+		return $answer;
+	}
+
+	/** A shard as a ManagedNode in the disposable posture, when server_manager is active. */
+	private function attachShardNode(MailboxFleetShard $shard): void {
+		if (!PluginHelper::isPluginActive('server_manager') || !class_exists('ManagedNode')) {
+			return;
+		}
+		try {
+			$node = null;
+			$node_id = intval($shard->get('mfs_mgn_managed_node_id'));
+			if ($node_id > 0) {
+				$node = new ManagedNode($node_id, TRUE);
+				if (!$node->key || (string)$node->get('mgn_delete_time') !== '') {
+					$node = null;
+				}
+			}
+			$hostname = (string)$shard->get('mfs_hostname');
+			if ($node === null) {
+				$node = new ManagedNode(NULL);
+				$node->set('mgn_name', substr('Relay shard ' . $hostname, 0, 100));
+				$node->set('mgn_slug', class_exists('AgentChannelEndpoint')
+					? AgentChannelEndpoint::freeSlug('shard-' . $hostname)
+					: substr('shard-' . preg_replace('/[^a-z0-9-]+/', '-', strtolower($hostname)) . '-' . intval($shard->key), 0, 50));
+			}
+			$node->set('mgn_host', substr((string)$shard->get('mfs_public_ip'), 0, 255));
+			$node->set('mgn_is_relay', true);
+			$node->set('mgn_skip_joinery_checks', true);
+			$node->set('mgn_enabled', true);
+			$node->set('mgn_ssh_key_path', null);
+			$node->set('mgn_uptime_enabled', true);
+			$node->set('mgn_uptime_check_type', 'tcp_port');
+			$node->set('mgn_uptime_tcp_port', 25);
+			$node->set('mgn_notes', 'Disposable fleet shard (specs/relay_without_a_shell.md): no shell, no agent.');
+			$node->save();
+			$shard->set('mfs_mgn_managed_node_id', intval($node->key));
+			$shard->save();
+		} catch (\Throwable $e) {
+			error_log('RelayCloudProvisioner: could not attach a ManagedNode to shard ' . intval($shard->key) . ': ' . $e->getMessage());
+		}
+	}
+
+	/**
 	 * The MailboxRelay row for a relay without a shell. Reuses the row an
 	 * upgrade names, or the row whose instance id this is (never a second row
 	 * for one machine); otherwise a fresh one, born enabled. Carries the
-	 * identity pin and the public address; none of the tunnel or ssh fields,
-	 * which stay empty and so keep every RelaySsh path off this row.
+	 * identity pin and the public address.
 	 */
 	public function registerBornRelay(RelayCloudProvision $run, string $public_ip, string $fingerprint,
 			string $identity_public_key, string $mail_hostname): MailboxRelay {
@@ -643,13 +745,8 @@ class RelayCloudProvisioner {
 		$relay->set('mrl_tenant_slug', 'main');
 		$relay->set('mrl_mx_hostname', substr($mail_hostname, 0, 255));
 		$relay->set('mrl_authserv_id', substr($mail_hostname, 0, 255));
-		$relay->set('mrl_spool_path', '/var/spool/joinery-relay/main');
 		// An updated relay is a new machine with a new identity: the pin above
-		// replaced the old one, and any tunnel-era fields a predecessor row
-		// carried are cleared so nothing reads this row as a tunnel relay.
-		foreach (array('mrl_host', 'mrl_ssh_user', 'mrl_ssh_key_path', 'mrl_wg_public_key', 'mrl_wg_endpoint', 'mrl_wg_ip') as $field) {
-			$relay->set($field, null);
-		}
+		// replaced the old one.
 		$relay->set('mrl_last_health_failure', null);
 		$relay->set('mrl_cloud_provider', (string)$run->get('rcp_provider'));
 		$relay->set('mrl_cloud_instance_id', (string)$run->get('rcp_instance_id'));

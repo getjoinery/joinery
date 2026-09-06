@@ -16,6 +16,7 @@
  * @version 2.1 - relay version line and the upgrade affordance, which differs by
  *                what the platform can reach (job / cloud wipe / the customer's
  *                own box / operator-managed shard)
+ * @version 2.2 - the ssh era is over: no job form, no Rebuild, no outbound mode
  * @version 2.1 - a relay without a shell (specs/relay_without_a_shell.md): identity pin and
  *                last-ping class in place of tunnel rows, the whole ping behind a disclosure,
  *                Update wording, a Delete confirm that names the machine and the MX, the
@@ -57,13 +58,8 @@ function mailbox_relay_upgrade_control(int $relay_id, array $up): string {
 		// This customer built the box, so they are the one who can act on it —
 		// and unlike a cloud relay, they demonstrably have a way in.
 		return '<p class="small" style="margin-top:.5rem;">This relay was set up by hand, so this site '
-			. 'cannot rebuild it for you. Re-run <code>provision_relay.sh</code> on the relay to bring it '
-			. 'up to date.</p>';
-	}
-
-	if ($route === 'job') {
-		return '<p class="text-muted small" style="margin-top:.5rem;">Use Rebuild to bring this relay up '
-			. 'to date. It stops accepting mail while it rebuilds; senders retry.</p>';
+			. 'cannot update it for you: rebuild the machine from a fresh image and run '
+			. '<code>provision_relay.sh</code> on it again.</p>';
 	}
 
 	// A relay that says outright it serves other deployments is never offered a
@@ -180,8 +176,8 @@ function mailbox_relay_section_render($page, array $v): void {
 					: '<span class="text-danger">' . htmlspecialchars($failure) . '</span> — '
 						. htmlspecialchars(RelayClient::describeFailure($failure))) . '</td></tr>';
 			} else {
-				echo '<tr><th style="width:45%;">Tunnel address (private)</th><td>' . htmlspecialchars((string)$relay->get('mrl_host')) . '</td></tr>';
-				echo '<tr><th>WireGuard key</th><td><code>' . htmlspecialchars(substr((string)$relay->get('mrl_wg_public_key'), 0, 16)) . '…</code></td></tr>';
+				echo '<tr><th style="width:45%;">Identity pin</th><td><span class="text-danger">none — this row predates the relay API '
+					. 'and cannot be reached; create a new relay and delete it</span></td></tr>';
 			}
 			echo '<tr><th>Address-list version</th><td>v' . (int)$relay->get('mrl_map_version') . '</td></tr>';
 			echo '<tr><th>Last address-list push</th><td>' . (htmlspecialchars((string)$relay->get('mrl_last_push_time')) ?: '—') . '</td></tr>';
@@ -208,11 +204,6 @@ function mailbox_relay_section_render($page, array $v): void {
 					. '</pre></details>';
 			}
 			echo mailbox_relay_action_button($rid, $enabled ? 'disable' : 'enable', $enabled ? 'Disable' : 'Enable');
-			// Rebuild renders only where a job can actually land: the button used to
-			// appear on cloud relays too, and dead-ended on "Select a managed node".
-			if (($up['route'] ?? '') === 'job') {
-				echo mailbox_relay_action_button($rid, 'rebuild', 'Rebuild', 'btn-warning');
-			}
 			// The hosted notice shows regardless of standing: a tenant is owed the
 			// plain statement that this relay is somebody else's to upgrade, not
 			// just silence until it happens to fall behind.
@@ -244,7 +235,7 @@ function mailbox_relay_section_render($page, array $v): void {
 	}
 
 	// Provider mode: an out-and-back probe proves sent mail carries no origin leak.
-	if (!empty($v['has_active_relay']) && $v['outbound_mode'] !== 'smarthost') {
+	if (!empty($v['has_active_relay'])) {
 		echo '<form method="post" style="display:inline">';
 		echo '<input type="hidden" name="action" value="origin_probe">';
 		echo '<button type="submit" class="btn btn-sm btn-outline-secondary">Run origin-leak probe</button>';
@@ -421,26 +412,11 @@ function mailbox_relay_section_render($page, array $v): void {
 				. 'billed to you, and builds the relay on it automatically. It can be resized later at Linode if ever needed.</p>';
 		}
 
-		// Operator convenience: provision onto an existing managed node.
-		if (empty($v['relays']) && !$cloud_run_live
-				&& !empty($v['server_manager_active']) && !empty($v['nodes'])) {
-			$formwriter = $page->getFormWriter('provision_relay');
-			echo $formwriter->begin_form();
-			$node_options = array();
-			foreach ($v['nodes'] as $node) {
-				$node_options[(string)$node->key] = $node->get('mgn_name') . ' (' . $node->get('mgn_host') . ')';
-			}
-			$formwriter->dropinput('mgn_managed_node_id', 'Managed node', array('options' => $node_options));
-			$formwriter->textinput('mail_hostname', 'Mail hostname', array('placeholder' => 'mx.example.com'));
-			$formwriter->hiddeninput('action', '', array('value' => 'provision'));
-			$formwriter->submitbutton('btn_provision', 'Provision relay');
-			echo $formwriter->end_form();
-		}
-
 		// The standalone floor: any VPS, by hand.
 		if (empty($v['relays']) && !$cloud_run_live) {
 			echo '<p class="text-muted small">Or by hand on any fresh VPS: run '
-				. '<code>provisioning/provision_relay.sh &lt;mail-hostname&gt;</code> as root (see the plugin docs).</p>';
+				. '<code>provisioning/provision_relay.sh &lt;mail-hostname&gt; --client-public-key &lt;this site\'s relay client key&gt;</code> '
+				. 'as root (see the plugin docs); such a relay cannot be updated from here.</p>';
 		}
 	}
 	} // get-a-relay gate (one relay per deployment)

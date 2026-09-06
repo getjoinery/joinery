@@ -162,9 +162,8 @@ Under a fronted topology:
 - **SPF** prescribes the outbound provider's mechanism alone
   (`v=spf1 <mechanism> -all`, from `EmailServiceProvider::getSpfMechanism()`)
   — a record naming the box FAILS, because it publishes the address the relay
-  hides. Smarthost outbound prescribes the relay's IP instead. Local-sendmail
-  outbound gets no record prescription: that row prescribes switching to an
-  API provider.
+  hides. Local-sendmail outbound gets no record prescription: that row
+  prescribes switching to an API provider.
 - **Relay identity rows** (the MX hostname's A record, the relay IP's PTR)
   replace the box's own A/PTR rows. On a fleet slot they are operator-published
   and render as neutral INFO when missing; on a self-hosted relay the tenant
@@ -697,7 +696,6 @@ identity and provisioning (provider, mail hostname/IP, SRS, the relay) live on t
 | `mailbox_spam_filtering_enabled` | `1` | Move suspected spam to the Spam view. The one spam question; on by default. See [Spam filtering](#spam-filtering). |
 | `mailbox_spam_learning_enabled` | `0` | Learn from what users mark as spam. Relay/webhook mail is re-scored locally wherever a scanner runs; this setting makes that local verdict the one that counts (replacing the upstream's) instead of merely adding to it. Clamped off whenever filing is off; offered only where a scanner is running (it ships with the mail stack). See [Content scanner](#content-scanner-rspamd). |
 | `mailbox_rspamd_controller_url` | `http://127.0.0.1:11334` | Loopback rspamd controller endpoint the ingest scan and the spam/ham feedback loop POST to. No password (loopback-trusted). |
-| `mailbox_relay_outbound_mode` | `provider` | On a relay-fronted deployment, where compose sends leave: `provider` (default — the configured provider's raw-MIME API, hiding the origin) or `smarthost` (through the relay over the tunnel; the deployment owns the relay IP's sending reputation). The stored value keeps the Postfix term; the reader is shown *Through the relay*. See [Outbound sending](#outbound-sending). |
 
 ## Plugin Structure
 
@@ -1954,12 +1952,12 @@ verifies it, **seals it to the recipient's public key at the moment of
 acceptance**, and spools ciphertext. Each tenant's plane pulls its own sealed
 blobs. Its own IP appears in no mail DNS.
 
-There are two relay shapes in the field, told apart by the `mrl_` row:
+A relay is **a relay without a shell** (`provision_relay.sh`,
+`specs/relay_without_a_shell.md`):
 
-- **A relay without a shell** (`provision_relay.sh` 3.0,
-  `specs/relay_without_a_shell.md`): two listeners, Postfix on 25 and the
+- two listeners, Postfix on 25 and the
   sealer binary's `relay-serve` mode on 443, and no other way in — no sshd, no
-  WireGuard, no tenant Unix accounts, no sudoers rules, and no credential held
+  tunnel, no tenant Unix accounts, no sudoers rules, and no credential held
   by the platform. It is born configured by its provider's first-boot
   user-data (`provisioning/relay_first_boot.sh`, rendered by the plane), fetches
   the release's support bundle from the plane, builds itself, generates an
@@ -1992,10 +1990,9 @@ There are two relay shapes in the field, told apart by the `mrl_` row:
   and a pinned ping to that address answers; then the row is written, the map
   push is the gate, reverse DNS is requested and the run is done
   (`RelayCloudProvisioner::completeBirth`).
-- **A tunnel relay** (`provision_relay.sh` 2.x): WireGuard between the plane and
-  the relay carries the spool pull (rsync over ssh as a restricted forced-command
-  tenant account), the map push, the health ping and Direct egress. The row
-  carries `mrl_wg_public_key` and the plane speaks to it through `RelaySsh`.
+- **A relay row with no identity pin** cannot be reached: it predates the
+  relay API, every consumer reports it as such (`no_identity`), and the remedy
+  is to create a new relay and delete the row.
 
 **It also serves Joinery Direct** for its tenants, from the same binary. At
 Fortress the relay has to: an SRV record pointing at the origin box would
@@ -2007,14 +2004,13 @@ address. The relay authenticates and never signs; the box authorizes at
 unlock. See [Joinery Direct](../../../docs/joinery_direct.md).
 
 **The relay stack is tenancy-native, and a self-hosted relay is a fleet of
-one.** Every tenant on a relay has its own spool subdirectory, its own
-root-owned registry entry (domain allowlist, shard-policy limits, and on a 3.0
-relay its Ed25519 public key; on a 2.x relay a restricted SSH pull account and
-a WireGuard peer). A self-hosted relay is simply a relay with one tenant (slug
+one.** Every tenant on a relay has its own spool directory and its own
+root-owned registry entry (Ed25519 public key, domain allowlist, shard-policy
+limits). A self-hosted relay is simply a relay with one tenant (slug
 `main`, allowlist `*`, created by the build); a fleet shard is one with a tenant
 per enrolment. One codebase, one code path — N=1 is the degenerate case.
 
-**Health is the only window into a 3.0 relay.** There is no door, so
+**Health is the only window into a relay.** There is no door, so
 `GET /relay/ping` carries everything a person would have learned from a shell,
 under one rule: service state is not tenant data, and anything per-tenant
 (spool, Postfix message counts, the journal excerpt) is reported only when the
@@ -2068,17 +2064,15 @@ For each accepted message it:
 The relay holds no database, so `RelayMapExporter` compiles this tenant's
 routing — its domains, recipients, forwarding domains, and per-tenant identity
 (SRS secret, forward From identity, transport key) — into **one JSON fragment**,
-and `RelayMapSync` pushes it to the relay — into the tenant's own drop area over
-the restricted tenant account on a 2.x relay, then the tenant shell's
-`joinery-merge` verb; as a signed `PUT /relay/fragment` on a 3.0 relay, where a
-root path unit performs the merge — and reads the validation verdict in-band.
-Never root, never `/etc/postfix`. IMAP-source domains are excluded — their mail arrives by IMAP
+and `RelayMapSync` pushes it to the relay as a signed `PUT /relay/fragment`,
+where a root path unit performs the merge, and reads the validation verdict
+in-band. Never root, never `/etc/postfix`. IMAP-source domains are excluded — their mail arrives by IMAP
 poll, not MX, and listing them would make the relay wrongly authoritative for
 e.g. `gmail.com`, looping forwards to addresses there back into the sealer
 instead of out over SMTP.
 
 The relay-side merge (`relay-sealer merge-maps`, root, triggered by the path
-unit or the tenant shell — never a resident daemon) is **where the domain-claim boundary is mechanically
+unit — never a resident daemon) is **where the domain-claim boundary is mechanically
 enforced**: every domain a fragment names must sit inside that tenant's
 root-owned allowlist (`/opt/joinery-relay/tenants/<slug>/allowed_domains` — `*`
 on a self-hosted fleet of one, the explicit TXT-verified list on a fleet
@@ -2115,13 +2109,11 @@ surface that cannot render the middle grade still treats it as unmet.
 
 The pull (`RelaySpoolConsumer`, phase 2 of the `MailboxRelayReconcile`
 scheduled task) dials out to the relay and copies new entries from **its own
-spool subdirectory** (over WireGuard as the restricted tenant account with
-`rsync` on a 2.x relay; as signed `GET /relay/spool` and per-entry fetches on a
-3.0 relay), stores each durably keyed on the spool id (an idempotent re-pull is
-a no-op), and acks the entries it stored (the tenant shell's `joinery-ack` verb,
-or `POST /relay/spool/ack`; ids only — the relay resolves them inside the
-tenant's spool and rejects anything with a path separator) — the
-delete-after-store is the ack. Standard/Private
+spool directory** (a signed `GET /relay/spool` listing and per-entry fetches),
+stores each durably keyed on the spool id (an idempotent re-pull is a no-op),
+and acks the entries it stored (`POST /relay/spool/ack`; ids only — the relay
+resolves them inside the tenant's spool and rejects anything with a path
+separator) — the delete-after-store is the ack. Standard/Private
 blobs are opened at pull with the ambient transport key and run through today's
 ingest. Fortress blobs cannot be opened while the owner is logged out, so they
 land as **pending-parse** rows: operational metadata + the sealed blob, so
@@ -2173,9 +2165,12 @@ path. SMTP submission would stamp the main box IP into the sent message's first
 provider, so the origin stays hidden. `OutboundTransport` builds a fully formed,
 in-app-signed message (`RawRelayComposeTransport`) and hands it to the active
 provider's `relayRawMessage()` — the `ApiSubmissionRelay` capability (Mailgun's
-`messages.mime`, SES's `Content.Raw`). The provider must be API-class; an
-SMTP-only provider is refused with a message pointing to an API provider or the
-smarthost. DKIM signing stays in-app: a protected domain signs with its
+`messages.mime`, SES's `Content.Raw`). An API provider passes by construction;
+an SMTP provider carries hidden-origin sends only once the origin-leak probe
+has round-tripped clean within its window (`InboundEmailHealth::hiddenOriginSendAllowed`),
+and is refused otherwise with the probe named as the remedy — an operator
+running their own Postfix strips the submission `Received:` line, runs the
+probe, and sends. DKIM signing stays in-app: a protected domain signs with its
 vault-sealed key, a standard domain with the filesystem key opendkim would have
 used, and the envelope (MAIL FROM) routes through the forwarding subdomain so the
 protected domain's own `v=spf1 -all` never touches the envelope. Generated
@@ -2190,106 +2185,60 @@ encrypted-interop path, which is ciphertext before it leaves the box and stays
 ciphertext through any transport. The asymmetry lives on **inbound**, which lands
 in the operator's own archive under the user's keys — and inbound keeps the relay.
 
-**Sending through the relay** is the opt-in alternative (`mailbox_relay_outbound_mode
-= smarthost`, offered on the Settings tab's "Sent mail leaves through" select as
-*Through the relay*). Compose sends then leave through the relay over the tunnel, so
-no third party carries outbound plaintext — in exchange the deployment owns the relay
-IP's sending reputation (warmup, blocklist monitoring, PTR hygiene). The stored value
-and the internal identifiers keep Postfix's word *smarthost*; no reader is shown it,
-because it names the plumbing rather than what happens to their mail.
-`OutboundTransport` routes hosted-alias sends through
-`SmtpConfig::fromRelaySmarthost()`; DKIM signing stays in-app, the relay only
-transports. The hop is deliberately plaintext
-SMTP — the WireGuard tunnel already encrypts it — so `fromRelaySmarthost()` sets
-`encryption = 'none'` and `SmtpMailer` disables PHPMailer's opportunistic
-auto-STARTTLS for an explicit `'none'` (otherwise it would upgrade into the
-relay's self-signed cert and fail the handshake). `provision_relay.sh` opens the
-tunnel submission listener (`permit_mynetworks` on the WireGuard subnet) only in
-this mode — pass `smarthost` as its second argument. The listener state is baked
-at provision time, so changing the outbound mode takes effect on the relay itself
-at its next Rebuild: switching to the relay leaves compose sends refused (and the
-tunnel check failing) until the Rebuild opens the listener, and switching back to a
-provider leaves the listener open until the next Rebuild closes it. The mode
-select's save message says so.
+**The relay never carries sent mail.** It is inbound only: a tenant key can
+read its own spool and write its own routing fragment, nothing more, so a
+compromised relay can send nothing as this deployment.
 
-The relay's outbound health checks match the chosen path, never showing an N/A row.
-Provider mode verifies the active provider is API-class and offers an out-and-back
-origin-leak probe: `sendOriginProbe()` sends a marked message from the first
-enabled store-mode alias on a Standard or Private domain to itself — a listed
-alias because the relay's SMTP-time recipient validation rejects anything else,
+The relay's outbound health checks are the provider's: `checkOutboundTransportClass`
+reads the same verdict as the send gate, and an out-and-back origin-leak probe
+is offered: `sendOriginProbe()` sends a marked message from the first enabled
+store-mode alias on a Standard or Private domain to itself — a listed alias
+because the relay's SMTP-time recipient validation rejects anything else,
 store-mode so the delivered copy lands in `iem_inbound_email_messages`, and
-non-Fortress so that copy is server-readable — out via the provider, back via the
-relay MX, and `checkOutboundOriginLeak` scans the delivered headers for the box
-IP or hostname on token boundaries. Smarthost mode verifies compose submission
-with a live SMTP handshake over the tunnel (EHLO, `MAIL FROM:<>`, RCPT to a
-reserved `.invalid` recipient, QUIT — nothing is ever sent): port 25 answers in
-both modes, so only the relay *accepting* an external recipient proves the
-submission listener is open.
+non-Fortress so that copy is server-readable — out via the provider, back via
+the relay MX, and `checkOutboundOriginLeak` scans the delivered headers for the
+box IP or hostname on token boundaries. A clean probe within the freshness
+window (`ORIGIN_PROBE_FRESH_DAYS`) is what clears an SMTP path.
 
 ### Provisioning
 
-`provisioning/provision_relay.sh` is the self-contained installer, in two
-layers:
+`provisioning/provision_relay.sh` is the self-contained build the relay runs on
+itself at first boot: idempotent, zero prompts, root on a fresh minimal
+Debian/Ubuntu image, driven by the first-boot user-data
+(`provisioning/relay_first_boot.sh`, rendered by the plane). It installs the
+prebuilt sealer from the bundle beside it, wires Postfix + opendkim (verify,
+`RemoveARFrom` stripping forged Authentication-Results) + opendmarc (stamp) +
+rspamd, creates the relay's identity, registers tenant `main` from the client
+public key in the user-data (or nothing, `--skeleton-only`, for a fleet shard
+with the operator's key), writes the three `systemd` units (`joinery-relay-serve`,
+the `joinery-relay-apply` path unit, the `joinery-relay-collect` timer),
+enables `systemd-timesyncd`, turns on unattended-upgrades' automatic reboot at a
+fixed hour, opens 25 and 443 and nothing else, and writes the signed birth
+report. rspamd is **stateless**: static rules only, Bayes classifier and
+autolearn off, no redis — learned state on a shared relay would be one model
+trained on every tenant's mail (a cross-tenant privacy leak and a poisoning
+vector), and the relay's header was never the verdict anyway — each tenant's
+own rspamd re-scores at ingest. `--keep-sshd` exists for one thing, a hand run
+on a box you can watch, and is refused without a terminal.
 
-- **Shard skeleton** (`provision_relay.sh <mail-hostname> [smarthost]`):
-  idempotent, zero prompts, runnable as root on a fresh minimal Debian VPS. It
-  builds the sealer/merge binary, installs the tenant shell
-  (`/opt/joinery-relay/bin/joinery-tenant-shell`) and the sudoers rule letting
-  tenant accounts trigger the map merge, wires Postfix + opendkim(verify,
-  `RemoveARFrom` stripping forged Authentication-Results) + opendmarc(stamp) +
-  rspamd + WireGuard + a default-deny firewall, and prints the relay public IP,
-  WireGuard public key, and tunnel endpoint. rspamd is **stateless**: static
-  rules only, Bayes classifier and autolearn off, no redis — learned state on a
-  shared relay would be one model trained on every tenant's mail (a
-  cross-tenant privacy leak and a poisoning vector), and the relay's header was
-  never the verdict anyway — each tenant's own rspamd re-scores at ingest. The
-  script self-installs to `/opt/joinery-relay/provision_relay.sh` so tenant
-  lifecycle operations run without re-shipping the bundle.
-- **Tenant lifecycle** (`add-tenant <slug> --pull-pubkey … [--wg-pubkey …]
-  [--tunnel-ip …] [--domains a.com,b.com | '*' | '-'] [--forward-limit N]
-  [--spool-max-mib N] [--spool-max-entries N]`, plus `remove-tenant` and
-  `set-domains`): each run creates one tenant — spool subdirectory
-  (`/var/spool/joinery-relay/<slug>`, mode 2770, owner the sealer, group the
-  tenant), SSH account `jt-<slug>` whose authorized key is locked to the tenant
-  shell (rsync pull of its own spool, rsync push into its own fragment drop,
-  `joinery-ack`, `joinery-merge`, `joinery-ping` — nothing else; `joinery-ping`
-  answers the shard's health as JSON, see **Is the relay still scanning?**),
-  WireGuard
-  peer pinned to its allocated tunnel address, and the root-owned registry
-  entry (allowlist + limits). `remove-tenant` refuses while the tenant's spool
-  holds undrained sealed mail unless forced. The smarthost is single-tenant
-  only — `add-tenant` refuses a second tenant on a smarthost relay, because
-  `mynetworks` trusts the whole tunnel subnet in that mode.
+Tenant lifecycle on a relay is `relay-sealer tenant-add | tenant-set-domains |
+tenant-remove` — the same functions the operator-signed tenant routes call — so
+a tenant is a spool directory, a fragment drop and a registry entry (public
+key, allowlist, limits): no account, no peer, no sudoers rule. `tenant-remove`
+refuses while the tenant's spool holds undrained sealed mail.
 
-The main box's half of the tunnel is `provisioning/provision_relay_main.sh`
-(root, once per deployment): it generates the box's WireGuard keypair (private
-key root-only in `/etc/wireguard`), writes the `jyrelay0` dial-out interface,
-installs the `joinery-relay-peer` root helper plus the sudoers rule that lets
-the provision job peer a freshly built relay automatically, generates the
-**relay pull key** (`{site root}/config/relay_pull_key`, `RelaySsh::pullKeyPath()`),
-and registers the public key in settings (`mailbox_relay_wg_public_key`). The
-Relay section's provision form stays gated — showing the exact command to run —
-until that key exists.
-
-The pull key is a dedicated SSH identity owned by the web user, because every
-steady-state relay connection — the spool pull and map-push cron tasks and the
-Relay section's health battery — runs as the web user, and ssh only accepts a key
-file its caller owns with mode 600. The provision job installs the pull key's
-public half as the tenant account's authorized key (forced command: the tenant
-shell) and points the relay row's `mrl_ssh_key_path` at it, so the managed
-node's admin key (which drives provisioning through the Go agent) never has to
-be readable by the web user, and the steady-state credential grants exactly the
-tenant surface — this tenant's spool and fragment drop, nothing else.
-`provision_relay_main.sh` also installs a second narrow root helper
-(`joinery-relay-addr`) that applies a fleet-allocated tunnel address to the
-`jyrelay0` interface (a hosted slot's allocation is not always the `10.99.0.2`
-self-hosted default).
+The main box's half is `provisioning/provision_relay_main.sh` (root, once per
+deployment): it installs two narrow root helpers with their sudoers rule —
+`joinery-mail-listener`, the guarded local-listener switch, and
+`joinery-dkim-remove`. Nothing about a relay lives on the main box's disk: the
+relay client identity and the relay's pin are rows in the database.
 
 The **Setup tab's Relay section** (rendered whenever the receive mode is relay
-or a relay row exists) is the dashboard: it lists each relay with the four
-provisioning checks (tunnel, spool draining, map fresh, origin hidden) plus the
-relay's last spam-scanning answer, and its guided controls provision, rebuild,
-enable/disable, delete, and **Check spam scanning now**.
+or a relay row exists) is the dashboard: it lists each relay with its
+provisioning checks (reachable, spool draining, map fresh, origin hidden) plus
+the relay's last health answer with every group the relay reported behind a
+disclosure, and its guided controls create, update, enable/disable, delete,
+and **Check spam scanning now**.
 
 #### Is the relay still scanning?
 
@@ -2303,29 +2252,39 @@ none — and no amount of reading stored mail can separate them. Warning on "no
 message carried a content verdict in N days" reports every quiet mailbox behind
 a healthy relay as broken.
 
-So the relay is asked. `joinery-ping` answers one JSON object:
+So the relay is asked. `GET /relay/ping` (signed, pinned) answers one JSON
+object whose first keys are the scanner verdict:
 
 ```json
 {"status":"ok",
- "services":{"rspamd":"active","opendkim":"active","opendmarc":"active"},
+ "services":{"rspamd":"active","opendkim":"active","opendmarc":"active","postfix":"active",
+             "joinery-relay-serve":"active","joinery-relay-apply.path":"active","joinery-relay-collect.timer":"active"},
  "milters":{"opendkim":true,"opendmarc":true,"rspamd":true},
- "contract":true,"provisioned":"2.2","slug":"example"}
+ "contract":true,"provisioned":"3.0","slug":"main","sole":true,"queue":0,
+ "build":{}, "identity":{}, "service_detail":{}, "listeners":{}, "tls":{}, "clock":{},
+ "machine":{}, "firewall":[], "postfix":{}, "spool":{}, "direct":{}, "auth":{}, "log":[]}
 ```
 
-`services` is `systemctl is-active`; `milters` is read from `postconf -h
-smtpd_milters`; `contract` is the header contract — provisioning writes
-`local.d/milter_headers.conf` and `local.d/actions.conf` itself and records
-their digest in `/opt/joinery-relay/contract.sha256`, so ping re-hashes and
-returns a boolean rather than PHP modelling rspamd's config format. A relay
-whose contract drifted scans perfectly and stamps nothing
-`InboundEmailRouter::readSpamHeader()` can parse, which is why service liveness
-alone is not the question. A relay built before this answers the plain text
-`PONG <slug>`, and that is the capability probe.
+`services` is unit state from the relay's root collector (a thirty-second
+timer; before its first pass every unit reads `unknown`, never active);
+`milters` is read from `postconf -h smtpd_milters`; `contract` is the header
+contract — the build writes `local.d/milter_headers.conf` and
+`local.d/actions.conf` itself and records their digest in
+`/opt/joinery-relay/contract.sha256`, so the collector re-hashes and returns a
+boolean rather than PHP modelling rspamd's config format. A relay whose contract
+drifted scans perfectly and stamps nothing `InboundEmailRouter::readSpamHeader()`
+can parse, which is why service liveness alone is not the question. The
+remaining groups are everything else a person would have learned from a shell —
+build, identity, listeners, certificate, clock, machine, firewall rule set,
+Postfix counts, spool, Direct, signature failures, the relay's own journal — and
+the Setup tab renders them behind a disclosure, because health is the only
+window into a relay.
 
-**Shard-level service liveness only.** A shared fleet shard serves several
-deployments, so the answer never carries queue depth, message counts, spool
-sizes, or anything per-tenant — that would leak one tenant's mail volume to
-another. Service state is not tenant data.
+**Service liveness only, per tenant where it is the asker's.** A shared fleet
+shard serves several deployments, so the answer carries queue depth, message
+counts, spool sizes and the journal excerpt only when the relay has exactly one
+tenant; on a shard those keys are absent, never zero. Service state is not
+tenant data.
 
 `MailboxRelay::readHealth()` turns one answer into a state (`ok`,
 `not_delivering`, `legacy`, `unreadable`, `unreachable`) plus a reason (`dead`,
@@ -2334,8 +2293,8 @@ relay row (`mrl_last_health_json` / `mrl_last_health_time`); an unreachable
 result is deliberately not cached, because overwriting the last real answer
 destroys the only information available during an outage.
 
-`MailboxRelayReconcile` polls once per pass — the SSH session is already open —
-and `InboundEmailSetupCheck::checkRelayScannerHealth()` reads the cached answer,
+`MailboxRelayReconcile` polls once per pass, and
+`InboundEmailSetupCheck::checkRelayScannerHealth()` reads the cached answer,
 so no page render pays for a round trip. **Check spam scanning now** in the
 Relay section forces a fresh one for an operator mid-incident. Severity depends
 on whether this server is covering:
@@ -2345,14 +2304,14 @@ on whether this server is covering:
 | delivering usable verdicts | either | PASS |
 | not delivering — dead, unwired, or drifted | active | WARN — the relay is not delivering verdicts; this server is covering |
 | not delivering — dead, unwired, or drifted | not available | FAIL — nothing is scanning content anywhere |
-| answers `PONG` | either | INFO — the relay predates the check |
+| no identity pin | either | FAIL — the row predates the relay API and cannot be reached |
 
 A dead scanner and a drifted contract share a severity on purpose: different
 faults, one finding (the verdict is not reaching the tenant) and one remedy
-(rebuild the relay). Which it was survives in the detail text. A relay answering
-`PONG` also reports its version as unknown; both are the one finding — this relay
-predates the current provisioner — so the scanner row names the same **Upgrade
-relay** control rather than offering a parallel fix.
+(update the relay). Which it was survives in the detail text. A relay row with
+no identity pin reports its version as unknown too; both are the one finding —
+this relay predates the current relay — so the scanner row names the same
+**Update relay** control rather than offering a parallel fix.
 
 **Relay findings reach only mailboxes whose domain needs a relay.** A WARN or FAIL
 scanner is promoted from Advanced to a Receiving card, and the relay's two state
@@ -2416,31 +2375,27 @@ does until mail already looks wrong.
 
 #### Keeping a relay's code current
 
-A relay runs code that ships with the platform — the tenant shell, the sealing
-binary, the rspamd configuration — so it goes out of date when the platform moves
-on. The Relay section reads the version out of the relay's own health answer
-(`joinery-ping` reports `provisioned`), compares it against `RELAY_VERSION` in
+A relay runs code that ships with the platform — the sealing binary, the
+rspamd configuration — so it goes out of date when the platform moves on. The
+Relay section reads the version out of the relay's own health answer (the ping
+reports `provisioned`), compares it against `RELAY_VERSION` in
 `provision_relay.sh` with `version_compare()`, and offers an upgrade when the
-relay is **behind or silent**. A relay that answers the legacy plain-text `PONG`
-predates the version marker and reads as unknown, which offers the upgrade. A
-relay **newer** than the deployment offers nothing: the deployment is the thing
-to update.
+relay is **behind or silent**. A relay that has never answered reads as
+unknown, which offers the update. A relay **newer** than the deployment offers
+nothing: the deployment is the thing to update.
 
-**Nobody holds a shell credential to a cloud relay, by design.** A relay born
-from user-data has no sshd at all (the first-boot script removes it), no
-tenant accounts and no sudoers rules; the platform installs no key and records
-no root password, and the account holder's only door is the provider's own
-console. A tunnel relay built by 2.x keeps a key-only sshd reachable through
-the tenant pull key alone. Either way a relay cannot be logged in to and
-patched - its contents are replaced instead.
+**Nobody holds a shell credential to a relay, by design.** A relay has no sshd
+at all (the first-boot script removes it), no tenant accounts and no sudoers
+rules; the platform installs no key and records no root password, and the
+account holder's only door is the provider's own console. A relay cannot be
+logged in to and patched - its contents are replaced instead.
 
 The route depends on what the platform can reach:
 
 | Relay origin | Upgrade route |
 |---|---|
 | Cloud (the customer's own account) | **Update** — the same grant-per-act ceremony as provisioning, with two states in front: **draining** over the relay API, then **rebuilding**, which re-images the same instance with fresh user-data and a fresh run token; the relay is born again and its new identity pin lands on the same row |
-| Server Manager managed node | **Rebuild** — a `rebuild_relay` job over root SSH. Rendered only when `mrl_mgn_managed_node_id` resolves to a live node |
-| Run by hand | The Relay section states the version and says to re-run `provision_relay.sh`. That customer built the box and is the one who can act on it |
+| Run by hand | The Relay section states the version and says to rebuild the machine from a fresh image and run `provision_relay.sh` again. That customer built the box and is the one who can act on it |
 | Hosted fleet slot | Operator-managed. The slot says so and offers no control |
 
 **An update drains before it wipes.** The re-image destroys every byte on the
@@ -2451,42 +2406,43 @@ upgrade is elective, and losing mail to it is not a trade the platform makes on
 the customer's behalf.
 
 **A relay somebody else lives on is never wiped.** A deployment can see only its
-own tenancy, so `joinery-ping` answers `sole` — is the asking tenant the only one
+own tenancy, so the ping answers `sole` — is the asking tenant the only one
 here? A `false` renders no control, refuses a hand-posted upgrade, and refuses
 again at drain time (re-asked live, because a tenant can have been added since the
 relay last spoke). Anything short of a confirmed count of one answers `false`,
 including an unreadable tenant registry. A relay too old to answer reports
 `null`, which is not consent: the upgrade proceeds only with an explicit
 acknowledgement that the relay serves this site alone. Without the guard, one
-tenant clicking Upgrade would destroy every other tenant's mail, accounts,
-allowlists and WireGuard peers — the drain empties only the asking tenant's spool.
+tenant clicking Update would destroy every other tenant's mail, registry entries
+and allowlists — the drain empties only the asking tenant's spool.
 
-**The wipe is a rebuild in place, not a recreate.** `rebuildInstance()` replaces
+**The wipe is a re-image in place, not a recreate.** `rebuildInstance()` replaces
 every disk while keeping the instance and its public IPv4 — the address an MX
-record points at. A destroy-and-create would turn a few minutes of downtime into a
+record points at — and the relay is born again from fresh user-data with a new
+identity pin. A destroy-and-create would turn a few minutes of downtime into a
 DNS change plus propagation. Port 25 is gone for the whole run; SMTP senders queue
 and retry for days, so the visible effect is mail arriving late.
 
-A failed upgrade **destroys nothing**. `destroyInstanceQuietly()` refuses on an
+A failed update **destroys nothing**. `destroyInstanceQuietly()` refuses on an
 upgrade run: the instance is the customer's working relay, not the run's to throw
 away. That refusal lives at the single choke point every cleanup path funnels
 through.
 
 **Postfix's own queue is lost with the machine.** It holds mail Postfix accepted
 but has not handed to the sealer — normally empty, and unreachable by the drain
-because the tenant credential cannot read the queue. So `joinery-ping` reports its
-depth and the upgrade control states it, blocking nothing. That count is emitted
+because the tenant credential cannot read the queue. So the ping reports its
+depth and the update control states it, blocking nothing. That count is emitted
 **only on a relay with exactly one tenant**: on a shared shard the queue is shared,
 and its depth would read out every other tenant's mail volume. Absent is not zero
 — a relay that could not measure its queue reports nothing rather than a reassuring
 `0`.
 
-**The operator's half** is the fleet console. A shard is a managed node, so the
-operator holds root SSH and rebuilds through the ordinary job path. There is no
-`joinery-ping` for them — the operator is not a tenant of their own shards, which
-are provisioned `skeleton_only` with no tenant account — so the version arrives
-from the job's `RELAY_VERSION=` marker into `mfs_provisioned_version`. A shard
-whose job emitted no marker reads as unknown, never as up to date.
+**The operator's half** is the fleet console. A shard is born like any relay —
+a skeleton-only cloud run in the operator's own account, the operator
+identity's public key in its registry — and its birth report stamps its version
+into `mfs_provisioned_version`; a shard that has not reported in reads as
+unknown, never as up to date. A shard holds every tenant's undrained mail, so
+nothing re-images one: a new shard is born and tenants move to it.
 
 ### The shrunken main box
 
@@ -2500,7 +2456,7 @@ HTTP at ingest, carrying its Bayes corpus across the move with no reinstall.
 The relay scores regardless
 (`provision_relay.sh` installs rspamd unconditionally, stateless) and stamps
 its X-Spam header inside the sealed raw. The setup/health checks retarget to the relay
-(`checkRelayTunnel`, `checkRelaySpoolDraining`, `checkRelayMapFresh`) and add a
+(`checkRelayReachable`, `checkRelaySpoolDraining`, `checkRelayMapFresh`) and add a
 deployment-wide origin-hidden check (`checkOriginHidden`) that fails if the main
 box IP appears in any hosted domain's mail DNS.
 
@@ -2512,8 +2468,8 @@ local mail software unnecessary and a security risk — plus the button); while
 any guardrail fails, nothing renders at all (the Setup rows already walk the
 missing pieces), and the server-side re-check on POST remains the
 enforcement. The button runs `/usr/local/sbin/joinery-mail-listener off` — a
-narrow root helper installed by `provision_relay_main.sh` alongside the
-peer/addr helpers — which stops and disables Postfix/opendkim/opendmarc and
+narrow root helper installed by `provision_relay_main.sh` — which stops and
+disables Postfix/opendkim/opendmarc and
 closes 25/tcp at the firewall. After an uninstall the block goes quiet while a
 relay is still receiving mail — reinstalling would reopen attack surface no
 mail would use — and returns only once no enabled relay remains, as an amber
@@ -2562,9 +2518,9 @@ account's API key
 `mailbox_fleet_api_secret_key`); enrollment itself is a button in the Setup
 tab's Relay section. `FleetClient` calls the operator's
 `/api/v1/action/mailbox/fleet_*` actions: `fleet_enroll` sends this box's
-WireGuard + pull public keys and returns the slot coordinates (per-tenant MX
-hostname, shard WireGuard endpoint + key, allocated tunnel address, pull
-account, spool subdirectory), which fold into the deployment's `MailboxRelay`
+relay client public key and returns the slot coordinates (per-tenant MX
+hostname, the shard's identity pin and address, spool directory), which fold
+into the deployment's `MailboxRelay`
 row (`mrl_is_hosted`) — after which every relay consumer runs exactly as
 against a self-hosted relay. Hosted vs self-hosted differs only in where the
 coordinates came from. Each domain must pass a **DNS TXT ownership proof**
@@ -2581,19 +2537,19 @@ automation calls — they are not user-facing steps.
 
 **Operator side** (the deployment with `mailbox_fleet_service_enabled` +
 `mailbox_fleet_mx_zone` set): the fleet service is the brain — `FleetService`
-assigns shards (least-loaded active shard with capacity), allocates tunnel
-addresses, issues and verifies domain claims, and checks entitlement (the
-`mailbox_fleet_slot` tier feature, re-checked periodically with a
-`mailbox_fleet_grace_days` grace window before suspension empties the tenant's
-shard allowlist). Every decision is effected by dispatching a `server_manager`
-job (`relay_add_tenant` / `relay_set_domains` / `relay_remove_tenant`) from the
-`FleetReconcile` scheduled task — server_manager is the hands and never knows
-what a tenant or a domain claim is. The operator's control panel is the
+assigns shards (least-loaded born shard with capacity), issues and verifies
+domain claims, and checks entitlement (the `mailbox_fleet_slot` tier feature,
+re-checked periodically with a `mailbox_fleet_grace_days` grace window before
+suspension empties the tenant's shard allowlist). Every decision is effected as
+one operator-signed request to the shard's tenant routes
+(`FleetService::applyTenant`) from the relay reconcile task, the slot's status
+moving on the verdict. The operator's control panel is the
 **relay fleet console** (`/plugins/mailbox/admin/admin_mailbox_fleet`, reached
 from the Server Manager dashboard — operator infrastructure, so it never
 appears in the tenant mailbox tabs): the service switch + MX zone, shard
-registration (skeleton-only provisioning: the operator's box is not a tenant
-of its own shards), and the DNS-to-publish table. Each tenant's MX hostname
+registration (a skeleton-only birth in the operator's cloud account: the
+operator's box is not a tenant of its own shards), and the DNS-to-publish
+table. Each tenant's MX hostname
 (`<slug>.<mailbox_fleet_mx_zone>`, slug format `t<id>` — deliberately
 anonymous so DNS names no tenant) is an operator-controlled A record, so
 re-sharding a tenant or replacing a burned shard is an A-record change —

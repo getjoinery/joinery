@@ -1713,16 +1713,9 @@ class InboundEmailSetupCheck {
 			// DKIM — rows per signing path this domain's mail actually rides
 			// (specs/mailbox_provider_dkim.md): local opendkim when mail leaves
 			// through local Postfix, the outbound provider's own records when
-			// composed mail rides its API, an honest gap under the relay
-			// smarthost. A locally generated key is never prescribed for a path
-			// it doesn't sign.
+			// composed mail rides its API. A locally generated key is never
+			// prescribed for a path it doesn't sign.
 			$dkim_plan = $this->dkimPlan();
-			if ($dkim_plan['smarthost']) {
-				$out[] = $this->r('domain.dkim', $domain, 'domain', 'DKIM record', self::RECOMMENDED, self::WARN,
-					'Sent mail leaves through the relay without a DKIM signature.',
-					'Deliverability rides on SPF alone. Switching the relay outbound mode to '
-					. 'provider (with an API provider) restores DKIM signing.');
-			}
 			if ($dkim_plan['local']) {
 				// Local opendkim signs what this box submits itself. One check
 				// covering both that a signing key exists on this server and
@@ -3861,9 +3854,8 @@ class InboundEmailSetupCheck {
 	 *   'label'     — what carries the mail, for row text.
 	 *
 	 * Colocated: the box's own IP plus every outbound mechanism (forwarding
-	 * relay + compose provider). Fronted, provider outbound: the provider's
-	 * mechanism alone — the box IP is exactly what the relay hides. Fronted,
-	 * smarthost outbound: the relay's IP.
+	 * relay + compose provider). Fronted: the provider's mechanism alone — the
+	 * box IP is exactly what the relay hides, and the relay itself sends nothing.
 	 */
 	private function spfPlan(string $domain): array {
 		if (!$this->fronted()) {
@@ -3880,15 +3872,6 @@ class InboundEmailSetupCheck {
 			$value = implode(' ', array_merge($terms, $mechanisms, array('-all')));
 			return array('prescribe' => 'record', 'value' => $value,
 				'mechanism' => implode(' ', $mechanisms), 'label' => $label);
-		}
-
-		$t = $this->topology();
-		$outbound_mode = (strtolower(trim((string)$this->settings->get_setting('mailbox_relay_outbound_mode'))) === 'smarthost')
-			? 'smarthost' : 'provider';
-		if ($outbound_mode === 'smarthost') {
-			$mech = 'ip4:' . ($t['public_ip'] !== '' ? $t['public_ip'] : 'YOUR_RELAY_IP');
-			return array('prescribe' => 'record', 'value' => 'v=spf1 ' . $mech . ' -all',
-				'mechanism' => $mech, 'label' => 'the relay');
 		}
 
 		$class = $this->activeProviderClass();
@@ -3916,8 +3899,6 @@ class InboundEmailSetupCheck {
 	 *                 rides local Postfix).
 	 *   'provider'  — composed mail rides the outbound provider's API, so the
 	 *                 correct record is the one the PROVIDER issues.
-	 *   'smarthost' — fronted with the relay smarthost carrying sends, which
-	 *                 sign nothing (honest-gap row).
 	 *   'class'     — the provider class when it can report its records
 	 *                 (DkimRecordSource), else null (generic guidance).
 	 *   'label'     — the provider's display label.
@@ -3929,16 +3910,10 @@ class InboundEmailSetupCheck {
 			&& in_array('DkimRecordSource', class_implements($class) ?: array(), true);
 
 		if (!$this->fronted()) {
-			return array('local' => true, 'smarthost' => false,
+			return array('local' => true,
 				'provider' => $source, 'class' => $source ? $class : null, 'label' => $label);
 		}
-
-		$smarthost = strtolower(trim((string)$this->settings->get_setting('mailbox_relay_outbound_mode'))) === 'smarthost';
-		if ($smarthost) {
-			return array('local' => false, 'smarthost' => true,
-				'provider' => false, 'class' => null, 'label' => $label);
-		}
-		return array('local' => false, 'smarthost' => false,
+		return array('local' => false,
 			'provider' => true, 'class' => $source ? $class : null, 'label' => $label);
 	}
 

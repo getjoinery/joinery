@@ -131,7 +131,6 @@ class RelayCloudProvisionTest {
 		check(strpos($ud, '--keep-sshd') === false || strpos($ud, 'KEEP_SSHD=0') !== false, 'the user-data never keeps sshd');
 		preg_match('/RUN_TOKEN="\${RUN_TOKEN:-([0-9a-f]+)}"/', $ud, $m);
 		check(!empty($m[1]) && $run->runTokenMatches($m[1]), 'the user-data carries the run\'s live token');
-		check((string)$run->get('rcp_sealed_ssh_key') === '' && (string)$run->get('rcp_ssh_public_key') === '', 'no per-run SSH key exists');
 
 		check($p->advance($run) === 'still booting' && (string)$run->get('rcp_status') === 'booting', 'not running yet stays booting');
 		check(strpos($p->advance($run), 'report in') !== false && (string)$run->get('rcp_status') === 'provisioning',

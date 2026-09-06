@@ -273,21 +273,12 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 				continue;
 			}
 
-			// 1. Fold finished jobs into slot status.
-			FleetService::reconcile($slot);
-			$status = (string)$slot->get('mft_status');
 			$reconciled++;
 
-			$job = FleetService::lastJobState($slot);
-			$job_running = $job !== null
-				&& !in_array((string)$job['mjb_status'], array('completed', 'failed'), true);
-			if ($job_running) {
-				continue; // one lifecycle job at a time per slot
-			}
-
-			// 2. Dispatch pending work.
+			// 1. Pending work, applied on the shard here and now through its
+			//    operator-signed tenant routes (the slot's status moves on the verdict).
 			if ($status === MailboxFleetSlot::STATUS_PROVISIONING) {
-				// No job yet, or the last add-tenant failed — (re)dispatch.
+				// Not registered yet, or the last registration failed — try again.
 				if (FleetService::applyTenant($slot, 'add_tenant')) {
 					$dispatched++;
 				}
@@ -306,7 +297,7 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 				continue;
 			}
 
-			// 3. Entitlement re-check (active slots only).
+			// 2. Entitlement re-check (active slots only).
 			if ($status === MailboxFleetSlot::STATUS_ACTIVE) {
 				$user_id = intval($slot->get('mft_usr_user_id'));
 				$now = gmdate('Y-m-d H:i:s');

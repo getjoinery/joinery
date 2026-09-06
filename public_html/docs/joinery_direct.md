@@ -331,13 +331,11 @@ SRV record pointing at the origin box would advertise in public DNS exactly the
 address the relay exists to conceal, so the target is the relay — the same
 posture MX already takes.
 
-The relay serves the channel from the same Go binary that seals its mail. A
-relay built by `provision_relay.sh` 3.0 runs `relay-sealer relay-serve` as the
-`joinery-relay-serve` service: one listener on 443 whose certificate is chosen
-by SNI, the mail hostname's ACME certificate for Direct callers and the relay's
-own identity certificate for its plane. A relay built by 2.x runs
-`relay-sealer direct-serve` as the `joinery-direct` service, with the egress
-listener bound to its WireGuard address. Either way:
+The relay serves the channel from the same Go binary that seals its mail:
+`relay-sealer relay-serve`, the `joinery-relay-serve` service, one listener on
+443 whose certificate is chosen by SNI, the mail hostname's ACME certificate for
+Direct callers and the relay's own identity certificate for its plane
+(`specs/relay_without_a_shell.md`):
 
 - **Inbound, `:443`** — the public endpoint. TLS is terminated in-process with an
   ACME certificate obtained over TLS-ALPN-01 on that same port; there is no web
@@ -345,12 +343,11 @@ listener bound to its WireGuard address. Either way:
   security property. A verified delivery is written to the tenant's spool as a
   `.direct` container beside the `.seal` blobs mail already uses, and travels the
   same pull mail does — no new transport and no new credential.
-- **Outbound** — `POST /egress`. The box builds and signs a complete request and
+- **Outbound** — `POST /egress` on the same listener, behind the tenant's signed
+  envelope (`RelayProtocol`). The box builds and signs a complete request and
   the relay makes it, so the recipient sees the relay's address and never the
-  box's. On a 3.0 relay the route is on the public listener and carries the
-  tenant's signed envelope (`RelayProtocol`); on a 2.x relay it is reachable only
-  over the tunnel. The target rules (no private, loopback, link-local or
-  reserved address; port 443 only) are the same on both.
+  box's. The target rules (no private, loopback, link-local or reserved
+  address; port 443 only) are what keep a public proxy from being an open one.
 
 The split is **relay transports, box authenticates and authorizes**. Freshness,
 replay, manifest bounds, rate limits and spool caps let the relay refuse obvious
@@ -474,9 +471,8 @@ and a mark.
   `includes/SafeHttpClient.php`.
 - The relay's side: `plugins/mailbox/provisioning/relay-sealer/direct_*.go`
   (endpoint, capability lookup, state, crypto, spool artifact, egress), served by
-  `relay-serve` (the `joinery-relay-serve` service on a 3.0 relay, beside the
-  signed `/relay/` API in `relay_*.go`) or by `direct-serve` (the `joinery-direct`
-  service on a 2.x relay).
+  `relay-serve` (the `joinery-relay-serve` service) beside the signed `/relay/`
+  API in `relay_*.go`.
 - The box's side of the relay path: `DirectRelayEgress` (outbound, registered
   into `JoineryDirect`), `DirectRelayIngest` (inbound, called by
   `RelaySpoolConsumer` for `.direct` entries), and the Direct block of the

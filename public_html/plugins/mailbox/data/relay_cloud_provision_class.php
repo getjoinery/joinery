@@ -52,6 +52,7 @@ class RelayCloudProvision extends SystemBase {
 
 	protected static $foreign_key_actions = array(
 		'rcp_mrl_mailbox_relay_id' => array('action' => 'null'),
+		'rcp_mfs_shard_id' => array('action' => 'null'),
 	);
 
 	public static $field_specifications = array(
@@ -68,8 +69,6 @@ class RelayCloudProvision extends SystemBase {
 		'rcp_instance_id'     => array('type'=>'varchar(50)'),
 		'rcp_instance_ip'     => array('type'=>'varchar(64)'),
 		'rcp_sealed_token'    => array('type'=>'text'),
-		'rcp_sealed_ssh_key'  => array('type'=>'text'),
-		'rcp_ssh_public_key'  => array('type'=>'text'),
 		// A relay born from user-data (specs/relay_without_a_shell.md): the
 		// one-time run token the first-boot script presents to fetch the bundle
 		// and post the birth report, sealed like the provider token and erased
@@ -79,6 +78,10 @@ class RelayCloudProvision extends SystemBase {
 		'rcp_run_token_expires'=> array('type'=>'timestamp(6)'),
 		'rcp_run_token_spent'  => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		'rcp_bundle_sha256'    => array('type'=>'varchar(64)'),
+		// A fleet SHARD is born the same way, skeleton only: no tenant main, the
+		// operator's public key in its registry, and its birth lands on the
+		// MailboxFleetShard row this names instead of a MailboxRelay row.
+		'rcp_mfs_shard_id'     => array('type'=>'int8'),
 		'rcp_error'           => array('type'=>'text'),
 		'rcp_create_time'     => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'rcp_update_time'     => array('type'=>'timestamp(6)'),
@@ -110,25 +113,6 @@ class RelayCloudProvision extends SystemBase {
 		return (string)((new SecretBox())->open($stored)['value'] ?? '');
 	}
 
-	/** Seal the per-run root SSH private key onto the row (not saved here). */
-	public function sealSshKey(string $private_key): void {
-		$box = new SecretBox();
-		$this->set('rcp_sealed_ssh_key', $box->seal('rcp_relay_cloud_provisions.rcp_sealed_ssh_key', $private_key));
-	}
-
-	/** @return string '' when no key is held (or it is unreadable here). */
-	public function unsealSshKey(): string {
-		$stored = (string)$this->get('rcp_sealed_ssh_key');
-		if ($stored === '') {
-			return '';
-		}
-		return (string)((new SecretBox())->open($stored)['value'] ?? '');
-	}
-
-	/**
-	 * Grant-per-act custody: every terminal state erases the in-flight
-	 * credentials. Saves.
-	 */
 	/**
 	 * Mint the one-time run token: 32 random bytes, hex. Sealed on the row;
 	 * returned once so the caller can put it in the user-data. Live until
@@ -216,7 +200,6 @@ class RelayCloudProvision extends SystemBase {
 
 	public function eraseCredentials(): void {
 		$this->set('rcp_sealed_token', null);
-		$this->set('rcp_sealed_ssh_key', null);
 		$this->set('rcp_sealed_run_token', null);
 		$this->eraseBundle();
 		$this->save();
@@ -235,6 +218,11 @@ class RelayCloudProvision extends SystemBase {
 	}
 
 	/** True when this run replaces an existing relay rather than creating one. */
+	/** Is this run for a fleet shard (skeleton only) rather than this deployment's relay? */
+	public function isShard(): bool {
+		return intval($this->get('rcp_mfs_shard_id')) > 0;
+	}
+
 	public function isUpgrade(): bool {
 		return (string)$this->get('rcp_kind') === 'upgrade';
 	}

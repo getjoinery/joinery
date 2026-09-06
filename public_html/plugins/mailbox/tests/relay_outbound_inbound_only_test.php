@@ -8,9 +8,9 @@
 /**
  * Relay inbound-only outbound fork (specs/mailbox_relay_inbound_only.md).
  *
- * The relay defaults to inbound-only: compose sends leave through the configured
- * provider's HTTP-API raw-message path (hiding the origin) instead of the relay
- * smarthost. This test covers the DB-free, injectable cores of that change:
+ * The relay is inbound only: compose sends leave through the configured
+ * provider's HTTP-API raw-message path (hiding the origin). This test covers the
+ * DB-free, injectable cores of that change:
  *
  *  - API-class self-declaration: Mailgun/SES are ApiSubmissionRelay (usable for
  *    the hidden-origin compose path); SmtpProvider is a RawMessageRelay but NOT

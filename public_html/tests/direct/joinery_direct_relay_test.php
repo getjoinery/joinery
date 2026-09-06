@@ -94,7 +94,7 @@ section('The relay signs nothing');
 // tenant is a far stronger position than one that can only forward, and the
 // whole custody argument rests on it not having one.
 $serve_source = (string)file_get_contents(PathHelper::getIncludePath(
-	'plugins/mailbox/provisioning/relay-sealer/direct_serve.go'));
+	'plugins/mailbox/provisioning/relay-sealer/direct_egress.go'));
 $crypto_source = (string)file_get_contents(PathHelper::getIncludePath(
 	'plugins/mailbox/provisioning/relay-sealer/direct_crypto.go'));
 check(strpos($crypto_source, 'ed25519.Sign(') === false,
@@ -397,8 +397,8 @@ section('The pull consumer reads both artifacts from one listing');
 
 $consumer_source = (string)file_get_contents(
 	PathHelper::getIncludePath('plugins/mailbox/includes/RelaySpoolConsumer.php'));
-check(strpos($consumer_source, "--include=*.direct") !== false,
-	'the pull asks for .direct entries as well as .seal');
+check(strpos($consumer_source, "array('seal', 'direct')") !== false,
+	'the pull fetches .direct entries as well as .seal');
 check(strpos($consumer_source, 'ingestDirect') !== false,
 	'and routes them to the Direct ingest rather than the mail router');
 check(strpos($consumer_source, "glob(\$stage . '/*.direct')") !== false,

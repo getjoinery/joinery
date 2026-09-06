@@ -1,11 +1,11 @@
 <?php
 /**
  * RawRelayComposeTransport - the hidden-origin compose transport for a
- * relay-fronted deployment with the relay smarthost OFF (the default:
- * specs/mailbox_relay_inbound_only.md).
+ * relay-fronted deployment (specs/mailbox_relay_inbound_only.md,
+ * specs/relay_without_a_shell.md).
  *
- * The relay defaults to inbound-only, so compose sends leave through the
- * deployment's configured outbound provider instead of the relay smarthost.
+ * The relay is inbound only, so compose sends leave through the deployment's
+ * configured outbound provider.
  * SMTP submission would stamp the main box's IP into the delivered message's
  * first Received: header and defeat the hidden origin; an HTTP-API raw-message
  * submission does not. This transport therefore builds the FULLY FORMED,
@@ -82,7 +82,8 @@ class RawRelayComposeTransport implements EmailServiceProvider {
         // this send. The resolver already checked, but re-assert defensively.
         if (!($provider instanceof ApiSubmissionRelay)) {
             error_log('[RawRelayComposeTransport] active provider is not an API raw-message relay — '
-                . 'cannot send hidden-origin compose mail. Switch providers or enable relay smarthost.');
+                . 'cannot send hidden-origin compose mail through it. Switch providers, or clear an SMTP '
+                . 'path with the origin-leak probe.');
             return false;
         }
 

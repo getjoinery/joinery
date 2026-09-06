@@ -2,13 +2,12 @@
 /**
  * RelaySpoolConsumer - pull sealed blobs off the relay and store them durably.
  *
- * (specs/inbound_email_hardened_ingest_relay_executor.md § Phase 4). The relay
- * runs no bespoke daemon: it spools <spoolid>.seal + <spoolid>.meta pairs, and
- * the main box dials out over WireGuard on a short poll to collect them. This
- * consumer:
+ * (specs/relay_without_a_shell.md). The relay runs no bespoke daemon for this:
+ * it spools <spoolid>.seal + <spoolid>.meta pairs (and .direct containers) and
+ * serves them over its own signed API. This consumer:
  *
- *   1. rsyncs new entries COPY-ONLY (never --remove-source-files — that would
- *      delete before durability).
+ *   1. lists complete entries (GET /relay/spool) and fetches each artifact and
+ *      its sidecar into a staging directory (GET /relay/spool/{id}.{kind}).
  *   2. Stores each durably with an idempotent store keyed on the spool id (a
  *      re-pull of an un-acked-but-stored item is a no-op = dedup):
  *        - key_kind=transport (Standard/Private): open the blob with the ambient
@@ -16,18 +15,19 @@
  *          relay already forwarded forward-mode aliases).
  *        - key_kind=user (Fortress): store a pending-parse row with the sealed
  *          blob; DeferredIngest parses it at the next unlock.
- *   3. Deletes the remote entries it durably stored — the delete-after-store IS
- *      the ack. A crash between store and delete just re-pulls, and the idempotent
- *      store makes that a no-op.
+ *   3. Acks the entries it durably stored (POST /relay/spool/ack) — the
+ *      delete-after-store IS the ack. A crash between store and ack just
+ *      re-pulls, and the idempotent store makes that a no-op.
  *
- * Degradation is safe by construction: relay down → senders' MTAs retry; tunnel
- * down → the relay keeps spooling until the next successful pull.
+ * Degradation is safe by construction: relay down → senders' MTAs retry; the
+ * plane unable to reach the relay → the relay keeps spooling until the next
+ * successful pull.
  *
- * The pull runs over the deployment's RESTRICTED TENANT ACCOUNT on the relay
- * (specs/mailbox_relay_shared_fleet.md): the rsync is pinned to this tenant's
- * own spool subdirectory and the ack is the tenant shell's joinery-ack verb —
- * ids only, no paths, no root.
+ * Every request is signed with this deployment's relay client identity and
+ * pinned to the relay's identity, and the relay scopes every path to this
+ * tenant's own spool: ids only, no paths, no root.
  *
+ * @version 1.12 - the ssh era is over: the API is the only pull path
  * @version 1.11 - a relay with an identity pin is pulled over its own API
  *   (RelayClient: list, fetch to the staging directory, ack); a tunnel relay
  *   keeps the rsync path. The ingest between the two is untouched
@@ -56,7 +56,6 @@
  * @version 1.4
  */
 
-require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySsh.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayClient.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/SRSRewriter.php'));
@@ -90,12 +89,11 @@ class RelaySpoolConsumer {
 	 * ['status'=>'success'|'error'|'skipped', 'message'=>..., 'stored'=>int, 'pending'=>int, 'acked'=>int].
 	 */
 	public function pull(int $max = self::DEFAULT_MAX): array {
-		if ($this->relay->usesRelayApi()) {
-			if (trim((string)$this->relay->get('mrl_public_ip')) === '') {
-				return array('status' => 'skipped', 'message' => 'relay has no public address yet');
-			}
-		} elseif (RelaySsh::host($this->relay) === '') {
-			return array('status' => 'skipped', 'message' => 'relay has no tunnel host yet');
+		if (!$this->relay->usesRelayApi()) {
+			return array('status' => 'skipped', 'message' => 'relay has no identity pin (it predates the relay API) and cannot be reached');
+		}
+		if (trim((string)$this->relay->get('mrl_public_ip')) === '') {
+			return array('status' => 'skipped', 'message' => 'relay has no public address yet');
 		}
 
 		// One pull per relay at a time, enforced here at the chokepoint every pull
@@ -119,37 +117,19 @@ class RelaySpoolConsumer {
 	}
 
 	private function pullLocked(int $max): array {
-		$spool_path = $this->relay->spoolPath();
-
 		$stage = $this->stageDir();
 		if ($stage === null) {
 			return array('status' => 'error', 'message' => 'could not create local staging dir');
 		}
 
 		try {
-			if ($this->relay->usesRelayApi()) {
-				// The relay lists complete entries only (artifact + .meta present),
-				// oldest first; each is fetched into the same staging directory the
-				// rsync path filled, so everything below this point is one code path.
-				try {
-					$this->fetchOverApi($stage, $max);
-				} catch (RelayClientException $e) {
-					return array('status' => 'error', 'message' => 'relay API pull failed (' . $e->failure_class . '): ' . $e->getMessage());
-				}
-			} else {
-				// Copy-only pull of complete entries; the tmp/ working dir is excluded so
-				// a half-written entry is never seen.
-				$cmd = RelaySsh::rsyncCommand(
-					$this->relay,
-					$stage . '/',
-					$spool_path . '/',
-					true, // download
-					array('--exclude=tmp/', "--include=*.seal", "--include=*.direct", "--include=*.meta", "--exclude=*")
-				);
-				list($code, $out) = RelaySsh::run($cmd);
-				if ($code !== 0) {
-					return array('status' => 'error', 'message' => 'rsync pull failed: ' . $out);
-				}
+			// The relay lists complete entries only (artifact + .meta present),
+			// oldest first; each is fetched into the staging directory the ingest
+			// below reads.
+			try {
+				$this->fetchOverApi($stage, $max);
+			} catch (RelayClientException $e) {
+				return array('status' => 'error', 'message' => 'relay API pull failed (' . $e->failure_class . '): ' . $e->getMessage());
 			}
 
 			// Two artifact kinds share one spool and one listing: `.seal` is a
@@ -193,7 +173,7 @@ class RelaySpoolConsumer {
 				}
 			}
 
-			$acked = $this->ack($spool_path, $acked_ids);
+			$acked = $this->ack($acked_ids);
 
 			if ($held > 0) {
 				// One aggregate line per pass — never per-blob (the pull runs every
@@ -538,13 +518,12 @@ class RelaySpoolConsumer {
 	}
 
 	/**
-	 * Delete the durably-stored entries on the relay — the ack. Over the relay
-	 * API it is one signed POST; over the tunnel it is one ssh round trip via
-	 * the tenant shell's joinery-ack verb. Ids only, either way: the relay
-	 * resolves them inside this tenant's spool and rejects anything with a path
-	 * separator. Returns the count acked.
+	 * Delete the durably-stored entries on the relay — the ack: one signed
+	 * POST /relay/spool/ack, ids only. The relay resolves them inside this
+	 * tenant's spool and rejects anything with a path separator. Returns the
+	 * count acked.
 	 */
-	private function ack(string $spool_path, array $spool_ids): int {
+	private function ack(array $spool_ids): int {
 		if (empty($spool_ids)) {
 			return 0;
 		}
@@ -557,25 +536,16 @@ class RelaySpoolConsumer {
 		if (empty($ids)) {
 			return 0;
 		}
-		if ($this->relay->usesRelayApi()) {
-			try {
-				$acked = 0;
-				foreach (array_chunk($ids, 400) as $chunk) {
-					$acked += $this->relay->withApi(function (RelayClient $c) use ($chunk) { return $c->spoolAck($chunk); });
-				}
-				return $acked;
-			} catch (RelayClientException $e) {
-				error_log('RelaySpoolConsumer: ack failed (' . $e->failure_class . '): ' . $e->getMessage());
-				return 0;
+		try {
+			$acked = 0;
+			foreach (array_chunk($ids, 400) as $chunk) {
+				$acked += $this->relay->withApi(function (RelayClient $c) use ($chunk) { return $c->spoolAck($chunk); });
 			}
-		}
-		$remote_cmd = 'joinery-ack ' . implode(' ', $ids);
-		list($code, $out) = RelaySsh::run(RelaySsh::sshCommand($this->relay, $remote_cmd));
-		if ($code !== 0) {
-			error_log('RelaySpoolConsumer: ack failed: ' . $out);
+			return $acked;
+		} catch (RelayClientException $e) {
+			error_log('RelaySpoolConsumer: ack failed (' . $e->failure_class . '): ' . $e->getMessage());
 			return 0;
 		}
-		return count($ids);
 	}
 
 	private function stageDir(): ?string {

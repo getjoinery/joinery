@@ -115,8 +115,8 @@ interface RawMessageRelay {
  * provider's infrastructure and the submitting client's IP appears nowhere.
  *
  * This is the property a relay-fronted deployment relies on to keep its origin
- * hidden when the relay smarthost is off and compose sends leave through the
- * provider (specs/mailbox_relay_inbound_only.md): SMTP submission stamps the
+ * hidden when compose sends leave through the provider
+ * (specs/mailbox_relay_inbound_only.md): SMTP submission stamps the
  * connecting client's IP into the first Received: header, an API submission does
  * not. It is a self-declaration, not something core can infer — a provider
  * asserts it by adding this interface to its `implements` list.

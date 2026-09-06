@@ -45,6 +45,8 @@
  * @version 1.11 - every terminal job records a result (sweep never re-processes); CF SSL gated on
  *                 CF_ROUTING_VERIFIED (no rDNS on the CF path); escrow reconcile matches ANY row;
  *                 install records the ACTUAL published container port (CONTAINER_PORT readback)
+ * @version 1.11 - the relay job handlers are gone (specs/relay_without_a_shell.md WP4): a relay
+ *                 registers itself through its birth report, never through a job
  * @version 1.10 - processable_types() drives the dashboard sweep (P-17: relay/ssl/backup results no longer skipped)
  */
 
@@ -59,11 +61,8 @@ class JobResultProcessor {
 	/**
 	 * Every job type this processor can reconcile — i.e. each type with a
 	 * process_<type> handler. The dashboard sweep derives its list from this so
-	 * an unwatched terminal job of ANY handled type (relay, SSL, backups, …) is
-	 * reconciled, not just a hardcoded few. Before this, only check_status /
-	 * install_node / apply_update were swept, so an unwatched provision_relay
-	 * left its relay row + WG pubkey unregistered forever (P-17), and the same
-	 * for provision_ssl and the backup types.
+	 * an unwatched terminal job of ANY handled type (SSL, backups, …) is
+	 * reconciled, not just a hardcoded few (P-17).
 	 */
 	public static function processable_types(): array {
 		$types = [];
@@ -1103,201 +1102,6 @@ class JobResultProcessor {
 			'ssl_state'     => $node->get('mgn_ssl_state'),
 		]));
 		$job->save();
-	}
-
-	/**
-	 * Post-process provision_relay: on success (PROVISION_RELAY_SUCCESS marker),
-	 * store the relay's returned WireGuard public key + endpoint + public IP on the
-	 * ManagedNode, flag it a relay, and clear the install state; on failure set
-	 * install_failed. Runs for both 'completed' and 'failed' terminal states.
-	 */
-	private static function process_provision_relay($job) {
-		$node_id = $job->get('mjb_mgn_node_id');
-		if (!$node_id) return;
-
-		try {
-			$node = new ManagedNode($node_id, TRUE);
-		} catch (Exception $e) { return; }
-
-		$status = $job->get('mjb_status');
-		$output = $job->get('mjb_output') ?: '';
-
-		if ($status === 'completed' && strpos($output, 'PROVISION_RELAY_SUCCESS') !== false) {
-			$node->set('mgn_is_relay', true);
-			$node->set('mgn_install_state', null);
-			// The relay runs no Joinery app, so skip the app health checks for it.
-			$node->set('mgn_skip_joinery_checks', true);
-
-			$wg_pubkey = self::extract_marker($output, 'RELAY_WG_PUBKEY');
-			$public_ip = self::extract_marker($output, 'RELAY_PUBLIC_IP');
-			if ($wg_pubkey !== '') {
-				$node->set('mgn_wg_public_key', substr($wg_pubkey, 0, 255));
-			}
-			if ($public_ip !== '') {
-				$node->set('mgn_wg_endpoint', $public_ip . ':51820');
-			}
-			// The relay's tunnel IP is fixed by provision_relay.sh.
-			$node->set('mgn_wg_ip', '10.99.0.1');
-			$node->save();
-
-			// Register (or refresh) the MailboxRelay row the mailbox plugin drives —
-			// born ENABLED so pulling and map pushes start immediately, before any
-			// MX points at it (Fix 10). Disable is the emergency stop.
-			// The output carries the TENANT_* markers (pull account, spool subdir).
-			// Fleet SHARDS (skeleton_only) are not this deployment's relay — the
-			// operator's box is not a tenant of them — so no relay row is minted.
-			$job_params = json_decode((string)$job->get('mjb_parameters'), true) ?: array();
-			if (empty($job_params['skeleton_only'])) {
-				self::register_relay_row($node, $public_ip, $wg_pubkey, $output,
-					(string)($job_params['mail_hostname'] ?? ''));
-			} else {
-				// A skeleton run IS a fleet shard. Stamp the version it reported so
-				// the operator can see which shards are behind — the tenants on them
-				// have been told the operator upgrades their relay, and nobody can
-				// keep that promise without being able to see the answer.
-				self::stamp_shard_version($node, self::extract_marker($output, 'RELAY_VERSION'));
-			}
-
-			// Peer the relay on the MAIN box's WireGuard interface — the other half
-			// of the tunnel. provision_relay_main.sh installs the root helper + a
-			// sudoers rule for exactly this call. Best-effort: on failure the tunnel
-			// health checks go red and the log says what to run. Fleet shards skip
-			// this too — the operator's box holds no tunnel into its shards.
-			if ($wg_pubkey !== '' && $public_ip !== '' && empty($job_params['skeleton_only'])) {
-				$peer_cmd = 'sudo -n /usr/local/sbin/joinery-relay-peer '
-					. escapeshellarg($wg_pubkey) . ' ' . escapeshellarg($public_ip . ':51820') . ' 2>&1';
-				$peer_out = array(); $peer_code = 1;
-				exec($peer_cmd, $peer_out, $peer_code);
-				if ($peer_code !== 0) {
-					error_log('process_provision_relay: main-box WireGuard peer add failed ('
-						. $peer_code . '): ' . implode(' ', $peer_out)
-						. ' — run plugins/mailbox/provisioning/provision_relay_main.sh on the main box');
-				}
-			}
-		} else {
-			$node->set('mgn_install_state', 'install_failed');
-			$node->save();
-		}
-
-		$job->set('mjb_result', json_encode([
-			'is_relay'      => (bool)$node->get('mgn_is_relay'),
-			'wg_public_key' => $node->get('mgn_wg_public_key'),
-			'wg_endpoint'   => $node->get('mgn_wg_endpoint'),
-			'install_state' => $node->get('mgn_install_state'),
-		]));
-		$job->save();
-	}
-
-	/** rebuild_relay post-processing is identical to a fresh provision. */
-	private static function process_rebuild_relay($job) {
-		self::process_provision_relay($job);
-	}
-
-	/**
-	 * Record the relay code version a fleet shard reported, on the shard row for
-	 * this node. Owned by the mailbox plugin, so it is required lazily and skipped
-	 * (no fatal) when that plugin is absent.
-	 *
-	 * An EMPTY version is written as empty, never skipped: a shard whose job
-	 * emitted no marker must read as unknown rather than keeping a stale value
-	 * that would render as up to date.
-	 */
-	private static function stamp_shard_version($node, string $version): void {
-		$shard_class = PathHelper::getIncludePath('plugins/mailbox/data/mailbox_fleet_shard_class.php');
-		if (!is_file($shard_class)) {
-			return; // mailbox plugin not present
-		}
-		try {
-			require_once($shard_class);
-			$shards = new MultiMailboxFleetShard(array('node_id' => intval($node->key), 'deleted' => false));
-			$shards->load();
-			foreach ($shards as $shard) {
-				$shard->set('mfs_provisioned_version', substr(trim($version), 0, 20));
-				$shard->save();
-			}
-		} catch (\Throwable $e) {
-			error_log('stamp_shard_version failed for node ' . intval($node->key) . ': ' . $e->getMessage());
-		}
-	}
-
-	/**
-	 * Create or update the mailbox plugin's MailboxRelay row for a provisioned node
-	 * (Fix 10). Owned by the mailbox plugin, so it is required lazily and skipped
-	 * (no fatal) when that plugin is inactive. A newly created row is born ENABLED
-	 * so pulling and map pushes start immediately; Disable is the emergency stop.
-	 */
-	private static function register_relay_row($node, string $public_ip, string $wg_pubkey, string $job_output = '', string $mail_hostname = ''): void {
-		$relay_class = PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php');
-		if (!is_file($relay_class)) {
-			return; // mailbox plugin not present
-		}
-		try {
-			require_once($relay_class);
-			$db = DbConnector::get_instance()->get_db_link();
-			$stmt = $db->prepare(
-				"SELECT mrl_mailbox_relay_id FROM mrl_mailbox_relays
-				  WHERE mrl_mgn_managed_node_id = ? AND mrl_delete_time IS NULL LIMIT 1"
-			);
-			$stmt->execute(array($node->key));
-			$existing = $stmt->fetchColumn();
-
-			$relay = $existing ? new MailboxRelay(intval($existing), TRUE) : new MailboxRelay(NULL);
-			$relay->set('mrl_mgn_managed_node_id', $node->key);
-			$relay->set('mrl_name', $node->get('mgn_name'));
-			// The main box reaches the relay over the tunnel at its WireGuard IP.
-			$relay->set('mrl_host', (string)$node->get('mgn_wg_ip') ?: '10.99.0.1');
-			if ($public_ip !== '') { $relay->set('mrl_public_ip', $public_ip); }
-			// The steady-state login is the RESTRICTED TENANT ACCOUNT the
-			// add-tenant step created (forced command: the tenant shell), never
-			// root. The markers carry the coordinates; a self-hosted relay is a
-			// fleet of one with slug 'main'.
-			$tenant_user = self::extract_marker($job_output, 'TENANT_SSH_USER') ?: 'jt-main';
-			$tenant_spool = self::extract_marker($job_output, 'TENANT_SPOOL') ?: '/var/spool/joinery-relay/main';
-			$tenant_slug = self::extract_marker($job_output, 'TENANT_SLUG') ?: 'main';
-			$relay->set('mrl_tenant_slug', substr($tenant_slug, 0, 28));
-			// The MX hostname the admin provisioned with — the topology-aware
-			// setup checks prescribe every domain's MX against it.
-			$mail_hostname = strtolower(trim($mail_hostname));
-			if ($mail_hostname !== '') {
-				$relay->set('mrl_mx_hostname', substr($mail_hostname, 0, 255));
-			}
-			$relay->set('mrl_ssh_user', substr($tenant_user, 0, 50));
-			$relay->set('mrl_ssh_port', intval($node->get('mgn_ssh_port')) ?: 22);
-			// The relay's steady-state connections run as the WEB USER (cron tasks,
-			// health battery), so the row points at the web-user-owned pull key the
-			// provision job authorized — never the node's admin key, which the web
-			// user cannot read (ssh demands caller-owned mode-600 key files).
-			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySsh.php'));
-			$pull_key = RelaySsh::pullKeyPath();
-			$relay->set('mrl_ssh_key_path', is_file($pull_key) ? $pull_key : (string)$node->get('mgn_ssh_key_path'));
-			$relay->set('mrl_spool_path', substr($tenant_spool, 0, 500));
-			if ($wg_pubkey !== '') { $relay->set('mrl_wg_public_key', substr($wg_pubkey, 0, 255)); }
-			$relay->set('mrl_wg_endpoint', (string)$node->get('mgn_wg_endpoint'));
-			$relay->set('mrl_wg_ip', (string)$node->get('mgn_wg_ip'));
-			if (!$existing) {
-				// Born enabled: pulling and map pushes start immediately, so the
-				// relay is ready before any MX points at it. Doctrine effects key
-				// off the recorded cutover state; Disable is an emergency stop.
-				$relay->set('mrl_is_enabled', true);
-			}
-			$relay->save();
-			// Mint the ambient transport keypair now so the first map push can seal
-			// Standard/Private mail immediately once enabled.
-			$relay->ensureTransportKeypair();
-		} catch (\Throwable $e) {
-			error_log('JobResultProcessor::register_relay_row failed: ' . $e->getMessage());
-		}
-	}
-
-	/**
-	 * Pull the value of an `echo KEY=value` marker line out of streamed job output
-	 * (the last occurrence wins). Returns '' when absent.
-	 */
-	private static function extract_marker(string $output, string $key): string {
-		if (preg_match_all('/^' . preg_quote($key, '/') . '=(.*)$/m', $output, $m) && !empty($m[1])) {
-			return trim((string)end($m[1]));
-		}
-		return '';
 	}
 
 	/**

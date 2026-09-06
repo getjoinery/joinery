@@ -2,19 +2,21 @@
 /**
  * MailboxRelay - the hardened ingest relay a deployment is fronted by.
  *
- * (specs/inbound_email_hardened_ingest_relay_executor.md). A relay-fronted
- * deployment puts a minimal, disposable VPS at the public MX: Postfix + verify
- * milters + the Go sealing binary + WireGuard, no PHP/DB/web. It seals each
- * accepted message to the recipient's public key and spools ciphertext; the main
- * Joinery box dials out over WireGuard and pulls sealed blobs.
+ * (specs/relay_without_a_shell.md). A relay-fronted deployment puts a minimal,
+ * disposable VPS at the public MX: Postfix + verify milters + the Go sealing
+ * binary, and one HTTPS listener the relay serves itself - no PHP, no DB, no
+ * web, no shell. It seals each accepted message to the recipient's public key
+ * and spools ciphertext; the plane pulls sealed blobs over the relay's own API,
+ * signed with its relay client identity and pinned to the relay's identity
+ * (RelayClient).
  *
- * There is at most ONE active relay per deployment — once a relay exists it is
+ * There is at most ONE active relay per deployment - once a relay exists it is
  * the MX for ALL hosted domains (a mixed MX would leak the origin), so this row
- * is effectively a singleton (see active()). It holds the tunnel connection
- * details the pull consumer and smarthost use, the alias-map sync bookkeeping the
- * health checks read, and the AMBIENT TRANSPORT KEYPAIR:
+ * is effectively a singleton (see active()). It holds the relay's address and
+ * identity pin, the alias-map sync bookkeeping the health checks read, the last
+ * health answer, and the AMBIENT TRANSPORT KEYPAIR:
  *
- *   - Fortress mail is sealed at the relay to the owner's own vault public key —
+ *   - Fortress mail is sealed at the relay to the owner's own vault public key -
  *     only a session opens it.
  *   - Standard/Private mail is sealed at the relay to this transport keypair,
  *     whose secret Joinery holds ambiently (sealed at rest under SecretBox). The
@@ -22,21 +24,20 @@
  *     transport wrapping exists so the relay disk never holds plaintext at rest
  *     for ANY level; it is transit protection, not a security-level guarantee.
  *
- * mailbox mustn't hard-depend on server_manager (provision_relay.sh is the
- * standalone floor), so the relay's identity lives here, not on a ManagedNode.
- * mrl_mgn_managed_node_id links to the server_manager node when one exists (for
- * the health dot on the dashboard).
+ * mailbox mustn't hard-depend on server_manager, so the relay's identity lives
+ * here, not on a ManagedNode. mrl_mgn_managed_node_id links to the server_manager
+ * node when one exists (the dashboard card, in the disposable posture).
  *
  * The relay stack is TENANCY-NATIVE (specs/mailbox_relay_shared_fleet.md): on
- * the relay this deployment is one tenant — identified by mrl_tenant_slug —
- * with its own spool subdirectory, restricted pull account, and fragment drop
- * area. A self-hosted relay is a fleet of one (slug 'main'); a hosted fleet
- * slot (mrl_is_hosted) carries the coordinates the fleet service returned at
- * enrollment instead of self-provisioned ones. Either way this row remains the
- * deployment's ONE relay, so active() stays a singleton.
+ * the relay this deployment is one tenant - identified by mrl_tenant_slug -
+ * with its own spool directory and registry entry. A self-hosted relay is a
+ * fleet of one (slug 'main'); a hosted fleet slot (mrl_is_hosted) carries the
+ * coordinates the fleet service returned at enrollment. Either way this row
+ * remains the deployment's ONE relay, so active() stays a singleton.
  *
- * @version 1.5 - the relay API: mrl_identity_fingerprint is the per-row switch between
- *                RelayClient (pinned HTTPS, signed requests) and RelaySsh; pollHealth()
+ * @version 1.6 - the ssh era is over: the tunnel and ssh columns and helpers are gone; a
+ *                row without an identity pin is unreachable and says so (no_identity)
+ * @version 1.5 - the relay API: RelayClient (pinned HTTPS, signed requests); pollHealth()
  *                records the failure class (specs/relay_without_a_shell.md)
  * @version 1.4 - readHealth() carries the relay's Postfix queue depth (NULL when
  *                unknown, never 0); provisionedVersion() and queuedCount()
@@ -67,22 +68,11 @@ class MailboxRelay extends SystemBase {
 	public static $field_specifications = array(
 		'mrl_mailbox_relay_id'   => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'mrl_name'               => array('type'=>'varchar(100)'),
-		// Tunnel address (the relay's WireGuard IP) used for rsync/ssh/smarthost;
 		// mrl_public_ip is the public MX IP that mail DNS points at.
-		'mrl_host'               => array('type'=>'varchar(255)'),
 		'mrl_public_ip'          => array('type'=>'varchar(64)'),
-		// The tenant's restricted pull account on the relay (jt-<slug>, locked to
-		// the joinery-tenant-shell forced command). Empty derives jt-<tenant slug>
-		// via pullUser() — never a root-class login.
-		'mrl_ssh_user'           => array('type'=>'varchar(50)'),
-		'mrl_ssh_port'           => array('type'=>'int4', 'default'=>22),
-		'mrl_ssh_key_path'       => array('type'=>'varchar(500)'),
-		// The tenant's spool SUBDIRECTORY on the relay. Empty derives
-		// /var/spool/joinery-relay/<tenant slug> via spoolPath().
-		'mrl_spool_path'         => array('type'=>'varchar(500)'),
-		// This deployment's tenant identity on the relay (spool subdir, pull
-		// account, fragment drop area all derive from it). 'main' on a
-		// self-hosted fleet of one; fleet-assigned on a hosted slot.
+		// This deployment's tenant identity on the relay (the registry entry and
+		// spool directory derive from it, and every signed request names it).
+		// 'main' on a self-hosted fleet of one; fleet-assigned on a hosted slot.
 		'mrl_tenant_slug'        => array('type'=>'varchar(28)', 'default'=>'main'),
 		// Hosted fleet slot (specs/mailbox_relay_shared_fleet.md § Enrollment):
 		// true when this relay is a slot on the operator's shared fleet. The MX
@@ -98,22 +88,17 @@ class MailboxRelay extends SystemBase {
 		// shard's. Empty falls back to the MX hostname, which is the same host on
 		// a self-hosted relay.
 		'mrl_authserv_id'        => array('type'=>'varchar(255)'),
-		// WireGuard: the relay's public key + listen endpoint (host:port), and the
-		// tunnel IP assigned to the relay. Joinery always initiates the peering.
 		// A relay without a shell (specs/relay_without_a_shell.md): the SPKI
 		// fingerprint the plane pins on every connection, and the Ed25519 key the
-		// birth report was signed with. A row with a fingerprint speaks the relay
-		// API through RelayClient; a row without one and with a WireGuard key
-		// speaks ssh through RelaySsh. That column IS the cutover switch.
+		// birth report was signed with. Every path to the relay goes through
+		// RelayClient with this pin; a row without one cannot be reached and says
+		// so (it predates the relay API).
 		'mrl_identity_fingerprint' => array('type'=>'varchar(64)'),
 		'mrl_identity_public_key'  => array('type'=>'varchar(64)'),
 		// The class of the last ping failure (RelayClient::FAIL_*), '' after a
 		// success: distinguishes a dead machine from an updated one whose pin has
 		// not landed from a clock problem.
 		'mrl_last_health_failure'  => array('type'=>'varchar(32)'),
-		'mrl_wg_public_key'      => array('type'=>'varchar(255)'),
-		'mrl_wg_endpoint'        => array('type'=>'varchar(255)'),
-		'mrl_wg_ip'              => array('type'=>'varchar(64)'),
 		// Ambient transport keypair (Standard/Private sealing). Public key is
 		// cleartext; the secret is sealed at rest under SecretBox and only opened
 		// in-process by the pull consumer.
@@ -121,7 +106,7 @@ class MailboxRelay extends SystemBase {
 		'mrl_transport_secret_sealed'=> array('type'=>'text'),
 		'mrl_transport_key_generation'=> array('type'=>'int4', 'is_nullable'=>false, 'default'=>1),
 		// Relay-fronted mode active. When true, the MTA-stack decommission and the
-		// smarthost/health retargeting apply.
+		// health retargeting apply.
 		'mrl_is_enabled'         => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		// Alias-map sync bookkeeping. mrl_map_content_hash is the sha256 of the last
 		// successfully pushed map; the sync compares a freshly-built map's hash to it
@@ -219,17 +204,6 @@ class MailboxRelay extends SystemBase {
 		return preg_match('/^[a-z0-9][a-z0-9-]{0,27}$/', $slug) ? $slug : 'main';
 	}
 
-	/** The restricted pull account (jt-<slug> unless the row overrides it). */
-	public function pullUser(): string {
-		return trim((string)$this->get('mrl_ssh_user')) ?: ('jt-' . $this->tenantSlug());
-	}
-
-	/** The tenant's spool subdirectory on the relay. */
-	public function spoolPath(): string {
-		$path = rtrim(trim((string)$this->get('mrl_spool_path')), '/');
-		return $path !== '' ? $path : ('/var/spool/joinery-relay/' . $this->tenantSlug());
-	}
-
 	/**
 	 * The name this relay's milters stamp Authentication-Results under, and so
 	 * the only authserv-id trusted on a message pulled from it
@@ -249,11 +223,6 @@ class MailboxRelay extends SystemBase {
 			}
 		}
 		return '';
-	}
-
-	/** The tenant's map-fragment drop area on the relay (fixed relay layout). */
-	public function fragmentDir(): string {
-		return '/opt/joinery-relay/home/' . $this->tenantSlug() . '/fragments';
 	}
 
 	// --- Scanner health (specs/mailbox_relay_scanner_health.md) ----------------
@@ -373,7 +342,17 @@ class MailboxRelay extends SystemBase {
 	 */
 	public function pollHealth(bool $store = true): array {
 		$failure = '';
-		if ($this->usesRelayApi()) {
+		if (!$this->usesRelayApi()) {
+			// No pin: nothing on this server can reach the machine. Reported as
+			// its own class so the Setup tab says what the row is rather than
+			// where a network fault might be.
+			$failure = self::FAILURE_NO_IDENTITY;
+			$health = self::readHealth('', 1);
+			$health['state'] = self::HEALTH_UNREACHABLE;
+			$health['failure'] = $failure;
+			$health['detail'] = 'This relay row carries no identity pin; it predates the relay API and cannot be reached. '
+				. 'Create a new relay and delete this row.';
+		} else {
 			try {
 				$ping = $this->withApi(function (RelayClient $c) { return $c->ping(); });
 				$health = self::readHealth(json_encode($ping), 0);
@@ -388,10 +367,6 @@ class MailboxRelay extends SystemBase {
 				$health['failure'] = $failure;
 				$health['detail'] = RelayClient::describeFailure($failure) . ' (' . $e->getMessage() . ')';
 			}
-		} else {
-			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySsh.php'));
-			list($code, $out) = RelaySsh::run(RelaySsh::sshCommand($this, 'joinery-ping'));
-			$health = self::readHealth((string)$out, (int)$code);
 		}
 		$health['checked_time'] = gmdate('Y-m-d H:i:s');
 
@@ -402,7 +377,7 @@ class MailboxRelay extends SystemBase {
 			}
 			// The failure class is recorded on every poll, success included, so
 			// '' means the last ping worked and anything else names what stopped it.
-			if ($this->usesRelayApi() && (string)$this->get('mrl_last_health_failure') !== $failure) {
+			if ((string)$this->get('mrl_last_health_failure') !== $failure) {
 				$this->set('mrl_last_health_failure', $failure);
 			}
 			$this->save();
@@ -410,9 +385,13 @@ class MailboxRelay extends SystemBase {
 		return $health;
 	}
 
+	/** The failure class of a row with no identity pin at all. */
+	const FAILURE_NO_IDENTITY = 'no_identity';
+
 	/**
-	 * Does this row speak the relay API? A relay born from user-data reported
-	 * an identity, and the plane pinned it; a tunnel relay never had one.
+	 * Does this row carry an identity pin? A relay born from user-data reported
+	 * one and the plane pinned it. A row without one predates the relay API and
+	 * cannot be reached from here.
 	 */
 	public function usesRelayApi(): bool {
 		return trim((string)$this->get('mrl_identity_fingerprint')) !== '';
@@ -536,9 +515,9 @@ class MailboxRelay extends SystemBase {
 	 * Is this deployment the ONLY tenant on the relay? TRUE, FALSE, or NULL for
 	 * "the relay is too old to say".
 	 *
-	 * This is the wipe guard. A rebuild replaces every byte on the machine —
-	 * every other tenant's account, allowlist, WireGuard peer and un-pulled mail
-	 * with it — and the drain only ever empties THIS tenant's spool subdirectory,
+	 * This is the wipe guard. An update replaces every byte on the machine —
+	 * every other tenant's registry entry, allowlist and un-pulled mail with it —
+	 * and the drain only ever empties THIS tenant's spool directory,
 	 * so nothing else is even preserved in passing. A deployment can see only its
 	 * own tenancy, so the relay has to answer this, and NULL must never be read as
 	 * yes.

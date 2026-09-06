@@ -1002,7 +1002,7 @@ need both:
 - **Inbound-email forwarding** uses `RawMessageRelay` when the active outbound
   provider implements it, reusing that provider's existing credential.
 - **The hidden-origin compose path** (`RawRelayComposeTransport`, on a
-  relay-fronted deployment with the relay smarthost off) builds a fully formed,
+  relay-fronted deployment) builds a fully formed,
   in-app-signed message and hands it to `relayRawMessage()` so the sent message's
   `Received:` chain begins inside the provider and the main box IP is never
   exposed. This path requires **`ApiSubmissionRelay`** — a sub-interface a
@@ -1033,9 +1033,10 @@ The structured-only providers (`postmark`, `sendgrid`, `brevo`, `mailjet`,
 `resend`) deliberately **do not** implement it — they expose no faithful
 raw-MIME relay. A provider without the capability is detected via
 `instanceof RawMessageRelay` (forwarding) or `instanceof ApiSubmissionRelay`
-(compose); forwarding falls back to an SMTP relay, and the compose path refuses
-a non-API provider with a message pointing to an API provider or the relay
-smarthost. See
+(compose); forwarding falls back to an SMTP relay, and the compose path allows
+a non-API provider only once the origin-leak probe has round-tripped clean
+within its window (`InboundEmailHealth::hiddenOriginSendAllowed`), refusing it
+otherwise with a message naming the probe. See
 [Mailbox — Forwarding relay](../plugins/mailbox/docs/overview.md#forwarding-relay)
 and [Mailbox — Outbound sending](../plugins/mailbox/docs/overview.md#outbound-sending)
 for how the mailbox plugin resolves each path.
@@ -1068,5 +1069,4 @@ per-domain DKIM rows; see
 
 Protected-domain `From` addresses remain usable only via the session-gated
 mailbox compose path (the injected transport), never by transactional senders —
-whether that transport submits directly, through the relay smarthost, or through
-the provider's raw-MIME API.
+whether that transport submits directly or through the provider's raw-MIME API.

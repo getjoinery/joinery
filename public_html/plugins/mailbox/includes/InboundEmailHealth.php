@@ -15,12 +15,16 @@
  * folds provider and topology into a single expected/present question.
  *
  * The relay outbound checks are MODE-aware (specs/mailbox_relay_inbound_only.md):
- * with the relay smarthost off (the default) compose rides the provider's API, so
- * checkOutboundTransportClass + checkOutboundOriginLeak apply and checkRelayReachable
- * is a ping; with smarthost on, checkRelayReachable applies and the two provider
+ * compose rides the provider's API or an SMTP path the origin-leak probe has
+ * cleared, so checkOutboundTransportClass + checkOutboundOriginLeak apply and
+ * checkRelayReachable is a pinned ping; the two provider
  * checks are no-ops. The check list always matches the chosen path.
  *
  * @version 1.17 - checkSearchIndexEngine() probes the index's real table shape
+ * @version 1.18 - the relay is inbound only: hiddenOriginSendAllowed() and originProbeVerdict()
+ *                 are the sending gate (an API provider passes by construction, an SMTP path
+ *                 passes on a fresh clean probe); the smarthost mode and the tunnel SMTP
+ *                 check are gone (specs/relay_without_a_shell.md Q1)
  * @version 1.17 - checkRelayReachable() (a pinned ping on a relay without a shell); with
  *                 no relay after a recorded cutover, checkInboundMailServer says the MX
  *                 points at a relay this deployment no longer has (specs/relay_without_a_shell.md)
@@ -170,15 +174,6 @@ class InboundEmailHealth {
         } catch (\Throwable $e) {
             return null;
         }
-    }
-
-    /**
-     * The relay's outbound mode: 'smarthost' (opt-in) or 'provider' (default).
-     * Anything but an explicit 'smarthost' is 'provider'.
-     */
-    private static function relayOutboundMode(): string {
-        $mode = strtolower(trim((string)Globalvars::get_instance()->get_setting('mailbox_relay_outbound_mode')));
-        return $mode === 'smarthost' ? 'smarthost' : 'provider';
     }
 
     /** The custom header a compose origin-leak probe stamps so the check can find its round-tripped copy. */
@@ -412,113 +407,30 @@ class InboundEmailHealth {
     // ---------------------------------------------------- hardened ingest relay
 
     /**
-     * Is the relay reachable the way this deployment reaches it?
-     *
-     * A relay with an identity pin answers a pinned, signed GET /relay/ping
-     * (specs/relay_without_a_shell.md); the ping is the only window into it, so
-     * this check is also what refreshes the stored answer the Setup tab renders.
-     *
-     * A tunnel relay is reached over WireGuard, and the one thing a bare
-     * connect cannot prove there is compose submission: port 25 listens in BOTH
-     * outbound modes, so the check runs a real SMTP dialogue - EHLO, MAIL
-     * FROM:<>, RCPT TO a reserved .invalid domain (never in relay_domains, never
-     * deliverable), then QUIT without DATA. A 250 at RCPT means the submission
-     * listener is open. Smarthost mode only; a no-op otherwise, and on colocated
-     * deployments.
+     * Is the relay reachable? One pinned, signed GET /relay/ping
+     * (specs/relay_without_a_shell.md): the ping is the only window into a relay,
+     * so this check is also what refreshes the stored answer the Setup tab
+     * renders. No-op on colocated deployments.
      */
     public static function checkRelayReachable() {
         $relay = self::activeRelay();
         if ($relay === null) {
             return;
         }
-        if ($relay->usesRelayApi()) {
-            // A relay without a shell: one pinned, signed GET /relay/ping. The
-            // failure class is the diagnosis - a dead machine, an updated one
-            // whose pin has not landed here, or a clock or key problem - and the
-            // ping's stored answer is what the Setup tab renders.
-            $health = $relay->pollHealth();
-            if ($health['state'] === MailboxRelay::HEALTH_UNREACHABLE) {
-                throw new ProvisioningCheckFailed('The relay at ' . $relay->get('mrl_public_ip')
-                    . ' did not answer its API (' . (string)($health['failure'] ?? 'unreachable') . '): '
-                    . (string)$health['detail']);
-            }
-            return;
+        if (!$relay->usesRelayApi()) {
+            throw new ProvisioningCheckFailed('This relay row carries no identity pin, so this server has no way to '
+                . 'reach it: it predates the relay API. Create a new relay and delete this row.');
         }
-        self::checkRelayTunnel($relay);
-    }
-
-    /**
-     * The tunnel relay's reachability: a real SMTP submission dialogue over
-     * WireGuard, which only means anything in smarthost mode.
-     */
-    private static function checkRelayTunnel(MailboxRelay $relay) {
-        if (self::relayOutboundMode() !== 'smarthost') {
-            return;
+        // One pinned, signed GET /relay/ping. The failure class is the
+        // diagnosis - a dead machine, an updated one whose pin has not landed
+        // here, or a clock or key problem - and the ping's stored answer is what
+        // the Setup tab renders.
+        $health = $relay->pollHealth();
+        if ($health['state'] === MailboxRelay::HEALTH_UNREACHABLE) {
+            throw new ProvisioningCheckFailed('The relay at ' . $relay->get('mrl_public_ip')
+                . ' did not answer its API (' . (string)($health['failure'] ?? 'unreachable') . '): '
+                . (string)$health['detail']);
         }
-        $host = trim((string)$relay->get('mrl_host'));
-        if ($host === '') {
-            throw new ProvisioningCheckFailed('The relay has no tunnel address configured yet.');
-        }
-        $sock = @stream_socket_client('tcp://' . $host . ':25', $errno, $errstr, self::RELAY_TIMEOUT);
-        if (!$sock) {
-            throw new ProvisioningCheckFailed(
-                'The relay SMTP port 25 is not reachable over the tunnel (' . $host . '): '
-                . ($errstr ?: 'connection refused') . ' — check WireGuard is up.'
-            );
-        }
-        stream_set_timeout($sock, self::RELAY_TIMEOUT);
-        try {
-            $banner = self::smtpReadReply($sock);
-            if (strpos($banner, '220') !== 0) {
-                throw new ProvisioningCheckFailed('The relay did not greet as an SMTP server (got: ' . trim($banner) . ').');
-            }
-            $ehlo_name = trim((string)Globalvars::get_instance()->get_setting('mailbox_mail_hostname')) ?: 'joinery.internal';
-            $reply = self::smtpCommand($sock, 'EHLO ' . $ehlo_name);
-            if (strpos($reply, '250') !== 0) {
-                throw new ProvisioningCheckFailed('The relay refused EHLO over the tunnel (got: ' . trim($reply) . ').');
-            }
-            $reply = self::smtpCommand($sock, 'MAIL FROM:<>');
-            if (strpos($reply, '250') !== 0) {
-                throw new ProvisioningCheckFailed('The relay refused MAIL FROM over the tunnel (got: ' . trim($reply) . ').');
-            }
-            // The probe recipient's domain is reserved (.invalid) so it is never in
-            // relay_domains: only permit_mynetworks can accept it, which is exactly
-            // the smarthost property under test. QUIT below — no DATA, nothing sent.
-            $reply = self::smtpCommand($sock, 'RCPT TO:<smarthost-check@joinery-check.invalid>');
-            if (strpos($reply, '250') !== 0) {
-                throw new ProvisioningCheckFailed(
-                    'The relay is reachable but refuses compose submission over the tunnel (got: ' . trim($reply)
-                    . '). The relay was provisioned inbound-only — run Rebuild in the Setup tab\'s Relay section to open the '
-                    . 'tunnel submission listener.'
-                );
-            }
-        } finally {
-            @fwrite($sock, "QUIT\r\n");
-            @fclose($sock);
-        }
-    }
-
-    /** Send one SMTP command and return the (possibly multiline) reply's final line. */
-    private static function smtpCommand($sock, string $command): string {
-        fwrite($sock, $command . "\r\n");
-        return self::smtpReadReply($sock);
-    }
-
-    /**
-     * Read one SMTP reply, consuming continuation lines ("250-…") until the final
-     * "250 …" line, which is returned. '' on read failure/timeout.
-     */
-    private static function smtpReadReply($sock): string {
-        while (($line = fgets($sock, 1024)) !== false) {
-            if (preg_match('/^\d{3}(?: |\r|\n|$)/', $line)) {
-                return $line;
-            }
-            // "NNN-..." continuation — keep reading to the final line.
-            if (!preg_match('/^\d{3}-/', $line)) {
-                return $line; // not an SMTP reply at all; surface it
-            }
-        }
-        return '';
     }
 
     /**
@@ -742,34 +654,88 @@ class InboundEmailHealth {
         return false;
     }
 
-    // ------------------------------------------- relay outbound (inbound-only default)
+    // ------------------------------------------- relay outbound (the relay is inbound only)
+
+    /** How long a passed origin-leak probe stays good evidence. */
+    const ORIGIN_PROBE_FRESH_DAYS = 7;
 
     /**
-     * The active outbound provider can carry hidden-origin compose mail: it must
-     * submit over an HTTP API (ApiSubmissionRelay), not SMTP. SMTP submission
-     * stamps the box IP into the first Received: header and defeats the hidden
-     * origin. PROVIDER MODE ONLY (the default): no-op in smarthost mode (the
-     * tunnel check covers that) and on colocated deployments.
-     * (specs/mailbox_relay_inbound_only.md § Setup checks.)
+     * May hidden-origin compose mail leave through the active provider?
+     *
+     * The relay is inbound only, so every sent message leaves through the
+     * configured provider. SMTP submission stamps the submitting client's IP
+     * into the first Received: header, which is the address the relay exists to
+     * conceal - so on a hidden-origin deployment sending is allowed when the
+     * provider submits over an API (ApiSubmissionRelay: it passes by
+     * construction) OR when the most recent origin-leak probe round-tripped
+     * clean within its freshness window. Refused otherwise, with the probe named
+     * as the remedy: an operator who runs their own Postfix strips the
+     * submission Received line, runs the probe, and sends; if they got it wrong
+     * the probe catches it before any real mail leaks.
+     *
+     * @return array{allowed:bool, reason:string, probe:array}
+     */
+    public static function hiddenOriginSendAllowed(): array {
+        require_once(PathHelper::getIncludePath('includes/EmailServiceProvider.php'));
+        require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+        $probe = self::originProbeVerdict();
+        $provider = EmailSender::getActiveProvider();
+        if ($provider === null) {
+            return array('allowed' => false, 'probe' => $probe,
+                'reason' => 'No outbound email provider is configured - hidden-origin compose mail has nothing to leave through.');
+        }
+        if ($provider instanceof ApiSubmissionRelay) {
+            return array('allowed' => true, 'probe' => $probe, 'reason' => '');
+        }
+        $label = method_exists($provider, 'getLabel') ? $provider::getLabel() : get_class($provider);
+        if ($probe['state'] === 'passed') {
+            return array('allowed' => true, 'probe' => $probe, 'reason' => '');
+        }
+        $why = ($probe['state'] === 'failed')
+            ? 'the last origin-leak probe found this server exposed in the delivered headers (' . $probe['message'] . ')'
+            : 'no origin-leak probe has round-tripped clean in the last ' . self::ORIGIN_PROBE_FRESH_DAYS . ' days';
+        return array('allowed' => false, 'probe' => $probe,
+            'reason' => 'Sent mail cannot leave through ' . $label . ' without proof it hides this server\'s address: '
+                . $why . '. Run the origin-leak probe from the Setup tab\'s Relay section, or use a provider that '
+                . 'submits over an API (Mailgun or Amazon SES).');
+    }
+
+    /**
+     * The most recent origin-leak probe's verdict: 'passed' (round-tripped
+     * clean within the freshness window), 'failed' (round-tripped with this
+     * server exposed), or 'none' (no readable probe in the window).
+     *
+     * @return array{state:string, message:string, checked_time:string}
+     */
+    public static function originProbeVerdict(): array {
+        $found = self::latestOriginProbe();
+        if ($found === null) {
+            return array('state' => 'none', 'message' => 'no origin-leak probe has been delivered in the last '
+                . self::ORIGIN_PROBE_FRESH_DAYS . ' days', 'checked_time' => '');
+        }
+        $settings = Globalvars::get_instance();
+        $origin_ip = trim((string)$settings->get_setting('mailbox_public_ip'));
+        $leaks = self::scanHeadersForOrigin($found['raw'], $origin_ip, (string)gethostname());
+        if (!empty($leaks)) {
+            return array('state' => 'failed', 'message' => implode('; ', $leaks), 'checked_time' => $found['time']);
+        }
+        return array('state' => 'passed', 'message' => 'the delivered probe carried no trace of this server',
+            'checked_time' => $found['time']);
+    }
+
+    /**
+     * Sending is allowed only along a route the origin cannot leak through: an
+     * API provider by construction, or an SMTP path the origin-leak probe has
+     * cleared within its window. No-op on colocated deployments.
      */
     public static function checkOutboundTransportClass() {
         $relay = self::activeRelay();
-        if ($relay === null || self::relayOutboundMode() !== 'provider') {
+        if ($relay === null) {
             return;
         }
-        require_once(PathHelper::getIncludePath('includes/EmailServiceProvider.php'));
-        require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
-        $provider = EmailSender::getActiveProvider();
-        if ($provider === null) {
-            throw new ProvisioningCheckFailed(
-                'No outbound email provider is configured — hidden-origin compose mail has nothing to leave through.');
-        }
-        if (!($provider instanceof ApiSubmissionRelay)) {
-            $label = method_exists($provider, 'getLabel') ? $provider::getLabel() : get_class($provider);
-            throw new ProvisioningCheckFailed(
-                'The active outbound provider (' . $label . ') submits over SMTP, which would stamp this server\'s '
-                . 'IP into sent mail and defeat the hidden origin. Use an API provider (Mailgun or Amazon SES), '
-                . 'or switch sent mail to leave through the relay.');
+        $verdict = self::hiddenOriginSendAllowed();
+        if (!$verdict['allowed']) {
+            throw new ProvisioningCheckFailed($verdict['reason']);
         }
     }
 
@@ -780,49 +746,52 @@ class InboundEmailHealth {
      * headers for this box's public IP or its internal hostname (gethostname()).
      * Pass = absent. This checks the FACT (no leak) rather than the MECHANISM
      * (API vs SMTP), so it also catches a provider that starts stamping the
-     * submitter's IP. PROVIDER MODE ONLY; no-op with no probe yet delivered.
+     * submitter's IP. No-op with no probe yet delivered.
      */
     public static function checkOutboundOriginLeak() {
         $relay = self::activeRelay();
-        if ($relay === null || self::relayOutboundMode() !== 'provider') {
+        if ($relay === null) {
             return;
         }
-        $raw = self::latestOriginProbeRaw();
-        if ($raw === '') {
-            // No probe delivered yet (or its raw is sealed and unreadable) — nothing
+        $verdict = self::originProbeVerdict();
+        if ($verdict['state'] === 'none') {
+            // No probe delivered yet (or its raw is sealed and unreadable) - nothing
             // to assert. The relay tab offers a "Run origin-leak probe" button.
             return;
         }
-        $settings = Globalvars::get_instance();
-        $origin_ip = trim((string)$settings->get_setting('mailbox_public_ip'));
-        $leaks = self::scanHeadersForOrigin($raw, $origin_ip, (string)gethostname());
-        if (!empty($leaks)) {
+        if ($verdict['state'] === 'failed') {
             throw new ProvisioningCheckFailed(
                 'The last outbound origin-leak probe found this server exposed in the delivered headers: '
-                . implode('; ', $leaks) . ' — sent mail must not carry the main box IP or hostname.');
+                . $verdict['message'] . ' - sent mail must not carry the main box IP or hostname.');
         }
     }
 
     /**
-     * The raw MIME of the most recently delivered origin-leak probe (carries the
-     * ORIGIN_PROBE_HEADER marker), or '' when none is readable. Side-effect-free.
+     * The most recently delivered origin-leak probe (carries the
+     * ORIGIN_PROBE_HEADER marker) as ['raw' => MIME, 'time' => received], or
+     * null when none is readable inside the freshness window. Side-effect-free.
      */
-    private static function latestOriginProbeRaw(): string {
+    private static function latestOriginProbe(): ?array {
         try {
             $db = DbConnector::get_instance()->get_db_link();
-            // The time window keeps the ILIKE scan bounded as the table grows —
-            // a probe older than a week is stale evidence anyway.
+            // The time window keeps the ILIKE scan bounded as the table grows -
+            // and it IS the freshness window: a probe older than this is stale
+            // evidence, not proof.
             $stmt = $db->prepare(
-                "SELECT iem_raw_message FROM iem_inbound_email_messages
+                "SELECT iem_raw_message, iem_received_time FROM iem_inbound_email_messages
                  WHERE iem_received_time >= ? AND iem_raw_message ILIKE ?
                  ORDER BY iem_received_time DESC LIMIT 1");
             $stmt->execute(array(
-                LibraryFunctions::time_shift(gmdate('Y-m-d H:i:s'), '-7 days', 'Y-m-d H:i:s'),
+                LibraryFunctions::time_shift(gmdate('Y-m-d H:i:s'), '-' . self::ORIGIN_PROBE_FRESH_DAYS . ' days', 'Y-m-d H:i:s'),
                 '%' . self::ORIGIN_PROBE_HEADER . '%',
             ));
-            return (string)($stmt->fetchColumn() ?: '');
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$row || (string)$row['iem_raw_message'] === '') {
+                return null;
+            }
+            return array('raw' => (string)$row['iem_raw_message'], 'time' => (string)$row['iem_received_time']);
         } catch (\Throwable $e) {
-            return '';
+            return null;
         }
     }
 
@@ -876,7 +845,7 @@ class InboundEmailHealth {
      * itself, marked with ORIGIN_PROBE_HEADER, through the REAL outbound path
      * (resolveOutboundTransport → the provider's API in the default mode). It
      * leaves via the provider and returns via the relay MX; checkOutboundOriginLeak
-     * then scans the delivered copy. Relay-fronted + provider mode only.
+     * then scans the delivered copy. Relay-fronted deployments only.
      *
      * @return array{ok:bool,message:string}
      */
@@ -884,9 +853,6 @@ class InboundEmailHealth {
         $relay = self::activeRelay();
         if ($relay === null) {
             return array('ok' => false, 'message' => 'No active relay — the origin-leak probe only applies to a relay-fronted deployment.');
-        }
-        if (self::relayOutboundMode() !== 'provider') {
-            return array('ok' => false, 'message' => 'Sent mail leaves through the relay; the tunnel-SMTP check covers that path.');
         }
 
         // The probe target must be a REAL enabled store-mode alias: the relay's

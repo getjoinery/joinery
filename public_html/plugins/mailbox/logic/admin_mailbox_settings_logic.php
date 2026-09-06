@@ -95,23 +95,6 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 		}
 
 		$outbound_note = '';
-		if (array_key_exists('mailbox_relay_outbound_mode', $input)) {
-			$prior = (strtolower(trim((string)$settings->get_setting('mailbox_relay_outbound_mode'))) === 'smarthost')
-				? 'smarthost' : 'provider';
-			$mode = ($input['mailbox_relay_outbound_mode'] === 'smarthost') ? 'smarthost' : 'provider';
-			$to_write['mailbox_relay_outbound_mode'] = $mode;
-			// The relay's Postfix submission listener is baked at provision time,
-			// so a mode switch takes effect on the relay itself only at the next
-			// Rebuild (Setup tab). The tunnel check fails honestly until then.
-			if ($mode === 'smarthost' && $prior !== 'smarthost') {
-				$outbound_note = ' Sent mail now leaves through the relay — this deployment owns the '
-					. 'relay IP\'s sending reputation. Run Rebuild on the relay (Setup tab) to open its tunnel '
-					. 'submission listener; until then compose sends are refused.';
-			} elseif ($mode === 'provider' && $prior === 'smarthost') {
-				$outbound_note = ' Sent mail now leaves through your email provider. The relay\'s submission '
-					. 'listener stays open until its next Rebuild.';
-			}
-		}
 
 		require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
 		require_once(PathHelper::getIncludePath('includes/SettingsWriter.php'));
@@ -152,8 +135,6 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 	$values['mailbox_fleet_service_url']    = $fleet_url;
 	$values['mailbox_fleet_api_public_key'] = trim((string)$settings->get_setting('mailbox_fleet_api_public_key'));
 	$fleet_secret_set = trim((string)$settings->get_setting('mailbox_fleet_api_secret_key')) !== '';
-	$outbound_mode = (strtolower(trim((string)$settings->get_setting('mailbox_relay_outbound_mode'))) === 'smarthost')
-		? 'smarthost' : 'provider';
 	// The connection box is hosted-relay-only, so it is also gated behind the
 	// hosted offering's launch flag.
 	$show_relay_config = mailbox_hosted_relay_offered()
@@ -230,7 +211,6 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 		'show_relay_config'       => $show_relay_config,
 		'fleet_secret_set'        => $fleet_secret_set,
 		'has_active_relay'        => (MailboxRelay::active() !== null),
-		'outbound_mode'           => $outbound_mode,
 		'scanner_state'           => $scanner_state,
 		'scanner_present'         => $scanner_present,
 	));

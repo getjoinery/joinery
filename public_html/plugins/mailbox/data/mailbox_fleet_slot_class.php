@@ -46,18 +46,15 @@ class MailboxFleetSlot extends SystemBase {
 		'mft_slug'                  => array('type'=>'varchar(28)'),
 		'mft_status'                => array('type'=>'varchar(20)', 'is_nullable'=>false, 'default'=>'provisioning'),
 		// Allocated WireGuard address inside the shard's tunnel subnet.
-		'mft_tunnel_ip'             => array('type'=>'varchar(64)'),
 		// The operator-controlled per-tenant MX hostname (an A record to the
 		// shard's IP — re-sharding is an A-record change, tenants never touch DNS).
 		'mft_mx_hostname'           => array('type'=>'varchar(255)'),
 		// The tenant's credentials the shard peers/authorizes: main-box
 		// WireGuard public key and the pull SSH public key (locked to the
 		// tenant shell by add-tenant).
-		'mft_wg_public_key'         => array('type'=>'varchar(255)'),
-		'mft_pull_public_key'       => array('type'=>'text'),
-		// The tenant's relay client public key (Ed25519, base64): what a shard
-		// without a shell holds in its registry in place of a pull key and a
-		// WireGuard peer (specs/relay_without_a_shell.md).
+		// The tenant's relay client public key (Ed25519, base64): what the shard
+		// holds in its registry and verifies every request against
+		// (specs/relay_without_a_shell.md).
 		'mft_public_key'            => array('type'=>'varchar(64)'),
 		// Shard-policy limits written into the tenant's root-owned limits.json.
 		'mft_forward_hourly_limit'  => array('type'=>'int4', 'is_nullable'=>false, 'default'=>200),
@@ -65,7 +62,6 @@ class MailboxFleetSlot extends SystemBase {
 		'mft_spool_max_entries'     => array('type'=>'int4', 'is_nullable'=>false, 'default'=>5000),
 		// The most recent lifecycle job (add-tenant / set-domains / remove-tenant)
 		// dispatched for this slot; fleet_status reconciles from it lazily.
-		'mft_last_job_id'           => array('type'=>'int8'),
 		// Set when the slot's verified-domain set changed (a claim verified, a
 		// suspension); the relay reconcile task dispatches the set-domains job
 		// and clears it once the shard allowlist matches again.
