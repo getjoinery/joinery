@@ -41,6 +41,7 @@ $services = EmailSender::getAvailableServices();
 check(is_array($services) && count($services) > 0, 'getAvailableServices returns a non-empty registry', 'count: ' . count($services));
 check(isset($services['mailgun']), 'registry includes mailgun');
 check(isset($services['smtp']), 'registry includes smtp');
+check(isset($services['smtp2go']), 'registry includes smtp2go');
 check(isset($services['mailgun']) && is_string($services['mailgun']) && $services['mailgun'] !== '', 'mailgun has a non-empty label');
 check(isset($services['smtp']) && is_string($services['smtp']) && $services['smtp'] !== '', 'smtp has a non-empty label');
 
@@ -111,6 +112,7 @@ $provider_reqs = array(
 	'sendgrid' => array('sendgrid_api_key', array('sendgrid_api_key')),
 	'postmark' => array('postmark_api_key', array('postmark_api_key')),
 	'ses'      => array('ses_access_key',   array('ses_access_key', 'ses_secret_key')),
+	'smtp2go'  => array('smtp2go_api_key',  array('smtp2go_api_key')),
 );
 foreach ($provider_reqs as $key => $spec) {
 	list($primary, $required) = $spec;

@@ -438,7 +438,7 @@ class InboundEmailSetupCheck {
 			foreach ((array)($status['records'] ?? array()) as $record) {
 				$this->planAdd($plan, (string)($record['type'] ?? 'TXT'),
 					(string)($record['name'] ?? ''), (string)($record['value'] ?? ''), null,
-					'DKIM — required by ' . $dkim['label'] . '.');
+					$this->recordPurpose($record) . ' — required by ' . $dkim['label'] . '.');
 			}
 		}
 
@@ -555,7 +555,8 @@ class InboundEmailSetupCheck {
 					foreach ((array)($m_status['records'] ?? array()) as $record) {
 						$this->planAdd($plan, (string)($record['type'] ?? 'TXT'),
 							(string)($record['name'] ?? ''), (string)($record['value'] ?? ''), null,
-							'DKIM for the machine sending identity — issued by ' . $m_label . '.');
+							$this->recordPurpose($record) . ' for the machine sending identity — issued by '
+								. $m_label . '.');
 					}
 				}
 			}
@@ -3959,12 +3960,25 @@ class InboundEmailSetupCheck {
 		return $rows;
 	}
 
-	/** Verify one provider-required DKIM record (TXT by p= body, CNAME by target) against live DNS. */
+	/**
+	 * What a provider record is FOR, in the operator's words — 'DKIM' unless
+	 * the provider says otherwise. A provider whose sending domain needs more
+	 * than a signing key (SMTP2GO asks for a return-path CNAME too) labels each
+	 * record with its own purpose, so the row and the plan name what they are
+	 * instead of calling every record DKIM.
+	 */
+	private function recordPurpose(array $rec): string {
+		$purpose = trim((string)($rec['purpose'] ?? ''));
+		return $purpose !== '' ? $purpose : 'DKIM';
+	}
+
+	/** Verify one provider-required record (TXT by p= body, CNAME by target) against live DNS. */
 	private function providerDkimRecordRow(string $id, string $label, string $domain, array $rec): array {
 		$type = strtoupper(trim((string)($rec['type'] ?? 'TXT')));
 		$name = rtrim(trim((string)($rec['name'] ?? '')), '.');
 		$value = trim((string)($rec['value'] ?? ''));
-		$row_label = 'DKIM record (' . $label . ')';
+		$purpose = $this->recordPurpose($rec);
+		$row_label = $purpose . ' record (' . $label . ')';
 
 		if ($type === 'CNAME') {
 			list($target, $ok) = $this->dns(function () use ($name) { return DnsResolver::getCname($name); });
@@ -3974,12 +3988,12 @@ class InboundEmailSetupCheck {
 			}
 			if ($target === null || $target === '') {
 				return $this->r($id, $domain, 'domain', $row_label, self::RECOMMENDED, self::WARN,
-					$label . ' requires a DKIM record at ' . $name . ' that is not published yet.', '',
+					$label . ' requires a ' . $purpose . ' record at ' . $name . ' that is not published yet.', '',
 					$this->dnsFix('CNAME', $name, $value));
 			}
 			if (strcasecmp(rtrim((string)$target, '.'), rtrim($value, '.')) === 0) {
 				return $this->r($id, $domain, 'domain', $row_label, self::RECOMMENDED, self::PASS,
-					'The ' . $label . ' DKIM record at ' . $name . ' is published.');
+					'The ' . $label . ' ' . $purpose . ' record at ' . $name . ' is published.');
 			}
 			return $this->r($id, $domain, 'domain', $row_label, self::RECOMMENDED, self::WARN,
 				'The record at ' . $name . ' does not match what ' . $label . ' requires.',
@@ -3997,7 +4011,7 @@ class InboundEmailSetupCheck {
 		}
 		if ($published === '') {
 			return $this->r($id, $domain, 'domain', $row_label, self::RECOMMENDED, self::WARN,
-				$label . ' requires a DKIM record at ' . $name . ' that is not published yet.', '',
+				$label . ' requires a ' . $purpose . ' record at ' . $name . ' that is not published yet.', '',
 				$this->dnsFix('TXT', $name, $value));
 		}
 		$pubP = $this->extractDkimP($published);
@@ -4006,7 +4020,7 @@ class InboundEmailSetupCheck {
 			: (preg_replace('/\s+/', '', $published) === preg_replace('/\s+/', '', $value));
 		if ($match) {
 			return $this->r($id, $domain, 'domain', $row_label, self::RECOMMENDED, self::PASS,
-				'The ' . $label . ' DKIM record at ' . $name . ' is published and matches.');
+				'The ' . $label . ' ' . $purpose . ' record at ' . $name . ' is published and matches.');
 		}
 		return $this->r($id, $domain, 'domain', $row_label, self::RECOMMENDED, self::WARN,
 			'The record at ' . $name . ' does not match what ' . $label . ' requires.',

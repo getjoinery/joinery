@@ -27,7 +27,13 @@
  * step and is the first response to a complaint threshold. Neither destroys the
  * customer's own record of what they sent.
  *
- * @version 1.0
+ * The domain endpoints' answers are read by Smtp2GoProvider (the core SMTP2GO
+ * email provider), which owns the one description of what SMTP2GO's domain
+ * responses look like. A hosted customer's sending domain and a self-hosted
+ * site's are the same thing at the provider, so they must not be read by two
+ * pieces of code that can drift apart.
+ *
+ * @version 1.1
  */
 
 require_once(PathHelper::getComposerAutoloadPath());
@@ -129,9 +135,10 @@ class Smtp2GoClient {
 			'subaccount_id' => $subaccount_id,
 			'domain'        => $domain,
 		));
+		$entry = Smtp2GoProvider::entryFor($data, $domain);
 		return array(
-			'id'      => self::firstScalar($data, array('domain_id', 'id'), array('domain', 'domains')),
-			'records' => self::extractRecords($data, $domain),
+			'id'      => trim((string)($entry['domain']['fulldomain'] ?? '')),
+			'records' => Smtp2GoProvider::recordsOf($entry),
 		);
 	}
 
@@ -145,7 +152,7 @@ class Smtp2GoClient {
 			'subaccount_id' => $subaccount_id,
 			'domain'        => $domain,
 		));
-		return self::looksVerified($data);
+		return Smtp2GoProvider::stateOf(Smtp2GoProvider::entryFor($data, $domain)) === 'active';
 	}
 
 	/** The domain's current state and the records it still wants. */
@@ -154,9 +161,10 @@ class Smtp2GoClient {
 			'subaccount_id' => $subaccount_id,
 			'domain'        => $domain,
 		));
+		$entry = Smtp2GoProvider::entryFor($data, $domain);
 		return array(
-			'verified' => self::looksVerified($data),
-			'records'  => self::extractRecords($data, $domain),
+			'verified' => Smtp2GoProvider::stateOf($entry) === 'active',
+			'records'  => Smtp2GoProvider::recordsOf($entry),
 		);
 	}
 
@@ -290,130 +298,6 @@ class Smtp2GoClient {
 			}
 		}
 		return '';
-	}
-
-	/**
-	 * The DNS records a domain response describes, normalized to the shape
-	 * DnsRecordPlan takes.
-	 *
-	 * Anything without all three of type, host and value is dropped rather
-	 * than published: a half-formed record is worse than a missing one, because
-	 * it looks like the domain is set up.
-	 */
-	private static function extractRecords(array $data, string $domain = ''): array {
-		// The whole envelope, not a guessed sub-key: the reader below finds both
-		// shapes wherever they sit, and an endpoint that moves a field one level
-		// then costs nothing rather than silently yielding no records.
-		$candidates = self::flattenRecords($data, $domain);
-
-		$out = array();
-		$seen = array();
-		foreach ($candidates as $record) {
-			$key = strtolower($record['type'] . '|' . $record['name'] . '|' . $record['value']);
-			if (isset($seen[$key])) { continue; }
-			$seen[$key] = true;
-			$out[] = $record;
-		}
-		return $out;
-	}
-
-	/**
-	 * Pull records out of a nested structure, in the two shapes the provider
-	 * uses.
-	 *
-	 * TYPED TRIPLES — {type, host/name, value/data} — are the easy case and the
-	 * one a generic reader expects.
-	 *
-	 * FIELD PAIRS are the shape the domain endpoints actually answer in, and
-	 * they carry no `type` at all: a domain object holds dkim_selector +
-	 * dkim_value, rpath_domain + rpath_value, and a trackers list of subdomain +
-	 * cname. Read only for triples, every real response yields NOTHING, the leg
-	 * publishes nothing, verification never succeeds, and the customer's mail
-	 * is unsigned for ever while every dashboard says the domain was added. So
-	 * the pairs are read explicitly, by name, against the domain they belong to.
-	 */
-	private static function flattenRecords($node, string $domain = ''): array {
-		if (!is_array($node)) {
-			return array();
-		}
-
-		$out = array();
-
-		// Shape one: a typed triple.
-		$type  = strtoupper(trim((string)($node['type'] ?? '')));
-		$name  = trim((string)($node['host'] ?? $node['name'] ?? $node['hostname'] ?? ''));
-		$value = trim((string)($node['value'] ?? $node['data'] ?? $node['content'] ?? $node['expected'] ?? ''));
-		if ($type !== '' && $name !== '' && $value !== ''
-				&& in_array($type, array('TXT', 'CNAME', 'MX', 'A', 'AAAA'), true)) {
-			$out[] = self::record($type, $name, $value,
-				isset($node['priority']) && $node['priority'] !== null ? (int)$node['priority'] : null);
-			return $out;
-		}
-
-		// Shape two: field pairs on a domain object. The domain this object is
-		// about wins over the caller's, so a response describing several is read
-		// correctly.
-		$own = trim((string)($node['fulldomain'] ?? $node['domain_name'] ?? $node['rpath_domain'] ?? $domain));
-		if (is_string($own) && $own !== '') {
-			$selector = trim((string)($node['dkim_selector'] ?? ''));
-			$dkim     = trim((string)($node['dkim_value'] ?? ''));
-			if ($selector !== '' && $dkim !== '') {
-				$out[] = self::record('TXT', $selector . '._domainkey.' . $own, $dkim, null);
-			}
-			$rpath_host  = trim((string)($node['rpath_domain'] ?? ''));
-			$rpath_value = trim((string)($node['rpath_value'] ?? ''));
-			if ($rpath_host !== '' && $rpath_value !== '') {
-				$out[] = self::record('CNAME', $rpath_host, $rpath_value, null);
-			}
-			foreach ((array)($node['trackers'] ?? array()) as $tracker) {
-				if (!is_array($tracker)) { continue; }
-				$sub   = trim((string)($tracker['subdomain'] ?? $tracker['cname'] ?? ''));
-				$to    = trim((string)($tracker['cname_expected'] ?? $tracker['value'] ?? $tracker['expected'] ?? ''));
-				if ($sub !== '' && $to !== '') {
-					$out[] = self::record('CNAME', $sub, $to, null);
-				}
-			}
-		}
-
-		foreach ($node as $key => $child) {
-			if ($key === 'trackers') { continue; }   // already read, as pairs
-			if (is_array($child)) {
-				$out = array_merge($out, self::flattenRecords($child, $own !== '' ? $own : $domain));
-			}
-		}
-		return $out;
-	}
-
-	/** One record in the shape DnsRecordPlan takes. */
-	private static function record(string $type, string $name, string $value, ?int $priority): array {
-		return array(
-			'type'     => $type,
-			'name'     => rtrim($name, '.'),
-			'value'    => $value,
-			'priority' => $priority,
-			'note'     => 'Outbound mail (SMTP2GO): ' . strtolower($type) . ' record for this sender domain.',
-		);
-	}
-
-	/** Does a domain response say the domain is verified? */
-	private static function looksVerified(array $data): bool {
-		foreach (array('verified', 'domain_verified', 'is_verified', 'active') as $key) {
-			if (isset($data[$key])) {
-				return (bool)$data[$key];
-			}
-		}
-		foreach (array('domain', 'domains') as $container) {
-			$node = $data[$container] ?? null;
-			if (is_array($node)) {
-				$candidate = (isset($node[0]) && is_array($node[0])) ? $node[0] : $node;
-				foreach (array('verified', 'domain_verified', 'is_verified', 'active') as $key) {
-					if (isset($candidate[$key])) {
-						return (bool)$candidate[$key];
-					}
-				}
-			}
-		}
-		return false;
 	}
 
 	/**

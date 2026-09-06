@@ -14,7 +14,7 @@
  * The step wears three faces, derived fresh on every render:
  *
  *   form   No working provider yet. One question (the From address), the
- *          provider picker with Mailgun preselected, and the API key. No
+ *          provider picker with SMTP2GO preselected, and the API key. No
  *          domain field — the domain is the From address's domain; the save
  *          handler provisions the mailbox for the address and registers the
  *          domain at the provider through its API (SendingDomainRegistrar),
@@ -31,7 +31,10 @@
  * The expensive work (provider API lookups, the record plan) runs only when
  * its stage renders — the step's status closure stays cheap.
  *
- * @version 3.2
+ * @version 3.3
+ * @changelog 3.3 - SMTP2GO is the preselected, recommended provider: one API
+ *   key sends mail and registers the sending domain, and its free tier covers
+ *   a small site. Mailgun remains in the picker, unchanged.
  * @changelog 3.2 - The prove stage's receiving checklist lists every store
  *   mailbox (SetupSteps::receivingMailboxes): a connected account reads
  *   "connected account" with a green dot while its feed is on and "connection
@@ -188,7 +191,7 @@ if ($setup_send_stage !== 'form' && class_exists('InboundEmailSetupCheck')) {
 // Prefills for a site configuring email for the first time. Stored values
 // always win — these only fill what is still empty, and nothing is written
 // until the operator presses Save.
-$setup_send_service_prefill = $setup_send_service !== '' ? $setup_send_service : 'mailgun';
+$setup_send_service_prefill = $setup_send_service !== '' ? $setup_send_service : 'smtp2go';
 
 // The site's own domain drives the address prefill. Blank when the site has
 // no real address yet (localhost / bare IP).
@@ -663,7 +666,7 @@ SettingsFieldRenderer::renderGroup($formwriter, 'email_delivery', array(
 		// No account can be connected during first setup, so the choice only
 		// appears when it is somehow already the active service.
 		'skip_options' => $setup_send_service === 'connected_account' ? array() : array('connected_account'),
-		'option_labels' => array('mailgun' => 'Mailgun (recommended)'),
+		'option_labels' => array('smtp2go' => 'SMTP2GO (recommended)'),
 	)),
 ));
 

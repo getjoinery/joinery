@@ -53,6 +53,7 @@
     "email_provider_sendgrid": "SendGrid",
     "email_provider_ses": "Amazon SES",
     "email_provider_smtp": "SMTP",
+    "email_provider_smtp2go": "SMTP2GO",
     "inbound_provider": "Inbound provider settings"
   },
   "settings": [
@@ -1587,6 +1588,14 @@
         "mailbox_provider": "mailgun"
       },
       "helptext": "HTTP Webhook Signing Key from your Mailgun dashboard (separate from the API key)."
+    },
+    {
+      "name": "smtp2go_api_key",
+      "default": "",
+      "secret": true,
+      "group": "email_provider_smtp2go",
+      "label": "SMTP2GO API key",
+      "helptext": "Create it in SMTP2GO under Sending, then API Keys. Give the key two permission groups: Emails, which sends the mail, and Sender Domains, which lets this site register your sending domain and read back the DNS records it needs. Without Sender Domains sending still works, but you add the domain and its records in the SMTP2GO dashboard yourself."
     },
     {
       "name": "brevo_api_key",
