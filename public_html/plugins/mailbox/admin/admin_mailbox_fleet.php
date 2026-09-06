@@ -55,14 +55,16 @@ if (!empty($fleet_service_on)) {
 	$page->begin_box(array('title' => 'Shards'));
 
 	if (!empty($fleet_shards)) {
-		// Version and Rebuild are the operator's half of the promise the tenant
-		// surface makes: a hosted slot tells its tenant the relay is upgraded by
-		// the operator, which needs somewhere the operator can see and do it.
+		// Version is the operator's half of the promise the tenant surface makes:
+		// a hosted slot tells its tenant the relay is the operator's to keep
+		// current, which needs somewhere the operator can see where it stands.
+		// A shard holds every tenant's undrained mail, so nothing here re-images
+		// one; a new shard is born and tenants move to it.
 		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayVersion.php'));
 		$shipped = RelayVersion::shipped();
 		echo '<table class="table"><thead><tr>'
-			. '<th>Shard</th><th>Hostname</th><th>Public IP</th><th>Tenants</th><th>Active</th>'
-			. '<th>Relay version</th><th></th>'
+			. '<th>Shard</th><th>Hostname</th><th>Public IP</th><th>Identity pin</th><th>Tenants</th><th>Active</th>'
+			. '<th>Relay version</th>'
 			. '</tr></thead><tbody>';
 		foreach ($fleet_shards as $row) {
 			$shard = $row['model'];
@@ -72,6 +74,8 @@ if (!empty($fleet_service_on)) {
 			echo '<td>' . htmlspecialchars((string)$shard->get('mfs_name')) . '</td>';
 			echo '<td>' . htmlspecialchars((string)$shard->get('mfs_hostname')) . '</td>';
 			echo '<td>' . htmlspecialchars((string)$shard->get('mfs_public_ip')) . '</td>';
+			$pin = (string)$shard->get('mfs_identity_fingerprint');
+			echo '<td><code>' . htmlspecialchars(substr($pin, 0, 16)) . ($pin !== '' ? '…' : '') . '</code></td>';
 			echo '<td>' . intval($row['slots']) . ' / ' . intval($shard->get('mfs_capacity')) . '</td>';
 			echo '<td>' . ((bool)$shard->get('mfs_is_active') ? 'Yes' : 'No') . '</td>';
 			switch ($standing) {
@@ -84,22 +88,11 @@ if (!empty($fleet_service_on)) {
 					$version_cell = htmlspecialchars($running)
 						. ' <span class="text-muted">(newer than this site)</span>'; break;
 				default:
-					// A shard whose job emitted no marker. Unknown must never read
+					// A shard that has not reported in. Unknown must never read
 					// as up to date — that is the whole point of showing this.
 					$version_cell = '<span class="text-muted">Unknown</span>';
 			}
 			echo '<td>' . $version_cell . '</td>';
-			echo '<td>';
-			if (RelayVersion::offersUpgrade($standing) && intval($shard->get('mfs_mgn_managed_node_id')) > 0) {
-				echo '<form method="post" style="display:inline" onsubmit="return confirm('
-					. htmlspecialchars(json_encode('Rebuild this shard now? Every tenant on it stops '
-						. 'receiving mail for several minutes; senders retry.'), ENT_QUOTES) . ')">';
-				echo '<input type="hidden" name="action" value="rebuild_shard">';
-				echo '<input type="hidden" name="shard_id" value="' . intval($shard->key) . '">';
-				echo '<button type="submit" class="btn btn-sm btn-warning">Rebuild</button>';
-				echo '</form>';
-			}
-			echo '</td>';
 			echo '</tr>';
 		}
 		echo '</tbody></table>';
@@ -131,21 +124,30 @@ if (!empty($fleet_service_on)) {
 		echo '<p>No shards yet. Provision the first one below.</p>';
 	}
 
-	if (!empty($nodes)) {
+	if (!empty($shard_run) && $shard_run->isLive()) {
+		echo '<p>⏳ A shard is being born (run #' . intval($shard_run->key) . ', ' . htmlspecialchars((string)$shard_run->get('rcp_status'))
+			. '). Approve or watch it in the <a href="/plugins/mailbox/admin/admin_mailbox_setup?advanced=1#relay-section">Relay section</a>.</p>';
+	} else {
+		// A shard is born like any relay: a skeleton-only run in the operator's
+		// own cloud account, the operator identity's public key in its registry.
 		$sform = $page->getFormWriter('provision_shard');
 		echo $sform->begin_form();
 		$sform->hiddeninput('action', '', array('value' => 'provision_shard'));
-		$shard_node_options = array();
-		foreach ($nodes as $node) {
-			$shard_node_options[(string)$node->key] = $node->get('mgn_name') . ' (' . $node->get('mgn_host') . ')';
-		}
-		$sform->dropinput('shard_node_id', 'Managed node', array('options' => $shard_node_options));
 		$sform->textinput('shard_hostname', 'Shard mail hostname', array('placeholder' => 'shard1.mx.example.com'));
+		$sform->dropinput('shard_region', 'Region', array(
+			'value'   => 'us-southeast',
+			'options' => array(
+				'us-southeast' => 'Atlanta, GA (US)', 'us-east' => 'Newark, NJ (US)', 'us-central' => 'Dallas, TX (US)',
+				'us-west' => 'Fremont, CA (US)', 'us-sea' => 'Seattle, WA (US)', 'us-mia' => 'Miami, FL (US)',
+				'ca-central' => 'Toronto (Canada)', 'eu-west' => 'London (UK)', 'eu-central' => 'Frankfurt (Germany)',
+				'nl-ams' => 'Amsterdam (Netherlands)', 'fr-par' => 'Paris (France)', 'ap-south' => 'Singapore',
+				'ap-northeast' => 'Tokyo (Japan)', 'ap-southeast' => 'Sydney (Australia)', 'br-gru' => 'São Paulo (Brazil)',
+			),
+		));
 		$sform->textinput('shard_capacity', 'Capacity (tenants)', array('value' => '25'));
-		$sform->submitbutton('btn_provision_shard', 'Provision shard');
+		$sform->submitbutton('btn_provision_shard', 'Create shard in my Linode account');
 		echo $sform->end_form();
-	} else {
-		echo '<p>No managed nodes are available. Add a node in Server Manager first.</p>';
+		echo '<p class="text-muted small">Creates one small instance in your Linode account, billed to you; it builds itself and reports in.</p>';
 	}
 
 	$page->end_box();

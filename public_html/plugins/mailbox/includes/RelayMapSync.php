@@ -1,16 +1,14 @@
 <?php
 /**
- * RelayMapSync - push this tenant's map fragment to the relay over the tunnel.
+ * RelayMapSync - push this tenant's map fragment to the relay.
  *
- * (specs/mailbox_relay_shared_fleet.md § Map sync: fragment push and shard-side
- * merge). Builds the fragment with RelayMapExporter, rsyncs it into the
- * tenant's own fragment drop area over WireGuard (the restricted tenant
- * account — never root, never /etc/postfix), then triggers the relay's merge
- * unit and reads the VALIDATION VERDICT in-band. The merge validates the
- * fragment against the tenant's root-owned domain allowlist, derives the
- * Postfix maps, and reloads — that shard-side step is where the domain-claim
- * boundary is enforced, so a rejected fragment surfaces here as an error (the
- * relay keeps serving the last accepted fragment).
+ * (specs/relay_without_a_shell.md, specs/mailbox_relay_shared_fleet.md § Map
+ * sync). Builds the fragment with RelayMapExporter and sends it as one signed
+ * PUT /relay/fragment; the relay's root path unit validates it against the
+ * tenant's root-owned domain allowlist, derives the Postfix maps, reloads, and
+ * the VALIDATION VERDICT comes back in the response. That relay-side step is
+ * where the domain-claim boundary is enforced, so a rejected fragment surfaces
+ * here as an error (the relay keeps serving the last accepted fragment).
  *
  * On success it records the synced version + push time so the health checks
  * can report map freshness.
@@ -19,6 +17,7 @@
  * periodic reconcile (the relay reconcile scheduled task), so freshness beats the
  * reject_unmatched gate.
  *
+ * @version 2.3 - the ssh era is over: the API is the only push path
  * @version 2.2 - a relay with an identity pin takes the fragment as a signed
  *                PUT /relay/fragment and answers the merge verdict in the response;
  *                a tunnel relay keeps the rsync + joinery-merge flow
@@ -27,13 +26,10 @@
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayMapExporter.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySsh.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayClient.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
 
 class RelayMapSync {
-
-	const FRAGMENT_NAME = 'fragment.json';
 
 	/**
 	 * Best-effort immediate push after a routing change (a new alias must not
@@ -72,12 +68,11 @@ class RelayMapSync {
 	 * relay keeps running the last accepted fragment).
 	 */
 	public static function push(MailboxRelay $relay, bool $force = false): array {
-		if ($relay->usesRelayApi()) {
-			if (trim((string)$relay->get('mrl_public_ip')) === '') {
-				return array('status' => 'skipped', 'message' => 'relay has no public address yet');
-			}
-		} elseif (trim((string)$relay->get('mrl_host')) === '') {
-			return array('status' => 'skipped', 'message' => 'relay has no tunnel host yet');
+		if (!$relay->usesRelayApi()) {
+			return array('status' => 'skipped', 'message' => 'relay has no identity pin (it predates the relay API) and cannot be reached');
+		}
+		if (trim((string)$relay->get('mrl_public_ip')) === '') {
+			return array('status' => 'skipped', 'message' => 'relay has no public address yet');
 		}
 
 		try {
@@ -105,70 +100,40 @@ class RelayMapSync {
 		$fragment['version'] = $version;
 		$fragment_body = self::encodeFragmentBody($fragment);
 
-		$stage = self::stage($fragment_body);
-		if ($stage === null) {
-			return array('status' => 'error', 'message' => 'could not stage the fragment');
-		}
-
+		// One signed PUT; root's path unit on the relay performs the merge and
+		// the response IS the verdict. A transport failure returns without
+		// touching the bookkeeping, so the next reconcile retries.
 		try {
-			if ($relay->usesRelayApi()) {
-				// One signed PUT; root's path unit on the relay performs the merge
-				// and the response IS the verdict. A transport failure returns
-				// without touching the bookkeeping, so the next reconcile retries.
-				try {
-					$answer = $relay->withApi(function (RelayClient $c) use ($fragment_body) { return $c->putFragment($fragment_body); });
-				} catch (RelayClientException $e) {
-					return array('status' => 'error', 'message' => 'fragment push failed (' . $e->failure_class . '): ' . $e->getMessage());
-				}
-				if (($answer['status'] ?? '') === 'timeout') {
-					return array('status' => 'error', 'message' => 'the relay did not apply the fragment in time — will retry');
-				}
-				if (($answer['status'] ?? '') === 'error') {
-					return array('status' => 'error', 'message' => 'the relay could not apply the fragment: '
-						. (string)($answer['reason'] ?? 'unknown reason'));
-				}
-				$verdict = isset($answer['merge']) && is_array($answer['merge']) ? $answer['merge'] : array();
-				if (($answer['status'] ?? '') === 'rejected' && !isset($verdict['status'])) {
-					$verdict = array('status' => 'rejected', 'reason' => (string)($answer['reason'] ?? 'rejected'));
-				}
-				if (!isset($verdict['status'])) {
-					return array('status' => 'error', 'message' => 'the relay answered the fragment push with no merge verdict');
-				}
-			} else {
-				// 1. Drop the fragment into the tenant's own drop area. The tenant
-				// shell pins the rsync destination to exactly this directory.
-				$cmd = RelaySsh::rsyncCommand($relay, $stage . '/' . self::FRAGMENT_NAME,
-					$relay->fragmentDir() . '/', false);
-				list($rc, $rout) = RelaySsh::run($cmd);
-				if ($rc !== 0) {
-					// Return WITHOUT touching mrl_map_content_hash / version / push_time,
-					// so the change-skip check stays false and the next reconcile retries.
-					return array('status' => 'error', 'message' => 'fragment push failed: ' . $rout);
-				}
-
-				// 2. Trigger the shard-side merge; the verdict comes back in-band.
-				list($code, $out) = RelaySsh::run(RelaySsh::sshCommand($relay, 'joinery-merge'));
-				$verdict = json_decode(trim($out), true);
-				if (!is_array($verdict)) {
-					return array('status' => 'error',
-						'message' => 'merge returned no verdict (exit ' . $code . '): ' . substr(trim($out), 0, 300));
-				}
-			}
-			if (($verdict['status'] ?? '') !== 'ok') {
-				return array('status' => 'error', 'message' => 'merge rejected the fragment: '
-					. (string)($verdict['reason'] ?? 'unknown reason'));
-			}
-			if (empty($verdict['installed'])) {
-				return array('status' => 'error', 'message' => 'merge validated the fragment but could not install the maps');
-			}
-			if (intval($verdict['fragment_version'] ?? -1) !== $version) {
-				return array('status' => 'error', 'message' => 'merge served fragment v'
-					. intval($verdict['fragment_version'] ?? -1) . ', expected v' . $version . ' — will retry');
-			}
+			$answer = $relay->withApi(function (RelayClient $c) use ($fragment_body) { return $c->putFragment($fragment_body); });
+		} catch (RelayClientException $e) {
+			return array('status' => 'error', 'message' => 'fragment push failed (' . $e->failure_class . '): ' . $e->getMessage());
 		} catch (\Throwable $e) {
 			return array('status' => 'error', 'message' => $e->getMessage());
-		} finally {
-			self::cleanup($stage);
+		}
+		if (($answer['status'] ?? '') === 'timeout') {
+			return array('status' => 'error', 'message' => 'the relay did not apply the fragment in time — will retry');
+		}
+		if (($answer['status'] ?? '') === 'error') {
+			return array('status' => 'error', 'message' => 'the relay could not apply the fragment: '
+				. (string)($answer['reason'] ?? 'unknown reason'));
+		}
+		$verdict = isset($answer['merge']) && is_array($answer['merge']) ? $answer['merge'] : array();
+		if (($answer['status'] ?? '') === 'rejected' && !isset($verdict['status'])) {
+			$verdict = array('status' => 'rejected', 'reason' => (string)($answer['reason'] ?? 'rejected'));
+		}
+		if (!isset($verdict['status'])) {
+			return array('status' => 'error', 'message' => 'the relay answered the fragment push with no merge verdict');
+		}
+		if (($verdict['status'] ?? '') !== 'ok') {
+			return array('status' => 'error', 'message' => 'merge rejected the fragment: '
+				. (string)($verdict['reason'] ?? 'unknown reason'));
+		}
+		if (empty($verdict['installed'])) {
+			return array('status' => 'error', 'message' => 'merge validated the fragment but could not install the maps');
+		}
+		if (intval($verdict['fragment_version'] ?? -1) !== $version) {
+			return array('status' => 'error', 'message' => 'merge served fragment v'
+				. intval($verdict['fragment_version'] ?? -1) . ', expected v' . $version . ' — will retry');
 		}
 
 		$relay->set('mrl_map_version', $version);
@@ -192,29 +157,6 @@ class RelayMapSync {
 			}
 		}
 		return json_encode($fragment, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-	}
-
-	/** Write the fragment to a private staging dir; returns its path or null. */
-	private static function stage(string $fragment_body): ?string {
-		$dir = sys_get_temp_dir() . '/joinery-relay-map-' . bin2hex(random_bytes(6));
-		if (!@mkdir($dir, 0700, true)) {
-			return null;
-		}
-		if (file_put_contents($dir . '/' . self::FRAGMENT_NAME, $fragment_body) === false) {
-			self::cleanup($dir);
-			return null;
-		}
-		return $dir;
-	}
-
-	private static function cleanup(?string $dir): void {
-		if ($dir === null || !is_dir($dir)) {
-			return;
-		}
-		foreach (glob($dir . '/*') ?: array() as $f) {
-			@unlink($f);
-		}
-		@rmdir($dir);
 	}
 
 }

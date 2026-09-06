@@ -22,6 +22,10 @@
  * `filesSent` is the PRESETS smtp_files_sent capability: true when the provider's
  * SMTP saves the sent copy itself; false when two-way sync must APPEND it.
  *
+ * @version 1.6 - the relay is inbound only: a hidden-origin send is allowed through an API
+ *                provider by construction or through SMTP once the origin-leak probe has
+ *                cleared it (InboundEmailHealth::hiddenOriginSendAllowed); the smarthost
+ *                branch is gone (specs/relay_without_a_shell.md Q1)
  * @version 1.5 - forHostedAlias() refuses an address on an IMAP-source
  *   domain: mail from a connected account leaves only through that account's
  *   own SMTP, never platform egress (specs/imap_source_domain_boundaries.md §5)
@@ -98,45 +102,39 @@ class OutboundTransport {
             }
         }
 
-        // Relay-fronted deployment. The relay defaults to INBOUND-ONLY
-        // (specs/mailbox_relay_inbound_only.md): compose sends leave through the
+        // Relay-fronted deployment. The relay is INBOUND ONLY
+        // (specs/relay_without_a_shell.md, Q1): compose sends leave through the
         // deployment's configured provider over an API raw-message path, so the
         // sent message's Received: chain begins inside the provider and the main
-        // box IP appears nowhere. The relay smarthost is the opt-in for operators
-        // who want no third party touching outbound plaintext and accept owning
-        // the relay IP's sending reputation.
+        // box IP appears nowhere. An SMTP provider may carry them too - but only
+        // once the origin-leak probe has round-tripped clean, which is the
+        // measurement that says this path hides the address.
         // Doctrine enforcement keys off the RECORDED cutover state, not the
         // relay row's mere existence: relays are born enabled and run through
         // the DNS move, during which sends must keep working the legacy way
         // (the origin is still public until the MX flips, so nothing leaks).
-        // The smarthost opt-in is an explicit admin choice and applies as soon
-        // as it is chosen.
         $relay = self::activeRelay();
         $cutover_complete = ((string)Globalvars::get_instance()
             ->get_setting('mailbox_relay_cutover_complete') === '1');
-        if ($relay !== null && (self::relayOutboundMode() === 'smarthost' || $cutover_complete)) {
-            if (self::relayOutboundMode() === 'smarthost') {
-                // Opt-in: relay smarthost over the tunnel — the sent Received: chain
-                // shows the relay. SmtpProvider still runs the in-app DKIM signer;
-                // the relay only transports.
-                $t->transport = new SmtpProvider(SmtpConfig::fromRelaySmarthost($relay));
+        if ($relay !== null && $cutover_complete) {
+            require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailHealth.php'));
+            $verdict = InboundEmailHealth::hiddenOriginSendAllowed();
+            if (!$verdict['allowed']) {
+                $t->error = $verdict['reason'];
                 return $t;
             }
-
-            // Default: hand a fully formed, app-signed message to the active
-            // provider's API raw-message relay. It must be API-class — SMTP
-            // submission would stamp the box IP into the first Received: header
-            // and defeat the hidden origin.
             require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
             $provider = EmailSender::getActiveProvider();
-            if (!($provider instanceof ApiSubmissionRelay)) {
-                $t->error = 'Sent mail cannot leave through the current email provider without exposing this '
-                    . 'server\'s address. Choose a provider that submits over an API (Mailgun or Amazon SES), '
-                    . 'or switch the relay to smarthost mode on the mailbox Settings tab.';
+            if ($provider instanceof ApiSubmissionRelay) {
+                // Hand a fully formed, app-signed message to the provider's API
+                // raw-message relay.
+                require_once(PathHelper::getIncludePath('includes/RawRelayComposeTransport.php'));
+                $t->transport = new RawRelayComposeTransport(self::hostedEnvelopeSender($aliasAddress), $provider);
                 return $t;
             }
-            require_once(PathHelper::getIncludePath('includes/RawRelayComposeTransport.php'));
-            $t->transport = new RawRelayComposeTransport(self::hostedEnvelopeSender($aliasAddress), $provider);
+            // An SMTP provider the probe has cleared: the platform's ordinary
+            // send path, which the probe measured.
+            $t->transport = null;
             return $t;
         }
 
@@ -154,18 +152,6 @@ class OutboundTransport {
 
         $t->transport = null;  // platform active provider via the default EmailSender path
         return $t;
-    }
-
-    /**
-     * The relay's outbound mode: 'provider' (default — compose rides the
-     * configured provider's API, hiding the origin) or 'smarthost' (opt-in —
-     * compose leaves through the relay smarthost over the tunnel). Reads the
-     * mailbox_relay_outbound_mode setting; anything but an explicit 'smarthost'
-     * is treated as 'provider'.
-     */
-    private static function relayOutboundMode(): string {
-        $mode = strtolower(trim((string)Globalvars::get_instance()->get_setting('mailbox_relay_outbound_mode')));
-        return $mode === 'smarthost' ? 'smarthost' : 'provider';
     }
 
     /**

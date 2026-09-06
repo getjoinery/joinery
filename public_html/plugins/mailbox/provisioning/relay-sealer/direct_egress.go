@@ -1,49 +1,27 @@
 package main
 
-// `relay-sealer direct-serve` — the two listeners that make a Fortress tenant
-// reachable on Joinery Direct without ever exposing its origin box.
+// The Direct EGRESS proxy: a tenant's box signs a fully-formed request and the
+// relay makes it, so the recipient sees the relay's address and never the
+// box's. The relay never holds the instance signing key and never signs: it
+// transports an app-signed request it cannot alter, exactly the division
+// OutboundTransport already enforces for mail. Moving the signing key here would
+// be a new custody model this design deliberately avoids.
 //
-//	PUBLIC (:443, TLS)     inbound deliveries from other Joinery instances
-//	TUNNEL (WireGuard)     outbound egress for this relay's own tenants
-//
-// **Why TLS is terminated here rather than by a web server.** The relay runs
-// Postfix, milters, a Go binary and WireGuard, and nothing else — no PHP, no
-// database, no web stack. Adding nginx plus certbot to obtain one certificate
-// would roughly double the software on a machine whose smallness IS the
-// security property. `autocert` obtains and renews the certificate in-process
-// over TLS-ALPN-01 on the same port it already has to listen on, so the relay
-// gains a certificate and no new package, daemon, config file or cron entry.
-//
-// **Why egress exists at all.** The recipient must see the RELAY's address, not
-// the box's — that is the whole point of a hidden origin. So the box signs a
-// fully-formed request and the relay makes it. The relay never holds the
-// instance signing key and never signs: it transports an app-signed request it
-// cannot alter, exactly the division OutboundTransport already enforces for
-// mail. Moving the signing key here would be a new custody model this design
-// deliberately avoids.
-//
-// The egress listener binds to the WireGuard address ONLY. The tunnel is the
-// authentication: reaching it at all requires a WireGuard peer key the relay
-// issued, which is the same boundary the spool pull already trusts.
+// Served by relay-serve on the public listener as POST /egress, behind the
+// tenant's signed envelope (relay_serve.go); the target rules below are what
+// keep a public proxy from being an open one.
 
 import (
 	"context"
 	"crypto/tls"
 	"errors"
-	"flag"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"os/signal"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
-
-	"golang.org/x/crypto/acme/autocert"
 )
 
 const (
@@ -58,111 +36,6 @@ const (
 
 	egressMaxBody = 128 << 20
 )
-
-// runDirectServe is the `direct-serve` entry point.
-func runDirectServe() int {
-	fs := flag.NewFlagSet("direct-serve", flag.ContinueOnError)
-	hostname := fs.String("hostname", "", "public hostname this relay answers Direct on (required)")
-	routing := fs.String("routing", envOr("JOINERY_RELAY_ROUTING", "/opt/joinery-relay/routing.json"), "routing map path")
-	spool := fs.String("spool", envOr("JOINERY_RELAY_SPOOL", "/var/spool/joinery-relay"), "default spool directory")
-	certDir := fs.String("cert-cache", "/opt/joinery-relay/acme", "ACME certificate cache directory")
-	stateDir := fs.String("state", "/opt/joinery-relay/direct", "Direct state directory (replay nonces)")
-	tunnelAddr := fs.String("tunnel", "10.99.0.1", "WireGuard address to serve tenant egress on")
-	tunnelPort := fs.Int("tunnel-port", 8442, "tenant egress port on the tunnel address")
-	httpsAddr := fs.String("listen", ":443", "public HTTPS listen address")
-	if err := fs.Parse(os.Args[2:]); err != nil {
-		return 2
-	}
-	if strings.TrimSpace(*hostname) == "" {
-		fmt.Fprintln(os.Stderr, "relay-sealer direct-serve: --hostname is required")
-		return 2
-	}
-
-	handler := newDirectHandler(*routing, *spool, *stateDir+"/nonces")
-
-	// Housekeeping: expired sessions, aged-out nonces and stale rate-limit
-	// history. A long-lived process must not grow without bound.
-	stop := make(chan struct{})
-	go func() {
-		t := time.NewTicker(time.Minute)
-		defer t.Stop()
-		for {
-			select {
-			case <-t.C:
-				handler.state.sweep()
-			case <-stop:
-				return
-			}
-		}
-	}()
-
-	manager := &autocert.Manager{
-		Prompt:     autocert.AcceptTOS,
-		HostPolicy: autocert.HostWhitelist(strings.ToLower(strings.TrimSpace(*hostname))),
-		Cache:      autocert.DirCache(*certDir),
-	}
-
-	public := &http.Server{
-		Addr:    *httpsAddr,
-		Handler: handler,
-		TLSConfig: &tls.Config{
-			GetCertificate: manager.GetCertificate,
-			NextProtos:     []string{"h2", "http/1.1", "acme-tls/1"},
-			MinVersion:     tls.VersionTLS12,
-		},
-		ReadHeaderTimeout: 15 * time.Second,
-		IdleTimeout:       60 * time.Second,
-	}
-
-	egress := &http.Server{
-		Addr:              net.JoinHostPort(*tunnelAddr, strconv.Itoa(*tunnelPort)),
-		Handler:           http.HandlerFunc(handleEgress),
-		ReadHeaderTimeout: 15 * time.Second,
-	}
-
-	errs := make(chan error, 2)
-	go func() {
-		fmt.Fprintf(os.Stderr, "relay-sealer: Direct listening on %s for %s\n", *httpsAddr, *hostname)
-		if err := public.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errs <- fmt.Errorf("public listener: %w", err)
-		}
-	}()
-	// The egress proxy authenticates callers ONLY by the address it binds — reaching
-	// the WireGuard address requires a peer key the relay issued. So the bind address
-	// must be a private/tunnel address: binding it to a public or empty address would
-	// turn the proxy into an open, world-reachable relay. Refuse rather than serve it,
-	// without touching the public listener inbound delivery depends on.
-	tunnelIP := net.ParseIP(strings.TrimSpace(*tunnelAddr))
-	if tunnelIP == nil || isPublicIP(tunnelIP) {
-		fmt.Fprintf(os.Stderr, "relay-sealer: refusing to serve egress on non-private tunnel address %q\n", *tunnelAddr)
-	} else {
-		go func() {
-			fmt.Fprintf(os.Stderr, "relay-sealer: Direct egress listening on %s\n", egress.Addr)
-			if err := egress.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				// The tunnel address does not exist until WireGuard is up. That is a
-				// real failure worth reporting, but it must not take the PUBLIC
-				// listener down with it — inbound delivery does not depend on it.
-				fmt.Fprintf(os.Stderr, "relay-sealer: egress listener unavailable: %v\n", err)
-			}
-		}()
-	}
-
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
-	select {
-	case err := <-errs:
-		fmt.Fprintf(os.Stderr, "relay-sealer: %v\n", err)
-		close(stop)
-		return 1
-	case <-signals:
-		close(stop)
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = public.Shutdown(ctx)
-		_ = egress.Shutdown(ctx)
-		return 0
-	}
-}
 
 // handleEgress proxies one already-signed request out to another instance.
 //

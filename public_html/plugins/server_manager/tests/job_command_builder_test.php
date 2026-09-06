@@ -182,45 +182,6 @@ check(strpos($why, 'no implementation') !== false,
 // ---------------------------------------------------------------------------
 section('Input refusals');
 
-// A relay tenant slug names a directory and a config stanza on the relay, so it
-// is constrained to a shape rather than escaped and hoped for.
-$bad_slugs = array($PAYLOAD, $SUBSHELL, $BACKTICK, '../../etc/passwd',
-	'has space', 'has/slash', '', '-leading-dash', str_repeat('a', 40));
-foreach ($bad_slugs as $slug) {
-	$threw = false;
-	try {
-		JobCommandBuilder::build_relay_add_tenant($ssh_node, array(
-			'slug' => $slug, 'pull_pubkey' => 'abc'));
-	} catch (Exception $e) {
-		$threw = true;
-	}
-	check($threw, 'relay_add_tenant refuses the slug ' . var_export(substr($slug, 0, 20), true));
-}
-
-$threw = false;
-try {
-	JobCommandBuilder::build_relay_add_tenant($ssh_node, array('slug' => 'good-slug'));
-} catch (Exception $e) { $threw = true; }
-check($threw, 'relay_add_tenant refuses a tenant with no pull key');
-
-// Case is normalised rather than refused, so an admin typing a slug in caps
-// gets the tenant they meant instead of an error.
-$steps = JobCommandBuilder::build_relay_add_tenant($ssh_node, array(
-	'slug' => 'MixedCase', 'pull_pubkey' => 'abc'));
-$cmd = jcb_cmds($steps);
-check(strpos($cmd, "'mixedcase'") !== false,
-	'an uppercase slug is lowercased rather than refused', $cmd);
-check(strpos($cmd, 'MixedCase') === false,
-	'the original casing does not survive into the command', $cmd);
-
-foreach (array('build_relay_set_domains', 'build_relay_remove_tenant') as $fn) {
-	$threw = false;
-	try {
-		JobCommandBuilder::$fn($ssh_node, array('slug' => $PAYLOAD));
-	} catch (Exception $e) { $threw = true; }
-	check($threw, $fn . ' refuses a slug carrying shell metacharacters');
-}
-
 // A node with no transport at all cannot have a job built for it silently.
 $threw = false;
 try {
@@ -236,14 +197,8 @@ section('Shell safety');
 // a shell evaluating the emitted command never executes it.
 $cases = array();
 
-$cases['relay_add_tenant pull key'] = jcb_cmds(JobCommandBuilder::build_relay_add_tenant(
-	$ssh_node, array('slug' => 'tenant-a', 'pull_pubkey' => $PAYLOAD)));
 
-$cases['relay_add_tenant domains'] = jcb_cmds(JobCommandBuilder::build_relay_add_tenant(
-	$ssh_node, array('slug' => 'tenant-a', 'pull_pubkey' => 'abc', 'domains' => $PAYLOAD)));
 
-$cases['relay_set_domains domains'] = jcb_cmds(JobCommandBuilder::build_relay_set_domains(
-	$ssh_node, array('slug' => 'tenant-a', 'domains' => $SUBSHELL)));
 
 foreach ($cases as $label => $cmd) {
 	check(strpos($cmd, 'CANARY_FIRED') !== false,
@@ -259,23 +214,6 @@ foreach ($cases as $label => $cmd) {
 		$label . ': the payload does not execute',
 		'emitted: ' . substr(preg_replace('/\s+/', ' ', $cmd), 0, 160));
 }
-
-// A quote in a value must not close the quoting around it.
-$quote_payload = "'; touch CANARY_FIRED; '";
-$cmd = jcb_cmds(JobCommandBuilder::build_relay_add_tenant(
-	$ssh_node, array('slug' => 'tenant-a', 'pull_pubkey' => 'abc', 'domains' => $quote_payload)));
-check(!jcb_payload_fired($cmd, $tmpdir),
-	'a value containing a single quote cannot close the quoting around it',
-	'emitted: ' . substr($cmd, 0, 160));
-
-// Numeric options are coerced, not quoted, so they must not accept text at all.
-$steps = JobCommandBuilder::build_relay_add_tenant($ssh_node, array(
-	'slug' => 'tenant-a', 'pull_pubkey' => 'abc', 'forward_limit' => '5; touch CANARY_FIRED'));
-$cmd = jcb_cmds($steps);
-check(strpos($cmd, '--forward-limit 5') !== false,
-	'a numeric option keeps its numeric prefix', $cmd);
-check(strpos($cmd, 'CANARY_FIRED') === false,
-	'a numeric option discards trailing text entirely rather than quoting it', $cmd);
 
 // ---------------------------------------------------------------------------
 section('Local backup delete: a name, never a path');

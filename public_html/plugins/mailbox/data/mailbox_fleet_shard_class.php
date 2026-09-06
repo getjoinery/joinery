@@ -41,11 +41,13 @@ class MailboxFleetShard extends SystemBase {
 		'mfs_hostname'               => array('type'=>'varchar(255)'),
 		'mfs_public_ip'              => array('type'=>'varchar(64)'),
 		// WireGuard listener tenants dial out to.
-		'mfs_wg_endpoint'            => array('type'=>'varchar(255)'),
-		'mfs_wg_public_key'          => array('type'=>'varchar(255)'),
-		// A shard without a shell: the identity pin tenants connect with, in
-		// place of the tunnel endpoint and WireGuard key.
+		// The identity pin tenants connect with (specs/relay_without_a_shell.md),
+		// and the provider coordinates of the instance the operator's plane
+		// created and can re-image: a shard is born from user-data like any relay.
 		'mfs_identity_fingerprint'   => array('type'=>'varchar(64)'),
+		'mfs_cloud_provider'         => array('type'=>'varchar(32)'),
+		'mfs_cloud_instance_id'      => array('type'=>'varchar(50)'),
+		'mfs_region'                 => array('type'=>'varchar(50)'),
 		// How many tenants this shard accepts (the blast-radius dial).
 		'mfs_capacity'               => array('type'=>'int4', 'is_nullable'=>false, 'default'=>25),
 		// Inactive shards accept no new enrollments (draining before rebuild or

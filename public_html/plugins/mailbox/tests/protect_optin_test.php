@@ -679,9 +679,9 @@ class ProtectOptinTest {
 	private function assertVocabulary() {
 		section('One word, one meaning');
 
-		// "Relay" meant three unrelated things one row apart: the ingest VPS, the
-		// outbound provider credential, and the smarthost setting. The middle one
-		// is the sending route and has nothing to do with a relay.
+		// "Relay" meant two unrelated things one row apart: the ingest VPS and the
+		// outbound provider credential. The latter is the sending route and has
+		// nothing to do with a relay.
 		$src = (string)file_get_contents(PathHelper::getIncludePath(
 			'plugins/mailbox/includes/InboundEmailSetupCheck.php'));
 		check(strpos($src, 'Outbound forwarding relay') === false,
@@ -699,9 +699,9 @@ class ProtectOptinTest {
 				basename($file) . ' always says WHICH protection');
 		}
 
-		// "Smarthost" is Postfix's word for the plumbing. It tells a reader what
-		// the component is called, not what happens to their mail, so the stored
-		// value keeps it and no reader-facing string may. The setting's own
+		// "Smarthost" is Postfix's word for the plumbing, and the relay no longer
+		// has one (specs/relay_without_a_shell.md Q1: the relay is inbound only).
+		// No reader-facing string may say it, and no setting may carry it. The
 		// options, helptexts and check descriptions live in plugin.json, which is
 		// the file most likely to reintroduce it.
 		$manifest = (string)file_get_contents(PathHelper::getIncludePath('plugins/mailbox/plugin.json'));
@@ -727,16 +727,12 @@ class ProtectOptinTest {
 			'no reader-facing string in plugin.json says smarthost',
 			implode(' | ', $leaks));
 
-		// The stored value is untouched on purpose — renaming it would be a
-		// settings migration for no reader benefit, exactly as with the setting key.
+		// The outbound-mode setting itself is gone with the smarthost.
 		$mode = null;
 		foreach (($decoded['settings'] ?? array()) as $setting) {
 			if (($setting['name'] ?? '') === 'mailbox_relay_outbound_mode') { $mode = $setting; }
 		}
-		check(is_array($mode) && isset($mode['options']['smarthost']),
-			'the stored value stays smarthost — only the words shown changed');
-		check(is_array($mode) && stripos((string)$mode['options']['smarthost'], 'relay') !== false,
-			'and the reader is shown the relay instead');
+		check($mode === null, 'there is no outbound-mode setting: sent mail leaves through the provider, never the relay');
 	}
 }
 

@@ -70,9 +70,9 @@ class SmtpMailer extends PHPMailer {
         }
 
         // Explicit 'none' means send in the clear — disable PHPMailer's opportunistic
-        // auto-STARTTLS. Otherwise, when the server advertises STARTTLS (e.g. the relay
-        // smarthost over the already-encrypted WireGuard tunnel, whose Postfix offers a
-        // self-signed cert), PHPMailer would upgrade and fail the handshake. The null
+        // auto-STARTTLS. Otherwise, when the server advertises STARTTLS with a
+        // certificate this box will not trust (a private Postfix with a self-signed
+        // cert), PHPMailer would upgrade and fail the handshake. The null
         // (auto-detect) path keeps opportunistic TLS.
         if ($config->encryption === 'none') {
             $this->SMTPAutoTLS = false;

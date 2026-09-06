@@ -17,9 +17,9 @@
  *   - The relay reconcile scheduled task (cron, operator context) dispatches
  *     the flagged jobs, reconciles finished ones, and re-checks entitlement.
  *
- * @version 1.4 - enrollment carries the tenant's relay client public key; applyTenant()
- *                drives a shard without a shell through its operator-signed tenant
- *                routes, and a tunnel shard through the job path (specs/relay_without_a_shell.md)
+ * @version 1.5 - the ssh era is over: no tunnel allocation, no lifecycle jobs; applyTenant()
+ *                drives every shard through its operator-signed tenant routes
+ *                (specs/relay_without_a_shell.md)
  * @version 1.3
  */
 
@@ -36,7 +36,6 @@ class FleetService {
 	const FEATURE_MAX_DOMAINS = 'mailbox_fleet_max_domains';
 
 	/** Every shard's relay listens at .1 of its tunnel subnet. */
-	const RELAY_TUNNEL_IP = '10.99.0.1';
 
 	// ------------------------------------------------------------ service gate
 
@@ -67,10 +66,9 @@ class FleetService {
 	 */
 	/**
 	 * Enroll a tenant. $keys carries the tenant's relay client public key
-	 * (`public_key`, Ed25519, base64 - what a shard without a shell holds in its
-	 * registry) and, for a tunnel shard, the legacy `wg_public_key` and
-	 * `pull_public_key`. The public key is required; the tunnel keys are
-	 * accepted when given and validated when present.
+	 * (`public_key`, Ed25519, base64) - what the shard holds in its registry and
+	 * verifies every request against. Idempotent: an existing live slot is
+	 * returned, re-registered on the next reconcile pass if the key changed.
 	 */
 	public static function enroll(int $user_id, array $keys): MailboxFleetSlot {
 		if (!self::enabled()) {
@@ -80,32 +78,16 @@ class FleetService {
 			throw new FleetServiceException('Your subscription does not include a hosted relay slot.');
 		}
 		$public_key = trim((string)($keys['public_key'] ?? ''));
-		$wg_public_key = trim((string)($keys['wg_public_key'] ?? ''));
-		$pull_public_key = trim((string)($keys['pull_public_key'] ?? ''));
 		$decoded = base64_decode($public_key, true);
 		if ($decoded === false || strlen($decoded) !== SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES) {
 			throw new FleetServiceException('public_key is not a valid Ed25519 public key.');
 		}
-		if ($wg_public_key !== '' && !preg_match('#^[A-Za-z0-9+/]{43}=$#', $wg_public_key)) {
-			throw new FleetServiceException('wg_public_key is not a valid WireGuard public key.');
-		}
-		if ($pull_public_key !== '' && !preg_match('/^(ssh-ed25519|ssh-rsa|ecdsa-[a-z0-9-]+) [A-Za-z0-9+\/=]+( [^\s]+)?$/', $pull_public_key)) {
-			throw new FleetServiceException('pull_public_key is not a valid SSH public key.');
-		}
 
 		$existing = MailboxFleetSlot::activeForUser($user_id);
 		if ($existing !== null) {
-			// Refresh the keys (a re-enroll after the tenant regenerated a key
-			// re-registers it on the next reconcile pass).
-			$changed = $public_key !== trim((string)$existing->get('mft_public_key'))
-				|| $wg_public_key !== trim((string)$existing->get('mft_wg_public_key'))
-				|| $pull_public_key !== trim((string)$existing->get('mft_pull_public_key'));
-			if ($changed) {
+			if ($public_key !== trim((string)$existing->get('mft_public_key'))) {
 				$existing->set('mft_public_key', $public_key);
-				$existing->set('mft_wg_public_key', $wg_public_key);
-				$existing->set('mft_pull_public_key', $pull_public_key);
 				$existing->set('mft_status', MailboxFleetSlot::STATUS_PROVISIONING);
-				$existing->set('mft_last_job_id', null);
 				$existing->save();
 			}
 			return $existing;
@@ -120,10 +102,7 @@ class FleetService {
 		$slot->set('mft_mfs_shard_id', intval($shard->key));
 		$slot->set('mft_usr_user_id', $user_id);
 		$slot->set('mft_status', MailboxFleetSlot::STATUS_PROVISIONING);
-		$slot->set('mft_tunnel_ip', self::allocateTunnelIp($shard));
 		$slot->set('mft_public_key', $public_key);
-		$slot->set('mft_wg_public_key', $wg_public_key);
-		$slot->set('mft_pull_public_key', $pull_public_key);
 		$slot->save();
 
 		// Slug + MX hostname derive from the slot id (stable, unique, short).
@@ -143,8 +122,8 @@ class FleetService {
 		$best = null;
 		$best_load = PHP_INT_MAX;
 		foreach ($shards as $shard) {
-			if (intval($shard->get('mfs_mgn_managed_node_id')) <= 0) {
-				continue; // no node to run jobs against
+			if (trim((string)$shard->get('mfs_identity_fingerprint')) === '') {
+				continue; // not born yet: nothing can register a tenant on it
 			}
 			$count = $shard->slotCount();
 			if ($count >= intval($shard->get('mfs_capacity'))) {
@@ -158,29 +137,10 @@ class FleetService {
 		return $best;
 	}
 
-	/** Lowest free tunnel address on the shard (.1 is the relay). */
-	public static function allocateTunnelIp(MailboxFleetShard $shard): string {
-		$slots = new MultiMailboxFleetSlot(array('shard_id' => intval($shard->key), 'live' => true, 'deleted' => false));
-		$slots->load();
-		$used = array(self::RELAY_TUNNEL_IP => true);
-		foreach ($slots as $slot) {
-			$ip = trim((string)$slot->get('mft_tunnel_ip'));
-			if ($ip !== '') {
-				$used[$ip] = true;
-			}
-		}
-		for ($n = 2; $n <= 254; $n++) {
-			$candidate = '10.99.0.' . $n;
-			if (!isset($used[$candidate])) {
-				return $candidate;
-			}
-		}
-		throw new FleetServiceException('Shard tunnel subnet is exhausted.');
-	}
 
 	/**
 	 * The connection coordinates a tenant deployment stores in its MailboxRelay
-	 * row — everything RelaySpoolConsumer/RelayMapSync/the tunnel need.
+	 * row - everything RelayClient needs.
 	 */
 	public static function coordinates(MailboxFleetSlot $slot): array {
 		$shard = new MailboxFleetShard(intval($slot->get('mft_mfs_shard_id')), TRUE);
@@ -195,14 +155,9 @@ class FleetService {
 			// is a per-tenant name and never appears on a stamp.
 			'authserv_id'     => (string)$shard->get('mfs_hostname'),
 			'shard_public_ip' => (string)$shard->get('mfs_public_ip'),
-			// A shard without a shell: the identity pin the tenant connects with.
-			// Empty on a tunnel shard, whose coordinates are the two lines below.
+			// The identity pin the tenant connects with; with the address, the
+			// whole coordinate set.
 			'identity_fingerprint' => (string)$shard->get('mfs_identity_fingerprint'),
-			'wg_endpoint'     => (string)$shard->get('mfs_wg_endpoint'),
-			'wg_public_key'   => (string)$shard->get('mfs_wg_public_key'),
-			'tunnel_ip'       => (string)$slot->get('mft_tunnel_ip'),
-			'relay_tunnel_ip' => self::RELAY_TUNNEL_IP,
-			'ssh_user'        => 'jt-' . $slug,
 			'spool_path'      => '/var/spool/joinery-relay/' . $slug,
 		);
 	}
@@ -314,88 +269,19 @@ class FleetService {
 		return array('verified' => true, 'message' => 'Domain verified. The fleet will accept mail for it within a few minutes.');
 	}
 
-	// ------------------------------------------------------------- job reading
-
-	/**
-	 * Raw status/output of a slot's last lifecycle job. Direct SQL — the fleet
-	 * actions run as the customer, who has no read grant on server_manager's
-	 * job rows; this is the mailbox plugin's own bookkeeping read.
-	 */
-	public static function lastJobState(MailboxFleetSlot $slot): ?array {
-		$job_id = intval($slot->get('mft_last_job_id'));
-		if ($job_id <= 0) {
-			return null;
-		}
-		try {
-			$db = DbConnector::get_instance()->get_db_link();
-			$stmt = $db->prepare(
-				"SELECT mjb_job_type, mjb_status, mjb_output FROM mjb_management_jobs
-				  WHERE mjb_id = ? LIMIT 1");
-			$stmt->execute(array($job_id));
-			$row = $stmt->fetch(PDO::FETCH_ASSOC);
-			return $row ?: null;
-		} catch (\Throwable $e) {
-			// A broken read here makes reconcile re-dispatch forever — never fail silently.
-			error_log('FleetService::lastJobState failed for job ' . $job_id . ': ' . $e->getMessage());
-			return null;
-		}
-	}
-
-	/**
-	 * Fold a finished lifecycle job back into the slot's status. Called from
-	 * fleet_status (lazy) and from the relay reconcile task. Only touches the
-	 * slot row (the customer's own).
-	 */
-	public static function reconcile(MailboxFleetSlot $slot): void {
-		$job = self::lastJobState($slot);
-		if ($job === null) {
-			return;
-		}
-		$status = (string)$job['mjb_status'];
-		$output = (string)($job['mjb_output'] ?? '');
-		$type = (string)$job['mjb_job_type'];
-
-		if ($status !== 'completed' && $status !== 'failed') {
-			return; // still running
-		}
-
-		if ($type === 'relay_add_tenant'
-			&& (string)$slot->get('mft_status') === MailboxFleetSlot::STATUS_PROVISIONING) {
-			if ($status === 'completed' && strpos($output, 'TENANT_ADDED') !== false) {
-				$slot->set('mft_status', MailboxFleetSlot::STATUS_ACTIVE);
-				$slot->save();
-			}
-			// A failed provision leaves the slot in provisioning; the task retries.
-		}
-
-		if ($type === 'relay_remove_tenant'
-			&& (string)$slot->get('mft_status') === MailboxFleetSlot::STATUS_RELEASED
-			&& $status === 'completed' && strpos($output, 'TENANT_REMOVED') !== false) {
-			$slot->set('mft_status', MailboxFleetSlot::STATUS_EVICTED);
-			$slot->save();
-		}
-
-		if ($type === 'relay_set_domains' && $status === 'completed'
-			&& strpos($output, 'DOMAINS_SET') !== false && (bool)$slot->get('mft_needs_domain_sync')) {
-			$slot->set('mft_needs_domain_sync', false);
-			$slot->save();
-		}
-	}
-
 	// ---------------------------------------- tenant lifecycle (cron only)
 
 	/**
 	 * Perform one tenant lifecycle act for a slot: add_tenant | set_domains |
-	 * remove_tenant. On a shard without a shell this is one operator-signed
-	 * request to the shard's tenant routes and the slot's status moves on the
-	 * verdict, here and now. On a tunnel shard it is a dispatched job that
-	 * reconcile() folds in later. Returns true when the act was performed or
-	 * dispatched.
+	 * remove_tenant - one operator-signed request to the shard's tenant routes,
+	 * the slot's status moving on the verdict here and now. Returns true when
+	 * the act was performed.
 	 */
 	public static function applyTenant(MailboxFleetSlot $slot, string $kind, array $extra = array()): bool {
 		$shard = new MailboxFleetShard(intval($slot->get('mft_mfs_shard_id')), TRUE);
-		if (trim((string)$shard->get('mfs_identity_fingerprint')) === '') {
-			return self::dispatchJob($slot, $kind, $extra) !== null;
+		if (trim((string)$shard->get('mfs_identity_fingerprint')) === '' || trim((string)$shard->get('mfs_public_ip')) === '') {
+			error_log('FleetService: shard ' . $shard->key . ' has not been born yet; cannot ' . $kind . ' for slot ' . $slot->key);
+			return false;
 		}
 		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayClient.php'));
 		$slug = (string)$slot->get('mft_slug');
@@ -445,68 +331,4 @@ class FleetService {
 		return true;
 	}
 
-	// ------------------------------------------------- job dispatch (cron only)
-
-	/**
-	 * Dispatch a lifecycle job for a slot. Runs from the relay reconcile task
-	 * (operator/cron context — job rows are server_manager's, and only an
-	 * elevated context may write them). $kind: add_tenant | set_domains |
-	 * remove_tenant.
-	 */
-	public static function dispatchJob(MailboxFleetSlot $slot, string $kind, array $extra = array()): ?int {
-		if (!PluginHelper::isPluginActive('server_manager')) {
-			error_log('FleetService: server_manager inactive; cannot dispatch ' . $kind);
-			return null;
-		}
-		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-
-		$shard = new MailboxFleetShard(intval($slot->get('mft_mfs_shard_id')), TRUE);
-		$node_id = intval($shard->get('mfs_mgn_managed_node_id'));
-		if ($node_id <= 0) {
-			error_log('FleetService: shard ' . $shard->key . ' has no managed node');
-			return null;
-		}
-		$node = new ManagedNode($node_id, TRUE);
-
-		$slug = (string)$slot->get('mft_slug');
-		$params = array('slug' => $slug);
-		$job_type = null;
-
-		switch ($kind) {
-			case 'add_tenant':
-				$job_type = 'relay_add_tenant';
-				$params += array(
-					'pull_pubkey'       => (string)$slot->get('mft_pull_public_key'),
-					'wg_pubkey'         => (string)$slot->get('mft_wg_public_key'),
-					'tunnel_ip'         => (string)$slot->get('mft_tunnel_ip'),
-					// A fresh fleet tenant has NO allowed domains until its first
-					// TXT verification — the shard accepts nothing for it yet.
-					'domains'           => implode(',', $slot->verifiedDomains()) ?: '-',
-					'forward_limit'     => intval($slot->get('mft_forward_hourly_limit')),
-					'spool_max_mib'     => intval($slot->get('mft_spool_max_mib')),
-					'spool_max_entries' => intval($slot->get('mft_spool_max_entries')),
-				);
-				break;
-			case 'set_domains':
-				$job_type = 'relay_set_domains';
-				$params['domains'] = implode(',', $slot->verifiedDomains()) ?: '-';
-				break;
-			case 'remove_tenant':
-				$job_type = 'relay_remove_tenant';
-				$params['force'] = !empty($extra['force']);
-				break;
-			default:
-				return null;
-		}
-
-		$builder = 'build_' . $job_type;
-		$steps = JobCommandBuilder::$builder($node, $params);
-		$job = ManagementJob::createJob($node->key, $job_type, $steps, $params, null);
-
-		$slot->set('mft_last_job_id', intval($job->key));
-		$slot->save();
-		return intval($job->key);
-	}
 }

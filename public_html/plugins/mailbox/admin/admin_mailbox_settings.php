@@ -138,34 +138,6 @@ if (!empty($show_relay_config)) {
 	$page->end_box();
 }
 
-if (!empty($has_active_relay)) {
-	$page->begin_box(array('title' => 'Outbound sending'));
-	$is_smarthost = ($outbound_mode === 'smarthost');
-	SettingsFieldRenderer::renderGroup($form, 'relay', array(
-		'source' => 'mailbox',
-		'only'   => array('mailbox_relay_outbound_mode'),
-		'values' => array('mailbox_relay_outbound_mode' => $outbound_mode),
-		'field_options' => array(
-			'mailbox_relay_outbound_mode' => array(
-				// One consequence line per option, shown one at a time by the
-				// select above. These are notes, not fields.
-				'visibility_rules' => array(
-					'provider'  => array('show' => array('provider_note'),  'hide' => array('smarthost_note')),
-					'smarthost' => array('show' => array('smarthost_note'), 'hide' => array('provider_note')),
-				),
-			),
-		),
-	));
-	// Server-set initial display avoids a flash before the toggle script runs.
-	echo '<p class="text-muted small" id="provider_note" style="display:' . ($is_smarthost ? 'none' : '') . '">'
-		. 'Deliverability is your provider\'s job, and it carries the message in transit. '
-		. 'The sent message\'s Received chain begins inside the provider, so this server\'s address stays hidden.</p>';
-	echo '<p class="text-muted small" id="smarthost_note" style="display:' . ($is_smarthost ? '' : 'none') . '">'
-		. 'No third party carries sent mail — it leaves through your own relay over the tunnel. In exchange this '
-		. 'deployment owns the relay IP\'s sending reputation: warmup, blocklist monitoring, and PTR hygiene.</p>';
-	$page->end_box();
-}
-
 $form->submitbutton('btn_save', 'Save settings');
 echo $form->end_form();
 

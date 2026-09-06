@@ -129,19 +129,15 @@ section('What SSH still owns');
 // operations cross. If it GROWS this fails and names the newcomer, because a new
 // SSH-only operation is a step backwards taken by accident.
 //
-// Five of these are relay builders that die at the cutover rather than crossing
-// (agent_machine_posture_and_relay_converge.md). The one that stays by design
-// is install_node: the single bootstrap session in a machine's life
-// (ssh_single_bootstrap.md). provision_ssl went to the agent, and enable_agent
-// and discover_nodes were deleted outright.
+// The ones that stay by design are the bootstrap pair: install_node, the single
+// bootstrap session in a machine's life (ssh_single_bootstrap.md), and its
+// closing session. provision_ssl went to the agent; enable_agent and
+// discover_nodes were deleted outright; the relay builders died with the ssh
+// era (relay_without_a_shell.md) - a relay is born from user-data and never runs
+// a job.
 $expected_ssh_only = array(
 	'install_node',
 	'retire_install_password',   // the bootstrap's closing session: host-harden over the same sealed password, once the machine's agents are admitted
-	'provision_relay',
-	'rebuild_relay',
-	'relay_add_tenant',
-	'relay_remove_tenant',
-	'relay_set_domains',
 );
 
 $source   = file_get_contents(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));

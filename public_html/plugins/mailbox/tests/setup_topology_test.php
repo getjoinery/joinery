@@ -29,7 +29,7 @@
  *  - Provider getSpfMechanism shapes (static includes, local '' cases).
  *  - DKIM plan branching (specs/mailbox_provider_dkim.md): local opendkim only
  *    when mail rides local Postfix, provider-driven rows under provider
- *    outbound, the honest smarthost gap — and provider DKIM row rendering
+ *    outbound — and provider DKIM row rendering
  *    (records verified against DNS, not_registered / unreachable verdicts)
  *    via a fake DkimRecordSource provider.
  *
@@ -263,7 +263,6 @@ try {
 	section('dkim plan: signing path by topology and outbound mode');
 
 	harness_set_setting_mem('email_service', 'mailgun');
-	harness_set_setting_mem('mailbox_relay_outbound_mode', '');
 
 	$c = topo_checker(topo('colocated'));
 	$plan = call_private($c, 'dkimPlan');
@@ -276,7 +275,7 @@ try {
 	check($plan['local'] === false, 'fronted: a local opendkim key is never prescribed');
 	check($plan['provider'] === true && $plan['class'] === 'MailgunProvider',
 		'fronted provider outbound: the provider is the signer');
-	check($plan['smarthost'] === false, 'fronted provider outbound: no smarthost gap row');
+	check(!array_key_exists('smarthost', $plan), 'fronted: the relay sends nothing, so there is no smarthost gap to state');
 
 	harness_set_setting_mem('email_service', 'smtp');
 	$c = topo_checker(topo('self_hosted', SELF_MX, RELAY_IP, true));
@@ -289,12 +288,6 @@ try {
 		'colocated + local-submission provider: opendkim row only');
 
 	harness_set_setting_mem('email_service', 'mailgun');
-	harness_set_setting_mem('mailbox_relay_outbound_mode', 'smarthost');
-	$c = topo_checker(topo('self_hosted', SELF_MX, RELAY_IP, true));
-	$plan = call_private($c, 'dkimPlan');
-	check($plan['smarthost'] === true && $plan['provider'] === false && $plan['local'] === false,
-		'smarthost outbound: the unsigned gap is stated, nothing else prescribed');
-	harness_set_setting_mem('mailbox_relay_outbound_mode', '');
 
 	// -----------------------------------------------------------------------
 	section('provider DKIM rows: verified against DNS, one row per record');

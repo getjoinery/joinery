@@ -594,7 +594,7 @@ func TestEgressOnThePublicListenerIsSigned(t *testing.T) {
 
 func TestDirectPathIsServedUntouched(t *testing.T) {
 	f := newRelayFixture(t)
-	// The Direct endpoint answers exactly as direct-serve did: no signature
+	// The Direct endpoint answers on its own terms: no signature
 	// needed, unknown step refused at request level.
 	resp, body := f.do(mustReq(http.MethodPost, f.ts.URL+directEndpointPath+"?step=bogus", "{}"))
 	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), "Unknown step") {

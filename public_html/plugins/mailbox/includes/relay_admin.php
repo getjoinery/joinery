@@ -16,6 +16,8 @@
  * @version 2.1 - the health battery carries a pending grade
  *                (ProvisioningCheckPending): a converging alias map renders as
  *                an amber wait on the relay card, not a red failure
+ * @version 2.2 - the ssh era is over: no relay jobs, no node route, no tunnel identity; a fleet
+ *                shard is born from a skeleton-only cloud run (specs/relay_without_a_shell.md)
  * @version 2.1 - a relay without a shell: Update wording, checkRelayReachable on the receiving
  *                card, the no-relay notice (specs/relay_without_a_shell.md)
  * @version 2.0 - relay_upgrade action + per-relay upgrade standing; Rebuild is
@@ -105,11 +107,6 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 		return LogicResult::redirect($self_url);
 	}
 
-	if (($action === 'provision' || $action === 'rebuild') && $server_manager_active) {
-		$result = admin_mailbox_relay_dispatch_job($action, $input, $session);
-		admin_mailbox_relay_flash($session, $result['message'], $result['title']);
-		return LogicResult::redirect($self_url);
-	}
 
 	// Upgrade a cloud relay: open an upgrade run against its existing instance.
 	// The relay cannot be logged in to — no root credential exists for it — so the
@@ -327,13 +324,13 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
  * nodes, and live hosted-slot state.
  */
 /**
- * Where one relay stands on code age, and which of the three upgrade routes (if
- * any) applies to it.
+ * Where one relay stands on code age, and which update route (if any) applies
+ * to it.
  *
  * The routes are decided by what the platform can actually reach, not by
- * preference: a managed node means root SSH and a job; a cloud instance means a
- * grant-per-act wipe-and-rebuild; anything else means the customer built the box
- * and is the only one who can act on it.
+ * preference: a cloud instance means a grant-per-act drain and re-image;
+ * anything else means the customer built the box and is the only one who can
+ * act on it.
  *
  * @return array{standing:string,running:string,shipped:string,offers:bool,
  *               route:string,queue:?int,describe:string}
@@ -347,8 +344,6 @@ function admin_mailbox_relay_upgrade_vars(MailboxRelay $relay): array {
 	if ((bool)$relay->get('mrl_is_hosted')) {
 		// A tenant cannot wipe a shard they share with strangers.
 		$route = 'hosted';
-	} elseif (admin_mailbox_relay_node_is_live($relay)) {
-		$route = 'job';
 	} elseif ((string)$relay->get('mrl_cloud_instance_id') !== ''
 			&& (string)$relay->get('mrl_cloud_provider') !== '') {
 		$route = 'cloud';
@@ -370,32 +365,8 @@ function admin_mailbox_relay_upgrade_vars(MailboxRelay $relay): array {
 	);
 }
 
-/**
- * Does this relay's managed node still resolve to something a job can run on?
- *
- * Rebuild renders off this rather than off "server_manager is active": a cloud
- * relay carries no node id at all, so the button used to render and then dead-end
- * on "Select a managed node to provision onto."
- */
-function admin_mailbox_relay_node_is_live(MailboxRelay $relay): bool {
-	$node_id = intval($relay->get('mrl_mgn_managed_node_id'));
-	if ($node_id <= 0 || !PluginHelper::isPluginActive('server_manager')) {
-		return false;
-	}
-	require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-	try {
-		$node = new ManagedNode($node_id, true);
-	} catch (\Throwable $e) {
-		return false;
-	}
-	return ($node->key
-		&& (string)$node->get('mgn_delete_time') === ''
-		&& (bool)$node->get('mgn_enabled'));
-}
-
 function admin_mailbox_relay_tenant_vars(): array {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySsh.php'));
 	$settings = Globalvars::get_instance();
 	$server_manager_active = PluginHelper::isPluginActive('server_manager');
 
@@ -411,7 +382,6 @@ function admin_mailbox_relay_tenant_vars(): array {
 		// Reconcile the relay's MX hostname from its provision job when the
 		// row predates the hostname being persisted — the topology-aware
 		// setup checks prescribe against it.
-		admin_mailbox_relay_backfill_mx_hostname($relay);
 		$is_active = ($active !== null && intval($relay->key) === intval($active->key));
 		$relays[] = array(
 			'model'   => $relay,
@@ -421,15 +391,6 @@ function admin_mailbox_relay_tenant_vars(): array {
 	}
 
 	// Managed nodes available to provision onto (server_manager).
-	$nodes = array();
-	if ($server_manager_active) {
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-		$node_multi = new MultiManagedNode(array('enabled' => true, 'deleted' => false));
-		$node_multi->load();
-		foreach ($node_multi as $node) {
-			$nodes[] = $node;
-		}
-	}
 
 	// Live hosted-slot state when the service connection is configured — and
 	// only while the hosted offering is launched (no network call for a
@@ -478,13 +439,8 @@ function admin_mailbox_relay_tenant_vars(): array {
 	return array(
 		'listener'              => $listener,
 		'relays'                => $relays,
-		'nodes'                 => $nodes,
 		'server_manager_active' => $server_manager_active,
-		'main_wg_public_key'    => (string)$settings->get_setting('mailbox_relay_wg_public_key'),
-		'pull_key_ready'        => is_file(RelaySsh::pullKeyPath()),
 		'has_active_relay'      => ($active !== null),
-		'outbound_mode'         => (strtolower(trim((string)$settings->get_setting('mailbox_relay_outbound_mode'))) === 'smarthost')
-			? 'smarthost' : 'provider',
 		'fleet_configured'      => $fleet_configured,
 		'fleet_status'          => $fleet_status,
 		'fleet_error'           => $fleet_error,
@@ -526,14 +482,8 @@ function admin_mailbox_relay_operator_actions(array $input, $session, string $se
 		return LogicResult::redirect($self_url);
 	}
 
-	if ($action === 'provision_shard' && PluginHelper::isPluginActive('server_manager')) {
+	if ($action === 'provision_shard') {
 		$result = admin_mailbox_relay_provision_shard($input, $session);
-		admin_mailbox_relay_flash($session, $result['message'], $result['title']);
-		return LogicResult::redirect($self_url);
-	}
-
-	if ($action === 'rebuild_shard' && PluginHelper::isPluginActive('server_manager')) {
-		$result = admin_mailbox_relay_rebuild_shard($input, $session);
 		admin_mailbox_relay_flash($session, $result['message'], $result['title']);
 		return LogicResult::redirect($self_url);
 	}
@@ -656,6 +606,7 @@ function admin_mailbox_relay_create_fleet_product(): array {
  * and the nodes a shard can be provisioned onto.
  */
 function admin_mailbox_relay_operator_vars(): array {
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provision_class.php'));
 	$settings = Globalvars::get_instance();
 	$server_manager_active = PluginHelper::isPluginActive('server_manager');
 
@@ -665,211 +616,76 @@ function admin_mailbox_relay_operator_vars(): array {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetService.php'));
 		$shard_multi = new MultiMailboxFleetShard(array('deleted' => false));
 		$shard_multi->load();
-		// Shard-row sync from node facts is reconciliation on a GET view.
-		SystemBase::server_initiated_write(function () use ($shard_multi, &$fleet_shards) {
-			foreach ($shard_multi as $shard) {
-				admin_mailbox_relay_sync_shard_from_node($shard);
-				$fleet_shards[] = array(
-					'model' => $shard,
-					'slots' => $shard->slotCount(),
-					'dns'   => admin_mailbox_relay_shard_dns_rows($shard),
-				);
-			}
-		});
-	}
-
-	$nodes = array();
-	if ($server_manager_active) {
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-		$node_multi = new MultiManagedNode(array('enabled' => true, 'deleted' => false));
-		$node_multi->load();
-		foreach ($node_multi as $node) {
-			$nodes[] = $node;
+		foreach ($shard_multi as $shard) {
+			$fleet_shards[] = array(
+				'model' => $shard,
+				'slots' => $shard->slotCount(),
+				'dns'   => admin_mailbox_relay_shard_dns_rows($shard),
+			);
 		}
 	}
+
 
 	return array(
 		'server_manager_active' => $server_manager_active,
 		'fleet_service_on'      => $fleet_service_on,
 		'fleet_mx_zone'         => trim((string)$settings->get_setting('mailbox_fleet_mx_zone')),
 		'fleet_shards'          => $fleet_shards,
-		'nodes'                 => $nodes,
+		// A shard is born like any relay: the live run, if one is in flight.
+		'shard_run'             => RelayCloudProvision::live(),
+		'cloud_oauth_configured'=> admin_mailbox_relay_linode_oauth_configured(),
 		'store_active'          => PluginHelper::isPluginActive('store'),
 		'fleet_products'        => $fleet_service_on ? admin_mailbox_relay_fleet_products() : array(),
 	);
 }
 
 /**
- * Register a fleet shard: create/refresh the MailboxFleetShard row and dispatch
- * the skeleton-only provisioning job against its managed node (the operator's
- * deployment is not a tenant of its own shards).
+ * Register a fleet shard and start its birth: create the MailboxFleetShard row
+ * and open a skeleton-only provisioning run for it in the operator's own cloud
+ * account (specs/relay_without_a_shell.md). The run's user-data carries the
+ * operator identity's public key and no tenant; tenants land on the shard
+ * through fleet enrollment once it has reported in.
  *
  * @return array{message:string,title:string}
  */
 function admin_mailbox_relay_provision_shard(array $input, $session): array {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetService.php'));
-	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
-	require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provision_class.php'));
 
-	$node_id = intval($input['shard_node_id'] ?? 0);
-	$hostname = trim((string)($input['shard_hostname'] ?? ''));
+	$hostname = strtolower(trim((string)($input['shard_hostname'] ?? '')));
+	$region = trim((string)($input['shard_region'] ?? ''));
 	$capacity = max(1, intval($input['shard_capacity'] ?? 25));
-	if ($node_id <= 0 || $hostname === '' || strpos($hostname, '.') === false) {
-		return array('title' => 'Cannot provision shard', 'message' => 'Select a node and give the shard a mail hostname (FQDN).');
+	if ($hostname === '' || strpos($hostname, '.') === false) {
+		return array('title' => 'Cannot provision shard', 'message' => 'Give the shard a mail hostname (FQDN).');
 	}
-	try {
-		$node = new ManagedNode($node_id, TRUE);
-	} catch (\Throwable $e) {
-		return array('title' => 'Cannot provision shard', 'message' => 'That managed node no longer exists.');
+	if ($region === '') {
+		return array('title' => 'Cannot provision shard', 'message' => 'Pick a region.');
+	}
+	if (RelayCloudProvision::live() !== null) {
+		return array('title' => 'Cannot provision shard', 'message' => 'A relay cloud act is already in flight — one at a time.');
 	}
 
-	// One shard row per node.
-	$existing = new MultiMailboxFleetShard(array('node_id' => $node_id, 'deleted' => false));
-	$existing->load();
-	$shard = null;
-	foreach ($existing as $row) { $shard = $row; break; }
-	if ($shard === null) {
-		$shard = new MailboxFleetShard(NULL);
-		$shard->set('mfs_mgn_managed_node_id', $node_id);
-	}
-	$shard->set('mfs_name', (string)$node->get('mgn_name'));
+	$shard = new MailboxFleetShard(NULL);
+	$shard->set('mfs_name', $hostname);
 	$shard->set('mfs_hostname', substr($hostname, 0, 255));
 	$shard->set('mfs_capacity', $capacity);
+	$shard->set('mfs_region', substr($region, 0, 50));
+	$shard->set('mfs_cloud_provider', 'linode');
+	$shard->set('mfs_is_active', false); // active once born
 	$shard->save();
 
-	$params = array('mail_hostname' => $hostname, 'skeleton_only' => true);
-	$steps = JobCommandBuilder::build_provision_relay($node, $params);
-	ManagementJob::createJob($node->key, 'provision_relay', $steps, $params, $session->get_user_id());
+	$run = new RelayCloudProvision(NULL);
+	$run->set('rcp_kind', 'provision');
+	$run->set('rcp_provider', 'linode');
+	$run->set('rcp_mail_hostname', substr($hostname, 0, 255));
+	$run->set('rcp_region', substr($region, 0, 50));
+	$run->set('rcp_instance_type', 'g6-nanode-1');
+	$run->set('rcp_mfs_shard_id', intval($shard->key));
+	$run->save();
 
-	return array('title' => 'Shard job queued',
-		'message' => 'Skeleton provisioning queued on ' . $node->get('mgn_name')
-			. '. Tenants land on it through fleet enrollment once it reports ready.');
-}
-
-/**
- * Re-run the skeleton provisioning on an existing shard, which is how a shard's
- * relay code gets brought up to date.
- *
- * Unlike a tenant's own cloud relay this needs no wipe: the operator holds root
- * on the shard through the Go agent, so the script can simply run again. Every
- * part of the skeleton path that would disturb a live relay is guarded — the
- * WireGuard keypair, wg0.conf and routing.json are written only if absent, so
- * tenant peers survive, and the tenant registry and spools are never touched.
- */
-function admin_mailbox_relay_rebuild_shard(array $input, $session): array {
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_fleet_shard_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
-	require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-
-	$shard_id = intval($input['shard_id'] ?? 0);
-	if ($shard_id <= 0) {
-		return array('title' => 'Cannot rebuild shard', 'message' => 'No shard selected.');
-	}
-	try {
-		$shard = new MailboxFleetShard($shard_id, TRUE);
-	} catch (\Throwable $e) {
-		return array('title' => 'Cannot rebuild shard', 'message' => 'That shard no longer exists.');
-	}
-	if (!$shard->key) {
-		return array('title' => 'Cannot rebuild shard', 'message' => 'That shard no longer exists.');
-	}
-	$node_id = intval($shard->get('mfs_mgn_managed_node_id'));
-	try {
-		$node = new ManagedNode($node_id, TRUE);
-	} catch (\Throwable $e) {
-		return array('title' => 'Cannot rebuild shard', 'message' => 'That shard\'s managed node no longer exists.');
-	}
-
-	$params = array('mail_hostname' => (string)$shard->get('mfs_hostname'), 'skeleton_only' => true);
-	$steps = JobCommandBuilder::build_provision_relay($node, $params);
-	ManagementJob::createJob($node->key, 'rebuild_relay', $steps, $params, $session->get_user_id());
-
-	return array('title' => 'Shard rebuild queued',
-		'message' => 'Queued on ' . $node->get('mgn_name') . '. Its tenants stop receiving mail while it '
-			. 'rebuilds; senders retry.');
-}
-
-/**
- * Keep the shard row's connection facts (public IP, WireGuard endpoint + key)
- * in step with what the provisioning job recorded on the managed node.
- */
-function admin_mailbox_relay_sync_shard_from_node($shard): void {
-	$node_id = intval($shard->get('mfs_mgn_managed_node_id'));
-	if ($node_id <= 0) {
-		return;
-	}
-	try {
-		$db = DbConnector::get_instance()->get_db_link();
-		$stmt = $db->prepare(
-			"SELECT mgn_wg_public_key, mgn_wg_endpoint FROM mgn_managed_nodes
-			  WHERE mgn_id = ? LIMIT 1");
-		$stmt->execute(array($node_id));
-		$row = $stmt->fetch(PDO::FETCH_ASSOC);
-		if (!$row) {
-			return;
-		}
-		$endpoint = trim((string)$row['mgn_wg_endpoint']);
-		$pubkey = trim((string)$row['mgn_wg_public_key']);
-		$public_ip = ($endpoint !== '' && strpos($endpoint, ':') !== false)
-			? substr($endpoint, 0, strrpos($endpoint, ':')) : '';
-		$dirty = false;
-		if ($pubkey !== '' && $pubkey !== (string)$shard->get('mfs_wg_public_key')) {
-			$shard->set('mfs_wg_public_key', $pubkey); $dirty = true;
-		}
-		if ($endpoint !== '' && $endpoint !== (string)$shard->get('mfs_wg_endpoint')) {
-			$shard->set('mfs_wg_endpoint', $endpoint); $dirty = true;
-		}
-		if ($public_ip !== '' && $public_ip !== (string)$shard->get('mfs_public_ip')) {
-			$shard->set('mfs_public_ip', $public_ip); $dirty = true;
-		}
-		if ($dirty) {
-			$shard->save();
-		}
-	} catch (\Throwable $e) {
-		// Best-effort sync; the shard list still renders — but never silently.
-		error_log('admin_mailbox_relay_sync_shard_from_node failed for shard '
-			. intval($shard->key) . ': ' . $e->getMessage());
-	}
-}
-
-/**
- * Persist a self-hosted relay's MX hostname from its provision/rebuild job
- * parameters when the row does not carry one. One field serves both relay
- * topologies: the hosted path stores it from slot coordinates; this reconcile
- * covers self-hosted rows whose provisioning predates the field.
- */
-function admin_mailbox_relay_backfill_mx_hostname($relay): void {
-	if ((bool)$relay->get('mrl_is_hosted') || trim((string)$relay->get('mrl_mx_hostname')) !== '') {
-		return;
-	}
-	$node_id = intval($relay->get('mrl_mgn_managed_node_id'));
-	if ($node_id <= 0 || !PluginHelper::isPluginActive('server_manager')) {
-		return;
-	}
-	try {
-		$db = DbConnector::get_instance()->get_db_link();
-		$stmt = $db->prepare(
-			"SELECT mjb_parameters FROM mjb_management_jobs
-			  WHERE mjb_mgn_node_id = ? AND mjb_job_type IN ('provision_relay', 'rebuild_relay')
-			    AND mjb_delete_time IS NULL
-			  ORDER BY mjb_id DESC LIMIT 1");
-		$stmt->execute(array($node_id));
-		$params = json_decode((string)$stmt->fetchColumn(), true) ?: array();
-		$hostname = strtolower(trim((string)($params['mail_hostname'] ?? '')));
-		if ($hostname === '' || strpos($hostname, '.') === false) {
-			return;
-		}
-		SystemBase::server_initiated_write(function () use ($relay, $hostname) {
-			$relay->set('mrl_mx_hostname', substr($hostname, 0, 255));
-			$relay->save();
-		});
-	} catch (\Throwable $e) {
-		// Best-effort reconcile; the list still renders — but never silently.
-		error_log('admin_mailbox_relay_backfill_mx_hostname failed for relay '
-			. intval($relay->key) . ': ' . $e->getMessage());
-	}
+	return array('title' => 'Shard birth started',
+		'message' => 'Approve access to your cloud account in the Relay section to create the shard\'s server. '
+			. 'It builds itself and reports in; tenants land on it through fleet enrollment once it is active.');
 }
 
 /**
@@ -955,30 +771,17 @@ function admin_mailbox_relay_write_setting(string $name, string $value): void {
  */
 function admin_mailbox_relay_health(): array {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailHealth.php'));
-	$mode = (strtolower(trim((string)Globalvars::get_instance()->get_setting('mailbox_relay_outbound_mode'))) === 'smarthost')
-		? 'smarthost' : 'provider';
-	// The check list matches the chosen outbound path — never an N/A row.
 	// Labels are plain outcomes; the technical detail rides the tooltip on
-	// failure.
+	// failure. Whether the relay answers its API is the first fact.
 	$run = array(
+		'checkRelayReachable'     => 'Relay reachable',
 		'checkRelaySpoolDraining' => 'Mail pickup',
 		'checkRelaySpoolHeld'     => 'No mail held on relay',
 		'checkRelayMapFresh'      => 'Address list current',
 		'checkOriginHidden'       => 'Server address hidden',
+		'checkOutboundTransportClass' => 'Sending route hides your address',
+		'checkOutboundOriginLeak'     => 'No leaks in sent mail',
 	);
-	$active_relay = MailboxRelay::active();
-	if ($active_relay !== null && $active_relay->usesRelayApi()) {
-		// A relay without a shell: whether it answers its API is the first fact.
-		$run = array('checkRelayReachable' => 'Relay reachable') + $run;
-	}
-	if ($mode === 'smarthost') {
-		if ($active_relay === null || !$active_relay->usesRelayApi()) {
-			$run['checkRelayReachable'] = 'Sending tunnel';
-		}
-	} else {
-		$run['checkOutboundTransportClass'] = 'Sending route hides your address';
-		$run['checkOutboundOriginLeak']     = 'No leaks in sent mail';
-	}
 	$out = array();
 	foreach ($run as $method => $label) {
 		$ok = true; $pending = false; $message = '';
@@ -1008,10 +811,9 @@ function admin_mailbox_relay_health(): array {
  * exists the card carries its health: green when every check for that side
  * passes, red when any does not, naming which.
  *
- * **The Sending card appears only under a smarthost**, because that is the only
- * arrangement where sent mail goes through the relay at all. With an API
- * provider carrying outbound, a green relay card in the Sending group says
- * "healthy" about a component that is not in the path — it is green because it
+ * **There is no Sending card for the relay**: the relay is inbound only, so sent
+ * mail never goes through it. A green relay card in the Sending group would say
+ * "healthy" about a component that is not in the path — green because it
  * is unused, which is the wrong thing to tell someone reading a checklist. The
  * outbound origin-leak checks still run; they surface as health dots in the
  * Relay section under Advanced, where they read as facts about the relay rather
@@ -1059,23 +861,12 @@ function admin_mailbox_relay_check_rows(string $advanced_url = ''): array {
 		);
 	}
 
-	$smarthost = (strtolower(trim((string)Globalvars::get_instance()
-		->get_setting('mailbox_relay_outbound_mode'))) === 'smarthost');
-
-	// Partition the battery by which side of the mail path each check speaks to.
-	// The sending side is the relay's tunnel and nothing else: the outbound
+	// The relay speaks only to the receiving side of the mail path: the outbound
 	// origin-leak checks describe the provider path, not the relay, and putting
 	// them on a card headed "Relay" would claim the relay is doing a job it is
-	// not doing.
-	$receiving_checks = array('checkRelaySpoolDraining', 'checkRelaySpoolHeld', 'checkRelayMapFresh', 'checkOriginHidden');
+	// not doing. Whether it answers its API is the first fact about receiving.
+	$receiving_checks = array('checkRelayReachable', 'checkRelaySpoolDraining', 'checkRelaySpoolHeld', 'checkRelayMapFresh', 'checkOriginHidden');
 	$sending_checks   = array();
-	if ($active->usesRelayApi()) {
-		// A relay without a shell is reached over its own API; whether it
-		// answers is the first fact about receiving.
-		array_unshift($receiving_checks, 'checkRelayReachable');
-	} elseif ($smarthost) {
-		$sending_checks = array('checkRelayReachable');
-	}
 
 	$health = admin_mailbox_relay_health();
 	$name = trim((string)$active->get('mrl_name')) ?: trim((string)$active->get('mrl_mx_hostname'));
@@ -1135,62 +926,4 @@ function admin_mailbox_relay_check_rows(string $advanced_url = ''): array {
 	);
 }
 
-/**
- * Create a provision_relay / rebuild_relay job on the selected managed node via
- * server_manager's queue. The job result processor registers/updates the
- * MailboxRelay row on success.
- *
- * @return array{message:string,title:string}
- */
-function admin_mailbox_relay_dispatch_job(string $action, array $input, $session): array {
-	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
-	require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
-
-	$mail_hostname = trim((string)($input['mail_hostname'] ?? ''));
-	$node_id = intval($input['mgn_managed_node_id'] ?? 0);
-
-	// Rebuild targets the relay's existing node + hostname.
-	if ($action === 'rebuild') {
-		$relay = ($input['mrl_mailbox_relay_id'] ?? null)
-			? new MailboxRelay(intval($input['mrl_mailbox_relay_id']), TRUE) : null;
-		if ($relay !== null) {
-			$node_id = intval($relay->get('mrl_mgn_managed_node_id')) ?: $node_id;
-			if ($mail_hostname === '') {
-				$settings = Globalvars::get_instance();
-				$mail_hostname = trim((string)$settings->get_setting('mailbox_mail_hostname'));
-			}
-		}
-	}
-
-	if ($node_id <= 0) {
-		return array('title' => 'Cannot provision', 'message' => 'Select a managed node to provision onto.');
-	}
-	if ($mail_hostname === '' || strpos($mail_hostname, '.') === false) {
-		return array('title' => 'Cannot provision', 'message' => 'A mail hostname (FQDN) is required.');
-	}
-
-	try {
-		$node = new ManagedNode($node_id, TRUE);
-	} catch (\Throwable $e) {
-		return array('title' => 'Cannot provision', 'message' => 'That managed node no longer exists.');
-	}
-
-	$settings = Globalvars::get_instance();
-	$params = array(
-		'mail_hostname'       => $mail_hostname,
-		'main_wg_public_key'  => (string)$settings->get_setting('mailbox_relay_wg_public_key'),
-	);
-	$job_type = ($action === 'rebuild') ? 'rebuild_relay' : 'provision_relay';
-	$builder = 'build_' . $job_type;
-	$steps = JobCommandBuilder::$builder($node, $params);
-	ManagementJob::createJob($node->key, $job_type, $steps, $params, $session->get_user_id());
-
-	return array(
-		'title'   => 'Job queued',
-		'message' => ucfirst($action) . ' job queued on ' . $node->get('mgn_name')
-			. '. Watch it in Server Manager; the relay registers here on success.',
-	);
-}
 ?>

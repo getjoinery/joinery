@@ -74,7 +74,7 @@ class RelayUpgradeTest {
 		section('The re-imaged machine is a new identity on the same row');
 		$this->assertHostKeyForgotten();
 
-		section('The shard version comes from the job marker');
+		section('The shard version comes from its birth report');
 		$this->assertShardMarker();
 	}
 
@@ -415,55 +415,34 @@ class RelayUpgradeTest {
 
 	/**
 	 * A re-imaged machine keeps its address and arrives with a brand-new
-	 * identity. The birth writes the new pin on the SAME row and clears every
-	 * tunnel-era field a predecessor carried, so nothing reads the row as a
-	 * tunnel relay and no stale pin or host key is trusted.
+	 * identity. The birth writes the new pin on the SAME row, so no stale pin is
+	 * trusted; there is no host key anywhere to forget.
 	 */
 	private function assertHostKeyForgotten() {
 		$source = (string)@file_get_contents(
 			PathHelper::getIncludePath('plugins/mailbox/includes/RelayCloudProvisioner.php'));
 		check(preg_match('/function registerBornRelay.*?mrl_identity_fingerprint.*?\$fingerprint/s', $source) === 1,
 			'the birth writes the reported identity pin on the row');
-		check(preg_match('/function registerBornRelay.*?mrl_wg_public_key.*?set\(\$field, null\)/s', $source) === 1,
-			'a predecessor\'s tunnel fields are cleared, so the row is never read as a tunnel relay');
-		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySsh.php'));
-		check(method_exists('RelaySsh', 'forgetHostKey'), 'RelaySsh::forgetHostKey exists for the tunnel relays that remain');
+		check(strpos($source, 'RelaySsh') === false && !file_exists(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySsh.php')),
+			'nothing in the provisioner speaks ssh, and RelaySsh is gone');
 	}
 
 	// ----------------------------------------------------------- shard version
 
 	/**
-	 * The operator is not a tenant of their own shards, so there is no
-	 * forced-command credential to ping them with. The version arrives through the
-	 * job's marker block instead — and a shard whose job emitted no marker must
-	 * read as unknown, never as up to date.
+	 * The operator is not a tenant of their own shards, so no tenant key pings
+	 * them. The version arrives in the shard's own birth report and is stamped on
+	 * the shard row - and a shard that has not reported in must read as unknown,
+	 * never as up to date.
 	 */
 	private function assertShardMarker() {
-		$builder = (string)@file_get_contents(
-			PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
-		check(strpos($builder, 'echo RELAY_VERSION=$(sudo cat /opt/joinery-relay/version') !== false,
-			'the provision job emits a RELAY_VERSION marker');
-
-		$processor = (string)@file_get_contents(
-			PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
-		check(preg_match('/skeleton_only.*?stamp_shard_version/s', $processor) === 1,
-			'a skeleton run (a fleet shard) stamps its version');
-		check(preg_match('/function stamp_shard_version.*?mfs_provisioned_version/s', $processor) === 1,
-			'the version lands on the shard row');
-		// Written even when empty: keeping a stale value would render as current.
-		check(preg_match('/function stamp_shard_version.*?substr\(trim\(\$version\)/s', $processor) === 1,
-			'an absent marker is written as empty rather than skipped');
-
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_fleet_shard_class.php'));
-		check(array_key_exists('mfs_provisioned_version', MailboxFleetShard::$field_specifications),
-			'the shard row has somewhere to hold it');
-
-		// The consequence that matters: no version reads as unknown, and unknown
-		// offers the rebuild rather than claiming the shard is fine.
-		$this->eq(RelayVersion::UNKNOWN, RelayVersion::compare('', RelayVersion::shipped()),
-			'a shard that never reported reads unknown, not current');
-		check(RelayVersion::offersUpgrade(RelayVersion::compare('', RelayVersion::shipped())),
-			'an unknown shard offers the rebuild');
+		$source = (string)@file_get_contents(
+			PathHelper::getIncludePath('plugins/mailbox/includes/RelayCloudProvisioner.php'));
+		check(preg_match('/function completeShardBirth.*?mfs_provisioned_version/s', $source) === 1,
+			'a shard birth stamps the reported relay version on the shard row');
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayVersion.php'));
+		check(RelayVersion::compare('', RelayVersion::shipped()) === RelayVersion::UNKNOWN,
+			'a shard that has not reported reads as unknown, never current');
 	}
 
 	// ----------------------------------------------------------------- helpers

@@ -29,16 +29,10 @@
 // runs the fragment validation + merge (root only, triggered via sudo by the
 // tenant shell or the provisioning job — never a resident daemon). See merge.go.
 //
-// And it serves JOINERY DIRECT for the relay's tenants:
-//
-//	relay-sealer direct-serve --hostname <mail hostname>
-//
-// terminates the public HTTPS endpoint other Joinery instances deliver to, and
-// a tunnel-only egress listener that sends a tenant's own box-signed requests
-// out from the relay's address. See direct_serve.go.
-//
-// The RELAY API (specs/relay_without_a_shell.md) is the same listener with the
-// plane's routes added and no tunnel:
+// And it is the relay's ONE listener besides Postfix - the RELAY API
+// (specs/relay_without_a_shell.md), which serves JOINERY DIRECT for the relay's
+// tenants on the mail hostname and the plane's signed routes on the relay's own
+// identity:
 //
 //	relay-sealer relay-serve --hostname <mail hostname>     the listener (unprivileged)
 //	relay-sealer apply-requests                             root: react to filed requests
@@ -47,7 +41,8 @@
 //	relay-sealer identity-init                              create the identity key + certificate
 //	relay-sealer birth-report                               sign and post the birth report
 //
-// See relay_serve.go, relay_apply.go, relay_identity.go, relay_birth.go.
+// See relay_serve.go, relay_apply.go, relay_identity.go, relay_birth.go,
+// direct_handler.go (the Direct exchange) and direct_egress.go (the egress proxy).
 //
 // Exit codes follow Postfix pipe conventions:
 //
@@ -83,19 +78,13 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "merge-maps" {
 		os.Exit(runMerge())
 	}
-	// Joinery Direct's endpoint (docs/joinery_direct.md). A resident service
-	// rather than a pipe invocation, and the only long-running mode this binary
-	// has: at Fortress the relay IS the Direct endpoint, because an SRV record
-	// pointing at the origin box would advertise the address the relay exists
-	// to conceal. Dispatched on a literal first argument for the same reason
-	// merge-maps is — an SMTP recipient is always an address, never a bare word.
-	if len(os.Args) > 1 && os.Args[1] == "direct-serve" {
-		os.Exit(runDirectServe())
-	}
 	// The relay API (specs/relay_without_a_shell.md): one listener on 443 that
-	// serves Direct AND the signed /relay/ routes the plane pulls, pushes and
-	// pings through, plus the root-side verbs that react to what the listener
-	// files. All dispatched on a literal first argument, as above.
+	// serves Joinery Direct (docs/joinery_direct.md - at Fortress the relay IS
+	// the Direct endpoint, because an SRV record pointing at the origin box would
+	// advertise the address the relay exists to conceal) AND the signed /relay/
+	// routes the plane pulls, pushes and pings through, plus the root-side verbs
+	// that react to what the listener files. All dispatched on a literal first
+	// argument, as above.
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "relay-serve":

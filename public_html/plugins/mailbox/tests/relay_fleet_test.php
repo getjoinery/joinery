@@ -9,11 +9,12 @@
  * Tests for the shared relay fleet's tenant-side and operator-side pieces
  * (specs/mailbox_relay_shared_fleet.md):
  *
- *   - MailboxRelay tenant identity helpers (tenantSlug/pullUser/spoolPath/
- *     fragmentDir) — the coordinates every relay consumer derives from.
+ *   - MailboxRelay tenant identity (tenantSlug, the identity pin) — what every
+ *     signed request names and every consumer reaches the relay with.
  *   - RelayMapExporter emits a valid tenancy-native fragment (fragment_format
  *     1, tenant slug, deterministic version 0).
- *   - FleetService tunnel allocation skips the relay's .1 and every live
+ *   - FleetService coordinates carry the shard's identity pin and address; no tunnel;
+ *     slot counting sees only live
  *     slot's address; domain-claim uniqueness is fleet-wide.
  *
  * Creates scratch shard/slot/claim/relay rows and deletes them. Skips the
@@ -65,21 +66,14 @@ class RelayFleetTest {
 		section('tenant identity helpers');
 		$relay = new MailboxRelay(NULL);
 		check($relay->tenantSlug() === 'main', 'default slug is main');
-		check($relay->pullUser() === 'jt-main', 'pull account derives jt-main');
-		check($relay->spoolPath() === '/var/spool/joinery-relay/main', 'spool path derives from slug');
-		check($relay->fragmentDir() === '/opt/joinery-relay/home/main/fragments', 'fragment dir derives from slug');
-
 		$relay->set('mrl_tenant_slug', 't42');
-		check($relay->pullUser() === 'jt-t42', 'slug drives the pull account');
-		check($relay->spoolPath() === '/var/spool/joinery-relay/t42', 'slug drives the spool path');
-
-		$relay->set('mrl_ssh_user', 'custom-user');
-		$relay->set('mrl_spool_path', '/srv/spool/x/');
-		check($relay->pullUser() === 'custom-user', 'explicit ssh user wins');
-		check($relay->spoolPath() === '/srv/spool/x', 'explicit spool path wins (trailing slash trimmed)');
-
+		check($relay->tenantSlug() === 't42', 'the slug is what every signed request names');
 		$relay->set('mrl_tenant_slug', 'Bad Slug!');
 		check($relay->tenantSlug() === 'main', 'invalid slug falls back to main');
+		// The relay is reached only through its API: no pin, no reach.
+		check(!$relay->usesRelayApi(), 'a row without an identity pin is unreachable');
+		$relay->set('mrl_identity_fingerprint', base64_encode(str_repeat("\x01", 32)));
+		check($relay->usesRelayApi(), 'a row with an identity pin speaks the relay API');
 	}
 
 	// The pushed artifact is one JSON fragment the shard-side merge validates.
@@ -141,40 +135,39 @@ class RelayFleetTest {
 		$shard->save();
 		$this->cleanup[] = array('mfs_mailbox_fleet_shards', 'mfs_mailbox_fleet_shard_id', intval($shard->key));
 
-		check(FleetService::allocateTunnelIp($shard) === '10.99.0.2',
-			'first tenant allocation is .2 (the self-hosted fixed address)');
+		$shard->set('mfs_identity_fingerprint', base64_encode(str_repeat("\x02", 32)));
+		$shard->set('mfs_public_ip', '203.0.113.9');
+		$shard->save();
 
 		$slot_a = new MailboxFleetSlot(NULL);
 		$slot_a->set('mft_mfs_shard_id', intval($shard->key));
 		$slot_a->set('mft_status', MailboxFleetSlot::STATUS_ACTIVE);
-		$slot_a->set('mft_tunnel_ip', '10.99.0.2');
+		$slot_a->set('mft_public_key', base64_encode(str_repeat("\x03", 32)));
 		$slot_a->save();
 		$slot_a->set('mft_slug', 't' . intval($slot_a->key));
 		$slot_a->set('mft_mx_hostname', 't' . intval($slot_a->key) . '.mx.fleet-test.example');
 		$slot_a->save();
 		$this->cleanup[] = array('mft_mailbox_fleet_slots', 'mft_mailbox_fleet_slot_id', intval($slot_a->key));
 
-		// The coordinates a tenant folds into its MailboxRelay row: slug-derived
-		// pull account and spool, the slot's MX hostname (id-derived — DNS names
-		// no tenant), and the shard's tunnel identity.
+		// The coordinates a tenant folds into its MailboxRelay row: the slot's MX
+		// hostname (id-derived — DNS names no tenant), and the shard's identity
+		// pin and address, which are everything RelayClient needs.
 		$coords = FleetService::coordinates($slot_a);
 		$slug = 't' . intval($slot_a->key);
 		check($coords['slug'] === $slug, 'coordinates carry the id-derived slug');
 		check($coords['mx_hostname'] === $slug . '.mx.fleet-test.example', 'coordinates carry the slot MX hostname');
-		check($coords['ssh_user'] === 'jt-' . $slug, 'pull account derives from the slug');
 		check($coords['spool_path'] === '/var/spool/joinery-relay/' . $slug, 'spool path derives from the slug');
-		check($coords['tunnel_ip'] === '10.99.0.2', 'coordinates carry the allocated tunnel address');
-		check($coords['relay_tunnel_ip'] === '10.99.0.1', 'the shard relay listens at .1');
-
-		check(FleetService::allocateTunnelIp($shard) === '10.99.0.3',
-			'allocation skips the live slot\'s address');
+		check($coords['identity_fingerprint'] === (string)$shard->get('mfs_identity_fingerprint'), 'coordinates carry the shard identity pin');
+		check($coords['shard_public_ip'] === '203.0.113.9', 'coordinates carry the shard address');
+		check(!isset($coords['ssh_user']) && !isset($coords['tunnel_ip']) && !isset($coords['wg_public_key']),
+			'no tunnel or ssh coordinate survives');
 		check($shard->slotCount() === 1, 'slot count sees the live slot');
 		check($shard->hasCapacity(), 'shard under capacity');
 
 		$slot_b = new MailboxFleetSlot(NULL);
 		$slot_b->set('mft_mfs_shard_id', intval($shard->key));
 		$slot_b->set('mft_status', MailboxFleetSlot::STATUS_ACTIVE);
-		$slot_b->set('mft_tunnel_ip', '10.99.0.3');
+		$slot_b->set('mft_public_key', base64_encode(str_repeat("\x04", 32)));
 		$slot_b->save();
 		$this->cleanup[] = array('mft_mailbox_fleet_slots', 'mft_mailbox_fleet_slot_id', intval($slot_b->key));
 

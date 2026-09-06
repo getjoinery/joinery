@@ -5,9 +5,9 @@ package main
 // One port, 443, certificate chosen by SNI: the mail hostname gets the ACME
 // certificate (Direct, public callers); anything else — and the plane names no
 // host, it connects by IP with a pinned key — gets the relay's identity
-// certificate. Direct's path is served exactly as direct-serve served it. Egress
-// moves from the tunnel address to this listener and gains a tenant signature.
-// Everything new lives under /relay/ and every /relay/ request is signed.
+// certificate. Direct's exchange is direct_handler.go, untouched. Egress is on
+// this listener behind a tenant signature. Everything else lives under /relay/
+// and every /relay/ request is signed.
 //
 // The process is the unprivileged relay user and never gains root. What needs
 // root — a merge, a tenant change — is filed as a request into a drop directory
@@ -275,8 +275,8 @@ func (s *relayServer) noteDirect(r *http.Request, status int) {
 	}
 }
 
-// serveEgress: the same proxy direct-serve bound to the tunnel, now on the
-// public listener and therefore signed. The target rules are unchanged.
+// serveEgress: the Direct egress proxy on the public listener, signed. The
+// target rules (direct_egress.go) are what keep it from being an open proxy.
 func (s *relayServer) serveEgress(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.NotFound(w, r)

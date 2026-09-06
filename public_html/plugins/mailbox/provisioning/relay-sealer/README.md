@@ -53,13 +53,13 @@ SNI:
 - the **mail hostname** gets an ACME certificate obtained in-process over
   TLS-ALPN-01 on that same port (there is no web server and no certbot on this
   machine) and serves **Joinery Direct** — `POST /.well-known/joinery-direct`,
-  the three-step exchange (preflight → one request per part → commit), exactly
-  as `direct-serve` serves it;
+  the three-step exchange (preflight → one request per part → commit,
+  `direct_handler.go`);
 - **any other name, or none**, gets the relay's **identity certificate**: an
   Ed25519 key and a self-signed certificate generated once at first start
   (`identity-init`). The plane pins the SPKI fingerprint it learned from the
-  signed birth report and connects by IP, so this is the job WireGuard's public
-  key did, with one fewer key.
+  signed birth report and connects by IP: the pin is the whole trust in the
+  machine, and no other key exists for it.
 
 Every `/relay/` request, and `/egress`, carries a signed envelope in
 `X-Joinery-Relay-Auth`: base64 of `{"envelope": {...}, "signature": "..."}`,
@@ -143,24 +143,15 @@ relay_version, postfix, listener_443}` with the identity key over
 The plane believes it only after dialling the provider's address with the
 reported fingerprint pinned.
 
-## Joinery Direct endpoint (`direct-serve`)
+## Joinery Direct
 
-```
-relay-sealer direct-serve --hostname <mail hostname>
-```
-
-The Direct listener on its own, as a relay built by `provision_relay.sh` 2.x
-runs it: the public endpoint on 443 with the ACME certificate, plus a
-tunnel-only `POST /egress` on the WireGuard address, where reaching the address
-at all is the authentication. `relay-serve` serves the same Direct path from the
-same code (`direct_handler.go` is shared, untouched) and moves egress onto the
-signed public listener.
-
-The split is **relay authenticates, box authorizes**: signature verification is
-stateless crypto needing no vault, so forged senders are dropped at the edge;
-the contact gate needs the sealed contact list, so it runs on the box at unlock.
-A verified delivery is written to the tenant's spool as a `.direct` container
-plus the usual `.meta` sidecar and travels the same pull mail does.
+The Direct exchange (`direct_handler.go`) is served by `relay-serve` on the mail
+hostname. The split is **relay authenticates, box authorizes**: signature
+verification is stateless crypto needing no vault, so forged senders are dropped
+at the edge; the contact gate needs the sealed contact list, so it runs on the
+box at unlock. A verified delivery is written to the tenant's spool as a
+`.direct` container plus the usual `.meta` sidecar and travels the same pull
+mail does.
 
 The relay is **kind-blind**. Served kinds, rate limits, spool caps and the decoy
 secret all arrive as relay-map data, so a new payload kind — core or plugin —
@@ -174,9 +165,7 @@ The same binary is the shard's map merge unit:
 relay-sealer merge-maps
 ```
 
-Root only. On a `relay-serve` relay the root applier runs it after writing a
-pushed fragment; on a 2.x relay the tenant shell's `joinery-merge` verb runs it
-through a narrow sudoers rule. It validates each tenant's pushed fragment
+Root only; the root applier runs it after writing a pushed fragment. It validates each tenant's pushed fragment
 against the tenant's root-owned domain allowlist
 (`/opt/joinery-relay/tenants/<slug>/allowed_domains` — `*` on a self-hosted
 fleet of one), keeps the last accepted fragment when a push is rejected,

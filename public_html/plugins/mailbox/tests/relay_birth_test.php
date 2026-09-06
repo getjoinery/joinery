@@ -155,8 +155,7 @@ if ($relay_id > 0) {
 	$relay->set('mrl_is_enabled', false);
 	$relay->save();
 	check((string)$relay->get('mrl_identity_fingerprint') === $probe2->fingerprint(), 'the row carries the pin');
-	check((string)$relay->get('mrl_public_ip') === '127.0.0.1' && (string)$relay->get('mrl_wg_public_key') === '' && (string)$relay->get('mrl_host') === '',
-		'the row carries the address and nothing of a tunnel');
+	check((string)$relay->get('mrl_public_ip') === '127.0.0.1', 'the row carries the address');
 	check(intval($relay->get('mrl_map_version')) >= 1 && is_array($probe2->acceptedFragment('main')), 'the map push was the gate: the relay holds the fragment');
 	check($relay->lastHealth() !== null, 'the born relay\'s health is stored from the ping in hand');
 	check((string)$relay->get('mrl_transport_public_key') !== '', 'the transport keypair exists');
