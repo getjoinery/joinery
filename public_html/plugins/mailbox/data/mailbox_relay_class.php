@@ -35,6 +35,8 @@
  * coordinates the fleet service returned at enrollment. Either way this row
  * remains the deployment's ONE relay, so active() stays a singleton.
  *
+ * @version 1.7 - mrl_pickup_alarm_time and pickupTransition(): the reconcile pass announces
+ *                once when mail stops being picked up off the relay, and once when it resumes
  * @version 1.6 - the ssh era is over: the tunnel and ssh columns and helpers are gone; a
  *                row without an identity pin is unreachable and says so (no_identity)
  * @version 1.5 - the relay API: RelayClient (pinned HTTPS, signed requests); pollHealth()
@@ -117,6 +119,10 @@ class MailboxRelay extends SystemBase {
 		'mrl_map_content_hash'   => array('type'=>'varchar(64)'),
 		'mrl_last_push_time'     => array('type'=>'timestamp(6)'),
 		'mrl_last_pull_time'     => array('type'=>'timestamp(6)'),
+		// When the reconcile pass announced that pickup had stopped; NULL while
+		// pickup is healthy. The alarm is raised once and cleared on the next pull
+		// that reaches the relay, so a relay that stays broken is not re-announced.
+		'mrl_pickup_alarm_time'  => array('type'=>'timestamp(6)'),
 		// Held blobs from the last pull: recoverable mail left on the relay
 		// because its domain is disabled/unconfigured or its Fortress owner is
 		// not yet resolvable (specs/mailbox_data_loss_fixes.md, Fixes 6/7). A
@@ -485,6 +491,45 @@ class MailboxRelay extends SystemBase {
 			return 'recovered';
 		}
 		return 'none';
+	}
+
+	/**
+	 * A relay whose spool has not been pulled for this long has stopped handing
+	 * mail over, whatever the reason: the reconcile pass runs every five
+	 * minutes, so this allows several missed passes before calling it stopped.
+	 * The Setup tab's "Mail pickup" check uses the same threshold.
+	 */
+	const PICKUP_STALL_SECONDS = 1800;
+
+	/**
+	 * What one pull result changes about the pickup alarm: 'stopped',
+	 * 'recovered' or 'none'.
+	 *
+	 * Pickup has STOPPED when a pull failed and no pull has reached the relay
+	 * for PICKUP_STALL_SECONDS (or ever) — one failed pass is not news, a
+	 * relay unreachable for half an hour is. It has RECOVERED when a pull reaches
+	 * the relay again while the alarm stands; an empty spool counts, because
+	 * reaching the relay is the fact that matters. A pull that was skipped
+	 * (another pull running, no address yet) says nothing either way.
+	 *
+	 * @param string      $pull_status    'success' | 'error' | 'skipped' from RelaySpoolConsumer::pull()
+	 * @param string|null $last_pull_time mrl_last_pull_time as read BEFORE the pull (UTC), or null/'' for never
+	 * @param bool        $alarmed        whether mrl_pickup_alarm_time is set
+	 * @param int         $now            unix time
+	 */
+	public static function pickupTransition(string $pull_status, ?string $last_pull_time, bool $alarmed, int $now): string {
+		if ($pull_status === 'success') {
+			return $alarmed ? 'recovered' : 'none';
+		}
+		if ($pull_status !== 'error' || $alarmed) {
+			return 'none';
+		}
+		$last = trim((string)$last_pull_time);
+		if ($last === '') {
+			return 'stopped';
+		}
+		$at = strtotime($last . ' UTC');
+		return ($at === false || $now - $at >= self::PICKUP_STALL_SECONDS) ? 'stopped' : 'none';
 	}
 
 	/** The cached state alone ('' when never polled) — what a transition compares. */

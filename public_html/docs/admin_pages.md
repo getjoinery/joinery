@@ -214,6 +214,34 @@ to get the card layout.
 | `no_page_card`   | Skip the surrounding card wrapper                  |
 | `header_action`  | Action button or dropdown HTML                     |
 
+### Admin header notices
+
+Every admin page renders the site-wide notices between the flash messages and
+the page content, through one registry: `AdminNotices::render()`. A notice is
+one thing an operator must know wherever they are in the admin — the hosting
+arrangement (`HostedPlanNotice`), a domain about to lapse
+(`ManagedDomainNotice`), mail that has stopped arriving (the mailbox plugin's
+`MailboxAttentionNotice`). Core notices are fixed and render first; a plugin
+registers its own from its bootstrap:
+
+```php
+AdminNotices::register('mailbox_attention', array('MailboxAttentionNotice', 'render'));
+```
+
+A renderer returns HTML, or `''` when it has nothing to say. Two rules keep
+the header honest:
+
+- **Read stored facts only.** Renderers run on every admin page load, so a
+  notice reads a settings row or a column a task stamped — never a DNS lookup,
+  a ping or a probe. The subsystem that learns the fact records it; the notice
+  reports it.
+- **Silence is the normal state.** A notice that renders on a healthy site
+  teaches operators to ignore the header. Render nothing unless there is
+  something to do.
+
+A renderer that throws is logged and skipped, so a page never fails to load
+because a notice could not decide. Tests: `tests/unit/admin_notices_test.php`.
+
 ## Common Patterns by Page Type
 
 ### List Page

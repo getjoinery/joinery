@@ -119,6 +119,16 @@ cheap — it runs when the wizard or pill asks, wrapped so a throw reads as
 not-started rather than a fatal. The mailbox plugin's `mail_import` step is
 the reference implementation.
 
+**Contributing admin-header notices.** A plugin that learns something every
+operator must know wherever they are — mail that has stopped arriving, a
+credential about to lapse — registers a renderer into the `AdminNotices`
+registry from its bootstrap (`AdminNotices::register('name', callable)`; see
+`docs/admin_pages.md` § Admin header notices). The registry pulls plugin
+bootstraps in itself before rendering. The renderer runs on every admin page
+load, so it reads stored facts only and returns `''` unless there is something
+to do. The mailbox plugin's `MailboxAttentionNotice` is the reference
+implementation.
+
 ### Classes Resolve By Name
 
 Name a class and it loads. That covers every class in core `includes/` and
