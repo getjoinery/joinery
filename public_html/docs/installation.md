@@ -57,7 +57,7 @@ The deploy form asks for as little as it can — every field is a chance for som
 | Admin password | Yes | The password for that account. Masked in the UI and kept out of the deployment log, which is what the `password` in its field name buys. A password change is still forced at first sign-in. |
 | Site domain | No | Blank brings the site up on the instance's IP. |
 | SSH public key | No | Placed in root's `authorized_keys` before server setup, which then mirrors it to `user1` with sudo and disables root login. Blank leaves root access as the provider configured it, so omitting it cannot lock anyone out. |
-| Linode API token | No | Only useful when the domain's DNS is already at Linode. Creates the A record from the instance so the first certificate attempt succeeds rather than the retry timer's. Used once, never written to disk, never printed. |
+| Linode API token | No | Only useful when the domain's nameservers point at Linode. Needs the Domains Read/Write scope. Creates the zone when the account holds none, then the A record, from the instance, so the first certificate attempt succeeds rather than the retry timer's. Never printed. Once it has proved usable it is sealed into the site for the setup wizard, whose email step uses it once to add the mail records and then deletes it. |
 
 Nothing is asked that can be worked out. The site name comes from the domain (or the instance ID); the install is always bare-metal, one site per instance.
 

@@ -280,6 +280,14 @@
       }
     },
     {
+      "name": "dns_install_credential",
+      "default": "",
+      "group": "dns",
+      "managed": true,
+      "secret": true,
+      "helptext": "Sealed JSON (driver key plus that driver's credential fields) handed in by a first-boot installer that already used the credential to create the site's DNS records. The setup wizard's DNS publish uses it once and deletes it. Written by utils/install_dns_credential.php, read by DnsInstallCredential."
+    },
+    {
       "name": "dns_move_pending",
       "default": "",
       "group": "dns",
@@ -2786,6 +2794,12 @@
       "feature": "Joinery Direct identity",
       "kind": "regenerable-breaks-things",
       "locator": "jdi_direct_identities.jdi_secret_key"
+    },
+    {
+      "label": "DNS credential handed in at install",
+      "feature": "Setup wizard DNS publish",
+      "kind": "ephemeral",
+      "locator": "dns_install_credential"
     },
     {
       "label": "Joinery Direct decoy secret",
