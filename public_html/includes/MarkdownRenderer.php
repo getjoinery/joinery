@@ -5,7 +5,7 @@
  * Extracted from adm/admin_spec_view.php for reuse across
  * the spec viewer and help documentation viewer.
  *
- * Version: 1.3
+ * Version: 1.7
  */
 
 class MarkdownRenderer {
@@ -54,13 +54,22 @@ class MarkdownRenderer {
             return $key;
         }, $text);
 
-        // Headers (# to ######)
-        $text = preg_replace('/^###### (.+)$/m', '<h6>$1</h6>', $text);
-        $text = preg_replace('/^##### (.+)$/m', '<h5>$1</h5>', $text);
-        $text = preg_replace('/^#### (.+)$/m', '<h4>$1</h4>', $text);
-        $text = preg_replace('/^### (.+)$/m', '<h3>$1</h3>', $text);
-        $text = preg_replace('/^## (.+)$/m', '<h2>$1</h2>', $text);
-        $text = preg_replace('/^# (.+)$/m', '<h1>$1</h1>', $text);
+        // Headers (# to ######), each carrying the slug its own document's
+        // table of contents links to. Repeated titles get -1, -2 suffixes, the
+        // same way the anchors are written elsewhere.
+        $slug_counts = array();
+        $text = preg_replace_callback('/^(#{1,6}) (.+)$/m', function($matches) use (&$slug_counts, $placeholders) {
+            $level = strlen($matches[1]);
+            $title = trim($matches[2]);
+            $slug = self::heading_slug($title, $placeholders);
+            if ($slug !== '') {
+                $n = isset($slug_counts[$slug]) ? $slug_counts[$slug] : 0;
+                $slug_counts[$slug] = $n + 1;
+                if ($n > 0) $slug = $slug . '-' . $n;
+                return '<h' . $level . ' id="' . $slug . '">' . $title . '</h' . $level . '>';
+            }
+            return '<h' . $level . '>' . $title . '</h' . $level . '>';
+        }, $text);
 
         // Bold (**text** or __text__)
         $text = preg_replace('/\*\*(.+?)\*\*/', '<strong>$1</strong>', $text);
@@ -72,6 +81,12 @@ class MarkdownRenderer {
 
         // Horizontal rules
         $text = preg_replace('/^---+$/m', '<hr>', $text);
+
+        // Images ![alt](url) — must run before the link rule, which would
+        // otherwise consume the bracket pair and leave a bare '!' beside a link.
+        // Text was escaped up front, so alt and src need no further escaping.
+        // Wrapped in a link to itself: shown small in the column, full size on click.
+        $text = preg_replace('/!\[([^\]]*)\]\(([^)\s]+)\)/', '<a href="$2" target="_blank" rel="noopener"><img src="$2" alt="$1"></a>', $text);
 
         // Links [text](url)
         $text = preg_replace('/\[([^\]]+)\]\(([^)]+)\)/', '<a href="$2">$1</a>', $text);
@@ -157,6 +172,22 @@ class MarkdownRenderer {
     }
 
     /**
+     * Anchor slug for a heading, matching the anchors authors hand-write in a
+     * table of contents: punctuation is dropped first, and only then do spaces
+     * become hyphens — so 'File Structure & Naming' is
+     * 'file-structure--naming', with the gap the ampersand left behind.
+     * Inline code in a heading is a placeholder by this point, so its text is
+     * restored before slugging.
+     */
+    private static function heading_slug($title, $placeholders = array()) {
+        $slug = $placeholders ? strtr($title, $placeholders) : $title;
+        $slug = html_entity_decode(strip_tags($slug), ENT_QUOTES, 'UTF-8');
+        $slug = strtolower($slug);
+        $slug = preg_replace('/[^a-z0-9 -]+/', '', $slug);
+        return str_replace(' ', '-', trim($slug));
+    }
+
+    /**
      * Rewrite markdown-doc links in rendered HTML to point at the active
      * viewer (e.g. '/admin/admin_help' or '/documentation').
      *
@@ -204,6 +235,12 @@ class MarkdownRenderer {
             .markdown-content ul { list-style: disc; }
             .markdown-content ol { list-style: decimal; }
             .markdown-content li { list-style: inherit; }
+            /* Screenshots sit at half the column width, framed so a
+               white-background capture reads as a distinct thing. They are
+               stored at twice that, so they stay sharp on high-DPI screens
+               and open at full size when clicked. */
+            .markdown-content img { display: block; max-width: min(100%, 380px); height: auto; margin: 1em 0; border: 1px solid #ddd; border-radius: 4px; }
+            .markdown-content a > img { cursor: zoom-in; }
         ';
     }
 }

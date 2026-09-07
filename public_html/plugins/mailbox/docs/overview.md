@@ -803,7 +803,7 @@ path: when provider relay is active it confirms the provider's own credential is
 configured (so a healthy API key reads PASS even with empty `smtp_*`); on the
 SMTP fallback path it connects to the SMTP host and closes. It is named for what
 it is — the route outgoing mail takes — and has nothing to do with the ingest
-relay described under [The relay](#the-relay); the two are unrelated, and
+relay described under [The receive-mode choice](#the-receive-mode-choice-relay-or-direct); the two are unrelated, and
 sharing the word *relay* between them left no way to tell which a row was
 about.
 

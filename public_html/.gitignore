@@ -11,6 +11,10 @@ Globalvars_site.php
 *.bak
 *.png
 *.log
+
+# Images that are part of the source, not uploaded content: the shipped UI
+# icons and the screenshots the docs embed.
+!/assets/images/**
 /cache
 /theme-sources
 

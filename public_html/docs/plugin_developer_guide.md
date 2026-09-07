@@ -72,7 +72,7 @@ Before diving in, a quick reference for the four common things plugins need to r
 |---|---|---|
 | Runtime hook registrations (upload purposes, File decrypt hooks, policy callables, window caps, deferred work) | a bootstrap file named by the top-level `bootstrap` key in `plugin.json` | [Bootstrap](#bootstrap-declarative) |
 | Tables and columns | `$field_specifications` in a data class under `data/` — applied automatically on install and sync | [Table Creation](#table-creation-automatic) |
-| Admin menu entries | `adminMenu` key in `plugin.json` — created on activate, removed on deactivate/uninstall | [Admin Menus](#admin-menus-declarative) |
+| Admin menu entries | `adminMenu` key in `plugin.json` — created on activate, removed on deactivate/uninstall | [Plugin Menus](#plugin-menus-declarative) |
 | Default plugin settings | `settings` array in `plugin.json` — seeded on activate and sync | [Plugin Settings](#plugin-settings-declarative) |
 | Signals your plugin emits, or reactions to existing signals | `signals` / `signalSubscribers` keys in `plugin.json` | [Plugin Signals & Subscribers](#plugin-signals--subscribers-declarative) |
 | A cloud-offload store profile (move rows' bytes to a bucket) | `storage_profiles` array in `plugin.json` — a `StorageProfile` class name | [Storage Profiles](#storage-profiles-declarative) |
@@ -1067,7 +1067,7 @@ class MyData extends SystemBase {
 
 ### Migration System
 
-For default plugin settings, use the `settings` key in `plugin.json` (see [Plugin Settings](#plugin-settings-declarative) above). Migrations are for **initial data seeds only** — dropdown options, category rows, reference data — that doesn't fit the settings model. Schema is handled automatically from `$field_specifications` (see [Table Creation](#table-creation-automatic) above), and admin menus are declared in `plugin.json` (see [Admin Menus](#admin-menus-declarative) above) — none of those belong in a migration.
+For default plugin settings, use the `settings` key in `plugin.json` (see [Plugin Settings](#plugin-settings-declarative) above). Migrations are for **initial data seeds only** — dropdown options, category rows, reference data — that doesn't fit the settings model. Schema is handled automatically from `$field_specifications` (see [Table Creation](#table-creation-automatic) above), and admin menus are declared in `plugin.json` (see [Plugin Menus](#plugin-menus-declarative) above) — none of those belong in a migration.
 
 Migrations are `.sql` files placed in `plugins/{name}/migrations/`:
 
@@ -2080,7 +2080,7 @@ Always use the two-parameter format:
 
 1. Create plugin directory under `/plugins/{name}/` with `plugin.json`
 2. Create data model classes in `plugins/{name}/data/` with `$field_specifications` (tables created automatically on install)
-3. Declare admin menus in `plugin.json` under the `adminMenu` key (see [Admin Menus](#admin-menus-declarative))
+3. Declare admin menus in `plugin.json` under the `adminMenu` key (see [Plugin Menus](#plugin-menus-declarative))
 4. Declare default settings in `plugin.json` under the `settings` key (see [Plugin Settings](#plugin-settings-declarative))
 5. Create `.sql` migration files in `plugins/{name}/migrations/` only if you have other initial data seeds (dropdowns, categories, reference rows)
 6. Create admin interface in `plugins/{name}/admin/` if needed
