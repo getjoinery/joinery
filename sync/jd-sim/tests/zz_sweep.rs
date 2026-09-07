@@ -357,6 +357,7 @@ fn workload_core(
     // to survive one.
     assert_no_entry_is_stranded(&world);
     assert_no_live_orphan_on_the_server(&world);
+    jd_sim::scenario::assert_no_two_records_on_one_directory(&world);
     if vault.any() {
         assert_nothing_in_the_vault_is_readable(&world, seed);
         jd_sim::scenario::assert_the_vault_opens(&world);
@@ -2189,6 +2190,7 @@ fn hammer(seed: u64, steps: usize, devices: &[(&str, Platform)], chaos: bool) {
     assert_converged(&world);
     assert_no_entry_is_stranded(&world);
     assert_no_live_orphan_on_the_server(&world);
+    jd_sim::scenario::assert_no_two_records_on_one_directory(&world);
 
     // Did it reach the shape it exists for? An arm that never produces a
     // conflict is two computers taking turns, not two computers colliding, and

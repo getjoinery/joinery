@@ -98,8 +98,17 @@ mod tests {
         assert!(client_app().ends_with(platform_name()));
     }
 
+    /// The two tests below both set and unset one process-wide environment
+    /// variable, and `cargo test` runs them on parallel threads in one process:
+    /// whichever gets there second reads what the other left. It passes alone
+    /// and fails under load, which is the worst way for a gate to behave -- one
+    /// spurious red in a full workspace run teaches everyone to re-run rather
+    /// than to look. They take turns instead.
+    static DEVICE_NAME_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn a_device_name_is_never_empty() {
+        let _guard = DEVICE_NAME_ENV.lock().unwrap_or_else(|e| e.into_inner());
         // It ends up in conflict-copy filenames, where an empty one produces
         // `Report (conflicted copy 2026-07-31 from ).xlsx`.
         std::env::set_var("JOINERY_DEVICE_NAME", "  ");
@@ -110,6 +119,7 @@ mod tests {
 
     #[test]
     fn an_explicit_device_name_wins() {
+        let _guard = DEVICE_NAME_ENV.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("JOINERY_DEVICE_NAME", "Kitchen iMac");
         let name = suggested_device_name();
         std::env::remove_var("JOINERY_DEVICE_NAME");
