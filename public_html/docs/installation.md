@@ -125,7 +125,7 @@ Save the password immediately — it's also written to the site's `Globalvars_si
 
 ### Bring your own password
 
-Use `--password-file` to avoid shell-escaping issues:
+Hand it over in a file so it never appears on a command line:
 
 ```bash
 echo 'YourStr0ng&Secure#Pass@9' > /tmp/dbpass.txt
@@ -133,21 +133,17 @@ sudo ./install.sh site mysite --password-file=/tmp/dbpass.txt mysite.com 8080
 rm /tmp/dbpass.txt
 ```
 
-### Forbidden characters
+### Any character works
 
-Shell and sed escaping forbid these characters in the database password:
+Quotes, backslashes, dollar signs, backticks, exclamation marks, spaces: all fine. The one value the password cannot hold is a line break, because it travels through single-line files.
 
-| Character | Reason                                  |
-|-----------|------------------------------------------|
-| `'`       | Breaks PHP string literals               |
-| `"`       | Breaks shell double-quoted strings       |
-| `\`       | Escape character in shell, sed, and PHP  |
-| `$`       | Variable expansion in shell              |
-| `` ` ``   | Command substitution in shell            |
-| `!`       | History expansion in bash                |
-| newlines  | Break sed replacement patterns           |
+The password is never pasted into a command. It reaches PostgreSQL as a quoted SQL literal on psql's standard input, reaches `Globalvars_site.php` through a PHP writer that emits a correct string literal, and reaches the database driver as a connection argument rather than part of a connection string.
 
-Safe symbols: `@ # % ^ * ( ) - _ + = { } [ ] | : ; < > , . ? ~ / &`
+What can still alter it is your own shell, before the installer runs: `!` triggers history expansion in an interactive bash session, and `$` and backticks expand inside double quotes. A file, or a single-quoted environment value, sidesteps that:
+
+```bash
+sudo POSTGRES_PASSWORD='It'"'"'s $12.50 & a "quote"!' ./install.sh site mysite mysite.com 8080
+```
 
 ### Requirements
 
@@ -687,9 +683,9 @@ sudo chmod -R 775 /var/www/html/mysite
 
 ### Database load failure during install
 
-Almost always a syntax or escaping error.
+Almost always a syntax error, or a password the shell altered on its way in.
 
-1. Check the password against the [forbidden characters table](#forbidden-characters).
+1. If the password was typed on a command line, pass it with `--password-file` or `POSTGRES_PASSWORD=` instead. See [Any character works](#any-character-works).
 2. Verify any locally-modified `joinery-install.sql.gz` for SQL syntax.
 3. Confirm UTF-8 encoding on the SQL file.
 

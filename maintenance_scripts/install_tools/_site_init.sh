@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 2.9 - Globalvars_site.php is filled by _write_site_config.php, so the
+#                database password can be any string. sed needed its own escaping
+#                and the result still had to parse as PHP; the union of the two
+#                alphabets is where "never use ' \ $ ! in a password" came from.
 # VERSION: 2.8 - a database that cannot be created, or a schema that cannot be
 #                loaded, reports what PostgreSQL actually said. Both calls sent
 #                stderr to /dev/null, so an authentication failure surfaced only
@@ -127,11 +131,6 @@ log_error() {
     echo "ERROR: $1" >&2
 }
 
-# Escape string for use in sed replacement (handles /, &, \, etc.)
-sed_escape() {
-    printf '%s\n' "$1" | sed -e 's/[\/&]/\\&/g'
-}
-
 # =============================================================================
 # VALIDATION
 # =============================================================================
@@ -193,9 +192,6 @@ mkdir -p "$SITE_ROOT/storage"
 # CONFIGURATION FILES
 # =============================================================================
 
-# Escape password for sed (handles special characters like /, &, \)
-ESCAPED_PASSWORD=$(sed_escape "$PASSWORD")
-
 # Helper function to create config file
 create_config_file() {
     # Never overwrite a config that is already there. It holds this deployment's
@@ -212,19 +208,24 @@ create_config_file() {
     fi
 
     log "Configuring site..."
-    cp "$GLOBALVARS_TEMPLATE" "$SITE_ROOT/config/Globalvars_site.php"
-    sed -i "s/{{PASSWORD}}/${ESCAPED_PASSWORD}/g" "$SITE_ROOT/config/Globalvars_site.php"
-    sed -i "s/{{SITE_NAME}}/${SITENAME}/g" "$SITE_ROOT/config/Globalvars_site.php"
-    sed -i "s/{{DOMAIN_NAME}}/${DOMAIN}/g" "$SITE_ROOT/config/Globalvars_site.php"
     # Record the deployment environment — single source of truth (spec deployment_environment_flag)
     if [ "$DOCKER_MODE" = true ]; then DEPLOY_ENV=docker; else DEPLOY_ENV=baremetal; fi
-    sed -i "s/{{DEPLOYMENT_ENVIRONMENT}}/${DEPLOY_ENV}/g" "$SITE_ROOT/config/Globalvars_site.php"
     # Generate a per-environment SecretBox key (32 random bytes, base64) for secrets at rest
     SECRET_BOX_KEY=$(openssl rand -base64 32)
-    ESCAPED_SECRET_BOX_KEY=$(sed_escape "$SECRET_BOX_KEY")
-    sed -i "s/{{SECRET_BOX_KEY}}/${ESCAPED_SECRET_BOX_KEY}/g" "$SITE_ROOT/config/Globalvars_site.php"
-    # Also handle the legacy pattern with empty password
-    sed -i "s/\$this->settings\['dbpassword'\] = '';/\$this->settings['dbpassword'] = '${ESCAPED_PASSWORD}';/g" "$SITE_ROOT/config/Globalvars_site.php"
+    # PHP fills the template, not sed: var_export() writes a correct literal
+    # for any password, and the values travel in the environment so neither
+    # secret is in argv. Written under an umask so the file is never readable
+    # by everyone, even for the instant before the chmod below.
+    if ! (umask 027 && \
+          JOINERY_CFG_SITENAME="$SITENAME" \
+          JOINERY_CFG_DOMAIN="$DOMAIN" \
+          JOINERY_CFG_DEPLOY_ENV="$DEPLOY_ENV" \
+          JOINERY_CFG_PASSWORD="$PASSWORD" \
+          JOINERY_CFG_SECRET_BOX_KEY="$SECRET_BOX_KEY" \
+          php "${SCRIPT_DIR}/_write_site_config.php" "$GLOBALVARS_TEMPLATE" "$SITE_ROOT/config/Globalvars_site.php"); then
+        log_error "Failed to write $SITE_ROOT/config/Globalvars_site.php"
+        exit 1
+    fi
     # Restrict config file — contains database credentials
     chmod 640 "$SITE_ROOT/config/Globalvars_site.php"
     chown root:www-data "$SITE_ROOT/config/Globalvars_site.php" 2>/dev/null || true

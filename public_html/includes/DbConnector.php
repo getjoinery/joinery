@@ -20,7 +20,11 @@ class DbConnector {
 
 		// GuardedPdo is a PDO — everything downstream is unchanged — that runs
 		// the hot-turn rule over every write. See includes/SealedEgressGuard.php.
-		$this->dblink = new GuardedPdo('pgsql:host=localhost port=5432 dbname=' . $settings->get_setting('dbname') . ' user=' . $settings->get_setting('dbusername') . ' password=' . $settings->get_setting('dbpassword'));
+		// Credentials go in as constructor arguments, never in the DSN: PDO
+		// quotes them for libpq, whereas a password pasted into the DSN has to
+		// avoid spaces, quotes and backslashes to survive the parse.
+		$this->dblink = new GuardedPdo('pgsql:host=localhost port=5432 dbname=' . $settings->get_setting('dbname'),
+			$settings->get_setting('dbusername'), $settings->get_setting('dbpassword'));
 		$this->dblink->setAttribute (PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);				
 
 	}
@@ -118,7 +122,8 @@ class DbConnector {
 
 	public function set_test_mode() {
 		$settings = Globalvars::get_instance();
-		$this->dblink_test = new GuardedPdo('pgsql:host=localhost port=5432 dbname=' . $settings->get_setting('dbname_test') . ' user=' . $settings->get_setting('dbusername_test') . ' password=' . $settings->get_setting('dbpassword_test'));
+		$this->dblink_test = new GuardedPdo('pgsql:host=localhost port=5432 dbname=' . $settings->get_setting('dbname_test'),
+			$settings->get_setting('dbusername_test'), $settings->get_setting('dbpassword_test'));
 		$this->dblink_test->setAttribute (PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 		$this->test_mode = true;
 		$this->test_mode_was_used = true;

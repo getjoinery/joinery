@@ -26,6 +26,9 @@
 #               five minutes. Every minute, not every five: the tick interval
 #               is the floor on latency for every_run tasks, and inbound mail
 #               is the one users feel.
+# VERSION 4.8 - The ALTER USER statement carries the password as a SQL literal
+#               (quotes doubled) via printf, so any character works. echo of a
+#               shell-interpolated string broke on a quote.
 # VERSION 4.7 - POSTGRES_PASSWORD is no longer a build arg baked into ENV. It
 #               put the database superuser password in the image, where
 #               docker inspect and docker history keep it after the container
@@ -247,7 +250,8 @@ CMD set +H && \
         fi && \
         sed -i -E 's/^(local[[:space:]]+all[[:space:]]+postgres[[:space:]]+)[A-Za-z0-9-]+/\1trust/' "$PG_CONF" && \
         service postgresql reload && \
-        echo "ALTER USER postgres PASSWORD '${POSTGRES_PASSWORD}';" | su -c "psql -q" postgres && \
+        PW_SQL="${POSTGRES_PASSWORD//"'"/"''"}" && \
+        printf "ALTER USER postgres PASSWORD '%s';\n" "$PW_SQL" | su -c "psql -q -v ON_ERROR_STOP=1" postgres && \
         sed -i -E "s/^(local[[:space:]]+all[[:space:]]+postgres[[:space:]]+)[A-Za-z0-9-]+/\1${PG_LOCAL_METHOD}/" "$PG_CONF" && \
         if grep -qE '^local[[:space:]]+all[[:space:]]+postgres[[:space:]]+trust' "$PG_CONF"; then \
             echo "FATAL: local postgres left on trust in ${PG_CONF}"; exit 1; \

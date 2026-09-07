@@ -64,8 +64,16 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 # The password is known to this gate alone, so the image checks can grep for
-# the literal. File, not argv — argv is readable through ps.
-PW="gate_$(openssl rand -hex 16)"
+# it. File, not argv — argv is readable through ps.
+#
+# It carries every character that was once forbidden — quote, double quote,
+# backslash, dollar, backtick, bang, space — so a run proves the first-boot
+# path (ALTER USER on stdin, the PHP config writer, the PDO argument) for a
+# real password and not just a tidy hex string. The leak checks grep for the
+# hex token alone: docker's JSON would escape the quotes and a literal grep
+# would miss a leaked copy.
+PW_TOKEN="$(openssl rand -hex 16)"
+PW="gate_${PW_TOKEN}'\"\\\$\`! x"
 PWFILE="$(mktemp)"
 chmod 600 "$PWFILE"
 printf '%s' "$PW" > "$PWFILE"
@@ -155,9 +163,9 @@ assert_installed_state "fresh install"
 # The image must not know the password. The container's env legitimately
 # carries it (that is how it arrives at run time); the IMAGE and its history
 # travel, and must not.
-IMG_HITS="$(docker inspect "joinery-$SITENAME" 2>/dev/null | grep -c "$PW" || true)"
+IMG_HITS="$(docker inspect "joinery-$SITENAME" 2>/dev/null | grep -c "$PW_TOKEN" || true)"
 chk "docker inspect of the image carries no database password" "$IMG_HITS" "0"
-HIST_HITS="$(docker history --no-trunc "joinery-$SITENAME" 2>/dev/null | grep -c "$PW" || true)"
+HIST_HITS="$(docker history --no-trunc "joinery-$SITENAME" 2>/dev/null | grep -c "$PW_TOKEN" || true)"
 chk "docker history carries no database password" "$HIST_HITS" "0"
 
 # Rebuild: same command again. -y removes the container, keeps the volumes,
