@@ -137,7 +137,7 @@ section('What SSH still owns');
 // a job.
 $expected_ssh_only = array(
 	'install_node',
-	'retire_install_password',   // the bootstrap's closing session: host-harden over the same sealed password, once the machine's agents are admitted
+	'retire_install_password',   // the bootstrap's closing session: password login turned off over the same sealed password, once the machine's agents are admitted
 );
 
 $source   = file_get_contents(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));

@@ -380,7 +380,7 @@ Only after the answer verifies does the host run the bundled, self-verifying `re
 | `apply_update` | Run `upgrade.php` on target | **Yes** |
 | `publish_upgrade` | Build and sign a release from a node's own tree, as a primitive of that node's **own** agent, dispatched by the management node that manages it (node detail, Updates tab, for any node whose agent reports the primitive). A management node that manages itself is the same case pointed at its own record: it connects to itself from its Management Node page, approves the request on its own dashboard, and `ManagedNode::self_node()` is the row its Publish page dispatches to. A management node that is another plane's node is published from that plane, and its Publish page says so (`ManagedNode::managed_by()`). See `specs/publish_as_node_action.md` | No |
 | `install_node` | The bootstrap SSH session: fetch the release, `install.sh docker` (host agent), `install.sh site … --enable-agent` (a clone adds `--clone-from` and pulls the source over HTTPS). Run by `InstallJobExecutor` on the plane over the provision's sealed install password | No (target must be clean) |
-| `retire_install_password` | The bootstrap's closing session, once every agent the install put on the machine is admitted: `install.sh host-harden --agent-managed` over the same password, so the machine stops accepting it. `InstallJobExecutor` completes the job only after a fresh login with the password is refused; the provision pipeline then erases the sealed password | No |
+| `retire_install_password` | The bootstrap's closing session, once every agent the install put on the machine is admitted: over the same password, write `/etc/ssh/sshd_config.d/00-joinery-agent-managed.conf` (password and keyboard-interactive authentication off, root limited to prohibit-password) and restart sshd, so the machine stops accepting it. `InstallJobExecutor` completes the job only after a fresh login with the password is refused; the provision pipeline then erases the sealed password | No |
 | `provision_certificate` | Issue the node's certificate as a primitive on the **issuer**: the node itself on bare metal, its host's own agent for a container (`for_node_id` names the site). Driven by `ProvisionPendingSsl`, which observes a certificate the machine already reports before asking | No |
 | `clone_export_arm` | Hand the SOURCE of a clone one export key for the length of a provision (empty disarms). The setting name is compiled into `utils/clone_export_arm.php` on the source | No |
 | `fleet_enroll` | Seed a new site's fleet-service URL and API key pair (three settings; the names are compiled into `utils/fleet_enroll.php`). The secret is blanked from the job row once the node answers | No || `backup_run` | This management node's own backup of a node. The node runs its backup engine — chain, envelope, upload, local sweep — with the bucket and a write-only credential supplied for that run and never stored there. What opens the archive is not supplied: the node seals to the recovery key it holds and has verified | No |
@@ -612,8 +612,8 @@ joins at install and whose join a human approves here.
 it: `held` from the moment it is sealed; once the provision is `done` and
 every agent the install put on the machine has been admitted (the site's
 agent, and on a docker box the host's own agent too), the provisioning task
-queues a `retire_install_password` job, which runs `install.sh host-harden
---agent-managed` over the password (`retiring`). The executor completes that
+queues a `retire_install_password` job, which writes the sshd drop-in that
+turns password login off, over the password (`retiring`). The executor completes that
 job only after it tried the password again and the machine refused it; the
 next pass erases the sealed password (`retired`). A job that could not prove
 the refusal fails, the password is kept (`retire_failed`, reason on the row,

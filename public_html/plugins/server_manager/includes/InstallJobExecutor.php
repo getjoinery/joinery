@@ -291,7 +291,7 @@ class InstallJobExecutor {
 	 * Returns '' when the machine said "Permission denied" — the only answer
 	 * that proves password login is off — and otherwise a failure message.
 	 *
-	 * sshd is restarted by host-harden moments before this, so the first probe
+	 * sshd is restarted by the retire step moments before this, so the first probe
 	 * may not connect at all; that is a wait, not a verdict. A probe that logs
 	 * in is a verdict: the password still works and the job must fail. A probe
 	 * that never gets an answer inside the budget is a doubt, and a doubt fails
@@ -307,8 +307,8 @@ class InstallJobExecutor {
 			list($out, $code) = $this->run_step($probe, $ctx);
 			if ($code === 0 && strpos($out, 'STILL_ACCEPTED') !== false) {
 				$this->append($job, "[the machine STILL ACCEPTED the install password]\n", $step_index);
-				return 'The machine still accepted the install password after host-harden; the password is kept. '
-					. 'Check sshd_config on the machine (PasswordAuthentication, PermitRootLogin) and re-run this job.';
+				return 'The machine still accepted the install password after the retire step; the password is kept. '
+					. 'Check sshd -T on the machine (PasswordAuthentication, KbdInteractiveAuthentication) and re-run this job.';
 			}
 			if (stripos($out, 'Permission denied') !== false) {
 				$this->append($job, "[the machine refused the install password: retired]\n", $step_index);

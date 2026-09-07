@@ -454,8 +454,8 @@ class CustomerCloudProvisioningTest {
 		$rjob = ManagementJob::latestForNode($site_id, 'retire_install_password');
 		$rcmd = $rjob ? json_decode((string)$rjob->get('mjb_commands'), true) : null;
 		check($rjob && $rjob->get('mjb_status') === 'queued'
-			&& strpos((string)($rcmd['steps'][0]['cmd'] ?? ''), 'host-harden --agent-managed') !== false,
-			'a queued retire_install_password job exists for the site node, running host-harden --agent-managed');
+			&& strpos((string)($rcmd['steps'][0]['cmd'] ?? ''), '00-joinery-agent-managed.conf') !== false,
+			'a queued retire_install_password job exists for the site node, writing the sshd drop-in');
 		check($probe->probeInstallPassword($prov) === 0, 'while the job is queued the pass waits');
 
 		// The job fails: the password is kept, the reason is on the row, ops

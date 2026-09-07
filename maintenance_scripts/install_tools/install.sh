@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+#VERSION 2.63 - host-harden is gone. Its housekeeping (fail2ban SSH jail, journal cap,
+#               BuildKit GC, orphaned build dirs, 2G swap, btmp) runs on every docker and
+#               server install as host_housekeeping, unprompted and ungated, since none of
+#               it can lock anyone out. Turning password login off was the only step that
+#               needed a gate; the management node does that itself with sshd drop-in
+#               commands when it retires a provisioned machine's install password, and a
+#               self-hosted machine keeps its owner's password login. (keyless_provisioning.md)
 #VERSION 2.62 - The postgres password can be any string. The ALTER USER
 #               statement reaches psql on stdin with the password as a SQL
 #               literal (quotes doubled), so no shell ever parses it; the
@@ -292,7 +299,6 @@
 #
 # Usage:
 #   ./install.sh docker [--management-node=URL] [--node-name=NAME]  # Install Docker + the siteless host agent (joins URL if given, as NAME)
-#   ./install.sh host-harden [--agent-managed]        # One-time: harden a Docker host server (--agent-managed: the joined agent is the access path)
 #   ./install.sh build-base                          # One-time per host: build joinery-base image
 #   ./install.sh server [--allow-unsupported-os]     # One-time: set up bare-metal server
 #   ./install.sh site SITENAME [DOMAIN] [PORT]      # Create a site (auto-generates password)
@@ -587,12 +593,8 @@ derive_ssh_access() {
     fi
 
     echo ""
-    print_warning "No SSH key in /root/.ssh/authorized_keys, and this run is not from a sudo account."
-    print_warning "Root password login is the only way into this server, so it is being left enabled."
-    echo ""
-    echo "To finish hardening, add your public key and re-run the hardening step:"
-    echo "  ssh-copy-id root@<this-server>            # from your own machine"
-    echo "  sudo ./install.sh host-harden             # on this server"
+    print_warning "This run is not from a sudo account, so root password login is the only way into this server."
+    print_warning "It is being left enabled; fail2ban limits guessing."
     echo ""
     return 0
 }
@@ -1649,9 +1651,10 @@ do_docker_install() {
         else
             print_success "Docker daemon is running"
         fi
-        # Do NOT exit here: an existing Docker host still needs its host agent
-        # installed and (if a URL was given) joined — the whole point on a
-        # keyless machine. Fall through to the agent step.
+        # Do NOT exit here: an existing Docker host still needs its
+        # housekeeping and its host agent installed and (if a URL was given)
+        # joined — the whole point on a keyless machine.
+        host_housekeeping
         install_docker_host_agent "$MGMT_NODE_URL" "$NODE_NAME"
         if [ "$QUIET_MODE" -eq 1 ]; then
             echo -e "${GREEN}Docker installation complete!${NC}"
@@ -1740,6 +1743,7 @@ do_docker_install() {
         print_success "Postgres ports 9080-9099 blocked on $PUBLIC_IFACE (tunnels still work)"
     fi
 
+    host_housekeeping
     install_docker_host_agent "$MGMT_NODE_URL" "$NODE_NAME"
 
     if [ "$QUIET_MODE" -eq 1 ]; then
@@ -1750,89 +1754,34 @@ do_docker_install() {
 }
 
 #==============================================================================
-# SUBCOMMAND: host-harden - Harden a Docker host server after initial provisioning
+# HOST HOUSEKEEPING - runs on every docker and server install, never prompts
 #==============================================================================
 
-do_host_harden() {
-    local AGENT_MANAGED=0
-    local arg
-    for arg in "$@"; do
-        case "$arg" in
-            # The machine's access path is its joined agent, not an SSH key.
-            # Asserted by the caller (the plane retiring the install password
-            # once the agent's join has been approved) — an agent that has been ADMITTED
-            # is a truthful answer that disabling password login orphans nobody.
-            --agent-managed) AGENT_MANAGED=1 ;;
-            *) consume_global_flag "$arg" || { print_error "Unknown option for host-harden: $arg"; exit 1; } ;;
-        esac
-    done
+# Everything here is idempotent and locks nobody out, so it needs no gate and
+# no confirmation. Turning password login off is NOT here: on a plane-
+# provisioned machine the management node does that once the machine's agents
+# are admitted (retire_install_password), and on a self-hosted machine the
+# owner's root password is their only way in, so nothing turns it off.
+host_housekeeping() {
+    print_header "Host Housekeeping"
 
-    print_header "Docker Host Security Hardening"
-
-    if [ "$EUID" -ne 0 ]; then
-        print_error "This command must be run as root (use sudo)"
-        exit 1
-    fi
-
-    # Safety check: require a reachable account before disabling password auth.
-    # A key in authorized_keys is one; a joined agent (--agent-managed) is the
-    # other — the fourth answer to derive_ssh_access's question, for a keyless
-    # machine whose only management path is its agent.
-    local AUTH_KEYS="${HOME}/.ssh/authorized_keys"
-    if [ "$AGENT_MANAGED" = "1" ]; then
-        print_info "Agent-managed host: the joined agent is the access path — safe to disable password auth"
-    elif [ ! -f "$AUTH_KEYS" ] || [ ! -s "$AUTH_KEYS" ]; then
-        print_error "No SSH authorized_keys found at $AUTH_KEYS"
-        print_error "Add your SSH public key before running host-harden to avoid being locked out"
-        print_error "(A plane-managed keyless host is hardened by the management node with --agent-managed.)"
-        exit 1
-    else
-        local KEY_COUNT
-        KEY_COUNT=$(grep -c 'ssh-' "$AUTH_KEYS" 2>/dev/null || echo 0)
-        print_info "Found $KEY_COUNT SSH key(s) in authorized_keys — safe to disable password auth"
-    fi
-
-    if [ "$ASSUME_YES" -ne 1 ]; then
-        echo ""
-        print_warning "This will disable SSH password authentication on this server."
-        print_warning "You will only be able to log in with the key(s) listed above."
-        # EOF (no terminal) leaves REPLY empty, which refuses — hardening a
-        # host you cannot confirm is what -y is for.
-        read -p "Proceed? [y/N] " -n 1 -r || true
-        echo ""
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            print_info "Aborted"
-            exit 0
-        fi
-    fi
-
-    # --- SSH hardening ---
-    print_step "Hardening SSH..."
-    cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup
-    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
-    sed -i 's/PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
-    sed -i 's/#PermitRootLogin yes/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
-    sed -i 's/PermitRootLogin yes/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
-    sed -i 's/#MaxAuthTries 6/MaxAuthTries 3/' /etc/ssh/sshd_config
-    systemctl restart ssh
-    print_success "SSH: password auth disabled, key-only login enforced"
-
-    # --- fail2ban ---
-    print_step "Installing and configuring fail2ban..."
+    # --- fail2ban: SSH jail ---
+    # A drop-in under jail.d, so it composes with whatever jail.local the
+    # server setup wrote and re-running never appends a second [sshd].
+    print_step "Configuring fail2ban SSH jail..."
     apt-get install -y fail2ban > /dev/null 2>&1
-    cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
-    tee -a /etc/fail2ban/jail.local > /dev/null << 'EOF'
-
-# Joinery host hardening
+    mkdir -p /etc/fail2ban/jail.d
+    tee /etc/fail2ban/jail.d/joinery-sshd.local > /dev/null << 'EOF'
+# Joinery host housekeeping
 [sshd]
 enabled = true
 bantime = 1h
 findtime = 10m
 maxretry = 3
 EOF
-    systemctl enable fail2ban
-    systemctl start fail2ban
-    print_success "fail2ban: installed and running, SSH jail active (ban after 3 failures in 10m)"
+    systemctl enable fail2ban > /dev/null 2>&1
+    systemctl restart fail2ban
+    print_success "fail2ban: SSH jail active (ban for 1h after 3 failures in 10m)"
 
     # --- journald size limit ---
     print_step "Capping systemd journal size..."
@@ -1842,7 +1791,7 @@ EOF
 SystemMaxUse=100M
 EOF
     systemctl restart systemd-journald
-    print_success "journald: capped at 200M, 2-week retention"
+    print_success "journald: capped at 100M"
 
     # --- Docker BuildKit GC policy ---
     if command -v docker &> /dev/null; then
@@ -1860,7 +1809,7 @@ EOF
   "builder": {
     "gc": {
       "enabled": true,
-      "defaultKeepStorage": "0"
+      "defaultKeepStorage": "2GB"
     }
   }
 }
@@ -1869,38 +1818,32 @@ EOF
             systemctl reload docker 2>/dev/null || true
             print_success "Docker BuildKit GC: auto-prune to 2GB"
         fi
-    else
-        print_info "Docker not installed — skipping BuildKit GC config"
-    fi
 
-    # --- Orphaned build dir scan ---
-    print_step "Scanning for orphaned build directories..."
-    local ORPHANS
-    ORPHANS=$(find ~ -maxdepth 1 -type d -name 'joinery-docker-build-*' 2>/dev/null)
-    if [ -n "$ORPHANS" ]; then
-        print_warning "Orphaned build directories found:"
-        echo "$ORPHANS"
-        if [ "$ASSUME_YES" -ne 1 ]; then
-            read -p "Delete them? [y/N] " -n 1 -r || true
-            echo ""
-            if [[ $REPLY =~ ^[Yy]$ ]]; then
-                echo "$ORPHANS" | xargs rm -rf
-                print_success "Orphaned build directories removed"
-            fi
-        else
+        # --- Orphaned build dir scan ---
+        print_step "Removing orphaned build directories..."
+        local ORPHANS
+        ORPHANS=$(find ~ -maxdepth 1 -type d -name 'joinery-docker-build-*' 2>/dev/null)
+        if [ -n "$ORPHANS" ]; then
             echo "$ORPHANS" | xargs rm -rf
             print_success "Orphaned build directories removed"
+        else
+            print_success "No orphaned build directories found"
         fi
-    else
-        print_success "No orphaned build directories found"
     fi
 
-    # --- Swap ---
+    # --- Swap: at least 2G ---
+    # A 2G machine with no swap has already had check_mail OOM-killed. Keep
+    # whatever swap the box has if it is big enough; otherwise a 2G swapfile
+    # replaces it.
     print_step "Configuring swap..."
     local SWAP_SIZE="2G"
     local SWAPFILE="/swapfile"
+    local SWAP_KB
+    SWAP_KB=$(awk '/^SwapTotal:/ {print $2}' /proc/meminfo)
     if swapon --show | grep -q "$SWAPFILE"; then
         print_info "Swapfile already active at $SWAPFILE — skipping"
+    elif [ "${SWAP_KB:-0}" -ge 2000000 ]; then
+        print_info "Swap already present ($((SWAP_KB / 1024))M) — keeping it"
     else
         swapoff -a 2>/dev/null || true
         fallocate -l "$SWAP_SIZE" "$SWAPFILE"
@@ -1918,15 +1861,6 @@ EOF
     truncate -s 0 /var/log/btmp 2>/dev/null || true
     truncate -s 0 /var/log/btmp.1 2>/dev/null || true
     print_success "btmp logs cleared"
-
-    print_header "Host Hardening Complete!"
-    echo -e "${GREEN}✓${NC} SSH password authentication disabled"
-    echo -e "${GREEN}✓${NC} fail2ban active (SSH jail)"
-    echo -e "${GREEN}✓${NC} journald capped at 200M"
-    echo -e "${GREEN}✓${NC} Docker BuildKit GC configured"
-    echo -e "${GREEN}✓${NC} Swap: 2G swapfile"
-    echo -e "${GREEN}✓${NC} btmp logs cleared"
-    echo ""
 }
 
 #==============================================================================
@@ -2730,9 +2664,6 @@ EOF
             print_success "SSH security configured (root login left enabled — see the warning above)"
         fi
 
-        # To go key-only afterwards, add your public key to the reachable account
-        # and run 'install.sh host-harden' — it refuses unless a key is present.
-
         # Configure UFW firewall
         print_step "Configuring firewall..."
         ufw --force reset
@@ -2774,6 +2705,8 @@ EOF
         service_restart fail2ban
 
         print_success "fail2ban configured"
+
+        host_housekeeping
 
         # Install automatic security updates
         print_step "Configuring automatic security updates..."
@@ -4506,7 +4439,6 @@ show_help() {
     echo ""
     echo "Commands:"
     echo "  docker       Install Docker (one-time, for Docker deployments)"
-    echo "  host-harden   Harden a Docker host server (one-time, run after docker install)"
     echo "  build-base   Build the shared joinery-base image (one-time per Docker host)"
     echo "  server       Set up base server (one-time, for bare-metal deployments)"
     echo "  site         Create a new Joinery site"
@@ -4535,9 +4467,8 @@ show_help() {
     echo "  Use --no-ssl to skip SSL setup."
     echo ""
     echo "Examples:"
-    echo "  # Install Docker (once), then harden the host"
+    echo "  # Install Docker (once)"
     echo "  sudo ./install.sh docker"
-    echo "  sudo ./install.sh host-harden"
     echo ""
     echo "  # Create Docker site (with automatic SSL)"
     echo "  sudo ./install.sh site production SecurePass! prod.example.com 8080"
@@ -4605,10 +4536,6 @@ case "${1:-}" in
     docker)
         shift
         do_docker_install "$@"
-        ;;
-    host-harden)
-        shift
-        do_host_harden "$@"
         ;;
     build-base)
         shift

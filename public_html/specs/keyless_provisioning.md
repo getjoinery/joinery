@@ -1,6 +1,12 @@
 # Keyless provisioning — we never put a key on a machine we create
 
-**Status: BUILT 2026-09-03, live gate open.** WP1, WP4 and the host link
+**Status: BUILT 2026-09-03, live gate open.** 2026-09-07: `install.sh
+host-harden` is gone (owner: nothing in it but the sshd step needed a gate, and
+the agent-side job does that step itself). Its housekeeping runs on every
+docker and server install (`host_housekeeping`, install.sh 2.63); the retire
+job writes `/etc/ssh/sshd_config.d/00-joinery-agent-managed.conf` directly
+(JobCommandBuilder 1.56) and needs no release on the machine. References to
+host-harden below describe the shape as it was when built. WP1, WP4 and the host link
 landed 2026-09-01; WP2/WP3 (retiring the install password) and WP5 (approval
 checked with the provider, the join's address verified) landed 2026-09-03 —
 see "Built" below. What remains is one live run per shape on a real instance.
