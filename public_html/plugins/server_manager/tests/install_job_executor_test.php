@@ -100,11 +100,23 @@ $job->load();
 check($job->get('mjb_status') === 'queued',
 	'a new install_node job starts in status queued');
 
-// A non-install_node job still starts pending.
-$other = ManagementJob::createJob($node->key, 'check_status', array(array('type' => 'local', 'label' => 'x', 'cmd' => 'true')), array(), null);
+// Everything that is not a bootstrap job is a primitive, and starts pending —
+// which is what the node's own agent claims.
+$other = ManagementJob::createPrimitiveJob($node->key, 'check_status', 'check_status', array(), null);
 $made_jobs[] = $other->key;
 $other->load();
-check($other->get('mjb_status') === 'pending', 'a non-install_node job still starts pending');
+check($other->get('mjb_status') === 'pending', 'a primitive job starts pending, for the node to claim');
+
+// And a step list under a non-bootstrap type cannot be filed at all: there is
+// no executor for one, so it would sit pending for ever.
+$orphan_refused = false;
+try {
+	ManagementJob::createJob($node->key, 'check_status',
+		array(array('type' => 'local', 'label' => 'x', 'cmd' => 'true')), array(), null);
+} catch (Exception $e) {
+	$orphan_refused = strpos($e->getMessage(), 'nothing will run') !== false;
+}
+check($orphan_refused, 'a step list outside the bootstrap set is refused when it is composed');
 
 // The node agent claims WHERE mjb_status = 'pending'; the executor claims
 // WHERE mjb_status = 'queued'. Prove both predicates against this exact job.
@@ -252,10 +264,17 @@ check(in_array('retire_install_password', ManagementJob::BOOTSTRAP_JOB_TYPES, tr
 
 // A job outside that set is refused by the executor by name, so a bootstrap
 // runner handed anything else fails loudly instead of running it.
-$bad = ManagementJob::createJob($node7->key, 'check_status',
+//
+// The row has to be forged, because createJob() will not compose one: a step
+// list outside the bootstrap set is refused where it is written. That is the
+// point of doing it here anyway — this asserts the SECOND fence, so a row
+// that reached the table some other way (a hand-written INSERT, a restored
+// backup, a future caller) still cannot make the executor run it.
+$bad = ManagementJob::createJob($node7->key, 'install_node',
 	array(array('type' => 'local', 'label' => 'x', 'cmd' => 'echo never')), array(), null);
 $made_jobs[] = $bad->key;
-$db->prepare("UPDATE mjb_management_jobs SET mjb_status = 'running' WHERE mjb_id = ?")->execute([$bad->key]);
+$db->prepare("UPDATE mjb_management_jobs SET mjb_status = 'running', mjb_job_type = 'check_status' WHERE mjb_id = ?")->execute([$bad->key]);
+$bad->load();
 (new InstallJobExecutor())->execute($bad);
 $bad->load();
 check($bad->get('mjb_status') === 'failed'

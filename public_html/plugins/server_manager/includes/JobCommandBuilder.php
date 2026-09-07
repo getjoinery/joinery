@@ -1,10 +1,18 @@
 <?php
 /**
- * JobCommandBuilder - Generates step arrays for each job type.
+ * JobCommandBuilder - Decides how each operation reaches a node.
  *
- * All job-type intelligence lives here. The Go agent is a generic executor
- * that reads these steps and runs them in order.
+ * All job-type intelligence lives here. Almost every operation now builds a
+ * {primitive, params} envelope: a NAME the node looks up in its own compiled-in
+ * vocabulary, never a command this plane composed. The only step lists left are
+ * the two bootstrap jobs, which the plane runs itself before the machine has an
+ * agent to dispatch to.
  *
+ * @version 1.56 - the api transport is gone with the agent's local queue, which was its only
+ *                 executor: build_check_status_api, build_list_backups_api and has_api() are
+ *                 deleted, and 'api' is no longer a transport can_run() will offer. The
+ *                 management API itself stays — this plane still probes /health and refreshes
+ *                 node status over it (specs/agent_local_queue_retirement.md, WP4).
  * @version 1.55 - build_publish_upgrade is a primitive of the management node's OWN agent: the
  *                 plane pairs to itself and the Publish form dispatches to that node. The local
  *                 step that ran the publisher out of the plane-local queue is gone
@@ -156,10 +164,16 @@ class JobCommandBuilder {
 	// ── Transport capability helpers ──
 	//
 	// Two orthogonal questions:
-	//   1. Does the node HAVE the transport configured? (has_api_creds / has_ssh)
+	//   1. Does the node HAVE the transport configured? (has_ssh)
 	//   2. Does the operation HAVE an implementation for a transport? (transports_for)
 	// can_run() combines both: this node + this operation ⇒ can the builder build a job?
-	// has_api() adds a live /health probe on top of has_api_creds (used at job-build time).
+	//
+	// has_api_creds() is NOT one of these any more. A job never travels over the
+	// management API: the agent that used to run an `api` step is gone with the
+	// local queue, so the only remaining reader of those credentials is this
+	// plane making an HTTP call itself — the health probe and the node status
+	// refresh. Configured credentials therefore say nothing about what a node
+	// can be asked to DO.
 
 	public static function has_api_creds($node) {
 		return !empty($node->get('mgn_api_public_key'))
@@ -175,20 +189,18 @@ class JobCommandBuilder {
 
 	/**
 	 * Which transports does this operation have an implementation for?
-	 * Looks for build_<op>_primitive, build_<op>_api and build_<op>_ssh methods.
+	 * Looks for build_<op>_primitive, build_<op>_probe and build_<op>_ssh methods.
 	 *
 	 * Order is preference order. The primitive transport comes first because it
 	 * is the one where the node decides what it will run
-	 * (specs/agent_on_node_architecture.md §3.1); api and ssh remain until each
-	 * operation has crossed and each node's cutover flag is on.
+	 * (specs/agent_on_node_architecture.md §3.1). A probe asks the node nothing
+	 * and reads what it already publishes. SSH is down to the one bootstrap
+	 * session in a machine's life and its closing session.
 	 */
 	public static function transports_for($operation) {
 		$transports = [];
 		if (method_exists(static::class, "build_{$operation}_primitive")) {
 			$transports[] = 'primitive';
-		}
-		if (method_exists(static::class, "build_{$operation}_api")) {
-			$transports[] = 'api';
 		}
 		if (method_exists(static::class, "build_{$operation}_probe")) {
 			$transports[] = 'probe';
@@ -397,13 +409,12 @@ class JobCommandBuilder {
 
 	/**
 	 * Optimistic: do we have at least one viable (transport, credentials) pair for this
-	 * node + operation? Uses has_api_creds (config check, no probe) so the UI isn't
-	 * gray-out-flickering on a transient endpoint hiccup.
+	 * node + operation? Every check here is a configuration read, never a live
+	 * call, so the UI isn't gray-out-flickering on a transient endpoint hiccup.
 	 */
 	public static function can_run($node, $operation) {
 		$op_transports = self::transports_for($operation);
 		if (in_array('primitive', $op_transports) && self::has_agent_channel($node)) return true;
-		if (in_array('api', $op_transports) && self::has_api_creds($node)) return true;
 		if (in_array('probe', $op_transports) && NodeHealthProbe::has_target($node)) return true;
 		if (in_array('ssh', $op_transports) && self::has_ssh($node)) return true;
 		return false;
@@ -424,17 +435,11 @@ class JobCommandBuilder {
 				? 'no agent has paired with this plane'
 				: 'the agent channel is not switched on for this node';
 		}
-		if (in_array('api', $op_transports) && !self::has_api_creds($node)) {
-			$parts[] = 'no API credentials are configured';
-		}
 		if (in_array('probe', $op_transports) && !NodeHealthProbe::has_target($node)) {
 			$parts[] = 'there is no health check URL or port to probe';
 		}
 		if (in_array('ssh', $op_transports) && !self::has_ssh($node)) {
 			$parts[] = 'SSH is not configured';
-		}
-		if (!in_array('api', $op_transports)) {
-			$parts[] = 'no API implementation exists';
 		}
 		// Only worth saying where SSH could still be the answer. An operation
 		// that reaches nodes by primitive or probe has no SSH implementation by
@@ -446,21 +451,6 @@ class JobCommandBuilder {
 			$parts[] = 'no SSH implementation exists';
 		}
 		return "Cannot run '{$operation}' on this node: " . implode('; ', $parts) . '.';
-	}
-
-	/**
-	 * Routing decision at job-build time: should the dispatcher emit API steps
-	 * for this (node, operation) pair? True iff:
-	 *   1. The node has API credentials configured.
-	 *   2. build_<op>_api exists on this class.
-	 *   3. A fresh GET /health probe against the node succeeds (1s timeout).
-	 */
-	public static function has_api($node, $operation) {
-		if (!self::has_api_creds($node)) return false;
-		if (!method_exists(static::class, "build_{$operation}_api")) return false;
-
-		$probe = self::probe_api_health($node, 1);
-		return !empty($probe['ok']);
 	}
 
 	/**
@@ -769,32 +759,27 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * Check system health metrics on a node. Dispatches between API and SSH
-	 * implementations based on has_api(). If API creds exist and /health probes
-	 * green, the job runs as a single api step; otherwise it runs the six-ish
-	 * SSH steps that have always been the default.
+	 * Check system health metrics on a node.
+	 *
+	 * Two routes, and the node's own posture picks between them. A machine with
+	 * an agent answers for itself, as a primitive. A machine that will never
+	 * carry one — the DNS resolvers, the mail relay — is not asked at all: this
+	 * plane reads what that machine already publishes about itself over HTTP.
+	 * There is no third route; check_status has no SSH implementation anywhere.
 	 */
 	public static function build_check_status($node) {
 		if (self::has_primitive($node, 'check_status')) {
 			return self::build_check_status_primitive($node);
 		}
-		if (self::has_api($node, 'check_status')) {
-			return self::build_check_status_api($node);
-		}
 		if (NodeHealthProbe::has_target($node)) {
 			return self::build_check_status_probe($node);
 		}
 		throw new Exception(
-			"Node '{$node->get('mgn_slug')}' cannot run check_status: it has no agent, no API "
-			. "credentials, and no health check URL or port for this plane to probe."
+			"Node '{$node->get('mgn_slug')}' cannot run check_status: it has no agent, and no "
+			. "health check URL or port for this plane to probe."
 		);
 	}
 
-	/**
-	 * API path: a single GET to /api/v1/management/stats. The response JSON
-	 * is parsed by JobResultProcessor::process_check_status into the same
-	 * mgn_last_status_data shape the SSH path produces.
-	 */
 	/**
 	 * Primitive path: {primitive: check_status, params: {}} — a NAME the node
 	 * looks up in its own compiled-in vocabulary, not an instruction this plane
@@ -809,12 +794,6 @@ class JobCommandBuilder {
 	 */
 	public static function build_check_status_primitive($node) {
 		return ['primitive' => 'check_status', 'params' => []];
-	}
-
-	public static function build_check_status_api($node) {
-		return [
-			['type' => 'api', 'label' => 'Fetch node stats', 'method' => 'GET', 'endpoint' => 'stats', 'timeout' => 30],
-		];
 	}
 
 	/**
@@ -1907,12 +1886,11 @@ class JobCommandBuilder {
 	/**
 	 * Stop a restore that would be composed for a transport nothing runs.
 	 *
-	 * Every restore now travels as a primitive to the node's own agent, where
-	 * the node's own operator approves it. A node that cannot take one has no
-	 * remaining route: the agent refuses ssh and scp steps outright. This turns
-	 * that into an answer an operator can act on — upgrade the agent, or pair
-	 * the node — rather than a job that fails at step one with a message about
-	 * a step type.
+	 * Every restore travels as a primitive to the node's own agent, where the
+	 * node's own operator approves it. A node that cannot take one has no
+	 * remaining route: there is no step executor left that could reach a node
+	 * at all. This turns that into an answer an operator can act on — upgrade
+	 * the agent, or pair the node — rather than a job nothing would ever claim.
 	 */
 	private static function refuse_dead_restore_transport($node, $operation) {
 		$slug = $node->get('mgn_slug');
@@ -2042,12 +2020,10 @@ class JobCommandBuilder {
 		if (self::has_primitive($node, 'list_backups')) {
 			return self::build_list_backups_primitive($node);
 		}
-		if (self::has_api($node, 'list_backups')) {
-			return self::build_list_backups_api($node);
-		}
 		throw new Exception(
-			"Node '{$node->get('mgn_slug')}' cannot run list_backups: "
-			. "no paired agent and no API credentials (or the health probe failed)."
+			"Node '{$node->get('mgn_slug')}' cannot run list_backups: it has no paired agent "
+			. "reporting the list_backups primitive, and that is the only way to ask a node "
+			. "what is on its shelf."
 		);
 	}
 
@@ -2063,12 +2039,6 @@ class JobCommandBuilder {
 	 */
 	public static function build_list_backups_primitive($node) {
 		return ['primitive' => 'list_backups', 'params' => []];
-	}
-
-	public static function build_list_backups_api($node) {
-		return [
-			['type' => 'api', 'label' => 'List local backups', 'method' => 'GET', 'endpoint' => 'backups/list', 'timeout' => 30],
-		];
 	}
 
 	/**

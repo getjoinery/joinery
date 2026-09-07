@@ -1,16 +1,50 @@
 # Retire the agent's local job queue
 
-**Status: AUDITED 2026-08-30. The agent's SSH transport was REMOVED the same
-day — thirteen operations now fail loudly and the plane-side executor is
-blocking, not planned.**
-Written 2026-08-30. WP2 is done and found two real gates; see "WP2 — the audit,
-done" below. The earlier status line ("gated on nothing but its own audit") is
-withdrawn.
+**Status: BUILT 2026-09-07. WP1–WP4 all done; the queue does not exist.** The
+agent has one job source, the signed channel, on every machine including the
+management node. A row written into `mjb_management_jobs` by hand executes
+nothing, anywhere.
 
-**2026-09-05: G1 decided.** `publish_upgrade` becomes a primitive of the
-plane's own agent — see "G1 — decided" below. G2 closed with
-`ssh_single_bootstrap.md` WP3 (certificate issuance goes to the host's agent).
-What remains of this spec is build work, listed under "Work".
+What was deleted, agent side (v1.21.0): `localqueue.go`, `runner.go`, `api.go`,
+`creds.go` and `server.go` in full, with the `local`, `ssh`, `scp` and `api`
+step types they carried; the claim loop in `main.go`; `ClaimNextJob` and its
+bookkeeping (`AppendOutput`, `CompleteJob`, `FailJob`, `RecoverStaleJobs`),
+`GetNodeAPIInfo` and the two backup-target credential readers in `db.go`; the
+`LocalJobs` and `SecretBoxKey` config fields.
+
+What was deleted, plane side (`JobCommandBuilder` 1.56): the `api` transport
+— `build_check_status_api`, `build_list_backups_api` and `has_api()` — whose
+only executor was the queue, and its branches in `transports_for()`,
+`can_run()` and `why_cannot_run()`. No node holds API credentials, so nothing
+routed there. The management API itself stays: this plane still probes
+`/health` and refreshes node status over it, which is the plane calling a node
+rather than a job travelling.
+
+**The guard that replaces the queue.** `ManagementJob::createJob()` (1.17)
+refuses a step list for anything but `install_node` and
+`retire_install_password`. Those two are the bootstrap pair, run plane-side by
+`InstallJobExecutor` in status `queued`. A step list under any other job type
+would sit `pending` for ever and read on the dashboard as waiting, so it
+throws at the moment it is composed and names the fix: give the operation a
+primitive. Pinned by `job_command_builder_test.php` § "Nothing composes work
+that nothing will run", which also reads the builder source so a NEW builder
+emitting a dead step type fails there rather than in production.
+
+**One clause of the old acceptance line could not be met and was wrong to
+promise.** "The agent holds no database credential" was written before
+primitives grew database readers. `check_status` reports whether the site's
+database answers, `backupdirs` and `restore_statement` read the site's own
+configuration, the victim ceremony and the join, leave and switch watchers all
+read the settings table — and the agent writes its own heartbeat row, which is
+what the dashboard's agent panel shows. Those are the agent reading and
+reporting on the site it runs on. None of them is a source of work. The
+property that actually mattered is the third clause, and it holds: the
+database is a queue for nothing.
+
+Written 2026-08-30. WP2 found two real gates; see "WP2 — the audit, done"
+below. **G1 decided 2026-09-05** — `publish_upgrade` became a primitive of the
+plane's own agent. **G2 closed** with `ssh_single_bootstrap.md` WP3
+(certificate issuance goes to the host's agent).
 
 ## What changed on 2026-08-30
 
@@ -401,14 +435,16 @@ button works from then on.
 on dev and on getjoinery, approved on each one's own dashboard. A hand step,
 once per publishing box; item 4's join approval is the mechanism.
 
-**WP3 — Flip `cfg.LocalJobs` false** (behind WP2b and WP2c; G2 closed with
-item 6) on the management node, which is now paired to
-itself. `main.go:289` already contemplates this: "A control plane paired to
-itself runs both job sources in one process."
+**WP3 — Flip `cfg.LocalJobs` false. DONE 2026-09-07**, and then subsumed by
+WP4: the flag itself is gone, because a queue that must never run is not a
+setting. The measurement that said it was safe: every job type dispatched from
+2026-09-02 onward was a primitive except `install_node`, which starts `queued`
+and is claimed by `InstallJobExecutor` — a status the agent's `pending`-only
+claim never matched — and nothing was pending, queued or running at the cut.
 
-**WP4 — Delete the local queue**, the `local`/`ssh`/`scp` step types from the
-runner, and every `DB` method above. The agent then holds no database
-credential.
+**WP4 — Delete the local queue. DONE 2026-09-07.** See the status block at the
+top of this spec for exactly what went, on both sides, and for the one
+acceptance clause that was withdrawn as unmeetable rather than quietly failed.
 
 ## What it fixes, and what it does not
 

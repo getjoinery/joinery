@@ -2,8 +2,10 @@
 /**
  * GET /api/v1/management/health
  *
- * Lightweight liveness probe. Used by JobCommandBuilder::has_api() to decide
- * whether to route a job via API or SSH. The probe should stay cheap and
+ * Lightweight liveness probe. A management node asks this to establish that a
+ * site is answering — the node health probe and the dashboard's status refresh
+ * both call it. It decides no routing: jobs reach a node as primitives over the
+ * signed channel, never over this API. The probe should stay cheap and
  * deterministic — do NOT add database checks, filesystem scans, etc.
  */
 

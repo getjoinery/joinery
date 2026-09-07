@@ -69,10 +69,10 @@ try {
 	section('returns the newest job of the requested type');
 	// -----------------------------------------------------------------------
 
-	$older = ManagementJob::createJob($node_id, 'check_status', $steps, null, null);
-	$newer = ManagementJob::createJob($node_id, 'check_status', $steps, null, null);
+	$older = ManagementJob::createPrimitiveJob($node_id, 'check_status', 'check_status', [], null);
+	$newer = ManagementJob::createPrimitiveJob($node_id, 'check_status', 'check_status', [], null);
 	// An interleaved job of a different type must not be picked.
-	$other_type = ManagementJob::createJob($node_id, 'backup_database', $steps, null, null);
+	$other_type = ManagementJob::createPrimitiveJob($node_id, 'backup_run', 'backup_run', [], null);
 	$job_ids[] = (int)$older->key;
 	$job_ids[] = (int)$newer->key;
 	$job_ids[] = (int)$other_type->key;
@@ -82,7 +82,7 @@ try {
 	check((int)$latest->key === (int)$newer->key, 'newest (highest mjb_id) check_status wins');
 	check($latest->get('mjb_job_type') === 'check_status', 'returned model is the right type');
 
-	$latest_backup = ManagementJob::latestForNode($node_id, 'backup_database');
+	$latest_backup = ManagementJob::latestForNode($node_id, 'backup_run');
 	check($latest_backup !== null && (int)$latest_backup->key === (int)$other_type->key,
 		'a different type resolves independently');
 

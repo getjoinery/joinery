@@ -86,10 +86,10 @@ Honestly: **there isn't one, and building one is the major rewrite this spec
 declines.** The web stack and the dispatch logic share a process and a
 database user. What changes is what that is *worth* to an attacker:
 
-- Today: web-stack compromise = root on the management node (the local
-  queue), and from there the fleet.
-- End state: web-stack compromise = the ability to dispatch **observe and
-  operate primitives** to paired nodes. Not root anywhere, not destructive
+- What it was worth until item 7 shipped: web-stack compromise = root on the
+  management node (the local queue), and from there the fleet.
+- What it is worth once 1.21.0 is in the field: web-stack compromise = the
+  ability to dispatch **observe and operate primitives** to paired nodes. Not root anywhere, not destructive
   anywhere, not a shell anywhere. Refusals are counted per node
   (`mjb_agent_outcome`), so a probing attacker is a visible spike, not a
   log-grep.
@@ -176,7 +176,7 @@ status**; the spec named is where its design lives.
 | 4 | Keyless provisioning | `keyless_provisioning.md` | **BUILT 2026-09-03, live gate open.** Provision over a sealed install password, host agent on every docker machine, the install password retired once every agent on the machine is admitted (the executor completes the retire job only after the machine refused the password), join approval checked with the provider. Owed: one live run per shape to `retired` |
 | 5 | Credential custody — the platform holds no SSH key | `implemented/fleet_ssh_credential_custody.md` | **DONE 2026-09-05.** WP1 done; WP2 superseded by item 4. **WP3 CLOSED 2026-09-05 with nothing to build:** the container case is done (`decommission_site` on the host agent); a whole machine is deleted at its provider BY HAND and its record removed from the dashboard afterwards, and that stays manual — the platform never deletes a cloud machine programmatically (owner). "Permanently delete" on the dashboard remains the way to remove one Joinery site from a shared machine. The dashboard already says so on a dedicated machine's Overview tab. **WP4 DONE 2026-09-05 — the whole of item 5, all of it on the management node, no managed node changes:** the platform forgot `config/provisioning_key`: no PHP reads it any more (measured 2026-09-05); what remains is the pin in `fix_permissions.sh`, the entry in `installer_contract_test.php`, and the key pair sitting in `config/` where the web user can read it. The pair moved to the operator's `~/.ssh/joinery_provisioning_key` as a troubleshooting key (`fix_permissions.sh` 3.2 dropped the pin; installer contract test and plugin doc no longer name it) — it was verified by hand to still reach jeremytunnell, nothing on jeremytunnell changed, and jeremytunnell's `mgn_ssh_key_path` was repointed to the new file so the interim reachability check does not go blind. Tree-wide, only specs still name `config/provisioning_key`. Readers of `mgn_ssh_key_path` (`has_ssh()`, the node form, `PollHostingOrders`, the relay copy) die with item 7's `ssh` step type. **WP5 (rekey jeremytunnell) WITHDRAWN** by owner 2026-09-05: no key is removed from or replaced on any current site. The annex still lists WP5; this table wins |
 | 6 | SSH is one bootstrap, run once | `implemented/ssh_single_bootstrap.md` | **DONE 2026-09-02**, live-verified on every shape: one install job = local preflight + one ssh session; certificates and fleet seeding over the agent; `enable_agent` and `discover_nodes` deleted |
-| 7 | Retire the local queue | `agent_local_queue_retirement.md` | **IN PROGRESS from 2026-09-05.** G2 closed with item 6 WP3. **G1 decided 2026-09-05 (owner):** `publish_upgrade` becomes a primitive of the plane's own agent, the plane pairs to itself, and the release signing key goes `600 root:root` — the `www-data` executor from item 4 cannot read the key and never will, and a cron worker was refused as a second installed component. Order: WP2b primitive + chown-on-exit + key pin + dashboard dispatch (**DONE on dev 2026-09-05**: agent 1.19.0 shipped in 0.8.371, key re-owned, 0.8.373 published from the dashboard as job 11519 of the plane's own node), WP2c self-pair (dev DONE as node 24776; getjoinery is dev's node, so dev publishes it as a node action — `publish_as_node_action.md`), WP3 flip `LocalJobs` false, WP4 delete the queue and the `local`/`ssh`/`scp` step types (which deletes the last readers of `mgn_ssh_key_path`) |
+| 7 | Retire the local queue | `agent_local_queue_retirement.md` | **DONE 2026-09-07 (agent 1.21.0, `JobCommandBuilder` 1.56, `ManagementJob` 1.17), undeployed.** G2 closed with item 6 WP3. G1 decided 2026-09-05 (owner) and built: `publish_upgrade` is a primitive of the plane's own agent, the plane pairs to itself (dev, node 24776), the release signing key is `600 root:root`, and getjoinery is published from dev as a node action (`publish_as_node_action.md`). WP3 and WP4 landed together — the queue, the `local`/`ssh`/`scp`/`api` step types and the `LocalJobs` flag are all gone, and `createJob()` now refuses a step list for anything but the bootstrap pair, so a builder that grows one breaks loudly instead of filing a job nothing claims. **The `api` transport went with it** (its only executor was the queue; no node held API credentials). **Open: the live gate.** The fleet runs 1.19.0; this ships on the next publish, and the management node is the machine that must be watched through it, because it is the one whose own job source changed |
 | 8 | Per-node hardening | `environment_build_surface_reduction.md` | The image and install surface work only. **It removes no SSH key from any current site** — the existing keys are the human troubleshooting door and stay (owner, 2026-09-05). The move of getjoinery to its own box is no longer part of this item; it was motivated by SSH removal |
 
 **Why item 7 is last, which is the reversal this family keeps re-deriving.** The
@@ -263,6 +263,21 @@ annexes.
 - No platform code, deploy script or test reads an SSH private key, and
   `config/` on the management node holds none. Keys on current sites are
   untouched. *(item 5, 2026-09-05)*
+- The agent's `local` step type is gone and inserting a row into
+  `mjb_management_jobs` by hand executes nothing, on any machine in the fleet.
+  *(item 7, built 2026-09-07, ships on the next publish)*
+
+  This criterion carried a third clause — "and it holds no database
+  credential" — which has been **struck as unmeetable and wrong to have
+  promised**. It was written on 2026-08-30, before primitives grew database
+  readers. The agent reads its own site's database to answer `check_status`
+  (does the database respond), to resolve backup directories, to compose a
+  restore statement, to run the victim ceremony, and to watch the settings
+  table for a join, a leave or the run switch; it writes one row, its own
+  heartbeat, which is what the dashboard's agent panel reads. Every one of
+  those is the agent reporting on the machine it runs on. **None of them is a
+  source of work**, which is the property the criterion existed to protect,
+  and that property is met outright.
 
 **Not met:**
 
@@ -270,16 +285,20 @@ annexes.
   and `install_node` opens exactly one. *(items 3 and 6)*
 - A provisioning password authenticates an install without ever being written to
   a machine. *(item 4)*
-- `mgn_ssh_key_path` has no reader. *(item 7; the item 5 half — no platform
+- `mgn_ssh_key_path` has no reader. *(the item 5 half — no platform
   code, deploy script or test reads an SSH private key, `config/` holds
-  none, keys on current sites untouched — was met 2026-09-05)*
+  none, keys on current sites untouched — was met 2026-09-05. What still reads
+  the column is the bootstrap pair, `install_node` and
+  `retire_install_password`, which are the one SSH session in a machine's life
+  and stay by design. So this criterion as written is met by everything except
+  the two operations it was never meant to cover, and should be read as
+  "nothing but the bootstrap reads it")*
 - The install runner runs as the site user and no step it runs is privileged
   on the management node. *(item 3)*
-- The agent's `local` step type is gone, it holds no database credential, and
-  inserting a row into `mjb_management_jobs` by hand executes nothing. *(item 7)*
 - A publish from the dashboard runs as the `publish_upgrade` primitive of the
   plane's own agent, and `config/agent_signing_key` is `600 root:root` on every
-  publishing box — no site process and no operator login can read it. *(item 7)*
+  publishing box — no site process and no operator login can read it. *(item 7;
+  built and proven on dev, unproven on getjoinery)*
 
 ## One reversal inside an implemented spec
 
@@ -348,4 +367,5 @@ dating them:**
   the whole fleet is there, and the SSH restore builders are unreachable.
 - The management node's agent is a root shell for its own database: it claims
   any pending row whose commands blob has no `primitive` key and executes a
-  `local` step as root. Still true. Item 7 closes it.
+  `local` step as root. **Closed 2026-09-07** by item 7 — the claim, the step
+  type and the code that ran it are deleted, not disabled.
