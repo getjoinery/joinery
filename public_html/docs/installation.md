@@ -2,7 +2,7 @@
 
 > **New to Joinery?** The [Quick Start guide](quickstart.md) walks you through renting a server, configuring your domain, and installing Joinery step by step — no prior experience required.
 
-Deploy Joinery on a fresh Ubuntu 24.04 or 26.04 LTS server, either in a Docker container or directly on the host (bare-metal). The same `install.sh` script handles both — the deployment mode is auto-detected from whether a port is supplied.
+Deploy Joinery on a fresh Ubuntu 24.04 or 26.04 LTS server, either in a Docker container or directly on the host (bare-metal). The same `install.sh` script handles both — the deployment mode is auto-detected from whether a port is supplied. Docker mode is how you put several sites on one machine; it is not a sandbox — see [What Docker mode is](#what-docker-mode-is).
 
 ## Table of Contents
 
@@ -167,6 +167,22 @@ sudo ./install.sh -y -q site mysite mysite.com 8080
 Without `-y`, a run with no terminal on stdin (cloud-init, CI, piped ssh) still completes: every prompt takes its default. Defaults are conservative — proposals (install Docker, use a suggested port) proceed; destructive choices (overwrite an existing site, delete data volumes, downgrade code) refuse, and only their explicit flags (`--wipe-data`, `--allow-downgrade`) can say otherwise. The one hard requirement is the bare-metal server setup's database password, which must arrive via `POSTGRES_PASSWORD` in the environment when nobody can type it.
 
 ## Docker Deployment
+
+### What Docker mode is
+
+Docker mode is how you run several Joinery sites on one machine. Each site gets a container holding a complete small server — Apache, PHP-FPM, PostgreSQL, cron, and whatever daemons its plugins need — with its own database, its own files and its own host port. The container's job is to keep sites from colliding with each other over ports, database names and file paths.
+
+The container is not a security boundary, and a site is not a sealed appliance that can be dropped safely onto a shared machine. Treat every site on a host, and the host itself, as one trust domain:
+
+- **The sites share a network.** Containers run on Docker's default bridge, so each one can reach the others, the host, and whatever else the host can reach. One site's code can open a connection to another site's PostgreSQL.
+- **The host is part of the site.** HTTPS terminates on the host's Apache, which proxies to the container over plain HTTP on loopback. The certificate, the proxy vhost and the site's DNS all live outside the container.
+- **`docker` access is access to every site.** Site data lives in named volumes on the host, `docker exec` opens a root shell in any container, and membership of the `docker` group is equivalent to root on the machine.
+- **Containers take Docker's defaults.** No user-namespace remapping, no read-only root filesystem, no dropped capabilities. Processes start as root inside the container; Apache and PHP-FPM drop their workers to `www-data`.
+- **The site's web port answers on every interface.** `-p PORT:80` publishes there, and Docker's forwarding rules are consulted before UFW's, so a UFW rule does not close it — anyone who knows the port reaches the site directly, skipping the host proxy and its HTTPS redirect. The container's PostgreSQL port is the exception: it publishes on loopback only, and `install.sh docker` adds a `DOCKER-USER` rule dropping ports 9080-9099 arriving on the public interface.
+
+Host hardening is its own step: `install.sh host-harden` sets key-only SSH and fail2ban. Neither it nor `install.sh docker` configures UFW on a Docker host — the UFW rules in this guide belong to bare-metal server setup.
+
+So run Joinery containers on a machine you control, and put sites that must not reach each other on separate machines rather than in separate containers.
 
 ### One-time setup
 

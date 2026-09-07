@@ -399,7 +399,7 @@ consumed by `password_reset_2_logic`, never anything vault-scoped):
   the ceremony additionally requires an *independent* second factor (TOTP, or a
   passkey other than the one that authorized the reset) at `/password-reset-2fa`
   — without it a stolen authenticator could reset, sign in, and unlock with one
-  key, the collapse [the role split](#the-role-split-passwords-vs-passkeys)
+  key, the collapse [the role split](#the-role-split-a-passkey-never-opens-both-doors)
   forbids. A vault holder with no independent factor accepts passkey-alone as
   their floor, consistent with declining 2FA everywhere else.
 - **TOTP alone** — for accounts **without** a vault only

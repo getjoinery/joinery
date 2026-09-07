@@ -391,7 +391,7 @@ The script fully supports running multiple sites on the same server:
 
 - **Port conflict detection**: Automatically checks if ports are in use
 - **Port suggestions**: Offers next available port if conflict detected
-- **Site isolation**: Each site uses completely isolated build context and volumes
+- **Separation, not isolation**: each site gets its own build context, volumes, database and port, so sites do not collide. The container is not a security boundary — sites share Docker's default bridge network, the host terminates their HTTPS, and anyone with `docker` access on the host reaches every site. Put sites that must not reach each other on separate machines.
 
 ```bash
 # First site (uses port 8080)
