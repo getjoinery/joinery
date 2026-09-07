@@ -1,5 +1,5 @@
 #!/bin/bash
-#VERSION 1.4
+#VERSION 1.5
 #
 # THIS FILE IS NOT RUN FROM THE REPOSITORY.
 #
@@ -55,7 +55,7 @@
 # <UDF name="JOINERY_ADMIN_PASSWORD" label="Admin password" example="Choose a strong password" />
 # <UDF name="JOINERY_DOMAIN" label="Site domain (point its DNS at this server for automatic HTTPS)" example="example.com" />
 # <UDF name="JOINERY_SSH_KEY" label="SSH public key for this server" default="" optional="true" />
-# <UDF name="JOINERY_LINODE_TOKEN_PASSWORD" label="Linode API token (only if your DNS is at Linode)" default="" optional="true" />
+# <UDF name="JOINERY_LINODE_TOKEN_PASSWORD" label="Linode API token with the Domains Read/Write scope (only if your DNS is at Linode)" default="" optional="true" />
 
 set -euo pipefail
 

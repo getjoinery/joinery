@@ -18,7 +18,32 @@ You also need an email sending service (we recommend [SMTP2GO](https://www.smtp2
 
 Finally, backups are important.  We will sign up for a storage "bucket" where your backups go.  The provider we recommend is ([Backblaze B2](https://www.backblaze.com/cloud-storage)), and they provide 10GB storage for free and extra storage is very cheap.
 
-One last note:  You will be shown important secrets three times, and each time it is the only time. The vault codes/key file open your data. The backup recovery key opens your backups. The 2fa codes get you back into your account.  You MUST save all three of these somewhere safe.
+## Before You Start
+
+You will create four accounts, in this order:
+
+| Account | What it's for | Cost |
+|---|---|---|
+| Namecheap | your domain name | about $10–15 a year |
+| SMTP2GO | sending email | free |
+| Linode | the server | $5 a month |
+| Backblaze | backups | free for the first 10 GB |
+
+Along the way you will be handed two kinds of secrets. Keep them apart in your head.
+
+**Keep until setup is done.** Three keys you copy from one website and paste into another. Once pasted, your site holds them and you can throw your copy away:
+
+- the SMTP2GO API key (Step 2)
+- the Linode API token (Step 3)
+- the Backblaze application key (Step 5)
+
+**Keep forever.** None of these can be looked up again later. Save each one in a password manager the moment you have it:
+
+- your **site login password** (Step 4, then a new one at first login)
+- your **server root password** (Step 4)
+- your **vault recovery codes** — open your encrypted email and files if you lose your passkey (wizard)
+- your **2FA backup codes** — get you back into your account if your second factor stops working (wizard)
+- your **backup recovery key** — opens your backups (wizard)
 
 ---
 
@@ -52,7 +77,7 @@ Instead, use an email sending service (we recommend [SMTP2GO](https://www.smtp2g
 2. Click the **Add API Key** button and give the key a name — anything; `Joinery` is fine.
 3. Check the key's **Permissions** before you save. Turn on two groups:
    **Emails** and **Sender Domains**. 
-4. Copy the key and save it somewhere — you'll paste it into your site in Step 6.
+4. Copy the key and save it somewhere — you'll paste it into the setup wizard in Step 7.
 
 
 ## Step 3 — Create a Linode Account and get an API Key
@@ -67,8 +92,8 @@ You'll need to verify your email and add a payment card. Once you can see the Li
 3. Click the **Create a Personal Access Token** button
 4. Label it **Joinery Token**
 5. Choose expiry "In one month"
-6. Select **No Access** for all options except set **Linodes**, to **Read/Write**.
-7. Click **Create Token**, and save the displayed token.  You'll need it later.
+6. Select **No Access** for all options except set **Domains** to **Read/Write**.
+7. Click **Create Token**, and save the displayed token.  You'll paste it in Step 4.
 
 ---
 
@@ -85,7 +110,7 @@ Click **Deploy New Linode**. A form opens. Here's every field and what it means:
 - **Admin email address** — the email you'll use to log in to your site. Use your real address you use today (not the new one you want): it's also how you recover your account if you ever forget your password.
 - **Admin password** — the password you'll use to log in to your site. Choose a strong one and save it in a password manager. (You'll be asked to set a fresh one the first time you log in — a routine precaution.)
 - **Site domain** — the domain you bought, like `yourname.com`. Type it exactly, with no `www` and no `https://`. Don't make one up — it must be a domain you actually own, because in the next step you'll connect it to this server.
-- **Linode API token** — Copy the token you created in step 3 into this box.
+- **Linode API token** — Copy the token you created in step 3 into this box. Your server uses it to add your domain to Linode's DNS and point it at itself.
 
 ### The server fields (rest of the form)
 
@@ -122,7 +147,7 @@ https://yourname.com/admin
 
 If the padlock isn't ready yet (DNS still spreading), `http://yourname.com/admin` works in the meantime — the secure version switches on by itself shortly after your domain connects.
 
-Log in with the **admin email and admin password you chose on the form** in Step 2.
+Log in with the **admin email and admin password you chose on the form** in Step 4.
 
 You'll be asked to set a new password right away. Do it, and save the new one in your password manager.
 
@@ -130,19 +155,11 @@ You'll be asked to set a new password right away. Do it, and save the new one in
 
 ## Step 7 — Walk Through the Setup Wizard
 
-The first time you log in, your site opens its **setup wizard** — a checklist that walks you through everything a new site needs: your name and the site's name, sign-in security, your personal encryption key, email, calendar, and backups. Each step explains itself, and you can leave and come back at any point.
+The first time you log in, your site opens its **setup wizard**. Each screen explains itself. Go through it in order, and don't skip the email step — a password reset email is the way back into your account, and a new site can't send one until email is set up.
 
-Go through it in order. 
+Have ready to paste: the SMTP2GO key from Step 2, and the Backblaze bucket name and key from Step 5. The Linode token is already there — the wizard uses it once to add your DNS entries, then deletes it.
 
-- **Passkeys** — you will be asked to create a passkey, which is like when you use your camera or fingerprint to unlock your computer.  
-- **Vault recovery codes** — For encrypting your email and files, if you cannot access your passkey, these codes will allow you to access your data.  Save these codes somewhere safe.
-- **2 factor authentication** — You can use your passkey as your second factor as long as you haven't chosen the highest level of security.  If you intend to choose the highest level of security, you'll need to set up a second factor here (the kind where you type in the 6-digit code to log in).  If you set up 2fa, you will also get a new set of backup codes if your 2fa stops working.  Save these codes.
-- **Choose your email address** — something like `you@yourname.com`. This becomes the address your site sends from *and* a real mailbox on your site: mail sent to it arrives right there.
-- **Paste your SMTP2GO API key** — from the SMTP2GO account you created earlier. Joinery will write all of your DNS entries for you using this API key.
-- **Confirm the test email** — the wizard sends you a message, and when it arrives, email is proven working end to end.
-- **Configure your backups** — You will be specifying a **storage API key** from step 5 and an **encryption key** that will be created automatically for you.  It is very important that you save this key.  It is the key that will allow you to open your backups.  
-
-Don't skip the email step. If you ever forget your password, a reset email is the way back in — and a brand-new site has no way to send one until this is done.
+Three screens show you a **keep forever** secret once and never again: your vault recovery codes, your 2FA backup codes, and your backup recovery key. Save each one before you click past it.
 
 ---
 
@@ -165,7 +182,7 @@ Your site comes ready with:
 
 ## If Something Goes Wrong
 
-- **The site never appears** after 15 minutes: the most common cause is a typo in the domain field. The cheapest fix is also the cleanest one — on the Linode dashboard, **delete the server** (Settings → Delete) and repeat Step 2 with the field corrected. 
+- **The site never appears** after 15 minutes: the most common cause is a typo in the domain field. The cheapest fix is also the cleanest one — on the Linode dashboard, **delete the server** (Settings → Delete) and repeat Step 4 with the field corrected. 
 - **The padlock / HTTPS isn't working** but the site loads over `http://`: DNS just hasn't finished spreading. 
 - **You can't log in**: make sure you're using the *admin email and password* from the form (not the root password), and that you're at `/admin`.
 

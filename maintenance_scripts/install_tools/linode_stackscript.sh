@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#VERSION 1.1 - First-boot install driver for the Linode StackScript path.
+#VERSION 1.3 - First-boot install driver for the Linode StackScript path.
 #
 # linode_stackscript.sh — turn a blank Linode into a running Joinery site.
 #
@@ -33,10 +33,15 @@
 #                           server setup, which then mirrors it to user1 with
 #                           sudo and hardens root login off. Blank leaves root
 #                           access exactly as the provider configured it.
-#   JOINERY_LINODE_TOKEN    optional — a Linode API token, used once to create
-#                           the A record so the first certificate attempt
-#                           succeeds instead of waiting on the retry timer.
-#                           Never written to disk, never printed.
+#   JOINERY_LINODE_TOKEN    optional — a Linode API token with the Domains
+#                           Read/Write scope, used to create the zone (when
+#                           the account holds none) and the A record, so the
+#                           first certificate attempt succeeds instead of
+#                           waiting on the retry timer. Never printed. A token
+#                           that proved usable is then sealed into the site
+#                           (utils/install_dns_credential.php) for the setup
+#                           wizard, whose email step uses it once to add the
+#                           mail records and deletes it.
 #   JOINERY_INSTALL_BUNDLE  optional — plugin bundle name, default personal.
 #
 # Failure is loud and immediate. A half-installed box that looks alive is worse
@@ -69,6 +74,7 @@ ADMIN_EMAIL="${JOINERY_ADMIN_EMAIL:-}"
 DOMAIN="${JOINERY_DOMAIN:-}"
 SSH_KEY="${JOINERY_SSH_KEY:-}"
 LINODE_TOKEN="${JOINERY_LINODE_TOKEN:-}"
+TOKEN_USABLE=false
 BUNDLE="${JOINERY_INSTALL_BUNDLE:-personal}"
 
 [ -n "$ADMIN_PASSWORD" ] || fail "No admin password was supplied. This field is required on the deploy form."
@@ -164,36 +170,56 @@ if [ -n "$LINODE_TOKEN" ] && [ -n "$DOMAIN" ]; then
             RECORD=""
         fi
 
-        DOMAIN_ID=$(curl -s --max-time 15 \
+        # Listing zones is the scope check: a token without Domains Read/Write
+        # gets a 401 here, which is a different problem from "no zone yet" and
+        # is reported as one.
+        LIST_CODE=$(curl -s -o /tmp/joinery_dns_zones.json -w '%{http_code}' --max-time 15 \
             -H "Authorization: Bearer ${LINODE_TOKEN}" \
-            "https://api.linode.com/v4/domains" 2>/dev/null \
-            | grep -o "{[^{]*\"domain\": *\"${ZONE}\"[^}]*}" \
-            | grep -o '"id": *[0-9]*' | head -1 | grep -o '[0-9]*' || true)
-
-        if [ -z "$DOMAIN_ID" ]; then
-            echo "No zone for '$ZONE' in this Linode account — skipping."
+            "https://api.linode.com/v4/domains?page_size=500" 2>/dev/null || echo 000)
+        if [ "$LIST_CODE" != "200" ]; then
+            echo "Linode returned HTTP $LIST_CODE listing zones — the token probably lacks the Domains Read/Write scope. Skipping DNS creation."
             echo "Point $DOMAIN at $PUBLIC_IP yourself; the certificate follows automatically."
+            DOMAIN_ID=""
         else
+            TOKEN_USABLE=true
+            DOMAIN_ID=$(grep -o "{[^{]*\"domain\": *\"${ZONE}\"[^}]*}" /tmp/joinery_dns_zones.json 2>/dev/null \
+                | grep -o '"id": *[0-9]*' | head -1 | grep -o '[0-9]*' || true)
+        fi
+        # No zone means the deployer pointed the nameservers at Linode and
+        # nothing else, which is exactly the quickstart's path. Create it,
+        # so that pointing the nameservers here is the only DNS errand left.
+        if [ "$LIST_CODE" = "200" ] && [ -z "$DOMAIN_ID" ]; then
+            echo "No zone for '$ZONE' in this Linode account — creating one."
+            CREATE_CODE=$(curl -s -o /tmp/joinery_dns_zone.json -w '%{http_code}' --max-time 15 \
+                -X POST \
+                -H "Authorization: Bearer ${LINODE_TOKEN}" \
+                -H "Content-Type: application/json" \
+                -d "{\"domain\":\"${ZONE}\",\"type\":\"master\",\"soa_email\":\"${ADMIN_EMAIL}\"}" \
+                "https://api.linode.com/v4/domains" 2>/dev/null || echo 000)
+            if [ "$CREATE_CODE" = "200" ]; then
+                DOMAIN_ID=$(grep -o '"id": *[0-9]*' /tmp/joinery_dns_zone.json 2>/dev/null | head -1 | grep -o '[0-9]*' || true)
+                echo "Zone created: $ZONE"
+            else
+                echo "Linode returned HTTP $CREATE_CODE creating the zone — continuing without it."
+                echo "Point $DOMAIN at $PUBLIC_IP yourself; the certificate follows automatically."
+            fi
+        fi
+        if [ -n "$DOMAIN_ID" ]; then
             HTTP_CODE=$(curl -s -o /tmp/joinery_dns_result.json -w '%{http_code}' --max-time 15 \
                 -X POST \
                 -H "Authorization: Bearer ${LINODE_TOKEN}" \
                 -H "Content-Type: application/json" \
                 -d "{\"type\":\"A\",\"name\":\"${RECORD}\",\"target\":\"${PUBLIC_IP}\",\"ttl_sec\":300}" \
                 "https://api.linode.com/v4/domains/${DOMAIN_ID}/records" 2>/dev/null || echo 000)
-
             if [ "$HTTP_CODE" = "200" ]; then
                 echo "A record created: $DOMAIN -> $PUBLIC_IP"
-                # Give the record a moment to be servable before install.sh's own
-                # DNS check runs. Not waited on properly: if it is not ready the
-                # install continues on HTTP and the retry timer finishes the job.
                 sleep 20
             else
                 echo "Linode returned HTTP $HTTP_CODE creating the record — continuing without it."
             fi
-            rm -f /tmp/joinery_dns_result.json
         fi
+        rm -f /tmp/joinery_dns_zones.json /tmp/joinery_dns_zone.json /tmp/joinery_dns_result.json
     fi
-    unset LINODE_TOKEN
 fi
 
 # ---------------------------------------------------------------------------
@@ -220,6 +246,29 @@ fi
 
 unset JOINERY_ADMIN_PASSWORD
 ADMIN_PASSWORD=""
+
+# The token proved usable above, and the setup wizard needs it once more, a
+# few minutes from now, for the mail records. Seal it into the site rather
+# than ask the deployer to paste it twice: the wizard's publish uses it once
+# and deletes it. Handed over on stdin, never as an argument.
+if [ "$TOKEN_USABLE" = true ]; then
+    case "$LINODE_TOKEN" in
+        *[!A-Za-z0-9_-]*) TOKEN_USABLE=false ;;
+    esac
+fi
+if [ "$TOKEN_USABLE" = true ]; then
+    say "Keeping the DNS token for the setup wizard"
+    STORE_TOOL="/var/www/html/${SITENAME}/public_html/utils/install_dns_credential.php"
+    if [ -f "$STORE_TOOL" ] \
+        && printf '{"driver":"linode","credential":{"access_token":"%s"}}' "$LINODE_TOKEN" \
+            | php "$STORE_TOOL" >/dev/null 2>&1; then
+        echo "The wizard's email step will use it once to add the mail records, then delete it."
+    else
+        echo "Could not keep the token — the wizard will ask for it when it adds the mail records."
+    fi
+fi
+unset LINODE_TOKEN
+LINODE_TOKEN=""
 
 say "Joinery is installed"
 SITE_HOST="$DOMAIN"

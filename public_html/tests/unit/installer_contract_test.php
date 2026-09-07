@@ -550,6 +550,23 @@ check(!preg_match('/echo[^\n]*\$\{?JOINERY_ADMIN_PASSWORD/', $handoff_src),
     'the handoff script never echoes the password');
 check(!preg_match('/echo[^\n]*\$\{?(JOINERY_)?LINODE_TOKEN/', $handoff_src),
     'and never echoes the API token');
+
+// The quickstart's only DNS errand is pointing the nameservers at Linode: the
+// zone itself is created here when the account holds none, and a token that
+// cannot list zones is reported as a scope problem rather than as "no zone".
+check(strpos($handoff_src, '"type\":\"master\"') !== false
+    && strpos($handoff_src, 'https://api.linode.com/v4/domains"') !== false,
+    'the handoff creates the zone when the account holds none');
+check(strpos($handoff_src, 'Domains Read/Write scope') !== false,
+    'a token that cannot list zones is reported as a scope problem');
+check(strpos($wrapper_src, 'Domains Read/Write') !== false,
+    'the deploy form field names the token scope');
+// The wizard needs the same token minutes later for the mail records: a
+// usable one is sealed into the site (consumed on the wizard's publish) rather
+// than asked for twice, and it crosses on stdin, never on argv.
+check(strpos($handoff_src, 'utils/install_dns_credential.php') !== false
+    && preg_match('/printf[^\n]*LINODE_TOKEN[^\n]*\n[^\n]*\| php "\$STORE_TOOL"/', $handoff_src) === 1,
+    'the handoff seals a usable token into the site for the wizard, over stdin');
 check(strpos($handoff_src, 'export JOINERY_ADMIN_PASSWORD') !== false
     && !preg_match('/install\.sh[^\n]*\$ADMIN_PASSWORD/', $handoff_src),
     'the password reaches install.sh through the environment, not an argument',

@@ -31,7 +31,7 @@
  * The expensive work (provider API lookups, the record plan) runs only when
  * its stage renders — the step's status closure stays cheap.
  *
- * @version 3.3
+ * @version 3.4
  * @changelog 3.3 - SMTP2GO is the preselected, recommended provider: one API
  *   key sends mail and registers the sending domain, and its free tier covers
  *   a small site. Mailgun remains in the picker, unchanged.
@@ -313,6 +313,16 @@ if ($setup_send_stage === 'dns') {
 	// Preselected whether or not the host gates its API — a gated selection
 	// asks its question with the radio choice below the dropdown.
 	$setup_send_dns_auto = isset($setup_send_drivers[$setup_send_dns_host]);
+	// The credential the installer kept for this publish
+	// (DnsInstallCredential): its driver is preselected when the live NS
+	// records answer nothing yet, and that driver's form says a blank field
+	// is fine. Only the driver key is read here — the secret stays sealed
+	// until the publish consumes it.
+	$setup_send_install_cred = DnsInstallCredential::stored();
+	$setup_send_install_drv = ($setup_send_install_cred !== null
+			&& isset($setup_send_drivers[$setup_send_install_cred['driver']]))
+		? $setup_send_install_cred['driver'] : '';
+	unset($setup_send_install_cred);
 	$setup_send_move = is_array($setup_send_notice) ? ($setup_send_notice['move'] ?? null) : null;
 	// The move is offered only when the domain serves nothing but this site:
 	// visible mail routing, addresses, or a sender policy pointing anywhere
@@ -464,7 +474,7 @@ if ($setup_send_stage === 'dns') {
 		$setup_pub->dropinput('dns_provider', 'Where is your domain managed?', array(
 			'options' => $setup_send_drv_options,
 			'empty_option' => 'Choose…',
-			'value' => $setup_send_dns_auto ? $setup_send_dns_host : '',
+			'value' => $setup_send_dns_auto ? $setup_send_dns_host : $setup_send_install_drv,
 		));
 		// A vendor that gates its API away from ordinary accounts asks its
 		// question before showing a form most people cannot fill: the gate as
@@ -520,6 +530,10 @@ if ($setup_send_stage === 'dns') {
 		}
 		foreach ($setup_send_drivers as $setup_send_drv_key => $setup_send_drv_class) {
 			echo '<div class="setup-ms-cred d-none" data-dns-driver="' . htmlspecialchars($setup_send_drv_key) . '">';
+			if ($setup_send_drv_key === $setup_send_install_drv) {
+				echo '<p class="small">The ' . htmlspecialchars($setup_send_drv_class::getLabel())
+					. ' token you entered when creating this server is saved for this step. Leave the field blank to use it — it is used once here, then deleted.</p>';
+			}
 			// The form is fields and one "How do I do this?" link; every note
 			// and instruction lives inside that modal. The vendor's account
 			// gate (unless the callout above already said it) and any setup

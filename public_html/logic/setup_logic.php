@@ -6,7 +6,7 @@
  * step mounts an existing ceremony or panel; this logic owns only the shell:
  * step resolution, dismissal, "not now" decisions, and the welcome save.
  *
- * @version 2.3
+ * @version 2.4
  * @changelog 2.3 - backup_task_activate and the run_backup / save_recovery_key
  *   forwarding are gone with the wizard's section 3 and by-hand fold; the
  *   backups step posts only target actions and the unproven-state forms.
@@ -379,6 +379,18 @@ function setup_logic(array $input): LogicResult {
 									&& $field !== 'session_token' && $field !== 'client_ip') {
 								$missing = true;
 							}
+						}
+						// A credential the installer kept for this one publish
+						// stands in for a blank form — and is deleted before it
+						// is used, so no outcome can leave it behind.
+						if ($missing) {
+							$install_cred = DnsInstallCredential::stored();
+							if ($install_cred !== null && DnsDriverRegistry::get($install_cred['driver']) === $driver_class) {
+								$credential = array_merge($credential, $install_cred['credential']);
+								$missing = false;
+								DnsInstallCredential::consume();
+							}
+							unset($install_cred);
 						}
 						if ($missing) {
 							$notice['publish_error'] = 'Enter the ' . $driver_class::getLabel() . ' credential to publish.';

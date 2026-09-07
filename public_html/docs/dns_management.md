@@ -543,6 +543,23 @@ DNS hosting is independent of where compute runs: a Cloudflare zone can hold the
 A record for a node on Linode — the record simply points at that node's IP.
 Adding VPS providers changes nothing here.
 
+## The credential an installer keeps
+
+A first-boot installer that created the site's DNS records (the Linode
+StackScript path) holds a token the setup wizard needs once more, minutes
+later, for the mail records. Rather than ask for it twice, the installer seals
+it into the site through `utils/install_dns_credential.php` (JSON on stdin:
+the driver key and that driver's credential fields), which stores it via
+`DnsInstallCredential` (`includes/dns/DnsInstallCredential.php`) in the
+`dns_install_credential` setting — one sealed blob, declared as an
+`ephemeral` sealed secret, so a stale one is discarded and never flagged.
+
+The wizard's sending step reads only the driver key when it renders (to
+preselect the host and say a blank credential field is fine) and consumes the
+credential on its publish: a blank form with a stored credential for the
+chosen driver uses it, and it is deleted before the publish runs, whatever
+the outcome. Nothing else reads it.
+
 ## The guided move to an open host
 
 When a domain's DNS lives at a host whose API is gated (`apiGateNote()`),
