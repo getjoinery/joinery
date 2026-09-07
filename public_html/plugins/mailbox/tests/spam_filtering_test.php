@@ -391,8 +391,8 @@ class SpamFilteringTest {
 		}
 		$this->eq('1', $declared['mailbox_spam_filtering_enabled'] ?? null,
 			'mailbox_spam_filtering_enabled ships on');
-		$this->eq('0', $declared['mailbox_spam_learning_enabled'] ?? null,
-			'mailbox_spam_learning_enabled ships off (it costs a scanner)');
+		$this->eq('1', $declared['mailbox_spam_learning_enabled'] ?? null,
+			'mailbox_spam_learning_enabled ships on (the scanner ships with the mail stack)');
 		check(!array_key_exists('mailbox_content_spam_filtering_enabled', $declared),
 			'the conflated content-scanner setting is gone from the manifest');
 		$this->eq('http://127.0.0.1:11334',

@@ -1364,3 +1364,25 @@
 	$migration['migration_sql'] = "DROP INDEX IF EXISTS idx_cnp_conversation_user";
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
+
+	// The shipped email recipes run as mail arrives, not on an hourly clock.
+	// recipes.json is create-only, so a declaration change never reaches a
+	// deployment that already seeded the row. Rows still at the old factory
+	// 'hourly' move to 'arrival'; an operator's own choice is left alone.
+	$migration = array();
+	$migration['database_version'] = '179';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'shipped_email_recipes_run_on_arrival.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
+	// Learning from spam corrections ships on. It was gated off when it implied
+	// installing a scanner; the scanner ships with the mail stack now, so the
+	// setting is a pure toggle where it works and inert where it cannot.
+	// Stored rows still at the old factory '0' turn on.
+	$migration = array();
+	$migration['database_version'] = '180';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'spam_learning_on_by_default.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

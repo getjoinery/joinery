@@ -694,7 +694,7 @@ identity and provisioning (provider, mail hostname/IP, SRS, the relay) live on t
 | `mailbox_forwarding_smtp_username` | (empty) | Falls back to `smtp_username` |
 | `mailbox_forwarding_smtp_password` | (empty) | Falls back to `smtp_password` |
 | `mailbox_spam_filtering_enabled` | `1` | Move suspected spam to the Spam view. The one spam question; on by default. See [Spam filtering](#spam-filtering). |
-| `mailbox_spam_learning_enabled` | `0` | Learn from what users mark as spam. Relay/webhook mail is re-scored locally wherever a scanner runs; this setting makes that local verdict the one that counts (replacing the upstream's) instead of merely adding to it. Clamped off whenever filing is off; offered only where a scanner is running (it ships with the mail stack). See [Content scanner](#content-scanner-rspamd). |
+| `mailbox_spam_learning_enabled` | `1` | Learn from what users mark as spam. Relay/webhook mail is re-scored locally wherever a scanner runs; this setting makes that local verdict the one that counts (replacing the upstream's) instead of merely adding to it. Clamped off whenever filing is off; offered only where a scanner is running (it ships with the mail stack). See [Content scanner](#content-scanner-rspamd). |
 | `mailbox_rspamd_controller_url` | `http://127.0.0.1:11334` | Loopback rspamd controller endpoint the ingest scan and the spam/ham feedback loop POST to. No password (loopback-trusted). |
 
 ## Plugin Structure
@@ -3315,7 +3315,7 @@ verdict changes a message's disposition is `mailbox_spam_filtering_enabled`'s
 call — with it off, the stored verdict stays NULL no matter what any scanner
 said.
 
-**Learning.** `mailbox_spam_learning_enabled` (default off, shown on the
+**Learning.** `mailbox_spam_learning_enabled` (default on, shown on the
 Settings tab as *Learn from what users mark as spam*, and only while filing is
 on) is the one advanced choice. It is the single capability no upstream scanner
 can provide: a Bayes corpus of **this deployment's own mail**, taught by its own
