@@ -269,6 +269,8 @@ On any node detail page (`/admin/server_manager/node_detail?mgn_id=N`), the **Up
 
 **Preferred usage:** Use the **Publish Upgrade** form on the Server Manager dashboard (`/admin/server_manager`). Enter release notes and submit — the plugin dispatches a `publish_upgrade` job to the management node's own agent, which builds all archives as root. The management node is a node of itself for this: on its own Management Node page (`/admin/admin_management_node`) it connects to its own URL, and the request is approved at the top of its own Server Manager dashboard — no shell involved (`sudo /usr/local/bin/joinery-agent join --management-node=<own URL>` files the same ask from a terminal). The form says so when that has not happened yet.
 
+The agent runs only scripts that match the signed release manifest, and a publish is what signs that manifest, so the one file the button cannot carry is the publisher itself. After an edit to `publish_upgrade.php`, the first publish runs from a shell under sudo (below); it signs the changed publisher into the new release and the button works again. The form detects this state and shows the command.
+
 **CLI usage** (root, because the signing key at `config/agent_signing_key` is `600 root:root`):
 ```bash
 sudo /usr/bin/php plugins/server_manager/includes/publish_upgrade.php "release notes here"

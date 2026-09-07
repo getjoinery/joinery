@@ -11,6 +11,10 @@
  * There is no plane-local queue and no other transport — the signing key is
  * root-only, and the root agent is its one reader.
  *
+ * @version 1.10 - the page checks the publisher script against the signed release manifest before
+ *                 offering the form: the agent runs only files that match the release, and the one
+ *                 file a publish cannot sign for itself ahead of time is publish_upgrade.php, so an
+ *                 edit to it means one publish from a shell under sudo (agent_local_queue_retirement.md, G1)
  * @version 1.9 - a site that is another management node's node says so, naming that node from its
  *                own agent's credential: its releases are a node action there
  *                (specs/publish_as_node_action.md)
@@ -266,6 +270,53 @@ if (!$self_node) {
 		. htmlspecialchars(PathHelper::getRootDir()) . '/plugins/server_manager/includes/publish_upgrade.php '
 		. '\'release notes\' — and the agent updates itself to the release that carries it, about a '
 		. 'minute after the publish finishes.';
+} elseif (($publisher_state = publisher_matches_signed_release()) !== '') {
+	$cannot_publish = $publisher_state;
+}
+
+/**
+ * Does the publisher script on disk match the hash the signed release
+ * manifest holds for it? The agent verifies every script against that
+ * manifest before running it as root, and a publish is what re-signs the
+ * manifest — so the one file whose edit the button cannot carry is the
+ * publisher itself. Returns '' when the two agree or there is no manifest to
+ * compare against (a box that has never published has nothing signed yet);
+ * otherwise the advice, which is one publish from a shell under sudo.
+ */
+function publisher_matches_signed_release() {
+	$site_root = dirname(PathHelper::getRootDir());
+	$manifest  = $site_root . '/RELEASE_MANIFEST';
+	$rel       = 'public_html/plugins/server_manager/includes/publish_upgrade.php';
+	if (!is_file($manifest)) {
+		return '';
+	}
+	$signed = '';
+	$fh = fopen($manifest, 'r');
+	if ($fh) {
+		while (($line = fgets($fh)) !== false) {
+			// sha256sum convention: 64 hex characters, two spaces, the path.
+			if (strlen($line) > 66 && substr(rtrim($line, "\r\n"), 66) === $rel) {
+				$signed = substr($line, 0, 64);
+				break;
+			}
+		}
+		fclose($fh);
+	}
+	if ($signed === '') {
+		return '';
+	}
+	$on_disk = hash_file('sha256', $site_root . '/' . $rel);
+	if ($on_disk === $signed) {
+		return '';
+	}
+	$running = LibraryFunctions::get_joinery_version();
+	return 'The publisher itself (plugins/server_manager/includes/publish_upgrade.php) has changed since '
+		. 'release ' . htmlspecialchars($running) . ' was signed, and this node\'s agent runs only files that '
+		. 'match the signed release. A publish is what signs the manifest, so this one file cannot be '
+		. 'carried by the button. Publish once from a shell — sudo /usr/bin/php '
+		. htmlspecialchars(PathHelper::getRootDir()) . '/plugins/server_manager/includes/publish_upgrade.php '
+		. '\'release notes\' — which signs the changed publisher into the new release; the button works '
+		. 'again after that. Every other file publishes from the button as usual.';
 }
 
 // On a site running exactly what upstream delivered, the number is not the
