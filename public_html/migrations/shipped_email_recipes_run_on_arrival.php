@@ -12,9 +12,32 @@
  * someone turns it on).
  *
  * Idempotent: re-running finds no shipped row still at 'hourly'.
+ *
+ * The recipes table belongs to the joinery_ai plugin, so it is checked for
+ * before it is touched, and so is the rcp_declared_key column: a site that
+ * activated the plugin once and turned it off keeps the table but stops
+ * receiving its columns (plugin tables sync for active plugins only), and a
+ * row with no declared key is not a shipped row. Where either is absent there
+ * is nothing to move: the rows are seeded from recipes.json on activation,
+ * and that declaration already says 'arrival'.
  */
 function shipped_email_recipes_run_on_arrival() {
     $db = DbConnector::get_instance()->get_db_link();
+
+    $q = $db->prepare("SELECT to_regclass('rcp_recipes')");
+    $q->execute();
+    if ($q->fetchColumn() === null) {
+        echo "  shipped email recipes: no recipes table here (joinery_ai not active), nothing to move\n";
+        return;
+    }
+    $q = $db->prepare(
+        "SELECT count(1) FROM information_schema.columns
+          WHERE table_name = 'rcp_recipes' AND column_name = 'rcp_declared_key'");
+    $q->execute();
+    if ((int)$q->fetchColumn() === 0) {
+        echo "  shipped email recipes: recipes table carries no declared key here (joinery_ai inactive), nothing to move\n";
+        return;
+    }
 
     $q = $db->prepare(
         "UPDATE rcp_recipes SET rcp_schedule_frequency = 'arrival'
