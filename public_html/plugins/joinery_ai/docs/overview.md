@@ -191,7 +191,7 @@ A few recipes are worth having on every install — triage the inbox, score mail
       "pipeline_job": "email_triage",
       "requires_plugin": "mailbox",
       "prompt": "",
-      "schedule_frequency": "hourly",
+      "schedule_frequency": "arrival",
       "max_iterations": 25,
       "thinking_level": "off"
     }
