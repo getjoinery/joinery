@@ -2218,7 +2218,17 @@ fn detect_folder_moves(
     let mut scan = FolderScan::default();
     // Where each tracked folder believes it is, and which of those are gone.
     let mut tracked: HashMap<String, EntityId> = HashMap::new();
+    // Which folder the record puts each tracked file in -- the parent id read
+    // straight off the entry, no path resolved. Used only by the cheap question
+    // below, and gathered here so it costs a field rather than a second pass.
+    let mut believed_parent: HashMap<u64, Option<i64>> = HashMap::new();
     for entry in all_entries(env)? {
+        if entry.id.entity_type == EntityType::File {
+            if let Some(fingerprint) = entry.synced_fingerprint {
+                believed_parent.insert(fingerprint.file_id, entry.local_placement().parent);
+            }
+            continue;
+        }
         if entry.id.entity_type != EntityType::Folder || entry.id.is_provisional() {
             continue;
         }
@@ -2241,7 +2251,38 @@ fn detect_folder_moves(
     // pairing one with the other, so there is nothing to pair and no reason to
     // pay for the evidence -- which costs a path resolution per tracked file.
     let unaccounted = dirs_on_disk.iter().any(|d| !folder_ids.contains_key(d));
-    if missing.is_empty() && !unaccounted {
+    // Two folders trading names is the one move that satisfies both of those
+    // and has still happened: nothing has gone, because each name still holds a
+    // directory, and there is nothing unaccounted, because each directory is
+    // one the engine already has a folder for. Taken on its own the test above
+    // returns from a swap without looking, which is where a vault's contents
+    // left it in the clear (Defect AD).
+    //
+    // What completes it is asking whether any tracked file has changed folders,
+    // which no swap can be true without. It is answered from the parent id on
+    // the record and the path map -- a lookup per file on the disk, and not one
+    // path resolved. An ordinary single file moved between two folders answers
+    // yes as well and pays for the evidence below; that is a scan where
+    // something really did move, not the settled case this exit is here for.
+    let a_file_changed_folders = || -> bool {
+        for file in observed {
+            let Some(believed) = believed_parent.get(&file.fingerprint.file_id) else {
+                continue;
+            };
+            let on_disk = match file.path.rsplit_once('/') {
+                None => None,
+                Some((dir, _)) => match folder_ids.get(dir) {
+                    Some(id) => Some(*id),
+                    None => continue,
+                },
+            };
+            if *believed != on_disk {
+                return true;
+            }
+        }
+        false
+    };
+    if missing.is_empty() && !unaccounted && !a_file_changed_folders() {
         return Ok(scan);
     }
 
@@ -2345,13 +2386,26 @@ fn detect_folder_moves(
         })
         .map(|(path, id)| (path.clone(), *id))
         .collect();
-    if missing.is_empty() && displaced.is_empty() {
+    // Folders whose directory is standing but is not theirs, and is not a
+    // rebuilt shell either -- it is full of files the engine knows, belonging
+    // to somebody else. That is the one shape `displaced` deliberately refuses,
+    // because on its own it is also what one file moved out of a folder looks
+    // like. Read as a RING it is unambiguous, and that is the only way it is
+    // read below.
+    let contested: Vec<(String, EntityId)> = tracked
+        .iter()
+        .filter(|(path, _)| {
+            dirs_on_disk.contains(*path) && !corroborated(path) && !holds_nothing_known(path)
+        })
+        .map(|(path, id)| (path.clone(), *id))
+        .collect();
+    if missing.is_empty() && displaced.is_empty() && contested.is_empty() {
         return Ok(scan);
     }
     // Every file this disk holds, by its identity on the volume. Used only to
-    // answer the question below, and only when there is a displaced folder to
-    // ask it about.
-    let by_file_id: HashMap<u64, &ObservedFile> = if displaced.is_empty() {
+    // answer the two questions below, and only when there is a displaced or
+    // contested folder to ask them about.
+    let by_file_id: HashMap<u64, &ObservedFile> = if displaced.is_empty() && contested.is_empty() {
         HashMap::new()
     } else {
         observed
@@ -2397,6 +2451,104 @@ fn detect_folder_moves(
         .collect();
     candidates.sort_by_key(|d| (depth_of(d), d.to_string()));
     let mut taken: std::collections::HashSet<&String> = std::collections::HashSet::new();
+
+    // Folders that traded names with each other.
+    //
+    // A swap leaves nothing missing and nothing displaced: every path still
+    // holds a directory, and every one of those directories is full of files
+    // the engine knows -- they are just the OTHER folder's files. Asked one
+    // path at a time there is no question to fail, so the engine reads the
+    // whole thing as every file being re-parented, and a vault's contents
+    // leave it in the clear under their real names (Defect AD).
+    //
+    // The evidence taken is a closed permutation and nothing less. Each
+    // member's directory must hold exactly one other member's contents
+    // WHOLESALE, and following who-left-where must come back to where it
+    // started. One file moved out does not look like this; a folder emptied
+    // into another does not close; two folders whose contents both landed
+    // under one directory cannot be told apart and are refused. Because the
+    // ring is what carries the evidence, this can be read from the very
+    // shape `displaced` has to refuse -- with no need to widen `displaced`,
+    // which drags a folder after a single file.
+    let mut arrived_at: HashMap<&String, EntityId> = HashMap::new();
+    for (path, _) in contested.iter() {
+        let mut found: Option<EntityId> = None;
+        let mut ambiguous = false;
+        for (other_path, other_id) in tracked.iter() {
+            if other_path == path || !moved_wholesale(other_path, path) {
+                continue;
+            }
+            if found.is_some() {
+                ambiguous = true;
+                break;
+            }
+            found = Some(*other_id);
+        }
+        if let (Some(id), false) = (found, ambiguous) {
+            arrived_at.insert(path, id);
+        }
+    }
+    // Where each arriving folder ended up, so a ring can be walked from the
+    // folder that LEFT a path to the path it went to.
+    let where_it_went: HashMap<EntityId, &String> =
+        arrived_at.iter().map(|(p, id)| (*id, *p)).collect();
+    let mut ring_members: Vec<(&String, EntityId)> = Vec::new();
+    let mut in_a_ring: std::collections::HashSet<&String> = std::collections::HashSet::new();
+    for (start_path, _) in contested.iter() {
+        if in_a_ring.contains(start_path) {
+            continue;
+        }
+        let mut ring: Vec<(&String, EntityId)> = Vec::new();
+        let mut at: &String = start_path;
+        let closed = loop {
+            let Some(arriving) = arrived_at.get(at) else { break false };
+            ring.push((at, *arriving));
+            // Who was standing here, and where did they go? A ring closes only
+            // if that walk returns to the path it started from.
+            let Some(leaving) = tracked.get(at) else { break false };
+            let Some(next) = where_it_went.get(leaving) else { break false };
+            if *next == start_path {
+                break true;
+            }
+            if ring.len() > contested.len() {
+                break false;
+            }
+            at = *next;
+        };
+        if !closed {
+            continue;
+        }
+        for (p, id) in ring {
+            in_a_ring.insert(p);
+            ring_members.push((p, id));
+        }
+    }
+    // Shallowest first, so a ring inside a renamed parent is placed after the
+    // parent it lives under. Claimed in full before any placement is worked
+    // out: every path in a ring is another member's old path, so the map has
+    // to describe the whole ring before it describes any of it.
+    ring_members.sort_by_key(|(p, _)| (depth_of(p), p.to_string()));
+    for (path, id) in &ring_members {
+        claimed.push(*id);
+        taken.insert(path);
+        scan.present.insert(*id);
+        folder_ids.insert((*path).clone(), id.server_id);
+    }
+    for (path, id) in &ring_members {
+        match placement_of(path, folder_ids) {
+            Some(placement) => {
+                let unchanged = env
+                    .store
+                    .get_entry(*id)?
+                    .and_then(|e| e.synced_placement.clone())
+                    .is_some_and(|p| p == placement);
+                if !unchanged {
+                    scan.moves.insert(*id, placement);
+                }
+            }
+            None => scan.deferred.push((*id, (*path).clone())),
+        }
+    }
 
     for (pool, whole_only) in [(&missing, false), (&displaced, true)] {
         for candidate in candidates.iter() {
