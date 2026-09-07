@@ -96,7 +96,7 @@ sudo ./install.sh site mysite mysite.com 8080
 
 ### Using Your Own Password
 
-If you must use a specific password, use `--password-file` to avoid shell escaping issues:
+If you must use a specific password, hand it over in a file so it never appears on a command line:
 
 ```bash
 # Create a file with your password (use a strong password!)
@@ -120,38 +120,22 @@ rm /tmp/dbpass.txt
   - Common substitutions (p@ssw0rd)
   - Example passwords from documentation
 
-### Password Character Restrictions
+### Password Characters
 
-**IMPORTANT:** Due to shell and sed escaping limitations, the following characters **MUST NOT** be used in database passwords:
+Any character works in a database password: quotes, backslashes, dollar signs, backticks, exclamation marks, spaces, anything. The only value that cannot be carried is a line break, because the password travels through single-line files.
 
-| Character | Name | Reason |
-|-----------|------|--------|
-| `'` | Single quote | Breaks PHP string literals |
-| `"` | Double quote | Breaks shell double-quoted strings |
-| `\` | Backslash | Escape character in shell, sed, and PHP |
-| `$` | Dollar sign | Variable expansion in shell |
-| `` ` `` | Backtick | Command substitution in shell |
-| `!` | Exclamation mark | History expansion in bash |
-| Newlines | Line breaks | Breaks sed replacement patterns |
+The password is never pasted into a command. It reaches PostgreSQL as a quoted SQL literal on psql's standard input, reaches the site config through a PHP writer that emits a correct string literal, and reaches the database driver as a connection argument rather than part of a connection string.
 
-**Safe characters for passwords:**
-- Letters: `A-Z`, `a-z`
-- Numbers: `0-9`
-- Symbols: `@`, `#`, `%`, `^`, `*`, `(`, `)`, `-`, `_`, `+`, `=`, `{`, `}`, `[`, `]`, `|`, `:`, `;`, `<`, `>`, `,`, `.`, `?`, `~`, `/`, `&`
+The one place a character can still bite is **your own shell**, before the installer ever runs: a `!` in an interactive bash session triggers history expansion, and `$` and backticks expand inside double quotes. Hand the password over in a file or through the environment and none of that applies:
 
-**Example of a safe password:**
-```
-Kj8@mN#2pQ%xR^4sT*9w
-```
+```bash
+# A file: nothing is typed on a command line
+printf '%s' "$(cat)" > /tmp/dbpass.txt   # paste the password, then Ctrl-D
+sudo ./install.sh site mysite --password-file=/tmp/dbpass.txt mysite.com 8080
+rm /tmp/dbpass.txt
 
-**Examples of passwords that will FAIL:**
-```
-MyP@ss'word     # Contains single quote
-Hello"World     # Contains double quote
-Pass\word       # Contains backslash
-Cost$100        # Contains dollar sign
-Run`cmd`        # Contains backticks
-Hello!There     # Contains exclamation mark
+# The environment, single-quoted so the shell leaves it alone
+sudo POSTGRES_PASSWORD='It'"'"'s $12.50 & a "quote"!' ./install.sh site mysite mysite.com 8080
 ```
 
 ### Non-Interactive / Scripted Deployment
@@ -948,7 +932,7 @@ If database initialization fails during site creation, the cause is almost alway
 - Empty settings table
 
 **What to check:**
-1. **Password escaping**: Certain characters MUST NOT be used in passwords: `'`, `"`, `\`, `$`, `` ` ``, `!`. See [Password Character Restrictions](#password-character-restrictions) for the full list.
+1. **Password mangled by your shell**: a password typed on a command line can be altered by the shell before the installer sees it (`!` history expansion, `$` inside double quotes). Pass it with `--password-file` or `POSTGRES_PASSWORD=` instead — see [Password Characters](#password-characters).
 2. **SQL file syntax**: If you've modified `joinery-install.sql.gz`, check for syntax errors
 3. **Character encoding**: Ensure the SQL file uses UTF-8 encoding
 
@@ -1071,7 +1055,7 @@ Note: If no password is provided, a secure 24-character password is auto-generat
 # Auto-generate secure password (RECOMMENDED)
 ./install.sh site mysite mysite.com 8080
 
-# Use password from file (for special characters)
+# Use a password of your own (a file keeps it out of the command line)
 echo 'MyStr0ng#Pass@9' > /tmp/pass.txt
 ./install.sh site mysite --password-file=/tmp/pass.txt mysite.com 8080
 rm /tmp/pass.txt

@@ -84,13 +84,15 @@ check(strpos($install_src, 'print_ssl_deferred_notice') !== false,
 
 // The doc and the behavior drifting apart is what made this defect expensive:
 // quickstart.md described the graceful path for as long as the script aborted.
+// The quickstart is the StackScript path, where the retry timer issues the
+// certificate on its own once DNS points here; what it promises is that the
+// site works over http meanwhile and the padlock arrives by itself.
 check(strpos($install_src, 'sysadmin_tools/setup_ssl.sh') !== false,
 	'install.sh names the command that issues the certificate later');
-check(strpos($quickstart_md, 'setup_ssl.sh') !== false,
-	'quickstart.md names the same command');
-check(stripos($quickstart_md, 'the install continues') !== false
-	|| stripos($quickstart_md, 'install continues') !== false,
-	'quickstart.md still says an install continues without DNS');
+check(stripos($quickstart_md, 'works in the meantime') !== false,
+	'quickstart.md says the site works over http while DNS spreads');
+check(stripos($quickstart_md, 'switches on by itself') !== false,
+	'quickstart.md says HTTPS arrives on its own once the domain connects');
 
 
 section('Server hardening keeps someone able to log in');
@@ -1150,7 +1152,7 @@ check(preg_match('/^\s*ENV\s+POSTGRES_PASSWORD/m', $df_code) === 0,
 // password appearing at all.
 check(preg_match('/psql[^\n|]*-c[^\n]*POSTGRES_PASSWORD/', $df_code) === 0,
     'the first-run ALTER USER does not put it in a psql command line');
-check(preg_match('/echo\s+"ALTER USER postgres PASSWORD[^\n]*\|\s*su -c "psql/', $df_code) === 1,
+check(preg_match('/printf\s+"ALTER USER postgres PASSWORD[^\n]*\|\s*su -c "psql/', $df_code) === 1,
     'it is piped to psql on stdin instead');
 check(strpos($df_code, 'JOINERY_DB_PASSWORD="${POSTGRES_PASSWORD}" ./_site_init.sh') !== false,
     'and site init receives it in the environment, not as a positional');
@@ -1871,5 +1873,114 @@ if (!preg_match('/cat > "\$SUPERVISE_PATH" <<\x27SUPERVISE\x27\n(.*?)\nSUPERVISE
 
 foreach (glob($tmp . '/*') as $f) { @unlink($f); }
 @rmdir($tmp);
+
+// ---------------------------------------------------------------------------
+// The database password can be any string.
+//
+// It used to be "anything except ' " \ $ ` ! and newlines", which was the
+// union of every alphabet the password was pasted into as code: a sed
+// replacement, a PHP literal built by that sed, a double-quoted shell string
+// handed to su -c, and a libpq connection string. Each hop now treats the
+// password as data. These pins hold every hop, and the last one runs the
+// config writer for real with a password made of the whole forbidden set.
+// ---------------------------------------------------------------------------
+section('Database password characters');
+
+$config_writer = $site_root . '/maintenance_scripts/install_tools/_write_site_config.php';
+$config_tpl    = $site_root . '/maintenance_scripts/install_tools/default_Globalvars_site.php';
+$readme        = $site_root . '/maintenance_scripts/install_tools/INSTALL_README.md';
+$dbconnector   = PathHelper::getIncludePath('includes/DbConnector.php');
+$site_init_now = is_file($site_init) ? file_get_contents($site_init) : '';
+$install_now   = is_file($install_sh) ? file_get_contents($install_sh) : '';
+$df_now        = is_file($dockerfile) ? file_get_contents($dockerfile) : '';
+$readme_md     = is_file($readme) ? file_get_contents($readme) : '';
+$dbconn_src    = is_file($dbconnector) ? file_get_contents($dbconnector) : '';
+
+check(is_file($config_writer), '_write_site_config.php ships with the install tools', $config_writer);
+check(strpos($site_init_now, '_write_site_config.php') !== false,
+	'_site_init.sh fills the site config through the PHP writer');
+check(!preg_match('/sed[^\n]*PASSWORD/', $site_init_now),
+	'_site_init.sh never passes the password through sed',
+	'a sed replacement needs its own escaping and the result still has to parse as PHP');
+check(strpos($site_init_now, 'JOINERY_CFG_PASSWORD="$PASSWORD"') !== false,
+	'the password reaches the config writer in the environment, not argv');
+
+// The ALTER USER statement: on stdin, as a SQL literal with quotes doubled,
+// never inside a shell string that su -c would parse a second time.
+foreach (array('install.sh' => $install_now, 'Dockerfile.template' => $df_now) as $label => $src) {
+	check(!preg_match('/su -c "psql[^\n]*ALTER USER postgres PASSWORD/', $src),
+		$label . ' does not put the password inside the su -c command string',
+		'a double-quoted shell string re-parses $ ` " \\ and the SQL literal breaks on a quote');
+	check(strpos($src, "POSTGRES_PASSWORD//\"'\"/\"''\"") !== false,
+		$label . ' doubles single quotes to make the password a SQL literal');
+	check(strpos($src, 'printf "ALTER USER postgres PASSWORD \'%s\';\n"') !== false,
+		$label . ' hands the statement to psql with printf, not echo');
+	check(strpos($src, 'psql -q -v ON_ERROR_STOP=1') !== false,
+		$label . ' fails the install when the password cannot be set');
+}
+check(preg_match('/\bread -s POSTGRES_PASSWORD/', $install_now) !== 1
+	&& preg_match('/\bread -rs POSTGRES_PASSWORD\b/', $install_now) === 1,
+	'the interactive password prompt reads raw (backslashes kept)');
+check(!preg_match('/print_info "[^\n]*\$\{?POSTGRES_PASSWORD(?![A-Z_])/', $install_now),
+	'install.sh never prints the password through echo -e');
+
+// The driver: credentials as constructor arguments, so PDO quotes them for
+// libpq. A password concatenated into the DSN has to avoid spaces, quotes
+// and backslashes to survive the connection-string parse.
+check($dbconn_src !== '' && !preg_match("/password=' \. /", $dbconn_src),
+	'DbConnector passes the password as a PDO argument, not inside the DSN');
+
+check($readme_md !== '' && stripos($readme_md, 'MUST NOT be used') === false
+	&& strpos($readme_md, 'Password Character Restrictions') === false,
+	'the install README no longer forbids any password character');
+check($installation_md !== '' && stripos($installation_md, 'Forbidden characters') === false
+	&& stripos($installation_md, 'forbid these characters') === false,
+	'docs/installation.md no longer forbids any password character');
+
+// And the writer itself, run for real: every once-forbidden character, plus
+// a placeholder token, must come back byte-for-byte from the file it writes.
+$awful = "a'b\"c\\d\$e`f!g h/i&j;k(l)m<n>o|p*q?r[s]t{u}v~w#x%y^z'{{SITE_NAME}}";
+$cfg_tmp = sys_get_temp_dir() . '/joinery_cfg_' . getmypid();
+@unlink($cfg_tmp);
+$env = array(
+	'JOINERY_CFG_SITENAME'       => 'demo',
+	'JOINERY_CFG_DOMAIN'         => 'demo.example.com',
+	'JOINERY_CFG_DEPLOY_ENV'     => 'baremetal',
+	'JOINERY_CFG_PASSWORD'       => $awful,
+	'JOINERY_CFG_SECRET_BOX_KEY' => base64_encode(random_bytes(32)),
+);
+$cmd = '';
+foreach ($env as $k => $v) { $cmd .= $k . '=' . escapeshellarg($v) . ' '; }
+$cmd .= 'php ' . escapeshellarg($config_writer) . ' ' . escapeshellarg($config_tpl) . ' ' . escapeshellarg($cfg_tmp) . ' 2>&1';
+$writer_out = array();
+$writer_rc = 1;
+exec($cmd, $writer_out, $writer_rc);
+check($writer_rc === 0 && is_file($cfg_tmp), 'the config writer writes the file', implode(' ', $writer_out));
+
+$loaded = array();
+if (is_file($cfg_tmp)) {
+	$lint = array(); $lint_rc = 1;
+	exec('php -l ' . escapeshellarg($cfg_tmp) . ' 2>&1', $lint, $lint_rc);
+	check($lint_rc === 0, 'the written config parses as PHP', implode(' ', $lint));
+	if ($lint_rc === 0) {
+		$loader = new class { public $settings = array(); public function load($f) { include $f; return $this->settings; } };
+		$loaded = $loader->load($cfg_tmp);
+	}
+}
+check(isset($loaded['dbpassword']) && $loaded['dbpassword'] === $awful,
+	'a password of every once-forbidden character round-trips byte for byte',
+	isset($loaded['dbpassword']) ? 'got: ' . $loaded['dbpassword'] : 'no dbpassword loaded');
+check(isset($loaded['dbname']) && $loaded['dbname'] === 'demo' && isset($loaded['webDir']) && $loaded['webDir'] === 'demo.example.com'
+	&& isset($loaded['deployment_environment']) && $loaded['deployment_environment'] === 'baremetal',
+	'the plain placeholders are filled');
+check(isset($loaded['secret_box_key']) && $loaded['secret_box_key'] === $env['JOINERY_CFG_SECRET_BOX_KEY'],
+	'the secret_box_key round-trips');
+
+// Never overwrites: the file carries the secret_box_key.
+$again = array(); $again_rc = 0;
+exec($cmd, $again, $again_rc);
+check($again_rc !== 0 && isset($loaded['secret_box_key']) && strpos((string)file_get_contents($cfg_tmp), $loaded['secret_box_key']) !== false,
+	'the config writer refuses to overwrite an existing config');
+@unlink($cfg_tmp);
 
 harness_finish();

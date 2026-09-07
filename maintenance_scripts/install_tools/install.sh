@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+#VERSION 2.62 - The postgres password can be any string. The ALTER USER
+#               statement reaches psql on stdin with the password as a SQL
+#               literal (quotes doubled), so no shell ever parses it; the
+#               interactive read keeps backslashes; the one place the password
+#               is printed uses printf, not echo -e. The matching config-file
+#               change is _site_init.sh 2.9 / _write_site_config.php.
 #VERSION 2.61 - A clone whose source refuses or fails the manifest request says
 #               which (HTTP code and meaning) instead of dying under set -e with
 #               a bare exit 22, because the guard after a failing command
@@ -2132,7 +2138,7 @@ do_server_setup() {
         else
             print_info "PostgreSQL password not set."
             echo -n "Please enter a password for PostgreSQL postgres user: "
-            read -s POSTGRES_PASSWORD || true
+            read -rs POSTGRES_PASSWORD || true
             echo ""
 
             if [[ -z "$POSTGRES_PASSWORD" ]]; then
@@ -2141,7 +2147,7 @@ do_server_setup() {
             fi
 
             echo -n "Confirm password: "
-            read -s POSTGRES_PASSWORD_CONFIRM || true
+            read -rs POSTGRES_PASSWORD_CONFIRM || true
             echo ""
 
             if [[ "$POSTGRES_PASSWORD" != "$POSTGRES_PASSWORD_CONFIRM" ]]; then
@@ -2612,8 +2618,16 @@ EOF
         # Reload PostgreSQL configuration
         service_reload postgresql
 
-        # Set the postgres user password
-        su -c "psql -c \"ALTER USER postgres PASSWORD '${POSTGRES_PASSWORD}';\"" postgres
+        # Set the postgres user password. The statement goes to psql on
+        # stdin with the password as a SQL literal — single quotes doubled,
+        # nothing else needs escaping in a standard-conforming string — so
+        # neither this shell nor the one su starts ever sees the password as
+        # code. Any character the operator chose is fine here.
+        local sql_pw=${POSTGRES_PASSWORD//"'"/"''"}
+        if ! printf "ALTER USER postgres PASSWORD '%s';\n" "$sql_pw" | su -c "psql -q -v ON_ERROR_STOP=1" postgres; then
+            print_error "Could not set the postgres role password."
+            exit 1
+        fi
 
         # Restore authenticated access
         sed -i -E "s/^(local[[:space:]]+all[[:space:]]+postgres[[:space:]]+)[A-Za-z0-9-]+/\1${PG_AUTH_METHOD}/" ${PG_CONFIG_DIR}/pg_hba.conf
@@ -2899,7 +2913,9 @@ EOF
     elif [ -n "${POSTGRES_PASSWORD}" ]; then
         print_warning "3. The postgres password could not be recorded to ${POSTGRES_PASSWORD_RECORD}."
         print_warning "   It appears once, below, and nowhere else. Save it now, then clear this log."
-        print_info "   ${POSTGRES_PASSWORD}"
+        # printf, not print_info: that goes through echo -e, which would turn
+        # a backslash sequence in the password into something else.
+        printf '   %s\n' "$POSTGRES_PASSWORD"
     fi
     echo ""
     print_success "Server is ready for site deployment!"
