@@ -85,7 +85,10 @@ try {
 		['label' => 'two', 'type' => 'ssh', 'cmd' => 'true'],
 		['label' => 'tidy', 'type' => 'ssh', 'cmd' => 'true', 'teardown' => true],
 	];
-	$sorig = ManagementJob::createJob($node_id, 'check_status', $steps, ['note' => 'x'], $created_by);
+	// install_node, because the bootstrap pair are the only step jobs left —
+	// everything else reaches a node as a primitive, and createJob refuses a
+	// step list under any other type.
+	$sorig = ManagementJob::createJob($node_id, 'install_node', $steps, ['note' => 'x'], $created_by);
 	$job_ids[] = (int)$sorig->key;
 	$sorig->set('mjb_status', 'failed');
 	$sorig->save();
@@ -96,7 +99,8 @@ try {
 	check(json_decode($sagain->get('mjb_commands'), true)['steps'] == $steps, 'same steps, teardown included');
 	check(json_decode($sagain->get('mjb_parameters'), true) == ['note' => 'x'], 'same parameters');
 	check((int)$sagain->get('mjb_total_steps') === 2, 'main-phase step count (teardown excluded)');
-	check($sagain->get('mjb_status') === 'pending', 'queued as pending');
+	check($sagain->get('mjb_status') === 'queued',
+		'queued for the install executor, which is the only thing that runs steps');
 
 	// ---------------------------------------------------------------------
 	section('A job with no work in it is refused');

@@ -248,7 +248,7 @@ check(isset($commands['steps'][0]['type']) && $commands['steps'][0]['type'] === 
 check(!in_array($commands['steps'][0]['type'], ['ssh', 'scp', 'local', 'api'], true),
 	'That step type is none of the four an older agent can run, so it fails loudly instead of silently completing');
 
-$steps_job = ManagementJob::createFromBuild($node->key, 'check_status',
+$steps_job = ManagementJob::createFromBuild($node->key, 'install_node',
 	[['type' => 'local', 'label' => 'x', 'cmd' => 'true']], null, null);
 check(!$steps_job->isPrimitiveJob(), 'createFromBuild still stores a step list as a step-list job');
 
@@ -412,7 +412,10 @@ $fresh = ManagementJob::createPrimitiveJob($node->key, 'check_status', 'check_st
 $db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_time=now(), mjb_claim_attempts=1 WHERE mjb_id=?")
 	->execute([$fresh->key]);
 
-$steps_stale = ManagementJob::createJob($node->key, 'check_status',
+// A bootstrap job: the only kind that carries steps, and the real case this
+// sweep must not touch — it is running on the plane's own install executor,
+// which does not claim over the channel and does not report back through it.
+$steps_stale = ManagementJob::createJob($node->key, 'install_node',
 	[['type' => 'local', 'label' => 'x', 'cmd' => 'true']], null, null);
 $db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_time=? WHERE mjb_id=?")
 	->execute([$old, $steps_stale->key]);

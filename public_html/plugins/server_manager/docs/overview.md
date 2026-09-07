@@ -105,7 +105,6 @@ Other optional settings in the env file:
 | Setting | Default | Purpose |
 |---------|---------|---------|
 | `JOINERY_CONFIG` | `/var/www/html/joinerytest/config/Globalvars_site.php` | Path to Globalvars_site.php |
-| `POLL_INTERVAL` | `5s` | How often to check for new jobs |
 | `HEARTBEAT_INTERVAL` | `30s` | How often to update the dashboard status |
 | `AGENT_NAME` | `joinery-agent` | Name shown in the admin dashboard |
 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | _(from Globalvars)_ | Override DB credentials if needed |
@@ -255,17 +254,17 @@ The web tier's only involvement on the node is a handoff through three managed s
 
 ### Routing
 
-A connected agent is routed to — approving the join is the routing decision, and there is no further switch. An operation with a primitive implementation runs on the node's own agent, and only there: a node without a paired agent is refused such a job at build time, with the fix (pair the node) in the message. SSH exists only for the one bootstrap (`install_node`, run plane-side by `InstallJobExecutor` over a provision's sealed root password) and the relay lifecycle. Disconnecting the agent therefore stops a node's operations until it pairs again.
+A connected agent is routed to — approving the join is the routing decision, and there is no further switch. An operation with a primitive implementation runs on the node's own agent, and only there: a node without a paired agent is refused such a job at build time, with the fix (pair the node) in the message. SSH exists only for the bootstrap pair — `install_node` and `retire_install_password`, both run plane-side by `InstallJobExecutor` over a provision's sealed root password. Disconnecting the agent therefore stops a node's operations until it pairs again.
 
-Either side can end the pairing, and neither needs the other's cooperation. This plane's Disconnect button forgets the node's key. The node's own Management Node page has a Disconnect too: its agent finishes any running job, sends one signed goodbye to `/api/v1/agent/leave` (so this plane forgets the key immediately), deletes its identity, and returns to serving only local work — and it leaves even when the goodbye cannot be delivered, in which case this plane just sees the agent go silent until someone disconnects the node here as well. Both endings run through `AgentChannelEndpoint::forgetAgent()`, so they cannot drift apart.
+Either side can end the pairing, and neither needs the other's cooperation. This plane's Disconnect button forgets the node's key. The node's own Management Node page has a Disconnect too: its agent finishes any running job, sends one signed goodbye to `/api/v1/agent/leave` (so this plane forgets the key immediately), deletes its identity, and then takes no work at all until it pairs again — and it leaves even when the goodbye cannot be delivered, in which case this plane just sees the agent go silent until someone disconnects the node here as well. Both endings run through `AgentChannelEndpoint::forgetAgent()`, so they cannot drift apart.
 
 Operations cross one at a time. An operation has crossed when `JobCommandBuilder` has a `build_<op>_primitive` method for it; `transports_for()` discovers that by reflection, and `ManagementJob::createFromBuild()` stores the right shape without any caller knowing which transport ran.
 
-**A primitive is routed to a node only when that node says it has it.** Every claim carries the agent's own list of the primitives its binary compiled in, and the plane stores it (`mgn_agent_primitives`). Routing consults that list: an operation missing from it is not sent to the agent — the builder refuses at build time (or, for `list_backups` and `check_status`, falls to the API or probe transport). The node's own account is the only one that is not a guess — a version number says which release a machine runs, and only the machine says what that release compiled into it.
+**A primitive is routed to a node only when that node says it has it.** Every claim carries the agent's own list of the primitives its binary compiled in, and the plane stores it (`mgn_agent_primitives`). Routing consults that list: an operation missing from it is not sent to the agent — the builder refuses at build time (or, for `check_status`, falls to the probe transport). The node's own account is the only one that is not a guess — a version number says which release a machine runs, and only the machine says what that release compiled into it.
 
 An agent old enough not to send a list leaves the column empty, and those nodes are answered by `JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION`: a per-operation floor naming the agent version that introduced the primitive. A node below the floor, or with no known version, is refused the primitive — dispatching to a vocabulary that cannot be confirmed buys a certain refusal on the node instead of a clear one at build time.
 
-**Upgrade the management node's own agent before connecting any node.** An agent from before this channel existed does not know to leave primitive jobs alone, and would claim one out of its local queue. Such a job carries a step type no released executor recognises, so that agent fails it and says exactly why rather than marking it complete having done nothing — but the job still has to be re-run.
+**The management node is a node like any other.** It pairs to its own site, and the work it does for itself — publishing a release — reaches it the same way every other operation reaches every other machine: as a primitive its own agent looks up in its own vocabulary. There is no second job source anywhere in the fleet. A row written into `mjb_management_jobs` by hand executes nothing, on any machine.
 
 ### Reading refusals
 

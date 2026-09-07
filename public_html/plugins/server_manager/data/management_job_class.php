@@ -2,6 +2,9 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.17 - createJob() refuses a step list for anything but a bootstrap job. The agent's local
+ *                 queue is gone, so InstallJobExecutor is the only step executor left and a step
+ *                 list filed under any other type would sit 'pending' for ever
  * @version 1.16 - transcript(): the output as a person reads it. A script primitive's result reaches
  *                 mjb_output as an envelope with the transcript inside as one JSON string; the job
  *                 page and the live poll show the transcript, not the envelope
@@ -125,14 +128,33 @@ class ManagementJob extends SystemBase {
 			);
 		}
 
+		// A step list has exactly one executor left, and it claims exactly two
+		// job types. The agent's local queue — which used to run any step list
+		// as root on the management node — is gone, so a step list filed under
+		// any other type is work nothing will ever pick up: a job that sits
+		// 'pending' for ever, on a dashboard that shows it as waiting.
+		//
+		// Refusing here is the same trade as the envelope guard above. A builder
+		// that grows a step list breaks its caller at the moment it is wrong,
+		// rather than producing a job that looks queued and is actually dead.
+		// The fix is always the same: give the operation a primitive.
+		if (!in_array($job_type, self::BOOTSTRAP_JOB_TYPES, true)) {
+			throw new Exception(
+				"createJob() was handed a step list for '{$job_type}', which nothing will run. "
+				. "Step lists are executed only by the plane-side InstallJobExecutor, and only for "
+				. implode(' and ', self::BOOTSTRAP_JOB_TYPES) . ". Every other operation reaches a "
+				. "node as a primitive over the signed channel — give '{$job_type}' a "
+				. "build_{$job_type}_primitive method."
+			);
+		}
+
 		$job = new ManagementJob(NULL);
 		$job->set('mjb_mgn_node_id', $node_id);
 		$job->set('mjb_job_type', $job_type);
 		// A bootstrap job (see BOOTSTRAP_JOB_TYPES) is executed by the plane-side
 		// InstallJobExecutor over the provision's sealed install password, not by
-		// a node agent, and starts 'queued' so no agent ever claims it. Everything
-		// else is 'pending'.
-		$job->set('mjb_status', in_array($job_type, self::BOOTSTRAP_JOB_TYPES, true) ? 'queued' : 'pending');
+		// a node agent. It starts 'queued'; nothing else reaches this line.
+		$job->set('mjb_status', 'queued');
 		$job->set('mjb_commands', json_encode(['steps' => $steps]));
 		$job->set('mjb_parameters', $parameters ? json_encode($parameters) : null);
 		// Progress counts the main phase only: teardown appends never advance

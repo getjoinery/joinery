@@ -150,9 +150,9 @@ check(!JobCommandBuilder::has_api_creds($partial),
 	'API credentials require the secret key too, not just a public key and URL');
 
 $transports = JobCommandBuilder::transports_for('check_status');
-check(in_array('primitive', $transports) && in_array('api', $transports)
+check(in_array('primitive', $transports) && !in_array('api', $transports)
 		&& in_array('probe', $transports) && !in_array('ssh', $transports),
-	'check_status reports agent, api and probe transports, and no SSH',
+	'check_status reports agent and probe transports, and neither api nor SSH',
 	implode(',', $transports));
 check(JobCommandBuilder::transports_for('no_such_operation') === array(),
 	'an unimplemented operation reports no transports');
@@ -173,8 +173,11 @@ check(strpos($why, 'no health check URL or port to probe') !== false,
 	'the refusal reason names what is actually missing', $why);
 check(strpos($why, 'no SSH implementation exists') === false,
 	'and does not report the absence of a transport being retired as a shortfall', $why);
-check(strpos($why, 'no API credentials') !== false,
-	'the refusal reason names the missing API credentials', $why);
+// API credentials are no longer a transport, so their absence is not a reason
+// an action is greyed out and must not be offered as one — it would send an
+// admin off to configure something that would change nothing.
+check(strpos($why, 'API') === false,
+	'the refusal reason says nothing about API credentials, which no job uses', $why);
 $why = JobCommandBuilder::why_cannot_run($ssh_node, 'no_such_operation');
 check(strpos($why, 'no implementation') !== false,
 	'an unimplemented operation says so rather than blaming the node', $why);
@@ -1258,9 +1261,8 @@ check(strpos($core_msg, 'consent') !== false
 
 // A victim mid-work is not demolished: open jobs refuse the dispatch.
 $decom_busy = jcb_decom_victim($decom_host, array('mgn_container_name' => 'decomsite7'));
-$busy_job = ManagementJob::createJob($decom_busy->key, 'check_status',
-	array(array('type' => 'api', 'label' => 'Busy fixture', 'method' => 'GET', 'endpoint' => 'status', 'timeout' => 30)),
-	array(), 1);
+$busy_job = ManagementJob::createPrimitiveJob($decom_busy->key, 'check_status',
+	'check_status', array(), 1);
 harness_register_row('mjb_management_jobs', 'mjb_id', $busy_job->key);
 $busy_msg = '';
 try { JobCommandBuilder::build_decommission_node($decom_busy); } catch (Exception $e) { $busy_msg = $e->getMessage(); }
@@ -1374,5 +1376,51 @@ $dot_relay_down = jcb_node(array('mgn_skip_joinery_checks' => true,
 	'mgn_uptime_enabled' => true, 'mgn_uptime_last_status' => 'down'));
 check(JobCommandBuilder::status_color_for_node($dot_relay_down, null, false) === 'danger',
 	'skip-Joinery uptime-down node shows red');
+
+// ---------------------------------------------------------------------------
+section('Nothing composes work that nothing will run');
+
+// The agent's plane-local queue is gone. It was the executor for every step
+// type but one, so a builder that emits a step list today is composing a job
+// that would sit 'pending' for ever — visible on the dashboard as waiting, and
+// waiting on nobody.
+//
+// Two assertions hold that shut, and they are deliberately different in kind.
+// The first reads the source, so a NEW builder emitting a dead step type fails
+// here rather than in production. The second exercises the refusal, so the
+// guard cannot be quietly weakened while the source still looks right.
+
+$builder_source = file_get_contents(PathHelper::getIncludePath(
+	'plugins/server_manager/includes/JobCommandBuilder.php'));
+
+// The step types whose executor was the local queue. `api` is among them: the
+// management API itself is alive and this plane still probes it, but no JOB
+// travels over it any more.
+foreach (array('local', 'scp', 'api') as $dead_type) {
+	$emitted = substr_count($builder_source, "'type' => '{$dead_type}'");
+	// install_node's one pre-flight is the exception the executor still runs.
+	$allowed = ($dead_type === 'local') ? 1 : 0;
+	check($emitted === $allowed,
+		"builders emit {$allowed} '{$dead_type}' step(s) — only what the install executor runs"
+		. " (found {$emitted})");
+}
+
+// A step list under any other job type has no executor at all.
+$refused = false;
+try {
+	ManagementJob::createJob($api_node->key, 'check_status',
+		array(array('type' => 'local', 'label' => 'Orphan', 'cmd' => 'true')), null, null);
+} catch (Exception $e) {
+	$refused = strpos($e->getMessage(), 'nothing will run') !== false;
+}
+check($refused,
+	'createJob refuses a step list for an operation the install executor does not claim');
+
+// And the bootstrap pair still gets through, in the status its executor claims.
+$boot = ManagementJob::createJob($api_node->key, 'install_node',
+	array(array('type' => 'local', 'label' => 'Pre-flight', 'cmd' => 'true')), null, null);
+harness_register_row('mjb_management_jobs', 'mjb_id', $boot->key);
+check($boot && $boot->get('mjb_status') === 'queued',
+	'a bootstrap job is still created, and starts queued for the install executor');
 
 harness_finish();
