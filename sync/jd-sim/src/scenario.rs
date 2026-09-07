@@ -1639,3 +1639,88 @@ pub fn assert_no_entry_is_stranded(world: &World) {
         );
     }
 }
+
+/// The slot a folder record claims on this device, folded the way the volume
+/// folds it. `None` when the chain does not reach the root, which
+/// [`assert_no_entry_is_stranded`] is the one to complain about.
+fn claimed_slot(
+    folders: &std::collections::HashMap<i64, jd_core::model::Entry>,
+    entry: &jd_core::model::Entry,
+    p: &jd_vfs::Personality,
+) -> Option<Vec<String>> {
+    let mut parts = vec![jd_vfs::comparison_key(entry.effective_local_name(), p)];
+    let mut parent = entry.local_placement().parent;
+    let mut guard = 0;
+    while let Some(id) = parent {
+        guard += 1;
+        if guard > 512 {
+            return None;
+        }
+        let folder = folders.get(&id)?;
+        parts.push(jd_vfs::comparison_key(folder.effective_local_name(), p));
+        parent = folder.local_placement().parent;
+    }
+    parts.reverse();
+    Some(parts)
+}
+
+/// No two folder records claim one directory.
+///
+/// The oracle this sweep has always run proves two things: both sides converge,
+/// and no bytes are lost. CUSTODY is neither -- which folder a file belongs to,
+/// and which record owns a directory. Defects AA, AB and AC were all custody
+/// defects and every one of them passed: the bytes were right, both sides
+/// agreed, and the file sat in the wrong folder consistently everywhere. That
+/// whole family had to be found by reading the code, because forty thousand
+/// seeds could not see it.
+///
+/// A directory carries no identity of its own, so the question can only be
+/// asked of the RECORDS: two folders that resolve to one path have one
+/// directory between them, whatever the disk says. Folded the way the volume
+/// folds, because on a case-insensitive disk `readme` and `README` genuinely
+/// are one slot.
+///
+/// **This is not a custody check and must not be cited as one.** It is a true
+/// invariant that costs nothing to hold, but it has never fired on a known
+/// defect: AB parks the rival with no directory, so only one record claims the
+/// slot, and AC's loser had none either. The custody oracle the sweep actually
+/// needs is described in `specs/drive_sync_estate_fidelity.md` -- it cannot be
+/// built from runtime state, because by the time the defect has settled both
+/// sides agree.
+pub fn assert_no_two_records_on_one_directory(world: &World) {
+    for device in &world.devices {
+        let personality = jd_vfs::Vfs::personality(&device.fs);
+        let entries = device.store.every_entry().unwrap();
+        let folders: std::collections::HashMap<i64, jd_core::model::Entry> = entries
+            .iter()
+            .filter(|e| e.id.entity_type == jd_core::EntityType::Folder)
+            .map(|e| (e.id.server_id, e.clone()))
+            .collect();
+        // A record holds a directory when its own agreement says so -- either
+        // the placement both sides settled on, or the stand-in it is wearing.
+        let holds_a_directory = |e: &jd_core::model::Entry| {
+            e.synced_placement.is_some() || e.stand_in.is_some()
+        };
+
+        let mut claimed: std::collections::HashMap<Vec<String>, i64> =
+            std::collections::HashMap::new();
+        for entry in folders.values() {
+            if entry.remote_deleted || !holds_a_directory(entry) {
+                continue;
+            }
+            let Some(slot) = claimed_slot(&folders, entry, &personality) else {
+                continue;
+            };
+            if let Some(other) = claimed.insert(slot.clone(), entry.id.server_id) {
+                panic!(
+                    "{}: folders {} and {} both claim {} -- one directory, two owners",
+                    device.name,
+                    other,
+                    entry.id.server_id,
+                    slot.join("/"),
+                );
+            }
+        }
+
+    }
+}

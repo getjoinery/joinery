@@ -272,6 +272,9 @@ pub fn apply_naming(
     // Folder -> what actually holds a name in it, filled as each folder is
     // resolved and read by `judge_destinations` afterwards.
     let mut settled: HashMap<Option<i64>, Vec<(EntityId, String)>> = HashMap::new();
+    // Entries whose name is about to come free because this round moves them.
+    let mut leaving_this_pass: std::collections::HashSet<EntityId> =
+        std::collections::HashSet::new();
 
     for (parent, mut siblings) in by_parent {
         siblings.sort_by_key(resolution_order);
@@ -514,6 +517,30 @@ pub fn apply_naming(
             // still says `Synced` until the park op runs, so the verdict has to
             // be read from the decision rather than from the record.
             if !releasing && !matches!(updated.status, LocalStatus::Unsyncable(_)) {
+                // Is this one about to vacate the name it is holding? The
+                // server has placed it somewhere else and this round will apply
+                // that move, so the name it wears now is not a name anything
+                // else has to lose to. Without this a SWAP is unresolvable:
+                // each folder wants the name the other is standing on, each is
+                // given up as a duplicate before the round can run, and the
+                // cycle-breaking park that was planned for exactly this is
+                // dropped on entries naming has already parked. Defect AE.
+                //
+                // Something must actually be here to vacate. The other two
+                // conditions bound what enters the walk rather than deciding
+                // anything: an entry with an operation in flight, or wearing a
+                // scratch name, is mid-something and its record does not
+                // describe the disk, so it has no business in a chain. Measured
+                // in review -- no pin depends on either, and the closed-chain
+                // test carries the weight on its own. They stay for the same
+                // reason the loop above skips a busy parked entry.
+                if updated.holds_a_local_file()
+                    && updated.remote != *updated.local_placement()
+                    && !busy.contains(&updated.id)
+                    && !parked_locally(&updated)
+                {
+                    leaving_this_pass.insert(updated.id);
+                }
                 settled
                     .entry(parent)
                     .or_default()
@@ -526,7 +553,7 @@ pub fn apply_naming(
         }
     }
 
-    judge_destinations(env, personality, &settled, &mut out)?;
+    judge_destinations(env, personality, &settled, &leaving_this_pass, &mut out)?;
 
     Ok(out)
 }
@@ -555,6 +582,7 @@ fn judge_destinations(
     env: &ExecEnv,
     personality: &Personality,
     settled: &HashMap<Option<i64>, Vec<(EntityId, String)>>,
+    leaving_this_pass: &std::collections::HashSet<EntityId>,
     out: &mut NamingOutcome,
 ) -> Result<(), ExecError> {
     // At most one park per entity per batch.
@@ -569,6 +597,7 @@ fn judge_destinations(
     // but a device that is never quiet again.
     let already: std::collections::HashSet<EntityId> =
         out.give_up_local_copy.iter().map(|(id, _)| *id).collect();
+    let trading = trading_names(env, personality, settled, leaving_this_pass)?;
     for entry in crate::pass::all_entries(env)? {
         if entry.status == LocalStatus::OutOfScope || entry.remote_deleted {
             continue;
@@ -587,6 +616,12 @@ fn judge_destinations(
             .map(|v| {
                 v.iter()
                     .filter(|(id, _)| *id != entry.id)
+                    // A sibling this same round is moving out of its name does
+                    // not hold that name against THIS arrival -- but only when
+                    // the two are trading, so that letting go is guaranteed to
+                    // free the name, and only for the one arrival that takes
+                    // it. See `trading_names`. Defect AE.
+                    .filter(|(id, _)| trading.get(&entry.id) != Some(id))
                     .map(|(_, n)| n.clone())
                     .collect()
             })
@@ -620,6 +655,84 @@ fn judge_destinations(
         }
     }
     Ok(())
+}
+
+/// Entries that are trading names with each other this round.
+///
+/// A holder about to vacate its name should not make an arrival give up its
+/// copy -- but "about to vacate" read from the record alone is too generous. It
+/// also describes a holder whose move is half-finished, stuck, or being put back
+/// by a peer, and exempting one of those hands the arrival a name that never
+/// comes free: the estate's peer-put-back kill sweep fails exactly there.
+///
+/// The safe case is a CLOSED one. If the name this entry wants is held by
+/// somebody who wants the name held by somebody... and the chain comes back
+/// here, then every name in it is vacated by the same round, and the planner's
+/// cycle-breaker already knows how to sequence that -- it parks one, moves the
+/// rest, and brings the parked one in last. That is the machinery that was
+/// planned and then thrown away when naming parked the entities first: on the
+/// two-folder case the planner had `broken_cycles` right and its ops were
+/// refused because the entries were already `Unsyncable`.
+///
+/// Anything that does not close is left alone and judged as before.
+fn trading_names(
+    env: &ExecEnv,
+    personality: &Personality,
+    settled: &HashMap<Option<i64>, Vec<(EntityId, String)>>,
+    leaving_this_pass: &std::collections::HashSet<EntityId>,
+) -> Result<HashMap<EntityId, EntityId>, ExecError> {
+    // Who is standing on each name, and what each mover is reaching for.
+    let mut holder_of: HashMap<(Option<i64>, String), EntityId> = HashMap::new();
+    for (parent, names) in settled {
+        for (id, name) in names {
+            holder_of.insert((*parent, jd_vfs::comparison_key(name, personality)), *id);
+        }
+    }
+    let mut wants: HashMap<EntityId, (Option<i64>, String)> = HashMap::new();
+    for entry in crate::pass::all_entries(env)? {
+        if leaving_this_pass.contains(&entry.id) {
+            wants.insert(
+                entry.id,
+                (
+                    entry.remote.parent,
+                    jd_vfs::comparison_key(&entry.remote.name, personality),
+                ),
+            );
+        }
+    }
+    // Each arrival, and the ONE holder it displaces.
+    //
+    // A closed chain vacates every name in it, but each of those names is
+    // handed to exactly one member -- so the exemption is a pairing, not a
+    // pass. Written as a set, a trading holder stopped counting against EVERY
+    // arrival in the parent, and an unrelated newcomer at the same slot walked
+    // past a clash nobody had resolved: on a folding volume, a server holding
+    // `A`, `B` and `b` while `A` and `B` traded names ended with the user's
+    // third folder conflict-renamed ON THE SERVER by a device that had only
+    // been told about renames. The planner cannot catch that -- a mover waits
+    // on one blocker and the occupant map holds current slots only. Found in
+    // review by public-html-0e; pinned by
+    // `a_swap_does_not_let_an_unrelated_case_twin_past_the_clash`.
+    let mut trading: HashMap<EntityId, EntityId> = HashMap::new();
+    for start in wants.keys() {
+        let mut at = *start;
+        let displaces = wants.get(start).and_then(|target| holder_of.get(target)).copied();
+        // Bounded by the number of movers: a chain longer than that has
+        // repeated somebody, and a repeat that is not the start is a chain
+        // running into a cycle it is not part of.
+        for _ in 0..=wants.len() {
+            let Some(target) = wants.get(&at) else { break };
+            let Some(next) = holder_of.get(target) else { break };
+            if *next == *start {
+                if let Some(holder) = displaces {
+                    trading.insert(*start, holder);
+                }
+                break;
+            }
+            at = *next;
+        }
+    }
+    Ok(trading)
 }
 
 /// Is this an encrypted entry this device has no key for?

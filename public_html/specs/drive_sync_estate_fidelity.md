@@ -2246,13 +2246,51 @@ right, so the detection was reverted rather than shipped. Until two cyclic
 folder renames can be applied -- from the feed and from a local scan -- no
 amount of better detection fixes AD.
 
-**Open question for whoever takes it:** is this the cycle-breaker machinery that
-already parks file swaps (`SWAP_PREFIX`, `find_cycle_breakers`), simply never
-reached for folders arriving from the feed? Or is a folder rename cycle a
-different animal because the park is itself a server-side rename? The detection
-experiment produced a `.jd-swap-` park that was then reported as an unfinished
-operation and put back under a conflict name, which reads like the machinery is
-reached and does not complete. Not traced, not asserted.
+**Answered, traced by public-html-0e.** It is the same machinery and it is
+reached -- the planner had `broken_cycles` right on the two-folder case -- and
+its ops were refused because a pre-round name verdict had already parked the
+entities. `judge_destinations` judges each moved folder's new server name
+against its settled siblings' CURRENT names: in a swap each wants the name the
+other is still standing on, so both are given up as duplicates, both flip
+`Unsyncable`, and park and moves alike are dropped on entries naming has already
+parked. The next pass then "recovers" both with `synced_placement` cleared,
+plans a create for each, and each ADOPTS the other's directory by name -- after
+which the files read as moved and the server is told. Hence the silent revert.
+
+**Fix.** A holder about to vacate its name does not hold it against the arrival
+that takes it. "About to vacate" cannot be read from the record alone -- that
+also describes a holder whose move is half-finished, stuck, or being put back by
+a peer, and exempting one of those hands the arrival a name that never comes
+free (the peer-put-back kill sweep fails exactly there). The safe case is a
+CLOSED one: the name this entry wants is held by somebody who wants a name held
+by somebody, and the chain comes back here. Then every name in it is vacated by
+the same round, which is precisely what the cycle-breaker sequences.
+
+The exemption is a PAIRING, not a pass. A name in a closed chain is free for
+exactly one entity -- the member that takes it -- so `trading` maps each arrival
+to the one holder it displaces. Written as a set it let an unrelated newcomer at
+the same slot past a clash nobody resolved: on a folding volume, with the server
+holding `A`, `B` and `b` while `A` and `B` traded, the user's third folder was
+conflict-renamed ON THE SERVER by a device that had only been told about
+renames. Found in review, pinned by
+`a_swap_does_not_let_an_unrelated_case_twin_past_the_clash`.
+
+Pins: `a_folder_name_swap_made_on_the_server_survives`,
+`a_three_folder_name_rotation_from_the_server_is_applied`, and the case-twin pin
+above. `two_stand_ins_whose_names_are_swapped_on_the_server_follow` stays red and
+ignored -- a stand-in's competing placement is its remote, so no duplicate is
+ever raised and that one is the "each waits for the other" its own comment
+describes.
+
+**Still open on this axis.** The exemption assumes the round plans every chain
+member's move. A member the round holds instead -- parent shadowed, or parent
+parked without a directory (the AB hold) -- breaks that assumption. A same-parent
+swap holds both, plans nothing, and is fine; a cross-parent swap into a parked
+parent is Overtaken by `move_local`'s parent gate and retried: not destructive,
+not quiet. Worth a probe. And `move_local` has a source-holder guard but NO
+destination-holder guard -- `make_room` moves whatever stands at the destination
+aside -- so any future widening of this exemption lands on `make_room` rather
+than on a refusal.
 
 **Decision already taken, for when this is unblocked.** Where the client cannot
 tell a folder rename from a mass file move, the owner chose the RENAME reading:
