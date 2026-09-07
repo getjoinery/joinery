@@ -24,6 +24,7 @@
  *
  * Run: php plugins/server_manager/tests/customer_cloud_provisioning_test.php
  *
+ * @version 1.3 - dismiss rules: which provisions can be cleared off the board, and what blocks the rest
  * @version 1.2 - node fixtures carry the HarnessTest prefix so a killed run's rows self-reclaim at the next db boot
  * @version 1.1
  */
@@ -69,6 +70,7 @@ class CustomerCloudProvisioningTest {
 			$this->test_driver();
 			$this->test_account_tokens();
 			$this->test_provision_model();
+			$this->test_dismiss_rules();
 			$this->test_origin_rules();
 			$this->test_consumer();
 			$this->test_reverse_dns();
@@ -615,6 +617,64 @@ class CustomerCloudProvisioningTest {
 		$reloaded = new CustomerCloudProvision($provision->key, TRUE);
 		check($reloaded->get('cvp_status') === 'failed' && strpos($reloaded->get('cvp_error'), 'test failure reason') !== false,
 			'fail() records terminal status + reason');
+	}
+
+	/**
+	 * Dismissing a provision hides the only record this plane keeps of what
+	 * that provision built, so it is allowed exactly when the provision built
+	 * nothing. Each case here is a thing that would otherwise be left running
+	 * on no page.
+	 */
+	private function test_dismiss_rules() {
+		section('Dismissing a provision that holds nothing');
+
+		$make = function (array $values) {
+			$p = new CustomerCloudProvision(NULL);
+			$p->set('cvp_origin', 'admin');
+			$p->set('cvp_usr_user_id', $this->user_id);
+			$p->set('cvp_domain', 'dismiss-' . random_int(1000, 9999) . '.example.com');
+			$p->set('cvp_slug', 'dismiss-test');
+			$p->set('cvp_status', 'failed');
+			foreach ($values as $k => $v) { $p->set($k, $v); }
+			$p->save();
+			return $p;
+		};
+
+		$clean = $make([]);
+		check($clean->can_dismiss() && $clean->dismiss_blockers() === [],
+			'a failed provision holding nothing can be dismissed');
+
+		$booting = $make(['cvp_status' => 'booting']);
+		$why = $booting->dismiss_blockers();
+		check(!$booting->can_dismiss() && strpos(implode(' ', $why), 'still working') !== false,
+			'a provision still working is not dismissible', implode('; ', $why));
+
+		$done = $make(['cvp_status' => 'done']);
+		$why = $done->dismiss_blockers();
+		check(!$done->can_dismiss() && strpos(implode(' ', $why), 'succeeded') !== false,
+			'a succeeded provision keeps its record', implode('; ', $why));
+
+		$with_instance = $make(['cvp_instance_id' => '100949812']);
+		$why = $with_instance->dismiss_blockers();
+		check(!$with_instance->can_dismiss() && strpos(implode(' ', $why), 'instance') !== false,
+			'a provision whose instance exists is not dismissible', implode('; ', $why));
+
+		$with_password = $make(['cvp_install_password' => 'held']);
+		check(!$with_password->can_dismiss(),
+			'a provision whose install password the plane still holds is not dismissible');
+
+		$with_mail = $make(['cvp_smtp2go_subaccount_id' => 'sub-123']);
+		check(!$with_mail->can_dismiss(),
+			'a provision with a live mail subaccount is not dismissible');
+
+		// A dismissed provision leaves the board, which is the whole point.
+		$clean->soft_delete();
+		$open = new MultiCustomerCloudProvision(['open' => true, 'deleted' => false, 'user_id' => $this->user_id]);
+		$still_listed = false;
+		foreach ($open as $row) {
+			if ((int)$row->key === (int)$clean->key) { $still_listed = true; }
+		}
+		check(!$still_listed, 'a dismissed provision is off the dashboard list');
 	}
 
 	private function test_origin_rules() {

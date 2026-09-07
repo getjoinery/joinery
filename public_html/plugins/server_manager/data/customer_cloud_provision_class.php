@@ -30,6 +30,9 @@
  * retire_failed when the job could not prove the machine refuses it (the
  * password is kept, so the machine stays reachable).
  *
+ * @version 1.7 - dismiss_blockers()/can_dismiss(): a provision holding nothing — no instance, no node,
+ *                no mail subaccount, no live install password, no paid order — can be cleared off the
+ *                dashboard, and one holding something says what
  * @version 1.6 - hosted tier (specs/hosted_trial_provisioning.md): cvp_hosting_mode chooses whose cloud
  *                account the instance is born on, cvp_admin_pass_sealed carries the buyer's first
  *                admin password until they reveal it once, and the mail leg's SMTP2GO identifiers
@@ -269,6 +272,57 @@ class CustomerCloudProvision extends SystemBase {
 	public static function holds_admin_password($node_id): bool {
 		$provision = self::latest_for_node($node_id);
 		return $provision !== null && $provision->admin_password_state() === 'sealed';
+	}
+
+	/** The statuses a provision can be cleared off the board in. */
+	const DISMISSIBLE_STATUSES = array('failed', 'pending_connect');
+
+	/**
+	 * Why this provision cannot be cleared off the board, or an empty array if
+	 * it can be.
+	 *
+	 * This row is the only record the plane keeps of anything the provision
+	 * brought into existence: an instance running on someone's cloud account,
+	 * a node, a mail subaccount, a password a machine still accepts. Hiding
+	 * the row would leave that thing real, still billed, and on no page — so
+	 * a provision is dismissible exactly when it holds none of them. What is
+	 * left then is a note about something that did not happen, and clearing it
+	 * should not take hand-written SQL.
+	 *
+	 * The reasons are the message. A caller shows them instead of a bare
+	 * refusal, so an operator can see what has to be dealt with first.
+	 */
+	public function dismiss_blockers(): array {
+		$blockers = array();
+
+		$status = (string)$this->get('cvp_status');
+		if (!in_array($status, self::DISMISSIBLE_STATUSES, true)) {
+			$blockers[] = ($status === 'done')
+				? 'it succeeded, and a provision that built a site keeps its record'
+				: "it is still working (status '{$status}') — wait for it to finish or fail";
+		}
+		if (trim((string)$this->get('cvp_instance_id')) !== '') {
+			$blockers[] = 'an instance was created on a cloud account and is still billed — deprovision it first';
+		}
+		if ((int)$this->get('cvp_mgn_node_id')) {
+			$blockers[] = 'it has a managed node — remove the node instead';
+		}
+		if (trim((string)$this->get('cvp_smtp2go_subaccount_id')) !== '') {
+			$blockers[] = 'it created a mail subaccount that is still live';
+		}
+		if (in_array((string)$this->get('cvp_install_password'), self::PASSWORD_HELD_STATES, true)) {
+			$blockers[] = 'this plane still holds an install password the machine accepts';
+		}
+		if ((int)$this->get('cvp_external_order_item_id')) {
+			$blockers[] = 'a paid order is waiting on it';
+		}
+
+		return $blockers;
+	}
+
+	/** Can this provision be cleared off the board? See dismiss_blockers(). */
+	public function can_dismiss(): bool {
+		return count($this->dismiss_blockers()) === 0;
 	}
 
 	/**

@@ -3,6 +3,9 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.22 - a provision that brought nothing into existence can be dismissed off the board; one
+ *                  that holds an instance, a node, a mail subaccount, a live install password or a
+ *                  paid order says so instead of offering the button
  * @version 1.21 - an agent asking to join is announced at the top of the board and can be approved or
  *                  rejected right there: approval makes the node record from the request
  *                  (AgentChannelEndpoint::adoptJoin), and a join from this machine's own address is recognised as
@@ -76,6 +79,34 @@ if ($_POST && in_array($_POST['action'] ?? '', ['adopt_join', 'reject_join'], tr
 			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
 		header('Location: /admin/server_manager'); exit;
 	}
+}
+
+// Clear a dead provision off the board. A provision that never brought
+// anything into existence is a note about an attempt, and an operator should
+// not need hand-written SQL to be rid of it. The model decides whether this
+// one qualifies and says why when it does not, so the refusal names the thing
+// still running rather than reading as a rule.
+if ($_POST && ($_POST['action'] ?? '') === 'dismiss_provision') {
+	$page_regex = '/\/admin\/server_manager/';
+	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager'); exit; }
+	$prov = new CustomerCloudProvision((int)($_POST['cvp_id'] ?? 0), TRUE);
+	if (!$prov->key || $prov->get('cvp_delete_time')) {
+		$session->save_message(new DisplayMessage('That provision is no longer on the board.', 'Error', $page_regex,
+			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		header('Location: /admin/server_manager'); exit;
+	}
+	$blockers = $prov->dismiss_blockers();
+	if ($blockers) {
+		$session->save_message(new DisplayMessage(
+			$prov->get('cvp_domain') . ' cannot be dismissed: ' . implode('; ', $blockers) . '.',
+			'Error', $page_regex, DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		header('Location: /admin/server_manager'); exit;
+	}
+	$prov->soft_delete();
+	$session->save_message(new DisplayMessage(
+		$prov->get('cvp_domain') . ' dismissed. It created nothing, so nothing is left running.',
+		'Dismissed', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+	header('Location: /admin/server_manager'); exit;
 }
 
 // Process completed jobs that haven't had their results parsed yet.
@@ -436,13 +467,14 @@ if ($agent_online) {
 	<div class="card-body py-2">
 		<strong>Cloud provisions:</strong>
 		<table class="table table-sm mb-0 mt-2">
-			<thead><tr><th>Domain</th><th>Origin</th><th>Status</th><th>Instance</th><th>Install password</th><th>Detail</th></tr></thead>
+			<thead><tr><th>Domain</th><th>Origin</th><th>Status</th><th>Instance</th><th>Install password</th><th>Detail</th><th></th></tr></thead>
 			<tbody>
 			<?php foreach ($inflight_provisions as $prov):
 				$pstatus = $prov->get('cvp_status');
 				$badge = ($pstatus === 'failed') ? 'danger' : (($pstatus === 'pending_connect') ? 'warning' : (($pstatus === 'done') ? 'success' : 'info'));
 				$pw_state = (string)$prov->get('cvp_install_password');
 				$pw_class = ($pw_state === 'retired') ? 'text-success' : (($pw_state === 'retire_failed') ? 'text-danger' : 'text-muted');
+				$dismiss_blockers = $prov->dismiss_blockers();
 			?>
 				<tr>
 					<td><?php echo htmlspecialchars($prov->get('cvp_domain')); ?></td>
@@ -451,6 +483,19 @@ if ($agent_online) {
 					<td><?php echo htmlspecialchars(trim(($prov->get('cvp_instance_type') ?: '') . ' ' . ($prov->get('cvp_region') ?: '')) ?: '—'); ?></td>
 					<td class="<?php echo $pw_class; ?> small"><?php echo htmlspecialchars(ProvisionCustomerCloud::install_password_summary($prov)); ?></td>
 					<td class="text-muted"><?php echo htmlspecialchars(mb_substr((string)$prov->get('cvp_error'), 0, 120) ?: '—'); ?></td>
+					<td>
+						<?php if (!$dismiss_blockers): ?>
+							<form method="post" action="/admin/server_manager" id="dismiss_prov_<?php echo (int)$prov->key; ?>" style="display:inline;">
+								<input type="hidden" name="action" value="dismiss_provision">
+								<input type="hidden" name="cvp_id" value="<?php echo (int)$prov->key; ?>">
+								<?php echo SmAdminCsrf::field(); ?>
+								<button type="button" class="btn btn-sm btn-outline-secondary"
+									onclick="JoineryModal.confirm(<?php echo htmlspecialchars(json_encode('Dismiss ' . $prov->get('cvp_domain') . '? It created nothing, so this only clears the record off this board.'), ENT_QUOTES); ?>, function(){ document.getElementById('dismiss_prov_<?php echo (int)$prov->key; ?>').submit(); })">Dismiss</button>
+							</form>
+						<?php else: ?>
+							<span class="text-muted small" title="<?php echo htmlspecialchars('Cannot be dismissed: ' . implode('; ', $dismiss_blockers) . '.'); ?>">&mdash;</span>
+						<?php endif; ?>
+					</td>
 				</tr>
 			<?php endforeach; ?>
 			</tbody>
