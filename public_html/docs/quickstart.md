@@ -92,7 +92,7 @@ You'll need to verify your email and add a payment card. Once you can see the Li
 3. Click the **Create a Personal Access Token** button
 4. Label it **Joinery Token**
 5. Choose expiry "In one month"
-6. Select **No Access** for all options except set **Domains** to **Read/Write**.
+6. Set **Domains** and **Linodes** to **Read/Write**, all other options set to **No Access**.
 7. Click **Create Token**, and save the displayed token.  You'll paste it in Step 4.
 
 ---
