@@ -17,6 +17,9 @@
  *                 plane pairs to itself and the Publish form dispatches to that node. The local
  *                 step that ran the publisher out of the plane-local queue is gone
  *                 (specs/agent_local_queue_retirement.md, G1).
+ * @version 1.56 - build_retire_install_password writes sshd drop-in config itself instead of running
+ *                 install.sh host-harden, which no longer exists: the retire job is the only thing that
+ *                 turns password login off, and it needs no release on the machine to do it
  * @version 1.54 - build_retire_install_password: the bootstrap's closing session, once every agent the
  *                 install put on the machine is admitted — host-harden --agent-managed over the sealed
  *                 password, so the machine stops accepting it (specs/keyless_provisioning.md WP2)
@@ -3111,28 +3114,30 @@ class JobCommandBuilder {
 	 *
 	 * A keyless machine accepts its install password until this runs. Once
 	 * every agent the install put on the machine has been admitted, the plane
-	 * uses that password one last time to run install.sh host-harden
-	 * --agent-managed, which disables password login (and does the fail2ban,
-	 * swap and journal hardening a fresh box is owed). The flag is the truthful
-	 * answer to host-harden's lockout check: the joined agent is the access
-	 * path, so refusing password login orphans nobody.
+	 * uses that password one last time to turn password login off: a drop-in
+	 * under /etc/ssh/sshd_config.d named to sort before cloud-init's, since
+	 * sshd takes the first value it reads for a keyword. The joined agent is
+	 * the access path from then on, so refusing password login orphans nobody.
+	 * Nothing else is done here — the box's housekeeping (fail2ban, swap, the
+	 * journal cap) ran with its install.
 	 *
 	 * One ssh session, run by InstallJobExecutor over the sealed password. The
 	 * executor then proves the machine refuses the password before the
 	 * provision pipeline erases it — this step's own check (sshd -T) is the
 	 * first half of that proof, the refused probe is the second.
-	 *
-	 * The release the bootstrap extracted stays under /opt/joinery-install, so
-	 * the install.sh that ran the install is the one that hardens the box.
 	 */
 	public static function build_retire_install_password($node) {
 		$lines = [];
 		$lines[] = 'set -eo pipefail';
-		$lines[] = 'TOOLS=$(ls -dt /opt/joinery-install/*/maintenance_scripts/install_tools 2>/dev/null | head -1)';
-		$lines[] = 'if [ -z "$TOOLS" ] || [ ! -f "$TOOLS/install.sh" ]; then echo "RETIRE_FAILED=no extracted release under /opt/joinery-install"; exit 1; fi';
-		$lines[] = 'cd "$TOOLS"';
-		$lines[] = './install.sh -y -q host-harden --agent-managed';
-		$lines[] = 'if sshd -T 2>/dev/null | grep -qi "^passwordauthentication no"; then echo INSTALL_PASSWORD_RETIRED; else echo "RETIRE_FAILED=sshd still accepts passwords after host-harden"; exit 1; fi';
+		$lines[] = 'install -d -m 755 /etc/ssh/sshd_config.d';
+		$lines[] = "printf '%s\\n'"
+			. " '# Written by the management node when it retired this machine install password.'"
+			. " '# The machine is reached through its Joinery agent; nothing logs in over SSH with a password.'"
+			. " 'PasswordAuthentication no' 'KbdInteractiveAuthentication no' 'PermitRootLogin prohibit-password' 'MaxAuthTries 3'"
+			. ' > /etc/ssh/sshd_config.d/00-joinery-agent-managed.conf';
+		$lines[] = 'sshd -t';
+		$lines[] = 'systemctl restart ssh';
+		$lines[] = 'if sshd -T 2>/dev/null | grep -qi "^passwordauthentication no" && sshd -T 2>/dev/null | grep -qi "^kbdinteractiveauthentication no"; then echo INSTALL_PASSWORD_RETIRED; else echo "RETIRE_FAILED=sshd still accepts passwords"; exit 1; fi';
 
 		return [
 			['type' => 'ssh', 'label' => 'Retire the install password: the machine stops accepting it',

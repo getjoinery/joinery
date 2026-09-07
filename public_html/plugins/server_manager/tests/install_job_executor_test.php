@@ -250,10 +250,12 @@ $node7 = ije_node('ijetest-retire-' . $suffix, $retire_pw);
 $built = JobCommandBuilder::build_retire_install_password($node7);
 check(count($built) === 1 && ($built[0]['type'] ?? '') === 'ssh',
 	'retiring the password is one ssh session');
-check(strpos($built[0]['cmd'], 'host-harden --agent-managed') !== false
+check(strpos($built[0]['cmd'], '/etc/ssh/sshd_config.d/00-joinery-agent-managed.conf') !== false
+	&& strpos($built[0]['cmd'], 'PasswordAuthentication no') !== false
+	&& strpos($built[0]['cmd'], 'KbdInteractiveAuthentication no') !== false
 	&& strpos($built[0]['cmd'], 'sshd -T') !== false
-	&& strpos($built[0]['cmd'], '/opt/joinery-install/') !== false,
-	'it runs host-harden --agent-managed from the release the bootstrap left, and reads sshd back');
+	&& strpos($built[0]['cmd'], 'install.sh') === false,
+	'it writes the sshd drop-in itself (password and keyboard-interactive off) and reads sshd back; no install.sh on the machine is needed');
 $rjob = ManagementJob::createJob($node7->key, 'retire_install_password', $built, array('provision_id' => 0), null);
 $made_jobs[] = $rjob->key;
 $rjob->load();

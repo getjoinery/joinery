@@ -176,7 +176,7 @@ The container is not a security boundary, and a site is not a sealed appliance t
 - **Containers take Docker's defaults.** No user-namespace remapping, no read-only root filesystem, no dropped capabilities. Processes start as root inside the container; Apache and PHP-FPM drop their workers to `www-data`.
 - **The site's web port answers on every interface.** `-p PORT:80` publishes there, and Docker's forwarding rules are consulted before UFW's, so a UFW rule does not close it — anyone who knows the port reaches the site directly, skipping the host proxy and its HTTPS redirect. The container's PostgreSQL port is the exception: it publishes on loopback only, and `install.sh docker` adds a `DOCKER-USER` rule dropping ports 9080-9099 arriving on the public interface.
 
-Host hardening is its own step: `install.sh host-harden` sets key-only SSH and fail2ban. Neither it nor `install.sh docker` configures UFW on a Docker host — the UFW rules in this guide belong to bare-metal server setup.
+`install.sh docker` also does the host's housekeeping: a fail2ban SSH jail, a 100M cap on the system journal, Docker BuildKit garbage collection, at least 2G of swap, and cleared failed-login logs. It does not configure UFW on a Docker host — the UFW rules in this guide belong to bare-metal server setup.
 
 So run Joinery containers on a machine you control, and put sites that must not reach each other on separate machines rather than in separate containers.
 
@@ -256,14 +256,7 @@ Turning off root SSH login is the one hardening step that can lock an operator o
 | Running under `sudo` from an ordinary account | That account already has its own key and sudo, so it sets `PermitRootLogin no` and does nothing else. |
 | Neither — root reached by password, no key installed | Leaves `PermitRootLogin` alone and says so. Disabling it here would leave nothing able to log in. |
 
-The third case is the only one that finishes with root password login still enabled. It is what you get on a provider that boots you a machine with a root password and no SSH key attached. To finish hardening, add your key and run the dedicated step:
-
-```bash
-ssh-copy-id root@your-server        # from your own machine
-sudo ./install.sh host-harden       # on the server
-```
-
-`host-harden` refuses to run unless it can see a non-empty `authorized_keys`, then disables password authentication entirely and sets `PermitRootLogin prohibit-password`.
+The third case is the only one that finishes with root password login still enabled. It is what you get on a provider that boots you a machine with a root password and no SSH key attached. On a self-hosted machine that password is the owner's only way in, so the installer leaves it on and relies on the fail2ban jail (three failures in ten minutes, banned for an hour) to limit guessing. On a machine a management node provisioned, the management node turns password login off itself once the machine's agents are admitted; see the Server Manager plugin's `retire_install_password` job.
 
 ### Create a site
 

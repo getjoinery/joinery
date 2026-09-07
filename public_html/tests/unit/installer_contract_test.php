@@ -1537,11 +1537,11 @@ section('Global flags mean the same thing in either position');
 // unknown flag is a stop, never a silent discard.
 check(strpos($install_exec, 'consume_global_flag()') !== false,
     'one setter owns the global flags');
-foreach (['docker', 'host-harden', 'build-base', 'server', 'list'] as $sub) {
+foreach (['docker', 'build-base', 'server', 'list'] as $sub) {
     check(preg_match('/Unknown option for ' . preg_quote($sub, '/') . '/', $install_src) === 1,
         "the {$sub} subcommand stops on a flag it does not know");
 }
-foreach (['do_docker_install', 'do_host_harden', 'do_build_base', 'do_server_setup', 'do_list'] as $fn) {
+foreach (['do_docker_install', 'do_build_base', 'do_server_setup', 'do_list'] as $fn) {
     // -y after the subcommand reaches the same setter as -y before it.
     $body = null;
     if (preg_match('/^' . $fn . '\(\)\s*\{(.*?)^\}/ms', $install_src, $m)) {

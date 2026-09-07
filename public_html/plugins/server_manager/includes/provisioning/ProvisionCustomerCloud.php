@@ -47,7 +47,7 @@
  * it is sealed. When the provision is done and every agent the install put on
  * the machine has been admitted — the site's agent, and on a docker box the
  * host's own agent too — a retire_install_password job (InstallJobExecutor,
- * one ssh session: host-harden --agent-managed) turns password login off, and
+ * one ssh session writing sshd drop-in config) turns password login off, and
  * the executor completes the job only after the machine REFUSED the password.
  * That completed job is what lets this task erase the sealed password:
  * retired. A failed job keeps the password (retire_failed, cvp_error says
