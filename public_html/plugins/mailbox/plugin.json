@@ -1,7 +1,7 @@
 {
     "name": "Mailbox",
     "description": "Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS",
-    "version": "1.113.3",
+    "version": "1.114.0",
     "author": "Joinery",
     "license": "PolyForm-Noncommercial-1.0.0",
     "status": "stable",
@@ -734,6 +734,42 @@
                 "supports_topic": true,
                 "default_email": true,
                 "title_template": "{relay_name} is scanning mail for spam again",
+                "body_template": "{detail}",
+                "link_template": "/plugins/mailbox/admin/admin_mailbox_setup"
+            }
+        },
+        "mailbox.relay_pickup_stopped": {
+            "label": "Mail has stopped arriving from the relay",
+            "description": "This server can no longer collect mail from the relay that receives it — the relay is unreachable, has no identity pin, or every pull is failing. The relay keeps accepting mail, so senders are told it was delivered while nothing brings it here. Raised once when it happens, not repeatedly while it stays broken.",
+            "category": "Mailbox",
+            "payload": {
+                "relay_name": "The relay this is about",
+                "reason": "Why collecting stopped, in plain terms",
+                "since": "When mail was last collected, or that it never was",
+                "fix": "What to open and what to do"
+            },
+            "notify": {
+                "ntf_type": "system",
+                "supports_topic": true,
+                "default_email": true,
+                "title_template": "Mail is not arriving: this server cannot collect from {relay_name}",
+                "body_template": "{reason} {since} {fix}",
+                "link_template": "/plugins/mailbox/admin/admin_mailbox_setup"
+            }
+        },
+        "mailbox.relay_pickup_recovered": {
+            "label": "Mail is arriving from the relay again",
+            "description": "This server reached the relay again and collected what was waiting.",
+            "category": "Mailbox",
+            "payload": {
+                "relay_name": "The relay this is about",
+                "detail": "What the first successful pickup brought in"
+            },
+            "notify": {
+                "ntf_type": "system",
+                "supports_topic": true,
+                "default_email": true,
+                "title_template": "Mail is arriving again from {relay_name}",
                 "body_template": "{detail}",
                 "link_template": "/plugins/mailbox/admin/admin_mailbox_setup"
             }

@@ -13,9 +13,9 @@
  *                    immediately (RelayMapSync::onChange); this is the
  *                    reconcile floor behind that, and an unchanged map costs
  *                    one DB read and no SSH.
- *  2. Spool          rsync sealed blobs off the relay spool (copy-only), store
- *                    each durably, then delete what was stored — the
- *                    delete-after-store is the ack.
+ *  2. Spool          pull sealed blobs off the relay spool over its API, store
+ *                    each durably, then ack what was stored — and announce,
+ *                    once, when pickup stops or resumes.
  *  3. Relay scanner  ask the relay whether its spam scanner is working, cache
  *                    the answer, and raise it when it changes.
  *  4. Cloud provision  advance the relay cloud-provision state machine.
@@ -28,6 +28,8 @@
  * A phase that throws is caught and recorded, and the later phases still run.
  * Phase 1 failing must not strand mail already sitting on the relay's spool.
  *
+ * @version 1.2 - phase 2 announces mailbox.relay_pickup_stopped / _recovered on transition
+ *                (mrl_pickup_alarm_time), and a relay without an identity pin is an error
  * @version 1.1 - phase 3: relay scanner health (specs/mailbox_relay_scanner_health.md)
  * @version 1.0
  */
@@ -114,13 +116,67 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 			$max = RelaySpoolConsumer::DEFAULT_MAX;
 		}
 
+		// Read before the pull: a successful pull stamps a fresh time, and the
+		// question is how long it had been since the last one.
+		$last_pull_before = (string)$relay->get('mrl_last_pull_time');
+
 		$consumer = new RelaySpoolConsumer($relay);
 		$result = $consumer->pull($max);
+
+		$this->announcePickup($relay, (string)($result['status'] ?? 'error'),
+			(string)($result['message'] ?? ''), $last_pull_before);
 
 		return array(
 			'status' => ($result['status'] === 'error') ? 'error' : 'success',
 			'message' => $result['message'],
 		);
+	}
+
+	/**
+	 * Raise "mail is not arriving" ONCE when pickup stops, and "arriving again"
+	 * once when it resumes (MailboxRelay::pickupTransition decides). The alarm
+	 * is stamped on the relay row, so the admin-header notice can show it from
+	 * a stored fact and a relay that stays broken is not announced every pass.
+	 *
+	 * Why this exists: an unreachable relay keeps ACCEPTING mail — senders are
+	 * told it was delivered — while nothing collects it. Every other surface
+	 * that knows is one an operator has to open. This one comes to them.
+	 */
+	private function announcePickup(MailboxRelay $relay, string $pull_status, string $message, string $last_pull_before): void {
+		$alarmed = trim((string)$relay->get('mrl_pickup_alarm_time')) !== '';
+		$transition = MailboxRelay::pickupTransition($pull_status, $last_pull_before, $alarmed, time());
+		if ($transition === 'none') {
+			return;
+		}
+		$name = trim((string)$relay->get('mrl_name'))
+			?: (trim((string)$relay->get('mrl_mx_hostname')) ?: 'the relay');
+		$relay->set('mrl_pickup_alarm_time', $transition === 'stopped' ? gmdate('Y-m-d H:i:s') : null);
+		$relay->save();
+
+		try {
+			require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
+			if ($transition === 'stopped') {
+				$since = trim($last_pull_before) !== ''
+					? 'The last successful pickup was at ' . $last_pull_before . ' UTC.'
+					: 'No mail has ever been picked up from it.';
+				SignalBus::dispatch('mailbox.relay_pickup_stopped', array(
+					'relay_name' => $name,
+					'reason'     => 'This server could not collect mail from ' . $name
+						. ($message !== '' ? ': ' . substr($message, 0, 300) : '.'),
+					'since'      => $since,
+					'fix'        => 'Open the mail Setup tab: the Relay card names what is wrong and what to do. '
+						. 'Mail sent to you is waiting on the relay in the meantime.',
+				));
+			} else {
+				SignalBus::dispatch('mailbox.relay_pickup_recovered', array(
+					'relay_name' => $name,
+					'detail'     => 'This server reached ' . $name . ' again and picked up what was waiting'
+						. ($message !== '' ? ' (' . substr($message, 0, 200) . ')' : '') . '.',
+				));
+			}
+		} catch (Throwable $e) {
+			error_log('MailboxRelayReconcile: could not announce pickup ' . $transition . ' — ' . $e->getMessage());
+		}
 	}
 
 	/**

@@ -17,6 +17,7 @@
  * periodic reconcile (the relay reconcile scheduled task), so freshness beats the
  * reject_unmatched gate.
  *
+ * @version 2.4 - a relay row without an identity pin is an ERROR, not a skip
  * @version 2.3 - the ssh era is over: the API is the only push path
  * @version 2.2 - a relay with an identity pin takes the fragment as a signed
  *                PUT /relay/fragment and answers the merge verdict in the response;
@@ -69,7 +70,9 @@ class RelayMapSync {
 	 */
 	public static function push(MailboxRelay $relay, bool $force = false): array {
 		if (!$relay->usesRelayApi()) {
-			return array('status' => 'skipped', 'message' => 'relay has no identity pin (it predates the relay API) and cannot be reached');
+			// An error, not a skip: the relay is routing this deployment's mail on
+			// a map this server can no longer update.
+			return array('status' => 'error', 'message' => 'relay has no identity pin (it predates the relay API) and cannot be reached — create a new relay and delete this row');
 		}
 		if (trim((string)$relay->get('mrl_public_ip')) === '') {
 			return array('status' => 'skipped', 'message' => 'relay has no public address yet');

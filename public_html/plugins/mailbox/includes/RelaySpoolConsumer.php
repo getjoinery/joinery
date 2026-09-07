@@ -27,6 +27,8 @@
  * pinned to the relay's identity, and the relay scopes every path to this
  * tenant's own spool: ids only, no paths, no root.
  *
+ * @version 1.13 - a relay row without an identity pin is an ERROR, not a skip: its mail
+ *                 is accumulating on a machine this server cannot reach
  * @version 1.12 - the ssh era is over: the API is the only pull path
  * @version 1.11 - a relay with an identity pin is pulled over its own API
  *   (RelayClient: list, fetch to the staging directory, ack); a tunnel relay
@@ -90,7 +92,10 @@ class RelaySpoolConsumer {
 	 */
 	public function pull(int $max = self::DEFAULT_MAX): array {
 		if (!$this->relay->usesRelayApi()) {
-			return array('status' => 'skipped', 'message' => 'relay has no identity pin (it predates the relay API) and cannot be reached');
+			// Not "does not apply": this relay is the MX for every hosted domain
+			// and nothing here can reach it, so mail addressed to this deployment
+			// is accumulating on a machine nobody pulls from. That is an outage.
+			return array('status' => 'error', 'message' => 'relay has no identity pin (it predates the relay API) and cannot be reached — create a new relay and delete this row');
 		}
 		if (trim((string)$this->relay->get('mrl_public_ip')) === '') {
 			return array('status' => 'skipped', 'message' => 'relay has no public address yet');

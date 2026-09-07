@@ -2373,6 +2373,45 @@ does until mail already looks wrong.
 - **By hand** — run `provision_relay.sh` as root on any fresh VPS: the
   standalone floor.
 
+#### Is mail being picked up?
+
+A relay keeps **accepting** mail while this server cannot collect it: senders
+are told their message was delivered, and it sits sealed on the relay's spool
+until something pulls it. So the reconcile pass treats a pull that cannot
+reach the relay as an outage, not as "does not apply" — a relay row with no
+identity pin answers *error* from both the spool pull and the map push — and
+announces the outage itself rather than waiting to be found:
+
+- **`mailbox.relay_pickup_stopped`** is raised **once** when a pull fails and
+  no pull has reached the relay for `MailboxRelay::PICKUP_STALL_SECONDS`
+  (30 minutes, the same threshold as the Setup tab's *Mail pickup* check), or
+  ever. The pass stamps `mrl_pickup_alarm_time` so a relay that stays broken
+  is not re-announced. The notification says what stopped, when mail was last
+  collected, that senders are being told it was delivered, and what to open.
+- **`mailbox.relay_pickup_recovered`** is raised once when a pull reaches the
+  relay again while the alarm stands — an empty spool counts, because reaching
+  the relay is the fact — and the stamp is cleared.
+- `MailboxRelay::pickupTransition()` is the pure rule both come from; a pull
+  that was *skipped* (another pull running, no address yet) says nothing
+  either way.
+
+Two surfaces read the same stored facts, so an operator learns of the outage
+wherever they are:
+
+- **Every admin page** carries `MailboxAttentionNotice` through the admin-
+  header registry (`AdminNotices`, `docs/admin_pages.md` § Admin header
+  notices): *Mail is not arriving* while the alarm stands, *This server cannot
+  reach the relay* while the last ping (`mrl_last_health_failure`) failed, and
+  nothing otherwise. It never pings or probes.
+- **The reader's setup banner** (*This mailbox needs attention*) is the Setup
+  tab's verdict for the open mailbox, and the relay's *Receiving* card is part
+  of it for a Fortress domain. Both reader mounts show it to an operator: the
+  admin reader always, and the profile reader
+  (`/profile/mailbox/mailbox`) for a viewer at permission 5 or above, since
+  that is where operators read mail too. Members never see it.
+
+Tests: `relay_pickup_alarm_test.php`.
+
 #### Keeping a relay's code current
 
 A relay runs code that ships with the platform — the sealing binary, the

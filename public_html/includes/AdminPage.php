@@ -107,16 +107,12 @@ class AdminPage extends PublicPage {
 		// clear_clearable_messages() then removes them — shown once, then gone.
 		echo $this->renderFlashMessages();
 
-		// A deployment whose domain was registered for it at checkout has one
-		// thing its owner must eventually do: move the domain into their own
-		// registrar account before it expires. Silent everywhere else.
-		echo ManagedDomainNotice::render();
-
-		// A deployment somebody else hosts says so where its admins look: what
-		// the arrangement is, when the next date falls, and where an allowance
-		// is running out. Admin pages only — this reaches permission 5 and
-		// above by virtue of where it renders. Silent everywhere else.
-		echo HostedPlanNotice::render();
+		// The site-wide notices: the hosting arrangement, a domain about to
+		// lapse, mail that has stopped arriving — whatever an operator must know
+		// wherever they are. Admin pages only, so this reaches permission 5 and
+		// above by virtue of where it renders; every notice is silent unless it
+		// has something to say (AdminNotices).
+		echo AdminNotices::render();
 
 		return true;
 	}

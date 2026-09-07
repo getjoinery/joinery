@@ -62,8 +62,10 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSender.
  *                                            asks mailbox/setup_status for the
  *                                            open mailbox and banners a verdict
  *                                            of `attention` at the top of the
- *                                            list. Null on the member mount: mail
- *                                            setup is operator work, and a member
+ *                                            list. Both mounts pass it for a viewer
+ *                                            at permission 5 and above and null
+ *                                            otherwise: mail setup is operator
+ *                                            work, and a member
  *                                            reading their own mail has no
  *                                            business being sent to it.
  */

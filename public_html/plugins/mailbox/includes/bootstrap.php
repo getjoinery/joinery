@@ -22,7 +22,9 @@
  * (specs/in_window_deferred_work.md), so a Fortress backlog drains anywhere the
  * owner is on the site with an open window, not only on a mailbox view.
  *
- * @version 1.12
+ * @version 1.13
+ * @changelog 1.13 - registers the admin-header notice (MailboxAttentionNotice): mail
+ *   that has stopped arriving is said on every admin page, from stored facts.
  * @changelog 1.12 - registers the mailbox_fts_fold deferred-work consumer
  *   (specs/mailbox_search_incremental_fold.md): a search-index backlog too
  *   large for a search request's bounded fold slice drains in-window in the
@@ -482,4 +484,9 @@ SetupSteps::register('mail_import', array(
 			? SetupSteps::STATUS_GREEN : SetupSteps::STATUS_NONE;
 	},
 ));
+
+// --- Admin-header notice (AdminNotices) ---
+// Mail that has stopped arriving is said on every admin page, from facts the
+// reconcile pass and the health poll stamped on the relay row — never a probe.
+AdminNotices::register('mailbox_attention', array('MailboxAttentionNotice', 'render'));
 ?>

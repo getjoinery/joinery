@@ -5,6 +5,8 @@
  * as the admin mount (includes/mailbox_reader_mount.php); this page supplies the
  * theme chrome, the member attachment endpoint, and no detail-page deep links.
  *
+ * @version 1.10.0 - an operator gets the setup banner here too: the check is turned on
+ *                  for permission 5 and above, since this is where they read mail
  * @version 1.9.0 - the AI panel docks in the reader's right column
  * @version 1.8.0
  * @version 1.5.0
@@ -66,10 +68,16 @@ if (!$has_mailboxes) {
 	</div>
 	<?php
 } else {
+	// The setup banner ("This mailbox needs attention") is the Setup tab's own
+	// verdict for the open mailbox, and the endpoint answering it refuses anyone
+	// below permission 5. An operator reads mail here like everyone else, so
+	// the link that turns the check on is passed for them and for nobody else.
+	$is_operator = SessionControl::get_instance()->get_permission() >= 5;
 	mailbox_render_mailbox_reader($page, array(
 		'csrf_token'          => $csrf_token,
 		'initial_mailboxes'   => $initial_mailboxes,
 		'attachment_url_base' => '/profile/mailbox/attachment',
+		'setup_url_base'      => $is_operator ? '/plugins/mailbox/admin/admin_mailbox_setup?alias_id=' : null,
 	));
 
 	if ($ai_panel_active) {
