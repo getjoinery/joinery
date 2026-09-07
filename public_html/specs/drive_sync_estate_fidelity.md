@@ -2170,9 +2170,8 @@ and abandoned, all plausible and all wrong:
 
 **Severity: a file the user put in a vault reaches the server as plaintext,
 under its real name, as the result of an ordinary rename.** Pre-existing:
-reproduces identically on `6ef36a51^`, before any of this round's changes. NOT
-FIXED -- recorded here for a decision, because the fix touches how renames are
-detected.
+reproduced identically on `6ef36a51^`, before any of this round's changes.
+FIXED.
 
 **Shape** (traced and reproduced). One device. An encrypted folder `Private`
 holding `memo.txt`, an ordinary folder `Public` holding `notes.txt`, both
@@ -2203,21 +2202,126 @@ both CORRECT, which is what makes the defect narrow and precise:
 The trigger is a swap that completes between syncs, so the engine only ever sees
 the end state, in which each name is held by the other folder's contents.
 
-**Why no seed could find it.** The workload refuses to generate vault-edge
-crossings on purpose -- "the server refuses an in-place crossing and the client
+**Why no seed could find it, corrected.** The claim below was half wrong and is
+kept because the correction matters. The workload DOES trade names -- action 13
+in `zz_sweep.rs` swaps two, or three-way rotates, over a small shared set both
+devices work on -- but the slots are FILES (`slot-1.dat` and friends). It has
+never once traded FOLDER names, which is the whole of this defect's territory.
+
+The fix for the coverage, when it is built: a parameter switching action 13
+between file slots and folder slots. `Names` is already threaded through
+`workload_core` explicitly, so a flag that is off by default consumes no
+different randomness and re-rolls no pinned seed, and the folder variant runs as
+its OWN estate arm rather than being folded into the default action set. Two
+requirements on that arm, both learned here rather than guessed
+(public-html-0e, 2026-09-07): it has to run under the FAULT matrix and not just
+the clean workload, because the happy path was green while a single refused
+rename leaked the vault (B4 is unfindable by a sweep that never refuses a
+rename); and at least one slot has to be a VAULT folder, because the plain
+shape converges and only the identity and sealing assertions can see the
+difference. An arm that asserts nothing about identity will pass forty thousand
+seeds exactly the way AA, AB and AC did.
+
+The original reasoning, which still holds for the vault half: the workload
+refuses to generate vault-edge crossings on purpose -- "the server refuses an in-place crossing and the client
 cannot yet make one for itself, so generating one would test a feature nobody
 has written". That guard rail has a hole in it: the user never crosses the edge,
 a folder rename carries them across. No sweep arm swaps two names either, for
 the separate reason that a swap takes a scratch name and two renames and no arm
 does that.
 
-Probes, red until this is fixed:
-`probe_a_vault_folder_and_a_plain_folder_trade_names`. Green companions that
-establish the scope: `probe_a_plain_folder_taking_a_vault_folders_old_name`,
+**The fix: a name trade is read as a closed permutation, or not at all.**
+
+Two things were wrong, and only the first turned out to matter.
+
+`detect_folder_moves` never ran on a swap. It opens with a cheap exit --
+nothing has gone from where it was, and there is no unaccounted directory for
+anything to have moved TO -- and a swap satisfies both while having very much
+happened: each name still holds a directory, and each directory is one the
+engine already has a folder for. So it returned without looking, and the pass
+fell through to the reading that re-parents every file. That is the whole
+mechanism.
+
+The exit is completed rather than removed, because it earns its keep:
+`relative_path` is a store read per ancestor per file, and the settled case has
+to stay cheap. The question added to it is whether any tracked file has changed
+folders, which no swap can be true without, and which is answered from the
+parent id on the record and the path map -- a lookup per file on the disk and
+not one path resolved. An ordinary single file moved between two folders
+answers yes too and pays for the full evidence; that is a scan where something
+really did move, not the settled case the exit exists for.
+
+The rule itself takes a closed permutation and nothing less. A `contested` set
+holds the tracked folders whose directory is standing, is not corroborated, and
+holds files the engine knows -- precisely the shape `displaced` refuses,
+because on its own it is also what one file moved out of a folder looks like.
+Each member's directory must hold exactly one other member's contents
+WHOLESALE, and following who-left-where must return to the start. Two folders
+whose contents both landed under one directory cannot be told apart and are
+refused. `displaced` is untouched: widening it drags a folder after a single
+file, which is how two earlier attempts at AD regressed
+`a_rename_refused_onto_a_siblings_name_is_re_derived_once_the_name_frees_up`.
+
+**The second half was not needed, and that is worth recording.** The plan was to
+feed the name walk from both sides -- the scan's intended placement for local
+movers alongside `remote` for feed movers -- because a local mover's `remote` is
+its ORIGIN, not its destination. It turned out no such change is required:
+by the time `judge_destinations` runs on a local ring the local names are
+already the new ones, so there is no clash left to resolve, and the planner's
+cycle-breaker sequences the two renames on the server by itself. AE is the
+reverse direction -- the feed bringing names that clash with what this disk is
+standing on -- and that half is already fixed.
+`three_folders_rotating_names_locally_keep_their_identities` is the test that
+tells the directions apart, since a two-folder swap is symmetric and a walk
+following the ring the wrong way round still closes on it.
+
+Pins, each proven red on the pre-fix `pass.rs` first:
+`a_vault_and_a_plain_folder_trading_names_keep_their_own_contents` (the vault
+follows the folder, not the name), `two_folders_trading_names_keep_their_identities`
+(which fails pre-fix with exactly the prediction above -- the folder that was A
+is still called A), `three_folders_rotating_names_locally_keep_their_identities`
+and `a_local_swap_and_a_feed_rename_in_one_round_both_land`. Green companions
+that establish the scope:
+`probe_a_plain_folder_taking_a_vault_folders_old_name`,
 `probe_a_plain_folder_moved_into_a_vault`,
-`probe_two_folders_trade_names_with_subtrees`,
 `probe_two_folders_trade_names_with_a_peer_watching`,
 `probe_a_file_and_a_folder_trade_names`.
+
+**The limit of the evidence, established under review (public-html-0e,
+2026-09-07).** The ring reading cannot be told apart from a CONTENTS EXCHANGE,
+and this is inherent rather than a gap in the rule. If the user moves every file
+of `A` into `B` and every file of `B` into `A` and renames nothing, the disk and
+the server end up in exactly the state a name trade produces; this engine reads
+it as the trade and gives the two folders each other's identities, where before
+it read it as file moves. Same disk, same server tree, opposite identities, no
+issues raised either way. No lesser file move counterfeits it -- partial,
+one-way, and emptied-into all fail the wholesale test -- but a total exchange
+does, and nothing in a scan can separate them, because a directory carries no
+identity.
+
+It is two-sided across a vault edge, and neither side is free. Dragging a
+vault's contents out and a plain folder's contents in, with no rename, leaves
+the ring reading calling the vault `Public` and calling the PLAIN folder
+`Private` -- so everything the user saves into `Private` afterwards goes up in
+the clear. Reading it as file moves instead publishes the memo immediately,
+which is the pinned drag-out policy. The rule ships as it is: a name trade is
+the plausible act, and of the two readings the ring one errs toward keeping the
+vault sealed.
+
+**Still open around it**, none blocking:
+
+- **A swap where one side is EMPTY.** An empty folder holds no contents, so a
+  ring cannot close through it, and
+  `probe_a_vault_swapped_against_an_empty_plain_folder` stays red and ignored.
+- **Say the ambiguity out loud.** When a ring includes an encrypted folder,
+  raise a reconcile issue naming the trade, the way the empty-vault rule already
+  does for its own ambiguity.
+- **The real close is directory identity.** `DirEntry` already carries
+  `fingerprint: Option<Fingerprint>`, and a directory has an inode or file index
+  on every platform this runs on. A folder record that remembers its directory's
+  file id at materialization makes a swap and an exchange exact rather than
+  inferred, and closes the empty-side gap as a fact rather than a guess. A store
+  field and a scanner change: its own spec, not this one.
 
 ## Defect AE -- a folder-name swap made elsewhere is silently undone
 
@@ -2391,8 +2495,9 @@ none, because it trains everyone to ignore it.
 
 ## Still open, found by review probes (2026-09-05, public-html-0e)
 
-All three are pre-existing and none is caused by the AB or AC fixes. Recorded
-here so they are not rediscovered a fourth time.
+B1 to B3 are pre-existing and none is caused by the AB or AC fixes. B4 and B5
+were added on 2026-09-07 from the AD review. Recorded here so they are not
+rediscovered a fourth time.
 
 **B1 -- a child the server moves INTO a parked folder loops for ever.** The
 hold added for Defect AB keys on the folder a child is LEAVING
@@ -2413,6 +2518,55 @@ a NEW server folder and the original is deleted server-side; with the AB hold
 in place the edit is never synced at all and the device reports itself quiet.
 Neither is right, and this is the state that makes AB's `no_directory`
 condition unpinnable today.
+
+Reproduced minimally on 2026-09-07 while probing AD's neighbours, and it needs
+none of AD's ingredients -- one device, no swap, nothing local:
+`probe_a_folder_renamed_into_a_case_twin_parks_cleanly` (ignored, red). The
+server renames `C` to `b` while this disk already holds `B`; the disk cannot
+hold both, so the park is correct. What follows it is not. The user is told `C`
+was moved to the trash, which it was not, and the directory `C` with `c.txt`
+inside it is left on the disk claimed by no entry at all --
+`assert_no_entry_is_stranded` names it: *holding files no entry claims, so
+nothing will ever scan, send, move or remove them*. B2 also blocks one AD test,
+`a_local_swap_leaves_an_unrelated_parked_case_twin_alone`, which is ignored for
+that reason and not for anything to do with the trade: the trade lands and the
+parked twin is left alone, and then the abandoned directory fails the run.
+
+Traced to the line: `unmaterialize_and_park` guards everything it does to the
+disk behind `if let Some(now) = env.vfs.fingerprint(&path)`, and a directory
+has no fingerprint. So a folder park skips the disk entirely, clears the
+record, and then raises the trash issue anyway. The machinery to do it properly
+is already in the file and already used for folders --
+`rescue_unsynced(env, folder, into)` moves out anything the server does not
+have, and `env.vfs.trash` takes the rest -- so the fix is to route a folder
+through that instead of past it, and to raise the trash issue only when a trash
+actually happened.
+
+**B4 -- a local swap whose first server rename is refused leaks the vault.**
+Found under fault injection by public-html-0e, 2026-09-07; probe set in that
+session's scratchpad as `zz_probe_ad_review.rs`, and pinned here as
+`probe_a_local_vault_swap_whose_first_rename_is_refused` (ignored, red). The
+plan parks one folder on the server, the finisher is refused and withdrawn, and
+the orphaned park is put back to its AGREED name -- the origin of the journey,
+which the other folder has since taken -- so it lands as a conflict copy. The
+directory it wore is parked `DuplicateName`, **B2** leaves it standing on the
+disk, and its files are adopted as new content into a MINTED plain folder. With
+a vault on one side the memo reaches the server in the clear. For a locally
+driven park the disk knows the destination; the rescue asks the agreement
+instead. The fix needs B2, so it is taken together with B2.
+
+Not caused by the ring rule, and measured rather than argued: on the pre-ring
+`pass.rs` this same probe leaks too, and three further fault shapes fail there
+which the ring rule fixes -- a lost rename answer, and chaos over the swap. Four
+of the review probes fail without the rule and two with it.
+
+**B5 -- a parent renamed while its two children swap is trashed and re-minted.**
+Pre-existing on both trees. `P` becomes `Q` while `Q/A` and `Q/B` trade names in
+the same go. The children are identified correctly; `P` is not -- it is trashed
+and re-minted under a new id, with the children re-homed under it. `children[]`
+credits a folder with its descendants at their OLD relative paths, and those
+paths no longer exist under the new name, so `P` matches nothing and reads as
+gone.
 
 **B3 -- `download` has no parent-materialized gate and MINTS the parent
 directory.** `create_local_folder` and `move_local` both refuse to act when the

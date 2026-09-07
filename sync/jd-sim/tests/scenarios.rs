@@ -9740,9 +9740,15 @@ fn probe_two_folders_trade_names_with_a_peer_watching() {
     assert_nothing_lost(&world, &committed);
 }
 
-/// PROBE: the same swap, with more inside each folder.
+/// Two folders trading names keep their own identities and their own contents.
+///
+/// The names move; nothing inside either folder does. Read as contents moving
+/// between two folders instead, both entities keep their old names and every
+/// file plus the whole subtree is re-parented across -- which converges, and
+/// looks perfect from the outside, and is how a vault's contents left it in the
+/// clear. So the identities are what this asserts. Defect AD.
 #[test]
-fn probe_two_folders_trade_names_with_subtrees() {
+fn two_folders_trading_names_keep_their_identities() {
     let world = World::of(9_299, &[("box", jd_sim::scenario::Platform::Linux)]);
     let box_dev = world.device("box");
 
@@ -9761,31 +9767,346 @@ fn probe_two_folders_trade_names_with_subtrees() {
 
     assert!(world.settle().is_some(), "never settled");
     eprintln!("DISK {:?}", disk_tree(box_dev).keys().collect::<Vec<_>>());
-    for (id, was) in [(fa, "A"), (fb, "B"), (suba, "deep-a")] {
-        let e = box_dev.store.get_entry(jd_core::model::EntityId::folder(id)).unwrap().unwrap();
-        eprintln!("entity {id} (was {was}) is now named {:?} under parent {:?}", e.remote.name, e.remote.parent);
+    // The folder that held a1, a2 and deep-a is the one now called B, and it
+    // still holds them. Nothing was re-parented.
+    for (id, was, now) in [(fa, "A", "B"), (fb, "B", "A"), (suba, "deep-a", "deep-a")] {
+        let e = box_dev
+            .store
+            .get_entry(jd_core::model::EntityId::folder(id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            e.remote.name, now,
+            "the folder that was {was} should be called {now}, not {:?}",
+            e.remote.name
+        );
     }
+    let deep = box_dev
+        .store
+        .get_entry(jd_core::model::EntityId::folder(suba))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        deep.remote.parent,
+        Some(fa),
+        "deep-a belongs to the folder it was always in, whatever that folder is called now"
+    );
     assert_converged(&world);
 }
 
-/// PROBE, the sharp version: a VAULT folder and an ordinary folder trade names.
+/// A local swap in the same round as a rename arriving from the server.
 ///
-/// If the swap is resolved by moving contents between the two folders rather
-/// than by renaming the folders, then the user's private file has been carried
-/// across the vault boundary by a rename -- and the plaintext of something they
-/// put in a vault goes to the server.
-/// RED, open: Defect AD, and blocked on AE. Ignored so the suite stays green.
+/// The two readings of a name trade run in opposite directions -- the feed
+/// brings names that clash with the ones this disk is standing on, a local ring
+/// has already taken its new names before anything is judged. This puts both in
+/// one round to check they do not read each other's evidence.
+#[test]
+fn a_local_swap_and_a_feed_rename_in_one_round_both_land() {
+    let world = World::of(9_306, &[("box", jd_sim::scenario::Platform::Linux)]);
+    let box_dev = world.device("box");
+    let mut committed = Committed::default();
+
+    let in_a: &[u8] = b"lives in the folder first called A";
+    let in_b: &[u8] = b"lives in the folder first called B";
+    let in_c: &[u8] = b"lives in the folder first called C";
+    let fa = world.server.seed_folder(None, "A");
+    world.server.seed_file(Some(fa), "a.txt", in_a);
+    let fb = world.server.seed_folder(None, "B");
+    world.server.seed_file(Some(fb), "b.txt", in_b);
+    let fc = world.server.seed_folder(None, "C");
+    world.server.seed_file(Some(fc), "c.txt", in_c);
+    assert!(world.settle().is_some(), "the premise");
+
+    // The disk trades A and B; the server, meanwhile, renames C to D.
+    box_dev.fs.user_rename("A", "tmp-swap");
+    box_dev.fs.user_rename("B", "A");
+    box_dev.fs.user_rename("tmp-swap", "B");
+    world
+        .server
+        .action(
+            "drive_rename",
+            &serde_json::json!({ "entity_type": "folder", "entity_id": fc, "name": "D" }),
+        )
+        .unwrap();
+    committed.note("B/a.txt", in_a);
+    committed.note("A/b.txt", in_b);
+    committed.note("D/c.txt", in_c);
+
+    assert!(world.settle().is_some(), "never settled");
+    eprintln!("DISK {:?}", disk_tree(box_dev).keys().collect::<Vec<_>>());
+    for (id, was, now) in [(fa, "A", "B"), (fb, "B", "A"), (fc, "C", "D")] {
+        let e = box_dev
+            .store
+            .get_entry(jd_core::model::EntityId::folder(id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            e.remote.name, now,
+            "the folder that was {was} should be called {now}, not {:?}",
+            e.remote.name
+        );
+    }
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// PROBE: a local swap whose FIRST server rename is refused once, with a vault
+/// on one side.
+///
+/// RED, open, and NOT closed by the ring rule -- the ring reading is what makes
+/// it reachable at all, and it is strictly better here than without it: on the
+/// pre-ring `pass.rs` this leaks too, and three more fault shapes leak with it
+/// (a lost answer, and chaos) that the ring rule fixes.
+///
+/// The plan parks one folder on the server, the finisher is refused and
+/// withdrawn, and the orphaned park is put back to its AGREED name -- the
+/// origin of the journey, which the other folder has since taken -- so it lands
+/// as a conflict copy. The directory it wore is then parked DuplicateName, B2
+/// leaves it standing on the disk, and its files are adopted as new content
+/// into a MINTED plain folder. For a locally driven park the disk knows the
+/// destination; the rescue asks the agreement instead. The fix needs B2, so it
+/// is taken with B2 and not here. Found by public-html-0e under fault
+/// injection; the full probe set is in that session's scratchpad as
+/// zz_probe_ad_review.rs.
 #[test]
 #[ignore]
-fn probe_a_vault_folder_and_a_plain_folder_trade_names() {
-    let vault = SimVault::new(9_300);
-    let mut world = World::new(9_300, &["laptop"]);
+fn probe_a_local_vault_swap_whose_first_rename_is_refused() {
+    let vault = SimVault::new(9_309);
+    let mut world = World::new(9_309, &["laptop"]);
     world.give_vault("laptop", &vault);
     world.server.set_vault_public_key(1, &vault.public_key_b64);
     let laptop = world.device("laptop");
 
     world.server.seed_encrypted_folder(None, "Private");
     world.server.seed_folder(None, "Public");
+    assert!(world.settle().is_some(), "the folders should arrive");
+    let secret = b"a memo the server must never be able to read";
+    laptop.fs.user_write("Private/memo.txt", secret);
+    laptop.fs.user_write("Public/notes.txt", b"nothing to hide");
+    assert!(world.settle().is_some(), "the uploads should settle");
+
+    laptop.fs.user_rename("Private", "tmp-swap");
+    laptop.fs.user_rename("Public", "Private");
+    laptop.fs.user_rename("tmp-swap", "Public");
+    laptop.net.set_faults(jd_sim::NetFaults {
+        refuse_before: Some("drive_rename".into()),
+        ..jd_sim::NetFaults::none()
+    });
+    let settled = world.settle();
+    laptop.net.set_faults(jd_sim::NetFaults::none());
+    let after = world.settle();
+    eprintln!("SETTLED {settled:?} then {after:?}");
+    eprintln!("DISK {:?}", disk_tree(laptop).keys().collect::<Vec<_>>());
+    eprintln!("SERVER {:?}", world.server.tree().keys().collect::<Vec<_>>());
+    eprintln!("ISSUES {:?}", laptop.store.open_issues().unwrap());
+    assert!(
+        world.server.blob(&jd_sim::sha256_hex(secret)).is_none()
+            && !world.server.tree().keys().any(|p| p.ends_with("memo.txt")),
+        "the vault's memo reached the server in the clear: {:?}",
+        world.server.tree().keys().collect::<Vec<_>>()
+    );
+}
+
+/// PROBE: a folder renamed on the server into a case twin of a folder this disk
+/// already holds. No swap, nothing local, one device.
+///
+/// RED, open: Defect B2, and nothing to do with AD -- this is the minimal
+/// reproduction, found while probing AD's neighbours. The park itself is right,
+/// the disk cannot hold `b` beside `B`. Two things after it are not: the folder
+/// is told the user it went TO THE TRASH, which it did not, and its directory
+/// and the file inside it are left on the disk with no entry claiming them, so
+/// nothing will ever scan, send, move or remove them again. Ignored so the
+/// suite stays green; it is the pin for B2 when B2 is fixed.
+#[test]
+#[ignore]
+fn probe_a_folder_renamed_into_a_case_twin_parks_cleanly() {
+    let world = World::of(9_308, &[("mac", jd_sim::Platform::MacOs)]);
+    let mac = world.device("mac");
+    let fb = world.server.seed_folder(None, "B");
+    world.server.seed_file(Some(fb), "b.txt", b"in B");
+    let fc = world.server.seed_folder(None, "C");
+    world.server.seed_file(Some(fc), "c.txt", b"in C");
+    assert!(world.settle().is_some(), "the premise");
+
+    world
+        .server
+        .action(
+            "drive_rename",
+            &serde_json::json!({ "entity_type": "folder", "entity_id": fc, "name": "b" }),
+        )
+        .unwrap();
+    assert!(world.settle().is_some(), "never settled");
+    eprintln!("DISK {:?}", disk_tree(mac).keys().collect::<Vec<_>>());
+    eprintln!("SERVER {:?}", world.server.tree().keys().collect::<Vec<_>>());
+    eprintln!("ISSUES {:?}", mac.store.open_issues().unwrap());
+    assert_converged(&world);
+}
+
+/// A LOCAL swap on a folding volume, with an unrelated case twin parked.
+///
+/// The mirror of `a_swap_does_not_let_an_unrelated_case_twin_past_the_clash`,
+/// which pins the same thing for a swap arriving from the server. The server
+/// holds `A`, `B` and `b`; this disk can only hold two of those, so `b` is
+/// parked as the clash it is. The user then trades `A` and `B` here. The trade
+/// must go through, and the parked twin must be left exactly where it is -- a
+/// device told about a local rename may not go and rename the user's third
+/// folder on the server to make room.
+///
+/// RED, open, on Defect B2 and NOT on AD: the trade itself lands correctly and
+/// the twin is left alone, which is everything this was written to ask. It then
+/// fails on the abandoned directory B2 leaves behind, which the probe above
+/// reproduces with no swap in it at all. Un-ignore this when B2 is fixed.
+#[test]
+#[ignore]
+fn a_local_swap_leaves_an_unrelated_parked_case_twin_alone() {
+    let world = World::of(9_307, &[("mac", jd_sim::Platform::MacOs)]);
+    let mac = world.device("mac");
+    let mut committed = Committed::default();
+
+    let in_a: &[u8] = b"lives in the folder first called A";
+    let in_b: &[u8] = b"lives in the folder first called B";
+    let in_c: &[u8] = b"lives in the folder first called C";
+    let fa = world.server.seed_folder(None, "A");
+    world.server.seed_file(Some(fa), "a.txt", in_a);
+    let fb = world.server.seed_folder(None, "B");
+    world.server.seed_file(Some(fb), "b.txt", in_b);
+    let fc = world.server.seed_folder(None, "C");
+    world.server.seed_file(Some(fc), "c.txt", in_c);
+    assert!(world.settle().is_some(), "the premise");
+
+    // C becomes `b` on the server: a third folder this disk cannot hold
+    // alongside `B`, so it parks.
+    world
+        .server
+        .action(
+            "drive_rename",
+            &serde_json::json!({ "entity_type": "folder", "entity_id": fc, "name": "b" }),
+        )
+        .unwrap();
+    assert!(world.settle().is_some(), "the twin should settle as a clash");
+
+    // Now the user trades the two names this disk IS holding.
+    mac.fs.user_rename("A", "tmp-swap");
+    mac.fs.user_rename("B", "A");
+    mac.fs.user_rename("tmp-swap", "B");
+    committed.note("the file from A", in_a);
+    committed.note("the file from B", in_b);
+    committed.note("the file from C", in_c);
+
+    assert!(world.settle().is_some(), "never settled");
+    let after = world.server.tree();
+    eprintln!("DISK {:?}", disk_tree(mac).keys().collect::<Vec<_>>());
+    eprintln!("SERVER {:?}", after.keys().collect::<Vec<_>>());
+    eprintln!("ISSUES {:?}", mac.store.open_issues().unwrap());
+    // The trade landed, by identity.
+    for (id, was, now) in [(fa, "A", "B"), (fb, "B", "A")] {
+        let e = mac
+            .store
+            .get_entry(jd_core::model::EntityId::folder(id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            e.remote.name, now,
+            "the folder that was {was} should be called {now}, not {:?}",
+            e.remote.name
+        );
+    }
+    // And the twin was not touched to make room for it.
+    let twin = mac
+        .store
+        .get_entry(jd_core::model::EntityId::folder(fc))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        twin.remote.name, "b",
+        "the parked case twin was renamed on the server by a device that was only \
+         told about a local rename"
+    );
+    assert!(
+        after.contains_key("b/c.txt"),
+        "the parked twin lost its file on the server: {:?}",
+        after.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        !after.keys().any(|p| p.contains("conflicted copy")),
+        "the user's folder was conflict-renamed on the server: {:?}",
+        after.keys().collect::<Vec<_>>()
+    );
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// Three folders rotating names on THIS disk keep their identities.
+///
+/// The two-folder swap is symmetric, so a walk that follows the ring the wrong
+/// way round still closes on it and still pairs the right two. A rotation is
+/// the shape that tells the two directions apart: A takes B's name, B takes
+/// C's, C takes A's, and who-gives-to-whom is no longer who-takes-from-whom.
+#[test]
+fn three_folders_rotating_names_locally_keep_their_identities() {
+    let world = World::of(9_305, &[("box", jd_sim::scenario::Platform::Linux)]);
+    let box_dev = world.device("box");
+
+    let fa = world.server.seed_folder(None, "A");
+    world.server.seed_file(Some(fa), "a.txt", b"a");
+    let fb = world.server.seed_folder(None, "B");
+    world.server.seed_file(Some(fb), "b.txt", b"b");
+    let fc = world.server.seed_folder(None, "C");
+    world.server.seed_file(Some(fc), "c.txt", b"c");
+    assert!(world.settle().is_some(), "the premise");
+
+    // A -> B -> C -> A, done the way a file manager does it.
+    box_dev.fs.user_rename("A", "tmp-rot");
+    box_dev.fs.user_rename("C", "A");
+    box_dev.fs.user_rename("B", "C");
+    box_dev.fs.user_rename("tmp-rot", "B");
+
+    assert!(world.settle().is_some(), "never settled");
+    eprintln!("DISK {:?}", disk_tree(box_dev).keys().collect::<Vec<_>>());
+    eprintln!("SERVER {:?}", world.server.tree().keys().collect::<Vec<_>>());
+    for (id, was, now) in [(fa, "A", "B"), (fb, "B", "C"), (fc, "C", "A")] {
+        let e = box_dev
+            .store
+            .get_entry(jd_core::model::EntityId::folder(id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            e.remote.name, now,
+            "the folder that was {was} should be called {now}, not {:?}",
+            e.remote.name
+        );
+    }
+    // Every file is still in the folder it started in, whatever it is called.
+    let disk = disk_tree(box_dev);
+    for (name, holder) in [("a.txt", "B"), ("b.txt", "C"), ("c.txt", "A")] {
+        assert!(
+            disk.contains_key(&format!("{holder}/{name}")),
+            "{name} should be in {holder}: {:?}",
+            disk.keys().collect::<Vec<_>>()
+        );
+    }
+    assert_converged(&world);
+}
+
+/// A VAULT folder and an ordinary folder trade names, and each keeps its own
+/// contents and its own privacy.
+///
+/// The sharp version of the case above, and the reason it matters. Resolve the
+/// swap by moving contents between the two folders instead of by renaming them,
+/// and the user's private file has been carried across the vault boundary by an
+/// ordinary rename: its plaintext goes to the server under its real name, and
+/// the file that was never private is encrypted into a vault it does not belong
+/// to. Nothing in the tree looks wrong afterwards. Defect AD.
+#[test]
+fn a_vault_and_a_plain_folder_trading_names_keep_their_own_contents() {
+    let vault = SimVault::new(9_300);
+    let mut world = World::new(9_300, &["laptop"]);
+    world.give_vault("laptop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let laptop = world.device("laptop");
+
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    let public = world.server.seed_folder(None, "Public");
     assert!(world.settle().is_some(), "the folders should arrive");
 
     let secret = b"a memo the server must never be able to read";
@@ -9809,6 +10130,31 @@ fn probe_a_vault_folder_and_a_plain_folder_trade_names() {
         !world.server.tree().keys().any(|p| p.ends_with("memo.txt")),
         "the real name of a vault file reached the server: {:?}",
         world.server.tree().keys().collect::<Vec<_>>()
+    );
+    // Privacy belongs to the folder, not to the name. The folder the user made
+    // private is called Public now and is still a vault; the plain one is
+    // called Private and is still plain. Getting this backwards is the defect,
+    // and it converges, so only the identities say so.
+    for (id, was, now, encrypted) in [
+        (private, "Private", "Public", true),
+        (public, "Public", "Private", false),
+    ] {
+        let e = laptop
+            .store
+            .get_entry(jd_core::model::EntityId::folder(id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(e.remote.name, now, "the folder that was {was} should be called {now}");
+        assert_eq!(
+            e.is_encrypted, encrypted,
+            "the folder that was {was} changed whether it is a vault by being renamed"
+        );
+    }
+    // And the memo is still inside the folder the user put it in.
+    assert!(
+        disk_tree(laptop).contains_key("Public/memo.txt"),
+        "the memo left the folder it was in: {:?}",
+        disk_tree(laptop).keys().collect::<Vec<_>>()
     );
 }
 
