@@ -2275,6 +2275,15 @@ standing on -- and that half is already fixed.
 tells the directions apart, since a two-folder swap is symmetric and a walk
 following the ring the wrong way round still closes on it.
 
+**Estate.** v36 on this tree: 16 arms, 89 sweeps, 40,070 seeds at shift
+32000000, zero failures; v35 on `d2c04fbe` immediately before it, the same
+totals at shift 30000000. What that is evidence OF is worth stating, because it
+is easy to over-read: it shows the change causes no regression, which matters
+because `detect_folder_moves` now runs in cases it used to exit from. It is NOT
+evidence about AD itself -- no arm trades folder names, which is the whole
+reason forty thousand seeds never found this. The fix is carried by the pins
+below and by the fault-injected review, not by the estate.
+
 Pins, each proven red on the pre-fix `pass.rs` first:
 `a_vault_and_a_plain_folder_trading_names_keep_their_own_contents` (the vault
 follows the folder, not the name), `two_folders_trading_names_keep_their_identities`

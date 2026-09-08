@@ -404,7 +404,12 @@ class CustomerCloudProvisioningTest {
 		$prov->load();
 		check($prov->get('cvp_install_password') === 'held', 'the install password is held from the moment it is sealed');
 		$ip = '198.51.100.' . random_int(20, 240);
-		$fake->getInstanceResult = ['id' => '77009', 'ip' => $ip, 'status' => 'running'];
+		// The provider reports the instance's IPv6 too (Linode: addr/128, prefix
+		// stripped by the driver). A dual-stack box joins a plane with AAAA
+		// records over IPv6 — keyless10, 2026-09-07 — so the plane must know
+		// both addresses as the instance.
+		$ip6 = '2600:3c02::' . dechex(random_int(0x1000, 0xffff)) . ':e6ff:fea7:' . dechex(random_int(0x1000, 0xffff));
+		$fake->getInstanceResult = ['id' => '77009', 'ip' => $ip, 'ipv6' => $ip6, 'status' => 'running'];
 		$probe->probeBooting($prov);
 		$prov->load();
 		$site_id = (int)$prov->get('cvp_mgn_node_id');
@@ -413,6 +418,11 @@ class CustomerCloudProvisioningTest {
 		check(CustomerCloudProvision::for_machine_address($ip) !== null
 			&& (int)CustomerCloudProvision::for_machine_address($ip)->key === (int)$prov->key,
 			'the provision is found by its instance address');
+		check((string)$prov->get('cvp_instance_ipv6') === $ip6, 'the instance\'s IPv6 is recorded at boot', (string)$prov->get('cvp_instance_ipv6'));
+		check(CustomerCloudProvision::for_machine_address(strtoupper($ip6)) !== null
+			&& (int)CustomerCloudProvision::for_machine_address(strtoupper($ip6))->key === (int)$prov->key,
+			'and the provision is found by its IPv6 in any spelling');
+		check(CustomerCloudProvision::for_machine_address('2600:3c02::dead:beef') === null, 'an IPv6 nobody was given finds nothing');
 
 		// Only a DONE provision retires. Stand in for the install finishing.
 		$prov->set('cvp_status', 'done');
@@ -427,20 +437,60 @@ class CustomerCloudProvisioningTest {
 		check(strpos(ProvisionCustomerCloud::install_password_summary($prov), 'Held') === 0,
 			'the dashboard line says the password is held and what it waits for');
 
-		// The host's own agent joins: a machine-posture node at the address,
-		// linked to the placement record at approval.
-		$host_node = new ManagedNode(NULL);
-		$host_node->set('mgn_name', 'HarnessTest retire host ' . $suffix);
-		$host_node->set('mgn_slug', 'retire-' . $suffix . '-host');
-		$host_node->set('mgn_host', $ip);
-		$host_node->set('mgn_skip_joinery_checks', true);
-		$host_node->set('mgn_uptime_enabled', false);
-		$host_node->save();
-		$host_node->load();
-		$linked = ManagedHost::link_host_node($host_node);
-		check($linked !== null, 'the host node links to the placement record');
-		$host_node->set('mgn_agent_public_key', base64_encode(str_repeat("\x0f", 32)));
-		$host_node->save();
+		// The host's own agent asks to join — from the box's IPv6, as keyless10
+		// did on 2026-09-07 — claiming <slug>-host. The dashboard adopts it: the
+		// provider check ties the address to the instance first, and the
+		// machine-posture node is made at the instance's IPv4, where the
+		// placement record lives, so approval links the two.
+		$fake->getInstanceResult = ['id' => '77009', 'ip' => $ip, 'ipv6' => $ip6, 'status' => 'running'];
+		AgentChannelEndpoint::$provisioner = $probe;
+		$hpair = sodium_crypto_sign_keypair();
+		$hpub  = sodium_crypto_sign_publickey($hpair);
+		$hjr = new AgentJoinRequest();
+		$hjr->set('ajr_claimed_name', 'retire-' . $suffix . '-host');
+		$hjr->set('ajr_public_key', base64_encode($hpub));
+		$hjr->set('ajr_fingerprint', AgentJoinRequest::fingerprint($hpub));
+		$hjr->set('ajr_source_ip', $ip6);
+		$hjr->set('ajr_agent_version', '1.21.0');
+		$hjr->set('ajr_status', AgentJoinRequest::STATUS_PENDING);
+		$hjr->save();
+		harness_register_row('ajr_agent_join_requests', 'ajr_id', $hjr->key);
+		// The SITE's own join from the same machine is not adoptable: it binds
+		// to the node the provisioner made, from that node's page.
+		$spair = sodium_crypto_sign_keypair();
+		$spub  = sodium_crypto_sign_publickey($spair);
+		$sjr = new AgentJoinRequest();
+		$sjr->set('ajr_claimed_name', 'retire-' . $suffix);
+		$sjr->set('ajr_public_key', base64_encode($spub));
+		$sjr->set('ajr_fingerprint', AgentJoinRequest::fingerprint($spub));
+		$sjr->set('ajr_source_ip', $ip);
+		$sjr->set('ajr_status', AgentJoinRequest::STATUS_PENDING);
+		$sjr->save();
+		harness_register_row('ajr_agent_join_requests', 'ajr_id', $sjr->key);
+		try {
+			AgentChannelEndpoint::adoptJoin($sjr);
+			check(false, 'the site\'s own join is sent to the provision\'s node, not adopted as a stray');
+		} catch (Exception $e) {
+			check(strpos($e->getMessage(), 'Approve it from that provision') !== false,
+				'the site\'s own join is sent to the provision\'s node, not adopted as a stray', $e->getMessage());
+		}
+		$fake->getInstanceResult = ['id' => '77009', 'ip' => $ip, 'ipv6' => '2600:3c02::1', 'status' => 'running'];
+		try {
+			AgentChannelEndpoint::adoptJoin($hjr);
+			check(false, 'a host claim from an address the provider does not confirm is refused');
+		} catch (Exception $e) {
+			check(strpos($e->getMessage(), 'Join not approved') !== false, 'a host claim from an address the provider does not confirm is refused', $e->getMessage());
+		}
+		$fake->getInstanceResult = ['id' => '77009', 'ip' => $ip, 'ipv6' => $ip6, 'status' => 'running'];
+		$adopted = AgentChannelEndpoint::adoptJoin($hjr);
+		AgentChannelEndpoint::$provisioner = null;
+		$host_node = $adopted['node'];
+		$hjr->load();
+		check($host_node->get('mgn_host') === $ip, 'the host node is made at the instance\'s IPv4, not the IPv6 the join came from', (string)$host_node->get('mgn_host'));
+		check($adopted['host'] !== null && (int)$adopted['host']->get('mgh_mgn_host_node_id') === (int)$host_node->key,
+			'and approval names it as the placement record\'s host agent');
+		check($host_node->get('mgn_agent_public_key') === base64_encode($hpub)
+			&& $hjr->get('ajr_status') === AgentJoinRequest::STATUS_APPROVED, 'with the joining key bound and the request approved');
 		$agents = ProvisionCustomerCloud::machine_agents($prov, $site);
 		check(!$agents['ready'] && strpos($agents['reason'], 'site') !== false,
 			'with the host admitted, the site\'s agent is what is waited for', $agents['reason']);
@@ -528,6 +578,16 @@ class CustomerCloudProvisioningTest {
 		check(!$no['ok'] && strpos($no['reason'], 'came from') !== false, 'an address the provider does not confirm is refused');
 		$none = $probe->join_approval_check('203.0.113.250', $stranger);
 		check($none['ok'] && $none['provision'] === null, 'a join from an address this plane never provisioned has nothing to check');
+		// The host's own agent reached the plane over IPv6: the same machine.
+		$fake->getInstanceResult = ['id' => '77009', 'ip' => $ip, 'ipv6' => $ip6, 'status' => 'running'];
+		$ok6 = $probe->join_approval_check($ip6, $host_node);
+		check($ok6['ok'] && (int)$ok6['provision']->key === (int)$prov->key, 'a join from the instance\'s IPv6 approves against the host node', $ok6['reason']);
+		$ok6n = $probe->join_approval_check($ip6, null);
+		check($ok6n['ok'] && (int)$ok6n['provision']->key === (int)$prov->key, 'with no node named, the check answers only whether this is the provision\'s machine', $ok6n['reason']);
+		$fake->getInstanceResult = ['id' => '77009', 'ip' => $ip, 'ipv6' => '2600:3c02::1', 'status' => 'running'];
+		$no6 = $probe->join_approval_check($ip6, $host_node);
+		check(!$no6['ok'] && strpos($no6['reason'], 'came from') !== false, 'an IPv6 the provider does not confirm is refused');
+		$fake->getInstanceResult = ['id' => '77009', 'ip' => $ip, 'ipv6' => $ip6, 'status' => 'running'];
 
 		// Cleanup: jobs, then the nodes (site first: its FK points at the host record), host record, provision.
 		$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_node_id IN (?, ?, ?)')->execute([$site_id, $host_node->key, $stranger->key]);

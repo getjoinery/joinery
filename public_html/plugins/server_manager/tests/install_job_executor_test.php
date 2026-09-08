@@ -311,6 +311,30 @@ check($sealed_still !== '' && (new SecretBox())->open($sealed_still)['value'] ==
 	'the sealed password is still on the provision row — nothing erased it');
 check($took < 90, 'the confirmation budget is honoured', round($took) . 's');
 
+// A machine that REFUSES the install password before the script even runs
+// has already retired it: an earlier run did the work and only the record
+// disagreed (keyless10, 2026-09-08 — job 12834 said "Permission denied" and
+// was filed as a failure, so the plane kept a password no machine accepted).
+// The refusal is the proof this job exists to obtain, so the job completes as
+// retired and the record catches up. Only "Permission denied" reads that way;
+// a machine that does not answer is still a doubt.
+putenv('JOINERY_INSTALL_SSH_READY_TIMEOUT=2');
+$node8 = ije_node('ijetest-refused-' . $suffix, 'Bb2!' . bin2hex(random_bytes(10)));
+$node8->set('mgn_host', '127.0.0.1');
+$node8->set('mgn_ssh_user', 'ijetest-nobody-' . $suffix);
+$node8->save();
+$refused = ManagementJob::createJob($node8->key, 'retire_install_password',
+	JobCommandBuilder::build_retire_install_password($node8), array('provision_id' => 0), null);
+$made_jobs[] = $refused->key;
+(new InstallJobExecutor())->execute($refused);
+putenv('JOINERY_INSTALL_SSH_READY_TIMEOUT');
+$refused->load();
+$refused_out = (string)$refused->get('mjb_output');
+check($refused->get('mjb_status') === 'completed',
+	'a retire job whose target refuses the install password up front completes as retired', (string)$refused->get('mjb_error_message') . ' | ' . substr($refused_out, -300));
+check(strpos($refused_out, 'INSTALL_PASSWORD_RETIRED') !== false && strpos($refused_out, 'already refuses the install password') !== false,
+	'and its output says the refusal was the proof, so the result processor reads it as retired');
+
 // ---------------------------------------------------------------------------
 section('Cleanup');
 

@@ -12,6 +12,7 @@
  * customer_cloud, scope linodes:read_write — the minimum that can create and
  * manage instances; no account/billing access is requested).
  *
+ * @version 1.2 - grant_expired/grant_expires: an expired Linode grant is reported as expired, not connected
  * @version 1.1
  */
 
@@ -94,6 +95,10 @@ function profile_connect_cloud_logic(array $input): LogicResult {
 		'settings'            => $settings,
 		'account'             => $account,
 		'account_connected'   => $account !== null && $account->get('cca_status') === 'active',
+		// A Linode grant lives two hours and holds no refresh token: an active
+		// row past it can create nothing, so the page must not say "connected".
+		'grant_expired'       => $account !== null && CustomerCloudAccount::grant_expired($account),
+		'grant_expires'       => $account !== null ? trim((string)$account->get('cca_token_expires')) : '',
 		'provisions'          => $provisions,
 		'provider_configured' => $provider_configured,
 		'referral_url'        => trim((string)$settings->get_setting('server_manager_linode_referral_url')),

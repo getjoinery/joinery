@@ -40,6 +40,8 @@
  * It writes the same mjb_output / mjb_status contract the agent's runner wrote,
  * so JobResultProcessor::process_install_node reads a completed job unchanged.
  *
+ * @version 1.7 - a retire_install_password job whose target refuses the install password before the script runs completes as
+ *                 retired: the refusal is the proof, and a record that still says held can be re-run to catch up
  * @version 1.6 - a step may ask for the site admin password on stdin, unsealed from the provision row
  *                and written to that one session (specs/hosted_trial_provisioning.md B1)
  * @version 1.5 - retire_install_password: the second bootstrap job type, claimed the same way, and
@@ -170,6 +172,7 @@ class InstallJobExecutor {
 		$ok = true;
 		$fail_message = '';
 		$ssh_ready = false;
+		$already_retired = false;
 		foreach ($main as $i => $step) {
 			$label = (string)($step['label'] ?? '');
 			$this->append($job, "\n=== [Step " . ($i + 1) . "/{$total}] {$label} ===\n", $i);
@@ -177,7 +180,16 @@ class InstallJobExecutor {
 			// is created in the same tick that sees 'running' — so the first
 			// remote step would race the machine's boot. Wait for it, once.
 			if (($step['type'] ?? '') === 'ssh' && !$ssh_ready) {
-				$waited = $this->wait_for_ssh($job, $ctx, $i);
+				$waited = $this->wait_for_ssh($job, $ctx, $i, $type === 'retire_install_password');
+				if ($waited === null && $type === 'retire_install_password'
+						&& stripos((string)$this->last_ssh_probe_output, 'Permission denied') !== false) {
+					// The machine already refuses the install password — an
+					// earlier run retired it and only the record disagreed.
+					// The refusal is the proof this job exists to obtain.
+					$this->append($job, "[the machine already refuses the install password: nothing left to retire]\nINSTALL_PASSWORD_RETIRED\n", $i);
+					$already_retired = true;
+					break;
+				}
 				if ($waited === null) {
 					$ok = false;
 					$fail_message = 'Step ' . ($i + 1) . " ({$label}) failed: the target did not accept SSH within "
@@ -218,7 +230,7 @@ class InstallJobExecutor {
 		// code: a fresh login with the password has to be refused. A machine that
 		// still accepts it, or one that cannot be asked, fails the job — and a
 		// failed job keeps the password, which is the safe side of this doubt.
-		if ($ok && $type === 'retire_install_password') {
+		if ($ok && $type === 'retire_install_password' && !$already_retired) {
 			$refusal = $this->confirm_password_refused($job, $ctx, max(0, $total - 1));
 			if ($refusal !== '') {
 				$ok = false;
@@ -248,7 +260,10 @@ class InstallJobExecutor {
 	 * is a real login with the sealed password, so 'ready' means the whole
 	 * path works — sshd up, password accepted — not merely that port 22 opens.
 	 */
-	private function wait_for_ssh($job, $ctx, $step_index) {
+	/** What the last readiness probe printed — a refusal there is meaningful to a retirement. */
+	private $last_ssh_probe_output = '';
+
+	private function wait_for_ssh($job, $ctx, $step_index, $stop_on_refusal = false) {
 		$started = time();
 		$budget = $this->ssh_ready_timeout();
 		$attempt = 0;
@@ -256,6 +271,12 @@ class InstallJobExecutor {
 			$attempt++;
 			$probe = array('type' => 'ssh', 'cmd' => 'echo SSH_READY', 'timeout' => 30);
 			list($out, $code) = $this->run_step($probe, $ctx);
+			$this->last_ssh_probe_output = (string)$out;
+			if ($stop_on_refusal && stripos((string)$out, 'Permission denied') !== false) {
+				// The machine answered and refused: for a retirement that is the
+				// answer, and waiting out the budget would only repeat it.
+				return null;
+			}
 			if ($code === 0 && strpos($out, 'SSH_READY') !== false) {
 				$waited = time() - $started;
 				if ($attempt > 1) {

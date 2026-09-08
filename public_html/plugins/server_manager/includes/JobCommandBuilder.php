@@ -8,6 +8,10 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.59 - retire_install_password reads sshd -T once and tests it without a pipe: under pipefail
+ *                 `sshd -T | grep -q` returned 141 and a retired box read as still accepting passwords
+ * @version 1.58 - a failed retire_install_password prints the effective sshd auth settings and every file that sets them
+ * @version 1.57 - the fleet_enroll guard names the address it rejected
  * @version 1.56 - the api transport is gone with the agent's local queue, which was its only
  *                 executor: build_check_status_api, build_list_backups_api and has_api() are
  *                 deleted, and 'api' is no longer a transport can_run() will offer. The
@@ -2601,7 +2605,7 @@ class JobCommandBuilder {
 		// The same bounds the node applies, so a bad value fails where the row
 		// that holds it can be looked at.
 		if (!preg_match('#^https://[A-Za-z0-9.\-]+(:[0-9]{1,5})?(/[A-Za-z0-9.\-/_]*)?$#', $url)) {
-			throw new Exception('Fleet seeding needs the service\'s https address, with no query string.');
+			throw new Exception('Fleet seeding needs the service\'s https address, with no query string; got \'' . $url . '\'.');
 		}
 		if (!preg_match('/^public_[a-z0-9]{8,64}$/', $pub) || !preg_match('/^secret_[a-z0-9]{8,64}$/', $sec)) {
 			throw new Exception('Fleet seeding needs the key pair in the shape the platform mints.');
@@ -3137,7 +3141,12 @@ class JobCommandBuilder {
 			. ' > /etc/ssh/sshd_config.d/00-joinery-agent-managed.conf';
 		$lines[] = 'sshd -t';
 		$lines[] = 'systemctl restart ssh';
-		$lines[] = 'if sshd -T 2>/dev/null | grep -qi "^passwordauthentication no" && sshd -T 2>/dev/null | grep -qi "^kbdinteractiveauthentication no"; then echo INSTALL_PASSWORD_RETIRED; else echo "RETIRE_FAILED=sshd still accepts passwords"; exit 1; fi';
+		// The effective config is read ONCE into a variable and tested with
+		// here-strings: under `set -o pipefail` a `sshd -T | grep -q` pipeline
+		// fails with 141 whenever grep quits at its first match, which read
+		// as "sshd still accepts passwords" on a box that had just stopped.
+		$lines[] = 'cfg=$(sshd -T 2>/dev/null || true)';
+		$lines[] = 'if [ "$(grep -ci "^passwordauthentication no" <<<"$cfg")" -gt 0 ] && [ "$(grep -ci "^kbdinteractiveauthentication no" <<<"$cfg")" -gt 0 ]; then echo INSTALL_PASSWORD_RETIRED; else echo "RETIRE_FAILED=sshd still accepts passwords"; echo "--- effective:"; grep -iE "^(passwordauthentication|kbdinteractiveauthentication|permitrootlogin|usepam) " <<<"$cfg"; echo "--- where set:"; grep -nHiE "^\\s*(PasswordAuthentication|KbdInteractiveAuthentication|ChallengeResponseAuthentication|Include|Match)\\b" /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null; exit 1; fi';
 
 		return [
 			['type' => 'ssh', 'label' => 'Retire the install password: the machine stops accepting it',

@@ -30,6 +30,7 @@
  * retire_failed when the job could not prove the machine refuses it (the
  * password is kept, so the machine stays reachable).
  *
+ * @version 1.8 - cvp_instance_ipv6 + normalize_address()/machine_addresses(): a provision is found by either of its instance's addresses
  * @version 1.7 - dismiss_blockers()/can_dismiss(): a provision holding nothing — no instance, no node,
  *                no mail subaccount, no live install password, no paid order — can be cleared off the
  *                dashboard, and one holding something says what
@@ -83,6 +84,7 @@ class CustomerCloudProvision extends SystemBase {
 		'cvp_provider'               => array('type'=>'varchar(32)', 'is_nullable'=>false, 'default'=>'linode'),
 		'cvp_instance_id'            => array('type'=>'varchar(50)'),
 		'cvp_instance_ip'            => array('type'=>'varchar(64)'),
+		'cvp_instance_ipv6'          => array('type'=>'varchar(64)'),
 		'cvp_region'                 => array('type'=>'varchar(50)'),
 		'cvp_instance_type'          => array('type'=>'varchar(50)'),
 		'cvp_mgn_node_id'            => array('type'=>'int8'),
@@ -216,12 +218,42 @@ class CustomerCloudProvision extends SystemBase {
 	 * against the provider. Newest first, so a re-provision of the same
 	 * address names the current row.
 	 */
-	public static function for_machine_address(string $ip) {
+	/**
+	 * One spelling for an address: IPv6 in its compressed lowercase form so a
+	 * source address and a provider report compare as strings; IPv4 as given.
+	 */
+	public static function normalize_address(string $ip): string {
 		$ip = trim($ip);
+		if ($ip === '') {
+			return '';
+		}
+		$packed = @inet_pton($ip);
+		return $packed === false ? $ip : (string)inet_ntop($packed);
+	}
+
+	/** Every address the provider has reported for this instance, normalized. */
+	public function machine_addresses(): array {
+		$out = [];
+		foreach (['cvp_instance_ip', 'cvp_instance_ipv6'] as $col) {
+			$a = self::normalize_address((string)$this->get($col));
+			if ($a !== '') {
+				$out[] = $a;
+			}
+		}
+		return $out;
+	}
+
+	public static function for_machine_address(string $ip) {
+		$ip = self::normalize_address($ip);
 		if ($ip === '') {
 			return null;
 		}
-		$rows = new MultiCustomerCloudProvision(['instance_ip' => $ip, 'deleted' => false], ['cvp_id' => 'DESC']);
+		// A dual-stack machine reaches the plane over whichever family routes;
+		// the instance is known by both its IPv4 and its IPv6.
+		$filter = (strpos($ip, ':') !== false)
+			? ['cvp_instance_ipv6' => $ip, 'deleted' => false]
+			: ['instance_ip' => $ip, 'deleted' => false];
+		$rows = new MultiCustomerCloudProvision($filter, ['cvp_id' => 'DESC']);
 		foreach ($rows as $row) {
 			if (trim((string)$row->get('cvp_instance_id')) !== '') {
 				return $row;

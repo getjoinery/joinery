@@ -139,6 +139,14 @@ Go to `/admin/server_manager/node_add` (or click **Add Node** on the dashboard).
 
 A site this management node did not install is enrolled from the node's own **Admin → System → Management Node** page: the admin there enters this management node's URL, the node's agent generates a keypair and asks to join, and the request appears on the node's API keys tab here for approval after a fingerprint comparison. Add the node's record below first so the join has something to be approved against. The plane never needs a shell on someone else's machine — there is no discovery scan (see `specs/ssh_single_bootstrap.md`).
 
+#### A machine this management node provisioned
+
+A cloud instance created from Remote Install runs two agents on a docker box: the site's, inside the container, and the host's own, beside it. Both ask to join on their own, named `<slug>` and `<slug>-host`. The instance is known by both the addresses the provider reported for it (IPv4 and IPv6), so a join from either family is recognised as that machine. The site's join is approved on the provision's node, from its API Keys tab, where the provider is asked first to confirm the instance is running at the join's address. The host's join is approved from the dashboard banner: the same provider check runs, then the host node is made at the instance's IPv4 and named on the placement record, which is what routes host-scope work (certificates, site removal) to it.
+
+Rejecting a join is reversible for a day. The dashboard lists joins rejected in the last day with a **Reopen** button; the machine keeps its key and asks again every five minutes, so a reopened request is answered by the same fingerprint the operator already compared and can then be approved like any other. `joinery-agent leave` on the machine is what discards the key.
+
+Retiring the install password is proven by the machine refusing it. A retirement job that finds the machine already refusing the password before its script runs completes as retired: the refusal is the proof, so a record that still says "held" catches up when the job is re-run.
+
 #### Manual
 
 Fill in the form fields directly:

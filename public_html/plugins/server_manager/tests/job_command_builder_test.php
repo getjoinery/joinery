@@ -1423,4 +1423,29 @@ harness_register_row('mjb_management_jobs', 'mjb_id', $boot->key);
 check($boot && $boot->get('mjb_status') === 'queued',
 	'a bootstrap job is still created, and starts queued for the install executor');
 
+section('retire_install_password: the verification cannot fail on a box that just retired');
+// Live on 2026-09-08 (keyless10, job 12833): the drop-in was written, ssh
+// restarted, password login WAS off — and the job still said "sshd still
+// accepts passwords", because `sshd -T | grep -q` under `set -o pipefail`
+// returns 141 when grep quits at its first match. The check reads sshd -T
+// once and tests the captured text with here-strings, never a pipe.
+$retire_node = jcb_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x0d", 32)), 'mgn_agent_primitives' => 'check_status'));
+$retire_steps = JobCommandBuilder::build_retire_install_password($retire_node);
+$retire_cmd = (string)($retire_steps[0]['cmd'] ?? '');
+check(($retire_steps[0]['type'] ?? '') === 'ssh' && strpos($retire_cmd, 'set -eo pipefail') === 0,
+	'the retirement is one ssh step under set -e and pipefail');
+check(strpos($retire_cmd, '/etc/ssh/sshd_config.d/00-joinery-agent-managed.conf') !== false
+	&& strpos($retire_cmd, "'PasswordAuthentication no'") !== false
+	&& strpos($retire_cmd, "'KbdInteractiveAuthentication no'") !== false,
+	'it writes the 00- drop-in turning password and keyboard-interactive login off');
+check(strpos($retire_cmd, 'cfg=$(sshd -T') !== false && preg_match('/sshd -T[^\n]*\| *grep/', $retire_cmd) !== 1,
+	'sshd -T is read once into a variable and never piped into grep', $retire_cmd);
+check(strpos($retire_cmd, '<<<"$cfg"') !== false && strpos($retire_cmd, 'INSTALL_PASSWORD_RETIRED') !== false,
+	'the verdict comes from here-string tests on the captured config');
+check(strpos($retire_cmd, 'RETIRE_FAILED=') !== false && strpos($retire_cmd, '--- where set:') !== false
+	&& strpos($retire_cmd, '/etc/ssh/sshd_config.d/*.conf') !== false,
+	'a failure prints the effective auth settings and every file that sets them');
+exec('bash -n ' . escapeshellarg('/dev/stdin') . ' <<\'JCB_RETIRE\'' . "\n" . $retire_cmd . "\nJCB_RETIRE\n", $retire_syntax_out, $retire_syntax_rc);
+check($retire_syntax_rc === 0, 'the generated script parses under bash -n', implode("\n", $retire_syntax_out));
+
 harness_finish();

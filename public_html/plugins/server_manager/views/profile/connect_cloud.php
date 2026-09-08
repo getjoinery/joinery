@@ -6,6 +6,7 @@
  * here; their provisions and setup progress are shown below. The Connect
  * button is a single-button action form (no user-entered fields).
  *
+ * @version 1.1 - an expired grant renders as expired with a Reconnect button, never as connected
  * @version 1.0
  */
 
@@ -42,7 +43,13 @@ echo PublicPage::BeginPage('Your Server Account', $hoptions);
 <?php endif; ?>
 
 <section class="smcc-connect">
-<?php if ($account_connected): ?>
+<?php if ($account_connected && !empty($grant_expired)): ?>
+	<p class="smcc-message">Your Linode grant expired<?php echo $grant_expires !== '' ? ' at ' . htmlspecialchars($grant_expires) . ' UTC' : ''; ?>. A grant lasts two hours and cannot be refreshed, so no server can be created until you reconnect.</p>
+	<form method="post" action="/profile/server_manager/connect_cloud">
+		<input type="hidden" name="action" value="connect">
+		<button type="submit" class="smcc-connect-btn">Reconnect your Linode account</button>
+	</form>
+<?php elseif ($account_connected): ?>
 	<p class="smcc-connected">✓ Your Linode account is connected. Servers are created in your account and billed directly to you by Linode.</p>
 	<form method="post" action="/profile/server_manager/connect_cloud">
 		<input type="hidden" name="action" value="connect">
