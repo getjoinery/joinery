@@ -1,4 +1,13 @@
 #!/usr/bin/env bash
+#VERSION 1.5 - An existing A record is updated, not duplicated: a second one
+#               round-robins the domain between the old server and this one. A
+#               zone Linode refuses to create says what is actually wrong -- it
+#               exists but this token cannot see it -- rather than leaving the
+#               deployer to guess why the domain still points at its old
+#               address. Zone and record are found by exact-match query, and
+#               every id is read only from an object that matches on name. A
+#               name that already round-robins is reduced to the one record
+#               just repointed.
 #VERSION 1.4 - The deploy-form password is the one the owner keeps; no forced change.
 #VERSION 1.3 - First-boot install driver for the Linode StackScript path.
 #
@@ -169,21 +178,37 @@ if [ -n "$LINODE_TOKEN" ] && [ -n "$DOMAIN" ]; then
             RECORD=""
         fi
 
-        # Listing zones is the scope check: a token without Domains Read/Write
-        # gets a 401 here, which is a different problem from "no zone yet" and
-        # is reported as one.
-        LIST_CODE=$(curl -s -o /tmp/joinery_dns_zones.json -w '%{http_code}' --max-time 15 \
-            -H "Authorization: Bearer ${LINODE_TOKEN}" \
-            "https://api.linode.com/v4/domains?page_size=500" 2>/dev/null || echo 000)
-        if [ "$LIST_CODE" != "200" ]; then
-            echo "Linode returned HTTP $LIST_CODE listing zones — the token probably lacks the Domains Read/Write scope. Skipping DNS creation."
+        # Ask Linode for this one zone by name rather than scanning the whole
+        # account. X-Filter matches server-side, so the reply holds that zone or
+        # nothing and the id comes out of a single object — no pattern matching
+        # against a list, and no page_size ceiling to fall off when an account
+        # holds more zones than one page returns. Listing is also the scope
+        # check: a token without Domains Read/Write gets a 401 here, which is a
+        # different problem from "no zone yet" and is reported as one.
+        zone_lookup() {
+            LOOKUP_CODE=$(curl -s -o /tmp/joinery_dns_zones.json -w '%{http_code}' --max-time 15 \
+                -H "Authorization: Bearer ${LINODE_TOKEN}" \
+                -H "X-Filter: {\"domain\": \"${ZONE}\"}" \
+                "https://api.linode.com/v4/domains" 2>/dev/null || echo 000)
+            # The id is read only out of an object that names this zone.
+            # X-Filter is the optimisation; this grep is the correctness check.
+            # A filter Linode ignores or widens would otherwise hand back the
+            # first zone in the account, and the A record below would be written
+            # into somebody else's domain.
+            ZONE_ID=$(grep -o "{[^{]*\"domain\": *\"${ZONE}\"[^}]*}" /tmp/joinery_dns_zones.json 2>/dev/null \
+                | grep -o '"id": *[0-9]*' | head -1 | grep -o '[0-9]*' || true)
+        }
+
+        zone_lookup
+        if [ "$LOOKUP_CODE" != "200" ]; then
+            echo "Linode returned HTTP $LOOKUP_CODE listing zones — the token probably lacks the Domains Read/Write scope. Skipping DNS creation."
             echo "Point $DOMAIN at $PUBLIC_IP yourself; the certificate follows automatically."
             DOMAIN_ID=""
         else
             TOKEN_USABLE=true
-            DOMAIN_ID=$(grep -o "{[^{]*\"domain\": *\"${ZONE}\"[^}]*}" /tmp/joinery_dns_zones.json 2>/dev/null \
-                | grep -o '"id": *[0-9]*' | head -1 | grep -o '[0-9]*' || true)
+            DOMAIN_ID="$ZONE_ID"
         fi
+        LIST_CODE="$LOOKUP_CODE"
         # No zone means the deployer pointed the nameservers at Linode and
         # nothing else, which is exactly the quickstart's path. Create it,
         # so that pointing the nameservers here is the only DNS errand left.
@@ -199,25 +224,78 @@ if [ -n "$LINODE_TOKEN" ] && [ -n "$DOMAIN" ]; then
                 DOMAIN_ID=$(grep -o '"id": *[0-9]*' /tmp/joinery_dns_zone.json 2>/dev/null | head -1 | grep -o '[0-9]*' || true)
                 echo "Zone created: $ZONE"
             else
-                echo "Linode returned HTTP $CREATE_CODE creating the zone — continuing without it."
-                echo "Point $DOMAIN at $PUBLIC_IP yourself; the certificate follows automatically."
+                # Linode's zones are unique across the whole platform, so a 400
+                # here is nearly always "already exists" — the zone is real and
+                # this token cannot see it. Asking again would return exactly
+                # what the lookup just returned, so name the cause instead.
+                echo "Linode returned HTTP $CREATE_CODE creating the zone — it most likely exists already but is not visible to this token (another account, or a restricted user with no access to it)."
+                echo "Point $DOMAIN at $PUBLIC_IP wherever $ZONE is managed; the certificate follows automatically."
             fi
         fi
         if [ -n "$DOMAIN_ID" ]; then
-            HTTP_CODE=$(curl -s -o /tmp/joinery_dns_result.json -w '%{http_code}' --max-time 15 \
-                -X POST \
+            # An A record for this name may already exist and point elsewhere.
+            # Adding a second one makes the zone round-robin between the old
+            # address and this one, so the site answers for some visitors and
+            # not others — worse than either address on its own. Update the
+            # record in place when it is there; create one only when it is not.
+            curl -s -o /tmp/joinery_dns_records.json --max-time 15 \
                 -H "Authorization: Bearer ${LINODE_TOKEN}" \
-                -H "Content-Type: application/json" \
-                -d "{\"type\":\"A\",\"name\":\"${RECORD}\",\"target\":\"${PUBLIC_IP}\",\"ttl_sec\":300}" \
-                "https://api.linode.com/v4/domains/${DOMAIN_ID}/records" 2>/dev/null || echo 000)
+                -H "X-Filter: {\"type\": \"A\", \"name\": \"${RECORD}\"}" \
+                "https://api.linode.com/v4/domains/${DOMAIN_ID}/records" >/dev/null 2>&1 || true
+            # Same guard as the zone: the id is taken only from an object
+            # that is itself an A record with this exact name. Trusting the
+            # filter alone would let a PUT repoint whatever record happened to
+            # come back first — an NS or MX record aimed at the web server.
+            RECORD_IDS=$(grep -o "{[^{]*\"type\": *\"A\"[^}]*}" /tmp/joinery_dns_records.json 2>/dev/null \
+                | grep "\"name\": *\"${RECORD}\"" \
+                | grep -o '"id": *[0-9]*' | grep -o '[0-9]*' || true)
+            RECORD_ID=$(printf '%s\n' "$RECORD_IDS" | head -1)
+            if [ -n "$RECORD_ID" ]; then
+                DID="updated"; DOING="updating"
+                HTTP_CODE=$(curl -s -o /tmp/joinery_dns_result.json -w '%{http_code}' --max-time 15 \
+                    -X PUT \
+                    -H "Authorization: Bearer ${LINODE_TOKEN}" \
+                    -H "Content-Type: application/json" \
+                    -d "{\"target\":\"${PUBLIC_IP}\",\"ttl_sec\":300}" \
+                    "https://api.linode.com/v4/domains/${DOMAIN_ID}/records/${RECORD_ID}" 2>/dev/null || echo 000)
+            else
+                DID="created"; DOING="creating"
+                HTTP_CODE=$(curl -s -o /tmp/joinery_dns_result.json -w '%{http_code}' --max-time 15 \
+                    -X POST \
+                    -H "Authorization: Bearer ${LINODE_TOKEN}" \
+                    -H "Content-Type: application/json" \
+                    -d "{\"type\":\"A\",\"name\":\"${RECORD}\",\"target\":\"${PUBLIC_IP}\",\"ttl_sec\":300}" \
+                    "https://api.linode.com/v4/domains/${DOMAIN_ID}/records" 2>/dev/null || echo 000)
+            fi
             if [ "$HTTP_CODE" = "200" ]; then
-                echo "A record created: $DOMAIN -> $PUBLIC_IP"
+                echo "A record $DID: $DOMAIN -> $PUBLIC_IP"
+                # A name that already round-robined keeps only the record just
+                # repointed. Every leftover still names the old server, so the
+                # domain would answer from both and the site would load for
+                # some visitors and not others -- the same split this step
+                # exists to prevent, arrived at from the other direction.
+                # Read the status, not curl's exit code: without -f curl is
+                # perfectly happy to return 0 on a 401 or a 404, and the loop
+                # would report a zone reduced to one record while it still
+                # round-robins. A refusal is named, with the id, so it can be
+                # removed by hand.
+                for extra_id in $(printf '%s\n' "$RECORD_IDS" | tail -n +2); do
+                    DEL_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
+                        -X DELETE \
+                        -H "Authorization: Bearer ${LINODE_TOKEN}" \
+                        "https://api.linode.com/v4/domains/${DOMAIN_ID}/records/${extra_id}" 2>/dev/null || echo 000)
+                    if [ "$DEL_CODE" = "200" ]; then
+                        echo "Removed a duplicate A record that still pointed at the old server."
+                    else
+                        echo "Linode returned HTTP $DEL_CODE deleting duplicate A record $extra_id — it is still there, and $DOMAIN will answer from two servers until it is removed."
+                    fi
+                done
                 sleep 20
             else
-                echo "Linode returned HTTP $HTTP_CODE creating the record — continuing without it."
+                echo "Linode returned HTTP $HTTP_CODE $DOING the record — continuing without it."
             fi
         fi
-        rm -f /tmp/joinery_dns_zones.json /tmp/joinery_dns_zone.json /tmp/joinery_dns_result.json
+        rm -f /tmp/joinery_dns_zones.json /tmp/joinery_dns_zone.json /tmp/joinery_dns_records.json /tmp/joinery_dns_result.json
     fi
 fi
 
