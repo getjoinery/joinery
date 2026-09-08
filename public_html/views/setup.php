@@ -193,7 +193,7 @@
 			<input type="hidden" name="action" value="dismiss">
 			<label class="jy-check">
 				<input type="checkbox" name="understand" value="1" required>
-				I understand — I can finish any time from the "Finish setup" link.
+				I understand — the "Finish setup" reminder goes away, and I can come back any time at /setup.
 			</label>
 			<div class="setup-dialog-actions">
 				<button type="button" class="btn btn-secondary" id="setup-dismiss-cancel">Keep going</button>

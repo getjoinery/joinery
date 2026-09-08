@@ -32,6 +32,10 @@
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
+ * @version 1.13
+ * @changelog 1.13 - interruptExempt(): the login interrupt's exemption list in one place,
+ *   now including /profile/security and /verify-stepup so the encryption step's
+ *   "add a passkey elsewhere" route is reachable while the wizard is pending.
  * @version 1.12
  * @changelog 1.12 - The Email step counts a connected account as receiving:
  *   green needs every enabled store mailbox either on a domain whose DNS
@@ -256,6 +260,21 @@ class SetupSteps {
 	 * not green. Once dismissal or all-green is seen, an all-clear sticks in
 	 * the session and this costs nothing further.
 	 */
+	/**
+	 * Paths the login interrupt leaves alone. The wizard itself and logout;
+	 * the API, which the wizard's own enrollment fetches use; the security
+	 * page, because the wizard's encryption step sends a user whose passkey
+	 * cannot derive a key there to add one that can (the 2FA gates exempt it
+	 * for the same reason); and the step-up ceremony, which the security page
+	 * and the wizard both run mid-flow and return from.
+	 */
+	public static function interruptExempt(string $path): bool {
+		if ($path === '/setup' || $path === '/logout' || $path === '/profile/security' || $path === '/verify-stepup') {
+			return true;
+		}
+		return strpos($path, '/api/v1/') === 0;
+	}
+
 	public static function shouldInterrupt(): bool {
 		if (PHP_SAPI === 'cli') {
 			return false;

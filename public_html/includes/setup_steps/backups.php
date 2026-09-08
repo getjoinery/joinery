@@ -9,6 +9,8 @@
  * POSTs go to /setup and are forwarded to admin_backups_logic. Included by
  * views/setup.php with $page, $settings in scope.
  *
+ * @version 2.3 - on a site a management node backs up, the target section states that
+ *                (as the Backups admin page does) instead of offering a bucket form
  * @version 2.2
  */
 require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
@@ -23,8 +25,21 @@ foreach ($setup_bk_targets as $setup_bk_row) {
 	}
 }
 $setup_bk_recovery = BackupRecoveryKey::setup_state();
+// A site whose backups a management node runs owes no bucket here — the same
+// fact the Backups admin page states — so the target section says who runs
+// them and the step is the recovery key alone.
+$setup_bk_managed = class_exists('ManagementNodeStatus') && ManagementNodeStatus::is_managed();
+$setup_bk_manager = $setup_bk_managed ? (string)ManagementNodeStatus::manager_url() : '';
 ?>
 
+<?php if ($setup_bk_managed) { ?>
+	<div class="jy-fieldset">
+		<h4>1 &middot; Where backups go</h4>
+		<p><span class="badge badge-success">Managed</span>
+			This site's backups are taken by <?php echo $setup_bk_manager !== '' ? '<code>' . htmlspecialchars($setup_bk_manager) . '</code>' : 'a management node'; ?>.
+			Where they go, how often they run, and how many are kept are set there, not here.</p>
+	</div>
+<?php } else { ?>
 <?php if ($setup_bk_target === null) { ?>
 	<p class="mb-1">You need a bucket at one of these services — all three work the same here:</p>
 	<ul class="small">
@@ -77,6 +92,7 @@ $setup_bk_recovery = BackupRecoveryKey::setup_state();
 	$setup_bk_form->end_form();
 } ?>
 	</div>
+<?php } // managed / self-run ?>
 
 	<div class="jy-fieldset jy-mt-3">
 		<h4>2 &middot; The recovery key</h4>

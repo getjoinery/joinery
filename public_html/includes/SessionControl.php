@@ -1553,13 +1553,10 @@ class SessionControl{
 			// taken to /setup. Sits BEFORE the 2FA gates on purpose — the wizard
 			// mounts the same enrollment ceremonies, so a fresh admin enrolls
 			// there; dismissing without enrolling lands on the stricter gates
-			// below. Same /api/v1/ exemption as those gates: the wizard's own
-			// enrollment fetches must survive this.
-			if ($current_path !== NULL && $current_path !== '/setup'
-					&& $current_path !== '/logout'
-					&& strpos((string)$current_path, '/api/v1/') !== 0) {
+			// below. SetupSteps::interruptExempt() lists the paths left alone.
+			if ($current_path !== NULL) {
 				require_once(PathHelper::getIncludePath('includes/SetupSteps.php'));
-				if (SetupSteps::shouldInterrupt()) {
+				if (!SetupSteps::interruptExempt((string)$current_path) && SetupSteps::shouldInterrupt()) {
 					header('Location: /setup');
 					exit();
 				}

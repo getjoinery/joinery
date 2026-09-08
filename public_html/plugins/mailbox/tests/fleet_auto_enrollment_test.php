@@ -205,6 +205,17 @@ $keys_after = 0;
 foreach (new MultiApiKey(array('user_id' => $buyer->key)) as $k) { $keys_after++; }
 check($keys_after === $keys_before, 'and no key was minted, so the holder\'s credential stands');
 
+// A decommissioned site holds nothing: its node row is soft-deleted, so the
+// slot is free for the account's next site (testing day 2026-09-08, B16).
+$unpaired->set('mgn_delete_time', gmdate('Y-m-d H:i:s'));
+$unpaired->save();
+check(FleetProvisionSeeding::seededElsewhere($paired, $buyer->key) === null,
+	'a holder whose site node is soft-deleted (decommissioned) no longer holds the slot');
+$unpaired->set('mgn_delete_time', null);
+$unpaired->save();
+check(FleetProvisionSeeding::seededElsewhere($paired, $buyer->key) === 'harnesstest-fleet-holder.example.com',
+	'and holds it again once its node is live');
+
 // ── D. The operator console's Fortress product ──────────────────────────────
 section('Fortress product creation');
 

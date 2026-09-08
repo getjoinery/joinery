@@ -2617,7 +2617,11 @@ owner's Setup tab then lands on one-click Enroll; the DNS TXT ownership
 proofs and the MX edit stay manual by nature (the customer proving domain
 control at their own DNS provider). Seeding is best-effort: a failure alerts
 the ops address and leaves the provision done — the owner can always enter
-the credentials manually on the Settings tab.
+the credentials manually on the Settings tab. A subscription carries one slot,
+so one seeded site per buyer: seeding a second site is refused, naming the
+site that holds the slot (re-seeding that same site is a key rotation). A site
+that has been decommissioned holds nothing — its node row is soft-deleted —
+so the slot is free for the account's next site.
 
 **Rebuild carries the spool across the wipe.** The scheduled shard rebuild
 closes port 25, flushes the Postfix queue for a bounded window, copies the

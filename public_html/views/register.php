@@ -33,6 +33,7 @@
         <h3>Register for an Account</h3>
 
         <?php
+        echo $page->render_messages();
         if (isset($_GET['msgtext']) && array_key_exists($_GET['msgtext'], $page_vars['LOGIN_MESSAGES'])) {
             echo PublicPage::alert('Login warning', htmlspecialchars($page_vars['LOGIN_MESSAGES'][$_GET['msgtext']]), 'warn');
         }
