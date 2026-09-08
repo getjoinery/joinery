@@ -60,6 +60,8 @@
  *                 helpers only those paths used
  * @version 1.47 - managed domains cross to the channel: build_managed_domain_prepare and
  *                 build_managed_domain_notice, both primitive-only with no SSH sibling
+ * @version 1.47 - install_report: how a node's first-boot install went, read off the logs the
+ *                 install left on the machine (observe primitive, 1.23.0). No SSH sibling.
  * @version 1.46 - check_status routes primitive -> api -> probe; build_check_status_ssh deleted.
  *                 A machine with no agent and no site reports itself over HTTP instead of
  *                 being read over a shell
@@ -286,6 +288,9 @@ class JobCommandBuilder {
 		// shape as the three above.
 		'hosted_mail_settings' => '1.20.0',
 		'hosted_plan_notice'   => '1.20.0',
+		// How the node's first-boot install went, read off the logs it left.
+		// New in 1.23.0.
+		'install_report' => '1.23.0',
 	];
 
 	/**
@@ -1381,6 +1386,33 @@ class JobCommandBuilder {
 
 	public static function build_recovery_key_report_primitive($node) {
 		return ['primitive' => 'recovery_key_report', 'params' => []];
+	}
+
+	/**
+	 * How a node's first-boot install went: whether it finished, how its DNS
+	 * and certificate steps ended, and the tail of the install log itself.
+	 *
+	 * The node reads a compiled-in list of the logs a first-boot install leaves
+	 * (the Linode StackScript log, cloud-init's) and answers off the marker
+	 * lines the installer prints. Nothing crosses the wire but the request: no
+	 * path, no line count. An install log has only ever been readable by a
+	 * shell on the box, which is the errand this exists to end.
+	 *
+	 * PRIMITIVE ONLY. The SSH way to read a log is `tail`, a command; there is
+	 * no build_install_report_ssh and there never will be.
+	 */
+	public static function build_install_report($node) {
+		if (!self::has_primitive($node, 'install_report')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot report its install: its agent "
+				. "does not offer the install_report primitive. Apply an update to the node; "
+				. "the agent that ships with it does.");
+		}
+		return self::build_install_report_primitive($node);
+	}
+
+	public static function build_install_report_primitive($node) {
+		return ['primitive' => 'install_report', 'params' => []];
 	}
 
 	/**

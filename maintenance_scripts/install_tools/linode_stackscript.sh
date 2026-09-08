@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+#VERSION 1.6 - The DNS step's outcome is a fact the rest of the install reads,
+#               not a line that scrolls past. A refusal that waiting will not
+#               change (a zone another account holds, a token without the
+#               scope) is reported as DNS setup FAILED in the closing summary
+#               and handed to install.sh, which says the same instead of
+#               "point it here whenever you are ready".
 #VERSION 1.5 - An existing A record is updated, not duplicated: a second one
 #               round-robins the domain between the old server and this one. A
 #               zone Linode refuses to create says what is actually wrong -- it
@@ -83,6 +89,11 @@ DOMAIN="${JOINERY_DOMAIN:-}"
 SSH_KEY="${JOINERY_SSH_KEY:-}"
 LINODE_TOKEN="${JOINERY_LINODE_TOKEN:-}"
 TOKEN_USABLE=false
+# How the DNS step ended, for the closing summary and for install.sh's own.
+# One of: skipped: ..., written: ..., failed: ... — "failed" is reserved for
+# a refusal that waiting will not change, which is what makes it a failure
+# rather than a record still propagating.
+DNS_OUTCOME="skipped: no Linode token was supplied"
 BUNDLE="${JOINERY_INSTALL_BUNDLE:-personal}"
 
 [ -n "$ADMIN_PASSWORD" ] || fail "No admin password was supplied. This field is required on the deploy form."
@@ -165,6 +176,7 @@ if [ -n "$LINODE_TOKEN" ] && [ -n "$DOMAIN" ]; then
     PUBLIC_IP=$(curl -s --max-time 10 https://api.ipify.org 2>/dev/null || true)
     if [ -z "$PUBLIC_IP" ]; then
         echo "Could not determine this instance's public IP — skipping DNS creation."
+        DNS_OUTCOME="failed: could not determine this instance's public IP"
     else
         # The zone is the registrable domain; anything to the left is the record
         # name. sub.example.com is an A record 'sub' in the zone example.com;
@@ -202,6 +214,7 @@ if [ -n "$LINODE_TOKEN" ] && [ -n "$DOMAIN" ]; then
         zone_lookup
         if [ "$LOOKUP_CODE" != "200" ]; then
             echo "Linode returned HTTP $LOOKUP_CODE listing zones — the token probably lacks the Domains Read/Write scope. Skipping DNS creation."
+            DNS_OUTCOME="failed: Linode returned HTTP $LOOKUP_CODE listing zones; the token probably lacks the Domains Read/Write scope"
             echo "Point $DOMAIN at $PUBLIC_IP yourself; the certificate follows automatically."
             DOMAIN_ID=""
         else
@@ -229,6 +242,7 @@ if [ -n "$LINODE_TOKEN" ] && [ -n "$DOMAIN" ]; then
                 # this token cannot see it. Asking again would return exactly
                 # what the lookup just returned, so name the cause instead.
                 echo "Linode returned HTTP $CREATE_CODE creating the zone — it most likely exists already but is not visible to this token (another account, or a restricted user with no access to it)."
+                DNS_OUTCOME="failed: the zone for $ZONE is not visible to this token (held by another Linode account, or by a restricted user with no access to it)"
                 echo "Point $DOMAIN at $PUBLIC_IP wherever $ZONE is managed; the certificate follows automatically."
             fi
         fi
@@ -269,6 +283,7 @@ if [ -n "$LINODE_TOKEN" ] && [ -n "$DOMAIN" ]; then
             fi
             if [ "$HTTP_CODE" = "200" ]; then
                 echo "A record $DID: $DOMAIN -> $PUBLIC_IP"
+                DNS_OUTCOME="written: $DOMAIN -> $PUBLIC_IP ($DID)"
                 # A name that already round-robined keeps only the record just
                 # repointed. Every leftover still names the old server, so the
                 # domain would answer from both and the site would load for
@@ -293,10 +308,13 @@ if [ -n "$LINODE_TOKEN" ] && [ -n "$DOMAIN" ]; then
                 sleep 20
             else
                 echo "Linode returned HTTP $HTTP_CODE $DOING the record — continuing without it."
+                DNS_OUTCOME="failed: Linode returned HTTP $HTTP_CODE $DOING the A record"
             fi
         fi
         rm -f /tmp/joinery_dns_zones.json /tmp/joinery_dns_zone.json /tmp/joinery_dns_records.json /tmp/joinery_dns_result.json
     fi
+elif [ -z "$DOMAIN" ]; then
+    DNS_OUTCOME="skipped: no domain was supplied"
 fi
 
 # ---------------------------------------------------------------------------
@@ -313,6 +331,9 @@ say "Creating the site"
 export JOINERY_ADMIN_PASSWORD="$ADMIN_PASSWORD"
 export JOINERY_ADMIN_EMAIL="$ADMIN_EMAIL"
 export JOINERY_INSTALL_BUNDLE="$BUNDLE"
+# The DNS step's outcome, so the closing summary install.sh prints tells the
+# truth about it: a failed step is not "point it here whenever you are ready".
+export JOINERY_DNS_OUTCOME="$DNS_OUTCOME"
 
 SITE_ARGS=(-y site --bare-metal "$SITENAME" -)
 if [ -n "$DOMAIN" ]; then
@@ -355,6 +376,17 @@ fi
 # Protocol deliberately unstated: install.sh has just reported whether a
 # certificate was issued or deferred, and repeating a guess here would
 # contradict it.
+case "$DNS_OUTCOME" in
+    failed:*)
+        echo "DNS setup failed: ${DNS_OUTCOME#failed: }"
+        echo "Nothing about that changes on its own. Point $DOMAIN at $PUBLIC_IP where its DNS is"
+        echo "actually managed; the certificate then follows within a few minutes."
+        echo ""
+        ;;
+    written:*)
+        echo "DNS: ${DNS_OUTCOME#written: }"
+        ;;
+esac
 echo "Sign in at: ${SITE_HOST}/login"
 echo "Email:      $ADMIN_EMAIL"
 echo "Password:   the one you entered on the deploy form"

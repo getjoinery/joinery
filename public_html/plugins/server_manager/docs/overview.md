@@ -188,7 +188,7 @@ The node detail page (`/admin/server_manager/node_detail?mgn_id=N&tab=...`) has 
 
 | Tab | Purpose |
 |-----|---------|
-| **Overview** | Status summary (health dot, disk/memory/load/postgres/version), action buttons (Check Status, Test Connection), recent jobs for this node, connection settings (collapsed by default), delete node. The Actions dropdown also offers **Run Plugin Installers** — queues a `run_plugin_installers` job that executes every active plugin's declared `host_installer` on the node as root (idempotent); this is how a bare-metal node picks up system-service configuration (e.g. the mail stack) after a plugin is activated, since it has no container-start moment |
+| **Overview** | Status summary (health dot, disk/memory/load/postgres/version), action buttons (Check Status, Install Report on a node whose agent ships the primitive, Test Connection), recent jobs for this node, connection settings (collapsed by default), delete node. The Actions dropdown also offers **Run Plugin Installers** — queues a `run_plugin_installers` job that executes every active plugin's declared `host_installer` on the node as root (idempotent); this is how a bare-metal node picks up system-service configuration (e.g. the mail stack) after a plugin is activated, since it has no container-start moment |
 | **Backups** | Target indicator, run database/project backup, backup file browser with scan, per-file upload-to-cloud and delete, restore full project from a `.tar.gz` archive, restore from an incremental chain |
 | **Database** | Restore from a backup file, and the record of database operations |
 | **Updates** | Version comparison (node vs management node), apply update |
@@ -377,6 +377,7 @@ Only after the answer verifies does the host run the bundled, self-verifying `re
 
 | Job Type | Description | Destructive |
 |----------|-------------|-------------|
+| `install_report` | How the node's first-boot install went, as the `install_report` **observe primitive**: whether it finished, how its DNS and certificate steps ended, warnings and errors, and the tail of the install log (`/var/log/stackscript.log`, or cloud-init's), read off the marker lines the installer prints. Covers an install that reached the agent: one that died before the agent was installed, or a machine nobody has paired yet, has no agent to ask and its log is reachable only from the console | No |
 | `check_status` | Disk, memory, load, uptime, PostgreSQL, version and database list. On a node with an agent this is the `check_status` **observe primitive**, which collects all of it without running a command; on a Joinery site without one, the management API; on a machine with neither, a **probe** of what the machine publishes about itself | No |
 | `backup_database` | Run `backup_database.sh`, optionally upload to cloud | No |
 | `backup_project` | Run `backup_project.sh` (DB + files + Apache config), optionally upload | No |

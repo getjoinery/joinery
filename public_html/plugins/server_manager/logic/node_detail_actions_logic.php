@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.25 - install_report action: the node reads its own first-boot install log
+ *                (observe primitive), and the job page shows the verdicts and the tail.
  * @version 1.24 - publish_upgrade: build and sign a release on the node, as the node's own agent. A
  *                 plane that is another plane's node is published from here; a plane that manages
  *                 itself is published from its Publish page through the same builder
@@ -90,6 +92,7 @@ class NodeDetailActions {
 	/** Which tab a failed action redirects back to (its error message shows there). */
 	private static $error_tab = [
 		'check_status'             => 'overview',
+		'install_report'           => 'overview',
 		'restore_database'         => 'database',
 		'restore_project'          => 'backups',
 		'restore_chain'            => 'backups',
@@ -160,6 +163,12 @@ class NodeDetailActions {
 			case 'check_status': {
 				$built = JobCommandBuilder::build_check_status($node);
 				$job = ManagementJob::createFromBuild($node->key, 'check_status', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'install_report': {
+				$built = JobCommandBuilder::build_install_report($node);
+				$job = ManagementJob::createFromBuild($node->key, 'install_report', $built, null, $uid);
 				return self::jobUrl($job);
 			}
 

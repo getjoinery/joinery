@@ -2275,7 +2275,9 @@ standing on -- and that half is already fixed.
 tells the directions apart, since a two-folder swap is symmetric and a walk
 following the ring the wrong way round still closes on it.
 
-**Estate.** v36 on this tree: 16 arms, 89 sweeps, 40,070 seeds at shift
+**Estate.** v38 on the B2 and B6 tree: 16 arms, 89 sweeps, 40,070 seeds at
+shift 34000000, ONE failure -- seed 34121769, which is Defect B8 and reproduces
+identically on the committed engine with all of this reverted. v36 on this tree: 16 arms, 89 sweeps, 40,070 seeds at shift
 32000000, zero failures; v35 on `d2c04fbe` immediately before it, the same
 totals at shift 30000000. What that is evidence OF is worth stating, because it
 is easy to over-read: it shows the change causes no regression, which matters
@@ -2411,6 +2413,168 @@ publish nothing, and raise an issue naming both folders ("Private and Plain
 traded names; the vault is now called Plain"). The catch accepted with it is
 that a vault can end up wearing the other folder's name until the user acts.
 
+## Defect AF -- two devices trading folder names publish the vault's contents
+
+**Severity: the plaintext of a file the user sealed reaches the server, under
+its real name, from an ordinary rename made on two computers at once.** Found
+2026-09-08 by the new folder-ring sweep arm, on the tree WITH the AD fix in, at
+a rate of **11 seeds in 40** on a clean network with no faults and no kills.
+NOT FIXED.
+
+**Shape.** Three folders side by side, one of them encrypted, and both devices
+trading their names. Seed 74000, two devices, forty steps, clean network. The
+server ends holding:
+
+    ring-1/enc-469d...                                    (encrypted, fine)
+    ring-2 (conflicted copy ... from desktop)/sealed.txt  (IN THE CLEAR)
+
+`sealed.txt` is the file written into the encrypted ring before the workload
+started. It is now in a plain conflict-copy folder as plaintext, and the plain
+folder's file has been carried the other way and encrypted. The same inversion
+as Defect AD, reached by a different route: AD's ring detection resolves a trade
+one device makes, and this is two devices trading at once, where the engine
+mints a conflict copy and resolves the collision by moving CONTENTS between the
+folders again.
+
+**Not the workload's doing, established rather than assumed.** The ring folders
+are never in the generator's `dirs` or `files` -- those start as `[root]` and
+empty, and only ever collect what the workload itself creates -- so no action
+can move, rename or write a ring's CONTENTS. The only thing done to them is
+trading the three folder names. Every byte that crossed the vault edge was moved
+by the engine.
+
+**Not B4.** B4 needs a refused rename; this reproduces with no fault injection at
+all.
+
+**Why nothing found it before.** Nothing could. See the corrected note under
+Defect AD: action 13 trades names, but its slots are FILES. In forty thousand
+seeds per estate the workload has never traded a folder name.
+
+**Mechanism, traced by public-html-0e on seed 74000.** 502 is the vault ring
+holding `sealed.txt` at inode 1001. The laptop trades ring-2 with ring-3; the
+desktop trades ring-1 with ring-2, so the VAULT's directory now wears the name
+`ring-2` while its record still says `ring-1`. The laptop's trade arrives at the
+desktop as a remote move of 504 onto `ring-2` -- which is occupied by the
+vault's directory. `make_room` moves it aside to a conflict name. That directory
+is now claimed by no record and holds the vault's plaintext. The file is then no
+longer at 502's agreed path, which reads as the user deleting it, so the
+CIPHERTEXT copy is trashed on the server; the scan meets the conflict-copy
+directory as a brand new plain folder, and inode 1001 under a plain folder reads
+as a drag out of the vault, which converts by design. The sealed file is
+uploaded in the clear, and the plain ring's file goes the other way and is
+encrypted.
+
+**Where it is.** `make_room`'s directory arm moves ANY directory aside without
+asking whose it is. `move_local` has a SOURCE-holder guard, added for Defect AC,
+and no DESTINATION-holder guard -- which the AE review named at the time and
+this is the cost of. AD's ring rule is not involved and does the right thing on
+the laptop: AF is an arriving remote move colliding with a local trade the
+record has not absorbed yet.
+
+**Fix shape, two layers.**
+
+1. Near-term, in `make_room` for a DIRECTORY: ask the records before moving
+   anything aside. Where a live folder record owns what stands at the
+   destination -- the vault's directory holds an inode a record knows, so
+   `holds_nothing_known` is false -- the arriving move stands down `Overtaken`
+   and the round decides again once the local trade is absorbed. The engine must
+   never mint a conflict-copy DIRECTORY out of a directory whose contents it
+   knows; that is the same shape `displaced` already refuses, one level up. If a
+   move-aside is ever unavoidable, the record that owned the directory has to
+   follow it, so the scan meets 502 under the conflict name instead of a
+   stranger.
+2. The family's close: **directory identity**. A folder record that remembered
+   its directory's `file_id` would have told `make_room` whose directory it was
+   outright. AF is the FOURTH defect -- AC, AD, AE, AF -- whose cheapest honest
+   answer is to ask the directory who it is, and it settles AD's
+   contents-exchange counterfeit and the empty-side ambiguity at the same time.
+   That spec should come before any further per-site guard.
+
+**A refusal in `make_room` was tried and does NOT fix it -- measured, and the
+negative result narrows the cause usefully.** The near-term shape above was
+built: `make_room` refuses to move a directory aside when it holds files the
+engine knows AND no record resolves to it. The ring arm stayed at exactly 11
+failures in 40, the same seeds. Instrumented, the guard is reached once per run,
+at the destination, and declines to refuse -- `known = true, claimed = TRUE`. A
+record does claim that path: the vault folder itself, whose local rename the
+scan HAS absorbed.
+
+So the premise was wrong. The engine is not failing to recognise the occupant;
+it recognises it and moves it aside anyway, and the record does not follow the
+directory. It is 0e's fallback clause that is the fix, not the refusal:
+
+> If a move-aside is ever unavoidable, the record that owned the directory must
+> follow it, so the scan sees 502 at the conflict name rather than a stranger.
+
+The refusal was reverted rather than kept -- it never fires in this case, so it
+is dead weight on a hot path, and an inert guard on a security-sensitive route
+invites the belief that something is protecting it.
+
+**And the pin that refusal broke turns out to BLESS this defect.** A first,
+broader version (contents alone, no "claimed" test) failed
+`a_second_folder_conflict_at_one_name_gets_its_own_name`, which reads as moving
+a tracked folder aside being designed behaviour. Verified here on what that test
+actually leaves behind, at 0e's prompting:
+
+    server:  Docs (conflicted copy ...)/f1.txt      -- and no `Docs` at all
+    store:   folder 501 is GONE
+             folder 504 is NEW, wearing the conflict name
+
+So "designed" is true only of the BYTES. The mechanism underneath is IDENTITY
+LOSS: the displaced folder is deleted on the server and re-minted under a new
+id, with its contents re-uploaded as new content. The test asserts all three
+files still exist and never asks whether the folder that held them survived, so
+it has been green over this the whole time.
+
+That is the same mechanism as AF, and it is why AF was reachable at all. With a
+plain folder it costs a server id nobody looks at. With a VAULT, the re-upload
+of "new content" into a folder the engine no longer knows is encrypted is
+exactly how the sealed bytes reach the server in the clear. **When AF is fixed,
+that pin must also assert the displaced folder keeps its server id** -- as it
+stands, a green run there is not evidence of anything but the byte count.
+
+**Order to build it in** (public-html-0e, and the reason not to start at the
+belt):
+
+1. **The vault-conversion gate.** Fail-safe and independent of everything else,
+   and it is the policy line below. Conversion happens only where the USER moved
+   the bytes; an engine-minted path never counts as consent. This alone turns AF
+   from a leak into a stall.
+2. **The planner's two-claimants rule.** The first-order defect is upstream of
+   `make_room`: one round planned an ApplyLocalMove and an ApplyRemoteMove onto
+   the SAME slot, which the AE review already recorded the planner cannot see.
+   The honest resolution is the verdict the engine already has for files --
+   `MoveRaceServerWon` -- applied to folders: the local rename lost, so revert
+   the directory and tell the user, then let the remote moves land in dependency
+   order. With that, `make_room` never meets a claimed directory in AF at all.
+3. **The move-aside as a park**, as the belt for what the planner still misses:
+   the record follows the directory in `local_name`, in the shape `park_local`
+   already uses, wearing a `.jd-swap-` SCRATCH name rather than a user-facing
+   conflict copy -- so the stranded-park put-back returns it to its agreed name
+   if the round dies, and the oracle's "no `.jd-` name survives" assertion
+   covers it. NOT `synced_placement`, which is the agreement and a lie there
+   becomes a delete pushed at the server; NOT `stand_in`, whose lapse rule is
+   written for a keyless device's placeholder and would silently drop a
+   directory holding the user's real files.
+4. **Directory identity**, as the close -- and the thing that lets the pin above
+   assert the id survives.
+
+Do NOT build 3 before 2: a belt on a route the planner should never send anyone
+down is the same inert-guard problem as the refusal that was just reverted.
+
+**A policy line this defect earns, wider than itself.** *A drag out of a vault
+converts by design* is a statement about something THE USER did. Here it was
+applied to a move the ENGINE made. Conversion must be gated on the user having
+moved the bytes: a path the engine minted for its own purposes -- a `make_room`
+move-aside, a rescue, a park -- must never count as consent to publish. That
+gate alone turns AF from a leak into a stall with an issue raised, which is the
+failure this engine should have whenever identity is uncertain.
+
+**Operational note: the ring arm must NOT join the estate until AF is fixed.**
+It fails 11 seeds in 40, so adding it now would make every estate red and bury
+the signal from the other fifteen arms. It runs on demand
+(`VAULT=3 ... scratch_one`, or `scratch_ring_sweep`) until then.
+
 ## The oracle is blind to custody
 
 The estate oracle proves two things: both sides converge, and no bytes are
@@ -2505,8 +2669,10 @@ none, because it trains everyone to ignore it.
 ## Still open, found by review probes (2026-09-05, public-html-0e)
 
 B1 to B3 are pre-existing and none is caused by the AB or AC fixes. B4 and B5
-were added on 2026-09-07 from the AD review and B6 on 2026-09-08 from the B2
-review. B6 is fixed; B1, B3, B4 and B5 remain open. Recorded here so they are not
+were added on 2026-09-07 from the AD review, and B6 and B8 on 2026-09-08. B6 is
+fixed; B1, B3, B4, B5 and B8 remain open. B8 is the one to look at first: it is
+the only one where the device tells the user it is finished while a file exists
+on one machine only. Recorded here so they are not
 rediscovered a fourth time.
 
 **B1 -- a child the server moves INTO a parked folder loops for ever.** The
@@ -2729,6 +2895,48 @@ public-html-0e on a fresh copy by making the guard's slot test never true.
 
 A red test proves a failure, not its cause. The entry that was opened for the
 cause has been withdrawn rather than left in this list for somebody to chase.
+
+**B8 -- a device reports itself settled while holding a file the server never
+got.** Found by estate v38, arm `hostilename-kill`, seed 34121769 (1 of 300).
+PRE-EXISTING: reproduces identically on the committed engine with B2, B6 and the
+oracle change all reverted, so it is not caused by any of them -- it is a fresh
+seed shift reaching it, not a regression. NOT FIXED, and only partly
+characterised.
+
+Reproduce:
+
+    SEED=34121769 STEPS=40 DEVS=2 CHAOS=1 KILLS=1 NAMECLASS=hostile \
+      PLATFORMS=linux,linux cargo test -p jd-sim --release --test zz_sweep \
+      -- --ignored --exact scratch_one
+
+`laptop did not converge with the server; only on the disk: ["Sub 23
+renamed/in-6-laptop.txt"]`. The device has no queued work and believes it is
+finished, so this is a SILENT divergence: the user's file lives on one machine
+only, and the client says everything is synced.
+
+**Both sides, asked directly.** The device's entry 902 says `in-6-laptop.txt`,
+`status = Synced`, `synced_content` present, `remote_deleted` FALSE, agreed and
+remote-placed under folder 508. The server, asked about the same two entities in
+the same run, says folder 508 is alive at the root -- and that file 902 is
+`deleted: true`, under folder **501**.
+
+So the record disagrees with the server about two separate things at once, and
+believes it agrees about both:
+
+- **the deletion was never absorbed** -- the server trashed the file, the device
+  still has `remote_deleted = false`;
+- **the parent** -- the device has it under 508, the server under 501.
+
+That makes this a lost-deletion race rather than a missing upload, and explains
+why nothing recovers: no upload is ever planned for a record that already claims
+to be agreed, and no deletion is ever applied for a record that does not know
+about one. The engine HAS a concept for this collision -- `DeleteLostToEdit` is
+raised elsewhere -- and here nothing was raised at all. The file is not
+re-uploaded, not trashed locally, and not complained about: it simply lives on
+one machine while the client reports itself finished.
+
+Kills are in the arm, so the likely shape is a feed event lost across a death
+and never re-derived, but that last step is inferred and not traced.
 
 **B3 -- `download` has no parent-materialized gate and MINTS the parent
 directory.** `create_local_folder` and `move_local` both refuse to act when the
