@@ -57,7 +57,7 @@ You're probably used to yourname@gmail.com or @yahoo.com.  Joinery was created s
 
 Once you've purchased one, you need to point it to your server.  
 
-**ONLY DO THIS IF THIS IS A NEW OR UNCONFIGURED DOMAIN.  IT WILL ERASE WHATEVER ENTRIES ARE THERE**
+**Only do this on a brand new domain with nothing on it.** Changing nameservers replaces whatever DNS records the domain has now. If you already own the domain, or it already does something, use the [alternate quick start](https://getjoinery.com/page/quickstart-existing-domain) instead: type the domain there and it shows these steps as they apply to it.
 
 1. **Go to the Namecheap dashboard** and click "Manage" next to your domain.
    ![The Namecheap domain list, with the Manage button beside the domain circled](/assets/images/docs/namecheap-dashboard.png)

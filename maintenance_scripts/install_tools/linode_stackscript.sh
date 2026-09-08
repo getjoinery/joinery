@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#VERSION 1.4 - The deploy-form password is the one the owner keeps; no forced change.
 #VERSION 1.3 - First-boot install driver for the Linode StackScript path.
 #
 # linode_stackscript.sh — turn a blank Linode into a running Joinery site.
@@ -21,10 +22,8 @@
 #   JOINERY_ADMIN_PASSWORD  required — the password the owner chose. Passed
 #                           through to _site_init.sh, which uses it instead of
 #                           generating one and writes no credentials file. The
-#                           account still has to change it at first sign-in: a
-#                           deploy-form value reaches the instance as an
-#                           environment variable and can land in cloud-init
-#                           logs on the box.
+#                           owner chose it, so it is the password they keep:
+#                           no change is forced at first sign-in.
 #   JOINERY_ADMIN_EMAIL     required — the admin account's address, so the
 #                           account is recoverable by email from the start.
 #   JOINERY_DOMAIN          optional — blank means the site comes up on the
@@ -282,8 +281,7 @@ echo "Sign in at: ${SITE_HOST}/login"
 echo "Email:      $ADMIN_EMAIL"
 echo "Password:   the one you entered on the deploy form"
 echo ""
-echo "You will be asked to choose a new password at first sign-in."
-echo "After that, set up email — password reset needs it, and a new site has no"
+echo "First, set up email — password reset needs it, and a new site has no"
 echo "mail provider yet. Linode blocks outbound port 25, so a mail server on this"
 echo "instance will not deliver; name a provider under Settings, Email."
 exit 0

@@ -6,6 +6,10 @@
  * step mounts an existing ceremony or panel; this logic owns only the shell:
  * step resolution, dismissal, "not now" decisions, and the welcome save.
  *
+ * @version 2.6
+ * @changelog 2.6 - the Secure connection screen mounts the DNS publish box for
+ *   the site's own address record (setup_https_dns_plan); its dns_action
+ *   posts are handled here before anything renders.
  * @version 2.5
  * @changelog 2.5 - the wizard redirects to the forced password change and the terms
  *   page before rendering, as check_permission() would for any other page.
@@ -84,6 +88,18 @@ function setup_logic(array $input): LogicResult {
 
 	$error = '';
 	$action = (string)($input['action'] ?? '');
+
+	// The Secure connection screen's DNS publish box: the site's own address
+	// record, written through the domain's DNS host. The box's actions arrive
+	// as dns_action; the plan is built only when one does.
+	if (!empty($input['dns_action']) && (string)($input['step'] ?? '') === 'https' && $permission >= 10) {
+		require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
+		require_once(PathHelper::getIncludePath('logic/setup_https_check_logic.php'));
+		$dns_redirect = DnsPublishBox::handle($input, 'setup_https_dns_plan', '/setup?step=https');
+		if ($dns_redirect !== null) {
+			return $dns_redirect;
+		}
+	}
 
 	// "Finish later" — the one thing dismissal stores (honest friction: the
 	// dialog listed what is outstanding and required the checkbox).
@@ -609,6 +625,19 @@ function setup_logic(array $input): LogicResult {
 		require_once(PathHelper::getIncludePath('logic/setup_https_check_logic.php'));
 		$https_diagnosis = setup_https_diagnose();
 	}
+	// The publish box for that screen: offered when the name does not point
+	// here yet and is not in use elsewhere. Rendering is credential-free; the
+	// box reads live DNS and, on dns_show, the diff.
+	$https_dns_box = null;
+	if (is_array($https_diagnosis) && !empty($https_diagnosis['applicable']) && empty($https_diagnosis['dns_match'])) {
+		$https_plan = setup_https_address_plan((string)$https_diagnosis['domain'],
+			(array)$https_diagnosis['dns_a'], (array)$https_diagnosis['dns_aaaa'],
+			(string)$https_diagnosis['server_ip4'], (string)$https_diagnosis['server_ip6']);
+		if ($https_plan !== null) {
+			require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
+			$https_dns_box = DnsPublishBox::build($https_plan, $input, '/setup?step=https');
+		}
+	}
 
 	// The done screen surfaces the scheduled-task heartbeat only when it is
 	// broken — imports, reminders, and backups all silently stall without it.
@@ -641,6 +670,7 @@ function setup_logic(array $input): LogicResult {
 		'force_render_step' => $force_render_step,
 		'calendar_import_summary' => $calendar_import_summary,
 		'https_diagnosis' => $https_diagnosis,
+		'https_dns_box' => $https_dns_box,
 	), $totp_forward));
 }
 

@@ -13,7 +13,11 @@
  * API is. Plain words only; the one term of art allowed is "A record", named
  * because that is the label they must find at their registrar.
  *
- * @version 1.2
+ * @version 1.3
+ * @changelog 1.3 - The DNS publish box mounts here for the site's own address
+ *   record, so a domain whose DNS host has a driver gets the record written
+ *   by the wizard rather than typed; a name that already answers from
+ *   another server is said plainly and the write is withheld.
  * @changelog 1.2 - Every render stamps "Checked just now, at {time}" so
  *   pressing "Check again" visibly registers even when nothing changed; the
  *   address-connected-but-not-armed state says what is actually missing (the
@@ -54,12 +58,37 @@ $d = $page_vars['https_diagnosis'] ?? null;
 			<li>Your web address currently points to: <strong><?php echo htmlspecialchars($points_at !== '' ? $points_at : 'nothing yet'); ?></strong></li>
 		</ul>
 <?php if (empty($d['dns_match'])) { ?>
-<?php if ($server_ip !== '') { ?>
+<?php if ($server_ip !== '' && !empty($d['points_elsewhere'])) { ?>
+		<p><strong><?php echo htmlspecialchars($d['domain']); ?> already points somewhere else</strong> —
+			at <?php echo htmlspecialchars($points_at); ?>. Something is being served there today, and
+			pointing the name at this server (<?php echo htmlspecialchars($server_ip); ?>) would replace it.
+			If that is a website you are keeping, this server wants a name of its own, such as
+			<strong>home.<?php echo htmlspecialchars($d['domain']); ?></strong> — whoever set the server up
+			can reinstall it under that name. If it is something you are done with, sign in wherever the
+			name's DNS is managed and change its <strong>A record</strong> to
+			<strong><?php echo htmlspecialchars($server_ip); ?></strong>.</p>
+<?php } elseif ($server_ip !== '') { ?>
 		<p><strong>Your web address isn't connected to this server yet.</strong>
-			Sign in wherever your web address is registered (GoDaddy, Namecheap, Cloudflare,
-			and so on), find its settings, and point <strong><?php echo htmlspecialchars($d['domain']); ?></strong>
-			at <strong><?php echo htmlspecialchars($server_ip); ?></strong> — the setting to change is
-			called the <strong>A record</strong>.</p>
+			<?php echo htmlspecialchars($d['domain']); ?> needs to point at
+			<strong><?php echo htmlspecialchars($server_ip); ?></strong> — the setting is called the
+			<strong>A record</strong>.</p>
+<?php
+		$https_box = $page_vars['https_dns_box'] ?? null;
+		if (is_array($https_box) && !empty($https_box['provider_label'])) {
+			// The domain's DNS host has a driver: the wizard can add the record
+			// itself. What it would write is shown first; the credential is
+			// asked for only at the write and lives for that one request.
+			require_once(PathHelper::getIncludePath('includes/dns/dns_publish_box.php'));
+			dns_publish_box_render($page, $https_box, 'Add the record at ' . $https_box['provider_label'] . ' for me');
+			echo '<p><strong>Or add it yourself:</strong> sign in at ' . htmlspecialchars($https_box['provider_label'])
+				. ', open ' . htmlspecialchars($d['domain']) . ', and add an <strong>A record</strong> pointing at <strong>'
+				. htmlspecialchars($server_ip) . '</strong>.</p>';
+		} else {
+			echo '<p>Sign in wherever your web address is registered (GoDaddy, Namecheap, Cloudflare, and so on), '
+				. 'find its DNS settings, and add an <strong>A record</strong> for <strong>' . htmlspecialchars($d['domain'])
+				. '</strong> pointing at <strong>' . htmlspecialchars($server_ip) . '</strong>.</p>';
+		}
+?>
 		<p>That change can take anywhere from a few minutes to a few hours to take effect.
 <?php if (!empty($d['retry_armed'])) { ?>
 			Once it does, this server switches the secure connection on all by itself —
