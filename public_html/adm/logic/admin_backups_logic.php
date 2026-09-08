@@ -6,6 +6,8 @@
  * opens them, how many are kept, and what has actually happened. No fleet, no
  * agent — server_manager is a layer on top of this, not a prerequisite for it.
  *
+ * @version 1.4 - save_target fills a Backblaze target's region and endpoint from Backblaze's own authorize answer
+ *                (both forms hide the fields for B2, and S3 signing needs them)
  * @version 1.3 - the history keeps cleaned-up runs visible (include_pruned) so Recent backups can show
  *                whether each backup is still present or has been pruned by retention
  * @version 1.2 - one backup history for all profiles (site + management-node runs), newest first, so the
@@ -214,16 +216,34 @@ function _admin_backups_handle($action, array $input, $session) {
 				$secret = trim((string)($input['secret_key'] ?? ''));
 				if ($access !== '' || $secret !== '' || !$id) {
 					$existing = $id ? ($target->get_credentials() ?: array()) : array();
-					$target->set('bkt_credentials', array(
+					$creds = array(
 						'access_key' => $access !== '' ? $access : (string)($existing['access_key'] ?? ''),
 						'secret_key' => $secret !== '' ? $secret : (string)($existing['secret_key'] ?? ''),
 						'region'     => trim((string)($input['region'] ?? ($existing['region'] ?? ''))),
 						'endpoint'   => trim((string)($input['endpoint'] ?? ($existing['endpoint'] ?? ''))),
-					));
+					);
+					// The forms hide region and endpoint for Backblaze, so ask
+					// Backblaze: its authorize answer names the account's S3
+					// address, and the region is a label inside it. Without
+					// this a B2 target saved here cannot sign a request.
+					if ($target->get('bkt_provider') === 'b2' && ($creds['region'] === '' || $creds['endpoint'] === '')
+							&& $creds['access_key'] !== '' && $creds['secret_key'] !== '') {
+						try {
+							$auth = (new B2Client($creds['access_key'], $creds['secret_key']))->authorize();
+							$loc = BackupTarget::b2_s3_location((string)($auth['s3_endpoint'] ?? ''));
+							if ($loc['endpoint'] !== '') {
+								$creds['region'] = $creds['region'] !== '' ? $creds['region'] : $loc['region'];
+								$creds['endpoint'] = $creds['endpoint'] !== '' ? $creds['endpoint'] : $loc['endpoint'];
+							}
+						} catch (\Throwable $e) {
+							$b2_note = ' Backblaze could not be asked for the bucket\'s S3 address (' . $e->getMessage() . '); the test will say so.';
+						}
+					}
+					$target->set('bkt_credentials', $creds);
 				}
 				$target->set('bkt_enabled', !empty($input['bkt_enabled']));
 				$target->save();
-				$say('Target saved.', true);
+				$say('Target saved.' . ($b2_note ?? ''), true);
 				return $url;
 			}
 

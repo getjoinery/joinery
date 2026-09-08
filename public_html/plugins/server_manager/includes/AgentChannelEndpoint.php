@@ -36,6 +36,8 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.13 - adoptJoin adopts a provision's HOST join (claim <slug>-host, provider check passed) as a machine-posture node at the
+ *                instance's IPv4, so the placement links; a provision's site join is still sent to the node page
  * @version 1.12 - adoptJoin(): a join for a machine with no node record is approved by making the
  *                 record from the request, then approveJoin() as ever; a join from this machine's
  *                 own address is the plane joining itself, named for the site and carrying its URL
@@ -472,6 +474,9 @@ class AgentChannelEndpoint {
 	 *
 	 * Returns ['node' => ManagedNode, 'self' => bool, 'host' => ManagedHost|null].
 	 */
+	/** Tests hand in a provisioner whose provider is a fake; null means the real one. */
+	public static $provisioner = null;
+
 	public static function adoptJoin($request): array {
 		if ($request->get('ajr_status') !== AgentJoinRequest::STATUS_PENDING) {
 			throw new Exception('That join request is no longer pending.');
@@ -481,9 +486,25 @@ class AgentChannelEndpoint {
 		}
 		$ip = (string)$request->get('ajr_source_ip');
 		$provision = self::provisionForAddress($ip);
+		$host_of_provision = null;
 		if ($provision) {
-			throw new Exception('This join comes from provision #' . (int)$provision->key . '\'s machine ('
-				. $provision->get('cvp_domain') . '). Approve it from that provision\'s node, where the claim is checked with the provider first.');
+			// A provision's machine runs two agents: the site's, which binds to
+			// the node the provisioner made, and the host's own, which has no
+			// record until it is adopted here. The claim says which; the
+			// provider check ties the machine to the provision before anything
+			// is made; the fingerprint the human compared is the identity.
+			$claimed = trim((string)$request->get('ajr_claimed_name'));
+			$is_host_claim = ($claimed !== '' && $claimed === trim((string)$provision->get('cvp_slug')) . '-host');
+			if (!$is_host_claim) {
+				throw new Exception('This join comes from provision #' . (int)$provision->key . '\'s machine ('
+					. $provision->get('cvp_domain') . '). Approve it from that provision\'s node, where the claim is checked with the provider first.');
+			}
+			$checker = (self::$provisioner instanceof ProvisionCustomerCloud) ? self::$provisioner : new ProvisionCustomerCloud();
+			$check = $checker->join_approval_check($ip, null);
+			if (!$check['ok']) {
+				throw new Exception('Join not approved. ' . $check['reason']);
+			}
+			$host_of_provision = $provision;
 		}
 
 		$self = self::isThisMachine($ip);
@@ -497,7 +518,11 @@ class AgentChannelEndpoint {
 		$node = new ManagedNode(NULL);
 		$node->set('mgn_name', mb_substr($name, 0, 100));
 		$node->set('mgn_slug', self::freeSlug($name));
-		$node->set('mgn_host', $self && $own_host !== '' ? $own_host : $ip);
+		// A provision's host node lives at the address its placement record
+		// carries (the instance's IPv4), whichever family the join arrived on —
+		// that is what lets link_host_node() find the placement.
+		$host_addr = $host_of_provision ? trim((string)$host_of_provision->get('cvp_instance_ip')) : '';
+		$node->set('mgn_host', $self && $own_host !== '' ? $own_host : ($host_addr !== '' ? $host_addr : $ip));
 		$node->set('mgn_site_url', $self ? $own_url : null);
 		$node->set('mgn_enabled', true);
 		$node->set('mgn_skip_joinery_checks', false);

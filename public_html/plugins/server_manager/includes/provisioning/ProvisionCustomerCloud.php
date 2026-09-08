@@ -61,6 +61,10 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 2.3 - the instance's IPv6 is recorded at boot; join_approval_check accepts either address, takes a null node for the
+ *                dashboard's host-join adoption, and machine_node_ids sees host records at either address
+ * @version 2.2 - the seeding and retiring loops reload each provision before handling it: a stale copy's
+ *                save was undoing the seeding state and re-dispatching fleet_enroll every pass
  * @version 2.1 - operator hosting mode (specs/hosted_trial_provisioning.md §4.1): a hosted provision
  *                resolves its driver from the plane's own cloud token instead of a buyer grant, and
  *                the bootstrap carries the buyer's admin email and a sealed first password
@@ -152,7 +156,15 @@ class ProvisionCustomerCloud {
 				$this->errors[] = "Provision #{$provision->key} ({$provision->get('cvp_domain')}): " . $e->getMessage();
 			}
 		}
+		// The three collections above hold SEPARATE copies of a provision that
+		// is in more than one of them (done + seeding + retiring). A handler's
+		// save writes its whole copy, so the second handler's stale copy would
+		// put the first handler's state back — seeding was re-dispatched and a
+		// key re-minted every pass that way. Each later loop works on a fresh
+		// load so it saves what the pass has already written.
 		foreach ($seeding as $provision) {
+			$provision = new CustomerCloudProvision((int)$provision->key, TRUE);
+			if (!$provision->key) { continue; }
 			try {
 				$advanced += $this->handle_seeding($provision);
 			} catch (Exception $e) {
@@ -160,6 +172,8 @@ class ProvisionCustomerCloud {
 			}
 		}
 		foreach ($retiring as $provision) {
+			$provision = new CustomerCloudProvision((int)$provision->key, TRUE);
+			if (!$provision->key) { continue; }
 			try {
 				$advanced += $this->handle_install_password($provision);
 			} catch (Exception $e) {
@@ -229,6 +243,7 @@ class ProvisionCustomerCloud {
 
 		$provision->set('cvp_instance_id',   $instance['id']);
 		$provision->set('cvp_instance_ip',   $instance['ip']);
+		$provision->set('cvp_instance_ipv6', (string)($instance['ipv6'] ?? ''));
 		$provision->set('cvp_region',        $region);
 		$provision->set('cvp_instance_type', $type);
 		$provision->set('cvp_status',        'booting');
@@ -527,6 +542,7 @@ class ProvisionCustomerCloud {
 
 		$provision->set('cvp_mgn_node_id', $node->key);
 		$provision->set('cvp_instance_ip', $instance['ip']);
+		$provision->set('cvp_instance_ipv6', (string)($instance['ipv6'] ?? ''));
 		$provision->set('cvp_status',      'installing');
 		$provision->save();
 		return 1;
@@ -993,8 +1009,7 @@ class ProvisionCustomerCloud {
 		if ($site_id) {
 			$ids[] = $site_id;
 		}
-		$ip = trim((string)$provision->get('cvp_instance_ip'));
-		if ($ip !== '') {
+		foreach ($provision->machine_addresses() as $ip) {
 			foreach (new MultiManagedNode(['host' => $ip, 'deleted' => false]) as $n) {
 				if (trim((string)$n->get('mgn_container_name')) === '' && trim((string)$n->get('mgn_web_root')) === '') {
 					$ids[] = (int)$n->key;
@@ -1050,7 +1065,10 @@ class ProvisionCustomerCloud {
 		}
 		$out = ['provision' => $provision, 'ok' => false, 'reason' => '', 'instance' => null];
 
-		if (!in_array((int)$node->key, self::machine_node_ids($provision), true)) {
+		// A null node means "is this the provision's machine?" only — the
+		// dashboard's adoption of a provision's HOST join asks that before it
+		// makes the host node.
+		if ($node !== null && !in_array((int)$node->key, self::machine_node_ids($provision), true)) {
 			$out['reason'] = "This join comes from provision #{$provision->key}'s machine ({$provision->get('cvp_domain')}), "
 				. 'but this node is neither that provision\'s site nor a host record at its address. '
 				. 'Approve it against the right node, or reject it.';
@@ -1075,9 +1093,13 @@ class ProvisionCustomerCloud {
 				. "' at the provider, not running. A join from a machine the provider says is not running is not that machine.";
 			return $out;
 		}
-		if (trim((string)($instance['ip'] ?? '')) !== $source_ip) {
+		$reported = array_values(array_filter([
+			CustomerCloudProvision::normalize_address((string)($instance['ip'] ?? '')),
+			CustomerCloudProvision::normalize_address((string)($instance['ipv6'] ?? '')),
+		]));
+		if (!in_array(CustomerCloudProvision::normalize_address($source_ip), $reported, true)) {
 			$out['reason'] = "The provider says instance {$provision->get('cvp_instance_id')} is at "
-				. ($instance['ip'] ?? '?') . ", but this join came from {$source_ip}.";
+				. (implode(' / ', $reported) ?: '?') . ", but this join came from {$source_ip}.";
 			return $out;
 		}
 		$out['ok'] = true;

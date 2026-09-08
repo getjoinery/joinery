@@ -13,6 +13,7 @@
  * key fingerprint and tells the operator to compare it against what the node's
  * own panel shows.
  *
+ * @version 1.2 - recently_rejected() and reopen(): a rejection is reversible for a day; the agent keeps asking with the same key
  * @version 1.1 - ajr_mgn_node_id deletion action declared: a deleted node clears the pointer and
  *                keeps the introduction record; undeclared it registered as prevent
  * @version 1.0
@@ -94,6 +95,36 @@ class AgentJoinRequest extends SystemBase {
 			$out[] = $row;
 		}
 		return $out;
+	}
+
+	/**
+	 * Requests rejected within the last day, newest first. A rejection can be
+	 * a mis-click, and the machine keeps asking with the same key; reopening
+	 * the row is what lets that ask be answered.
+	 */
+	const REJECTED_REOPEN_WINDOW_SECONDS = 86400;
+
+	public static function recently_rejected(): array {
+		$cutoff = gmdate('Y-m-d H:i:s', time() - self::REJECTED_REOPEN_WINDOW_SECONDS);
+		$rows = new MultiAgentJoinRequest(
+			['status' => self::STATUS_REJECTED, 'deleted' => FALSE],
+			['ajr_update_time' => 'DESC']
+		);
+		$out = [];
+		foreach ($rows as $row) {
+			$when = (string)($row->get('ajr_update_time') ?: $row->get('ajr_create_time'));
+			if ($when >= $cutoff) {
+				$out[] = $row;
+			}
+		}
+		return $out;
+	}
+
+	/** Put a rejected request back in front of the operator, with a fresh clock. */
+	public function reopen(): void {
+		$this->set('ajr_status', self::STATUS_PENDING);
+		$this->set('ajr_create_time', gmdate('Y-m-d H:i:s'));
+		$this->save();
 	}
 
 	/** Count of live pending requests, for the intake ceiling. */

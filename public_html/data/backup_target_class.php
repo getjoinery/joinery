@@ -15,6 +15,7 @@
  * seals; get_credentials() unseals. A legacy plaintext credential object reads
  * back unchanged, so existing rows migrate the next time they are saved.
  *
+ * @version 2.5 - b2_s3_location(): region and endpoint from the S3 address Backblaze reports
  * @version 2.4 - bkt_mint_run_keys / can_mint_run_keys(): where the provider allows it, a node-bound
  *                run is handed a key minted for that run and pinned to that node's own prefix
  *                instead of the one write-only credential the whole fleet shares
@@ -192,6 +193,22 @@ class BackupTarget extends SystemBase {
 	 *
 	 * @return array<array{ref:string, blob:?string}>
 	 */
+	/**
+	 * Backblaze names an S3 endpoint per account cluster (s3.us-east-005.backblazeb2.com);
+	 * the region SigV4 wants is the middle label of that hostname. Both forms
+	 * hide region and endpoint for B2, so the save derives them from the
+	 * address Backblaze itself reports. Pure: hand it the s3ApiUrl.
+	 *
+	 * @return array{region:string, endpoint:string} both '' when the address is not a Backblaze S3 host
+	 */
+	public static function b2_s3_location(string $s3_api_url): array {
+		$host = (string)(parse_url(trim($s3_api_url), PHP_URL_HOST) ?: trim($s3_api_url));
+		if (!preg_match('/^s3\.([a-z]{2}-[a-z]+-\d{3})\.backblazeb2\.com$/i', $host, $m)) {
+			return array('region' => '', 'endpoint' => '');
+		}
+		return array('region' => strtolower($m[1]), 'endpoint' => 'https://' . strtolower($host));
+	}
+
 	public static function eachCredentialBlob(): array {
 		return self::each_column_blob('bkt_credentials');
 	}

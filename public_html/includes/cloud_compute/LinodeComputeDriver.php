@@ -6,6 +6,7 @@
  * instances it creates are billed by Linode to the customer. Requires the
  * 'linodes:read_write' OAuth scope.
  *
+ * @version 1.5 - the instance report carries ipv6 (Linode's addr/128, prefix stripped) beside the first public IPv4
  * @version 1.4 - shutdownInstance()/bootInstance() (POST …/shutdown, …/boot) and getTransfer()
  *                (GET account/transfer): the hosted tier's only automatic lever is power, and
  *                the transfer figure it watches is the account pool's, not an instance's.
@@ -225,10 +226,18 @@ class LinodeComputeDriver implements CloudComputeProvider {
 				}
 			}
 		}
+		// Linode reports the instance's public IPv6 as "addr/128". A dual-stack
+		// box reaches a plane with AAAA records over IPv6, so a join can arrive
+		// from this address and the plane must know it belongs to the instance.
+		$ipv6 = '';
+		if (!empty($instance['ipv6']) && is_string($instance['ipv6'])) {
+			$ipv6 = strtolower(trim(explode('/', $instance['ipv6'], 2)[0]));
+		}
 		return array(
 			'id'     => isset($instance['id']) ? (string)$instance['id'] : '',
 			'status' => isset($instance['status']) ? (string)$instance['status'] : '',
 			'ip'     => $ip,
+			'ipv6'   => $ipv6,
 			'label'  => isset($instance['label']) ? (string)$instance['label'] : '',
 		);
 	}

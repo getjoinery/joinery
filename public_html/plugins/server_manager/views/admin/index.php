@@ -3,6 +3,10 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.24 - a rejected join can be reopened for a day (reopen_join): a mis-click is reversible, and the machine
+ *                keeps asking with the same key until it is answered
+ * @version 1.23 - a provision's host join (claim <slug>-host) says approving makes the host node at the instance's IPv4
+ *                and links the placement; other joins from a provision's address are still sent to its node
  * @version 1.22 - a provision that brought nothing into existence can be dismissed off the board; one
  *                  that holds an instance, a node, a mail subaccount, a live install password or a
  *                  paid order says so instead of offering the button
@@ -47,13 +51,24 @@ $session->set_return();
 // Approve or reject a join request from the banner. Approval makes the node
 // record from the request and binds the key to it — the same act as approval
 // on a node's API Keys tab, without the hand-typed record first.
-if ($_POST && in_array($_POST['action'] ?? '', ['adopt_join', 'reject_join'], true)) {
+if ($_POST && in_array($_POST['action'] ?? '', ['adopt_join', 'reject_join', 'reopen_join'], true)) {
 	$page_regex = '/\/admin\/server_manager/';
 	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager'); exit; }
 	$jr = new AgentJoinRequest((int)($_POST['ajr_id'] ?? 0), TRUE);
 	if (!$jr->key || $jr->get('ajr_delete_time')) {
 		$session->save_message(new DisplayMessage('That join request no longer exists.', 'Error', $page_regex,
 			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		header('Location: /admin/server_manager'); exit;
+	}
+	if ($_POST['action'] === 'reopen_join') {
+		if ($jr->get('ajr_status') !== AgentJoinRequest::STATUS_REJECTED) {
+			$session->save_message(new DisplayMessage('That join request is not rejected.', 'Error', $page_regex,
+				DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+			header('Location: /admin/server_manager'); exit;
+		}
+		$jr->reopen();
+		$session->save_message(new DisplayMessage('Join request from ' . $jr->get('ajr_claimed_name') . ' reopened; the machine\'s next ask sees it pending again, and it can be approved here or on a node.',
+			'Reopened', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
 		header('Location: /admin/server_manager'); exit;
 	}
 	if ($_POST['action'] === 'reject_join') {
@@ -194,6 +209,7 @@ $script_trust_problems = NodeMonitorHealth::script_trust_problems();
 // one — otherwise the only trace is a command on the machine waiting for an
 // answer nobody knows they owe.
 $pending_joins = class_exists('AgentJoinRequest') ? AgentJoinRequest::pending() : [];
+$rejected_joins = class_exists('AgentJoinRequest') ? AgentJoinRequest::recently_rejected() : [];
 $agentless_nodes = [];
 if ($pending_joins) {
 	foreach (new MultiManagedNode(['enabled' => true, 'deleted' => false], ['mgn_name' => 'ASC']) as $candidate) {
@@ -385,11 +401,15 @@ if ($agent_online) {
 				&mdash; key <code><?php echo htmlspecialchars(AgentJoinRequest::display_fingerprint((string)$jr->get('ajr_fingerprint'))); ?></code>
 				<?php $jr_fpr = AgentJoinRequest::display_fingerprint((string)$jr->get('ajr_fingerprint'));
 				      $jr_self = AgentChannelEndpoint::isThisMachine((string)$jr->get('ajr_source_ip'));
-				      $jr_prov = AgentChannelEndpoint::provisionForAddress((string)$jr->get('ajr_source_ip')); ?>
+				      $jr_prov = AgentChannelEndpoint::provisionForAddress((string)$jr->get('ajr_source_ip'));
+				      $jr_host_claim = $jr_prov && trim((string)$jr->get('ajr_claimed_name')) === trim((string)$jr_prov->get('cvp_slug')) . '-host'; ?>
 				<div class="small mt-1">
 					<?php if ($jr_self): ?>
 						<strong>This is this management node's own machine</strong> asking to be managed like any other node.
 						Approving names the record after this site and lets its agent take over the plane-side work.
+					<?php elseif ($jr_host_claim): ?>
+						This is <strong>provision #<?php echo (int)$jr_prov->key; ?></strong>'s host agent (<?php echo htmlspecialchars($jr_prov->get('cvp_domain')); ?>), the machine's own agent beside the site's.
+						Approving asks the provider to confirm the instance is running at this address, then makes the host node at <?php echo htmlspecialchars((string)$jr_prov->get('cvp_instance_ip')); ?> and names it on the placement record, so host-scope work (certificates, site removal) has somewhere to go.
 					<?php elseif ($jr_prov): ?>
 						This address is <strong>provision #<?php echo (int)$jr_prov->key; ?></strong> (<?php echo htmlspecialchars($jr_prov->get('cvp_domain')); ?>).
 						Approve it from that provision's node, where the claim is checked with the provider first
@@ -402,7 +422,7 @@ if ($agent_online) {
 					<?php endif; ?>
 				</div>
 				<div class="mt-2">
-					<?php if (!$jr_prov): ?>
+					<?php if (!$jr_prov || $jr_host_claim): ?>
 					<form method="post" action="/admin/server_manager" id="adopt_join_<?php echo (int)$jr->key; ?>" style="display:inline;margin-right:6px;">
 						<input type="hidden" name="action" value="adopt_join">
 						<input type="hidden" name="ajr_id" value="<?php echo (int)$jr->key; ?>">
@@ -420,6 +440,24 @@ if ($agent_online) {
 			</li>
 		<?php endforeach; ?>
 	</ul>
+</div>
+<?php endif; ?>
+<?php // A rejection can be a mis-click. The machine keeps asking with the same
+      // key; reopening the row lets that ask be answered. Kept for a day. ?>
+<?php if (!empty($rejected_joins)): ?>
+<div class="alert alert-secondary small" role="status">
+	<strong>Rejected in the last day:</strong>
+	<?php foreach ($rejected_joins as $rj): ?>
+		<span class="ms-2"><?php echo htmlspecialchars($rj->get('ajr_claimed_name')); ?>
+			(<?php echo htmlspecialchars((string)$rj->get('ajr_source_ip')); ?>, key <?php echo htmlspecialchars(AgentJoinRequest::display_fingerprint((string)$rj->get('ajr_fingerprint'))); ?>)
+			<form method="post" action="/admin/server_manager" style="display:inline;">
+				<input type="hidden" name="action" value="reopen_join">
+				<input type="hidden" name="ajr_id" value="<?php echo (int)$rj->key; ?>">
+				<?php echo SmAdminCsrf::field(); ?>
+				<button type="submit" class="btn btn-sm btn-outline-secondary py-0 px-2">Reopen</button>
+			</form>
+		</span>
+	<?php endforeach; ?>
 </div>
 <?php endif; ?>
 

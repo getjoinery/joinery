@@ -627,6 +627,47 @@ $late_left = 0;
 foreach (new MultiManagedNode(['slug' => 'agtest-late', 'deleted' => false]) as $x) { $late_left++; }
 check($late_left === 0, 'A refused adoption makes no node record');
 
+section('A rejection is reversible for a day: reopen puts the same key back in front of the operator');
+// keyless10, 2026-09-07: one wrong click rejected the container's join and
+// nothing could take it back — the plane answered "rejected" forever and the
+// agent threw its key away. Now the row is listed as recently rejected, reopen
+// makes it pending with a fresh clock, and the agent (which keeps its key and
+// keeps asking) sees pending on its next ask.
+$re_pair = sodium_crypto_sign_keypair();
+$re_pub  = sodium_crypto_sign_publickey($re_pair);
+$re_jr = new AgentJoinRequest();
+$re_jr->set('ajr_claimed_name', 'agtest-reopen');
+$re_jr->set('ajr_public_key', base64_encode($re_pub));
+$re_jr->set('ajr_fingerprint', AgentJoinRequest::fingerprint($re_pub));
+$re_jr->set('ajr_source_ip', '203.0.113.99');
+$re_jr->set('ajr_status', AgentJoinRequest::STATUS_REJECTED);
+$re_jr->save();
+$made_join_requests[] = $re_jr->key;
+$listed = array_map(function ($r) { return (int)$r->key; }, AgentJoinRequest::recently_rejected());
+check(in_array((int)$re_jr->key, $listed, true), 'a request rejected today is listed as recently rejected');
+$pending_ids = array_map(function ($r) { return (int)$r->key; }, AgentJoinRequest::pending());
+check(!in_array((int)$re_jr->key, $pending_ids, true), 'and is not pending while rejected');
+$re_jr->reopen();
+$re_jr->load();
+check($re_jr->get('ajr_status') === AgentJoinRequest::STATUS_PENDING && !$re_jr->is_expired(),
+	'reopen makes it pending again with a fresh clock');
+$pending_ids = array_map(function ($r) { return (int)$r->key; }, AgentJoinRequest::pending());
+check(in_array((int)$re_jr->key, $pending_ids, true), 'so it is back in the pending list, same key, same fingerprint');
+$listed = array_map(function ($r) { return (int)$r->key; }, AgentJoinRequest::recently_rejected());
+check(!in_array((int)$re_jr->key, $listed, true), 'and no longer among the rejected');
+$old_reject = new AgentJoinRequest();
+$old_reject->set('ajr_claimed_name', 'agtest-reopen-old');
+$old_reject->set('ajr_public_key', base64_encode(sodium_crypto_sign_publickey(sodium_crypto_sign_keypair())));
+$old_reject->set('ajr_fingerprint', 'old');
+$old_reject->set('ajr_source_ip', '203.0.113.98');
+$old_reject->set('ajr_status', AgentJoinRequest::STATUS_REJECTED);
+$old_reject->save();
+$made_join_requests[] = $old_reject->key;
+$db->prepare("UPDATE ajr_agent_join_requests SET ajr_update_time = ?, ajr_create_time = ? WHERE ajr_id = ?")
+	->execute([gmdate('Y-m-d H:i:s', time() - 3 * 86400), gmdate('Y-m-d H:i:s', time() - 3 * 86400), $old_reject->key]);
+$listed = array_map(function ($r) { return (int)$r->key; }, AgentJoinRequest::recently_rejected());
+check(!in_array((int)$old_reject->key, $listed, true), 'a rejection older than a day is not offered for reopening');
+
 section('Cleanup');
 
 // Hosts first: mgh_mgn_host_node_id points at a node, so a host row still
