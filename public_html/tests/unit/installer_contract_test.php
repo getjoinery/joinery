@@ -252,6 +252,14 @@ check(strpos($site_init_src, 'UPGRADE_SOURCE_VALUE="${UPGRADE_SERVER%/}"') !== f
 check(strpos($install_src, 'export UPGRADE_SERVER') !== false,
     'install.sh exports it so _site_init.sh can see it');
 
+// A password the owner chose on the deploy form is not replaced at first
+// login; only a generated one is. The distinction is made where the two
+// cases part ways, and handed to the reset tool as --chosen.
+check(strpos($site_init_src, 'RESET_ARGS="$RESET_ARGS --chosen"') !== false,
+    '_site_init.sh passes --chosen to the reset tool for an owner-supplied password');
+check(strpos($site_init_src, 'if [ "$ADMIN_PASSWORD_SUPPLIED" = true ]; then') !== false,
+    'and only when JOINERY_ADMIN_PASSWORD supplied it');
+
 
 section('The OS pin is a stop, not a warning');
 

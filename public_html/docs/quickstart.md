@@ -39,7 +39,7 @@ Along the way you will be handed two kinds of secrets. Keep them apart in your h
 
 **Keep forever.** None of these can be looked up again later. Save each one in a password manager the moment you have it:
 
-- your **site login password** (Step 4, then a new one at first login)
+- your **site login password** (Step 4)
 - your **server root password** (Step 4)
 - your **vault recovery codes** — open your encrypted email and files if you lose your passkey (wizard)
 - your **2FA backup codes** — get you back into your account if your second factor stops working (wizard)
@@ -108,7 +108,7 @@ Click **Deploy New Linode**. A form opens. Here's every field and what it means:
 ### The Joinery fields (top of the form)
 
 - **Admin email address** — the email you'll use to log in to your site. Use your real address you use today (not the new one you want): it's also how you recover your account if you ever forget your password.
-- **Admin password** — the password you'll use to log in to your site. Choose a strong one and save it in a password manager. (You'll be asked to set a fresh one the first time you log in — a routine precaution.)
+- **Admin password** — the password you'll use to log in to your site. Choose a strong one and save it in a password manager; it is the password you will keep.
 - **Site domain** — the domain you bought, like `yourname.com`. Type it exactly, with no `www` and no `https://`. Don't make one up — it must be a domain you actually own, because in the next step you'll connect it to this server.
 - **Linode API token** — Copy the token you created in step 3 into this box. Your server uses it to add your domain to Linode's DNS and point it at itself.
 
@@ -148,8 +148,6 @@ https://yourname.com/admin
 If the padlock isn't ready yet (DNS still spreading), `http://yourname.com/admin` works in the meantime — the secure version switches on by itself shortly after your domain connects.
 
 Log in with the **admin email and admin password you chose on the form** in Step 4.
-
-You'll be asked to set a new password right away. Do it, and save the new one in your password manager.
 
 ---
 

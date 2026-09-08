@@ -9861,13 +9861,13 @@ fn a_local_swap_and_a_feed_rename_in_one_round_both_land() {
 /// The plan parks one folder on the server, the finisher is refused and
 /// withdrawn, and the orphaned park is put back to its AGREED name -- the
 /// origin of the journey, which the other folder has since taken -- so it lands
-/// as a conflict copy. The directory it wore is then parked DuplicateName, B2
-/// leaves it standing on the disk, and its files are adopted as new content
-/// into a MINTED plain folder. For a locally driven park the disk knows the
-/// destination; the rescue asks the agreement instead. The fix needs B2, so it
-/// is taken with B2 and not here. Found by public-html-0e under fault
-/// injection; the full probe set is in that session's scratchpad as
-/// zz_probe_ad_review.rs.
+/// as a conflict copy, and the memo goes up in the clear beside it.
+///
+/// B2 was a prerequisite and is now fixed; this still fails, so B2 was
+/// necessary and not sufficient. What is left is the rescue's choice of name:
+/// for a locally driven park the disk knows the destination, and the rescue
+/// asks the agreement instead. Found by public-html-0e under fault injection;
+/// the full probe set is in that session's scratchpad as zz_probe_ad_review.rs.
 #[test]
 #[ignore]
 fn probe_a_local_vault_swap_whose_first_rename_is_refused() {
@@ -9907,19 +9907,100 @@ fn probe_a_local_vault_swap_whose_first_rename_is_refused() {
     );
 }
 
-/// PROBE: a folder renamed on the server into a case twin of a folder this disk
-/// already holds. No swap, nothing local, one device.
+/// A folder the server trashed is trashed here IN FULL: nothing is rescued out
+/// beside it, and nothing is uploaded back.
 ///
-/// RED, open: Defect B2, and nothing to do with AD -- this is the minimal
-/// reproduction, found while probing AD's neighbours. The park itself is right,
-/// the disk cannot hold `b` beside `B`. Two things after it are not: the folder
-/// is told the user it went TO THE TRASH, which it did not, and its directory
-/// and the file inside it are left on the disk with no entry claiming them, so
-/// nothing will ever scan, send, move or remove them again. Ignored so the
-/// suite stays green; it is the pin for B2 when B2 is fixed.
+/// The rescue exists to save work the server never got. Asked about a file the
+/// server is holding it must say so -- and it did not, because it asks
+/// `entity_for_file_id`, which reads an index the scan rebuilds. The scan
+/// rehashes whatever it cannot vouch for and cached the result with NO entity,
+/// writing NULL over the one a download had recorded moments earlier. So the
+/// rescue carried a file the server had out to the top of the tree, told the
+/// user it had not reached the server yet, and the next pass uploaded it as new
+/// content: a folder deleted on one device came back as loose files at the root
+/// of every other device, and back onto the server. Defect B6.
+///
+/// It needs no unusual timing on a real disk: the download caches at `now_ms`
+/// floored to milliseconds while the mtime is in nanoseconds, so any download
+/// whose cache write lands in the same millisecond as its own write is
+/// clobbered the same way.
 #[test]
-#[ignore]
-fn probe_a_folder_renamed_into_a_case_twin_parks_cleanly() {
+fn a_folder_the_server_trashed_takes_its_contents_with_it() {
+    let world = World::of(9_311, &[("mac", jd_sim::Platform::MacOs)]);
+    let mac = world.device("mac");
+    let fc = world.server.seed_folder(None, "C");
+    world.server.seed_file(Some(fc), "c.txt", b"in C");
+    assert!(world.settle().is_some(), "the premise");
+
+    world
+        .server
+        .action(
+            "drive_trash",
+            &serde_json::json!({ "entity_type": "folder", "entity_id": fc }),
+        )
+        .unwrap();
+    assert!(world.settle().is_some(), "never settled");
+
+    let disk = disk_tree(mac);
+    let server = world.server.tree();
+    eprintln!("DISK {:?}", disk.keys().collect::<Vec<_>>());
+    eprintln!("SERVER {:?}", server.keys().collect::<Vec<_>>());
+    eprintln!("ISSUES {:?}", mac.store.open_issues().unwrap());
+    assert!(
+        disk.is_empty(),
+        "something was carried out of a folder the server had in full: {:?}",
+        disk.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        server.is_empty(),
+        "a file the server had already deleted was uploaded back: {:?}",
+        server.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        !mac.store
+            .open_issues()
+            .unwrap()
+            .iter()
+            .any(|i| i.kind == "rescued_from_trash"),
+        "the user was told a file had not reached the server when it had: {:?}",
+        mac.store.open_issues().unwrap()
+    );
+}
+
+/// A device syncing a server that ALREADY holds a name this volume cannot add.
+///
+/// No park operation is involved and nothing local happens, and the device
+/// still lands in exactly the state a folder park leaves behind: the twin
+/// unsyncable with no directory, the file under it waiting for a download it
+/// can never take. That makes it a designed end state rather than the aftermath
+/// of one -- which is what says the convergence oracle had to learn it, rather
+/// than the park having to avoid it. No sweep had produced the shape, because
+/// the workload never mints a folder name that folds onto another.
+#[test]
+fn a_case_twin_that_was_never_holdable_converges() {
+    let world = World::of(9_310, &[("mac", jd_sim::Platform::MacOs)]);
+    let mac = world.device("mac");
+    let fb = world.server.seed_folder(None, "B");
+    world.server.seed_file(Some(fb), "b.txt", b"in B");
+    let fc = world.server.seed_folder(None, "b");
+    world.server.seed_file(Some(fc), "c.txt", b"in c");
+    assert!(world.settle().is_some(), "never settled");
+    eprintln!("DISK {:?}", disk_tree(mac).keys().collect::<Vec<_>>());
+    eprintln!("SERVER {:?}", world.server.tree().keys().collect::<Vec<_>>());
+    assert_converged(&world);
+}
+
+/// A folder renamed on the server into a case twin of one this disk already
+/// holds parks WITHOUT abandoning its directory. Defect B2.
+///
+/// One device, no swap, nothing local. The park itself was always right -- this
+/// disk cannot hold `b` beside `B`. What followed it was not. A directory has
+/// no fingerprint, so the park saw an empty spot where the folder stood: it
+/// cleared the record, left the directory and the file inside it on the disk
+/// claimed by no entry at all, and told the user it had gone to the trash.
+/// Nothing would ever scan, send, move or remove those files again.
+#[test]
+fn a_folder_parked_for_a_case_clash_does_not_abandon_its_directory() {
     let world = World::of(9_308, &[("mac", jd_sim::Platform::MacOs)]);
     let mac = world.device("mac");
     let fb = world.server.seed_folder(None, "B");
@@ -9939,6 +10020,36 @@ fn probe_a_folder_renamed_into_a_case_twin_parks_cleanly() {
     eprintln!("DISK {:?}", disk_tree(mac).keys().collect::<Vec<_>>());
     eprintln!("SERVER {:?}", world.server.tree().keys().collect::<Vec<_>>());
     eprintln!("ISSUES {:?}", mac.store.open_issues().unwrap());
+    // The directory went with the park, and nothing of it is left standing.
+    let disk = disk_tree(mac);
+    assert!(
+        !disk.keys().any(|p| p == "C" || p.starts_with("C/")),
+        "the parked folder's directory was left on the disk: {:?}",
+        disk.keys().collect::<Vec<_>>()
+    );
+    // The file inside it is waiting to come back, not claiming a copy that is
+    // gone and not marked broken -- its name was never the problem.
+    let child = mac
+        .store
+        .get_entry(jd_core::model::EntityId::file(902))
+        .unwrap()
+        .unwrap();
+    assert!(
+        child.synced_placement.is_none(),
+        "the child still claims a local copy that went with the directory"
+    );
+    assert!(
+        matches!(child.status, jd_core::model::LocalStatus::PendingDownload),
+        "a child under a parked folder should be waiting for a download, not {:?}",
+        child.status
+    );
+    // The server keeps it, and the device did not go and change anything there.
+    let after = world.server.tree();
+    assert!(
+        after.contains_key("b/c.txt"),
+        "the server lost the parked folder's file: {:?}",
+        after.keys().collect::<Vec<_>>()
+    );
     assert_converged(&world);
 }
 
@@ -9952,12 +10063,10 @@ fn probe_a_folder_renamed_into_a_case_twin_parks_cleanly() {
 /// device told about a local rename may not go and rename the user's third
 /// folder on the server to make room.
 ///
-/// RED, open, on Defect B2 and NOT on AD: the trade itself lands correctly and
-/// the twin is left alone, which is everything this was written to ask. It then
-/// fails on the abandoned directory B2 leaves behind, which the probe above
-/// reproduces with no swap in it at all. Un-ignore this when B2 is fixed.
+/// Was red on Defect B2 rather than on anything to do with the trade: the trade
+/// landed and the twin was left alone, and then the abandoned directory failed
+/// the run. Green since B2 was fixed.
 #[test]
-#[ignore]
 fn a_local_swap_leaves_an_unrelated_parked_case_twin_alone() {
     let world = World::of(9_307, &[("mac", jd_sim::Platform::MacOs)]);
     let mac = world.device("mac");

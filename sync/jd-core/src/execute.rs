@@ -3895,7 +3895,187 @@ fn unmaterialize_and_park(
         Placed::At(p) => p,
         Placed::Not(why) => return Ok(why.outcome()),
     };
-    let on_disk = env.vfs.fingerprint(&path)?;
+    // A DIRECTORY has no fingerprint, so a folder used to fall straight past
+    // everything below: the record was cleared, the directory and everything
+    // in it was left on the disk claimed by no entry at all -- nothing would
+    // ever scan, send, move or remove it again -- and the user was told it had
+    // gone to the trash, which it had not. Defect B2.
+    //
+    // A folder is given up here the way a folder is given up everywhere else in
+    // this file. Work the server does not have is rescued out beside it first,
+    // then the directory goes to the OS trash with what remains.
+    //
+    // The descendants' records go with the directory, because they say a copy
+    // is here and after this there is not one. They are put back to waiting for
+    // a download rather than marked unsyncable: there is nothing wrong with
+    // their names, it is their PARENT that cannot be held on this disk, and
+    // saying otherwise would tell the user their file is broken when it is not.
+    // They are not forgotten either -- the server still has them, and the whole
+    // point of a park is that it comes back the moment the clash is resolved.
+    let mut trashed = false;
+    if entry.id.entity_type == EntityType::Folder {
+        // Is the directory standing here even ours?
+        //
+        // `local_path` resolves from THIS entry's record, and naming ranks by
+        // records rather than by what is on the disk, so the slot it names can
+        // be another live folder's directory -- the escaped spelling of one
+        // name and the literal spelling of another landing on the same string.
+        // The file arm below has `the_file_here_is_another_entrys` for exactly
+        // this. The folder arm had nothing, so a park could rescue another
+        // folder's files out from under it and send its directory to the trash.
+        // Same rule as the source-holder check that fixed Defect AC: ask a
+        // record, not the path. There is nothing of ours to give up in that
+        // case -- the record is what has to change, and the directory belongs
+        // to somebody who is looking after it.
+        for other in env.store.every_entry()? {
+            if other.id == entry.id
+                || other.id.entity_type != EntityType::Folder
+                || other.remote_deleted
+                || matches!(other.status, LocalStatus::Unsyncable(_))
+                || (other.synced_placement.is_none() && other.stand_in.is_none())
+            {
+                continue;
+            }
+            if let Placed::At(theirs) = local_path(env, &other)? {
+                if theirs == path {
+                    entry.synced_placement = None;
+                    entry.synced_fingerprint = None;
+                    entry.synced_content = None;
+                    entry.synced_remote_content = None;
+                    entry.local_name = None;
+                    entry.status = LocalStatus::Unsyncable(reason.clone());
+                    env.store.put_entry(&entry)?;
+                    env.store.raise_issue(
+                        Some(entry.id),
+                        "unsyncable",
+                        &format!("{reason:?}"),
+                        (env.now_ms)() as i64,
+                    )?;
+                    return Ok(OpOutcome::Done);
+                }
+            }
+        }
+        // Whose COPY is inside this directory, which is not the same question as
+        // whose record the server files under this folder.
+        //
+        // `subtree_ids` walks the REMOTE parent, and in a round that also moved
+        // something the two trees disagree. A child the server has just moved
+        // INTO this folder is in the remote subtree while its copy is still
+        // sitting where it was, so resetting its record hands the scan a
+        // stranger and the next pass uploads a second copy of it. A child the
+        // server has just moved OUT is not in the remote subtree at all, while
+        // its copy is still in this directory and about to go to the trash with
+        // it. Only the local chain answers the question actually being asked
+        // here, which is what the server-side trash already does.
+        let mut inside: Vec<Entry> = Vec::new();
+        for e in env.store.every_entry()? {
+            if e.id == entry.id || e.id.is_provisional() || e.remote_deleted {
+                continue;
+            }
+            if local_chain_passes(env, &e, entry.id.server_id)? {
+                inside.push(e);
+            }
+        }
+        // A copy in here that the server now keeps somewhere else is neither
+        // rescued nor trashed: the rescue saves only what never reached the
+        // server, and trashing it would leave a record with an agreement and no
+        // directory, which the next pass reads as the user deleting it and the
+        // server's copy follows the local one into the trash. The server-side
+        // trash waits for exactly this (estate seed 16062180) and so does the
+        // park. Retrying is safe here in a way it is not in the file arm below:
+        // the move being waited for is planned on the CHILD, which has no open
+        // operation, so this is not an operation waiting on work its own
+        // existence prevents.
+        for e in &inside {
+            if sits_under(env, e.id, entry.id.server_id)? {
+                continue;
+            }
+            if local_chain_parked(env, e, entry.id.server_id)? {
+                env.store.raise_issue(
+                    Some(entry.id),
+                    "park_waits",
+                    &format!(
+                        "{} cannot be held on this computer under the name it now has on \
+                         the server, but {} inside it now lives elsewhere on the server and \
+                         cannot be moved there here yet; the folder stays until it can",
+                        entry.remote.name, e.remote.name
+                    ),
+                    (env.now_ms)() as i64,
+                )?;
+            }
+            return Ok(OpOutcome::Retry(format!(
+                "something inside it now lives elsewhere on the server and has not been \
+                 moved here yet ({})",
+                e.id.server_id
+            )));
+        }
+        for issue in env.store.open_issues()? {
+            if issue.kind == "park_waits" && issue.entity == Some(entry.id) {
+                env.store.dismiss_issue(issue.issue_id)?;
+            }
+        }
+        // What the records say the server already holds, for the copies that
+        // are actually in here. Gathered before anything moves, because the
+        // rescue below asks it about files whose folder is on its way out.
+        let mut agreed_here: std::collections::HashMap<u64, jd_vfs::Fingerprint> =
+            std::collections::HashMap::new();
+        for under in &inside {
+            if under.synced_content.is_none() {
+                continue;
+            }
+            if let Some(fingerprint) = under.synced_fingerprint {
+                agreed_here.insert(fingerprint.file_id, fingerprint);
+            }
+        }
+        if env.vfs.read_dir(&path).is_ok() {
+            if let Some(parent) = path.parent() {
+                let rescued = rescue_unsynced(env, &path, parent, &agreed_here)?;
+                if !rescued.is_empty() {
+                    env.store.raise_issue(
+                        Some(entry.id),
+                        "rescued_from_trash",
+                        &format!(
+                            "{} file(s) here had not reached the server yet and were \
+                             moved to {} rather than going to the trash with the \
+                             folder: {}",
+                            rescued.len(),
+                            parent.display(),
+                            summarise(&rescued),
+                        ),
+                        (env.now_ms)() as i64,
+                    )?;
+                }
+            }
+            match env.vfs.trash(&path) {
+                Ok(()) => trashed = true,
+                Err(jd_vfs::VfsError::NotFound(_)) => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+        for child in inside {
+            let Some(mut child) = env.store.get_entry(child.id)? else {
+                continue;
+            };
+            if child.synced_placement.is_none()
+                && child.synced_fingerprint.is_none()
+                && child.local_name.is_none()
+            {
+                continue;
+            }
+            child.synced_placement = None;
+            child.synced_fingerprint = None;
+            child.synced_content = None;
+            child.synced_remote_content = None;
+            child.local_name = None;
+            child.status = LocalStatus::PendingDownload;
+            env.store.put_entry(&child)?;
+        }
+    }
+    let on_disk = if entry.id.entity_type == EntityType::Folder {
+        None
+    } else {
+        env.vfs.fingerprint(&path)?
+    };
     if let Some(now) = on_disk {
         let agreed = entry.synced_fingerprint.filter(|agreed| {
             now.unchanged_from(agreed, &env.vfs.personality())
@@ -3961,7 +4141,7 @@ fn unmaterialize_and_park(
             ));
         }
         match env.vfs.trash(&path) {
-            Ok(()) => {}
+            Ok(()) => trashed = true,
             Err(jd_vfs::VfsError::NotFound(_)) => {}
             Err(e) => return Err(e.into()),
         }
@@ -3994,16 +4174,22 @@ fn unmaterialize_and_park(
         &format!("{reason:?}"),
         (env.now_ms)() as i64,
     )?;
-    env.store.raise_issue(
-        Some(entry.id),
-        "parked",
-        &format!(
-            "{told} was moved to the trash: this computer cannot hold the name \
-             it now has on the server ({reason:?}). It is safe on the server, \
-             and it comes back here if the clash is resolved."
-        ),
-        (env.now_ms)() as i64,
-    )?;
+    // The EVENT, and only if it happened. A copy that was never on this disk
+    // was not moved to the trash, and saying so sends the user looking through
+    // their trash for something that was never in it. The state complaint above
+    // is the part that is always true.
+    if trashed {
+        env.store.raise_issue(
+            Some(entry.id),
+            "parked",
+            &format!(
+                "{told} was moved to the trash: this computer cannot hold the name \
+                 it now has on the server ({reason:?}). It is safe on the server, \
+                 and it comes back here if the clash is resolved."
+            ),
+            (env.now_ms)() as i64,
+        )?;
+    }
     Ok(OpOutcome::Done)
 }
 
@@ -4031,10 +4217,29 @@ fn summarise(names: &[String]) -> String {
 /// Anything this cannot vouch for is treated as not uploaded. Being wrong that
 /// way costs a spare copy beside the folder; being wrong the other way costs
 /// the file.
-fn is_on_the_server(env: &ExecEnv, child: &jd_vfs::DirEntry) -> Result<bool, ExecError> {
+fn is_on_the_server(
+    env: &ExecEnv,
+    child: &jd_vfs::DirEntry,
+    agreed_here: &std::collections::HashMap<u64, jd_vfs::Fingerprint>,
+) -> Result<bool, ExecError> {
     let Some(fp) = child.fingerprint else {
         return Ok(false);
     };
+    // What the caller knows from the RECORDS, asked first.
+    //
+    // The index below is built by the scan, and a folder given up in the same
+    // pass that scanned it can have children the index holds no row for --
+    // `entity_for_file_id` then answers "never seen it" about a file the server
+    // is holding, and the rescue carries a copy out of a folder that was about
+    // to come back, leaving the user a duplicate at the root of their tree.
+    // Callers that already know the subtree pass what its entries say. The same
+    // freshness test still has to pass, so an edit nobody has uploaded is still
+    // work worth saving.
+    if let Some(recorded) = agreed_here.get(&fp.file_id) {
+        if fp.unchanged_from(recorded, &env.vfs.personality()) {
+            return Ok(true);
+        }
+    }
     let Some(id) = env.store.entity_for_file_id(fp.file_id)? else {
         return Ok(false);
     };
@@ -4066,6 +4271,7 @@ fn rescue_unsynced(
     env: &ExecEnv,
     folder: &std::path::Path,
     into: &std::path::Path,
+    agreed_here: &std::collections::HashMap<u64, jd_vfs::Fingerprint>,
 ) -> Result<Vec<String>, ExecError> {
     let mut rescued = Vec::new();
     let children = match env.vfs.read_dir(folder) {
@@ -4078,10 +4284,10 @@ fn rescue_unsynced(
         let path = folder.join(&child.name);
         match child.kind {
             jd_vfs::EntryKind::Directory => {
-                rescued.extend(rescue_unsynced(env, &path, into)?);
+                rescued.extend(rescue_unsynced(env, &path, into, agreed_here)?);
             }
             jd_vfs::EntryKind::File => {
-                if is_on_the_server(env, &child)? {
+                if is_on_the_server(env, &child, agreed_here)? {
                     continue;
                 }
                 // Its own name where that is free, because this is a rescue and
@@ -4322,7 +4528,7 @@ fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             }
         }
         if let Some(parent) = path.parent() {
-            let rescued = rescue_unsynced(env, &path, parent)?;
+            let rescued = rescue_unsynced(env, &path, parent, &std::collections::HashMap::new())?;
             if !rescued.is_empty() {
                 let detail = format!(
                     "{} file(s) here had not reached the server yet and were moved to {} \

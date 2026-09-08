@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.0 - A password the owner chose on the deploy form (JOINERY_ADMIN_PASSWORD)
+#                is not marked for change at first login; only a generated one is.
 # VERSION: 2.9 - Globalvars_site.php is filled by _write_site_config.php, so the
 #                database password can be any string. sed needed its own escaping
 #                and the result still had to parse as PHP; the union of the two
@@ -526,6 +528,12 @@ if [ -z "$CLONE_FROM" ] && [ "$DB_EXISTS" = false ]; then
         printf '%s\n' "$ADMIN_PASSWORD" > "$ADMIN_PW_FILE"
 
         RESET_ARGS="--email=admin@example.com --password-file=$ADMIN_PW_FILE --yes"
+        if [ "$ADMIN_PASSWORD_SUPPLIED" = true ]; then
+            # The owner chose it on the deploy form and nothing wrote it down,
+            # so there is nothing to make them replace at first login. A
+            # generated one is printed to a file and IS replaced.
+            RESET_ARGS="$RESET_ARGS --chosen"
+        fi
         if [ "$ADMIN_EMAIL" != "admin@example.com" ]; then
             RESET_ARGS="$RESET_ARGS --set-email=$ADMIN_EMAIL"
         fi
