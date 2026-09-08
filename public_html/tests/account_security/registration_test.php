@@ -219,6 +219,9 @@ $res = reg_call(reg_input(array('usr_email' => $existing->get('usr_email'))));
 check($res->error !== null && stripos((string)$res->error, 'already been registered') !== false,
 	'a duplicate email refuses registration and points at password reset',
 	'error: ' . var_export($res->error, true));
+check(!empty($res->data) && isset($res->data['settings']),
+	'the duplicate-address refusal carries the page data, so the form re-renders with the message instead of the error page',
+	'data keys: ' . implode(',', array_keys((array)$res->data)));
 
 $res = reg_call(reg_input(array('usr_email' => strtoupper($existing->get('usr_email')))));
 check($res->error !== null,
@@ -244,6 +247,9 @@ if ($hosted_domain) {
 	check($res->error !== null && stripos((string)$res->error, 'hosted here') !== false,
 		'a login email on a platform-hosted domain is refused at creation',
 		'domain: ' . $hosted_domain . '; error: ' . var_export($res->error, true));
+	check(!empty($res->data) && isset($res->data['settings']),
+		'the hosted-address refusal carries the page data, so the form re-renders with the message instead of the error page',
+		'data keys: ' . implode(',', array_keys((array)$res->data)));
 } else {
 	harness_skip('a login email on a platform-hosted domain is refused at creation',
 		'no inbound email domain configured');

@@ -23,6 +23,7 @@
  * The plane already mints this key, holds its hash, and is the API it
  * authenticates TO, so the job row is not a new holder of anything.
  *
+ * @version 2.2 - a decommissioned site (its node soft-deleted) no longer holds the buyer's slot
  * @version 2.1 - one seeded site per buyer: seeding a second site is refused, naming the site that
  *                holds the slot, instead of silently revoking that site's credential
  * @version 2.0 - seeding is the fleet_enroll primitive over the agent channel; the SSH path is gone
@@ -128,7 +129,12 @@ class FleetProvisionSeeding {
 		$q = $db->prepare(
 			"SELECT cvp_domain FROM cvp_customer_cloud_provisions " .
 			"WHERE cvp_usr_user_id = ? AND cvp_fleet_seed_state = 'done' AND cvp_delete_time IS NULL " .
-			"AND cvp_mgn_node_id IS NOT NULL AND cvp_mgn_node_id <> ? ORDER BY cvp_id LIMIT 1"
+			"AND cvp_mgn_node_id IS NOT NULL AND cvp_mgn_node_id <> ? " .
+			// A site that has been decommissioned holds nothing: its node row is
+			// soft-deleted and the credential it enrolled with has no site behind
+			// it, so the slot is free for the account's next site.
+			"AND EXISTS (SELECT 1 FROM mgn_managed_nodes WHERE mgn_id = cvp_mgn_node_id AND mgn_delete_time IS NULL) " .
+			"ORDER BY cvp_id LIMIT 1"
 		);
 		$q->execute(array($buyer_user_id, (int)$node->key));
 		$domain = $q->fetchColumn();

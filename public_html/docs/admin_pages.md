@@ -890,7 +890,12 @@ decision row).
 
 The login redirect lives in `SessionControl::check_permission()` alongside the
 other interstitials and fires only for accounts that have never dismissed the
-wizard (`usr_setup_dismissed_time`). The "Finish setup — n of m" header pill
+wizard (`usr_setup_dismissed_time`). `SetupSteps::interruptExempt()` names the
+paths it leaves alone: the wizard, logout, the API, the security page (where
+the encryption step sends a user to add a passkey that can derive a key) and
+the step-up ceremony. The wizard applies the forced-password-change and terms
+gates itself, in `check_permission()`'s order, since it never calls that
+method. The "Finish setup — n of m" header pill
 renders from `PublicPageBase::render_setup_pill()`; counts are session-cached
 by `SetupSteps::pillCounts()`.
 

@@ -6,6 +6,9 @@
  * step mounts an existing ceremony or panel; this logic owns only the shell:
  * step resolution, dismissal, "not now" decisions, and the welcome save.
  *
+ * @version 2.5
+ * @changelog 2.5 - the wizard redirects to the forced password change and the terms
+ *   page before rendering, as check_permission() would for any other page.
  * @version 2.4
  * @changelog 2.3 - backup_task_activate and the run_backup / save_recovery_key
  *   forwarding are gone with the wizard's section 3 and by-hand fold; the
@@ -57,6 +60,16 @@ function setup_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 	if (!$session->is_logged_in()) {
 		return LogicResult::redirect('/login');
+	}
+	// The wizard stands behind the same two gates every page does (the ones
+	// SessionControl::check_permission() applies, in its order): a forced
+	// password change and the terms. It never calls check_permission itself,
+	// so it says so here.
+	if ($session->must_change_password()) {
+		return LogicResult::redirect('/change-password-required');
+	}
+	if ($session->must_accept_terms()) {
+		return LogicResult::redirect('/terms-accept');
 	}
 	$settings = Globalvars::get_instance();
 	$viewer = SetupSteps::viewerUser();

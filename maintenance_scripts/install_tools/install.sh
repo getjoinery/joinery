@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 2.64 - The '-' password placeholder (generate one) no longer draws the
+#  'password passed as a command-line argument' warning: it is not a password.
 #VERSION 2.63 - host-harden is gone. Its housekeeping (fail2ban SSH jail, journal cap,
 #               BuildKit GC, orphaned build dirs, 2G swap, btmp) runs on every docker and
 #               server install as host_housekeeping, unprompted and ungated, since none of
@@ -3072,7 +3074,11 @@ do_site_create() {
                         # Everything in argv is readable by every user on the box
                         # via ps, for as long as the install runs. Recorded here
                         # so the warning below can name the safe alternatives.
-                        PASSWORD_FROM_ARGV=1
+                        # A bare '-' is the placeholder for "generate one", not
+                        # a password, so it exposes nothing.
+                        if [ "$1" != "-" ]; then
+                            PASSWORD_FROM_ARGV=1
+                        fi
                     fi
                 elif [ -z "$DOMAIN_NAME" ]; then
                     DOMAIN_NAME="$1"

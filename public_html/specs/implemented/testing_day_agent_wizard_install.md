@@ -1,10 +1,11 @@
 # Testing day: agent, wizard, install (2026-09-07)
 
-**Status:** PLAN, written 2026-09-07 evening from the live-verification queue,
-the programme table and the fleet as it stands. Tier A runs on the dev box
-with nothing created. Tier B creates throwaway Linode instances. Tier C is the
-owner at a browser. Each gate says what a pass looks like; a gate is struck
-only after a real run.
+**Status:** IMPLEMENTED 2026-09-08. Written 2026-09-07 evening from the
+live-verification queue, the programme table and the fleet as it stood. Tier A
+ran on the dev box with nothing created; Tier B ran on throwaway Linode
+instances (all four deleted, rows removed 2026-09-08). Tier C (owner UX runs)
+was withdrawn: the owner runs manual testing from their own spec. Every
+defect the day found is fixed (§ 6a); the records per gate are the history.
 
 Sources folded in: `project_live_verification_queue` (memory),
 `agent_management_first_principles.md` (item 4 and item 7 gates),
@@ -184,8 +185,9 @@ Decisions taken 2026-09-08 ~02:00 and built: **D5** the owner added the A record
    row untouched and still paired. Check `docker port <site>` first (DB port
    = web port + 1000).
 4. The decline half: decline on the victim's page → job refused naming it.
-5. Re-dispatch → `REMOVE_ACCOUNT_NOTHING` + `DECOMMISSION_VERIFIED` (second
-   ceremony works).
+5. Re-dispatch → refused by the host, naming the site and the vhost path it
+   looked for; the job fails (D9, owner 2026-09-08: a host never verifies the
+   removal of a site it does not know).
 
 ### B3 — The other two shapes to `retired`
 
@@ -193,7 +195,25 @@ Decisions taken 2026-09-08 ~02:00 and built: **D5** the owner added the A record
 - **bare-metal site** (`install.sh server` then `site --bare-metal`): root
   password login stays on until retirement — prove retirement turns it off.
 
-`provision_shapes.php` from the 2026-09-02 scratchpad is the template.
+A bare instance is encoded as `cvp_install_mode = bare` with
+`cvp_docker_mode = docker` (it IS a Docker host); the builder refuses the
+bare-metal encoding the 2026-09-02 `provision_shapes.php` scratch template
+used, as the install form (1.8) already knew.
+
+#### B3 record (run 2026-09-08 11:50 UTC –; provision 3914 `keyless12` bare host, Linode 104588424 at 45.79.196.31, node 27662; provision 3915 `keyless13` bare-metal site, Linode 104588429 at 139.177.207.45, node 27663)
+
+| Step | keyless12 (bare host) | keyless13 (bare-metal site) |
+|---|---|---|
+| 1 boot, sealed | PASS 11:50:13, both addresses recorded, password sealed | PASS 11:50:15 |
+| 2 install | PASS — job 12992 INSTALL_SUCCESS 12:00 (docker only, no site) | PASS — job 12991 INSTALL_SUCCESS 11:58; https://keyless13.dev.getjoinery.com answers 200 with its Let's Encrypt certificate (A record was in place before the install) |
+| 3 join | PASS — join 260 `keyless12` over IPv6, approved on node 27662's page with the provider check (12:00); agent 1.21.0 connected; bundle 2c1c6f9832cf0f88 on the node | PASS — join 259 `keyless13` arrived over IPv6, recognised as provision 3915's machine, approved on the node page with the provider check (11:58); agent 1.21.0 connected, no host join (bare-metal has none) |
+| 4 fleet seeding | n/a (no site) | REFUSED (policy) — "This account's hosted relay slot is already seeded on keyless11", whose site was destroyed last night. Defect B16: a decommission does not release the relay slot. Retirement proceeded regardless |
+| 5 retire | PASS — job 12995 (12:01:54–58): INSTALL_PASSWORD_RETIRED, then the confirmation probe was refused; row `retired`, sealed password cleared at 12:02 | PASS — job 12993 (12:00): INSTALL_PASSWORD_RETIRED, confirmation refused; row `retired`, sealed cleared at 12:01 |
+| 6 sshd from outside | before: `Permission denied (publickey,password)`; after: `Permission denied (publickey)` | before: `(publickey,password)`; after: `(publickey)` — root password login stayed on through the bare-metal site install and retirement turned it off |
+
+B3 DONE 12:03 UTC: both shapes reached `retired` with no hand repair beyond
+my own mis-encoded row. Cleanup owed: delete Linodes 104588424 and 104588429
+by hand, then nodes 27662/27663, provisions 3914/3915, joins 259/260.
 
 ### B4 — `install_container_gate.sh` (queue: installer defects round 2)
 
@@ -246,40 +266,11 @@ record before the run, and file the defect either way.
 
 ---
 
-## 4. Tier C — owner manual UX runs
+## 4. Tier C — withdrawn
 
-### M1 — The quickstart as a stranger (`docs/quickstart.md`, all eight steps)
-
-Fresh domain (D2), real SMTP2GO key, real Linode token, StackScript deploy
-form, wait, `/admin` login, forced password change, the wizard, webmail.
-Things to watch, in order:
-
-- Step 1 nameserver move on Namecheap: does the zone at Linode get created
-  by the handoff, or does the quickstart need the person to create it?
-- The deploy form's field labels match the doc (token scope named).
-- First HTTPS: padlock on the first visit or the retry timer armed?
-- Forced password change works over whichever scheme the page loaded on.
-- Wizard email step: SMTP2GO selected, sender domain registered, the stored
-  Linode token used for the first DNS publish and gone from settings after,
-  DNS goes green on Refresh, the test send arrives and "It arrived" turns
-  the step green, the owner's mailbox exists.
-- The three keep-forever screens (vault recovery codes, 2FA backup codes,
-  backup recovery key) — each shown once, each saveable.
-- Backups step: B2 creds in, key generated in the browser, pasted back,
-  proven; nightly task activates on its own.
-- AI step: a key pasted, test connection answers.
-- Step 8: `/profile` → Email shows the new mailbox; send yourself a mail.
-
-### M2 — The operator path on the dashboard
-
-Install New Node → watch the board (`queued`, executor, both join cards with
-provision/instance/age, Approve) → the install-password line on the card
-going held → retiring → retired → node detail Overview/Updates tabs. Then
-Permanently Delete Site and answer with the recovery key.
-
-### M3 (optional) — Relay Create on the mail Setup tab (B5's UI half).
-
----
+The owner's manual UX runs (quickstart as a stranger, the operator path on
+the dashboard, relay Create on the Setup tab) come off this plan on
+2026-09-08: the owner runs manual testing from their own spec.
 
 ## 5. Order of the day
 
@@ -287,8 +278,7 @@ Permanently Delete Site and answer with the recovery key.
 2. P1 commit, P2 reconnect, D1 settled.
 3. B1 → B2 on one box (~90 min wall clock, mostly waiting on installs).
 4. B3 two shapes in parallel with B6.
-5. M1 and M2 while B-boxes are still up (M2 can use a B3 box).
-6. B5 / M3 last unless P4 says otherwise.
+5. B5 last unless P4 says otherwise. (Tier C withdrawn, see § 4.)
 7. Cleanup: every instance deleted at Linode by hand, rows removed, proof
    box 45.33.67.199 gone, node 1800 gone after rotation.
 
@@ -320,28 +310,38 @@ Still open, in priority order:
    re-ask every five minutes) is committed in the agent repo but reaches no
    box until the next agent release. Until then a rejection still strands a
    machine.
-2. **B3** — bare-metal site and bare docker host to `retired`. Needs a fresh
-   Linode grant (P2) and two instances. B4 cannot run on dev (no docker); B6
-   optional.
-3. **D9** — a second decommission of a site that is already gone: the host
-   refuses ("no vhost for a site named X"); the gate wanted
-   `REMOVE_ACCOUNT_NOTHING` + `DECOMMISSION_VERIFIED`. Decide which changes.
-4. **Tier C** — M1 (quickstart as a stranger, reuse jeremytunnell.info), M2
-   (operator path on the dashboard), M3 (relay Create on the Setup tab — the
-   platform-born relay path has still never run).
-5. **Cleanup** — delete Linodes 104549597 (keyless10) and 104553256
-   (keyless11) at Linode by hand; then remove nodes 27397/27398/27638/27639,
-   hosts 740/776, provisions 3813/3872, join requests 239/240/250/251, and
-   the dashboard fixture user 85805 on dev. Rotate the B2 test key and the
+2. ~~B3~~ DONE 2026-09-08 12:03 (record above). B4 cannot run on dev (no
+   docker); B6 optional.
+3. ~~D9~~ DECIDED 2026-09-08 (owner, option 1): the host's refusal of a
+   decommission naming a site it has no vhost for stands; the gate and the
+   Server Manager docs now say so (the docs had promised a
+   `REMOVE_ACCOUNT_NOTHING` answer the agent never emitted). No code change.
+4. ~~Tier C~~ WITHDRAWN 2026-09-08 — the owner runs manual testing from
+   their own spec. (The platform-born relay Create path has still never run;
+   it stays on `relay_born_configured.md`'s own gate.)
+5. ~~Cleanup~~ DONE 2026-09-08: the four Linodes deleted by the owner; the
+   six nodes, two hosts, four provisions, six join requests and the fixture
+   user removed from dev. Rotate the B2 test key and the
    SMTP2GO test key: both went through the chat, as did keyless11's admin
    password (moot: the site is destroyed).
-6. **Unfixed defects** (memory `project_wizard_defects_2026_09_07`): B2
-   registration refusal renders as a 500 page; B3 wizard "Add a passkey
-   elsewhere" dead end; B4 phrase lost across step-up; B5 Finish-later
-   promises a pill dismissal removes; B6 fleet version/SSL status facts stale;
-   B8 installer warns about the `-` password placeholder; B14 wizard offers a
-   local backup target on a plane-managed site; B15 /setup renders before the
-   forced password change; the unreproduced fleet_auto_enrollment red (A1).
+6. ~~Unfixed defects~~ ALL FIXED 2026-09-08 afternoon, uncommitted (memory
+   `project_wizard_defects_2026_09_07` has each fix): B2 registration refusal
+   re-renders the form with the message (register_logic + view); B3 the
+   security page and the step-up ceremony are exempt from the wizard
+   interrupt (`SetupSteps::interruptExempt()`) and "Add a passkey elsewhere"
+   goes there; B4 the bypass-phrase route steps up BEFORE the phrase is typed
+   (returns with `?phrase=1`); B5 the Finish-later copy matches the rule the
+   IMAP-boundaries spec set (dismissal hides the pill; /setup stays
+   reachable); B6 the uptime pass queues a `check_status` for any agent node
+   whose facts are older than six hours (RunNodeUptimeChecks 2.0); B8
+   install.sh 2.64 does not warn for the `-` placeholder; B14 the wizard's
+   backups step states who runs the backups on a managed site (backups step
+   2.3); B15 setup_logic 2.5 applies the password-change and terms gates; B16
+   a soft-deleted (decommissioned) site node no longer holds the relay slot
+   (FleetProvisionSeeding 2.2). Tests: registration_test extended, new
+   setup_wizard_gates_test, fleet_auto_enrollment_test extended, new
+   status_refresh_cadence_test. Still open: the unreproduced
+   fleet_auto_enrollment red (A1) — nothing to fix until it recurs.
 7. **Not verifiable without a shell** — B1 step 7 (host housekeeping evidence)
    and RELEASE_MANIFEST in the site tree; B1 step 9's powered-off half; B2's
    `docker port` check.

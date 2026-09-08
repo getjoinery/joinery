@@ -11,6 +11,7 @@
  * create. It is enrolled from its own Admin → System → Management Node page
  * and added on the Connect Site page.
  *
+ * @version 1.9 - the instance-type fallback and hint name the 1 GB nanode, the size every instance should be
  * @version 1.8 - a bare instance is encoded as docker_mode 'docker' (it is a Docker host with no site); the
  *                builder refused the bare-metal encoding this form used, so every bare provision failed
  * @version 1.7 - cloud instances only: the existing-server target (an SSH key on a machine the plane
@@ -215,7 +216,7 @@ $formwriter = $page->getFormWriter('install_form', [
 		'source_node_id' => $_POST['source_node_id'] ?? '',
 		'cca_account_id' => $_POST['cca_account_id'] ?? '',
 		'cloud_region'   => $_POST['cloud_region'] ?? (Globalvars::get_instance()->get_setting('server_manager_customer_cloud_region') ?: 'us-southeast'),
-		'cloud_instance_type' => $_POST['cloud_instance_type'] ?? (Globalvars::get_instance()->get_setting('server_manager_customer_cloud_type') ?: 'g6-standard-1'),
+		'cloud_instance_type' => $_POST['cloud_instance_type'] ?? (Globalvars::get_instance()->get_setting('server_manager_customer_cloud_type') ?: 'g6-nanode-1'),
 	],
 ]);
 
@@ -251,8 +252,8 @@ $formwriter->textinput('cloud_region', 'Region', [
 	'placeholder' => 'e.g., us-southeast',
 ]);
 $formwriter->textinput('cloud_instance_type', 'Instance Type', [
-	'placeholder' => 'e.g., g6-standard-1',
-	'helptext'    => 'g6-nanode-1 = 1 GB, g6-standard-1 = 2 GB, g6-standard-2 = 4 GB.',
+	'placeholder' => 'e.g., g6-nanode-1',
+	'helptext'    => 'g6-nanode-1 (1 GB) is the choice; g6-standard-1 = 2 GB, g6-standard-2 = 4 GB exist for a site that has outgrown it.',
 ]);
 echo '</div>';
 

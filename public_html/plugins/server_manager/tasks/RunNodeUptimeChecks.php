@@ -18,6 +18,9 @@
  * (over the wire, pinned to the node's own IP) that warns before a
  * self-renewed cert lapses. See check_cert_expiry().
  *
+ * @version 2.0 - queues a check_status job for every enabled agent node whose status facts are
+ *                older than STATUS_REFRESH_SECONDS: nothing else ever measured a node again after
+ *                its last button press or deploy, so versions and certificate facts went stale
  * @version 1.9 - probes moved to NodeHealthProbe so the uptime pass and check_status cannot
  *                disagree about reachability; a health document read on the way past is folded,
  *                and only a pass that measured something dates the node figures
@@ -36,6 +39,8 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	const TIMEOUT_SECONDS         = 10;
 	const FAILURE_THRESHOLD       = 2;
 	const CERT_RECHECK_ALERT_DAYS = 3;
+	/** How old an agent node's status facts may be before a check_status is queued. */
+	const STATUS_REFRESH_SECONDS  = 6 * 3600;
 
 	public function run(array $config): array {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
@@ -140,15 +145,62 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 		// the agent that does not, where no poll is ever going to arrive.
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
 		$requeued = ManagementJob::requeueStaleClaims();
+		$refreshed = $this->refresh_status_facts($nodes, $now_utc);
 
 		$message = sprintf('Checked %d node(s); %d up/down alert(s); %d cert alert(s); %d skipped; %d not due.', $checked, $alerts, $cert_alerts, $skipped, $not_due);
 		if ($requeued > 0) {
 			$message .= sprintf(' %d stale agent claim(s) returned to the queue.', $requeued);
 		}
+		if ($refreshed > 0) {
+			$message .= sprintf(' %d status refresh(es) queued.', $refreshed);
+		}
 		if (!empty($errors)) {
 			$message .= ' Notes: ' . implode(' | ', array_slice($errors, 0, 5));
 		}
 		return ['status' => 'success', 'message' => $message];
+	}
+
+	/**
+	 * Keep an agent node's status facts current.
+	 *
+	 * Version, certificate, disk and memory facts are measured only by a
+	 * check_status job, and until now nothing queued one on its own: a node
+	 * was measured when a person pressed the button or a deploy ran, then
+	 * never again, and the fleet page showed the version a node had answered
+	 * weeks earlier. Every enabled node whose agent offers the primitive and
+	 * whose facts are older than STATUS_REFRESH_SECONDS gets one queued here,
+	 * whatever its uptime setting — the up/down probe and the facts measure
+	 * different things. A queued or running job, or one completed inside the
+	 * window, is cover, so one stale node yields one job per window.
+	 *
+	 * @param iterable $nodes   live ManagedNode rows
+	 * @param string   $now_utc 'Y-m-d H:i:s'
+	 * @return int jobs queued
+	 */
+	public function refresh_status_facts($nodes, string $now_utc): int {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
+		$queued = 0;
+		$floor = strtotime($now_utc . ' UTC') - self::STATUS_REFRESH_SECONDS;
+		foreach ($nodes as $node) {
+			if (!$node->get('mgn_enabled') || $node->get('mgn_delete_time')) {
+				continue;
+			}
+			if (!JobCommandBuilder::has_primitive($node, 'check_status')) {
+				continue;
+			}
+			$last = trim((string)$node->get('mgn_last_status_check'));
+			if ($last !== '' && strtotime($last . ' UTC') >= $floor) {
+				continue;
+			}
+			if (ManagementJob::activeOrRecentForNode($node->key, 'check_status', self::STATUS_REFRESH_SECONDS)) {
+				continue;
+			}
+			ManagementJob::createFromBuild($node->key, 'check_status',
+				JobCommandBuilder::build_check_status_primitive($node), null, null);
+			$queued++;
+		}
+		return $queued;
 	}
 
 	/**

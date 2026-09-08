@@ -2,6 +2,14 @@
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
 
+/**
+ * A refusal the visitor can act on — a blank field, an address already
+ * registered, a hosted-mailbox address, a wrong anti-spam answer — is handed
+ * back WITH the page data, so process_logic() re-renders the form with the
+ * message above it and the typed values kept. A refusal returned with no
+ * data is thrown as the generic error page, which is right only for the
+ * feature being off or the honeypot firing.
+ */
 function register_logic(array $input): LogicResult{
 	// Check if the page was requested with jQuery, if so, we should process this page differently
 	$ajax = !(empty($_SERVER['HTTP_X_REQUESTED_WITH']) || $_SERVER['HTTP_X_REQUESTED_WITH'] != 'XMLHttpRequest');
@@ -43,7 +51,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		// SUCCESSFUL signups is the abuse being bounded here.
 		require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
 		if (!RequestLogger::check_rate_limit('register', 5, 900, NULL)) {
-			return LogicResult::error('Too many sign-up attempts from this location. Please wait a few minutes and try again.');
+			return LogicResult::error('Too many sign-up attempts from this location. Please wait a few minutes and try again.', $page_vars);
 		}
 		RequestLogger::log('register', 'register_attempt', TRUE);
 
@@ -53,13 +61,13 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 
 		if(!$formwriter->antispam_question_check($input)){
-			return LogicResult::error('Please type the correct value into the anti-spam field.');
+			return LogicResult::error('Please type the correct value into the anti-spam field.', $page_vars);
 		}
 
 		$captcha_success = $formwriter->captcha_check($input);
 		if (!$captcha_success) {
 			$errormsg = 'Sorry, '.strip_tags($input['usr_first_name']).' '.strip_tags($input['usr_last_name']).', you must click the CAPTCHA to submit the form.';
-			return LogicResult::error($errormsg);
+			return LogicResult::error($errormsg, $page_vars);
 		}
 
 		if(isset($input['prevformname'])){
@@ -101,7 +109,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 
 		if ($error_fields) {
-			return LogicResult::error("The following required fields were left blank: " . implode(', ', $error_fields) . '.  Please try again.');
+			return LogicResult::error("The following required fields were left blank: " . implode(', ', $error_fields) . '.  Please try again.', $page_vars);
 		}
 
 		/*
@@ -115,7 +123,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		*/
 
 		if (User::GetByEmail($fixed_fields['usr_email'])) {
-			return LogicResult::error('An account has already been registered with this email address.  Please go back and double check the email you entered or <a href="/password-reset-1">click here</a> if you forgot your password.');
+			return LogicResult::error('An account has already been registered with this email address.  Please go back and double check the email you entered or <a href="/password-reset-1">click here</a> if you forgot your password.', $page_vars);
 		}
 		// Population-2 precondition at account creation
 		// (specs/mailbox_security_levels.md § Password reset): a login email that is
@@ -126,7 +134,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		// to a hosted one later (account_edit) once a passkey/authenticator/recovery
 		// address exists. State the locked-out floor now, not during the crisis.
 		else if (_register_email_is_platform_hosted($fixed_fields['usr_email'])) {
-			return LogicResult::error('That address is a mailbox hosted here, so it cannot be your login email yet: a forgotten-password link would land in an inbox you would be locked out of. Sign up with an outside email address (Gmail, Outlook, etc.). Once you are in, you can add a passkey or authenticator app and then switch your login to a hosted address.');
+			return LogicResult::error('That address is a mailbox hosted here, so it cannot be your login email yet: a forgotten-password link would land in an inbox you would be locked out of. Sign up with an outside email address (Gmail, Outlook, etc.). Once you are in, you can add a passkey or authenticator app and then switch your login to a hosted address.', $page_vars);
 		}
 		else{
 			$user = User::CreateCompleteNew($fixed_fields, true, true, $fixed_fields['setcookie']);

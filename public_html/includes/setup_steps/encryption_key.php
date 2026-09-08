@@ -5,6 +5,8 @@
  * over the API. Included by views/setup.php with $page, $viewer, $settings,
  * $next_key in scope.
  *
+ * @version 1.5 - "Add a passkey elsewhere" goes to the security page (the wizard interrupt
+ *                exempts it); the bypass-phrase route steps up BEFORE the phrase is typed
  * @version 1.4
  */
 require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
@@ -18,6 +20,12 @@ require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
 $setup_vault_passkey_count = (new MultiPasskey(array('user_id' => (int)$viewer->key)))->count_all();
 $setup_vault_blocked = Passkey::userNeedsPassphraseFallback((int)$viewer->key);
 $setup_vault_phrase_min = (int)SealedBox::PASSPHRASE_MIN_CHARS;
+// Minting a key under a phrase demands the account's second factor
+// (vault_setup_passphrase). Asked BEFORE the phrase panel opens, so the
+// ceremony never discards a phrase already typed: the button becomes the
+// step-up link, which returns here with ?phrase=1 to open the panel.
+$setup_vault_stepup_first = SessionControl::get_instance()->step_up_outstanding($viewer);
+$setup_vault_phrase_return = '/setup?step=encryption_key&phrase=1';
 ?>
 
 <?php if ($setup_vault_passkey_count === 0) { ?>
@@ -36,9 +44,14 @@ $setup_vault_phrase_min = (int)SealedBox::PASSPHRASE_MIN_CHARS;
 		<p>If you have a newer phone, laptop or a password manager, adding a passkey there is the better route. Otherwise you can unlock with a phrase you memorise.</p>
 	</div>
 	<div class="setup-choice jy-mt-2">
-		<a class="btn btn-primary" href="/setup?step=signin_security">&larr; Add a passkey elsewhere</a>
+		<a class="btn btn-primary" href="/profile/security">&larr; Add a passkey elsewhere</a>
+<?php if ($setup_vault_stepup_first) { ?>
+		<a class="btn btn-secondary" href="/verify-stepup?return=<?php echo urlencode($setup_vault_phrase_return); ?>">Use a bypass phrase instead</a>
+<?php } else { ?>
 		<button type="button" class="btn btn-secondary" id="setup-vault-phrase-open">Use a bypass phrase instead</button>
+<?php } ?>
 	</div>
+	<p class="jy-muted">Adding a passkey happens on your security page; the "Finish setup" reminder in the header brings you back here.</p>
 
 	<div id="setup-vault-phrase" class="d-none jy-mt-3">
 		<p class="jy-muted">A phrase you type is weaker than a passkey you tap — it can be guessed, and it can be phished. It is here because your device leaves no better option. Use something long and unique, and store it in a password manager if you have one. Minimum <?php echo $setup_vault_phrase_min; ?> characters.</p>
@@ -81,11 +94,14 @@ document.addEventListener('DOMContentLoaded', function () {
 	var hint = document.getElementById('setup-vault-phrase-hint');
 	if (!open || !panel) { return; }
 
-	open.addEventListener('click', function () {
+	function openPanel() {
 		panel.classList.remove('d-none');
 		open.classList.add('d-none');
 		one.focus();
-	});
+	}
+	open.addEventListener('click', openPanel);
+	// Back from the step-up ceremony: the user already chose the phrase route.
+	if (/[?&]phrase=1(&|$)/.test(window.location.search)) { openPanel(); }
 
 	function sync() {
 		create.disabled = !(ack.checked && one.value.length >= <?php echo $setup_vault_phrase_min; ?> && one.value === two.value);
