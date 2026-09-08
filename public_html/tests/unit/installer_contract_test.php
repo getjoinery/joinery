@@ -2008,4 +2008,83 @@ check($again_rc !== 0 && isset($loaded['secret_box_key']) && strpos((string)file
 	'the config writer refuses to overwrite an existing config');
 @unlink($cfg_tmp);
 
+// ---------------------------------------------------------------------------
+// The install log is a contract with the node's agent.
+//
+// The install_report primitive (joinery-agent primitives/observe_install_report.go)
+// reads how an install went off marker lines these scripts print. The lines are
+// matched by exact string on the agent side, so a rewording here that reads
+// better on the console silently turns a failed DNS step back into "unknown"
+// on every node's Install Report. Both sides pin the same strings; the agent's
+// own test pins its reader to them.
+// ---------------------------------------------------------------------------
+section('The install log carries the markers the agent reads');
+
+// The handoff prints its headings through say(), which wraps them in === ===
+// at run time, and reports the A record through $DID (created/updated). The
+// source is read as the log will read.
+$handoff_as_logged = preg_replace('/\bsay "([^"]*)"/', '=== $1 ===', $handoff_src);
+$handoff_as_logged = str_replace('$DID', 'created', $handoff_as_logged) . "\n"
+	. str_replace('$DID', 'updated', $handoff_as_logged);
+
+$stackscript_markers = array(
+	'=== Joinery first-boot install: ' => 'the wrapper stamps the start of the log',
+	'=== Joinery is installed ===' => 'the handoff closes a finished install with the finished marker',
+	'Install stopped. Nothing further will run.' => 'fail() prints the stopped marker',
+	'DNS setup failed: ' => 'the handoff closing summary names a DNS failure with the failed marker',
+	'A record $DID: ' => 'the handoff reports a written A record as created/updated',
+	'Skipping DNS creation' => 'the handoff says when DNS creation is skipped',
+);
+foreach ($stackscript_markers as $marker => $why) {
+	$where = $marker === '=== Joinery first-boot install: ' ? $wrapper_src : $handoff_src . "\n" . $handoff_as_logged;
+	check(strpos($where, $marker) !== false, $why, 'marker: ' . $marker);
+}
+check(strpos($install_src, 'DNS setup failed: ${dns_reason}') !== false,
+	'install.sh prints the failed marker when the installer hands it a failed DNS outcome');
+check(strpos($install_src, 'No SSL certificate was issued') !== false,
+	'install.sh prints the deferred-certificate marker');
+check(strpos($install_src, 'Issued LE certificate for ') !== false,
+	'install.sh prints the issued-certificate marker');
+
+// The handoff hands the outcome to install.sh through one named variable, and
+// install.sh reads exactly that name. A rename on one side is a wait reported
+// as a wait again.
+check(strpos($handoff_src, 'export JOINERY_DNS_OUTCOME="$DNS_OUTCOME"') !== false,
+	'the handoff exports the DNS outcome for install.sh');
+check(preg_match('/DNS_OUTCOME="failed: /', $handoff_src) === 1
+	&& preg_match('/DNS_OUTCOME="written: /', $handoff_src) === 1
+	&& preg_match('/DNS_OUTCOME="skipped: /', $handoff_src) === 1,
+	'the handoff records failed, written and skipped outcomes');
+check(strpos($install_src, '"${JOINERY_DNS_OUTCOME:-}" == failed:*') !== false,
+	'install.sh treats a failed outcome as a failure, not a wait');
+check(strpos($install_src, 'Point $DOMAIN_NAME at this server whenever you') !== false,
+	'install.sh keeps the whenever-you-are-ready wording for a genuine wait');
+
+// The other side of the contract, when the agent source is on this box: every
+// marker the reader matches on must be one of the strings above.
+$agent_reader = '/home/user1/joinery-agent/primitives/observe_install_report.go';
+if (class_exists('AgentDistPublisher')) {
+	$agent_reader = AgentDistPublisher::sourcePath() . '/primitives/observe_install_report.go';
+}
+if (is_file($agent_reader)) {
+	$reader_src = file_get_contents($agent_reader);
+	if (preg_match_all('/marker\w+\s*=\s*"([^"]+)"/', $reader_src, $rm)) {
+		$all_scripts = $wrapper_src . "\n" . $handoff_as_logged . "\n" . $install_src;
+		foreach ($rm[1] as $marker) {
+			if ($marker === '[WARN]' || $marker === 'ERROR') {
+				continue; // generic tokens, printed by print_warning/print_error and fail()
+			}
+			// The scripts interpolate ($DID, ${dns_reason}); compare the literal
+			// prefix up to the first variable.
+			$literal = preg_replace('/\$.*$/', '', $marker);
+			check(strpos($all_scripts, $literal) !== false,
+				"the agent's reader marker is printed by a script: " . $marker, $literal);
+		}
+	} else {
+		check(false, 'the agent reader declares its markers as marker* constants', $agent_reader);
+	}
+} else {
+	check(true, 'no agent source on this box — reader-side marker check not applicable', $agent_reader);
+}
+
 harness_finish();

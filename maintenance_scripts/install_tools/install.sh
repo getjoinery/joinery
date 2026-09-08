@@ -1,4 +1,18 @@
 #!/usr/bin/env bash
+#VERSION 2.67 - The closing summary tells a DNS failure from a DNS wait. A
+#               first-boot installer that tried to write the record and was
+#               refused for a reason waiting will not change hands the outcome
+#               in JOINERY_DNS_OUTCOME; the summary then
+#               says "DNS setup failed" with the reason and writes the same
+#               line to the site's error log, instead of "point it here
+#               whenever you are ready".
+#VERSION 2.66 - The pre-install DNS check compares per address family, like the
+#               certificate step already does. It asked ifconfig.me bare, which a
+#               dual-stack host answers with its IPv6 address, so a domain whose
+#               A record pointed here was told it did not, naming an address no
+#               A record could ever hold. The site table's DOMAIN column reads
+#               the key the config actually carries (webDir) and was blank on
+#               every install.
 #VERSION 2.65 - The post-install check asks the address the vhost is bound to.
 #               It probed http://localhost/, but the bare-metal vhosts bind to
 #               the box's primary IP, so the probe matched no vhost and every
@@ -690,13 +704,34 @@ print_ssl_deferred_notice() {
         [ -f "$candidate" ] && break
     done
 
-    echo -e "${YELLOW}No SSL certificate was issued — DNS did not point here during install.${NC}"
-    echo "Your site is serving HTTP."
-    echo ""
+    # A first-boot installer that tried to write the DNS record itself says how
+    # that went in JOINERY_DNS_OUTCOME. "failed:" means it was refused for a
+    # reason waiting will not change — a zone another account holds, a token
+    # without the scope — and that is a failure to report, not a wait.
+    if [[ "${JOINERY_DNS_OUTCOME:-}" == failed:* ]]; then
+        local dns_reason="${JOINERY_DNS_OUTCOME#failed: }"
+        echo -e "${RED}DNS setup failed: ${dns_reason}${NC}"
+        echo -e "${YELLOW}No SSL certificate was issued — $DOMAIN_NAME does not point here, and nothing about that changes on its own.${NC}"
+        echo "Your site is serving HTTP."
+        echo ""
+        echo "Point $DOMAIN_NAME at this server where its DNS is actually managed."
+        if [ -n "${SITENAME:-}" ] && [ -d "/var/www/html/$SITENAME/logs" ]; then
+            echo "[$(date -u '+%Y-%m-%d %H:%M:%S')] [INSTALL] DNS setup failed: ${dns_reason}" \
+                >> "/var/www/html/$SITENAME/logs/error.log" 2>/dev/null || true
+        fi
+    else
+        echo -e "${YELLOW}No SSL certificate was issued — DNS did not point here during install.${NC}"
+        echo "Your site is serving HTTP."
+        echo ""
+    fi
 
     if [ "$SSL_RETRY_ARMED" -eq 1 ]; then
-        echo "Nothing further is needed. Point $DOMAIN_NAME at this server whenever you"
-        echo "are ready and a certificate will be issued within a few minutes, on its own."
+        if [[ "${JOINERY_DNS_OUTCOME:-}" == failed:* ]]; then
+            echo "Once it points here, a certificate will be issued within a few minutes, on its own."
+        else
+            echo "Nothing further is needed. Point $DOMAIN_NAME at this server whenever you"
+            echo "are ready and a certificate will be issued within a few minutes, on its own."
+        fi
         echo ""
         echo -e "To watch it: ${BLUE}journalctl -fu joinery-ssl-retry@${DOMAIN_NAME}${NC}"
         echo -e "To issue one immediately: ${BLUE}sudo $ssl_script $DOMAIN_NAME${NC}"
@@ -755,22 +790,31 @@ sys.exit(1)
 check_dns_points_here() {
     local domain="$1"
 
-    # Get this server's public IP
-    local server_ip=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null)
+    # Ask for each family explicitly, as provision_origin_cert does. A bare
+    # `curl ifconfig.me` answers with whichever address the host prefers, and a
+    # dual-stack host prefers IPv6 -- compared against an A record that never
+    # matches, and the warning names an address no A record could hold.
+    local server_ip4 server_ip6 dns_ip4 dns_ip6 server_ip dns_ip
+    server_ip4=$(curl -4 -s --max-time 5 ifconfig.me 2>/dev/null || curl -4 -s --max-time 5 icanhazip.com 2>/dev/null || true)
+    server_ip6=$(curl -6 -s --max-time 5 ifconfig.me 2>/dev/null || curl -6 -s --max-time 5 icanhazip.com 2>/dev/null || true)
+    server_ip="${server_ip4:-$server_ip6}"
     if [ -z "$server_ip" ]; then
         print_warning "Could not determine server's public IP"
         return 1
     fi
 
     # Get DNS resolution for domain
-    local dns_ip=$(dig +short "$domain" 2>/dev/null | grep -E '^[0-9.]+$' | head -1)
+    dns_ip4=$(dig +short A "$domain" 2>/dev/null | grep -E '^[0-9.]+$' | head -1 || true)
+    dns_ip6=$(dig +short AAAA "$domain" 2>/dev/null | grep -E '^[0-9a-fA-F:]+$' | head -1 || true)
+    dns_ip="${dns_ip4:-$dns_ip6}"
     if [ -z "$dns_ip" ]; then
         print_warning "DNS lookup failed for $domain"
         return 1
     fi
 
-    # Compare - direct match
-    if [ "$dns_ip" = "$server_ip" ]; then
+    # Either family reaching this host is enough.
+    if { [ -n "$server_ip4" ] && [ "$server_ip4" = "$dns_ip4" ]; } \
+       || { [ -n "$server_ip6" ] && [ "$server_ip6" = "$dns_ip6" ]; }; then
         return 0
     fi
 
@@ -1148,7 +1192,10 @@ list_baremetal_sites() {
             local domain="N/A"
             local config_file="${site_dir}config/Globalvars_site.php"
             if [ -f "$config_file" ]; then
-                domain=$(grep -oP "site_url.*?'https?://\K[^'/]+" "$config_file" 2>/dev/null | head -1 || echo "N/A")
+                # The config names the domain as webDir; a site created without
+                # one carries its IP address there.
+                domain=$(grep -oP "\['webDir'\]\s*=\s*'\K[^']+" "$config_file" 2>/dev/null | head -1)
+                [ -n "$domain" ] || domain="N/A"
             fi
 
             # Check if Apache virtualhost is enabled

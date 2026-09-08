@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.9 - Install Report button beside Check Status, for a node whose agent ships
+ *                install_report.
  * @version 1.8 - the health badge and the measured-at line read the fold's per-key provenance, so
  *                figures too old to judge health by grey the badge out instead of colouring it green
  * @version 1.8 - Permanently Delete Site is offered for container sites (the removal runs on the
@@ -33,6 +35,10 @@
 ?>
 <form id="nodeActionCheckStatus" method="post" action="<?php echo $base_url; ?>" hidden>
 	<input type="hidden" name="action" value="check_status">
+	<?php echo SmAdminCsrf::field(); ?>
+</form>
+<form id="nodeActionInstallReport" method="post" action="<?php echo $base_url; ?>" hidden>
+	<input type="hidden" name="action" value="install_report">
 	<?php echo SmAdminCsrf::field(); ?>
 </form>
 <form id="run_plugin_installers_form" method="post" action="<?php echo $base_url; ?>" hidden>
@@ -258,6 +264,12 @@
 		echo '<small class="text-muted">No status check has been run yet.</small>';
 	}
 	echo '<button type="submit" form="nodeActionCheckStatus" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075">Check Status</button>';
+	// The install log has only ever been readable by a shell on the box. A
+	// node whose agent can read it offers the report here; one that cannot
+	// shows nothing rather than a button that would refuse.
+	if (JobCommandBuilder::has_primitive($node, 'install_report')) {
+		echo ' <button type="submit" form="nodeActionInstallReport" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075" title="How the first-boot install went: DNS, certificate, and the tail of the install log">Install Report</button>';
+	}
 	echo '</div>';
 
 	// Uptime monitoring status
