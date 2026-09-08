@@ -91,6 +91,17 @@ check((bool)$reloaded->get('usr_force_password_change'),
 	'the account is flagged to choose a new password at next sign-in',
 	'what is typed here is a way in, not a permanent credential');
 
+// A password the owner chose on a deploy form is theirs to keep: the install
+// passes --chosen and the account is NOT flagged (a tester was made to replace
+// a password they had picked a minute earlier).
+$chosen_password = 'HarnessChosen_' . bin2hex(random_bytes(6));
+list($rc, $out) = apr_run($tool, array('--email=' . $target_email, '--chosen', '--yes'), $chosen_password);
+check($rc === 0, '--chosen exits cleanly', $out);
+$reloaded = apr_reload($target->key);
+check($reloaded->check_password($chosen_password), 'the chosen password authenticates');
+check(!(bool)$reloaded->get('usr_force_password_change'),
+	'with --chosen the account is not flagged for a change at next sign-in');
+
 
 section('The account is chosen deliberately');
 

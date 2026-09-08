@@ -448,8 +448,11 @@ sudo php /var/www/html/{sitename}/maintenance_scripts/sysadmin_tools/reset_admin
 - **`--email=ADDRESS`** selects the account. With no `--email` it targets the
   sole permission-10 account, and refuses when there is more than one.
 - **`usr_force_password_change` is set**, so what is typed here is a way in, not
-  a permanent credential. Changing the password also revokes every active API
-  session key for that user, like any other password change.
+  a permanent credential. `--chosen` leaves it clear: a password the owner
+  picked on a deploy form and that nothing wrote down is theirs to keep, and
+  the install passes it for exactly that case. Changing the password also
+  revokes every active API session key for that user, like any other password
+  change.
 - **The second factor survives by default.** `--clear-second-factor` turns TOTP
   off and rotates the trusted-device key, signing every "remember this device"
   grant out at once. It is opt-in because losing a password often means losing

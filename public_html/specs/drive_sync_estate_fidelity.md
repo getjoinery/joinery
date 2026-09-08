@@ -2505,7 +2505,8 @@ none, because it trains everyone to ignore it.
 ## Still open, found by review probes (2026-09-05, public-html-0e)
 
 B1 to B3 are pre-existing and none is caused by the AB or AC fixes. B4 and B5
-were added on 2026-09-07 from the AD review. Recorded here so they are not
+were added on 2026-09-07 from the AD review and B6 on 2026-09-08 from the B2
+review. B6 is fixed; B1, B3, B4 and B5 remain open. Recorded here so they are not
 rediscovered a fourth time.
 
 **B1 -- a child the server moves INTO a parked folder loops for ever.** The
@@ -2518,7 +2519,7 @@ forever-loop shape 2, never quiet. `shadowed` has the same blind spot for
 hold an entry whose REMOTE parent is in the set as well as its local one.
 
 **B2 -- `unmaterialize_and_park` abandons a FOLDER's directory and lies about
-it.** `vfs.fingerprint` of a directory is None, so the park never moves the
+it. FIXED 2026-09-08.** `vfs.fingerprint` of a directory is None, so the park never moves the
 directory: it clears `synced_placement`, sets `Unsyncable`, and raises "moved
 to the trash" while nothing was trashed. The record then says there is no
 directory while the directory stands at the old name with the children inside
@@ -2536,7 +2537,7 @@ hold both, so the park is correct. What follows it is not. The user is told `C`
 was moved to the trash, which it was not, and the directory `C` with `c.txt`
 inside it is left on the disk claimed by no entry at all --
 `assert_no_entry_is_stranded` names it: *holding files no entry claims, so
-nothing will ever scan, send, move or remove them*. B2 also blocks one AD test,
+nothing will ever scan, send, move or remove them*. B2 blocked one AD test,
 `a_local_swap_leaves_an_unrelated_parked_case_twin_alone`, which is ignored for
 that reason and not for anything to do with the trade: the trade lands and the
 parked twin is left alone, and then the abandoned directory fails the run.
@@ -2550,6 +2551,115 @@ is already in the file and already used for folders --
 have, and `env.vfs.trash` takes the rest -- so the fix is to route a folder
 through that instead of past it, and to raise the trash issue only when a trash
 actually happened.
+
+**The fix, and the two things it turned up.**
+
+A folder is now given up the way a folder is given up everywhere else here:
+work the server does not have is rescued out beside it, the directory goes to
+the OS trash with what remains, and the descendants' records go with it. They
+are put back to `PendingDownload` rather than marked `Unsyncable` -- there is
+nothing wrong with THEIR names, it is their parent that cannot be held on this
+disk, and saying otherwise tells the user their file is broken when it is not.
+They are not forgotten either, because the server still has them and the park
+is supposed to come back. The trash issue is raised only when a trash happened;
+claiming one that did not sends the user hunting through their trash for
+something that was never in it, and that goes for the file path too.
+
+**The rescue was asking the wrong oracle.** Routed through `rescue_unsynced`
+unchanged, the park carried the folder's files OUT to the sync root and
+uploaded them as new content, leaving the user a duplicate at the top of their
+tree and two copies on the server. `is_on_the_server` answers from
+`entity_for_file_id`, which reads `local_index` -- a SCAN artifact -- and a
+folder given up in the same pass that scanned it has children the index holds
+no row for. So the check answered "never seen it" about a file the server was
+holding. It now takes what the caller knows from the RECORDS first, and the
+callers that know a subtree pass it; the freshness test is unchanged, so an
+edit nobody has uploaded is still work worth saving. Same lesson as AA to AE:
+ask a record, not the disk.
+
+**The convergence oracle could not describe the correct answer.** With the park
+fixed, `assert_converged` failed on `b` and `b/c.txt` being only on the server.
+The content exemption excuses a parked entry by its own bytes; a folder has
+none, and nothing reached the FILES under a parked folder, which have no
+claimant on this disk and cannot get one. Established as an oracle gap rather
+than a bad end state by removing the park entirely: a device syncing a server
+that ALREADY holds a name this volume cannot add lands in exactly the same
+place (`a_case_twin_that_was_never_holdable_converges`), so it is a designed end
+state. It had never been seen because the workload never mints a folder name
+that folds onto another, so no sweep has ever produced the shape. The exemption
+added is against a RECORD and on the server's side only -- a path under a park
+is forgiven when this device has an entry for it holding no local copy, so an
+entry the engine has lost track of, or one still claiming a copy, goes on
+failing, and anything the device wrongly HAS still shows up as
+only-on-the-disk.
+
+**Three corrections from review (public-html-0e, 2026-09-08), all reproduced
+here before acting.**
+
+*The descendant sweep was keyed on the wrong tree.* `subtree_ids` walks the
+REMOTE parent, and in a round that also moved something the two trees disagree.
+A child the server had just moved INTO the folder was in the remote subtree
+while its copy still sat where it was, so resetting its record handed the scan a
+stranger and the next pass uploaded a second copy. A child the server had just
+moved OUT was not in the remote subtree at all, while its copy was in the
+directory and about to go to the trash with it. The sweep now asks the LOCAL
+chain -- `local_chain_passes`, the same question the server-side trash asks --
+and a copy in here that the server keeps elsewhere is waited for rather than
+trashed: `Retry`, with a `park_waits` issue while `local_chain_parked` says the
+wait has no end in sight, withdrawn the moment it stops waiting. Retrying is
+safe here where it is not in the file arm, because the move being waited for is
+planned on the CHILD, which has no open operation.
+
+Worth recording: keyed on the remote tree the park SETTLED, by minting the
+duplicate. That masked **B1**, whose whole signature is never settling. Keying
+it on the local chain removes the mask and the honest B1 loop comes back, which
+is the better failure of the two.
+
+*The folder arm had no ownership guard -- and this one is load-bearing, not
+tidiness.* It was proposed and taken as a cheap fix on principle. It is the only
+thing standing between an honest hash index and a destroyed file: with B6 fixed
+and this guard absent, `a_second_folder_conflict_at_one_name_gets_its_own_name`
+loses `f3.txt` from the disk and the server both. Note the pin discriminates it
+only while the index is honest -- let the index lie again and the over-rescue
+hides the hole, which is how it survived this long. `local_path` resolves from this entry's
+record and naming ranks by records, so the slot it names can be another live
+folder's directory -- the escaped spelling of one name and the literal spelling
+of another landing on one string. The file arm has
+`the_file_here_is_another_entrys` for exactly this; the folder arm would have
+rescued another folder's files out from under it and trashed its directory. Now
+the same source-holder rule that fixed Defect AC: another live, non-parked
+folder entry with a directory resolving to this slot means disown the records
+and touch nothing.
+
+*The oracle exemption did not make the excuse earned.* Keyed on any unsyncable
+folder, a naming regression that parked folders wrongly would hide their whole
+subtree -- and parking on a stale reading is precisely what Defect AE was. A
+folder parked for a CLASH is now only excused where the oracle can see the clash
+itself: a live sibling in the same parent whose name folds onto the parked one
+under that volume's rule. Reasons that are self-evident from the name -- too
+long, a forbidden character -- pass through, because `expected_path` already
+drops those paths on its own.
+
+**How much the oracle was actually loosened, measured rather than argued.**
+Loosening an oracle cannot be defended by a green run -- a looser oracle can
+only pass more often -- so the exemption was instrumented and counted instead.
+Across the whole scenario suite it fires SIX times, and all six are the three
+tests that exist to need it: two server paths each, the parked folder and the
+file under it. It fires zero times in the sweep arms, which is the estate's own
+code, and zero times in the executor suite. So it is inert for every piece of
+existing coverage and cannot be hiding anything those tests would have caught.
+
+Pins, each proven red against the half that fixes it:
+`a_folder_parked_for_a_case_clash_does_not_abandon_its_directory` (red without
+the engine change, with the abandoned directory named),
+`a_case_twin_that_was_never_holdable_converges` (red without the oracle change),
+and `a_local_swap_leaves_an_unrelated_parked_case_twin_alone`, which was ignored
+on B2 rather than on anything to do with the name trade and is now live.
+
+**B4 is unblocked but NOT fixed by this**, which is worth recording because it
+was expected to be: B2 was necessary and not sufficient. What remains is the
+rescue's choice of name -- for a locally driven park the disk knows the
+destination, and the rescue asks the agreement instead.
 
 **B4 -- a local swap whose first server rename is refused leaks the vault.**
 Found under fault injection by public-html-0e, 2026-09-07; probe set in that
@@ -2576,6 +2686,49 @@ and re-minted under a new id, with the children re-homed under it. `children[]`
 credits a folder with its descendants at their OLD relative paths, and those
 paths no longer exist under the new name, so `P` matches nothing and reads as
 gone.
+
+**B6 -- a folder deleted on one device resurrects its contents at the ROOT of
+every other device, and pushes them back to the server. FIXED 2026-09-08.**
+Pre-existing, traced
+by public-html-0e on 2026-09-08 and reproduced here on the committed tree with
+nothing local involved. One device, a server folder fully synced, the server
+trashes it. The device rescues the file out beside the folder, tells the user it
+*had not reached the server yet* -- which is false -- and the next pass uploads
+it as new content, so the original is deleted server-side and a loose copy
+appears at the top of the tree on every device. `assert_converged` passes
+throughout, because the resurrected copy is on both sides: the custody blind
+spot again.
+
+The cause is one line. `is_on_the_server` asks `entity_for_file_id`, which reads
+`local_index`; the scan rehashes whatever it cannot vouch for and calls
+`cache_hash(fp, sha, None, now)`, whose upsert sets
+`entity_type = excluded.entity_type` -- NULL over the entity a download recorded
+moments earlier. It needs no unusual timing on a real disk: the download caches
+at `now_ms` floored to milliseconds while the mtime is in nanoseconds, so any
+download whose cache write lands in the same millisecond as its own write is
+clobbered.
+
+**FIXED**: the upsert now `COALESCE`s the incoming NULL, so a caller that does
+not know the entity cannot forget one. Pinned by
+`a_folder_the_server_trashed_takes_its_contents_with_it`, which asserts the disk
+is empty, the server is empty, and no `rescued_from_trash` issue was raised --
+red without the fix on all three.
+
+**What this nearly became, recorded because the reasoning is the lesson.** With
+the index made honest and the folder arm's ownership guard NOT yet in,
+`a_second_folder_conflict_at_one_name_gets_its_own_name` goes red with `f3.txt
+was displaced out of existence` -- destroyed on the disk AND on the server, with
+a further settle converging on the loss. That was written up here as a separate
+and more serious defect, on the strength of the failure alone. It was not one.
+The cause is the missing guard: a `DuplicateName` park runs the folder arm on a
+directory that is not that entry's, an honest index correctly tells the rescue
+there is nothing to carry out, and the park then trashes a directory whose
+contents are not what the records say. Attributed by measuring one variable at a
+time -- guard out: red; guard in: green -- and confirmed independently by
+public-html-0e on a fresh copy by making the guard's slot test never true.
+
+A red test proves a failure, not its cause. The entry that was opened for the
+cause has been withdrawn rather than left in this list for somebody to chase.
 
 **B3 -- `download` has no parent-materialized gate and MINTS the parent
 directory.** `create_local_folder` and `move_local` both refuse to act when the

@@ -18,7 +18,7 @@
  * Usage:
  *   sudo php reset_admin_password.php [--email=ADDRESS] [--set-email=ADDRESS]
  *                                     [--password-file=PATH]
- *                                     [--clear-second-factor] [--yes]
+ *                                     [--clear-second-factor] [--chosen] [--yes]
  *
  *   --email=ADDRESS         Account to reset. Defaults to the only permission-10
  *                           account when there is exactly one.
@@ -38,15 +38,25 @@
  *                           laptop), but wiping a second factor should be a
  *                           decision rather than a side effect of a routine
  *                           password change.
+ *   --chosen                The password was chosen by the account's owner (a
+ *                           deploy form), so it is NOT marked for change at
+ *                           first login. Without this the account is left with
+ *                           usr_force_password_change set, because a password
+ *                           nobody chose — generated, printed, or typed by an
+ *                           operator on the owner's behalf — is a way in, not
+ *                           a permanent credential.
  *   --yes                   Skip the confirmation prompt.
  *
- * The account is left with usr_force_password_change set, so the password typed
- * here is a way in, not a permanent credential. Changing the password also
- * revokes every active API session key for that user (User::save handles it).
+ * Unless --chosen says otherwise, the account is left with
+ * usr_force_password_change set, so the password typed here is a way in, not a
+ * permanent credential. Changing the password also revokes every active API
+ * session key for that user (User::save handles it).
  *
  * Validate with `php -l` only — never the file validator, which executes the
  * file it is checking.
  *
+ * @version 1.2 - --chosen: a password the owner picked on a deploy form is not marked for
+ *                change at first login; the forced change is for passwords nobody chose
  * @version 1.1
  */
 
@@ -68,6 +78,7 @@ function rap_usage($code = 2) {
     fwrite($stream, "  --set-email=ADDRESS     also change the account's address, in the same save\n");
     fwrite($stream, "  --password-file=PATH    read the new password from the first line of PATH\n");
     fwrite($stream, "  --clear-second-factor   also disable TOTP and rotate the trusted-device key\n");
+    fwrite($stream, "  --chosen                the owner chose this password: no forced change at first login\n");
     fwrite($stream, "  --yes                   skip the confirmation prompt\n");
     fwrite($stream, "  --help                  show this message\n");
     exit($code);
@@ -220,6 +231,7 @@ if (trim($password) === '') {
 // ---------------------------------------------------------------------------
 
 $clear_second_factor = isset($opts['clear-second-factor']);
+$chosen = isset($opts['chosen']);
 $totp_on = (bool)$user->get('usr_totp_enabled_time');
 
 if (!isset($opts['yes'])) {
@@ -244,7 +256,7 @@ if (!isset($opts['yes'])) {
 
 try {
     $user->set('usr_password', User::GeneratePassword($password));
-    $user->set('usr_force_password_change', true);
+    $user->set('usr_force_password_change', !$chosen);
     if ($new_email !== '') {
         $user->set('usr_email', $new_email);
     }
@@ -266,6 +278,7 @@ if ($clear_second_factor) {
 }
 
 $note = $clear_second_factor ? ' (second factor cleared)' : '';
+$note .= $chosen ? ' (owner-chosen, no forced change)' : '';
 if ($new_email !== '') {
     $note .= ' (address changed to ' . $new_email . ')';
 }

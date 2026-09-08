@@ -1119,6 +1119,25 @@ impl Store {
 
     /// Remember a file's hash against its fingerprint, so a rescan that finds
     /// the fingerprint unchanged can skip reading the bytes.
+    /// Remember the hash of a fingerprint, and which entity it belongs to if
+    /// the caller knows.
+    ///
+    /// A caller that does NOT know does not get to forget. The scan rehashes a
+    /// file whenever it cannot vouch for the cached row and calls this with no
+    /// entity, and writing that straight in erased the entity a download had
+    /// recorded moments earlier -- so `entity_for_file_id` answered "never seen
+    /// it" about a file the server was holding. Its one caller is
+    /// `is_on_the_server`, which decides whether a file about to go to the trash
+    /// with its folder is already safe; told nothing, it rescues the file out
+    /// beside the folder and the next pass uploads it as new content. That is
+    /// how a folder deleted on one device came back as loose files at the root
+    /// of every other device, and back onto the server.
+    ///
+    /// It needs no unusual timing on a real disk: the download caches at
+    /// `now_ms` floored to milliseconds while the file's mtime is in
+    /// nanoseconds, so any download whose cache write lands in the same
+    /// millisecond as its own write leaves a row the next scan cannot vouch
+    /// for.
     pub fn cache_hash(
         &self,
         fp: jd_vfs::Fingerprint,
@@ -1132,8 +1151,8 @@ impl Store {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
              ON CONFLICT(file_id, size, mtime_ns) DO UPDATE SET
                 sha256 = excluded.sha256,
-                entity_type = excluded.entity_type,
-                server_id = excluded.server_id,
+                entity_type = COALESCE(excluded.entity_type, local_index.entity_type),
+                server_id = COALESCE(excluded.server_id, local_index.server_id),
                 cached_at_ns = excluded.cached_at_ns",
             params![
                 fp.file_id as i64,

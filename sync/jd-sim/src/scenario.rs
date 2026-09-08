@@ -1152,6 +1152,90 @@ pub fn assert_converged(world: &World) {
             .map(|(p, h)| (p.clone(), h.clone()))
             .collect();
 
+        // A folder this volume cannot hold takes everything under it with it.
+        //
+        // The content exemption above excuses a parked entry by its own bytes,
+        // and a folder has none -- but more to the point it never reaches the
+        // FILES inside a parked folder. Those have no claimant on this disk and
+        // cannot get one: their parent has no directory, so there is nowhere
+        // for them to be. Held to the plain tree, a device is asked to produce
+        // files underneath a folder it was right to refuse.
+        //
+        // This is a designed end state rather than the aftermath of one, and no
+        // park operation is needed to reach it: a device syncing a server that
+        // ALREADY holds a name this volume cannot add lands in exactly the same
+        // place (`probe_a_case_twin_that_was_never_holdable_converges`). It went
+        // unnoticed because the workload never mints a folder name that folds
+        // onto another, so no sweep has ever produced the shape.
+        //
+        // Excused against a RECORD, not a path prefix, and on the server's side
+        // only. A path under a park is forgiven when this device has an entry
+        // for it that holds no local copy -- one it has lost track of, or one
+        // still claiming a copy, goes on failing -- and anything the device
+        // wrongly HAS still shows up as only-on-the-disk. So this can excuse an
+        // absence without excusing a mistake.
+        // The excuse has to be EARNED, not merely claimed. Keyed on any
+        // unsyncable folder, a naming regression that parked folders wrongly
+        // would hide their whole subtree from this oracle -- and parking on a
+        // stale reading is exactly the class Defect AE was. So a folder parked
+        // for a CLASH is only excused where this oracle can see the clash
+        // itself: a live sibling whose name folds onto the parked one under
+        // this volume's own rule. The other reasons -- a name too long, a
+        // character this filesystem forbids -- are self-evident from the name,
+        // and `expected_path`'s `to_local_name` arm already drops those paths
+        // without help from here.
+        let folding = jd_vfs::Vfs::personality(&device.fs);
+        let parked_trees: Vec<String> = entries
+            .iter()
+            .filter(|e| e.id.entity_type == jd_core::EntityType::Folder)
+            .filter(|e| match &e.status {
+                jd_core::model::LocalStatus::Unsyncable(reason) => match reason {
+                    jd_vfs::UnsyncableReason::CaseClash { .. }
+                    | jd_vfs::UnsyncableReason::UnicodeClash { .. }
+                    | jd_vfs::UnsyncableReason::DuplicateName { .. } => {
+                        let mine = jd_vfs::comparison_key(&e.remote.name, &folding);
+                        entries.iter().any(|other| {
+                            other.id != e.id
+                                && !other.remote_deleted
+                                && other.remote.parent == e.remote.parent
+                                && !matches!(
+                                    other.status,
+                                    jd_core::model::LocalStatus::Unsyncable(_)
+                                )
+                                && jd_vfs::comparison_key(&other.remote.name, &folding) == mine
+                        })
+                    }
+                    _ => true,
+                },
+                _ => false,
+            })
+            .filter_map(|e| server_path_of(&entries, e))
+            .collect();
+        let server: BTreeMap<String, Option<String>> = if parked_trees.is_empty() {
+            server
+        } else {
+            let by_server_path: std::collections::HashMap<String, &jd_core::model::Entry> = entries
+                .iter()
+                .filter(|e| !e.remote_deleted)
+                .filter_map(|e| server_path_of(&entries, e).map(|p| (p, e)))
+                .collect();
+            server
+                .into_iter()
+                .filter(|(p, _)| {
+                    let under_a_park = parked_trees
+                        .iter()
+                        .any(|t| p == t || p.starts_with(&format!("{t}/")));
+                    if !under_a_park {
+                        return true;
+                    }
+                    match by_server_path.get(p.as_str()) {
+                        Some(e) => e.synced_placement.is_some(),
+                        None => true,
+                    }
+                })
+                .collect()
+        };
+
         // A device with no key materializes no vault folder and nothing under
         // one, on purpose -- see `MockServer::vault_folder_paths`. Holding it to
         // a tree that contains them asks it to produce files it cannot read and
@@ -1227,7 +1311,7 @@ pub fn assert_converged(world: &World) {
             .filter_map(|e| {
                 let local = e.local_name.as_deref()?;
                 (jd_vfs::comparison_key(local, &personality)
-                    == jd_vfs::comparison_key(&e.remote.name, &personality))
+                    == jd_vfs::comparison_key(&e.remote.name, &folding))
                 .then(|| Some((server_path_of(&entries, e)?, local.to_string())))
                 .flatten()
             })
