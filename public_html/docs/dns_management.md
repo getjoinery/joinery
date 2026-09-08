@@ -161,6 +161,19 @@ dns_publish_box_render($page, $dns_box);
 `build()` is cheap unless the diff is on screen, at which point it costs a
 handful of public DNS lookups and no credential at all.
 
+### Where the box is mounted
+
+Beyond admin pages that own a record plan, the setup wizard's **Secure
+connection** screen mounts the box for the site's own address record (`A`, and
+`AAAA` when the server has a public IPv6 address), built by
+`setup_https_address_plan()` in `logic/setup_https_check_logic.php`. The plan
+exists only while the name does not yet point here, and is withheld when the
+name already answers from another server: pointing it at this one would
+replace whatever is served there, which is a decision the operator makes by
+hand, and the screen says so. The wizard's Email screen carries its own
+publish form for the mail plan (`includes/setup_steps/mail_send.php`), which
+also honours the credential an installer kept (`DnsInstallCredential`).
+
 ## The order: diff, then authorize, then write
 
 This is the property everything else rests on.

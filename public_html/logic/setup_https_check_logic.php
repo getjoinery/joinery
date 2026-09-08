@@ -23,6 +23,10 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
  * face correctly refuses cleartext with 426 — so the page cannot fetch its
  * own diagnosis. The API action remains for secure contexts.
  *
+ * @version 1.2
+ * @changelog 1.2 - points_elsewhere in the diagnosis, and setup_https_address_plan():
+ *   the A/AAAA record the publish box can write for the site, withheld when the
+ *   name already answers from another server.
  * @version 1.1
  * @changelog 1.1 - Diagnosis extracted to setup_https_diagnose() so the wizard
  *   can render it server-side over plain HTTP (the API face refuses cleartext).
@@ -76,6 +80,10 @@ function setup_https_diagnose(): array {
 	$server_ip6 = setup_https_public_ip(6);
 	$dns_match = ($server_ip4 !== '' && in_array($server_ip4, $dns_a, true))
 		|| ($server_ip6 !== '' && in_array($server_ip6, $dns_aaaa, true));
+	// The name answers with an address that is not this server's: something
+	// else is being served there today, and pointing it here would replace
+	// that. Said on the page, and the automatic write is withheld.
+	$points_elsewhere = !$dns_match && (!empty($dns_a) || !empty($dns_aaaa));
 
 	// 3. The deferred-certificate retry timer (arm_ssl_retry.sh) leaves its
 	// conf at a fixed path; existence is the armed signal. The file itself is
@@ -94,8 +102,52 @@ function setup_https_diagnose(): array {
 		'server_ip4'   => $server_ip4,
 		'server_ip6'   => $server_ip6,
 		'dns_match'    => $dns_match,
+		'points_elsewhere' => $points_elsewhere,
 		'retry_armed'  => $retry_armed,
 	);
+}
+
+/**
+ * The record the wizard can add for the operator: this server's address at
+ * the site's name, for the DNS publish box to write through the domain's own
+ * host. Null when there is nothing safe to offer — no public address, a name
+ * that is not a real domain, or a name that already answers with someone
+ * else's address (pointing it here would take down whatever is there; that
+ * is a decision for the operator, made by hand).
+ */
+function setup_https_address_plan(string $domain, array $dns_a, array $dns_aaaa, string $ip4, string $ip6): ?DnsRecordPlan {
+	require_once(PathHelper::getIncludePath('includes/dns/DnsRecordPlan.php'));
+	$domain = DnsRecord::normalizeName($domain);
+	if ($domain === '' || $domain === 'localhost' || filter_var($domain, FILTER_VALIDATE_IP)
+			|| strpos($domain, '.') === false) {
+		return null;
+	}
+	if ($ip4 === '' && $ip6 === '') {
+		return null;
+	}
+	foreach (array_merge($dns_a, $dns_aaaa) as $live) {
+		if ($live !== $ip4 && $live !== $ip6) {
+			return null;
+		}
+	}
+	$plan = new DnsRecordPlan($domain, 'setup_wizard');
+	if ($ip4 !== '') {
+		$plan->addRecord(DnsRecord::TYPE_A, $domain, $ip4);
+	}
+	if ($ip6 !== '') {
+		$plan->addRecord(DnsRecord::TYPE_AAAA, $domain, $ip6);
+	}
+	return $plan;
+}
+
+/** The plan for the running site, from a fresh diagnosis. */
+function setup_https_dns_plan(): ?DnsRecordPlan {
+	$d = setup_https_diagnose();
+	if (empty($d['applicable']) || !empty($d['dns_match'])) {
+		return null;
+	}
+	return setup_https_address_plan((string)$d['domain'], (array)$d['dns_a'], (array)$d['dns_aaaa'],
+		(string)$d['server_ip4'], (string)$d['server_ip6']);
 }
 
 /**

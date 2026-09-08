@@ -3911,7 +3911,7 @@ EOF
     # Everything _site_init.sh reads from the environment has to cross here
     # too: on Docker it runs inside the container on first boot, so a host-side
     # export never reaches it. Same visibility trade as POSTGRES_PASSWORD
-    # above, and the admin password is replaced at first sign-in anyway.
+    # above; the file is mode 600 and removed once the container has read it.
     if [ -n "${JOINERY_ADMIN_EMAIL:-}" ]; then
         printf 'JOINERY_ADMIN_EMAIL=%s\n' "$JOINERY_ADMIN_EMAIL" >> "$ENV_FILE"
     fi
