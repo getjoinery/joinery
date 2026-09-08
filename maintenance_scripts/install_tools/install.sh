@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+#VERSION 2.65 - The post-install check asks the address the vhost is bound to.
+#               It probed http://localhost/, but the bare-metal vhosts bind to
+#               the box's primary IP, so the probe matched no vhost and every
+#               healthy install ended on "Site returned HTTP 403 - may need
+#               manual verification".
 #VERSION 2.64 - The '-' password placeholder (generate one) no longer draws the
 #  'password passed as a command-line argument' warning: it is not a password.
 #VERSION 2.63 - host-harden is gone. Its housekeeping (fail2ban SSH jail, journal cap,
@@ -4278,7 +4283,15 @@ do_site_baremetal() {
     # Same probe contract as the Docker path: ask for the site by its
     # configured domain, and refuse to call a redirect into a vhost that does
     # not exist a healthy site.
-    PROBE=$(curl -s -o /dev/null -w "%{http_code} %{redirect_url}" -H "Host: $DOMAIN_NAME" "http://localhost/" 2>/dev/null || true)
+    # Probe the address the vhost is actually bound to. default_virtualhost.conf
+    # binds every VirtualHost to this box's primary IP, so a request arriving on
+    # 127.0.0.1 matches no vhost at all and falls through to the unmatched
+    # catch-all -- a 403 that reads as a broken install on a perfectly healthy
+    # one. Derived exactly as the bind address is, so the two cannot disagree;
+    # when that fell back to "*" there is no primary IP and localhost is right.
+    PROBE_HOST=$(hostname -I 2>/dev/null | awk '{print $1}')
+    [ -n "$PROBE_HOST" ] || PROBE_HOST="localhost"
+    PROBE=$(curl -s -o /dev/null -w "%{http_code} %{redirect_url}" -H "Host: $DOMAIN_NAME" "http://${PROBE_HOST}/" 2>/dev/null || true)
     HTTP_CODE="${PROBE%% *}"
     REDIRECT_URL="${PROBE#* }"
     [ -n "$HTTP_CODE" ] || HTTP_CODE="000"

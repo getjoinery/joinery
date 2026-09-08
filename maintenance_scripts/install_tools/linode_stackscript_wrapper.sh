@@ -1,5 +1,8 @@
 #!/bin/bash
-#VERSION 1.5
+#VERSION 1.6 - The deployment log keeps its tail. Output went through a process
+#              substitution, which nothing waits for, so the console session's
+#              teardown killed tee with the closing summary still unread in the
+#              pipe and every successful install looked like it stopped mid-step.
 #
 # THIS FILE IS NOT RUN FROM THE REPOSITORY.
 #
@@ -59,36 +62,49 @@
 
 set -euo pipefail
 
-exec > >(tee -a /var/log/stackscript.log) 2>&1
+# The whole deploy prints through one real pipeline into the log, never through
+# a process substitution. `exec > >(tee ...)` is not waited for: the script ends,
+# the console session is stopped, getty hangs up its whole cgroup, and tee is
+# killed with the last writes still sitting unread in the pipe. What dies there
+# is the tail - the "Joinery is installed / sign in here" block, the one thing
+# the deployer most needs - so a completed install reads in the log as one that
+# stopped mid-step with no error. A pipeline IS waited for, so tee always drains
+# before exit. Nothing here suspends errexit: pipefail makes the pipeline carry
+# the handoff status, and errexit then exits this script with it.
+run_install() {
+    RELEASE_URL="https://getjoinery.com/utils/latest_release"
+    WORKDIR="/opt/joinery-install"
 
-RELEASE_URL="https://getjoinery.com/utils/latest_release"
-WORKDIR="/opt/joinery-install"
+    echo "=== Joinery first-boot install: $(date -u) ==="
 
-echo "=== Joinery first-boot install: $(date -u) ==="
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y -qq curl ca-certificates tar
 
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq curl ca-certificates tar
+    rm -rf "$WORKDIR"
+    mkdir -p "$WORKDIR"
 
-rm -rf "$WORKDIR"
-mkdir -p "$WORKDIR"
+    echo "Fetching the current release..."
+    if ! curl -sfL --max-time 300 "$RELEASE_URL" | tar xz -C "$WORKDIR"; then
+        echo "ERROR: could not fetch the release archive from $RELEASE_URL" >&2
+        exit 1
+    fi
 
-echo "Fetching the current release..."
-if ! curl -sfL --max-time 300 "$RELEASE_URL" | tar xz -C "$WORKDIR"; then
-    echo "ERROR: could not fetch the release archive from $RELEASE_URL" >&2
-    exit 1
-fi
+    HANDOFF="$WORKDIR/maintenance_scripts/install_tools/linode_stackscript.sh"
+    if [ ! -f "$HANDOFF" ]; then
+        echo "ERROR: the release archive does not contain linode_stackscript.sh" >&2
+        exit 1
+    fi
 
-HANDOFF="$WORKDIR/maintenance_scripts/install_tools/linode_stackscript.sh"
-if [ ! -f "$HANDOFF" ]; then
-    echo "ERROR: the release archive does not contain linode_stackscript.sh" >&2
-    exit 1
-fi
+    # The UDF is named ..._PASSWORD so Linode masks it; the handoff script knows
+    # it by its real name. This rename is the one translation the wrapper does.
+    export JOINERY_LINODE_TOKEN="${JOINERY_LINODE_TOKEN_PASSWORD:-}"
+    unset JOINERY_LINODE_TOKEN_PASSWORD
 
-# The UDF is named ..._PASSWORD so Linode masks it; the handoff script knows it
-# by its real name. This rename is the one piece of translation the wrapper does.
-export JOINERY_LINODE_TOKEN="${JOINERY_LINODE_TOKEN_PASSWORD:-}"
-unset JOINERY_LINODE_TOKEN_PASSWORD
+    chmod +x "$HANDOFF"
+    # Replaces this subshell, so the pipeline - and tee - outlive the handoff
+    # and drain it to the end.
+    exec bash "$HANDOFF"
+}
 
-chmod +x "$HANDOFF"
-exec bash "$HANDOFF"
+run_install 2>&1 | tee -a /var/log/stackscript.log
