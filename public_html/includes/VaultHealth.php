@@ -18,6 +18,14 @@
  * (logic/vault_setup_verify_logic.php) and via the CLI equivalent,
  * maintenance_scripts/dev_tools/check_vault_health.php.
  *
+ * Each check reads its host facts through a parameter with a live default,
+ * so tests/vault/vault_health_test.php can hand it a fixture and cover every
+ * branch on any box.
+ *
+ * @version 1.1 - specs/vault_exposure_quick_fixes.md Q2-Q4: the core-dump check
+ *                reads kernel.core_pattern (apport ignores the rlimit); the swap
+ *                check confirms dm-crypt from sysfs and accepts zram; a fourth
+ *                check keeps exception arguments out of the log
  * @version 1.0
  */
 class VaultHealth {
@@ -31,6 +39,7 @@ class VaultHealth {
 		return [
 			self::checkApcuAnonymous(),
 			self::checkCoredumpsDisabled(),
+			self::checkExceptionArgs(),
 			self::checkSwapSafe(),
 		];
 	}
@@ -55,41 +64,131 @@ class VaultHealth {
 	}
 
 	/**
-	 * The PHP worker's core-dump size limit must be 0 - a crash while the
-	 * vault window is open must not write the unwrapped key to a core file.
-	 * PHP has no getrlimit() without a dedicated extension, so this shells
-	 * out to `ulimit -c`, which a forked child inherits from the running
-	 * worker's actual limit.
+	 * A crash while the vault window is open must not write the unwrapped key
+	 * anywhere. Two facts decide it. The worker's core-dump size limit
+	 * (`ulimit -c`, which a forked child inherits from the running worker) is
+	 * the whole story only when kernel.core_pattern names a file. When it is a
+	 * pipe the kernel hands the core to the named handler regardless of the
+	 * rlimit: Ubuntu's apport reads the whole core from stdin into its
+	 * /var/crash report, so a box with apport enabled keeps cores whatever the
+	 * limit says; systemd-coredump honours the limit, so there the rlimit
+	 * check stands; any other handler is unknown territory.
+	 *
+	 * @param array|null $facts Injected facts for tests; see coredumpFacts().
 	 */
-	public static function checkCoredumpsDisabled(): array {
+	public static function checkCoredumpsDisabled(?array $facts = null): array {
 		$key = 'coredumps_disabled';
-		$label = 'PHP worker core dumps are disabled (rlimit_core = 0)';
-		if (!function_exists('exec')) {
-			return ['key' => $key, 'label' => $label, 'state' => 'unknown', 'reason' => 'exec() is disabled - cannot check the worker rlimit.'];
+		$label = 'PHP worker core dumps are disabled';
+		$facts = $facts ?? self::coredumpFacts();
+		$rlimit = $facts['rlimit'];
+		$pattern = trim((string)($facts['core_pattern'] ?? ''));
+
+		if ($pattern !== '' && $pattern[0] === '|') {
+			$handler = trim(substr($pattern, 1));
+			if (strpos($handler, 'apport') !== false) {
+				if ($facts['apport_enabled'] === null) {
+					return ['key' => $key, 'label' => $label, 'state' => 'unknown',
+						'reason' => 'Cores are piped to apport and its state could not be read. Check /etc/default/apport and the apport unit on the host.'];
+				}
+				if ($facts['apport_enabled']) {
+					return ['key' => $key, 'label' => $label, 'state' => 'unmet',
+						'reason' => 'Cores are piped to apport, which keeps them in /var/crash whatever the rlimit says. On the host: sudo systemctl disable --now apport, and set enabled=0 in /etc/default/apport.'];
+				}
+				// apport is off: the pipe target discards, and the rlimit
+				// governs the plain core file apport would otherwise also write.
+			} elseif (strpos($handler, 'systemd-coredump') === false) {
+				return ['key' => $key, 'label' => $label, 'state' => 'unknown',
+					'reason' => 'Cores are piped to "' . $handler . '", which is not a handler this check knows. Confirm on the host that it discards them.'];
+			}
 		}
-		$output = [];
-		$status = null;
-		@exec('ulimit -c 2>&1', $output, $status);
-		$value = trim(implode('', $output));
-		if ($value === '0') {
+
+		if ($rlimit === null) {
+			return ['key' => $key, 'label' => $label, 'state' => 'unknown', 'reason' => 'Could not read the worker core-dump limit (exec() is disabled or ulimit gave no answer).'];
+		}
+		if ($rlimit === '0') {
 			return ['key' => $key, 'label' => $label, 'state' => 'verified', 'reason' => ''];
 		}
-		if ($value === '') {
-			return ['key' => $key, 'label' => $label, 'state' => 'unknown', 'reason' => 'Could not read the worker core-dump limit.'];
-		}
 		return ['key' => $key, 'label' => $label, 'state' => 'unmet',
-			'reason' => 'Core dump size limit is "' . $value . '", not 0 - set rlimit_core = 0 in the FPM pool.'];
+			'reason' => 'Core dump size limit is "' . $rlimit . '", not 0 - set rlimit_core = 0 in the FPM pool.'];
 	}
 
 	/**
-	 * Swap must be off, or every active swap device must be an encrypted
-	 * (dm-crypt/LUKS) mapping - an idle worker's pages holding the unwrapped
-	 * key must never land on an unencrypted disk.
+	 * The live facts checkCoredumpsDisabled() decides on.
+	 *
+	 * rlimit: the worker's `ulimit -c` as a string, null when unreadable.
+	 * core_pattern: /proc/sys/kernel/core_pattern (not namespaced, so inside a
+	 *   container this is the host's - which is the right thing to read).
+	 * apport_enabled: true when /etc/default/apport says enabled=1 AND the
+	 *   apport unit is active, false when either says off, null when neither
+	 *   could be read. Only consulted when the pattern pipes to apport.
 	 */
-	public static function checkSwapSafe(): array {
+	public static function coredumpFacts(): array {
+		$rlimit = null;
+		if (function_exists('exec')) {
+			$output = [];
+			$status = null;
+			@exec('ulimit -c 2>&1', $output, $status);
+			$value = trim(implode('', $output));
+			if ($value !== '') {
+				$rlimit = $value;
+			}
+		}
+
+		$pattern = @file_get_contents('/proc/sys/kernel/core_pattern');
+		$pattern = is_string($pattern) ? trim($pattern) : '';
+
+		$apport_enabled = null;
+		if (strpos($pattern, 'apport') !== false) {
+			$defaults = @file_get_contents('/etc/default/apport');
+			if (is_string($defaults)) {
+				$apport_enabled = (bool)preg_match('/^\s*enabled\s*=\s*1\s*$/m', $defaults);
+			}
+			if ($apport_enabled !== false && function_exists('exec')) {
+				$output = [];
+				$status = null;
+				@exec('systemctl is-active apport 2>/dev/null', $output, $status);
+				$state = trim(implode('', $output));
+				if ($state !== '') {
+					$apport_enabled = ($state === 'active') && ($apport_enabled ?? true);
+				}
+			}
+		}
+
+		return ['rlimit' => $rlimit, 'core_pattern' => $pattern, 'apport_enabled' => $apport_enabled];
+	}
+
+	/**
+	 * An uncaught exception's trace must not carry its arguments into the
+	 * error log: the secret key is a string argument on the VaultCrypto open
+	 * methods, and with zend.exception_ignore_args off the log would hold its
+	 * leading bytes. The ini is PHP_INI_ALL, so a test can flip it.
+	 */
+	public static function checkExceptionArgs(): array {
+		$key = 'exception_args_ignored';
+		$label = 'Exception traces omit their arguments (zend.exception_ignore_args = On)';
+		$value = ini_get('zend.exception_ignore_args');
+		if (filter_var($value, FILTER_VALIDATE_BOOLEAN)) {
+			return ['key' => $key, 'label' => $label, 'state' => 'verified', 'reason' => ''];
+		}
+		return ['key' => $key, 'label' => $label, 'state' => 'unmet',
+			'reason' => 'zend.exception_ignore_args is off - a logged exception carries the key bytes it was called with. Set zend.exception_ignore_args = On in php.ini.'];
+	}
+
+	/**
+	 * Swap must be off, or every active swap device must be one whose pages
+	 * never reach disk in the clear - an idle worker's pages holding the
+	 * unwrapped key must not land on an unencrypted disk. Every device-mapper
+	 * device states its type in /sys/block/dm-N/dm/uuid: CRYPT- is dm-crypt
+	 * (verified), LVM- is a plain logical volume (unmet). zram is compressed
+	 * RAM and only reaches disk with its writeback feature, which no distro
+	 * enables by default (verified).
+	 *
+	 * @param string $proc_swaps Path of /proc/swaps, or a fixture.
+	 * @param string $sys_block  Path of /sys/block, or a fixture tree.
+	 */
+	public static function checkSwapSafe(string $proc_swaps = '/proc/swaps', string $sys_block = '/sys/block'): array {
 		$key = 'swap_off_or_encrypted';
 		$label = 'Swap is off, or every active swap device is encrypted';
-		$proc_swaps = '/proc/swaps';
 		if (!is_readable($proc_swaps)) {
 			return ['key' => $key, 'label' => $label, 'state' => 'unknown', 'reason' => '/proc/swaps is not readable on this host.'];
 		}
@@ -103,15 +202,30 @@ class VaultHealth {
 		}
 		foreach ($devices as $line) {
 			$path = trim(explode(' ', $line)[0] ?? '');
-			// Heuristic: an encrypted swap device is mapped through dm-crypt,
-			// which always shows up under /dev/mapper/.
-			if (strpos($path, '/dev/mapper/') !== 0) {
-				return ['key' => $key, 'label' => $label, 'state' => 'unmet',
-					'reason' => 'Active swap device "' . $path . '" is not a dm-crypt mapping - verify it is encrypted.'];
+			$real = @realpath($path);
+			$name = basename($real !== false ? $real : $path);
+
+			if (strpos($name, 'zram') === 0) {
+				continue;
 			}
+			if (strpos($name, 'dm-') === 0) {
+				$uuid = @file_get_contents($sys_block . '/' . $name . '/dm/uuid');
+				if (!is_string($uuid) || trim($uuid) === '') {
+					return ['key' => $key, 'label' => $label, 'state' => 'unknown',
+						'reason' => 'Active swap device "' . $path . '" is a device-mapper device whose type could not be read from sysfs.'];
+				}
+				$uuid = trim($uuid);
+				if (strpos($uuid, 'CRYPT-') === 0) {
+					continue;
+				}
+				$type = explode('-', $uuid)[0];
+				return ['key' => $key, 'label' => $label, 'state' => 'unmet',
+					'reason' => 'Active swap device "' . $path . '" is a ' . $type . ' mapping, not dm-crypt - its pages reach disk in the clear.'];
+			}
+			return ['key' => $key, 'label' => $label, 'state' => 'unmet',
+				'reason' => 'Active swap device "' . $path . '" is a plain device - its pages reach disk in the clear. Encrypt it (the installer\'s housekeeping does this) or turn swap off.'];
 		}
-		return ['key' => $key, 'label' => $label, 'state' => 'unknown',
-			'reason' => 'Swap is active on an encrypted-looking (dm-crypt) device - encryption could not be independently confirmed from PHP.'];
+		return ['key' => $key, 'label' => $label, 'state' => 'verified', 'reason' => ''];
 	}
 }
 ?>

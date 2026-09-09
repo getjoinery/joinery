@@ -5,6 +5,9 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.24 - parse_check_status_ssh_output reads the Swap: line of free -m it always
+ *                 received (swap_total_mb, swap_used_mb), so a node's swap pressure is a
+ *                 recorded fact and not a guess (specs/vault_exposure_quick_fixes.md Q5)
  * @version 1.23 - process_apply_update keeps the node's own refusal or failure reason instead of
  *                 replacing it with the version verdict; the probe only confirms the version
  *                 did not move.
@@ -618,6 +621,11 @@ class JobResultProcessor {
 			$result['memory_total_mb'] = intval($m[1]);
 			$result['memory_used_mb']  = intval($m[2]);
 			$result['memory_free_mb']  = intval($m[3]);
+		}
+		// A swapless box prints "Swap: 0 0 0" - a real reading of zero, kept.
+		if (preg_match('/Swap:\s+(\d+)\s+(\d+)\s+(\d+)/m', $output, $m)) {
+			$result['swap_total_mb'] = intval($m[1]);
+			$result['swap_used_mb']  = intval($m[2]);
 		}
 
 		if (preg_match('/up\s+(.+?),\s+\d+\s+user/m', $output, $m)) {

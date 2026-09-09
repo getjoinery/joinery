@@ -48,6 +48,7 @@ section('The machine key contract');
 $machine_keys = array(
 	'disk_usage_percent', 'disk_total', 'disk_used', 'disk_available',
 	'memory_total_mb', 'memory_free_mb', 'memory_used_mb',
+	'swap_total_mb', 'swap_used_mb',
 );
 check(NodeHealthProbe::MACHINE_KEYS === $machine_keys,
 	'the machine key set matches what the agent primitive and the resolver publish',
@@ -66,6 +67,8 @@ $live = json_encode(array(
 	'memory_total_mb'    => 961,
 	'memory_free_mb'     => 126,
 	'memory_used_mb'     => 835,
+	'swap_total_mb'      => 0,
+	'swap_used_mb'       => 0,
 ));
 $facts = NodeHealthProbe::facts_from_body($live);
 
