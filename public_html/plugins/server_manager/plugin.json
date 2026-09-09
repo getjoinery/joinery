@@ -213,7 +213,12 @@
       "helptext": "Path to the joinery-agent source checkout on this management node. When set (or when the default /home/user1/joinery-agent exists), publishing a release rebuilds and signs the bundled agent artifact; otherwise the previously bundled artifact carries forward.",
       "group": "publishing",
       "label": "Agent source path",
-      "type": "text"
+      "type": "text",
+      "vault_gated": true,
+      "validation": {
+        "pattern": "/^(?:\\\/[A-Za-z0-9._-]+)+\\\/?$/",
+        "messages": { "pattern": "An absolute path made of letters, digits, dots, _ and -." }
+      }
     },
     {
       "name": "server_manager_fleet_backup_enabled",

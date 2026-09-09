@@ -169,16 +169,15 @@ domain's consent.
 Ordered by likelihood of the route each closes. S-numbers are stable for
 tracking. B-numbers are findings; B1–B6 are described in
 `vault_key_memory_exposure.md`, B7–B11 below, Q-numbers in
-`vault_exposure_quick_fixes.md`. **S12 is built** (committed c6b89dd8,
-2026-09-09, applied on both fleet hosts) and **S1, S15 and S20 are built**
-(2026-09-09, uncommitted); everything else is open and the owner is investigating and
-adding.
+`vault_exposure_quick_fixes.md`. A row marked Closed is finished and its
+record lives in `implemented/security_inventory_closures_2026_09.md`;
+everything else is open and the owner is investigating and adding.
 
 | # | Item | Closes | Size |
 |---|---|---|---|
-| S1 | **DONE 2026-09-09.** Agent-files editor: a target name is one plain basename ending in `.md`, one dot, nothing else (B5). `AgentFile::validate_target_filename()`, pinned by `tests/security/agent_file_target_name_test.php` | admin session → code | one function |
-| S2 | Settings: refuse executable extensions in `allowed_upload_extensions`; refuse a `composerAutoLoad` outside `vendor/`; both become credential events (step-up, audit, `lockAll`) (B6) | admin session → code | small |
-| S3 | Grep the tree for every setting or admin page whose value becomes a path handed to `require`, `include`, `exec`, `proc_open` or `ZipArchive::open`; add each to S2's treatment | the class behind B5/B6 | inventory |
+| S1 | Closed 2026-09-09 (2429131f). Agent-files editor target names are one folder name ending in `.md` (B5) — closures spec § S1 | admin session → code | one function |
+| S2 | Closed 2026-09-09. Path-bearing settings carry a validation pattern and are vault gated; the theme-name sink refuses a bad name (B6) — closures spec § S2 | admin session → code | small |
+| S3 | Closed 2026-09-09. The sweep and every verdict — closures spec § S3 | the class behind B5/B6 | inventory |
 | S4 | `totp_require_admins`: default on for managed nodes, or the protection ceremony reports "N admins have no second factor" as information with an in-place fix (never a gate, per the declined item) | route 1 | owner decision + small |
 | S5 | Extractor subprocess under its own uid with no write to the webroot (a `joinery-extract` user, or `systemd-run` with `ProtectSystem=strict` and `PrivateNetwork`) | route 2 | medium, per node |
 | S6 | Postfix pipe under a uid that can write only the attachment store and the DB, not the tree; falls out of Mitigation C if C lands first | route 2 | medium, install + fleet |
@@ -187,15 +186,15 @@ adding.
 | S9 | Mitigation B: signed plugin and theme packages, vendor inside the archive (B3), site-local root-held key | admin session → code | large |
 | S10 | Mitigation C: web user cannot write the tree (B4); makes S5/S6 structural | persistence after any break-in | large, agent-migration territory |
 | S11 | CSP on with nonces, dropping `'unsafe-inline'` (`project_csp_phase1`) | defence in depth for route 1 | medium |
-| S12 | **DONE 2026-09-09, c6b89dd8.** Quick fixes Q1–Q6 (`vault_exposure_quick_fixes.md`): index file mode, 1 GB encrypted swap, apport off, core-dump check, `exception_ignore_args`, doc sentences. Both fleet hosts converted; open there: a reboot proof, dev's own conversion, the agent release that carries swap telemetry | residue, route 3 in § Ranked | small each |
+| S12 | Closed 2026-09-09 (c6b89dd8). Quick fixes Q1–Q6 — `vault_exposure_quick_fixes.md`, which stays open for its gates: a reboot proof, dev's own conversion, the agent release carrying swap telemetry | residue, route 3 in § Ranked | small each |
 | S13 | Mitigation A: the unseal daemon | long-term key never in the pool; the only close for disk-image residue | large, after agent migration |
 | S14 | Forward loop guard: stamp `Auto-Submitted: auto-forwarded` on filter forwards, refuse to forward a message that carries it or our own `X-Forwarded-By`, and cap hops (B7) | mail loop started by a stranger | small |
-| S15 | **DONE 2026-09-09.** `remember`, `forget`, `save_note`, `set_workspace` are mutating in `RiskHeuristic` (`STATE_WRITE_TOOLS`) and each renders its approval card, so chat queues them (B8). Pinned by `plugins/joinery_ai/tests/untrusted_envelope_test.php` | unapproved AI writes | one function |
+| S15 | Closed 2026-09-09 (2429131f). Memory, note and workspace writes are mutating and render their card, so chat queues them (B8) — closures spec § S15 | unapproved AI writes | one function |
 | S16 | Agent-mode recipes that read untrusted content queue their writes instead of executing inline, or lose the write tools; the standing approval covers pipeline verdicts only (B8) | unattended AI action on mail | medium |
 | S17 | `EmailScheduleJob` writes a *proposed* calendar entry the owner confirms, not a live row (B8) | attacker-authored calendar entries | small |
 | S18 | Memory writes from a turn that read untrusted content are held for approval, or marked so recall shows their provenance (B9) | memory poisoning | small to medium |
 | S19 | `consentTrustFloor()` honours the domain's `local|trusted|cloud` consent for Standard mail, not only sealed mail (B10) | mail leaving the box against the consent setting | small |
-| S20 | **DONE 2026-09-09.** `UntrustedEnvelope` is the one place the markers are built; it rewrites any `<<UNTRUSTED_`/`<</UNTRUSTED_` token inside content before wrapping, and the test fails on a hand-built marker anywhere in the plugin (B11) | envelope escape | one class, nine sites |
+| S20 | Closed 2026-09-09 (2429131f). The untrusted markers are built in one place and any marker inside content is rewritten (B11) — closures spec § S20 | envelope escape | one class |
 | S21 | Direct on Private/Fortress: bound what an unapproved stranger can spool per sender, not only in total | storage from strangers | small |
 
 

@@ -10,7 +10,8 @@
 	require_once(PathHelper::getIncludePath('data/points_class.php'));
 
 	$settings = Globalvars::get_instance();
-	$node_dir = $settings->get_setting('node_dir');
+	// Quoted once here: every exec() below splices it into a shell command.
+	$node_dir = escapeshellarg(rtrim((string)$settings->get_setting('node_dir'), '/'));
 
 	if($_REQUEST['point']){
 		if(!FormWriter::honeypot_check($_REQUEST)){
