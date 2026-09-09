@@ -652,7 +652,11 @@ private static function UcAddress($string) {
 			$dbhelper->handle_query_error($e);
 		}
 
-		$optionvals = array();
+		// UTC belongs to no country, so the zone table has no row for it,
+		// yet it is the factory default_timezone and what every stored time
+		// is in. A list without it renders that default unselected, and the
+		// first save writes the first zone alphabetically back instead.
+		$optionvals = $country_code ? array() : array('UTC' => 'UTC');
 		while ($zone = $q->fetch()) {
 			$optionvals[$zone->zone_name] = $zone->zone_name;
 		}

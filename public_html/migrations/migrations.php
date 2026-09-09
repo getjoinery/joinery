@@ -1386,3 +1386,23 @@
 	$migration['migration_file'] = 'spam_learning_on_by_default.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// The site root sends visitors to sign in and members to /profile. Rows
+	// still at the old blank factory default move, unless the active theme
+	// ships its own homepage, in which case blank is the right value.
+	$migration = array();
+	$migration['database_version'] = '181';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'homepage_defaults_login_and_profile.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
+	// default_comment_status was seeded as 'Approved' while its options and
+	// its reader say 'approved', so installs at the factory value never
+	// auto-approved a comment. Rows at the miscased value take the real one.
+	$migration = array();
+	$migration['database_version'] = '182';
+	$migration['test'] = "SELECT CASE WHEN EXISTS(SELECT 1 FROM stg_settings WHERE stg_name = 'default_comment_status' AND stg_value = 'Approved') THEN 0 ELSE 1 END AS count";
+	$migration['migration_file'] = NULL;
+	$migration['migration_sql'] = "UPDATE stg_settings SET stg_value = 'approved', stg_update_time = now() WHERE stg_name = 'default_comment_status' AND stg_value = 'Approved'";
+	$migrations[] = $migration;

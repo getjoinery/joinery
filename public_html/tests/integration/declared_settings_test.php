@@ -103,6 +103,22 @@ check(empty($bad_patterns),
 	'every declared pattern compiles',
 	implode(', ', $bad_patterns));
 
+// A select whose default is not among its options renders with nothing
+// selected, and the next save of that page writes the first option back —
+// the factory value evaporates the first time an operator touches settings.
+$orphan_defaults = array();
+foreach (SettingsDeclarations::all() as $name => $d) {
+	if (($d['type'] ?? '') !== 'select' || ($d['default'] ?? '') === '') continue;
+	$options = SettingsDeclarations::resolveOptions($d);
+	if (empty($options)) continue; // options_from that cannot resolve here is section F's concern
+	if (!array_key_exists($d['default'], $options)) {
+		$orphan_defaults[] = $name . ' => ' . $d['default'];
+	}
+}
+check(empty($orphan_defaults),
+	'every select default is one of its own options',
+	implode(', ', $orphan_defaults));
+
 
 // =========================================================================
 section('C. A declared rule binds every page');

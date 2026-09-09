@@ -1029,7 +1029,7 @@
     },
     {
       "name": "default_comment_status",
-      "default": "Approved",
+      "default": "approved",
       "group": "blog",
       "label": "Default comment status",
       "type": "select",
@@ -1253,22 +1253,22 @@
     },
     {
       "name": "alternate_homepage",
-      "default": "",
+      "default": "/login",
       "group": "cms",
       "label": "Page to use as the homepage",
       "type": "select",
       "options_from": "CoreSettingOptions::homepageTargets",
       "options_include": "includes/CoreSettingOptions.php",
       "empty_option": true,
-      "helptext": "Optional. Leave blank to use the built-in homepage."
+      "helptext": "Where a visitor who is not signed in lands at the site root. The factory default sends them to the sign-in page. Leave blank only when the active theme ships its own homepage."
     },
     {
       "name": "alternate_loggedin_homepage",
-      "default": "",
+      "default": "/profile",
       "group": "cms",
       "label": "Page to use as the signed-in homepage",
       "type": "text",
-      "helptext": "Optional. A path, e.g. /dashboard."
+      "helptext": "Where a signed-in member lands at the site root. A path, e.g. /profile or /profile/mailbox. Blank falls back to the homepage above."
     },
     {
       "name": "api_allowed_origins",

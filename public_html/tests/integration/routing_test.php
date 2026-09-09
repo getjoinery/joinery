@@ -182,8 +182,10 @@ class HttpRoutingTestRunner {
         section('1. TESTING PUBLIC PAGES');
         
         $test_cases = [
-            // Homepage - always test this
-            ['/', 200, 'Homepage'],
+            // Homepage - always test this. The root renders a page or sends
+            // the visitor on (the factory homepage is a redirect to /login);
+            // either is a routed answer, a 404 or 500 is not.
+            ['/', [200, 302], 'Homepage'],
         ];
         
         // Check for actual view files that exist

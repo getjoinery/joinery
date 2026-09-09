@@ -385,4 +385,29 @@ check($res->redirect !== '/verify-totp' && !login_is_retry($res),
 	'cadence sensitive_only signs in without asking the factor at the door',
 	'redirect: ' . var_export($res->redirect, true));
 
+// ---------------------------------------------------------------------------
+section('Already signed in');
+
+// The session above is signed in. The factory public homepage is /login, and
+// the site root falls back to it when the signed-in homepage is blank, so a
+// member arriving here is sent where a successful login would have gone
+// rather than shown a login form.
+harness_set_setting_mem('alternate_loggedin_homepage', '');
+$res = harness_call_logic('logic/login_logic.php', 'login_logic', array(), 'GET');
+check($res->redirect === '/profile',
+	'a signed-in visitor to the sign-in page is sent to /profile',
+	'redirect: ' . var_export($res->redirect, true));
+
+harness_set_setting_mem('alternate_loggedin_homepage', '/profile/mailbox');
+$res = harness_call_logic('logic/login_logic.php', 'login_logic', array(), 'GET');
+check($res->redirect === '/profile/mailbox',
+	'the signed-in homepage setting decides where they go',
+	'redirect: ' . var_export($res->redirect, true));
+
+$_SESSION = array();
+$res = harness_call_logic('logic/login_logic.php', 'login_logic', array(), 'GET');
+check($res->redirect === null,
+	'a signed-out visitor still gets the form',
+	'redirect: ' . var_export($res->redirect, true));
+
 harness_finish();

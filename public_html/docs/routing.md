@@ -181,6 +181,9 @@ PHP closures for complex logic. Return `true` if handled, `false` to continue to
 
 ## Common Patterns
 
+### The site root
+`/` is a custom route driven by two settings. `alternate_homepage` (factory `/login`) is where a visitor who is not signed in lands; `alternate_loggedin_homepage` (factory `/profile`) is where a member lands, and falls back to the public one when blank. A value of `/blog` or `/page/{slug}` renders that content at the root; any other path is a 302 to it. Both blank renders the built-in `views/index.php` through the theme chain, which is the right state only for a theme that ships its own homepage. A signed-in member who reaches `/login` is sent to the signed-in homepage.
+
 ### Simple public page
 ```
 views/notifications.php          → /notifications
