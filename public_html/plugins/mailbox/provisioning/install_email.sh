@@ -16,6 +16,15 @@
 #                MySQL server that was never there, printing two ERROR lines into
 #                every install log. Only the report tooling wants that database
 #                and nothing here runs it
+# Version: 2.16 - Honour the recorded listener decommission. This script is the
+#                declared host_installer and runs on EVERY deploy, so its
+#                unconditional enable/start of postfix, opendkim and opendmarc
+#                (and its ufw allow 25/tcp) undid the decommission on every
+#                upgrade - the box came back with the whole local mail stack
+#                running and re-armed for boot. Configuration is still converged;
+#                only service arming and the port-25 rule are skipped, and the
+#                skip re-asserts the decommission so a deploy heals a drifted box.
+#                All postfix arming moved into section 8 so there is one gate.
 # Version: 2.15 - The sqlite3 package is named for the PHP actually on the box,
 #                not pinned to 8.3, so provisioning on any other PHP stops asking
 #                apt for a package that does not exist there
@@ -264,8 +273,9 @@ else
     echo "All mail packages already installed."
 fi
 
-systemctl enable postfix >/dev/null 2>&1 || true
-systemctl start postfix  >/dev/null 2>&1 || true
+# Postfix is NOT armed here. All of its service arming lives in section 8, in
+# one place, behind the decommission guard - a box whose local listener is
+# decommissioned must come out of this script still decommissioned.
 
 # --- 2. master.cf: joinery pipe transport (assert, self-repairing) -----------
 # The transport must run the CURRENT handler with a usable php binary. Asserting
@@ -380,6 +390,74 @@ if [[ "${TABLE_CHECK}" != "t" ]]; then
     echo "       Activate the Mailbox plugin and run update_database, then re-run this script." >&2
     exit 1
 fi
+
+# --- the decommission guard --------------------------------------------------
+# A relay-fronted box can have its own mail listener deliberately removed from
+# the Setup tab (specs/mailbox_listener_decommission.md), which stops and
+# disables postfix/opendkim/opendmarc and shuts port 25. This script is the
+# mailbox plugin's declared host_installer, so it RUNS ON EVERY DEPLOY - and
+# without this guard each deploy silently re-enabled and restarted all three and
+# reopened the firewall, undoing the decommission and leaving the setup check
+# reporting "recorded as decommissioned, but ... is running".
+#
+# Configuration is still written on a decommissioned box: main.cf, master.cf,
+# the maps, the milter config and the DKIM tables must stay converged so Restore
+# brings back a correct listener rather than a stale one. Only the ARMING -
+# enable, start, restart, and the port-25 firewall rule - is skipped.
+#
+# The recorded setting is the intent and is what we read. db_psql authenticates
+# from the site's own config, not the caller's environment, so nothing about how
+# this script was invoked can break the read.
+#
+# READ FAILURE MUST NOT FAIL OPEN. The setting is seeded into stg_settings from
+# plugin.json, so it is normally present. If the query itself fails, swallowing
+# the error would leave LISTENER_RECORDED empty, the guard would read that as
+# "not decommissioned", and this script would re-arm the very box it is meant to
+# leave alone - the exact bug it exists to prevent. So the query is checked the
+# same way TABLE_CHECK above is: a failure stops the script. A SUCCESSFUL query
+# returning no row is a different thing (a box whose seed has not run yet) and
+# is the factory state, 'active'.
+LISTENER_RECORDED="$(db_psql -c "SELECT stg_value FROM stg_settings WHERE stg_name = 'mailbox_local_listener'" 2>&1)" || {
+    echo "ERROR: could not read the recorded mail listener state from '${DBNAME}': ${LISTENER_RECORDED}" >&2
+    echo "       Refusing to continue: this script arms postfix, opendkim and opendmarc, and" >&2
+    echo "       without that setting it cannot tell whether this box's listener was" >&2
+    echo "       deliberately decommissioned. Fix database access and re-run." >&2
+    exit 1
+}
+LISTENER_RECORDED="$(printf '%s' "${LISTENER_RECORDED}" | head -1 | tr -d '[:space:]')"
+if [[ "${LISTENER_RECORDED,,}" == "decommissioned" ]]; then
+    LISTENER_DECOMMISSIONED=1
+    echo
+    echo "listener: recorded as DECOMMISSIONED - configuration will be converged, but"
+    echo "          postfix, opendkim and opendmarc will NOT be enabled or started and"
+    echo "          port 25 will NOT be reopened. Restore from the Setup tab's Relay"
+    echo "          section to put local mail back."
+    echo
+else
+    LISTENER_DECOMMISSIONED=0
+fi
+
+# Arm one mail-stack service, unless the listener is decommissioned.
+# Returns 0 either way: a deliberate skip is not a failure.
+arm_service() {
+    local svc="$1"
+    if [[ "${LISTENER_DECOMMISSIONED}" -eq 1 ]]; then
+        # Re-ASSERT the decommission rather than merely declining to undo it, so
+        # a deploy heals a box where something else started the service. This is
+        # the same verb the Setup tab's Decommission runs.
+        systemctl disable --now "${svc}" >/dev/null 2>&1 || true
+        echo "${svc}: stopped and disabled (listener decommissioned)."
+        return 0
+    fi
+    systemctl enable "${svc}" >/dev/null 2>&1 || true
+    if command -v systemctl >/dev/null 2>&1 && systemctl restart "${svc}" 2>/dev/null; then
+        echo "${svc}: restarted (systemd)."
+    elif command -v service >/dev/null 2>&1 && service "${svc}" restart >/dev/null 2>&1; then
+        echo "${svc}: restarted (service)."
+    else
+        echo "WARNING: could not restart ${svc} automatically - restart it manually." >&2
+    fi
+}
 
 # Role name carries the database name so multiple sites on one PostgreSQL
 # cluster never collide on a shared role.
@@ -613,23 +691,8 @@ postconf -e "smtpd_milters = inet:localhost:8891, inet:localhost:8893"
 postconf -e "non_smtpd_milters = inet:localhost:8891"
 echo "main.cf: milters wired (opendkim:8891 then opendmarc:8893; default action accept)"
 
-systemctl enable opendkim >/dev/null 2>&1 || true
-if command -v systemctl >/dev/null 2>&1 && systemctl restart opendkim 2>/dev/null; then
-    echo "opendkim: restarted (systemd)."
-elif command -v service >/dev/null 2>&1 && service opendkim restart >/dev/null 2>&1; then
-    echo "opendkim: restarted (service)."
-else
-    echo "WARNING: could not restart opendkim automatically - restart it manually." >&2
-fi
-
-systemctl enable opendmarc >/dev/null 2>&1 || true
-if command -v systemctl >/dev/null 2>&1 && systemctl restart opendmarc 2>/dev/null; then
-    echo "opendmarc: restarted (systemd)."
-elif command -v service >/dev/null 2>&1 && service opendmarc restart >/dev/null 2>&1; then
-    echo "opendmarc: restarted (service)."
-else
-    echo "WARNING: could not restart opendmarc automatically - restart it manually." >&2
-fi
+arm_service opendkim
+arm_service opendmarc
 
 # --- 5b. local spam scanner (ships with the mail stack) -----------------------
 # The scanner is part of the mail stack, unconditionally: every box this script
@@ -650,7 +713,15 @@ else
 fi
 
 # --- 6. firewall -------------------------------------------------------------
-if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+# Never reopen 25/tcp on a decommissioned box: closing it is half of what the
+# decommission did, and nothing would be listening behind it anyway.
+if [[ "${LISTENER_DECOMMISSIONED}" -eq 1 ]]; then
+    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+        ufw delete allow 25/tcp >/dev/null 2>&1 || true
+        ufw deny 25/tcp >/dev/null 2>&1 || true
+    fi
+    echo "firewall: 25/tcp kept closed (listener decommissioned)."
+elif command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
     ufw allow 25/tcp >/dev/null 2>&1 || true
     echo "firewall: ufw allow 25/tcp"
 fi
@@ -668,12 +739,20 @@ fi
 # inet_interfaces and milter changes need a full restart, not a reload. Prefer
 # systemd when present; fall back to the `postfix` command for containers.
 if postfix check; then
-    if command -v systemctl >/dev/null 2>&1 && systemctl restart postfix 2>/dev/null; then
-        echo "Postfix configuration validated and restarted (systemd)."
+    if [[ "${LISTENER_DECOMMISSIONED}" -eq 1 ]]; then
+        # Validated, converged, and deliberately left down. `postfix check` is
+        # still worth running: it proves the config a Restore would bring up.
+        systemctl disable --now postfix >/dev/null 2>&1 || true
+        echo "Postfix configuration validated; stopped and disabled (listener decommissioned)."
     else
-        postfix stop 2>/dev/null || true
-        postfix start
-        echo "Postfix configuration validated and (re)started."
+        systemctl enable postfix >/dev/null 2>&1 || true
+        if command -v systemctl >/dev/null 2>&1 && systemctl restart postfix 2>/dev/null; then
+            echo "Postfix configuration validated and restarted (systemd)."
+        else
+            postfix stop 2>/dev/null || true
+            postfix start
+            echo "Postfix configuration validated and (re)started."
+        fi
     fi
 else
     echo "WARNING: 'postfix check' reported problems - NOT restarting. Review above." >&2
