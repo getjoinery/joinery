@@ -211,6 +211,16 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
 
+	// A member who is already signed in has nothing to do on the sign-in
+	// form. Send them where a successful login would have. The site root
+	// falls back to the public homepage when the signed-in one is blank, and
+	// the factory public homepage is this page, so without this a member
+	// with that setting cleared would land on a login form while logged in.
+	if ($session->is_logged_in()) {
+		$alternate_homepage = $settings->get_setting('alternate_loggedin_homepage');
+		return LogicResult::redirect($alternate_homepage ?: '/profile');
+	}
+
 	$login_messages = array(
 		'email_verified'=>'Your email is now verified.  Please log in to improve your profile.',
 		'email_not_verified'=>'Your email address was unable to be verified because of an incorrect or expired verification code.  Please log in to resend your verification code',

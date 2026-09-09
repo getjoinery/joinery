@@ -264,6 +264,9 @@ $routes = [
         //   - "/blog"          -> render blog view here
         //   - "/page/{slug}"   -> render that page's contents here
         //   - any other URL    -> 302 redirect to it (so the front controller routes it normally)
+        // Factory defaults are /login and /profile: most installs exist for
+        // mail and members, so the built-in welcome page is reached only when
+        // both settings are blank (a theme that ships its own views/index.php).
         '/' => function($params, $settings, $session, $template_directory) {
             $alternate_page = '';
             if($session->is_logged_in()){
