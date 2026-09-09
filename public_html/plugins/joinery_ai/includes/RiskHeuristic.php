@@ -10,11 +10,12 @@ require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
  * (specs/implemented/ai_action_queue.md, specs/ai_hot_turn_egress_approval.md);
  * everything else flows inline.
  *
- * Classification uses only signals that already exist — the generic write
- * tool names, the action descriptor's `mutates` flag, the web tools'
- * names, and the sealed-egress guard's hot flag — so there is no new
- * per-tool marking. An unknown or unresolvable action fails safe to mutating.
+ * Classification uses only signals that already exist — the write tool
+ * names, the action descriptor's `mutates` flag, the web tools' names, and
+ * the sealed-egress guard's hot flag — so there is no new per-tool marking.
+ * An unknown or unresolvable action fails safe to mutating.
  *
+ * @version 2.3 - memory, note and workspace writes are mutating (security_inventory S15)
  * @version 2.2
  */
 class RiskHeuristic {
@@ -24,6 +25,13 @@ class RiskHeuristic {
      *  plaintext has been opened in this process) that is the injection-
      *  exfiltration channel, so these calls stop flowing inline. */
     const WEB_EGRESS_TOOLS = ['fetch_url', 'web_search', 'get_stock_data'];
+
+    /** Tools that write state. The generic model writes, and the four that
+     *  write somewhere the next conversation reads from: a stored memory, a
+     *  note, the recipe workspace. A message the model just read can steer
+     *  any of them, so on a queuing surface none runs without the owner. */
+    const STATE_WRITE_TOOLS = ['create_model', 'update_model', 'delete_model',
+        'remember', 'forget', 'save_note', 'set_workspace'];
 
     /**
      * Is this call web egress that must be gated? True when the tool sends its
@@ -43,13 +51,13 @@ class RiskHeuristic {
 
     /**
      * Is this tool_use a mutating call the deferred-write boundary must
-     * queue? Generic writes always are; an invoke_action is when the action's
+     * queue? State writes always are; an invoke_action is when the action's
      * descriptor declares mutates — or cannot be resolved at all, which fails
      * safe to mutating rather than executing an unknown.
      */
     public static function isMutating(array $tool_use): bool {
         $name = $tool_use['name'] ?? '';
-        if (in_array($name, ['create_model', 'update_model', 'delete_model'], true)) {
+        if (in_array($name, self::STATE_WRITE_TOOLS, true)) {
             return true;
         }
         if ($name === 'invoke_action') {

@@ -1,5 +1,6 @@
 <?php
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolInterface.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/QueueableToolInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunContext.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_memories_class.php'));
 
@@ -13,7 +14,19 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_memories_cla
  * authority boundary and a prompt-injection defense (a poisoned memory can
  * only ever influence the one user whose chat wrote it).
  */
-class RememberTool implements RecipeToolInterface {
+class RememberTool implements RecipeToolInterface, QueueableToolInterface {
+
+    public function renderProposedAction(array $input): array {
+        $lines = ['Remember a fact in your private memory'];
+        if (trim((string)($input['title'] ?? '')) !== '') {
+            $lines[] = 'title: ' . ProposedActionFacts::scalar($input['title']);
+        }
+        $lines = array_merge($lines, ProposedActionFacts::verbatim('content', $input['content'] ?? ''));
+        if (!empty($input['tags'])) {
+            $lines[] = 'tags: ' . ProposedActionFacts::scalar($input['tags']);
+        }
+        return $lines;
+    }
 
     public static function name(): string {
         return 'remember';

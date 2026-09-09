@@ -98,7 +98,7 @@ class PipelineRunner {
             $label    = (string)($item['label'] ?? $item_key);
 
             $digest_content = $job->untrustedDigest()
-                ? "<<UNTRUSTED_{$ctx->untrustedNonce()}>>\n$digest\n<</UNTRUSTED_{$ctx->untrustedNonce()}>>"
+                ? UntrustedEnvelope::wrapBlock($digest, $ctx->untrustedNonce())
                 : $digest;
 
             // A provider that will not answer (candidates exhausted, or an

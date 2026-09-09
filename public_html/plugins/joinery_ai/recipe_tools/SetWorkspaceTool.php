@@ -1,5 +1,6 @@
 <?php
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolInterface.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/QueueableToolInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunContext.php'));
 
 /**
@@ -14,7 +15,12 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunCo
  * each call would cost an extra UPDATE per write; instead we just mutate the
  * in-memory Recipe — the runner picks it up at end of run.
  */
-class SetWorkspaceTool implements RecipeToolInterface {
+class SetWorkspaceTool implements RecipeToolInterface, QueueableToolInterface {
+
+    public function renderProposedAction(array $input): array {
+        return array_merge(['Overwrite the recipe workspace'],
+            ProposedActionFacts::verbatim('content', $input['content'] ?? ''));
+    }
 
     public static function name(): string {
         return 'set_workspace';

@@ -109,7 +109,7 @@ class RecallTool implements RecipeToolInterface {
 
         // Whole-payload untrusted wrap: memory content is stored text, data only.
         $nonce = $ctx->untrustedNonce();
-        return "<<UNTRUSTED_$nonce>>" . trim(implode("\n", $lines)) . "<</UNTRUSTED_$nonce>>";
+        return UntrustedEnvelope::wrap(trim(implode("\n", $lines)), $nonce);
     }
 
 }

@@ -260,8 +260,6 @@ class ModelQueryExecutor {
         if (empty($effective)) return $rows;
 
         $nonce = $ctx->untrustedNonce();
-        $open  = "<<UNTRUSTED_$nonce>>";
-        $close = "<</UNTRUSTED_$nonce>>";
 
         foreach ($rows as &$row) {
             foreach ($effective as $field) {
@@ -269,7 +267,7 @@ class ModelQueryExecutor {
                 $val = $row[$field];
                 if ($val === null) continue;
                 if (!is_string($val)) $val = json_encode($val, JSON_UNESCAPED_SLASHES);
-                $row[$field] = $open . $val . $close;
+                $row[$field] = UntrustedEnvelope::wrap($val, $nonce);
             }
         }
         return $rows;

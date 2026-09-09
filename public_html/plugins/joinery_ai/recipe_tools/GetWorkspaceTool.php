@@ -40,7 +40,7 @@ class GetWorkspaceTool implements RecipeToolInterface {
         // even though the recipe itself wrote it. Using the same nonce as
         // $ai_untrusted_fields so the LLM only learns one contract.
         $nonce = $ctx->untrustedNonce();
-        return "<<UNTRUSTED_$nonce>>$value<</UNTRUSTED_$nonce>>";
+        return UntrustedEnvelope::wrap($value, $nonce);
     }
 
 }
