@@ -2,7 +2,15 @@
 #
 # provision_dkim.sh - generate and wire one domain's DKIM signing key.
 #
-# Version: 1.3 - Removal mode deletes table lines in place (sed -E -i) instead
+# Version: 1.4 - Never START a stopped opendkim: both the add and remove paths
+#                restart it through one guard that skips a unit systemd reports
+#                as disabled. A box whose local listener is decommissioned has
+#                opendkim stopped and disabled on purpose, and `systemctl
+#                restart` resurrects a disabled unit - so generating or removing
+#                a key there used to leave a live daemon behind and the setup
+#                check reporting "recorded as decommissioned, but opendkim is
+#                running".
+#          1.3 - Removal mode deletes table lines in place (sed -E -i) instead
 #                of a grep -v pipeline: under set -e, grep -v exits 1 when it
 #                selects zero lines, which aborted --remove on any box where the
 #                target domain was the only table entry (the common single-domain
@@ -85,7 +93,20 @@ if ! getent group "${WEB_GROUP}" >/dev/null 2>&1; then
     WEB_GROUP="apache"
 fi
 
+# Make opendkim pick the table/key change up - but only on a box that still
+# runs it. A decommissioned local listener leaves opendkim stopped AND disabled
+# (joinery-mail-listener off), and `systemctl restart` starts a disabled unit
+# just as readily as an enabled one: resurrecting it there would contradict the
+# recorded state and put a live daemon back on a box that reported it gone.
+# Only "disabled" is treated as decommissioned - a merely crashed opendkim on a
+# live box is still enabled, and is restarted as before.
 restart_opendkim() {
+    if command -v systemctl >/dev/null 2>&1 \
+            && systemctl is-enabled opendkim 2>/dev/null | grep -qx 'disabled'; then
+        echo "opendkim: disabled on this box (local mail listener decommissioned) - left stopped."
+        echo "          The key is on disk; in-app signing and the relay read it directly."
+        return 0
+    fi
     if command -v systemctl >/dev/null 2>&1 && systemctl restart opendkim 2>/dev/null; then
         echo "opendkim: restarted (systemd)."
     elif command -v service >/dev/null 2>&1 && service opendkim restart >/dev/null 2>&1; then
@@ -195,13 +216,7 @@ else
 fi
 
 # --- 3. restart opendkim so it loads the new key -----------------------------
-if command -v systemctl >/dev/null 2>&1 && systemctl restart opendkim 2>/dev/null; then
-    echo "opendkim: restarted (systemd)."
-elif command -v service >/dev/null 2>&1 && service opendkim restart >/dev/null 2>&1; then
-    echo "opendkim: restarted (service)."
-else
-    echo "WARNING: could not restart opendkim automatically - restart it manually." >&2
-fi
+restart_opendkim
 
 # --- 4. assemble + print the DNS record --------------------------------------
 # opendkim-genkey writes mail.txt as a BIND fragment: the key is split across

@@ -197,6 +197,87 @@ check($assembled['relay_enabled'] === (MailboxRelay::active() !== null),
 	'relay_enabled tracks the active relay, not a re-derivation');
 harness_set_setting_mem('mailbox_local_listener', 'active');
 
+section('the declared setting matches the values the code writes');
+
+// A select whose stored value is not one of its declared options renders as the
+// FIRST option, and saving that settings page then writes that option back --
+// silently flipping the record. With the installer now re-asserting from this
+// one value, a silent flip to 'active' re-arms the whole mail stack on the next
+// deploy. So the declaration and the code must agree.
+$manifest = json_decode((string)@file_get_contents(
+	PathHelper::getIncludePath('plugins/mailbox/plugin.json')), true);
+$declared = null;
+foreach (($manifest['settings'] ?? array()) as $row) {
+	if (($row['name'] ?? '') === 'mailbox_local_listener') { $declared = $row; break; }
+}
+check(is_array($declared), 'mailbox_local_listener is declared in plugin.json');
+$options = array_keys($declared['options'] ?? array());
+foreach (array('active', 'decommissioned') as $value) {
+	check(in_array($value, $options, true),
+		"'" . $value . "' is a declared option", implode(', ', $options));
+}
+check(mailbox_listener_setting() === 'active' || mailbox_listener_setting() === 'decommissioned',
+	'the reader only ever resolves to a declared option', mailbox_listener_setting());
+
+$admin_src = (string)@file_get_contents(
+	PathHelper::getIncludePath('plugins/mailbox/includes/listener_admin.php'));
+preg_match_all("/admin_mailbox_relay_write_setting\('mailbox_local_listener',\s*'([a-z]+)'\)/",
+	$admin_src, $writes);
+check(!empty($writes[1]), 'found the recorded-state writes in listener_admin.php');
+foreach (array_unique($writes[1]) as $written) {
+	check(in_array($written, $options, true),
+		"the value listener_admin.php writes ('" . $written . "') is a declared option",
+		implode(', ', $options));
+}
+
+section('the host installer honours the decommission');
+
+// install_email.sh is the mailbox plugin's declared host_installer, so it runs
+// on EVERY deploy. Unguarded, its service arming undid the decommission each
+// time and the box came back with the whole local mail stack running. These
+// checks pin the guard in the shipped source: a future edit that reintroduces a
+// bare enable/start of a mail unit fails here rather than on a live node.
+$installer = PathHelper::getIncludePath('plugins/mailbox/provisioning/install_email.sh');
+$src = (string)@file_get_contents($installer);
+check($src !== '', 'install_email.sh is readable', $installer);
+
+check(strpos($src, "stg_name = 'mailbox_local_listener'") !== false,
+	'install_email.sh reads the recorded listener state');
+check(preg_match('/LISTENER_DECOMMISSIONED=1/', $src) === 1,
+	'install_email.sh sets a decommissioned flag from that reading');
+
+// Every line that ARMS a named mail unit must sit inside a block the guard
+// controls. Arming through arm_service() uses "${svc}" and so never matches;
+// what this catches is a bare `systemctl enable|start|restart postfix` written
+// back in somewhere the flag does not reach — the defect itself.
+preg_match_all('/^[^#\n]*systemctl\s+(?:enable|start|restart)\s+(?:postfix|opendkim|opendmarc)\b/m',
+	$src, $bare, PREG_OFFSET_CAPTURE | PREG_SET_ORDER);
+$unguarded = array();
+foreach ($bare as $m) {
+	$before = substr($src, max(0, $m[0][1] - 500), min(500, $m[0][1]));
+	if (strpos($before, 'LISTENER_DECOMMISSIONED') === false) {
+		$unguarded[] = trim($m[0][0]);
+	}
+}
+check(empty($unguarded),
+	'no mail unit is armed outside the decommission guard',
+	$unguarded ? implode(' | ', $unguarded) : 'every arming site is guarded');
+
+check(count($bare) > 0, 'the arming-site scan actually found arming sites to check',
+	count($bare) . ' site(s)');
+
+check(strpos($src, 'ufw allow 25/tcp') !== false && strpos($src, 'ufw deny 25/tcp') !== false,
+	'install_email.sh can both open and re-close port 25 at the firewall');
+
+// The two root helpers must not start a unit the decommission disabled: a
+// `systemctl restart` starts a disabled unit just as readily as an enabled one.
+foreach (array('provision_dkim.sh', 'provision_relay_main.sh') as $script) {
+	$path = PathHelper::getIncludePath('plugins/mailbox/provisioning/' . $script);
+	$body = (string)@file_get_contents($path);
+	check($body !== '' && strpos($body, "is-enabled opendkim") !== false,
+		$script . ' checks is-enabled before restarting opendkim', $path);
+}
+
 section('helper runner');
 
 if (!is_file(mailbox_listener_helper_path())) {

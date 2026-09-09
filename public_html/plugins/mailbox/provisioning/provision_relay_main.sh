@@ -16,7 +16,11 @@
 #     ordinary on-disk signing key once its sending is locked to a vault-sealed
 #     key (specs/mailbox_relay_surface_simplification.md)
 #
-# Version: 3.0 - the ssh era is over: no WireGuard keypair, no jyrelay0 interface,
+# Version: 3.1 - joinery-dkim-remove no longer starts a stopped opendkim: its
+#                reload fell through to `systemctl restart`, which starts a unit
+#                the listener decommission had disabled, so removing a signing
+#                key on a decommissioned box left opendkim running.
+#          3.0 - the ssh era is over: no WireGuard keypair, no jyrelay0 interface,
 #                no peer or address helper, no relay pull key, no registered tunnel
 #                key. A box that has them from an earlier run keeps them until the
 #                owner removes them as root (specs/relay_without_a_shell.md,
@@ -134,7 +138,8 @@ cat > "${DKIM_REMOVE_HELPER}" <<'DKIMREMOVEHELPER'
 #!/usr/bin/env bash
 # joinery-dkim-remove <domain>
 # Strips <domain> from opendkim's signing and key tables and deletes its key
-# directory, then reloads opendkim.            -> DKIM_REMOVED <domain>
+# directory, then reloads opendkim if this box still runs it.
+#                                              -> DKIM_REMOVED <domain>
 # Installed by provision_relay_main.sh; invoked via sudo by the web user, which
 # validates the domain against the registered set before calling.
 set -euo pipefail
@@ -165,7 +170,16 @@ if [[ -d "${KEY_DIR}" ]]; then
     echo "joinery-dkim-remove: ${KEY_DIR} still present" >&2
     exit 4
 fi
-systemctl reload opendkim >/dev/null 2>&1 || systemctl restart opendkim >/dev/null 2>&1 || true
+# Only nudge an opendkim this box still runs. Where the local mail listener is
+# decommissioned opendkim is stopped and disabled on purpose, and `systemctl
+# restart` would start it again regardless - putting a live daemon back on a box
+# that reports it gone. Nothing is lost by skipping: a stopped opendkim signs
+# nothing, so the entry is already unused the moment the table line is deleted.
+if systemctl is-enabled opendkim 2>/dev/null | grep -qx 'disabled'; then
+    echo "opendkim is disabled here (listener decommissioned) - left stopped"
+else
+    systemctl reload opendkim >/dev/null 2>&1 || systemctl restart opendkim >/dev/null 2>&1 || true
+fi
 echo "DKIM_REMOVED ${DOMAIN}"
 DKIMREMOVEHELPER
 chmod 755 "${DKIM_REMOVE_HELPER}"
