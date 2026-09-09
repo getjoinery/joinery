@@ -157,7 +157,7 @@ Fill in the form fields directly:
 | Slug | empoweredhealthtn | scrolldaddy |
 | SSH Host | 23.239.11.53 | 23.239.11.53 |
 | SSH User | root | root |
-| SSH Key Path | /home/user1/.ssh/id_ed25519_claude | /home/user1/.ssh/id_ed25519_claude |
+| SSH Key Path | /home/user1/.ssh/id_ed25519 | /home/user1/.ssh/id_ed25519 |
 | SSH Port | 22 | 22 |
 | Docker Container | empoweredhealthtn | scrolldaddy |
 | Container User | _(blank)_ | _(blank)_ |

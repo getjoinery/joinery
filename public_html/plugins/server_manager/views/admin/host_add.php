@@ -148,7 +148,7 @@ $formwriter->textinput('mgh_ssh_user', 'SSH User', [
 ]);
 
 $formwriter->textinput('mgh_ssh_key_path', 'SSH Key Path', [
-	'placeholder' => '/home/user1/.ssh/id_ed25519_claude',
+	'placeholder' => '/home/user1/.ssh/id_ed25519',
 	'validation' => ['maxlength' => 500],
 ]);
 
