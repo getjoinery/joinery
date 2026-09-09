@@ -143,6 +143,7 @@ class PathHelper {
                 throw new Exception("Plugin theme is active but no plugin selected. Please contact administrator.");
             }
             
+            self::assertThemeName($active_plugin);
             $plugin_dir = self::getIncludePath("plugins/$active_plugin");
             if (!is_dir($plugin_dir)) {
                 throw new Exception("Plugin theme is active but plugin '$active_plugin' not found. Please contact administrator.");
@@ -152,6 +153,7 @@ class PathHelper {
         }
         
         // Validate regular theme exists
+        self::assertThemeName($theme_template);
         $theme_dir = self::getIncludePath("theme/$theme_template");
         if (!is_dir($theme_dir)) {
             throw new Exception("Theme '$theme_template' directory not found. Please contact administrator.");
@@ -192,6 +194,24 @@ class PathHelper {
         }
     }
     
+    /**
+     * A theme or plugin is named by its folder and nothing else. The name
+     * comes from a setting (theme_template, active_theme_plugin) and is
+     * prefixed onto every file the theme chain requires, so a name carrying
+     * a slash or a dot-dot would make a setting into a require path
+     * (specs/security_inventory.md S2). The 'theme/x' and 'plugins/x' forms
+     * getActiveThemeDirectory() returns are the only prefixes allowed.
+     */
+    public static function assertThemeName($name) {
+        if (!self::isThemeName($name)) {
+            throw new Exception("Theme name must be a plain folder name (letters, digits, _ and -). Given: '" . (is_string($name) ? $name : gettype($name)) . "'");
+        }
+    }
+
+    public static function isThemeName($name) {
+        return is_string($name) && preg_match('/^(?:(?:theme|plugins)\/)?[A-Za-z0-9_-]+\z/', $name) === 1;
+    }
+
     /**
      * Get the full system path to a theme file with complete override chain support
      *
@@ -264,6 +284,16 @@ class PathHelper {
         // Auto-detect plugin name if not specified
         if ($plugin_name === null && class_exists('RouteHelper')) {
             $plugin_name = RouteHelper::getCurrentPlugin();
+        }
+        // The theme name comes from a setting, so a bad one is refused loudly.
+        // The plugin name is a URL segment the router guessed (/sitemap.xml
+        // names no plugin), so a name that could not be a folder simply is
+        // not a plugin, and the chain falls through to core.
+        if ($theme_name) {
+            self::assertThemeName($theme_name);
+        }
+        if ($plugin_name && !self::isThemeName($plugin_name)) {
+            $plugin_name = null;
         }
 
 

@@ -914,7 +914,12 @@
       "group": "files",
       "label": "Allowed upload extensions",
       "type": "text",
-      "helptext": "Comma separated, no dots. An extension absent from this list is refused on upload."
+      "helptext": "Comma separated, lowercase, no dots. An extension absent from this list is refused on upload. An extension the server would execute (php, phtml, phar, cgi, sh and the like) is refused here, because this list is what decides whether an upload can become code.",
+      "vault_gated": true,
+      "validation": {
+        "pattern": "/^(?!.*\\b(?:php\\d*|phtml|phar|pht|phps|phpt|inc|cgi|pl|py|sh|bash|shtml|htaccess|htpasswd)\\b)[a-z0-9]+(?:,[a-z0-9]+)*$/",
+        "messages": { "pattern": "Lowercase extensions separated by commas, and never one the server would execute (php, phtml, phar, cgi, sh)." }
+      }
     },
     {
       "name": "anti_spam_answer",
@@ -1145,7 +1150,12 @@
       "group": "composer",
       "label": "Composer path",
       "type": "text",
-      "helptext": "Directory holding autoload.php, e.g. ../vendor/. The directory, not the file."
+      "helptext": "Directory holding autoload.php: ../vendor/ (the site's own vendor tree) or vendor/. The directory, not the file. Nothing else is accepted, because this path is handed to require.",
+      "vault_gated": true,
+      "validation": {
+        "pattern": "/^(?:\\.\\.\\/)?vendor\\/$/",
+        "messages": { "pattern": "Must be ../vendor/ or vendor/." }
+      }
     },
     {
       "name": "theme_template",
@@ -1154,7 +1164,12 @@
       "label": "Active theme",
       "type": "select",
       "options_from": "CoreSettingOptions::themes",
-      "options_include": "includes/CoreSettingOptions.php"
+      "options_include": "includes/CoreSettingOptions.php",
+      "vault_gated": true,
+      "validation": {
+        "pattern": "/^[A-Za-z0-9_-]+$/",
+        "messages": { "pattern": "A theme is named by its folder: letters, digits, _ and - only." }
+      }
     },
     {
       "name": "member_area_app_chrome",
@@ -1972,6 +1987,11 @@
       "options_from": "CoreSettingOptions::themePlugins",
       "options_include": "includes/CoreSettingOptions.php",
       "empty_option": true,
+      "vault_gated": true,
+      "validation": {
+        "pattern": "/^[A-Za-z0-9_-]+$/",
+        "messages": { "pattern": "A plugin is named by its folder: letters, digits, _ and - only." }
+      },
       "show_when": {
         "theme_template": "plugin"
       },
@@ -2510,7 +2530,12 @@
       "group": "paths",
       "label": "Node Path",
       "type": "text",
-      "helptext": "Path to the node install used for asset builds, e.g. /var/www/html/mysite/node. Empty when the deployment has none."
+      "helptext": "Absolute path to the node install used for asset builds, e.g. /var/www/html/mysite/node. Empty when the deployment has none. Plain path characters only; it is used in a shell command.",
+      "vault_gated": true,
+      "validation": {
+        "pattern": "/^(?:\\\/[A-Za-z0-9._-]+)+\\\/?$/",
+        "messages": { "pattern": "An absolute path made of letters, digits, dots, _ and -." }
+      }
     },
     {
       "name": "apache_error_log",
@@ -2518,7 +2543,11 @@
       "group": "paths",
       "label": "Apache Error Log Path",
       "type": "text",
-      "helptext": "Read by the admin log viewer. Must be a readable file — an unreadable path makes the settings page refuse every save."
+      "helptext": "Read by the admin log viewer. Must be a readable file — an unreadable path makes the settings page refuse every save. Plain path characters only.",
+      "validation": {
+        "pattern": "/^(?:\\\/[A-Za-z0-9._-]+)+\\\/?$/",
+        "messages": { "pattern": "An absolute path made of letters, digits, dots, _ and -." }
+      }
     },
     {
       "name": "siteDir",
