@@ -57,7 +57,7 @@ $formwriter->textbox('agf_target_filenames', 'Target filenames (one per line)', 
 	'rows'     => 4,
 	'cols'     => 60,
 	'htmlmode' => 'no',
-	'helptext' => 'Filenames written to project root, one per line. Examples: CLAUDE.md, GEMINI.md, AGENTS.md. No directory separators.',
+	'helptext' => 'Filenames written to project root, one per line, each a plain name ending in .md. Examples: CLAUDE.md, GEMINI.md, AGENTS.md. No directory separators; only Markdown is accepted.',
 ));
 
 $formwriter->textbox('agf_content', 'Content', array(

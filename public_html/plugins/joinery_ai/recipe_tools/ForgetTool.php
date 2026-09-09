@@ -1,5 +1,6 @@
 <?php
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolInterface.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/QueueableToolInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunContext.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_memories_class.php'));
 
@@ -11,7 +12,11 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_memories_cla
  * no-op with the same neutral message — no existence signal leaks, matching
  * recall's non-leaking posture on ids.
  */
-class ForgetTool implements RecipeToolInterface {
+class ForgetTool implements RecipeToolInterface, QueueableToolInterface {
+
+    public function renderProposedAction(array $input): array {
+        return ['Forget memory id ' . ProposedActionFacts::scalar($input['memory_id'] ?? '?')];
+    }
 
     public static function name(): string {
         return 'forget';

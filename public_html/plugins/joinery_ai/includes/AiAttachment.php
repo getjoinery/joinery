@@ -544,7 +544,7 @@ class AiAttachment {
      */
     private static function framedText(string $text, string $nonce, string $label): array {
         $body = "Untrusted attachment — $label:\n\n"
-              . "<<UNTRUSTED_$nonce>>\n" . self::capText($text) . "\n<</UNTRUSTED_$nonce>>";
+              . UntrustedEnvelope::wrapBlock(self::capText($text), $nonce);
         return ['type' => 'text', 'text' => $body];
     }
 

@@ -1,5 +1,6 @@
 <?php
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolInterface.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/QueueableToolInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunContext.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_notes_class.php'));
 
@@ -11,7 +12,17 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_notes_cl
  * owner in the admin UI (eventually — Phase 9 polish), so the agent can
  * write notes that the human edits between runs.
  */
-class SaveNoteTool implements RecipeToolInterface {
+class SaveNoteTool implements RecipeToolInterface, QueueableToolInterface {
+
+    public function renderProposedAction(array $input): array {
+        $lines = ['Save a note (a note with the same title is overwritten)'];
+        $lines[] = 'title: ' . ProposedActionFacts::scalar($input['title'] ?? '');
+        $lines = array_merge($lines, ProposedActionFacts::verbatim('content', $input['content'] ?? ''));
+        if (!empty($input['tags'])) {
+            $lines[] = 'tags: ' . ProposedActionFacts::scalar($input['tags']);
+        }
+        return $lines;
+    }
 
     const MAX_TITLE_LEN = 255;
     const MAX_CONTENT_CHARS = 50000;

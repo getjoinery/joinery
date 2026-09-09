@@ -164,7 +164,7 @@ class ChatMemory {
             if ($when) $meta .= ' · ' . LibraryFunctions::convert_time($when, 'UTC', $tz, 'M j, Y');
 
             $part = "[id $id] $title ($meta):\n"
-                  . "<<UNTRUSTED_$nonce>>$content<</UNTRUSTED_$nonce>>";
+                  . UntrustedEnvelope::wrap($content, $nonce);
             if ($truncated) {
                 $part .= " …(truncated — recall id $id for the rest)";
             }
@@ -197,7 +197,7 @@ class ChatMemory {
             $line .= ' · id ' . (int)$r['mem_memory_id'];
             $lines[] = $line;
         }
-        return "<<UNTRUSTED_$nonce>>\n" . implode("\n", $lines) . "\n<</UNTRUSTED_$nonce>>";
+        return UntrustedEnvelope::wrapBlock(implode("\n", $lines), $nonce);
     }
 
     /** A title as one safe index/heading line: whitespace collapsed (an

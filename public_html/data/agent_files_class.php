@@ -71,18 +71,23 @@ class AgentFile extends SystemBase {
 		return array();
 	}
 
+	/**
+	 * A target is a Markdown file in the project root and nothing else.
+	 *
+	 * The editor writes a database row to disk under this name, so the name
+	 * decides what an admin session can create: allowed to be anything, it is
+	 * the front controller or an .htaccess, and a stolen session is code
+	 * (specs/security_inventory.md S1). A bare basename ending in .md cannot
+	 * be executed or read as configuration by anything on the box. One dot
+	 * only: Apache's AddHandler matches an extension anywhere in the name, so
+	 * CLAUDE.php.md is not a Markdown file to every server.
+	 */
 	public static function validate_target_filename($filename) {
 		if (!is_string($filename) || $filename === '') {
 			throw new AgentFileException('Target filename must be a non-empty string.');
 		}
-		if (strpos($filename, '/') !== false || strpos($filename, '\\') !== false) {
-			throw new AgentFileException('Target filename "'.$filename.'" cannot contain directory separators.');
-		}
-		if ($filename === '.' || $filename === '..' || strpos($filename, '..') !== false) {
-			throw new AgentFileException('Target filename "'.$filename.'" cannot contain ".." segments.');
-		}
-		if (strpos($filename, "\0") !== false) {
-			throw new AgentFileException('Target filename cannot contain NUL bytes.');
+		if (!preg_match('/^[A-Za-z0-9][A-Za-z0-9_-]*\.md\z/', $filename)) {
+			throw new AgentFileException('Target filename "'.$filename.'" must be a plain name ending in .md, such as CLAUDE.md, with no directory separators.');
 		}
 	}
 
