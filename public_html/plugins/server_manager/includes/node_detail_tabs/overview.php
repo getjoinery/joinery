@@ -812,7 +812,7 @@
 	$edit_open = !empty($_GET['edit']);
 	echo '<div id="connectionSettings"' . ($edit_open ? '' : ' hidden') . '>';
 
-	$default_ssh_key = '/home/user1/.ssh/id_ed25519_claude';
+	$default_ssh_key = '/home/user1/.ssh/id_ed25519';
 
 	$pageoptions = ['title' => 'Connection Settings'];
 	$page->begin_box($pageoptions);
