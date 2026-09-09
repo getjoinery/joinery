@@ -81,6 +81,7 @@ Filesystem      Size  Used Avail Use% Mounted on
 /dev/sda1        40G   12G   26G  32% /
               total        used        free
 Mem:           7982        3120        1204
+Swap:          2047         183        1864
  14:22:01 up 12 days,  3:41,  1 user,  load average: 0.42, 0.55, 0.61
 /var/run/postgresql:5432 - accepting connections
 VERSION = '2.14.3';
@@ -155,6 +156,17 @@ check(($r['disk_available'] ?? null) === '26G', 'disk available is read',
 check(($r['memory_total_mb'] ?? null) === 7982, 'memory total is read',
 	var_export($r['memory_total_mb'] ?? null, true));
 check(($r['memory_used_mb'] ?? null) === 3120, 'memory used is read');
+check(($r['swap_total_mb'] ?? null) === 2047, 'swap total is read',
+	var_export($r['swap_total_mb'] ?? null, true));
+check(($r['swap_used_mb'] ?? null) === 183, 'swap used is read');
+
+// A box with no swap says so with zeros. That is a measurement - a node
+// running without swap is a fact the dashboard should show - not an absence.
+$swapless = jrp_call('parse_check_status_ssh_output',
+	array("Mem: 961 700 261\nSwap: 0 0 0\n"));
+check(($swapless['swap_total_mb'] ?? null) === 0 && ($swapless['swap_used_mb'] ?? null) === 0,
+	'a swapless box reads as zero swap, not as no reading',
+	var_export($swapless, true));
 check(($r['load_1m'] ?? null) === 0.42, 'the one-minute load average is read',
 	var_export($r['load_1m'] ?? null, true));
 check(($r['load_15m'] ?? null) === 0.61, 'the fifteen-minute load average is read');
@@ -193,6 +205,7 @@ check(($partial['disk_usage_percent'] ?? null) === 32,
 	'a truncated stream still yields the readings it contained');
 check(!isset($partial['memory_total_mb']),
 	'a truncated stream invents no reading for the part that never arrived');
+check(!isset($partial['swap_total_mb']), 'no swap reading is invented either');
 check(!isset($partial['load_1m']), 'no load average is invented either');
 
 // Two status blocks in one stream (a retried step) must not produce a blend of

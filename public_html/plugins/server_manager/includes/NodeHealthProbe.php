@@ -19,6 +19,7 @@
  * node. They used to be separate code and could disagree about whether a
  * machine was reachable.
  *
+ * @version 1.1 - MACHINE_KEYS carries swap_total_mb and swap_used_mb
  * @version 1.0
  */
 
@@ -57,6 +58,7 @@ class NodeHealthProbe {
 	const MACHINE_KEYS = [
 		'disk_usage_percent', 'disk_total', 'disk_used', 'disk_available',
 		'memory_total_mb', 'memory_free_mb', 'memory_used_mb',
+		'swap_total_mb', 'swap_used_mb',
 	];
 
 	/**

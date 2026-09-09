@@ -296,14 +296,49 @@ remote attacker must hold a possession factor, never just stolen strings.
 
 ### Host hardening
 
-`includes/VaultHealth.php` checks the three facts that keep an unwrapped
-secret key off disk even during a live window: APCu backed by anonymous
-shared memory (`apc.mmap_file_mask` unset), the PHP worker's core dumps
-disabled (`rlimit_core = 0`), and swap off or encrypted. Best-effort and
-advisory (a check that can't be verified reports `unknown`, never a false
-pass) — surfaced informationally from `vault_setup_verify` and via
-`php maintenance_scripts/dev_tools/check_vault_health.php` (exits non-zero on
-any `unmet` check, mirroring `check_provisioning.php`'s convention).
+`includes/VaultHealth.php` checks the four facts that keep an unwrapped
+secret key off disk even during a live window:
+
+- APCu backed by anonymous shared memory (`apc.mmap_file_mask` unset).
+- The PHP worker's core dumps disabled. `rlimit_core = 0` in the pool is the
+  whole answer only when `kernel.core_pattern` names a file. When it pipes to
+  a handler the kernel ignores the rlimit: Ubuntu's apport reads the entire
+  core into its `/var/crash` report, so the check is `unmet` while apport is
+  enabled (`sudo systemctl disable --now apport`, and `enabled=0` in
+  `/etc/default/apport` — on the host, since `core_pattern` is not
+  namespaced and a container reads the host's). `systemd-coredump` honours
+  the rlimit; any other handler reports `unknown`, naming it.
+- Exception traces omit their arguments (`zend.exception_ignore_args = On`).
+  The secret key is a string argument on the `VaultCrypto` open methods, and
+  with it off a logged uncaught exception carries the key's leading bytes.
+- Swap off, or every active swap device encrypted. The device-mapper type is
+  read from `/sys/block/dm-N/dm/uuid`: `CRYPT-` is dm-crypt and verified,
+  `LVM-` is a plain volume and unmet. zram is accepted (compressed RAM, no
+  disk without its writeback feature). The installer's housekeeping creates
+  1 GB of swap as dm-crypt with a per-boot random key.
+
+Best-effort and advisory (a check that can't be verified reports `unknown`,
+never a false pass) — surfaced informationally from `vault_setup_verify` and
+via `php maintenance_scripts/dev_tools/check_vault_health.php` (exits
+non-zero on any `unmet` check, mirroring `check_provisioning.php`'s
+convention).
+
+Two facts about the APCu window these checks guard:
+
+- APCu never zeroes a freed slot. Closing a window deletes the entry, but the
+  key bytes remain in the segment until the allocator reuses them, so the
+  anonymous-memory, no-core, encrypted-swap trio guards residue after close as
+  much as the live window. `sodium_memzero` reaches the PHP copy only.
+- The APCu segment belongs to the php-fpm master and is shared by every pool
+  and every site that master serves. Code on any site served by the same
+  php-fpm can read every other site's open windows. Managed nodes run one
+  site per container; a self-hoster serving several sites from one php-fpm
+  does not have that separation.
+
+The mailbox search index's working copy in `/dev/shm` (a 1777 tmpfs every
+local account can list) is created 0600 before its first write, at both of
+its creation points, and `SealedBox::openStreamFile()` makes its plaintext
+temp file private before the first decrypted byte lands.
 
 ## The lock chip
 

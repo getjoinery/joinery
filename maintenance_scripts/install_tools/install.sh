@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+#VERSION 2.68 - Swap is encrypted with a per-boot random key (crypttab + systemd-cryptsetup,
+#               nofail so a bad line never keeps a box from booting) and is a flat 1 GB on
+#               every box: the old 2 GB was never derived, and no node has used more than
+#               half a gigabyte. apport is disabled: it keeps core dumps whatever the rlimit
+#               says. (specs/vault_exposure_quick_fixes.md Q5)
 #VERSION 2.67 - The closing summary tells a DNS failure from a DNS wait. A
 #               first-boot installer that tried to write the record and was
 #               refused for a reason waiting will not change hands the outcome
@@ -21,7 +26,7 @@
 #VERSION 2.64 - The '-' password placeholder (generate one) no longer draws the
 #  'password passed as a command-line argument' warning: it is not a password.
 #VERSION 2.63 - host-harden is gone. Its housekeeping (fail2ban SSH jail, journal cap,
-#               BuildKit GC, orphaned build dirs, 2G swap, btmp) runs on every docker and
+#               BuildKit GC, orphaned build dirs, encrypted swap, apport off, btmp) runs on every docker and
 #               server install as host_housekeeping, unprompted and ungated, since none of
 #               it can lock anyone out. Turning password login off was the only step that
 #               needed a gate; the management node does that itself with sshd drop-in
@@ -1885,30 +1890,74 @@ EOF
         fi
     fi
 
-    # --- Swap: at least 2G ---
-    # A 2G machine with no swap has already had check_mail OOM-killed. Keep
-    # whatever swap the box has if it is big enough; otherwise a 2G swapfile
-    # replaces it.
+    # --- Swap: 1 GB, encrypted ---
+    # Swap stays on: a 1 GB box needs somewhere to put idle php-fpm workers
+    # and cold Postgres pages. But an idle worker's pages can hold an open
+    # vault window's key, so the device is dm-crypt with a throwaway key drawn
+    # from /dev/urandom at every boot (the standard Debian pattern; nothing to
+    # manage, nothing to lose). The size is a flat 1 GB on every box: no node
+    # has ever used more than half that, and more is only room to thrash in.
+    # Both lines carry nofail, so a box whose swap fails to come up boots
+    # without it and VaultHealth reports the gap, instead of hanging in the
+    # emergency shell.
     print_step "Configuring swap..."
-    local SWAP_SIZE="2G"
     local SWAPFILE="/swapfile"
+    local CRYPT_NAME="cryptswap"
+    local CRYPT_DEV="/dev/mapper/$CRYPT_NAME"
+    local SWAP_GB=1
     local SWAP_KB
     SWAP_KB=$(awk '/^SwapTotal:/ {print $2}' /proc/meminfo)
-    if swapon --show | grep -q "$SWAPFILE"; then
-        print_info "Swapfile already active at $SWAPFILE — skipping"
-    elif [ "${SWAP_KB:-0}" -ge 2000000 ]; then
-        print_info "Swap already present ($((SWAP_KB / 1024))M) — keeping it"
+    # The kernel names an active mapping by its resolved node (/dev/dm-N),
+    # never by the /dev/mapper alias, so compare resolved paths. Skip only
+    # when the mapping is up AT this size; anything else is replaced.
+    local CRYPT_NODE
+    CRYPT_NODE=$(readlink -f "$CRYPT_DEV" 2>/dev/null || echo "$CRYPT_DEV")
+    if swapon --show=NAME --noheadings 2>/dev/null | grep -qx "$CRYPT_NODE" \
+            && [ "${SWAP_KB:-0}" -ge $((SWAP_GB * 1000000)) ] \
+            && [ "${SWAP_KB:-0}" -le $((SWAP_GB * 1100000)) ]; then
+        print_info "Encrypted swap already active at $CRYPT_DEV ($((SWAP_KB / 1024))M) — keeping it"
     else
+        apt-get install -y cryptsetup > /dev/null 2>&1
         swapoff -a 2>/dev/null || true
-        fallocate -l "$SWAP_SIZE" "$SWAPFILE"
+        if [ -e "$CRYPT_DEV" ]; then
+            systemctl stop "systemd-cryptsetup@$CRYPT_NAME" 2>/dev/null || cryptsetup close "$CRYPT_NAME" 2>/dev/null || true
+        fi
+        rm -f "$SWAPFILE"
+        fallocate -l "${SWAP_GB}G" "$SWAPFILE"
         chmod 600 "$SWAPFILE"
-        mkswap "$SWAPFILE"
-        swapon "$SWAPFILE"
-        # Replace any existing swap entries with the swapfile
+        # crypttab: fresh key each boot; the swap option runs mkswap on the mapping.
+        touch /etc/crypttab
+        sed -i "/^$CRYPT_NAME[[:space:]]/d" /etc/crypttab
+        echo "$CRYPT_NAME $SWAPFILE /dev/urandom swap,cipher=aes-xts-plain64,size=256,nofail" >> /etc/crypttab
+        # Replace any existing swap entries (Linode's plain swap disk, an older
+        # plain /swapfile line) with the mapping.
         sed -i '/[[:space:]]swap[[:space:]]/d' /etc/fstab
-        echo "$SWAPFILE none swap sw 0 0" >> /etc/fstab
-        print_success "Swap: ${SWAP_SIZE} swapfile created and active"
+        echo "$CRYPT_DEV none swap sw,nofail 0 0" >> /etc/fstab
+        systemctl daemon-reload
+        if systemctl start "systemd-cryptsetup@$CRYPT_NAME" && swapon "$CRYPT_DEV"; then
+            local ACTIVE
+            ACTIVE=$(swapon --show=NAME --noheadings 2>/dev/null | tr '\n' ' ')
+            CRYPT_NODE=$(readlink -f "$CRYPT_DEV" 2>/dev/null || echo "$CRYPT_DEV")
+            if [ "$(echo "$ACTIVE" | xargs)" = "$CRYPT_NODE" ]; then
+                print_success "Swap: ${SWAP_GB}G encrypted swap active at $CRYPT_DEV"
+            else
+                print_warning "Swap: expected only $CRYPT_DEV active, found: $ACTIVE"
+            fi
+        else
+            print_warning "Swap: could not bring up $CRYPT_DEV — the box runs without swap until check_vault_health.php is green"
+        fi
     fi
+
+    # --- apport: off ---
+    # kernel.core_pattern pipes cores to apport on Ubuntu, and the kernel
+    # ignores the core rlimit for a pipe: apport reads the whole core (an open
+    # vault window's key included) into /var/crash whatever rlimit_core says.
+    print_step "Disabling apport..."
+    if [ -f /etc/default/apport ]; then
+        sed -i 's/^enabled=1/enabled=0/' /etc/default/apport
+    fi
+    systemctl disable --now apport > /dev/null 2>&1 || true
+    print_success "apport disabled"
 
     # --- Truncate btmp ---
     print_step "Truncating failed-login logs..."

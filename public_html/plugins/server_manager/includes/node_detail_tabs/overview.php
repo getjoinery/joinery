@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.10 - the Memory card shows swap used beside memory used, a swapless box saying so
  * @version 1.9 - Install Report button beside Check Status, for a node whose agent ships
  *                install_report.
  * @version 1.8 - the health badge and the measured-at line read the fold's per-key provenance, so
@@ -364,7 +365,14 @@
 			echo '<div class="text-muted small text-uppercase">Memory</div>';
 			echo '<div class="fs-3 fw-semibold mt-1">' . $pct . '<span class="fs-5 text-muted">%</span></div>';
 			echo '<div class="progress mt-2 svm-progress-thin"><div class="progress-bar ' . $bar . ' svm-progress-bar" style="--svm-pct:' . $pct . '%"></div></div>';
-			echo '<div class="text-muted small mt-2">' . $used . ' / ' . $total . ' MB</div>';
+			$mem_line = $used . ' / ' . $total . ' MB';
+			if (isset($status_data['swap_total_mb'])) {
+				$swap_total = (int)$status_data['swap_total_mb'];
+				$mem_line .= $swap_total > 0
+					? ' · swap ' . (int)($status_data['swap_used_mb'] ?? 0) . ' / ' . $swap_total . ' MB'
+					: ' · no swap';
+			}
+			echo '<div class="text-muted small mt-2">' . $mem_line . '</div>';
 			echo '</div></div>';
 		}
 

@@ -85,6 +85,10 @@
  * a working copy or restored blob of another format fails to open and is
  * rebuilt — the disposable-cache contract, so a shape change never needs a
  * migration, just one rebuild per owner on their next unlocked visit.
+ * @version 1.9 - the working copy is 0600 from before its first write: /dev/shm is a
+ *                1777 tmpfs shared with every local account on a bare-metal host,
+ *                and SQLite gives -journal/-wal the main file's mode
+ *                (specs/vault_exposure_quick_fixes.md Q1)
  * @version 1.8 - contentless, positionless FTS table keyed by rowid, with a
  *                format stamp that rebuilds any older working copy or blob
  * @version 1.7 - batched checkpointed folding with a deadline and a per-user
@@ -244,6 +248,7 @@ class MailboxIndex {
 		if (!is_dir(self::SHM_DIR)) {
 			throw new MailboxIndexException('MailboxIndex: ' . self::SHM_DIR . ' is not available.');
 		}
+		self::createPrivateFile($path);
 		$db = new SQLite3($path);
 		$db->busyTimeout(self::BUSY_TIMEOUT_MS);
 		$db->exec(self::FTS_DDL);
@@ -336,6 +341,30 @@ class MailboxIndex {
 
 	// ------------------------------------------------------------- internals
 
+	/**
+	 * Pre-create the working copy as a 0600 file so SQLite never creates it
+	 * under the worker's umask (0644 in a world-writable tmpfs). `x` refuses
+	 * an existing file: rebuild() unlinks first, and fs.protected_regular
+	 * already stops a squatter's file from being adopted — a path that exists
+	 * here is someone else's, so it is an error, not a chmod.
+	 */
+	private static function createPrivateFile(string $path): void {
+		$fh = @fopen($path, 'x');
+		if ($fh === false) {
+			throw new MailboxIndexException('MailboxIndex: could not create the working copy at ' . $path . '.');
+		}
+		fclose($fh);
+		self::makePrivate($path);
+	}
+
+	/** The working copy must be readable by this worker alone. */
+	private static function makePrivate(string $path): void {
+		if (!@chmod($path, 0600) || (fileperms($path) & 0777) !== 0600) {
+			@unlink($path);
+			throw new MailboxIndexException('MailboxIndex: could not make the working copy private at ' . $path . '.');
+		}
+	}
+
 	private function tryOpenDb(string $path): ?SQLite3 {
 		try {
 			$db = new SQLite3($path, SQLITE3_OPEN_READWRITE);
@@ -391,6 +420,8 @@ class MailboxIndex {
 			$crypto = new VaultCrypto();
 			$dek = $crypto->openItemDek((string)$sealed_key, $secret_key);
 			$crypto->openFieldFile($src, $this->shmPath($user_id), $dek, $this->blobAd($user_id));
+			// Before the first open: SQLite's -journal/-wal inherit this mode.
+			self::makePrivate($this->shmPath($user_id));
 		} catch (Throwable $e) {
 			error_log('MailboxIndex: restoreFromBlob failed for user ' . $user_id . ' (rebuilding): ' . $e->getMessage());
 			return false;

@@ -22,6 +22,9 @@
  * memory bounded by one chunk — for content too large to ever hold as a
  * string, such as the sealed mailbox search index.
  *
+ * @version 1.4 - openStreamFile's plaintext is 0600 from the byte it is created, not
+ *                whatever the umask gives: the destination may be a shared tmpfs
+ *                (specs/vault_exposure_quick_fixes.md Q1)
  * @version 1.3
  */
 class SealedBox {
@@ -279,6 +282,15 @@ class SealedBox {
 		if ($out === false) {
 			fclose($in);
 			throw new RuntimeException('SealedBox: cannot open stream destination for writing.');
+		}
+		// Plaintext is about to land here. Private before the first byte, so a
+		// destination in a world-readable tmpfs never exposes it mid-open, and
+		// the rename carries the mode to the final path.
+		if (!@chmod($tmp, 0600)) {
+			fclose($out);
+			@unlink($tmp);
+			fclose($in);
+			throw new RuntimeException('SealedBox: cannot make the stream destination private.');
 		}
 		try {
 			if (fread($in, strlen(self::STREAM_MAGIC)) !== self::STREAM_MAGIC) {
