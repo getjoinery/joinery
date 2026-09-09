@@ -109,6 +109,16 @@ enum Vault {
     /// device does with an entry it can see, cannot open, and must not guess
     /// about -- while the tree around it is being renamed, moved and deleted.
     OneKeyHolder,
+    /// A vault at the root, every device keyed, AND three folders beside it
+    /// whose NAMES the workload trades -- one of the three encrypted.
+    ///
+    /// The estate has traded names forty thousand times and never once traded a
+    /// FOLDER name: action 13's slots are files. That is the whole territory of
+    /// Defects AA to AE, and no seed could ever reach it. One of the three
+    /// rings is a vault because a plain trade converges whichever way it is
+    /// resolved -- only encryption makes custody observable, since it follows
+    /// the folder and not the name.
+    FolderRings,
 }
 
 impl Vault {
@@ -116,6 +126,16 @@ impl Vault {
         self != Vault::None
     }
 }
+
+/// The sealed body seeded inside the encrypted ring, derived from the seed so
+/// the assertion can recompute it without the workload carrying it around.
+fn sealed_ring_body(seed: u64) -> Vec<u8> {
+    format!("sealed ring content for seed {seed}, which the server may never read").into_bytes()
+}
+
+/// The three names the rings trade between. Which folder wears which changes;
+/// the SET never does, so trading among them is always a legal move.
+const RING_NAMES: [&str; 3] = ["ring-1", "ring-2", "ring-3"];
 
 /// Where a sweep's workload hangs off.
 ///
@@ -180,10 +200,43 @@ fn sweep_world(
         // that had not yet learned the folder was a vault would make an
         // ordinary directory of that name and send its contents up in the
         // clear -- testing the harness's mistake instead of the engine.
+        if vault == Vault::FolderRings {
+            // One encrypted, two plain, all beside the vault rather than under
+            // it -- the shape Defect AD was: a vault folder and an ordinary
+            // folder swapping names. The vault root itself stays out of the
+            // trade, because `is_movable` refuses it and the rest of the
+            // workload needs it standing.
+            world.server.seed_encrypted_folder(None, RING_NAMES[0]);
+            for name in &RING_NAMES[1..] {
+                world.server.seed_folder(None, name);
+            }
+        }
         assert!(
             world.settle().is_some(),
             "seed {seed}: the vault folder should arrive before the workload starts"
         );
+        if vault == Vault::FolderRings {
+            // Written by a DEVICE, not seeded onto the server. `seed_file` puts
+            // plaintext where it is told, so seeding into the encrypted ring
+            // would hand the run a leak the engine never made and fail the
+            // in-vault assertion on the harness's own setup. Writing it here
+            // means it goes up the way the user's files do, and is ciphertext
+            // on the server before a single name is traded.
+            let writer = world.device(devices[0].0);
+            writer.fs.user_write(
+                &format!("{}/sealed.txt", RING_NAMES[0]),
+                &sealed_ring_body(seed),
+            );
+            for name in &RING_NAMES[1..] {
+                writer
+                    .fs
+                    .user_write(&format!("{name}/{name}.txt"), name.as_bytes());
+            }
+            assert!(
+                world.settle().is_some(),
+                "seed {seed}: the rings should settle before the workload starts"
+            );
+        }
     }
     // A chaotic world is one where the user is still working, not just one
     // where the network is bad. Uploads finishing against a file that has moved
@@ -363,6 +416,9 @@ fn workload_core(
         jd_sim::scenario::assert_the_vault_opens(&world);
         jd_sim::scenario::assert_no_ciphertext_on_a_keyless_disk(&world);
     }
+    if vault == Vault::FolderRings {
+        assert_sealed_content_never_reached_the_clear(&world, seed);
+    }
     if vault == Vault::Shared {
         // Only meaningful when everything is inside the vault. In a mixed world
         // most names are plaintext by design, and checking them against the
@@ -383,6 +439,40 @@ fn assert_nothing_in_the_vault_is_readable(world: &World, seed: u64) {
     assert!(
         readable.is_empty(),
         "seed {seed}: the server holds these in the clear inside a vault: {readable:?}"
+    );
+}
+
+/// What the user sealed is never on the server in the clear, wherever it ended
+/// up.
+///
+/// `assert_nothing_in_the_vault_is_readable` asks whether the server holds
+/// plaintext INSIDE a vault. Defect AD leaked the other way: the vault's
+/// contents ended up OUTSIDE it, in a folder where being plaintext is perfectly
+/// legal, so nothing in the tree and nothing in that assertion could object. The
+/// only way to see it is to remember what was sealed and go looking for those
+/// bytes anywhere the server can read them.
+///
+/// Sound here precisely because the workload refuses to generate a vault
+/// crossing (`same_side_of_the_vault`): no legitimate conversion can happen in a
+/// sweep, so sealed bytes in the clear are a leak and never a feature. That is
+/// NOT true of the engine at large, where an explicit drag out of a vault
+/// converts by design -- which is why this lives here and not in the shared
+/// invariants.
+fn assert_sealed_content_never_reached_the_clear(world: &World, seed: u64) {
+    let sealed = jd_sim::sha256_hex(&sealed_ring_body(seed));
+    assert!(
+        world.server.blob(&sealed).is_none(),
+        "seed {seed}: the plaintext of a file the user sealed reached the server"
+    );
+    let leaked: Vec<String> = world
+        .server
+        .tree()
+        .into_keys()
+        .filter(|p| p.ends_with("sealed.txt"))
+        .collect();
+    assert!(
+        leaked.is_empty(),
+        "seed {seed}: the real name of a sealed file reached the server: {leaked:?}"
     );
 }
 
@@ -640,7 +730,7 @@ fn drive(
         // hold enough to be interesting: at a third it produced about one
         // encrypted file per run, and a workload that barely reaches the thing
         // it is testing is a green run that proves nothing.
-        let into_the_vault = vault == Vault::OneKeyHolder
+        let into_the_vault = matches!(vault, Vault::OneKeyHolder | Vault::FolderRings)
             && device.vault().is_some()
             && rng.below(2) == 0;
         let join = |d: &str, n: &str| -> String {
@@ -796,6 +886,32 @@ fn drive(
             // device's own random files, which is what this did first, almost
             // never has the other device touching the same pair, and fifteen
             // hundred seeds of it found nothing.
+            // Trade or rotate the RING folders' names. Same trap as the file
+            // slots below, one level up: A to B and B to A cannot both be
+            // applied without a temporary name, and the folders carry their
+            // contents -- and one of them carries a vault.
+            13 if vault == Vault::FolderRings => {
+                let here: Vec<String> = RING_NAMES
+                    .iter()
+                    .map(|n| n.to_string())
+                    .filter(|n| device.fs.exists(n))
+                    .collect();
+                if here.len() == RING_NAMES.len() {
+                    let via = format!(".ring-swap-{step}.tmp");
+                    if rng.below(3) == 0 {
+                        device.fs.user_rename(&here[0], &via);
+                        device.fs.user_rename(&here[1], &here[0]);
+                        device.fs.user_rename(&here[2], &here[1]);
+                        device.fs.user_rename(&via, &here[2]);
+                    } else {
+                        let i = rng.below(3) as usize;
+                        let j = (i + 1 + rng.below(2) as usize) % 3;
+                        device.fs.user_rename(&here[i], &via);
+                        device.fs.user_rename(&here[j], &here[i]);
+                        device.fs.user_rename(&via, &here[j]);
+                    }
+                }
+            }
             13 => {
                 let base = join(root, "Shared");
                 let slots = [
@@ -1023,6 +1139,35 @@ fn sweep_on(
     chaos: bool,
 ) -> Vec<(String, u64)> {
     sweep_core(label, seeds, steps, devices, chaos, Vault::None, false, Names::Ordinary)
+}
+
+/// The same sweep with three folders beside the vault whose names the workload
+/// trades, one of them encrypted. See `Vault::FolderRings`.
+#[must_use]
+fn sweep_rings(
+    label: &str,
+    seeds: std::ops::Range<u64>,
+    steps: usize,
+    devices: &[&str],
+    chaos: bool,
+) -> Vec<(String, u64)> {
+    let named: Vec<(&str, Platform)> = devices.iter().map(|n| (*n, Platform::Linux)).collect();
+    sweep_core(label, seeds, steps, &named, chaos, Vault::FolderRings, false, Names::Ordinary)
+}
+
+/// The same, on computers that disagree about what a name is, and with kills.
+/// Both matter: the happy path of a name trade was green while a single refused
+/// rename leaked the vault, so an arm that never faults would not find B4 and
+/// never found AD.
+#[must_use]
+fn sweep_rings_hostile(
+    label: &str,
+    seeds: std::ops::Range<u64>,
+    steps: usize,
+    devices: &[(&str, Platform)],
+    kills: bool,
+) -> Vec<(String, u64)> {
+    sweep_core(label, seeds, steps, devices, true, Vault::FolderRings, kills, Names::Ordinary)
 }
 
 /// The same sweep with the whole workload inside a vault every device can open.
@@ -1676,6 +1821,46 @@ fn scratch_marker_sweep() {
     no_seed_failed(arms);
 }
 
+/// Three folders beside the vault whose NAMES the workload trades, one of them
+/// encrypted.
+///
+/// The gap this fills: action 13 has traded names forty thousand seeds at a
+/// time and its slots are FILES. No estate has ever traded a FOLDER name, which
+/// is the whole territory of Defects AA to AE, so no seed could reach it. One
+/// ring is a vault because a plain trade converges whichever way it is
+/// resolved -- only encryption makes custody visible, since it follows the
+/// folder and not the name. The hostile and kill arms are here because the
+/// happy path was green while a single refused rename leaked the vault.
+///
+/// RED as it stands, on Defect AF: 11 seeds in 40 on a clean network. Kept out
+/// of the estate until AF is fixed -- 16 arms reporting one real failure is a
+/// signal, 16 arms reporting a known one is noise that buries the other 15.
+#[test]
+#[ignore]
+fn scratch_ring_sweep() {
+    let mut arms: Vec<Vec<(String, u64)>> = Vec::new();
+    std::panic::set_hook(Box::new(|_| {}));
+    arms.push(sweep_rings("rings-clean-2dev", 74000..74400, 40, &["laptop", "desktop"], false));
+    arms.push(sweep_rings("rings-hostile-2dev", 74400..74800, 30, &["laptop", "desktop"], true));
+    arms.push(sweep_rings("rings-clean-3dev", 74800..75100, 40, &["a", "b", "c"], false));
+    arms.push(sweep_rings_hostile(
+        "rings-kill-2dev",
+        75100..75400,
+        30,
+        &[("mac", Platform::MacOs), ("pc", Platform::Windows)],
+        true,
+    ));
+    arms.push(sweep_rings_hostile(
+        "rings-platform-3dev",
+        75400..75700,
+        40,
+        &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)],
+        false,
+    ));
+    let _ = std::panic::take_hook();
+    no_seed_failed(arms);
+}
+
 /// Everything the other sweeps do, inside a vault.
 ///
 /// Encryption has only ever been tested by stories somebody wrote down, and
@@ -2039,6 +2224,7 @@ fn scratch_one() {
     let vault = match std::env::var("VAULT").unwrap_or("0".into()).as_str() {
         "1" => Vault::Shared,
         "2" => Vault::OneKeyHolder,
+        "3" => Vault::FolderRings,
         _ => Vault::None,
     };
     let names: Vec<&str> = if n == 3 { vec!["a", "b", "c"] } else { vec!["laptop", "desktop"] };
