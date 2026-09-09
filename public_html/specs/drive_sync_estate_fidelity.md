@@ -2208,6 +2208,53 @@ in `zz_sweep.rs` swaps two, or three-way rotates, over a small shared set both
 devices work on -- but the slots are FILES (`slot-1.dat` and friends). It has
 never once traded FOLDER names, which is the whole of this defect's territory.
 
+**Seed inertness, measured rather than argued.** The claim is that adding the
+arm re-rolls no pinned seed. There are three touch points in shared paths -- the
+`matches!` in `into_the_vault` (first term false for every other vault, so
+`rng.below(2)` is short-circuited exactly as before), the `13 if` guard (a
+comparison, no draw), and the ring seeding (entirely inside
+`if vault == FolderRings`). That reasoning was checked by review and holds, but
+it is an argument, so it was also measured.
+
+Method: an ISOLATED copy of the sync tree with its own target directory, so the
+shared checkout is never modified -- the earlier attempt swapped the file in
+place, which parks the working tree in a reverted state while it runs and is not
+worth doing on a machine other people are using. `zz_sweep.rs` is the only file
+differing from HEAD, so replacing just that one file in the copy reproduces HEAD
+exactly, and both halves are built in the same environment. The comparator is
+the workload's own per-seed dials (`DIALS=1`: swaps during uploads, landing
+saves, folder renames, kills), which are directly sensitive to the random
+stream.
+
+Result: **identical across 60 runs** (VAULT=0, 1 and 2, twenty seeds each). Not
+vacuous -- the 60 lines are all distinct, and `swaps` and `folder_renames` both
+range 0 to 4, so a shifted stream would have shown. No pinned seed re-rolls.
+
+**Two follow-ups on the arm, from review (public-html-0e), neither a blocker.**
+
+*It goes quiet exactly where it matters.* In the sim `user_rename` cannot fail,
+so the workload's rotation always completes on the disk -- but the moment the
+ENGINE renames a ring aside, which is what AF does, that device has fewer than
+three rings standing at their names and the arm becomes a silent no-op on that
+device for the rest of the run. So it stops trading on precisely the seeds where
+the trade is interesting, and after AF is fixed the same will be true on any
+seed where a park or an aside is in flight. Fix: trade among whatever rings
+still stand when at least two do, and count trades per seed so a run that made
+none reports itself vacuous, in the spirit of `no-ciphertext: vacuous`.
+
+*A ring world never runs the FILE name trades.* The ring arm of action 13 sits
+ahead of the file arm and takes the whole action number, so `Shared/slot-N.dat`
+is never traded in a ring world. Either say so where the arm is written or give
+the ring trade an action number of its own so both fire.
+
+*And a hazard to pin while it is still true:* `same_side_of_the_vault` knows
+only `VAULT_ROOT`, so the encrypted ring is a second vault the crossing refusal
+has never heard of. The sealed-content assertion is sound ONLY because nothing in
+the generator can produce a path under a ring -- `dirs` starts at the root,
+`files` starts empty, and no arm enumerates the disk. An arm that ever picks
+paths from the disk would break that silently, so the constraint belongs in a
+comment at `same_side_of_the_vault` naming the rings.
+
 The fix for the coverage, when it is built: a parameter switching action 13
 between file slots and folder slots. `Names` is already threaded through
 `workload_core` explicitly, so a flag that is off by default consumes no
@@ -2536,10 +2583,49 @@ stands, a green run there is not evidence of anything but the byte count.
 **Order to build it in** (public-html-0e, and the reason not to start at the
 belt):
 
-1. **The vault-conversion gate.** Fail-safe and independent of everything else,
-   and it is the policy line below. Conversion happens only where the USER moved
-   the bytes; an engine-minted path never counts as consent. This alone turns AF
-   from a leak into a stall.
+1. **The vault-conversion gate** -- but NOT where it was first specified. The
+   policy below is right; `crossing_a_vault_edge` is the wrong site, and it was
+   measured rather than assumed. Traced on seed 74000: the leak is not a
+   conversion at all. The two uploads of `sealed.txt` are
+
+       UploadAsNew entity=File(-3)  provisional=true  parent=502   (correct, encrypted)
+       UploadAsNew entity=File(-12) provisional=true  parent=515   (the leak, in the clear)
+
+   The second is a PROVISIONAL entity -- a brand new record the scan minted --
+   into folder 515, itself minted from the orphaned conflict-copy directory. The
+   engine has entirely forgotten these bytes were ever sealed: there is no move,
+   no encrypted entry and no edge to cross, so `crossing_a_vault_edge` is never
+   consulted and gating it changes nothing.
+
+   The enforceable form of the policy is one step later, where a PROVISIONAL
+   file is about to be uploaded as new content: ask whether these bytes are
+   already held under encryption. The inode is the link -- 1001 belongs to the
+   sealed file's record -- and `entity_for_file_id` can answer it, which it
+   could not have done before Defect B6 was fixed, because the scan was NULLing
+   the entity out. If the answer is yes, the upload stalls with an issue instead
+   of publishing.
+
+   **BUILT, MEASURED, AND IT DOES NOT FIX AF. Reverted.** The gate was written
+   exactly as specified -- a new `UnsyncableReason::AlreadySealed`, a
+   `sealed_source_of` reading the ENTRIES rather than the hash index, keyed on
+   the inode alone, placed at the file mint so no upload is ever planned. All 11
+   known AF seeds still leak, and instrumenting the mint says why in one line:
+
+       minting "ring-2 (conflicted copy ...)/sealed.txt" inode=1001 sealed_source=None
+
+   The encrypted records at that moment contain no entry for inode 1001 at all.
+   The sealed record is not deleted-but-present, it is already FORGOTTEN by the
+   time the provisional is minted. The fail-open window this gate was known to
+   have is not an edge case: measured per seed, it is 11 of 11.
+
+   So the gate cannot be the first layer. It only ever fires while the sealed
+   record still exists, and on the AF path it never does. Whatever is built
+   first has to be something that stops the record being forgotten -- the
+   planner's two-claimants rule, or the record following its directory -- and
+   the gate is worth revisiting only afterwards, when there is a record left for
+   it to match. Reverted rather than kept: it costs a full entry scan per
+   created file and fires in no known case, and an inert guard on a route that
+   publishes vault contents invites the belief that something is protecting it.
 2. **The planner's two-claimants rule.** The first-order defect is upstream of
    `make_room`: one round planned an ApplyLocalMove and an ApplyRemoteMove onto
    the SAME slot, which the AE review already recorded the planner cannot see.
@@ -2561,6 +2647,77 @@ belt):
 
 Do NOT build 3 before 2: a belt on a route the planner should never send anyone
 down is the same inert-guard problem as the refusal that was just reverted.
+
+**What actually forgets the sealed record, measured on seed 74000.** Neither
+reading that was proposed. Every operation the run plans was logged:
+
+    20 create_local_folder   19 upload_new   19 download
+    11 create_remote_folder   4 move_remote   2 trash_local
+     2 move_local             1 unmaterialize_and_park
+
+There is **no `TrashRemote` at all**. The record is destroyed by `trash_local`
+on file 901 -- the LOCAL application of a deletion, which forgets the entry.
+And `trash_local` has an arm that forgets an entry with no file found:
+`Placed::Not(Unplaced::AncestorMissing)`, whose comment reads *"there is
+provably nothing on this disk to put in the trash -- and the record has to go
+with that conclusion"*. Here that conclusion is FALSE: 901's ancestor is folder
+502, whose directory was moved aside without its record, so the chain cannot
+resolve -- while the bytes are sitting on the disk under the conflict name the
+whole time.
+
+That is the forgetting site, and it explains every measurement: the record is
+gone before the mint (11 of 11), the inode is still on the disk, and the scan
+then adopts those bytes as brand new plaintext content.
+
+**Who marks the sealed file deleted, measured.** A `trash_local` is only ever
+planned for (local None, remote Deleted), so 901 carried `remote_deleted` before
+that operation existed -- and a directory rename on this disk cannot make the
+server say a file is gone. Instrumented at every writer of that flag, both flips
+in the run come from **`absorb_remote`** (pass.rs), which is the feed or a stat
+reporting a genuine server deletion. Not the parent-trashed cascade, not the
+download's `gone` closure, and not either `server_view_after_retry` site. Both
+`trash_local` operations are on FILES -- 901 and 902 -- and neither is folder
+502.
+
+**That does NOT establish a genuine server deletion, and the first reading of it
+here was wrong.** `absorb_remote` has four callers and only one is the feed:
+`poll_remote` (the feed, a real server event), `walk_index` (a full index
+re-derivation, reached exactly when a folder's chain breaks -- which is the
+state AF is in), `open_what_the_key_unlocks` (a `stat_all` on sealed files
+waiting for a key), and `forget_folder_the_server_confirms` (a stat on a trashed
+folder's children). The last three all carry the `missing` flag that means "gone
+OR no longer visible" -- two server statements wearing one flag, as that
+function's own comment says. So the trap above is not ruled out; it may simply
+have re-entered wearing `absorb_remote`.
+
+**A second fact, established from the run already taken.** The operation counts
+were FLEET-WIDE -- the instrumentation sat at the op-queue point with no device
+filter, and the sweep runs both devices in one process -- and there was **no
+`trash_remote` at all**, for a file or a folder, on either device. So no device
+asked the server to delete anything. "The other device trashed a sealed file"
+is therefore NOT the open question. The open question is why the server's answer
+for a live file was read as gone.
+
+**Where the next session starts** -- these two lines before any build:
+
+1. **Which of the four `absorb_remote` callers wrote 901 and 902.** If it is
+   `poll_remote` and the other device's log shows a trash, the aside fix goes
+   first and that device's reason is the open defect. If it is `walk_index` or
+   either stat, the root is a sealed file read as deleted from a `missing`
+   answer, the aside fix is SECOND, and nothing should be built on the
+   forgetting site at all.
+2. Confirm (1) against the fleet-wide fact above rather than a single device's
+   view.
+
+Nothing is to be built on the forgetting site until line 1 is answered.
+
+**The invariant the fix has to restore**, and the one sentence to test against:
+*the engine never forgets a sealed record while its inode is still on the disk.*
+
+It also says the move-aside fix reaches this, though by a different route than
+predicted: if the aside carried 502's record, 901's ancestor chain would resolve
+to the conflict path, the file would be found, and the belief-based forget would
+never be reached.
 
 **A policy line this defect earns, wider than itself.** *A drag out of a vault
 converts by design* is a statement about something THE USER did. Here it was
