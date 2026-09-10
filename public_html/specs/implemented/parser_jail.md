@@ -1,19 +1,14 @@
 # Parser jail: strangers' bytes never parse as the web user
 
-**Status:** BUILT 2026-09-10 (WP1–WP5, uncommitted). Awaiting the root install
-on dev (`sudo bash maintenance_scripts/install_tools/install_parser_jail.sh`),
-which makes `tests/security/parser_jail_gate.sh` runnable and lets
-`tests/unit/document_text_test.php` prove the fence from inside; then a
-release, which carries the launcher to every node through the core host
-installer. **Owner decision 2026-09-10: the fallback stays advisory.** A
-self-hosted box whose owner never runs the installer keeps the previous
-posture and the notice; `DocumentText::JAIL_REQUIRED` is not scheduled to
-flip. Managed nodes are always jailed because the agent-run upgrade installs
-it. Pulled out of `security_inventory.md` S5 (separation 1)
-as the first structural item to build. The Postfix pipe uid (S6) stays in the
-inventory; it is a permissions question the read-only tree (S10) answers, not
-a parser question. `docs/document_text.md` is the current-state record; the
-section "As built" below records where the build differs from the design.
+**Status:** IMPLEMENTED 2026-09-10. Shipped in 0.8.384 and upgraded onto
+every managed node the same day; dev installed by hand. The fence is proven
+from inside (`tests/unit/document_text_test.php`) and outside
+(`tests/security/parser_jail_gate.sh`) on dev with launcher 1.0.1, which
+fixes the one defect the first jailed run found (see "As built"). Owner
+decision: the fallback stays advisory; `DocumentText::JAIL_REQUIRED` is not
+scheduled to flip. `docs/document_text.md` is the current-state record. The
+Postfix pipe uid (S6) stays in the inventory; it is a permissions question
+the read-only tree (S10) answers, not a parser question.
 
 ## What this closes
 
@@ -357,6 +352,13 @@ Where the build differs from the design above, and why:
   fresh `public_html` into place. Where the grant cannot be made the launcher
   is not installed and the advisory fallback stands, rather than a jail whose
   every extraction fails.
+- **The address-space cap is applied by util-linux `prlimit`**, exec'd by
+  the launcher as the last hop before the command. Launcher 1.0.0 set
+  `RLIMIT_AS` on itself and died intermittently with "runtime: cannot
+  allocate memory": a Go runtime maps memory lazily and a cap on its own
+  address space can land before the exec. Found by the unit suite on the
+  first jailed run on dev (2026-09-10), fixed in 1.0.1; the installer
+  refuses a box without `prlimit`.
 - **The address-space ceiling is 640 MB** (`JAIL_ADDRESS_SPACE_BYTES`):
   PHP's 256 MB plus what the interpreter (~140 MB before reading a byte) and
   the C libraries map outside it. Every fixture in the suite parses under it

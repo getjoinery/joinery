@@ -28,7 +28,10 @@
 // environment is discarded and replaced: a setuid binary that honours the
 // caller's environment is a privilege bug waiting for a library that reads one.
 //
-// Version 1.0.0
+// Version 1.0.1 - the address-space cap is applied by util-linux prlimit as
+// the last hop before the command, never on this process: a Go runtime
+// reserves memory lazily, and capping its own address space made the second
+// stage die with "cannot allocate memory" on the way to exec.
 package main
 
 import (
@@ -285,8 +288,8 @@ func stage2() {
 	uid, gid := jailIDs()
 
 	// Everything that needs a lookup happens before the fence closes: the
-	// command's path against the scrubbed PATH, and the argv/env pointers the
-	// final exec will hand the kernel.
+	// command's path against the scrubbed PATH, and the argv the final exec
+	// will hand the kernel.
 	os.Setenv("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
 	path := o.argv[0]
 	if !strings.Contains(path, "/") {
@@ -299,6 +302,21 @@ func stage2() {
 	if _, err := os.Stat(path); err != nil {
 		fail(exitUsage, "command not found: %s", path)
 	}
+	argv := o.argv
+
+	// The address-space cap is the one limit this process must not put on
+	// itself: the Go runtime maps memory lazily, and a cap below what it may
+	// still need kills the process between here and exec. util-linux's prlimit
+	// (a small C program, present on every Debian and Ubuntu) applies it and
+	// execs the command, inside the same fence.
+	if o.rlimitAS > 0 {
+		prlimit, err := exec.LookPath("prlimit")
+		if err != nil {
+			fail(exitUsage, "prlimit (util-linux) not found; it applies --rlimit-as")
+		}
+		argv = append([]string{"prlimit", fmt.Sprintf("--as=%d", o.rlimitAS), "--", path}, o.argv[1:]...)
+		path = prlimit
+	}
 
 	// 1. A fresh, empty network namespace. Needs CAP_SYS_ADMIN, which a setuid
 	//    root process has on bare metal and lacks inside a default container;
@@ -310,9 +328,6 @@ func stage2() {
 	setLimit(rlimitNofile, 256, 256)
 	setLimit(syscall.RLIMIT_FSIZE, o.rlimitFsize, o.rlimitFsize)
 	setLimit(syscall.RLIMIT_CPU, uint64(o.rlimitCPU), uint64(o.rlimitCPU+5))
-	if o.rlimitAS > 0 {
-		setLimit(syscall.RLIMIT_AS, o.rlimitAS, o.rlimitAS)
-	}
 
 	// 3. Become the jail user. This must precede the seccomp filter, whose
 	//    deny-list includes every setuid family.
@@ -329,7 +344,7 @@ func stage2() {
 	// 5. Files the command creates are its own.
 	syscall.Umask(0077)
 
-	if err := syscall.Exec(path, o.argv, childEnv); err != nil {
+	if err := syscall.Exec(path, argv, childEnv); err != nil {
 		fail(exitUsage, "exec %s: %v", path, err)
 	}
 }

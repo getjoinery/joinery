@@ -3,7 +3,9 @@
 # install_parser_jail.sh - install or converge the parser jail's launcher on
 # this machine (specs/parser_jail.md, docs/document_text.md).
 #
-# Version: 1.0
+# Version: 1.1 - checks for util-linux prlimit, which the launcher uses to apply
+#              the address-space cap as the last hop before the command.
+#          1.0
 #
 # What it leaves behind, every time it runs:
 #   - a system user `joinery-jail` with no shell, no home and no groups;
@@ -60,6 +62,11 @@ if [[ ! -f "${SRC}" ]]; then
 fi
 if ! head -c 4 "${SRC}" | grep -q 'ELF'; then
     echo "parser jail: ${SRC} is not an executable - skipping" >&2
+    exit 0
+fi
+
+if ! command -v prlimit >/dev/null 2>&1; then
+    echo "parser jail: WARNING - prlimit (util-linux) not found; the launcher needs it - not installed" >&2
     exit 0
 fi
 
