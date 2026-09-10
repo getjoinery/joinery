@@ -18,6 +18,9 @@
  * (over the wire, pinned to the node's own IP) that warns before a
  * self-renewed cert lapses. See check_cert_expiry().
  *
+ * @version 2.1 - the cert-expiry alert reports whether renewal is actually overdue, and by how
+ *                much, instead of guessing that "renewal appears to be failing": issue date,
+ *                lifetime, renewal-due date, issuer, serial, and whether the cert changed
  * @version 2.0 - queues a check_status job for every enabled agent node whose status facts are
  *                older than STATUS_REFRESH_SECONDS: nothing else ever measured a node again after
  *                its last button press or deploy, so versions and certificate facts went stale
@@ -502,6 +505,9 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 		}
 
 		$not_after = (int)$cert['validTo_time_t'];
+		// Read before the overwrite: an expiry date unchanged since the previous
+		// pass is proof nothing renewed, which the alert says out loud.
+		$prev_expiry = trim((string)$node->get('mgn_cert_expiry_ts'));
 		$node->set('mgn_cert_expiry_ts', gmdate('Y-m-d H:i:s', $not_after));
 		$out['modified'] = true;
 
@@ -513,7 +519,7 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 		if ($days_left < $warn_days) {
 			$due = ($alerted_ts === null || $alerted_ts === '')
 				|| (time() - strtotime($alerted_ts . ' UTC') >= self::CERT_RECHECK_ALERT_DAYS * 86400);
-			if ($due && $this->send_cert_alert($node, $days_left, $not_after)) {
+			if ($due && $this->send_cert_alert($node, $days_left, $cert, $prev_expiry, $alerted_ts)) {
 				$node->set('mgn_cert_alerted_ts', gmdate('Y-m-d H:i:s'));
 				$out['alerted'] = true;
 			}
@@ -593,16 +599,29 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	/**
 	 * Send the cert-expiry warning email. Returns true on send, false if no
 	 * recipient resolved.
+	 *
+	 * "Expires in N days" on its own does not say whether anything is wrong —
+	 * a healthy 90-day certificate spends every day of its life expiring. What
+	 * says something is wrong is that the renewal date has already passed and
+	 * the certificate on the wire is still the old one. Both facts are read
+	 * straight off the served certificate, so the mail carries the diagnosis
+	 * instead of the guess it used to make.
+	 *
+	 * @param array       $cert        Parsed served cert (openssl_x509_parse shape).
+	 * @param string      $prev_expiry mgn_cert_expiry_ts as it stood before this pass.
+	 * @param string|null $alerted_ts  mgn_cert_alerted_ts, i.e. when we last warned.
 	 */
-	private function send_cert_alert($node, int $days_left, int $not_after): bool {
+	private function send_cert_alert($node, int $days_left, array $cert, string $prev_expiry = '', ?string $alerted_ts = null): bool {
 		$to = $this->resolve_alert_recipient();
 		if (!$to) {
 			error_log('RunNodeUptimeChecks: no alert recipient for cert warning on node ' . $node->get('mgn_slug'));
 			return false;
 		}
-		$name   = $node->get('mgn_name');
-		$host   = parse_url((string)$node->get('mgn_site_url'), PHP_URL_HOST);
-		$expiry = gmdate('Y-m-d H:i:s', $not_after) . ' UTC';
+		$name      = $node->get('mgn_name');
+		$host      = parse_url((string)$node->get('mgn_site_url'), PHP_URL_HOST);
+		$ip        = trim((string)$node->get('mgn_host'));
+		$not_after = (int)$cert['validTo_time_t'];
+		$expiry    = gmdate('Y-m-d H:i:s', $not_after) . ' UTC';
 
 		if ($days_left < 0) {
 			$subject  = '[' . $name . '] TLS certificate EXPIRED';
@@ -611,11 +630,64 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 			$subject  = '[' . $name . '] TLS certificate expires in ' . $days_left . ' day(s)';
 			$headline = 'The TLS certificate expires in ' . $days_left . ' day(s).';
 		}
+
+		$facts = "Expires:     {$expiry}\n";
+		$issuer = $this->describe_issuer($cert);
+		if ($issuer !== '') {
+			$facts .= "Issuer:      {$issuer}\n";
+		}
+		if (!empty($cert['serialNumberHex'])) {
+			$facts .= "Serial:      " . $cert['serialNumberHex'] . "\n";
+		}
+
+		// The renewal verdict. Without a usable notBefore we cannot say when
+		// renewal was due, so we state what we measured and claim nothing more.
+		$not_before = isset($cert['validFrom_time_t']) ? (int)$cert['validFrom_time_t'] : 0;
+		$due_ts     = $this->renewal_due_ts($not_before, $not_after);
+		if ($due_ts === null) {
+			$verdict = "This certificate carries no usable issue date, so how overdue its renewal is\n"
+			         . "cannot be measured from here. Check the certificate manager on the node.\n";
+		} else {
+			$lifetime_days = (int)round(($not_after - $not_before) / 86400);
+			$facts .= "Issued:      " . gmdate('Y-m-d H:i:s', $not_before) . " UTC\n"
+			        . "Lifetime:    {$lifetime_days} days\n"
+			        . "Renewal due: " . gmdate('Y-m-d H:i:s', $due_ts) . " UTC";
+
+			$overdue_days = (int)floor((time() - $due_ts) / 86400);
+			if ($overdue_days >= 0) {
+				$facts  .= " — " . $overdue_days . " day(s) ago\n";
+				$verdict = "Renewal is {$overdue_days} day(s) overdue, so automatic renewal on this node is\n"
+				         . "failing. It is not simply a certificate nearing the end of a normal life.\n";
+			} else {
+				$facts  .= " — in " . abs($overdue_days) . " day(s)\n";
+				$verdict = "Renewal is not overdue yet; it is due in " . abs($overdue_days) . " day(s). If the certificate\n"
+				         . "has not been replaced by then, automatic renewal on this node is failing.\n";
+			}
+		}
+
+		// An unchanged expiry date across two alerts means no new certificate was
+		// issued in between — the strongest evidence we can gather from outside.
+		if ($alerted_ts !== null && $alerted_ts !== '' && $prev_expiry !== ''
+			&& strtotime($prev_expiry . ' UTC') === $not_after) {
+			$verdict .= "\nThis is the same certificate reported in the previous alert on "
+			          . gmdate('Y-m-d', strtotime($alerted_ts . ' UTC')) . ";\nnothing has renewed since.\n";
+		}
+
+		$where = "\nThis certificate is issued and served by the node itself. This system only reads\n"
+		       . "it over the wire, so the reason renewal is failing is in the node's own\n"
+		       . "certificate manager log, not here.\n";
+
 		$body = "Node: {$name}\n"
-		      . "Host: {$host}\n"
-		      . "{$headline}\n"
-		      . "Expires: {$expiry}\n\n"
-		      . "Automatic renewal appears to be failing. Check the certificate manager on this node.\n";
+		      . "Host: {$host}" . ($ip !== '' ? " ({$ip})" : '') . "\n\n"
+		      . "{$headline}\n\n"
+		      . $facts . "\n"
+		      . $verdict
+		      . $where;
+
+		$detail = $this->node_detail_url($node);
+		if ($detail !== '') {
+			$body .= "\nNode detail: {$detail}\n";
+		}
 
 		try {
 			EmailSender::quickSend($to, $subject, $body);
@@ -624,6 +696,51 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 			error_log('RunNodeUptimeChecks: cert alert send failed for node ' . $node->get('mgn_slug') . ': ' . $e->getMessage());
 			return false;
 		}
+	}
+
+	/**
+	 * When a standard ACME client would have replaced this certificate: at two
+	 * thirds of its life, i.e. one third of the lifetime before expiry. That is
+	 * what Let's Encrypt's renewal window works out to for a 90-day cert (day
+	 * 60), and the proportion holds for shorter and longer lifetimes too.
+	 *
+	 * Returns null when notBefore is missing or not before notAfter, so a
+	 * malformed date produces no claim rather than a wrong one.
+	 */
+	private function renewal_due_ts(int $not_before, int $not_after): ?int {
+		if ($not_before <= 0 || $not_before >= $not_after) {
+			return null;
+		}
+		return $not_after - intdiv($not_after - $not_before, 3);
+	}
+
+	/**
+	 * Human-readable issuer, "O CN" where both are present. Worth stating: an
+	 * issuer that is not the one you expect (a staging or test CA) is its own
+	 * answer to why clients are unhappy.
+	 */
+	private function describe_issuer(array $cert): string {
+		$issuer = $cert['issuer'] ?? [];
+		$parts  = [];
+		foreach (['O', 'CN'] as $field) {
+			if (!empty($issuer[$field]) && is_string($issuer[$field])) {
+				$parts[] = trim($issuer[$field]);
+			}
+		}
+		return implode(' ', array_unique($parts));
+	}
+
+	/**
+	 * Absolute URL of this node's detail page, or '' when the site's own
+	 * address is not configured.
+	 */
+	private function node_detail_url($node): string {
+		$web = trim((string)Globalvars::get_instance()->get_setting('webDir'), " /");
+		$id  = (int)$node->get('mgn_id');
+		if ($web === '' || $id <= 0) {
+			return '';
+		}
+		return 'https://' . $web . '/admin/server_manager/node_detail?mgn_id=' . $id;
 	}
 
 	private function format_duration(int $seconds): string {
