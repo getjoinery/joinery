@@ -48,7 +48,7 @@ The subprocess runs under **the parser jail** wherever the launcher is installed
 
 1. Discards the caller's environment and replaces it (`PATH`, `LANG`, `TMPDIR=/dev/shm`).
 2. Enters a fresh, empty network namespace. This needs `CAP_SYS_ADMIN`, which a setuid-root process has on bare metal and lacks inside a default container; step 5 closes the same door either way.
-3. Sets kernel limits the command inherits: address space (`--rlimit-as`, the backstop for what libzip, libxml2 and the interpreter map outside PHP's own `memory_limit`), CPU seconds, file size, open files, no core dumps.
+3. Sets kernel limits the command inherits: CPU seconds, file size, open files, no core dumps. The address space (`--rlimit-as`, the backstop for what libzip, libxml2 and the interpreter map outside PHP's own `memory_limit`) is applied by util-linux `prlimit` as the last hop before the command, because a Go process cannot cap its own address space without risking its runtime.
 4. Becomes `joinery-jail`: no supplementary groups, verified by reading the ids back, not dumpable.
 5. Sets `PR_SET_NO_NEW_PRIVS` and installs a seccomp filter that answers `EPERM` to `socket`/`connect`/`bind`, `fork`/`clone`/`clone3`, `ptrace`, every mount and namespace call, every `setuid` family, `keyctl`, `bpf`, `io_uring_setup`, module loading and the like; a syscall from another architecture's table is killed outright. It is a deny-list on purpose: PHP's syscall set is wide and changes between releases, and an allow-list that breaks on a PHP upgrade is a jail nobody keeps.
 6. Sets umask `077` and execs the command.

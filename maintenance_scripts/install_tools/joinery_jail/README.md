@@ -12,6 +12,10 @@ load kernel code, or exceed the address-space, file-size and CPU limits it was
 given. It runs as `joinery-jail`, a user that owns nothing and can read the code
 tree and vendor directory, nothing else that matters.
 
+The address-space cap is applied by util-linux `prlimit` as the last hop before
+the command (a Go process cannot cap its own address space without risking its
+runtime); every other limit is set here.
+
 Exit codes follow `timeout(1)`: the command's own, 124 on the deadline,
 128+signal when it died of one, 125 when the launcher refused.
 
