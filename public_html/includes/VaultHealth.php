@@ -22,6 +22,8 @@
  * so tests/vault/vault_health_test.php can hand it a fixture and cover every
  * branch on any box.
  *
+ * @version 1.3 - a sixth check: the host converger has run within a day
+ *                (specs/host_converger.md)
  * @version 1.2 - a fifth check: the parser jail is installed, so strangers'
  *                bytes are never parsed as the web user (specs/parser_jail.md)
  * @version 1.1 - specs/vault_exposure_quick_fixes.md Q2-Q4: the core-dump check
@@ -44,7 +46,42 @@ class VaultHealth {
 			self::checkExceptionArgs(),
 			self::checkSwapSafe(),
 			self::checkParserJail(),
+			self::checkHostConverger(),
 		];
+	}
+
+	/**
+	 * The root half of an upgrade (PHP extensions, the host installers) is done
+	 * by a root timer on a self-hosted box, a job on a managed node, and the
+	 * container start in Docker. Where a timer is installed, it must be
+	 * running: a box whose code moves on while its host does not is one whose
+	 * jail launcher, agent artifact and plugin services are silently stale.
+	 *
+	 * @param array|null $facts Injected for tests; HostConvergerNotice::facts() otherwise.
+	 * @param int|null   $now   Injected for tests.
+	 */
+	public static function checkHostConverger(?array $facts = null, ?int $now = null): array {
+		$key = 'host_converger';
+		$label = 'The host converger follows upgrades (runs within a day)';
+		$facts = $facts ?? HostConvergerNotice::facts();
+		$now = $now ?? time();
+		if (!$facts['installed']) {
+			return ['key' => $key, 'label' => $label, 'state' => 'unknown',
+				'reason' => 'No host converger is installed on this machine. A container converges at every start and a managed node through its upgrade job; a bare-metal box upgraded from the browser needs one: ' . HostConvergerNotice::installCommand()];
+		}
+		if ($facts['last_run'] === null) {
+			return ['key' => $key, 'label' => $label, 'state' => 'unmet',
+				'reason' => 'The host converger is installed and has never run. On the host: ' . HostConvergerNotice::installCommand()];
+		}
+		if ($now - $facts['last_run'] >= HostConvergerNotice::STALE_AFTER) {
+			return ['key' => $key, 'label' => $label, 'state' => 'unmet',
+				'reason' => 'The host converger last ran ' . gmdate('Y-m-d H:i', $facts['last_run']) . ' UTC, over a day ago. On the host: ' . HostConvergerNotice::installCommand()];
+		}
+		if ($facts['outcome'] === 'installer-failed') {
+			return ['key' => $key, 'label' => $label, 'state' => 'unmet',
+				'reason' => 'The host converger ran but an installer failed; see logs/host_converger.log on the host.'];
+		}
+		return ['key' => $key, 'label' => $label, 'state' => 'verified', 'reason' => ''];
 	}
 
 	/**

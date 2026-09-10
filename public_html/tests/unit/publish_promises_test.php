@@ -43,6 +43,23 @@ $bundle_tool_src = is_file($bundle_tool) ? file_get_contents($bundle_tool) : '';
 $helper_src      = is_file($helper)      ? file_get_contents($helper)      : '';
 
 
+section('A publish converges the management node itself');
+
+// The plane's own tree is the source and is never upgraded, so the host
+// installers a release ships (the parser jail launcher, the agent artifact)
+// would only reach this machine by hand. A publish queues the same
+// run_plugin_installers job every other node gets from its upgrade, on this
+// site's own paired agent. The job, not an inline exec: the agent verifies
+// what it runs, and a job row is how work reaches root on a node.
+check(strpos($publisher_src, 'ManagedNode::self_node()') !== false,
+    'the publisher finds this site\'s own node record');
+check(strpos($publisher_src, "JobCommandBuilder::build_run_plugin_installers(\$self_node)") !== false
+    && strpos($publisher_src, "createFromBuild(\$self_node->key, 'run_plugin_installers'") !== false,
+    'and queues run_plugin_installers on it after the archives are written');
+check(preg_match('/^[^*\n]*_plugin_installers_start\.sh/m', $publisher_src) === 1
+    && strpos($publisher_src, 'no paired agent of its own') !== false,
+    'a site with no agent of its own is told the one command instead');
+
 section('A fresh install can obtain the plugins its bundle names');
 
 check($bundle_tool_src !== '', 'the bundle tool exists', $bundle_tool);

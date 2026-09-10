@@ -12,6 +12,7 @@
  * branches are driven here with fixtures rather than with whatever this box
  * happens to be (specs/vault_exposure_quick_fixes.md Q2-Q4).
  *
+ * @version 1.3 - the host converger check
  * @version 1.2 - the parser jail check
  * @version 1.1 - branch coverage for core_pattern, exception args, and the swap device types
  * @version 1.0
@@ -23,7 +24,7 @@ require_once(PathHelper::getIncludePath('includes/VaultHealth.php'));
 
 section('Report shape');
 $checks = VaultHealth::runAll();
-check(count($checks) === 5, 'runAll reports the five host facts');
+check(count($checks) === 6, 'runAll reports the six host facts');
 $valid_states = ['verified', 'unmet', 'unknown'];
 $all_valid = true;
 $has_fields = true;
@@ -99,6 +100,29 @@ check(strpos($r['reason'], DocumentText::JAIL_LAUNCHER) !== false, 'and the path
 $live = VaultHealth::checkParserJail();
 check($live['state'] === (DocumentText::jailAvailable() ? 'verified' : 'unmet'),
 	'the live check agrees with DocumentText about this box', $live['state']);
+
+// ---------------------------------------------------------------------------
+section('Host converger: installed boxes must have run within a day');
+
+$now = 1800000000;
+$hc = function ($installed, $last, $outcome = 'converged') use ($now) {
+	return VaultHealth::checkHostConverger(['installed' => $installed, 'last_run' => $last, 'outcome' => $outcome], $now);
+};
+check($hc(false, null)['state'] === 'unknown', 'no converger installed is unknown, not a failure (containers and managed nodes converge otherwise)');
+check(strpos($hc(false, null)['reason'], 'install_host_converger.sh') !== false, 'and names the installer for a box that needs one');
+check($hc(true, $now - 300)['state'] === 'verified', 'a run five minutes ago is verified');
+check($hc(true, null)['state'] === 'unmet', 'installed and never run is unmet');
+$r = $hc(true, $now - 2 * 86400);
+check($r['state'] === 'unmet', 'a run two days ago is unmet', $r['reason']);
+check(strpos($r['reason'], 'install_host_converger.sh') !== false, 'and the remediation is the installer');
+check($hc(true, $now - 300, 'installer-failed')['state'] === 'unmet', 'a fresh run that reported a failed installer is unmet');
+check(HostConvergerNotice::forState(true, $now - 300, 'converged', $now, 'cmd') === '', 'the notice is silent while the converger runs');
+check(HostConvergerNotice::forState(false, null, '', $now, 'cmd') === '', 'and silent on a box with no converger');
+check(strpos(HostConvergerNotice::forState(true, $now - 2 * 86400, 'converged', $now, 'sudo bash x'), 'sudo bash x') !== false, 'a stale converger shows the command');
+check(strpos(HostConvergerNotice::forState(true, null, '', $now, 'cmd'), 'never run') !== false, 'a converger that never ran says so');
+$facts = HostConvergerNotice::facts();
+check(array_key_exists('installed', $facts) && array_key_exists('last_run', $facts) && array_key_exists('outcome', $facts),
+	'the live fact reader returns the three facts the check decides on');
 
 // ---------------------------------------------------------------------------
 section('Swap: the device type decides, read from sysfs');
