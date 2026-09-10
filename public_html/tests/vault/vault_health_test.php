@@ -12,6 +12,7 @@
  * branches are driven here with fixtures rather than with whatever this box
  * happens to be (specs/vault_exposure_quick_fixes.md Q2-Q4).
  *
+ * @version 1.2 - the parser jail check
  * @version 1.1 - branch coverage for core_pattern, exception args, and the swap device types
  * @version 1.0
  */
@@ -22,7 +23,7 @@ require_once(PathHelper::getIncludePath('includes/VaultHealth.php'));
 
 section('Report shape');
 $checks = VaultHealth::runAll();
-check(count($checks) === 4, 'runAll reports the four host facts');
+check(count($checks) === 5, 'runAll reports the five host facts');
 $valid_states = ['verified', 'unmet', 'unknown'];
 $all_valid = true;
 $has_fields = true;
@@ -85,6 +86,19 @@ $r = VaultHealth::checkExceptionArgs();
 check($r['state'] === 'unmet', 'ignore_args off is unmet');
 check(strpos($r['reason'], 'zend.exception_ignore_args = On') !== false, 'and the remediation is the ini line');
 ini_set('zend.exception_ignore_args', $was);
+
+// ---------------------------------------------------------------------------
+section('Parser jail: installed or named');
+
+$r = VaultHealth::checkParserJail(true);
+check($r['state'] === 'verified', 'an installed launcher is verified');
+$r = VaultHealth::checkParserJail(false);
+check($r['state'] === 'unmet', 'a missing launcher is unmet', $r['reason']);
+check(strpos($r['reason'], 'install_parser_jail.sh') !== false, 'and the remediation names the installer');
+check(strpos($r['reason'], DocumentText::JAIL_LAUNCHER) !== false, 'and the path the launcher is missing from');
+$live = VaultHealth::checkParserJail();
+check($live['state'] === (DocumentText::jailAvailable() ? 'verified' : 'unmet'),
+	'the live check agrees with DocumentText about this box', $live['state']);
 
 // ---------------------------------------------------------------------------
 section('Swap: the device type decides, read from sysfs');

@@ -85,6 +85,9 @@
  * a working copy or restored blob of another format fails to open and is
  * rebuilt — the disposable-cache contract, so a shape change never needs a
  * migration, just one rebuild per owner on their next unlocked visit.
+ * @version 1.10 - a fold primes its messages in chunks so the HTML-only ones
+ *   read their text through ONE extraction subprocess per chunk (received
+ *   HTML opens in the parser jail, specs/parser_jail.md), not one per message
  * @version 1.9 - the working copy is 0600 from before its first write: /dev/shm is a
  *                1777 tmpfs shared with every local account on a bare-metal host,
  *                and SQLite gives -journal/-wal the main file's mode
@@ -120,6 +123,12 @@ class MailboxIndex {
 	/** Messages per checkpoint: the high-water mark advances after each fully
 	 *  successful batch, so an interrupted fold resumes instead of restarting. */
 	const FOLD_BATCH = 200;
+
+	/** Messages loaded ahead per chunk of a fold, so their HTML reads in one subprocess. */
+	const PRIME_CHUNK = 50;
+
+	/** @var array<int, ?array{msg: InboundEmailMessage, readable: string}> loaded ahead by prime() */
+	private $primed = array();
 
 	/** How far the working copy may run ahead of the persisted blob before a
 	 *  mid-backlog fold re-persists. A window close wipes the working copy and
@@ -625,23 +634,30 @@ class MailboxIndex {
 			return $ok;
 		};
 
-		// Refold pass: stale entries first.
-		foreach ($refold as $id) {
-			if ($deadline !== null && microtime(true) >= $deadline) {
-				$r['complete'] = false;
-				break;
+		// Refold pass: stale entries first. Each chunk's messages are loaded
+		// ahead so their HTML-only bodies read through one subprocess.
+		foreach (array_chunk($refold, self::PRIME_CHUNK) as $chunk) {
+			$this->prime(array_values(array_filter($chunk, function ($id) use ($refold_valid) {
+				return isset($refold_valid[$id]);
+			})));
+			foreach ($chunk as $id) {
+				if ($deadline !== null && microtime(true) >= $deadline) {
+					$r['complete'] = false;
+					break 2;
+				}
+				if (!$fold_one($id, isset($refold_valid[$id]))) {
+					error_log('MailboxIndex: fold stopped for user ' . $user_id
+						. ' — SQLite write failed on refold id ' . $id);
+					$r['complete'] = false;
+					break 2;
+				}
+				$r['refold_done'][] = $id;
+				$r['written'] = true;
+				$r['refolded']++;
+				$r['folded']++;
 			}
-			if (!$fold_one($id, isset($refold_valid[$id]))) {
-				error_log('MailboxIndex: fold stopped for user ' . $user_id
-					. ' — SQLite write failed on refold id ' . $id);
-				$r['complete'] = false;
-				break;
-			}
-			$r['refold_done'][] = $id;
-			$r['written'] = true;
-			$r['refolded']++;
-			$r['folded']++;
 		}
+		$this->primed = array();
 
 		// Main pass: the new rows since the mark, skipping any refolded moments
 		// ago. The mark checkpoints only on whole batches — every id at or
@@ -650,26 +666,32 @@ class MailboxIndex {
 			$refolded_now = array_flip($r['refold_done']);
 			$last_ok = $since_id;
 			$n = 0;
-			foreach ($ids as $id) {
-				if ($deadline !== null && microtime(true) >= $deadline) {
-					$r['complete'] = false;
-					break;
-				}
-				if (!isset($refolded_now[$id])) {
-					if (!$fold_one($id, true)) {
-						error_log('MailboxIndex: fold stopped for user ' . $user_id
-							. ' — SQLite write failed on message id ' . $id);
+			foreach (array_chunk($ids, self::PRIME_CHUNK) as $chunk) {
+				$this->prime(array_values(array_filter($chunk, function ($id) use ($refolded_now) {
+					return !isset($refolded_now[$id]);
+				})));
+				foreach ($chunk as $id) {
+					if ($deadline !== null && microtime(true) >= $deadline) {
 						$r['complete'] = false;
-						break;
+						break 2;
 					}
-					$r['written'] = true;
-					$r['folded']++;
-				}
-				$last_ok = $id;
-				if (++$n % self::FOLD_BATCH === 0) {
-					$this->checkpointMark($user_id, $last_ok);
+					if (!isset($refolded_now[$id])) {
+						if (!$fold_one($id, true)) {
+							error_log('MailboxIndex: fold stopped for user ' . $user_id
+								. ' — SQLite write failed on message id ' . $id);
+							$r['complete'] = false;
+							break 2;
+						}
+						$r['written'] = true;
+						$r['folded']++;
+					}
+					$last_ok = $id;
+					if (++$n % self::FOLD_BATCH === 0) {
+						$this->checkpointMark($user_id, $last_ok);
+					}
 				}
 			}
+			$this->primed = array();
 			$this->checkpointMark($user_id, $last_ok);
 		}
 		$shm->close();
@@ -815,6 +837,39 @@ class MailboxIndex {
 	 * person can see.
 	 */
 	private function rowContent(int $id): ?string {
+		if (array_key_exists($id, $this->primed)) {
+			$entry = $this->primed[$id];
+			unset($this->primed[$id]);
+			if ($entry === null) {
+				return null;
+			}
+			$msg = $entry['msg'];
+			$readable = $entry['readable'];
+		} else {
+			$loaded = $this->loadForIndex($id);
+			if ($loaded === null) {
+				return null;
+			}
+			$msg = $loaded[0];
+			$readable = MailboxHtmlSanitizer::toReadableText($loaded[1]);
+		}
+		try {
+			return (string)$msg->get('iem_sender') . ' ' . (string)$msg->get('iem_subject') . ' '
+				. (string)$msg->get('iem_body_plain') . ' '
+				. $readable
+				. ' ' . $this->attachmentFilenames($id);
+		} catch (VaultLockedException $e) {
+			return null;
+		}
+	}
+
+	/**
+	 * One message and its HTML body for indexing, or null when there is
+	 * nothing to index: row gone, sealed away, or pending parse.
+	 *
+	 * @return array{0: InboundEmailMessage, 1: string}|null
+	 */
+	private function loadForIndex(int $id): ?array {
 		$msg = new InboundEmailMessage($id, TRUE);
 		if (!$msg->key) {
 			return null;
@@ -826,12 +881,36 @@ class MailboxIndex {
 			return null;
 		}
 		try {
-			return (string)$msg->get('iem_sender') . ' ' . (string)$msg->get('iem_subject') . ' '
-				. (string)$msg->get('iem_body_plain') . ' '
-				. MailboxHtmlSanitizer::toReadableText((string)$msg->get('iem_body_html'))
-				. ' ' . $this->attachmentFilenames($id);
+			return array($msg, (string)$msg->get('iem_body_html'));
 		} catch (VaultLockedException $e) {
 			return null;
+		}
+	}
+
+	/**
+	 * Load a chunk of messages ahead of folding them, and read every HTML-only
+	 * body's text through one extraction subprocess. rowContent() then takes
+	 * each from here. Cheap when the deadline cuts a chunk short: a few loaded
+	 * rows go unfolded and are loaded again next tick.
+	 *
+	 * @param int[] $ids
+	 */
+	private function prime(array $ids): void {
+		$this->primed = array();
+		$html = array();
+		foreach ($ids as $id) {
+			$loaded = $this->loadForIndex($id);
+			if ($loaded === null) {
+				$this->primed[$id] = null;
+				continue;
+			}
+			$this->primed[$id] = array('msg' => $loaded[0], 'readable' => '');
+			if (trim($loaded[1]) !== '') {
+				$html[$id] = $loaded[1];
+			}
+		}
+		foreach (MailboxHtmlSanitizer::toReadableTextMany($html) as $id => $text) {
+			$this->primed[$id]['readable'] = $text;
 		}
 	}
 

@@ -37,6 +37,8 @@
  * wrapper differs.
  *
  * @see specs/implemented/inbound_email_filters.md
+ * @version 1.3 - parseGmailExport(): the XML opens in the parser jail
+ *   (GmailFilterExportParser); the mapping stays here
  * @version 1.2
  * @changelog 1.2 - forwarding consent follows the MAILBOX's protection level;
  *   a domain-scoped filter needs it as soon as any mailbox under it seals
@@ -643,29 +645,27 @@ class InboundEmailFilter extends SystemBase {
 		if ($xml === '') {
 			throw new InboundEmailFilterException('The uploaded file is empty.');
 		}
-		// Untrusted input: LIBXML_NONET blocks network fetches; without LIBXML_NOENT
-		// (never passed) modern libxml does not resolve external entities (XXE-safe).
-		$prev = libxml_use_internal_errors(true);
-		$feed = simplexml_load_string($xml, 'SimpleXMLElement', LIBXML_NONET);
-		libxml_clear_errors();
-		libxml_use_internal_errors($prev);
-		if ($feed === false || strtolower($feed->getName()) !== 'feed') {
-			throw new InboundEmailFilterException('This does not look like a Gmail mailFilters.xml export.');
+		// The XML opens in the parser jail (GmailFilterExportParser), which
+		// answers with each entry's property pairs; the mapping is pure PHP
+		// and stays here.
+		$r = DocumentText::parseWith('GmailFilterExportParser', $xml);
+		$answer = ($r['status'] === DocumentText::OK) ? json_decode($r['text'], true) : null;
+		if (!is_array($answer) || !isset($answer['entries']) || !is_array($answer['entries'])) {
+			$why = is_array($answer) && !empty($answer['error']) ? (string)$answer['error'] : (string)$r['detail'];
+			if ($why === GmailFilterExportParser::ERROR_NOT_A_FEED || $why === '') {
+				throw new InboundEmailFilterException('This does not look like a Gmail mailFilters.xml export.');
+			}
+			throw new InboundEmailFilterException('The export could not be read: ' . $why);
 		}
-
-		$appsNs = 'http://schemas.google.com/apps/2006';
 		$out = array();
-		foreach ($feed->entry as $entry) {
-			// Properties as ordered name/value pairs (label can legitimately repeat).
-			$props = array();
-			$children = $entry->children($appsNs);
-			if (isset($children->property)) {
-				foreach ($children->property as $p) {
-					$attrs = $p->attributes(); // name/value are in no namespace
-					$props[] = array((string)$attrs['name'], (string)$attrs['value']);
+		foreach ($answer['entries'] as $props) {
+			$pairs = array();
+			foreach ((array)$props as $pair) {
+				if (is_array($pair) && count($pair) === 2) {
+					$pairs[] = array((string)$pair[0], (string)$pair[1]);
 				}
 			}
-			$out[] = self::mapGmailEntry($props);
+			$out[] = self::mapGmailEntry($pairs);
 		}
 		return $out;
 	}

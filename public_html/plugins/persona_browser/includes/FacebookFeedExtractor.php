@@ -20,8 +20,63 @@
  * the real thing. The metadata fields are read from the
  * post's header/footer markup — see the corresponding pfi_ columns in
  * PersonaFeedItem for what each means.
+ *
+ * The captured markup is Facebook's bytes, and libxml2 is the C parser that
+ * opens them, so the reading happens inside the parser jail
+ * (specs/parser_jail.md): extract(), extractStories() and extractAll() hand
+ * the capture to DocumentText::parseWith() with this class as the parser, and
+ * sandboxParse() runs every selector in the extraction subprocess as a user
+ * that holds nothing. One capture is one subprocess.
+ *
+ * @version 1.1 - the parse runs in the jail; extractAll() reads items and
+ *   stories in one pass; every loadHTML() passes LIBXML_NONET
  */
-class FacebookFeedExtractor {
+class FacebookFeedExtractor implements SandboxParserInterface {
+
+    /**
+     * Sandbox side. The bytes are JSON {posts: string[], media: {src: file}};
+     * the answer is JSON {items: [...], stories: [...]}.
+     */
+    public static function sandboxParse(string $bytes, array $options): string {
+        $in = json_decode($bytes, true);
+        if (!is_array($in)) {
+            throw new DocumentTextException('FacebookFeedExtractor: input is not the capture JSON');
+        }
+        $posts = array_values(array_filter((array)($in['posts'] ?? []), 'is_string'));
+        $media = is_array($in['media'] ?? null) ? $in['media'] : [];
+        $answer = [
+            'items'   => self::extractInSandbox($posts, $media),
+            'stories' => self::extractStoriesInSandbox($posts, $media),
+        ];
+        $json = json_encode($answer, JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_SLASHES);
+        return $json === false ? '{"items":[],"stories":[]}' : $json;
+    }
+
+    /**
+     * Items and stories from one capture, read in ONE subprocess.
+     *
+     * @return array{items: array, stories: array}
+     */
+    public static function extractAll(array $posts, array $media): array {
+        $payload = json_encode(['posts' => array_values($posts), 'media' => $media],
+            JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_SLASHES);
+        $none = ['items' => [], 'stories' => []];
+        if ($payload === false) {
+            error_log('FacebookFeedExtractor: could not encode the capture');
+            return $none;
+        }
+        $r = DocumentText::parseWith(self::class, $payload);
+        if ($r['status'] !== DocumentText::OK) {
+            error_log('FacebookFeedExtractor: the capture could not be read: ' . (string)$r['detail']);
+            return $none;
+        }
+        $answer = json_decode($r['text'], true);
+        if (!is_array($answer)) return $none;
+        return [
+            'items'   => is_array($answer['items'] ?? null) ? $answer['items'] : [],
+            'stories' => is_array($answer['stories'] ?? null) ? $answer['stories'] : [],
+        ];
+    }
 
     // An <img> counts as a real photo (not an avatar/icon) at or above this
     // rendered pixel width. The Mac stamps each <img> with data-nw (its runtime
@@ -35,6 +90,11 @@ class FacebookFeedExtractor {
      * @return array           list of normalized feed items (see class docblock)
      */
     public static function extract(array $posts, array $media): array {
+        return self::extractAll($posts, $media)['items'];
+    }
+
+    /** Sandbox side of extract(). */
+    private static function extractInSandbox(array $posts, array $media): array {
         $out = [];   // dedup_key => item, so a post seen across scrolls merges
 
         foreach ($posts as $html) {
@@ -135,12 +195,17 @@ class FacebookFeedExtractor {
      * are keys into the service's media map ('' if not cached).
      */
     public static function extractStories(array $posts, array $media): array {
+        return self::extractAll($posts, $media)['stories'];
+    }
+
+    /** Sandbox side of extractStories(). */
+    private static function extractStoriesInSandbox(array $posts, array $media): array {
         foreach ($posts as $html) {
             if (!is_string($html) || $html === '') continue;
 
             $doc = new DOMDocument();
             libxml_use_internal_errors(true);
-            $doc->loadHTML('<?xml encoding="UTF-8">' . $html, LIBXML_NOWARNING | LIBXML_NOERROR);
+            $doc->loadHTML('<?xml encoding="UTF-8">' . $html, LIBXML_NONET | LIBXML_NOWARNING | LIBXML_NOERROR);
             libxml_clear_errors();
             $xp = new DOMXPath($doc);
 
@@ -194,7 +259,7 @@ class FacebookFeedExtractor {
     private static function parsePost(string $html, array $media): ?array {
         $doc = new DOMDocument();
         libxml_use_internal_errors(true);
-        $doc->loadHTML('<?xml encoding="UTF-8">' . $html, LIBXML_NOWARNING | LIBXML_NOERROR);
+        $doc->loadHTML('<?xml encoding="UTF-8">' . $html, LIBXML_NONET | LIBXML_NOWARNING | LIBXML_NOERROR);
         libxml_clear_errors();
         $xp = new DOMXPath($doc);
 

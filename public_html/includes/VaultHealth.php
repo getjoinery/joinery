@@ -22,6 +22,8 @@
  * so tests/vault/vault_health_test.php can hand it a fixture and cover every
  * branch on any box.
  *
+ * @version 1.2 - a fifth check: the parser jail is installed, so strangers'
+ *                bytes are never parsed as the web user (specs/parser_jail.md)
  * @version 1.1 - specs/vault_exposure_quick_fixes.md Q2-Q4: the core-dump check
  *                reads kernel.core_pattern (apport ignores the rlimit); the swap
  *                check confirms dm-crypt from sysfs and accepts zram; a fourth
@@ -41,7 +43,35 @@ class VaultHealth {
 			self::checkCoredumpsDisabled(),
 			self::checkExceptionArgs(),
 			self::checkSwapSafe(),
+			self::checkParserJail(),
 		];
+	}
+
+	/**
+	 * Attachments, deliverability reports, received HTML and the AI's fetched
+	 * pages are parsed by C libraries, and a parser bug runs code as whoever
+	 * called it. With the launcher installed that is a user which holds no
+	 * key, no config and no database; without it, it is the web user, in the
+	 * same process family as every open vault window.
+	 *
+	 * @param bool|null $installed Injected for tests; DocumentText::jailAvailable() otherwise.
+	 */
+	public static function checkParserJail(?bool $installed = null): array {
+		$key = 'parser_jail';
+		$label = "Strangers' bytes are parsed by the jail user, never the web user";
+		$installed = $installed ?? DocumentText::jailAvailable();
+		if ($installed) {
+			return ['key' => $key, 'label' => $label, 'state' => 'verified', 'reason' => ''];
+		}
+		return ['key' => $key, 'label' => $label, 'state' => 'unmet',
+			'reason' => 'The parser jail launcher is not installed at ' . DocumentText::JAIL_LAUNCHER
+				. ', so attachments, reports and fetched pages are parsed as the web user on this node. '
+				. 'On the host: ' . self::parserJailInstallCommand()];
+	}
+
+	/** The one command that installs the jail on this machine. */
+	public static function parserJailInstallCommand(): string {
+		return 'sudo bash ' . PathHelper::getSiteRoot() . '/maintenance_scripts/install_tools/install_parser_jail.sh';
 	}
 
 	/**

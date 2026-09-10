@@ -5,19 +5,30 @@
  * Two faces, and the split between them is the whole security design:
  *
  *   PARENT SIDE (any web request): normalizeMime(), categoryForMime(),
- *   isExtractable(), mimeForExtension(), extractPath(), extractBytes().
- *   These decide whether a file COULD be read and spawn the reader. They never
- *   open the bytes — not with finfo, not with ZipArchive, not with DOMDocument.
+ *   isExtractable(), mimeForExtension(), extractPath(), extractBytes(),
+ *   parseWith(), parseWithMany(). These decide whether a file COULD be read
+ *   and spawn the reader. They never open the bytes — not with finfo, not with
+ *   ZipArchive, not with DOMDocument.
  *
  *   SANDBOX SIDE (utils/extract_document_text.php only): sandboxExtract() and
- *   everything under it. This is where attacker-supplied bytes are sniffed,
- *   unpacked and parsed, inside a short-lived `timeout N php -d memory_limit=…`
- *   subprocess. A bomb, a hang or a runaway allocation kills only that child;
- *   the parent reads the exit code and reports the file unreadable.
+ *   everything under it, plus every SandboxParserInterface class. This is
+ *   where attacker-supplied bytes are sniffed, unpacked and parsed, inside a
+ *   short-lived `php -d memory_limit=…` subprocess that runs under the parser
+ *   jail (specs/parser_jail.md): as the joinery-jail user, with no network, no
+ *   forking, a kernel address-space ceiling and a seccomp deny-list, holding
+ *   no config, no database and no key. A bomb, a hang or a runaway allocation
+ *   kills only that child; a parser bug corrupts a process that can read the
+ *   bytes it was given and nothing else. The parent reads the exit code and
+ *   reports the file unreadable.
  *
  * Never call sandboxExtract() from a web request. The isolation is not a
  * nicety — an in-process memory fatal is uncatchable, and the parser retains
  * per-document state that accumulates across files in a long-lived process.
+ *
+ * A node without the launcher (JAIL_LAUNCHER) runs the same subprocess as the
+ * web user and says so: once per process in the error log, in VaultHealth, and
+ * in the admin notice ParserJailNotice. JAIL_REQUIRED turns that into a
+ * refusal to parse, in the release after the fleet carries the launcher.
  *
  * Extracted text is ALWAYS valid UTF-8: it crosses a JSON boundary, and
  * json_encode() fails outright on a malformed sequence, so one Latin-1 .txt
@@ -25,7 +36,13 @@
  *
  * See specs/safe_attachment_preview.md and docs/document_text.md.
  *
- * @version 1.2.0
+ * @version 1.3.0
+ * @changelog 1.3.0 - the parser jail: the subprocess runs under joinery-jail
+ *   where installed (fallback + finding where not); the vendor path travels on
+ *   argv so the child never reads settings; extractPath() streams the file so
+ *   the jail never opens a caller's path; the stale-staging sweep runs in the
+ *   child; parseWith()/parseWithMany() run a SandboxParserInterface class in
+ *   the same subprocess; xmlDoc() is public as the one XML door for parsers
  * @changelog 1.2.0 - emlText() parses through MimeParse (a body quoting its own
  *   MIME boundary hangs the Horde parser); toUtf8() is now the platform-wide
  *   charset ladder, delegated to by the mailbox ingest paths
@@ -52,8 +69,32 @@ class DocumentText {
 
 	/** Hard ceiling on the extraction subprocess wall-clock (seconds). */
 	const TIMEOUT_SECONDS = 20;
-	/** Hard memory ceiling handed to the extraction subprocess. */
+	/** Hard memory ceiling handed to the extraction subprocess (PHP's own). */
 	const MEMORY_LIMIT = '256M';
+
+	/**
+	 * The parser jail's launcher, installed setuid root by
+	 * maintenance_scripts/install_tools/install_parser_jail.sh at the
+	 * platform's root moments. Outside the tree on purpose: the web user
+	 * cannot replace it.
+	 */
+	const JAIL_LAUNCHER = '/usr/local/sbin/joinery-jail';
+	/**
+	 * Whether a missing launcher refuses to parse. False: the subprocess runs
+	 * unjailed as the web user and the fact is reported (once in the log, in
+	 * VaultHealth, in the admin header). It stays false by decision: a
+	 * self-hosted box whose owner never runs the installer keeps the previous
+	 * posture rather than losing previews, reports and fetched pages. Managed
+	 * nodes are always jailed because the agent-run upgrade installs it.
+	 */
+	const JAIL_REQUIRED = false;
+	/**
+	 * Address space the kernel allows the jailed child, in bytes. PHP's
+	 * MEMORY_LIMIT bounds what PHP allocates; what libzip, libxml2 and the
+	 * interpreter itself map sits outside that count, and this is the backstop
+	 * for it. The interpreter alone maps ~140 MB before reading a byte.
+	 */
+	const JAIL_ADDRESS_SPACE_BYTES = 671088640;
 	/** Cap on returned text, in characters. */
 	const DEFAULT_MAX_CHARS = 50000;
 
@@ -229,7 +270,18 @@ class DocumentText {
 		if (!is_file($path) || !is_readable($path)) {
 			return self::result(self::FAILED, null, '', 'unreadable path');
 		}
-		return self::run($path, null, self::normalizeMime($mime), $maxChars);
+		// The bytes go down stdin like everything else: the jail user cannot
+		// read an uploaded temp file or a private upload, and it should not
+		// be able to. The caller can read it, so the caller reads it.
+		$bytes = @file_get_contents($path);
+		if ($bytes === false) {
+			return self::result(self::FAILED, null, '', 'unreadable path');
+		}
+		if ($bytes === '') {
+			return self::result(self::EMPTY, null, '', 'no bytes');
+		}
+		return self::run($bytes, array('document', '-', self::normalizeMime($mime) ?: 'application/octet-stream', max(1, $maxChars)),
+			$path . ', hint ' . ($mime !== '' ? self::normalizeMime($mime) : 'none'));
 	}
 
 	/**
@@ -244,12 +296,157 @@ class DocumentText {
 		if ($bytes === '') {
 			return self::result(self::EMPTY, null, '', 'no bytes');
 		}
-		return self::run('-', $bytes, self::normalizeMime($mime), $maxChars);
+		$mime = self::normalizeMime($mime);
+		return self::run($bytes, array('document', '-', $mime !== '' ? $mime : 'application/octet-stream', max(1, $maxChars)),
+			strlen($bytes) . ' stdin bytes, hint ' . ($mime !== '' ? $mime : 'none'));
 	}
 
 	/**
-	 * Spawn `timeout N php -d memory_limit=… utils/extract_document_text.php`
-	 * and interpret what comes back.
+	 * Run a SandboxParserInterface class over one input, in the same jailed
+	 * subprocess the documents use. The class's file is resolved here (the
+	 * parent has the class map; the child is handed a path) and its
+	 * sandboxParse() runs there with the bytes on stdin. The result's `text`
+	 * is whatever the class returned — text, a fragment, or JSON.
+	 *
+	 * @param string $class   a class implementing SandboxParserInterface
+	 * @param string $bytes   the input
+	 * @param array  $options JSON-safe options for the class
+	 * @return array{status:string, category:?string, text:string, detail:?string}
+	 *         Never throws. `category` is the class name.
+	 */
+	public static function parseWith(string $class, string $bytes, array $options = array()): array {
+		$file = self::handlerFile($class);
+		if ($file === null) {
+			return self::result(self::FAILED, null, '', $class . ' is not a SandboxParserInterface class');
+		}
+		return self::run($bytes, array('parser', $file, $class, self::encodeOptions($options)),
+			$class . ', ' . strlen($bytes) . ' bytes');
+	}
+
+	/**
+	 * The same, over many inputs in one subprocess: a page of fifty list rows
+	 * is one spawn, not fifty. Returns the outputs keyed exactly as $inputs
+	 * was, null where an input failed to parse; the whole call yields nulls
+	 * when the subprocess itself failed (its reason is logged).
+	 *
+	 * @param string   $class   a class implementing SandboxParserInterface
+	 * @param string[] $inputs  the inputs, any keys
+	 * @param array    $options JSON-safe options for the class
+	 * @return array<mixed, ?string>
+	 */
+	public static function parseWithMany(string $class, array $inputs, array $options = array()): array {
+		$nulls = array_fill_keys(array_keys($inputs), null);
+		if (!count($inputs)) return $nulls;
+		$file = self::handlerFile($class);
+		if ($file === null) {
+			error_log('DocumentText: ' . $class . ' is not a SandboxParserInterface class');
+			return $nulls;
+		}
+		// Keys travel as a list so a numeric key never becomes a string one on
+		// the way back; the answer is re-keyed here.
+		$keys = array_keys($inputs);
+		$list = array();
+		foreach ($keys as $k) $list[] = is_string($inputs[$k]) ? $inputs[$k] : '';
+		$payload = json_encode($list, JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_SLASHES);
+		if ($payload === false) {
+			error_log('DocumentText: parseWithMany could not encode the inputs for ' . $class);
+			return $nulls;
+		}
+		$r = self::run($payload, array('parser', $file, $class, self::encodeOptions($options), 'many'),
+			$class . ', ' . count($inputs) . ' inputs');
+		if ($r['status'] !== self::OK && $r['status'] !== self::EMPTY) {
+			error_log('DocumentText: parseWithMany ' . $class . ' failed: ' . (string)$r['detail']);
+			return $nulls;
+		}
+		$decoded = json_decode($r['text'], true);
+		if (!is_array($decoded)) return $nulls;
+		$out = array();
+		foreach ($keys as $i => $k) {
+			$v = $decoded[$i] ?? null;
+			$out[$k] = is_string($v) ? $v : null;
+		}
+		return $out;
+	}
+
+	/** The file declaring a SandboxParserInterface class, or null when it is not one. */
+	private static function handlerFile(string $class): ?string {
+		if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $class) || !class_exists($class)) return null;
+		if (!is_subclass_of($class, 'SandboxParserInterface', true)) return null;
+		try {
+			$file = (new ReflectionClass($class))->getFileName();
+		} catch (Throwable $e) {
+			return null;
+		}
+		return is_string($file) && $file !== '' ? $file : null;
+	}
+
+	private static function encodeOptions(array $options): string {
+		$json = json_encode($options, JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_SLASHES);
+		return $json === false ? '{}' : $json;
+	}
+
+	/**
+	 * True when the parser jail's launcher is installed the way the installer
+	 * leaves it: present, owned by root, setuid. A file that is any less than
+	 * that is not a jail, and is not used as one.
+	 */
+	public static function jailAvailable(): bool {
+		static $known = null;
+		if ($known !== null) return $known;
+		$p = self::JAIL_LAUNCHER;
+		$known = is_file($p) && is_executable($p)
+			&& (int)@fileowner($p) === 0
+			&& ((int)@fileperms($p) & 04000) === 04000;
+		return $known;
+	}
+
+	/**
+	 * The command line for one subprocess: the launcher's fence where the
+	 * jail is installed, `timeout` where it is not. The PHP half is the same
+	 * either way. display_errors is pinned to stderr: interpret() requires
+	 * stdout to begin exactly with `category=`, and on a php.ini with
+	 * display_errors=On the CLI default sink is stdout — one deprecation notice
+	 * from a parser library would corrupt the header protocol and render as
+	 * document text.
+	 *
+	 * @return string[]|null null when the jail is required and absent
+	 */
+	private static function command(string $script, array $args): ?array {
+		$php = array_merge(array(
+			self::phpBinary(),
+			'-d', 'memory_limit=' . self::MEMORY_LIMIT,
+			'-d', 'display_errors=stderr',
+			$script,
+			PathHelper::getComposerVendorPath(),
+		), array_map('strval', $args));
+
+		if (self::jailAvailable()) {
+			return array_merge(array(
+				self::JAIL_LAUNCHER,
+				'--timeout=' . (int)self::TIMEOUT_SECONDS,
+				'--rlimit-as=' . (int)self::JAIL_ADDRESS_SPACE_BYTES,
+				'--',
+			), $php);
+		}
+		if (self::JAIL_REQUIRED) {
+			return null;
+		}
+		self::noteUnjailed();
+		return array_merge(array('timeout', (string)(int)self::TIMEOUT_SECONDS), $php);
+	}
+
+	/** Once per process: this node parses strangers' bytes as the web user. */
+	private static function noteUnjailed(): void {
+		static $said = false;
+		if ($said) return;
+		$said = true;
+		error_log('DocumentText: parser jail not installed at ' . self::JAIL_LAUNCHER
+			. '; parsing as the web user. Run install_parser_jail.sh as root (specs/parser_jail.md).');
+	}
+
+	/**
+	 * Spawn the extraction subprocess with $args after the vendor path, feed
+	 * it $stdin, and interpret what comes back.
 	 *
 	 * The parent PUMPS rather than write-then-read. Up to 15MB can go down
 	 * stdin; if the child rejects the input early, stops reading and writes to
@@ -257,25 +454,17 @@ class DocumentText {
 	 * opposite a child blocked the same way — a deadlock `timeout` converts into
 	 * a guaranteed 20-second stall on every bad file.
 	 */
-	private static function run(string $path, ?string $stdin, string $mime, int $maxChars): array {
+	private static function run(string $stdin, array $args, string $label): array {
 		$script = PathHelper::getIncludePath('utils/extract_document_text.php');
 		if (!is_file($script)) {
 			error_log('DocumentText: extractor script missing at ' . $script);
 			return self::result(self::FAILED, null, '', 'extractor missing');
 		}
-
-		// display_errors is pinned to stderr: interpret() requires stdout to
-		// begin exactly with `category=`, and on a php.ini with display_errors=On
-		// the CLI default sink is stdout — one deprecation notice from a parser
-		// library would corrupt the header protocol and render as document text.
-		$cmd = 'timeout ' . (int)self::TIMEOUT_SECONDS . ' '
-			 . escapeshellarg(self::phpBinary())
-			 . ' -d ' . escapeshellarg('memory_limit=' . self::MEMORY_LIMIT)
-			 . ' -d ' . escapeshellarg('display_errors=stderr')
-			 . ' ' . escapeshellarg($script)
-			 . ' ' . escapeshellarg($path)
-			 . ' ' . escapeshellarg($mime !== '' ? $mime : 'application/octet-stream')
-			 . ' ' . max(1, $maxChars);
+		$cmd = self::command($script, $args);
+		if ($cmd === null) {
+			error_log('DocumentText: parser jail required and not installed (' . $label . ')');
+			return self::result(self::FAILED, null, '', 'parser jail not installed');
+		}
 
 		$pipes = array();
 		$proc = @proc_open($cmd, array(
@@ -289,10 +478,7 @@ class DocumentText {
 
 		$out = self::pump($pipes, $stdin);
 		$exit = proc_close($proc);
-		self::sweepStaleStaged();
 
-		$label = ($path === '-' ? strlen((string)$stdin) . ' stdin bytes' : $path)
-			. ', hint ' . ($mime !== '' ? $mime : 'none');
 		return self::interpret($exit, $out['stdout'], $out['stderr'], $label);
 	}
 
@@ -300,11 +486,13 @@ class DocumentText {
 	 * Remove staged container files a killed child left behind. The sandbox
 	 * unlinks its own staging as soon as the container is open, but a SIGKILL
 	 * between stage() and that unlink skips every in-process cleanup — so the
-	 * parent, which always survives, sweeps anything older than a live child
-	 * could still be holding. Decrypted sealed bytes must not outlive the
-	 * extraction that staged them.
+	 * next child, at startup, sweeps anything older than a live child could
+	 * still be holding. It runs in the child rather than the parent because
+	 * /dev/shm is sticky: only the user that staged a file may unlink it, and
+	 * under the jail that is the jail user. Decrypted sealed bytes must not
+	 * outlive the extraction that staged them.
 	 */
-	private static function sweepStaleStaged(): void {
+	public static function sweepStaleStaged(): void {
 		$stale = time() - (self::TIMEOUT_SECONDS + 10);
 		foreach ((array)@glob('/dev/shm/joinery_doctext_*') as $f) {
 			$mtime = @filemtime($f);
@@ -387,6 +575,11 @@ class DocumentText {
 		if ($exit === 137) {
 			error_log('DocumentText: extraction OOM-killed (' . $label . ')');
 			return self::result(self::FAILED, null, '', 'ran out of memory');
+		}
+		if ($exit === 125) {
+			// The launcher itself refused: no jail user, a broken install.
+			error_log('DocumentText: the parser jail launcher refused to run (' . $label . '): ' . trim($stderr));
+			return self::result(self::FAILED, null, '', 'parser jail launcher refused: ' . trim($stderr));
 		}
 
 		// Stdout is `category=<cat>` + blank line + text. The header is written
@@ -1133,11 +1326,16 @@ class DocumentText {
 	}
 
 	/**
-	 * THE hardened XML parse — the only loadXML() call in the class. The flags
-	 * are the whole story (see xmlText()); behind them, a document that
-	 * declares internal entities at all is refused rather than flattened.
+	 * THE hardened XML parse — the only loadXML() call in the class, and the
+	 * one XML door for every SandboxParserInterface class too. The flags are
+	 * the whole story (see xmlText()); behind them, a document that declares
+	 * internal entities at all is refused rather than flattened. Sandbox side
+	 * only: it opens the bytes.
+	 *
+	 * @return DOMDocument|null null when the bytes are not well-formed XML
+	 * @throws DocumentTextException when the document declares entities
 	 */
-	private static function xmlDoc(string $xml): ?DOMDocument {
+	public static function xmlDoc(string $xml): ?DOMDocument {
 		$prev = libxml_use_internal_errors(true);
 		$doc = new DOMDocument();
 		$ok = $doc->loadXML($xml, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);

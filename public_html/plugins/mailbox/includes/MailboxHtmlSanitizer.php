@@ -31,14 +31,43 @@
  * tables, alignment, inline styles — for the one surface that has to render
  * received mail inside a document of ours, the print sheet.
  *
+ * Received HTML is a stranger's bytes, and libxml2 is a C parser, so those two
+ * never open it in the pool: toReadableText() and sanitizeForPrint() hand the
+ * HTML to DocumentText::parseWith() with this class as the parser, and
+ * sandboxParse() runs the same walk inside the extraction subprocess — under
+ * the parser jail (specs/parser_jail.md) as a user that holds no key, no
+ * config and no database. A page of list rows is one subprocess
+ * (toReadableTextMany()), not one per row. Composed HTML (sanitize(),
+ * toPlainText()) is the signed-in author's own and parses in the pool.
+ *
  * Uses ext-dom (DOMDocument), always present in this deployment; no new dependency.
  *
+ * @version 1.4 - received HTML parses in the jail; toReadableTextMany() for a page of rows
  * @version 1.3 - previewText(): entity-decode + invisible-character collapse
  *                for plain-part previews
  * @version 1.2
  */
 
-class MailboxHtmlSanitizer {
+class MailboxHtmlSanitizer implements SandboxParserInterface {
+
+	/** parseWith() options: which received-mail walk to run. */
+	const OP_READABLE = 'readable';
+	const OP_PRINT    = 'print';
+
+	/**
+	 * The sandbox side of toReadableText() and sanitizeForPrint(): the one
+	 * place received HTML is opened. Runs only in the extraction subprocess.
+	 */
+	public static function sandboxParse(string $bytes, array $options): string {
+		$op = (string)($options['op'] ?? '');
+		if ($op === self::OP_READABLE) {
+			return self::readableInSandbox($bytes);
+		}
+		if ($op === self::OP_PRINT) {
+			return self::printInSandbox($bytes);
+		}
+		throw new DocumentTextException('MailboxHtmlSanitizer: unknown op ' . $op);
+	}
 
 	/** Tags kept as-is (attributes still filtered per keepElement()). */
 	private static $ALLOWED = array(
@@ -138,16 +167,66 @@ class MailboxHtmlSanitizer {
 	 * @return string Collapsed single-line text; '' when there is nothing to read.
 	 */
 	public static function toReadableText(string $html): string {
-		$html = trim($html);
+		$html = self::readableInput($html);
 		if ($html === '') {
 			return '';
 		}
-		// A preview needs the first readable sentence, not the whole newsletter.
+		$r = DocumentText::parseWith(self::class, $html, array('op' => self::OP_READABLE));
+		if ($r['status'] === DocumentText::OK || $r['status'] === DocumentText::EMPTY) {
+			return $r['text'];
+		}
+		error_log('MailboxHtmlSanitizer: readable text failed in the subprocess: ' . (string)$r['detail']);
+		return self::readableFallback($html);
+	}
+
+	/**
+	 * toReadableText() over many documents in ONE subprocess — a page of list
+	 * rows is one spawn, not fifty. Keys are preserved; every value is a string.
+	 *
+	 * @param array<mixed, string> $htmls
+	 * @return array<mixed, string>
+	 */
+	public static function toReadableTextMany(array $htmls): array {
+		$out = array();
+		$send = array();
+		foreach ($htmls as $key => $html) {
+			$html = self::readableInput((string)$html);
+			$out[$key] = '';
+			if ($html !== '') {
+				$send[$key] = $html;
+			}
+		}
+		if (!count($send)) {
+			return $out;
+		}
+		foreach (DocumentText::parseWithMany(self::class, $send, array('op' => self::OP_READABLE)) as $key => $text) {
+			$out[$key] = is_string($text) ? $text : self::readableFallback($send[$key]);
+		}
+		return $out;
+	}
+
+	/** Trimmed and capped: a preview needs the first readable sentence, not the whole newsletter. */
+	private static function readableInput(string $html): string {
+		$html = trim($html);
 		// The cap bounds the parse; it is far past any document's <head>, so the
 		// stylesheet is never all that survives truncation.
 		if (strlen($html) > self::READABLE_INPUT_LIMIT) {
 			$html = substr($html, 0, self::READABLE_INPUT_LIMIT);
 		}
+		return $html;
+	}
+
+	/**
+	 * When the subprocess could not answer: a naive strip is still better than
+	 * returning nothing, and strip_tags() is PHP's own tokenizer, not libxml2.
+	 */
+	private static function readableFallback(string $html): string {
+		return self::collapseReadable(
+			html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+	}
+
+	/** Sandbox side of toReadableText(). */
+	private static function readableInSandbox(string $html): string {
 		$doc = self::load($html);
 		if ($doc === null) {
 			// Unparseable — a naive strip is still better than returning nothing.
@@ -208,6 +287,18 @@ class MailboxHtmlSanitizer {
 		if ($html === '') {
 			return '';
 		}
+		$r = DocumentText::parseWith(self::class, $html, array('op' => self::OP_PRINT));
+		if ($r['status'] === DocumentText::OK || $r['status'] === DocumentText::EMPTY) {
+			return $r['text'];
+		}
+		// No fallback renders received markup: a print sheet with no body is
+		// the honest answer when the sanitizer could not run.
+		error_log('MailboxHtmlSanitizer: print sanitizer failed in the subprocess: ' . (string)$r['detail']);
+		return '';
+	}
+
+	/** Sandbox side of sanitizeForPrint(). */
+	private static function printInSandbox(string $html): string {
 		$doc = self::load($html);
 		if ($doc === null) {
 			return '';

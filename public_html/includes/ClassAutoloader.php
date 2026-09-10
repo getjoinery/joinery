@@ -13,6 +13,9 @@
  * the map once and retries, so a class added since the cache was written
  * resolves without a cache flush.
  *
+ * @version 1.1.0 - restrictToCore(): the extraction subprocess resolves core
+ *   classes only, never touching the theme chain or the plugin registry, both
+ *   of which need the settings and the database it must not have
  * @version 1.0.0
  */
 class ClassAutoloader {
@@ -27,6 +30,7 @@ class ClassAutoloader {
 	private static $map = null;
 	private static $rebuilt = false;
 	private static $resolving_theme_chain = false;
+	private static $core_only = false;
 
 	/**
 	 * Register the autoloader. Safe to call repeatedly.
@@ -37,6 +41,20 @@ class ClassAutoloader {
 		}
 		self::$registered = true;
 		spl_autoload_register(array(__CLASS__, 'load'));
+	}
+
+	/**
+	 * Answer for core classes only, from the filesystem alone. For a process
+	 * that must never read settings or open the database — the extraction
+	 * subprocess (utils/extract_document_text.php) — the theme chain and the
+	 * active-plugin set are both off limits: resolving either loads Globalvars,
+	 * and under the parser jail the config file is not readable, so that load
+	 * is a fatal error rather than an exception. A plugin's sandbox parser is
+	 * handed to that process by file path instead.
+	 */
+	public static function restrictToCore() {
+		self::$core_only = true;
+		self::$map = null;
 	}
 
 	/**
@@ -109,8 +127,8 @@ class ClassAutoloader {
 
 		// Resolving the theme chain reads settings and theme metadata, which can
 		// itself want a class. One level in, answer from core rather than
-		// recursing.
-		if (self::$resolving_theme_chain) {
+		// recursing. A core-only process never consults the chain at all.
+		if (self::$resolving_theme_chain || self::$core_only) {
 			return $core;
 		}
 
@@ -154,6 +172,13 @@ class ClassAutoloader {
 
 		self::scan_directory(PathHelper::getIncludePath('includes'), $map);
 		self::scan_directory(PathHelper::getIncludePath('data'), $map);
+
+		// A core-only map is never cached: it is deliberately missing its
+		// plugin half, and it belongs to a process that cannot write here.
+		if (self::$core_only) {
+			self::$map = $map;
+			return $map;
+		}
 
 		foreach (self::active_plugins($complete) as $plugin) {
 			$plugin_root = PathHelper::getIncludePath('plugins/' . $plugin);

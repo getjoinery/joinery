@@ -5,6 +5,7 @@ require_once(__DIR__ . '/Globalvars.php');
 
 class PathHelper {
     private static $root_dir = null;
+    private static $composer_vendor_override = null;
     
     public static function getRootDir() {
         if (self::$root_dir === null) {
@@ -42,8 +43,23 @@ class PathHelper {
      * @return string Absolute path to vendor directory (with trailing slash)
      */
     public static function getComposerVendorPath() {
+        if (self::$composer_vendor_override !== null) {
+            return self::$composer_vendor_override;
+        }
         $settings = Globalvars::get_instance();
         return self::getBasePath() . $settings->get_setting('composerAutoLoad');
+    }
+
+    /**
+     * Pin the vendor directory for a process that must not read settings.
+     * The extraction subprocess (utils/extract_document_text.php) is handed
+     * the path by its parent, which has the setting; under the parser jail it
+     * has neither the config file nor the database to resolve it itself.
+     *
+     * @param string $path Absolute vendor directory
+     */
+    public static function setComposerVendorPath($path) {
+        self::$composer_vendor_override = rtrim((string)$path, '/') . '/';
     }
 
     /**

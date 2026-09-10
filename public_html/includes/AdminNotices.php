@@ -19,6 +19,7 @@
  * is all a plugin needs. A renderer that throws is logged and skipped — an
  * admin page never fails to render because a notice could not decide.
  *
+ * @version 1.2 - parser_jail joins the core notices (specs/parser_jail.md)
  * @version 1.1 - second_factor joins the core notices (security_inventory S4)
  */
 class AdminNotices {
@@ -39,6 +40,9 @@ class AdminNotices {
 			// Admins with no second factor are the route a stolen session
 			// takes. Named here, with the fix in place, never as a gate.
 			'second_factor'  => array('AdminSecondFactorNotice', 'render'),
+			// A node parsing strangers' bytes as the web user says so to the
+			// one admin who can run the installer. Silent once it is installed.
+			'parser_jail'    => array('ParserJailNotice', 'render'),
 		);
 	}
 

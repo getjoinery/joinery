@@ -197,6 +197,12 @@ function harness_unmet_needs(array $needs) {
 				case 'b2':
 					$cache[$need] = trim((string)$settings->get_setting('cloud_storage_access_key')) !== '';
 					break;
+				case 'parser-jail':
+					// The launcher is installed by root (install_parser_jail.sh);
+					// a checkout without it skips the jail gate rather than
+					// failing it, and says so.
+					$cache[$need] = DocumentText::jailAvailable();
+					break;
 				case 'test-db':
 					// The test-database copy is provisioned per install (see
 					// /admin/admin_test_database), so a checkout without one must

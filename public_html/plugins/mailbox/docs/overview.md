@@ -1139,7 +1139,8 @@ as the download** (a preview is exactly as private as the file), throttled at 30
 minutes per IP because each one costs a subprocess — refusals count against the throttle
 too — and ceilinged by `mailbox_preview_max_bytes` (15 MB) from the attachment's recorded
 size before any byte is fetched or decrypted. Parsing itself is
-[`DocumentText`](../../../docs/document_text.md) — PDF, Word, Excel, PowerPoint,
+[`DocumentText`](../../../docs/document_text.md), in a subprocess under the parser jail
+(the `joinery-jail` user: no network, no forking, no config, no key) — PDF, Word, Excel, PowerPoint,
 OpenDocument, EPUB, RTF, XML/SVG, forwarded `.eml`, calendar invites, the whole text
 family, and a name-and-size manifest for a `.zip`. Whether the button appears is decided
 from the declared type **and** the filename, because most real PDFs arrive declared
@@ -2798,10 +2799,13 @@ own Message-ID → null; a null key is a singleton, keyed client-side as `m:<id>
 Subject-based grouping for header-less mail is a deliberate non-goal.
 
 The row's **preview** is the plain body when there is one, and otherwise the
-reading text of the HTML via `MailboxHtmlSanitizer::toPreviewText()`. That is a
+reading text of the HTML via `MailboxHtmlSanitizer::toReadableText()`. That is a
 DOM walk, not a `strip_tags()`: received bulk mail carries its stylesheet inside
 the document, and stripping tags keeps the CSS between them, so the preview
-would read `a.cta_button{-moz-box-sizing…`. The walk drops `<style>`, `<script>`,
+would read `a.cta_button{-moz-box-sizing…`. The walk runs in the parser jail
+([`DocumentText::parseWithMany()`](../../../docs/document_text.md#sandbox-parsers),
+one subprocess for the whole page of rows), never in the request: received HTML
+is a stranger's bytes and libxml2 is a C parser. The walk drops `<style>`, `<script>`,
 `<head>`, `<title>` and comments with their contents, treats block edges as word
 boundaries (table-built mail otherwise reads as `benefitTerms apply`), keeps link
 text without the URL, and removes the invisible characters — zero-width joiners,
@@ -2991,7 +2995,8 @@ from the source mailbox to a viewer already scope-checked for the message.
 be: a browser prints only the visible slice of a scrollable frame, and the
 frame's opaque origin is exactly what stops us measuring its content to size it.
 So the sheet inlines the body through `MailboxHtmlSanitizer::sanitizeForPrint()`
-— an allowlist that keeps what an email's layout is made of (tables, alignment
+— run in the parser jail, like every read of received HTML — an allowlist that
+keeps what an email's layout is made of (tables, alignment
 attributes, inline styles) and drops everything that executes, fetches, or
 escapes the attribute, including `<style>` blocks and any style value carrying
 `url()` / `expression()` / `@import`. Images survive only with an `http(s)` src;
