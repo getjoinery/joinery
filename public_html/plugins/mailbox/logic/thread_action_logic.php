@@ -4,8 +4,8 @@
  *
  * POST /api/v1/action/mailbox/thread_action (session key). Params:
  * action ∈ {mark_read, mark_unread, star, unstar, delete, archive,
- * unarchive, mark_spam, mark_not_spam, restore, purge, set_membership,
- * create_folder},
+ * unarchive, mark_spam, mark_not_spam, allow_sender, restore, purge,
+ * set_membership, create_folder},
  * targets as ids[] (message ids) OR thread_key OR thread_keys[] (each expanded
  * server-side, optionally narrowed by alias_id), plus folder_id/present for
  * set_membership and name for create_folder. thread_keys[] is what the reader's
@@ -18,7 +18,7 @@
  * (specs/mailbox_trash_folder.md), so they expand a thread_key under the Trash
  * scope; every other action refuses a discarded row by scope.
  *
- * @version 1.2.0
+ * @version 1.3.0
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -97,6 +97,16 @@ function thread_action_logic(array $input): LogicResult {
 		case 'mark_not_spam':
 			$count = $service->setSpamVerdict($ids, InboundEmailMessage::SPAM_VERDICT_HAM);
 			break;
+		case 'allow_sender':
+			// "Always allow this sender" from the Spam view: write the explicit
+			// never_spam filter and clear the messages in hand. The only route past
+			// an authentication failure, and deliberately a deliberate act — see
+			// MailboxService::allowSender().
+			$allowed = $service->allowSender($ids);
+			return LogicResult::render(array(
+				'count'     => $allowed['count'],
+				'addresses' => $allowed['addresses'],
+			));
 		case 'restore':
 			$count = $service->restoreFromTrash($ids);
 			break;
@@ -125,7 +135,7 @@ function thread_action_logic(array $input): LogicResult {
 function thread_action_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'description' => 'Mutate mail state: read/star/archive/delete/spam, restore/purge from trash, labels, create-folder',
+		'description' => 'Mutate mail state: read/star/archive/delete/spam, allow a sender, restore/purge from trash, labels, create-folder',
 	];
 }
 

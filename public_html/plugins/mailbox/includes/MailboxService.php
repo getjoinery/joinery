@@ -49,6 +49,9 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.37 - allowSender(): the Spam view's "always allow this sender",
+ *                 which writes the explicit never_spam filter and clears the
+ *                 messages in hand (specs/mailbox_contact_spam_bypass.md)
  * @version 1.36 - each mailbox in the switcher payload carries send_ok /
  *                 send_error (MailboxSender::sendCapabilityFor), so the reader
  *                 can say a mailbox cannot send BEFORE a message is written
@@ -1518,6 +1521,15 @@ class MailboxService {
 				// Content-spam score (specs/inbound_email_content_spam_filtering.md):
 				// display only, NULL when none reported. Never drives disposition.
 				'spam_score'        => ($r['iem_spam_score'] !== null) ? (float)$r['iem_spam_score'] : null,
+				// Why this message would be filed as spam by the AUTH rule, asked of
+				// the row's own stored verdicts (specs/mailbox_contact_spam_bypass.md).
+				// The reader shows the "allow this sender" offer only for 'auth',
+				// because that is the one filing a contact entry cannot lift: the
+				// From is unattested, so trusting it has to be a deliberate act.
+				'spam_auth_rule'    => InboundEmailMessage::authRuleSaysSpam(array(
+										'spf'   => (string)$r['iem_spf_result'],
+										'dkim'  => (string)$r['iem_dkim_result'],
+										'dmarc' => (string)$r['iem_dmarc_result'])),
 				// How the message reached the box, and whether it earned the
 				// verified-direct mark. The mark asserts exactly two things: the
 				// sending instance was cryptographically verified, and the sender
@@ -2093,6 +2105,128 @@ class MailboxService {
 		$stmt = $this->db()->prepare($sql);
 		$stmt->execute();
 		return $stmt->rowCount();
+	}
+
+	/**
+	 * Always allow this sender: write the explicit never_spam filter the Spam view
+	 * offers, and lift the messages in hand out of Spam right now
+	 * (specs/mailbox_contact_spam_bypass.md).
+	 *
+	 * This is the ONE way a sender whose domain fails authentication reaches the
+	 * inbox. It is deliberately not something the address book can do on its own —
+	 * a DMARC failure means the From header is unattested, so "this address is a
+	 * contact" is a claim about an address nobody verified, and anyone spoofing it
+	 * would inherit the same pass. Making it a filter the user creates means the
+	 * trust is granted knowingly, is visible on the Filters page beside every other
+	 * rule, and can be taken back there.
+	 *
+	 * The filter is scoped to the mailbox the message arrived in, matches the bare
+	 * address (substring, case-insensitive — the same match every filter uses), and
+	 * is flagged for the "also apply to existing" backfill so mail already sitting
+	 * in Spam from that sender is swept up too. The messages the caller named are
+	 * ALSO marked ham inline, so the click has a visible effect immediately rather
+	 * than at the next backfill pass.
+	 *
+	 * Re-allowing an address that already has a rule is a no-op on the filter (the
+	 * existing one is re-flagged for backfill rather than duplicated) and still
+	 * clears the messages in hand.
+	 *
+	 * @param array $message_ids
+	 * @return array{count:int,addresses:string[]} rows cleared, and the addresses allowed
+	 */
+	public function allowSender(array $message_ids): array {
+		$ids = $this->intList($message_ids);
+		if (!count($ids)) {
+			return array('count' => 0, 'addresses' => array());
+		}
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_filter_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxContacts.php'));
+
+		$in = implode(',', $ids);
+		$sql = "SELECT iem_inbound_email_message_id, iem_iea_inbound_email_alias_id, iem_sender,
+					iem_recipient, iem_bcc, iem_subject, iem_body_plain, iem_body_html,
+					iem_ai_summary, iem_ai_scan, iem_pending_parse,
+					iem_content_sealed, iem_sealed_key, iem_sealed_owner_user_id
+				FROM iem_inbound_email_messages
+				WHERE iem_inbound_email_message_id IN ($in) AND " . $this->mutationScopeSql();
+		$rows = $this->db()->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+
+		$addresses = array();
+		$cleared = array();
+		foreach ($rows as $r) {
+			$alias_id = intval($r['iem_iea_inbound_email_alias_id']);
+			if ($alias_id <= 0) {
+				continue; // catch-all store row: no mailbox to hang a filter on
+			}
+			// The sender rides through the same decryption the reader uses, so this
+			// works on a sealed mailbox exactly as it does on a plaintext one — the
+			// user is right there with an open window.
+			$decrypted = $this->decryptThreadRow($r);
+			$parsed = MailboxContacts::parseAddress((string)$decrypted['iem_sender']);
+			if ($parsed === null || $parsed[0] === '') {
+				continue;
+			}
+			$address = $parsed[0];
+			if ($this->writeAllowSenderFilter($alias_id, $address)) {
+				$addresses[$address] = true;
+			}
+			$cleared[] = intval($r['iem_inbound_email_message_id']);
+		}
+
+		$count = count($cleared)
+			? $this->setSpamVerdict($cleared, InboundEmailMessage::SPAM_VERDICT_HAM) : 0;
+		return array('count' => $count, 'addresses' => array_keys($addresses));
+	}
+
+	/**
+	 * Create (or re-arm) the never_spam filter for one address on one mailbox.
+	 * Returns false only when the filter could not be written, so the caller can
+	 * still report the messages it cleared.
+	 */
+	private function writeAllowSenderFilter(int $alias_id, string $address): bool {
+		try {
+			$alias = new InboundEmailAlias($alias_id, TRUE);
+			if (!$alias->key) {
+				return false;
+			}
+			// An existing rule for the same address on the same mailbox is re-armed
+			// for backfill rather than duplicated — clicking twice must not leave two
+			// rules saying the same thing.
+			// alias_id is the collection's own option; fil_match_from resolves through
+			// the declared-column path, which types and binds the value itself — so
+			// both take a plain scalar, never a [value, type] pair.
+			$existing = new MultiInboundEmailFilter(array(
+				'alias_id'       => $alias_id,
+				'fil_match_from' => $address,
+				'deleted'        => FALSE,
+			));
+			$filter = null;
+			foreach ($existing as $candidate) {
+				$filter = $candidate;
+				break;
+			}
+			if ($filter === null) {
+				$filter = new InboundEmailFilter();
+				$filter->set('fil_iea_inbound_email_alias_id', $alias_id);
+				$filter->set('fil_ied_inbound_email_domain_id',
+					intval($alias->get('iea_ied_inbound_email_domain_id')));
+				$filter->set('fil_name', 'Always allow ' . $address);
+				$filter->set('fil_match_from', $address);
+			}
+			$filter->set('fil_is_enabled', true);
+			$filter->set('fil_action_never_spam', true);
+			$filter->set('fil_action_mark_spam', false);
+			$filter->set('fil_apply_existing_pending', true);
+			$filter->set('fil_apply_existing_cursor', 0);
+			$filter->prepare();
+			$filter->save();
+			return true;
+		} catch (\Throwable $e) {
+			error_log('MailboxService::allowSender filter write failed for alias '
+				. $alias_id . ': ' . $e->getMessage());
+			return false;
+		}
 	}
 
 	/**

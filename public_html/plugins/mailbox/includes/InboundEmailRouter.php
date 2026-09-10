@@ -90,6 +90,11 @@
  * dedup return adopts from the raw in hand, storeDirectMessage's from the
  * delivered parts. See AttachmentByteCustody.
  *
+ * @version 1.40
+ * @changelog 1.40 - the address book elevates a sender past the CONTENT score on
+ *   every ingest path (elevateForContact), never past the auth rule; the auth
+ *   rule itself moves to InboundEmailMessage::authRuleSaysSpam() so the reader
+ *   can ask it too (specs/mailbox_contact_spam_bypass.md).
  * @version 1.39
  * @changelog 1.39 - parsePendingMessage enqueues a search-index refold when it
  *   clears the pending state (specs/mailbox_search_incremental_fold.md): the
@@ -308,6 +313,11 @@ class InboundEmailRouter {
 				return 0; // Discard silently
 			}
 		}
+
+		// The address book elevates past the CONTENT score, never past the auth
+		// rule — see elevateForContact(). Applied here, before the forward
+		// decision below, so a contact's mail is not held from forwarding either.
+		$content_spam = $this->elevateForContact($alias, $this->senderDisplayString($parsed), $content_spam);
 
 		// 4. Delivery mode (auth verdicts were resolved above as $auth).
 		$mode = $alias->get('iea_delivery_mode') ?: InboundEmailAlias::MODE_FORWARD;
@@ -558,6 +568,11 @@ class InboundEmailRouter {
 		$subject_raw = $parsed['subject'] ?? '';
 		$subject = substr($this->decodeMimeHeader($subject_raw), 0, 4000);
 		$sender = $this->senderDisplayString($parsed);
+
+		// Idempotent with the live path's own call above (an already-elevated signal
+		// returns untouched); this is what covers store-only, catch-all-store and
+		// archive-import callers, which reach the row build without passing here.
+		$content_spam = $this->elevateForContact($alias, $sender, $content_spam);
 
 		// Conversation grouping for the Mailbox Reader. Computed in-memory from
 		// the already-parsed In-Reply-To / References headers — the raw headers
@@ -864,6 +879,7 @@ class InboundEmailRouter {
 			'source' => (string)$msg->get('iem_auth_source'),
 		);
 		$content_spam = $this->resolveContentSpam($raw);
+		$content_spam = $this->elevateForContact($alias, $sender, $content_spam);
 		$spam_verdict = $this->classifySpam($auth, $content_spam['signal']);
 
 		// Clear the pending state, discard the sealed raw blob, and record the spam
@@ -2850,14 +2866,15 @@ class InboundEmailRouter {
 	 * (specs/inbound_email_spam_filtering.md). Returns null when filtering is off, so
 	 * the stored verdict stays NULL and behavior is exactly as before.
 	 *
-	 *   - DMARC fail → spam (the primary rule; DMARC is alignment-based and already
-	 *     subsumes SPF/DKIM, so it is the one signal worth acting on directly).
-	 *   - DMARC absent (no verdict — none/unverified) AND both SPF and DKIM fail →
-	 *     spam (the fallback for providers that supply SPF/DKIM but no DMARC, e.g.
-	 *     Mailgun/SendGrid). BOTH must fail because raw SPF/DKIM lack DMARC's
-	 *     alignment check; a single failure has too many legitimate causes
-	 *     (forwarding breaks SPF; some legit mail breaks DKIM).
+	 *   - the auth rule fires (InboundEmailMessage::authRuleSaysSpam, which owns the
+	 *     DMARC-fail and SPF/DKIM-both-fail definitions) → spam.
 	 *   - otherwise → ham.
+	 *
+	 * The address book elevates past the CONTENT signal before this is called
+	 * (elevateForContact) and deliberately not past the auth rule: a DMARC failure
+	 * means the From is unattested, so a contact entry for it is a claim about an
+	 * address nobody verified. Granting that sender the inbox anyway is an explicit
+	 * never_spam filter the user creates from the Spam view, never an inference.
 	 *
 	 * This never computes verdicts — it only acts on the trusted ones already read.
 	 * The strict rule is safe because the disposition is a reviewable Spam view,
@@ -2884,21 +2901,84 @@ class InboundEmailRouter {
 			return InboundEmailMessage::SPAM_VERDICT_SPAM;
 		}
 
-		$dmarc = strtolower(trim((string)($auth['dmarc'] ?? '')));
-		if ($dmarc === 'fail') {
+		// The auth rule itself lives on the model, so the reader can ask the same
+		// question of a stored row when it explains why a message is in Spam.
+		if (InboundEmailMessage::authRuleSaysSpam($auth)) {
 			return InboundEmailMessage::SPAM_VERDICT_SPAM;
 		}
 
-		// No DMARC verdict present → SPF/DKIM both-fail fallback.
-		if ($dmarc === '' || $dmarc === 'none' || $dmarc === 'unverified') {
-			$spf  = strtolower(trim((string)($auth['spf'] ?? '')));
-			$dkim = strtolower(trim((string)($auth['dkim'] ?? '')));
-			if ($spf === 'fail' && $dkim === 'fail') {
-				return InboundEmailMessage::SPAM_VERDICT_SPAM;
-			}
-		}
-
 		return InboundEmailMessage::SPAM_VERDICT_HAM;
+	}
+
+
+	/**
+	 * Neutralize the CONTENT-spam signal when the sender is in the recipient
+	 * mailbox's address book (specs/mailbox_contact_spam_bypass.md).
+	 *
+	 * A contact is a deliberate act — MailboxContacts only ever writes a row from
+	 * manualAdd() or import(), never from mail traffic — so its presence is the
+	 * user saying "I know this person". That statement outranks a content score,
+	 * which is exactly what the address book is being asked to buy here, and it
+	 * mirrors what the Direct path already grants a verified contact in
+	 * storeDirectMessage().
+	 *
+	 * ELEVATION ONLY, and only over the CONTENT layer. The auth rule in
+	 * classifySpam() is untouched: a DMARC failure means the From header is not
+	 * attested, so "this address is a contact" is a statement about an address
+	 * nobody has verified, and letting it clear an auth failure would let anyone
+	 * spoofing a contact's address into the inbox. A contact whose domain has
+	 * broken DMARC therefore still files as spam — the Spam view offers the
+	 * one-click allow (an explicit never_spam filter) for that case, so the trust
+	 * is granted knowingly rather than inferred.
+	 *
+	 * The score is deliberately KEPT. iem_spam_score is recorded for transparency
+	 * on every path, and a reader that shows "scored 9.2, delivered because the
+	 * sender is a contact" is more honest than one that shows nothing.
+	 *
+	 * The lookup is the shared, unencrypted book (aliasHasContact): ingest is
+	 * keyless, so per-grantee contacts sealed under a closed vault are invisible
+	 * here and a Private/Fortress mailbox gets no bypass. That is fail-closed and
+	 * matches the Direct gate's own reading of the same store.
+	 *
+	 * @param InboundEmailAlias|null $alias        recipient mailbox; null (catch-all) never elevates
+	 * @param string                 $sender       From display string or bare address
+	 * @param array                  $content_spam ['signal'=>..,'score'=>..] from resolveContentSpam()
+	 * @return array the same array, with 'signal' => 'none' when the sender is a contact
+	 */
+	private function elevateForContact($alias, string $sender, array $content_spam): array {
+		if (($content_spam['signal'] ?? 'none') !== 'spam') {
+			return $content_spam; // nothing to elevate past
+		}
+		if (!$alias || !$alias->key || trim($sender) === '') {
+			return $content_spam;
+		}
+		if (!$this->senderIsContact($alias, $sender)) {
+			return $content_spam;
+		}
+		$content_spam['signal'] = 'none';
+		$content_spam['contact_elevated'] = true;
+		return $content_spam;
+	}
+
+	/**
+	 * Is this sender in the recipient mailbox's address book?
+	 *
+	 * Protected so a test can substitute the lookup, the same way scanContentSpam()
+	 * substitutes the scanner transport — the elevation RULE is then testable
+	 * without a contact store, which is what keeps it a safe-tier assertion.
+	 *
+	 * A store that cannot be read answers false: an unreadable address book is not
+	 * a reason to change a verdict, so the scanner's answer stands.
+	 */
+	protected function senderIsContact($alias, string $sender): bool {
+		try {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxContacts.php'));
+			$contacts = new MailboxContacts();
+			return $contacts->aliasHasContact(intval($alias->key), $sender);
+		} catch (\Throwable $e) {
+			error_log('InboundEmailRouter: contact elevation lookup failed: ' . $e->getMessage());
+			return false;
+		}
 	}
 
 	/**

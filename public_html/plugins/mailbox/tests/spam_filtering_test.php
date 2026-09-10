@@ -43,7 +43,7 @@
  *
  * Run: php plugins/mailbox/tests/spam_filtering_test.php
  *
- * @version 1.4
+ * @version 1.5
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -51,6 +51,18 @@ harness_boot();
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSpamPolicy.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+
+/**
+ * Router whose contact lookup is scripted rather than read from a store, so the
+ * ELEVATION RULE is testable without a database. $is_contact is the answer the
+ * substituted lookup gives for every sender.
+ */
+class ScriptedContactRouter extends InboundEmailRouter {
+	public $is_contact = false;
+	protected function senderIsContact($alias, string $sender): bool {
+		return $this->is_contact;
+	}
+}
 
 /**
  * Router with a scripted local scanner. $scan_result is what the substituted
@@ -127,6 +139,16 @@ class SpamFilteringTest {
 		$router = new InboundEmailRouter();
 		$m = new ReflectionMethod('InboundEmailRouter', 'classifySpam');
 		return $m->invoke($router, $auth, $content_signal);
+	}
+
+	/** Invoke the router's private elevateForContact() with a scripted lookup. */
+	private function elevate(bool $is_contact, $alias, array $content_spam,
+			string $sender = 'Someone <someone@example.test>'): array {
+		$router = new ScriptedContactRouter();
+		$router->is_contact = $is_contact;
+		$m = new ReflectionMethod('InboundEmailRouter', 'elevateForContact');
+		$m->setAccessible(true);
+		return $m->invoke($router, $alias, $sender, $content_spam);
 	}
 
 	/** Invoke the router's private readSpamHeader(). */
@@ -350,6 +372,72 @@ class SpamFilteringTest {
 		MailboxSpamPolicy::overrideScannerAvailable(null);
 
 		// --- reading an rspamd /checkv2 response ---
+		// --- the address book elevates past CONTENT, never past AUTH ---
+		// (specs/mailbox_contact_spam_bypass.md). The rule is the whole point of
+		// the feature and the whole point of its limit, so both halves are pinned.
+		section('contact elevation');
+		$alias = new InboundEmailAlias();
+		$alias->key = 4242;   // elevateForContact needs only a saved alias's key
+		$spam_signal = array('signal' => 'spam', 'score' => 9.5);
+
+		$this->eq('none', $this->elevate(true, $alias, $spam_signal)['signal'],
+			'a contact\'s message is elevated past a content-scanner spam verdict');
+		$this->eq(9.5, $this->elevate(true, $alias, $spam_signal)['score'],
+			'the score survives the elevation — it is recorded for transparency');
+		$this->eq('spam', $this->elevate(false, $alias, $spam_signal)['signal'],
+			'a stranger is not elevated');
+		$this->eq('spam', $this->elevate(true, null, $spam_signal)['signal'],
+			'a catch-all row (no alias) has no address book to consult');
+		$this->eq('spam', $this->elevate(true, $alias, $spam_signal, '')['signal'],
+			'an empty sender is never a contact');
+		$ham = array('signal' => 'ham', 'score' => 0.1);
+		$this->eq('ham', $this->elevate(true, $alias, $ham)['signal'],
+			'a signal that is not spam is returned untouched');
+
+		// The limit: elevation removes the CONTENT signal, and classifySpam still
+		// files the message on the auth rule. This is what makes "I added them to
+		// my contacts and they still go to spam" the CORRECT behavior for a sender
+		// whose DMARC fails — their From is unattested, so contact membership is a
+		// claim about an address nobody verified.
+		$dmarc_fail = array('dkim'=>'fail', 'spf'=>'fail', 'dmarc'=>'fail', 'source'=>'postfix');
+		$elevated = $this->elevate(true, $alias, $spam_signal);
+		$this->eq(InboundEmailMessage::SPAM_VERDICT_SPAM,
+			$this->classify($dmarc_fail, $elevated['signal']),
+			'a contact whose DMARC fails is STILL spam — elevation never clears the auth rule');
+		$clean = array('dkim'=>'pass', 'spf'=>'pass', 'dmarc'=>'pass', 'source'=>'postfix');
+		$this->eq(InboundEmailMessage::SPAM_VERDICT_HAM,
+			$this->classify($clean, $elevated['signal']),
+			'a contact who authenticates reaches the inbox despite the content score');
+		$this->eq(InboundEmailMessage::SPAM_VERDICT_SPAM,
+			$this->classify($clean, $spam_signal['signal']),
+			'the same message from a stranger stays spam — elevation is what changed it');
+
+		// --- the auth rule has ONE definition ---
+		// The reader re-asks it of a stored row to explain why a message is in
+		// Spam, so a drift between the two would offer the "allow this sender"
+		// button on messages it cannot help, and withhold it where it would.
+		section('auth rule is single-sourced');
+		$rule_cases = array(
+			array(array('dmarc'=>'fail', 'spf'=>'pass', 'dkim'=>'pass'), true,  'DMARC fail'),
+			array(array('dmarc'=>'pass', 'spf'=>'fail', 'dkim'=>'fail'), false, 'DMARC pass outranks both'),
+			array(array('dmarc'=>'none', 'spf'=>'fail', 'dkim'=>'fail'), true,  'no DMARC + both fail'),
+			array(array('dmarc'=>'none', 'spf'=>'fail', 'dkim'=>'pass'), false, 'no DMARC + one fail'),
+			array(array('dmarc'=>'unverified', 'spf'=>'fail', 'dkim'=>'fail'), true, 'unverified DMARC + both fail'),
+			array(array('dmarc'=>'', 'spf'=>'pass', 'dkim'=>'pass'), false, 'nothing failing'),
+		);
+		foreach ($rule_cases as $case) {
+			list($auth, $expected, $label) = $case;
+			$this->eq($expected, InboundEmailMessage::authRuleSaysSpam($auth),
+				'authRuleSaysSpam: ' . $label);
+			// classifySpam must agree, since it now asks the same question.
+			$auth['source'] = 'postfix';
+			$this->eq($expected
+					? InboundEmailMessage::SPAM_VERDICT_SPAM
+					: InboundEmailMessage::SPAM_VERDICT_HAM,
+				$this->classify($auth, 'none'),
+				'classifySpam agrees: ' . $label);
+		}
+
 		section('interpretScanResponse');
 		$r = $this->interpret('{"score":12.4,"required_score":6.0,"action":"add header"}');
 		$this->eq('spam', $r['signal'], 'action=add header → spam');
