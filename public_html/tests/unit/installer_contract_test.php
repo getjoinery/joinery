@@ -1012,6 +1012,27 @@ section('The agent reaches every node, not only management nodes');
 // nowhere else, so the agent reached two machines out of twelve and the spec
 // read "the rollout cost is configuration, not deployment" while no managed
 // node had a binary at all (surveyed 2026-08-26).
+section('A self-hosted box takes its root-level changes without a shell (specs/host_converger.md)');
+
+$converger = $site_root . '/maintenance_scripts/install_tools/install_host_converger.sh';
+$converger_src = is_file($converger) ? file_get_contents($converger) : '';
+check($converger_src !== '', 'the host converger installer ships beside install.sh');
+check(strpos($converger_src, '/etc/systemd/system/${UNIT_NAME}.timer') !== false
+	&& strpos($converger_src, '/etc/cron.d/${UNIT_NAME}') !== false,
+	'it installs a systemd timer where PID 1 is systemd and a cron entry otherwise');
+check(strpos($converger_src, '[ "$(id -u)" == "0" ]] ||') !== false || strpos($converger_src, '[[ "$(id -u)" == "0" ]] ||') !== false,
+	'it skips without root rather than failing');
+$runner_for_converger = file_get_contents($site_root . '/maintenance_scripts/install_tools/_plugin_installers_start.sh');
+check(preg_match('/CORE_INSTALLERS="[^"]*install_host_converger\.sh/', $runner_for_converger) === 1,
+	'the runner lists it as a core installer, so first install and every root moment install it');
+check(strpos($runner_for_converger, '--when-changed') !== false && strpos($runner_for_converger, 'host_converger.last') !== false,
+	'the runner has the converge-when-changed mode and records its last run');
+check(strpos($install_src, '_plugin_installers_start.sh" "$SITENAME"') !== false,
+	'install.sh runs the runner at the end of a site install (the root moment the converger is born at)');
+check(strpos($upgrade_src, 'joinery-host-converger') !== false && strpos($upgrade_src, 'within five minutes') !== false,
+	'a browser upgrade without root tells the admin the converger will finish the root half');
+$runner_src = $runner_for_converger;
+
 $core_installer = $site_root . '/maintenance_scripts/install_tools/install_agent.sh';
 $agent_src      = is_file($core_installer) ? file_get_contents($core_installer) : '';
 check($agent_src !== '', 'the agent installer is a core install tool', $core_installer);

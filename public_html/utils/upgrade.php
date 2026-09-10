@@ -1739,6 +1739,16 @@
 			$runner_output = [];
 			exec($root_prefix . 'bash ' . escapeshellarg($installers_runner) . ' ' . escapeshellarg($site_template) . ' 2>&1', $runner_output);
 			echo nl2br(htmlspecialchars(implode("\n", $runner_output))) . "<br>\n";
+			if (!$is_root) {
+				// A browser upgrade cannot do the root half. On a box with the
+				// host converger (specs/host_converger.md) root does it within
+				// five minutes from its own timer; on one without, say so.
+				$has_converger = file_exists('/etc/systemd/system/joinery-host-converger.timer')
+					|| file_exists('/etc/cron.d/joinery-host-converger');
+				upgrade_echo($has_converger
+					? "ℹ The host installers above ran without root; the host converger applies the root half (PHP extensions, host installers) within five minutes.<br>"
+					: "⚠ The host installers above ran without root and this machine has no host converger. On the host, once: sudo bash " . htmlspecialchars($full_site_dir) . "/maintenance_scripts/install_tools/install_host_converger.sh<br>");
+			}
 		}
 
 		// Flush static page cache so new code's renders aren't masked by

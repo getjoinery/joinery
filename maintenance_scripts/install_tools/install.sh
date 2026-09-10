@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+#VERSION 2.69 - The host converger (specs/host_converger.md) is installed by the
+#               installers runner this script already runs at the end of a site
+#               install: a root timer that keeps a self-hosted box's host
+#               converged after browser upgrades. No new step here.
 #VERSION 2.68 - Swap is encrypted with a per-boot random key (crypttab + systemd-cryptsetup,
 #               nofail so a bad line never keeps a box from booting) and is a flat 1 GB on
 #               every box: the old 2 GB was never derived, and no node has used more than

@@ -19,6 +19,7 @@
  * is all a plugin needs. A renderer that throws is logged and skipped — an
  * admin page never fails to render because a notice could not decide.
  *
+ * @version 1.3 - host_converger joins the core notices (specs/host_converger.md)
  * @version 1.2 - parser_jail joins the core notices (specs/parser_jail.md)
  * @version 1.1 - second_factor joins the core notices (security_inventory S4)
  */
@@ -43,6 +44,9 @@ class AdminNotices {
 			// A node parsing strangers' bytes as the web user says so to the
 			// one admin who can run the installer. Silent once it is installed.
 			'parser_jail'    => array('ParserJailNotice', 'render'),
+			// A box whose root timer stopped following its upgrades says so to
+			// the one admin who can reinstall it. Silent while it runs.
+			'host_converger' => array('HostConvergerNotice', 'render'),
 		);
 	}
 

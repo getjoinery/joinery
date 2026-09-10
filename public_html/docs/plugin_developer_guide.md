@@ -372,7 +372,7 @@ A plugin that needs something installed on the host declares it; the platform in
 
 The runner `maintenance_scripts/install_tools/_plugin_installers_start.sh` executes every **active** plugin's declared installer at the root moments without systemd: the container `CMD` (every start), `install.sh` site builds, and `upgrade.php`. On a bare-metal node, activating a plugin after install has no such moment — run the installers on demand from the node's detail page in Server Manager (Actions → Run Plugin Installers), which queues a `run_plugin_installers` job. The runner is fail-safe — an installer failure logs a warning and never blocks container start. The Mailbox plugin's `provisioning/install_email.sh` is the reference implementation.
 
-Activation cannot run a `host_installer` (web requests lack root) — pair the installer with `provisioners` entries (below) so the admin UI detects missing host state and points at the fix; on Docker nodes a container restart runs the installer automatically.
+Activation cannot run a `host_installer` itself (web requests lack root), but the host converger — a root timer every site install leaves behind, see [Deploy and Upgrade](deploy_and_upgrade.md#upgradephp) — runs the installers within five minutes of a change in the active set, so a newly activated plugin's services arrive without a shell. Still pair the installer with `provisioners` entries (below) so the admin UI detects missing host state and points at the fix; on Docker nodes a container restart runs the installer automatically.
 
 #### Deprecation Fields
 

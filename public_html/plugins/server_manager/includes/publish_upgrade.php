@@ -1100,6 +1100,32 @@
 		publish_output("\nAll archives created successfully!");
 
 		// =====================================================
+		// The management node is a node too: converge its host installers
+		// =====================================================
+		// Whatever this release's host installers put on a machine (the
+		// parser jail launcher, the agent artifact, a plugin's services) must
+		// land on this machine as well, and nothing upgrades this tree - it IS
+		// the source. So a publish queues the same run_plugin_installers job
+		// every other node gets from its upgrade, on this site's own paired
+		// agent, which runs the installers as root against the manifest this
+		// publish has just signed. Queued, not run inline: the agent verifies
+		// what it runs, and a job row is how work reaches root here.
+		try {
+			$self_node = class_exists('ManagedNode') ? ManagedNode::self_node() : null;
+			if ($self_node !== null && JobCommandBuilder::has_primitive($self_node, 'run_plugin_installers')) {
+				$converge = ManagementJob::createFromBuild($self_node->key, 'run_plugin_installers',
+					JobCommandBuilder::build_run_plugin_installers($self_node), [], 0);
+				publish_output("\nHost installers queued on this node as job #" . ($converge ? $converge->key : '?')
+					. " - the launcher and artifacts this release ships converge here without a shell.");
+			} else {
+				publish_output("\nThis site has no paired agent of its own, so its host installers do not run by themselves. Run once as root:"
+					. "\n  sudo bash " . rtrim($full_site_dir, '/') . "/maintenance_scripts/install_tools/_plugin_installers_start.sh");
+			}
+		} catch (\Throwable $e) {
+			publish_output("\nWARNING: could not queue the host installers on this node: " . $e->getMessage());
+		}
+
+		// =====================================================
 		// Retention: reclaim old core archives
 		// =====================================================
 		// Deletes archive files only — every release row survives as history.
