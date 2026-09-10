@@ -42,6 +42,8 @@ class StubReadContext implements ToolContext {
     public function allowedModels(): array { return array_keys(ModelRegistry::all()); }
     public function allowedActions(): array { return []; }
     public function queuesWrites(): bool { return false; }
+    public function executesInline(string $tool_name): bool { return true; }
+    public function writeProvenance(): string { return 'test'; }
     public function enqueueProposedAction(array $tool_use): array {
         throw new LogicException('This fixture context does not queue writes.');
     }

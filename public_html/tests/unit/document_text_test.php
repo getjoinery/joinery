@@ -28,6 +28,8 @@
  *
  * Run: php tests/unit/document_text_test.php
  *
+ * @version 1.2.0 - the jail: parseWith()/parseWithMany() contract, and the
+ *   fence proven from inside where the launcher is installed
  * @version 1.1.0
  */
 
@@ -171,6 +173,15 @@ $sources = array(
 	'includes/DocumentText.php'       => file_get_contents(PathHelper::getIncludePath('includes/DocumentText.php')),
 	'utils/extract_document_text.php' => file_get_contents(PathHelper::getIncludePath('utils/extract_document_text.php')),
 );
+$extract_src = $sources['utils/extract_document_text.php'];
+check(strpos($extract_src, 'ClassAutoloader::restrictToCore()') !== false,
+	'the extractor resolves core classes only (never the theme chain or the plugin registry)');
+check(strpos($extract_src, 'PathHelper::setComposerVendorPath(') !== false,
+	'the extractor is handed the vendor path rather than reading the setting');
+check(strpos($extract_src, 'Globalvars') === false,
+	'the extractor never names Globalvars: under the jail the config file is not readable');
+check(strpos($extract_src, 'DocumentText::sweepStaleStaged()') !== false,
+	'the stale-staging sweep runs in the child, whose files they are');
 foreach ($sources as $label => $src) {
 	// The constant's own name appears in this file's comments, so match the
 	// token as code would use it, not as prose mentions it.
@@ -251,10 +262,16 @@ check($fromPath['category'] === $fromBytes['category'], 'and on its category');
 check(strpos(DocumentText::toUtf8("Caf\xE9 line", 'unknown-8bit'), 'Café') === 0,
 	'a nonsense sender-declared charset falls back to detection rather than failing the extraction');
 
-// A killed child runs none of its own cleanup, so the parent sweeps stale
-// staging around every extraction. Simulate what a SIGKILLed child leaves:
+// A killed child runs none of its own cleanup, so the next child sweeps stale
+// staging at startup. Simulate what a SIGKILLed child leaves. Under the jail
+// the child is another user and /dev/shm is sticky, so a file THIS user made
+// is not its to remove — the property holds for the jail's own files, which
+// the gate covers from the outside.
 $stale = '/dev/shm/joinery_doctext_staletest';
-if (@file_put_contents($stale, 'x') !== false) {
+if (DocumentText::jailAvailable()) {
+	harness_skip('a staged file left by a killed child is swept by the next extraction',
+		'the jail user cannot remove this user\'s file; the same sweep runs for its own');
+} elseif (@file_put_contents($stale, 'x') !== false) {
 	@touch($stale, time() - 120);
 	DocumentText::extractBytes("plain words\n", 'text/plain');
 	check(!file_exists($stale), 'a staged file left by a killed child is swept by the next extraction');
@@ -286,5 +303,54 @@ check(DocumentText::categoryForMime($refined) === 'docx',
 $refined = DocumentText::refineContainerMime($dir . '/sample.zip', 'application/zip');
 check(DocumentText::categoryForMime($refined) === 'archive',
 	'a plain zip stays a plain zip', $refined);
+
+// ── The parser jail ──────────────────────────────────────────────────────────
+section('Sandbox parsers — the same subprocess, a class of the caller\'s');
+
+require_once(__DIR__ . '/../fixtures/documents/JailProbeParser.php');
+
+$r = DocumentText::parseWith('JailProbeParser', 'the bytes', array('marker' => 'm1'));
+check($r['status'] === DocumentText::OK && $r['category'] === 'JailProbeParser', 'a parser class runs and names itself', $r['status'] . ' ' . (string)$r['detail']);
+$probe = json_decode((string)$r['text'], true);
+check(is_array($probe) && ($probe['echo'] ?? null) === 'the bytes', 'the bytes reach sandboxParse() unchanged');
+check(is_array($probe) && ($probe['option'] ?? null) === 'm1', 'the options reach it too');
+
+$r = DocumentText::parseWith('JailProbeParser', 'boom');
+check($r['status'] === DocumentText::FAILED && strpos((string)$r['detail'], 'boom') !== false,
+	'a DocumentTextException from the class is the caller\'s failed result, with its reason', $r['status']);
+
+$r = DocumentText::parseWith('DocumentText', 'x');
+check($r['status'] === DocumentText::FAILED, 'a class that is not a SandboxParserInterface is refused before any spawn', $r['status']);
+$r = DocumentText::parseWith('NoSuchClassAnywhere', 'x');
+check($r['status'] === DocumentText::FAILED, 'an unknown class is refused', $r['status']);
+
+$many = DocumentText::parseWithMany('JailProbeParser', array('a' => 'one', 7 => 'boom', 'c' => 'three'), array('marker' => 'm2'));
+check(array_keys($many) === array('a', 7, 'c'), 'parseWithMany keeps the caller\'s keys in order', json_encode(array_keys($many)));
+check(is_string($many['a']) && (json_decode($many['a'], true)['echo'] ?? null) === 'one', 'each input is parsed');
+check($many[7] === null, 'a failing input is null, and does not take the batch with it');
+check(is_string($many['c']) && (json_decode($many['c'], true)['option'] ?? null) === 'm2', 'and the rest still answer');
+check(DocumentText::parseWithMany('JailProbeParser', array()) === array(), 'an empty batch spawns nothing and returns nothing');
+
+section('The jail — the fence, from inside');
+
+$here = function_exists('posix_geteuid') ? posix_geteuid() : null;
+if (DocumentText::jailAvailable()) {
+	$jail = function_exists('posix_getpwnam') ? posix_getpwnam('joinery-jail') : false;
+	check(is_array($jail) && (int)$probe['uid'] === (int)$jail['uid'], 'the subprocess is the joinery-jail user', json_encode($probe['uid'] ?? null));
+	check(($probe['user'] ?? '') === 'joinery-jail', 'by name as well as number');
+	check($probe['socket'] === false, 'it cannot open a socket');
+	check($probe['fork'] === false, 'it cannot start a process');
+	check($probe['wrote_tree'] === false, 'it cannot write the code tree');
+	check($probe['staged_mode'] === '0600', 'what it stages in /dev/shm is 0600, its own', (string)$probe['staged_mode']);
+	check(VaultHealth::checkParserJail()['state'] === 'verified', 'VaultHealth reports the jail verified');
+} else {
+	check($here === null || (int)$probe['uid'] === (int)$here, 'without the launcher the subprocess is this user (the advisory fallback)');
+	check(VaultHealth::checkParserJail()['state'] === 'unmet', 'and VaultHealth says so');
+	harness_skip('the fence from inside', 'launcher not installed on this box: run ' . VaultHealth::parserJailInstallCommand());
+}
+check(strpos($sources['includes/DocumentText.php'], "JAIL_LAUNCHER = '/usr/local/sbin/joinery-jail'") !== false,
+	'the launcher lives outside the tree, where the web user cannot replace it');
+check(strpos($sources['includes/DocumentText.php'], 'JAIL_REQUIRED = false') !== false,
+	'a missing launcher is advisory in this release (the flip is one constant)');
 
 harness_finish();

@@ -39,8 +39,9 @@ try {
 	$run_id = substr(md5(uniqid('', true)), 0, 6);
 	$jar = harness_jar_new('jygst');
 
-	$page = harness_request('GET', '/', array('jar' => $jar));
-	check($page['status'] === 200, 'anonymous GET / renders', 'status ' . $page['status']);
+	// The site root sends a visitor to sign-in; a public page is what renders anonymously.
+	$page = harness_request('GET', '/page/quickstart', array('jar' => $jar));
+	check($page['status'] === 200, 'anonymous GET of a public page renders', 'status ' . $page['status']);
 	$token = harness_jar_csrf($jar);
 	check($token !== null && preg_match('/^[0-9a-f]{64}$/', (string)$token),
 		'joinery_api_csrf mirror cookie distributed to an anonymous visitor');
@@ -190,17 +191,17 @@ try {
 	// is then served to this visitor's normal jar too.
 	$browser_ua = 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
 		. 'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36';
-	harness_request('GET', '/', array('jar' => $jar, 'headers' => array($browser_ua)));
+	harness_request('GET', '/page/quickstart', array('jar' => $jar, 'headers' => array($browser_ua)));
 	$hit = null;
 	// 8, not 5: the entry is known to exist now, so this only has to absorb the
 	// 1% serve-time freshness roll, which an all-miss run across 8 fetches
 	// cannot realistically survive.
 	for ($i = 0; $i < 8 && $hit === null; $i++) {
-		$p = harness_request('GET', '/', array('jar' => $jar));
+		$p = harness_request('GET', '/page/quickstart', array('jar' => $jar));
 		if (harness_header_matches($p['headers'], '/^X-Cache:\s*HIT/i')) $hit = $p;
 	}
 	check($hit !== null,
-		'an X-Cache HIT was observed on / after warming the page cache (else the static cache is disabled on dev — see /admin/admin_static_cache)');
+		'an X-Cache HIT was observed on a public page after warming the page cache (else the static cache is disabled on dev — see /admin/admin_static_cache)');
 	if ($hit !== null) {
 		check(strpos($hit['raw'], '<meta name="joinery-api-csrf"') === false,
 			'cached HTML carries no CSRF meta tag');

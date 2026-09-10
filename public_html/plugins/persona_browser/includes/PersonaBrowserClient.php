@@ -67,8 +67,10 @@ class PersonaBrowserClient {
 
         $posts = array_values(array_filter((array)($decoded['posts'] ?? []), 'is_string'));
         $media = is_array($decoded['media'] ?? null) ? $decoded['media'] : [];
-        $items = FacebookFeedExtractor::extract($posts, $media);
-        $stories = FacebookFeedExtractor::extractStories($posts, $media);
+        // One subprocess reads the whole capture (the parser jail, specs/parser_jail.md).
+        $read = FacebookFeedExtractor::extractAll($posts, $media);
+        $items = $read['items'];
+        $stories = $read['stories'];
 
         return ['state' => 'ok', 'items' => $items, 'stories' => $stories, 'url' => $decoded['url'] ?? null, 'error' => null];
     }

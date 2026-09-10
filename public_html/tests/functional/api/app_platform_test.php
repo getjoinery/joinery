@@ -213,7 +213,8 @@ try {
 	check(strpos($res['body'], 'jy-app-mode') !== false, 'app-mode body class hook present');
 	check(!preg_match($chrome_regex, $res['body']), 'site nav/footer chrome absent');
 
-	$res = web_request('/');
+	// The site root sends a visitor to sign-in; a public page is what renders anonymously.
+	$res = web_request('/page/quickstart');
 	check((bool)preg_match($chrome_regex, $res['body']), 'anonymous page keeps site chrome');
 	check(strpos($res['body'], 'jy-app-mode') === false, 'anonymous page has no app-mode hook');
 

@@ -516,6 +516,25 @@
 			}
 		}
 
+		// =====================================================
+		// Cross-compile the parser jail's launcher into install_tools
+		// =====================================================
+		// Every node consumes a prebuilt launcher: install_parser_jail.sh copies
+		// bin/joinery-jail-<uname -m> to /usr/local/sbin setuid root at the
+		// platform's root moments (specs/parser_jail.md). The source ships in
+		// maintenance_scripts/install_tools/joinery_jail, so the publish is the
+		// place that builds it, before the core archive is rsynced. A stale
+		// launcher must not ship: a build owed and not done refuses the release.
+		publish_output("Building parser jail launcher binaries...");
+		$parser_jail = ParserJailPublisher::publish($full_site_dir, 'publish_output');
+		if ($parser_jail['status'] === ParserJailPublisher::STATUS_FAILED) {
+			publish_output("\nRefusing to publish {$version} — the parser jail launcher "
+				. "(maintenance_scripts/install_tools/joinery_jail/bin) is stale and the build failed. "
+				. "Publishing now would ship an installer with nothing current to install.");
+			publish_output("Fix the launcher build and publish again. Nothing has been written.");
+			exit(1);
+		}
+
 		// The support bundle rides beside the agent artifact: the signed script
 		// tree a machine with NO SITE resolves its primitives against. Built
 		// here, while the tree is the tree that is about to ship and before the

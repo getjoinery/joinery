@@ -403,6 +403,8 @@ function harness_web_login($jar, $email, $password) {
 	if (!in_array($login['status'], array(301, 302, 303), true)) {
 		return null;
 	}
-	$page = harness_request('GET', '/', array('jar' => $jar, 'accept' => null));
+	// The site root sends a signed-in member on to /profile; follow it to a
+	// page that carries the joinery-api-csrf meta tag.
+	$page = harness_request('GET', '/', array('jar' => $jar, 'accept' => null, 'follow' => true));
 	return harness_meta_csrf($page['body']);
 }

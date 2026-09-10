@@ -242,7 +242,9 @@ check(eg_reassemble($q_facts, 'Query') === 'who is the CEO of Initech',
 section('Approve executes the fetch; the event row carries the text verbatim');
 
 $fetch = ActionQueue::enqueue($owner_id, 'fetch_url',
-	['url' => 'https://dev.getjoinery.com/'], intval($conversation->key));
+	// A page with prose: the site root sends a visitor to sign-in, which is
+	// too short to prove the event row carries the fetch verbatim.
+	['url' => 'https://dev.getjoinery.com/page/quickstart'], intval($conversation->key));
 eg_register((int)$fetch->key);
 check((string)$fetch->get('aqa_status') === AiQueuedAction::STATUS_PENDING
 		&& (string)$fetch->get('aqa_result') === '',
@@ -333,6 +335,8 @@ $stub_ctx = new class implements ToolContext {
 	public function allowedModels(): array { return []; }
 	public function allowedActions(): array { return []; }
 	public function queuesWrites(): bool { return false; }
+	public function executesInline(string $tool_name): bool { return true; }
+	public function writeProvenance(): string { return 'test'; }
 	public function enqueueProposedAction(array $tool_use): array {
 		throw new LogicException('autonomous surfaces never queue');
 	}

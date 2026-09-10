@@ -20,13 +20,14 @@
  *
  * Run: php plugins/mailbox/tests/deliverability_report_test.php
  *
- * @version 1.0
+ * @version 1.1 - the parse runs in the jail (DeliverabilityReportParser)
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/DeliverabilityReportIngest.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/DeliverabilityReportParser.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/deliverability_report_class.php'));
 
 $FIX = __DIR__ . '/fixtures/deliverability/';
@@ -75,8 +76,8 @@ $d = dv_detect($router, dv_carrier($google_subject, $google_name, $google_zip));
 check($d !== null && $d['kind'] === DeliverabilityReport::KIND_DMARC_AGGREGATE,
 	'a real Google aggregate report (subject + filename + payload) is detected',
 	$d === null ? 'not detected' : $d['kind']);
-check($d !== null && $d['parsed_payload'] instanceof DOMDocument,
-	'and its zip payload was extracted and structurally parsed');
+check($d !== null && is_array($d['parsed_payload']) && ($d['parsed_payload']['domain'] ?? '') === 'dev.getjoinery.com',
+	'and its zip payload was opened and parsed in the jail, coming back as the flat record');
 
 $d = dv_detect($router, dv_carrier('Your weekly stats', $google_name, $google_zip));
 check($d !== null && $d['kind'] === DeliverabilityReport::KIND_DMARC_AGGREGATE,
@@ -117,9 +118,9 @@ check($d !== null && $d['kind'] === DeliverabilityReport::KIND_ARF,
 
 section('RFC 7489 parser: the real Google dialect');
 
-$doc = new DOMDocument();
-$doc->loadXML($google_xml);
-$g = DeliverabilityReportIngest::parseDmarcAggregate($doc);
+$doc = DeliverabilityReportParser::parseDocument($google_xml);
+check($doc instanceof DOMDocument, 'the report XML opens through the one XML door');
+$g = DeliverabilityReportParser::parseDmarcAggregate($doc);
 check($g['org_name'] === 'google.com', 'reporter org extracted', $g['org_name']);
 check($g['report_id'] === '14651549524214893979', 'report id extracted', $g['report_id']);
 check($g['domain'] === 'dev.getjoinery.com', 'reported domain extracted', $g['domain']);
@@ -135,9 +136,7 @@ check(count($g['sources'][0]['auth_detail']) === 3, 'auth_results detail preserv
 
 section('RFC 7489 parser: the Microsoft dialect');
 
-$doc = new DOMDocument();
-$doc->loadXML($ms_xml);
-$m = DeliverabilityReportIngest::parseDmarcAggregate($doc);
+$m = DeliverabilityReportParser::parseDmarcAggregate(DeliverabilityReportParser::parseDocument($ms_xml));
 check($m['org_name'] === 'Enterprise Outlook', 'reporter org extracted', $m['org_name']);
 check(count($m['sources']) === 2, 'both records extracted', count($m['sources']) . ' rows');
 $bad = null; $good = null;
@@ -152,7 +151,7 @@ check($m['message_count'] === 17, 'message count summed across records', (string
 
 section('TLS-RPT parser');
 
-$t = DeliverabilityReportIngest::parseTlsRpt(json_decode($tlsrpt, true));
+$t = DeliverabilityReportParser::parseTlsRpt(json_decode($tlsrpt, true));
 check($t['org_name'] === 'Google Inc.', 'reporter org extracted', $t['org_name']);
 check($t['domain'] === 'reports.example', 'policy domain extracted', $t['domain']);
 check(count($t['sources']) === 1 && $t['sources'][0]['ip'] === '192.0.2.88'
@@ -175,6 +174,16 @@ check($a['sources'][0]['aligned'] === true, 'a complaint is about mail the domai
 check($a['report_id'] === '<arf-fixture-1@bigmail.example>', 'carrier Message-ID is the report id');
 
 section('D9: report content is untrusted input');
+
+check(DeliverabilityReportParser::parseDocument("<?xml version=\"1.0\"?><!DOCTYPE feedback [<!ENTITY x \"y\">]><feedback/>") === null,
+	'a DOCTYPE is refused before the parser sees it');
+$ingest_src = file_get_contents(PathHelper::getIncludePath('plugins/mailbox/includes/DeliverabilityReportIngest.php'));
+foreach (array('ZipArchive', 'DOMDocument', 'inflate_init', 'gzdecode', 'loadXML') as $token) {
+	check(!preg_match('/^[^*\n]*\b' . $token . '\b/m', $ingest_src),
+		'the ingest (pool side) never names ' . $token . ' — the bytes open in the jail');
+}
+check(strpos($ingest_src, "DocumentText::parseWith('DeliverabilityReportParser'") !== false,
+	'the ingest hands the bytes to the jail');
 
 $xxe = "<?xml version=\"1.0\"?><!DOCTYPE feedback [<!ENTITY x SYSTEM \"file:///etc/passwd\">]>"
 	. "<feedback><report_metadata><org_name>&x;</org_name></report_metadata></feedback>";

@@ -3,7 +3,10 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
-# Version: 1.3 - Derives its own site root and reads its own database
+# Version: 1.4 - The parser jail's installer is the second core installer: the
+#                launcher belongs on every Joinery instance, and this is the one
+#                root moment a node has (specs/parser_jail.md).
+#          1.3 - Derives its own site root and reads its own database
 #                credentials. It did neither, and under the run_plugin_installers
 #                primitive - which passes no argument and inherits no environment -
 #                each gap alone produced a clean-looking exit 0: with no SITENAME
@@ -135,7 +138,7 @@ fi
 # Core's own installers run before any plugin's, and unconditionally: nothing
 # about them is a plugin's business. Each is idempotent and decides for itself
 # whether it applies here, the same contract plugin installers work under.
-CORE_INSTALLERS="install_agent.sh"
+CORE_INSTALLERS="install_agent.sh install_parser_jail.sh"
 
 for CORE_INSTALLER in ${CORE_INSTALLERS}; do
     CORE_PATH="${SCRIPT_DIR}/${CORE_INSTALLER}"

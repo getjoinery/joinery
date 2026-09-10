@@ -16,6 +16,7 @@
  * any port (allowed_ports => null) since it legitimately scans dev sites on
  * non-standard ports. Covered by tests/unit/url_safety_validator_test.php.
  *
+ * @version 1.4 - the fetched page opens in the parser jail (ScanUrlPageResources)
  * @version 1.3
  */
 
@@ -161,63 +162,17 @@ function scan_url_logic(array $input): LogicResult{
 
 	$page_registrable = get_registrable_domain($page_host);
 
-	// Parse HTML
-	libxml_use_internal_errors(true);
-	$dom = new DOMDocument();
-	$dom->loadHTML($html);
-	libxml_clear_errors();
-
+	// The page opens in the parser jail (specs/parser_jail.md): every URL it
+	// refers to comes back as a list, and only the resolving happens here.
 	$found_domains = array();
-
-	// Standard single-attribute tags
-	$tag_attrs = array(
-		'script' => array('src'),
-		'link'   => array('href'),
-		'img'    => array('src'),
-		'iframe' => array('src'),
-		'video'  => array('src'),
-		'audio'  => array('src'),
-		'form'   => array('action'),
-	);
-	foreach ($tag_attrs as $tag => $attrs) {
-		foreach ($dom->getElementsByTagName($tag) as $el) {
-			foreach ($attrs as $attr) {
-				$val = $el->getAttribute($attr);
-				if ($val) add_url_to_domains($val, $page_scheme, $page_registrable, $found_domains);
-			}
-		}
+	$listed = DocumentText::parseWith('ScanUrlPageResources', $html);
+	if ($listed['status'] !== DocumentText::OK && $listed['status'] !== DocumentText::EMPTY) {
+		return LogicResult::error('Could not read the page. ' . (string)$listed['detail']);
 	}
-
-	// img[srcset] — comma-separated entries; first whitespace token of each entry is the URL
-	foreach ($dom->getElementsByTagName('img') as $img) {
-		$srcset = $img->getAttribute('srcset');
-		if ($srcset) {
-			foreach (explode(',', $srcset) as $entry) {
-				$tokens = preg_split('/\s+/', trim($entry), 2);
-				if (!empty($tokens[0])) add_url_to_domains($tokens[0], $page_scheme, $page_registrable, $found_domains);
-			}
-		}
-	}
-
-	// source[src] and source[srcset]
-	foreach ($dom->getElementsByTagName('source') as $source) {
-		$src = $source->getAttribute('src');
-		if ($src) add_url_to_domains($src, $page_scheme, $page_registrable, $found_domains);
-		$srcset = $source->getAttribute('srcset');
-		if ($srcset) {
-			foreach (explode(',', $srcset) as $entry) {
-				$tokens = preg_split('/\s+/', trim($entry), 2);
-				if (!empty($tokens[0])) add_url_to_domains($tokens[0], $page_scheme, $page_registrable, $found_domains);
-			}
-		}
-	}
-
-	// Inline <style> blocks: CSS url()
-	foreach ($dom->getElementsByTagName('style') as $style) {
-		$css = $style->textContent;
-		preg_match_all('/url\(\s*[\'"]?([^\'"\)\s]+)[\'"]?\s*\)/i', $css, $matches);
-		foreach ($matches[1] as $css_url) {
-			add_url_to_domains($css_url, $page_scheme, $page_registrable, $found_domains);
+	$urls = json_decode((string)$listed['text'], true);
+	foreach (is_array($urls) ? $urls : array() as $val) {
+		if (is_string($val) && $val !== '') {
+			add_url_to_domains($val, $page_scheme, $page_registrable, $found_domains);
 		}
 	}
 
