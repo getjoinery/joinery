@@ -743,19 +743,22 @@ $formwriter->numberinput('rcp_monthly_token_cap', 'Monthly Token Cap', ['min' =>
 $advanced_limits_html = ob_get_clean();
 
 // --- Security ---
-// The old label ("Allow tainted writes") named the mechanism, so it told an
-// admin nothing about what they were agreeing to. The badge above the checkbox
-// answers the first question people actually ask — does this recipe even need
-// it? — and mirrors TaintGate exactly (see the script at the foot of the form).
+// The badge above the checkbox answers the first question people actually
+// ask — what happens to this recipe's changes? — and mirrors TaintGate
+// exactly (see the script at the foot of the form). In agent mode a recipe
+// that reads content written by other people queues its changes for
+// approval, so the checkbox applies to pipeline mode only, where the job
+// writes a fixed field from the verdict with nobody clicking.
 echo '<div id="rcp_taint_state" class="mb-2"></div>';
 
 $formwriter->checkboxinput('rcp_allow_tainted_writes',
-    'Let this recipe act on content written by other people', [
+    'Let this recipe act on content written by other people (pipeline mode)', [
     'value' => 1,
     'checked' => (bool)$recipe->get('rcp_allow_tainted_writes'),
     'helptext' => 'Anything written by other people — an email body, a member message — can carry '
-                 . 'hidden instructions aimed at the AI. Ticking this accepts that risk for '
-                 . 'whatever this recipe can change.',
+                 . 'hidden instructions aimed at the AI. In pipeline mode the job writes one fixed '
+                 . 'field from the model\'s verdict on its own; ticking this accepts that risk. '
+                 . 'Agent-mode recipes need no tick: their changes wait for your approval instead.',
 ]);
 
 // --- Advanced ---
@@ -949,9 +952,10 @@ foreach (PipelineJobRegistry::all() as $tj_id => $tj_class) {
 })();
 
 (function () {
-    // Live mirror of TaintGate::evaluate(). Answers "does this recipe even need
-    // that permission?" before the admin has to reason about the checkbox.
-    var WRITE_TOOLS      = <?php echo json_encode(ModelWriteExecutor::WRITE_TOOL_NAMES); ?>;
+    // Live mirror of TaintGate::evaluate(). Answers "what happens to this
+    // recipe's changes?" before the admin has to reason about the checkbox.
+    var WRITE_TOOLS      = <?php echo json_encode(TaintGate::writeTools()); ?>;
+    var WEB_TOOLS        = <?php echo json_encode(RiskHeuristic::WEB_EGRESS_TOOLS); ?>;
     var UNTRUSTED_MODELS = <?php echo json_encode($taint_untrusted_models); ?>;
     var UNTRUSTED_JOBS   = <?php echo json_encode((object)$taint_untrusted_jobs); ?>;
     var PIPELINE         = <?php echo json_encode(Recipe::MODE_PIPELINE); ?>;
@@ -978,29 +982,35 @@ foreach (PipelineJobRegistry::all() as $tj_id => $tj_class) {
             }
             return { required: false, why: 'This job only reads content you control.' };
         }
-        var tools = checkedValues('rcp_allowed_tools[]').filter(function (t) {
-            return WRITE_TOOLS.indexOf(t) !== -1; });
+        var allTools = checkedValues('rcp_allowed_tools[]');
+        var tools = allTools.filter(function (t) { return WRITE_TOOLS.indexOf(t) !== -1; });
         if (!tools.length) {
             return { required: false, why: 'This recipe cannot change anything — it has no write tools.' };
         }
         var models = checkedValues('rcp_allowed_models[]').filter(function (m) {
             return UNTRUSTED_MODELS.indexOf(m) !== -1; });
+        var web = allTools.filter(function (t) { return WEB_TOOLS.indexOf(t) !== -1; });
         var ws = wsEl && wsEl.value.trim() !== '';
-        if (models.length) {
-            return { required: true, why: 'It can write (' + tools.join(', ') + ') and reads records '
-                + 'holding text other people wrote: ' + models.join(', ') + '.' };
+        var reasons = [];
+        if (models.length) reasons.push('reads records holding text other people wrote: ' + models.join(', '));
+        if (web.length) reasons.push('reads pages from the web (' + web.join(', ') + ')');
+        if (ws) reasons.push('carries notes the AI wrote to itself on earlier runs');
+        if (reasons.length) {
+            return { required: false, queued: true, why: 'It can write (' + tools.join(', ') + ') and '
+                + reasons.join(' and ') + ', so each change it wants to make becomes a card you '
+                + 'approve or decline. Nothing is applied on its own.' };
         }
-        if (ws) {
-            return { required: true, why: 'It can write (' + tools.join(', ') + ') and carries notes '
-                + 'the AI wrote to itself on earlier runs.' };
-        }
-        return { required: false, why: 'Nothing it reads was written by anyone else.' };
+        return { required: false, why: 'Nothing it reads was written by anyone else, so its changes apply directly.' };
     }
 
     function render() {
         var state = evaluate();
         var cls, text;
-        if (!state.required) {
+        if (state.queued) {
+            cls = 'alert alert-info py-2 mb-2';
+            text = '<strong>Changes wait for your approval.</strong> ' + state.why
+                 + ' The box below does not apply to this recipe.';
+        } else if (!state.required) {
             cls = 'alert alert-secondary py-2 mb-2';
             text = '<strong>Not needed for this recipe.</strong> ' + state.why
                  + ' Leaving the box below ticked does no harm; it just does not apply.';

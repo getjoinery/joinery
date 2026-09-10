@@ -12,6 +12,9 @@
  * in place and resolves into the completed facts. A lowering lands on its
  * mirror (specs/mailbox_lowering_unseal.md), which unseals them back.
  *
+ * @version 3.9 - the AI travel consent shows at every security level: where
+ *   mail may be sent to be read is a decision for Standard domains too
+ *   (specs/security_inventory.md S19); the read switch stays sealed-only
  * @version 3.8 - an ADD offers only Hosted mail: a new pulled-in domain is
  *   born in the connect wizard, with its first mailbox
  * @version 3.7 - a provider (IMAP-source) domain shows no protection level: it is
@@ -115,8 +118,9 @@ if ($show_form) {
 	// The protection level goes with them (specs/mailbox_connect_flow.md § D): a
 	// provider domain is somebody else's, so it makes no claim about the mail —
 	// each pulled-in mailbox under it chooses for itself, in the mailbox editor.
-	// The AI consents follow the level, since they only mean something once mail
-	// is sealed at rest.
+	// The AI consents go with the level too: the read switch only means
+	// something once mail is sealed, and the travel consent belongs to the
+	// domain that receives the mail.
 	$imap_only_hide = ['ied_catch_all_mode', 'ied_catch_all_address', 'ied_reject_unmatched',
 		'ied_security_level', 'ied_security_level_fortress_card',
 		'ied_ai_processing_enabled', 'ied_ai_processing_consent'];
@@ -202,11 +206,13 @@ if ($show_form) {
 				'This domain can only send mail while you are signed in.',
 			],
 		],
-		// The AI consent control only means something once mail is encrypted at
-		// rest. On Standard the server already reads it, so there is nothing to
-		// consent to (specs/in_window_deferred_work.md).
+		// The AI READ switch only means something once mail is encrypted at
+		// rest: on Standard the server already reads it, so there is nothing to
+		// consent to (specs/in_window_deferred_work.md). The TRAVEL consent
+		// below it shows at every level — where mail may be sent to be read is
+		// a decision for a Standard domain too.
 		'visibility_rules' => [
-			InboundEmailDomain::LEVEL_STANDARD => ['show' => [], 'hide' => ['ied_ai_processing_enabled', 'ied_ai_processing_consent']],
+			InboundEmailDomain::LEVEL_STANDARD => ['show' => ['ied_ai_processing_consent'], 'hide' => ['ied_ai_processing_enabled']],
 			InboundEmailDomain::LEVEL_PRIVATE  => ['show' => ['ied_ai_processing_enabled', 'ied_ai_processing_consent'], 'hide' => []],
 			InboundEmailDomain::LEVEL_FORTRESS => ['show' => ['ied_ai_processing_enabled', 'ied_ai_processing_consent'], 'hide' => []],
 		],
@@ -254,25 +260,26 @@ if ($show_form) {
 				. 'is off, because encrypted mail is unreadable without you.',
 		]);
 
-	// The narrower second consent: not whether the AI may read this mail, but
-	// how far the decrypted text may travel to be read. Reading sealed mail on
-	// your own hardware, handing it to a vendor you have accepted terms with,
-	// and handing it to a general cloud are three different promises, so the
-	// operator gets three answers rather than one switch that conflates the
-	// last two.
+	// The travel consent: not whether the AI may read this mail, but how far
+	// the text may travel to be read. Reading mail on your own hardware,
+	// handing it to a vendor you have accepted terms with, and handing it to a
+	// general cloud are three different promises, so the operator gets three
+	// answers rather than one switch that conflates the last two. At every
+	// level: a Standard domain's mail leaving for a hosted API is what this
+	// setting exists to refuse, sealed at rest or not.
 	$formwriter->dropinput('ied_ai_processing_consent',
-		"How far this domain's decrypted mail may travel", [
+		"How far this domain's mail may travel to be read by AI", [
 			'value'   => $consent_value,
 			'options' => [
 				InboundEmailDomain::CONSENT_LOCAL   => 'Stay on my hardware (default)',
 				InboundEmailDomain::CONSENT_TRUSTED => 'My hardware, or a vendor I have accepted',
 				InboundEmailDomain::CONSENT_CLOUD   => 'Any configured AI endpoint, including cloud',
 			],
-			'helptext' => 'Starts at the strictest setting, and separate from the option above on '
-				. 'purpose. On the first, this domain\'s mail is only ever read by a model running '
-				. 'on hardware you control, and a recipe that would need anything else is refused. '
-				. 'Loosening it lets the decrypted mail be sent to that provider, who then holds it '
-				. 'in the clear. Tightening it back stops those recipes at their next run.'
+			'helptext' => 'Starts at the strictest setting. On the first, this domain\'s mail is only '
+				. 'ever read by a model running on hardware you control, and a recipe that would '
+				. 'need anything else is refused. Loosening it lets the mail be sent to that '
+				. 'provider, who then holds it in the clear. Tightening it back stops those '
+				. 'recipes at their next run.'
 				. ($trust_notes ? ' On this install, "a vendor I have accepted" means — '
 					. implode(' ', $trust_notes) : ''),
 		]);

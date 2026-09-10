@@ -108,6 +108,12 @@
  *   the alias branch, and parsePendingMessage intercepts at unlock — the
  *   Fortress relay path's first plaintext moment — removing the pending row
  *   once the report's derived rows are written
+ * @version 1.37
+ * @changelog 1.37 - forward loop guard (specs/security_inventory.md S14): every
+ *   forward stamps Auto-Submitted: auto-forwarded beside X-Forwarded-By, and
+ *   no forward path relays a message that already carries either marker or
+ *   has crossed FORWARD_MAX_HOPS relays; the message is kept or dropped as
+ *   its delivery mode says, never bounced (a bounce could loop too)
  * @version 1.36
  * @changelog 1.36 - every raw MIME parse goes through MimeParse (a message
  *   quoting its own boundary mid-line hangs Horde's parser; observed pinning
@@ -380,7 +386,16 @@ class InboundEmailRouter {
 			return 0;
 		}
 
-		// 8. Forward
+		// 8. Forward — unless the message is itself an automatic forward, in
+		// which case relaying it again is how two forwarders loop. The copy a
+		// forward_and_store alias keeps was stored above, so nothing is lost;
+		// a pure forward drops it here rather than bouncing, because a bounce
+		// to a forwarder is the same loop by another route.
+		$loop = self::forwardLoopRefusal($parsed);
+		if ($loop !== null) {
+			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_REJECTED, $envelope_recipient, null, 'Forward loop guard: ' . $loop, $domain->key);
+			return 0;
+		}
 		$destinations = $alias->get_destinations_array();
 		$results = $this->forwardEmail($raw_email, $parsed, $alias, $domain, $destinations);
 
@@ -2249,8 +2264,22 @@ class InboundEmailRouter {
 		}
 		try {
 			$raw = $msg->getRawMessage();
+			// The loop guard reads the headers the message ARRIVED with. A lean
+			// record keeps no raw but keeps its header block, and the synthesized
+			// forward below carries none of the arrival headers — so the guard
+			// looks before the synthesis, at whichever of the two this row has.
+			$arrival = ($raw !== null && $raw !== '') ? $raw : (string)$msg->get('iem_raw_headers');
 		} catch (VaultLockedException $e) {
 			$raw = null; // sealed raw and no open window — treated as unavailable below
+			$arrival = '';
+		}
+		if ($arrival !== '') {
+			$loop = self::forwardLoopRefusal($this->parseEmail(rtrim($arrival) . "\n\n"));
+			if ($loop !== null) {
+				error_log('InboundEmailRouter::forwardStoredMessage: not forwarding message ' . $msg->key
+					. ' — ' . $loop);
+				return array();
+			}
 		}
 		if ($raw === null || $raw === '') {
 			// A Joinery Direct delivery never became a MIME document (and a lean
@@ -2399,6 +2428,56 @@ class InboundEmailRouter {
 		return $at === false ? 'localhost' : substr($address, $at + 1);
 	}
 
+	/** The X-Forwarded-By value every forward carries; the loop guard's own marker. */
+	const FORWARD_MARKER = 'Joinery Inbound Email';
+
+	/** A message that has crossed this many relays is not forwarded again. */
+	const FORWARD_MAX_HOPS = 30;
+
+	/**
+	 * Why this message must not be forwarded again, or null when it may be
+	 * (specs/security_inventory.md S14). Every forward path asks before it
+	 * relays: the alias forward, forward_and_store, the catch-all forward and
+	 * the filter action. Two owners forwarding to each other, or one forwarding
+	 * to an address that lands back on a matching rule, would otherwise relay
+	 * one message through the relay until something rate-limits — and a
+	 * stranger can start that with one message.
+	 *
+	 * Three signals, any one of which is enough:
+	 *   - our own X-Forwarded-By marker (a Joinery node already forwarded it);
+	 *   - Auto-Submitted: auto-forwarded, the RFC 3834 declaration a foreign
+	 *     forwarder makes; other auto-* values (a bounce, a vacation reply) are
+	 *     left alone, because forwarding those to the owner is wanted;
+	 *   - FORWARD_MAX_HOPS Received headers, the classic hop count, for a loop
+	 *     through a system that strips both of the above.
+	 *
+	 * @param array $parsed the parseEmail() result; header keys are lowercase,
+	 *                      a repeated header is an array of values
+	 */
+	public static function forwardLoopRefusal(array $parsed): ?string {
+		$headers = is_array($parsed['headers'] ?? null) ? $parsed['headers'] : array();
+		$values = function ($name) use ($headers) {
+			$v = $headers[$name] ?? null;
+			if ($v === null || $v === '') return array();
+			return is_array($v) ? $v : array($v);
+		};
+		foreach ($values('x-forwarded-by') as $v) {
+			if (stripos((string)$v, self::FORWARD_MARKER) !== false) {
+				return 'already forwarded by a Joinery mailbox (X-Forwarded-By)';
+			}
+		}
+		foreach ($values('auto-submitted') as $v) {
+			if (stripos(ltrim((string)$v), 'auto-forwarded') === 0) {
+				return 'the message is an automatic forward (Auto-Submitted: auto-forwarded)';
+			}
+		}
+		$hops = count($values('received'));
+		if ($hops >= self::FORWARD_MAX_HOPS) {
+			return 'too many hops (' . $hops . ' Received headers)';
+		}
+		return null;
+	}
+
 	/**
 	 * Build the forwarded message and its envelope sender, shared by the alias
 	 * forward and the catch-all forward. Rewrites the From header to the site's
@@ -2451,11 +2530,19 @@ class InboundEmailRouter {
 		// Remove existing Reply-To if present, then add ours
 		$header_block = preg_replace('/^Reply-To:.*$/mi', '', $header_block);
 
-		// Add forwarding headers and Reply-To
+		// Add forwarding headers and Reply-To. X-Forwarded-By is the marker
+		// forwardLoopRefusal() recognises as our own; Auto-Submitted is the
+		// RFC 3834 one every other mail system recognises. An original that
+		// already declares itself auto-submitted (auto-replied, auto-generated)
+		// keeps that declaration — a second would be noise, and a foreign
+		// responder honours either value.
 		$extra_headers = "Reply-To: " . $parsed['from_email'] . "\n";
 		$extra_headers .= "X-Original-To: " . $original_to_address . "\n";
 		$extra_headers .= "X-Forwarded-For: " . $original_to_address . "\n";
-		$extra_headers .= "X-Forwarded-By: Joinery Inbound Email";
+		$extra_headers .= "X-Forwarded-By: " . self::FORWARD_MARKER;
+		if (!preg_match('/^Auto-Submitted:/mi', $header_block)) {
+			$extra_headers .= "\nAuto-Submitted: auto-forwarded";
+		}
 
 		$header_block = trim($header_block) . "\n" . $extra_headers;
 
@@ -2607,6 +2694,11 @@ class InboundEmailRouter {
 	 * earlier rebuild-from-parsed-parts approach was lossy.
 	 */
 	private function forwardToCatchAll($parsed, $raw_email, $envelope_recipient, $domain, $catch_all_address) {
+		$loop = self::forwardLoopRefusal($parsed);
+		if ($loop !== null) {
+			$this->logTransaction($parsed, null, InboundEmailLog::STATUS_REJECTED, $envelope_recipient, null, 'Forward loop guard: ' . $loop, $domain->key);
+			return 0;
+		}
 		list($raw_mime, $envelope_sender) = $this->buildForwardMessage($raw_email, $parsed, $domain, $envelope_recipient);
 
 		$results = $this->relay($raw_mime, $envelope_sender, array($catch_all_address));

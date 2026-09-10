@@ -31,6 +31,9 @@
  * signature over the ordered hashes of the SEALED bytes before anything is
  * ingested.
  *
+ * @version 1.2
+ * @changelog 1.2 - the spool cap check carries the verified sending domain, so
+ *   the per-sender bound applies (specs/security_inventory.md S21)
  * @version 1.1
  * @changelog 1.1 - the kind's declared recipient requirement is judged with the
  *   gate: live here at Standard, folded into the same `declined`; at the sealed
@@ -179,7 +182,8 @@ class DirectReceiver {
 			// Safe to signal — instance-level state, the same answer for every
 			// address — and the per-address cap charges decoy deliveries too, so a
 			// full spool refuses identically whether the address exists or not.
-			$cap_error = DirectSpoolService::capRefusal($resolved, $recipient, $declared_bytes);
+			// The verified sending domain rides along for the per-sender cap.
+			$cap_error = DirectSpoolService::capRefusal($resolved, $recipient, $declared_bytes, $verified_domain);
 			if ($cap_error !== null) {
 				return self::refuse(507, $cap_error);
 			}

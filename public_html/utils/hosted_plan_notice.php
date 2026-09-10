@@ -35,10 +35,19 @@
  * omitted value CLEARS its setting. That is what retires a trial countdown once
  * the trial is over, and what returns a box to silence when its hosting ends.
  *
+ * ONE THING HERE IS NOT A BANNER FACT. The first time a deployment becomes
+ * managed — its state goes from silent to one of the billing states — the
+ * admin second-factor requirement (totp_require_admins) is switched ON. It is
+ * only ever switched on, only on that transition, and never off: a managed
+ * deployment is born requiring a second factor of its admins
+ * (specs/security_inventory.md S4), and an owner who later relaxes it is not
+ * overruled at the next billing update. The worst a compromised management
+ * node achieves through this line is tightening somebody's security.
+ *
  * Prints HOSTED_PLAN_NOTICE=ok or =error; exits 0 on success, 2 on unusable
  * input, 1 on a write that failed.
  *
- * @version 1.0
+ * @version 1.1 - born managed means born requiring a second factor of admins
  */
 
 if (php_sapi_name() !== 'cli') {
@@ -93,6 +102,9 @@ $values = array(
 	'manage_url' => trim((string)($supplied['manage_url'] ?? '')),
 );
 
+$settings = Globalvars::get_instance();
+$was_managed = trim((string)$settings->get_setting('hosted_plan_state', false, true)) !== '';
+
 $written = array();
 foreach ($notice_settings as $setting => $key) {
 	try {
@@ -105,6 +117,16 @@ foreach ($notice_settings as $setting => $key) {
 		exit(1);
 	}
 	$written[] = $setting;
+}
+
+if ($state !== '' && !$was_managed) {
+	try {
+		Setting::put('totp_require_admins', '1');
+		echo "second_factor_required=on\n";
+	} catch (Throwable $e) {
+		fwrite(STDERR, "HOSTED_PLAN_NOTICE=error\ntotp_require_admins: " . $e->getMessage() . "\n");
+		exit(1);
+	}
 }
 
 echo "HOSTED_PLAN_NOTICE=ok\n";

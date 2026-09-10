@@ -589,6 +589,69 @@ check(count(DirectTestHandler::$ingested) === 1 && DirectTestHandler::$ingested[
 	'a stranger\'s message is still filed at commit, carrying the decline — filed, never dropped');
 
 // ---------------------------------------------------------------------------
+section('One sending domain cannot be the whole of a recipient\'s allowance');
+// ---------------------------------------------------------------------------
+
+// The two recipient-side caps bound what a box will hold; without a sender-side
+// one, a single stranger could fill an address's entire allowance with mail the
+// recipient has not yet judged (specs/security_inventory.md S21). The sender cap
+// counts the VERIFIED sending domain's held bytes across every recipient, and it
+// refuses on instance configuration alone, so it discloses nothing about the
+// recipient either.
+$s21_db = DbConnector::get_instance()->get_db_link();
+$s21_prior = $s21_db->query(
+	"SELECT stg_value FROM stg_settings WHERE stg_name = 'joinery_direct_spool_sender_cap_bytes'")->fetchColumn();
+harness_defer(function () use ($s21_prior) {
+	direct_test_set_raw('joinery_direct_spool_sender_cap_bytes', $s21_prior === false ? null : (string)$s21_prior);
+});
+direct_test_setup(true);
+$receiver = new DirectReceiver();
+
+$s21_body = str_repeat('held for the sender cap ', 8);
+$s21_size = strlen($s21_body);
+// Room for one more delivery from either sender, not two. Earlier sections of
+// this run (and abandoned staging rows awaiting their TTL) already charge the
+// test sender, so the cap is set relative to what is held right now.
+$s21_held_before = DirectSpool::bytesForSenderDomain('sender-test.invalid');
+$s21_other_before = DirectSpool::bytesForSenderDomain('other-sender.invalid');
+direct_test_set_raw('joinery_direct_spool_sender_cap_bytes',
+	(string)(max($s21_held_before, $s21_other_before) + $s21_size + intdiv($s21_size, 2)));
+
+$s21_first = direct_test_envelope($REAL);
+$s21_pre = $receiver->preflight($s21_first, direct_test_manifest($s21_body), $LOOPBACK);
+check($s21_pre['answer'] === DirectProtocol::ANSWER_ACCEPT,
+	'a sender under its cap is accepted', json_encode($s21_pre));
+$receiver->acceptPart($s21_first['nonce'], 0, $s21_body);
+$receiver->commit($s21_first['nonce'], array(DirectProtocol::hashBytes($s21_body)), false, 0, $LOOPBACK);
+$s21_rows = new MultiDirectSpool(array('nonce' => $s21_first['nonce']));
+$s21_rows->load();
+foreach ($s21_rows as $r) {
+	harness_defer(function () use ($r) { try { $r->permanent_delete(); } catch (Throwable $e) {} });
+}
+check(DirectSpool::bytesForSenderDomain('sender-test.invalid') >= $s21_held_before + $s21_size,
+	'and its held bytes are charged to the sending domain');
+
+$s21_second = $receiver->preflight(direct_test_envelope($ABSENT), direct_test_manifest($s21_body), $LOOPBACK);
+check($s21_second['answer'] === 'refused' && (int)$s21_second['status'] === 507,
+	'the same sender\'s next delivery is refused at request level', json_encode($s21_second));
+check(stripos((string)($s21_second['error'] ?? json_encode($s21_second)), 'sender') !== false,
+	'naming the sender cap, not the recipient — the refusal says nothing about the address');
+
+// Another sending domain, same recipient, same bytes: still accepted. The
+// recipient-side caps have room; only this one stranger was full.
+$s21_other = direct_test_envelope($REAL);
+$s21_other['sender'] = 'peer@other-sender.invalid';
+$s21_other_pre = $receiver->preflight($s21_other, direct_test_manifest($s21_body),
+	array('verified_domain' => 'other-sender.invalid'));
+check($s21_other_pre['answer'] === DirectProtocol::ANSWER_ACCEPT,
+	'a different sending domain is still accepted — the bound is per sender', json_encode($s21_other_pre));
+$s21_other_rows = new MultiDirectSpool(array('nonce' => $s21_other['nonce']));
+$s21_other_rows->load();
+foreach ($s21_other_rows as $r) {
+	harness_defer(function () use ($r) { try { $r->permanent_delete(); } catch (Throwable $e) {} });
+}
+
+// ---------------------------------------------------------------------------
 section('An abandoned delivery is reclaimed, so its bytes stop being charged');
 // ---------------------------------------------------------------------------
 

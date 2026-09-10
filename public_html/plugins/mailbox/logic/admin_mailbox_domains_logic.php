@@ -258,10 +258,11 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 			$new_ai = false;   // meaningless at Standard; never store a stale yes
 		}
 
-		// The narrower consent: how far may that reading travel? It can only be
-		// loosened where the first is on — consenting to off-box processing for
-		// mail the AI may not read at all is a stale yes waiting to surprise
-		// someone.
+		// The travel consent: how far may the mail go to be read? On a sealed
+		// level it can only be loosened where the read switch is on — consenting
+		// to off-box processing for mail the AI may not read at all is a stale
+		// yes waiting to surprise someone. At Standard there is no read switch
+		// (the server reads the mail regardless), so the consent stands alone.
 		$consent_rank = array(InboundEmailDomain::CONSENT_LOCAL => 0,
 			InboundEmailDomain::CONSENT_TRUSTED => 1, InboundEmailDomain::CONSENT_CLOUD => 2);
 		$old_consent = $domain->key ? $domain->ai_processing_consent() : InboundEmailDomain::CONSENT_LOCAL;
@@ -269,7 +270,7 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 		if (!in_array($new_consent, InboundEmailDomain::CONSENTS, true)) {
 			$new_consent = InboundEmailDomain::CONSENT_LOCAL;
 		}
-		if (!$new_ai) {
+		if ($new_seals && !$new_ai) {
 			$new_consent = InboundEmailDomain::CONSENT_LOCAL;
 		}
 		$loosening_consent = ($consent_rank[$new_consent] > $consent_rank[$old_consent]);

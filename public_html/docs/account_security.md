@@ -77,6 +77,27 @@ straight back, and no amount of confirming will satisfy it. Ask
 administration.** Domain security-level changes are gated this way today; the
 same helper is how the remaining sensitive-administration actions adopt the gate.
 
+## Admin second-factor requirement
+
+`totp_require_admins` sends every admin (permission 5 and above) who holds no
+usable second factor to `/profile/security` until one is enrolled
+(`SessionControl::must_enable_totp_for_admin()`), exempting that page,
+`/setup`, `/logout` and every `/api/v1/` request so the enrollment ceremonies
+can run. A usable factor is an authenticator app or, while passkey sign-in is
+enabled, one live passkey (`user_has_second_factor()`): the requirement exists
+against a stolen session, and a passkey resists the relayed-code phishing an
+authenticator code does not, so a passkey holder is never pushed onto an app
+to pass it. A managed deployment is born with the requirement on — the
+node-side hosting script switches it on the first time the deployment becomes
+managed, and only then — and a self-hosted one starts with it off.
+
+Whether or not the requirement is on, `AdminSecondFactorNotice` shows on every
+admin page while any admin has no second factor: it names them, offers "Enrol
+yours" to a viewer who is one of them, and offers a superadmin a one-button
+"Require one of every admin" (`/admin/admin_require_second_factor`, a POST
+that switches the setting on). It is information, never a gate, and silent
+when every admin holds a factor.
+
 ## Fortress mandatory two-factor enrollment
 
 A user who owns or holds a grant on a **Fortress**-level domain

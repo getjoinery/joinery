@@ -17,7 +17,10 @@
  * read a mailbox at all (specs/in_window_deferred_work.md): whether the mail is
  * sealed at rest, and whether the domain has consented to AI reading it.
  *
- * @version 1.2
+ * @version 1.3
+ * @changelog 1.3 - aiProcessingConsent() answers from the domain's stored
+ *   consent at every security level (specs/security_inventory.md S19); a
+ *   Standard domain is no longer read as having consented to the cloud
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
@@ -198,13 +201,15 @@ class MailboxAliasConfig {
 	}
 
 	/**
-	 * How far this address's decrypted mail may travel to be read by a model:
-	 * the most permissive endpoint trust class it may reach.
+	 * How far this address's mail may travel to be read by a model: the most
+	 * permissive endpoint trust class it may reach.
 	 *
-	 * Only meaningful where there is something to protect. On a standard domain
-	 * the mail is not sealed at rest, so no promise is broken by any model
-	 * reading it and the answer is 'cloud'. On a sealed domain it is the
-	 * domain's explicit second consent, which starts at 'local'.
+	 * The domain's stored consent, at every security level. Sealing is about
+	 * who can read the mail at rest; this is about where it may be sent to be
+	 * read, and a stranger's message leaving the box for a hosted API is what
+	 * the setting exists to refuse whether or not the mail was sealed on disk.
+	 * It starts at 'local' everywhere, so a domain that has not said otherwise
+	 * keeps its mail on hardware the operator controls.
 	 *
 	 * Deliberately separate from aiProcessingAllowed(): letting the AI read
 	 * sealed mail on hardware you control and letting that plaintext leave the
@@ -220,10 +225,6 @@ class MailboxAliasConfig {
 		$row = self::domainPostureForAddress($address);
 		if ($row === null) {
 			return InboundEmailDomain::CONSENT_LOCAL;
-		}
-		$level = (string)$row['ied_security_level'];
-		if ($level !== 'private' && $level !== 'fortress') {
-			return InboundEmailDomain::CONSENT_CLOUD;
 		}
 		$v = strtolower(trim((string)$row['ied_ai_processing_consent']));
 		return in_array($v, InboundEmailDomain::CONSENTS, true) ? $v : InboundEmailDomain::CONSENT_LOCAL;

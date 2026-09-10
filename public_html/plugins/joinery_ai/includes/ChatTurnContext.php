@@ -194,6 +194,16 @@ class ChatTurnContext implements ToolContext {
                 . 'tell the user it is waiting for their approval and continue.'];
     }
 
+    /** Chat queues everything; nothing runs inline. */
+    public function executesInline(string $tool_name): bool {
+        return false;
+    }
+
+    /** Every chat write ran because the owner approved its card. */
+    public function writeProvenance(): string {
+        return 'chat #' . (int)$this->conversation->key . ', approved by you';
+    }
+
     /** A non-admin member's reads are contained to their own rows; an admin
      *  reads cross-user, exactly as the admin-only chat always has. */
     public function ownerScopedReads(): bool {

@@ -157,6 +157,16 @@ class RecipeRunner {
 
             self::finishFromResult($run, $recipe, $result, $max_iterations);
 
+            // What the platform did with the run's writes: none of a queuing
+            // recipe's changes happened yet, and the owner should see that on
+            // the run before they look for the cards.
+            if ($ctx->queuedCount() > 0) {
+                $n = $ctx->queuedCount();
+                $run->set('rcr_status_note', $n . ($n === 1 ? ' change is' : ' changes are')
+                    . ' waiting for your approval');
+                $run->saveContent();
+            }
+
         } catch (LlmProviderException $e) {
             $code = LlmProviderException::classify($e);
             $run->set('rcr_status', RecipeRun::STATUS_FAILED);
@@ -243,25 +253,18 @@ class RecipeRunner {
     }
 
     /**
-     * Re-evaluate the taint gate at run-start to catch drift since save —
-     * specifically, models that newly declared $ai_untrusted_fields after
-     * the recipe was last saved (agent mode), or a pipeline job that newly
-     * declares untrustedDigest() (pipeline mode). Returns null on success, or
-     * a specific error message if the gate is now triggered without
-     * rcp_allow_tainted_writes.
+     * Re-evaluate the standing-approval gate at a pipeline run's start to
+     * catch drift since save: the job began declaring untrustedDigest() after
+     * the recipe was saved with the flag off. Returns null on success, or the
+     * message that stops the run. Agent mode has no drift stop — a recipe
+     * that drifts into reading outside content starts queuing its writes
+     * (RecipeRunContext::queuesWrites()), which needs nobody's acknowledgment.
      */
     private static function checkTaintDrift(Recipe $recipe): ?string {
+        if ((string)$recipe->get('rcp_mode') !== Recipe::MODE_PIPELINE) return null;
         if ($recipe->get('rcp_allow_tainted_writes')) return null;
 
-        if ((string)$recipe->get('rcp_mode') === Recipe::MODE_PIPELINE) {
-            $job = PipelineJobRegistry::get((string)$recipe->get('rcp_pipeline_job'));
-            $eval = TaintGate::evaluate([], [], '', $job !== null && $job->untrustedDigest());
-        } else {
-            $tools = self::decodeJsonArray($recipe->get('rcp_allowed_tools'));
-            $models = self::decodeJsonArray($recipe->get('rcp_allowed_models'));
-            $workspace = (string)$recipe->get('rcp_workspace');
-            $eval = TaintGate::evaluate($tools, $models, $workspace);
-        }
+        $eval = TaintGate::forRecipe($recipe);
         if (!$eval['tainted_capable']) return null;
 
         return 'Stopped before the run began: ' . TaintGate::describeDrift($eval);

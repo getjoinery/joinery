@@ -91,6 +91,9 @@ class RecallTool implements RecipeToolInterface {
             $meta = 'id ' . (int)$r['mem_memory_id'];
             $meta .= ' · ' . ($r['mem_scope'] === AiMemory::SCOPE_SHARED ? 'shared' : 'personal');
             $meta .= ' · saved by ' . (string)$r['mem_source'];
+            if (trim((string)($r['mem_provenance'] ?? '')) !== '') {
+                $meta .= ' · from ' . trim((string)preg_replace('/\s+/', ' ', (string)$r['mem_provenance']));
+            }
             $when = $r['mem_update_time'] ?: $r['mem_create_time'];
             if ($when) {
                 $meta .= ' · ' . LibraryFunctions::convert_time($when, 'UTC', $tz, 'M j, Y');

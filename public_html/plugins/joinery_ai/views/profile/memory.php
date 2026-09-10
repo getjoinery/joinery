@@ -46,7 +46,10 @@ $page->public_header([
 
         <h2><?php echo $is_edit ? 'Edit Memory' : 'Add a Memory'; ?></h2>
         <?php if ($is_edit && (string)$memory->get('mem_source') === AiMemory::SOURCE_AI): ?>
-            <p><strong>AI</strong> — the assistant saved this memory; edit or delete it freely.</p>
+            <p><strong>AI</strong> — the assistant saved this memory<?php
+                $from = trim((string)$memory->get('mem_provenance'));
+                echo $from !== '' ? ' (from ' . htmlspecialchars($from) . ')' : '';
+            ?>; edit or delete it freely.</p>
         <?php endif; ?>
         <?php
         $formwriter = $page->getFormWriter('memory_form', [
@@ -99,6 +102,7 @@ $page->public_header([
                     <th>Title</th>
                     <th>Content</th>
                     <th>Saved by</th>
+                    <th>From</th>
                     <th>Updated</th>
                     <th></th>
                 </tr>
@@ -120,6 +124,7 @@ $page->public_header([
                         ?>
                     </td>
                     <td><?php echo (string)$m->get('mem_source') === AiMemory::SOURCE_AI ? 'AI' : 'You'; ?></td>
+                    <td><small><?php echo htmlspecialchars((string)$m->get('mem_provenance')); ?></small></td>
                     <td>
                         <?php
                         $when = $m->get('mem_update_time') ?: $m->get('mem_create_time');

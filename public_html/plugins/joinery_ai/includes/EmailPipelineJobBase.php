@@ -19,7 +19,9 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/aip_recipe_item
  * Lives in includes/, NOT pipeline_jobs/ — PipelineJobRegistry instantiates
  * every class it discovers there, and an abstract class cannot be.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - processingConsent() folds EVERY bound address, not only the
+ *   sealed ones (specs/security_inventory.md S19)
  */
 abstract class EmailPipelineJobBase implements PipelineJobInterface, AreaScopedJobInterface {
 
@@ -91,17 +93,17 @@ abstract class EmailPipelineJobBase implements PipelineJobInterface, AreaScopedJ
     }
 
     /**
-     * The domain's second consent: how far may its decrypted mail travel?
+     * The domain's consent: how far may its mail travel to be read?
      *
      * A run reads the whole bound set in one pass, so the answer is the
-     * STRICTEST any sealed address gives — one address that must stay on the
-     * box holds the whole recipe there. An address with nothing sealed has
-     * nothing to protect and contributes no constraint.
+     * STRICTEST any bound address gives — one address that must stay on the
+     * box holds the whole recipe there. Every address counts, sealed or not:
+     * the consent is about where the mail may be sent, and a Standard domain's
+     * mail leaving for a hosted API is exactly what its setting refuses.
      */
     public function processingConsent(array $config): string {
         $consent = InboundEmailDomain::CONSENT_CLOUD;
         foreach (MailboxAliasConfig::listedAddresses($config) as $address) {
-            if (!MailboxAliasConfig::isSealedAtRest($address)) continue;
             $consent = InboundEmailDomain::strictestConsent(
                 $consent, MailboxAliasConfig::aiProcessingConsent($address));
         }

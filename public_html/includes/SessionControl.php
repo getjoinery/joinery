@@ -1562,7 +1562,8 @@ class SessionControl{
 				}
 			}
 
-			// Enforce 2FA on admin accounts when totp_require_admins is set.
+			// Enforce a second factor on admin accounts when totp_require_admins
+			// is set (security_inventory S4: on by default on a managed node).
 			// Exempt /profile/security (where they enable it), /setup (which
 			// mounts the same enrollment) and /logout to avoid loops, and ALL
 			// /api/v1/ requests: the gate governs page navigation, but the
@@ -1576,7 +1577,7 @@ class SessionControl{
 				if ($current_path !== '/profile/security' && $current_path !== '/setup'
 						&& $current_path !== '/logout'
 						&& strpos((string)$current_path, '/api/v1/') !== 0) {
-					$msgtxt = urlencode('Your administrator account requires two-factor authentication.');
+					$msgtxt = urlencode('Your administrator account requires a second factor: an authenticator app or a passkey.');
 					header('Location: /profile/security?msgtext=' . $msgtxt);
 					exit();
 				}
@@ -1622,8 +1623,14 @@ class SessionControl{
 
 	/**
 	 * Returns true if the current user has admin permission (>=5) AND the
-	 * totp_require_admins setting is enabled AND TOTP is not yet enabled on
-	 * their account. Used to gate admin pages until 2FA is set up.
+	 * totp_require_admins setting is enabled AND the account holds no usable
+	 * second factor. Used to gate admin pages until one is enrolled.
+	 *
+	 * A passkey satisfies it as well as an authenticator app: the requirement
+	 * exists against a stolen session — phishing that relays a code in real
+	 * time — and a passkey resists that where a code does not, so forcing a
+	 * passkey holder onto an authenticator app would lower their posture to
+	 * pass a gate meant to raise it (security_inventory S4).
 	 */
 	function must_enable_totp_for_admin() {
 		if (!isset($_SESSION['usr_user_id'])) return false;
@@ -1632,7 +1639,7 @@ class SessionControl{
 		if (!$settings->get_setting('totp_require_admins')) return false;
 		require_once(PathHelper::getIncludePath('data/users_class.php'));
 		$user = new User($_SESSION['usr_user_id'], true);
-		return !$user->has_totp_enabled();
+		return !$this->user_has_second_factor($user);
 	}
 
 	/**

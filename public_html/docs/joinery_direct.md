@@ -409,13 +409,16 @@ of enabling Direct for a domain, never the first.
   not a new engine.
 - Storage is bounded in bytes, not just counts: manifest size caps at preflight
   (`joinery_direct_max_parts`, `joinery_direct_max_part_bytes`,
-  `joinery_direct_max_total_bytes`), and per-domain plus per-address byte caps on
-  the Direct spool at the sealed tiers
-  (`joinery_direct_spool_domain_cap_bytes`,
-  `joinery_direct_spool_address_cap_bytes`), refused at request level. Decoy
-  addresses accrue phantom bytes, so a full spool refuses identically for real and
-  nonexistent addresses; a cap refusal downgrades mail to the provider path, losing
-  nothing.
+  `joinery_direct_max_total_bytes`), and three byte caps on the Direct spool at
+  the sealed tiers, refused at request level: per recipient domain and per
+  recipient address (`joinery_direct_spool_domain_cap_bytes`,
+  `joinery_direct_spool_address_cap_bytes`) bound what a box can be made to
+  hold, and per verified sending domain
+  (`joinery_direct_spool_sender_cap_bytes`) bounds how much of that any one
+  stranger can be — per domain, not per address, because addresses under a
+  domain are free to invent. Decoy addresses accrue phantom bytes, so a full
+  spool refuses identically for real and nonexistent addresses; a cap refusal
+  downgrades mail to the provider path, losing nothing.
 - Nothing is silent to the operator: request-level refusals and send-side
   downgrades are counted in Direct's request log and surfaced on the mailbox admin
   **Logs** tab, so a clock-drifted box that quietly loses Direct is diagnosable.

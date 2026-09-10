@@ -39,7 +39,7 @@ plugins/joinery_ai/
     RecipeToolInterface.php    # Tool contract
     RecipeToolRegistry.php     # Auto-discovers tools across plugins
     DescriptorValidator.php    # Coerces/validates input against a descriptor; renders the pipeline output instruction
-    TaintGate.php               # Standing-approval (tainted-write) posture for both modes
+    TaintGate.php               # Reads-outside-content predicate: queues writes (agent), asks standing approval (pipeline)
     ActionQueue.php             # The proposed-action queue — the one deferred write door
     QueueableToolInterface.php  # Card-renderer opt-in a tool needs before it can be queued
     ProposedActionFacts.php     # Shared literal-argument fact-line rendering
@@ -92,7 +92,7 @@ A recipe is a row in `rcp_recipes` with:
 - **pipeline job** (`rcp_pipeline_job`) / **source config** (`rcp_source_config`) — which registered job drives the run, and its per-recipe binding config. Pipeline mode only. Like mode, the job is chosen at creation and static afterwards: `aip_recipe_item_log` is unique on `(recipe, item_key)` and item keys are job-scoped, so repointing a saved recipe at another job would reinterpret everything it has already processed against a different namespace — the new job would read every past item as done and silently do nothing.
 - **Runs** (`rcp_enabled` + `rcp_schedule_frequency`) — when the recipe runs by itself. One control on the edit form; see [Scheduling](#scheduling).
 - **dashboard card** (`rcp_delivery_dashboard`) — whether `/joinery_ai` shows a card with this recipe's most recent successful output. Independent of whether it runs.
-- **acts on others' content** (`rcp_allow_tainted_writes`) — the admin's acknowledgment that the recipe reads text other people wrote and writes based on it. The edit form computes whether the recipe even needs it, live, from the same inputs `TaintGate::evaluate()` reads, and says so above the checkbox.
+- **acts on others' content** (`rcp_allow_tainted_writes`) — pipeline mode only: the owner's acknowledgment that the job reads text other people wrote and writes a fixed field from the verdict on its own. An agent-mode recipe that reads content written by other people — an allowed model with `$ai_untrusted_fields`, a web tool, or a carried workspace — needs no acknowledgment, because it does not write on its own: every mutating tool call is queued as a proposed action the owner approves or declines, exactly as in chat (`RecipeRunContext::queuesWrites()`; see [Proposed actions](#proposed-actions)). Its own workspace is the one write it keeps inline (`RecipeRunContext::OWN_STATE_TOOLS`): nothing but that recipe reads it, and it is wrapped as untrusted when it does. The edit form computes which case applies, live, from the same inputs `TaintGate::evaluate()` reads, and says so above the checkbox. A run that queued anything says how many changes are waiting in `rcr_status_note`.
 
 Recipes are configured at `/admin/joinery_ai` (dashboard) and edited at `/admin/joinery_ai/edit`. `rcp_max_iterations` is the max tool-loop iterations in agent mode and the max items processed per run (batch size) in pipeline mode; `rcp_allowed_actions` and `rcp_workspace` are agent-mode only, same as the tool/model allow-lists.
 
@@ -370,7 +370,7 @@ A job's `validateVerdict(array $verdict): void` runs immediately after schema co
 
 ### Taint posture
 
-A pipeline recipe has no tool or model allow-list — there's nothing there to evaluate — so `TaintGate::evaluate()` takes an additional `$pipeline_untrusted_digest` argument. When the recipe's job declares `untrustedDigest()`, the recipe is tainted-capable exactly as an agent-mode recipe would be with a write tool reading `$ai_untrusted_fields`, and needs the same `rcp_allow_tainted_writes` acknowledgment to save and to run. The structural difference from agent mode is that the acknowledgment covers a much smaller surface: model output can reach exactly one validated handler (`recordVerdict()`), aimed by config, never chosen by the model.
+A pipeline recipe has no tool or model allow-list — there's nothing there to evaluate — so `TaintGate::evaluate()` takes an additional `$pipeline_untrusted_digest` argument. When the recipe's job declares `untrustedDigest()`, the recipe is tainted-capable, and needs the `rcp_allow_tainted_writes` acknowledgment to save and to run (`checkTaintDrift()` re-checks at run start, so a job that begins declaring `untrustedDigest()` after the recipe was saved stops the run until the owner renews the acknowledgment). Pipeline mode is the one place a standing approval exists, because it is the one place the model's output is written with nobody clicking — and the surface is small: model output can reach exactly one validated handler (`recordVerdict()`), aimed by config, never chosen by the model. An agent-mode recipe that reads outside content queues its writes instead (see [Recipes](#recipes)).
 
 ### Pipeline boundaries
 
@@ -399,7 +399,7 @@ The jobs:
 
 - **`email_security_scan`** (`plugins/joinery_ai/pipeline_jobs/EmailSecurityScanJob.php`) — scores each inbound email on the bound mailboxes for phishing/scam danger, rendered via `EmailSecurityDigest::build()` (see `plugins/mailbox/docs/overview.md`) — never raw MIME, and no attachment digest: the scan judges envelope and body alone. The verdict is `score` (0-10), `verdict` (`safe` / `caution` / `dangerous`), `red_flags` (up to 12, each a checklist letter A-G plus a one-sentence finding), and `summary`; `validateVerdict()` rejects a verdict whose `verdict` disagrees with the score band (0-4 safe / 5-6 caution / 7-10 dangerous). `recordVerdict()` writes exactly three fields on the scanned message (`iem_ai_danger_score`, `iem_ai_scan`, `iem_ai_scan_time`).
 - **`email_triage`** (`plugins/joinery_ai/pipeline_jobs/EmailTriageJob.php`) — sorts each inbound email on the bound mailboxes into existing labels and writes a one-line summary, so the inbox is triaged automatically. Digest is `EmailSecurityDigest::build()` plus, when the message carries non-inline attachments, an appended `EmailAttachmentDigest::build()` section (metadata for every part; readable text for file-backed `text/plain` bodies and rendered `.ics` invites — see `plugins/mailbox/docs/overview.md`). The verdict is `label` (an enum of live label names plus the sentinel `none`, built fresh on every call so it never drifts from what labels actually exist — label names are one global namespace, so the enum covers every bound mailbox by construction; a label literally named `none` can never be applied, since the sentinel owns that string) and `summary` (one plain-language sentence, up to 280 characters). `recordVerdict()` applies the chosen label via `InboundLabelMember::apply()` (an *existing* label only — this job never creates one) and writes `iem_ai_summary`; it silently skips the label application (summary still records) if the label was deleted between descriptor build and verdict.
-- **`email_schedule`** (`plugins/joinery_ai/pipeline_jobs/EmailScheduleJob.php`) — reads each inbound email on the bound mailboxes for a real, dated event (meeting, deadline, reservation, …) and puts it on the recipe owner's own calendar. Same digest as `email_triage`; when the ATTACHMENTS section carries an ICS EVENT block, the prompt directs the model to take that invite's title/start/end/timezone verbatim as the authoritative statement of the event rather than deriving them from prose. The verdict is `event_found` (bool) plus, when true, `title`/`start_local`/`end_local`/`timezone`/`all_day`; `validateVerdict()` requires a well-formed `title` and `start_local` when `event_found` is true and rejects an `end_local` that isn't after `start_local`. `recordVerdict()` does **not** configure a write target — the calendar is always the recipe owner's own, fixed in code — and resolves a missing/invalid `timezone` to the owner's profile timezone before calling `CalendarEntryImporter::upsert()` (see [Calendar access](#calendar-access)) with `source = 'email'`, `source_ref` = the message id, so a log-row reset and re-run updates the same entry instead of duplicating it. `event_found = false` records nothing beyond the processing-log row.
+- **`email_schedule`** (`plugins/joinery_ai/pipeline_jobs/EmailScheduleJob.php`) — reads each inbound email on the bound mailboxes for a real, dated event (meeting, deadline, reservation, …) and puts it on the recipe owner's own calendar. Same digest as `email_triage`; when the ATTACHMENTS section carries an ICS EVENT block, the prompt directs the model to take that invite's title/start/end/timezone verbatim as the authoritative statement of the event rather than deriving them from prose. The verdict is `event_found` (bool) plus, when true, `title`/`start_local`/`end_local`/`timezone`/`all_day`; `validateVerdict()` requires a well-formed `title` and `start_local` when `event_found` is true and rejects an `end_local` that isn't after `start_local`. `recordVerdict()` does **not** configure a write target — the calendar is always the recipe owner's own, fixed in code — and resolves a missing/invalid `timezone` to the owner's profile timezone before queueing a `create_calendar_entry` **proposal** for the owner through `ActionQueue::propose()` (see [Proposed actions](#proposed-actions) and [Calendar access](#calendar-access)): the entry exists only once the owner approves the card. `source_ref` = the message id, so a log-row reset and re-run replaces the pending proposal, and an approved re-run updates the same entry instead of duplicating it. `event_found = false` records nothing beyond the processing-log row.
 
 ### Recipes that run in the owner's unlock window
 
@@ -584,11 +584,14 @@ anything without either a standing rule you configured, or a yes you
 clicked.** Every AI-initiated write reaches the database or an outbound
 channel through exactly one of two doors:
 
-1. **A recipe's own write door** — `recordVerdict()` behind the owner's
-   standing approval (pipeline mode), or an agent recipe's allow-listed tools
-   behind the same save-time approval.
+1. **A pipeline recipe's own write door** — `recordVerdict()` behind the
+   owner's standing approval, or an agent recipe's allow-listed tools when
+   the recipe reads nothing written by other people (`TaintGate` says so).
 2. **An approved queued action** — executed at the moment the owner approves
-   it, never before.
+   it, never before. This is where every write of an agent recipe that reads
+   outside content goes, with the recipe as its source: the card names the
+   recipe, and approval executes under `ApprovedActionContext` with the
+   recipe's own allow-lists and its owner as the acting user.
 
 There is no third door. In chat, a mutating tool call never executes in the
 turn: `AgentLoop` hands it to the context's `enqueueProposedAction()`, which
@@ -688,6 +691,15 @@ should become a recipe.
 **Where it appears:** inline in the chat transcript (a "Waiting for you"
 block of cards below the messages) and in the area AI panel's Waiting list —
 one object, one server-rendered card shape, one resolve path.
+
+**Two sources.** A chat turn queues a write (`aqa_source_type = 'chat'`) and
+approval executes it under the conversation's `ChatTurnContext`. A pipeline
+job queues a proposal beyond its verdict menu (`'recipe'`, `aqa_rcp_recipe_id`
+set, no conversation) through `ActionQueue::propose()`, which replaces a
+pending proposal carrying the same provenance instead of adding a second;
+approval executes it under `ApprovedActionContext` — the recipe's allow-lists,
+the recipe owner as the acting user — and the card says which recipe proposed
+it. A proposal whose recipe or conversation is gone fails closed on approval.
 
 **API surface** (`plugins/joinery_ai/logic/`, member-callable over `/api/v1`;
 ownership is the authorization):
@@ -961,11 +973,15 @@ because the resolution is stated back:
 ### Domain consent is three-valued
 
 `ied_ai_processing_consent` on a mailbox domain holds the most permissive trust class
-that domain's decrypted mail may reach: `local` | `trusted` | `cloud`, the same
-vocabulary an endpoint uses, so the gate is a direct comparison. It starts at `local`
-— sealed mail never travels until someone says so — and loosening it needs the same
-fresh identity check as turning AI reading on at all. `EmailPipelineJobBase` folds a
-recipe's whole bound set to the **strictest** answer any sealed address gives.
+that domain's mail may reach to be read: `local` | `trusted` | `cloud`, the same
+vocabulary an endpoint uses, so the gate is a direct comparison. It binds at every
+security level — sealing is about who can read the mail at rest, consent is about
+where it may be sent, and a Standard domain's mail leaving for a hosted API is what
+the setting refuses. It starts at `local` — mail never travels until someone says so
+— and loosening it needs the same fresh identity check as turning AI reading on at
+all. `EmailPipelineJobBase` folds a recipe's whole bound set to the **strictest**
+answer any bound address gives, and `RecipeVaultScope::consentTrustFloor()` folds
+that into every pipeline recipe's requirement.
 
 ### The provider layer
 
@@ -1282,7 +1298,7 @@ Durable facts the assistant recalls across separate chats and recipe runs — "t
 - **Per-user (private)** — `mem_scope = 'user'`, `mem_owner_user_id` set. Each member's memories are theirs; the AI only ever reads or writes the acting user's own. Everything the AI stores lands here.
 - **Admin-shared (global)** — `mem_scope = 'shared'`, owner NULL (the org owns it). An admin-curated pool the AI recalls for **every** user: org facts, policies, house style. Only humans write these, through the admin page. **The AI can never write a shared memory** — `remember` hard-codes `scope='user'` — which is both an authority boundary and a prompt-injection defense: a poisoned memory can only ever influence the one user whose chat wrote it.
 
-`mem_source` records who created each row (`ai` | `user` | `admin`) and is shown as a badge in the UIs; it is not rewritten when a human later edits an AI-created memory. `mem_created_by_user_id` records which human authored a shared row (audit) and is nulled on that user's deletion — the shared pool survives its authors. A user's private memories cascade away with the user. Not `$ai_readable`: the generic model tools owner-scope by a single owner column, and a shared row (NULL owner) would either leak or vanish under that logic — access goes only through the dedicated tools.
+`mem_source` records who created each row (`ai` | `user` | `admin`) and is shown as a badge in the UIs; it is not rewritten when a human later edits an AI-created memory. `mem_provenance` is the one line an AI-written row carries about where it came from — `ToolContext::writeProvenance()`: the recipe and run, or the chat, and whether that source reads content written by other people — shown as "from …" in the recall index, in recall results, and in the memory lists and edit pages, so a memory that was planted by a message the AI read says so wherever it is seen. `mem_created_by_user_id` records which human authored a shared row (audit) and is nulled on that user's deletion — the shared pool survives its authors. A user's private memories cascade away with the user. Not `$ai_readable`: the generic model tools owner-scope by a single owner column, and a shared row (NULL owner) would either leak or vanish under that logic — access goes only through the dedicated tools.
 
 **Three tools** (standard `recipe_tools/` implementations, available to chat via the Memory toggle and to recipes by listing them in the recipe's allowed tools):
 
@@ -1443,7 +1459,7 @@ The personal calendar (`CalendarEntry`/`Schedule`, core — see [Personal Calend
 - **Reads** go through the polymorphic `$ai_owner_field` form (above): both models declare `type_value = 'user'`, so a member's `query_model` call sees only their own entries/schedule; a non-`user` subject (`resource`/`team`/`venue`, reserved) is out of scope.
 - **Writes never go through `$ai_writable_fields`** — `CalendarEntry::authenticate_write()` lets any permission-≥5 caller write any subject's entry (recipes are typically admin-configured), so a raw write tool would let model output aim at another user's calendar. Every AI-originated entry instead goes through one shared owner-fixed helper, `CalendarEntryImporter::upsert()` (`includes/calendar/CalendarEntryImporter.php`, core): it fixes the subject from the *caller's* code, derives UTC from wall-clock + timezone, always writes `cal_status = 'tentative'`, and dedupes on `(cal_source, cal_source_event_id)` scoped to the owner so a re-run updates the same entry instead of duplicating it.
   - **Agent mode** (chat, agent recipes) enters through the `create_calendar_entry` action (`logic/create_calendar_entry_logic.php`, `ai_agent: 'confirm'`) — the acting user is always the session user; the model supplies only title/time/timezone.
-  - **Pipeline mode** enters directly: `EmailScheduleJob::recordVerdict()` (`plugins/joinery_ai/pipeline_jobs/EmailScheduleJob.php`) calls the importer itself with the recipe owner's id, the same way `EmailTriageJob` writes `InboundEmailMessage` directly — no action indirection.
+  - **Pipeline mode** proposes: `EmailScheduleJob::recordVerdict()` (`plugins/joinery_ai/pipeline_jobs/EmailScheduleJob.php`) queues a `create_calendar_entry` tool call (`plugins/joinery_ai/recipe_tools/CreateCalendarEntryTool.php`, queueable) for the owner; approving it runs the tool under `ApprovedActionContext` — the recipe's scope, the owner as the acting user — and the tool calls the importer. A stranger's message can put a card in front of the owner; it cannot put a row on their calendar.
 - **Firmness vs. busy/free.** `cal_status` (`tentative` / `confirmed` / `cancelled`) is a separate axis from `cal_blocks_availability`: an AI-extracted meeting still blocks time (busy is a fact), but stays `tentative` until the owner acts on it in the calendar UI. See `docs/calendar.md` and `CalendarItemSourceRegistry::getBusyBlocks()`'s `$include` parameter for how a downstream consumer (e.g. bookings) can choose to treat tentative entries differently.
 
 ## Adding a new hand-written tool

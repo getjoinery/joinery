@@ -19,7 +19,9 @@
  * sender in either case — the sender was answered `accept` at receive, and the
  * no-bounce rule holds for every kind.
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - bytesForSenderDomain(): the per-sending-domain counter
+ *   behind the third spool cap (specs/security_inventory.md S21)
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
@@ -215,6 +217,16 @@ class DirectSpool extends SystemBase {
 
 	public static function bytesForAddress(string $address): int {
 		return self::sumBytes('jdp_recipient', strtolower($address));
+	}
+
+	/**
+	 * Bytes currently held that one SENDING domain put there, across every
+	 * recipient. The recipient-side caps bound the total; this bounds how much
+	 * of it any one stranger can be. The sending domain is the identity the
+	 * signature verified, so it costs a registration and a published record.
+	 */
+	public static function bytesForSenderDomain(string $sender_domain): int {
+		return self::sumBytes('jdp_sender_domain', strtolower($sender_domain));
 	}
 
 	/**

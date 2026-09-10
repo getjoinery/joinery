@@ -26,7 +26,11 @@ class ActionQueueException extends Exception {}
  * the conversation through the resolution event row, where the next turn can
  * reason over it.
  *
- * @version 1.2
+ * @version 1.3
+ * @changelog 1.3 - propose(): a recipe-sourced proposal that replaces a pending
+ *   one with the same provenance; approve executes a recipe-sourced action
+ *   under ApprovedActionContext (specs/security_inventory.md S17); the card
+ *   names the proposing recipe
  */
 class ActionQueue {
 
@@ -109,6 +113,52 @@ class ActionQueue {
     }
 
     /**
+     * A RECIPE's proposal — the schedule job drafting a calendar entry it read
+     * in a stranger's mail (specs/security_inventory.md S17). Keyed on a
+     * provenance field of the arguments so a re-judged item updates its
+     * pending proposal instead of adding a second: a log-row reset and re-run
+     * would otherwise line the queue with copies of one entry.
+     *
+     * A pending row whose arguments are sealed cannot be compared without the
+     * owner's window, so it is left alone and a new proposal is queued beside
+     * it; the owner sees two cards for one message in that rare case, never
+     * a silently dropped one.
+     *
+     * @param string $dedup_field the argument that carries the provenance
+     */
+    public static function propose(int $owner_id, int $recipe_id, string $area, string $tool_name,
+            array $input, string $dedup_field): AiQueuedAction {
+        $key = (string)($input[$dedup_field] ?? '');
+        if ($key !== '') {
+            $pending = new MultiAiQueuedAction([
+                'owner_user_id' => $owner_id,
+                'status'        => AiQueuedAction::STATUS_PENDING,
+                'aqa_rcp_recipe_id' => $recipe_id,
+                'aqa_tool'      => $tool_name,
+            ]);
+            foreach ($pending as $row) {
+                if ($row->get('aqa_content_sealed')) continue;
+                $stored = json_decode((string)$row->get('aqa_arguments'), true);
+                if (!is_array($stored) || (string)($stored[$dedup_field] ?? '') !== $key) continue;
+                if (SealedEgressGuard::isHot()) {
+                    // The replacement may quote sealed content; a cold row cannot
+                    // hold it. Let enqueue() seal a fresh one beside it.
+                    break;
+                }
+                $row->set('aqa_arguments', json_encode($input, JSON_UNESCAPED_SLASHES));
+                $row->set('aqa_created_time', gmdate('Y-m-d H:i:s'));
+                $row->set('aqa_expires_time', gmdate('Y-m-d H:i:s',
+                    time() + AiQueuedAction::DEFAULT_EXPIRY_DAYS * 86400));
+                $row->save();
+                $row->load();
+                return $row;
+            }
+        }
+        return self::enqueue($owner_id, $tool_name, $input, null, $area,
+            AiQueuedAction::SOURCE_RECIPE, $recipe_id);
+    }
+
+    /**
      * The platform-rendered facts for a card: the queued tool's own renderer
      * over the literal stored arguments, each line bounded. Null when the row
      * is sealed and the owner's window is not open (the card then renders as
@@ -182,24 +232,37 @@ class ActionQueue {
                 'This proposal is sealed to your vault — unlock it to approve.');
         }
 
-        $conversation = null;
+        // Execution scope (model/action allowlists) lives on the source: the
+        // conversation for a chat proposal, the recipe for a recipe's. Without
+        // either there is nothing safe to execute under.
+        $ctx = null;
         $conv_id = (int)$row->get('aqa_aic_conversation_id');
+        $recipe_id = (int)$row->get('aqa_rcp_recipe_id');
         if ($conv_id > 0) {
             $conversation = new AiConversation($conv_id, TRUE);
-            if (!$conversation->key || $conversation->get('aic_delete_time')) $conversation = null;
+            if ($conversation->key && !$conversation->get('aic_delete_time')) {
+                require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatTurnContext.php'));
+                $ctx = new ChatTurnContext($conversation, $user_id);
+            }
+        } elseif ($recipe_id > 0) {
+            require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.php'));
+            $recipe = new Recipe($recipe_id, TRUE);
+            if ($recipe->key && !$recipe->get('rcp_delete_time')
+                    && (int)$recipe->get('rcp_owner_user_id') === $user_id) {
+                require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ApprovedActionContext.php'));
+                $ctx = new ApprovedActionContext($recipe, $user_id);
+            }
         }
-        if ($conversation === null) {
-            // Execution scope (model/action allowlists) lives on the source
-            // conversation; without it there is nothing safe to execute under.
+        if ($ctx === null) {
             self::markResolved($row, AiQueuedAction::STATUS_FAILED,
-                ['error' => 'The conversation this action came from no longer exists.']);
+                ['error' => $conv_id > 0
+                    ? 'The conversation this action came from no longer exists.'
+                    : 'The recipe this action came from no longer exists.']);
             $row->load();
             return $row;
         }
 
-        require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatTurnContext.php'));
         require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AgentLoop.php'));
-        $ctx = new ChatTurnContext($conversation, $user_id);
         $tool_use = [
             'type'  => 'tool_use',
             'id'    => 'toolu_queued_' . (int)$row->key,
@@ -274,11 +337,21 @@ class ActionQueue {
             'facts'           => $facts,
             'model_note'      => $facts === null ? null : (string)$row->get('aqa_model_note'),
             'result'          => $result,
+            'source_type'     => (string)$row->get('aqa_source_type'),
+            'recipe_name'     => self::recipeName((int)$row->get('aqa_rcp_recipe_id')),
             'conversation_id' => (int)$row->get('aqa_aic_conversation_id') ?: null,
             'created_time'    => (string)$row->get('aqa_created_time'),
             'expires_time'    => (string)$row->get('aqa_expires_time'),
             'resolved_time'   => (string)$row->get('aqa_resolved_time'),
         ];
+    }
+
+    /** The proposing recipe's name for the card, or null for a chat proposal. */
+    private static function recipeName(int $recipe_id): ?string {
+        if ($recipe_id <= 0) return null;
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.php'));
+        $recipe = new Recipe($recipe_id, TRUE);
+        return $recipe->key ? (string)$recipe->get('rcp_name') : null;
     }
 
     /**

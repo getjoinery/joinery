@@ -8,8 +8,29 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_cla
  * and RecipeRun plus owner/timezone so tools can read/write owner-scoped
  * data and append to the run's tool-call trace without reaching for a
  * global session.
+ *
+ * The deferred-write boundary (specs/security_inventory.md S16): an agent
+ * recipe that can read content written by other people — an untrusted model
+ * field, a fetched web page, its own carried workspace — queues every
+ * mutating call for the owner's approval, exactly as chat does, and the
+ * approval executes it later under ApprovedActionContext. A recipe that
+ * reads nothing outside runs its writes inline. The one write that always
+ * stays inline is the recipe's own workspace (OWN_STATE_TOOLS): nothing but
+ * this recipe reads it, and it is wrapped as untrusted when it does.
+ *
+ * @version 2.0 - queues writes for a tainted-capable agent recipe (S16);
+ *   writeProvenance() for memories (S18)
  */
 class RecipeRunContext implements ToolContext {
+
+    /** Mutating tools that write state only this recipe reads: never queued. */
+    const OWN_STATE_TOOLS = ['set_workspace'];
+
+    /** The taint evaluation for this recipe, computed once. */
+    private $taint_eval;
+
+    /** How many calls this run queued for the owner's approval. */
+    private $queued_count = 0;
 
     /** @var Recipe */
     public $recipe;
@@ -47,6 +68,8 @@ class RecipeRunContext implements ToolContext {
         $this->owner_timezone = self::resolveTimezone($this->owner_user_id);
         $this->untrusted_input_nonce = bin2hex(random_bytes(4));
         $this->loop_started_at = microtime(true);
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/TaintGate.php'));
+        $this->taint_eval = TaintGate::forRecipe($recipe);
     }
 
     /** The user whose identity the loop acts under (owner-or-staff writes,
@@ -122,20 +145,82 @@ class RecipeRunContext implements ToolContext {
     }
 
     /**
-     * Recipes never defer writes to the approval queue: they are autonomous
-     * by design — the author gave the standing approval at save time via the
-     * taint gate — and their write surface is bounded by allow-lists (agent
-     * mode) or the single verdict handler (pipeline mode). The interactive
-     * chat context answers true and the shared AgentLoop then queues every
-     * mutating call for the owner (specs/implemented/ai_action_queue.md).
+     * An agent recipe that can read content written by other people queues
+     * its writes; one that cannot runs them inline. A pipeline recipe never
+     * reaches the tool loop — its one write door is the verdict handler,
+     * behind the owner's standing approval.
      */
     public function queuesWrites(): bool {
-        return false;
+        return (string)$this->recipe->get('rcp_mode') !== Recipe::MODE_PIPELINE
+            && !empty($this->taint_eval['tainted_capable']);
     }
 
-    /** Never called — queuesWrites() is false. Kept loud, not silent. */
+    /** Does this recipe read content written by other people? */
+    public function readsOutsideContent(): bool {
+        return !empty($this->taint_eval['tainted_capable']);
+    }
+
+    /**
+     * Queue one proposed mutating call for the recipe owner's approval and
+     * hand the model its tool result. The proposal is recipe-sourced with no
+     * conversation; on approval it executes under ApprovedActionContext with
+     * this recipe's allow-lists. A call that cannot be queued (no card
+     * renderer, unsealable protected content) is refused, never executed.
+     */
     public function enqueueProposedAction(array $tool_use): array {
-        throw new LogicException('Recipe runs do not queue writes.');
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ActionQueue.php'));
+        $name = (string)($tool_use['name'] ?? '');
+        $id   = (string)($tool_use['id'] ?? '');
+        $input = isset($tool_use['input']) && is_array($tool_use['input']) ? $tool_use['input'] : [];
+        $now = gmdate('Y-m-d H:i:s.u');
+
+        try {
+            $row = ActionQueue::enqueue($this->owner_user_id, $name, $input, null, '',
+                AiQueuedAction::SOURCE_RECIPE, (int)$this->recipe->key);
+        } catch (ActionQueueException $e) {
+            $this->appendToolCall([
+                'name' => $name, 'input' => $input,
+                'started_time' => $now, 'completed_time' => $now,
+                'is_error' => true, 'output' => 'not queued: ' . $e->getMessage(),
+                'duration_ms' => 0,
+            ]);
+            return ['type' => 'tool_result', 'tool_use_id' => $id,
+                'content' => $e->getMessage(), 'is_error' => true];
+        }
+
+        $this->queued_count++;
+        $this->appendToolCall([
+            'name' => $name, 'input' => $input,
+            'started_time' => $now, 'completed_time' => $now,
+            'is_error' => false,
+            'output' => 'queued for the owner\'s approval as action #' . (int)$row->key,
+            'duration_ms' => 0,
+        ]);
+        return ['type' => 'tool_result', 'tool_use_id' => $id,
+            'content' => 'Queued for approval as pending action #' . (int)$row->key
+                . '. It has NOT run: the recipe owner will approve or decline it from their '
+                . 'pending-actions list. Do not retry this call or assume its outcome — '
+                . 'say in your output that it is waiting for approval and continue.'];
+    }
+
+    /** The recipe's own workspace is written in the turn even when writes queue. */
+    public function executesInline(string $tool_name): bool {
+        return in_array($tool_name, self::OWN_STATE_TOOLS, true);
+    }
+
+    /** How many calls this run queued for the owner's approval. */
+    public function queuedCount(): int {
+        return $this->queued_count;
+    }
+
+    /** The recipe and run, and whether the recipe reads content written by other people. */
+    public function writeProvenance(): string {
+        $line = 'recipe ' . trim((string)$this->recipe->get('rcp_name'));
+        if ($this->run->key) $line .= ', run #' . (int)$this->run->key;
+        if ($this->readsOutsideContent()) {
+            $line .= '; the recipe reads content written by other people';
+        }
+        return $line;
     }
 
     /**

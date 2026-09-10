@@ -26,7 +26,9 @@ class AiQueuedActionException extends SystemBaseException {}
  * clear when cold. Rendering a sealed card needs the owner's window — which
  * approval always has, because resolving is an in-browser act.
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - SOURCE_RECIPE is in use: a pipeline job proposes an action
+ *   beyond its verdict menu by enqueueing it (specs/security_inventory.md S17)
  */
 class AiQueuedAction extends SystemBase {
 
@@ -41,7 +43,7 @@ class AiQueuedAction extends SystemBase {
     const STATUS_FAILED   = 'failed';
 
     const SOURCE_CHAT   = 'chat';
-    const SOURCE_RECIPE = 'recipe';   // reserved — see the spec's "Recipes and the queue"
+    const SOURCE_RECIPE = 'recipe';   // a pipeline job's proposal; executes under ApprovedActionContext
 
     /** Proposals are perishable; the world they described moves on. */
     const DEFAULT_EXPIRY_DAYS = 7;

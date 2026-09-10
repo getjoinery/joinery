@@ -2,30 +2,74 @@
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ActionRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelWriteExecutor.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RiskHeuristic.php'));
 
 /**
- * Static taint gate — the primary write-side defense against prompt
- * injection via untrusted user-generated text. A recipe is *tainted-
- * capable* if its allowed tools can write AND it can read any
- * user-generated content (or carries LLM-curated workspace state across
- * runs).
+ * Static taint gate — the predicate behind the write-side defense against
+ * prompt injection via untrusted text. A recipe is *tainted-capable* if its
+ * allowed tools can write something the world sees AND it can read content
+ * written by other people: an allowed model with $ai_untrusted_fields, a
+ * web tool (a fetched page is a stranger's text), or LLM-curated workspace
+ * state carried across runs.
  *
- * The same predicate fires at two points:
- *   - admin_edit_logic save: rejects a tainted-capable save without
- *     rcp_allow_tainted_writes set.
- *   - RecipeRunner run-start: re-evaluates against current model class
- *     state. Catches drift — a developer added $ai_untrusted_fields to
- *     a model after the recipe was last saved.
+ * What the predicate DOES differs by mode (specs/security_inventory.md S16):
+ *   - agent mode: a tainted-capable recipe QUEUES its writes for the owner's
+ *     approval instead of executing them (RecipeRunContext::queuesWrites()).
+ *     No acknowledgment is asked for, because nothing changes without a
+ *     click. The editor says so.
+ *   - pipeline mode: the model returns one verdict and the job writes one
+ *     fixed field — a bounded menu, which is what keeps routine volume out of
+ *     the queue — so the owner's standing approval (rcp_allow_tainted_writes)
+ *     is asked for at save and re-checked at run start (drift: the job began
+ *     declaring untrustedDigest() after the recipe was saved).
  *
  * One-way tightening: a predicate that becomes false again does not
- * auto-clear the recipe's opt-in. The opt-in is admin acknowledgment,
+ * auto-clear a recipe's opt-in. The opt-in is admin acknowledgment,
  * not derived state.
  *
- * Returns an evaluation object so callers can render targeted errors.
+ * Returns an evaluation object so callers can render targeted text.
  *   { tainted_capable: bool, write_tools: string[], untrusted_models: string[],
- *     workspace_present: bool }
+ *     untrusted_web: string[], workspace_present: bool }
+ *
+ * @version 2.0 - memory and note writes count as writes, web tools as an
+ *   untrusted source; the agent-mode consequence is queuing, not a gate (S16)
  */
 class TaintGate {
+
+    /**
+     * The tools whose writes reach somewhere other than the recipe itself:
+     * the generic model writes and actions, and the memory and note writes
+     * the next conversation reads. set_workspace is left out on purpose — the
+     * workspace is the recipe's own scratchpad, read only by that recipe and
+     * always wrapped as untrusted (RecipeRunContext::OWN_STATE_TOOLS).
+     */
+    public static function writeTools(): array {
+        return array_values(array_unique(array_diff(
+            array_merge(ModelWriteExecutor::WRITE_TOOL_NAMES, RiskHeuristic::STATE_WRITE_TOOLS),
+            RecipeRunContext::OWN_STATE_TOOLS
+        )));
+    }
+
+    /** The evaluation for a saved recipe, in either mode, from its own columns. */
+    public static function forRecipe(Recipe $recipe): array {
+        if ((string)$recipe->get('rcp_mode') === Recipe::MODE_PIPELINE) {
+            $job = PipelineJobRegistry::get((string)$recipe->get('rcp_pipeline_job'));
+            return self::evaluate([], [], '', $job !== null && $job->untrustedDigest());
+        }
+        return self::evaluate(
+            self::decodeList($recipe->get('rcp_allowed_tools')),
+            self::decodeList($recipe->get('rcp_allowed_models')),
+            (string)$recipe->get('rcp_workspace')
+        );
+    }
+
+    private static function decodeList($value): array {
+        if (is_string($value)) {
+            $decoded = json_decode($value, true);
+            return is_array($decoded) ? $decoded : [];
+        }
+        return is_array($value) ? $value : [];
+    }
 
     /**
      * $pipeline_untrusted_digest is the pipeline-mode substitute for the
@@ -39,10 +83,10 @@ class TaintGate {
      */
     public static function evaluate(array $allowed_tools, array $allowed_models, string $workspace,
             bool $pipeline_untrusted_digest = false): array {
-        $write_tools = array_values(array_intersect(
-            array_map('strval', $allowed_tools),
-            ModelWriteExecutor::WRITE_TOOL_NAMES
-        ));
+        $allowed_tools = array_map('strval', $allowed_tools);
+        $write_tools = array_values(array_intersect($allowed_tools, self::writeTools()));
+        $untrusted_web = empty($write_tools) ? []
+            : array_values(array_intersect($allowed_tools, RiskHeuristic::WEB_EGRESS_TOOLS));
 
         $untrusted_models = [];
         if (!empty($write_tools)) {
@@ -62,12 +106,14 @@ class TaintGate {
             $untrusted_models[] = 'pipeline item digest';
         }
 
-        $tainted = !empty($write_tools) && (!empty($untrusted_models) || $workspace_present);
+        $tainted = !empty($write_tools)
+            && (!empty($untrusted_models) || !empty($untrusted_web) || $workspace_present);
 
         return [
             'tainted_capable'   => $tainted,
             'write_tools'       => $write_tools,
             'untrusted_models'  => $untrusted_models,
+            'untrusted_web'     => $untrusted_web,
             'workspace_present' => $workspace_present,
         ];
     }
@@ -96,47 +142,41 @@ class TaintGate {
         }
 
         $tools = implode(', ', $eval['write_tools']);
+        return "This recipe can change things ($tools) while it " . self::reasons($eval)
+             . ', so outside text could try to steer what it changes. Its changes are '
+             . 'therefore queued for your approval instead of applied on their own: each '
+             . 'one becomes a card you approve or decline.';
+    }
+
+    /** "reads content written by other people (…) and …" — the untrusted sources, named. */
+    public static function reasons(array $eval): string {
         $reasons = [];
         if (!empty($eval['untrusted_models'])) {
             $reasons[] = 'reads content written by other people (' . implode(', ', $eval['untrusted_models']) . ')';
         }
+        if (!empty($eval['untrusted_web'])) {
+            $reasons[] = 'reads pages from the web (' . implode(', ', $eval['untrusted_web']) . ')';
+        }
         if (!empty($eval['workspace_present'])) {
             $reasons[] = 'carries notes from its own earlier runs';
         }
-        return "This recipe can change things ($tools) while it " . implode(' and ', $reasons)
-             . ', so outside text could try to steer what it changes. Agreeing here is your '
-             . 'standing approval for those writes — read what the recipe can reach before '
-             . 'giving it.';
+        return implode(' and ', $reasons);
     }
 
     /**
-     * Drift-detection variant for run-start. Same predicate, but framed as
-     * "what newly triggered the gate since save?" — names the specific
-     * source that became untrusted, since that's the actionable detail for
-     * the admin. Person-facing (failure email, run detail page): same
-     * vocabulary rule as explain() — standing approval and outside
-     * influence, never the internal gate terms.
+     * Drift-detection text for a pipeline run start: the job began declaring
+     * untrustedDigest() after the recipe was saved with the flag off. Person-
+     * facing (failure email, run detail page): same vocabulary rule as
+     * explain() — standing approval and outside influence, never the
+     * internal gate terms. Agent mode has no drift stop: a recipe that drifts
+     * into reading outside content starts queuing its writes, which needs
+     * nobody's acknowledgment.
      */
     public static function describeDrift(array $eval): string {
-        // Pipeline mode: the job's item digest is the whole surface — say so
-        // plainly rather than presenting it as a phantom "allowed model".
-        if (in_array('record_verdict', $eval['write_tools'], true)) {
-            return 'since this recipe was last saved, its job began reading content '
-                 . "written by other people, and a message could try to steer the AI's "
-                 . 'verdicts. Runs stay stopped until you open the recipe and give it '
-                 . 'your standing approval to act on that content.';
-        }
-        $parts = [];
-        if (!empty($eval['untrusted_models'])) {
-            $parts[] = 'it began reading content written by other people ('
-                     . implode(', ', $eval['untrusted_models']) . ')';
-        }
-        if (!empty($eval['workspace_present'])) {
-            $parts[] = 'it carries notes from its own earlier runs';
-        }
-        return 'since this recipe was last saved, ' . implode(' and ', $parts)
-             . ', so outside text could try to steer what it changes. Runs stay '
-             . 'stopped until you open the recipe and renew your standing approval.';
+        return 'since this recipe was last saved, its job began reading content '
+             . "written by other people, and a message could try to steer the AI's "
+             . 'verdicts. Runs stay stopped until you open the recipe and give it '
+             . 'your standing approval to act on that content.';
     }
 
 }

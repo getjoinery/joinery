@@ -12,10 +12,14 @@
  *   - capability allowlists: which models and actions are in scope (a recipe's
  *     rcp_allowed_* or a conversation's aic_allowed_*);
  *   - the untrusted-input nonce used to wrap externally-authored text;
- *   - queuesWrites() / enqueueProposedAction(): the deferred-write boundary —
- *     an interactive surface queues every mutating call for the owner's
- *     approval (specs/implemented/ai_action_queue.md); recipes answer false and keep
- *     their own single write door (the verdict handler);
+ *   - queuesWrites() / enqueueProposedAction() / executesInline(): the
+ *     deferred-write boundary — an interactive surface queues every mutating
+ *     call for the owner's approval (specs/implemented/ai_action_queue.md), and
+ *     so does an agent recipe that reads content written by other people
+ *     (specs/security_inventory.md S16); a pipeline recipe keeps its own
+ *     single write door (the verdict handler);
+ *   - writeProvenance(): the one line a durable write (a memory) records
+ *     about where it came from, so recall can show it;
  *   - shouldContinue(): the per-iteration continuation guard (recipe: kill
  *     flag + wall clock; chat: per-turn timeout);
  *   - the begin/finish/append tool-call audit hooks (recipe persists each call
@@ -45,10 +49,11 @@ interface ToolContext {
     public function allowedActions(): array;
 
     /** Does this surface defer AI-initiated writes to the owner's approval
-     *  queue? True for the interactive chat — a mutating tool call never
+     *  queue? True for the interactive chat, and for an agent recipe that can
+     *  read content written by other people — a mutating tool call never
      *  executes in the turn; it becomes a pending action the owner approves
-     *  or declines (specs/implemented/ai_action_queue.md). False for autonomous recipes,
-     *  whose one write door is their own verdict handler. */
+     *  or declines (specs/implemented/ai_action_queue.md). False for a recipe
+     *  that reads nothing outside, and for an approval, which IS the execution. */
     public function queuesWrites(): bool;
 
     /** Queue one mutating tool call for the owner's approval and return the
@@ -56,6 +61,16 @@ interface ToolContext {
      *  refusal when the call cannot be queued). Called only when
      *  queuesWrites() is true. */
     public function enqueueProposedAction(array $tool_use): array;
+
+    /** A mutating tool this surface still runs in the turn although it queues
+     *  writes: state nothing but this surface reads (a recipe's own workspace).
+     *  Chat answers false for everything. */
+    public function executesInline(string $tool_name): bool;
+
+    /** One short line saying where a durable write made under this context
+     *  came from — the recipe or chat, and whether it read content written by
+     *  other people — stored with a memory and shown when it is recalled. */
+    public function writeProvenance(): string;
 
     /** Are reads contained to the acting user's own rows? True for a non-admin
      *  member caller (the read executor adds an owner filter and hides

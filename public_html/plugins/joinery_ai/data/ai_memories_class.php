@@ -54,6 +54,11 @@ class AiMemory extends SystemBase {
         // Who created it ('ai' | 'user' | 'admin') — origin provenance for the UI
         // badge. Not rewritten when a human later edits an AI-created memory.
         'mem_source'             => array('type'=>'varchar(16)', 'required'=>true, 'default'=>'user', 'allowed_values'=>array(self::SOURCE_AI, self::SOURCE_USER, self::SOURCE_ADMIN)),
+        // Where an AI-written row came from, as one line a person reads at
+        // recall time: the recipe or chat, and whether it read content written
+        // by other people (ToolContext::writeProvenance(); security_inventory
+        // S18). Empty for rows a person wrote.
+        'mem_provenance'         => array('type'=>'varchar(255)'),
         'mem_create_time'        => array('type'=>'timestamp(6)', 'default'=>'now()'),
         'mem_update_time'        => array('type'=>'timestamp(6)'),
         'mem_delete_time'        => array('type'=>'timestamp(6)'),
@@ -368,7 +373,7 @@ class MultiAiMemory extends SystemMultiBase {
         $exclude_ids = array_values(array_filter(array_map('intval', $exclude_ids), fn($i) => $i > 0));
         $excl = empty($exclude_ids) ? '' : ' AND mem_memory_id NOT IN (' . implode(',', $exclude_ids) . ')';
         $db = DbConnector::get_instance()->get_db_link();
-        $cols = 'mem_memory_id, mem_title, mem_scope, mem_source, mem_tags, mem_create_time, mem_update_time';
+        $cols = 'mem_memory_id, mem_title, mem_scope, mem_source, mem_provenance, mem_tags, mem_create_time, mem_update_time';
 
         $q = $db->prepare("SELECT $cols FROM mem_memories WHERE mem_delete_time IS NULL"
             . " AND mem_scope = 'shared'$excl"

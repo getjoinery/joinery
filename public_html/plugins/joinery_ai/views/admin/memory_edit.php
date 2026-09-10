@@ -32,7 +32,10 @@ if (!empty($saved)) {
 
 $box_title = $is_new ? 'Create Shared Memory'
     : 'Edit ' . ($is_shared ? 'Shared' : 'Private') . ' Memory'
-      . ' (saved by ' . strtoupper((string)$memory->get('mem_source')) . ')';
+      . ' (saved by ' . strtoupper((string)$memory->get('mem_source'))
+      . (trim((string)$memory->get('mem_provenance')) !== ''
+          ? ', from ' . htmlspecialchars(trim((string)$memory->get('mem_provenance'))) : '')
+      . ')';
 $page->begin_box(['title' => $box_title]);
 
 $formwriter = $page->getFormWriter('form1', [

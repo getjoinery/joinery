@@ -64,7 +64,7 @@ $filter->submitbutton('btn_filter', 'View');
 echo $filter->end_form();
 
 $pager = new Pager(['numrecords' => $numrecords, 'numperpage' => $numperpage]);
-$headers = ['Title', 'Content', 'Source', 'Updated', 'Tags', 'Actions'];
+$headers = ['Title', 'Content', 'Source', 'From', 'Updated', 'Tags', 'Actions'];
 $title = $is_user_view
     ? 'Private memories of user ' . $browse_user_id . ' (' . $numrecords . ')'
     : 'Shared memories (' . $numrecords . ')';
@@ -84,6 +84,7 @@ foreach ($memories as $memory) {
     $row[] = htmlspecialchars($preview);
 
     $row[] = htmlspecialchars(strtoupper((string)$memory->get('mem_source')));
+    $row[] = '<small>' . htmlspecialchars((string)$memory->get('mem_provenance')) . '</small>';
 
     $when = $memory->get('mem_update_time') ?: $memory->get('mem_create_time');
     $row[] = $when
