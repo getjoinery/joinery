@@ -1,7 +1,7 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.36
+ * Vanilla CSS, no framework. @version 2.37
  */
 
 /* Every size the reader renders text at, in one ladder. Nothing in this file
@@ -666,6 +666,36 @@
 }
 .mbx-danger-banner.caution   { background: #fffbeb; color: #92400e; }
 .mbx-danger-banner.dangerous { background: #fef2f2; color: #991b1b; }
+
+/* Why a message is in Spam, plus the one deliberate way past it
+   (specs/mailbox_contact_spam_bypass.md). A sibling of the body like the scan
+   banner above, so the explanation survives a collapsed message. Deliberately
+   informational rather than alarming — the message is already filed, and the
+   banner exists to explain and offer, not to warn. */
+.mbx-spam-reason {
+	padding: 10px 12px;
+	font-size: var(--mbx-text-sm);
+	background: #fffbeb;
+	color: #92400e;
+	border-bottom: 1px solid #fde68a;
+}
+.mbx-spam-reason-head { font-weight: 700; margin-bottom: 4px; }
+.mbx-spam-reason-actions {
+	margin-top: 8px;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+}
+.mbx-spam-reason-btn {
+	display: inline-flex; align-items: center; gap: 6px;
+	border: 1px solid #b45309; background: #fff; color: #92400e;
+	border-radius: 18px; padding: 6px 14px; cursor: pointer;
+	font-size: var(--mbx-text-sm); font-weight: 600;
+}
+.mbx-spam-reason-btn:hover { background: #fef3c7; }
+.mbx-spam-reason-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.mbx-spam-reason-note { font-size: var(--mbx-text-xs); opacity: 0.85; }
 
 /* ---- Attachment chips (Gmail-style, below the content area) ---- */
 .mbx-attachments {

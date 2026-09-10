@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.61
+ * No framework. @version 2.62
  *
  * The conversation list updates in place after mutations
  * (specs/implemented/mailbox_reader_list_persistence.md): actions that take rows out of
@@ -1318,6 +1318,17 @@
 	// The open message shows name AND address — the address is what survived DKIM,
 	// and a display name is only ever as trustworthy as the domain behind it. The
 	// stored form quotes the name; render it unquoted.
+	// The bare address out of a From header, lowercased — what an "allow this
+	// sender" rule matches on, and what the Spam banner names so the user sees the
+	// address rather than only the display name a spoofer chooses freely.
+	function senderAddress(raw) {
+		if (!raw) return '';
+		raw = String(raw).trim();
+		var m = /<([^>]+)>/.exec(raw);
+		var addr = (m ? m[1] : raw).trim();
+		return addr.indexOf('@') > 0 ? addr.toLowerCase() : '';
+	}
+
 	function senderFull(raw) {
 		if (!raw) return '(unknown)';
 		raw = String(raw).trim();
@@ -1641,7 +1652,7 @@
 		pane.appendChild(header);
 
 		messages.forEach(function (m, idx) {
-			pane.appendChild(messageBlock(m, idx === messages.length - 1));
+			pane.appendChild(messageBlock(m, idx === messages.length - 1, t.thread_key));
 		});
 
 		// Gmail-style: Reply / Reply All / Forward chips at the bottom of the
@@ -1667,7 +1678,7 @@
 	// reply whose source disappears on the retention clock. Restore it first.
 	function renderThreadMessages(pane, t, messages) {
 		messages.forEach(function (m, idx) {
-			pane.appendChild(messageBlock(m, idx === messages.length - 1));
+			pane.appendChild(messageBlock(m, idx === messages.length - 1, t.thread_key));
 		});
 	}
 
@@ -1881,6 +1892,60 @@
 		return banner;
 	}
 
+	// Why this message is in Spam, and the one way past it
+	// (specs/mailbox_contact_spam_bypass.md).
+	//
+	// Shown only in the Spam view, and only when the AUTH rule is what filed the
+	// message (spam_auth_rule, decided server-side from the row's own verdicts so
+	// this never keeps its own copy of the filing rule). That is the one case the
+	// address book cannot lift on its own: the sender's domain fails
+	// authentication, so their From header is unattested and being in contacts is
+	// a claim about an address nobody verified.
+	//
+	// It says that in plain words and offers the deliberate act instead — an
+	// explicit "always allow" filter the user can see and undo on the Filters
+	// page. A content-scored message gets no banner: "Not spam" already teaches
+	// the scanner, and adding the sender to contacts already elevates them.
+	function spamReasonBanner(m, threadKey) {
+		if (!state.spamView || !m.spam_auth_rule || m.direction === 'outbound') return null;
+		var addr = senderAddress(m.sender);
+		var banner = el('div', 'mbx-spam-reason');
+		banner.appendChild(el('div', 'mbx-spam-reason-head',
+			'This is in Spam because the sender\u2019s domain failed authentication'));
+		banner.appendChild(el('div', null,
+			senderName(m.sender) + ' has a misconfigured DMARC record, so their mail '
+			+ 'cannot be proved to come from them. Anyone can put ' + (addr || 'that address')
+			+ ' on a message. If you know this sender and trust them anyway, you can let '
+			+ 'their mail through from now on.'));
+		var act = el('div', 'mbx-spam-reason-actions');
+		var btn = el('button', 'mbx-spam-reason-btn', 'Always allow ' + (addr || 'this sender'));
+		btn.type = 'button';
+		btn.addEventListener('click', function () {
+			btn.disabled = true;
+			apiAction({ action: 'allow_sender', ids: [m.id], aliasId: state.aliasId })
+				.then(function (resp) {
+					// apiAction swallows transport errors into {}, so a run that
+					// cleared nothing must not look like a success — the message
+					// would vanish from the view while still being filed as spam.
+					if (!resp || !resp.count) {
+						btn.disabled = false;
+						alert('That sender could not be allowed. Try again, or add the '
+							+ 'rule yourself under Settings \u203a Filters.');
+						return;
+					}
+					closeThread();
+					refreshMailboxes();
+					removeThreadRows([threadKey]);
+				});
+		});
+		act.appendChild(btn);
+		act.appendChild(el('span', 'mbx-spam-reason-note',
+			'Adds a rule you can remove any time under Settings \u203a Filters, and '
+			+ 'rescues mail already in Spam from this sender.'));
+		banner.appendChild(act);
+		return banner;
+	}
+
 	// Splice <base target="_blank"> into a message document so every link in it
 	// opens a new tab. Placement matters: anything ahead of a leading <!DOCTYPE>
 	// puts the frame in quirks mode and reflows the email, so the tag goes after
@@ -1898,7 +1963,7 @@
 		return BASE + html;
 	}
 
-	function messageBlock(m, expanded) {
+	function messageBlock(m, expanded, threadKey) {
 		var outbound = (m.direction === 'outbound');
 		var wrap = el('div', 'mbx-message' + (outbound ? ' mbx-outbound' : '') + (expanded ? '' : ' mbx-collapsed'));
 
@@ -1944,6 +2009,10 @@
 		// the message is collapsed.
 		var banner = dangerBanner(m);
 		if (banner) wrap.appendChild(banner);
+
+		// Why it is in Spam, when the reason is one only the user can overrule.
+		var reason = spamReasonBanner(m, threadKey);
+		if (reason) wrap.appendChild(reason);
 
 		var body = el('div', 'mbx-message-body');
 		if (m.body_html) {

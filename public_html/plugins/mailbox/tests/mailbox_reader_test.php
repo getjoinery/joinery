@@ -20,6 +20,9 @@
  * Run: php plugins/mailbox/tests/mailbox_reader_test.php
  * (requires schema synced — iem threading/state columns + ieg table).
  *
+ * @version 1.7 - allowSender: the Spam view's "always allow this sender"
+ *                writes the never_spam filter, clears only the mail it was
+ *                given, does not duplicate, and refuses out of scope
  * @version 1.6 - teardown removes the attachment manifest before the messages
  *                it hangs off
  * @version 1.5 - Sent is ordered by time alone: a read message sent today
@@ -516,7 +519,72 @@ class MailboxReaderTest {
 		$beth->softDelete([$this->msg_ids['t2']]);
 		$keys = $this->threadKeys($beth->listThreads($this->legal_alias, array(), 1, 50));
 		$this->ok(!in_array('<t2@x>', $keys, true), 'soft-deleted thread hidden from list');
+
+		// --- "Always allow this sender" (specs/mailbox_contact_spam_bypass.md) ---
+		// The Spam view's one route past an authentication failure. Both halves
+		// matter and the filter half is the one that can fail silently: the
+		// verdict flip is a plain UPDATE, while the filter is a model write whose
+		// failure the caller deliberately swallows so the messages still clear.
+		section('allow sender writes the filter AND clears the mail');
+		$spam_a = $this->insertMsg($this->beth_alias, '<allow1@x>', 'first from them', false, false, 9);
+		$spam_b = $this->insertMsg($this->beth_alias, '<allow2@x>', 'second from them', false, false, 8);
+		$this->msg_ids['allow_a'] = $spam_a;
+		$this->msg_ids['allow_b'] = $spam_b;
+		$this->db->exec("UPDATE iem_inbound_email_messages SET iem_spam_verdict = 'spam'
+			WHERE iem_inbound_email_message_id IN ($spam_a, $spam_b)");
+
+		$allowed = $beth->allowSender(array($spam_a));
+		$this->ok($allowed['count'] === 1, 'allowSender clears the message it was given');
+		$this->ok($this->scalar($spam_a, 'iem_spam_verdict') === 'ham',
+			'the message in hand is ham immediately');
+		$this->ok($this->scalar($spam_b, 'iem_spam_verdict') === 'spam',
+			'its sibling waits for the backfill rather than being touched inline');
+
+		$sender_addr = 'sender_' . $this->suffix . '@out.test';
+		$this->ok(in_array($sender_addr, $allowed['addresses'], true),
+			'the allowed address is reported back for the UI');
+		$rule = $this->allowRule($sender_addr);
+		$this->ok($rule !== null, 'the never_spam filter was actually written');
+		if ($rule !== null) {
+			$this->ok(intval($rule['fil_iea_inbound_email_alias_id']) === intval($this->beth_alias),
+				'the rule is scoped to the mailbox the message arrived in');
+			$this->ok($this->pgTrue($rule['fil_action_never_spam']), 'it is a never_spam rule');
+			$this->ok($this->pgTrue($rule['fil_apply_existing_pending']),
+				'it is armed for the backfill, so mail already in Spam is swept up');
+			$this->ok($this->pgTrue($rule['fil_is_enabled']), 'it is enabled');
+		}
+
+		// Pressing it twice must not leave two rules saying the same thing.
+		$beth->allowSender(array($spam_b));
+		$this->ok($this->allowRuleCount($sender_addr) === 1,
+			'allowing the same sender again re-arms the one rule rather than duplicating it');
+
+		// Out of scope: bob cannot allow a sender on beth's mailbox, and no rule
+		// appears from the attempt.
+		$before = $this->allowRuleCount($sender_addr);
+		$bob_try = $bob->allowSender(array($spam_a));
+		$this->ok($bob_try['count'] === 0, 'bob cannot allow a sender on a mailbox he has no grant for');
+		$this->ok($this->allowRuleCount($sender_addr) === $before,
+			'the refused attempt wrote no filter');
 	}
+
+	/** The never_spam rule for one address, or null. */
+	private function allowRule(string $address) {
+		$stmt = $this->db->prepare("SELECT * FROM fil_inbound_email_filters
+			WHERE fil_match_from = ? AND fil_delete_time IS NULL LIMIT 1");
+		$stmt->execute([$address]);
+		$row = $stmt->fetch(PDO::FETCH_ASSOC);
+		return $row ? $row : null;
+	}
+
+	private function allowRuleCount(string $address): int {
+		$stmt = $this->db->prepare("SELECT count(*) FROM fil_inbound_email_filters
+			WHERE fil_match_from = ? AND fil_delete_time IS NULL");
+		$stmt->execute([$address]);
+		return intval($stmt->fetchColumn());
+	}
+
+	private function pgTrue($v): bool { return ($v === true || $v === 't' || $v === '1' || $v === 1); }
 
 	private function scalar($id, $col) {
 		$stmt = $this->db->prepare("SELECT $col FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = ?");
@@ -539,6 +607,12 @@ class MailboxReaderTest {
 				$this->db->exec("DELETE FROM iem_inbound_email_messages
 					WHERE iem_inbound_email_message_id IN (" . implode(',', $ids) . ")");
 			}
+		} catch (\Throwable $e) {}
+		// The allow-sender rules this run wrote (they hang off the alias with no
+		// cascade to lean on, and a leftover would match a later run's fixtures).
+		try {
+			$this->db->prepare("DELETE FROM fil_inbound_email_filters WHERE fil_match_from = ?")
+				->execute(['sender_' . $this->suffix . '@out.test']);
 		} catch (\Throwable $e) {}
 		// Grants don't cascade on raw alias delete (no DB FK), so clean them first.
 		$aids = array_filter(array_map('intval', [$this->beth_alias, $this->legal_alias, $this->other_alias]));

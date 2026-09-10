@@ -2711,6 +2711,941 @@ for a live file was read as gone.
 
 Nothing is to be built on the forgetting site until line 1 is answered.
 
+**Line 1 answered, and it corrects two facts recorded above (2026-09-09).**
+Instrumented at all four `absorb_remote` callers, with the device named, across
+all 11 failing seeds and with an exact test filter -- the first attempt used
+`scratch_one` as a substring, which also matched `scratch_onekey_one` and mixed
+a second test's devices into the log.
+
+Of the sealed-record flips from live to deleted: **12 `poll_remote`, 4
+`forget_folder_the_server_confirms`**, and none from `walk_index` or
+`open_what_the_key_unlocks`. So the dominant path is the feed reporting a
+GENUINE server deletion, not a `missing` answer misread.
+
+**Which makes the next question who deleted it on the server, and the answer
+overturns the fleet-wide note above.** Instrumented inside the mock's
+`drive_trash` -- where nothing can hide, since it is the only site that sets
+`trashed` -- the desktop trashes the sealed file outright:
+
+    SRVTRASH dev=desktop kind=file id=901
+
+There IS a `trash_remote`, on both a file and a folder, on every failing seed.
+The earlier count that found none was taken at the op-queue point and missed it,
+because this trash is **queued directly in `pass.rs` and never passes through
+`reconcile`** -- a `PLAN_TRASH` probe on the `(Deleted, None)` arm stays silent
+through the whole run.
+
+**The whole chain, traced on seed 74000, in the order it happens:**
+
+    ASIDE         dev=desktop dir=true from="ring-2"
+                  to="ring-2 (conflicted copy ... from desktop)"
+    CONVERT_TRASH dev=desktop id=File:901 enc=true
+                  remote=Placement { parent: Some(502), name: "sealed.txt" }
+                  local=Moved { to: Placement { parent: Some(-11), ... } }
+    SRVTRASH      dev=desktop kind=file id=901
+    AFTRACE       dev=laptop who=poll_remote id=File:901
+                  was_deleted=Some(false) enc=Some(true)
+
+`make_room` moves the vault's directory aside; the scan reports the sealed file
+as MOVED, to parent **-11** -- a negative id, so a PROVISIONAL folder, the
+conflict-copy directory the engine minted from its own aside. That reads as a
+drag out of the vault, the conversion trashes the server's ciphertext, and the
+laptop's feed then tells it the sealed file is gone.
+
+**This revives item 1, which was retired as unfixable.** The note above says
+`crossing_a_vault_edge` is never consulted and gating it changes nothing. That
+was measured at the MINT, one step too late, where the record is already
+forgotten -- `sealed_source=None`, 11 of 11. At the CROSSING the record is still
+in hand and says `enc=true` outright. So the gate has a site where it can fire,
+and the enforceable predicate is visible in the same line: **the destination
+parent is a folder the ENGINE minted, not one the user moved the file into.**
+
+Note the predicate needs care: a user dragging a sealed file into a folder they
+have just created also gives a provisional parent. Refusing there stalls a
+legitimate conversion, which raises an issue and loses nothing; publishing loses
+the seal. The asymmetry is what justifies the refusal, and any version of this
+must be measured against the pinned suite, not reasoned about.
+
+**What this does NOT change.** The build order stands: the record being
+forgotten is still upstream, and a gate is still a belt. What it changes is that
+item 1 is no longer dead -- it is a belt with a working buckle, and worth
+carrying once 2 lands.
+
+**Item 1 revived, built at the crossing, measured -- and it does NOT fix AF
+either. Third attempt, reverted (2026-09-09).** The gate was written exactly as
+the line above specifies: at the conversion site, before the trash is queued,
+refuse when the entry is encrypted AND the destination parent is provisional (a
+negative id, so a folder the engine minted rather than one the user moved the
+file into).
+
+    baseline    failures=11 of 40
+    with gate   failures=11 of 40   -- the same eleven seeds
+
+**Unlike the mint gate, this one FIRES** -- six refusals across the arm, on both
+devices, always on the sealed file into a provisional parent:
+
+    GATE_REFUSED dev=desktop id=File:901 dest=Some(-11)
+    GATE_REFUSED dev=laptop  id=File:901 dest=Some(-19)
+
+So the conversion trash is real, and stopping it is not sufficient. The leak
+survives it, which means the plaintext upload does not depend on the sealed
+record being destroyed first.
+
+**And measuring at the mint found the thing this whole section had backwards.**
+The mint gate was shelved on the reading that the inode link was empty --
+`sealed_source=None`, taken to mean the index had nothing for inode 1001.
+Instrumented with the link and the entry printed SEPARATELY, at the moment the
+leaking copy is minted:
+
+    MINT dev=desktop path="ring-2 (conflicted copy ...)/sealed.txt"
+         inode=1001
+         index_link=Some(File:901)              <- the link IS there
+         entry=None                             <- the ENTRY is gone
+         rows=[(Some("file"), Some(901), "1fe4a751")]
+
+`entity_for_file_id` answers correctly and names 901. What does not exist is the
+ENTRY it names. The earlier gate was built to read *the entries* -- the half
+that has been destroyed -- which is precisely why it measured as fail-open 11 of
+11. The half that SURVIVES is the index link, and it survives because of the B6
+COALESCE fix.
+
+**So `forget_entry` leaves a dangling inode link behind, and that dangling link
+is evidence.** A row in `local_index` naming an entity that no longer exists
+means: these bytes on this disk belonged to a record the engine destroyed while
+they were still here. Nothing else in the store says that.
+
+**The invariant that follows is wider than the vault**, which is what makes it
+worth having: *bytes whose record the engine destroyed while they were still on
+the disk are not new content, and must not be uploaded as new content.* On the
+AF path the bytes are a sealed file and the upload is a plaintext publication;
+on any other path it is a file silently re-created as a stranger.
+
+**And the obvious tidy-up is actively wrong.** Making `forget_entry` clear the
+index link would leave the store self-consistent and destroy the only surviving
+evidence that these bytes were ever tracked -- turning AF from detectable into
+silent. The dangling link must be kept and read, not cleaned up.
+
+This does NOT displace the ordering already written down -- the record should
+not be forgotten in the first place, so the planner (item 2) and the record
+following its directory (item 3) remain the fix, with directory identity (4) as
+the close. What changes is that the belt is no longer a measured dead end: it
+has a signal that outlives the defect, and it is worth building once the
+upstream work lands.
+
+**The belt was then BUILT and measured, and it stops the leak (2026-09-09).**
+At the file mint, refuse when the inode's index link names an entity that no
+longer exists. On the ring arm the failure count did not move -- 11 of 40 either
+way -- and the first reading of that was WRONG, because the arm records only
+THAT a seed failed. Asked what the failure actually says:
+
+    belt off:  seed 74000: the plaintext of a file the user sealed reached
+               the server
+    belt on:   desktop is holding files no entry claims, so nothing will ever
+               scan, send, move or remove them:
+               ["ring-1/ring-2.txt",
+                "ring-2 (conflicted copy ...)/sealed.txt"]
+
+Different defect. The vault leak is GONE -- traced at the upload site, the only
+uploads in the run with the belt on are the three correct seeding uploads, and
+no plaintext copy is ever sent. What is left is the refused bytes sitting on the
+disk unclaimed, which is the belt's own `continue` with nothing after it, and
+the orphan assertion catching it loudly.
+
+It also catches the other half of the inversion, unprompted:
+
+    BELT_REFUSED desktop "ring-2 (conflicted copy ...)/sealed.txt" was=File:901
+    BELT_REFUSED desktop "ring-1/ring-2.txt"                      was=File:902
+
+**So the belt is the first intervention of the three that works, and what it
+needs is a disposition, not a rethink.** Refusing forever is not a fix; the
+refused bytes need parking with an issue raised, the way the engine already
+handles content it cannot place. The upstream work (items 2 and 3) remains the
+real fix -- the record should never have been forgotten -- but the belt is the
+thing that turns a silent publication into something a person can see, and that
+is worth having on a route that publishes vault contents.
+
+**A measurement lesson worth more than the result.** Counting failures without
+their REASON hid a working fix behind an unchanged number, and this campaign has
+now been bitten by the same shape twice in one day -- a `head -12` that cut the
+interesting lines off a trace, and a probe that printed one variable under
+another's name. Any arm used to judge a fix has to report what the failure SAYS,
+not just how many there were.
+
+**How precise the belt's predicate is, measured against the pinned suite.**
+Run log-only over the 201 scenarios, the predicate -- an index row naming an
+entity that no longer exists -- fires **8 times on healthy, passing code**, on
+three paths: `report.txt`, a conflict copy of it, and `X/Y/note.txt`. Turned
+into a hard refusal it breaks **7 of 201**:
+
+    a_crash_window_that_left_two_copies_of_our_own_bytes_settles_on_one
+    a_finisher_waits_for_its_own_park_before_the_park_has_landed
+    a_land_beside_that_died_before_its_rename_heals_on_the_next_run
+    a_park_mid_replacement_survives_its_create_being_refused_once
+    a_park_whose_destination_is_trashed_keeps_its_finisher_and_its_files
+    an_upload_of_bytes_the_server_already_has_adopts_rather_than_duplicates
+    an_upload_onto_a_name_the_server_gave_away_lands_beside_it
+
+Every one is a RECOVERY scenario -- a crash window, a park, a land-beside, an
+adoption. Those are precisely the cases where the engine forgets a record on
+purpose and re-adopts the bytes afterwards, and they are indistinguishable from
+AF on the dangling link alone. So the cheap predicate is dead as a refusal.
+
+**What that measurement buys is the shape of the real one.** The belt cannot
+tell a sealed record from an ordinary one because the entry it would have to ask
+is the thing that was destroyed. So `forget_entry` has to leave a TOMBSTONE
+saying what the record was -- at minimum whether it was encrypted. That is the
+counterpart to the `trash_local` comment that ends *"and the record has to go
+with that conclusion"*: the record may go, but not without saying what it was.
+
+The prediction this makes, and the way to test it: all seven pinned failures
+above are PLAINTEXT paths, and AF's forgotten record is `enc=true`. A belt gated
+on *the forgotten record was encrypted* should therefore fire on AF and on none
+of the seven. That is one measurement away once the tombstone exists, and it
+should be taken before the belt is trusted, not after.
+
+**Build order corrected by measurement (2026-09-10): item 2 is not the
+first-order fix, and item 3 is not a belt.** The order above says build the
+planner's two-claimants rule first and explicitly *"Do NOT build 3 before 2: a
+belt on a route the planner should never send anyone down is the same
+inert-guard problem"*. Measured, that reasoning does not hold.
+
+Probing the planner directly -- every round, every item with a destination slot,
+reported when two DISTINCT entities claim one slot -- seed 74000 shows the
+predicted collision exactly as specified:
+
+    TWO_CLAIMANTS dev=desktop slot=(None, "ring-2") claimants=[
+        (Folder:502, ApplyLocalMove  { to: ring-2 }),   <- the vault
+        (Folder:504, ApplyRemoteMove { to: ring-2 })]
+
+But across the 11 red seeds it fires on **9, not 11**. Seeds **74019 and 74037
+leak with no same-round slot collision anywhere in the run** -- and both still
+move a VAULT directory aside:
+
+    74000  TWO_CLAIMANTS -> ASIDE ring-2 (desktop)
+    74019  no collision  -> ASIDE ring-1 (desktop)
+    74037  no collision  -> ASIDE ring-2 (laptop)
+
+So the aside is the choke point and the planner race is one of its causes, not
+the cause. A planner rule would close nine seeds and leave two, which is the
+worst possible outcome for a defect of this kind: the arm goes from 11 red to 2
+red and looks nearly fixed while still publishing vault contents.
+
+**Why the planner cannot be the whole answer, and it is structural.** `run_round`
+resolves one round; `dependency_graph` builds `occupant` from items moving OUT of
+a slot in THAT round. A local move that landed in an earlier round and a remote
+move arriving in a later one never appear in the same `items` vector, so a
+cross-round race is invisible to the planner by construction. (Traced: the
+collision-free asides are real and on the vault. That a cross-round race is the
+mechanism behind them is INFERENCE from the planner's shape, not yet traced --
+it wants the round number logged beside the aside before anyone relies on it.)
+
+**Revised order.** Item 3 -- the aside carrying the owner's record -- is the
+first-order fix, not a belt. Item 2 remains worth doing: a lost move race is a
+real defect and `MoveRaceServerWon` is the honest verdict for folders. But it is
+a correctness fix in its own right, not AF's fix, and it must not be measured as
+one.
+
+**Item 3 BUILT and measured (2026-09-10): 11 red seeds become 5.** In
+`make_room`'s directory arm, the folder record whose resolved local path IS the
+displaced directory is found, the directory goes to `.jd-swap-dir-{id}` rather
+than a user-facing conflict copy, and the record's `local_name` follows it -- so
+the chain from the files inside back to the root keeps resolving.
+
+    baseline        failures=11 of 40
+    record follows  failures=5  of 40   (74014, 74018, 74019, 74023, 74033)
+
+All five remaining failures are still the genuine leak, checked by REASON and
+not by count. Six seeds closed, and 74037 is among them -- one of the two with
+no planner collision at all, which is direct evidence that item 2 could not have
+closed them and item 3 can.
+
+**AF IS NOT ONE DEFECT, and the claim written above that "the aside is the choke
+point all 11 seeds pass through" was an overreach from three seeds. Corrected
+here by measuring all of them.** With item 3 on, the five survivors split:
+
+    74019                        OWNED_ASIDE fires (ring-1 -> .jd-swap-dir-502)
+                                 and the seed STILL leaks
+    74014, 74018, 74023, 74033   NO directory aside of any kind -- only file
+                                 asides -- and they leak anyway
+
+So four of the eleven never displace a directory at all. There is a **second
+leak route that does not pass through `make_room`'s directory arm**, and nothing
+built on the aside can reach it. That route is unidentified and is the next
+thing to trace; the AD/AE/AF family's shared root (a directory carries no
+identity) is a reasonable suspect but has NOT been shown to be this.
+
+**What that means for the plan.** Item 3 is worth having on its own -- it halves
+a vault disclosure and it is the honest behaviour regardless -- but it must not
+be described as AF's fix, and the ring arm must not be read as nearly-green at
+5 of 40. Directory identity (item 4) should now be specified against BOTH routes,
+not just the aside, and the second route needs tracing before it is.
+
+**ROUTE 2 TRACED (2026-09-10): `create_remote_folder` steps aside on the
+SERVER.** The four seeds that leak with no directory aside do not go through
+`make_room` at all. Tagging all eight conflict-name minting sites, exactly one
+fires on 74014:
+
+    CONFLICT_NAME dev=desktop who=create_remote_folder placement="ring-3" attempt=1
+
+The ordered chain, with item 3 on:
+
+    CONFLICT_NAME desktop create_remote_folder "ring-3" attempt=1
+    MINT   desktop "ring-3 (conflicted copy ...)/sealed.txt"
+           inode=1001 link=Some(File:901) entry=None
+    UPLOAD desktop File:-7 enc=false -> parent 511 "sealed.txt"   <- published
+    UPLOAD desktop File:-8 enc=true  -> parent 502 "ring-2.txt"   <- the inversion
+
+The conflict-copy directory is minted on the SERVER by the create, not by any
+local move-aside. **The guard already there is the right shape and too narrow:**
+
+    Err(e) if e.name_taken()
+        && held_by_a_rename_this_device_owes(env, &wanted, placement.parent)? =>
+        Retry("the name is spoken for by something this device is renaming")
+
+It waits when THIS device owes the rename. In a ring trade the holder is a name
+the OTHER device renamed, arriving by feed, so the guard is silent and the
+device steps aside into a plain folder.
+
+**Both routes end on the same line**, which is the reason to work at the mint
+rather than add a second site guard:
+
+    MINT ... inode=1001 link=Some(File:901) entry=None
+
+Route 1 reaches it through `make_room`'s aside, route 2 through
+`create_remote_folder`'s step-aside. The record is destroyed and the bytes are
+adopted as new plaintext content either way.
+
+**The objection that decides whether a belt there can work at all**
+(public-html-0e, 2026-09-10, read from the tree): a user's designed drag-out of
+an UNEDITED sealed file may be byte-for-byte identical to AF at that mint --
+`pass.rs` ~1024's own comment says the conversion works by trashing the remote,
+leaving the local bytes, and letting the next scan adopt them at the new path.
+Same inode, same hash, same dangling link, same tombstone. If that holds, NO
+predicate on what the record was can separate them, and the separating fact has
+to be whether the FILE's directory changed (a user drag-out moves the file
+between directories; AF re-attributes the directory around a file that never
+moved) -- which is item 4, directory identity.
+
+Evidence so far cuts against strict byte-identity, and it is worth stating
+because it was nearly assumed away: pinned drag-outs DO exist
+(`a_file_dragged_into_a_vault_and_back_out_again_still_moves`,
+`a_vault_folder_dragged_out_is_not_published_in_the_clear`,
+`a_swap_across_a_vault_edge_converts_both_ways`), and the plain dangling-link
+belt broke 7 pinned scenarios with NONE of those three among them. Something
+already tells them apart. What, is the open question, and it is being measured
+rather than argued.
+
+**Two corrections to the tombstone taken from the same review, both right:**
+- The tombstone belongs in `delete_entry` (written from the row being removed),
+  not `forget_entry`. And `forget_entry` CLEARS `local_index`, so a belt keyed on
+  a dangling link is structurally blind on the `forget_folder_the_server_confirms`
+  route -- 4 of the 16 sealed-record flips -- however well it works elsewhere.
+- The predicate is *last held sealed AND about to be minted plain*, not *the
+  forgotten record was encrypted*. A crash-window or park re-adopted INSIDE a
+  vault is `enc=true` forgotten-and-re-adopted, and the bare form stalls it. The
+  vault arms generate exactly that.
+
+## Defect AG -- dragging one file out of a vault swaps the vault's name onto a plain folder
+
+**Severity: after an ordinary drag, the folder called `Private` protects
+nothing, and everything the user saves into it afterwards is published in the
+clear. One device, one drag, no trades, no faults, no second actor.** Found
+2026-09-10 while building public-html-0e's C1 control.
+
+**The reproduction.** One keyed device. A vault `Private` on the server holding
+one sealed file, downloaded. The user makes a folder `Plain` and drags the file
+into it. Settled, stable over six further rounds:
+
+    disk    ["Plain", "Plain/y.txt", "Private"]
+    server  ["Plain", "Plain/enc-4c1a9da0...", "Private"]
+    folders (501, "Plain",   encrypted=true,  parent=None)
+            (502, "Private", encrypted=false, parent=None)
+
+**501 is the vault, and it is now called `Plain`. 502 is a brand new folder with
+no protection, and it is now called `Private`.** The names have exchanged
+meanings. The user's own vault answers to the name of the plain folder they just
+made, and the name they trust protects nothing.
+
+**Mechanism, traced.** The file never moved:
+
+    XING id=Folder:501 enc=true  local=Moved { to: {parent:None,name:"Plain"} }
+                                 agreed={parent:None,name:"Private"}  verdict=None
+    XING id=File:901   enc=true  local=None
+
+Dragging the file out left `Private` empty and `Plain` holding 501's only known
+child. A directory carries no identity, so the folder scan paired 501 with
+whichever directory held its child and reported the VAULT as renamed to `Plain`.
+`crossing_a_vault_edge` is then asked about a folder whose parent has not
+changed -- root to root -- and returns `None` at its first test, so no crossing
+is seen and no conversion happens. The engine renames the vault on the server
+and mints a new plain folder for the empty directory left behind, which takes
+the name `Private`.
+
+**The trigger is the vault losing its LAST KNOWN CHILD -- not provenance.**
+`detect_folder_moves` guards folder pairing with `holds_nothing_known`, and its
+own comment says why: *without it, one file moved out of a folder reads as the
+folder having moved*. That guard protects a folder only while some tracked
+content still stands under it. A vault holding ONE file has none left the moment
+that file leaves, so its standing directory reads as a rebuilt shell and the
+record is paired with whichever directory now holds its child.
+
+Measured, not reasoned: the same drag with the sealed file WRITTEN locally
+rather than downloaded fails identically.
+
+    before  [(501, "Private", true, None)]
+    after   [(501, "Plain", true, None), (502, "Private", false, None)]
+
+So provenance -- which decides the AF belt's reach -- has nothing to do with AG.
+The first reading here blamed the download because C1 happened to use one.
+
+**Why the pins never caught it.** `a_swap_across_a_vault_edge_converts_both_ways`
+is green because its vault never empties -- a file swaps in as the other swaps
+out. `a_file_dragged_into_a_vault_and_back_out_again_still_moves` is a keyless
+device on the claimant path. C1 is the first single-file vault drag-out in the
+suite.
+
+**Why this matters beyond itself.** It is the AC/AD/AE/AF root cause -- *a
+directory carries no identity* -- reproduced with ONE device, no name trade, no
+fault injection and no concurrency. Everything else in the family needed two
+devices racing. This needs a user dragging a file.
+
+**The obvious near-term fix is wrong, and the reason is worth keeping**
+(public-html-0e). The tempting rule is *a standing directory at an encrypted
+folder's agreed path keeps its identity; contents decide only when the directory
+is gone*. That is right for AG and wrong for its mirror: the user renames the
+vault `Private` -> `Plain` and makes a NEW empty `Private`. Same disk, same
+server, opposite intent. Under the standing-directory rule 501 stays at
+`Private` (the new empty directory), `Plain` is adopted as a new plain folder
+holding the sealed inode, the file reads as dragged OUT, `Convert` fires, and
+the sealed file is published in the clear -- from a rename that never asked for
+disclosure. Under today's rule, AG inverts the protection of everything saved
+afterwards. **Neither reading keeps the vault sealed in both worlds**, which is
+AD's contents-exchange counterfeit reachable on one device with one drag.
+
+So the only safe thing to land before directory identity is a HOLD: an encrypted
+folder whose pairing rests on contents alone -- directory standing empty at its
+agreed path, its known child under another directory -- parks folder and file
+`Unsyncable` with one issue naming both readings (*"Private was emptied and
+Plain holds its file: was Private renamed, or was the file moved out?"*). No
+rename pushed, no conversion, no adoption of either directory. The
+`empty_and_encrypted` ambiguous arm already says exactly this for its own case.
+A hold costs a stall with a sentence; both alternatives cost a vault.
+
+**And it makes directory identity urgent rather than the family's close.** With
+the directory's `file_id` on the folder record, AG's `Private` directory keeps
+501's id, so 501 is `Private`, the file moved out, `Convert` -- correct. The
+mirror: the directory now named `Plain` carries 501's id, so 501 was renamed,
+the new `Private` is adopted plain, nothing published -- also correct. Every
+hold above becomes a decision.
+
+**Verified on content, not just names.** The name proves the metadata blob
+opened; only the hash proves the bytes did. `Plain/y.txt` on the disk hashes to
+exactly the plaintext written:
+
+    disk y.txt = 102c117196d66d419cf9e7c77c75edf2982809ae6429e312cc891c3521a3ae91
+    written    = 102c117196d66d419cf9e7c77c75edf2982809ae6429e312cc891c3521a3ae91
+
+So the user holds their readable file locally while the server holds only the
+ciphertext, under the vault's new name.
+
+**Still open.** Whether the same swap happens with a locally-written sealed file
+(provenance may not matter here at all, unlike AF); whether a second device
+inverts the same way; and what a real server does with the rename, since
+`drive_move_logic.php` converts a file in place across the boundary and refuses
+an out-of-vault move without a vault window, which the mock does not model.
+
+**ROUTE 3 TRACED: the pre-trash rescue carries the sealed file to the root.**
+Predicted by public-html-0e from `is_on_the_server`, confirmed on both seeds
+that mint at the sync root:
+
+    RESCUE dev=laptop file="ring-3/sealed.txt" inode=1001
+           on_server=false agreed_here_has=false link=None
+
+Before a folder is trashed locally, the rescue saves work nobody has uploaded.
+It decides that with `agreed_here` -- a map the caller builds from the folder's
+LOCAL CHAIN -- and then the index link. In AF's state the chain is exactly what
+does not resolve, so `agreed_here` misses the file; and on the device that WROTE
+the file there is no link. Both answers empty means "unsent work", so the sealed
+file is carried out to the sync root and uploaded in the clear.
+
+Its fix is the family's sentence again: the rescue must ask the RECORDS by
+fingerprint over every entry, not a map scoped to a chain that is broken in
+precisely the state the rescue runs in, and a sealed record's bytes are never
+carried anywhere while the inode is on the disk.
+
+**ALL 11 SEEDS LABELLED BY ROUTE.** The routes OVERLAP; they do not partition.
+
+    74000  aside            desktop link=Some
+    74014  create           desktop link=Some
+    74017  aside            laptop  link=None
+    74018  create + rescue  laptop  link=None
+    74019  aside  + rescue  laptop  link=None
+    74023  create           desktop link=Some
+    74026  aside            desktop link=Some
+    74031  aside            desktop link=Some
+    74033  create           laptop  link=None
+    74035  aside            desktop link=Some
+    74037  aside            laptop  link=None
+
+aside 7, create 4, rescue 2. **Report closed SEEDS, never closed routes** -- with
+two seeds firing two routes, a per-route count overstates any fix. And the honest
+line for item 3 is *6 of 11 closed; 74017 and 74037 are aside seeds it does NOT
+close, both laptop/link=None* -- so "item 3 fixes route 1" is already too strong.
+Unresolved: which route fires FIRST on those two. The label records which routes
+fired, not their order, and that is what would explain them.
+
+**THE ORACLE NEEDS TWO FORMS, and the arm's header has to say which it uses.**
+Convergence asks about bytes and agreement, so a folder that stops being the
+vault passes it -- custody blindness hiding a PROTECTION LEVEL rather than an
+identity, which is new.
+
+- Where the workload never renames a folder slot: for each seeded vault, the
+  folder with that ID still wears that name and is encrypted, and no plain
+  folder wears a name a vault was seeded with. There the name IS the evidence,
+  and this is exactly AG's shape.
+- **In the ring arm neither name clause is decidable**, and the first draft of
+  this oracle got that wrong twice. After the user trades ring-1 (the vault)
+  with ring-2, a plain folder legitimately wears `ring-1`; with two devices
+  trading at once the vault's right final name is race-dependent. What IS exact,
+  because that workload never creates or removes a folder: the server holds
+  exactly the three seeded ring ids, all live, the vault's still encrypted and
+  the other two still plain, and no root folder beyond them. That catches every
+  re-mint whatever the trades did to the names -- AF's blessed identity loss,
+  AG's minted namesake, and route 2's step-aside.
+
+**Tombstone belt, measured: it closes ZERO of the 40 ring seeds.**
+
+    A baseline        failures=11 of 40
+    B tombstone only  failures=11 of 40
+
+Provenance blindness was its CEILING, not its result. The argument above says it
+could reach at most the six link-bearing seeds; measured, it reaches none.
+
+**And the reason is in the code, not a mystery** (public-html-0e): this build
+parked the mint `PendingKey`, which is not a stall on a device that HOLDS the
+key. The mint's own comment says so -- the file waits and `apply_naming`
+releases it by itself the moment a key arrives -- and `no_key_for` parks
+encrypted entries only *while there is no key*. The desktop holds the vault key
+in every link-bearing seed, so the provisional was released at the top of the
+next pass and uploaded as planned. The belt fired and was undone one pass later.
+The earlier dangling-link belt skipped the mint outright, which is why that one
+stopped the leak (and left the bytes unclaimed, and broke 7 pins).
+
+With the right stall shape the belt returns to exactly its known ceiling: blind
+on five seeds, breaks seven pins. It stays retired on the provenance argument
+alone; the disposition detail changes nothing about that.
+
+**ITEM 3 IS INERT UNDER FAULTS, and every number above describes the GENTLE arm
+(2026-09-10).** Measured on a probe-free copy built fresh from HEAD with only
+item 3 in it, run uncontended:
+
+    clean arm    (no faults)                 11 -> 5  of 40
+    hostile arm  (chaos + kills + platforms) 40 -> 40 of 60
+
+So `11 -> 5` is a clean-arm-only result. Where the faults are -- the conditions
+that found AD and B4 in the first place -- the aside fix closes nothing.
+
+*(Caveat on that run: the per-seed REASONS were truncated by a `head` in the
+capture, so only 19 of each 40 were seen; all 19 in both halves are the sealed
+leak. The 40/40 totals are sound, the claim that all 40 fail the same way is
+not. Third truncation of the night -- see the measurement lesson above -- and
+the rule now is that no measurement output passes through `head`.)*
+
+**Two consequences, and the second is the uncomfortable one.**
+
+1. On landing item 3: a real improvement on the clean arm, no regression under
+   kills, inert where it matters most. Worth having, never to be described as
+   AF's fix.
+2. **The hostile arm leaks at 67% against the clean arm's 27.5%, so the arm this
+   campaign has been measuring on is the easy one.** Every figure above -- 11 of
+   40, six closed, and the whole route table -- was taken on clean seeds. The
+   route distribution under faults is simply not known, and "aside 7 / create 4
+   / rescue 2" should not be read as the shape of the defect until the hostile
+   arm is labelled the same way.
+
+**The kill condition on item 3 is NOT satisfied by this run.** The worry
+public-html-0e raised is specific: `.jd-swap-dir-` carries `SWAP_PREFIX`, so a
+death between the rename and the record update leaves the stranded-park put-back
+to return the directory to its AGREED name -- which is the contested one, and
+that is B4's mechanism. A baseline already saturated at 40 of 60 has nowhere for
+such a regression to show. Random kills approximate the window; they do not test
+it. What is needed is a targeted test: force the aside, kill between the rename
+and the `put_entry`, restart, and assert the directory is not standing at the
+contested agreed name and no ring id was re-minted.
+
+**B9 -- a killing arm where EVERY seed fails reports nothing at all.**
+Found 2026-09-10 while trying to run the identity oracle over the hostile ring
+arm. `sweep_core` ends with
+
+    assert!(!kills || kills_made > 0,
+            "SWEEP {label}: the killing arm never killed anything");
+
+and `kills_made` accumulates only from seeds that PASS -- a failing seed's kill
+count is discarded with its panic. So an arm in which every seed fails has
+`kills_made == 0`, and this assertion fires BEFORE the sweep prints its failure
+list. The run reports `FAILED` with no seeds named, no `SWEEP` line, and no
+count. Worse in the arms that suppress the panic hook to keep per-seed output
+quiet: there the message itself is swallowed and the arm is simply silent for
+ten minutes and then red.
+
+This is the same class as the guard already pinned by
+`a_sweep_with_a_failing_seed_fails_the_test` -- a reporting path that is silent
+exactly when the news is worst. The fix is to count kills from every seed
+attempted rather than every seed that passed, and to make the check a reported
+warning rather than an assertion that pre-empts the failure list.
+
+It matters beyond tidiness: it is how the hostile arm's identity result nearly
+went unmeasured tonight.
+
+**THE HOSTILE ARM LEAKS WITHOUT RE-MINTING ANYTHING, which says where its fix
+lives (2026-09-10).** 30 hostile ring seeds, sealed oracle and identity oracle
+both armed (counted from `af3/split6.log`):
+
+    22 of 30 failed (22 kills)
+    22  the plaintext of a file the user sealed reached the server
+     0  identity failures
+
+Every seeded ring id survives with the protection it was seeded with. So under
+faults the vault is published **with no folder re-mint at all** -- which is not
+the reassuring reading. It points the hostile arm's leak at route 3 (the
+pre-trash rescue) and the crossing convert, and away from the aside (route 1)
+and the create step-aside (route 2), both of which work by re-minting.
+
+**That explains item 3's inertness under kills.** Item 3 is a re-mint fix -- it
+makes the record follow a directory the engine moves aside -- and the hostile
+arm does not move directories aside. Same for the adoption guard, when it is
+built. The fix that reaches the hostile arm is the rescue asking the RECORDS by
+fingerprint rather than a chain-scoped map plus a provenance-decided link.
+
+**The oracle was wrong twice before it was right, and both were FALSE POSITIVES
+of mine.** Recorded because the corrections are the useful part:
+
+- First run, 8 "identity failures" naming folder 501 `Private` -- the VAULT ROOT
+  that `sweep_world` seeds for every vault mode. My allowed set held the three
+  rings only.
+- Second run, 6 more naming `Contested Folder`, `Sub 9`, `Sub 26` -- folders the
+  WORKLOAD creates. The premise that this workload never creates a folder is
+  true of the rings and false of the ordinary actions running beside them, so
+  the *nothing beyond the seeded ids* clause was unsound from the start and is
+  gone.
+
+What is exact, and all that is left, is that the seeded ids survive with their
+seeded protection. The oracle now takes those ids from `sweep_world` rather than
+a retyped list, so it cannot drift a third time.
+
+**Non-vacuity is NOT established, and worse: the ring form CANNOT catch AG --
+the defect that inspired it.** Read off AG's end state against the oracle's own
+predicate:
+
+    AG leaves   (501, "Plain",   encrypted=true)   <- the vault, renamed
+                (502, "Private", encrypted=false)  <- new, unprotected
+
+The ring form asks only that each seeded id still exists with its seeded
+protection. 501 does. **It passes.** The clause that catches AG is the NAME
+clause, which is precisely the one that is undecidable where names are traded;
+and the *nothing beyond the seeded ids* clause that would have caught 502 had to
+go, because workloads legitimately create folders.
+
+So the ring arm's identity oracle detects exactly two things: a seeded id
+vanishing, and a seeded id's protection flipping. A name swap of AG's shape goes
+straight through it. Its zero above means "no ring folder was destroyed or had
+its protection changed" and nothing more; it is NOT evidence that identity held.
+
+**What IS decidable in a name-trading arm** is the assertion 0e wrote for the
+K1/K2 list: *the sealed inode sits under the directory the store resolves to the
+vault's ID*. That holds whatever the trades did to the names, and it is the
+check that would see AG. It should be added before the identity result from this
+arm is quoted again.
+
+**The NAME form does have a true positive, taken as its positive control.** Run
+against AG's reproduction it goes red naming the vault outright:
+
+    c1b: assertion `left == right` failed:
+         the vault kept neither its name nor its protection
+           left:  Some(("Plain", true))
+           right: Some(("Private", true))
+
+So the two forms have different powers and the difference must be stated
+wherever either is used: the NAME form catches AG and is admissible only in arms
+that never rename a folder slot; the RING form catches a seeded id vanishing or
+its protection flipping, has no demonstrated true positive at all, and provably
+cannot see AG.
+
+**ROUTE 4, and it is the dominant shape under faults: a folder NAME TRADE read
+as a file moved across the vault edge (2026-09-10).** Traced on seed 75100,
+counted over all 22 from `af2/hostile_logs/`:
+
+    XING   pc File:901 enc=true
+           local=Moved { to: { parent: Some(504), name: "sealed.txt" } }
+           agreed={ parent: Some(502), name: "sealed.txt" }
+           verdict=Some(Convert)
+    MINT   pc "ring-3/sealed.txt" inode=1001 link=Some(901) entry=None
+    UPLOAD pc File:-7 enc=false -> parent 504 "sealed.txt"
+
+The destination parent is **504 -- a real, existing plain ring**, not a
+provisional conflict copy. The devices trade the ring NAMES, so the sealed file's
+directory ends up wearing a different name, and the scan reports the FILE as
+having moved from the vault ring into a plain one. `crossing_a_vault_edge` then
+answers `Convert` on a move the user never made, and the conversion publishes.
+
+No aside, no re-mint, no conflict directory -- which is exactly why the identity
+oracle returned zero on this arm, and why item 3 (a re-mint fix) is inert here.
+
+**Accounting over the 22 failing hostile seeds:**
+
+    Convert verdict with a real-folder destination   10
+    aside (route 1)                                   1
+    create step-aside (route 2)                       1
+    rescue (route 3)                                  2
+    union accounted for                              13
+    STILL UNEXPLAINED                                 9
+
+The nine are 75104, 75108, 75111, 75114, 75116, 75120, 75122, 75126, 75128.
+None of the four probes fires on them and they leak anyway. That is the next
+trace, and nothing should be built for the hostile arm until it is done: on this
+evidence the hostile arm is at least two shapes, and possibly three.
+
+**Two counting mistakes on the way to this, both mine, both caught by checking
+the probes were alive rather than trusting a zero.** The first tally used
+`CONVERT_TRASH` as route 2's marker when route 2 is `CONFLICT_NAME` from
+`create_remote_folder`, and reported "19 of 22 through an unknown route". A
+probe census on one seed showed 13 ASIDE, 24 MINT, 329 UPLOAD and 1356 XING
+lines, so the zeros could only have been bad greps. The rule that caught it: a
+zero from a probe is only evidence once that probe has been shown to fire.
+
+**B10 -- the sweep is not trace-reproducible: the same seed runs a different
+action sequence each time.** Found 2026-09-10 while chasing the nine unexplained
+hostile seeds. Seed 75104, same binary, two consecutive runs:
+
+    run 1  120 uploads  22 mints  aside=0 create=0 rescue=0 convert=0
+    run 2  120 uploads  22 mints  aside=0 create=0 rescue=0 convert=0
+    but:   "Report 13.docx" content 2bcdab30 in one run, fb04850e in the other
+
+Totals and route markers match; the BYTES do not. Workload bodies are
+`format!("body {step} {}", device.name)`, wholly determined by step and device,
+so a different body at the same path means a different STEP or DEVICE wrote it.
+The action sequence therefore differs between processes for one seed.
+
+**What this does and does not cost.** Outcome-level stability has held in
+practice all campaign -- the same eleven clean seeds and the same twenty-two
+hostile seeds reproduce run after run -- and route attribution reproduced
+exactly on the seed tested. What is NOT reproducible is the trace: a failing
+seed re-run for diagnosis executes a different sequence, so a line number, an
+entity id, or a step index taken from one run may not exist in the next. Every
+per-seed trace in this document should be read as "a run of that seed", not
+"the run".
+
+Cause not established. A shared RNG consumed in a device order that is not fixed
+is the obvious candidate and has NOT been confirmed.
+
+**THE NINE, ANSWERED AT THE LEVEL OF *WHERE*: the sealed bytes are adopted into
+ORDINARY WORKLOAD FILES' identities.** The oracle now names the path it found
+the plaintext at (public-html-0e's probe -- one line, reads the END STATE, so it
+is immune to B10's trace nondeterminism, and strictly better than the
+upload-site hash it replaced):
+
+    75104  "Contested Folder/contested (conflicted copy ... from pc).txt"
+    75108  "contested.txt"                      <- the sync root
+    75111  "ring-2/ring-3.txt"
+
+Not a ring folder, not a conflict-copy directory, not the vault. The vault's
+content ends up wearing ANOTHER FILE'S NAME -- `contested.txt`, a conflict copy
+of it, `ring-3.txt` standing in `ring-2` -- and goes up in the clear under that
+identity.
+
+That is why none of the four publishing-site probes fires on these seeds: there
+is no mint of a sealed record and no crossing consulted. Some other file's
+record simply comes to hold the sealed bytes, and uploading them is then
+ordinary correct behaviour for that record. It is the contents-exchange
+counterfeit of Defect AD, wider than the rings: any workload file whose path the
+sealed bytes come to occupy can inherit them.
+
+**Still open: WHICH VERB puts the sealed bytes under that other identity.** The
+end state names the entity; its history names the verb, and that history has NOT
+been read. Do that before building anything for these seeds.
+
+**Also fixed on the way: the oracle's failure message.** It said only "the
+plaintext of a file the user sealed reached the server", which sent a session
+hunting through upload logs for a fact the end state already held. It now names
+the paths.
+
+## Defect AH -- the scan gives one record another record's bytes
+
+**This is the verb behind the nine, traced 2026-09-10.** Not a move, not a mint,
+not a crossing: the SCAN hands a plaintext record the sealed file's bytes, and
+uploading them is then ordinary correct behaviour for that record.
+
+    ADOPT_STRANGER entry=File:905 path="Contested Folder/in-27-pc.txt"
+                   took inode=1001 which belongs to File:901
+    ADOPT_STRANGER entry=File:901 path="ring-2/sealed.txt"
+                   took inode=1003 which belongs to File:905
+
+Inode 1001 is the sealed file. Record 905 -- an ordinary workload file -- adopts
+the vault's bytes as an EDIT OF ITSELF, and 901 takes 905's bytes in exchange.
+Thirteen such adoptions on seed 75104 alone, and the oracle finds the sealed
+plaintext at exactly the path 905 owns.
+
+**Where, and why it is there on purpose.** `scan::pair` rule 1, whose own
+comment says it: *"Same path, for every entry ... Checked WITHOUT CONSULTING THE
+INODE, because the safe-save dance replaces the inode at a stable path and that
+is an edit, not a new file."* That is a good reason and the rule is right for
+the case it was written for.
+
+**The guard that exists, and the gap.** The same loop already refuses this for
+one class of record:
+
+    if k.held && k.fingerprint.is_none_or(|fp| fp.file_id != obs.fingerprint.file_id) {
+        continue;
+    }
+
+with a comment describing precisely this hazard -- *"a stranger saved under the
+old name became the held file edited: its bytes went up as a version of a file
+whose real bytes were waiting in a vault this device cannot open"*. So the
+danger was seen, and the guard was scoped to HELD records. A non-held record
+gets no inode test at all.
+
+**Why the rings reach it.** The workload trades ring folder names with
+`user_rename` on the DISK -- the user's own act, never through `move_local`,
+which is why four of the nine seeds show no engine move of any kind. A renamed
+directory carries everything inside it, so the sealed file arrives at a path
+some other entry owns, and rule 1 pairs them.
+
+**Fix shape.** Extend the existing test past `held`: bytes at an entry's path
+whose inode belongs to a DIFFERENT live record are not that entry's edit. The
+safe-save case is untouched, because a safe-save leaves no other record owning
+the new inode. It is the family sentence from a fourth direction -- the engine
+never treats bytes it cannot name as content it owns.
+
+**PREDICTION, written before it is measured (public-html-0e, 2026-09-10): AH's
+guard ALONE will not close the nine -- it will move them to route 4.** With rule
+1 refused, 905's path holds a stranger's inode, so 905 falls through to the
+by-hash rule and finds its own bytes at 901's path: `Moved` INTO the vault. 901
+finds its bytes at 905's path: `Moved` OUT -- a `Convert` at the crossing, with
+502 left holding no known child. That is route 4's exact line, reached from the
+scan instead of from a trade.
+
+    AH guard alone     hostile count unchanged; route-4 CONVERT count
+                       rises by roughly nine
+    AH guard + hold    those nine become holds
+
+Recorded in advance so the number reads correctly when it arrives, and so the
+non-additivity this campaign has been bitten by twice is predicted rather than
+discovered.
+
+**The guard is consistent with the doctrine** because the inode is used to
+REFUSE a claim, never to make one -- the mirror of
+`the_file_here_is_another_entrys`. Its cost, which its pin should state: a
+recycled inode inside one scan window (A deleted, its inode reused by a save at
+B's path, A's record still live) refuses B's edit, and B's chain is lost as
+delete-plus-create. That is the degradation this engine already chooses over
+corruption, and the same price rule 4's deletion pays. A tighter and equally
+cheap form: refuse only when the OTHER record's own path does not currently hold
+its own inode -- in AH both paths hold the other's inode so it fires, and a
+plain safe-save beside a live neighbour never trips it.
+
+**MEASURED ON ALL NINE: AH fires on every one, and the wider damage is in the
+same numbers.**
+
+    seed   adoptions   of the SEALED inode
+    75104     13            2
+    75108     13            7
+    75111      7            2
+    75114     17            0     <- leaks, never adopts the sealed file
+    75116     19           12
+    75120     12            2
+    75122     21           17
+    75126     15           10
+    75128     14           10
+
+Eight of the nine adopt inode 1001 specifically, so AH accounts for those.
+**75114 leaks with ZERO sealed-inode adoptions and remains unexplained.**
+
+**The first column is the finding with the wider reach: 7 to 21 adoptions PER
+SEED, overwhelmingly between ORDINARY FILES.** On 75114, seventeen ordinary
+files took each other's bytes and nothing objected. So the poisoned-journey
+shape is not a hypothesis needing a synthetic test -- it is already happening,
+at volume, in every hostile seed. The end-state oracles cannot see it because
+the server finishes with the right bytes under the right names; only the version
+CHAINS are wrong, and nothing asserts on those. The estate's file-slot trades
+have been running this green for forty thousand seeds a version.
+
+**Not established:** what 75114 does instead, and the PLAIN-WORLD version -- two ordinary files trading names on disk, where
+rule 1 pairs each with the other's bytes as an edit, the server ends with the
+right bytes at the right names, and every end-state oracle is GREEN while both
+version chains carry the other file's history. That is the poisoned-journey
+shape, and the estate's file-slot trades may have been exercising it green all
+campaign. AH's pin must assert the VERSION CHAINS, not only the vault.
+
+## Defect AI -- swapping two filenames poisons both files' version histories
+
+**Severity: after an ordinary rename swap, restoring either file to its previous
+version gives the user the OTHER file's content. No vault, no faults, no second
+device, no concurrency -- one person renaming two files past each other.**
+Reproduced 2026-09-10 in `two_files_trading_names_keep_their_own_histories`.
+
+**And it reaches further than restore, which is the form the owner will care
+about** (public-html-0e; REASONED from how sharing is addressed, not measured --
+the simulator models no sharing, so this needs confirming against the platform
+before it is repeated as fact): sharing follows the ENTITY. A public link or a
+member grant issued on 901 would, after the swap, serve 902's bytes -- the
+person sent a draft is reading the other document -- and a tier grant or key
+wrap held on the entity would cover content it was never issued for. "Restore
+gives you the other file" becomes "the link you sent gives someone the other
+file".
+
+Write `a.txt` and `b.txt`, settle, then swap the names through a scratch name
+the way anyone swaps a draft for a final. Result:
+
+    tree      a.txt = A's content    b.txt = B's content     <- CORRECT
+    versions  901 (a.txt): A, then B
+              902 (b.txt): B, then A
+
+The tree is right, so **every end-state oracle in the estate is green**. What is
+wrong is invisible to all of them: each file's history now contains the other
+file's bytes. A user restoring a previous version gets a stranger's document.
+
+**Same mechanism as AH**, and the probe says so directly -- exactly two
+adoptions, one each way:
+
+    ADOPT_STRANGER entry=File:901 path="b.txt" took inode=1001 (belongs to 902)
+    ADOPT_STRANGER entry=File:902 path="a.txt" took inode=1002 (belongs to 901)
+
+`scan::pair` rule 1 matches by path without the inode, so each record reads the
+other's bytes as an edit of itself and uploads them as its own next version.
+
+**What this settles about scope.** AH was found in a vault ring under faults, and
+the obvious question was whether the exchange is a faults-only phenomenon. It is
+not: this needs no faults, no vault and no second device. The estate's file-slot
+trades have been running this shape green for forty thousand seeds a version,
+because nothing in the estate asserts on version rows.
+
+**Still to measure, and NOT yet claimed:** how OFTEN this happens in ordinary
+arms. The hostile ring seeds show 7-21 adoptions each, but the clean arms have
+not been probed, so "ordinary files exchange histories continuously" is
+unsupported as written and must not go further until the control is run
+(public-html-0e). The control is the ADOPT_STRANGER probe on the clean ring arm
+and on a plain file-slot-trade arm, checking it stays quiet where it should --
+in particular that it does not count the legitimate case of a download landing
+new bytes at a record's path after `make_room` moved the old file aside.
+
+**PREDICTION FOR AI UNDER AH'S GUARD, written before it is measured**
+(public-html-0e): with rule 1 refusing a path whose inode another live record
+owns, both records fall through to the by-hash rule and each finds its own bytes
+at the other's path -- two `Moved` deltas, a swap, which is the case naming
+already handles through a `.jd-swap` park and which the swap pins are green on.
+So the expected result is: two moves through a scratch name, 901's chain
+carrying A only, 902's carrying B only, **no upload at all**, no conflict copy.
+Anything else -- an upload, a park that does not finish, a conflict name -- is
+the guard interacting with naming and must be traced before the guard lands.
+AI is the right FIRST measurement of the guard, ahead of the hostile arm,
+because it is minimal: two adoptions, one each way, no faults.
+
+**The oracle this needs** is the chain assertion: give each PATH a lineage by
+following the workload's own renames, and assert per server entity that every
+version it received is a body the workload wrote at THAT lineage. Estate-wide,
+not AH's pin alone. Its first run will be red, and that red is the baseline any
+fix is measured against.
+
 **The invariant the fix has to restore**, and the one sentence to test against:
 *the engine never forgets a sealed record while its inode is still on the disk.*
 

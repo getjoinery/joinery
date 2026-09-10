@@ -103,6 +103,9 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.29
+ * @changelog 1.29 - authRuleSaysSpam(): the one definition of the authentication
+ *   spam rule, asked at ingest and again by the reader to explain a filing.
  * @version 1.28
  * @changelog 1.28 - two mailbox-scoped partial indexes (live rows, trashed rows)
  *   so the reader's list and count queries stop scanning the whole table.
@@ -506,6 +509,40 @@ class InboundEmailMessage extends SystemBase {
 	 */
 	public static function authIsVerified(?string $source): bool {
 		return isset(self::$AUTH_SOURCE_NAMES[strtolower(trim((string)$source))]);
+	}
+
+	/**
+	 * Does the AUTHENTICATION rule alone file this message as spam?
+	 *
+	 * The single definition of that rule. InboundEmailRouter::classifySpam() calls
+	 * it to decide a verdict at ingest; the reader calls it against a stored row to
+	 * explain WHY a message is sitting in Spam, so the two can never drift into
+	 * saying different things about the same message.
+	 *
+	 *   - DMARC fail → spam. DMARC is alignment-based and already subsumes
+	 *     SPF/DKIM, so it is the one signal worth acting on directly.
+	 *   - DMARC absent (none/unverified/empty) AND both SPF and DKIM fail → spam.
+	 *     The fallback for providers that supply SPF/DKIM but no DMARC. BOTH must
+	 *     fail: raw SPF/DKIM lack DMARC's alignment check, and a single failure
+	 *     has too many legitimate causes (forwarding breaks SPF; some legitimate
+	 *     mail breaks DKIM).
+	 *
+	 * Deliberately knows nothing about content scores, contacts or filters — it is
+	 * one input to a disposition, never the disposition.
+	 *
+	 * @param array{dkim?:string,spf?:string,dmarc?:string} $auth
+	 */
+	public static function authRuleSaysSpam(array $auth): bool {
+		$dmarc = strtolower(trim((string)($auth['dmarc'] ?? '')));
+		if ($dmarc === 'fail') {
+			return true;
+		}
+		if ($dmarc === '' || $dmarc === 'none' || $dmarc === 'unverified') {
+			$spf  = strtolower(trim((string)($auth['spf'] ?? '')));
+			$dkim = strtolower(trim((string)($auth['dkim'] ?? '')));
+			return ($spf === 'fail' && $dkim === 'fail');
+		}
+		return false;
 	}
 
 	/**

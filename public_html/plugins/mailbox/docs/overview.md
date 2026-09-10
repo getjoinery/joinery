@@ -3326,7 +3326,10 @@ because the auth verdicts it acts on are recorded for every message regardless.
 
 **Classification rule.** The router acts on the SPF/DKIM/DMARC verdicts it already
 records (it never computes them — see [Inbound authentication](#inbound-authentication-spf--dkim--dmarc)).
-`InboundEmailRouter::classifySpam()`:
+`InboundEmailMessage::authRuleSaysSpam()` holds the rule itself, and
+`InboundEmailRouter::classifySpam()` applies it alongside the content signal.
+One definition, because the reader asks the same question of a stored row when it
+explains why a message is in Spam:
 
 - **DMARC `fail` → `spam`.** The primary rule. DMARC is alignment-based and already
   subsumes SPF and DKIM, so it is the one signal worth acting on directly. Applies
@@ -3340,6 +3343,28 @@ records (it never computes them — see [Inbound authentication](#inbound-authen
 
 The rule is intentionally strict because the disposition is reviewable, never
 rejection: a false positive costs a click in the Spam view, not a lost message.
+
+**Contacts.** A sender in the recipient mailbox's address book is elevated past
+the **content score** — that is what the address book buys, and it applies on every
+ingest path (live SMTP, store-only, catch-all-store, the deferred/sealed parse,
+archive imports, and Direct). It does **not** clear the auth rule. A contact whose
+domain fails authentication still files as spam, because a DMARC failure means the
+`From` is unattested: contact membership is then a claim about an address nobody
+verified, and honouring it would hand the inbox to whoever spoofs that address.
+The lookup reads the mailbox's shared, unencrypted book, so a Private/Fortress
+mailbox — whose contacts are sealed per grantee and unreadable to keyless ingest —
+gets no automatic elevation. The content score is still recorded on an elevated
+message.
+
+**Always allow a sender.** A message filed by the auth rule carries a banner in the
+Spam view naming the reason and offering *Always allow `<address>`*. The button
+writes an explicit `never_spam` filter scoped to that mailbox, flagged for the
+"also apply to existing" backfill so mail already in Spam from that sender is swept
+up, and clears the message in hand immediately. This is the only route past an
+authentication failure, and it is deliberate, visible on the Filters page, and
+reversible by deleting the rule. A message filed on the content score gets no
+banner: **Not spam** teaches the scanner and adding the sender to contacts elevates
+them from then on. See `specs/mailbox_contact_spam_bypass.md`.
 
 **Forward suppression.** A judged-`spam` message is **never relayed** — forwarding
 spam burns the platform's sending reputation and can relay abuse. The forward is
