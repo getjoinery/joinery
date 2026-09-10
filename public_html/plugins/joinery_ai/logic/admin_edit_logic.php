@@ -276,25 +276,23 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
             $recipe->set('rcp_owner_user_id', $session->get_user_id());
         }
 
-        // Save-time taint gate. A tainted-capable recipe must explicitly
-        // opt in via rcp_allow_tainted_writes. The check fires here so the
-        // admin sees the trade-off in plain language at the moment they're
-        // configuring scope, instead of a mid-run failure. Pipeline mode has
-        // no tool/model allow-list surface — tainted-capability instead comes
-        // from the job's own untrustedDigest() declaration.
+        // Save-time standing-approval gate, pipeline mode only: the job writes
+        // one fixed field from the model's verdict with nobody clicking, so a
+        // job that reads other people's content needs the owner's explicit
+        // acknowledgment (rcp_allow_tainted_writes). The check fires here so
+        // the admin sees the trade-off at the moment they're configuring
+        // scope, instead of a mid-run failure. An agent recipe that reads
+        // outside content needs no acknowledgment: its writes are queued for
+        // approval (RecipeRunContext::queuesWrites()), and the editor says so.
         if ((string)$recipe->get('rcp_mode') === Recipe::MODE_PIPELINE) {
             $taint_eval = TaintGate::evaluate([], [], '',
                 $pipeline_job !== null && $pipeline_job->untrustedDigest());
-        } else {
-            $taint_eval = TaintGate::evaluate(
-                $tool_list, $model_list, (string)$recipe->get('rcp_workspace')
-            );
-        }
-        if ($taint_eval['tainted_capable'] && !$recipe->get('rcp_allow_tainted_writes')) {
-            return LogicResult::error(
-                'Standing approval required: ' . TaintGate::explain($taint_eval),
-                ['recipe' => $recipe, 'session' => $session]
-            );
+            if ($taint_eval['tainted_capable'] && !$recipe->get('rcp_allow_tainted_writes')) {
+                return LogicResult::error(
+                    'Standing approval required: ' . TaintGate::explain($taint_eval),
+                    ['recipe' => $recipe, 'session' => $session]
+                );
+            }
         }
 
         // A checkbox posts nothing when unticked, so the thinking requirement

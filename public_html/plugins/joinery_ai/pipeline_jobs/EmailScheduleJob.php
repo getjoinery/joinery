@@ -1,29 +1,33 @@
 <?php
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/EmailPipelineJobBase.php'));
-require_once(PathHelper::getIncludePath('includes/calendar/CalendarEntryImporter.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ActionQueue.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 /**
  * Pipeline job (specs/joinery_ai_calendar_ai_surface.md § 5): reads every
  * inbound email on the recipe's bound mailboxes for a real, dated event and
- * puts it on the recipe owner's own calendar, so a meeting confirmation or a
- * deadline notice buried in an inbox lands on the calendar automatically.
- * Reads the same deterministic EmailSecurityDigest the security scan and
- * triage jobs read (never raw MIME) — the item stays attacker-controlled
- * text the model only ever judges, never something it can act on beyond
- * this one verdict.
+ * PROPOSES it for the recipe owner's own calendar, so a meeting confirmation
+ * or a deadline notice buried in an inbox is one approval away from the
+ * calendar. Reads the same deterministic EmailSecurityDigest the security
+ * scan and triage jobs read (never raw MIME) — the item stays
+ * attacker-controlled text the model only ever judges.
  *
- * The write surface is exactly one CalendarEntryImporter::upsert() call
- * (recordVerdict()) — the calendar entry is always the recipe owner's own,
- * fixed in code, never configured or model-supplied. Nothing is deleted,
- * moved, or forwarded here.
+ * The write surface is exactly one queued create_calendar_entry proposal
+ * (recordVerdict()), which the owner approves or declines from their AI
+ * panel (specs/security_inventory.md S17). A stranger's message can put a
+ * card in front of the owner; it cannot put a row on their calendar. The
+ * entry, once approved, is always the recipe owner's own, fixed in code,
+ * never configured or model-supplied. Nothing is deleted, moved, or
+ * forwarded here.
  *
  * The mailbox-list binding, candidate selection, scheduling posture, and AI
  * panel contract all live in EmailPipelineJobBase, shared with the other two
  * email jobs.
  *
- * @version 1.4
+ * @version 1.5
+ * @changelog 1.5 - recordVerdict() queues a proposal instead of writing the
+ *   entry (specs/security_inventory.md S17)
  */
 class EmailScheduleJob extends EmailPipelineJobBase {
 
@@ -120,17 +124,19 @@ class EmailScheduleJob extends EmailPipelineJobBase {
             $end_local = LibraryFunctions::time_shift($start_local, '1 hour', 'Y-m-d H:i:s');
         }
 
-        // Provenance = the message id, so a log-row reset and re-run updates
-        // the same entry instead of duplicating it.
-        CalendarEntryImporter::upsert($owner_id, [
+        // Provenance = the message id: a log-row reset and re-run updates the
+        // pending proposal (ActionQueue::propose) and, once approved, the
+        // importer updates the same entry instead of duplicating it. The card
+        // is rendered from these literal arguments; nothing the model wrote
+        // reaches it as prose.
+        ActionQueue::propose($owner_id, (int)$recipe->key, $this->area(), 'create_calendar_entry', [
             'title'       => (string)($verdict['title'] ?? ''),
             'start_local' => $start_local,
             'end_local'   => $end_local,
             'timezone'    => $tz,
             'all_day'     => $all_day,
-            'source'      => 'email',
             'source_ref'  => $item_key,
-        ]);
+        ], 'source_ref');
     }
 
     public function defaultPrompt(): string {

@@ -86,6 +86,7 @@ class RememberTool implements RecipeToolInterface, QueueableToolInterface {
         $memory->set('mem_owner_user_id', $ctx->actingUserId());
         $memory->set('mem_created_by_user_id', $ctx->actingUserId());
         $memory->set('mem_source', AiMemory::SOURCE_AI);
+        $memory->set('mem_provenance', mb_substr($ctx->writeProvenance(), 0, 255));
         $memory->set('mem_title', $title);
         $memory->set('mem_content', $content);
         if ($tags !== null) {

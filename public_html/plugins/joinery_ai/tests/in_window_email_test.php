@@ -766,8 +766,8 @@ try {
 	MailboxAliasConfig::clearPostureCache();
 	check(MailboxAliasConfig::aiProcessingConsent($address) === InboundEmailDomain::CONSENT_LOCAL,
 		'the sealed domain has not consented to its mail travelling');
-	check(MailboxAliasConfig::aiProcessingConsent($std_address) === InboundEmailDomain::CONSENT_CLOUD,
-		'while a standard domain has nothing to withhold');
+	check(MailboxAliasConfig::aiProcessingConsent($std_address) === InboundEmailDomain::CONSENT_LOCAL,
+		'and neither has the standard domain — consent is about where mail may go, not whether it is sealed');
 
 	$unpinned = iw_recipe($owner_id, 'email_triage', $address);
 	$unpinned->set('rcp_model', '');
@@ -788,8 +788,8 @@ try {
 		$cloud_message = $e->getMessage();
 	}
 	check($refused_cloud, 'a sealed-source recipe pinned to a cloud model is refused');
-	check(stripos($cloud_message, 'encrypted at rest') !== false,
-		'and the refusal explains that the mail is sealed', $cloud_message);
+	check(stripos($cloud_message, 'domain page') !== false,
+		'and the refusal names the domain page where the consent lives', $cloud_message);
 
 	// A local model on the same sealed recipe is fine.
 	$recipe->set('rcp_model', 'qwen3.6:35b-a3b-nvfp4');
@@ -841,10 +841,31 @@ try {
 	check($stopped_again,
 		'withdrawing consent stops an already-saved recipe, with the recipe untouched');
 
-	// A standard-mailbox recipe is never gated by this.
+	// A standard-mailbox recipe is gated by the same setting: its domain has
+	// not consented either, so it is floored to local — and a cloud pin is
+	// refused with the same explanation, no "encrypted at rest" assumed.
 	$std_recipe->set('rcp_model', 'claude-haiku-4-5');
-	check(RecipeVaultScope::consentTrustFloor($std_recipe) === null,
-		'and an ordinary mailbox recipe imposes no consent floor at all');
+	check(RecipeVaultScope::consentTrustFloor($std_recipe) === AiModelRequirement::TRUST_LOCAL,
+		'an ordinary mailbox recipe is floored by its domain\'s consent too (S19)');
+	$std_refused = false;
+	$std_message = '';
+	try {
+		RecipeVaultScope::resolveForRecipe($std_recipe);
+	} catch (LlmProviderException $e) {
+		$std_refused = true;
+		$std_message = $e->getMessage();
+	}
+	check($std_refused, 'a standard-mailbox recipe pinned to a cloud model is refused');
+	check(stripos($std_message, 'encrypted') === false && stripos($std_message, 'domain page') !== false,
+		'and the refusal points at the domain page without claiming the mail is encrypted', $std_message);
+	$standard->set('ied_ai_processing_consent', InboundEmailDomain::CONSENT_CLOUD);
+	$standard->save();
+	MailboxAliasConfig::clearPostureCache();
+	check(RecipeVaultScope::consentTrustFloor($std_recipe) === AiModelRequirement::TRUST_ANY,
+		'and a standard domain that consents to the cloud lifts the floor');
+	$standard->set('ied_ai_processing_consent', InboundEmailDomain::CONSENT_LOCAL);
+	$standard->save();
+	MailboxAliasConfig::clearPostureCache();
 
 	// A pin to an endpoint this install cannot reach is an AVAILABILITY fact,
 	// not a consent violation: the requirement is still enough to run on, so it

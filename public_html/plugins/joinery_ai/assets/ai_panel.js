@@ -45,7 +45,7 @@
  * the person as the blue circle — one is progress, the other is a request, and
  * they must not read as the same kind of number.
  *
- * Vanilla JS, jy-ui styling, no framework. @version 2.5.0
+ * Vanilla JS, jy-ui styling, no framework. @version 2.6.0
  */
 (function () {
 	'use strict';
@@ -372,6 +372,9 @@
 				(a.facts || []).forEach(function (line, i) {
 					card.appendChild(el('p', i === 0 ? 'aip-card-name' : 'aip-card-status', line));
 				});
+				if (a.source_type === 'recipe' && a.recipe_name) {
+					card.appendChild(el('p', 'aip-card-status', 'Proposed by the recipe “' + a.recipe_name + '”'));
+				}
 				if (a.model_note) {
 					var det = document.createElement('details');
 					det.className = 'aip-action-note';

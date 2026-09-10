@@ -23,7 +23,11 @@
  * was considered and rejected: it could lose a legitimate contact's sealed mail,
  * where a request-level refusal loses nothing.
  *
- * @version 1.2
+ * @version 1.3
+ * @changelog 1.3 - capRefusal() also bounds the held bytes per SENDING domain
+ *   (specs/security_inventory.md S21): the recipient-side caps say how much a
+ *   box will hold in total, the sender cap says how much of it one stranger
+ *   can be.
  * @changelog 1.1 - a kind's ingest may throw DirectDeferIngest at commit; the
  *   delivery is HELD with its parts and drained at the recipient's next unlock.
  * @changelog 1.2 - gateFor() judges the kind's declared recipient requirement
@@ -43,11 +47,19 @@ require_once(PathHelper::getIncludePath('data/direct_spool_parts_class.php'));
 class DirectSpoolService {
 
 	/**
-	 * Null when this delivery fits under both caps; the refusal reason otherwise.
+	 * Null when this delivery fits under every cap; the refusal reason otherwise.
 	 *
-	 * @param array $resolved the recipient facts from DirectRecipients::resolve()
+	 * Three caps. Two are recipient-side — the whole domain, one address within
+	 * it — and bound what a box can be made to hold. The third is sender-side:
+	 * the verified sending domain's own held bytes across every recipient, so
+	 * that one stranger cannot be the whole of an address's allowance. All three
+	 * are instance configuration applied identically to every address, so a
+	 * refusal on any of them discloses nothing about the recipient.
+	 *
+	 * @param array  $resolved      the recipient facts from DirectRecipients::resolve()
+	 * @param string $sender_domain the domain the signature verified ('' skips the sender cap)
 	 */
-	public static function capRefusal(array $resolved, string $recipient, int $declared_bytes): ?string {
+	public static function capRefusal(array $resolved, string $recipient, int $declared_bytes, string $sender_domain = ''): ?string {
 		$domain = DirectProtocol::domainOf($recipient);
 
 		$domain_cap = DirectSettings::spoolDomainCapBytes();
@@ -57,6 +69,11 @@ class DirectSpoolService {
 		$address_cap = DirectSettings::spoolAddressCapBytes();
 		if ($address_cap > 0 && DirectSpool::bytesForAddress($recipient) + $declared_bytes > $address_cap) {
 			return 'Direct spool is full for this address';
+		}
+		$sender_cap = DirectSettings::spoolSenderCapBytes();
+		if ($sender_domain !== '' && $sender_cap > 0
+				&& DirectSpool::bytesForSenderDomain($sender_domain) + $declared_bytes > $sender_cap) {
+			return 'Direct spool is full for this sender';
 		}
 		return null;
 	}

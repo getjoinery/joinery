@@ -160,6 +160,9 @@ class ChatMemory {
             $title = self::indexTitle((string)$r['mem_title']);
             $meta = ($r['mem_scope'] === AiMemory::SCOPE_SHARED ? 'shared' : 'personal')
                   . ' · saved by ' . (string)$r['mem_source'];
+            if (trim((string)($r['mem_provenance'] ?? '')) !== '') {
+                $meta .= ' · from ' . trim((string)$r['mem_provenance']);
+            }
             $when = $r['mem_update_time'] ?: $r['mem_create_time'];
             if ($when) $meta .= ' · ' . LibraryFunctions::convert_time($when, 'UTC', $tz, 'M j, Y');
 
@@ -190,6 +193,9 @@ class ChatMemory {
         foreach ($rows as $r) {
             $line = '- ' . self::indexTitle((string)$r['mem_title'])
                   . ' · ' . ($r['mem_scope'] === AiMemory::SCOPE_SHARED ? 'shared' : 'personal');
+            if (trim((string)($r['mem_provenance'] ?? '')) !== '') {
+                $line .= ' · from ' . self::indexTitle((string)$r['mem_provenance']);
+            }
             $tags = json_decode((string)$r['mem_tags'], true);
             if (is_array($tags) && count($tags)) {
                 $line .= ' · ' . implode(', ', array_map('strval', $tags));

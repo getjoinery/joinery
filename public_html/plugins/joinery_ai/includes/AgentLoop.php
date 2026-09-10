@@ -234,15 +234,17 @@ class AgentLoop {
             // tool result and the turn continues, so a hostile message's best
             // possible outcome is a proposal the owner saw and declined
             // (specs/implemented/ai_action_queue.md, the hot-turn egress
-            // approval spec). For recipes the queue hook is inert
-            // (queuesWrites() is false): writes run through the recipe's own
-            // standing-approval door as always, but hot egress has no one to
-            // approve it, so it is refused outright.
+            // approval spec). An agent recipe that reads content written by
+            // other people queues the same way (security_inventory S16); its
+            // own workspace is the one write it keeps inline (executesInline).
+            // A recipe that reads nothing outside runs its writes inline, and
+            // hot egress there has no one to approve it, so it is refused.
             $tool_result_blocks = [];
             $iter_had_error = false;
             foreach ($tool_uses as $tu) {
                 $hot_egress = RiskHeuristic::isHotEgress($tu);
-                if ($context->queuesWrites() && ($hot_egress || RiskHeuristic::isMutating($tu))) {
+                if ($context->queuesWrites() && ($hot_egress || RiskHeuristic::isMutating($tu))
+                        && !$context->executesInline((string)($tu['name'] ?? ''))) {
                     // Queued for the owner's approval. A SUCCESSFUL enqueue is
                     // not an error, but a FAILED one (e.g. no vault to seal the
                     // proposal to) comes back is_error and must count toward the

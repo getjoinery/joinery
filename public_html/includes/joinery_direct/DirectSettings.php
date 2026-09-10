@@ -10,7 +10,9 @@
  * mechanism — the values live here, the enforcement reuses the platform's
  * existing limiters and byte counters.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - spoolSenderCapBytes(): the per-sending-domain bound on
+ *   held mail (specs/security_inventory.md S21)
  */
 
 class DirectSettings {
@@ -46,6 +48,17 @@ class DirectSettings {
 
 	public static function spoolAddressCapBytes(): int {
 		return max(0, (int)self::raw('joinery_direct_spool_address_cap_bytes', (string)(1024 * 1024 * 1024)));
+	}
+
+	/**
+	 * The most one SENDING domain may have held across the deployment. The two
+	 * caps above bound what a recipient can be made to store in total; this one
+	 * bounds how much of that any single stranger can be. Per sending domain,
+	 * not per sending address: addresses under a domain cost nothing to mint,
+	 * a domain costs a registration and a published capability record.
+	 */
+	public static function spoolSenderCapBytes(): int {
+		return max(0, (int)self::raw('joinery_direct_spool_sender_cap_bytes', (string)(512 * 1024 * 1024)));
 	}
 
 	public static function spoolRetentionDays(): int {

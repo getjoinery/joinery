@@ -12,7 +12,10 @@
  * dispatcher and refused by the spawner outright; a mixed binding still runs
  * from cron for its standard remainder.
  *
- * @version 1.4.0
+ * @version 1.5.0
+ * @changelog 1.5.0 - consentTrustFloor() binds for every pipeline recipe with a
+ *   job, not only one with sealed content in play (specs/security_inventory.md
+ *   S19); the refusal wording no longer assumes the mail is encrypted at rest
  */
 
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.php'));
@@ -170,10 +173,20 @@ class RecipeVaultScope {
 	 * see scopeOrThrow().
 	 */
 	public static function consentTrustFloor(Recipe $recipe): ?string {
+		// Agent mode is out of scope here, for the reason scopeOrThrow() states;
+		// a pipeline recipe that declares no job reads nothing.
+		if ((string)$recipe->get('rcp_mode') !== Recipe::MODE_PIPELINE) {
+			return null;
+		}
+		if (trim((string)$recipe->get('rcp_pipeline_job')) === '') {
+			return null;
+		}
+		// The scope check is not what decides the floor any more — the domain's
+		// consent binds whether or not the mail is sealed at rest — but a
+		// registry failure here is still worth a line in the log, and the
+		// consent path below treats it as protected on its own.
 		try {
-			if (self::scopeOrThrow($recipe) === null) {
-				return null;   // nothing sealed in play — any model may read it
-			}
+			self::scopeOrThrow($recipe);
 		} catch (\Throwable $e) {
 			error_log('RecipeVaultScope: assuming protected content for recipe '
 				. (int)$recipe->key . ' — scope check failed: ' . $e->getMessage());
@@ -245,14 +258,13 @@ class RecipeVaultScope {
 			// fix is a domain setting, not a bigger model.
 			if ($floor !== null && $floor !== AiModelRequirement::TRUST_ANY) {
 				throw new LlmProviderException(
-					'This recipe reads mail that is encrypted at rest, and that mail\'s domain only '
-					. 'permits it to be read by a model on '
+					'This recipe reads mail whose domain only permits it to be read by a model on '
 					. ($floor === AiModelRequirement::TRUST_LOCAL
 						? 'this server'
 						: 'this server or a vendor you have accepted')
 					. '. Nothing configured here fits. Either serve a suitable model locally, or '
-					. 'change how far the domain\'s decrypted mail may travel on the mailbox '
-					. 'domain page. (' . $e->getMessage() . ')');
+					. 'change how far the domain\'s mail may travel on the mailbox domain page. ('
+					. $e->getMessage() . ')');
 			}
 			throw $e;
 		}
@@ -277,11 +289,10 @@ class RecipeVaultScope {
 		if (AiModelRequirement::trustSatisfies($floor, $resolution->trust())) return;
 
 		throw new LlmProviderException(
-			'This recipe reads mail that is encrypted at rest, and “' . $resolution->label()
+			'This recipe reads mail, and “' . $resolution->label()
 			. '” runs on a ' . $resolution->trust() . ' endpoint — so running it would send the '
-			. 'decrypted mail further than that mail\'s domain has agreed to. Either pin a model '
-			. 'this domain permits, or change how far its decrypted mail may travel on the '
-			. 'mailbox domain page.');
+			. 'mail further than its domain has agreed to. Either pin a model this domain '
+			. 'permits, or change how far its mail may travel on the mailbox domain page.');
 	}
 
 	/**

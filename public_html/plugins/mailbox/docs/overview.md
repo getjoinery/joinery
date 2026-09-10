@@ -785,6 +785,25 @@ filter and the address.
 A filter with no forwarding address needs no acknowledgment, and forwarding off
 a Standard domain is unaffected.
 
+### The forward loop guard
+
+No forward path relays a message that is itself an automatic forward. Every
+forward the router builds carries `X-Forwarded-By: Joinery Inbound Email` and
+`Auto-Submitted: auto-forwarded` (an original that already declares itself
+auto-submitted keeps its own declaration), and before relaying — alias forward,
+`forward_and_store`, catch-all forward, and the filter "Forward to" action —
+`InboundEmailRouter::forwardLoopRefusal()` reads the arrival headers for
+three signals: our own marker, a foreign `Auto-Submitted: auto-forwarded`, or
+`FORWARD_MAX_HOPS` (30) `Received` headers. Any one refuses. Other
+`Auto-Submitted` values (`auto-replied`, `auto-generated`) do not: a bounce or
+a vacation reply still reaches the owner.
+
+A refused message is never bounced, because a bounce to a forwarder is the same
+loop by another route. The alias path logs it `rejected` with the reason and
+keeps whatever its delivery mode keeps (a `forward_and_store` copy was already
+stored). The filter action reads the retained header block (`iem_raw_headers`)
+when the row keeps no raw, so a lean record is guarded too.
+
 The **SRS bounce notification** (`handleSRSBounce`) is not a relay — it is a
 freshly generated delivery-failure message, sent through the normal provider
 send path (`EmailSender`), which also reuses the provider credential.
@@ -1704,6 +1723,16 @@ domain form only for Private and Fortress domains (at Standard the server
 already reads the mail, so there is nothing to consent to), and turning it on
 requires a recent identity confirmation. Turning it off never does — withdrawing
 consent must not be harder than giving it.
+
+A second, separate answer — `ied_ai_processing_consent` — says how far the
+domain's mail may travel to be read by a model: `local` (hardware the operator
+controls), `trusted` (a vendor the operator has accepted), or `cloud`. It shows
+at **every** security level, Standard included, because where mail is sent to
+be read is a different question from whether it is sealed on disk: a stranger's
+message leaving the box for a hosted API is exactly what the setting refuses.
+It starts at `local`, loosening it needs the same identity confirmation, and a
+recipe that would need more than the domain allows is refused with a message
+naming this page.
 
 With it off, saving a recipe pointed at a mailbox on that domain is refused, and
 the message names the domain and the setting. The refusal happens at save time

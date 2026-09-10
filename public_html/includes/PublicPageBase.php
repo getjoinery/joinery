@@ -978,7 +978,10 @@ abstract class PublicPageBase {
 	 *
 	 * The listed hosts are the third parties pages actually load: the payment
 	 * providers (script + their checkout frames), hCaptcha and reCAPTCHA,
-	 * YouTube embeds, Google Fonts, and the script CDNs themes declare.
+	 * YouTube and Vimeo embeds, Google Fonts, and the script CDNs themes
+	 * declare. Plugins load every asset locally; there is no way for a plugin
+	 * to add a host here, and one that needs to shows up in the console as a
+	 * violation.
 	 */
 	public static function csp_policy() {
 		return array(
@@ -998,7 +1001,8 @@ abstract class PublicPageBase {
 				'https://js.stripe.com', 'https://hooks.stripe.com', 'https://checkout.stripe.com',
 				'https://www.paypal.com', 'https://www.sandbox.paypal.com',
 				'https://*.hcaptcha.com', 'https://www.google.com',
-				'https://www.youtube.com', 'https://www.youtube-nocookie.com'),
+				'https://www.youtube.com', 'https://www.youtube-nocookie.com',
+				'https://player.vimeo.com'),
 			'worker-src'      => array("'self'", 'blob:'),
 			'object-src'      => array("'none'"),
 			'base-uri'        => array("'self'"),
