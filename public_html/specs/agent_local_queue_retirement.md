@@ -297,11 +297,11 @@ That is a live TLS defect, not a queue-retirement problem, and it is tracked
 in its own right rather than here. Its only bearing on this spec is on G2: the
 right end state for certificate issuance is DNS-01 through the platform's own
 DNS drivers, which changes what R3 should be. Specified in
-`origin_tls_and_certificate_issuance.md` (deferred by owner, 2026-08-30).
+`tls_and_origin_trust.md` (its origin-trust half deferred by owner, 2026-08-30).
 
 **What the flip breaks is new issuance** — the SSL phase of provisioning a
 container or Docker-host node has no transport once the local queue is gone.
-Still a gate; its fix home is `origin_tls_and_certificate_issuance.md`, whose
+Still a gate; its fix home is `tls_and_origin_trust.md`, whose
 DNS-01 design needs nothing inbound and works identically inside a container.
 R3 (Docker-host certificates) in `agent_machine_posture_and_relay_converge.md`
 is what that supersedes, and should not be built as written.
