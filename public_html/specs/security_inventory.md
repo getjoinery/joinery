@@ -173,8 +173,8 @@ domain's consent.
 Ordered by likelihood of the route each closes. S-numbers are stable for
 tracking. B-numbers are findings; B1–B6 are described in
 `vault_key_memory_exposure.md`, B7–B11 below, Q-numbers in
-`vault_exposure_quick_fixes.md`. A row marked Closed is finished and its
-record lives in the closures spec the row names, all under `implemented/`
+`vault_exposure_quick_fixes.md`. A row marked Closed or Declined is finished
+and its record lives in the closures spec the row names, all under `implemented/`
 (S1–S3, S15, S20 in `security_inventory_closures_2026_09.md`; the mail items
 in `security_inventory_closures_mail_2026_09.md`; S4 in
 `security_inventory_closures_admin_2026_09.md`); everything else is open and
@@ -188,8 +188,8 @@ the owner is investigating and adding.
 | S4 | Closed 2026-09-10. Both shapes: a deployment is born managed with `totp_require_admins` on (`utils/hosted_plan_notice.php`, only ever on, only on the silent-to-managed transition), and `AdminSecondFactorNotice` names the admins with no second factor on every admin page with the fix in place (enrol yours; require one of every admin) — never a gate. The requirement accepts a passkey as well as an authenticator app — `security_inventory_closures_admin_2026_09.md` § S4 | route 1 | small |
 | S5 | Extractor subprocess under its own uid with no write to the webroot (a `joinery-extract` user, or `systemd-run` with `ProtectSystem=strict` and `PrivateNetwork`) | route 2 | medium, per node |
 | S6 | Postfix pipe under a uid that can write only the attachment store and the DB, not the tree; falls out of Mitigation C if C lands first | route 2 | medium, install + fleet |
-| S7 | Refresh: the pool never parses stranger bytes. The button enqueues and polls; the parse runs in the cron tier | route 3 | medium |
-| S8 | Declined 2026-09-09. Remote images keep loading from the reader's browser. The leak is the sender learning the open, the reader's IP and browser; it cannot run code or reach the session. Blocking by default breaks mail; proxying substitutes the node's address, which names the deployment, for the reader's, which the owner judged the worse leak | (privacy, not the bar) | — |
+| S7 | Declined 2026-09-10. Moving the Refresh parse to the cron tier relocates it between two processes sharing a uid and credentials, cannot move Fortress mail at all, and makes Refresh wait a scheduler tick; the parse jail of separation 1 is the close — `security_inventory_closures_mail_2026_09.md` § S7 | (separation 1) | — |
+| S8 | Declined 2026-09-09. Remote images keep loading from the reader's browser; disclosure to one sender, never execution (residual 11) — `security_inventory_closures_mail_2026_09.md` § S8 | (privacy, not the bar) | — |
 | S9 | Mitigation B: signed plugin and theme packages, vendor inside the archive (B3), site-local root-held key | admin session → code | large |
 | S10 | Mitigation C: web user cannot write the tree (B4); makes S5/S6 structural | persistence after any break-in | large, agent-migration territory |
 | S11 | The rollout is the open step: turn `enable_csp` on with report-only, use the site watching the browser console, add what is legitimate to `csp_policy()` (Vimeo added 2026-09-09), move plugin assets local (plugins load every asset locally, no host declaration), then enforce. Owner 2026-09-09: no report endpoint or table for this; a memory reminder carries it. Dropping `'unsafe-inline'` (nonces + FormWriter handlers, about 150 inline script blocks and 129 inline handlers) stays a large maybe-later item; until then the policy does not stop an injected inline script | defence in depth for route 1 | rollout small; nonces large |

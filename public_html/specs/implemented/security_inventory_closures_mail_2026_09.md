@@ -3,8 +3,9 @@
 **Status:** Implemented 2026-09-09. The record of the six mail
 rows closed from `security_inventory.md` (the 1.0 bar): S14, S16, S17, S18,
 S19 and S21 — the "what a message can make the system do" findings B7, B8
-(both halves), B9 and B10, plus the Direct spool bound. The inventory keeps
-the S-numbers and points here.
+(both halves), B9 and B10, plus the Direct spool bound — and of the two mail
+rows the owner declined, S7 and S8, with the reasoning, so the inventory
+carries only the pointer. The inventory keeps the S-numbers and points here.
 
 Each section says what the door was, what closes it, and where the closure is
 pinned. The reasoning is in the inventory's § What a message can make the
@@ -178,3 +179,57 @@ is the counter, over the `jdp_sender_domain` the spool row already kept.
 section): a sender under its cap is accepted and charged; its next delivery
 is refused 507 naming the sender; a different sending domain to the same
 recipient is still accepted.
+
+---
+
+## S7 — declined: the Refresh parse stays where it is
+
+**Declined 2026-09-10.** The row asked that the Refresh button enqueue and
+poll, with the MIME parse of a stranger's message running in the cron tier
+so the web pool never touches those bytes.
+
+**What Refresh does.** The button calls `mailbox/check_mail`, which runs two
+pull lanes inside the web request. The relay lane pulls sealed blobs and
+does not parse them. The IMAP lane runs the full fetch cycle, parse
+included, in the php-fpm worker under a 20-second budget. Fortress rows are
+parsed in the pool on the list read that follows, because only the viewer's
+session holds the key that opens them. Attachment extraction is already a
+subprocess with a timeout and a memory cap (`DocumentText::run()`).
+
+**Why the move does not contain anything.** The cron tier and the pool run
+as the same uid with the same database credentials and the same config file.
+An attacker who lands in a cron process from a parser bug has everything
+except the live session and the keys of whoever else is in a vault window at
+that moment. Fortress mail cannot move at all: cron never holds a vault key,
+so the sealed parse stays in the pool in the one topology where the keys are
+worth the most. IMAP mail already parses in the cron tier on every scheduled
+pass; Refresh adds the same parse on demand. Relocating the parse between two
+processes that share a uid is not a containment.
+
+**What it would cost.** Refresh means "go get my mail". Enqueue-and-poll
+makes it wait for the next scheduler tick — a minute on a node, fifteen on
+dev — and the button stops meaning that.
+
+**Where the door closes instead.** Separation 1 in the inventory: the parse
+runs in a jail (its own user, no network, a read-only view of the tree, a
+seccomp profile) wherever it is called from, and Refresh calls into it
+synchronously and stays fast. S5 and S6 are the same jail at the extractor
+and the Postfix pipe.
+
+---
+
+## S8 — declined: remote images keep loading from the reader's browser
+
+**Declined 2026-09-09.** The row asked that remote images in a message not
+load by default, or load through the node.
+
+**What the leak is.** A tracking pixel reports the open, the time, the
+reader's IP and browser to the sender. The message frame is sandboxed, so
+this is disclosure to one sender, never execution and never the session.
+
+**Why not.** Blocking by default breaks mail for every reader to close a leak
+of one address. Proxying through the node substitutes the node's address,
+which names the deployment, for the reader's, which the owner judged the
+worse leak of the two. The inventory carries the residual as its item 11
+(*A sender learns the open*).
+
