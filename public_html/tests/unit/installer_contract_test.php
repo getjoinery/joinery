@@ -458,9 +458,8 @@ check($wuv !== '' && strpos($wuv, 'mint_placeholder_cert "$domain"') !== false,
 check(strpos($render_src, 'mint_placeholder_cert "${DOMAIN}"') !== false, 'and render_vhost.sh mints it on every converge');
 check(strpos($issue_src, 'placeholder') === false || strpos($issue_src, 'mint_placeholder_cert') === false,
     'issue_origin_cert.sh never touches the placeholder');
-foreach (array('default_virtualhost.conf' => '2.06', 'default_proxy_vhost.conf' => '1.02') as $tpl => $ver) {
+foreach (array('default_virtualhost.conf', 'default_proxy_vhost.conf') as $tpl) {
     $t = (string)file_get_contents($tools_dir . '/' . $tpl);
-    check(strpos($t, '#Version ' . $ver) === 0, "$tpl is $ver");
     check(substr_count($t, 'Define JOINERY_CERT_DIR_{{SITE_NAME}}') === 2
         && strpos($t, '<IfFile ${JOINERY_CERT_DIR_{{SITE_NAME}}}/fullchain.pem>') !== false
         && strpos($t, 'SSLCertificateFile ${JOINERY_CERT_DIR_{{SITE_NAME}}}/fullchain.pem') !== false,
@@ -469,6 +468,46 @@ foreach (array('default_virtualhost.conf' => '2.06', 'default_proxy_vhost.conf' 
         "$tpl defines the placeholder first and the Let's Encrypt lineage over it, so the variable is never undefined");
 }
 check(is_file($history_dir . '/default_virtualhost-2.05.conf'), 'vhost_history carries 2.05 so boxes rendered from it adopt');
+
+// B11: a TLS connection whose SNI is www.<domain> matches no :443 vhost when
+// only the apex has one, and Apache hands it to the FIRST :443 vhost on the
+// address — on a shared host, another site's certificate and content. So www
+// has its own :443 host under the same guard, on the same certificate,
+// answering only with a 308 to the apex.
+foreach (array('default_virtualhost.conf' => '2.07', 'default_proxy_vhost.conf' => '1.03') as $tpl => $ver) {
+    $t = (string)file_get_contents($tools_dir . '/' . $tpl);
+    check(strpos($t, '#Version ' . $ver) === 0, "$tpl is $ver");
+    preg_match_all('/<VirtualHost [^>]*:443>(.*?)<\/VirtualHost>/s', $t, $hosts);
+    $www_hosts = array_values(array_filter($hosts[1], function ($b) { return preg_match('/^\s*ServerName www\.\{\{DOMAIN_NAME\}\}\s*$/m', $b) === 1; }));
+    $apex_hosts = array_values(array_filter($hosts[1], function ($b) { return preg_match('/^\s*ServerName \{\{DOMAIN_NAME\}\}\s*$/m', $b) === 1; }));
+    check(count($www_hosts) === 1 && count($apex_hosts) === 1, "$tpl has exactly one :443 host for www and one for the apex", count($www_hosts) . '/' . count($apex_hosts));
+    $w = $www_hosts[0] ?? '';
+    $a = $apex_hosts[0] ?? '';
+    check(strpos($w, 'SSLCertificateFile ${JOINERY_CERT_DIR_{{SITE_NAME}}}/fullchain.pem') !== false
+        && strpos($w, 'SSLCertificateKeyFile ${JOINERY_CERT_DIR_{{SITE_NAME}}}/privkey.pem') !== false,
+        "$tpl www :443 carries the same certificate paths as the apex");
+    // The same TLS policy as its own template's apex block: the bare-metal
+    // template states one, the proxy template inherits Apache's; www matches
+    // whichever its apex does.
+    foreach (array('SSLProtocol', 'SSLCipherSuite', 'SSLHonorCipherOrder', 'SSLSessionTickets') as $directive) {
+        preg_match('/^\s*' . $directive . ' .*$/m', $a, $am); preg_match('/^\s*' . $directive . ' .*$/m', $w, $wm);
+        check(trim($am[0] ?? '') === trim($wm[0] ?? ''), "$tpl www :443 states the same $directive as the apex", trim($am[0] ?? '(none)') . ' vs ' . trim($wm[0] ?? '(none)'));
+    }
+    check(preg_match('/^\s*Redirect 308 \/ https:\/\/\{\{DOMAIN_NAME\}\}\/\s*$/m', $w) === 1, "$tpl www :443 answers only with a 308 to the apex, path preserved");
+    check(strpos($w, 'ProxyPass') === false && strpos($w, 'DocumentRoot') === false, "$tpl www :443 serves nothing of its own");
+    check(strpos($t, 'ServerAlias') === false, "$tpl uses no ServerAlias: the redirect stays a vhost, not a rewrite inside the site's block");
+    // Inside the certificate guard: the www host sits after the guard opens and before it closes.
+    $guard_at = strpos($t, '<IfFile ${JOINERY_CERT_DIR_{{SITE_NAME}}}/fullchain.pem>');
+    $www_at   = strpos($t, 'ServerName www.{{DOMAIN_NAME}}' . "
+", $guard_at !== false ? $guard_at : 0);
+    $close_at = $guard_at !== false ? strpos($t, '</IfFile>', $guard_at) : false;
+    // The guard's own </IfFile> is the first one after the apex :443 block; www must precede it.
+    $apex_close = $guard_at !== false ? strpos($t, '</VirtualHost>', $guard_at) : false;
+    $guard_close = $apex_close !== false ? strpos($t, '</IfFile>', $apex_close) : false;
+    check($guard_at !== false && $www_at !== false && $guard_close !== false && $www_at > $guard_at && $www_at < $guard_close,
+        "$tpl www :443 sits inside the certificate guard");
+}
+check(is_file($history_dir . '/default_virtualhost-2.06.conf'), 'vhost_history carries 2.06');
 
 // Executed: the helper mints, and both rendered templates parse under Apache
 // in all three states with the certificate directory each state calls for.
@@ -526,12 +565,14 @@ if ($apache !== '' && is_file('/usr/lib/apache2/modules/mod_info.so')) {
         check(substr(trim($d), -4) === 'RC=0' && strpos($d, 'Syntax error') === false, "$tpl parses with the placeholder only", implode(' | ', array_slice(preg_split('/\R/', trim($d)), -4)));
         check(strpos($d, 'SSLCertificateFile ' . $vt . '/ph/example.test/fullchain.pem') !== false, "$tpl :443 carries the placeholder paths");
         check(strpos($d, 'RewriteRule ^ https://%{SERVER_NAME}') === false, "$tpl :80 has no https redirect on the placeholder");
+        check(preg_match('/port 443 namevhost www\.example\.test/', $d) === 1, "$tpl lists www.example.test on port 443 with the placeholder (B11)");
         // Both: the real certificate wins.
         copy($vt . '/ph/example.test/fullchain.pem', $le_live . '/fullchain.pem');
         copy($vt . '/ph/example.test/privkey.pem', $le_live . '/privkey.pem');
         $d = $dump($conf);
         check(strpos($d, 'SSLCertificateFile ' . $le_live . '/fullchain.pem') !== false, "$tpl :443 carries the Let's Encrypt paths once the lineage exists");
         check(strpos($d, 'RewriteRule ^ https://%{SERVER_NAME}') !== false, "$tpl :80 redirects to https once the lineage exists");
+        check(preg_match('/port 443 namevhost www\.example\.test/', $d) === 1, "$tpl lists www.example.test on port 443 with the lineage (B11)");
         unlink($le_live . '/fullchain.pem'); unlink($le_live . '/privkey.pem');
         // Neither: no :443 host, no parse error, the site answers on :80.
         rename($vt . '/ph/example.test/fullchain.pem', $vt . '/ph/away.pem');
