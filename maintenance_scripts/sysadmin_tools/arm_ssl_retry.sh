@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 
-# arm_ssl_retry.sh - watch for DNS, then issue the certificate on its own
+# arm_ssl_retry.sh - watch for the name to reach this box, then issue the certificate on its own
+# Version: 1.2.1 - The two ways the https hop can fail are two journal lines: 526 is the
+#                  edge on Strict refusing the placeholder (set it to Full); 525 is this box
+#                  answering no TLS at all, which after the placeholder is a defect
+#                  (specs/tls_and_origin_trust.md R2).
+# Version: 1.2.0 - The wait condition is "the name reaches this box", asked through
+#                  install.sh's name_reaches_here (a nonce fetched through the name),
+#                  not "the name resolves to this box's address". Behind Cloudflare
+#                  the name never resolves here, so the old gate waited forever for
+#                  a certificate HTTP-01 could have issued through the edge on the
+#                  first tick (specs/tls_and_origin_trust.md WP10). The budget
+#                  argument holds: a failed reach, like a failed lookup, costs
+#                  nothing at Let's Encrypt, so five minutes stays safe.
 # Version: 1.1.0 - --setup-ssl takes several candidate paths, colon-separated and most
 #                  durable first; the timer runs the first that exists when it fires.
 #                  An install arms it before the host agent's bundle exists, and the
@@ -11,17 +23,20 @@
 # Version: 1.0.0
 #
 # Description:
-#   A site can come up before its domain points at the box — a fresh install
-#   ahead of the DNS cutover, or a rebuild that will take the domain over later.
-#   This arms a systemd timer that checks every five minutes and does nothing at
-#   all until the domain resolves HERE, then issues once and disables itself. The
-#   deployer points DNS whenever they get to it and the certificate arrives
-#   without them doing anything, or knowing this existed.
+#   A site can come up before its domain reaches the box — a fresh install
+#   ahead of the DNS cutover, a rebuild that will take the domain over later, or
+#   an edge already set to Full (Strict) that will not forward to an origin with
+#   no certificate. This arms a systemd timer that checks every five minutes and
+#   does nothing at all until a request for the domain REACHES here (directly or
+#   through an edge), then issues once and disables itself. The deployer points
+#   DNS, or sets the edge to Full, whenever they get to it and the certificate
+#   arrives without them doing anything, or knowing this existed.
 #
-#   The DNS lookup before each attempt is what makes an indefinite retry safe.
+#   The reach probe before each attempt is what makes an indefinite retry safe.
 #   Let's Encrypt allows five FAILED VALIDATIONS per hostname per hour, so
-#   hammering certbot at a domain that cannot resolve here would burn the budget
-#   the eventually-correct attempt needs. A failed lookup costs nothing.
+#   hammering certbot at a domain that cannot reach here would burn the budget
+#   the eventually-correct attempt needs. A failed probe is one HTTP fetch of a
+#   nonce and costs nothing at the CA.
 #
 #   Units are templated on the domain, so a multi-site box gets one instance per
 #   site rather than one timer that can only ever serve the first.
@@ -104,8 +119,8 @@ cat > /usr/local/sbin/joinery-ssl-retry <<'RETRY_EOF'
 # points here.
 #
 # Run from joinery-ssl-retry@<domain>.timer every few minutes; does nothing at
-# all until the domain resolves to this server, then issues once and disables
-# its own timer.
+# all until a request for the domain reaches this server, then issues once and
+# disables its own timer.
 set -u
 
 DOMAIN="${1:-}"
@@ -156,39 +171,34 @@ have_real_cert() {
 have_real_cert && give_up "A CA-issued certificate is already in place for $DOMAIN."
 
 # The cheap check, before spending an attempt. Let's Encrypt counts failed
-# validations, not failed lookups.
+# validations, not failed probes.
 #
-# Ask for each family explicitly, and compare like with like. A bare
-# `curl ifconfig.me` answers with whichever address the host prefers, and every
-# Linode is dual-stack and prefers IPv6 -- so it reports an IPv6 address, the
-# domain has only an A record, the two never match, and a box that was entitled
-# to a certificate waits for one forever while saying it is still waiting. That
-# is not hypothetical: it is what this script did on its first deferred install.
-# provision_origin_cert already asks per family for the same reason; this is the
-# same check, and it has to agree with it.
-SERVER_IP4=$(curl -4 -s --max-time 5 ifconfig.me 2>/dev/null || curl -4 -s --max-time 5 icanhazip.com 2>/dev/null || true)
-SERVER_IP6=$(curl -6 -s --max-time 5 ifconfig.me 2>/dev/null || curl -6 -s --max-time 5 icanhazip.com 2>/dev/null || true)
-DNS_IP4=$(dig +short A "$DOMAIN" 2>/dev/null | grep -E '^[0-9.]+$' | head -1)
-DNS_IP6=$(dig +short AAAA "$DOMAIN" 2>/dev/null | grep -E '^[0-9a-fA-F:]+$' | head -1)
-
-if [ -z "$DNS_IP4" ] && [ -z "$DNS_IP6" ]; then
-    echo "$DOMAIN does not resolve yet — waiting."
+# The question is whether a request for the name lands on this box, which is
+# what HTTP-01 needs and which is true both when the name resolves here and
+# when it resolves to an edge that forwards here. install.sh answers it with
+# name_reaches_here (a nonce written where the site serves files and fetched
+# through the name); it is sourced from beside the setup_ssl.sh that will run.
+INSTALL_SH="$(cd "$(dirname "$RUN_SSL")/../install_tools" 2>/dev/null && pwd)/install.sh"
+if [ ! -f "$INSTALL_SH" ]; then
+    echo "install.sh is not beside $RUN_SSL — waiting."
     exit 0
 fi
-if [ -z "$SERVER_IP4" ] && [ -z "$SERVER_IP6" ]; then
-    echo "Could not determine this server's public IP — waiting."
-    exit 0
-fi
+# shellcheck source=/dev/null
+. "$INSTALL_SH"
 
-# Either family arriving here is enough: certbot only needs the challenge to
-# reach this box, not to reach it over both protocols.
-if ! { [ -n "$SERVER_IP4" ] && [ "$SERVER_IP4" = "$DNS_IP4" ]; } \
-   && ! { [ -n "$SERVER_IP6" ] && [ "$SERVER_IP6" = "$DNS_IP6" ]; }; then
-    echo "$DOMAIN resolves to ${DNS_IP4:-none}/${DNS_IP6:-none}, this server is ${SERVER_IP4:-none}/${SERVER_IP6:-none} — waiting."
-    exit 0
-fi
+reach=0
+name_reaches_here "$DOMAIN" || reach=$?
+case "$reach" in
+    0) ;;
+    2)  echo "$DOMAIN reaches an edge that is on Full (Strict) and refuses the placeholder certificate this box presents. Set the edge to Full until the first certificate lands — waiting."
+        exit 0 ;;
+    3)  echo "$DOMAIN reaches an edge, but this box did not complete a TLS handshake: the placeholder certificate is missing. On the host: bash $(dirname "$INSTALL_SH")/render_vhost.sh — waiting."
+        exit 0 ;;
+    *)  echo "$DOMAIN does not reach this box yet — waiting."
+        exit 0 ;;
+esac
 
-echo "$DOMAIN now points here. Requesting a certificate."
+echo "$DOMAIN now reaches here (${REACH_STATE:-?}). Requesting a certificate."
 bash "$RUN_SSL" "$DOMAIN" || echo "setup_ssl.sh returned non-zero; will try again."
 
 have_real_cert && give_up "Certificate issued for $DOMAIN. Retry timer disabled."

@@ -195,14 +195,25 @@ and that credential lives for exactly one request:
 - An **API-credential** driver collects its key in the Apply form. The key exists
   as a local variable for the duration of that POST.
 
-**Ephemeral is the only mode. Nothing DNS-write-capable is ever stored — not
-even sealed.** There is no persistence path in the code: `DnsDriverBase` refuses
-to be serialized and redacts itself from `var_dump`/`print_r`, and
-`dnr_dns_records` has no column that could hold a secret. Nothing in the platform
-forces us off this: drift is *detected* credential-free, and certificate issuance
-runs over HTTP-01 through `certbot` on each node, so no timer ever needs a
-standing DNS-write credential. Unattended drift-fixing is out of scope for
-exactly this reason.
+**Ephemeral is the only mode for the platform's own DNS writes. Nothing
+DNS-write-capable is ever stored here — not even sealed.** There is no
+persistence path in the code: `DnsDriverBase` refuses to be serialized and
+redacts itself from `var_dump`/`print_r`, and `dnr_dns_records` has no column
+that could hold a secret. Drift is *detected* credential-free, and unattended
+drift-fixing is out of scope for exactly this reason.
+
+The rule covers what this subsystem does. It does not describe the whole
+estate, and a reader should know where a standing DNS-write credential does
+live, because each one is a zone-wide key on a public box with nobody
+rotating it:
+
+| Where | Standing DNS-write credential |
+|---|---|
+| Joinery nodes (bare metal, containers, fronted by an edge) | **None.** Certificates are issued and renewed over HTTP-01 through `certbot`; the challenge arrives through the edge when one is in front (docs/deploy_and_upgrade.md § Apache Vhost). |
+| The fleet DNS-01 fallback (`SslProvisionOutcome.php`, `install.sh` step 2) | **Yes, by design, on that node** — an operator hand-drops `/etc/letsencrypt/<provider>.ini`. Used only where HTTP-01 cannot reach the box. |
+| The two ScrollDaddy DNS resolvers | **Yes** — one zone-wide Cloudflare token each, at `/etc/systemd/system/caddy.service.d/cloudflare.conf`, because `dns.scrolldaddy.app` has two A records and HTTP-01 lands on either box. Where that credential should live is an open decision (specs/tls_and_origin_trust.md D1). |
+| The setup wizard's first-boot publish | No — `DnsInstallCredential`, sealed, deleted on first use. |
+| The admin DNS publish box | No — ephemeral, one request, never stored. |
 
 **Account selection needs nothing stored either.** A grant reaching one account
 — the common case — is used with no question asked. A grant reaching several (a

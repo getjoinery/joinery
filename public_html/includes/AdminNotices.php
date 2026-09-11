@@ -19,7 +19,8 @@
  * is all a plugin needs. A renderer that throws is logged and skipped — an
  * admin page never fails to render because a notice could not decide.
  *
- * @version 1.3 - host_converger joins the core notices (specs/host_converger.md)
+ * @version 1.4 - certificates joins the core notices (specs/tls_and_origin_trust.md WP11)
+ * @version 1.3 - host_converger joins the core notices (specs/implemented/host_converger.md)
  * @version 1.2 - parser_jail joins the core notices (specs/parser_jail.md)
  * @version 1.1 - second_factor joins the core notices (security_inventory S4)
  */
@@ -47,6 +48,10 @@ class AdminNotices {
 			// A box whose root timer stopped following its upgrades says so to
 			// the one admin who can reinstall it. Silent while it runs.
 			'host_converger' => array('HostConvergerNotice', 'render'),
+			// A box whose own certificate has stopped renewing, or would fail a
+			// Strict flip, says so to the admin who can run certbot. Silent
+			// while renewal is on schedule.
+			'certificates'   => array('CertificateNotice', 'render'),
 		);
 	}
 

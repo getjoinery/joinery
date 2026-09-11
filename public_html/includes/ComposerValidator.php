@@ -463,7 +463,7 @@ class ComposerValidator {
      * The same question reconcilePluginPackages() asks per package, asked
      * without doing anything about the answer. Activation needs it because
      * installing a package writes vendor/, which is code the PHP pool executes
-     * and therefore not the pool's to write (specs/read_only_tree.md): a web
+     * and therefore not the pool's to write (specs/implemented/read_only_tree.md): a web
      * request has to know whether root is needed BEFORE it starts.
      *
      * @param array|string|null $include_plugins Plugin name(s) beyond the active set

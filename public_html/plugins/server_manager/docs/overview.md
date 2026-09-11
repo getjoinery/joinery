@@ -454,7 +454,7 @@ A `check_status` on a node with an agent enumerates the certificate lineages the
 
 ### Manual Provisioning
 
-The **Overview** tab shows an **SSL Setup card** when `mgn_ssl_state` is not `active`, the node has a domain in its site URL, and `mgn_cert_expiry_ts` is empty. The last condition excludes directly-exposed, self-renewed nodes (see [Certificate Expiry Monitoring](#certificate-expiry-monitoring)) — their cert lifecycle is owned by an external renewer (e.g. Caddy), and the card's certbot-based provisioning does not apply to them. The card:
+The **Overview** tab shows an **SSL Setup card** when `mgn_ssl_state` is not `active`, the node has a domain in its site URL, and `mgn_cert_expiry_ts` is empty. The last condition excludes nodes whose served certificate already covers their name (see [Certificate monitoring](#certificate-monitoring)) — their cert lifecycle is owned by an external renewer (e.g. Caddy), and the card's certbot-based provisioning does not apply to them. The card:
 
 1. Resolves the domain via DNS and shows whether it points to the node's host IP
 2. Enables the **Provision SSL** button when DNS is ready (or when the host IP is not configured)
@@ -1566,7 +1566,7 @@ A lightweight per-node uptime check runs on each scheduled-task tick (~15 min). 
 - `mgn_uptime_last_status` (varchar) — `'up'` / `'down'` / null (never checked)
 - `mgn_uptime_consecutive_failures` (int) — streak counter for threshold logic
 - `mgn_uptime_down_since` (timestamp) — when current outage started, null when up
-- `mgn_cert_expiry_ts` (timestamp) — observed `notAfter` of the served TLS cert (see Certificate-expiry monitoring)
+- `mgn_cert_expiry_ts` (timestamp) — observed `notAfter` of the served TLS cert (see Certificate monitoring)
 - `mgn_cert_alerted_ts` (timestamp) — last cert-expiry warning send, for re-alert cadence; null when the cert is comfortably valid
 
 "Last checked at" reuses the existing `mgn_last_status_check` — both check types update it.
@@ -1612,18 +1612,22 @@ If none resolve, the send is logged and skipped; the state machine still advance
 - Node edit form (`node_detail` overview tab and `node_add`): a "Monitor uptime" checkbox and a "Check type" dropdown. When `mgn_skip_joinery_checks` is on, the runtime forces `http_status` regardless of the stored value (so picking `api` here is harmless for non-Joinery nodes).
 - Node detail overview tab: a one-line uptime status under "Last checked" — `Up`, `Down since X`, `disabled`, or `not yet checked`.
 
-### Certificate-expiry monitoring
+### Certificate monitoring
 
-Every enabled node also gets an **independent TLS certificate-expiry check** on each tick (`RunNodeUptimeChecks::check_cert_expiry()`), separate from the up/down probe. It warns before a certificate **we renew** lapses — the failure mode where auto-renewal silently breaks for weeks and the cert expires unnoticed.
+Every enabled node also gets an **independent TLS certificate check** on each tick (`RunNodeUptimeChecks::check_cert_expiry()`), separate from the up/down probe. It says when a certificate **the node renews itself** stops renewing — the failure mode where auto-renewal silently breaks and the certificate expires unnoticed.
 
 It reads the **served certificate over the wire** (`stream_socket_client` on `ssl://mgn_host:443`, `capture_peer_cert`, SNI = the site hostname), so it sees whatever the cert manager actually serves — Caddy, certbot, anything. Validity is deliberately *not* verified, so the `notAfter` of an already-expired or near-expiry cert is still readable.
 
-**It self-limits to self-renewed, directly-exposed nodes** via two guards, because probing an origin behind a CDN returns a misleading cert:
+**Fronted nodes are watched the same as direct ones.** The probe is pinned to `mgn_host`, so a name proxied through Cloudflare is answered by the origin, not the edge. The edge renews its own certificate; the origin behind it holds another that expires on its own schedule, and on Cloudflare Full (not Strict) an expired origin certificate is accepted and invisible — right up until Strict is enabled and it is an outage. One test decides whose certificate it is: the served cert's CN/SANs must cover the hostname (`cert_covers_host()`). A certificate for some other name is not this node's to date, but it is reported (reason 4 below).
 
-1. **Directly-exposed:** `mgn_host` must appear in the public A records for the site hostname (`DnsResolver::getA()`). A Cloudflare-fronted hostname resolves to Cloudflare, not the origin — those are skipped, because Cloudflare renews that edge cert (not our failure surface).
-2. **SAN match:** the served cert's CN/SANs must actually cover the hostname. A shared default-vhost fallback cert (SAN mismatch) is ignored — there is nothing dedicated to monitor.
+On a monitored node it stores `mgn_cert_expiry_ts` and alerts on the first of four reasons (`cert_alert_verdict()`, `www_gap()`, `uncovered_alert_text()`):
 
-On a monitored node it stores `mgn_cert_expiry_ts`. When days-remaining drops below `server_manager_cert_expiry_warn_days` (default **21**), it emails a warning through the same recipient fallback chain as the up/down alerts — once on crossing the threshold, then re-alerting every `CERT_RECHECK_ALERT_DAYS` (default 3) while still under it, and clearing `mgn_cert_alerted_ts` when a fresh cert pushes the date back out. The node detail overview shows a "TLS cert: expires …" line (warning-styled under threshold) whenever `mgn_cert_expiry_ts` is set — which also surfaces certs the certbot-file SSL tile can't see (e.g. Caddy nodes).
+1. **Renewal overdue.** A standard ACME client replaces a certificate at two thirds of its life (`renewal_due_ts()`); when that date is more than a day past and the certificate on the wire is still the one that was due, renewal on the node is failing. No stored fingerprint is needed: the due date is computed from the served certificate's own dates, so a replacement carries a fresh `notBefore` and its own due date lies ahead. For a 90-day certificate this fires around day 61, nine days before the expiry threshold would.
+2. **Expiry approaching.** Days remaining under `server_manager_cert_expiry_warn_days` (default **21**) — the safety net for a certificate whose issue date cannot be read.
+3. **www uncovered.** When `www.<hostname>` resolves, the origin is probed again with `www.` as SNI; a certificate that does not cover it is its own reason, because a Strict flip would take the www address dark while the apex looks healthy. A www that does not resolve is not mentioned.
+4. **Origin uncovered.** The origin answers TLS but with a certificate for other names — a shared fallback vhost on the host, or the placeholder minted at install. Under Full the site serves; under Full (Strict) it goes dark. The mail names the presented names and the wanted one and the tool that fixes it (`issue_origin_cert.sh`). Nothing is stored for a foreign certificate: its expiry is not this node's.
+
+The warning goes through the same recipient fallback chain as the up/down alerts — once, then re-alerting every `CERT_RECHECK_ALERT_DAYS` (default 3) while a reason persists, and clearing `mgn_cert_alerted_ts` once nothing is wrong. The mail carries the diagnosis: issue date, lifetime, renewal-due date and how overdue, issuer, serial, whether the certificate is unchanged since the last alert, and the www re-issue line when that is the gap. The node detail overview shows a "TLS cert: expires …" line (warning-styled under threshold) whenever `mgn_cert_expiry_ts` is set — which also surfaces certs the certbot-file SSL tile can't see (e.g. Caddy nodes).
 
 This is distinct from `mgn_ssl_state` / the SSL tile, which track certbot **provisioning** status (does an LE cert exist on disk) — a different question from "is the served cert about to expire," and largely a different set of nodes. The two are orthogonal.
 

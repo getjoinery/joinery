@@ -393,7 +393,7 @@ abstract class AbstractExtensionManager {
     protected function setPermissions($dir) {
         // Extensions are code the PHP pool executes, so they take the same
         // ownership as the rest of the tree: the tree's owner, readable by
-        // everyone, writable by nobody else (specs/read_only_tree.md). The
+        // everyone, writable by nobody else (specs/implemented/read_only_tree.md). The
         // owner is read off public_html rather than named, because it is root
         // on a node and the developer's account on the developer box, and this
         // runs on both.

@@ -52,7 +52,7 @@ class AdminPage extends PublicPage {
 	 *
 	 * The pool cannot write the code tree, so an upgrade, a plugin install or a
 	 * docs save is queued for root and carried out on its own clock
-	 * (specs/read_only_tree.md). A button that queued one and then said nothing
+	 * (specs/implemented/read_only_tree.md). A button that queued one and then said nothing
 	 * would be a button that looks broken, so every page that submits a request
 	 * renders this: the state, the exit code when there is one, and the
 	 * transcript as it grows.

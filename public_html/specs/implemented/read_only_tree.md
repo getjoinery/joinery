@@ -1,7 +1,7 @@
 # The read-only tree: the web user can read the code and never change it
 
 **Security inventory row:** S10 (closes S6 with it; the floor under S9).
-**Status:** BUILT 2026-09-11, proven on dev (read_only_tree gate 23/23, a web-user request carried out by root). Moves to implemented/ once the fleet has been upgraded and watched.
+**Status:** IMPLEMENTED 2026-09-11. Release 0.8.386 on all nine nodes, gate 30/30 each, no rollbacks; dev proved a web-user request carried out by root (read_only_tree gate 23/23). Deferred live proofs (a root-request round trip on a production node; a StackScript install converging a browser upgrade without a shell) are tracked in the live verification queue. Follow-up fixes found in the rollout (vhost template 2.05, converger hash glob, render_vhost 1.5, certbot out of the vhost) ship in 0.8.387 under `specs/tls_and_origin_trust.md` WP1a.
 **Related:** `specs/host_converger.md` (the root actor this spec relies on),
 `specs/implemented/parser_jail.md` (S5), `specs/vault_key_memory_exposure.md`
 § Mitigation C (the direction this spec turns into a task; B4, B12).

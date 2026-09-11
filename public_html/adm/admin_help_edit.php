@@ -29,11 +29,11 @@ if (!empty($error)) {
 	echo '<div class="alert alert-danger" role="alert">' . htmlspecialchars($error) . '</div>';
 }
 
-if (empty($writable)) {
-	echo '<div class="alert alert-warning" role="alert">'
-		. 'This file is not writable by the web server, so a save will be refused. Restore its mode with '
-		. '<code>chmod 666 ' . htmlspecialchars($relative_path) . '</code> — a git checkout resets it.'
-		. '</div>';
+// A save is a root request (specs/implemented/read_only_tree.md): the web
+// user never writes the code tree. The only thing that can stop it is a box
+// with no root actor to carry it out, and that is said before the author types.
+if (!empty($actor_warning)) {
+	echo '<div class="alert alert-warning" role="alert">' . htmlspecialchars($actor_warning) . '</div>';
 }
 
 $page->begin_box(array('title' => 'Edit ' . $doc_title));

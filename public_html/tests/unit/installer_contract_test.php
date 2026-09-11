@@ -299,39 +299,256 @@ check(strpos($armer_src, 'joinery-ssl-retry@.timer') !== false,
 check(strpos($armer_src, '--disarm') !== false,
     'it can also stop watching a domain, so a restore that changes the name leaves no orphan timer');
 
-// The DNS lookup before certbot is what makes an indefinite retry safe: Let's
+// The probe before certbot is what makes an indefinite retry safe: Let's
 // Encrypt counts five failed validations per hostname per hour, and a failed
-// lookup counts for nothing.
+// reach probe (one HTTP fetch of a nonce) counts for nothing.
 $retry_block = '';
 if (preg_match('/RETRY_EOF.*?\nRETRY_EOF/s', $armer_src, $m)) {
     $retry_block = $m[0];
 }
 check($retry_block !== '', 'the retry script is findable');
-check($retry_block !== '' && strpos($retry_block, 'dig +short') !== false,
-    'it resolves the domain before spending a validation attempt');
+check($retry_block !== '' && strpos($retry_block, 'name_reaches_here "$DOMAIN"') !== false,
+    'it asks whether the name reaches this box before spending a validation attempt');
+check($retry_block !== '' && strpos($retry_block, 'dig ') === false,
+    'and not whether the name resolves to this box: behind an edge it never does, and HTTP-01 works through the edge',
+    'specs/tls_and_origin_trust.md B8');
 check($retry_block !== '' && strpos($retry_block, 'have_real_cert') !== false,
     'it disables itself on a CA-issued certificate, not on any file at the cert path',
     'an operator or an origin-cert flow can place a self-signed cert there, so file-exists is not a finish line');
+check($retry_block !== '' && preg_match('/^\s*2\)\s+echo ".*Full \(Strict\).*Set the edge to Full/m', $retry_block) === 1,
+    'when the edge is on Strict and refuses the placeholder (526), the journal line says to set it to Full until the first one lands');
+check($retry_block !== '' && preg_match('/^\s*3\)\s+echo ".*placeholder certificate is missing.*render_vhost\.sh/m', $retry_block) === 1,
+    'when this box completed no handshake at all (525), the journal line says the placeholder is missing and names render_vhost.sh');
+check($retry_block !== '' && strpos($retry_block, '. "$INSTALL_SH"') !== false,
+    'the probe is install.sh\'s own, sourced from beside the setup_ssl.sh that will run, so the timer and the installer cannot disagree');
 
-// Every Linode is dual-stack and prefers IPv6, so a bare `curl ifconfig.me`
-// reports an IPv6 address. Compared against an A record it never matches, and
-// the box waits for a certificate forever while reporting that it is waiting —
-// which is exactly what happened on the first deferred install. Ask per family
-// and compare like with like, the same way provision_origin_cert already does.
-check($retry_block !== '' && preg_match('/curl -4 [^\n]*ifconfig\.me/', $retry_block) === 1
-    && preg_match('/curl -6 [^\n]*ifconfig\.me/', $retry_block) === 1,
-    'it asks for its own address per family, not whichever the host prefers');
-check($retry_block !== '' && strpos($retry_block, 'dig +short A ') !== false
-    && strpos($retry_block, 'dig +short AAAA ') !== false,
-    'and resolves both A and AAAA to compare like with like');
-check($retry_block !== '' && !preg_match('/\$\(curl -s --max-time 5 ifconfig\.me/', $retry_block),
-    'with no bare curl left to reintroduce the mismatch');
+section('The installer issues for every install (specs/tls_and_origin_trust.md WP10)');
 
-// The same comparison exists in install.sh. Two checks that must agree, and
-// only one of them was fixed the first time.
-check(strpos($install_src, 'curl -4 -s') !== false && strpos($install_src, 'curl -6 -s') !== false,
-    'provision_origin_cert makes the same per-family comparison',
-    'the retry timer and the installer must agree on whether DNS points here');
+// The rule is "the name reaches this box", which is what HTTP-01 actually
+// requires and is true both direct and through an edge. The old gate — the
+// name resolves to this box's own address — was never true behind Cloudflare,
+// so every Cloudflare-first install ended with no certificate and a Full
+// (Strict) flip took it dark.
+$pfn = '';
+if (preg_match('/^provision_origin_cert\(\) \{.*?^\}$/ms', $install_src, $m)) { $pfn = $m[0]; }
+check($pfn !== '', 'provision_origin_cert is findable');
+check($pfn !== '' && strpos($pfn, '"$server_ip4" = "$dns_ip4"') === false && strpos($pfn, '"$server_ip6" = "$dns_ip6"') === false,
+    'no HTTP-01 attempt is gated on an IP comparison');
+$reach_at = $pfn !== '' ? strpos($pfn, 'name_reaches_here "$domain"') : false;
+$issue_at = $pfn !== '' ? strpos($pfn, 'certbot certonly --apache') : false;
+check($reach_at !== false && $issue_at !== false && $reach_at < $issue_at,
+    'the HTTP-01 line is reached from a branch guarded by name_reaches_here');
+check($pfn !== '' && strpos($pfn, '-d "www.${domain}"') !== false
+    && strpos($pfn, 'name_resolves "www.${domain}"') !== false
+    && strpos($pfn, 'name_reaches_here "www.${domain}"') !== false,
+    'www joins the issue line behind a resolve check and its own reach probe');
+$nr = '';
+if (preg_match('/^name_resolves\(\) \{.*?^\}$/ms', $install_src, $m)) { $nr = $m[0]; }
+check($nr !== '' && strpos($nr, 'getent ahostsv4') !== false && strpos($nr, 'dig') === false,
+    'the resolve check reads addresses from getent, so a CNAME target made of hex letters is never taken for one');
+check(strpos($install_src, '"$code" = "526"') !== false && strpos($install_src, 'return 3') !== false,
+    'the reach probe returns 2 for 526 (Strict refusing the placeholder) and 3 for 525 or no answer (no handshake at all)');
+check(strpos($install_src, 'sysadmin_tools/setup_ssl.sh ${domain}"') === false || strpos($install_src, '/var/www/html/*/') === false,
+    'the by-hand setup_ssl.sh path is printed resolved, not as a glob');
+check($pfn !== '' && strpos($pfn, '--expand') !== false,
+    'an existing apex-only lineage can take on www (--expand)');
+check($pfn !== '' && strpos($pfn, '$reach" -eq 2') !== false && strpos($pfn, 'Full (Strict)') !== false,
+    'the one true limit is named: an edge already on Strict cannot reach an origin with no certificate');
+// The word "direct" or "edge" survives only as a log line.
+check(preg_match('/^REACH_STATE=""$/m', $install_src) === 1
+    && strpos($install_src, 'REACH_STATE="edge"') !== false && strpos($install_src, 'REACH_STATE="direct"') !== false,
+    'direct or through an edge is a word for the log, not a gate');
+
+// name_reaches_here itself, against a local server in a temp root: match,
+// mismatch, unreachable. JOINERY_REACH_BASE_URL and JOINERY_REACH_DIR replace
+// http://<name> and the site's static_files directory, so no DNS is touched.
+$reach_fn = '';
+$site_fn = '';
+if (preg_match('/^REACH_STATE=""\nname_reaches_here\(\) \{.*?^\}$/ms', $install_src, $m)) { $reach_fn = $m[0]; }
+if (preg_match('/^site_serving_name\(\) \{.*?^\}$/ms', $install_src, $m)) { $site_fn = $m[0]; }
+check($reach_fn !== '' && $site_fn !== '', 'the reach probe and the vhost lookup are findable');
+$rr = harness_scratch_dir('reach_probe');
+@mkdir($rr . '/served/static_files', 0755, true);
+@mkdir($rr . '/elsewhere', 0755, true);
+$port = 18000 + (getmypid() % 1000);
+$server = proc_open('exec python3 -m http.server ' . $port . ' --bind 127.0.0.1 --directory ' . escapeshellarg($rr . '/served') . ' >/dev/null 2>&1',
+    array(), $pipes);
+$server_up = false;
+for ($i = 0; $i < 30 && !$server_up; $i++) {
+    usleep(100000);
+    $sock = @fsockopen('127.0.0.1', $port, $errno, $errstr, 0.5);
+    if ($sock) { $server_up = true; fclose($sock); }
+}
+check($server_up, 'a local http server is listening for the probe', "127.0.0.1:$port");
+$probe = function (string $base_url, string $dir) use ($reach_fn, $site_fn, $rr): string {
+    $script = $rr . '/probe.sh';
+    file_put_contents($script, "print_info() { :; }; print_warning() { :; }; print_step() { :; }\n"
+        . "dig() { :; }\n"  // the direct/edge word asks dig; here it must not reach the network
+        . $site_fn . "\n" . $reach_fn . "\n"
+        . 'export JOINERY_REACH_BASE_URL=' . escapeshellarg($base_url) . ' JOINERY_REACH_DIR=' . escapeshellarg($dir) . "\n"
+        . "name_reaches_here example.com; echo \"\$? \$REACH_STATE\"\n");
+    return trim((string)shell_exec('bash ' . escapeshellarg($script) . ' 2>/dev/null'));
+};
+if ($server_up) {
+    check($probe('http://127.0.0.1:' . $port, $rr . '/served/static_files') === '0 direct',
+        'a nonce fetched back through the name is a reach');
+    check($probe('http://127.0.0.1:' . $port, $rr . '/elsewhere') === '1 none',
+        'a nonce that is not what comes back is not a reach (mismatch)');
+    check($probe('http://127.0.0.1:' . ($port + 1), $rr . '/served/static_files') === '1 none',
+        'nothing answering is not a reach (unreachable)');
+    check(count(glob($rr . '/served/static_files/reach-*')) === 0 && count(glob($rr . '/elsewhere/reach-*')) === 0,
+        'the nonce file is removed whichever way the probe went');
+}
+if (is_resource($server)) { proc_terminate($server, 9); proc_close($server); }
+foreach (array('/served/static_files', '/served', '/elsewhere') as $d) { array_map('unlink', glob($rr . $d . '/*') ?: array()); @rmdir($rr . $d); }
+array_map('unlink', glob($rr . '/*') ?: array());
+@rmdir($rr);
+
+// The early DNS check's Cloudflare branch tells the owner the one thing that
+// matters at the edge, and the post-attempt check is what decides deferral.
+check(strpos($install_src, 'note_ssl_deferred_if_missing "$DOMAIN_NAME"') !== false,
+    'whether the retry timer is armed follows whether a certificate landed, not what the early DNS check guessed');
+check(strpos($install_src, 'Full (Strict) with Origin Certificate') === false,
+    'the installer no longer points a Cloudflare owner at an Origin CA certificate');
+
+// The by-hand tools for WP0 and the www re-issue. The demo and orgs
+// certificates on the Docker host were once read as vestigial and a
+// `certbot delete` was proposed; they are the origin-leg certificates for a
+// live serving path. Nothing here deletes.
+$sys_dir = dirname(PathHelper::getRootDir()) . '/maintenance_scripts/sysadmin_tools';
+foreach (array('issue_origin_cert.sh', 'strict_readiness.sh') as $tool) {
+    $src = is_file($sys_dir . '/' . $tool) ? (string)file_get_contents($sys_dir . '/' . $tool) : '';
+    check($src !== '', "$tool exists");
+    check($src !== '' && strpos($src, 'certbot delete') === false, "$tool never runs certbot delete");
+    check($src !== '' && shell_exec('bash -n ' . escapeshellarg($sys_dir . '/' . $tool) . ' 2>&1 && echo ok') === "ok\n", "$tool parses");
+}
+$issue_src = (string)file_get_contents($sys_dir . '/issue_origin_cert.sh');
+check(strpos($issue_src, 'certbot certonly --apache') !== false && strpos($issue_src, '--deploy-hook') !== false,
+    'issue_origin_cert.sh issues the way the installer does: certonly with a reload hook, never --apache as installer');
+check(strpos($issue_src, 'EXPAND=(--expand)') !== false && strpos($issue_src, '-d "/etc/letsencrypt/live/${DOMAIN}"') !== false,
+    'and passes --expand only when the lineage already exists');
+check(strpos($issue_src, 'name_reaches_here "$DOMAIN"') !== false && strpos($issue_src, 'name_reaches_here "www.${DOMAIN}"') !== false,
+    'and probes reach for the apex and www before spending anything');
+check(strpos($issue_src, '-servername "$n"') !== false, 'and verifies at the origin with SNI per name');
+$ready_src = (string)file_get_contents($sys_dir . '/strict_readiness.sh');
+check(strpos($ready_src, 'certbot') === false, 'strict_readiness.sh is read-only: it never runs certbot at all');
+check(strpos($ready_src, 'origin="${spec#*=}"') !== false, 'and takes the origin address per name rather than guessing it');
+
+section('A site answers TLS from the first minute (specs/tls_and_origin_trust.md WP12)');
+
+// An edge redirects the HTTP-01 challenge to https, and a box with no
+// certificate file has no :443 listener, so the edge's https hop fails 525 in
+// Full mode too and the first certificate can never arrive (B10). The vhost
+// reads the Let's Encrypt lineage when one exists and a self-signed
+// placeholder otherwise, chosen by a per-site Define; the :80 -> https
+// redirect stays guarded on the Let's Encrypt path alone.
+$tools_dir   = dirname(PathHelper::getRootDir()) . '/maintenance_scripts/install_tools';
+$history_dir = $tools_dir . '/vhost_history';
+$render_src  = (string)file_get_contents($tools_dir . '/render_vhost.sh');
+$issue_src   = (string)file_get_contents(dirname(PathHelper::getRootDir()) . '/maintenance_scripts/sysadmin_tools/issue_origin_cert.sh');
+$ph_src = (string)file_get_contents($tools_dir . '/_placeholder_cert.sh');
+check($ph_src !== '' && strpos($ph_src, 'mint_placeholder_cert()') !== false, 'the placeholder helper exists');
+check(strpos($install_src, '. "${SCRIPT_DIR:-${BASH_SOURCE%/*}}/_placeholder_cert.sh"') !== false
+    && strpos($render_src, '. "${SCRIPT_DIR}/_placeholder_cert.sh"') !== false,
+    'install.sh and render_vhost.sh source the one helper');
+$wuv = '';
+if (preg_match('/^write_universal_vhost\(\) \{.*?^\}$/ms', $install_src, $m)) { $wuv = $m[0]; }
+check($wuv !== '' && strpos($wuv, 'mint_placeholder_cert "$domain"') !== false,
+    'write_universal_vhost mints the placeholder in both modes, before the site is enabled');
+check(strpos($render_src, 'mint_placeholder_cert "${DOMAIN}"') !== false, 'and render_vhost.sh mints it on every converge');
+check(strpos($issue_src, 'placeholder') === false || strpos($issue_src, 'mint_placeholder_cert') === false,
+    'issue_origin_cert.sh never touches the placeholder');
+foreach (array('default_virtualhost.conf' => '2.06', 'default_proxy_vhost.conf' => '1.02') as $tpl => $ver) {
+    $t = (string)file_get_contents($tools_dir . '/' . $tpl);
+    check(strpos($t, '#Version ' . $ver) === 0, "$tpl is $ver");
+    check(substr_count($t, 'Define JOINERY_CERT_DIR_{{SITE_NAME}}') === 2
+        && strpos($t, '<IfFile ${JOINERY_CERT_DIR_{{SITE_NAME}}}/fullchain.pem>') !== false
+        && strpos($t, 'SSLCertificateFile ${JOINERY_CERT_DIR_{{SITE_NAME}}}/fullchain.pem') !== false,
+        "$tpl chooses the certificate directory by a per-site Define and guards :443 on it");
+    check(strpos($t, "Define JOINERY_CERT_DIR_{{SITE_NAME}} /etc/ssl/joinery/{{DOMAIN_NAME}}\n<IfFile /etc/letsencrypt/live/{{DOMAIN_NAME}}/fullchain.pem>\nDefine JOINERY_CERT_DIR_{{SITE_NAME}} /etc/letsencrypt/live/{{DOMAIN_NAME}}") !== false,
+        "$tpl defines the placeholder first and the Let's Encrypt lineage over it, so the variable is never undefined");
+}
+check(is_file($history_dir . '/default_virtualhost-2.05.conf'), 'vhost_history carries 2.05 so boxes rendered from it adopt');
+
+// Executed: the helper mints, and both rendered templates parse under Apache
+// in all three states with the certificate directory each state calls for.
+$vt = harness_scratch_dir('vhost_tls');
+foreach (array('le/live/example.test', 'ph', 'site/public_html', 'site/static_files', 'site/logs', 'site_test/public_html', 'site_test/logs', 'logs') as $d) { @mkdir($vt . '/' . $d, 0755, true); }
+$le_live = $vt . '/le/live/example.test';
+$mint = function (string $le_dir) use ($vt, $tools_dir): string {
+    return trim((string)shell_exec('JOINERY_PLACEHOLDER_ROOT=' . escapeshellarg($vt . '/ph') . ' JOINERY_LETSENCRYPT_DIR=' . escapeshellarg($le_dir)
+        . ' bash -c ' . escapeshellarg('. ' . $tools_dir . '/_placeholder_cert.sh; mint_placeholder_cert example.test') . ' 2>&1'));
+};
+$out = $mint($vt . '/no-le');
+check(strpos($out, 'minted a self-signed certificate for example.test and www.example.test') !== false, 'the helper mints when neither file exists', $out);
+check(is_file($vt . '/ph/example.test/fullchain.pem') && is_file($vt . '/ph/example.test/privkey.pem'), 'at <root>/<domain>/{fullchain,privkey}.pem');
+check((fileperms($vt . '/ph/example.test/privkey.pem') & 0777) === 0600, 'the key is 0600');
+$x = trim((string)shell_exec('openssl x509 -in ' . escapeshellarg($vt . '/ph/example.test/fullchain.pem') . ' -noout -ext subjectAltName -subject -issuer -enddate 2>/dev/null'));
+check(strpos($x, 'DNS:example.test') !== false && strpos($x, 'DNS:www.example.test') !== false, 'it names the apex and www', $x);
+preg_match('/subject=(.*)/', $x, $sub); preg_match('/issuer=(.*)/', $x, $iss);
+check(isset($sub[1], $iss[1]) && $sub[1] === $iss[1], 'and is self-signed, which is what the retry timer refuses to count as done');
+preg_match('/notAfter=(.*)/', $x, $na);
+check(isset($na[1]) && strtotime($na[1]) > time() + 9 * 365 * 86400, 'and lives ten years');
+check($mint($vt . '/no-le') === '', 'a second run is silent and changes nothing');
+copy($vt . '/ph/example.test/fullchain.pem', $le_live . '/fullchain.pem');
+unlink($vt . '/ph/example.test/fullchain.pem');
+check($mint($vt . '/le') === '' && !is_file($vt . '/ph/example.test/fullchain.pem'), 'with a Let\'s Encrypt lineage present nothing is minted');
+unlink($le_live . '/fullchain.pem');
+$mint($vt . '/no-le');
+
+$apache = trim((string)shell_exec('command -v apache2 2>/dev/null'));
+$mods = '';
+foreach (array('mpm_event', 'authz_core', 'ssl', 'rewrite', 'headers', 'proxy', 'proxy_http', 'alias', 'dir', 'setenvif', 'mime', 'info') as $mname) {
+    $mods .= "LoadModule {$mname}_module /usr/lib/apache2/modules/mod_{$mname}.so\n";
+}
+file_put_contents($vt . '/main.conf', "ServerRoot \"{$vt}\"\nServerName localhost\nPidFile logs/pid\nErrorLog logs/error.log\n{$mods}Listen 18080\nListen 18443\n");
+$render_tpl = function (string $tpl) use ($vt, $tools_dir): string {
+    $text = (string)file_get_contents($tools_dir . '/' . $tpl);
+    // The site path first: the scratch root lives under /var/www/html itself,
+    // and str_replace applies its pairs in order over the whole string.
+    $text = str_replace('/var/www/html/', $vt . '/', $text);
+    return str_replace(
+        array('{{DOMAIN_NAME}}', '{{SITE_NAME}}', '{{SERVER_IP}}', '{{PORT}}', '/etc/letsencrypt/live', '/etc/ssl/joinery'),
+        array('example.test', 'site', '*', '8081', $vt . '/le/live', $vt . '/ph'), $text);
+};
+// With DUMP_* flags Apache prints the dump in place of "Syntax OK", so the
+// parse verdict is the exit code, appended as a last line.
+$dump = function (string $conf) use ($vt, $apache): string {
+    return (string)shell_exec(escapeshellarg($apache) . ' -t -f ' . escapeshellarg($vt . '/main.conf')
+        . ' -C ' . escapeshellarg('Include ' . $conf) . ' -D DUMP_CONFIG -D DUMP_VHOSTS 2>&1; echo "RC=$?"');
+};
+if ($apache !== '' && is_file('/usr/lib/apache2/modules/mod_info.so')) {
+    foreach (array('default_virtualhost.conf', 'default_proxy_vhost.conf') as $tpl) {
+        $conf = $vt . '/' . $tpl;
+        file_put_contents($conf, $render_tpl($tpl));
+        // Placeholder only (the state right after install behind an edge).
+        $d = $dump($conf);
+        check(substr(trim($d), -4) === 'RC=0' && strpos($d, 'Syntax error') === false, "$tpl parses with the placeholder only", implode(' | ', array_slice(preg_split('/\R/', trim($d)), -4)));
+        check(strpos($d, 'SSLCertificateFile ' . $vt . '/ph/example.test/fullchain.pem') !== false, "$tpl :443 carries the placeholder paths");
+        check(strpos($d, 'RewriteRule ^ https://%{SERVER_NAME}') === false, "$tpl :80 has no https redirect on the placeholder");
+        // Both: the real certificate wins.
+        copy($vt . '/ph/example.test/fullchain.pem', $le_live . '/fullchain.pem');
+        copy($vt . '/ph/example.test/privkey.pem', $le_live . '/privkey.pem');
+        $d = $dump($conf);
+        check(strpos($d, 'SSLCertificateFile ' . $le_live . '/fullchain.pem') !== false, "$tpl :443 carries the Let's Encrypt paths once the lineage exists");
+        check(strpos($d, 'RewriteRule ^ https://%{SERVER_NAME}') !== false, "$tpl :80 redirects to https once the lineage exists");
+        unlink($le_live . '/fullchain.pem'); unlink($le_live . '/privkey.pem');
+        // Neither: no :443 host, no parse error, the site answers on :80.
+        rename($vt . '/ph/example.test/fullchain.pem', $vt . '/ph/away.pem');
+        $d = $dump($conf);
+        check(substr(trim($d), -4) === 'RC=0' && strpos($d, ':443') === false && strpos($d, ':80') !== false,
+            "$tpl with neither file has no :443 host and still answers on :80", implode(' | ', array_slice(preg_split('/\R/', trim($d)), -4)));
+        rename($vt . '/ph/away.pem', $vt . '/ph/example.test/fullchain.pem');
+    }
+} else {
+    check(true, 'apache2 with mod_info is not on this box; the rendered-state pins were not executed');
+}
+shell_exec('rm -rf ' . escapeshellarg($vt));
+
+// WP5: renewal on a new node does not depend on a default we did not set.
+check(strpos($install_src, 'systemctl enable --now certbot.timer') !== false
+    && strpos($install_src, '/etc/cron.d/certbot') !== false,
+    'the server step asserts certbot.timer, or the cron.d file where there is no systemd');
 
 
 section('An upgrade proves the code it just installed');
@@ -1496,15 +1713,29 @@ foreach ([
 
     // Every unconditional redirect-to-https must sit inside such a guard. Walk
     // the file rather than pattern-match, so a new one added outside is caught.
+    // A rule that names https only to a visitor who already arrived on it
+    // (RewriteCond on %{HTTPS}, X-Forwarded-Proto or CF-Visitor) is not an
+    // upgrade and reaches a port that is answering by construction; the
+    // uploads fallback is one. Conditions attach to the next RewriteRule.
     $depth = 0;
     $ungated = [];
+    $scheme_guarded = false;
     foreach (preg_split('/\R/', $src) as $n => $line) {
         $t = trim($line);
         if ($t === '' || $t[0] === '#') { continue; }
         if (stripos($t, '<IfFile') === 0)  { $depth++; continue; }
         if (stripos($t, '</IfFile') === 0) { $depth = max(0, $depth - 1); continue; }
-        if ($depth === 0 && preg_match('~RewriteRule.*https://~i', $t)) {
-            $ungated[] = ($n + 1) . ': ' . $t;
+        if (stripos($t, 'RewriteCond') === 0) {
+            if (preg_match('~%\{HTTPS\} =on|X-Forwarded-Proto\} =https|CF-Visitor\} scheme":"https~', $t)) {
+                $scheme_guarded = true;
+            }
+            continue;
+        }
+        if (stripos($t, 'RewriteRule') === 0) {
+            if ($depth === 0 && !$scheme_guarded && preg_match('~https://~i', $t)) {
+                $ungated[] = ($n + 1) . ': ' . $t;
+            }
+            $scheme_guarded = false;
         }
     }
     check(!$ungated, "{$label} has no redirect to https outside a cert guard",
@@ -1846,11 +2077,13 @@ section('The health probe reports reachability, not liveness');
 // is a failure, not a pass.
 // The clone-source manifest check also keeps its HTTP status (to say why a
 // source refused), but it asks another site's export endpoint, not this
-// site's health — it is not a probe line.
+// site's health — it is not a probe line. Nor is the reach probe
+// (name_reaches_here), which fetches a nonce THROUGH the name on purpose:
+// asking by Host header would prove nothing about the path the CA takes.
 $probe_lines = array_values(array_filter(
     preg_split('/\R/', $install_exec),
     function ($l) { return strpos($l, '%{http_code}') !== false && strpos($l, 'curl') !== false
-        && strpos($l, 'clone_export') === false; }
+        && strpos($l, 'clone_export') === false && strpos($l, 'url_effective') === false; }
 ));
 check(count($probe_lines) >= 2, 'both install paths probe the site',
     'probe lines found: ' . count($probe_lines));
@@ -2369,6 +2602,13 @@ if (preg_match('/^vhost_is_an_older_render\(\) \{.*?^\}$/ms', $render_src, $m)) 
     $render_fn = $m[0];
 }
 check($render_fn !== '', 'the adoption test is findable');
+// The subset rule skips certbot's own insertions, so it needs that test too.
+$certbot_fn = '';
+if (preg_match('/^is_certbot_insertion\(\) \{.*?^\}$/ms', $render_src, $m)) {
+    $certbot_fn = $m[0];
+}
+check($certbot_fn !== '', 'the certbot-insertion test is findable');
+$render_fn = $certbot_fn . "\n" . $render_fn;
 
 $vh = harness_scratch_dir('vhost_adopt');
 @mkdir($vh, 0700, true);
@@ -2455,6 +2695,11 @@ $match_fn = '';
 if (preg_match('/^render_template\(\) \{.*?^\}$/ms', $render_src, $m)) { $render_fn = $m[0]; }
 if (preg_match('/^vhost_matches_history\(\) \{.*?^\}$/ms', $render_src, $m)) { $match_fn = $m[0]; }
 check($render_fn !== '' && $match_fn !== '', 'the render and history-match functions are findable');
+// The history match compares through the certbot-tolerant test, so it needs
+// that and the insertion list alongside.
+foreach (array('is_certbot_insertion', 'vhost_is_render_plus_certbot') as $needed) {
+    if (preg_match('/^' . $needed . '\(\) \{.*?^\}$/ms', $render_src, $m)) { $match_fn = $m[0] . "\n" . $match_fn; }
+}
 
 $vh2 = harness_scratch_dir('vhost_history');
 @mkdir($vh2, 0700, true);
@@ -2496,6 +2741,122 @@ check(!$adopts($over, $new_render),
 
 array_map('unlink', glob($vh . '/*'));
 @rmdir($vh);
+
+section('Renewal never edits a vhost the renderer owns (specs/tls_and_origin_trust.md WP1a)');
+
+// certbot's Apache installer adds an Include line to the domain's vhost on
+// every renewal, so the file stopped matching the renderer's record and every
+// later converge refused it. Three parts: install.sh issues with certonly and
+// a deploy hook; the renderer heals the lineage's renewal conf so the edit
+// never recurs; and certbot's known insertions count as not an operator edit.
+$install_src = (string)file_get_contents($tools_dir . '/install.sh');
+check(preg_match('/^\s*(if\s+)?certbot\s+--apache/m', $install_src) === 0,
+    'install.sh never runs certbot --apache as the installer');
+preg_match_all('/^\s*(?:if\s+)?certbot\s+(?!.*\bdelete\b)(.*?)(?:;\s*then)?\s*$/m', $install_src, $issues);
+$issue_lines = array_filter($issues[0], function ($l) { return strpos($l, 'certonly') !== false || strpos($l, ' -d ') !== false; });
+check(count($issue_lines) >= 2, 'both issuance paths are findable', count($issue_lines) . ' lines');
+$all_certonly = true;
+foreach ($issue_lines as $line) {
+    if (strpos($line, 'certonly') === false) { $all_certonly = false; }
+}
+check($all_certonly, 'every certbot line that issues is certonly');
+// The hook may sit on a continuation line, so look at the whole function.
+$pfn = '';
+if (preg_match('/^provision_origin_cert\(\) \{.*?^\}$/ms', $install_src, $m)) { $pfn = $m[0]; }
+check($pfn !== '' && substr_count($pfn, "--deploy-hook 'systemctl reload apache2'") >= 2,
+    'each issuance carries a deploy hook that reloads Apache, recorded as renew_hook for every renewal');
+
+$heal_fn = '';
+$plus_fn = '';
+if (preg_match('/^heal_renewal_conf\(\) \{.*?^\}$/ms', $render_src, $m)) { $heal_fn = $m[0]; }
+if (preg_match('/^vhost_is_render_plus_certbot\(\) \{.*?^\}$/ms', $render_src, $m)) { $plus_fn = $m[0]; }
+check($heal_fn !== '' && $plus_fn !== '', 'the heal and the certbot-tolerant comparison are findable');
+check(strpos($render_src, 'heal_renewal_conf "${JOINERY_LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal/${DOMAIN}.conf"') !== false,
+    'the renderer heals the site\'s own lineage on every run');
+
+$vh3 = harness_scratch_dir('vhost_certbot');
+@mkdir($vh3 . '/renewal', 0700, true);
+$renewal = $vh3 . '/renewal/example.com.conf';
+file_put_contents($renewal, "# renew_before_expiry = 30 days\nversion = 2.9.0\n"
+    . "archive_dir = /etc/letsencrypt/archive/example.com\n\n# Options used in the renewal process\n"
+    . "[renewalparams]\naccount = abc\nauthenticator = apache\ninstaller = apache\n"
+    . "server = https://acme-v02.api.letsencrypt.org/directory\n");
+$run_heal = function () use ($heal_fn, $vh3, $renewal): string {
+    $script = $vh3 . '/heal.sh';
+    file_put_contents($script, "say() { echo \"vhost: \$*\"; }\n" . $heal_fn . "\n"
+        . 'heal_renewal_conf ' . escapeshellarg($renewal) . "\n");
+    return trim((string)shell_exec('bash ' . escapeshellarg($script) . ' 2>&1'));
+};
+$out1 = $run_heal();
+$after1 = (string)file_get_contents($renewal);
+check(preg_match('/^installer = None$/m', $after1) === 1, 'installer = apache becomes installer = None', $after1);
+check(preg_match('/^renew_hook = systemctl reload apache2$/m', $after1) === 1, 'and a renew_hook that reloads Apache is added');
+check(preg_match('/^\[renewalparams\]$/m', $after1) === 1 && strpos($after1, 'authenticator = apache') !== false,
+    'everything else in the conf is untouched');
+check(strpos($out1, 'installer = None') !== false, 'the run says what it changed');
+$copies = glob($renewal . '.before-render.*');
+check(count($copies) === 1, 'one copy of the original is kept beside it', count($copies) . ' copies');
+check(!in_array(true, array_map(function ($c) { return substr($c, -5) === '.conf'; }, $copies), true),
+    'and its name does not end in .conf, so certbot never reads it as a lineage');
+$out2 = $run_heal();
+check((string)file_get_contents($renewal) === $after1, 'a second run changes nothing');
+check($out2 === '', 'and says nothing');
+check(count(glob($renewal . '.before-render.*')) === 1, 'and keeps no second copy');
+file_put_contents($renewal, str_replace('renew_hook = systemctl reload apache2', 'renew_hook = /usr/local/bin/mine', $after1));
+$run_heal();
+check(strpos((string)file_get_contents($renewal), 'renew_hook = /usr/local/bin/mine') !== false,
+    'a renew_hook an operator set is theirs and is left alone');
+unlink($renewal);
+check($run_heal() === '', 'no renewal conf (no certificate yet) is not an error');
+
+$plus = function (string $render, string $disk) use ($certbot_fn, $plus_fn, $vh3): bool {
+    file_put_contents($vh3 . '/render.conf', $render);
+    file_put_contents($vh3 . '/disk.conf', $disk);
+    $script = $vh3 . '/plus.sh';
+    file_put_contents($script, $certbot_fn . "\n" . $plus_fn . "\n"
+        . 'vhost_is_render_plus_certbot ' . escapeshellarg($vh3 . '/render.conf') . ' ' . escapeshellarg($vh3 . '/disk.conf')
+        . " example.com\necho \$?\n");
+    return trim((string)shell_exec('bash ' . escapeshellarg($script) . ' 2>/dev/null')) === '0';
+};
+// The recorded render carries the same RewriteCond line certbot writes, so the
+// comparison has to tolerate certbot's copy without stripping the render's.
+$recorded = "<VirtualHost *:80>\n    ServerName example.com\n    RewriteEngine On\n"
+    . "    RewriteCond %{SERVER_NAME} =example.com\n    RewriteRule ^ https://%{SERVER_NAME}%{REQUEST_URI} [END,NE,R=308]\n"
+    . "</VirtualHost>\n<VirtualHost *:443>\n    ServerName example.com\n    SSLEngine on\n</VirtualHost>\n";
+$with_include = str_replace("    SSLEngine on\n", "    SSLEngine on\n    Include /etc/letsencrypt/options-ssl-apache.conf\n", $recorded);
+$with_both = str_replace("</VirtualHost>\n<VirtualHost *:443>",
+    "    RewriteEngine on\n    RewriteCond %{SERVER_NAME} =example.com\n"
+    . "    RewriteRule ^ https://%{SERVER_NAME}%{REQUEST_URI} [END,NE,R=permanent]\n</VirtualHost>\n<VirtualHost *:443>", $with_include);
+check($plus($recorded, $recorded), 'a file identical to the record is ours');
+check($plus($recorded, $with_include), 'the record plus certbot\'s Include line is ours');
+check($plus($recorded, $with_both), 'the record plus the Include line plus certbot\'s redirect block is ours');
+check(!$plus($recorded, $with_both . "    ServerAlias www.example.com\n"), 'the same file plus one unrelated line is not');
+check(!$plus($recorded, str_replace("    SSLEngine on\n", '', $with_include)), 'a line of the record that is missing is an edit');
+check(!$plus($recorded, str_replace("=example.com\n    RewriteRule ^ https://%{SERVER_NAME}%{REQUEST_URI} [END,NE,R=permanent]",
+    "=other.example\n    RewriteRule ^ https://%{SERVER_NAME}%{REQUEST_URI} [END,NE,R=permanent]", $with_both)),
+    'certbot\'s RewriteCond for some other name is not certbot\'s for this one');
+// The first-run subset rule tolerates the same lines.
+$older_fn = '';
+if (preg_match('/^vhost_is_an_older_render\(\) \{.*?^\}$/ms', $render_src, $m)) { $older_fn = $m[0]; }
+$adopts_dom = function (string $on_disk, string $candidate) use ($certbot_fn, $older_fn, $vh3): bool {
+    file_put_contents($vh3 . '/on_disk.conf', $on_disk);
+    file_put_contents($vh3 . '/candidate.conf', $candidate);
+    $script = $vh3 . '/sub.sh';
+    file_put_contents($script, $certbot_fn . "\n" . $older_fn . "\n"
+        . 'vhost_is_an_older_render ' . escapeshellarg($vh3 . '/on_disk.conf') . ' ' . escapeshellarg($vh3 . '/candidate.conf')
+        . " example.com\necho \$?\n");
+    return trim((string)shell_exec('bash ' . escapeshellarg($script) . ' 2>/dev/null')) === '0';
+};
+check($adopts_dom($with_both, $recorded), 'on a box with no record, an older render plus certbot\'s lines adopts');
+check(!$adopts_dom($with_both . "    ServerAlias www.example.com\n", $recorded), 'and one unrelated line still does not');
+check(strpos($render_src, 'if ! vhost_is_render_plus_certbot "${STATE}" "${CONF}" "${DOMAIN}"; then') !== false,
+    'the recorded-render check is the certbot-tolerant comparison, so a box carrying the Include re-renders instead of waiting for a hand-apply');
+check(strpos($render_src, 'vhost_is_render_plus_certbot "${rendered_old}" "${on_disk}" "${DOMAIN}"') !== false,
+    'and so is the history match');
+array_map('unlink', glob($vh3 . '/renewal/*'));
+@rmdir($vh3 . '/renewal');
+array_map('unlink', glob($vh3 . '/*'));
+@rmdir($vh3);
 
 section('The converger entry point is refreshed when it goes stale');
 

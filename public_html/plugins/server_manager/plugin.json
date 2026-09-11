@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.22.8",
+  "version": "1.22.10",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -151,6 +151,7 @@
       "default": "21",
       "group": "monitoring",
       "label": "Warn this many days before a certificate expires",
+      "helptext": "The safety net. A node's certificate is watched on the node's own address whether or not an edge fronts the name, and renewal more than a day overdue alerts on its own, before this threshold is reached.",
       "type": "number",
       "validation": {
         "number": true,

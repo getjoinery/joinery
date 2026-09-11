@@ -1,6 +1,6 @@
 # Host converger: a self-hosted box takes its root-level changes without a shell
 
-**Status:** BUILT 2026-09-10 (uncommitted): `install_host_converger.sh`
+**Status:** IMPLEMENTED 2026-09-11 with `read_only_tree.md`; the timer runs on all nine nodes (0.8.386). The StackScript closing proof is deferred to the live verification queue. Built 2026-09-10: `install_host_converger.sh`
 (core installer 1.0), `_plugin_installers_start.sh` 1.5 (`--when-changed`,
 `--site-root=`, the stamp and `cache/host_converger.last`), `install.sh`
 2.69 (changelog only; the runner it already runs installs the converger),

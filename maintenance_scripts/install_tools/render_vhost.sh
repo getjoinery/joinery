@@ -3,6 +3,24 @@
 # render_vhost.sh - keep this site's Apache vhost in step with the template the
 # deployed release ships.
 #
+# Version: 1.7 - Mints the site's placeholder certificate on every converge when
+#                neither it nor the Let's Encrypt lineage exists
+#                (_placeholder_cert.sh, specs/tls_and_origin_trust.md WP12), so
+#                a box that somehow has no certificate at all still answers TLS
+#                and can receive its first challenge through an edge.
+# Version: 1.6 - certbot is taken out of the vhost (specs/tls_and_origin_trust.md
+#                WP1a). Its Apache installer edited the domain's vhost on every
+#                renewal - an Include line, and on older installs a redirect
+#                block - so the file stopped matching the record and every
+#                later converge refused it. Two changes: the site's renewal
+#                conf is healed on every run (installer = None, a renew_hook
+#                that reloads Apache), so the edit never recurs; and those two
+#                known insertions count as not an operator edit, so a box that
+#                already carries them adopts and re-renders instead of waiting
+#                for a hand-apply. Nothing else is tolerated.
+# Version: 1.5 - A candidate that does not parse is reported with Apache's own
+#                error line and exits 1, so the runner logs it as a failed
+#                installer instead of "ok" over a silent rollback.
 # Version: 1.4 - Creates the test site's directories before rendering. The
 #                template's test-site vhost logs to {site}_test/logs, and every
 #                installer creates it; a box that never had it fails the config
@@ -97,6 +115,87 @@ DOMAIN="$(grep -m1 -oE '^[[:space:]]*ServerName[[:space:]]+\S+' "${CONF}" | awk 
 SERVER_IP="$(grep -m1 -oE '<VirtualHost[[:space:]]+[^:]+:' "${CONF}" | sed -E 's/<VirtualHost[[:space:]]+//; s/:$//')"
 [[ -n "${SERVER_IP}" ]] || SERVER_IP="*"
 
+# certbot's Apache installer edits the vhost this script owns: on every renewal
+# ApacheConfigurator._deploy_cert adds `Include /etc/letsencrypt/options-ssl-apache.conf`
+# wherever the line is missing, and older installs also got its http->https
+# redirect block. The template states both itself, so the edit only ever made
+# the file stop matching the record. The renewal conf is where certbot decides
+# to do that (`installer = apache`); with `installer = None` it writes the
+# certificate files and runs the hook, which is all a renewal has to do.
+#
+# $1 = the lineage's renewal conf. Idempotent: a second run changes nothing.
+# The first run that changes something keeps a copy beside the file (a name
+# not ending in .conf, so certbot never reads it as a lineage).
+heal_renewal_conf() {
+    local conf="$1" tmp changed=0
+    [[ -f "${conf}" ]] || return 0
+    tmp="$(mktemp)"
+    cp "${conf}" "${tmp}"
+    if grep -qE '^[[:space:]]*installer[[:space:]]*=[[:space:]]*apache[[:space:]]*$' "${tmp}"; then
+        sed -i -E 's/^([[:space:]]*installer[[:space:]]*=[[:space:]]*)apache[[:space:]]*$/\1None/' "${tmp}"
+        changed=1
+    fi
+    if grep -q '^\[renewalparams\]' "${tmp}" \
+       && ! grep -qE '^[[:space:]]*renew_hook[[:space:]]*=' "${tmp}"; then
+        sed -i '/^\[renewalparams\]/a renew_hook = systemctl reload apache2' "${tmp}"
+        changed=1
+    fi
+    if [[ "${changed}" == 1 ]]; then
+        if ! ls "${conf}".before-render.* >/dev/null 2>&1; then
+            cp -p "${conf}" "${conf}.before-render.$(date -u +%Y%m%d%H%M%S)" 2>/dev/null || true
+        fi
+        cat "${tmp}" > "${conf}"
+        say "renewal: ${conf} says installer = None with a reload hook; certbot will not edit the vhost again"
+    fi
+    rm -f "${tmp}"
+    return 0
+}
+heal_renewal_conf "${JOINERY_LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal/${DOMAIN}.conf"
+
+# The placeholder the template's :443 host reads until a real certificate
+# lands. Minted before the render so the vhost written below has something to
+# answer with on the very next reload.
+if [[ -f "${SCRIPT_DIR}/_placeholder_cert.sh" ]]; then
+    # shellcheck source=_placeholder_cert.sh
+    . "${SCRIPT_DIR}/_placeholder_cert.sh"
+    mint_placeholder_cert "${DOMAIN}" || true
+fi
+
+# The lines certbot's installer inserts, and nothing else. $1 = the line with
+# its indentation removed, $2 = the domain.
+is_certbot_insertion() {
+    case "$1" in
+        'Include /etc/letsencrypt/options-ssl-apache.conf') return 0 ;;
+        'RewriteEngine on') return 0 ;;
+        "RewriteCond %{SERVER_NAME} =$2") return 0 ;;
+        'RewriteRule ^ https://%{SERVER_NAME}%{REQUEST_URI} [END,NE,R=permanent]') return 0 ;;
+    esac
+    return 1
+}
+
+# Is the file on disk one of our renders plus any subset of certbot's
+# insertions? Compared with diff rather than by stripping first: the template
+# itself carries a `RewriteCond %{SERVER_NAME} =<domain>` line identical to
+# certbot's, and stripping it would refuse every box. A line of the render
+# that is missing, or an added line that is not certbot's, is an operator's
+# edit. $1 = the render, $2 = the file on disk, $3 = the domain.
+vhost_is_render_plus_certbot() {
+    local d line trimmed
+    d="$(diff "$1" "$2" 2>/dev/null)" && return 0
+    while IFS= read -r line; do
+        case "${line}" in
+            '<'*) return 1 ;;
+            '>'*)
+                trimmed="${line#> }"
+                trimmed="${trimmed#"${trimmed%%[![:space:]]*}"}"
+                [[ -z "${trimmed}" ]] && continue
+                is_certbot_insertion "${trimmed}" "$3" || return 1 ;;
+            *) ;;
+        esac
+    done <<< "${d}"
+    return 0
+}
+
 # The rule this file used to carry now lives in the vhost above, where the web
 # user cannot edit it. Removed here rather than left inert, because AllowOverride
 # None means a .htaccess in a web-writable directory is no longer read — and a
@@ -139,7 +238,8 @@ render_template "${TEMPLATE}" > "${RENDERED}"
 # vhost_history/ holds every template version we ever shipped. A file that is
 # byte-for-byte one of their renders for this domain and address is ours by
 # construction - no operator edit survives an exact comparison - and it is
-# adopted without a further test. Echoes the matching version's file name.
+# adopted without a further test. certbot's own insertions are allowed on top
+# (vhost_is_render_plus_certbot). Echoes the matching version's file name.
 vhost_matches_history() {
     local on_disk="$1" history_dir="$2" old rendered_old
     [[ -d "${history_dir}" ]] || return 1
@@ -147,7 +247,7 @@ vhost_matches_history() {
     for old in "${history_dir}"/*.conf; do
         [[ -f "${old}" ]] || continue
         render_template "${old}" > "${rendered_old}"
-        if cmp -s "${rendered_old}" "${on_disk}"; then
+        if vhost_is_render_plus_certbot "${rendered_old}" "${on_disk}" "${DOMAIN}"; then
             rm -f "${rendered_old}"
             echo "${old##*/}"
             return 0
@@ -177,7 +277,7 @@ fi
 # None is the point of this release: every older render carries
 # `AllowOverride All`, which by construction is not in the new one.
 vhost_is_an_older_render() {
-    local on_disk="$1" candidate="$2" line trimmed
+    local on_disk="$1" candidate="$2" domain="${3:-}" line trimmed
     while IFS= read -r line || [[ -n "${line}" ]]; do
         trimmed="${line#"${line%%[![:space:]]*}"}"
         # Blank lines and comments configure nothing, and the template carries a
@@ -185,6 +285,8 @@ vhost_is_an_older_render() {
         # refuse every box on earth over a number in a comment.
         [[ -z "${trimmed}" ]] && continue
         [[ "${trimmed}" == \#* ]] && continue
+        # certbot's installer wrote these, not an operator.
+        is_certbot_insertion "${trimmed}" "${domain}" && continue
         # The directive itself, not every directive whose name starts the same
         # way: AllowOverrideList is an operator's, and skipping it would adopt a
         # file carrying one.
@@ -203,7 +305,7 @@ if [[ ! -f "${STATE}" ]]; then
         say "adopting ${CONF}: it is exactly what ${MATCHED} rendered to for this site"
         cp "${CONF}" "${STATE}" 2>/dev/null || true
         chmod 600 "${STATE}" 2>/dev/null || true
-    elif vhost_is_an_older_render "${CONF}" "${RENDERED}"; then
+    elif vhost_is_an_older_render "${CONF}" "${RENDERED}" "${DOMAIN}"; then
         say "adopting ${CONF}: it is an unedited render from an older release"
         cp "${CONF}" "${STATE}" 2>/dev/null || true
         chmod 600 "${STATE}" 2>/dev/null || true
@@ -222,9 +324,10 @@ fi
 # Is the vhost on disk still the one WE last wrote, or has an operator edited
 # it? A ServerAlias, an extra header, a redirect for one path — all normal, all
 # invisible to a renderer that just overwrites. So: apply only over our own
-# previous output. Anything else is somebody's work, and it is written beside
-# the file with a message instead of over it.
-if ! cmp -s "${STATE}" "${CONF}"; then
+# previous output, allowing for certbot's insertions on top of it (the renewal
+# conf healed above keeps them from coming back). Anything else is somebody's
+# work, and it is written beside the file with a message instead of over it.
+if ! vhost_is_render_plus_certbot "${STATE}" "${CONF}" "${DOMAIN}"; then
     cp "${RENDERED}" "${CONF}.new" 2>/dev/null || true
     chmod 644 "${CONF}.new" 2>/dev/null || true
     say "${CONF} has been edited since this script last wrote it; not overwriting." >&2
@@ -241,10 +344,11 @@ cp "${CONF}" "${BACKUP}" || { say "could not back up ${CONF} - not touching it" 
 cp "${RENDERED}" "${CONF}"
 chmod 644 "${CONF}"
 
-if ! apache2ctl -t >/dev/null 2>&1; then
+if ! parse_out="$(apache2ctl -t 2>&1)"; then
     say "the re-rendered vhost does not parse; putting the previous one back" >&2
+    say "  $(printf '%s' "${parse_out}" | grep -viE 'AH00558|Syntax' | head -3 | tr '\n' ' ')" >&2
     cp "${BACKUP}" "${CONF}"
-    exit 0
+    exit 1
 fi
 
 # The backup is KEPT. It is the only copy of what was running a moment ago, and

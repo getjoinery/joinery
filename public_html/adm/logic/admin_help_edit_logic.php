@@ -110,10 +110,9 @@ function admin_help_edit_logic(array $input): LogicResult {
 		// this is the hash of the other author's version, so a deliberate
 		// second Save goes through -- the warning is shown once, not forever.
 		'content_hash'  => sha1((string)file_get_contents($filepath)),
-		// Said at the top of the editor rather than only on a refused save: a
-		// git checkout recreates a doc with the developer's umask, and the
-		// web server loses write access to it until the mode is restored.
-		'writable'      => is_writable($filepath),
+		// The save is a root request; the one thing that stops it is a box
+		// with no root actor, said before the author types rather than after.
+		'actor_warning' => RootRequest::actorState() === 'present' ? '' : RootRequest::actorWarning(),
 		'error'         => $error,
 		'view_url'      => $view_url,
 	);

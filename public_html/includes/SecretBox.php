@@ -22,7 +22,7 @@
  * for new sites, and the host converger mints it as root on a site installed
  * before the key existed. SecretBox itself never writes the config file — it is
  * `require`d PHP, and the web user has no business editing the code it runs
- * (specs/read_only_tree.md). checkConfigKey() reports which of those two states
+ * (specs/implemented/read_only_tree.md). checkConfigKey() reports which of those two states
  * a site is in.
  *
  * A value is sealed through seal($locator, $plaintext), which refuses a locator
@@ -36,7 +36,7 @@
  *
  * @version 1.3 - ensureConfigKey() is checkConfigKey(): it reports, and never
  *   writes config/Globalvars_site.php. Minting the key is a root step at the
- *   host installers' moments (specs/read_only_tree.md)
+ *   host installers' moments (specs/implemented/read_only_tree.md)
  * @version 1.2 - seal() teeth, four-state open() contract, key canary
  * @version 1.1
  */

@@ -1,7 +1,7 @@
 <?php
 /**
  * HostConvergerNotice — the admin-header notice on a box whose host converger
- * has not run (specs/host_converger.md).
+ * has not run (specs/implemented/host_converger.md).
  *
  * A self-hosted box upgrades from the browser as the web user; the root half
  * of an upgrade (declared PHP extensions, the host installers) is done by the
@@ -50,7 +50,7 @@ class HostConvergerNotice {
 		}
 		// The converger is also the root actor that carries out root requests, so
 		// the queue's depth and the age of its oldest entry are facts about the
-		// same machine (specs/read_only_tree.md). Read here so the notice, the
+		// same machine (specs/implemented/read_only_tree.md). Read here so the notice, the
 		// health check and the test runner's `needs` all see one set of facts.
 		$pending = array();
 		$oldest_age = null;

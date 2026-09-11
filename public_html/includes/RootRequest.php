@@ -3,7 +3,7 @@
  * RootRequest — how the web side asks for something only root can do.
  *
  * The code tree belongs to root and the PHP pool cannot write it
- * (specs/read_only_tree.md). That closes the door an attacker walked through —
+ * (specs/implemented/read_only_tree.md). That closes the door an attacker walked through —
  * one bug that made the web server write a file used to leave PHP in the tree,
  * and the tree is what the next request runs — but it also takes away the
  * upgrade, plugin and theme installs, and the other operator actions that used
