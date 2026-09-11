@@ -20,7 +20,7 @@ origin firewall (WP7) do not serve it and are deferred below it.
 |---|---|
 | **Strict-ready nodes** — the installer, renewal, www, node-side health (WP0, WP1a, WP2, WP3, WP5, WP10, WP11) | **PLANNED 2026-09-11, owner accepted the step-by-step plan.** Build in the order under "The plan". |
 | **Flip Strict on our own zones** (WP6) | Waits on WP0 + www on the three bare-metal certificates + WP2. |
-| **ScrollDaddy DoH renewal** (WP1) | **Hard deadline 2026-09-30 21:58 UTC.** Independent of everything else. |
+| **ScrollDaddy DoH renewal** (WP1) | **DONE 2026-09-11.** New zone-scoped, IP-filtered token on both boxes; both renewed from the production CA (expire 2026-12-10); DoH verified end to end. Credential recorded in the ops guide and `docs/dns_management.md`. |
 | **Origin trust layer three** — Authenticated Origin Pulls, the firewall (WP7, D5) | **DEFERRED by owner 2026-08-30.** Unchanged. |
 | **Where a standing DNS-01 credential lives** (D1–D3, WP8, WP9) | **DEFERRED 2026-09-11.** Strict needs none of it. WP1 buys the time. |
 
@@ -29,7 +29,7 @@ Dated items:
 - **2026-09-17** — first renewal on jeremytunnell after the read-only-tree
   vhost hand-apply; certbot's Apache installer edits the managed vhost and the
   converger then refuses to manage it. B6, WP1a. dev follows 2026-09-20.
-- **2026-09-30 21:58 UTC** — the ScrollDaddy DoH certificate lapses. WP1.
+- ~~2026-09-30 21:58 UTC — the ScrollDaddy DoH certificate lapses. WP1.~~ Closed 2026-09-11: renewed to 2026-12-10 on both boxes.
 
 ## The problem in plain terms
 
@@ -524,7 +524,7 @@ give us this for free.
   `certonly` with a reload hook, verified at the origin with SNI for both
   names. No vhost edit: the proxy template's `<IfFile>` block reads the
   standard path. **Read "Corrections" first — never delete demo or orgs.**
-- **WP1 — Restore ScrollDaddy renewal. Deadline 2026-09-30.** New Cloudflare
+- **WP1 — Restore ScrollDaddy renewal. DONE 2026-09-11** (two gotchas, recorded in the ops guide: an account-owned token fails `/user/tokens/verify` though valid, and Caddy reaches the API over IPv6 so the IP filter needs both families). Was: New Cloudflare
   credential, both boxes, `daemon-reload`, restart Caddy so the next attempt
   goes to production rather than staging. Confirm a fresh certificate lands.
   Buys the time to decide D1.
