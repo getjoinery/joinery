@@ -1,4 +1,4 @@
-# Quick Start: Your First Joinery Site
+# Quick Start: Your First Joinery Site 
 
 This guide gets you from nothing to a running Joinery site — no technical experience needed, and nothing to type into a command line. You'll do everything by filling in forms in a web browser. Expect about 30 minutes of active work, plus a short wait while your site installs itself.
 
