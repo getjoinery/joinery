@@ -211,7 +211,7 @@ rotating it:
 |---|---|
 | Joinery nodes (bare metal, containers, fronted by an edge) | **None.** Certificates are issued and renewed over HTTP-01 through `certbot`; the challenge arrives through the edge when one is in front (docs/deploy_and_upgrade.md § Apache Vhost). |
 | The fleet DNS-01 fallback (`SslProvisionOutcome.php`, `install.sh` step 2) | **Yes, by design, on that node** — an operator hand-drops `/etc/letsencrypt/<provider>.ini`. Used only where HTTP-01 cannot reach the box. |
-| The two ScrollDaddy DNS resolvers | **Yes** — one zone-wide Cloudflare token each, at `/etc/systemd/system/caddy.service.d/cloudflare.conf`, because `dns.scrolldaddy.app` has two A records and HTTP-01 lands on either box. Where that credential should live is an open decision (specs/tls_and_origin_trust.md D1). |
+| The two ScrollDaddy DNS resolvers | **Yes** — one account-owned Cloudflare token, the same on both boxes, at `/etc/systemd/system/caddy.service.d/cloudflare.conf` (root, 0600): "Edit zone DNS" scoped to the zone `scrolldaddy.app` alone, no expiry, client IP filtering allowing exactly the two boxes over IPv4 and IPv6. Needed because `dns.scrolldaddy.app` has two A records and HTTP-01 lands on either box. Owner, verification and rotation are in `/etc/scrolldaddy/OPS_GUIDE.md` on each box; the management node alerts when its renewal is more than a day overdue. Whether it stays there is an open decision (specs/tls_and_origin_trust.md D1). |
 | The setup wizard's first-boot publish | No — `DnsInstallCredential`, sealed, deleted on first use. |
 | The admin DNS publish box | No — ephemeral, one request, never stored. |
 
