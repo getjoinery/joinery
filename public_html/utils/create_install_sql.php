@@ -335,11 +335,12 @@ $admin_user_sql = sprintf(
     $bcrypt_hash
 );
 
-// Create system user SQL (user_id 2) - used for system-generated actions
+// Create system user SQL (user_id 2) - used for system-generated actions.
+// It is an attribution id, never a login: nothing reads its permission, so it holds none.
 $system_user_sql = "-- System user (user_id 2) - used for system-generated actions\n" .
     "INSERT INTO public.usr_users (usr_user_id, usr_first_name, usr_last_name, usr_email, usr_permission, " .
     "usr_is_activated, usr_email_is_verified, usr_password, usr_signup_date, usr_force_password_change, usr_timezone) " .
-    "VALUES (2, 'System', 'User', 'system-user@joinery.local', 10, false, false, '', CURRENT_DATE, false, 'America/New_York');\n\n";
+    "VALUES (2, 'System', 'User', 'system-user@joinery.local', 0, false, false, '', CURRENT_DATE, false, 'America/New_York');\n\n";
 
 // Create deleted user SQL (user_id 3) - placeholder for reassigning ownership when users are deleted
 $deleted_user_sql = "-- Deleted user (user_id 3) - placeholder for reassigning ownership when users are deleted\n" .

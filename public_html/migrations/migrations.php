@@ -1406,3 +1406,12 @@
 	$migration['migration_file'] = NULL;
 	$migration['migration_sql'] = "UPDATE stg_settings SET stg_value = 'approved', stg_update_time = now() WHERE stg_name = 'default_comment_status' AND stg_value = 'Approved'";
 	$migrations[] = $migration;
+
+	// The system user (id 2) is an attribution id, never a login, and nothing
+	// reads its permission. Installs seeded it at 10; it holds 0.
+	$migration = array();
+	$migration['database_version'] = '183';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'system_user_no_permission.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
