@@ -22,13 +22,16 @@
  * so tests/vault/vault_health_test.php can hand it a fixture and cover every
  * branch on any box.
  *
+ * @version 1.5 - a seventh check: this box's own TLS certificate renews on
+ *   schedule, read from the summary the host converger writes
+ *   (specs/tls_and_origin_trust.md WP11)
  * @version 1.4 - the host-converger check also fails on a root request queued
  *   for over a day, and on an installer the runner refused to attribute. The
  *   converger carries requests out as well as converging the host, so a
  *   stalled queue is the same machine failing in a way the timer's own
- *   heartbeat cannot show (specs/read_only_tree.md)
+ *   heartbeat cannot show (specs/implemented/read_only_tree.md)
  * @version 1.3 - a sixth check: the host converger has run within a day
- *                (specs/host_converger.md)
+ *                (specs/implemented/host_converger.md)
  * @version 1.2 - a fifth check: the parser jail is installed, so strangers'
  *                bytes are never parsed as the web user (specs/parser_jail.md)
  * @version 1.1 - specs/vault_exposure_quick_fixes.md Q2-Q4: the core-dump check
@@ -52,7 +55,32 @@ class VaultHealth {
 			self::checkSwapSafe(),
 			self::checkParserJail(),
 			self::checkHostConverger(),
+			self::checkCertificates(),
 		];
+	}
+
+	/**
+	 * A self-hosted box has no management node watching its certificate, so
+	 * it reads certbot's own records — through the summary the host converger
+	 * writes, since /etc/letsencrypt is root's — and says when renewal has
+	 * stopped, before the site dies of it. CertificateNotice::forState() is
+	 * the one verdict; this row is that verdict in the health panel's shape.
+	 *
+	 * @param array|null $facts     Injected for tests; CertificateNotice::facts() otherwise.
+	 * @param int|null   $now       Injected for tests.
+	 * @param string|null $site_name Injected for tests; CertificateNotice::siteName() otherwise.
+	 */
+	public static function checkCertificates(?array $facts = null, ?int $now = null, ?string $site_name = null): array {
+		$key = 'certificates';
+		$label = 'The TLS certificate renews on schedule';
+		$facts = $facts ?? CertificateNotice::facts();
+		$now = $now ?? time();
+		$site_name = $site_name ?? CertificateNotice::siteName();
+		$verdict = CertificateNotice::forState($facts, $now, $site_name);
+		$state = $verdict['state'] === 'met' ? 'verified' : ($verdict['state'] === 'advice' ? 'unmet' : $verdict['state']);
+		$reason = $verdict['state'] === 'met' ? '' : trim($verdict['lead'] . ' ' . $verdict['body']
+			. ($verdict['command'] !== '' ? ' ' . $verdict['command'] : ''));
+		return ['key' => $key, 'label' => $label, 'state' => $state, 'reason' => $reason];
 	}
 
 	/**
@@ -94,7 +122,7 @@ class VaultHealth {
 		// is not moving is the same fact as a converger that is not running,
 		// seen from the other side: the timer may tick while every request it
 		// picks up fails, and an upgrade nobody notices did not happen is worse
-		// than one that visibly failed (specs/read_only_tree.md).
+		// than one that visibly failed (specs/implemented/read_only_tree.md).
 		$oldest = $facts['oldest_request_age'] ?? RootRequest::oldest_pending_age();
 		if ($oldest !== null && $oldest >= RootRequest::STALE_AFTER) {
 			return ['key' => $key, 'label' => $label, 'state' => 'unmet',

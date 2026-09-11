@@ -16,7 +16,7 @@
  * @version 1.2.0 - the cached map is cache/class_map.json, read with
  *   json_decode. It was cache/class_map.php, a PHP file the web user wrote and
  *   this class `include`d on every request — code the pool both writes and
- *   executes, which is what specs/read_only_tree.md removes. A class_map.php
+ *   executes, which is what specs/implemented/read_only_tree.md removes. A class_map.php
  *   left by an earlier release is deleted on the first read.
  * @version 1.1.0 - restrictToCore(): the extraction subprocess resolves core
  *   classes only, never touching the theme chain or the plugin registry, both
@@ -365,7 +365,7 @@ class ClassAutoloader {
 	/**
 	 * The map used to be a PHP file this class `include`d on every request —
 	 * a file the web user writes, executed by the web user, which is the one
-	 * shape specs/read_only_tree.md exists to remove. A cache is data; it is
+	 * shape specs/implemented/read_only_tree.md exists to remove. A cache is data; it is
 	 * read with json_decode and never executed. Named so a site upgraded from
 	 * a release that wrote the old file can have it removed.
 	 */

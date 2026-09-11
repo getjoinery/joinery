@@ -1,4 +1,41 @@
 #!/usr/bin/env bash
+#VERSION 2.74 - Review round 1 of specs/tls_and_origin_trust.md. WP12: the
+#               placeholder certificate (_placeholder_cert.sh) is minted by
+#               write_universal_vhost in both modes, so the :443 host answers
+#               from the first minute and an edge that redirects the HTTP-01
+#               challenge to https can deliver it (B10). name_reaches_here
+#               tells 526 (the edge on Strict refusing the placeholder, rc 2)
+#               from 525 or no answer (this box completed no handshake: the
+#               placeholder is missing, rc 3). www resolves through
+#               name_resolves (getent), which never mistakes a CNAME target
+#               for an address. The by-hand setup_ssl.sh path is printed
+#               resolved, not as a glob.
+#VERSION 2.73 - The server step asserts certbot.timer (or the cron.d file) after
+#               installing certbot instead of inheriting it from the package
+#               (specs/tls_and_origin_trust.md WP5): a change of install method
+#               cannot silently leave every new node with a certificate that
+#               never renews.
+#VERSION 2.72 - The installer issues for every install (specs/tls_and_origin_trust.md
+#               WP10, B7 and B8). HTTP-01 is attempted whenever the name REACHES
+#               this box - proven by name_reaches_here, which fetches a nonce
+#               through the name - not only when it resolves to this box's own
+#               address. Behind Cloudflare the name never resolved here, so the
+#               installer gave up on HTTP-01 for a reason that was never true
+#               and every Cloudflare-first install ended with no certificate,
+#               which a Full (Strict) flip then took dark. www.<domain> joins
+#               the lineage whenever it resolves and reaches here, because
+#               Strict rejects a www the certificate does not name. When the
+#               edge is already Strict and this box holds no certificate, the
+#               probe sees the https hop refused and says so.
+#VERSION 2.71 - certbot never edits the vhost (specs/tls_and_origin_trust.md
+#               WP1a). Both issuance paths are certonly with a deploy hook that
+#               reloads Apache; the certificate lands at the path the vhost
+#               template's <IfFile> :443 block reads, and the hook is recorded
+#               as renew_hook so every renewal reloads too. certbot's Apache
+#               installer inserted an Include line into the domain's vhost on
+#               every renewal, which made the rendered vhost stop matching the
+#               renderer's record, so template changes stopped landing on that
+#               box; render_vhost.sh 1.6 heals existing lineages the same way.
 #VERSION 2.70 - The server setup step no longer chowns /var/www to www-data
 #               (specs/read_only_tree.md). Sites get their permissions from
 #               fix_permissions.sh, which _site_init.sh already runs at the end
@@ -694,11 +731,44 @@ install_ssl_retry_timer() {
 #      the time it fires, so a path that does not exist yet (the host agent's
 #      bundle, which lands when its join is approved) is still the right first
 #      choice.
+# Whatever the early DNS check guessed, the fact that decides whether the
+# retry timer is armed is whether a certificate landed. A name that resolved
+# to an edge and still could not be reached (an edge already on Strict, a
+# provider we did not recognise) ends here the same as one that resolved
+# nowhere: the timer asks again every five minutes at no cost.
+#
+# The install's summary and the first arming call run before the certificate
+# step, so this arms the timer itself when it is the first to learn the
+# certificate is missing, and says so in one line.
+note_ssl_deferred_if_missing() {
+    local domain="$1"
+    [ -f "/etc/letsencrypt/live/${domain}/fullchain.pem" ] && return 0
+    SSL_DEFERRED=1
+    if [ "$SSL_RETRY_ARMED" -eq 0 ] && [ -n "$SSL_RETRY_CANDIDATES" ]; then
+        arm_ssl_deferred_retry "$SSL_RETRY_CANDIDATES"
+    fi
+    if [ "$SSL_RETRY_ARMED" -eq 1 ]; then
+        print_info "No certificate yet for ${domain}. A retry timer asks every five minutes whether the name reaches this box and issues one when it does."
+    else
+        # The path a human runs by hand: the first candidate that exists now,
+        # else the site's own copy.
+        local by_hand="" candidate
+        local -a candidates=()
+        IFS=':' read -r -a candidates <<< "${SSL_RETRY_CANDIDATES:-}"
+        for candidate in "${candidates[@]}"; do
+            [ -f "$candidate" ] && { by_hand="$candidate"; break; }
+        done
+        [ -n "$by_hand" ] || by_hand="/var/www/html/${SITENAME:-<site>}/maintenance_scripts/sysadmin_tools/setup_ssl.sh"
+        print_info "No certificate yet for ${domain}. Issue one with: sudo bash ${by_hand} ${domain}"
+    fi
+}
+
 SSL_RETRY_ARMED=0
 SSL_RETRY_CANDIDATES=""
 arm_ssl_deferred_retry() {
-    [ "$SSL_DEFERRED" -eq 1 ] || return 0
     SSL_RETRY_CANDIDATES="$1"
+    [ "$SSL_DEFERRED" -eq 1 ] || return 0
+    [ "$SSL_RETRY_ARMED" -eq 1 ] && return 0
     if install_ssl_retry_timer "$DOMAIN_NAME" "$SSL_RETRY_CANDIDATES"; then
         SSL_RETRY_ARMED=1
     fi
@@ -878,6 +948,14 @@ setup_ssl_baremetal() {
 # be able to serve anything. See specs/implemented/universal_apache_vhost.md.
 #==============================================================================
 
+# The placeholder certificate the :443 host reads until a real one lands
+# (_placeholder_cert.sh, specs/tls_and_origin_trust.md WP12). Sourced here so
+# setup_ssl.sh and render_vhost.sh see the same function.
+if [ -f "${SCRIPT_DIR:-${BASH_SOURCE%/*}}/_placeholder_cert.sh" ]; then
+    # shellcheck source=_placeholder_cert.sh
+    . "${SCRIPT_DIR:-${BASH_SOURCE%/*}}/_placeholder_cert.sh"
+fi
+
 # Emit the universal vhost into a named conf file by sed-substituting one of
 # the template files in install_tools/ (single source of truth per mode):
 #
@@ -933,6 +1011,13 @@ write_universal_vhost() {
         a2enmod proxy proxy_http > /dev/null 2>&1 || true
     fi
 
+    # The :443 host must answer from the first minute or an edge that
+    # redirects the challenge to https can never deliver it (B10). Minted
+    # before the site is enabled, so the first reload brings :443 up.
+    if command -v mint_placeholder_cert > /dev/null 2>&1; then
+        mint_placeholder_cert "$domain" || true
+    fi
+
     a2ensite "${sitename}.conf" > /dev/null 2>&1 || true
 }
 
@@ -961,17 +1046,171 @@ detect_dns_provider() {
     esac
 }
 
-# Provision an origin LE cert. Two-step decision tree:
+# The first address a name resolves to, IPv4 then IPv6, through any CNAME;
+# nothing when it does not resolve. getent, not dig: a CNAME target made of
+# hex letters is not an address, and getent only ever prints addresses.
+name_resolves() {
+    local name="$1" ip
+    [ -n "$name" ] || return 0
+    ip="$(getent ahostsv4 "$name" 2>/dev/null | awk '{print $1; exit}')"
+    [ -n "$ip" ] || ip="$(getent ahostsv6 "$name" 2>/dev/null | awk '{print $1; exit}')"
+    [ -n "$ip" ] && printf '%s' "$ip"
+    return 0
+}
+
+# Which site's vhost answers for a name, and how: echoes "<sitename> proxy" for
+# a container served through the host's reverse proxy, "<sitename> direct" for
+# a bare-metal site. www.<name> has no vhost of its own (the catch-all vhost
+# redirects it to the apex), so it is answered by the apex's site.
+site_serving_name() {
+    local name="$1" conf
+    for conf in /etc/apache2/sites-available/*.conf; do
+        [ -f "$conf" ] || continue
+        if grep -qE "^[[:space:]]*ServerName[[:space:]]+${name//./\\.}[[:space:]]*$" "$conf"; then
+            if grep -q 'ProxyPass' "$conf"; then
+                echo "$(basename "$conf" .conf) proxy"
+            else
+                echo "$(basename "$conf" .conf) direct"
+            fi
+            return 0
+        fi
+    done
+    case "$name" in
+        www.*) site_serving_name "${name#www.}"; return $? ;;
+    esac
+    return 1
+}
+
+# Does an HTTP request for a name land on this box? That is what HTTP-01
+# actually requires, and it is true both when the name resolves here and when
+# it resolves to an edge that forwards here (demo and orgs were issued through
+# Cloudflare that way). Proven rather than inferred: a nonce is written where
+# the site serves files, fetched through the name, and compared. Spends no
+# Let's Encrypt budget, so it can be asked every five minutes forever.
 #
-#   1. Domain resolves to this server -> certbot --apache HTTP-01.
-#   2. Domain resolves elsewhere -> DNS-01 via auto-detected provider plugin
-#      (if credentials are present at /etc/letsencrypt/<provider>.ini).
+# Returns 0 when the body matched. 1 when it did not. When the http hop
+# reached something but the https hop it was redirected to did not, the edge's
+# status says which of two things is wrong: 2 for 526 — an edge in Full
+# (Strict) refusing the placeholder certificate, which only the owner can
+# change by setting Full until the real certificate lands; 3 for 525 or no
+# answer — this box completed no TLS handshake at all, which means the
+# placeholder is missing (render_vhost.sh mints it) and is a defect here, not
+# at the edge. REACH_STATE names which of the three was seen: direct, edge,
+# none.
+#
+# $1 = the name to probe. JOINERY_REACH_BASE_URL and JOINERY_REACH_DIR replace
+# http://<name> and the site's static_files directory, so a test can run this
+# in a temp root against a local server and never touch DNS.
+REACH_STATE=""
+name_reaches_here() {
+    local name="$1" nonce dir file url body out code effective site kind sitename
+    nonce="reach-$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+    body="$nonce"
+    out="$(mktemp)"
+
+    if [ -n "${JOINERY_REACH_DIR:-}" ]; then
+        kind="direct"
+        dir="${JOINERY_REACH_DIR}"
+    else
+        site="$(site_serving_name "$name" 2>/dev/null || true)"
+        if [ -z "$site" ]; then
+            REACH_STATE="none"
+            print_info "No vhost on this box answers for ${name}; it cannot reach here."
+            rm -f "$out"
+            return 1
+        fi
+        sitename="${site%% *}"
+        kind="${site##* }"
+        dir="/var/www/html/${sitename}/static_files"
+    fi
+    file="${dir}/${nonce}.txt"
+
+    # Place the nonce where the vhost serves it: on disk for a bare-metal
+    # site, inside the container for a proxied one (the host's tree is not
+    # what the proxy forwards to).
+    if [ "$kind" = "proxy" ]; then
+        docker exec "$sitename" sh -c "mkdir -p '${dir}' && printf '%s' '${body}' > '${file}'" 2>/dev/null \
+            || { REACH_STATE="none"; print_warning "Could not place the reach probe in container ${sitename}."; rm -f "$out"; return 1; }
+    else
+        mkdir -p "$dir" 2>/dev/null || true
+        printf '%s' "$body" > "$file" 2>/dev/null \
+            || { REACH_STATE="none"; print_warning "Could not write the reach probe at ${file}."; rm -f "$out"; return 1; }
+        chmod 644 "$file" 2>/dev/null || true
+    fi
+
+    url="${JOINERY_REACH_BASE_URL:-http://${name}}/static_files/${nonce}.txt"
+    # Follow redirects: an edge with "always HTTPS" answers 301 to https, and
+    # the catch-all vhost sends www. to the apex. In Full mode the edge reaches
+    # an origin without a certificate, so the https hop is fine there.
+    local wout
+    wout="$(curl -sL --max-time 10 -o "$out" -w '%{http_code} %{url_effective}' "$url" 2>/dev/null || true)"
+    code="${wout%% *}"
+    effective="${wout#* }"
+
+    if [ "$kind" = "proxy" ]; then
+        docker exec "$sitename" rm -f "$file" 2>/dev/null || true
+    else
+        rm -f "$file" 2>/dev/null || true
+    fi
+
+    local fetched
+    fetched="$(head -c 200 "$out" 2>/dev/null || true)"
+    rm -f "$out"
+
+    if [ "$fetched" = "$body" ]; then
+        # Reached. Direct or through an edge is a word for the log, not a gate.
+        local dns_ip4 dns_ip6 server_ip4 server_ip6
+        server_ip4=$(curl -4 -s --max-time 5 ifconfig.me 2>/dev/null || curl -4 -s --max-time 5 icanhazip.com 2>/dev/null || true)
+        server_ip6=$(curl -6 -s --max-time 5 ifconfig.me 2>/dev/null || curl -6 -s --max-time 5 icanhazip.com 2>/dev/null || true)
+        dns_ip4=$(dig +short A "$name" @1.1.1.1 2>/dev/null | grep -E '^[0-9.]+$' | head -1 || true)
+        dns_ip6=$(dig +short AAAA "$name" @1.1.1.1 2>/dev/null | grep -E '^[0-9a-fA-F:]+$' | head -1 || true)
+        if { [ -n "$server_ip4" ] && [ "$server_ip4" = "$dns_ip4" ]; } \
+           || { [ -n "$server_ip6" ] && [ "$server_ip6" = "$dns_ip6" ]; } \
+           || [ -n "${JOINERY_REACH_BASE_URL:-}" ]; then
+            REACH_STATE="direct"
+            print_info "${name} reaches this box directly."
+        else
+            REACH_STATE="edge"
+            print_info "${name} reaches this box through an edge (resolves to ${dns_ip4:-${dns_ip6:-?}})."
+        fi
+        return 0
+    fi
+
+    REACH_STATE="none"
+    case "$effective" in
+        https://*)
+            # The http hop answered and sent us on to https, and that hop did
+            # not deliver. Two different things look alike from here and the
+            # edge's status tells them apart.
+            if [ "$code" = "526" ]; then
+                print_warning "${name} reaches an edge, but the edge is on Full (Strict) and refuses the placeholder certificate this box presents (HTTP 526)."
+                print_warning "  Set the edge to Full until the first certificate lands; then Full (Strict) works."
+                return 2
+            fi
+            if [ -z "$code" ] || [ "$code" = "000" ] || [ "${code:0:1}" = "5" ]; then
+                print_warning "${name} reaches an edge, but this box did not complete a TLS handshake (HTTP ${code:-none}): the placeholder certificate is missing."
+                print_warning "  On the host: bash ${SCRIPT_DIR:-${BASH_SOURCE%/*}}/render_vhost.sh"
+                return 3
+            fi ;;
+    esac
+    print_info "${name} does not reach this box (HTTP ${code:-none})."
+    return 1
+}
+
+# Provision an origin LE cert. The rule is "the name reaches this box", which
+# is what HTTP-01 actually requires:
+#
+#   1. name_reaches_here -> certbot certonly --apache (HTTP-01), for the apex
+#      and, when www.<domain> resolves and reaches here too, for www. Direct or
+#      through an edge makes no difference: the challenge only has to arrive.
+#   2. Otherwise, or when HTTP-01 fails -> DNS-01 via the auto-detected
+#      provider plugin, if credentials are present at /etc/letsencrypt/<provider>.ini.
 #
 # If neither path issues a cert, the function exits silently. The vhost
-# template's <IfFile> guard means the :443 vhost simply doesn't activate,
-# and any TLS-terminating proxy in front (e.g. Cloudflare) handles HTTPS at
-# the edge. Origin SSL is opt-in: drop a credential file and re-run
-# `sysadmin_tools/setup_ssl.sh <domain>` whenever you want it.
+# template's <IfFile> guard means the :443 vhost simply doesn't activate, the
+# site serves HTTP, and the retry timer armed by the install asks again every
+# five minutes at no cost until the name reaches here. Re-run
+# `sysadmin_tools/setup_ssl.sh <domain>` by hand whenever you want it.
 provision_origin_cert() {
     local domain="$1"
 
@@ -981,27 +1220,39 @@ provision_origin_cert() {
         apt-get install -y -qq certbot python3-certbot-apache
     fi
 
-    # Ask for each family explicitly. A bare `curl ifconfig.me` answers with
-    # whichever address the host prefers, and a dual-stack host prefers IPv6 --
-    # so comparing that reply against an A record never matches, and a box that
-    # was entitled to HTTP-01 silently loses it. Every new Linode is dual-stack.
-    local server_ip4 server_ip6 dns_ip4 dns_ip6
-    # Every probe ends in `|| true`: a host with no IPv6, or a domain with no
-    # AAAA record, is the normal case, not an error -- and setup_ssl.sh sources
-    # this under `set -euo pipefail`, where an empty grep would otherwise abort
-    # the run before certbot is ever reached.
-    server_ip4=$(curl -4 -s --max-time 5 ifconfig.me 2>/dev/null || curl -4 -s --max-time 5 icanhazip.com 2>/dev/null || true)
-    server_ip6=$(curl -6 -s --max-time 5 ifconfig.me 2>/dev/null || curl -6 -s --max-time 5 icanhazip.com 2>/dev/null || true)
-    dns_ip4=$(dig +short A "$domain" @1.1.1.1 2>/dev/null | grep -E '^[0-9.]+$' | head -1 || true)
-    dns_ip6=$(dig +short AAAA "$domain" @1.1.1.1 2>/dev/null | grep -E '^[0-9a-fA-F:]+$' | head -1 || true)
-
-    # Step 1: direct-to-origin -> HTTP-01. Either family arriving here is
-    # enough; certbot only needs the challenge to reach this box.
-    if { [ -n "$server_ip4" ] && [ "$server_ip4" = "$dns_ip4" ]; } \
-       || { [ -n "$server_ip6" ] && [ "$server_ip6" = "$dns_ip6" ]; }; then
-        print_step "Domain ${domain} points at this server — using LE HTTP-01 challenge"
-        if certbot --apache -d "$domain" --non-interactive --agree-tos --register-unsafely-without-email --no-redirect; then
-            print_success "Issued LE certificate for ${domain} (HTTP-01)"
+    # Step 1: the name reaches this box -> HTTP-01. Every probe ends in
+    # `|| true` because setup_ssl.sh sources this under `set -euo pipefail`.
+    local reach=0
+    name_reaches_here "$domain" || reach=$?
+    if [ "$reach" -eq 0 ]; then
+        local -a names=(-d "$domain")
+        # www is covered by the same lineage whenever it resolves and reaches
+        # here: every zone's www is proxied to the origin, and an edge in
+        # Full (Strict) rejects a www the certificate does not name. A www that
+        # resolves to somebody else is not ours to issue for.
+        local www_ip
+        www_ip="$(name_resolves "www.${domain}")"
+        if [ -n "$www_ip" ]; then
+            if name_reaches_here "www.${domain}"; then
+                names+=(-d "www.${domain}")
+            else
+                print_info "www.${domain} resolves (${www_ip}) but does not reach this box; issuing for ${domain} only."
+            fi
+        else
+            print_info "www.${domain} does not resolve; issuing for ${domain} only."
+        fi
+        print_step "${domain} reaches this box (${REACH_STATE:-?}) — using LE HTTP-01 challenge for ${names[*]//-d /}"
+        # --apache answers the challenge through the running vhost; certonly
+        # keeps it from also editing that vhost, which the renderer owns
+        # (render_vhost.sh refuses to re-render a file it did not write). The
+        # certificate lands at the standard path the template's <IfFile> :443
+        # block already reads, so all a renewal has to do is reload Apache: the
+        # deploy hook is recorded in the lineage's renewal conf as renew_hook.
+        # --expand lets an existing apex-only lineage take on www.
+        if certbot certonly --apache "${names[@]}" --non-interactive --agree-tos --expand \
+                --register-unsafely-without-email --deploy-hook 'systemctl reload apache2'; then
+            print_success "Issued LE certificate for ${names[*]//-d /} (HTTP-01)"
+            systemctl reload apache2 2>/dev/null || true
             return 0
         fi
         print_warning "HTTP-01 failed; trying DNS-01"
@@ -1026,17 +1277,25 @@ provision_origin_cert() {
             print_step "Domain ${domain} resolves to ${provider}; using DNS-01"
             if certbot certonly --non-interactive --agree-tos --register-unsafely-without-email \
                     "--dns-${provider}" "--dns-${provider}-credentials" "$cred" \
+                    --deploy-hook 'systemctl reload apache2' \
                     -d "$domain"; then
                 print_success "Issued LE certificate for ${domain} (DNS-01 via ${provider})"
+                systemctl reload apache2 2>/dev/null || true
                 return 0
             fi
             print_warning "DNS-01 via ${provider} failed"
         else
             print_info "No origin cert issued for ${domain}."
-            print_info "  Drop credentials at ${cred} and re-run sysadmin_tools/setup_ssl.sh ${domain} to enable origin SSL via DNS-01."
+            if [ "$reach" -eq 2 ]; then
+                print_info "  Set the edge to Full (not Full (Strict)) until the first certificate lands; the retry timer issues it on its own once ${domain} reaches here."
+            elif [ "$reach" -eq 3 ]; then
+                print_info "  This box answered no TLS: the placeholder certificate is missing. Run render_vhost.sh on the host; the retry timer issues once ${domain} reaches here."
+            else
+                print_info "  The retry timer issues it on its own once ${domain} reaches this box; or drop credentials at ${cred} and re-run sysadmin_tools/setup_ssl.sh ${domain} for DNS-01."
+            fi
         fi
     else
-        print_info "No origin cert issued for ${domain} (no LE challenge path available)."
+        print_info "No origin cert issued for ${domain} (the name does not reach this box and no DNS-01 provider was detected)."
     fi
     return 0
 }
@@ -2712,6 +2971,17 @@ EOF
     # Install Certbot for SSL
     print_step "Installing Certbot for SSL certificates..."
     apt install -y certbot python3-certbot-apache
+    # Renewal is a default the package happens to set, and a default nobody
+    # asserted is one a change of install method silently loses. Say it.
+    if command -v systemctl > /dev/null 2>&1 && systemctl list-unit-files certbot.timer > /dev/null 2>&1; then
+        systemctl enable --now certbot.timer > /dev/null 2>&1 \
+            && print_success "certbot.timer is enabled: certificates renew on their own" \
+            || print_warning "certbot.timer could not be enabled; renewal will not run on its own"
+    elif [ -f /etc/cron.d/certbot ]; then
+        print_success "certbot renews from /etc/cron.d/certbot"
+    else
+        print_warning "Neither certbot.timer nor /etc/cron.d/certbot exists; certificates will not renew on their own"
+    fi
 
     # Configure PHP for production (fpm SAPI serves all web requests)
     print_step "Configuring PHP settings..."
@@ -3373,23 +3643,25 @@ do_site_create() {
             # Direct DNS match - proceed with Let's Encrypt
             print_success "DNS validated - $DOMAIN_NAME points to this server"
         elif [ $dns_result -eq 2 ]; then
-            # Cloudflare proxy detected - proceed without Let's Encrypt
-            print_success "Cloudflare proxy detected - SSL handled by Cloudflare"
+            # Cloudflare proxy detected. The origin certificate is issued the
+            # same way as a direct one: the HTTP-01 challenge arrives through
+            # the edge. Cloudflare must be on Full, not Full (Strict), until it
+            # has landed - Strict refuses to reach an origin with no certificate.
+            print_success "Cloudflare proxy detected - the origin certificate is issued through the edge"
             echo ""
-            print_info "Cloudflare provides SSL at the edge. For origin encryption, configure:"
-            echo "  - Cloudflare SSL/TLS → Full (Strict) with Origin Certificate, or"
-            echo "  - Cloudflare SSL/TLS → Full (works with self-signed or no origin cert)"
+            print_info "Keep Cloudflare SSL/TLS on Full until the first certificate lands; then Full (Strict) works."
             echo ""
         else
             # DNS doesn't point here and it's not Cloudflare. The install goes
-            # ahead on HTTP; the certificate is the only thing deferred.
-            SSL_DEFERRED=1
+            # ahead on HTTP; the certificate is the only thing deferred. (If the
+            # name reaches here through some other edge, provision_origin_cert
+            # finds that out for itself when it runs.)
             echo ""
             print_warning "DNS for $DOMAIN_NAME does not point to this server yet"
             echo ""
-            echo "Installation continues. Your site will be reachable over HTTP, and no"
-            echo "certificate will be issued during this run. The command to issue one"
-            echo "later is printed in the summary at the end of this install."
+            echo "Installation continues. Your site will be reachable over HTTP. A retry"
+            echo "timer issues the certificate on its own once the name reaches this box;"
+            echo "the command to issue one by hand is printed in the summary at the end."
             echo ""
         fi
     fi
@@ -4253,6 +4525,7 @@ EOF
     # Set up SSL with reverse proxy if domain provided
     if should_setup_ssl "$DOMAIN_NAME" "$NO_SSL"; then
         setup_ssl_docker_proxy "$SITENAME" "$DOMAIN_NAME" "$PORT"
+        note_ssl_deferred_if_missing "$DOMAIN_NAME"
     fi
 }
 
@@ -4475,6 +4748,7 @@ do_site_baremetal() {
     # Set up SSL if domain provided
     if should_setup_ssl "$DOMAIN_NAME" "$NO_SSL"; then
         setup_ssl_baremetal "$DOMAIN_NAME"
+        note_ssl_deferred_if_missing "$DOMAIN_NAME"
     fi
 }
 

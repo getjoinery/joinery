@@ -12,6 +12,7 @@
  * branches are driven here with fixtures rather than with whatever this box
  * happens to be (specs/vault_exposure_quick_fixes.md Q2-Q4).
  *
+ * @version 1.4 - the certificate row counts among the host facts
  * @version 1.3 - the host converger check
  * @version 1.2 - the parser jail check
  * @version 1.1 - branch coverage for core_pattern, exception args, and the swap device types
@@ -24,7 +25,7 @@ require_once(PathHelper::getIncludePath('includes/VaultHealth.php'));
 
 section('Report shape');
 $checks = VaultHealth::runAll();
-check(count($checks) === 6, 'runAll reports the six host facts');
+check(count($checks) === 7, 'runAll reports the seven host facts');
 $valid_states = ['verified', 'unmet', 'unknown'];
 $all_valid = true;
 $has_fields = true;

@@ -751,7 +751,7 @@ class PluginManager extends AbstractExtensionManager {
         // output. Spec plugin_dependency_installation.
         //
         // Installing a package writes vendor/, which is code the pool executes
-        // and so not the pool's to write (specs/read_only_tree.md). When the
+        // and so not the pool's to write (specs/implemented/read_only_tree.md). When the
         // packages are already there nothing is written and activation goes
         // ahead from anywhere; when they are not, a web request says so and the
         // page queues a reconcile_composer request for root.
@@ -1623,7 +1623,7 @@ class PluginManager extends AbstractExtensionManager {
      * Refuse to write the tree from inside a web request.
      *
      * The tree belongs to root and the PHP pool cannot write it
-     * (specs/read_only_tree.md), so these would fail anyway — as a permission
+     * (specs/implemented/read_only_tree.md), so these would fail anyway — as a permission
      * error somewhere in the middle of an extraction, with half a plugin on
      * disk. Refusing at the door instead means the failure names the cause and
      * the remedy, and it keeps a future caller from quietly reintroducing a

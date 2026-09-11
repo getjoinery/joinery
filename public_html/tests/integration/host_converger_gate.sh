@@ -14,6 +14,8 @@
 # retried next tick, and every run records cache/host_converger.last.
 #
 # The installer's unit text is rendered and parsed too, without installing it.
+# The certificate summary the runner writes for the admin notice is pinned from
+# a fixture lineage (specs/tls_and_origin_trust.md WP11).
 
 set -u
 TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/maintenance_scripts/install_tools"
@@ -73,7 +75,7 @@ bash "$RUNNER" --site-root="$T" >/dev/null 2>&1   # a plain run writes no stamp
 # history, every plugin manifest, and the active-plugin list (unreachable here).
 expected_stamp() {
     local tools="$T/maintenance_scripts/install_tools"
-    { cat "$T/public_html/VERSION" "$tools"/*.sh "$tools"/default_*vhost.conf "$tools"/vhost_history/*.conf 2>/dev/null
+    { cat "$T/public_html/VERSION" "$tools"/*.sh "$tools"/default_*.conf "$tools"/vhost_history/*.conf 2>/dev/null
       for m in "$T"/public_html/plugins/*/plugin.json; do [ -f "$m" ] && cat "$m"; done
       echo "db-unreachable"; } | sha256sum | cut -d' ' -f1
 }
@@ -232,6 +234,47 @@ chk "a stray copy with no site named refuses rather than guessing /usr" \
 rm -rf "$(dirname "$COPY")"
 chk "and fires the same oneshot service" \
     "$(grep -c 'Unit=\${UNIT_NAME}.service' "$INSTALLER")" "1"
+
+echo "== a converging run writes the certificate summary (specs/tls_and_origin_trust.md WP11) =="
+# /etc/letsencrypt is root's on a root-owned tree, so the admin notice reads a
+# summary the converger writes. A fixture lineage with a self-signed cert
+# stands in for /etc/letsencrypt; the root gate is stripped as above.
+LE="$T/letsencrypt"
+mkdir -p "$LE/live/example.test" "$LE/renewal" "$T/sites" "$T/cache"
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
+    -keyout "$LE/live/example.test/privkey.pem" -out "$LE/live/example.test/cert.pem" -days 90 \
+    -subj "/CN=example.test" -addext "subjectAltName=DNS:example.test,DNS:www.example.test" >/dev/null 2>&1
+printf '[renewalparams]\ninstaller = None\n' > "$LE/renewal/example.test.conf"
+printf 'ServerName example.test\n' > "$T/sites/$(basename "$T").conf"
+rm -f "$T/cache/certificates.json"
+out=$(JOINERY_CONVERGER_ENTRY=/dev/null JOINERY_LETSENCRYPT_DIR="$LE" JOINERY_APACHE_SITES_DIR="$T/sites" \
+    bash "$T/nogate.sh" --site-root="$T" 2>&1)
+chk "the run says it wrote the summary" "$(echo "$out" | grep -c 'certificates: summary written')" "1"
+chk "the summary exists" "$(test -f "$T/cache/certificates.json" && echo yes || echo no)" "yes"
+SUMMARY="$T/cache/certificates.json"
+read_summary() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(eval(sys.argv[2]))' "$SUMMARY" "$1" 2>/dev/null; }
+chk "it parses as JSON" "$(read_summary 'True')" "True"
+chk "it carries the lineage by its directory name" "$(read_summary 'd["lineages"][0]["name"]')" "example.test"
+chk "with every name the certificate carries" "$(read_summary '",".join(d["lineages"][0]["names"])')" "example.test,www.example.test"
+chk "and dates ninety days apart" "$(read_summary '(d["lineages"][0]["not_after"]-d["lineages"][0]["not_before"])//86400')" "90"
+chk "and what the renewal conf says the installer is" "$(read_summary 'd["lineages"][0]["renewal_installer"]')" "None"
+chk "the site's name is read from its vhost" "$(read_summary 'd["site"]["name"]')" "example.test"
+chk "a name that resolves nowhere has no addresses" "$(read_summary 'len(d["site"]["apex_addresses"])')" "0"
+chk "written is now" "$(read_summary 'abs(d["written"]-'"$(date -u +%s)"')<120')" "True"
+chk "the summary is not world-readable" "$(stat -c '%a' "$SUMMARY")" "640"
+
+# No letsencrypt directory at all: the empty form, never a missing file.
+out=$(JOINERY_CONVERGER_ENTRY=/dev/null JOINERY_LETSENCRYPT_DIR="$T/no-such-dir" JOINERY_APACHE_SITES_DIR="$T/sites" \
+    bash "$T/nogate.sh" --site-root="$T" 2>&1)
+chk "no letsencrypt directory still writes the summary" "$(echo "$out" | grep -c 'certificates: summary written to cache/certificates.json (0 lineage')" "1"
+chk "with no lineages" "$(read_summary 'len(d["lineages"])')" "0"
+chk "and says letsencrypt is absent" "$(read_summary 'd["letsencrypt"]')" "False"
+
+# The runner as it really runs, without root: it must not write a summary
+# claiming there are no lineages on a box where it simply could not look.
+rm -f "$SUMMARY"
+bash "$RUNNER" --site-root="$T" >/dev/null 2>&1
+chk "a run without root writes no summary" "$(test -f "$SUMMARY" && echo written || echo none)" "none"
 
 echo
 echo "host_converger gate: $passed passed, $failed failed"

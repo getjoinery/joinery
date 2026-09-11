@@ -158,7 +158,7 @@ class BackupEnvelope {
 		$tmp = $path . '.' . getmypid() . '.tmp';
 		if (@file_put_contents($tmp, base64_encode($keypair)) === false) {
 			// config/ belongs to the tree owner, so the web user cannot create
-			// a file there (specs/read_only_tree.md). The host converger mints
+			// a file there (specs/implemented/read_only_tree.md). The host converger mints
 			// this key at its root moments and normally gets there first; this
 			// is the loud fallback for a site whose converger has not run.
 			throw new BackupEnvelopeException(

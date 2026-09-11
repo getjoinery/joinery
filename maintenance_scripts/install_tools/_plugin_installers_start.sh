@@ -3,6 +3,21 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.10 - When fix_permissions.sh fails, the log line carries the last
+#                 lines of its stderr, not only the fact (review round 1, R4b).
+# Version: 2.9 - Writes cache/certificates.json after the installers: every
+#                lineage under /etc/letsencrypt/live (its names and dates,
+#                the renewal conf's installer), whether certbot's timer is
+#                active, and where the site's name and its www resolve. The
+#                root-owned tree makes /etc/letsencrypt unreadable to the
+#                pool, so this is how the admin notice and the health panel
+#                learn that renewal has stopped before the site dies of it
+#                (specs/tls_and_origin_trust.md WP11). Same mechanics as
+#                host_converger.last: written on every run, world-readable.
+# Version: 2.8 - The change hash names the templates as default_*.conf. The
+#                earlier glob default_*vhost.conf matched only the proxy
+#                template, so an edit to default_virtualhost.conf never
+#                converged a box until something else changed.
 # Version: 2.7 - The change hash covers every script in install_tools and the
 #                vhost templates (incl. vhost_history/), not only install_*.sh:
 #                a renderer or trust-helper change converged only at the daily
@@ -354,10 +369,13 @@ apply_tree_permissions() {
         mode="--dev"
     fi
 
-    if bash "${script}" "${SITENAME}" "${mode}" >/dev/null 2>&1; then
+    local why
+    if why="$(bash "${script}" "${SITENAME}" "${mode}" 2>&1 >/dev/null)"; then
         echo "permissions: applied ${mode} (tree owner ${owner})"
     else
-        echo "permissions: WARNING - fix_permissions.sh ${mode} failed; the tree may still be writable by the web user" >&2
+        # The reason, not only the fact: the last lines of the script's stderr.
+        why="$(printf '%s' "${why}" | tail -3 | tr '\n' ' ')"
+        echo "permissions: WARNING - fix_permissions.sh ${mode} failed; the tree may still be writable by the web user${why:+ - ${why}}" >&2
         CONVERGE_OUTCOME="permissions-failed"
     fi
 }
@@ -427,7 +445,7 @@ converge_hash() {
         # Every script this runner executes or sources, and the vhost
         # templates render_vhost.sh applies: a change to any of them is a
         # reason to converge, not something to wait a day for.
-        cat "${TOOLS_DIR}"/*.sh "${TOOLS_DIR}"/default_*vhost.conf "${TOOLS_DIR}"/vhost_history/*.conf 2>/dev/null
+        cat "${TOOLS_DIR}"/*.sh "${TOOLS_DIR}"/default_*.conf "${TOOLS_DIR}"/vhost_history/*.conf 2>/dev/null
         for m in "${PUBLIC_HTML}"/plugins/*/plugin.json; do [[ -f "${m}" ]] && cat "${m}"; done
         echo "${ACTIVE_PLUGINS_FOR_HASH:-}"
     } | sha256sum | cut -d' ' -f1
@@ -652,6 +670,92 @@ done
 }
 
 run_plugin_installers
+
+# --- The certificate summary (root only) -------------------------------------
+# certbot records everything needed to say whether renewal is on schedule, in
+# a directory the web user cannot read. Written here on every run so the
+# admin notice (includes/CertificateNotice.php) and the health panel read a
+# stored fact and never probe. The shape is documented in that class.
+#
+# JOINERY_LETSENCRYPT_DIR and JOINERY_APACHE_SITES_DIR let a test point this
+# at a fixture tree; the gate does, with a self-signed certificate.
+json_string() {
+    # One plain string (a DNS name, an address, a word) as a JSON string.
+    local v="${1:-}"
+    v="${v//\\/\\\\}"; v="${v//\"/\\\"}"
+    printf '"%s"' "${v}"
+}
+json_string_list() {
+    # $@ = plain strings; echoes a JSON array of them.
+    local out="" v
+    for v in "$@"; do
+        [[ -n "${v}" ]] || continue
+        out="${out:+${out},}$(json_string "${v}")"
+    done
+    printf '[%s]' "${out}"
+}
+resolve_v4() {
+    # A records for a name (through CNAMEs), one per line; nothing when it
+    # does not resolve. getent rather than dig: present on every box.
+    [[ -n "${1:-}" ]] || return 0
+    getent ahostsv4 "$1" 2>/dev/null | awk '{print $1}' | sort -u
+}
+write_certificate_summary() {
+    [[ "$(id -u)" == "0" ]] || return 0
+    local le="${JOINERY_LETSENCRYPT_DIR:-/etc/letsencrypt}"
+    local sites="${JOINERY_APACHE_SITES_DIR:-/etc/apache2/sites-available}"
+    local out="${SITE_ROOT}/cache/certificates.json"
+    local in_container=false letsencrypt=false timer_active=false
+    local site_name=""
+    local -a own_a=() apex_a=() www_a=()
+
+    if [[ -f /.dockerenv ]] || grep -q docker /proc/1/cgroup 2>/dev/null; then
+        in_container=true
+    fi
+    [[ -d "${le}" ]] && letsencrypt=true
+    if systemctl is-active --quiet certbot.timer 2>/dev/null || [[ -f /etc/cron.d/certbot ]]; then
+        timer_active=true
+    fi
+
+    if [[ -f "${sites}/${SITENAME}.conf" ]]; then
+        site_name="$(grep -m1 -oE '^[[:space:]]*ServerName[[:space:]]+\S+' "${sites}/${SITENAME}.conf" | awk '{print $2}')"
+    fi
+    mapfile -t own_a < <(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^$' | sort -u)
+    if [[ -n "${site_name}" ]]; then
+        mapfile -t apex_a < <(resolve_v4 "${site_name}")
+        mapfile -t www_a < <(resolve_v4 "www.${site_name}")
+    fi
+
+    local lineages="" count=0 dir name cert names nb na installer
+    for cert in "${le}"/live/*/cert.pem; do
+        [[ -f "${cert}" ]] || continue
+        dir="$(dirname "${cert}")"; name="$(basename "${dir}")"
+        names="$(openssl x509 -in "${cert}" -noout -ext subjectAltName 2>/dev/null \
+            | tr ',' '\n' | sed -n 's/.*DNS:[[:space:]]*//p' | sed 's/[[:space:]]*$//')"
+        [[ -n "${names}" ]] || names="$(openssl x509 -in "${cert}" -noout -subject 2>/dev/null | sed -n 's/.*CN[[:space:]]*=[[:space:]]*//p')"
+        nb="$(date -u -d "$(openssl x509 -in "${cert}" -noout -startdate 2>/dev/null | cut -d= -f2)" +%s 2>/dev/null || echo 0)"
+        na="$(date -u -d "$(openssl x509 -in "${cert}" -noout -enddate 2>/dev/null | cut -d= -f2)" +%s 2>/dev/null || echo 0)"
+        installer="$(sed -n 's/^[[:space:]]*installer[[:space:]]*=[[:space:]]*//p' "${le}/renewal/${name}.conf" 2>/dev/null | head -1)"
+        local -a names_a=()
+        mapfile -t names_a <<< "${names}"
+        lineages="${lineages:+${lineages},}$(printf '{"name":%s,"names":%s,"not_before":%s,"not_after":%s,"renewal_installer":%s}' \
+            "$(json_string "${name}")" "$(json_string_list "${names_a[@]}")" "${nb:-0}" "${na:-0}" "$(json_string "${installer:-}")")"
+        count=$((count + 1))
+    done
+
+    mkdir -p "${SITE_ROOT}/cache" 2>/dev/null || true
+    printf '{"written":%s,"in_container":%s,"letsencrypt":%s,"timer_active":%s,"site":{"name":%s,"own_addresses":%s,"apex_addresses":%s,"www_addresses":%s},"lineages":[%s]}\n' \
+        "$(date -u +%s)" "${in_container}" "${letsencrypt}" "${timer_active}" \
+        "$(json_string "${site_name}")" "$(json_string_list "${own_a[@]}")" \
+        "$(json_string_list "${apex_a[@]}")" "$(json_string_list "${www_a[@]}")" "${lineages}" \
+        > "${out}.tmp" 2>/dev/null || { rm -f "${out}.tmp"; return 0; }
+    # Readable by the PHP pool, which is what reads it; nobody else needs to.
+    chown www-data:www-data "${out}.tmp" 2>/dev/null || true
+    chmod 640 "${out}.tmp" 2>/dev/null || true
+    mv -f "${out}.tmp" "${out}" 2>/dev/null || true
+    echo "certificates: summary written to cache/certificates.json (${count} lineage(s))"
+}
+write_certificate_summary
 
 # --- Carry out queued root requests ------------------------------------------
 # The PHP pool cannot write the code tree, so the operator actions that used to
