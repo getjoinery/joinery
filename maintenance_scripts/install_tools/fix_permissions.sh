@@ -1,4 +1,47 @@
 #!/usr/bin/env bash
+#VERSION 4.2 - The record is authoritative once written. --dev and --production
+#              decide only what is recorded the first time. upgrade.php passes
+#              --production on every site it upgrades, developer checkout
+#              included, so a mode read as an instruction would hand the
+#              developer's tree to root at the next upgrade. A box is told once
+#              whose it is, and it stays told.
+#VERSION 4.1 - Records the tree owner in {site}/config/tree_owner, because the
+#              root actor has to know the answer at a moment when it cannot be
+#              read off the tree. The host converger asserts ownership before it
+#              executes anything, and the state it fires in - public_html owned
+#              by www-data - is exactly the state where "look at who owns
+#              public_html" returns the wrong answer. Hardcoding root there took
+#              a developer checkout to root the first time it ran. The record is
+#              written here and only here: this script is already told which
+#              mode the install is in, so it needs no cleverness, and nothing on
+#              the web side can create or change the file. Root and the tree
+#              owner are the only accounts that can (config/ is 0750 and this
+#              file is root-owned 0644).
+#VERSION 4.0 - Two sets, one rule each (specs/read_only_tree.md, S10).
+#
+#              EXECUTABLE SET - the site directory itself, public_html,
+#              maintenance_scripts, vendor, RELEASE_MANIFEST(.sig) and
+#              config/*.php: everything the PHP pool executes or includes. It is
+#              owned by the TREE OWNER (root on a node, the developer account on
+#              the developer box) at 755/644, and the pool has read and nothing
+#              else. A bug that makes the web server write one file can no
+#              longer put PHP where the web server will run it.
+#
+#              DATA SET - uploads, static_files, cache, logs, storage, backups
+#              and the non-PHP contents of config/: www-data:www-data 0770 in
+#              BOTH modes. Nothing here is ever executed, so the pool keeps
+#              write access to exactly the files that are data. The dev-mode 777
+#              sweep is gone with it, which also closes uploads/ to every other
+#              local account on the box.
+#
+#              config/ itself belongs to the tree owner (group www-data, 0750):
+#              the pool reads and traverses it, and only the tree owner can
+#              create or remove a file in it. Directory write would be enough to
+#              unlink Globalvars_site.php and put a new one in its place, and
+#              that file is `require`d PHP.
+#
+#              Anything else under the site root - a developer checkout's .git,
+#              android/, ios/, sync/ - is in neither set and is left alone.
 #VERSION 3.3 - config/agent_signing_key is pinned 600 root:root. Publishing is a job of the
 #              management node's own agent, which runs as root, so root is the key's only
 #              reader; an operator login on the box can no longer copy the fleet trust root
@@ -43,17 +86,19 @@
 #   ./fix_permissions.sh site_name [--production|--dev]
 #
 # Modes:
-#   --production  (default) Secure permissions: 770 for dirs/files, 777 for uploads
-#                 Use for ALL sites on production/staging servers (including _test sites)
-#   --dev         Permissive permissions: 777 for everything
-#                 Use ONLY on the single development server (e.g., joinerytest)
+#   --production  (default) The tree owner is root. Use for ALL sites on
+#                 production/staging servers (including _test sites).
+#   --dev         The tree owner is the developer account that already owns
+#                 public_html (falling back to the invoking sudo user). Use ONLY
+#                 on the single development server (e.g., joinerytest).
 #
-# Ownership is always set to www-data:user1
+# The two modes differ in exactly one thing: who owns the executable set. The
+# modes and the data set are identical in both.
 #
 # Examples:
-#   sudo ./fix_permissions.sh mysite              # Production mode (770)
+#   sudo ./fix_permissions.sh mysite              # Production mode (root owns the tree)
 #   sudo ./fix_permissions.sh mysite --production # Same as above
-#   sudo ./fix_permissions.sh mysite --dev        # Dev mode (777)
+#   sudo ./fix_permissions.sh mysite --dev        # Dev mode (the developer owns the tree)
 
 set -e
 
@@ -74,11 +119,12 @@ if [ -z "$1" ]; then
     echo "Usage: sudo ./fix_permissions.sh site_name [--production|--dev]"
     echo ""
     echo "Modes:"
-    echo "  --production  (default) Secure: 770 dirs/files, 777 uploads (prod & staging)"
-    echo "  --dev         Permissive: 777 everything (dev server only)"
+    echo "  --production  (default) root owns the executable set (prod & staging)"
+    echo "  --dev         the developer account owns it (dev server only)"
     exit 1
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SITE_NAME="$1"
 MODE="production"  # Default mode
 
@@ -101,16 +147,67 @@ fi
 
 echo -e "${GREEN}Fixing permissions for $SITE_NAME (mode: $MODE)${NC}"
 
+# --- Who owns the executable set ---------------------------------------------
+# The record wins wherever there is one. {site}/config/tree_owner is written
+# here, by root, and by nothing else; once it exists it is the answer, and --dev
+# and --production decide only what gets recorded the first time.
+#
+# That matters because this script is run by things that pass a mode without
+# knowing the box: upgrade.php passes --production on every site it upgrades,
+# including a developer checkout, and honouring that would hand the developer's
+# tree to root on the next upgrade. The mode is a default, not an instruction.
+#
+# With no record: on a node it is root. On the developer box it is whichever
+# account already owns public_html — a checkout the developer edits with their
+# own editor, git and CLI test runner. www-data is not an answer in either mode:
+# it is the account the whole spec is taking write access away from, so finding
+# it there means the tree has not been re-owned yet and the invoking sudo user
+# is the best available stand-in.
+TREE_OWNER=""
+TRUST_HELPER="$SCRIPT_DIR/_tree_trust.sh"
+if [ -f "$TRUST_HELPER" ]; then
+    # shellcheck source=_tree_trust.sh
+    . "$TRUST_HELPER"
+    if RECORDED="$(joinery_tree_owner_record "$SITE_ROOT")"; then
+        TREE_OWNER="$RECORDED"
+        if { [ "$MODE" == "production" ] && [ "$TREE_OWNER" != "root" ]; } \
+           || { [ "$MODE" == "dev" ] && [ "$TREE_OWNER" == "root" ]; }; then
+            echo "  Tree owner is recorded as '${TREE_OWNER}'; --${MODE} does not change it."
+        fi
+    fi
+fi
+
+if [ -z "$TREE_OWNER" ]; then
+    if [ "$MODE" == "production" ]; then
+        TREE_OWNER="root"
+    else
+        TREE_OWNER="$(stat -c '%U' "$SITE_ROOT/public_html" 2>/dev/null || true)"
+        if [ -z "$TREE_OWNER" ] || [ "$TREE_OWNER" == "www-data" ] || [ "$TREE_OWNER" == "UNKNOWN" ]; then
+            TREE_OWNER="${SUDO_USER:-root}"
+        fi
+    fi
+fi
+if ! id "$TREE_OWNER" >/dev/null 2>&1; then
+    echo -e "${YELLOW}  WARNING: '$TREE_OWNER' is not an account here; falling back to root.${NC}"
+    TREE_OWNER="root"
+fi
+TREE_GROUP="$(id -gn "$TREE_OWNER")"
+echo "  Tree owner: ${TREE_OWNER}:${TREE_GROUP}"
+
 # The page cache the code reads is {site root}/cache/static_pages. Create it
 # before the sweep so the ownership and mode fixes below always cover it —
 # a missing or root-owned cache dir silently disables page caching.
 mkdir -p "$SITE_ROOT/cache/static_pages"
 
-# Files with deliberately tighter, non-770 permissions — the secret keys and the
-# admin credentials, each re-pinned individually at the end. They are pruned from
-# the recursive sweep below so it does not keep "correcting" them to 770 and then
+# Files with deliberately tighter, non-sweep permissions — the secret keys and
+# the admin credentials, each re-pinned individually at the end. They are pruned
+# from the sweeps below so those do not keep "correcting" them and then
 # re-tightening them on every run, which changed their ctime on every deploy.
 PINNED=(
+    # Written at the end of this run, root:root 0644. Pruned so the data-set
+    # sweep does not make it group-writable in between — the converger refuses
+    # to trust a tree_owner file anyone but root or the owner could have written.
+    "$SITE_ROOT/config/tree_owner"
     "$SITE_ROOT/config/relay_pull_key"
     "$SITE_ROOT/config/backup_site_key"
     "$SITE_ROOT/config/agent_signing_key"
@@ -127,6 +224,10 @@ PINNED_DIRS=(
 PRUNE=()
 for p in "${PINNED[@]}"; do PRUNE+=( -not -path "$p" ); done
 for d in "${PINNED_DIRS[@]}"; do PRUNE+=( -not -path "$d" -not -path "$d/*" ); done
+# A developer checkout's object store is not part of either set. Re-owning it
+# would rewrite tens of thousands of files' ctimes for nothing, and git is run
+# by the developer, not by the web server.
+PRUNE+=( -not -path "*/.git" -not -path "*/.git/*" )
 
 # Ownership and permissions are corrected with find, matching only what is
 # ALREADY wrong — not a blanket chown -R / chmod -R. A recursive chown/chmod
@@ -137,29 +238,108 @@ for d in "${PINNED_DIRS[@]}"; do PRUNE+=( -not -path "$d" -not -path "$d/*" ); d
 # it keeps incrementals proportional to real change. Symlinks are skipped: their
 # own mode is meaningless and following one could reach outside the tree (vendor).
 
-# Set ownership: www-data (web server) as owner, user1 (developer) as group
-echo "  Setting ownership to www-data:user1 (only where it differs)..."
-find "$SITE_ROOT" "${PRUNE[@]}" \( -type f -o -type d \) \
-     \( -not -user www-data -o -not -group user1 \) \
-     -exec chown www-data:user1 {} +
+# =============================================================================
+# THE EXECUTABLE SET
+# =============================================================================
+# Everything the PHP pool executes or includes. Owned by the tree owner,
+# readable by everyone (the pool among them), writable by nobody else.
 
-if [ "$MODE" == "production" ]; then
-    # Production mode: 770 (owner+group full access, others nothing). This
-    # covers uploads/ and storage/ too — they take the same 770 as the rest, so
-    # they no longer need a separate pass.
-    echo "  Setting permissions to 770 (secure, only where they differ)..."
-    find "$SITE_ROOT" "${PRUNE[@]}" \( -type f -o -type d \) \
-         -not -perm 770 -exec chmod 770 {} +
-else
-    # Dev mode: 777 (everyone full access) - for development server only
-    echo "  Setting permissions to 777 (dev mode, only where they differ)..."
-    find "$SITE_ROOT" "${PRUNE[@]}" \( -type f -o -type d \) \
-         -not -perm 777 -exec chmod 777 {} +
+EXEC_ROOTS=()
+for d in public_html maintenance_scripts vendor; do
+    [ -d "$SITE_ROOT/$d" ] && EXEC_ROOTS+=( "$SITE_ROOT/$d" )
+done
+
+# The site directory itself, and only itself: renaming public_html or dropping a
+# replacement RELEASE_MANIFEST beside it needs write here, so the pool must not
+# have it. Its other children (a checkout's .git, android/, ios/) are in neither
+# set and are not walked.
+echo "  Executable set: the site directory, public_html, maintenance_scripts, vendor..."
+chown "${TREE_OWNER}:${TREE_GROUP}" "$SITE_ROOT"
+chmod 755 "$SITE_ROOT"
+
+for mf in RELEASE_MANIFEST RELEASE_MANIFEST.sig; do
+    if [ -f "$SITE_ROOT/$mf" ]; then
+        chown "${TREE_OWNER}:${TREE_GROUP}" "$SITE_ROOT/$mf"
+        chmod 644 "$SITE_ROOT/$mf"
+    fi
+done
+
+if [ ${#EXEC_ROOTS[@]} -gt 0 ]; then
+    find "${EXEC_ROOTS[@]}" "${PRUNE[@]}" \( -type f -o -type d \) \
+         \( -not -user "$TREE_OWNER" -o -not -group "$TREE_GROUP" \) \
+         -exec chown "${TREE_OWNER}:${TREE_GROUP}" {} +
+
+    find "${EXEC_ROOTS[@]}" "${PRUNE[@]}" -type d \
+         -not -perm 755 -exec chmod 755 {} +
+
+    # 644 for everything, 755 for shell scripts. install.sh, _site_init.sh and
+    # this script are invoked as commands rather than as `bash <path>`, so the
+    # execute bit is load-bearing on exactly that set. It grants nobody write.
+    find "${EXEC_ROOTS[@]}" "${PRUNE[@]}" -type f -name '*.sh' \
+         -not -perm 755 -exec chmod 755 {} +
+    find "${EXEC_ROOTS[@]}" "${PRUNE[@]}" -type f -not -name '*.sh' \
+         -not -perm 644 -exec chmod 644 {} +
 fi
 
-# SSH private keys demand 0600 and caller-only ownership — the blanket sweep
-# above would make ssh refuse them, silently breaking the relay mail pull on
-# every deploy. Re-pin them last, in both modes.
+# config/ holds `require`d PHP. The directory belongs to the tree owner with
+# group www-data at 0750 — the pool reads and traverses, and creating or
+# removing a file in it takes the tree owner. Directory write alone would be
+# enough to unlink Globalvars_site.php and leave a different one in its place.
+CONFIG_DIR="$SITE_ROOT/config"
+if [ -d "$CONFIG_DIR" ]; then
+    echo "  Executable set: config/*.php to root:www-data 0640..."
+    chown "${TREE_OWNER}:www-data" "$CONFIG_DIR"
+    chmod 750 "$CONFIG_DIR"
+    # root, not the tree owner: the pool has to read it and nobody else needs
+    # to. On the developer box the developer is in the www-data group, so the
+    # file is still readable from a shell and still not writable from one.
+    find "$CONFIG_DIR" -maxdepth 1 -type f -name '*.php' \
+         \( -not -user root -o -not -group www-data \) \
+         -exec chown root:www-data {} +
+    find "$CONFIG_DIR" -maxdepth 1 -type f -name '*.php' \
+         -not -perm 640 -exec chmod 640 {} +
+fi
+
+# =============================================================================
+# THE DATA SET
+# =============================================================================
+# What the pool writes, and what nothing ever executes. www-data:www-data 0770
+# in both modes: the web server owns its own data, and no other local account on
+# the box can read an upload.
+
+DATA_ROOTS=()
+for d in uploads static_files cache logs storage backups; do
+    [ -d "$SITE_ROOT/$d" ] && DATA_ROOTS+=( "$SITE_ROOT/$d" )
+done
+
+echo "  Data set: uploads, static_files, cache, logs, storage, backups to www-data:www-data 0770..."
+if [ ${#DATA_ROOTS[@]} -gt 0 ]; then
+    find "${DATA_ROOTS[@]}" "${PRUNE[@]}" \( -type f -o -type d \) \
+         \( -not -user www-data -o -not -group www-data \) \
+         -exec chown www-data:www-data {} +
+    find "${DATA_ROOTS[@]}" "${PRUNE[@]}" \( -type f -o -type d \) \
+         -not -perm 770 -exec chmod 770 {} +
+fi
+
+# The non-PHP contents of config/ are data the pool reads and writes: this
+# site's backup key, the relay pull key, the ledger. The pins below re-tighten
+# the ones that need it.
+if [ -d "$CONFIG_DIR" ]; then
+    find "$CONFIG_DIR" -mindepth 1 "${PRUNE[@]}" \( -type f -o -type d \) \
+         -not -name '*.php' \
+         \( -not -user www-data -o -not -group www-data \) \
+         -exec chown www-data:www-data {} +
+    find "$CONFIG_DIR" -mindepth 1 "${PRUNE[@]}" \( -type f -o -type d \) \
+         -not -name '*.php' \
+         -not -perm 770 -exec chmod 770 {} +
+fi
+
+# =============================================================================
+# THE PINS
+# =============================================================================
+
+# SSH private keys demand 0600 and caller-only ownership — a group-readable key
+# is one ssh refuses, silently breaking the relay mail pull on every deploy.
 for keyfile in "$SITE_ROOT/config/relay_pull_key"; do
     if [ -f "$keyfile" ]; then
         echo "  Pinning key $keyfile to 600 www-data:www-data..."
@@ -168,11 +348,11 @@ for keyfile in "$SITE_ROOT/config/relay_pull_key"; do
     fi
 done
 
-# config/backup_site_key needs the sweep undone for a different reason: it opens
-# this site's own backups, so the dev-mode 777 above would hand every backup this
-# site ever made to anyone with a shell on the box. It stops at 640 rather than
-# 600 because backups run under more than one account — the web user on the
-# scheduled run, the deploy account from a shell — and both live in www-data.
+# config/backup_site_key opens this site's own backups, so a wider mode would
+# hand every backup this site ever made to anyone with a shell on the box. It
+# stops at 640 rather than 600 because backups run under more than one account —
+# the web user on the scheduled run, the deploy account from a shell — and both
+# live in www-data.
 BACKUP_KEY="$SITE_ROOT/config/backup_site_key"
 if [ -f "$BACKUP_KEY" ]; then
     echo "  Pinning key $BACKUP_KEY to 640 www-data:www-data..."
@@ -181,11 +361,11 @@ if [ -f "$BACKUP_KEY" ]; then
 fi
 
 # config/backup-ledger records what this machine uploaded, and a restore checks
-# an archive against it before loading it as root over live data. The sweep
-# above would make it 770 in production and 777 in dev — which is not "the web
-# user owns it", it is "anyone with a shell on this box can vouch for any bytes
-# they like", on the one file whose entire job is vouching. That turns a
-# management node's forged or replayed archive into an accepted one.
+# an archive against it before loading it as root over live data. A 770 sweep
+# would not be "the web user owns it", it would be "anyone with a shell on this
+# box can vouch for any bytes they like", on the one file whose entire job is
+# vouching. That turns a management node's forged or replayed archive into an
+# accepted one.
 #
 # 0700/0600 www-data:www-data, the same posture and the same reasoning as
 # config/backup_site_key above: backups run under more than one account (the web
@@ -217,13 +397,29 @@ if [ -f "$SIGNING_KEY" ]; then
 fi
 
 # The install-time admin password, for whoever can already reach the server as
-# root. The sweep above would hand it to the web server user and, in dev mode,
-# to everyone — so re-pin it last, in both modes.
+# root. The sweep above would hand it to the web server user, so re-pin it last.
 CRED_FILE="$SITE_ROOT/config/admin_credentials.txt"
 if [ -f "$CRED_FILE" ]; then
     echo "  Pinning $CRED_FILE to 600 root:root..."
     chown root:root "$CRED_FILE" 2>/dev/null || true
     chmod 600 "$CRED_FILE"
+fi
+
+# --- Record who owns this tree -----------------------------------------------
+# The host converger runs as root every few minutes and asserts the executable
+# set's ownership before it executes anything out of the tree. In the state that
+# assertion is for — the pool owning the code — the tree itself cannot answer
+# "who should own this", so the answer is written down here while it is known.
+#
+# root:root 0644 inside a 0750 config/ directory: root and the tree owner are
+# the only accounts that can write it, the runner can read it before it trusts
+# anything, and it survives with no database and no PHP.
+OWNER_FILE="$CONFIG_DIR/tree_owner"
+if [ -d "$CONFIG_DIR" ]; then
+    echo "  Recording tree owner '${TREE_OWNER}' in $OWNER_FILE..."
+    printf '%s\n' "$TREE_OWNER" > "$OWNER_FILE"
+    chown root:root "$OWNER_FILE"
+    chmod 644 "$OWNER_FILE"
 fi
 
 echo -e "${GREEN}Done. Permissions fixed for $SITE_NAME.${NC}"

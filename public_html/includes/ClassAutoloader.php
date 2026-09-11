@@ -8,11 +8,16 @@
  * active-plugin `includes/` and `data/` file. Tokenizing means the map is built
  * without executing any of the mapped files.
  *
- * The map is cached (APCu under the web server, a file under the site root's
- * cache/ directory on CLI, where APCu is not enabled). A lookup miss rebuilds
+ * The map is cached (APCu under the web server, a JSON file under the site
+ * root's cache/ directory on CLI, where APCu is not enabled). A lookup miss rebuilds
  * the map once and retries, so a class added since the cache was written
  * resolves without a cache flush.
  *
+ * @version 1.2.0 - the cached map is cache/class_map.json, read with
+ *   json_decode. It was cache/class_map.php, a PHP file the web user wrote and
+ *   this class `include`d on every request — code the pool both writes and
+ *   executes, which is what specs/read_only_tree.md removes. A class_map.php
+ *   left by an earlier release is deleted on the first read.
  * @version 1.1.0 - restrictToCore(): the extraction subprocess resolves core
  *   classes only, never touching the theme chain or the plugin registry, both
  *   of which need the settings and the database it must not have
@@ -354,10 +359,26 @@ class ClassAutoloader {
 	}
 
 	private static function cache_file() {
+		return PathHelper::getSiteRoot() . '/cache/class_map.json';
+	}
+
+	/**
+	 * The map used to be a PHP file this class `include`d on every request —
+	 * a file the web user writes, executed by the web user, which is the one
+	 * shape specs/read_only_tree.md exists to remove. A cache is data; it is
+	 * read with json_decode and never executed. Named so a site upgraded from
+	 * a release that wrote the old file can have it removed.
+	 */
+	private static function legacy_cache_file() {
 		return PathHelper::getSiteRoot() . '/cache/class_map.php';
 	}
 
 	private static function cache_read() {
+		// Before the backend check, not after: a site running APCu never reaches
+		// the file path at all, and it is exactly as entitled to have an
+		// executable file the web user owns removed from its cache directory.
+		self::drop_legacy_cache();
+
 		if (self::apcu_available()) {
 			$ok = false;
 			$value = apcu_fetch(self::CACHE_KEY, $ok);
@@ -368,8 +389,25 @@ class ClassAutoloader {
 		if (!is_file($file) || (time() - @filemtime($file)) > self::CACHE_TTL) {
 			return null;
 		}
-		$value = @include($file);
+		$raw = @file_get_contents($file);
+		if ($raw === false || $raw === '') {
+			return null;
+		}
+		$value = json_decode($raw, true);
 		return is_array($value) ? $value : null;
+	}
+
+	/**
+	 * Remove a class_map.php left by an earlier release. It is inert the moment
+	 * cache_file() stops naming it, but an executable file the web user owns
+	 * does not get to sit in the tree's cache directory because nothing happens
+	 * to read it today.
+	 */
+	private static function drop_legacy_cache() {
+		$legacy = self::legacy_cache_file();
+		if (is_file($legacy)) {
+			@unlink($legacy);
+		}
 	}
 
 	private static function cache_write($map) {
@@ -384,11 +422,19 @@ class ClassAutoloader {
 			return;
 		}
 
-		// Written atomically: a half-written map would be included by another
-		// process as a parse error.
+		// Written atomically: a half-written map would be read by another
+		// process as malformed JSON and thrown away, costing it a rebuild.
+		$json = json_encode($map);
+		if ($json === false) {
+			return;
+		}
 		$temp = $file . '.' . getmypid() . '.tmp';
-		if (@file_put_contents($temp, '<?php return ' . var_export($map, true) . ';') !== false) {
-			@chmod($temp, 0666);
+		if (@file_put_contents($temp, $json) !== false) {
+			// 0660, not 0666: the accounts that run this are the web user and,
+			// on a developer box or a CLI run, an account in its group. Nobody
+			// else needs to write the cache, and a world-writable cache file is
+			// something any local account can corrupt on every request.
+			@chmod($temp, 0660);
 			@rename($temp, $file);
 		}
 	}
@@ -407,6 +453,7 @@ class ClassAutoloader {
 		if (is_file($file)) {
 			@unlink($file);
 		}
+		self::drop_legacy_cache();
 	}
 
 	private static function defined_now($class) {

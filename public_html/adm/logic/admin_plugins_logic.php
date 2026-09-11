@@ -15,6 +15,11 @@ function admin_plugins_logic(array $input): LogicResult {
 
 	$message = '';
 	$message_type = '';
+	// Set when an action was queued for the root actor rather than done here;
+	// the view renders the live transcript panel for it.
+	$root_request_id = '';
+	// Set when an upload was staged and the operator has to finish it in a shell.
+	$staged_command = '';
 
 	// Check if plugin system is properly set up
 	$system_health = null;
@@ -45,12 +50,26 @@ function admin_plugins_logic(array $input): LogicResult {
 
 		// Handle upload action separately as it doesn't require plugin_name
 		if ($action === 'upload') {
+			// The upload is unpacked and checked here, under uploads/staging,
+			// outside the tree — a path escape or a symlink fails as www-data,
+			// where it can do nothing. Installing it is a SHELL command, not a
+			// root request: this queue is www-data-writable, so a request file
+			// proves only that something running as the web user wrote it, and
+			// a kind that installed a staged directory would turn one
+			// file-write bug into root code execution (a staged
+			// migrations/migrations.php is included as root). See
+			// RootRequest::NO_PACKAGE_KIND.
 			try {
 				if (isset($_FILES['plugin_zip']) && $_FILES['plugin_zip']['error'] === UPLOAD_ERR_OK) {
 					$plugin_manager = new PluginManager();
-					$installed_plugin_name = $plugin_manager->installPlugin($_FILES['plugin_zip']['tmp_name']);
-					$message = "Plugin '$installed_plugin_name' installed successfully.";
-					$message_type = 'success';
+					$staged = $plugin_manager->stage($_FILES['plugin_zip']['tmp_name']);
+					$staged_command = 'sudo -u ' . escapeshellarg(PluginManager::tree_owner_name()) . ' php '
+						. escapeshellarg(PathHelper::getIncludePath('utils/install_extension.php'))
+						. ' plugin --staged=' . escapeshellarg($staged['dir']);
+					$message = 'Plugin "' . htmlspecialchars($staged['name'])
+						. '" was unpacked and checked. Installing an uploaded package writes code into '
+						. 'the tree, which is done from a shell rather than from this page — run:';
+					$message_type = 'warning';
 				} else {
 					$message = "Upload failed. Please check the file and try again.";
 					$message_type = 'danger';
@@ -109,9 +128,13 @@ function admin_plugins_logic(array $input): LogicResult {
 				$plugin_manager = new PluginManager();
 
 				if ($action === 'install') {
+					// Installing by name fetches the plugin's files from the
+					// upgrade source and writes them into the tree, which a web
+					// request cannot do. Root does it and reports back.
 					try {
-						$plugin_manager->install($plugin_name);
-						$message = "Plugin '$plugin_name' installed successfully.";
+						$root_request_id = RootRequest::submit('install_plugin',
+							array('name' => $plugin_name), (int)$session->get_user_id());
+						$message = 'Plugin "' . htmlspecialchars($plugin_name) . '" is queued for installation.';
 						$message_type = 'success';
 					} catch (Exception $e) {
 						$message = 'Installation failed: ' . htmlspecialchars($e->getMessage());
@@ -136,6 +159,15 @@ function admin_plugins_logic(array $input): LogicResult {
 								$message_type = 'warning';
 							}
 						}
+					} catch (PluginComposerNeedsRootException $e) {
+						// Not a failure the operator can act on by retrying:
+						// the packages have to be installed by root, so queue
+						// that and tell them to come back to the button.
+						$root_request_id = RootRequest::submit('reconcile_composer',
+							array('plugin' => $plugin_name), (int)$session->get_user_id());
+						$message = 'Plugin "' . htmlspecialchars($plugin_name) . '" needs composer packages that '
+							. 'only root installs here. They are queued; activate it again when this finishes.';
+						$message_type = 'warning';
 					} catch (Exception $e) {
 						$message = 'Failed to activate plugin "' . htmlspecialchars($plugin_name) . '": ' . htmlspecialchars($e->getMessage());
 						$message_type = 'danger';
@@ -173,8 +205,9 @@ function admin_plugins_logic(array $input): LogicResult {
 						$plugin->save();
 
 						try {
-							$plugin_manager->install($plugin_name);
-							$message = 'Plugin "' . htmlspecialchars($plugin_name) . '" repaired successfully.';
+							$root_request_id = RootRequest::submit('install_plugin',
+								array('name' => $plugin_name), (int)$session->get_user_id());
+							$message = 'Plugin "' . htmlspecialchars($plugin_name) . '" is queued for repair.';
 							$message_type = 'success';
 						} catch (Exception $e) {
 							$message = 'Plugin repair failed: ' . htmlspecialchars($e->getMessage());
@@ -213,7 +246,10 @@ function admin_plugins_logic(array $input): LogicResult {
 		'message' => $message,
 		'message_type' => $message_type,
 		'plugins' => $plugins,
-		'provisioning_plugins' => $provisioning_plugins
+		'provisioning_plugins' => $provisioning_plugins,
+		'root_request_id' => $root_request_id,
+		'staged_command' => $staged_command,
+		'root_actor_notice' => AdminPage::root_actor_notice()
 	));
 }
 ?>

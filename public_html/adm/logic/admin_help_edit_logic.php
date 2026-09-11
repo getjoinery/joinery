@@ -62,21 +62,38 @@ function admin_help_edit_logic(array $input): LogicResult {
 			// the author's work away.
 			$content = (string)($input['doc_content'] ?? '');
 
-			$error = DocsScanner::save_doc(
-				$selected_doc,
-				$docs_dir,
-				$content,
-				(string)($input['content_hash'] ?? '')
-			);
+			// Docs live in the code tree, which the web user cannot write
+			// (specs/read_only_tree.md), so the save is queued for the root
+			// actor. The starting hash travels with it: an edit that landed in
+			// the checkout while the request waited is still not clobbered,
+			// because save_doc() checks the hash at the moment it writes.
+			//
+			// The request names the document and nothing else. Root derives the
+			// directory from the key, so a forged request cannot point the write
+			// at a directory of its own choosing.
+			$error = '';
+			try {
+				$request_id = RootRequest::submit('save_doc', array(
+					'key'           => $selected_doc,
+					'content'       => $content,
+					'expected_hash' => (string)($input['content_hash'] ?? ''),
+				), (int)$session->get_user_id());
+			} catch (\Throwable $e) {
+				$error = 'The save could not be queued: ' . $e->getMessage();
+			}
 
 			if ($error === '') {
+				$queued_note = RootRequest::actorState() === 'present'
+					? 'It is being written now; reload in a moment to see it.'
+					: RootRequest::actorWarning();
 				$session->save_message(new DisplayMessage(
-					'Saved ' . basename($filepath) . '. Commit it and publish an upgrade to reach the other sites.',
-					'Saved',
+					'Queued ' . basename($filepath) . ' for saving. ' . $queued_note
+						. ' Commit it and publish an upgrade to reach the other sites.',
+					'Queued',
 					NULL,
 					DisplayMessage::MESSAGE_ANNOUNCEMENT
 				));
-				return LogicResult::redirect($view_url . '?doc=' . $selected_doc);
+				return LogicResult::redirect($view_url . '?doc=' . $selected_doc . '&request=' . urlencode($request_id));
 			}
 		}
 	}

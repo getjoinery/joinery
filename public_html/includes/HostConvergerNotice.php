@@ -28,7 +28,8 @@ class HostConvergerNotice {
 			return '';
 		}
 		$facts = self::facts();
-		return self::forState($facts['installed'], $facts['last_run'], $facts['outcome'], time(), self::installCommand());
+		return self::forState($facts['installed'], $facts['last_run'], $facts['outcome'], time(),
+			self::installCommand(), (int)($facts['pending_requests'] ?? 0), $facts['oldest_request_age'] ?? null);
 	}
 
 	/**
@@ -47,22 +48,63 @@ class HostConvergerNotice {
 			$last_run = (int)$m[1];
 			$outcome = $m[2];
 		}
-		return array('installed' => $installed, 'last_run' => $last_run, 'outcome' => $outcome);
+		// The converger is also the root actor that carries out root requests, so
+		// the queue's depth and the age of its oldest entry are facts about the
+		// same machine (specs/read_only_tree.md). Read here so the notice, the
+		// health check and the test runner's `needs` all see one set of facts.
+		$pending = array();
+		$oldest_age = null;
+		if (class_exists('RootRequest')) {
+			$pending = RootRequest::pending();
+			$oldest_age = RootRequest::oldest_pending_age();
+		}
+
+		return array(
+			'installed'          => $installed,
+			'last_run'           => $last_run,
+			'outcome'            => $outcome,
+			'pending_requests'   => count($pending),
+			'oldest_request_age' => $oldest_age,
+		);
 	}
 
 	/** The notice for one set of facts. Public and pure so the wording can be tested. */
-	public static function forState(bool $installed, ?int $last_run, string $outcome, int $now, string $command): string {
+	public static function forState(bool $installed, ?int $last_run, string $outcome, int $now,
+			string $command, int $pending = 0, ?int $oldest_age = null): string {
 		if (!$installed) {
 			return '';
 		}
 		$fresh = $last_run !== null && ($now - $last_run) < self::STALE_AFTER;
-		if ($fresh && $outcome !== 'installer-failed') {
+
+		// A queue that is not moving is its own alarm, even on a converger that
+		// is otherwise healthy: the timer can tick while every request it picks
+		// up fails, and an upgrade that quietly never happened is worse than one
+		// that visibly failed.
+		if ($fresh && $outcome !== 'installer-failed' && $outcome !== 'installer-refused'
+			&& $oldest_age !== null && $oldest_age >= 3600) {
+			$hours = max(1, (int)round($oldest_age / 3600));
+			return self::css()
+				. '<div class="jy-converger-notice" role="status">'
+				. '<div class="jy-converger-notice__text"><strong>'
+				. htmlspecialchars($pending . ' root request' . ($pending === 1 ? '' : 's')
+					. ' ' . ($pending === 1 ? 'has' : 'have') . ' been waiting up to '
+					. $hours . ' hour' . ($hours === 1 ? '' : 's') . '.', ENT_QUOTES, 'UTF-8')
+				. '</strong> '
+				. htmlspecialchars('The host converger is running, so the requests themselves are failing. '
+					. 'Upgrades, extension installs and doc saves queued from the browser are not being carried out; '
+					. 'the transcripts are in logs/root_requests/ on the host.', ENT_QUOTES, 'UTF-8')
+				. '</div></div>';
+		}
+
+		if ($fresh && $outcome !== 'installer-failed' && $outcome !== 'installer-refused') {
 			return '';
 		}
 		if ($last_run === null) {
 			$lead = 'The host converger has never run on this box.';
 		} elseif (!$fresh) {
 			$lead = 'The host converger has not run since ' . gmdate('Y-m-d H:i', $last_run) . ' UTC.';
+		} elseif ($outcome === 'installer-refused') {
+			$lead = 'The host converger refused an installer it could not attribute.';
 		} else {
 			$lead = 'The host converger\'s last run reported a failed installer.';
 		}

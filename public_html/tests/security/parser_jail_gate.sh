@@ -41,18 +41,14 @@ chk "stdin reaches the command" "$(printf 'hello' | "$LAUNCHER" -- /bin/cat)" "h
 chk "exit code passes through" "$("$LAUNCHER" -- /bin/sh -c 'exit 7'; echo $?)" "7"
 
 echo "== what the command cannot do =="
+# No box has a world-writable tree any more, the developer's included
+# (specs/read_only_tree.md), so this is a hard check on every machine. It used
+# to warn and pass on a 777 tree.
 probe="$ROOT/jail_gate_probe_$$"
 TREE_WRITE_EXPECT="nowrite"
-if [ "$(stat -c %a "$ROOT" | tail -c 2)" = "7" ]; then
-    # A world-writable tree (a dev box) is writable by anyone; that is the
-    # tree's permissions (security_inventory S10), not the launcher's.
-    echo "  WARN: the code tree is world-writable on this box; the tree-write check is the tree's business, not the jail's"
-    TREE_WRITE_EXPECT="wrote"
-else
-    "$LAUNCHER" -- /usr/bin/touch "$probe" 2>/dev/null
-    chk "cannot write the code tree" "$(test -e "$probe" && echo wrote || echo refused)" "refused"
-    rm -f "$probe"
-fi
+"$LAUNCHER" -- /usr/bin/touch "$probe" 2>/dev/null
+chk "cannot write the code tree" "$(test -e "$probe" && echo wrote || echo refused)" "refused"
+rm -f "$probe"
 chk "cannot fork (a shell running two commands)" \
     "$("$LAUNCHER" -- /bin/sh -c '/bin/true; /bin/true' >/dev/null 2>&1 && echo forked || echo refused)" "refused"
 chk "cannot open a socket" \
@@ -73,13 +69,12 @@ cd "$ROOT" || exit 1
 out="$(php -r 'require "includes/PathHelper.php"; $r = DocumentText::extractBytes("plain words", "text/plain"); echo $r["status"], ":", $r["text"];')"
 chk "a document extracts through the jail" "$out" "ok:plain words"
 out="$(php -r 'require "includes/PathHelper.php"; require "tests/fixtures/documents/JailProbeParser.php"; $r = DocumentText::parseWith("JailProbeParser", "x"); $j = json_decode($r["text"], true); echo (int)$j["uid"], ":", $j["socket"] ? "socket" : "nosocket", ":", $j["fork"] ? "fork" : "nofork", ":", $j["wrote_tree"] ? "wrote" : "nowrite", ":", $j["staged_mode"], ":", $j["config_readable"] ? "config" : "noconfig";')"
-chk "a parser class runs as the jail user, without socket or fork, staging 0600 (tree write per the tree's mode)" \
+chk "a parser class runs as the jail user, without socket or fork, staging 0600, and cannot write the tree" \
     "${out%:*}" "$JAIL_UID:nosocket:nofork:$TREE_WRITE_EXPECT:0600"
-# The config file's mode is the tree's business (security_inventory S10), not
-# the launcher's: a dev box keeps it world-readable. Named, not failed.
-case "$out" in
-    *:config) echo "  WARN: the config file is readable by the jail user on this box (tree permissions, not the jail)";;
-esac
+# config/Globalvars_site.php is root:www-data 0640 on every box now, and the
+# jail user is in neither. A parser that can read the site config can read the
+# database password (specs/read_only_tree.md B15). This used to warn.
+chk "the jail user cannot read the site config" "${out##*:}" "noconfig"
 
 echo
 echo "parser_jail gate: $passed passed, $failed failed"

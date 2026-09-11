@@ -10,6 +10,20 @@ require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
  */
 abstract class AbstractExtensionManager {
 
+    /**
+     * The most an uploaded archive may unpack to, in bytes.
+     *
+     * A zip is a compression format, so a small upload can be an enormous
+     * extraction: a few hundred kilobytes of zeros unpacks to gigabytes and
+     * fills the volume the site's uploads, database WAL and logs share. The
+     * sizes come out of the archive's own directory, so nothing is written
+     * before the total is known.
+     *
+     * 256 MB is far above any real plugin or theme (the largest we ship is
+     * under 5 MB) and far below anything that hurts a small node.
+     */
+    const MAX_UNPACKED_BYTES = 268435456;
+
     // Configuration that subclasses must define
     protected $extension_type;      // 'theme' or 'plugin'
     protected $extension_dir;        // 'theme' or 'plugins'
@@ -377,23 +391,168 @@ abstract class AbstractExtensionManager {
      * @param string $dir Directory path
      */
     protected function setPermissions($dir) {
-        @chown($dir, 'www-data');
-        @chgrp($dir, 'user1');
-        @chmod($dir, 0775);
+        // Extensions are code the PHP pool executes, so they take the same
+        // ownership as the rest of the tree: the tree's owner, readable by
+        // everyone, writable by nobody else (specs/read_only_tree.md). The
+        // owner is read off public_html rather than named, because it is root
+        // on a node and the developer's account on the developer box, and this
+        // runs on both.
+        //
+        // It used to be www-data:user1 0775/0664, which put a freshly installed
+        // plugin in the one state the whole spec removes: code the web server
+        // can rewrite. It also named an account that exists on our boxes and
+        // not on a stranger's.
+        $tree = PathHelper::getRootDir();
+        $uid = @fileowner($tree);
+        $gid = @filegroup($tree);
+
+        $apply = function ($path, $is_dir) use ($uid, $gid) {
+            if ($uid !== false) { @chown($path, $uid); }
+            if ($gid !== false) { @chgrp($path, $gid); }
+            @chmod($path, $is_dir ? 0755 : 0644);
+        };
+
+        $apply($dir, true);
 
         $iterator = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($dir),
+            new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
             RecursiveIteratorIterator::SELF_FIRST
         );
 
         foreach ($iterator as $path) {
-            @chown($path, 'www-data');
-            @chgrp($path, 'user1');
-            if ($path->isDir()) {
-                @chmod($path, 0775);
-            } else {
-                @chmod($path, 0664);
+            $apply($path->getPathname(), $path->isDir());
+        }
+    }
+
+    /**
+     * Unpack an uploaded archive somewhere it can do no harm, and check it.
+     *
+     * The web user unpacks; root installs. A stranger's archive is opened here,
+     * as www-data, under uploads/staging — outside the tree, where nothing is
+     * ever executed — and everything that can go wrong with one goes wrong at
+     * this point: a path that escapes its directory, a symlink pointing into
+     * the tree, a missing manifest, a name that is not a name. Root is handed a
+     * directory that has already survived all of that, and moves it.
+     *
+     * Returns the staging directory and what was found in it. The caller
+     * submits a root request naming the directory; it never touches the tree.
+     *
+     * @param string $archive_path An uploaded .zip
+     * @return array{dir:string, name:string, manifest:array}
+     * @throws Exception when the archive is not one we will install
+     */
+    public function stage($archive_path) {
+        if (!extension_loaded('zip')) {
+            throw new Exception("PHP zip extension is required but not installed");
+        }
+        if (!is_file($archive_path)) {
+            throw new Exception("Archive not found: $archive_path");
+        }
+
+        $staging_root = PathHelper::getSiteRoot() . '/uploads/staging';
+        if (!is_dir($staging_root) && !@mkdir($staging_root, 0770, true) && !is_dir($staging_root)) {
+            throw new Exception("Could not create the staging area at $staging_root");
+        }
+
+        // <id>/ holds the unpacked archive; the extension ends up at
+        // <id>/<name>/, so the directory root moves into place is named after
+        // the manifest. Staging straight into <id>/ meant an archive with its
+        // manifest at the top level installed as `plugin_3f9a1c…`, which
+        // validateName happily accepts and is not what the page told the
+        // operator it was installing.
+        $dir = $staging_root . '/' . $this->extension_type . '_' . bin2hex(random_bytes(6));
+        if (!@mkdir($dir, 0770, true)) {
+            throw new Exception("Could not create a staging directory at $dir");
+        }
+
+        try {
+            $zip = new ZipArchive();
+            if ($zip->open($archive_path) !== TRUE) {
+                throw new Exception("Failed to open ZIP file");
             }
+            // Refuse before extracting, not after: an entry that escapes has
+            // already escaped by the time it is on disk.
+            for ($i = 0; $i < $zip->numFiles; $i++) {
+                $entry = (string)$zip->getNameIndex($i);
+                if ($entry === '' || $entry[0] === '/' || strpos($entry, '..') !== false
+                    || preg_match('~(^|/)\.\.($|/)~', $entry)) {
+                    $zip->close();
+                    throw new Exception("Archive entry escapes its directory: $entry");
+                }
+            }
+            // A zip bomb is refused on the archive's own numbers, before a byte
+            // of it is written. Nothing here trusts the figures to be honest —
+            // they are the archive author's — but an archive that understates
+            // its size still gets no further than the cap, because a liar who
+            // declares 1 KB and carries 4 GB has declared something we would
+            // have allowed and written something we have to survive. The cap is
+            // the first of two defences; the second is that staging is the web
+            // user's volume, and root never extracts anything.
+            $unpacked_total = 0;
+            for ($i = 0; $i < $zip->numFiles; $i++) {
+                $stat = $zip->statIndex($i);
+                $unpacked_total += (int)($stat['size'] ?? 0);
+            }
+            if ($unpacked_total > self::MAX_UNPACKED_BYTES) {
+                $zip->close();
+                throw new Exception(sprintf(
+                    'Archive unpacks to %d MB, over the %d MB limit for a %s',
+                    (int)round($unpacked_total / 1048576),
+                    (int)(self::MAX_UNPACKED_BYTES / 1048576),
+                    $this->extension_type
+                ));
+            }
+
+            // Into a holding directory, never straight into $dir: the
+            // extension ends up at $dir/<name>, and an archive whose manifest
+            // is at its top level would otherwise have to be renamed into
+            // itself.
+            $unpacked = $dir . '/_unpacked';
+            if (!@mkdir($unpacked, 0770, true)) {
+                throw new Exception("Could not create a staging directory at $unpacked");
+            }
+            $zip->extractTo($unpacked);
+            $zip->close();
+
+            // A symlink in the staging tree is a symlink root would move into
+            // the tree, pointing wherever the archive's author chose.
+            $iterator = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($unpacked, FilesystemIterator::SKIP_DOTS),
+                RecursiveIteratorIterator::SELF_FIRST
+            );
+            foreach ($iterator as $path) {
+                if ($path->isLink()) {
+                    throw new Exception('Archive contains a symlink: ' . $path->getPathname());
+                }
+            }
+
+            $manifest_data = $this->findAndValidateManifest($unpacked);
+            $name = $manifest_data['name'];
+            if (!$this->validateName($name)) {
+                throw new Exception("Invalid {$this->extension_type} name: " . $name);
+            }
+
+            // Give the directory the extension's own name, so what is moved
+            // into the tree is addressed the way the tree addresses it. Both
+            // paths are inside $dir and on one filesystem, so this rename is
+            // the cheap kind.
+            $named = $dir . '/' . $name;
+            if (file_exists($named)) {
+                throw new Exception("Archive already contains a directory called '$name' beside its manifest");
+            }
+            if (!@rename($manifest_data['root'], $named)) {
+                throw new Exception("Could not name the staged {$this->extension_type} directory '$name'");
+            }
+            @rmdir($unpacked);      // empty when the manifest was at the top level
+
+            return array(
+                'dir'      => $named,
+                'name'     => $name,
+                'manifest' => $manifest_data['manifest'],
+            );
+        } catch (Exception $e) {
+            $this->cleanup($dir);
+            throw $e;
         }
     }
 

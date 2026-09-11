@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+#VERSION 2.70 - The server setup step no longer chowns /var/www to www-data
+#               (specs/read_only_tree.md). Sites get their permissions from
+#               fix_permissions.sh, which _site_init.sh already runs at the end
+#               of every site install; the blanket recursive chown here reached
+#               past it and made every file the PHP pool executes writable by
+#               the PHP pool.
 #VERSION 2.69 - The host converger (specs/host_converger.md) is installed by the
 #               installers runner this script already runs at the end of a site
 #               install: a root timer that keeps a self-hosted box's host
@@ -2900,10 +2906,19 @@ EOF
         print_success "Security hardening applied"
     fi
 
-    # Set proper permissions for web directory
+    # Set proper permissions for web directory.
+    #
+    # /var/www belongs to root and nothing under it is given to www-data here.
+    # A site's own permissions are set by fix_permissions.sh, which _site_init.sh
+    # runs at the end of every site install in the mode that install is in — and
+    # that script is the one place that knows the two sets apart: the code the
+    # PHP pool executes (root-owned, read-only to the pool) and the data it
+    # writes (uploads, cache, logs, its own). A blanket chown here handed the
+    # pool write access to every file it runs before either set existed
+    # (specs/read_only_tree.md).
     print_step "Setting up web directory permissions..."
-    chown -R www-data:www-data /var/www/
-    chmod -R 755 /var/www/
+    chown root:root /var/www/
+    chmod 755 /var/www/
 
     # Add user1 to www-data group for web development
     usermod -aG www-data user1

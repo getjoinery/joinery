@@ -39,7 +39,15 @@ Bundling is the first thing a publish does, before the VERSION file, the archive
 
 The last line of a publish names the agent version the release carries. `plugins/server_manager/tests/agent_bundle_drift_test.php` asserts the same invariant on its own, so a bundle that falls behind its source is caught by the safe test tier rather than by the next release.
 
-**First install** is handled by the core installer `maintenance_scripts/install_tools/install_agent.sh`, which runs at every root moment — site install, code upgrade, container start, the node-detail **Run Plugin Installers** action, and the host converger's five-minute timer on a box whose upgrades run from the browser (`docs/deploy_and_upgrade.md`). It installs the bundled binary, writes the env file with the right `JOINERY_CONFIG`, and sets up systemd or cron supervision automatically.
+The converger has a second job: it is the **root actor** that carries out root
+requests. The code tree belongs to root and the web server cannot write it, so
+an upgrade, a plugin or theme install, a docs save — anything that writes code —
+is queued by the page as a named request and run by the converger as root, with
+its transcript polled back onto the page that asked. See
+`docs/deploy_and_upgrade.md`. On a managed node the agent does the same work
+through its own jobs; the converger is what a self-hosted box has instead.
+
+**First install** is handled by the core installer `maintenance_scripts/install_tools/install_agent.sh`, which runs at every root moment — site install, code upgrade, container start, the node-detail **Run Plugin Installers** action, and the host converger's timer on a box whose upgrades run from the browser (`docs/deploy_and_upgrade.md`). It installs the bundled binary, writes the env file with the right `JOINERY_CONFIG`, and sets up systemd or cron supervision automatically.
 
 The installer is core rather than a plugin's, and runs on every Joinery instance: the agent does a machine's own backups, upgrades and health checks, and only a management node has `server_manager` turned on. The artifact stays in this plugin's tree because this plugin builds and signs it, and it reaches every node regardless — the plugin is `included_in_publish` and `receives_upgrades`, both independent of whether it is active there.
 

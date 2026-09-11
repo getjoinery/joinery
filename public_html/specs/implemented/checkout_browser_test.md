@@ -13,7 +13,7 @@ Tests cover all payment methods (Stripe Regular, Stripe Checkout, PayPal, free o
 ## Test Environment
 
 - **URL:** `https://joinerytest.site`
-- **Admin login:** `jeremy.tunnell+claude@gmail.com` / `sKU^1cK1pVJCNAv`
+- **Admin login:** `jeremy.tunnell+claude@gmail.com` — password in Claude memory
 - **Test mode:** Enabled via admin session (permission level 10)
 - **Stripe test token:** `tok_visa` (simulates valid Visa in test mode)
 - **Stripe test keys:** Already configured in site settings

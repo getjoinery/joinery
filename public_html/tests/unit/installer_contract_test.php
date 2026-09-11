@@ -923,11 +923,44 @@ if (preg_match('/create_config_file\(\) \{.*?\n\}/s', $init_src, $m)) {
 check($mk_config !== '', 'the config writer is findable');
 
 $guard_at = strpos($mk_config, 'Globalvars_site.php" ]; then');
-$keygen_at = strpos($mk_config, 'openssl rand -base64 32');
+$keygen_at = strpos($mk_config, 'joinery_generate_secret_box_key');
 check($guard_at !== false, 'it checks whether a config is already there');
-check($keygen_at !== false, 'and it is still the thing that generates the key');
+check($keygen_at !== false, 'and it is still the thing that mints the key at install');
 check($guard_at !== false && $keygen_at !== false && $guard_at < $keygen_at,
     'the check comes first, so an existing key is never regenerated');
+
+// One definition of the key, shared by the install and by the root moments that
+// mint it on a site older than the key. Two copies of a key format is two
+// answers to what a key is, and the site whose data was encrypted under the
+// first one is the one that finds out.
+$secrets_sh = $site_root . '/maintenance_scripts/install_tools/_config_secrets.sh';
+$secrets_src = is_file($secrets_sh) ? file_get_contents($secrets_sh) : '';
+check($secrets_src !== '', 'the shared config-secrets helper ships beside install.sh', $secrets_sh);
+check(strpos($secrets_src, 'openssl rand -base64 32') !== false,
+    'it is where the key format lives');
+check(strpos($init_src, '_config_secrets.sh') !== false,
+    'the installer sources it rather than carrying its own copy');
+$runner_src_for_secrets = (string)@file_get_contents(
+    $site_root . '/maintenance_scripts/install_tools/_plugin_installers_start.sh');
+check(strpos($runner_src_for_secrets, '_config_secrets.sh') !== false,
+    'and so does the root-moment runner, which mints on a site that predates the key');
+
+// The function body, from its opening line to the closing brace in column one.
+// A `[^}]*` scan cannot be used here: every ${var} in the body ends it.
+$mint_fn = '';
+if (preg_match('/^joinery_mint_secret_box_key\(\) \{$.*?^\}$/ms', $secrets_src, $m)) {
+    $mint_fn = $m[0];
+}
+check($mint_fn !== '', 'the mint function is findable');
+check(strpos($mint_fn, 'id -u') !== false,
+    'minting refuses without root',
+    'config/ belongs to the tree owner; a mint the web user could run would mean '
+        . 'the pool can write the PHP it boots');
+$has_at = strpos($mint_fn, 'joinery_config_has_secret_box_key');
+$write_at = strpos($mint_fn, 'joinery_generate_secret_box_key');
+check($has_at !== false && $write_at !== false && $has_at < $write_at,
+    'and checks for an existing key before it generates one',
+    'minting over a live key orphans every secret encrypted under the old one');
 check(preg_match('/Globalvars_site\.php" \]; then.*?\n\s*return 0/s', $mk_config) === 1,
     'and an existing config returns rather than falling through');
 
@@ -1165,6 +1198,221 @@ foreach (['1', 'true', 'TRUE', 'True', 'yes', 'on', ' on ', '0', '', 'no', 'off'
         'shell: ' . var_export($shell_reads_on($value), true)
             . ', php: ' . var_export(admin_management_node_agent_switch_on($value), true));
 }
+
+section('The web user cannot write the code it runs (specs/read_only_tree.md)');
+
+// The whole spec in one sentence: every file the PHP pool executes belongs to
+// somebody else, and every file the pool writes is data nothing executes. These
+// pin the two halves of the mechanism that makes it stick on a live box.
+
+$fix_perms_src_s10 = $fix_perms_src;
+$runner_s10        = file_get_contents($plugin_start);
+
+// --- fix_permissions.sh: two sets ---------------------------------------
+check(strpos($fix_perms_src_s10, 'TREE_OWNER="root"') !== false,
+    'production mode gives the executable set to root');
+check(preg_match('/config\/\*\.php.*\n.*chown root:www-data|-exec chown root:www-data \{\} \+/', $fix_perms_src_s10) === 1,
+    'config/*.php is root:www-data, so the pool reads the file it includes and writes nothing');
+check(strpos($fix_perms_src_s10, 'chmod 750') !== false && strpos($fix_perms_src_s10, '"$SITE_ROOT/config"') !== false,
+    'the config directory itself is 0750, so the pool cannot unlink Globalvars_site.php and leave another',
+    'directory write is enough to replace a file the pool `require`s');
+check(strpos($fix_perms_src_s10, '-exec chown www-data:www-data {} +') !== false,
+    'the data set is www-data:www-data');
+check(strpos($fix_perms_src_s10, "-not -perm 777") === false,
+    'no mode is 777 in either mode any more',
+    'dev used to sweep the whole tree to 777, uploads included');
+check(strpos($fix_perms_src_s10, '-not -path "*/.git"') !== false,
+    "a developer checkout's object store is not re-owned");
+
+// --- the recorded tree owner --------------------------------------------
+// The converger asserts ownership at a moment when public_html is owned by the
+// pool — which is exactly when "who owns public_html" is the wrong question. So
+// the answer is written down while it is known, and read back under guards.
+check(strpos($fix_perms_src_s10, 'config/tree_owner') !== false
+    && strpos($fix_perms_src_s10, 'chown root:root "$OWNER_FILE"') !== false,
+    'fix_permissions.sh records the tree owner, root-owned');
+check(strpos($fix_perms_src_s10, '"$SITE_ROOT/config/tree_owner"') !== false
+    && strpos($fix_perms_src_s10, 'PINNED=(') !== false
+    && strpos($fix_perms_src_s10, '"$SITE_ROOT/config/tree_owner"') < strpos($fix_perms_src_s10, 'PINNED_DIRS=('),
+    'and prunes it from the data sweep, which would otherwise make it group-writable',
+    'a group-writable record is one the runner refuses');
+
+// Nothing on the web side may write the record. This is the guard that keeps it
+// from becoming a way in: a request kind or an admin page that could name the
+// tree owner would let the pool name itself.
+// The FILE, not the words. PluginManager::tree_owner_name() reads who owns
+// public_html to tell an operator which account to install as, and the pages
+// that print that command mention it — none of them touch the record.
+$php_writers = array();
+foreach (array('includes', 'adm', 'utils', 'api', 'ajax', 'data', 'logic') as $dir) {
+    $base = PathHelper::getIncludePath($dir);
+    if (!is_dir($base)) continue;
+    $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($base));
+    foreach ($it as $f) {
+        if (!$f->isFile() || substr($f->getFilename(), -4) !== '.php') continue;
+        if (preg_match('~[\'"]config/tree_owner|tree_owner[\'"]\s*\)~', (string)file_get_contents($f->getPathname()))) {
+            $php_writers[] = $f->getPathname();
+        }
+    }
+}
+check(empty($php_writers),
+    'no PHP anywhere names the config/tree_owner file, so nothing on the web side can create or change it',
+    implode(', ', $php_writers));
+
+// --- the runner: assert, refuse, then run -------------------------------
+// The reading of the record and the refusal itself live in _tree_trust.sh, so
+// install_host_converger.sh reaches the identical answer when it decides whether
+// to refresh the root timer's entry point. Two copies would drift, and the one
+// that drifted looser would be the one that mattered.
+$trust_src = (string)file_get_contents(dirname(PathHelper::getRootDir())
+    . '/maintenance_scripts/install_tools/_tree_trust.sh');
+check($trust_src !== '', 'the shared trust helper ships in install_tools');
+check(strpos($runner_s10, '. "${TOOLS_DIR}/_tree_trust.sh"') !== false,
+    'the runner sources it');
+check(strpos($runner_s10, 'refusing to run anything as root') !== false,
+    'and runs nothing as root without it',
+    'the check that says which installers may run is in that file');
+
+$assert_at  = strpos($runner_s10, 'assert_tree_ownership()');
+$refuse_at  = strpos($runner_s10, 'installer_is_trusted()');
+$core_at_s10 = strpos($runner_s10, 'CORE_INSTALLERS=');
+check($assert_at !== false && $refuse_at !== false && $core_at_s10 !== false
+    && $assert_at < $refuse_at && $refuse_at < $core_at_s10,
+    'the runner asserts ownership, then defines the refusal, then runs installers',
+    'running an installer before either check is running a script we cannot attribute');
+
+$stamp_at = strpos($runner_s10, 'if [[ "${WHEN_CHANGED}" == "1" ]]; then');
+check($assert_at !== false && $stamp_at !== false && $assert_at < $stamp_at,
+    'the assertion runs before the converge-when-changed early exit',
+    'a container whose start command still chowns to www-data reports nothing changed, '
+        . 'so an assertion behind the stamp would never fire on the box that needs it');
+
+check(strpos($trust_src, 'installer refused: ${path} owned by ${owner} mode ${mode}') !== false,
+    'a refusal says which file, whose it is, and what mode it carries');
+check(strpos($runner_s10, 'CONVERGE_OUTCOME="installer-refused"') !== false,
+    'and the outcome reaches cache/host_converger.last, so the admin notice can report it');
+
+// The three guards on the record, executed rather than pattern-matched. stat is
+// shadowed so the fixture can carry any owner without the harness being root.
+$runner_fn = '';
+if (preg_match('/^joinery_tree_owner_record\(\) \{.*?^\}$/ms', $trust_src, $m)) {
+    $runner_fn = $m[0];
+}
+check($runner_fn !== '', 'the record reader is findable');
+
+// Outside the tree on purpose: this suite is about a tree the pool cannot
+// write, and a test that needed to write it would be testing the opposite.
+$scratch = sys_get_temp_dir() . '/joinery_s10_owner_' . getmypid();
+@mkdir($scratch . '/config', 0700, true);
+
+$reads_as = function (string $file_owner, string $file_mode, string $recorded)
+        use ($runner_fn, $scratch): string {
+    file_put_contents($scratch . '/config/tree_owner', $recorded . "\n");
+    $script = $runner_fn . "\n"
+        . 'stat() { echo ' . escapeshellarg($file_owner . ' ' . $file_mode) . '; }' . "\n"
+        . 'joinery_tree_owner_record ' . escapeshellarg($scratch) . "\n";
+    $path = $scratch . '/drive.sh';
+    file_put_contents($path, $script);
+    return trim((string)shell_exec('bash ' . escapeshellarg($path) . ' 2>/dev/null'));
+};
+
+// Guard 1 — root could have written it.
+check($reads_as('www-data', '644', 'user1') === 'root',
+    'a record the web user owns is ignored');
+check($reads_as('root', '646', 'user1') === 'root',
+    'an other-writable record is ignored');
+check($reads_as('root', '664', 'user1') === 'root',
+    'a group-writable record is ignored');
+
+// Guard 2 — a real account, never the web user. This is the forgery that would
+// pay: a record naming www-data makes the assertion a no-op on a tree the pool
+// already owns, which is the one thing it exists to undo.
+check($reads_as('www-data', '644', 'www-data') === 'root',
+    'a record naming www-data is refused even when its owner matches the name');
+check($reads_as('user1', '644', 'user1') === 'root',
+    'a record is refused unless root owns it, even when its owner matches the name',
+    'fix_permissions.sh writes it root:root and nothing else writes it, so any '
+        . 'other owner is a forgery');
+check($reads_as('root', '644', 'www-data') === 'root',
+    'and refused when root owns it, because the name is the problem');
+check($reads_as('root', '644', 'nosuchaccount_zz') === 'root',
+    'a record naming an account that does not exist here is ignored');
+check($reads_as('root', '644', '') === 'root',
+    'an empty record is ignored');
+
+// And the good case, or all of the above would pass by refusing everything.
+check($reads_as('root', '644', 'root') === 'root', 'a root record reads as root');
+$me = (string)(posix_getpwuid(posix_geteuid())['name'] ?? '');
+if ($me !== '' && $me !== 'www-data') {
+    check($reads_as('root', '644', $me) === $me,
+        'a root-owned record naming a real account is trusted (' . $me . ')');
+
+}
+
+@unlink($scratch . '/config/tree_owner');
+@unlink($scratch . '/drive.sh');
+@rmdir($scratch . '/config');
+@rmdir($scratch);
+
+// --- the record is authoritative once written ----------------------------
+// upgrade.php passes --production on every site it upgrades, developer checkout
+// included. A mode read as an instruction rather than a default would hand the
+// developer's tree to root at the next upgrade — which is what happened the
+// first time this was built. Driven, not pattern-matched.
+$derive_block = '';
+$d_start = strpos($fix_perms_src_s10, 'TREE_OWNER=""');
+$d_end   = strpos($fix_perms_src_s10, 'TREE_GROUP="$(id -gn "$TREE_OWNER")"');
+if ($d_start !== false && $d_end !== false && $d_end > $d_start) {
+    $derive_block = substr($fix_perms_src_s10, $d_start, $d_end - $d_start);
+}
+check($derive_block !== '', 'the owner derivation is findable');
+
+$fp = sys_get_temp_dir() . '/joinery_s10_mode_' . getmypid();
+@mkdir($fp . '/config', 0700, true);
+@mkdir($fp . '/public_html', 0700, true);
+
+$derives = function (string $mode, ?string $recorded) use ($derive_block, $fp): string {
+    $recorded === null ? @unlink($fp . '/config/tree_owner')
+                       : file_put_contents($fp . '/config/tree_owner', $recorded . "\n");
+    $script = 'SCRIPT_DIR=' . escapeshellarg(dirname(PathHelper::getRootDir())
+            . '/maintenance_scripts/install_tools') . "\n"
+        . 'SITE_ROOT=' . escapeshellarg($fp) . "\n"
+        . 'MODE=' . escapeshellarg($mode) . "\n"
+        . 'YELLOW=""; NC=""; SUDO_USER="root"' . "\n"
+        // The record's own stat has to read root:0644 or guard 1 refuses it;
+        // public_html reads as whoever, which only the no-record path uses.
+        . 'stat() { if [ "$3" = ' . escapeshellarg($fp . '/config/tree_owner')
+            . ' ]; then echo "root 644"; else echo "root"; fi; }' . "\n"
+        . $derive_block . "\n"
+        . 'echo "$TREE_OWNER"' . "\n";
+    $path = $fp . '/derive.sh';
+    file_put_contents($path, $script);
+    $out = (string)shell_exec('bash ' . escapeshellarg($path) . ' 2>/dev/null');
+    $lines = array_values(array_filter(array_map('trim', explode("\n", $out)), 'strlen'));
+    return (string)end($lines);
+};
+
+$me_acct = (string)(posix_getpwuid(posix_geteuid())['name'] ?? '');
+if ($me_acct !== '' && $me_acct !== 'www-data' && $me_acct !== 'root') {
+    check($derives('production', $me_acct) === $me_acct,
+        '--production does not take a tree the record says belongs to someone else',
+        'upgrade.php passes --production on every site, this checkout included');
+    check($derives('dev', $me_acct) === $me_acct,
+        '--dev agrees with the same record');
+}
+check($derives('dev', 'root') === 'root',
+    '--dev does not take a node\'s tree off root either');
+check($derives('production', null) === 'root',
+    'with no record, --production records root');
+check($derives('production', 'www-data') === 'root',
+    'a record naming the web user is not a record',
+    'believing it would leave the executable set writable by the pool');
+
+@unlink($fp . '/config/tree_owner');
+@unlink($fp . '/derive.sh');
+@rmdir($fp . '/config');
+@rmdir($fp . '/public_html');
+@rmdir($fp);
 
 section('The database password never becomes a command line');
 
@@ -1657,7 +1905,7 @@ check($fix_perms_src !== '', 'fix_permissions.sh exists', $fix_perms);
 // is unchanged either way: the cache directory has to exist before the sweep
 // runs, or it is never given to www-data and page caching silently stays off.
 $fp_mkdir = strpos($fix_perms_src, 'mkdir -p "$SITE_ROOT/cache/static_pages"');
-$fp_chown = strpos($fix_perms_src, '-exec chown www-data:user1 {} +');
+$fp_chown = strpos($fix_perms_src, '-exec chown www-data:www-data {} +');
 check($fp_mkdir !== false && $fp_chown !== false && $fp_mkdir < $fp_chown,
     'the permissions sweep guarantees the cache directory exists before it sweeps');
 
@@ -2107,5 +2355,171 @@ if (is_file($agent_reader)) {
 } else {
 	check(true, 'no agent source on this box — reader-side marker check not applicable', $agent_reader);
 }
+
+section('The vhost renderer adopts an old render and keeps an edited one');
+
+// Two states on a box with no .rendered record, and the difference between them
+// is an operator's work. Adopt the unedited older render — that is every box we
+// ever installed, and refusing them all would mean AllowOverride None reached
+// none of them. Never adopt a file carrying a line the template does not have.
+$render_src = (string)file_get_contents(dirname(PathHelper::getRootDir())
+    . '/maintenance_scripts/install_tools/render_vhost.sh');
+$render_fn = '';
+if (preg_match('/^vhost_is_an_older_render\(\) \{.*?^\}$/ms', $render_src, $m)) {
+    $render_fn = $m[0];
+}
+check($render_fn !== '', 'the adoption test is findable');
+
+$vh = harness_scratch_dir('vhost_adopt');
+@mkdir($vh, 0700, true);
+
+$adopts = function (string $on_disk, string $candidate) use ($render_fn, $vh): bool {
+    file_put_contents($vh . '/on_disk.conf', $on_disk);
+    file_put_contents($vh . '/candidate.conf', $candidate);
+    $script = $vh . '/drive.sh';
+    file_put_contents($script, $render_fn . "\n"
+        . 'vhost_is_an_older_render ' . escapeshellarg($vh . '/on_disk.conf')
+        . ' ' . escapeshellarg($vh . '/candidate.conf') . "\n"
+        . 'echo $?' . "\n");
+    return trim((string)shell_exec('bash ' . escapeshellarg($script) . ' 2>/dev/null')) === '0';
+};
+
+$new_render = "<VirtualHost *:443>\n"
+    . "    ServerName example.com\n"
+    . "    DocumentRoot /var/www/html/s/public_html\n"
+    . "    <Directory /var/www/html/s/public_html>\n"
+    . "        AllowOverride None\n"
+    . "        Require all granted\n"
+    . "    </Directory>\n"
+    . "    <Directory /var/www/html/s/static_files>\n"
+    . "        AllowOverride None\n"
+    . "        <FilesMatch \"\\.ph(?:ar|p|ps|tml|p[0-9])\$\">\n"
+    . "            Require all denied\n"
+    . "        </FilesMatch>\n"
+    . "    </Directory>\n"
+    . "</VirtualHost>\n";
+
+// An older render: the same file with AllowOverride All and without the blocks
+// this release added.
+$older_render = "<VirtualHost *:443>\n"
+    . "    ServerName example.com\n"
+    . "    DocumentRoot /var/www/html/s/public_html\n"
+    . "    <Directory /var/www/html/s/public_html>\n"
+    . "        AllowOverride All\n"
+    . "        Require all granted\n"
+    . "    </Directory>\n"
+    . "</VirtualHost>\n";
+
+check($adopts($older_render, $new_render), 'an unedited older render is adopted',
+    'AllowOverride All is ignored — flipping it is the point of the release');
+
+// The same older render with one line an operator added.
+$edited = str_replace("    ServerName example.com\n",
+    "    ServerName example.com\n    ServerAlias www.example.com\n", $older_render);
+check(!$adopts($edited, $new_render), 'a ServerAlias somebody added is not adopted',
+    'overwriting it is how a re-render silently takes a site off a name it answers on');
+
+$header = str_replace("</VirtualHost>\n",
+    "    Header always set X-Frame-Options SAMEORIGIN\n</VirtualHost>\n", $older_render);
+check(!$adopts($header, $new_render), 'an extra header is not adopted');
+
+$redirect = str_replace("</VirtualHost>\n",
+    "    Redirect /old /new\n</VirtualHost>\n", $older_render);
+check(!$adopts($redirect, $new_render), 'a redirect an operator added is not adopted');
+
+check($adopts($new_render, $new_render), 'a file identical to the render is adopted');
+
+// The template carries a `#Version` line that changes every release, so a rule
+// that compared comments would refuse every box on earth over a number in one.
+$versioned = "#Version 2.00\n# an older explanation of what this file is for\n" . $older_render;
+check($adopts($versioned, "#Version 2.04\n" . $new_render),
+    'a comment that changed between releases is not an operator edit');
+check(!$adopts(str_replace("</VirtualHost>\n", "    ServerAlias old.example.com\n</VirtualHost>\n", $versioned),
+        "#Version 2.04\n" . $new_render),
+    'but a directive under one still is');
+
+section('The vhost renderer adopts an exact render of any template we ever shipped');
+
+// The fleet was rendered from template 2.00, and 2.04 changed redirect
+// directives, so the line-subset rule above cannot adopt those boxes - and
+// nobody has a shell on them. A vhost that is byte-for-byte what one of our
+// own templates rendered to is ours with no guessing, so every template we
+// shipped lives in vhost_history/ and the renderer tries each one first.
+$tools_dir = dirname(PathHelper::getRootDir()) . '/maintenance_scripts/install_tools';
+$history_dir = $tools_dir . '/vhost_history';
+$history = glob($history_dir . '/default_virtualhost-*.conf') ?: array();
+check(count($history) >= 7, 'vhost_history carries every shipped template (1.06 through 2.03)', count($history) . ' files');
+
+$render_fn = '';
+$match_fn = '';
+if (preg_match('/^render_template\(\) \{.*?^\}$/ms', $render_src, $m)) { $render_fn = $m[0]; }
+if (preg_match('/^vhost_matches_history\(\) \{.*?^\}$/ms', $render_src, $m)) { $match_fn = $m[0]; }
+check($render_fn !== '' && $match_fn !== '', 'the render and history-match functions are findable');
+
+$vh2 = harness_scratch_dir('vhost_history');
+@mkdir($vh2, 0700, true);
+$drive = function (string $on_disk_text) use ($render_fn, $match_fn, $vh2, $history_dir): string {
+    file_put_contents($vh2 . '/disk.conf', $on_disk_text);
+    $script = $vh2 . '/drive.sh';
+    file_put_contents($script, "DOMAIN=example.org; SITENAME=site1; SERVER_IP='*'; PORT=''\n"
+        . $render_fn . "\n" . $match_fn . "\n"
+        . 'vhost_matches_history ' . escapeshellarg($vh2 . '/disk.conf') . ' ' . escapeshellarg($history_dir) . "\n");
+    return trim((string)shell_exec('bash ' . escapeshellarg($script) . ' 2>/dev/null'));
+};
+$render_old = function (string $template) {
+    return str_replace(array('{{DOMAIN_NAME}}', '{{SITE_NAME}}', '{{SERVER_IP}}', '{{PORT}}'),
+        array('example.org', 'site1', '*', ''), (string)file_get_contents($template));
+};
+
+foreach ($history as $template) {
+    $name = basename($template);
+    check($drive($render_old($template)) === $name, "an unedited render of $name is matched to it");
+}
+$two = $render_old($history_dir . '/default_virtualhost-2.00.conf');
+check($drive(str_replace("ServerName example.org\n", "ServerName example.org\n        ServerAlias www.example.org\n", $two)) === '',
+    'one added line and no template matches');
+check($drive(str_replace('AllowOverride All', 'AllowOverride None', $two)) === '',
+    'one changed directive and no template matches');
+check($drive('') === '', 'an empty file matches nothing');
+
+// The adoption order: an exact history match is tried before the subset rule.
+check(strpos($render_src, 'vhost_matches_history "${CONF}"') !== false
+    && strpos($render_src, 'vhost_matches_history "${CONF}"') < strpos($render_src, 'elif vhost_is_an_older_render'),
+    'the exact match is asked first, the subset rule second');
+
+// And the rule is only about AllowOverride, not about every directive whose name
+// happens to start the same way.
+$over = str_replace("        AllowOverride All\n",
+    "        AllowOverrideList Options\n        AllowOverride All\n", $older_render);
+check(!$adopts($over, $new_render),
+    'AllowOverrideList is an operator directive, not the flag this release flips');
+
+array_map('unlink', glob($vh . '/*'));
+@rmdir($vh);
+
+section('The converger entry point is refreshed when it goes stale');
+
+// The copy at /usr/local/sbin is what root actually runs. Placed once and never
+// replaced, it is whichever release happened to install it — and the first such
+// copy resolved its tools against /usr/local/sbin, found no installers, and
+// could not reach the runner that would have replaced it.
+$converger_src = (string)file_get_contents(dirname(PathHelper::getRootDir())
+    . '/maintenance_scripts/install_tools/install_host_converger.sh');
+check(strpos($converger_src, 'if [[ ! -x "${ENTRY}" ]]; then') === false,
+    'the installer no longer places the copy only when there is none');
+check(strpos($converger_src, 'cmp -s "${RUNNER}" "${ENTRY}"') !== false,
+    'it refreshes the copy whenever it differs from the tree\'s runner');
+check(strpos($converger_src, 'joinery_file_is_trusted "${RUNNER}" "${TREE_OWNER}"') !== false,
+    'and only from a runner that passes the same check an installer gets',
+    'otherwise the refresh is itself the way to become root');
+check(strpos($converger_src, 'joinery_tree_owner_record "${SITE_ROOT}"') !== false,
+    'reading the tree owner from the record, not from the tree');
+// Every box on the day this ships has no record yet, so a refusal there would
+// refuse exactly the boxes carrying the stale copy.
+check(strpos($converger_src, "stat -c '%U' \"\${SITE_ROOT}/public_html\"") !== false,
+    'with no record it falls back to whoever owns public_html');
+check(strpos($converger_src, '"${TREE_OWNER}" == "www-data"') !== false,
+    'but never to www-data',
+    'this can run on its own, and on a tree the pool still owns that is the attacker');
 
 harness_finish();

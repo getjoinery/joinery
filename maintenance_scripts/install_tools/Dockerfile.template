@@ -1,4 +1,13 @@
 # Joinery Docker Template
+# VERSION 5.0 - The start command leaves the code tree to root (specs/read_only_tree.md).
+#               It used to chown public_html, maintenance_scripts and vendor to
+#               www-data on every start, which handed the PHP pool write access
+#               to every file it executes: one bug that makes the web server
+#               write a file was enough to leave PHP behind in the tree, and the
+#               tree is what the next request runs. The pool keeps cache/ and
+#               the data volumes, which is everything it actually writes.
+#               Globalvars_site.php is root:www-data 0640 for the same reason —
+#               it is `require`d PHP, so the pool reads it and nothing more.
 # VERSION 4.9 - PostgreSQL's memory is sized here, at every start, before the
 #               server comes up. It cannot be done in the base image: the
 #               image is built by install.sh do_server_setup, so any figure
@@ -265,10 +274,15 @@ CMD set +H && \
     ([ -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ] || \
         (cd "/var/www/html/${SITENAME}/maintenance_scripts/install_tools" && \
         JOINERY_DB_PASSWORD="${POSTGRES_PASSWORD}" ./_site_init.sh "${SITENAME}" "" "${DOMAIN_NAME}" --docker-mode ${CLONE_OPTS})) && \
-    chown -R www-data:www-data "/var/www/html/${SITENAME}/public_html" "/var/www/html/${SITENAME}/maintenance_scripts" && \
-    ([ -d "/var/www/html/${SITENAME}/vendor" ] && chown -R www-data:www-data "/var/www/html/${SITENAME}/vendor" || true) && \
-    find "/var/www/html/${SITENAME}/public_html" -type d -exec chmod 755 {} + && \
-    find "/var/www/html/${SITENAME}/public_html" -type f -exec chmod 644 {} + && \
+    chown -R root:root "/var/www/html/${SITENAME}/public_html" "/var/www/html/${SITENAME}/maintenance_scripts" && \
+    ([ -d "/var/www/html/${SITENAME}/vendor" ] && chown -R root:root "/var/www/html/${SITENAME}/vendor" || true) && \
+    chown root:root "/var/www/html/${SITENAME}" && chmod 755 "/var/www/html/${SITENAME}" && \
+    ([ -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ] && \
+        chown root:www-data "/var/www/html/${SITENAME}/config/Globalvars_site.php" && \
+        chmod 640 "/var/www/html/${SITENAME}/config/Globalvars_site.php" || true) && \
+    find "/var/www/html/${SITENAME}/public_html" "/var/www/html/${SITENAME}/maintenance_scripts" -type d -exec chmod 755 {} + && \
+    find "/var/www/html/${SITENAME}/public_html" "/var/www/html/${SITENAME}/maintenance_scripts" -type f -name '*.sh' -exec chmod 755 {} + && \
+    find "/var/www/html/${SITENAME}/public_html" "/var/www/html/${SITENAME}/maintenance_scripts" -type f -not -name '*.sh' -exec chmod 644 {} + && \
     bash "/var/www/html/${SITENAME}/maintenance_scripts/install_tools/_install_declared_dependencies.sh" "/var/www/html/${SITENAME}/public_html" || true && \
     php "/var/www/html/${SITENAME}/public_html/utils/update_database.php" 2>/dev/null || true && \
     bash "/var/www/html/${SITENAME}/maintenance_scripts/install_tools/_reconcile_upgradable_assets.sh" || true && \

@@ -47,6 +47,113 @@ class AdminPage extends PublicPage {
 	 * @param string|null $current Label of the calling page's tab
 	 * @return string HTML
 	 */
+	/**
+	 * The live view of a queued root request.
+	 *
+	 * The pool cannot write the code tree, so an upgrade, a plugin install or a
+	 * docs save is queued for root and carried out on its own clock
+	 * (specs/read_only_tree.md). A button that queued one and then said nothing
+	 * would be a button that looks broken, so every page that submits a request
+	 * renders this: the state, the exit code when there is one, and the
+	 * transcript as it grows.
+	 *
+	 * Polls the read-only root_request_status action through /api/v1 with the
+	 * browser-session credential, every two seconds, and stops the moment the
+	 * request reaches done or failed.
+	 *
+	 * @param string $id The request id returned by RootRequest::submit()
+	 * @return string HTML
+	 */
+	public static function root_request_panel($id) {
+		$id = (string)$id;
+		if ($id === '') {
+			return '';
+		}
+		$safe = htmlspecialchars($id, ENT_QUOTES, 'UTF-8');
+		$json = json_encode($id);
+
+		return <<<HTML
+<div class="jy-rootreq" data-request="{$safe}" data-state="queued">
+<style>
+.jy-rootreq{margin:1rem 0;border:1px solid var(--jy-border,#d4d4d8);border-radius:6px;overflow:hidden}
+.jy-rootreq__head{display:flex;align-items:center;gap:.5rem;padding:.6rem .9rem;background:var(--jy-surface-2,#f4f4f5);font-size:.95rem}
+.jy-rootreq__dot{width:.6rem;height:.6rem;border-radius:50%;background:#a1a1aa;flex:none}
+.jy-rootreq[data-state="running"] .jy-rootreq__dot{background:#f59e0b;animation:jy-rootreq-pulse 1.2s ease-in-out infinite}
+.jy-rootreq[data-state="done"] .jy-rootreq__dot{background:#16a34a}
+.jy-rootreq[data-state="failed"] .jy-rootreq__dot{background:#dc2626}
+@keyframes jy-rootreq-pulse{50%{opacity:.35}}
+.jy-rootreq__note{color:#71717a}
+.jy-rootreq__log{margin:0;padding:.75rem .9rem;max-height:22rem;overflow:auto;background:#18181b;color:#e4e4e7;font-size:.85rem;line-height:1.45;white-space:pre-wrap;word-break:break-word}
+.jy-rootreq__log:empty{display:none}
+</style>
+<div class="jy-rootreq__head">
+<span class="jy-rootreq__dot"></span>
+<strong class="jy-rootreq__state">Queued</strong>
+<span class="jy-rootreq__note"></span>
+</div>
+<pre class="jy-rootreq__log"></pre>
+</div>
+<script>
+(function () {
+	var id = {$json};
+	var box = document.querySelector('.jy-rootreq[data-request="' + id + '"]');
+	if (!box) { return; }
+	var stateEl = box.querySelector('.jy-rootreq__state');
+	var noteEl  = box.querySelector('.jy-rootreq__note');
+	var logEl   = box.querySelector('.jy-rootreq__log');
+	var meta    = document.querySelector('meta[name="joinery-api-csrf"]');
+	var words   = { queued: 'Queued', running: 'Running', done: 'Done', failed: 'Failed' };
+
+	function tick() {
+		fetch('/api/v1/root_request_status', {
+			method: 'POST',
+			credentials: 'same-origin',
+			headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': meta ? meta.content : '' },
+			body: JSON.stringify({ id: id })
+		}).then(function (r) { return r.json(); }).then(function (d) {
+			var data = (d && d.data) ? d.data : d;
+			if (!data || !data.state) { setTimeout(tick, 5000); return; }
+			box.setAttribute('data-state', data.state);
+			stateEl.textContent = words[data.state] || data.state;
+			if (data.transcript && data.transcript !== logEl.textContent) {
+				logEl.textContent = data.transcript;
+				logEl.scrollTop = logEl.scrollHeight;
+			}
+			if (data.state === 'queued' && data.actor !== 'present') {
+				noteEl.textContent = 'waiting for this machine’s root actor';
+			} else if (data.state === 'failed' && data.abandoned) {
+				noteEl.textContent = 'interrupted — the run carrying it out was killed; submit it again';
+			} else if (data.state === 'failed') {
+				noteEl.textContent = 'exit ' + (data.exit_code === null ? '?' : data.exit_code);
+			} else {
+				noteEl.textContent = '';
+			}
+			if (!data.finished) { setTimeout(tick, 2000); }
+		}).catch(function () { setTimeout(tick, 5000); });
+	}
+	tick();
+})();
+</script>
+HTML;
+	}
+
+	/**
+	 * The line shown above any button that queues a root request, when this
+	 * machine has nothing that will carry one out. Empty when it has.
+	 *
+	 * The request is still written either way — a converger that comes back
+	 * finds it waiting — but a button must not look like it worked on a box
+	 * where nothing will act on it.
+	 */
+	public static function root_actor_notice() {
+		$warning = RootRequest::actorWarning();
+		if ($warning === '') {
+			return '';
+		}
+		return '<div class="alert alert-warning" role="status">'
+			. htmlspecialchars($warning, ENT_QUOTES, 'UTF-8') . '</div>';
+	}
+
 	public static function settings_tab_menu($current = NULL) {
 		$tab_menus = array('General Settings' => '/admin/admin_settings');
 		// Payment settings live in the store plugin — only offer the tab when active.

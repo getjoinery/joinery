@@ -340,11 +340,13 @@ if (DocumentText::jailAvailable()) {
 	check(($probe['user'] ?? '') === 'joinery-jail', 'by name as well as number');
 	check($probe['socket'] === false, 'it cannot open a socket');
 	check($probe['fork'] === false, 'it cannot start a process');
-	if ((fileperms(PathHelper::getRootDir()) & 0002) === 0002) {
-		harness_skip('it cannot write the code tree', 'the tree is world-writable on this box (its permissions, not the jail\'s)');
-	} else {
-		check($probe['wrote_tree'] === false, 'it cannot write the code tree');
-	}
+	// Hard on every box, the developer's included: there is no world-writable
+	// tree anywhere any more (specs/read_only_tree.md). This used to skip on a
+	// 777 tree, which is the state that made the check worth having.
+	check($probe['wrote_tree'] === false, 'it cannot write the code tree');
+	check(($probe['config_readable'] ?? true) === false,
+		'and cannot read the site config',
+		'config/Globalvars_site.php is root:www-data 0640; a parser that can read it can read the database password');
 	check($probe['staged_mode'] === '0600', 'what it stages in /dev/shm is 0600, its own', (string)$probe['staged_mode']);
 	check(VaultHealth::checkParserJail()['state'] === 'verified', 'VaultHealth reports the jail verified');
 } else {

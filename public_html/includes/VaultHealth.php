@@ -22,6 +22,11 @@
  * so tests/vault/vault_health_test.php can hand it a fixture and cover every
  * branch on any box.
  *
+ * @version 1.4 - the host-converger check also fails on a root request queued
+ *   for over a day, and on an installer the runner refused to attribute. The
+ *   converger carries requests out as well as converging the host, so a
+ *   stalled queue is the same machine failing in a way the timer's own
+ *   heartbeat cannot show (specs/read_only_tree.md)
  * @version 1.3 - a sixth check: the host converger has run within a day
  *                (specs/host_converger.md)
  * @version 1.2 - a fifth check: the parser jail is installed, so strangers'
@@ -80,6 +85,22 @@ class VaultHealth {
 		if ($facts['outcome'] === 'installer-failed') {
 			return ['key' => $key, 'label' => $label, 'state' => 'unmet',
 				'reason' => 'The host converger ran but an installer failed; see logs/host_converger.log on the host.'];
+		}
+		if ($facts['outcome'] === 'installer-refused') {
+			return ['key' => $key, 'label' => $label, 'state' => 'unmet',
+				'reason' => 'The host converger refused to run an installer it could not attribute — one is owned by the wrong account or is writable by more than its owner. See logs/host_converger.log on the host.'];
+		}
+		// The converger is also what carries out root requests, so a queue that
+		// is not moving is the same fact as a converger that is not running,
+		// seen from the other side: the timer may tick while every request it
+		// picks up fails, and an upgrade nobody notices did not happen is worse
+		// than one that visibly failed (specs/read_only_tree.md).
+		$oldest = $facts['oldest_request_age'] ?? RootRequest::oldest_pending_age();
+		if ($oldest !== null && $oldest >= RootRequest::STALE_AFTER) {
+			return ['key' => $key, 'label' => $label, 'state' => 'unmet',
+				'reason' => 'A root request has been queued for ' . (int)round($oldest / 3600)
+					. ' hours without being carried out. The host converger is installed and running, '
+					. 'so the requests themselves are failing; see logs/root_requests/ on the host.'];
 		}
 		return ['key' => $key, 'label' => $label, 'state' => 'verified', 'reason' => ''];
 	}

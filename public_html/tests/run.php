@@ -197,6 +197,14 @@ function harness_unmet_needs(array $needs) {
 				case 'b2':
 					$cache[$need] = trim((string)$settings->get_setting('cloud_storage_access_key')) !== '';
 					break;
+				case 'host-converger':
+					// The root actor. Without one, a root request is never
+					// carried out and the read-only tree gate would fail on a
+					// box that is simply missing its timer, which is a
+					// different problem with a different fix.
+					$facts = HostConvergerNotice::facts();
+					$cache[$need] = !empty($facts['installed']);
+					break;
 				case 'parser-jail':
 					// The launcher is installed by root (install_parser_jail.sh);
 					// a checkout without it skips the jail gate rather than

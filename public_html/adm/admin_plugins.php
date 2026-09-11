@@ -19,6 +19,12 @@ $message_type = $page_vars['message_type'];
 $system_health = $page_vars['system_health'];
 $plugins = $page_vars['plugins'];
 $provisioning_plugins = $page_vars['provisioning_plugins'] ?? array();
+// Installing a plugin writes the code tree, which only root does here, so the
+// page shows the queued request's progress rather than claiming it is finished
+// (specs/read_only_tree.md).
+$root_request_id = $page_vars['root_request_id'] ?? '';
+$root_actor_notice = $page_vars['root_actor_notice'] ?? '';
+$staged_command = $page_vars['staged_command'] ?? '';
 
 // Build Options dropdown links
 $altlinks = array();
@@ -66,6 +72,14 @@ $page->begin_box(array('altlinks' => $altlinks));
                 <?php echo $message; ?>
                 <button type="button" class="alert-close" aria-label="Close">&times;</button>
             </div>
+        <?php endif; ?>
+
+        <?php echo $root_actor_notice; ?>
+        <?php if ($staged_command): ?>
+            <pre style="padding:.75rem .9rem;background:#18181b;color:#e4e4e7;border-radius:6px;overflow-x:auto;user-select:all;"><?= htmlspecialchars($staged_command) ?></pre>
+        <?php endif; ?>
+        <?php if ($root_request_id): ?>
+            <?php echo AdminPage::root_request_panel($root_request_id); ?>
         <?php endif; ?>
 
         <?php if (isset($_GET['show_upload'])): ?>
