@@ -70,6 +70,18 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	const USER_SYSTEM = 2;
 	const USER_DELETED = 3;
 
+	/**
+	 * The system and deleted-user rows stand in for "nobody in particular": a
+	 * task runs as the system user, a departed member's rows are re-owned by the
+	 * deleted user. Neither is a person. Their email addresses are placeholders
+	 * on a domain nobody here controls, so anything that talks TO a user — a
+	 * notification, a queued email — has nobody to talk to and must skip them.
+	 */
+	public static function is_placeholder($user_id) {
+		$user_id = (int)$user_id;
+		return $user_id === self::USER_SYSTEM || $user_id === self::USER_DELETED;
+	}
+
 	protected static $foreign_key_actions = [
 		// 'pic' isn't a model prefix (the column stores a File id directly),
 		// so it doesn't fit the {prefix}_{target_prefix}_..._id convention.
@@ -1183,7 +1195,7 @@ private static function UcName($string) {
 			return true;
 		}
 
-		if($this->key == User::USER_SYSTEM || $this->key == User::USER_DELETED){
+		if(User::is_placeholder($this->key)){
 			throw new SystemAuthenticationError(
 					'You cannot delete this user.');
 		}

@@ -16,7 +16,9 @@
  *
  * See docs/signals.md and docs/notifications.md.
  *
- * @version 2.0
+ * @version 2.1
+ * @changelog 2.1 - Placeholder users (system, deleted) are never recipients on
+ *   either channel.
  */
 
 class Notify {
@@ -120,6 +122,12 @@ class Notify {
 			}
 			// Never notify someone of their own action.
 			if ($source_user_id !== null && $uid === $source_user_id) {
+				continue;
+			}
+			// The system and deleted users are not people: a run that a task
+			// owns has nobody to tell, and mail to their placeholder address
+			// would leave the building addressed to a stranger's domain.
+			if (User::is_placeholder($uid)) {
 				continue;
 			}
 

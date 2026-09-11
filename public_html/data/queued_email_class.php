@@ -71,7 +71,42 @@ class QueuedEmail extends SystemBase {	public static $prefix = 'equ';
 	    'equ_retry_count' => array('type'=>'int2', 'default'=>0),
 	);
 
-function get_status() {
+	/**
+	 * A row queued while email test mode is on is redirected to the trap address
+	 * as it is written, exactly as EmailSender redirects a message as it is sent.
+	 *
+	 * Doing it here as well matters because the queue is drained by a different
+	 * process — the SendQueuedEmails task, under the site's real settings. A
+	 * test run guards its own process (tests/lib/harness.php sets test mode in
+	 * memory), but a row it left in the queue carried its real recipient out of
+	 * that guard, and the cron then delivered it through the paid provider.
+	 * With the redirect on the row, whoever sends it sends it to the trap.
+	 *
+	 * A row already addressed to the trap (a redirected message EmailSender
+	 * queued for retry) is left alone, so the subject is not prefixed twice.
+	 * Test mode with no trap address suppresses at send time; here the row is
+	 * written as DELETED so it never waits for a process where the mode is off.
+	 */
+	function save($debug = false) {
+		if ($this->key === NULL) {
+			$trap = EmailSender::testModeTrap();
+			$to   = trim((string)$this->get('equ_to'));
+			if ($trap === '') {
+				$this->set('equ_status', self::DELETED);
+			} elseif ($trap !== null && $to !== '' && strcasecmp($to, $trap) !== 0) {
+				$this->set('equ_to', $trap);
+				// A blank subject stays blank: the required-field check below
+				// still has to see it.
+				$subject = (string)$this->get('equ_subject');
+				if ($subject !== '') {
+					$this->set('equ_subject', mb_substr(EmailSender::testModeSubject(array($to), $subject), 0, 128));
+				}
+			}
+		}
+		return parent::save($debug);
+	}
+
+	function get_status() {
 		return self::$status_to_text[$this->get('equ_status')];
 	}
 

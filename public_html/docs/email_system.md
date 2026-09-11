@@ -462,6 +462,15 @@ redirect can never leak through the instance-to-instance fast lane, and in
 mode on and no recipient configured, sends are suppressed and logged
 (service name `test-mode`) rather than falling back to the real recipient.
 
+The same trap is applied where a recipient is *decided*, not only where the
+message leaves: a `QueuedEmail` row created while test mode is on is written
+already addressed to the trap, with the real recipient in its subject
+(`QueuedEmail::save()`). The queue is drained by the `SendQueuedEmails` task
+in its own process under the site's real settings, so a row that carried its
+real recipient out of a test-mode process would otherwise be delivered for
+real. A row already at the trap (a redirected message queued for retry) is
+left as it is; test mode with no trap address writes the row `DELETED`.
+
 The send path runs for real end to end — transport, provider, delivery — so
 this is the safety switch for a staging clone of a production site, and it is
 what the test harness sets in-memory (`tests/lib/harness.php`, trap
