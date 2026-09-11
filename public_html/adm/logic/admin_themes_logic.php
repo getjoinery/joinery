@@ -15,6 +15,10 @@ function admin_themes_logic(array $input): LogicResult {
 	$theme_manager = ThemeManager::getInstance();
 	$message = '';
 	$error = '';
+	// Set when an action was queued for the root actor rather than done here.
+	$root_request_id = '';
+	// Set when an upload was staged and the operator has to finish it in a shell.
+	$staged_command = '';
 
 	// Handle form submissions and GET actions
 	$action = isset($input['action']) ? $input['action'] : (isset($input['action']) ? $input['action'] : null);
@@ -62,34 +66,45 @@ function admin_themes_logic(array $input): LogicResult {
 						}
 						break;
 
+					// The flag lives in two places because two readers need it:
+					// the database row, which the admin list shows, and
+					// theme.json, which is what the upgrade actually consults
+					// on the target site. The manifest is in the code tree, so
+					// writing it is a root request (specs/read_only_tree.md);
+					// the row is written here and now so the page tells the
+					// truth immediately.
 					case 'mark_upgradable':
-						$theme_name = $input['theme_name'];
-						$theme = Theme::get_by_theme_name($theme_name);
-						if ($theme) {
-							$theme->set('thm_receives_upgrades', true);
-							$theme->save();
-							// Write back to manifest to keep in sync
-							$theme_manager->writeManifestReceivesUpgrades($theme_name, true);
-							$message = "Theme '$theme_name' will be replaced from the upgrade payload during deploy.";
-						}
-						break;
-
 					case 'mark_preserved':
 						$theme_name = $input['theme_name'];
+						$upgradable = ($action === 'mark_upgradable');
 						$theme = Theme::get_by_theme_name($theme_name);
 						if ($theme) {
-							$theme->set('thm_receives_upgrades', false);
+							$theme->set('thm_receives_upgrades', $upgradable);
 							$theme->save();
-							// Write back to manifest to keep in sync
-							$theme_manager->writeManifestReceivesUpgrades($theme_name, false);
-							$message = "Theme '$theme_name' will be preserved on deploy (receives_upgrades=false).";
+							$root_request_id = RootRequest::submit('set_receives_upgrades',
+								array('type' => 'theme', 'name' => $theme_name, 'value' => $upgradable),
+								(int)$session->get_user_id());
+							$message = $upgradable
+								? "Theme '$theme_name' will be replaced from the upgrade payload during deploy."
+								: "Theme '$theme_name' will be preserved on deploy (receives_upgrades=false).";
 						}
 						break;
 
 					case 'upload':
+						// Unpacked and checked here, under uploads/staging,
+						// outside the tree. Installed from a shell: a theme is
+						// PHP, and this queue is www-data-writable, so a kind
+						// that installed a staged directory would turn one
+						// file-write bug into code the site runs. See
+						// RootRequest::NO_PACKAGE_KIND.
 						if (isset($_FILES['theme_zip']) && $_FILES['theme_zip']['error'] === UPLOAD_ERR_OK) {
-							$theme_name = $theme_manager->installTheme($_FILES['theme_zip']['tmp_name']);
-							$message = "Theme '$theme_name' installed successfully.";
+							$staged = $theme_manager->stage($_FILES['theme_zip']['tmp_name']);
+							$staged_command = 'sudo -u ' . escapeshellarg(PluginManager::tree_owner_name()) . ' php '
+								. escapeshellarg(PathHelper::getIncludePath('utils/install_extension.php'))
+								. ' theme --staged=' . escapeshellarg($staged['dir']);
+							$message = "Theme '" . $staged['name'] . "' was unpacked and checked. Installing an "
+								. 'uploaded package writes code into the tree, which is done from a shell '
+								. 'rather than from this page — run:';
 						} else {
 							$error = "Upload failed. Please check the file and try again.";
 						}
@@ -143,7 +158,10 @@ function admin_themes_logic(array $input): LogicResult {
 	return LogicResult::render(array(
 		'message' => $message,
 		'error' => $error,
-		'themes' => $themes
+		'themes' => $themes,
+		'root_request_id' => $root_request_id,
+		'staged_command' => $staged_command,
+		'root_actor_notice' => AdminPage::root_actor_notice()
 	));
 }
 ?>

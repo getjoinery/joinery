@@ -124,6 +124,38 @@ $facts = HostConvergerNotice::facts();
 check(array_key_exists('installed', $facts) && array_key_exists('last_run', $facts) && array_key_exists('outcome', $facts),
 	'the live fact reader returns the three facts the check decides on');
 
+// The converger also carries out root requests (specs/read_only_tree.md), so a
+// queue that is not moving is the same machine failing in a way the timer's own
+// heartbeat cannot show: it ticks, and every request it picks up fails.
+$hcq = function ($outcome, $oldest) use ($now) {
+	return VaultHealth::checkHostConverger(
+		['installed' => true, 'last_run' => $now - 300, 'outcome' => $outcome,
+		 'oldest_request_age' => $oldest], $now);
+};
+check($hcq('converged', null)['state'] === 'verified', 'a fresh converger with an empty queue is verified');
+check($hcq('converged', 600)['state'] === 'verified', 'and one with a request queued ten minutes ago is still verified');
+$stalled = $hcq('converged', 2 * 86400);
+check($stalled['state'] === 'unmet', 'a request queued two days ago is unmet even though the timer is running');
+check(strpos($stalled['reason'], 'logs/root_requests/') !== false,
+	'and the reason says where the transcripts are', $stalled['reason']);
+check($hcq('installer-refused', null)['state'] === 'unmet',
+	'an installer the runner refused to attribute is unmet');
+check(strpos($hcq('installer-refused', null)['reason'], 'attribute') !== false,
+	'and says what refusing meant');
+
+check(array_key_exists('pending_requests', $facts) && array_key_exists('oldest_request_age', $facts),
+	'the live fact reader also reports the request queue');
+check(HostConvergerNotice::forState(true, $now - 300, 'converged', $now, 'cmd', 0, null) === '',
+	'the notice stays silent when the queue is empty');
+check(HostConvergerNotice::forState(true, $now - 300, 'converged', $now, 'cmd', 1, 600) === '',
+	'and while a request is merely recent');
+$queue_notice = HostConvergerNotice::forState(true, $now - 300, 'converged', $now, 'cmd', 3, 4 * 3600);
+check(strpos($queue_notice, '3 root requests') !== false,
+	'a stalled queue is named on the page, with its depth', $queue_notice);
+check(strpos($queue_notice, '4 hours') !== false, 'and how long the oldest has waited');
+check(strpos(HostConvergerNotice::forState(true, $now - 300, 'installer-refused', $now, 'cmd'), 'attribute') !== false,
+	'a refused installer is reported on the page too');
+
 // ---------------------------------------------------------------------------
 section('Swap: the device type decides, read from sysfs');
 

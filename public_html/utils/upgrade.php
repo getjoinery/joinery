@@ -242,6 +242,141 @@
 		exit(1);
 	}
 
+	// A tree that cannot be given its ownership and modes does not get to run.
+	// The old fallback here was `chmod -R 770` over the live directory, which
+	// made every file the PHP pool executes writable by the PHP pool — the exact
+	// state specs/read_only_tree.md exists to end, reached by the one path
+	// nobody watches, a failure. So the deploy rolls back to the tree that was
+	// serving a moment ago, which is at least a tree whose permissions are known.
+	function upgrade_permissions_failed($site_template, $verbose, $detail) {
+		echo '<strong>Permissions could not be set on the deployed tree.</strong><br>';
+		echo $detail . '<br>';
+		echo 'Rolling back — a tree whose ownership is unknown is not left serving.<br>';
+		$rollback = DeploymentHelper::performRollback($site_template, true, $verbose);
+		if ($rollback['success']) {
+			echo "✓ Rollback completed successfully<br>";
+			if ($rollback['failed_dir']) {
+				echo "  Failed deployment preserved at: " . $rollback['failed_dir'] . "<br>";
+			}
+		} else {
+			echo "✗ Rollback FAILED: " . htmlspecialchars($rollback['error']) . "<br>";
+		}
+		exit(1);
+	}
+
+	/**
+	 * The browser's whole view of upgrading, now that upgrading is a request.
+	 *
+	 * The pool cannot write the code tree, so this page's job is to say what
+	 * version is running, what the source is offering, whether this machine has
+	 * anything that will act on a request, and then to watch one
+	 * (specs/read_only_tree.md). The work itself is this same script run as
+	 * root by the host converger.
+	 */
+	function upgrade_browser_page($request_id, $live_directory) {
+		$settings = Globalvars::get_instance();
+		$session  = SessionControl::get_instance();
+
+		$here   = trim((string)LibraryFunctions::get_joinery_version());
+		$source = trim((string)$settings->get_setting('upgrade_source'));
+
+		// What the source is offering. A source that cannot be reached is a
+		// fact worth showing, not an error worth stopping for: the operator may
+		// be here to read the transcript of a request already running.
+		$there = '';
+		$source_error = '';
+		if ($source === '') {
+			$source_error = 'No upgrade source is configured for this site.';
+		} else {
+			$curl = curl_init();
+			curl_setopt_array($curl, array(
+				CURLOPT_URL => rtrim($source, '/') . '/utils/upgrade?serve-upgrade=1',
+				CURLOPT_RETURNTRANSFER => true,
+				CURLOPT_FOLLOWLOCATION => true,
+				CURLOPT_TIMEOUT => 15,
+				CURLOPT_CONNECTTIMEOUT => 8,
+			));
+			$body = curl_exec($curl);
+			$err  = curl_error($curl);
+			curl_close($curl);
+			if ($body === false || $err !== '') {
+				$source_error = 'Could not reach ' . htmlspecialchars($source) . ': ' . htmlspecialchars($err);
+			} else {
+				$decoded = json_decode((string)$body, true);
+				// system_version is the key the serve-upgrade branch emits
+				// (see $response['system_version'] below); 'version' was never
+				// in the response, so this said "unknown" on every healthy box
+				// and the re-deploy branch was unreachable.
+				$there = is_array($decoded) ? trim((string)($decoded['system_version'] ?? '')) : '';
+				if ($there === '') {
+					$source_error = 'The upgrade source answered, but named no version.';
+				}
+			}
+		}
+
+		$page = new AdminPage();
+		$page->admin_header(array(
+			'breadcrumbs' => array('System' => '', 'Upgrade' => ''),
+			'session'     => $session,
+		));
+
+		echo '<div style="max-width:52rem;">';
+		echo '<h2>Upgrade</h2>';
+
+		echo '<table style="margin-bottom:1rem;border-collapse:collapse;">';
+		foreach (array(
+			'Running here'    => $here !== '' ? $here : 'unknown',
+			'Upgrade source'  => $source !== '' ? $source : 'none configured',
+			'Available there' => $there !== '' ? $there : 'unknown',
+		) as $label => $value) {
+			echo '<tr><th style="text-align:left;padding:.25rem 1rem .25rem 0;font-weight:600;">'
+				. htmlspecialchars($label) . '</th><td style="padding:.25rem 0;">'
+				. htmlspecialchars((string)$value) . '</td></tr>';
+		}
+		echo '</table>';
+
+		if ($source_error !== '') {
+			echo '<div class="alert alert-warning" role="status">' . $source_error . '</div>';
+		}
+
+		// Every upgrade goes through the root actor, so a machine without one
+		// cannot upgrade at all until it has one back. Said before the button,
+		// not after it is pressed.
+		echo AdminPage::root_actor_notice();
+
+		if ($request_id !== '') {
+			echo '<p>This upgrade is being carried out by the host converger. The transcript below '
+				. 'is the same output a command-line upgrade prints.</p>';
+			echo AdminPage::root_request_panel($request_id);
+			echo '<p style="margin-top:1rem;"><a class="jy-btn" href="/utils/upgrade">Back</a></p>';
+		} else {
+			$same = ($here !== '' && $there !== '' && $here === $there);
+			if ($same) {
+				echo '<p>This site is running the version its source is offering. Upgrading again '
+					. 're-deploys the same release, which is harmless and occasionally useful.</p>';
+			}
+			// A single-button action form: no fields, one server action. The
+			// one shape CLAUDE.md exempts from FormWriter, and a POST rather
+			// than a link because a link is a GET and a browser performs a GET
+			// whenever it is told to, including by another site.
+			echo AdminPage::action_button(
+				$same ? 'Re-deploy this version' : 'Upgrade now',
+				'/utils/upgrade',
+				array(
+					'hidden'  => array('queue_upgrade' => '1'),
+					'class'   => 'btn btn-primary',
+					'confirm' => $same
+						? 'Re-deploy the version already running?'
+						: 'Upgrade this site to ' . ($there !== '' ? $there : 'the available version') . '?',
+				));
+			echo '<p style="margin-top:.75rem;color:#71717a;font-size:.9rem;">The upgrade runs as root, '
+				. 'from this machine\'s own copy of the code. Nothing is downloaded until it starts.</p>';
+		}
+
+		echo '</div>';
+		$page->admin_footer();
+	}
+
 	// One upgrade at a time. Staging (uploads/upgrades/) is shared state: a second
 	// run's staging-clear wipes the first run's extraction mid-flight, and whichever
 	// run swaps first deploys a broken tree. flock is kernel-held, so a killed run
@@ -324,15 +459,39 @@
 		exit;
 	}
 
+	$session = SessionControl::get_instance();
+	if (!$is_cli) {
+		$session->check_permission(8);
+
+		// The code tree belongs to root and the PHP pool cannot write it
+		// (specs/read_only_tree.md), so a browser upgrade is a REQUEST: this
+		// page asks, the host converger runs this same script as root, and the
+		// operator watches its transcript here. The CLI branch below — the
+		// agent's apply_update, a scripted deploy, the converger itself — is
+		// the one that does the work, and is unchanged.
+		$upgrade_request = (string)($_GET['request'] ?? $_POST['request'] ?? '');
+
+		if (isset($_POST['queue_upgrade'])) {
+			try {
+				$upgrade_request = RootRequest::submit('upgrade', array(), (int)$session->get_user_id());
+			} catch (Throwable $e) {
+				$upgrade_request = '';
+				out_alert('danger', 'The upgrade could not be queued', htmlspecialchars($e->getMessage()));
+			}
+			if ($upgrade_request !== '') {
+				header('Location: /utils/upgrade?request=' . urlencode($upgrade_request));
+				exit;
+			}
+		}
+
+		upgrade_browser_page($upgrade_request, $live_directory);
+		exit;
+	}
+
 	if (!is_writable($live_directory)) {
 		echo $live_directory . ' (live_directory) is not writable by the current process. Aborting upgrade.<br>';
 		echo 'Owner: ' . posix_getpwuid(fileowner($live_directory))['name'] . '; permissions: ' . substr(sprintf('%o', fileperms($live_directory)), -3) . '<br>';
 		exit;
-	}
-
-	$session = SessionControl::get_instance();
-	if (!$is_cli) {
-		$session->check_permission(8);
 	}
 
 	$dbhelper = DbConnector::get_instance();
@@ -1271,23 +1430,27 @@
 				}
 			}
 
-			// Fix permissions using centralized script (production mode).
-			// The script chowns to www-data. Without it, the deployed tree stays
-			// owned by the agent user with mode 770 and Apache cannot read a
-			// single file — the site 500s until permissions are fixed by hand.
+			// Permissions for the deployed tree come from fix_permissions.sh and
+			// from nowhere else. It is the one place that knows the two sets
+			// apart — the code the PHP pool executes, which belongs to the tree
+			// owner and is read-only to the pool, and the data the pool writes
+			// (specs/read_only_tree.md). There is no chmod fallback: a blanket
+			// 770 over the live tree would hand the pool write access to every
+			// file it runs, which is the state this release exists to end. If
+			// the script is missing or fails, the deploy says so and stops.
 			$fix_permissions_script = $full_site_dir . '/maintenance_scripts/install_tools/fix_permissions.sh';
 			if(file_exists($fix_permissions_script)) {
 				if($verbose) echo 'Setting permissions using fix_permissions.sh --production<br>';
 				exec($root_prefix . escapeshellarg($fix_permissions_script) . " " . escapeshellarg($site_template) . " --production 2>&1", $perm_output, $perm_exit);
 				if($perm_exit !== 0) {
-					echo 'Warning: fix_permissions.sh failed (' . htmlspecialchars(implode(' ', array_slice($perm_output, -2))) . '), falling back to chmod<br>';
-					exec($root_prefix . "chmod -R 770 " . escapeshellarg($live_directory));
+					upgrade_permissions_failed($site_template, $verbose,
+						'fix_permissions.sh did not complete: '
+						. htmlspecialchars(implode(' ', array_slice($perm_output, -2))));
 				}
 			} else {
-				echo 'Warning: fix_permissions.sh not found, using fallback chmod<br>';
-				exec($root_prefix . "chmod -R 770 " . escapeshellarg($live_directory));
+				upgrade_permissions_failed($site_template, $verbose,
+					'fix_permissions.sh is not present at ' . htmlspecialchars($fix_permissions_script));
 			}
-			exec($root_prefix . "chmod -R 770 " . escapeshellarg($backup_directory) . " 2>/dev/null");
 
 			// Check if deployment succeeded
 			$deployment_failed = false;
@@ -1682,7 +1845,15 @@
 			$test_return = 0;
 			// Subprocess for the same reason update_database runs as one: this
 			// process holds model classes loaded from the pre-swap tree.
-			exec('/usr/bin/php ' . escapeshellarg($test_runner) . ' deploy 2>&1', $test_output, $test_return);
+			//
+			// JOINERY_DEPLOY_VERIFY marks the run as the one inside a deploy:
+			// permissions are set, the host installers have NOT run yet, and on
+			// a browser-upgrade box the host converger may be the process
+			// running this. A deploy-tier gate that needs the installers' work
+			// (the re-rendered vhost) or the converger's attention (a queued
+			// root request) skips those checks under it and runs the rest
+			// (tests/security/read_only_tree_gate.sh).
+			exec('JOINERY_DEPLOY_VERIFY=1 /usr/bin/php ' . escapeshellarg($test_runner) . ' deploy 2>&1', $test_output, $test_return);
 
 			if ($test_return === 0) {
 				upgrade_echo('✓ Deploy checks passed against the newly deployed code<br>');

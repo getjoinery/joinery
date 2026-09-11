@@ -394,6 +394,37 @@ function harness_defer(callable $fn) {
  * and stored locally, so nothing escapes to a stranger even when a send is
  * real, and harness_cleanup_delivered_mail() can then remove it.
  */
+/**
+ * A directory a test may write into, outside the code tree.
+ *
+ * The tree belongs to its owner and the PHP pool cannot write it
+ * (specs/read_only_tree.md); a suite that scattered scratch files through
+ * public_html was relying on the state that spec removes, and would leave a
+ * stranger's file in the executable set besides. Scratch goes under
+ * {site}/cache/tests, which is data and is never executed.
+ *
+ * Each call with the same $label gives the same directory, created if needed.
+ * Tests that write CODE into the tree on purpose — a task class, a plugin
+ * directory, a probe file at a routed path — are testing discovery at a real
+ * location and do not use this.
+ *
+ * @param string $label A short name for the caller, e.g. 'documents'
+ * @return string Absolute path, with no trailing slash
+ */
+function harness_scratch_dir($label = 'scratch') {
+	$label = preg_replace('/[^a-z0-9_-]/i', '', (string)$label);
+	if ($label === '') {
+		$label = 'scratch';
+	}
+	$dir = PathHelper::getSiteRoot() . '/cache/tests/' . $label;
+	if (!is_dir($dir) && !@mkdir($dir, 0770, true) && !is_dir($dir)) {
+		// A box where cache/ is not writable is a broken box, but a test that
+		// died here would say so in the least useful way possible.
+		throw new RuntimeException('harness: could not create the scratch directory at ' . $dir);
+	}
+	return $dir;
+}
+
 function harness_fixture_email($label) {
 	$h = &$GLOBALS['__harness'];
 	return 'harnesstest_' . strtolower($label) . '_' . $h['run_token'] . '@' . HARNESS_FIXTURE_DOMAIN;

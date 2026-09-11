@@ -15,14 +15,24 @@
  * cal_entries row owned by the given CalendarSubject. See docs/calendar.md.
  *
  * @version 1.2
+ * @changelog 1.3 - the file-scope requires are gone. parse() used none of them,
+ *   and they are what put the site config inside the parser jail: any of them
+ *   reaches LibraryFunctions, which pulls SystemBase, which pulls the errors
+ *   model, which pulls the users model, which boots the settings singleton at
+ *   file scope. The document extractor calls parse() to read a calendar
+ *   attachment, and that subprocess has no config file and no database by
+ *   design. Classes resolve by name, so nothing here needed a require.
  * @changelog 1.2 - parse(): repeated ATTENDEE lines collect into an 'attendees' list (like exdates) instead of overwriting one props slot
  */
 
-require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-require_once(PathHelper::getIncludePath('data/calendar_entry_class.php'));
-require_once(PathHelper::getIncludePath('data/calendar_entry_exception_class.php'));
-require_once(PathHelper::getIncludePath('includes/calendar/CalendarSubject.php'));
-require_once(PathHelper::getIncludePath('data/event_logs_class.php'));
+// No file-scope requires. Classes resolve by name, so these bought nothing —
+// and they cost the parser jail: the document extractor calls parse() to read a
+// calendar attachment in a subprocess that has no config file and no database,
+// and requiring a model here reached Globalvars before a line of the calendar
+// was read (calendar_entry_class -> LibraryFunctions -> SystemBase ->
+// general_errors_class -> users_class, which boots the settings singleton at
+// file scope). The import half still resolves every one of these by name at the
+// moment it uses them.
 
 class IcsImporter {
 

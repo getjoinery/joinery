@@ -369,10 +369,54 @@ A plugin that needs something installed on the host declares it; the platform in
 - **Root** — it may `apt-get install` and edit `/etc`; it should verify root and refuse otherwise.
 - **Non-interactive** — set `DEBIAN_FRONTEND=noninteractive`; never prompt.
 - **Exit 0 when not-applicable** — plugin inactive for the site, feature setting off, wrong platform.
+- **Owned by the tree owner, and writable by nobody else.** The runner checks
+  before it executes: an installer owned by another account, or carrying a group
+  or other write bit, is refused with the reason on stderr, and the converger
+  records `installer-refused`. These scripts run as root, so an installer the
+  web user could edit would be a root shell for anyone who found one bug in the
+  web stack. Ordinary permissions from `fix_permissions.sh` satisfy this; a
+  refusal means something re-owned part of the tree.
 
 The runner `maintenance_scripts/install_tools/_plugin_installers_start.sh` executes every **active** plugin's declared installer at the root moments without systemd: the container `CMD` (every start), `install.sh` site builds, and `upgrade.php`. On a bare-metal node, activating a plugin after install has no such moment — run the installers on demand from the node's detail page in Server Manager (Actions → Run Plugin Installers), which queues a `run_plugin_installers` job. The runner is fail-safe — an installer failure logs a warning and never blocks container start. The Mailbox plugin's `provisioning/install_email.sh` is the reference implementation.
 
-Activation cannot run a `host_installer` itself (web requests lack root), but the host converger — a root timer every site install leaves behind, see [Deploy and Upgrade](deploy_and_upgrade.md#upgradephp) — runs the installers within five minutes of a change in the active set, so a newly activated plugin's services arrive without a shell. Still pair the installer with `provisioners` entries (below) so the admin UI detects missing host state and points at the fix; on Docker nodes a container restart runs the installer automatically.
+Activation cannot run a `host_installer` itself (web requests lack root), but the host converger — a root timer every site install leaves behind, see [Deploy and Upgrade](deploy_and_upgrade.md#who-owns-the-code-and-how-the-browser-upgrades) — runs the installers within a minute of a change in the active set, so a newly activated plugin's services arrive without a shell. Still pair the installer with `provisioners` entries (below) so the admin UI detects missing host state and points at the fix; on Docker nodes a container restart runs the installer automatically.
+
+#### A plugin never writes the code tree
+
+The code a site runs belongs to root, and the PHP pool has read access and
+nothing more — see [Deploy and Upgrade](deploy_and_upgrade.md#who-owns-the-code-and-how-the-browser-upgrades).
+That applies to a plugin's own directory: it is code the pool executes, so the
+pool does not write it.
+
+What this rules out in practice:
+
+- **A cache, a download or an upload inside the plugin directory.** Anything the
+  plugin writes at run time belongs under `{site}/cache/<plugin>/`,
+  `{site}/uploads/` or `{site}/storage/`. A directory the web server drops
+  remote bytes into, sitting inside the directory the web server runs, is the
+  shape the whole rule exists to remove. Serve such files through a view with
+  `readfile()` rather than as a URL under the plugin.
+- **Editing `plugin.json` from a page.** The manifest is read by the upgrade on
+  every site, so it is code. Where a flag has to reach the manifest, submit a
+  root request; where it only has to reach this site, put it in the database.
+- **Unpacking an archive into `plugins/`.** The web side unpacks into
+  `uploads/staging/` and checks it there — no path escapes, no symlinks, a
+  manifest present, and the entries summing under
+  `AbstractExtensionManager::MAX_UNPACKED_BYTES` so a small archive cannot fill
+  the volume — and the install itself is a shell command
+  (`php utils/install_extension.php plugin --staged=<dir>`). That command copies
+  the staged directory into a root-owned temporary directory before it reads
+  anything in it, and checks the copy: staging belongs to the web user, so
+  checking it and then installing from it leaves a window in between. It is
+  deliberately
+  not something the web side can ask root to do: the staging area and the
+  request queue are both web-writable, so a request to install a staged
+  directory would prove nothing about who asked, and a staged
+  `migrations/migrations.php` is included as root.
+
+`PluginManager::refreshFromUpstream()` and `installPlugin()` throw from a web
+request, so a caller that tries finds out at the door rather than half way
+through an extraction.
 
 #### Deprecation Fields
 

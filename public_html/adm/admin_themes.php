@@ -14,6 +14,12 @@ $session = SessionControl::get_instance();
 
 $message = $page_vars['message'];
 $error = $page_vars['error'];
+// Installing a theme, and the preserve/upgradable flag, write the code tree —
+// only root does that here, so the page shows the queued request's progress
+// rather than claiming it is finished (specs/read_only_tree.md).
+$root_request_id = $page_vars['root_request_id'] ?? '';
+$root_actor_notice = $page_vars['root_actor_notice'] ?? '';
+$staged_command = $page_vars['staged_command'] ?? '';
 $themes = $page_vars['themes'];
 
 $page = new AdminPage();
@@ -48,6 +54,14 @@ $page->begin_box(array('altlinks' => $altlinks));
             
             <?php if ($error): ?>
                 <div class="alert alert-danger"><?= htmlspecialchars($error) ?></div>
+            <?php endif; ?>
+
+            <?= $root_actor_notice ?>
+            <?php if ($staged_command): ?>
+            <pre style="padding:.75rem .9rem;background:#18181b;color:#e4e4e7;border-radius:6px;overflow-x:auto;user-select:all;"><?= htmlspecialchars($staged_command) ?></pre>
+        <?php endif; ?>
+        <?php if ($root_request_id): ?>
+                <?= AdminPage::root_request_panel($root_request_id) ?>
             <?php endif; ?>
             
             <?php if (isset($_GET['show_upload'])): ?>

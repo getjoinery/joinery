@@ -43,7 +43,7 @@ class FetchFeedTask implements ScheduledTaskInterface {
             ];
         }
 
-        $cache_dir = PathHelper::getIncludePath('plugins/persona_browser/media_cache');
+        $cache_dir = PersonaFeedItem::media_cache_dir();
         $new = 0;
         $media_saved = 0;
         $refreshed = 0;
@@ -88,7 +88,7 @@ class FetchFeedTask implements ScheduledTaskInterface {
                     foreach ($item['media'] as $file) {
                         $dest = $cache_dir . '/' . basename($file);
                         if ($client->fetch_media($file, $dest)) {
-                            @chmod($dest, 0666);
+                            @chmod($dest, 0660);
                             $healed_media[] = basename($file);
                             $media_saved++;
                         }
@@ -117,7 +117,7 @@ class FetchFeedTask implements ScheduledTaskInterface {
             foreach ($item['media'] as $file) {
                 $dest = $cache_dir . '/' . basename($file);
                 if ($client->fetch_media($file, $dest)) {
-                    @chmod($dest, 0666);
+                    @chmod($dest, 0660);
                     $local_media[] = basename($file);
                     $media_saved++;
                 }
@@ -190,7 +190,7 @@ class FetchFeedTask implements ScheduledTaskInterface {
                 $file = basename((string)$story[$k]);
                 if ($file === '') continue;
                 if ($client->fetch_media($file, $cache_dir . '/' . $file)) {
-                    @chmod($cache_dir . '/' . $file, 0666);
+                    @chmod($cache_dir . '/' . $file, 0660);
                     $target->set($col, $file);
                 }
             }

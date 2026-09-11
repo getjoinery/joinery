@@ -46,12 +46,19 @@ function admin_agent_file_edit_logic(array $input): LogicResult {
 		$agent_file->save();
 
 		if (isset($input['btn_save_and_write'])) {
+			// The row is saved above; the file in the tree is written by root
+			// (specs/read_only_tree.md). The drift guard runs there.
 			try {
-				$agent_file->write_to_disk();
-				return LogicResult::redirect('/admin/admin_agent_files?written=' . $agent_file->key);
-			} catch (AgentFileDriftException $e) {
-				// On-disk edits would be lost — the list page prompts for confirmation.
-				return LogicResult::redirect('/admin/admin_agent_files?confirm_overwrite=' . $agent_file->key);
+				if ($agent_file->get_drifted_targets()) {
+					// The list page prompts for confirmation, as it always did.
+					return LogicResult::redirect('/admin/admin_agent_files?confirm_overwrite=' . $agent_file->key);
+				}
+				$id = RootRequest::submit('write_agent_files',
+					array('agent_file_id' => (int)$agent_file->key),
+					(int)$session->get_user_id());
+				return LogicResult::redirect('/admin/admin_agent_files?queued=' . urlencode($id));
+			} catch (\Throwable $e) {
+				return LogicResult::redirect('/admin/admin_agent_files?error=' . urlencode($e->getMessage()));
 			}
 		}
 

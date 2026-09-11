@@ -236,8 +236,16 @@ check($code === 0 && strpos(implode("\n", $out), 'already running') !== false,
 	implode(' | ', $out));
 if ($we_hold) { flock($held, LOCK_UN); }
 if ($held !== false) { fclose($held); }
+// Group-accessible, not world-writable. The accounts that run this are the web
+// user (the scheduled-task tick) and root or the developer by hand, and all of
+// them are in the file's group — so a hand run still never locks the cron user
+// out. What 0666 additionally granted was every other local account the ability
+// to hold this lock and stop installs from running.
 $perms = substr(sprintf('%o', fileperms($lock_path)), -3);
-check($perms === '666', 'the lock file is openable by any user, so a hand run never locks the cron user out', $perms);
+check(((int)base_convert($perms, 8, 10) & 060) === 060,
+	'the lock file is group-accessible, so a hand run never locks the cron user out', $perms);
+check(((int)base_convert($perms, 8, 10) & 002) === 0,
+	'and is not world-writable, so no other local account can wedge the queue', $perms);
 
 // ---------------------------------------------------------------------------
 section('retire_install_password is the second bootstrap job, and a doubt keeps the password');

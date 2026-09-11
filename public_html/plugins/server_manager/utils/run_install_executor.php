@@ -20,6 +20,9 @@
  *
  * @version 1.2 - logs each claim, finish and empty-queue check with a timestamp, so a worker that
  *                holds the lock without working can be seen doing it
+ * @version 1.2 - the lock is group-accessible rather than world-writable, and is
+ *                only widened when it is not already, so it does not fight the
+ *                permissions sweep (specs/read_only_tree.md)
  * @version 1.1 - lock under the site's logs dir; an unopenable lock is an error, not 'already running'
  */
 
@@ -51,8 +54,18 @@ if ($lock === false) {
 	exit(1);
 }
 // Whoever created it, the next user must be able to open it: an operator's
-// hand run must never lock the scheduled-task user out.
-@chmod($lock_path, 0666);
+// hand run must never lock the scheduled-task user out. Group-accessible is
+// enough for that — the accounts that run this are the web user and root, and
+// on a developer box the developer is in the web user's group. It used to be
+// 0666, which also handed every other local account on the machine the ability
+// to hold the lock and stop installs running (specs/read_only_tree.md closes
+// the same door on the rest of the data set). Widened only when it is not
+// already group-accessible, so this does not fight the permissions sweep and
+// change the file's ctime on every run.
+$lock_mode = @fileperms($lock_path) & 0777;
+if (!($lock_mode & 0060)) {
+	@chmod($lock_path, 0660);
+}
 if (!flock($lock, LOCK_EX | LOCK_NB)) {
 	fwrite(STDERR, "install executor already running; nothing to do\n");
 	exit(0);

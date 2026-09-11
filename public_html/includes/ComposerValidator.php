@@ -457,6 +457,41 @@ class ComposerValidator {
      * @param array|null $include_plugins Additional plugin names beyond the active set
      * @return bool True when every declared package is installed
      */
+    /**
+     * Are a plugin's declared composer packages already installed?
+     *
+     * The same question reconcilePluginPackages() asks per package, asked
+     * without doing anything about the answer. Activation needs it because
+     * installing a package writes vendor/, which is code the PHP pool executes
+     * and therefore not the pool's to write (specs/read_only_tree.md): a web
+     * request has to know whether root is needed BEFORE it starts.
+     *
+     * @param array|string|null $include_plugins Plugin name(s) beyond the active set
+     * @return bool True when nothing would have to be installed
+     */
+    public function pluginPackagesPresent($include_plugins = null) {
+        if (is_string($include_plugins)) {
+            $include_plugins = array($include_plugins);
+        }
+        $declared = $this->collectPluginComposerRequires($include_plugins);
+        if (empty($declared)) {
+            return true;
+        }
+        $base_path = PathHelper::getBasePath();
+        if (!file_exists($base_path . '/composer.json')) {
+            return false;
+        }
+        $root = json_decode(file_get_contents($base_path . '/composer.json'), true) ?: [];
+        $root_require = array_change_key_case($root['require'] ?? [], CASE_LOWER);
+        $installed = $this->getInstalledPackages() ?? [];
+        foreach ($declared as $package => $constraint) {
+            if (!isset($installed[$package]) || ($root_require[$package] ?? null) !== $constraint) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     public function reconcilePluginPackages($include_plugins = null) {
         $declared = $this->collectPluginComposerRequires($include_plugins);
         if (!empty($this->packageConflicts)) {
@@ -519,26 +554,32 @@ class ComposerValidator {
     /**
      * Environment prefix for shelling out to composer.
      *
-     * Composer needs COMPOSER_HOME (or a writable HOME) for its config/cache.
-     * Root CLI runs (upgrade, site init) have always had a writable HOME and
-     * are left untouched. The one process without one is www-data during
-     * activation-time reconcile; for it, use the site's existing cache
-     * directory ({site root}/cache, chowned to www-data at container start)
-     * rather than inventing a new location.
+     * Two things composer needs that a root request does not get for free.
+     *
+     * COMPOSER_HOME is always set, to the site's own cache/composer_home. It
+     * used to be set only when nothing else provided one, which meant composer
+     * wrote its cache into whichever HOME the caller happened to have — root's
+     * during an upgrade, www-data's during an activation — so the same site had
+     * two caches and root left files in /root that the next run could not read.
+     * One directory beside the site is the whole of it.
+     *
+     * COMPOSER_ALLOW_SUPERUSER is set when this is running as root, which it now
+     * routinely is: reconcile_composer is a root request, carried out by the
+     * converger. Composer refuses to run plugins as root without it and prints a
+     * warning that reads like a failure, and the reason for that refusal — don't
+     * run a stranger's install scripts as root — is answered here by the
+     * installer refusal, which is what got us to root in the first place.
      */
     private function composerEnvPrefix() {
-        if (getenv('COMPOSER_HOME')) {
-            return '';
-        }
-        $home = getenv('HOME');
-        if ($home && is_dir($home) && is_writable($home)) {
-            return '';
-        }
         $composer_home = dirname(PathHelper::getBasePath()) . '/cache/composer_home';
         if (!is_dir($composer_home)) {
             @mkdir($composer_home, 0770, true);
         }
-        return 'COMPOSER_HOME=' . escapeshellarg($composer_home) . ' ';
+        $prefix = 'COMPOSER_HOME=' . escapeshellarg($composer_home) . ' ';
+        if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+            $prefix .= 'COMPOSER_ALLOW_SUPERUSER=1 ';
+        }
+        return $prefix;
     }
 
     /**

@@ -18,10 +18,12 @@
  * constructor throws — SecretBox fails closed and never silently stores or
  * returns plaintext. Plaintext is never logged or echoed.
  *
- * The key exists on every site without operator action: the installer
- * generates it for new sites, and ensureConfigKey() — run by the
- * update_database pipeline — backfills it into the config file on sites
- * installed before the key existed.
+ * The key exists on every site without operator action: the installer mints it
+ * for new sites, and the host converger mints it as root on a site installed
+ * before the key existed. SecretBox itself never writes the config file — it is
+ * `require`d PHP, and the web user has no business editing the code it runs
+ * (specs/read_only_tree.md). checkConfigKey() reports which of those two states
+ * a site is in.
  *
  * A value is sealed through seal($locator, $plaintext), which refuses a locator
  * that is not declared in a `sealed_secrets` manifest block — the same way
@@ -32,6 +34,9 @@
  * database or a rotated key is a fact a consumer can handle rather than an
  * exception that takes down a feature.
  *
+ * @version 1.3 - ensureConfigKey() is checkConfigKey(): it reports, and never
+ *   writes config/Globalvars_site.php. Minting the key is a root step at the
+ *   host installers' moments (specs/read_only_tree.md)
  * @version 1.2 - seal() teeth, four-state open() contract, key canary
  * @version 1.1
  */
@@ -65,9 +70,11 @@ class SecretBox {
 
         if ($encoded === '') {
             throw new RuntimeException(
-                'SecretBox: secret_box_key is not configured. Add a base64-encoded '
-                . '32-byte key to config/Globalvars_site.php (e.g. '
-                . "base64_encode(random_bytes(32))) before storing any secret."
+                'SecretBox: secret_box_key is not set for this site. The host '
+                . 'converger mints it as root on its next run, normally within a '
+                . 'minute; nothing can be stored encrypted until it has. If this '
+                . 'persists, the machine has no root actor — see the notice on '
+                . 'any admin page that needs one.'
             );
         }
 
@@ -83,18 +90,21 @@ class SecretBox {
     }
 
     /**
-     * Ensure config/Globalvars_site.php carries a secret_box_key, generating
-     * and writing one when absent. Idempotent and non-destructive: an
-     * existing non-empty key assignment is never touched; an unwritable or
-     * missing config file is reported, not fatal. The key value itself is
-     * never included in the returned message or any log.
+     * Report whether config/Globalvars_site.php carries a secret_box_key.
+     *
+     * Reports; never writes. The config file is PHP the pool `require`s, and a
+     * process that can rewrite it can put anything in the tree's boot path — so
+     * minting the key is a root step (_plugin_installers_start.sh, which runs
+     * as root at container start, at install, and on the converger's timer).
+     * This is what update_database calls to tell an operator which state their
+     * site is in.
      *
      * $config_path overrides the target file (tests); by default the site's
      * own config file is used.
      *
      * @return array{ok:bool, action:string, message:string}
      */
-    public static function ensureConfigKey(?string $config_path = null): array {
+    public static function checkConfigKey(?string $config_path = null): array {
         if ($config_path === null) {
             $config_path = PathHelper::getSiteRoot() . '/config/Globalvars_site.php';
         }
@@ -103,7 +113,7 @@ class SecretBox {
             return array('ok' => false, 'action' => 'missing_config',
                 'message' => 'Config file not found: ' . $config_path);
         }
-        $contents = file_get_contents($config_path);
+        $contents = @file_get_contents($config_path);
         if ($contents === false) {
             return array('ok' => false, 'action' => 'unreadable',
                 'message' => 'Config file could not be read: ' . $config_path);
@@ -114,33 +124,9 @@ class SecretBox {
                 'message' => 'secret_box_key already configured.');
         }
 
-        if (!is_writable($config_path)) {
-            return array('ok' => false, 'action' => 'unwritable',
-                'message' => 'secret_box_key is missing and the config file is not writable: '
-                    . $config_path);
-        }
-
-        $key = base64_encode(random_bytes(self::KEY_BYTES));
-        $block = "\n// Key for SecretBox (secrets at rest). Generated automatically for a site\n"
-            . "// installed before this key existed. 32 random bytes, base64-encoded.\n"
-            . "\$this->settings['secret_box_key'] = '" . $key . "';\n";
-
-        // Content after a PHP closing tag would be emitted as page output, so
-        // the block goes before a trailing closing tag when one exists.
-        $close = strrpos($contents, '?>');
-        if ($close !== false) {
-            $new_contents = substr($contents, 0, $close) . $block . "\n" . substr($contents, $close);
-        } else {
-            $new_contents = rtrim($contents) . "\n" . $block;
-        }
-
-        if (file_put_contents($config_path, $new_contents, LOCK_EX) === false) {
-            return array('ok' => false, 'action' => 'write_failed',
-                'message' => 'Failed writing secret_box_key to ' . $config_path);
-        }
-
-        return array('ok' => true, 'action' => 'generated',
-            'message' => 'secret_box_key generated and written to the config file.');
+        return array('ok' => false, 'action' => 'awaiting_root',
+            'message' => 'secret_box_key is not set. The host converger mints it as root '
+                . 'on its next run; nothing can be stored encrypted until it has.');
     }
 
     /**

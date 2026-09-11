@@ -1,6 +1,7 @@
 {
     "name": "Persona Browser",
-    "version": "0.11.67",
+    "version": "0.11.69",
+    "host_installer": "provisioning/relocate_media_cache.sh",
     "description": "Reads your own social feed through a real logged-in browser on a Mac and shows it on a clean profile page. Experimental; Facebook only.",
     "author": "Joinery",
     "license": "PolyForm-Noncommercial-1.0.0",

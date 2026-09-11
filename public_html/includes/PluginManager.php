@@ -13,6 +13,13 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
  * This consolidated class replaces the previous multi-class structure with
  * a single cohesive manager that extends AbstractExtensionManager
  */
+/**
+ * Activation needs composer packages that are not installed, and installing
+ * them is root's job. Its own type so the page can offer to queue the work
+ * instead of showing the operator a failure they cannot act on.
+ */
+class PluginComposerNeedsRootException extends Exception {}
+
 class PluginManager extends AbstractExtensionManager {
     
     private static $instance = null;
@@ -742,11 +749,23 @@ class PluginManager extends AbstractExtensionManager {
         // dependency tier that genuinely installs at activation; a failed
         // resolve (conflict, no network) refuses activation with composer's
         // output. Spec plugin_dependency_installation.
-        require_once(PathHelper::getIncludePath('includes/ComposerValidator.php'));
+        //
+        // Installing a package writes vendor/, which is code the pool executes
+        // and so not the pool's to write (specs/read_only_tree.md). When the
+        // packages are already there nothing is written and activation goes
+        // ahead from anywhere; when they are not, a web request says so and the
+        // page queues a reconcile_composer request for root.
         $composer_validator = new ComposerValidator();
-        if (!$composer_validator->reconcilePluginPackages([$name])) {
-            throw new Exception("Cannot activate plugin '$name': composer dependency reconcile failed. "
-                . implode('; ', $composer_validator->getErrors()));
+        if (!$composer_validator->pluginPackagesPresent([$name])) {
+            if (php_sapi_name() !== 'cli') {
+                throw new PluginComposerNeedsRootException(
+                    "Cannot activate plugin '$name': it declares composer packages that are not installed, "
+                    . 'and installing them writes vendor/, which only root does here.');
+            }
+            if (!$composer_validator->reconcilePluginPackages([$name])) {
+                throw new Exception("Cannot activate plugin '$name': composer dependency reconcile failed. "
+                    . implode('; ', $composer_validator->getErrors()));
+            }
         }
 
         // Run plugin table updates — picks up schema changes since install
@@ -961,6 +980,8 @@ class PluginManager extends AbstractExtensionManager {
      * @param string $name Plugin name
      */
     public function refreshFromUpstream($name) {
+        self::refuse_from_web('refreshFromUpstream');
+
         // The origin has no upstream — these files are what it publishes. A
         // self-download would tar this tree and extract it back over itself,
         // and the publisher caches archives per version, so an edit made
@@ -1044,16 +1065,26 @@ class PluginManager extends AbstractExtensionManager {
      * @param string $name Plugin name
      * @throws Exception on failure
      */
-    public function install($name) {
+    /**
+     * @param string $name          Plugin directory name
+     * @param bool   $refresh_files Fetch the plugin's files from the upgrade
+     *   source first. True for an install by name, which is what fetching means.
+     *   FALSE when the files are already in place and are the ones wanted — a
+     *   package the operator just installed from a staged upload. refreshFromUpstream()
+     *   does not skip an existing directory, so refreshing there downloads
+     *   upstream over the operator's own copy.
+     */
+    public function install($name, $refresh_files = true) {
         if (!$this->validateName($name)) {
             throw new Exception("Invalid plugin name: $name");
         }
 
-        // Before any DB work, attempt to refresh the plugin's files from the
-        // upgrade endpoint. Plugins with included_in_publish=true on the upgrade
-        // server get fresh code on every install; plugins not in the catalog 404
-        // silently and install proceeds with on-disk files.
-        $this->refreshFromUpstream($name);
+        // Plugins with included_in_publish=true on the upgrade server get fresh
+        // code on every install; plugins not in the catalog 404 silently and
+        // install proceeds with on-disk files.
+        if ($refresh_files) {
+            $this->refreshFromUpstream($name);
+        }
 
         $plugin_path = $this->getExtensionPath($name);
         if (!is_dir($plugin_path)) {
@@ -1584,7 +1615,47 @@ class PluginManager extends AbstractExtensionManager {
      * @return string Plugin name
      */
     public function installPlugin($zip_path) {
+        self::refuse_from_web('installPlugin');
         return $this->installFromZip($zip_path);
+    }
+
+    /**
+     * Refuse to write the tree from inside a web request.
+     *
+     * The tree belongs to root and the PHP pool cannot write it
+     * (specs/read_only_tree.md), so these would fail anyway — as a permission
+     * error somewhere in the middle of an extraction, with half a plugin on
+     * disk. Refusing at the door instead means the failure names the cause and
+     * the remedy, and it keeps a future caller from quietly reintroducing a
+     * tree write from a page.
+     *
+     * The CLI callers (utils/install_extension.php, run by the root actor) go
+     * straight through.
+     */
+    /**
+     * The account that owns the code tree — root on a node, the developer's
+     * account on a development box. Read off public_html rather than named,
+     * because it differs per machine and a hardcoded name would be wrong on
+     * whichever kind this is not.
+     *
+     * Used to tell an operator which account to run an install as.
+     */
+    public static function tree_owner_name() {
+        $uid = @fileowner(PathHelper::getRootDir());
+        if ($uid === false) {
+            return 'root';
+        }
+        $pw = function_exists('posix_getpwuid') ? @posix_getpwuid($uid) : false;
+        return is_array($pw) && !empty($pw['name']) ? (string)$pw['name'] : 'root';
+    }
+
+    protected static function refuse_from_web($method) {
+        if (php_sapi_name() === 'cli') {
+            return;
+        }
+        throw new Exception(
+            'PluginManager::' . $method . '() writes the code tree, which a web request cannot do. '
+            . 'Submit a root request instead (RootRequest::submit) and let the host converger carry it out.');
     }
     
     /**

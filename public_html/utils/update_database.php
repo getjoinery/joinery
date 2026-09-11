@@ -686,14 +686,14 @@
 		$migration_log->prepare();
 		$migration_log->save();
 		
-		// Step: SecretBox key self-heal. Sites installed before secret_box_key
+		// Step: SecretBox key check. Sites installed before secret_box_key
 		// existed have no key in Globalvars_site.php and fail closed the first
-		// time anything stores a secret; generate one here so every upgraded
-		// site can encrypt at rest. Present keys are never touched.
+		// time anything stores a secret. Reported here, minted by the host
+		// converger as root — the config file is PHP the pool `require`s, and
+		// this process is not root (specs/read_only_tree.md).
 		echo "<br>\n<strong>SecretBox Key Check</strong><br>\n";
 		try {
-			require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
-			$sbk = SecretBox::ensureConfigKey();
+			$sbk = SecretBox::checkConfigKey();
 			echo ($sbk['ok'] ? '✓ ' : '⚠️  ') . $sbk['message'] . "<br>\n";
 		} catch (Exception $e) {
 			echo "⚠️  SecretBox key check failed: " . $e->getMessage() . "<br>\n";
@@ -1109,6 +1109,19 @@
 		try {
 			require_once(PathHelper::getIncludePath('data/agent_files_class.php'));
 
+			// From a web request the code tree is not writable, so this is
+			// queued for the root actor rather than attempted here
+			// (specs/read_only_tree.md). A CLI run — the deploy, the converger
+			// — is already root and writes them directly.
+			if (php_sapi_name() !== 'cli') {
+				$agent_queued_id = RootRequest::submit('write_agent_files', array(),
+					(int)(SessionControl::get_instance()->get_user_id()));
+				echo "  Agent files queued for the root actor (request " . htmlspecialchars($agent_queued_id) . ").<br>\n";
+				if (RootRequest::actorState() !== 'present') {
+					echo '  ⚠ ' . htmlspecialchars(RootRequest::actorWarning()) . "<br>\n";
+				}
+			} else {
+
 			$agent_files = new MultiAgentFile(array('deleted' => false, 'written' => true));
 			$agent_files->load();
 
@@ -1140,6 +1153,8 @@
 					. ($agent_skipped_count > 0 ? ", {$agent_skipped_count} skipped (on-disk edits preserved)" : '')
 					. ($agent_failed_count > 0 ? ", {$agent_failed_count} failed" : '')
 					. "<br>\n";
+			}
+
 			}
 		} catch (\Throwable $e) {
 			echo "⚠️  Agent file regenerate failed: " . htmlspecialchars($e->getMessage()) . "<br>\n";

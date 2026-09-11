@@ -157,7 +157,13 @@ class BackupEnvelope {
 		$keypair = sodium_crypto_box_keypair();
 		$tmp = $path . '.' . getmypid() . '.tmp';
 		if (@file_put_contents($tmp, base64_encode($keypair)) === false) {
-			throw new BackupEnvelopeException('Could not write the site backup key at ' . $path . '.');
+			// config/ belongs to the tree owner, so the web user cannot create
+			// a file there (specs/read_only_tree.md). The host converger mints
+			// this key at its root moments and normally gets there first; this
+			// is the loud fallback for a site whose converger has not run.
+			throw new BackupEnvelopeException(
+				'The site backup key is not present and could not be created at ' . $path . '. '
+				. 'The host converger mints it as root on its next run; backups cannot be sealed until it has.');
 		}
 		// 0640, not 0600: whichever account mints the key first, the other
 		// accounts that run backups here still have to read it. The web user

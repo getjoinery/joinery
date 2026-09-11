@@ -14,6 +14,11 @@ $written     = $page_vars['written'];
 $switched    = $page_vars['switched'];
 $error       = $page_vars['error'];
 $confirm_row = $page_vars['confirm_row'];
+// The files live in the code tree, which the web user cannot write, so a write
+// is queued for the root actor and shown here as it runs
+// (specs/read_only_tree.md).
+$queued      = $page_vars['queued'] ?? '';
+$root_actor_notice = $page_vars['root_actor_notice'] ?? '';
 
 $page = new AdminPage();
 $page->admin_header(array(
@@ -30,6 +35,10 @@ if ($error) {
 }
 if ($written) {
 	echo '<div class="alert alert-success" role="alert">Agent file written to disk.</div>';
+}
+echo $root_actor_notice;
+if ($queued) {
+	echo AdminPage::root_request_panel($queued);
 }
 if ($switched) {
 	echo '<div class="alert alert-success" role="alert">Switched to upgrade candidate. The previously-active row is now archived.</div>';

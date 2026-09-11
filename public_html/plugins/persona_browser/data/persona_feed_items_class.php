@@ -19,6 +19,28 @@ class PersonaFeedItemException extends SystemBaseException {}
  * image filenames served via /profile/persona_browser/media.
  */
 class PersonaFeedItem extends SystemBase {
+
+    /**
+     * Where this plugin's downloaded feed images live.
+     *
+     * {site}/cache/persona_browser, not inside the plugin directory. These are
+     * bytes fetched from a stranger's server at run time — data, not code — and
+     * the tree the PHP pool executes is not the pool's to write
+     * (specs/read_only_tree.md). A directory the web server can drop remote
+     * files into, sitting inside the directory the web server runs, is the exact
+     * shape that spec exists to remove.
+     *
+     * Files here are served by views/profile/media.php through readfile(), never
+     * by Apache, so nothing under it is reachable as a URL.
+     */
+    public static function media_cache_dir() {
+        $dir = PathHelper::getSiteRoot() . '/cache/persona_browser';
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0770, true);
+        }
+        return $dir;
+    }
+
     public static $prefix = 'pfi';
     public static $tablename = 'pfi_persona_feed_items';
     public static $pkey_column = 'pfi_persona_feed_item_id';
@@ -144,7 +166,7 @@ class PersonaFeedItem extends SystemBase {
             }
         }
 
-        $cache_dir = PathHelper::getIncludePath('plugins/persona_browser/media_cache');
+        $cache_dir = self::media_cache_dir();
         $files_removed = 0;
         foreach (array_keys($media_candidates) as $file) {
             if (isset($still_referenced[$file])) continue;

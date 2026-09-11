@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.1 - The secret_box_key generator comes from _config_secrets.sh,
+#                shared with the root moments that mint it on a site older than
+#                the key. The web side no longer writes config at all
+#                (specs/read_only_tree.md).
 # VERSION: 3.0 - A password the owner chose on the deploy form (JOINERY_ADMIN_PASSWORD)
 #                is not marked for change at first login; only a generated one is.
 # VERSION: 2.9 - Globalvars_site.php is filled by _write_site_config.php, so the
@@ -156,6 +160,12 @@ SITE_ROOT="/var/www/html/$SITENAME"
 
 # Template files location
 GLOBALVARS_TEMPLATE="${SCRIPT_DIR}/default_Globalvars_site.php"
+
+# The per-site secrets that live in config/, and the one definition of how each
+# is minted - shared with _plugin_installers_start.sh so an install and a root
+# moment produce identical keys.
+# shellcheck source=_config_secrets.sh
+. "${SCRIPT_DIR}/_config_secrets.sh"
 VIRTUALHOST_TEMPLATE="${SCRIPT_DIR}/default_virtualhost.conf"
 SQL_RESTORE="${SCRIPT_DIR}/joinery-install.sql.gz"
 
@@ -212,8 +222,11 @@ create_config_file() {
     log "Configuring site..."
     # Record the deployment environment — single source of truth (spec deployment_environment_flag)
     if [ "$DOCKER_MODE" = true ]; then DEPLOY_ENV=docker; else DEPLOY_ENV=baremetal; fi
-    # Generate a per-environment SecretBox key (32 random bytes, base64) for secrets at rest
-    SECRET_BOX_KEY=$(openssl rand -base64 32)
+    # Generate a per-environment SecretBox key (32 random bytes, base64) for
+    # secrets at rest. The generator is shared with the root moments, which mint
+    # the same key on a site installed before it existed, so the two cannot
+    # drift apart on format (specs/read_only_tree.md).
+    SECRET_BOX_KEY=$(joinery_generate_secret_box_key)
     # PHP fills the template, not sed: var_export() writes a correct literal
     # for any password, and the values travel in the environment so neither
     # secret is in argv. Written under an umask so the file is never readable

@@ -379,7 +379,7 @@ https://yoursite.com/admin/server_manager/publish_theme?list=themes
 6. Sync staged maintenance_scripts/ into the site root
 7. Run database migrations (update_database.php)
 8. Run composer_install_if_needed.php
-9. Fix permissions (www-data:user1, 775)
+9. Fix permissions (`fix_permissions.sh --production`: the code to root at 755/644, the data to www-data)
 
 If ANY step fails → Automatic rollback
 ```
@@ -588,12 +588,100 @@ All methods return structured arrays with success status, errors, and detailed r
 
 ---
 
+## Who owns the code, and how the browser upgrades
+
+The code a site runs belongs to root, and the web server cannot write it. Every
+file the PHP pool executes or includes — `public_html`, `maintenance_scripts`,
+`vendor`, the release manifest, the site directory itself, `config/*.php` — is
+owned by the tree owner at 755/644, and the pool has read and nothing else.
+Everything the pool writes — `uploads`, `static_files`, `cache`, `logs`,
+`storage`, `backups` — is `www-data:www-data` 0770, and none of it is ever
+executed.
+
+The point is what a break-in gets. A bug that makes the web server write one
+file can write data, and data does not run. Before, the same bug left PHP in the
+tree, and the tree is what the next request executes.
+
+The tree owner is root on a node and the developer's account on a development
+box. `fix_permissions.sh` records which in `{site}/config/tree_owner`, root-owned
+so nothing else can name it, and the root actor reads it before it re-owns
+anything. The record is the answer once it exists: `--dev` and `--production`
+decide only what is written the first time, so a tool that passes a mode without
+knowing the box — `upgrade.php` passes `--production` everywhere — cannot change
+whose a tree is.
+
+### Root requests
+
+Installing a plugin, upgrading, saving a doc from the admin editor — anything
+that writes the code — is a **root request**: a small JSON file the web side
+writes into `{site}/cache/root_requests/` naming a kind from a fixed list.
+
+| kind | what root does |
+|---|---|
+| `upgrade` | `php utils/upgrade.php --verbose` |
+| `install_plugin` | fetch a plugin by name from the upgrade source and install it |
+| `reconcile_composer` | install a plugin's declared composer packages |
+| `write_agent_files` | write `CLAUDE.md` and its siblings from the database |
+| `save_doc` | write one file under `docs/`, in the directory the key names |
+| `set_receives_upgrades` | set the preserve-on-deploy flag in a theme's manifest |
+
+A **name** crosses, never a command. The arguments stay in the file and are read
+by the PHP that acts on them, so nothing a web request wrote becomes a shell
+word — and no argument names a place. `save_doc` carries the document key, and
+root derives the directory from it: `plugin/<name>/…` is that plugin's `docs/`
+and anything else is core's.
+
+### Why there is no kind for installing an uploaded package
+
+The queue and `uploads/staging/` are both writable by the web user — they have
+to be, the web side writes them — so a request file proves that *something
+running as the web user* wrote it, and never that an operator asked. A kind that
+installed a staged directory would therefore turn the one bug this whole model
+is about into root code execution: stage a `plugin.json` and a
+`migrations/migrations.php`, queue the request, and root moves the directory
+into `plugins/` and includes the migration as root. No activation needed.
+
+The kinds that remain cannot be used that way. `upgrade` and `install_plugin`
+fetch from the configured upgrade source, so the bytes come from somewhere the
+attacker does not control; the rest write a `.md`, a docs file, or one boolean
+in a theme manifest.
+
+Installing an uploaded package is a shell command. The admin page still accepts
+the upload, unpacks it under `uploads/staging/` — outside the tree, where a path
+escape or a symlink fails as `www-data` and can do nothing — and then shows the
+command to finish it:
+
+```
+sudo -u <tree owner> php utils/install_extension.php plugin --staged=<dir>
+```
+
+A shell is the thing an attacker who can write one file does not have, and that
+is the whole difference. `--replace` is needed to overwrite an extension that is
+already installed; the copy it replaces is kept beside it.
+
+The host converger carries them out — a root timer running every minute, plus a
+`.path` unit that fires the moment a request is queued, so an operator watching
+a transcript sees it move in seconds. The page that submitted the request polls
+its transcript and shows it as it grows.
+
+A machine with no converger cannot upgrade or install anything until it has one,
+because nothing else can write the new code in. Every page that submits a
+request says so before its button rather than after, and the request is written
+either way — a converger that comes back finds it waiting. `install.sh` installs
+one on every new box; `HostConvergerNotice` reports a missing or stalled one.
+
+---
+
 ## Common Issues
 
 **Permission Errors:**
+
+One script sets every permission on a site, and it is the only thing that
+should. Correcting them by hand risks handing the code back to the web user,
+which is the state the ownership model exists to prevent.
+
 ```bash
-sudo chown -R www-data:user1 /var/www/html/joinerytest/public_html
-sudo chmod -R 775 /var/www/html/joinerytest/public_html
+sudo bash /var/www/html/{site}/maintenance_scripts/install_tools/fix_permissions.sh {site} --production
 ```
 
 **Validation Failures:**
