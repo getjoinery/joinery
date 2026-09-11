@@ -6,7 +6,7 @@
 #                is a missing placeholder, not an edge on Strict); www resolves
 #                through name_resolves, which never mistakes a CNAME target for
 #                an address (review round 1, R2 and R4a).
-# Version: 1.0 - specs/tls_and_origin_trust.md WP0 and the www re-issue. Run as
+# Version: 1.0 - specs/implemented/tls_and_origin_trust.md WP0 and the www re-issue. Run as
 #                root on a bare-metal node, or on the Docker host for a
 #                container: probes that the apex and www reach this box, prints
 #                the exact certbot line, asks, runs it, reloads Apache, then

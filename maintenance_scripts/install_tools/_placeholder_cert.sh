@@ -4,7 +4,7 @@
 # a real one. Sourced by install.sh (write_universal_vhost) and render_vhost.sh
 # (every converge); never run on its own.
 #
-# Version: 1.0 - specs/tls_and_origin_trust.md WP12 (B10). A fresh box behind
+# Version: 1.0 - specs/implemented/tls_and_origin_trust.md WP12 (B10). A fresh box behind
 #                an edge can never get its first certificate otherwise: the
 #                edge redirects the HTTP-01 challenge to https, and a box with
 #                no certificate file has no :443 listener, so the edge's https

@@ -12,7 +12,7 @@
 #                root-owned tree makes /etc/letsencrypt unreadable to the
 #                pool, so this is how the admin notice and the health panel
 #                learn that renewal has stopped before the site dies of it
-#                (specs/tls_and_origin_trust.md WP11). Same mechanics as
+#                (specs/implemented/tls_and_origin_trust.md WP11). Same mechanics as
 #                host_converger.last: written on every run, world-readable.
 # Version: 2.8 - The change hash names the templates as default_*.conf. The
 #                earlier glob default_*vhost.conf matched only the proxy

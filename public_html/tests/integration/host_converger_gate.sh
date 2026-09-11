@@ -15,7 +15,7 @@
 #
 # The installer's unit text is rendered and parsed too, without installing it.
 # The certificate summary the runner writes for the admin notice is pinned from
-# a fixture lineage (specs/tls_and_origin_trust.md WP11).
+# a fixture lineage (specs/implemented/tls_and_origin_trust.md WP11).
 
 set -u
 TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/maintenance_scripts/install_tools"
@@ -235,7 +235,7 @@ rm -rf "$(dirname "$COPY")"
 chk "and fires the same oneshot service" \
     "$(grep -c 'Unit=\${UNIT_NAME}.service' "$INSTALLER")" "1"
 
-echo "== a converging run writes the certificate summary (specs/tls_and_origin_trust.md WP11) =="
+echo "== a converging run writes the certificate summary (specs/implemented/tls_and_origin_trust.md WP11) =="
 # /etc/letsencrypt is root's on a root-owned tree, so the admin notice reads a
 # summary the converger writes. A fixture lineage with a self-signed cert
 # stands in for /etc/letsencrypt; the root gate is stripped as above.

@@ -1,5 +1,10 @@
 # TLS across the estate: strict-ready nodes, issuance, renewal, and origin trust
 
+**Status: IMPLEMENTED 2026-09-11** for the strict-ready half (see the table).
+The two deferred halves below (WP7; D1–D3 with WP8–WP9) stay deferred by the
+owner and are recorded here as they stood; a spec that takes either up starts
+from this file.
+
 **Supersedes and replaces two specs**, merged 2026-09-10 at the owner's
 request: `origin_tls_and_certificate_issuance.md` (written 2026-08-30) and
 `certificate_lifecycle.md` (written 2026-09-10, itself filed first as
@@ -18,18 +23,15 @@ origin firewall (WP7) do not serve it and are deferred below it.
 
 | Part | Status |
 |---|---|
-| **Strict-ready nodes** — the installer, renewal, www, node-side health (WP0, WP1a, WP2, WP3, WP5, WP10, WP11) | **PLANNED 2026-09-11, owner accepted the step-by-step plan.** Build in the order under "The plan". |
-| **Flip Strict on our own zones** (WP6) | Waits on WP0 + www on the three bare-metal certificates + WP2. |
+| **Strict-ready nodes** — the installer, renewal, www, node-side health (WP0, WP1a, WP2, WP3, WP5, WP10, WP11, WP12) | **DONE 2026-09-11.** Released as 0.8.388 on every node. WP0 ran on the Docker host (five zones, apex + www); the three bare-metal lineages carry www; `strict_readiness.sh` reports every one of the ten names covered. |
+| **Flip Strict on our own zones** (WP6) | **Owner flipped `jeremytunnell.com` and `getjoinery.com` 2026-09-11**, probed green after each. `scrolldaddy.app`, `galactictribune.net`, `mapsofwisdom.org`, `phillyzouk.org` are ready and unflipped; the owner flips them when ready. |
 | **ScrollDaddy DoH renewal** (WP1) | **DONE 2026-09-11.** New zone-scoped, IP-filtered token on both boxes; both renewed from the production CA (expire 2026-12-10); DoH verified end to end. Credential recorded in the ops guide and `docs/dns_management.md`. |
 | **Origin trust layer three** — Authenticated Origin Pulls, the firewall (WP7, D5) | **DEFERRED by owner 2026-08-30.** Unchanged. |
 | **Where a standing DNS-01 credential lives** (D1–D3, WP8, WP9) | **DEFERRED 2026-09-11.** Strict needs none of it. WP1 buys the time. |
 
-Dated items:
-
-- **2026-09-17** — first renewal on jeremytunnell after the read-only-tree
-  vhost hand-apply; certbot's Apache installer edits the managed vhost and the
-  converger then refuses to manage it. B6, WP1a. dev follows 2026-09-20.
-- ~~2026-09-30 21:58 UTC — the ScrollDaddy DoH certificate lapses. WP1.~~ Closed 2026-09-11: renewed to 2026-12-10 on both boxes.
+Dated items: none. ~~2026-09-17 first renewal on jeremytunnell after the
+hand-apply (B6, WP1a)~~ closed by WP1a in 0.8.388; ~~2026-09-30 the ScrollDaddy
+DoH certificate lapses (WP1)~~ closed 2026-09-11, renewed to 2026-12-10.
 
 ## The problem in plain terms
 
@@ -528,7 +530,7 @@ give us this for free.
   credential, both boxes, `daemon-reload`, restart Caddy so the next attempt
   goes to production rather than staging. Confirm a fresh certificate lands.
   Buys the time to decide D1.
-- **WP1a — Fix B6: take certbot out of the vhost. Deadline 2026-09-17.**
+- **WP1a — Fix B6: take certbot out of the vhost. DONE 2026-09-11 (0.8.388).**
   Three parts, all in install tools, pinned by `installer_contract_test`:
   (1) `install.sh` issues with `certbot certonly --apache ... --deploy-hook
   'systemctl reload apache2'`, then reloads Apache once so the `<IfFile>` block
