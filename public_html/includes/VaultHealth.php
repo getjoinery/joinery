@@ -24,7 +24,7 @@
  *
  * @version 1.5 - a seventh check: this box's own TLS certificate renews on
  *   schedule, read from the summary the host converger writes
- *   (specs/tls_and_origin_trust.md WP11)
+ *   (specs/implemented/tls_and_origin_trust.md WP11)
  * @version 1.4 - the host-converger check also fails on a root request queued
  *   for over a day, and on an installer the runner refused to attribute. The
  *   converger carries requests out as well as converging the host, so a

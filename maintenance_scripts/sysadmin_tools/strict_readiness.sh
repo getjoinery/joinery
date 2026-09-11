@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # strict_readiness.sh - would Cloudflare Full (Strict) work for these names?
-# Version: 1.0 - specs/tls_and_origin_trust.md WP6. Read-only, run from anywhere
+# Version: 1.0 - specs/implemented/tls_and_origin_trust.md WP6. Read-only, run from anywhere
 #                that can reach the origins: for each zone name, resolves the
 #                apex and www, then probes the ORIGIN address with SNI for each
 #                and prints one line per name: covered / not covered / does not

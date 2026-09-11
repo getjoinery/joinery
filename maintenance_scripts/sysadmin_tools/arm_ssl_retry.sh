@@ -4,13 +4,13 @@
 # Version: 1.2.1 - The two ways the https hop can fail are two journal lines: 526 is the
 #                  edge on Strict refusing the placeholder (set it to Full); 525 is this box
 #                  answering no TLS at all, which after the placeholder is a defect
-#                  (specs/tls_and_origin_trust.md R2).
+#                  (specs/implemented/tls_and_origin_trust.md R2).
 # Version: 1.2.0 - The wait condition is "the name reaches this box", asked through
 #                  install.sh's name_reaches_here (a nonce fetched through the name),
 #                  not "the name resolves to this box's address". Behind Cloudflare
 #                  the name never resolves here, so the old gate waited forever for
 #                  a certificate HTTP-01 could have issued through the edge on the
-#                  first tick (specs/tls_and_origin_trust.md WP10). The budget
+#                  first tick (specs/implemented/tls_and_origin_trust.md WP10). The budget
 #                  argument holds: a failed reach, like a failed lookup, costs
 #                  nothing at Let's Encrypt, so five minutes stays safe.
 # Version: 1.1.0 - --setup-ssl takes several candidate paths, colon-separated and most

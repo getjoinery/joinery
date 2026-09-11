@@ -8,7 +8,7 @@
 
 /**
  * A self-hosted node tells its owner that its certificate has stopped
- * renewing before the site dies of it (specs/tls_and_origin_trust.md WP11).
+ * renewing before the site dies of it (specs/implemented/tls_and_origin_trust.md WP11).
  * The verdict is decided from the summary the host converger writes
  * (cache/certificates.json) and a fixed clock, so every state is pinned here
  * from a fixture: nothing touches the network or /etc/letsencrypt.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#VERSION 2.74 - Review round 1 of specs/tls_and_origin_trust.md. WP12: the
+#VERSION 2.74 - Review round 1 of specs/implemented/tls_and_origin_trust.md. WP12: the
 #               placeholder certificate (_placeholder_cert.sh) is minted by
 #               write_universal_vhost in both modes, so the :443 host answers
 #               from the first minute and an edge that redirects the HTTP-01
@@ -12,10 +12,10 @@
 #               resolved, not as a glob.
 #VERSION 2.73 - The server step asserts certbot.timer (or the cron.d file) after
 #               installing certbot instead of inheriting it from the package
-#               (specs/tls_and_origin_trust.md WP5): a change of install method
+#               (specs/implemented/tls_and_origin_trust.md WP5): a change of install method
 #               cannot silently leave every new node with a certificate that
 #               never renews.
-#VERSION 2.72 - The installer issues for every install (specs/tls_and_origin_trust.md
+#VERSION 2.72 - The installer issues for every install (specs/implemented/tls_and_origin_trust.md
 #               WP10, B7 and B8). HTTP-01 is attempted whenever the name REACHES
 #               this box - proven by name_reaches_here, which fetches a nonce
 #               through the name - not only when it resolves to this box's own
@@ -27,7 +27,7 @@
 #               Strict rejects a www the certificate does not name. When the
 #               edge is already Strict and this box holds no certificate, the
 #               probe sees the https hop refused and says so.
-#VERSION 2.71 - certbot never edits the vhost (specs/tls_and_origin_trust.md
+#VERSION 2.71 - certbot never edits the vhost (specs/implemented/tls_and_origin_trust.md
 #               WP1a). Both issuance paths are certonly with a deploy hook that
 #               reloads Apache; the certificate lands at the path the vhost
 #               template's <IfFile> :443 block reads, and the hook is recorded
@@ -949,7 +949,7 @@ setup_ssl_baremetal() {
 #==============================================================================
 
 # The placeholder certificate the :443 host reads until a real one lands
-# (_placeholder_cert.sh, specs/tls_and_origin_trust.md WP12). Sourced here so
+# (_placeholder_cert.sh, specs/implemented/tls_and_origin_trust.md WP12). Sourced here so
 # setup_ssl.sh and render_vhost.sh see the same function.
 if [ -f "${SCRIPT_DIR:-${BASH_SOURCE%/*}}/_placeholder_cert.sh" ]; then
     # shellcheck source=_placeholder_cert.sh

@@ -311,7 +311,7 @@ check($retry_block !== '' && strpos($retry_block, 'name_reaches_here "$DOMAIN"')
     'it asks whether the name reaches this box before spending a validation attempt');
 check($retry_block !== '' && strpos($retry_block, 'dig ') === false,
     'and not whether the name resolves to this box: behind an edge it never does, and HTTP-01 works through the edge',
-    'specs/tls_and_origin_trust.md B8');
+    'specs/implemented/tls_and_origin_trust.md B8');
 check($retry_block !== '' && strpos($retry_block, 'have_real_cert') !== false,
     'it disables itself on a CA-issued certificate, not on any file at the cert path',
     'an operator or an origin-cert flow can place a self-signed cert there, so file-exists is not a finish line');
@@ -322,7 +322,7 @@ check($retry_block !== '' && preg_match('/^\s*3\)\s+echo ".*placeholder certific
 check($retry_block !== '' && strpos($retry_block, '. "$INSTALL_SH"') !== false,
     'the probe is install.sh\'s own, sourced from beside the setup_ssl.sh that will run, so the timer and the installer cannot disagree');
 
-section('The installer issues for every install (specs/tls_and_origin_trust.md WP10)');
+section('The installer issues for every install (specs/implemented/tls_and_origin_trust.md WP10)');
 
 // The rule is "the name reaches this box", which is what HTTP-01 actually
 // requires and is true both direct and through an edge. The old gate — the
@@ -434,7 +434,7 @@ $ready_src = (string)file_get_contents($sys_dir . '/strict_readiness.sh');
 check(strpos($ready_src, 'certbot') === false, 'strict_readiness.sh is read-only: it never runs certbot at all');
 check(strpos($ready_src, 'origin="${spec#*=}"') !== false, 'and takes the origin address per name rather than guessing it');
 
-section('A site answers TLS from the first minute (specs/tls_and_origin_trust.md WP12)');
+section('A site answers TLS from the first minute (specs/implemented/tls_and_origin_trust.md WP12)');
 
 // An edge redirects the HTTP-01 challenge to https, and a box with no
 // certificate file has no :443 listener, so the edge's https hop fails 525 in
@@ -2783,7 +2783,7 @@ check(!$adopts($over, $new_render),
 array_map('unlink', glob($vh . '/*'));
 @rmdir($vh);
 
-section('Renewal never edits a vhost the renderer owns (specs/tls_and_origin_trust.md WP1a)');
+section('Renewal never edits a vhost the renderer owns (specs/implemented/tls_and_origin_trust.md WP1a)');
 
 // certbot's Apache installer adds an Include line to the domain's vhost on
 // every renewal, so the file stopped matching the renderer's record and every

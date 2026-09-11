@@ -1,7 +1,7 @@
 <?php
 /**
  * CertificateNotice — the admin-header notice on a box whose own TLS
- * certificate is not going to keep working (specs/tls_and_origin_trust.md, WP11).
+ * certificate is not going to keep working (specs/implemented/tls_and_origin_trust.md, WP11).
  *
  * A self-hosted node has no management node watching its certificate. Its
  * owner learns that renewal broke when the site dies — behind Cloudflare in

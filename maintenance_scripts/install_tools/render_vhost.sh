@@ -5,10 +5,10 @@
 #
 # Version: 1.7 - Mints the site's placeholder certificate on every converge when
 #                neither it nor the Let's Encrypt lineage exists
-#                (_placeholder_cert.sh, specs/tls_and_origin_trust.md WP12), so
+#                (_placeholder_cert.sh, specs/implemented/tls_and_origin_trust.md WP12), so
 #                a box that somehow has no certificate at all still answers TLS
 #                and can receive its first challenge through an edge.
-# Version: 1.6 - certbot is taken out of the vhost (specs/tls_and_origin_trust.md
+# Version: 1.6 - certbot is taken out of the vhost (specs/implemented/tls_and_origin_trust.md
 #                WP1a). Its Apache installer edited the domain's vhost on every
 #                renewal - an Include line, and on older installs a redirect
 #                block - so the file stopped matching the record and every
