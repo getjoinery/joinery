@@ -651,8 +651,13 @@ class EmailSender {
     /**
      * The test-mode trap address: null when test mode is off, the configured
      * address when on, '' when on but unconfigured (callers suppress).
+     *
+     * Public because the redirect has to be applied wherever a recipient is
+     * DECIDED, not only where the message leaves: a queued row is sent later by
+     * whichever process drains the queue, under that process's settings.
+     * QueuedEmail applies the same trap at save time so the row itself is safe.
      */
-    private static function testModeTrap(): ?string {
+    public static function testModeTrap(): ?string {
         $settings = Globalvars::get_instance();
         if ((string)$settings->get_setting('email_test_mode') !== '1') {
             return null;
@@ -661,7 +666,7 @@ class EmailSender {
     }
 
     /** "[for a@b, c@d +3 more] Original subject" — the trap mailbox stays legible. */
-    private static function testModeSubject(array $originals, string $subject): string {
+    public static function testModeSubject(array $originals, string $subject): string {
         $shown = array_slice($originals, 0, 2);
         $extra = count($originals) - count($shown);
         return '[for ' . implode(', ', $shown)

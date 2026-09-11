@@ -100,7 +100,10 @@ names, they are versioned with the code, not exposed for live admin editing.
 For each notifiable signal, Notify builds the recipient set from any targeted
 `recipients` plus every topic subscriber (users with a `NotificationPreference`
 row where `ntp_subscribed = true`), de-duplicates, and drops `source_user_id` so
-nobody is notified of their own action.
+nobody is notified of their own action. The system and deleted users
+(`User::is_placeholder()`) are never recipients on either channel: they are not
+people, and their email addresses are placeholders on a domain nobody here
+controls.
 
 Per recipient:
 
