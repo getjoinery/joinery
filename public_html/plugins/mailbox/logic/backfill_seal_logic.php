@@ -44,8 +44,10 @@ function backfill_seal_logic(array $input): LogicResult {
 	if (!$vault) {
 		return LogicResult::error('Set up your vault before sealing existing mail.');
 	}
-	$secret = VaultUnlock::secretKey($user_id);
-	if ($secret === null) {
+	// Sealing needs only the public key, but backfill is offered as an
+	// in-window act: the owner is present, and what it seals is readable to
+	// them the moment it lands rather than at some later unlock.
+	if (!VaultUnlock::isOpen($user_id)) {
 		return LogicResult::error('Unlock your vault first.');
 	}
 

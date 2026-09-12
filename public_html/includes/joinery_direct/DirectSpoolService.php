@@ -270,7 +270,7 @@ class DirectSpoolService {
 	 * gate's outcome — because the sender was already answered `accept`, a
 	 * deferred decline is a local disposition, not a drop.
 	 */
-	public static function ingest(DirectSpool $spool, bool $gate_accepted, ?string $vault_secret_key): void {
+	public static function ingest(DirectSpool $spool, bool $gate_accepted, ?VaultKey $vault_key): void {
 		$kind = (string)$spool->get('jdp_kind');
 		$handler = DirectKinds::handler($kind);
 		if ($handler === null) {
@@ -279,7 +279,7 @@ class DirectSpoolService {
 			throw new RuntimeException('No handler for kind ' . $kind);
 		}
 
-		$envelope = self::envelopeFor($spool, $vault_secret_key);
+		$envelope = self::envelopeFor($spool, $vault_key);
 
 		$parts = array();
 		foreach (DirectSpoolPart::forSpool(intval($spool->key)) as $stored) {
@@ -301,11 +301,11 @@ class DirectSpoolService {
 	/**
 	 * The typed envelope for a staged delivery, rebuilt from the row so the
 	 * recipient identity resolved at accept reaches both the gate and ingest
-	 * unchanged. A non-null secret marks the deferred path and lets a sealed part
+	 * unchanged. A non-null key marks the deferred path and lets a sealed part
 	 * be opened; null is the live/commit path, where the parts are already
 	 * plaintext.
 	 */
-	private static function envelopeFor(DirectSpool $spool, ?string $vault_secret_key): DirectEnvelope {
+	private static function envelopeFor(DirectSpool $spool, ?VaultKey $vault_key): DirectEnvelope {
 		return DirectEnvelope::fromVerified(array(
 			'kind'              => (string)$spool->get('jdp_kind'),
 			'protocol_version'  => intval($spool->get('jdp_protocol_version')),
@@ -318,8 +318,8 @@ class DirectSpoolService {
 			'timestamp'         => (string)$spool->get('jdp_received_time'),
 			'manifest'          => $spool->manifest(),
 			'key_generation'    => intval($spool->get('jdp_key_generation')),
-			'is_deferred'       => $vault_secret_key !== null,
-			'vault_secret_key'  => $vault_secret_key,
+			'is_deferred'       => $vault_key !== null,
+			'vault_key'         => $vault_key,
 		));
 	}
 

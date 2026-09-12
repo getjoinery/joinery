@@ -35,6 +35,7 @@
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
+require_once(__DIR__ . '/../../../tests/lib/vault_fixtures.php');
 require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
@@ -225,7 +226,7 @@ check($srow['iem_body_html'] !== '<p>secret body</p>' && !empty($srow['iem_draft
 check(($sdrafts->getDraft($sid)['locked'] ?? false) === true, 'reopen while locked returns locked:true');
 
 // The sealed content opens correctly under the owner's key + the field AD.
-$dek = $vc->openItemDek($srow['iem_sealed_key'], $kp['secret']);
+$dek = $vc->openItemDek($srow['iem_sealed_key'], vault_fixture_key($kp['secret']));
 $body = $vc->openField($srow['iem_body_html'], $dek, InboundEmailMessage::sealAd($sid, 'iem_body_html'));
 $state = json_decode($vc->openField($srow['iem_draft_state'], $dek, InboundEmailMessage::sealAd($sid, 'iem_draft_state')), true);
 check(strpos($body, 'secret body') !== false, 'sealed draft body opens back to the original', $body);
@@ -236,7 +237,7 @@ check(($state['to'] ?? '') === 'bob@x.com', 'sealed draft_state opens back to th
 $sdrafts->saveDraft(array('alias_id' => $sealed_alias, 'draft_id' => $sid, 'mode' => 'new',
 	'to' => 'bob@x.com', 'subject' => 'Sealed edited', 'body_html' => '<p>secret body 2</p>'));
 $srow2 = $db->query("SELECT * FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = $sid")->fetch(PDO::FETCH_ASSOC);
-$dek2 = $vc->openItemDek($srow2['iem_sealed_key'], $kp['secret']);
+$dek2 = $vc->openItemDek($srow2['iem_sealed_key'], vault_fixture_key($kp['secret']));
 $body2 = $vc->openField($srow2['iem_body_html'], $dek2, InboundEmailMessage::sealAd($sid, 'iem_body_html'));
 check(strpos($body2, 'secret body 2') !== false, 'locked update re-seals the new content (opens under its DEK)', $body2);
 

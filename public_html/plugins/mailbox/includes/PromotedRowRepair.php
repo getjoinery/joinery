@@ -81,9 +81,9 @@ class PromotedRowRepair {
 	 * $deadline is a microtime(true) value: repair stops before starting a new
 	 * row once it passes.
 	 */
-	public static function drainForUser(int $user_id, string $secret_key, int $max = self::DEFAULT_MAX,
+	public static function drainForUser(int $user_id, VaultKey $key, int $max = self::DEFAULT_MAX,
 			?float $deadline = null): int {
-		if ($user_id <= 0 || $secret_key === '') {
+		if ($user_id <= 0) {
 			return 0;
 		}
 		$rows = self::candidateRows($user_id, $max);
@@ -97,8 +97,8 @@ class PromotedRowRepair {
 				// One row is one unit for the hot-turn rule: unwrapping the DEK
 				// opens this owner's sealed scope, and nothing one row decrypts
 				// is in play when the next one starts.
-				$ok = SealedEgressGuard::isolate(function () use ($row, $secret_key) {
-					return self::repairOne($row, $secret_key);
+				$ok = SealedEgressGuard::isolate(function () use ($row, $key) {
+					return self::repairOne($row, $key);
 				});
 				if ($ok) {
 					$done++;
@@ -139,7 +139,7 @@ class PromotedRowRepair {
 	 *
 	 * @return bool true when the row is fully repaired
 	 */
-	private static function repairOne(array $row, string $secret_key): bool {
+	private static function repairOne(array $row, VaultKey $key): bool {
 		$id = intval($row['iem_inbound_email_message_id']);
 		$db = DbConnector::get_instance()->get_db_link();
 
@@ -162,7 +162,7 @@ class PromotedRowRepair {
 				return false;
 			}
 			$crypto = new VaultCrypto();
-			$dek = $crypto->openItemDek($sealed_key, $secret_key); // throws on mismatch
+			$dek = $crypto->openItemDek($sealed_key, $key); // throws on mismatch
 			// Reused DEK: sealColumns() never touches the key wrapping, so the
 			// vault argument is not consulted.
 			InboundEmailMessage::sealColumns($id, null, array('iem_recipient' => $recipient), $dek);

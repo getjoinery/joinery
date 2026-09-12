@@ -306,7 +306,7 @@ check(stripos($refused, 'unlock') !== false,
 	'and approval is refused until the vault is unlocked', $refused);
 
 if ($aq_window_capable) {
-	VaultUnlock::open($owner_id, $secret, UserEncryptionVault::SCOPE_USER,
+	vault_fixture_open_window($owner_id, $secret, UserEncryptionVault::SCOPE_USER,
 		['idle' => null, 'absolute' => null]);
 	$sealed->load();
 	$card = ActionQueue::card($sealed);

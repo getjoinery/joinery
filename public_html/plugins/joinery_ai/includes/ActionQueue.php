@@ -417,15 +417,15 @@ class ActionQueue {
             $reuse_dek = null;
             if ($row_sealed) {
                 // Same-DEK reseal so the already-sealed arguments still open.
-                $secret = VaultUnlock::secretKey($owner_id);
-                if ($secret === null) {
+                $key = VaultUnlock::secretKey($owner_id);
+                if ($key === null) {
                     error_log('ActionQueue: result for action ' . (int)$row->key
                         . ' not retained — row is sealed and the window closed mid-resolve.');
                     return;
                 }
                 require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
                 $reuse_dek = (new VaultCrypto())->openItemDek(
-                    (string)$row->get('aqa_sealed_key'), $secret);
+                    (string)$row->get('aqa_sealed_key'), $key);
             }
             AiQueuedAction::sealColumns((int)$row->key, $vault,
                 ['aqa_result' => $encoded], $reuse_dek);

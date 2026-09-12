@@ -136,13 +136,13 @@ File::registerStreamingDecryptHook(File::SOURCE_EMAIL_ATTACHMENT, function (File
 
 // --- Rotation re-seal callback (docs/sealed_vault.md § Key rotation) ---
 // Scoped to the generation being drained (iem_key_generation =
-// $old_key_generation — the only generation $old_secret_key can open) and
+// $old_key_generation — the only generation $old_key can open) and
 // fail-loud per the VaultUnlock::onReseal() contract: every row is attempted,
 // then any failure THROWS so the ceremony refuses to retire the old
 // wrappings while content is still sealed to them. The FTS index is sealed
 // under the now-superseded key too, so it is purged rather than re-sealed —
 // the next unlock rebuilds it from the freshly-resealed rows.
-VaultUnlock::onReseal(function (int $user_id, string $old_secret_key, int $old_key_generation, string $new_public_key, int $new_key_generation) {
+VaultUnlock::onReseal(function (int $user_id, VaultKey $old_key, int $old_key_generation, string $new_public_key, int $new_key_generation) {
 	$db = DbConnector::get_instance()->get_db_link();
 	$crypto = new VaultCrypto();
 	$failed = 0;
@@ -173,7 +173,7 @@ VaultUnlock::onReseal(function (int $user_id, string $old_secret_key, int $old_k
 				if (!$msg->key || !$msg->get('iem_sealed_key')) {
 					continue;
 				}
-				$dek = $crypto->openItemDek((string)$msg->get('iem_sealed_key'), $old_secret_key);
+				$dek = $crypto->openItemDek((string)$msg->get('iem_sealed_key'), $old_key);
 				$new_sealed_key = $crypto->sealItemDek($dek, $new_public_key);
 				$upd = $db->prepare(
 					'UPDATE iem_inbound_email_messages SET iem_sealed_key = ?, iem_key_generation = ?
@@ -205,7 +205,7 @@ VaultUnlock::onReseal(function (int $user_id, string $old_secret_key, int $old_k
 			if ($sealed === '') {
 				continue;
 			}
-			$dek = $crypto->openItemDek($sealed, $old_secret_key);
+			$dek = $crypto->openItemDek($sealed, $old_key);
 			$new_sealed_key = $crypto->sealItemDek($dek, $new_public_key);
 			$upd = $db->prepare('UPDATE imc_mailbox_contacts SET imc_sealed_key = ?, imc_key_generation = ?
 				WHERE imc_mailbox_contact_id = ?');
@@ -232,7 +232,7 @@ VaultUnlock::onReseal(function (int $user_id, string $old_secret_key, int $old_k
 				continue;
 			}
 			try {
-				$private = $crypto->openItemDek($sealed, $old_secret_key);
+				$private = $crypto->openItemDek($sealed, $old_key);
 				$resealed = $crypto->sealItemDek($private, $new_public_key);
 				$upd = $db->prepare(
 					'UPDATE ied_inbound_email_domains SET ' . $col . ' = ?
@@ -264,7 +264,7 @@ VaultUnlock::onReseal(function (int $user_id, string $old_secret_key, int $old_k
 		}
 		$direct_count++;
 		try {
-			$secret = $crypto->openItemDek($sealed, $old_secret_key);
+			$secret = $crypto->openItemDek($sealed, $old_key);
 			$upd = $db->prepare('UPDATE jdi_direct_identities SET jdi_sealed_secret_key = ?
 				WHERE jdi_direct_identity_id = ?');
 			$upd->execute(array($crypto->sealItemDek($secret, $new_public_key), intval($identity->key)));
@@ -283,6 +283,12 @@ VaultUnlock::onReseal(function (int $user_id, string $old_secret_key, int $old_k
 			. 'the old key generation must not be retired.');
 	}
 });
+
+// The contact store's blind-index key (MailboxContactIndexKey) is sealed to the
+// vault like a row DEK and re-wraps through the generic model path, so a
+// rotation leaves every address hash valid.
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_contact_index_keys_class.php'));
+VaultUnlock::onReseal(VaultUnlock::modelReseal(array(MailboxContactIndexKey::class)));
 
 // --- Window-wipe callback (docs/sealed_vault.md § consumer contract) ---
 // Clears the /dev/shm FTS working copy when a window closes (explicit lock,
@@ -310,8 +316,8 @@ VaultDeferredWork::register(
 	function (int $user_id): bool {
 		return DeferredIngest::hasWork($user_id);
 	},
-	function (int $user_id, string $secret_key, float $deadline): int {
-		return DeferredIngest::drainForUser($user_id, $secret_key, DeferredIngest::DEFAULT_MAX, $deadline);
+	function (int $user_id, VaultKey $key, float $deadline): int {
+		return DeferredIngest::drainForUser($user_id, $key, DeferredIngest::DEFAULT_MAX, $deadline);
 	}
 );
 
@@ -327,8 +333,8 @@ VaultDeferredWork::register(
 	function (int $user_id): bool {
 		return PromotedRowRepair::hasWork($user_id);
 	},
-	function (int $user_id, string $secret_key, float $deadline): int {
-		return PromotedRowRepair::drainForUser($user_id, $secret_key, PromotedRowRepair::DEFAULT_MAX, $deadline);
+	function (int $user_id, VaultKey $key, float $deadline): int {
+		return PromotedRowRepair::drainForUser($user_id, $key, PromotedRowRepair::DEFAULT_MAX, $deadline);
 	}
 );
 
@@ -345,9 +351,9 @@ VaultDeferredWork::register(
 	function (int $user_id): bool {
 		return MailboxIndex::hasBacklog($user_id);
 	},
-	function (int $user_id, string $secret_key, float $deadline): int {
+	function (int $user_id, VaultKey $key, float $deadline): int {
 		$index = new MailboxIndex();
-		$status = $index->fold($user_id, $secret_key, $deadline);
+		$status = $index->fold($user_id, $key, $deadline);
 		return intval($status['folded']);
 	}
 );
@@ -363,8 +369,8 @@ VaultDeferredWork::register(
 	function (int $user_id): bool {
 		return InlineImageBackfill::hasWork($user_id);
 	},
-	function (int $user_id, string $secret_key, float $deadline): int {
-		return InlineImageBackfill::drainForUser($user_id, $secret_key, InlineImageBackfill::DEFAULT_MAX, $deadline);
+	function (int $user_id, VaultKey $key, float $deadline): int {
+		return InlineImageBackfill::drainForUser($user_id, $key, InlineImageBackfill::DEFAULT_MAX, $deadline);
 	}
 );
 

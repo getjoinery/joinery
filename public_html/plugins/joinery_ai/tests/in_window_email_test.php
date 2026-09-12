@@ -222,7 +222,7 @@ try {
 	// -----------------------------------------------------------------------
 	section('and visible while unlocked, newest first');
 
-	VaultUnlock::open($owner_id, $secret, UserEncryptionVault::SCOPE_USER,
+	vault_fixture_open_window($owner_id, $secret, UserEncryptionVault::SCOPE_USER,
 		array('idle' => null, 'absolute' => null));
 	check(VaultUnlock::isOpen($owner_id), 'precondition: the window is open');
 
@@ -396,7 +396,7 @@ try {
 	}
 	check($locked_ok, 'and saving a sealed row while the vault is LOCKED does not throw',
 		$locked_ok ? '' : $cloud_message);
-	VaultUnlock::open($owner_id, $secret, UserEncryptionVault::SCOPE_USER,
+	vault_fixture_open_window($owner_id, $secret, UserEncryptionVault::SCOPE_USER,
 		array('idle' => null, 'absolute' => null));
 
 	// -----------------------------------------------------------------------
@@ -486,7 +486,7 @@ try {
 		$locked_read = true;
 	}
 	check($locked_read, 'and with the vault locked the value is unreadable, not returned as ciphertext');
-	VaultUnlock::open($owner_id, $secret, UserEncryptionVault::SCOPE_USER,
+	vault_fixture_open_window($owner_id, $secret, UserEncryptionVault::SCOPE_USER,
 		array('idle' => null, 'absolute' => null));
 
 	// -----------------------------------------------------------------------
@@ -656,7 +656,7 @@ try {
 		'showing no content rather than ciphertext or a placeholder string');
 	check((string)$locked_run->get('rcr_status') === RecipeRun::STATUS_RUNNING,
 		'while the status is still readable, because it is not content');
-	VaultUnlock::open($owner_id, $secret, UserEncryptionVault::SCOPE_USER,
+	vault_fixture_open_window($owner_id, $secret, UserEncryptionVault::SCOPE_USER,
 		array('idle' => null, 'absolute' => null));
 
 	// The suppression is conditional. A standard mailbox has nothing to protect
@@ -932,7 +932,7 @@ try {
 	// only runs when the recipe's own Runs setting says so, and that a run a
 	// PERSON asked for is never left waiting for a worker that cannot exist
 	// (specs/recipe_run_scheduling.md § 2.5 and § 2.6).
-	VaultUnlock::open($owner_id, $secret, UserEncryptionVault::SCOPE_USER,
+	vault_fixture_open_window($owner_id, $secret, UserEncryptionVault::SCOPE_USER,
 		array('idle' => null, 'absolute' => null));
 	check(VaultUnlock::isOpen($owner_id), 'precondition: the window is open');
 
@@ -1035,7 +1035,7 @@ try {
 		->query('SELECT count(*) FROM rcr_recipe_runs WHERE rcr_rcp_recipe_id = '
 			. intval($clock->key) . ' AND rcr_delete_time IS NULL')->fetchColumn());
 
-	$executed = RecipeVaultScope::drain($owner_id, $secret, microtime(true) + 30);
+	$executed = RecipeVaultScope::drain($owner_id, vault_fixture_key($secret), microtime(true) + 30);
 	check($executed === 1, 'the drain executes exactly one run', (string)$executed);
 
 	$adopted = new RecipeRun(intval($manual->key), TRUE);
@@ -1084,7 +1084,7 @@ try {
 		'but the row makes even a Manually-only recipe pending — a person pressed the button');
 
 	RecipeRun::updateColumns(intval($mo_run->key), array('rcr_kill_requested' => true));
-	check(RecipeVaultScope::drain($owner_id, $secret, microtime(true) + 30) === 1,
+	check(RecipeVaultScope::drain($owner_id, vault_fixture_key($secret), microtime(true) + 30) === 1,
 		'the drain executes it');
 	$mo_done = new RecipeRun(intval($mo_run->key), TRUE);
 	check((string)$mo_done->get('rcr_status') !== RecipeRun::STATUS_PENDING,

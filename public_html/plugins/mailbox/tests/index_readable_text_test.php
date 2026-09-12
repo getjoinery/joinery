@@ -24,6 +24,7 @@
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
+require_once(__DIR__ . '/../../../tests/lib/vault_fixtures.php');
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
@@ -93,7 +94,7 @@ harness_register_model('InboundEmailMessage', $mid);
 
 $idx = new MailboxIndex();
 $idx->wipe($uid);              // start from a clean working copy
-$idx->fold($uid, 'dummy-secret');
+$idx->fold($uid, vault_fixture_dummy_key());
 
 $hits = function ($term) use ($idx, $uid) { return $idx->search($uid, $term); };
 

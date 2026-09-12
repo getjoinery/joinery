@@ -76,9 +76,11 @@ consumer repeats, thin over `SealedBox`:
 
 ```php
 $crypto = new VaultCrypto();
+$key    = VaultUnlock::secretKey($user_id);              // ?VaultKey — null means locked
 $dek    = $crypto->newItemDek();                        // random 32B, one per content item
-$sealed = $crypto->sealItemDek($dek, $public_key);       // store on the consumer's own row
-$dek    = $crypto->openItemDek($sealed, $secret_key);
+$sealed = $crypto->sealItemDek($dek, $key->publicKey()); // store on the consumer's own row
+$dek    = $crypto->openItemDek($sealed, $key);           // one row; memoized per key id + blob
+$deks   = $crypto->openItemDeks($sealed_list, $key);     // a page of rows in ONE VaultKey::unseal()
 $blob   = $crypto->sealField($plaintext, $dek, $ad);     // $ad is the CONSUMER's row-binding string
 $plain  = $crypto->openField($blob, $dek, $ad);          // e.g. 'mail:{message_id}:body_plain'
 $crypto->sealFieldFile($src, $dst, $dek, $ad);           // whole FILE, path-to-path, memory bounded
@@ -88,6 +90,19 @@ $crypto->openFieldFile($src, $dst, $dek, $ad);           //   by a chunk (Sealed
 The AD (additional data) is entirely the consumer's convention — a stable
 per-item identity string. Binding it means a ciphertext can never be spliced
 onto a different row and still decrypt.
+
+**A vault key is used, never read.** `VaultUnlock::secretKey()` returns a
+`VaultKey` (`includes/VaultKey.php`): `unseal(array $sealed)` opens
+crypto_box_seal ciphertexts sealed to its public half, `publicKey()` is that
+half, and `id()` is a stable non-secret identity the DEK memo keys on. There
+is no getter for the bytes and no wrap method. `PoolVaultKey` is the
+implementation that holds the bytes in PHP; the `SealedBox` primitives that
+take or produce a vault secret (`openDek`, `openBinary`, `unwrapKey`,
+`wrapKey`, `generateKeypair`) are pinned to that one file by
+`tests/vault/sealed_read_paths_test.php`, so a consumer cannot reach the raw
+secret by any path the tree contains. Wrapping the secret under a new
+unlocker happens only inside `VaultUnlock::open()`/`openKey()`, in the
+request that presented an unlocker for it.
 
 ## Key hierarchy
 
@@ -106,16 +121,20 @@ onto a different row and still decrypt.
   `uew_is_used` (recovery codes are one-time), `uew_delete_time` (soft delete
   retires a wrapping).
 
-`UserEncryptionWrapping::createWrapped($vault_id, $type, $secret_key, $kek,
-$credential_id = null, $label = null, $key_generation = null, $salt = null)`
-is the one place a wrapping gets created — it two-phase-inserts (the AD needs
-the row's own id) so every wrapping is sealed the same way. `$key_generation`
+A wrapping is made in two phases because its AD binds the row's own id.
+`UserEncryptionWrapping::reserve($vault_id, $type, $credential_id = null,
+$label = null, $key_generation = null, $salt = null)` saves the row with an
+empty wrapping; the row's `wrapEntry($kek)` goes into the wrap list of the
+`VaultUnlock::open()`/`openKey()` call that unwraps (or mints) the secret;
+`storeWrapped()` (or `storeWrappings()` for a batch) persists what that call
+returned. Nothing else produces a wrapping: the secret is wrapped only in the
+request that presented an unlocker for it, or that minted it. `$key_generation`
 null resolves to the vault's current generation (correct for every enrollment
-ceremony — the in-window secret being wrapped is the current generation's);
-rotation passes its computed `new_key_generation` explicitly. Unlock paths
-derive each wrapping's KEK from the wrapping's own `uew_salt` (falling back
-to `uev_salt` for a null), so codes and passphrases from a not-yet-drained
-generation keep working in a two-generation state.
+ceremony); rotation passes its computed `new_key_generation` explicitly.
+Unlock paths derive each wrapping's KEK from the wrapping's own `uew_salt`
+(falling back to `uev_salt` for a null) and hand `unlocker($kek)` to
+`open()`, so codes and passphrases from a not-yet-drained generation keep
+working in a two-generation state.
 
 Neither table is an API resource; consumers never touch them directly.
 
@@ -222,10 +241,23 @@ contract rather than left to fail incidentally.
 | Action pair | Purpose |
 |---|---|
 | `vault_setup_options` / `vault_setup_verify` | First-time setup: generate the keypair, wrap it under the enrolling passkey + N fresh recovery codes, open the window. The verify action also accepts an optional `passphrase` (a bypass-phrase wrapping) for non-web clients; the web ceremony never offers it. Requires an account password first (see *The vault-activation flip*) and an explicit permanent-loss acknowledgment. |
-| `vault_add_passkey_options` / `vault_add_passkey_verify` | Wrap the (already-unlocked) secret key under another PRF-capable passkey — "activating" that passkey for the vault. The security page chains this automatically after enrolling a new passkey while the vault is unlocked, so passkeys end up vault-active by default; each passkey row carries a vault badge with activate/deactivate in its Actions menu. |
+| `vault_add_passkey_options` / `vault_add_passkey_verify` | Wrap the secret key under another PRF-capable passkey — "activating" that passkey for the vault. The verify step takes the new passkey's derivation and a fresh `unlocker` in the same request. `passkey_register_verify` does the same activation at enrolment when the request carries an `unlocker`, so passkeys end up vault-active by default; each passkey row carries a vault badge with activate/deactivate in its Actions menu. |
 | `vault_passkey_deactivate` | Remove one passkey's vault wrapping (it still signs in; it can no longer unlock). Requires a recent step-up; refused if it would break the unlocker floor. |
-| `vault_regenerate_codes` | Invalidate all recovery codes and mint a fresh set. Requires a recent step-up and an unlocked vault. |
-| `vault_passphrase_enroll` / `vault_passphrase_remove` | Add or remove the optional bypass phrase. Requires a recent step-up; enroll also requires an unlocked vault. |
+| `vault_regenerate_codes` | Invalidate all recovery codes and mint a fresh set. Requires a recent step-up and a fresh `unlocker`. |
+| `vault_passphrase_enroll` / `vault_passphrase_remove` | Add or remove the optional bypass phrase. Requires a recent step-up; enroll also takes a fresh `unlocker`. |
+
+**Every enrolment presents a fresh unlocker.** A wrapping is produced only
+in the request that presented a real unlocker for the vault — a tap of an
+enrolled passkey (`unlocker: {credential}`, minted by `vault_unlock_options`),
+the bypass phrase (`{passphrase}`) or a recovery code (`{code}`, consumed) —
+never from an open window. `VaultCeremonies::openWithUnlocker()` resolves
+the input, opens under it with the new wrappings in the wrap list, and arms
+the resulting window for the session. In the browser
+`JoineryVaultLock.collectUnlocker(purpose)` offers whichever of the three the
+vault has and returns the shape to send. A passkey enrolment therefore
+verifies two assertions in one request; `PasskeyService` keeps one pending
+challenge per purpose per session, and the add-passkey derivation carries the
+tag `add` so it stands beside the unlocker's own `vault-kek` ceremony.
 | `vault_status` | Read-only: set-up/unlock state and the wrapping list (no secret material) for the keyring UI. |
 
 **Which passkeys a vault prompt offers** is one rule, shared by every ceremony
@@ -257,20 +289,34 @@ cannot activate one silently.
 
 `includes/VaultUnlock.php` — the secret key lives in APCu, keyed
 `vault:{session_id}:{user_id}:{scope}`, TTL = `vault_unlock_idle_minutes`
-(default 30), re-stored on every read (activity extension):
+(default 30), re-stored on every read (activity extension). What callers
+hold is a `VaultKey`, never the bytes:
 
 ```php
-VaultUnlock::open($user_id, $secret_key, $scope = 'user');
+// $unlocker = $wrapping->unlocker($kek) — the row's wrapping, the KEK the
+// credential derived, the row's AD; null mints a fresh keypair (setup, rotation).
+// $wrap_under = [$row->wrapEntry($kek), ...] — the wrappings to produce.
+VaultUnlock::open($user_id, $unlocker, $wrap_under = [], $scope = 'user', $caps = null, $via)
+    : array{key: VaultKey, wrappings: string[]};          // opens AND arms the session's window
+VaultUnlock::openKey($user_id, $unlocker, $wrap_under = [], $scope = 'user'): array;  // the key, no window
+VaultUnlock::arm($user_id, VaultKey $key, $scope = 'user', $caps = null, $via): void;  // make it the window
 VaultUnlock::isOpen($user_id, $scope = 'user'): bool;
-VaultUnlock::secretKey($user_id, $scope = 'user'): ?string;  // null = locked
+VaultUnlock::secretKey($user_id, $scope = 'user'): ?VaultKey;  // null = locked
 VaultUnlock::close($user_id, $scope = 'user'): void;         // current session
 VaultUnlock::lock($user_id, $session_id, $scope = 'user'): void;  // a specific session
 VaultUnlock::lockAll($user_id): void;                        // every scope, every session
 VaultUnlock::hasAnyOpenWindow($user_id, $scope = 'user'): bool;  // ANY session, any SAPI
 ```
 
+`openKey()` exists for the two callers that need a key without a window: the
+rotation ceremony, whose old-generation key every resealer uses and which
+must never become the window, and the recovery-code / bypass-phrase probes
+(and the recovery-readiness dry run), which try each wrapping until one
+opens. A wrong unlocker throws and yields nothing.
+
 Every content read calls `secretKey()` and treats `null` as **locked** — a
-one-tap unlock prompt, never an error. `lock()`/`lockAll()` are the generic
+one-tap unlock prompt, never an error; code that only asks whether the window
+is open calls `isOpen()`. `lock()`/`lockAll()` are the generic
 wipe surface; *when* to call them (explicit lock, a credential event, a
 heartbeat/IP-change policy, a permission cap) is entirely consumer-defined.
 
@@ -422,9 +468,9 @@ a decryptor for its `fil_source` tag once, at bootstrap:
 
 ```php
 File::registerDecryptHook(File::SOURCE_EMAIL_ATTACHMENT, function (string $ciphertext, File $file): string {
-    $secret = VaultUnlock::secretKey($file->get('fil_usr_user_id'));
-    if ($secret === null) throw new VaultLockedException();
-    // ... open the per-item DEK, then the AEAD blob, return plaintext bytes
+    $key = VaultUnlock::secretKey($file->get('fil_usr_user_id'));
+    if ($key === null) throw new VaultLockedException();
+    // ... $crypto->openItemDek($sealed_key, $key), then the AEAD blob, return plaintext bytes
 });
 ```
 
@@ -783,11 +829,12 @@ crash-safety order:
    (public key, salt, generation, updated time).
 3. **Only then** walk every registered consumer's re-seal callback
    (`VaultUnlock::onReseal($callback)`, registration order; signature
-   `function(int $user_id, string $old_secret_key, int $old_key_generation,
-   string $new_public_key, int $new_key_generation): void`) — the old secret
-   is still in hand to open with, the new public key to seal to. A callback
+   `function(int $user_id, VaultKey $old_key, int $old_key_generation,
+   string $new_public_key, int $new_key_generation): void`) — the old
+   generation's key is open to open with (`$crypto->openItemDek($sealed,
+   $old_key)`), the new public key to seal to. A callback
    re-seals **exactly** the items whose per-item generation equals
-   `$old_key_generation` (the only generation `$old_secret_key` can open),
+   `$old_key_generation` (the only generation `$old_key` can open),
    attempts every item, and **throws** if any failed. Any callback throw
    aborts the ceremony here with an error: nothing is retired, every
    unlocker still works, and re-running the rotation converges.
@@ -919,7 +966,8 @@ intact.
    belongs to no mailbox, because an item with no resolvable owner is stored in
    the clear.
 3. Read via `SystemBase::get()`, or `VaultUnlock::secretKey($user_id)` where you
-   need the key itself; treat a locked vault as a one-tap prompt, never an error.
+   need the `VaultKey` itself (for `VaultCrypto::openItemDek()` or its
+   `publicKey()`); treat a locked vault as a one-tap prompt, never an error.
 4. Reuse the File decrypt hook for sealed attachments
    (`File::registerDecryptHook`) and the sealed-field model hook for generic
    reads (`$sealed_fields` + `decryptSealedField()`/`decryptSealedFieldStatic()`).
@@ -1070,7 +1118,7 @@ inside a web request carrying a live window.
 VaultDeferredWork::register(
     'mailbox_parse',
     fn(int $user_id) => bool,                                   // cheap, indexed, no decrypt
-    fn(int $user_id, string $key, float $deadline) => int        // work until the deadline
+    fn(int $user_id, VaultKey $key, float $deadline) => int      // work until the deadline
 );
 ```
 

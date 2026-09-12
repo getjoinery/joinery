@@ -81,7 +81,7 @@ function sealed_member(string $label): array {
 }
 
 function open_window(array $member): void {
-	VaultUnlock::open($member['id'], $member['secret'],
+	vault_fixture_open_window($member['id'], $member['secret'],
 		UserEncryptionVault::SCOPE_USER, array('idle' => null, 'absolute' => null));
 }
 
@@ -279,7 +279,7 @@ $before = ConversationKeyGrant::forMember((int)$room->key, $alice['id']);
 $before_wrapped = (string)$before->get('ckg_wrapped_key');
 
 $result = ConversationKeyGrant::resealForUser(
-	$alice['id'], $alice['secret'], 1, $new_public, 2);
+	$alice['id'], vault_fixture_key($alice['secret']), 1, $new_public, 2);
 check($result['failed'] === 0, 'every grant re-wraps');
 check($result['attempted'] >= 1, 'and there was something to re-wrap');
 
@@ -288,7 +288,7 @@ check((string)$after->get('ckg_wrapped_key') !== $before_wrapped, 'the wrapping 
 check((int)$after->get('ckg_key_generation') === 2, 'onto the new generation');
 
 lock_everyone(array($alice));
-VaultUnlock::open($alice['id'], $new_secret, UserEncryptionVault::SCOPE_USER,
+vault_fixture_open_window($alice['id'], $new_secret, UserEncryptionVault::SCOPE_USER,
 	array('idle' => null, 'absolute' => null));
 check((new Message((int)$first->key, TRUE))->get('msg_body') === 'said before protection',
 	'and the old messages still open under the new key');

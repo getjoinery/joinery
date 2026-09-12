@@ -18,10 +18,21 @@
  * different row and decrypt successfully — VaultCrypto enforces nothing about
  * the AD's shape, it just always requires one.
  *
+ * The three asymmetric opens take a VaultKey (docs/sealed_vault.md § The
+ * unlock window) rather than secret bytes: the key object does the
+ * crypto_box_seal open, this class does the framing, the memo and the
+ * hot-turn accounting. The DEK memo keys on VaultKey::id(), so a row is still
+ * unwrapped once per request however many times the window is fetched.
+ *
+ * @version 1.5 - openItemDek()/openBulkDelivery()/openHeldDeliveryBlob() take a
+ *   VaultKey; openItemDeks() opens a whole batch in one VaultKey::unseal()
+ *   call (one daemon round trip once the key lives there); the memo keys on
+ *   the key's id instead of its bytes
  * @version 1.4
  */
 require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
 require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
+require_once(PathHelper::getIncludePath('includes/VaultKey.php'));
 
 class VaultCrypto {
 
@@ -30,7 +41,7 @@ class VaultCrypto {
 	/** Cap on the memo below — see openItemDek(). */
 	const DEK_MEMO_MAX = 2000;
 
-	/** @var array<string,string> unwrapped DEKs, keyed by secret+blob. Process-lived. */
+	/** @var array<string,string> unwrapped DEKs, keyed by key id + blob. Process-lived. */
 	private static $dek_memo = array();
 
 	/** @var SealedBox */
@@ -66,12 +77,11 @@ class VaultCrypto {
 	 * late, the same plaintext receive-time ingest holds cold on a Standard box —
 	 * NOT a read of content stored under the sealed-at-rest promise.
 	 */
-	public function openBulkDelivery(string $sealed, string $secret_key): string {
-		return $this->box->openBinary($sealed, $secret_key);
+	public function openBulkDelivery(string $sealed, VaultKey $key): string {
+		return $key->unseal(array($sealed))[0];
 	}
 
-	/** Open a sealed per-item DEK with the in-window vault secret key (the
-	 *  matching public key is derived from it — see SealedBox::openDek()).
+	/** Open a sealed per-item DEK with the in-window vault key.
 	 *
 	 *  Memoized for the life of the process, because a row's wrapped key is
 	 *  opened once per SEALED COLUMN and always yields the same DEK. A mail row
@@ -82,24 +92,52 @@ class VaultCrypto {
 	 *  fires exactly as often as it did.
 	 *
 	 *  Safe to memoize because this is a pure function: the same blob under the
-	 *  same secret has exactly one answer, and rotation rewrites the blob, so a
-	 *  rotated row cannot hit a stale entry. The cache keys on both inputs, so a
-	 *  blob never opens under a secret that did not actually open it — a wrong
-	 *  secret still reaches openDek() and still throws. */
-	public function openItemDek(string $sealed, string $secret_key): string {
-		$ck = hash('sha256', $secret_key . "\0" . $sealed);
-		if (isset(self::$dek_memo[$ck])) {
-			return self::$dek_memo[$ck];
+	 *  same key has exactly one answer, and rotation rewrites the blob, so a
+	 *  rotated row cannot hit a stale entry. The cache keys on the key's id AND
+	 *  the blob, so a blob never opens under a key that did not actually open
+	 *  it — a wrong key still reaches unseal() and still throws. */
+	public function openItemDek(string $sealed, VaultKey $key): string {
+		return $this->openItemDeks(array($sealed), $key)[0];
+	}
+
+	/**
+	 * Open a batch of sealed per-item DEKs in ONE VaultKey::unseal() call —
+	 * the same memo as openItemDek(), filled from one round trip. A caller
+	 * that already holds a set of rows (a thread list, a fold batch, a
+	 * resealer, a deferred-work drain) uses this so the per-row opens that
+	 * follow all hit the memo.
+	 *
+	 * @param string[] $sealed `v1.seal.` blobs under any keys
+	 * @return string[] the DEKs under the same keys
+	 * @throws RuntimeException when any blob is malformed or does not open
+	 */
+	public function openItemDeks(array $sealed, VaultKey $key): array {
+		$out = array();
+		$pending = array();
+		$key_id = $key->id();
+		foreach ($sealed as $slot => $blob) {
+			$blob = (string)$blob;
+			$ck = hash('sha256', $key_id . "\0" . $blob);
+			if (isset(self::$dek_memo[$ck])) {
+				$out[$slot] = self::$dek_memo[$ck];
+				continue;
+			}
+			$pending[$slot] = array('ck' => $ck, 'raw' => SealedBox::unframeSeal($blob));
 		}
-		$dek = $this->box->openDek($sealed, $secret_key);
-		// Bounded so a bulk export cannot grow this without limit. Dropping the
-		// whole map rather than evicting one entry keeps it simple: the reader
-		// pages this exists for hold far fewer rows than the cap.
-		if (count(self::$dek_memo) >= self::DEK_MEMO_MAX) {
-			self::$dek_memo = array();
+		if ($pending) {
+			$opened = $key->unseal(array_map(function ($p) { return $p['raw']; }, $pending));
+			// Bounded so a bulk export cannot grow this without limit. Dropping the
+			// whole map rather than evicting one entry keeps it simple: the reader
+			// pages this exists for hold far fewer rows than the cap.
+			if (count(self::$dek_memo) + count($opened) > self::DEK_MEMO_MAX) {
+				self::$dek_memo = array();
+			}
+			foreach ($pending as $slot => $p) {
+				self::$dek_memo[$p['ck']] = $opened[$slot];
+				$out[$slot] = $opened[$slot];
+			}
 		}
-		self::$dek_memo[$ck] = $dek;
-		return $dek;
+		return $out;
 	}
 
 	/**
@@ -108,7 +146,7 @@ class VaultCrypto {
 	 *
 	 * Key rotation needs no call here: it rewraps each item under a new public
 	 * key, so post-rotation reads present a different blob AND a different
-	 * secret, and cannot collide with an entry cached under the old pair.
+	 * key id, and cannot collide with an entry cached under the old pair.
 	 */
 	public static function forgetItemDeks(): void {
 		self::$dek_memo = array();
@@ -158,8 +196,8 @@ class VaultCrypto {
 	 * quietly joining. Reading anything STORED sealed goes through openField(),
 	 * which arms.
 	 */
-	public function openHeldDeliveryBlob(string $sealed, string $secret_key): string {
-		return $this->box->openDek($sealed, $secret_key);
+	public function openHeldDeliveryBlob(string $sealed, VaultKey $key): string {
+		return $key->unseal(array(SealedBox::unframeSeal($sealed)))[0];
 	}
 
 	/** Open content sealed by sealField(). Throws on tamper or an AD mismatch. */

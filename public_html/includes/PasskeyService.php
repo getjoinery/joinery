@@ -21,7 +21,14 @@
  * for the same reason. RP ID/origin come from the site's own domain
  * (LibraryFunctions::get_absolute_url()) - no separate setting.
  *
- * @version 1.9
+ * @version 1.10
+ * @changelog 1.10 - One pending challenge PER PURPOSE per session, not one per
+ *   session: a vault enrolment presents two assertions in one request (the new
+ *   passkey's derivation and a fresh tap of an enrolled unlocker,
+ *   specs/unseal_daemon.md B1), so both ceremonies must be in flight at once.
+ *   getDerivationOptions()/verifyDerivation() take an optional tag that keeps
+ *   two same-context derivations apart. The vault eval at registration asks
+ *   only that a vault exists; activation itself needs the unlocker.
  * @changelog 1.9 - Registration evaluates the vault PRF context in the same
  *   creation ceremony when the enroller's unlock window is open, so a capable
  *   authenticator's credential can be vault-activated with no second prompt;
@@ -306,14 +313,13 @@ class PasskeyService {
 	}
 
 	/** Whether registration should carry the vault eval input: the enroller
-	 *  holds a user-scope vault and its unlock window is open right now. */
+	 *  holds a user-scope vault. The PRF output a creation evaluates lets
+	 *  passkey_register_verify activate the credential for that vault when the
+	 *  request also presents an unlocker (specs/unseal_daemon.md B1); without
+	 *  one the output is simply discarded, so the eval costs nothing to ask for. */
 	private function _vaultEvalEligible(User $user): bool {
 		try {
-			$vault = UserEncryptionVault::loadForUser((int)$user->key);
-			if (!$vault) {
-				return false;
-			}
-			return VaultUnlock::secretKey((int)$user->key, UserEncryptionVault::SCOPE_USER) !== null;
+			return UserEncryptionVault::loadForUser((int)$user->key) !== null;
 		} catch (\Throwable $e) {
 			return false;
 		}
@@ -456,7 +462,8 @@ class PasskeyService {
 	 *   so the fallback is deliberate and lives here, at the one place every
 	 *   caller passes through, rather than in each of them.
 	 */
-	public function getDerivationOptions(User $user, string $context, ?array $credential_ids = null): array {
+	public function getDerivationOptions(User $user, string $context, ?array $credential_ids = null,
+			string $tag = ''): array {
 		if (!in_array($context, self::allowedPrfContexts(), true)) {
 			throw new PasskeyException('Unknown passkey secret context: ' . $context);
 		}
@@ -502,11 +509,21 @@ class PasskeyService {
 		// § Authentication).
 		$challenge = random_bytes(32);
 		$options = PublicKeyCredentialRequestOptions::create($challenge, $this->rp_id, $allow, 'required', 120000, $extensions);
-		$this->_stashChallenge('derive:' . $context . ':' . $user->key, $challenge);
+		$this->_stashChallenge(self::_derivePurpose($context, (int)$user->key, $tag), $challenge);
 		return json_decode($this->serializer->serialize($options, 'json'), true);
 	}
 
-	public function verifyDerivation(string $client_response_json, string $context): array {
+	/**
+	 * The stash purpose of a derivation. $tag keeps two derivations in the
+	 * SAME context apart when one request needs both — the vault enrolment
+	 * ceremony verifies the new passkey's derivation and a fresh unlocker tap
+	 * together, and both are 'vault-kek' (the KEK salt is the context).
+	 */
+	private static function _derivePurpose(string $context, int $user_id, string $tag): string {
+		return 'derive:' . $context . ':' . $user_id . ($tag !== '' ? ':' . $tag : '');
+	}
+
+	public function verifyDerivation(string $client_response_json, string $context, string $tag = ''): array {
 		if (!in_array($context, self::allowedPrfContexts(), true)) {
 			throw new PasskeyException('Unknown passkey secret context: ' . $context);
 		}
@@ -522,7 +539,7 @@ class PasskeyService {
 		$passkey = $this->_findLivePasskeyByRawId($pk_credential->rawId);
 		$user_id = (int)$passkey->get('pkc_usr_user_id');
 
-		$challenge = $this->_consumeChallenge('derive:' . $context . ':' . $user_id);
+		$challenge = $this->_consumeChallenge(self::_derivePurpose($context, $user_id, $tag));
 		// Every PRF context is a Sealed Vault unlock - user verification is
 		// enforced here (the validator's CheckUserVerification step), not just
 		// requested in the options (getDerivationOptions() asks for 'required' too).
@@ -854,13 +871,24 @@ class PasskeyService {
 		$stmt->execute([$this->_sessionId(), $kind]);
 	}
 
-	/** One in-flight ceremony per session: a new stash replaces any pending
-	 *  challenge. Expired rows (any session) are swept here too. */
+	/** This session's pending challenge for one purpose. */
+	private function _deleteChallengeRows(string $purpose): void {
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$stmt = $dblink->prepare(
+			'DELETE FROM pks_passkey_ceremonies WHERE pks_session_id = ? AND pks_kind = ? AND pks_purpose = ?');
+		$stmt->execute([$this->_sessionId(), 'challenge', $purpose]);
+	}
+
+	/** One in-flight ceremony per PURPOSE per session: a new stash replaces a
+	 *  pending challenge for the same purpose and leaves other purposes'
+	 *  pending — a request may need two ceremonies verified together (a vault
+	 *  enrolment's new-passkey derivation beside its unlocker tap). Expired
+	 *  rows (any session) are swept here too. */
 	private function _stashChallenge(string $purpose, string $challenge): void {
 		$dblink = DbConnector::get_instance()->get_db_link();
 		$dblink->prepare('DELETE FROM pks_passkey_ceremonies WHERE pks_expires_time < ?')
 			->execute([gmdate('Y-m-d H:i:s')]);
-		$this->_deleteCeremonyRows('challenge');
+		$this->_deleteChallengeRows($purpose);
 
 		$row = new PasskeyCeremony(NULL);
 		$row->set('pks_session_id', $this->_sessionId());
@@ -871,14 +899,20 @@ class PasskeyService {
 		$row->save();
 	}
 
-	/** Single-use: deletes the stash before validating, so a replay finds nothing. */
+	/** Single-use: deletes the purpose's stash before validating, so a replay finds nothing. */
 	private function _consumeChallenge(string $expected_purpose): string {
 		$rows = new MultiPasskeyCeremony(['session_id' => $this->_sessionId(), 'kind' => 'challenge']);
 		$rows->load();
-		$stash = $rows->count() ? $rows->get(0) : null;
-		$this->_deleteCeremonyRows('challenge');
+		$stash = null;
+		foreach ($rows as $row) {
+			if ($row->get('pks_purpose') === $expected_purpose) {
+				$stash = $row;
+				break;
+			}
+		}
+		$this->_deleteChallengeRows($expected_purpose);
 
-		if (!$stash || $stash->get('pks_purpose') !== $expected_purpose) {
+		if (!$stash) {
 			throw new PasskeyException('This passkey request has expired or is invalid. Please try again.');
 		}
 		if ($stash->get('pks_expires_time') < gmdate('Y-m-d H:i:s')) {

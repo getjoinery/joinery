@@ -16,6 +16,7 @@
  * example.com's instance key, and a spoofed From cannot borrow someone else's
  * place in your contacts.
  *
+ * @version 1.1 - the deferred path carries the recipient's VaultKey (vaultKey()), never secret bytes
  * @version 1.0
  */
 
@@ -116,13 +117,13 @@ class DirectEnvelope {
 	}
 
 	/**
-	 * The recipient's in-window vault secret, present only on the deferred path
+	 * The recipient's in-window vault key, present only on the deferred path
 	 * — which is the only moment a sealed part can be opened, and the reason a
 	 * sealed delivery waits for an unlock rather than being ingested at receive.
 	 */
-	public function vaultSecretKey(): ?string {
-		$secret = $this->data['vault_secret_key'] ?? null;
-		return ($secret === null || $secret === '') ? null : (string)$secret;
+	public function vaultKey(): ?VaultKey {
+		$key = $this->data['vault_key'] ?? null;
+		return ($key instanceof VaultKey) ? $key : null;
 	}
 
 	/** The admitted manifest: one entry per part (role, content_type, filename, size). */
@@ -218,12 +219,12 @@ class DirectPart {
 	 * recipient's vault secret key — which only exists inside an unlock window,
 	 * which is the whole reason a sealed delivery waits for one.
 	 */
-	public function open(?string $vault_secret_key): string {
+	public function open(?VaultKey $vault_key): string {
 		if (!$this->is_sealed) {
 			return $this->raw();
 		}
-		if ($vault_secret_key === null || $vault_secret_key === '') {
-			throw new RuntimeException('A sealed Direct part cannot be opened without the recipient vault secret.');
+		if ($vault_key === null) {
+			throw new RuntimeException('A sealed Direct part cannot be opened without the recipient vault key.');
 		}
 		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
 		// The named non-arming open: this is mail (or another payload) held in
@@ -231,7 +232,7 @@ class DirectPart {
 		// receive-time ingest holds cold on a Standard box. It is not a read of
 		// stored sealed content. A part is sealed raw (SealedBox::sealBinary), so
 		// it opens with the matching bulk primitive, not the base64 DEK one.
-		return (new VaultCrypto())->openBulkDelivery($this->raw(), $vault_secret_key);
+		return (new VaultCrypto())->openBulkDelivery($this->raw(), $vault_key);
 	}
 
 	/** A descriptor of this part for a manifest entry. */

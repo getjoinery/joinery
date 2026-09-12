@@ -73,8 +73,7 @@ class MailDirectHandler implements DirectKindHandler {
 			}
 		}
 
-		$secret = $envelope->vaultSecretKey();
-		$assembled = self::assemble($envelope, $parts, $secret);
+		$assembled = self::assemble($envelope, $parts, $envelope->vaultKey());
 
 		$router = new InboundEmailRouter();
 		try {
@@ -97,7 +96,7 @@ class MailDirectHandler implements DirectKindHandler {
 	 * CDN, or relay — ever held plaintext, so the first unseal happens inside
 	 * the recipient's own unlock window.
 	 */
-	private static function assemble(DirectEnvelope $envelope, array $parts, ?string $vault_secret_key): array {
+	private static function assemble(DirectEnvelope $envelope, array $parts, ?VaultKey $vault_key): array {
 		$meta = array(
 			'sender'    => $envelope->sender(),
 			'recipient' => $envelope->recipient(),
@@ -113,7 +112,7 @@ class MailDirectHandler implements DirectKindHandler {
 
 		foreach ($parts as $part) {
 			/** @var DirectPart $part */
-			$content = $part->open($vault_secret_key);
+			$content = $part->open($vault_key);
 
 			if ($part->role() === DirectProtocol::ROLE_HEADERS) {
 				$meta = array_merge($meta, self::parseHeaderPart($content, $envelope));

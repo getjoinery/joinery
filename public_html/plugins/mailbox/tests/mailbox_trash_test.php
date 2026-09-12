@@ -37,6 +37,7 @@
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
+require_once(__DIR__ . '/../../../tests/lib/vault_fixtures.php');
 require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
 require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
 require_once(PathHelper::getIncludePath('data/files_class.php'));
@@ -331,7 +332,7 @@ if (!is_dir(MailboxIndex::SHM_DIR)) {
 	$svc->softDelete(array($m_early));
 	$m_later = $make_msg($mine_alias, '<later@x>', 'Later', 'laterkeyword');
 
-	$idx->rebuild($owner_id, 'dummy-secret');
+	$idx->rebuild($owner_id);
 	check($idx->search($owner_id, 'laterkeyword') === array($m_later),
 		'an ordinary message is indexed');
 	check($idx->search($owner_id, 'earlykeyword') === array($m_early),
@@ -342,7 +343,7 @@ if (!is_dir(MailboxIndex::SHM_DIR)) {
 	check($hw >= $m_later, 'the watermark advanced past both', "hw=$hw later=$m_later");
 
 	$svc->restoreFromTrash(array($m_early));
-	$idx->fold($owner_id, 'dummy-secret');
+	$idx->fold($owner_id, vault_fixture_dummy_key());
 	check($idx->search($owner_id, 'earlykeyword') === array($m_early),
 		'restore-then-search finds it, with no index bookkeeping at all');
 
@@ -358,7 +359,7 @@ if (!is_dir(MailboxIndex::SHM_DIR)) {
 
 	// Purge prunes because the row is gone, not because a flag says so.
 	$svc->purgeFromTrash(array($m_early));
-	$idx->fold($owner_id, 'dummy-secret');
+	$idx->fold($owner_id, vault_fixture_dummy_key());
 	check($idx->search($owner_id, 'earlykeyword') === array(),
 		'the purged message left the index at the next fold',
 		json_encode($idx->search($owner_id, 'earlykeyword')));

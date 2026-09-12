@@ -22,7 +22,8 @@ if (!vault_ensure_session()) {
 $user = make_user('VaultWork');
 $uid = (int)$user->key;
 $sid = session_id();
-$secret = random_bytes(32);
+$secret = (new SealedBox())->generateKeypair()['secret'];
+$key_id = vault_fixture_key($secret)->id();
 $scope = 'user';
 $meta_key = 'vaultmeta:' . $sid . ':' . $uid . ':' . $scope;
 harness_defer(function () use ($uid) { VaultUnlock::lockAll($uid); });
@@ -40,7 +41,7 @@ function fake_consumer(string $id, int $items, float $seconds_per_item = 0.0, bo
 			$ref['has_work_calls'] = $ref['has_work_calls'] + 1;
 			return $ref['remaining'] > 0;
 		},
-		function (int $user_id, string $secret_key, float $deadline) use ($ref, $seconds_per_item, $throws): int {
+		function (int $user_id, VaultKey $key, float $deadline) use ($ref, $seconds_per_item, $throws): int {
 			$ref['turns'] = $ref['turns'] + 1;
 			if ($throws) {
 				throw new RuntimeException('deliberate consumer failure');
@@ -68,7 +69,7 @@ check($idle['done'] === 0, 'and no work was done');
 section('Work drains inside an open window');
 VaultDeferredWork::resetForTests();
 list($a) = fake_consumer('t_a', 3);
-VaultUnlock::open($uid, $secret, $scope, ['idle' => null, 'absolute' => null]);
+vault_fixture_open_window($uid, $secret, $scope, ['idle' => null, 'absolute' => null]);
 $res = VaultDeferredWork::drain($uid, $scope, 2.0);
 check($res['locked'] === false, 'an open window is not locked');
 check($a['done'] === 3, 'all available items were completed');
@@ -81,7 +82,7 @@ $order = new ArrayObject(array());
 foreach (array('t_first', 't_second') as $name) {
 	VaultDeferredWork::register($name,
 		function () { return true; },
-		function (int $u, string $k, float $d) use ($order, $name): int {
+		function (int $u, VaultKey $k, float $d) use ($order, $name): int {
 			$order[] = $name;
 			return 0;   // no progress, so one pass then stop
 		});
@@ -130,7 +131,7 @@ section('Background work is not user activity');
 // passes whether suppression works or not.
 VaultDeferredWork::resetForTests();
 list($bg) = fake_consumer('t_bg', 2);
-VaultUnlock::open($uid, $secret, $scope, ['idle' => 600, 'absolute' => null]);
+vault_fixture_open_window($uid, $secret, $scope, ['idle' => 600, 'absolute' => null]);
 
 // Age the clock to well inside the cap: still open, but clearly not "now".
 $aged = time() - 500;
@@ -153,7 +154,7 @@ check($res['locked'] === true, 'once the cap is exceeded a drain reports locked'
 check(!VaultUnlock::isOpen($uid), 'and the window really ended');
 
 section('Suppression is scoped and restored');
-VaultUnlock::open($uid, $secret, $scope, ['idle' => null, 'absolute' => null]);
+vault_fixture_open_window($uid, $secret, $scope, ['idle' => null, 'absolute' => null]);
 check(!VaultUnlock::isActivitySuppressed(), 'suppression is off outside a drain');
 $seen = null;
 VaultDeferredWork::withBackgroundWork(function () use (&$seen) {
@@ -168,11 +169,12 @@ try {
 check(!VaultUnlock::isActivitySuppressed(), 'suppression is restored even when the body throws');
 
 section('An ordinary read still counts as activity');
-VaultUnlock::open($uid, $secret, $scope, ['idle' => 600, 'absolute' => null]);
+vault_fixture_open_window($uid, $secret, $scope, ['idle' => 600, 'absolute' => null]);
 $meta = apcu_fetch($meta_key);
 $meta['content'] = time() - 300;
 apcu_store($meta_key, $meta, 3600);
-check(VaultUnlock::secretKey($uid, $scope) === $secret, 'a normal read succeeds');
+$got = VaultUnlock::secretKey($uid, $scope);
+check($got instanceof VaultKey && $got->id() === $key_id, 'a normal read succeeds');
 $meta = apcu_fetch($meta_key);
 check(time() - (int)$meta['content'] < 5, 'and it refreshed the content stamp');
 

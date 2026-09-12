@@ -66,9 +66,9 @@ class DirectSpoolDrain {
 	 * drained. A per-delivery failure is logged and the row left held, to be
 	 * retried at the next unlock — one bad delivery never stalls the rest.
 	 */
-	public static function drainForUser(int $user_id, string $secret_key, int $max = self::DEFAULT_MAX,
+	public static function drainForUser(int $user_id, VaultKey $key, int $max = self::DEFAULT_MAX,
 			?float $deadline = null): int {
-		if ($user_id <= 0 || $secret_key === '') {
+		if ($user_id <= 0) {
 			return 0;
 		}
 		$ids = DirectSpool::heldIdsForUser($user_id, $max);
@@ -86,8 +86,8 @@ class DirectSpoolDrain {
 				// One delivery is one unit of work for the hot-turn rule, by the
 				// same argument deferred mail ingest makes: opening this delivery's
 				// parts must not leave every LATER delivery in the pass hot.
-				$done = SealedEgressGuard::isolate(function () use ($spool, $secret_key) {
-					return self::drainOne($spool, $secret_key);
+				$done = SealedEgressGuard::isolate(function () use ($spool, $key) {
+					return self::drainOne($spool, $key);
 				});
 				if ($done) {
 					$drained++;
@@ -100,7 +100,7 @@ class DirectSpoolDrain {
 	}
 
 	/** Gate, ingest, and retire one held delivery. */
-	private static function drainOne(DirectSpool $spool, string $secret_key): bool {
+	private static function drainOne(DirectSpool $spool, VaultKey $key): bool {
 		$kind = (string)$spool->get('jdp_kind');
 		if (!DirectKinds::isServed($kind)) {
 			// The plugin is gone for now. Held, silently — it may come back, and
@@ -114,7 +114,7 @@ class DirectSpoolDrain {
 		// unlock, against the now-readable sealed contact list.
 		$accepted = DirectSpoolService::gateFor($spool);
 		try {
-			DirectSpoolService::ingest($spool, $accepted, $secret_key);
+			DirectSpoolService::ingest($spool, $accepted, $key);
 		} catch (DirectDeferIngest $e) {
 			// Still not openable from THIS member's unlock — the store it
 			// belongs in is sealed to someone else's window. Held for a future
@@ -154,7 +154,7 @@ class DirectSpoolDrain {
 	 * Fail-loud per the onReseal contract: every delivery is attempted, then any
 	 * failure throws so the ceremony refuses to retire the old generation.
 	 */
-	public static function resealForUser(int $user_id, string $old_secret_key, int $old_key_generation,
+	public static function resealForUser(int $user_id, VaultKey $old_key, int $old_key_generation,
 			string $new_public_key, int $new_key_generation): void {
 		$db = DbConnector::get_instance()->get_db_link();
 		$stmt = $db->prepare('SELECT jdp_direct_spool_id FROM jdp_direct_spool
@@ -184,7 +184,7 @@ class DirectSpoolDrain {
 					if ($sealed === '') {
 						continue;
 					}
-					$plain = $crypto->openBulkDelivery($sealed, $old_secret_key);
+					$plain = $crypto->openBulkDelivery($sealed, $old_key);
 					$old_file_id = self::replacePartBytes($part,
 						$crypto->sealBulkDelivery($plain, $new_public_key), $user_id);
 					unset($plain);
@@ -276,8 +276,8 @@ VaultDeferredWork::register(
 	function (int $user_id): bool {
 		return DirectSpoolDrain::hasWork($user_id);
 	},
-	function (int $user_id, string $secret_key, float $deadline): int {
-		return DirectSpoolDrain::drainForUser($user_id, $secret_key, DirectSpoolDrain::DEFAULT_MAX, $deadline);
+	function (int $user_id, VaultKey $key, float $deadline): int {
+		return DirectSpoolDrain::drainForUser($user_id, $key, DirectSpoolDrain::DEFAULT_MAX, $deadline);
 	}
 );
 
@@ -285,8 +285,8 @@ VaultDeferredWork::register(
 // Held deliveries carry parts sealed straight to the vault keypair being
 // rotated away; without this, retiring the old generation would orphan every
 // one of them — silently, since the spool bounces nothing and expires quietly.
-VaultUnlock::onReseal(function (int $user_id, string $old_secret_key, int $old_key_generation,
+VaultUnlock::onReseal(function (int $user_id, VaultKey $old_key, int $old_key_generation,
 		string $new_public_key, int $new_key_generation) {
-	DirectSpoolDrain::resealForUser($user_id, $old_secret_key, $old_key_generation,
+	DirectSpoolDrain::resealForUser($user_id, $old_key, $old_key_generation,
 		$new_public_key, $new_key_generation);
 });

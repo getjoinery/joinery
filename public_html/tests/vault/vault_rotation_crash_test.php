@@ -34,7 +34,7 @@ $consumer = new stdClass();
 $consumer->items = [];   // each: ['sealed_key','gen','blob','ad','plain']
 $consumer->calls = [];
 $consumer->armed = false;
-VaultUnlock::onReseal(function (int $uid, string $old_secret, int $old_gen, string $new_pub, int $new_gen) use ($consumer, $crypto) {
+VaultUnlock::onReseal(function (int $uid, VaultKey $old_secret, int $old_gen, string $new_pub, int $new_gen) use ($consumer, $crypto) {
 	$consumer->calls[] = ['old_gen' => $old_gen, 'new_gen' => $new_gen, 'new_pub' => $new_pub];
 	if ($consumer->armed) {
 		throw new RuntimeException('synthetic consumer failure');
@@ -59,7 +59,7 @@ $seal_item = function (string $plain, string $ad) use ($consumer, $crypto, $vaul
 		'plain'      => $plain,
 	];
 };
-$open_all_items = function (string $secret) use ($consumer, $crypto): int {
+$open_all_items = function (VaultKey $secret) use ($consumer, $crypto): int {
 	$readable = 0;
 	foreach ($consumer->items as $item) {
 		try {
@@ -69,12 +69,12 @@ $open_all_items = function (string $secret) use ($consumer, $crypto): int {
 	}
 	return $readable;
 };
-$secret_for_generation = function (int $gen) use ($box, $vault_id, $credential_id, $kek): ?string {
+$secret_for_generation = function (int $gen) use ($box, $vault_id, $credential_id, $kek): ?VaultKey {
 	foreach (vault_live_wrappings($vault_id) as $w) {
 		if ($w->get('uew_unlocker_type') !== UserEncryptionWrapping::TYPE_PASSKEY) { continue; }
 		if ((int)$w->get('uew_pkc_credential_id') !== $credential_id) { continue; }
 		if ((int)$w->get('uew_key_generation') !== $gen) { continue; }
-		return $box->unwrapKey($w->get('uew_wrapped_secret_key'), $kek, UserEncryptionWrapping::adFor($vault_id, (int)$w->key));
+		return VaultUnlock::openKey(0, $w->unlocker($kek))['key'];
 	}
 	return null;
 };
@@ -149,8 +149,8 @@ check($threw, 'the drained generation-2 codes are dead after completion');
 section('R4 orphan cleanup');
 // Fabricate the mirror-image crash artifact: a wrapping tagged newer than
 // the vault row (its keypair was never advertised).
-$orphan = UserEncryptionWrapping::createWrapped($vault_id, UserEncryptionWrapping::TYPE_PASSKEY,
-	$box->generateKeypair()['secret'], random_bytes(32), $credential_id, 'orphan', 9);
+$orphan = UserEncryptionWrapping::reserve($vault_id, UserEncryptionWrapping::TYPE_PASSKEY, $credential_id, 'orphan', 9);
+$orphan->storeWrapped(VaultUnlock::openKey(0, null, [$orphan->wrapEntry(random_bytes(32))])['wrappings'][0]);
 $r3 = $ceremonies->rotate($user, new UserEncryptionVault($vault_id, TRUE), $credential_id, 'label', $kek, '', false);
 check($r3['completed_pending'] === false && $r3['key_generation'] === 4, 'rotation proceeded normally past the orphan');
 $orphan_after = new UserEncryptionWrapping((int)$orphan->key, TRUE);

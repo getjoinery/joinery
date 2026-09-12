@@ -22,6 +22,10 @@
  * memory bounded by one chunk — for content too large to ever hold as a
  * string, such as the sealed mailbox search index.
  *
+ * @version 1.5 - unframeSeal() splits the `v1.seal.` text form from the raw
+ *                crypto_box_seal bytes, so a VaultKey (which opens raw bytes
+ *                only) can be handed a stored DEK; openDek() is that plus
+ *                openBinary()
  * @version 1.4 - openStreamFile's plaintext is 0600 from the byte it is created, not
  *                whatever the umask gives: the destination may be a shared tmpfs
  *                (specs/vault_exposure_quick_fixes.md Q1)
@@ -84,24 +88,24 @@ class SealedBox {
 	 * is the one thing it holds: the in-window secret.
 	 */
 	public function openDek(string $sealed, string $secret_key): string {
+		return $this->openBinary(self::unframeSeal($sealed), $secret_key);
+	}
+
+	/**
+	 * The raw crypto_box_seal bytes inside a sealDek() blob — the form a
+	 * VaultKey::unseal() takes. Throws on anything that is not a well-formed
+	 * `v1.seal.` blob; nothing is decrypted here.
+	 */
+	public static function unframeSeal(string $sealed): string {
 		$parts = explode('.', $sealed);
 		if (count($parts) !== 3 || $parts[0] !== 'v1' || $parts[1] !== 'seal') {
 			throw new RuntimeException('SealedBox: malformed sealed blob.');
 		}
 		$ciphertext = self::b64url_decode($parts[2]);
-		$secret_raw = self::b64url_decode($secret_key);
-		if ($ciphertext === false || $secret_raw === false || strlen($secret_raw) !== SODIUM_CRYPTO_BOX_SECRETKEYBYTES) {
+		if ($ciphertext === false) {
 			throw new RuntimeException('SealedBox: malformed sealed blob encoding.');
 		}
-
-		$public_raw = sodium_crypto_box_publickey_from_secretkey($secret_raw);
-		$keypair = sodium_crypto_box_keypair_from_secretkey_and_publickey($secret_raw, $public_raw);
-		$plain = sodium_crypto_box_seal_open($ciphertext, $keypair);
-		sodium_memzero($keypair);
-		if ($plain === false) {
-			throw new RuntimeException('SealedBox: unseal failed (tampered or wrong keypair).');
-		}
-		return $plain;
+		return $ciphertext;
 	}
 
 	/**

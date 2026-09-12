@@ -31,6 +31,7 @@
 
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
+require_once(__DIR__ . '/../lib/vault_fixtures.php');
 
 require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectProtocol.php'));
 require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectSettings.php'));
@@ -62,7 +63,7 @@ class DirectTestHandler implements DirectKindHandler {
 	public function ingest(DirectEnvelope $envelope, array $parts, bool $gate_accepted): void {
 		$bodies = array();
 		foreach ($parts as $part) {
-			$bodies[] = $part->open($envelope->vaultSecretKey());
+			$bodies[] = $part->open($envelope->vaultKey());
 		}
 		self::$ingested[] = array(
 			'sender' => $envelope->sender(),
@@ -525,7 +526,7 @@ if ($sealed_row !== null) {
 
 	// The drain: the gate runs now, against the list that has just become
 	// readable, and ingest gets the recipient's in-window secret.
-	DirectSpoolService::ingest($sealed_row, true, $RECIPIENT_VAULT['secret']);
+	DirectSpoolService::ingest($sealed_row, true, vault_fixture_key($RECIPIENT_VAULT['secret']));
 	check(count(DirectTestHandler::$ingested) === 1, 'the kind ingests once the recipient unlocks');
 	check(DirectTestHandler::$ingested[0]['bodies'][0] === $secret_text,
 		'and only then does the plaintext exist');
@@ -537,7 +538,7 @@ if ($sealed_row !== null) {
 // back to a sender who is long gone.
 DirectTestHandler::$ingested = array();
 if ($sealed_row !== null) {
-	DirectSpoolService::ingest($sealed_row, false, $RECIPIENT_VAULT['secret']);
+	DirectSpoolService::ingest($sealed_row, false, vault_fixture_key($RECIPIENT_VAULT['secret']));
 	check(count(DirectTestHandler::$ingested) === 1,
 		'a deferred decline still reaches ingest — the message is filed, not dropped');
 	check(DirectTestHandler::$ingested[0]['accepted'] === false,

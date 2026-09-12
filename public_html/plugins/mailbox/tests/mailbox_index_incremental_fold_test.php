@@ -33,6 +33,7 @@
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
+require_once(__DIR__ . '/../../../tests/lib/vault_fixtures.php');
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
@@ -139,13 +140,13 @@ check(MailboxIndex::hasBacklog($uid) === false,
 
 section('a fold cut off by its deadline reports the truth');
 
-$r = $idx->fold($uid, $kp['secret'], microtime(true) - 1);
+$r = $idx->fold($uid, vault_fixture_key($kp['secret']), microtime(true) - 1);
 check($r['complete'] === false, 'an already-passed deadline reports incomplete');
 check($r['remaining'] === 3 && $r['total'] === 3, 'and counts the whole backlog', json_encode($r));
 check($mark() === 0, 'the mark did not move past work that was not done');
 check(MailboxIndex::hasBacklog($uid) === true, 'hasBacklog now sees the owed fold');
 
-$r = $idx->fold($uid, $kp['secret']);
+$r = $idx->fold($uid, vault_fixture_key($kp['secret']));
 check($r['complete'] === true && $r['remaining'] === 0 && $r['total'] === 3,
 	'an unbounded fold completes and says so', json_encode($r));
 check($r['folded'] === 3, 'all three messages folded', 'folded=' . $r['folded']);
@@ -169,7 +170,7 @@ check($idx->search($uid, 'stalekw') === array($m1), 'fixture: stale postings mat
 // so a re-fold of a range the mark forgot replaces the row rather than
 // stacking a third copy on it.
 $set_mark(0); // as if an interrupted build never got its checkpoint
-$r = $idx->fold($uid, $kp['secret']);
+$r = $idx->fold($uid, vault_fixture_key($kp['secret']));
 check($r['complete'] === true, 'the re-fold completes');
 check($idx->search($uid, 'stalekw') === array(), 'the stale postings are gone');
 check($idx->search($uid, 'incfoldkwone') === array($m1), 'and m1 is still found by its real content');
@@ -183,14 +184,14 @@ $lock_path = MailboxIndex::SHM_DIR . '/mailfts_' . $uid . '.lock';
 $holder = fopen($lock_path, 'c');
 flock($holder, LOCK_EX);
 $m4 = $make_msg('Fourth', 'delta incfoldkwfour');
-$r = $idx->fold($uid, $kp['secret'], microtime(true) + 30);
+$r = $idx->fold($uid, vault_fixture_key($kp['secret']), microtime(true) + 30);
 check($r['folded'] === 0 && $r['complete'] === false && $r['remaining'] === 1,
 	'the locked-out fold did no work and reported the backlog', json_encode($r));
 check($idx->search($uid, 'incfoldkwone') === array($m1),
 	'search still answers from what is already indexed');
 flock($holder, LOCK_UN);
 fclose($holder);
-$r = $idx->fold($uid, $kp['secret']);
+$r = $idx->fold($uid, vault_fixture_key($kp['secret']));
 check($r['complete'] === true && $idx->search($uid, 'incfoldkwfour') === array($m4),
 	'with the lock released the fold catches up');
 
@@ -209,7 +210,7 @@ $m6 = $make_msg('Sixth', 'zeta incfoldkwsix');
 $set_mark($m6);
 $idx->wipe($uid);
 
-$r = $idx->fold($uid, $kp['secret']);
+$r = $idx->fold($uid, vault_fixture_key($kp['secret']));
 check($r['complete'] === true, 'the post-restore fold completes');
 check($idx->search($uid, 'incfoldkwfive') === array($m5) && $idx->search($uid, 'incfoldkwsix') === array($m6),
 	'the gap between blob-time and the stale mark was re-folded, not skipped');
@@ -222,7 +223,7 @@ SealedEgressGuard::reset();
 section('a pending-parse row folds as a no-op and refolds after parse');
 
 $m7 = $make_msg('Pending', 'eta incfoldkwseven', true);
-$r = $idx->fold($uid, $kp['secret']);
+$r = $idx->fold($uid, vault_fixture_key($kp['secret']));
 check($r['complete'] === true && $mark() === $m7, 'the mark advanced past the pending row');
 check($idx->search($uid, 'incfoldkwseven') === array(), 'its non-existent content was not indexed');
 
@@ -230,7 +231,7 @@ check($idx->search($uid, 'incfoldkwseven') === array(), 'its non-existent conten
 InboundEmailMessage::updateColumns($m7, array('iem_pending_parse' => false));
 MailboxIndex::enqueueRefold($alias_id, $m7);
 check(MailboxIndex::hasBacklog($uid) === true, 'the queued refold counts as owed work');
-$r = $idx->fold($uid, $kp['secret']);
+$r = $idx->fold($uid, vault_fixture_key($kp['secret']));
 check($idx->search($uid, 'incfoldkwseven') === array($m7), 'the parsed content entered the index');
 check(MailboxIndex::hasBacklog($uid) === false, 'and the queue drained');
 

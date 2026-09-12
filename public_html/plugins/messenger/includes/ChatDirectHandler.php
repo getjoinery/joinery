@@ -115,7 +115,7 @@ class ChatDirectHandler implements DirectKindHandler {
 		$attachments = array();
 		foreach ($parts as $part) {
 			if ($part->role() === DirectProtocol::ROLE_BODY_TEXT) {
-				$body = $part->open($envelope->vaultSecretKey());
+				$body = $part->open($envelope->vaultKey());
 			} elseif ($part->role() === DirectProtocol::ROLE_ATTACHMENT) {
 				$attachments[] = $part;
 			}
@@ -201,7 +201,7 @@ class ChatDirectHandler implements DirectKindHandler {
 			if ($part->role() !== DirectProtocol::ROLE_HEADERS) {
 				continue;
 			}
-			$decoded = json_decode($part->open($envelope->vaultSecretKey()), true);
+			$decoded = json_decode($part->open($envelope->vaultKey()), true);
 			return is_array($decoded) ? $decoded : null;
 		}
 		return null;
@@ -306,7 +306,7 @@ class ChatDirectHandler implements DirectKindHandler {
 		$out = array();
 		foreach ($parts as $part) {
 			try {
-				$bytes = $part->open($envelope->vaultSecretKey());
+				$bytes = $part->open($envelope->vaultKey());
 				$file = File::createFromBytes($bytes,
 					(string)($part->filename() ?: 'attachment'),
 					$part->contentType(), $owner_user_id, array(

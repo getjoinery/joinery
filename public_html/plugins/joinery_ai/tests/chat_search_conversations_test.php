@@ -237,7 +237,7 @@ section('Surfaced protected path (local + vault open)');
 if (!vault_apcu_usable() || !$has_session || session_id() === '') {
     harness_skip('APCu/session unavailable (run with -d apc.enable_cli=1) — surfaced protected path skipped');
 } else {
-    VaultUnlock::open($uidA, $kp['secret'], UserEncryptionVault::SCOPE_USER);
+    vault_fixture_open_window($uidA, $kp['secret'], UserEncryptionVault::SCOPE_USER);
 
     // Seam, surfaced: the protected chat is decrypted and returned.
     $sr = MultiAiConversation::searchForTool($uidA, 'quarterly bonus', 10, true);

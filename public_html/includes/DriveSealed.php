@@ -79,8 +79,8 @@ class DriveSealed {
 		if ($owner_id <= 0) {
 			throw new VaultLockedException();
 		}
-		$secret = VaultUnlock::secretKey($owner_id);
-		if ($secret === null) {
+		$key = VaultUnlock::secretKey($owner_id);
+		if ($key === null) {
 			throw new VaultLockedException();
 		}
 
@@ -88,7 +88,7 @@ class DriveSealed {
 		SealedEgressGuard::markHot('fil:' . (int)$file->key . ':content');
 
 		$crypto = new VaultCrypto();
-		return $crypto->openItemDek($sealed_key, $secret);
+		return $crypto->openItemDek($sealed_key, $key);
 	}
 
 	/**
@@ -759,11 +759,11 @@ class DriveSealedStream implements FileStreamingDecryptor {
 
 // --- Rotation re-seal callback (docs/sealed_vault.md § Key rotation) --------
 // Re-wraps the per-file keys of EXACTLY the generation being drained — the only
-// one $old_secret_key can open. The container bytes are untouched: rotation
+// one $old_key can open. The container bytes are untouched: rotation
 // changes who can unwrap the key, never the key itself. Every file is attempted
 // and any failure throws, so the ceremony cannot retire the old wrappings while
 // a file still depends on them.
-VaultUnlock::onReseal(function (int $user_id, string $old_secret_key, int $old_key_generation,
+VaultUnlock::onReseal(function (int $user_id, VaultKey $old_key, int $old_key_generation,
 		string $new_public_key, int $new_key_generation) {
 	$db = DbConnector::get_instance()->get_db_link();
 	$crypto = new VaultCrypto();
@@ -783,7 +783,7 @@ VaultUnlock::onReseal(function (int $user_id, string $old_secret_key, int $old_k
 			if ($sealed === '') {
 				continue;
 			}
-			$fk = $crypto->openItemDek($sealed, $old_secret_key);
+			$fk = $crypto->openItemDek($sealed, $old_key);
 			$upd = $db->prepare(
 				'UPDATE fil_files SET fil_sealed_key = ?, fil_key_generation = ? WHERE fil_file_id = ?');
 			$upd->execute(array($crypto->sealItemDek($fk, $new_public_key), $new_key_generation, $id));

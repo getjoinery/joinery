@@ -94,7 +94,9 @@ check(count($clamped['recovery_codes']) === 20, 'code_count caps at 20');
 
 section('Passphrase unlock');
 $secret = $ceremonies->unlockWithPassphrase($fx['user'], $fx['vault'], 'a sufficiently long passphrase');
-check($recovered !== null && $secret === $recovered, 'passphrase unwraps the same secret the key file reconstructed');
+check($recovered !== null && $secret instanceof VaultKey && $secret->id() === vault_fixture_key($recovered)->id(),
+	'passphrase opens the same key the key file reconstructed, as a VaultKey');
+check($secret->publicKey() === $kf['public_key'], 'the opened key advertises the vault\'s public half');
 $threw = false;
 try { $ceremonies->unlockWithPassphrase($fx['user'], $fx['vault'], 'the wrong passphrase entirely'); } catch (VaultCeremonyException $e) { $threw = true; }
 check($threw, 'a wrong passphrase is refused');
@@ -108,7 +110,7 @@ $old_salt = (string)$vault->get('uev_salt');
 $vault->set('uev_salt', $box->generateSalt());
 $vault->save();
 $secret2 = $ceremonies->unlockWithPassphrase($fx['user'], new UserEncryptionVault((int)$vault->key, TRUE), 'a sufficiently long passphrase');
-check($secret2 === $secret, 'passphrase unlock survives a uev_salt change (per-wrapping salt)');
+check($secret2->id() === $secret->id(), 'passphrase unlock survives a uev_salt change (per-wrapping salt)');
 $vault->set('uev_salt', $old_salt);
 $vault->save();
 
@@ -158,6 +160,73 @@ $threw = false;
 try { $ceremonies->unlockWithRecoveryCode($fx['user'], $clamped['vault'], $fx['recovery_codes'][2], false); }
 catch (VaultCeremonyException $e) { $threw = ($e->getMessage() === 'Vault does not belong to this user.'); }
 check($threw, 'recovery unlock refuses a foreign vault (ownership)');
+
+section('Enrolment presents a fresh unlocker (openWithUnlocker, spec B1)');
+// A wrapping is produced only in the request that presented a real unlocker:
+// a fresh vault, then a new bypass phrase enrolled under a recovery code, then
+// fresh codes under the phrase — each an open with the new rows in its wrap
+// list, and the window that results is the session's.
+if (!$apcu) {
+	harness_skip('APCu unavailable', 'openWithUnlocker arms a window; run with -d apc.enable_cli=1');
+} else {
+	$ex = vault_fixture_vault('CerEnrol', '', 5);
+	$euser = $ex['user'];
+	$evault = $ex['vault'];
+	$euid = (int)$euser->key;
+	$esalt = (string)$evault->get('uev_salt');
+
+	// 1. Enrol a phrase, confirming with recovery code 0.
+	$phrase_row = UserEncryptionWrapping::reserve((int)$evault->key, UserEncryptionWrapping::TYPE_PASSPHRASE, null, null, 1, $esalt);
+	$opened = $ceremonies->openWithUnlocker($euser, $evault, ['code' => $ex['recovery_codes'][0]],
+		[$phrase_row->wrapEntry($box->kekFromPassphrase('a brand new bypass phrase', $esalt))]);
+	$phrase_row->storeWrapped($opened['wrappings'][0]);
+	check($opened['key'] instanceof VaultKey && $opened['key']->publicKey() === (string)$evault->get('uev_public_key'),
+		'the open under a recovery code yields the vault key');
+	check(VaultUnlock::isOpen($euid), 'and the window that results is this session\'s');
+	$consumed = 0;
+	foreach (vault_live_wrappings((int)$evault->key) as $w) {
+		if ($w->get('uew_unlocker_type') === UserEncryptionWrapping::TYPE_RECOVERY && $w->get('uew_is_used')) { $consumed++; }
+	}
+	check($consumed === 1, 'the code that confirmed the enrolment is used up');
+	$via_phrase = $ceremonies->unlockWithPassphrase($euser, new UserEncryptionVault((int)$evault->key, TRUE), 'a brand new bypass phrase');
+	check($via_phrase->id() === $opened['key']->id(), 'the enrolled phrase opens the same key');
+
+	// 2. The same code again is refused, and so is a wrong phrase.
+	$threw = false;
+	try { $ceremonies->openWithUnlocker($euser, $evault, ['code' => $ex['recovery_codes'][0]], []); }
+	catch (VaultCeremonyException $e) { $threw = true; }
+	check($threw, 'a used recovery code cannot confirm an enrolment');
+	$threw = false;
+	try { $ceremonies->openWithUnlocker($euser, $evault, ['passphrase' => 'not the phrase at all'], []); }
+	catch (VaultCeremonyException $e) { $threw = true; }
+	check($threw, 'a wrong bypass phrase cannot confirm an enrolment');
+	$threw = false;
+	try { $ceremonies->openWithUnlocker($euser, $evault, null, []); }
+	catch (VaultCeremonyException $e) { $threw = true; }
+	check($threw, 'no unlocker at all is refused');
+	$threw = false;
+	try { $ceremonies->openWithUnlocker($euser, $clamped['vault'], ['passphrase' => 'a brand new bypass phrase'], []); }
+	catch (VaultCeremonyException $e) { $threw = ($e->getMessage() === 'Vault does not belong to this user.'); }
+	check($threw, 'a foreign vault is refused before any unlocker is tried');
+
+	// 3. Fresh codes under the phrase: a batch of wrappings from one open.
+	$rows = [];
+	$wrap_under = [];
+	$new_codes = [];
+	for ($i = 0; $i < 3; $i++) {
+		$code = $box->generateRecoveryCode();
+		$new_codes[] = $code;
+		$row = UserEncryptionWrapping::reserve((int)$evault->key, UserEncryptionWrapping::TYPE_RECOVERY, null, null, 1, $esalt);
+		$rows[] = $row;
+		$wrap_under[] = $row->wrapEntry($box->kekFromRecoveryCode($code, $esalt));
+	}
+	$opened = $ceremonies->openWithUnlocker($euser, $evault, ['passphrase' => 'a brand new bypass phrase'], $wrap_under);
+	check(count($opened['wrappings']) === 3, 'three wrap entries, three wrappings back');
+	UserEncryptionWrapping::storeWrappings($rows, $opened['wrappings']);
+	$res = $ceremonies->unlockWithRecoveryCode($euser, new UserEncryptionVault((int)$evault->key, TRUE), $new_codes[1], false);
+	check(is_array($res), 'a code from the new set unlocks');
+	VaultUnlock::lockAll($euid);
+}
 
 harness_finish();
 ?>

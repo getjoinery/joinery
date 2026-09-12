@@ -232,14 +232,14 @@ class DirectSigningIdentity {
 		$sealed = (string)$identity->get('jdi_sealed_secret_key');
 		if ($sealed !== '') {
 			$owner_id = intval($identity->get('jdi_owner_usr_user_id'));
-			$vault_secret = ($owner_id > 0) ? VaultUnlock::secretKey($owner_id) : null;
-			if ($vault_secret === null) {
+			$vault_key = ($owner_id > 0) ? VaultUnlock::secretKey($owner_id) : null;
+			if ($vault_key === null) {
 				// Locked. The compose path turns this into a one-tap unlock prompt;
 				// an ambient send falls back rather than signing in nobody's name.
 				throw new VaultLockedException();
 			}
 			$crypto = new VaultCrypto();
-			return $crypto->openItemDek($sealed, $vault_secret);
+			return $crypto->openItemDek($sealed, $vault_key);
 		}
 
 		$stored = (string)$identity->get('jdi_secret_key');

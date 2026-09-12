@@ -153,15 +153,15 @@ class MailboxIndex {
 	 * when there is none (first search) or it fails to open (corrupt/missing
 	 * — the disposable-cache contract).
 	 */
-	public function ensureOpen(int $user_id, string $secret_key, ?float $deadline = null): void {
+	public function ensureOpen(int $user_id, VaultKey $key, ?float $deadline = null): void {
 		$path = $this->shmPath($user_id);
 		if (file_exists($path) && $this->tryOpenDb($path) !== null) {
 			return;
 		}
-		if ($this->restoreFromBlob($user_id, $secret_key)) {
+		if ($this->restoreFromBlob($user_id, $key)) {
 			return;
 		}
-		$this->rebuild($user_id, $secret_key, $deadline);
+		$this->rebuild($user_id, $deadline);
 	}
 
 	/**
@@ -179,13 +179,13 @@ class MailboxIndex {
 	 *         queued refolds), so a fold cut short by the deadline, a lost
 	 *         lock race, or an aborted write all report the truth.
 	 */
-	public function fold(int $user_id, string $secret_key, ?float $deadline = null): array {
+	public function fold(int $user_id, VaultKey $key, ?float $deadline = null): array {
 		$lock = $this->acquireFoldLock($user_id);
 		if ($lock === null) {
 			return $this->foldStatus($user_id, 0);
 		}
 		try {
-			$this->ensureOpen($user_id, $secret_key, $deadline);
+			$this->ensureOpen($user_id, $key, $deadline);
 			$bookkeeping = InboundMailboxSearchIndex::loadOrCreateForUser($user_id);
 			$r = $this->foldSince($user_id, intval($bookkeeping->get('imi_fts_high_water')), $deadline);
 
@@ -204,7 +204,7 @@ class MailboxIndex {
 			$persist_ok = true;
 			if ($no_blob || ($r['written']
 					&& ($r['complete'] || $r['refolded'] > 0 || $advance >= self::PERSIST_MIN_ADVANCE))) {
-				$persist_ok = $this->persist($user_id, $secret_key);
+				$persist_ok = $this->persist($user_id);
 			}
 
 			// Refolds leave the queue only once their result is safe against a
@@ -251,7 +251,7 @@ class MailboxIndex {
 	 * reset mark and folds like any other row. A deadline may leave the rebuild
 	 * partial; the checkpointed mark makes any later fold() continue it.
 	 */
-	public function rebuild(int $user_id, string $secret_key, ?float $deadline = null): void {
+	public function rebuild(int $user_id, ?float $deadline = null): void {
 		$path = $this->shmPath($user_id);
 		@unlink($path);
 		if (!is_dir(self::SHM_DIR)) {
@@ -270,7 +270,7 @@ class MailboxIndex {
 		$bookkeeping->save();
 
 		$this->foldSince($user_id, 0, $deadline);
-		$this->persist($user_id, $secret_key);
+		$this->persist($user_id);
 	}
 
 	/** Delete only the /dev/shm working copy — window-close, the sweep task. */
@@ -402,7 +402,7 @@ class MailboxIndex {
 	 * caller rebuilds from the sealed message rows and the next persist writes
 	 * stream-format.
 	 */
-	private function restoreFromBlob(int $user_id, string $secret_key): bool {
+	private function restoreFromBlob(int $user_id, VaultKey $key): bool {
 		$bookkeeping = InboundMailboxSearchIndex::loadOrCreateForUser($user_id);
 		$fil_id = intval($bookkeeping->get('imi_fil_file_id'));
 		$sealed_key = $bookkeeping->get('imi_sealed_key');
@@ -427,7 +427,7 @@ class MailboxIndex {
 		}
 		try {
 			$crypto = new VaultCrypto();
-			$dek = $crypto->openItemDek((string)$sealed_key, $secret_key);
+			$dek = $crypto->openItemDek((string)$sealed_key, $key);
 			$crypto->openFieldFile($src, $this->shmPath($user_id), $dek, $this->blobAd($user_id));
 			// Before the first open: SQLite's -journal/-wal inherit this mode.
 			self::makePrivate($this->shmPath($user_id));
@@ -469,9 +469,9 @@ class MailboxIndex {
 	 *              processed refolds queued until a persist has carried them,
 	 *              so a restore of the old blob cannot revive a stale entry.
 	 */
-	private function persist(int $user_id, string $secret_key): bool {
+	private function persist(int $user_id): bool {
 		try {
-			$this->persistOrThrow($user_id, $secret_key);
+			$this->persistOrThrow($user_id);
 			return true;
 		} catch (Throwable $e) {
 			error_log('MailboxIndex: persist failed for user ' . $user_id
@@ -480,7 +480,7 @@ class MailboxIndex {
 		}
 	}
 
-	private function persistOrThrow(int $user_id, string $secret_key): void {
+	private function persistOrThrow(int $user_id): void {
 		$path = $this->shmPath($user_id);
 		if (!file_exists($path)) {
 			return;

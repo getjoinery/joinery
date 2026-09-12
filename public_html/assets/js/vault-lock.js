@@ -26,7 +26,12 @@
  * success (alerting on failure), JoineryVaultLock.lock() ends the window —
  * both keep the chip and events in sync, so page code should always go
  * through them rather than calling the vault actions directly.
+ * JoineryVaultLock.collectUnlocker(purpose) gathers the fresh unlocker every
+ * enrolment must present in its own request (adding a passkey, a bypass
+ * phrase, new recovery codes): a wrapping is produced only in the request
+ * that proved it may be (specs/unseal_daemon.md B1).
  *
+ * @version 1.2 - collectUnlocker(): the shared "confirm it's you" step for enrolments
  * @version 1.1
  */
 (function () {
@@ -82,6 +87,58 @@
 			busy = false;
 			if (chip) { chip.classList.remove('jy-vault-lock--busy'); }
 		}
+	}
+
+	// A fresh unlocker for an enrolment. Resolves {credential} (a vault-kek
+	// assertion from a passkey that already unlocks the vault), {passphrase}
+	// or {code}, which the caller sends as `unlocker` beside its own request —
+	// or null when the person backed out of the prompt. `purpose` reads in the
+	// prompts: "to let this passkey open your vault". Which methods are
+	// offered follows what the vault actually has enrolled; with exactly one
+	// there is nothing to choose and the prompt for it opens directly.
+	async function collectUnlocker(purpose) {
+		if (!window.JoineryModal) { throw new Error('Confirming is unavailable on this page.'); }
+		var status = await api('vault_status', {});
+		if (!status || !status.set_up) { throw new Error('Set up your vault first.'); }
+		var choices = [];
+		if (status.passkey_wrapping_count > 0 && window.JoineryPasskeys) { choices.push('passkey'); }
+		if (status.has_passphrase) { choices.push('passphrase'); }
+		if (status.unused_recovery_code_count > 0) { choices.push('code'); }
+		if (!choices.length) {
+			throw new Error('Nothing can confirm this: your vault has no working passkey, bypass phrase or recovery code.');
+		}
+		var method = choices.length === 1 ? choices[0] : await chooseUnlocker(purpose, choices);
+		if (!method) { return null; }
+		if (method === 'passkey') {
+			var opt = await api('vault_unlock_options', {});
+			if (!opt || !opt.options) { throw new Error('Could not start the passkey prompt.'); }
+			var credential = (await JoineryPasskeys.derive(opt.options)).response;
+			return { credential: credential };
+		}
+		if (method === 'passphrase') {
+			var phrase = await JoineryModal.promptAsync('Enter your bypass phrase ' + purpose + ':',
+				{ inputType: 'password', confirmLabel: 'Continue', confirmStyle: 'primary' });
+			return phrase ? { passphrase: phrase } : null;
+		}
+		var code = await JoineryModal.promptAsync('Enter a recovery code ' + purpose + '. The code is used up by this:',
+			{ confirmLabel: 'Continue', confirmStyle: 'primary' });
+		return code ? { code: code } : null;
+	}
+
+	// One button per method the vault has; resolves the method picked, or null.
+	function chooseUnlocker(purpose, choices) {
+		return new Promise(function (resolve) {
+			var labels = { passkey: 'Use a passkey', passphrase: 'Use my bypass phrase', code: 'Use a recovery code' };
+			var picked = null;
+			var buttons = choices.map(function (c) {
+				return { label: labels[c], style: c === 'passkey' ? 'primary' : 'secondary', onClick: function () { picked = c; } };
+			});
+			buttons.push({ label: 'Cancel', style: 'secondary' });
+			var text = document.createElement('p');
+			text.textContent = 'Confirm it’s you ' + purpose + '.';
+			var handle = JoineryModal.open(text, { buttons: buttons });
+			handle.dialog.addEventListener('close', function () { resolve(picked); }, { once: true });
+		});
 	}
 
 	// End the unlock window for this session and announce it.
@@ -181,6 +238,7 @@
 	window.JoineryVaultLock = {
 		unlock: unlock,
 		lock: lock,
+		collectUnlocker: collectUnlocker,
 		state: function () { return state; }
 	};
 

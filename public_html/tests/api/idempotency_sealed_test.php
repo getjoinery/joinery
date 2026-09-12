@@ -138,7 +138,7 @@ try {
 	// =====================================================================
 	section('replay inside the owner window returns it; outside, it is not retained');
 
-	VaultUnlock::open($owner_id, $secret, UserEncryptionVault::SCOPE_USER,
+	vault_fixture_open_window($owner_id, $secret, UserEncryptionVault::SCOPE_USER,
 		array('idle' => null, 'absolute' => null));
 	$replayed = IdempotencySealedTestEndpoint::replayBody(new ApiIdempotencyKey((int)$hot_row->key, TRUE));
 	check($replayed === $hot_body, 'an in-window replay decrypts and returns the original body');
@@ -162,7 +162,7 @@ try {
 	$stored = ids_stored((int)$multi_row->key);
 	check((int)$stored['aik_response_status'] === 201, 'the status is still stored');
 	check($stored['aik_response_body'] === null, 'but no body is — it belongs to no single person');
-	VaultUnlock::open($owner_id, $secret, UserEncryptionVault::SCOPE_USER,
+	vault_fixture_open_window($owner_id, $secret, UserEncryptionVault::SCOPE_USER,
 		array('idle' => null, 'absolute' => null));
 	check(IdempotencySealedTestEndpoint::replayBody(new ApiIdempotencyKey((int)$multi_row->key, TRUE)) === null,
 		'and even an open window cannot conjure one back');

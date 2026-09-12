@@ -31,6 +31,7 @@
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
+require_once(__DIR__ . '/../../../tests/lib/vault_fixtures.php');
 
 require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
 if (!PluginHelper::isPluginActive('mailbox')) {
@@ -192,7 +193,7 @@ try {
 }
 check($threw, 'no window and no grant: the self-sealed shape is locked (the 423 path)');
 
-$fk = $crypto->openItemDek((string)$sealed_file->get('fil_sealed_key'), $kp['secret']);
+$fk = $crypto->openItemDek((string)$sealed_file->get('fil_sealed_key'), vault_fixture_key($kp['secret']));
 $tok = FileServeGrant::mint((int)$sealed_file->key, 'original', FileServeGrant::SHAPE_FILE_KEY, $fk, 60);
 check(FileServeGrant::redeemAndActivate((int)$sealed_file->key, 'original', $tok), 'the file-key grant redeems');
 // isolate(): opening sealed content arms the hot-turn rule, and this test
@@ -359,7 +360,7 @@ $db->exec("UPDATE ima_inbound_message_attachments SET ima_content_type = 'image/
 	WHERE ima_inbound_message_attachment_id IN ($att_raw, $att_gone)");
 
 check(InlineImageBackfill::hasWork($uid), 'hasWork sees the reference-backed inline images');
-$done = InlineImageBackfill::drainForUser($uid, '');
+$done = InlineImageBackfill::drainForUser($uid, vault_fixture_dummy_key());
 check($done === 1, 'exactly the resolvable part adopted (got ' . $done . ')');
 
 $stmt = $db->prepare('SELECT ima_fil_file_id FROM ima_inbound_message_attachments WHERE ima_inbound_message_attachment_id = ?');

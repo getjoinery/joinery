@@ -31,9 +31,14 @@
  * available to hash and seal. Sealing follows the USER within that posture, not the mailbox:
  * two grantees sharing one sealed mailbox each build their own contacts, each readable only by
  * them. The address hash is a keyed blind index for sealed rows (never leaks the sealed
- * address) and a plain SHA-256 otherwise.
+ * address) and a plain SHA-256 otherwise; the key is the user's own random index key,
+ * sealed to their vault (MailboxContactIndexKey) and opened in-window like any row DEK, so
+ * a vault rotation moves its wrapping and every hash survives.
  *
- * @version 2.3
+ * @version 2.4
+ * @changelog 2.4 - the blind index is keyed by the user's sealed index key
+ *   (MailboxContactIndexKey), opened through the VaultKey; nothing here ever
+ *   holds the vault secret
  * @changelog 2.3 - the posture question follows the MAILBOX, and an unreadable
  *   one fails toward sealed rather than toward plaintext
  * @changelog 2.2 - listForUser(): the user's whole contact store for surfaces not scoped to one mailbox (Messenger people picker)
@@ -42,6 +47,7 @@
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_contacts_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_contact_index_keys_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 
@@ -101,22 +107,39 @@ class MailboxContacts {
 
 	/**
 	 * The dedup digest for a normalized address ON ONE MAILBOX. For a vault holder it is
-	 * a keyed HMAC (blind index) under a subkey derived from the in-window vault secret,
-	 * so DB access alone can't recover the sealed address; for a user with no vault it is
-	 * a plain SHA-256 (the address column is plaintext anyway).
+	 * a keyed HMAC (blind index) under the user's index key (indexKey()), so DB access
+	 * alone can't recover the sealed address; for a user with no vault it is a plain
+	 * SHA-256 (the address column is plaintext anyway).
 	 *
 	 * The mailbox is hashed alongside the address so that the same address on two
 	 * mailboxes digests differently — which is what lets the (hash, user) unique
 	 * constraint enforce one row per (user, mailbox, address) without a composite key
 	 * over an encrypted column.
 	 */
-	public function addressHash(string $normalized, ?string $secret, int $alias_id): string {
+	public function addressHash(string $normalized, ?string $index_key, int $alias_id): string {
 		$material = $alias_id . ':' . $normalized;
-		if ($secret !== null) {
-			$subkey = hash_hmac('sha256', 'joinery:contact-index:v1', $secret, true);
-			return hash_hmac('sha256', $material, $subkey); // 64 hex chars
+		if ($index_key !== null) {
+			return hash_hmac('sha256', $material, $index_key); // 64 hex chars
 		}
 		return hash('sha256', 'joinery:contact:' . $material);
+	}
+
+	/**
+	 * The user's contact-index key for a sealed store, or null when the store is
+	 * plaintext ($vault null). Needs the window: returns false when it is closed,
+	 * which every caller reports as locked rather than absent.
+	 *
+	 * @return array{index_key: ?string, key: ?VaultKey}|false
+	 */
+	private function indexKey(int $user_id, ?UserEncryptionVault $vault) {
+		if ($vault === null) {
+			return array('index_key' => null, 'key' => null);
+		}
+		$key = VaultUnlock::secretKey($user_id);
+		if ($key === null) {
+			return false;
+		}
+		return array('index_key' => MailboxContactIndexKey::openForUser($user_id, $vault, $key), 'key' => $key);
 	}
 
 	/**
@@ -168,11 +191,11 @@ class MailboxContacts {
 		}
 		try {
 			$vault = $this->sealingVault($user_id, $alias_id);
-			$secret = ($vault !== null) ? VaultUnlock::secretKey($user_id) : null;
 			// A sealed mailbox whose window is closed: can't compute the keyed hash or
 			// read for dedup, so there is nowhere to put the address. The caller
 			// surfaces this as a failed add rather than silently dropping it.
-			if ($vault !== null && $secret === null) {
+			$keys = $this->indexKey($user_id, $vault);
+			if ($keys === false) {
 				return;
 			}
 
@@ -187,18 +210,18 @@ class MailboxContacts {
 					continue; // one bump per address per batch
 				}
 				$seen[$addr] = true;
-				$this->upsertOne($user_id, $addr, $name, $source, $vault, $secret, $alias_id);
+				$this->upsertOne($user_id, $addr, $name, $source, $vault, $keys['index_key'], $alias_id);
 			}
 		} catch (\Throwable $e) {
 			error_log('MailboxContacts::upsertBatch failed for user ' . $user_id . ': ' . $e->getMessage());
 		}
 	}
 
-	private function upsertOne(int $user_id, string $addr, string $name, string $source, ?UserEncryptionVault $vault, ?string $secret, int $alias_id): void {
-		$hash = $this->addressHash($addr, $secret, $alias_id);
+	private function upsertOne(int $user_id, string $addr, string $name, string $source, ?UserEncryptionVault $vault, ?string $index_key, int $alias_id): void {
+		$hash = $this->addressHash($addr, $index_key, $alias_id);
 		$db = $this->db();
 
-		$existing = $this->findRow($user_id, $addr, $secret, $alias_id);
+		$existing = $this->findRow($user_id, $addr, $index_key, $alias_id);
 		if ($existing !== null) {
 			$bump = $db->prepare('UPDATE imc_mailbox_contacts
 				SET imc_use_count = imc_use_count + 1, imc_last_used_time = now()
@@ -237,7 +260,7 @@ class MailboxContacts {
 	/**
 	 * Is $address in a mailbox's SHARED, unencrypted address book — an entry any
 	 * grantee added? For a shared mailbox with no single vault the contacts are
-	 * plaintext, so their digest is the unkeyed form (secret null) and the match is
+	 * plaintext, so their digest is the unkeyed form (index key null) and the match is
 	 * across grantees rather than scoped to one user. Sealed per-grantee contacts
 	 * are deliberately not visible here — they need that grantee's unlock — but a
 	 * shared/group mailbox's book is plaintext by nature, which is the case this
@@ -261,10 +284,10 @@ class MailboxContacts {
 	}
 
 	/** The row for one normalized address on one mailbox, or null when there is none. */
-	private function findRow(int $user_id, string $normalized, ?string $secret, int $alias_id): ?array {
+	private function findRow(int $user_id, string $normalized, ?string $index_key, int $alias_id): ?array {
 		$stmt = $this->db()->prepare('SELECT * FROM imc_mailbox_contacts
 			WHERE imc_usr_user_id = ? AND imc_address_hash = ? LIMIT 1');
-		$stmt->execute(array($user_id, $this->addressHash($normalized, $secret, $alias_id)));
+		$stmt->execute(array($user_id, $this->addressHash($normalized, $index_key, $alias_id)));
 		$row = $stmt->fetch(PDO::FETCH_ASSOC);
 		return $row ? $row : null;
 	}
@@ -288,11 +311,11 @@ class MailboxContacts {
 		}
 		try {
 			$vault = $this->sealingVault($user_id, $alias_id);
-			$secret = ($vault !== null) ? VaultUnlock::secretKey($user_id) : null;
-			if ($vault !== null && $secret === null) {
+			$keys = $this->indexKey($user_id, $vault);
+			if ($keys === false) {
 				return array('locked' => true);
 			}
-			$row = $this->findRow($user_id, $parsed[0], $secret, $alias_id);
+			$row = $this->findRow($user_id, $parsed[0], $keys['index_key'], $alias_id);
 			if ($row === null) {
 				return null;
 			}
@@ -311,9 +334,9 @@ class MailboxContacts {
 	// ── list ─────────────────────────────────────────────────────────────────
 
 	/**
-	 * The user's contacts ON ONE MAILBOX, decrypted, de-duplicated by address (a rotation
-	 * can leave two rows for one address — keep the most-used), ranked use_count desc then
-	 * recency. Returns ['contacts'=>[{id,address,name,use_count,source}], 'locked'=>bool].
+	 * The user's contacts ON ONE MAILBOX, decrypted, de-duplicated by address (a row hashed
+	 * before the user's index key existed can sit beside its re-add — keep the most-used),
+	 * ranked use_count desc then recency. Returns ['contacts'=>[{id,address,name,use_count,source}], 'locked'=>bool].
 	 * A vault holder with a closed window returns ['locked'=>true] and no contacts.
 	 */
 	public function listForMailbox(int $user_id, int $alias_id): array {
@@ -476,11 +499,11 @@ class MailboxContacts {
 	private function markSaved(int $user_id, string $normalized, string $name, int $alias_id): bool {
 		try {
 			$vault = $this->sealingVault($user_id, $alias_id);
-			$secret = ($vault !== null) ? VaultUnlock::secretKey($user_id) : null;
-			if ($vault !== null && $secret === null) {
+			$keys = $this->indexKey($user_id, $vault);
+			if ($keys === false) {
 				return false;
 			}
-			$row = $this->findRow($user_id, $normalized, $secret, $alias_id);
+			$row = $this->findRow($user_id, $normalized, $keys['index_key'], $alias_id);
 			if ($row === null) {
 				return false;
 			}
@@ -491,7 +514,7 @@ class MailboxContacts {
 			if ($name !== '') {
 				$stored = (string)MailboxContact::decryptSealedFieldStatic('imc_display_name', $row['imc_display_name'], $row);
 				if (trim($stored) === '') {
-					$this->setDisplayName($row, $name, $secret);
+					$this->setDisplayName($row, $name, $keys['key']);
 				}
 			}
 			return true;
@@ -502,20 +525,20 @@ class MailboxContacts {
 	}
 
 	/** Write a display name onto an existing row, re-sealing under that row's own DEK. */
-	private function setDisplayName(array $row, string $name, ?string $secret): void {
+	private function setDisplayName(array $row, string $name, ?VaultKey $key): void {
 		$id = intval($row['imc_mailbox_contact_id']);
 		if (!empty($row['imc_content_sealed']) && !empty($row['imc_sealed_key'])) {
-			// $secret is the row owner's only when the row was sealed to their own vault
+			// $key is the row owner's only when the row was sealed to their own vault
 			// (always so in practice) — otherwise leave the stored name alone.
 			$sealed_owner = intval($row['imc_sealed_owner_user_id'] ?? 0);
-			if ($secret === null || $sealed_owner !== intval($row['imc_usr_user_id'])) {
+			if ($key === null || $sealed_owner !== intval($row['imc_usr_user_id'])) {
 				return;
 			}
 			require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
 			$crypto = new VaultCrypto();
 			// Re-seal under the row's OWN DEK, so the address sealed beside it stays
 			// readable; a reused DEK needs no vault (the wrapping is already written).
-			$dek = $crypto->openItemDek((string)$row['imc_sealed_key'], $secret);
+			$dek = $crypto->openItemDek((string)$row['imc_sealed_key'], $key);
 			MailboxContact::sealColumns($id, null, array('imc_display_name' => $name), $dek);
 			return;
 		}

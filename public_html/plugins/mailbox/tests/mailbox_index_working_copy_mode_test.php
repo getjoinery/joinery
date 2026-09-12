@@ -22,6 +22,7 @@
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
+require_once(__DIR__ . '/../../../tests/lib/vault_fixtures.php');
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
@@ -106,7 +107,7 @@ $idx->wipe($uid);
 
 section('rebuild() creates the working copy 0600');
 
-$idx->fold($uid, $kp['secret']);   // no blob yet: ensureOpen() rebuilds
+$idx->fold($uid, vault_fixture_key($kp['secret']));   // no blob yet: ensureOpen() rebuilds
 $fil_1 = $blob_file_id();
 harness_register_model('File', $fil_1);
 check($fil_1 > 0, 'the first fold rebuilt and persisted (no blob existed)', 'fil=' . $fil_1);
@@ -119,7 +120,7 @@ section('restoreFromBlob() leaves the working copy 0600');
 
 $idx->wipe($uid);
 check(!is_file($path), 'the working copy is gone');
-$idx->fold($uid, $kp['secret']);   // blob exists: ensureOpen() restores
+$idx->fold($uid, vault_fixture_key($kp['secret']));   // blob exists: ensureOpen() restores
 check($blob_file_id() === $fil_1, 'the blob id held, so this copy came from a restore, not a rebuild', 'fil=' . $blob_file_id());
 check($idx->search($uid, 'shmmodekw') === array($mid), 'the restored copy searches');
 check($mode_of($path) === '0600', 'the restored working copy is 0600 ', $mode_of($path));

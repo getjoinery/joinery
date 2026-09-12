@@ -25,6 +25,7 @@
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
+require_once(__DIR__ . '/../../../tests/lib/vault_fixtures.php');
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/DeliverabilityReportIngest.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/deliverability_report_class.php'));
@@ -250,7 +251,7 @@ $pending_id = intval($result['message']->key);
 harness_register_model('InboundEmailMessage', $pending_id);
 
 $msg = new InboundEmailMessage($pending_id, TRUE);
-$done = $router->parsePendingMessage($msg, $kp['secret']);
+$done = $router->parsePendingMessage($msg, vault_fixture_key($kp['secret']));
 check($done === true, 'deferred parse reports the row handled');
 
 $freports = dvi_register_reports($db, intval($fdom->key));

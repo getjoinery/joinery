@@ -21,7 +21,8 @@ if (!vault_ensure_session()) {
 $user   = make_user('VaultAudit');
 $uid    = (int)$user->key;
 $sid    = session_id();
-$secret = random_bytes(32);
+$secret = (new SealedBox())->generateKeypair()['secret'];
+
 $scope  = 'user';
 harness_defer(function () use ($uid) { VaultUnlock::lockAll($uid); });
 
@@ -44,7 +45,7 @@ section('Opening a window records how it was armed');
 
 check(count(audit_rows($uid)) === 0, 'no audit rows before anything opens');
 
-VaultUnlock::open($uid, $secret, $scope, array('idle' => 600, 'absolute' => 7200), VaultAudit::VIA_PASSKEY);
+vault_fixture_open_window($uid, $secret, $scope, array('idle' => 600, 'absolute' => 7200), VaultAudit::VIA_PASSKEY);
 $rows = audit_rows($uid);
 check(count($rows) === 1, 'one row after open', count($rows) . ' rows');
 check($rows[0]['evl_event'] === VaultAudit::EVENT_OPENED, 'and it is the opened event');
@@ -84,7 +85,7 @@ check(count(audit_rows($uid)) === $before, 'a lock with no window to close is no
 
 section('Each policy cap reports its own reason');
 
-VaultUnlock::open($uid, $secret, $scope, array('idle' => null, 'absolute' => 1), VaultAudit::VIA_PASSPHRASE);
+vault_fixture_open_window($uid, $secret, $scope, array('idle' => null, 'absolute' => 1), VaultAudit::VIA_PASSPHRASE);
 $meta_key = 'vaultmeta:' . $sid . ':' . $uid . ':' . $scope;
 $meta = apcu_fetch($meta_key);
 $meta['armed'] = time() - 3600;           // armed an hour ago, absolute cap is 1s
@@ -93,7 +94,7 @@ check(!VaultUnlock::isOpen($uid), 'the absolute cap ends the window');
 check(strpos(last_row($uid)['evl_note'], 'reason=' . VaultAudit::REASON_ABSOLUTE_CAP) !== false,
 	'and names the absolute cap');
 
-VaultUnlock::open($uid, $secret, $scope, array('idle' => 1, 'absolute' => null), VaultAudit::VIA_PASSPHRASE);
+vault_fixture_open_window($uid, $secret, $scope, array('idle' => 1, 'absolute' => null), VaultAudit::VIA_PASSPHRASE);
 $meta = apcu_fetch($meta_key);
 $meta['content'] = time() - 3600;         // no content decrypt for an hour, idle cap is 1s
 apcu_store($meta_key, $meta, 600);
@@ -101,7 +102,7 @@ check(!VaultUnlock::isOpen($uid), 'the idle cap ends the window');
 check(strpos(last_row($uid)['evl_note'], 'reason=' . VaultAudit::REASON_IDLE_CAP) !== false,
 	'and names the idle cap');
 
-VaultUnlock::open($uid, $secret, $scope, array('idle' => null, 'absolute' => null), VaultAudit::VIA_PASSPHRASE);
+vault_fixture_open_window($uid, $secret, $scope, array('idle' => null, 'absolute' => null), VaultAudit::VIA_PASSPHRASE);
 VaultUnlock::heartbeat($uid, $scope);
 $meta = apcu_fetch($meta_key);
 $meta['hb'] = time() - (VaultUnlock::HEARTBEAT_MAX_STALE_SECONDS + 60);
@@ -114,7 +115,7 @@ section('An APCu expiry is noticed by the next read');
 
 // The case nothing else can report: no cap fired, no lock was called — the
 // entry simply aged out of the cache, which runs no code of its own.
-VaultUnlock::open($uid, $secret, $scope, array('idle' => null, 'absolute' => null), VaultAudit::VIA_PASSKEY);
+vault_fixture_open_window($uid, $secret, $scope, array('idle' => null, 'absolute' => null), VaultAudit::VIA_PASSKEY);
 $before = count(audit_rows($uid));
 apcu_delete('vault:' . $sid . ':' . $uid . ':' . $scope);
 apcu_delete($meta_key);
@@ -135,7 +136,7 @@ check(count(audit_rows($uid)) === $before, 'and it is reported once, not on ever
 
 section('Heartbeats are not events');
 
-VaultUnlock::open($uid, $secret, $scope, array('idle' => null, 'absolute' => null), VaultAudit::VIA_PASSKEY);
+vault_fixture_open_window($uid, $secret, $scope, array('idle' => null, 'absolute' => null), VaultAudit::VIA_PASSKEY);
 $before = count(audit_rows($uid));
 for ($i = 0; $i < 5; $i++) {
 	VaultUnlock::heartbeat($uid, $scope);

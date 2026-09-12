@@ -8,6 +8,7 @@
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
+require_once(__DIR__ . '/../../../tests/lib/vault_fixtures.php');
 
 require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
 if (!PluginHelper::isPluginActive('mailbox')) {
@@ -35,7 +36,7 @@ $crypto = new VaultCrypto();
 // The mailbox re-seal callback, via the same registry the rotation uses.
 $callbacks = VaultUnlock::resealCallbacks();
 check(count($callbacks) >= 1, 'the mailbox bootstrap registered a re-seal callback');
-$run_reseal = function (int $uid, string $old_secret, int $old_gen, string $new_pub, int $new_gen) use ($callbacks) {
+$run_reseal = function (int $uid, VaultKey $old_secret, int $old_gen, string $new_pub, int $new_gen) use ($callbacks) {
 	foreach ($callbacks as $cb) {
 		call_user_func($cb, $uid, $old_secret, $old_gen, $new_pub, $new_gen);
 	}
@@ -116,7 +117,7 @@ $read_msg = function (int $id) {
 	$stmt->execute([$id]);
 	return $stmt->fetch(PDO::FETCH_ASSOC);
 };
-$open_body = function (array $row, string $secret) use ($crypto) {
+$open_body = function (array $row, VaultKey $secret) use ($crypto) {
 	$dek = $crypto->openItemDek($row['iem_sealed_key'], $secret);
 	return $crypto->openField($row['iem_body_plain'], $dek, InboundEmailMessage::sealAd((int)$row['iem_inbound_email_message_id'], 'iem_body_plain'));
 };
@@ -124,11 +125,11 @@ $open_body = function (array $row, string $secret) use ($crypto) {
 // ---- Re-seal drains exactly the named generation --------------------------
 section('Generation-scoped re-seal');
 $c_before = $read_msg($msg_c);
-$run_reseal($uid, $kp1['secret'], 1, $kp2['public'], 2);
+$run_reseal($uid, vault_fixture_key($kp1['secret']), 1, $kp2['public'], 2);
 
 $a = $read_msg($msg_a);
 check((int)$a['iem_key_generation'] === 2, 'gen-1 message A moved to generation 2');
-check($open_body($a, $kp2['secret']) === 'gen one message A', 'A opens under the new secret with its original content');
+check($open_body($a, vault_fixture_key($kp2['secret'])) === 'gen one message A', 'A opens under the new secret with its original content');
 $b = $read_msg($msg_b);
 check((int)$b['iem_key_generation'] === 2, 'gen-1 message B moved too');
 $c = $read_msg($msg_c);
@@ -136,8 +137,8 @@ check($c['iem_sealed_key'] === $c_before['iem_sealed_key'], 'the gen-2 straggler
 
 section('DKIM keys ride the rotation');
 $d = new InboundEmailDomain((int)$domain->key, TRUE);
-check($crypto->openItemDek((string)$d->get('ied_dkim_sealed_key'), $kp2['secret']) === $dkim_live, 'live DKIM key re-sealed to the new generation');
-check($crypto->openItemDek((string)$d->get('ied_dkim_pending_sealed_key'), $kp2['secret']) === $dkim_pending, 'pending DKIM key re-sealed too');
+check($crypto->openItemDek((string)$d->get('ied_dkim_sealed_key'), vault_fixture_key($kp2['secret'])) === $dkim_live, 'live DKIM key re-sealed to the new generation');
+check($crypto->openItemDek((string)$d->get('ied_dkim_pending_sealed_key'), vault_fixture_key($kp2['secret'])) === $dkim_pending, 'pending DKIM key re-sealed too');
 
 // ---- Fail-loud: a broken row blocks retirement ----------------------------
 section('Fail-loud contract');
@@ -145,7 +146,7 @@ $db = DbConnector::get_instance()->get_db_link();
 $stmt = $db->prepare('UPDATE iem_inbound_email_messages SET iem_sealed_key = ? WHERE iem_inbound_email_message_id = ?');
 $stmt->execute([$crypto->sealItemDek(random_bytes(32), $box->generateKeypair()['public']), $msg_b]);
 $threw = false;
-try { $run_reseal($uid, $kp2['secret'], 2, $kp3['public'], 3); } catch (Throwable $e) { $threw = true; }
+try { $run_reseal($uid, vault_fixture_key($kp2['secret']), 2, $kp3['public'], 3); } catch (Throwable $e) { $threw = true; }
 check($threw, 'an unopenable row makes the callback THROW (retirement must be blocked)');
 $a = $read_msg($msg_a);
 check((int)$a['iem_key_generation'] === 3, 'every other row was still attempted before the throw');
@@ -164,9 +165,9 @@ $domain2->set('ied_dkim_sealed_key', $crypto->sealItemDek($dkim2, $kpo1['public'
 $domain2->save();
 harness_register_row('ied_inbound_email_domains', 'ied_inbound_email_domain_id', (int)$domain2->key);
 
-$run_reseal((int)$owner2->key, $kpo1['secret'], 1, $kpo2['public'], 2);
+$run_reseal((int)$owner2->key, vault_fixture_key($kpo1['secret']), 1, $kpo2['public'], 2);
 $d2 = new InboundEmailDomain((int)$domain2->key, TRUE);
-check($crypto->openItemDek((string)$d2->get('ied_dkim_sealed_key'), $kpo2['secret']) === $dkim2, 'DKIM re-sealed for an owner holding zero mailbox grants');
+check($crypto->openItemDek((string)$d2->get('ied_dkim_sealed_key'), vault_fixture_key($kpo2['secret'])) === $dkim2, 'DKIM re-sealed for an owner holding zero mailbox grants');
 
 // ---- Locked reads fail legibly, never leak --------------------------------
 section('Locked-state reads');

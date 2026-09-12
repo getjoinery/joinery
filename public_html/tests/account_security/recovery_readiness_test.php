@@ -65,7 +65,7 @@ section('Vault-code dry run: pass without consuming');
 $box = new SealedBox();
 $code = 'RRTEST-' . bin2hex(random_bytes(4));
 $salt = base64_encode(random_bytes(16));
-$secret = random_bytes(32);
+$secret = $box->generateKeypair()['secret']; // the dry run opens it through VaultUnlock::openKey(), which wants a real X25519 secret
 
 $vault = new UserEncryptionVault(NULL);
 $vault->set('uev_usr_user_id', $fixture_user_id);

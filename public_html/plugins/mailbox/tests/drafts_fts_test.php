@@ -21,6 +21,7 @@
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
+require_once(__DIR__ . '/../../../tests/lib/vault_fixtures.php');
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
@@ -97,7 +98,7 @@ $draft_id = intval($drafts->saveDraft(array('alias_id' => $alias_id, 'mode' => '
 harness_register_model('InboundEmailMessage', $draft_id);
 $m2 = $make_msg('inbound', 'Third', 'beta uniquekwtwo');
 
-$idx->fold($uid, 'dummy-secret');
+$idx->fold($uid, vault_fixture_dummy_key());
 check($idx->search($uid, 'uniquekwone') === array($m1), 'first message is searchable after fold', json_encode($idx->search($uid, 'uniquekwone')));
 check($idx->search($uid, 'kwdraft') === array(), 'the draft is NOT indexed');
 
@@ -116,7 +117,7 @@ $bk = InboundMailboxSearchIndex::loadOrCreateForUser($uid);
 $bk->set('imi_refold_ids', json_encode(array($draft_id)));
 $bk->save();
 
-$idx->fold($uid, 'dummy-secret');
+$idx->fold($uid, vault_fixture_dummy_key());
 check($idx->search($uid, 'kwmorph') === array($draft_id), 'the morphed Sent row is searchable after the refold', json_encode($idx->search($uid, 'kwmorph')));
 
 $after = InboundMailboxSearchIndex::loadOrCreateForUser($uid);

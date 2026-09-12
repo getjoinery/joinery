@@ -93,13 +93,13 @@ class MailboxDkimSigner {
 			throw new VaultLockedException();
 		}
 
-		$secret = VaultUnlock::secretKey($owner_id);
-		if ($secret === null) {
+		$key = VaultUnlock::secretKey($owner_id);
+		if ($key === null) {
 			throw new VaultLockedException(); // locked — the compose path turns this into an unlock prompt
 		}
 
 		$crypto = new VaultCrypto();
-		$private_string = $crypto->openItemDek($sealed, $secret); // opens any crypto_box_seal blob, not only DEKs
+		$private_string = $crypto->openItemDek($sealed, $key); // opens any crypto_box_seal blob, not only DEKs
 
 		return array(
 			'domain'         => strtolower($from_domain),
