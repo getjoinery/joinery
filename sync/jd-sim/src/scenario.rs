@@ -123,6 +123,38 @@ pub struct World {
     /// suite that reports coverage it does not have is worse than one that
     /// reports none.
     power_cycles: std::sync::Arc<std::sync::Mutex<usize>>,
+    /// One line per pass: which device ran, what it planned, what happened.
+    ///
+    /// The trace a seed leaves. Two runs of one seed must leave one trace, and
+    /// [`World::journal`] is how a test asks; without it "the same seed" is a
+    /// claim about the workload's dice, not about what the engine did with
+    /// them.
+    journal: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    /// Every pair of bodies a swap separated for ever, with the source of
+    /// the swap.
+    ///
+    /// A swap destroys nothing: both bodies are still on the disk when it
+    /// returns, standing at each other's names. From that instant the two
+    /// belong to two DIFFERENT files, permanently, and any one server entity
+    /// whose version history holds both was handed a stranger's bytes and
+    /// recorded them as its own edit (Defect AI). The chain oracle reads this
+    /// list; every swap the harness makes -- the chaos name-swapper here, the
+    /// workload's slot swaps, rotations and folder trades -- records here.
+    swap_pairs: std::sync::Arc<std::sync::Mutex<Vec<SwapPair>>>,
+}
+
+/// Two bodies a swap separated, and which swap did it.
+#[derive(Clone, Debug)]
+pub struct SwapPair {
+    pub a: Vec<u8>,
+    pub b: Vec<u8>,
+    /// `chaos`, `slots`, `rotation` or `folders`.
+    pub source: &'static str,
+    /// Either body stood under a directory the harness marked sealed when the
+    /// swap was made. The chain oracle reads version blobs raw and the server
+    /// holds ciphertext for these, so it can never match such a pair; the
+    /// count says how much of the record it could judge.
+    pub sealed: bool,
 }
 
 /// Which operating system's filesystem a device has.
@@ -185,6 +217,8 @@ impl World {
             swaps_seen: Default::default(),
             folder_renames_seen: Default::default(),
             power_cycles: Default::default(),
+            journal: Default::default(),
+            swap_pairs: Default::default(),
         }
     }
 
@@ -315,6 +349,7 @@ impl World {
             self.rng.next_u64() ^ 0x5a1d_5eed,
         )));
         let seen = self.swaps_seen.clone();
+        let pairs = self.swap_pairs.clone();
         let mut round: u64 = 0;
         self.server.while_completing_an_upload(move || {
             if round >= budget {
@@ -346,6 +381,12 @@ impl World {
             // forces every application to do it. The window where the first
             // name holds nothing is the whole point.
             let (a, b) = (a.clone(), b.clone());
+            if let (Some(ba), Some(bb)) = (disk.peek(&a), disk.peek(&b)) {
+                if ba != bb {
+                    let sealed = disk.under_sealed_dir(&a) || disk.under_sealed_dir(&b);
+                    pairs.lock().unwrap().push(SwapPair { a: ba, b: bb, source: "chaos", sealed });
+                }
+            }
             let parked = format!(".swap-{round}.tmp");
             disk.user_rename(&a, &parked);
             disk.user_rename(&b, &a);
@@ -427,6 +468,7 @@ impl World {
         let seed = self.rng.next_u64() ^ 0x100d_5a7e;
         for (i, device) in self.devices.iter().enumerate() {
             let disk = device.fs.clone();
+            let name = device.name.clone();
             let destroyed = destroyed.clone();
             let landed = landing.clone();
             let seen = seen.clone();
@@ -458,8 +500,12 @@ impl World {
                 if let Some(gone) = disk.peek(&rel) {
                     destroyed.lock().unwrap().insert(crate::sha256_hex(&gone));
                 }
+                // Named for the device as well as the round: each disk counts
+                // its own rounds, and two disks writing the same bytes would
+                // give one body two origins, which is what the sealed and
+                // chain oracles must never be handed.
                 let saved =
-                    format!("saved while a download was landing, {round}").into_bytes();
+                    format!("saved while a download was landing, {round} on {name}").into_bytes();
                 landed.lock().unwrap().insert(crate::sha256_hex(&saved));
                 *seen.lock().unwrap() += 1;
                 disk.user_write(&rel, &saved);
@@ -525,6 +571,10 @@ impl World {
         self.destroyed_by_the_user.lock().unwrap().clear();
         self.landing_saves.lock().unwrap().clear();
         let outcome = self.run_pass_on(device);
+        self.journal.lock().unwrap().push(match &outcome {
+            Ok(o) => format!("{} plan={:?} exec={:?}", device.name, o.round.plan, o.exec),
+            Err(e) => format!("{} failed={e:?}", device.name),
+        });
         let after = held_by(device);
         let by_the_user = self.destroyed_by_the_user.lock().unwrap().clone();
         for hash in &before {
@@ -662,6 +712,30 @@ impl World {
         // network is still down is an ordinary morning, not an impossible one.
         let _ = jd_core::execute::recover(&e);
         *self.power_cycles.lock().unwrap() += 1;
+    }
+
+    /// Two bodies a swap is about to separate. Recorded only when they differ:
+    /// equal bodies are not separated by exchanging their names.
+    pub fn record_swap_pair(&self, a: &[u8], b: &[u8], source: &'static str, sealed: bool) {
+        if a != b {
+            self.swap_pairs.lock().unwrap().push(SwapPair {
+                a: a.to_vec(),
+                b: b.to_vec(),
+                source,
+                sealed,
+            });
+        }
+    }
+
+    /// Every pair of bodies a swap separated in this world, in order.
+    pub fn swap_pairs(&self) -> Vec<SwapPair> {
+        self.swap_pairs.lock().unwrap().clone()
+    }
+
+    /// Every pass this world has run, in order, as the plan it made and the
+    /// report it gave.
+    pub fn journal(&self) -> Vec<String> {
+        self.journal.lock().unwrap().clone()
     }
 
     /// How many times a device died and came back here.

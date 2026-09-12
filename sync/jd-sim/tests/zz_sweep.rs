@@ -204,8 +204,9 @@ fn sweep_world(
             // One encrypted, two plain, all beside the vault rather than under
             // it -- the shape Defect AD was: a vault folder and an ordinary
             // folder swapping names. The vault root itself stays out of the
-            // trade, because `is_movable` refuses it and the rest of the
-            // workload needs it standing.
+            // trade: the ring trade is over `RING_NAMES` only, and
+            // `is_movable` refuses the vault root to every other action, so
+            // the rest of the workload can rely on it standing.
             world.server.seed_encrypted_folder(None, RING_NAMES[0]);
             for name in &RING_NAMES[1..] {
                 world.server.seed_folder(None, name);
@@ -215,6 +216,30 @@ fn sweep_world(
             world.settle().is_some(),
             "seed {seed}: the vault folder should arrive before the workload starts"
         );
+        // What the user sealed, by directory, on every disk: the sealed
+        // oracle follows these marks through every name trade the run makes.
+        // Marked now, after the folders have arrived everywhere and before a
+        // single file is written into them. A mark not placed is a probe
+        // that never fires, so a disk without the folder is a failure here,
+        // not a skip -- the vault on every disk that holds a key, the
+        // encrypted ring on every disk of a ring arm.
+        for d in &world.devices {
+            let mut owed = Vec::new();
+            if d.vault().is_some() {
+                owed.push(VAULT_ROOT);
+            }
+            if vault == Vault::FolderRings {
+                owed.push(RING_NAMES[0]);
+            }
+            for name in owed {
+                assert!(
+                    d.fs.exists(name),
+                    "seed {seed}: {} has no {name} to mark sealed before the workload starts",
+                    d.name
+                );
+                d.fs.mark_sealed_dir(name);
+            }
+        }
         if vault == Vault::FolderRings {
             // Written by a DEVICE, not seeded onto the server. `seed_file` puts
             // plaintext where it is told, so seeding into the encrypted ring
@@ -345,6 +370,109 @@ fn workload_on(seed: u64, steps: usize, devices: &[(&str, Platform)], chaos: boo
     let _ = workload_core(seed, steps, devices, chaos, Vault::None, false, Names::Ordinary);
 }
 
+/// Two folders are about to trade names: record every body pair that trade
+/// separates.
+///
+/// A folder trade moves files, and moving a file separates nothing -- unless
+/// the two folders each hold a file with the SAME leaf and different bodies.
+/// Then each body ends up standing at the other's full path, and a scan that
+/// pairs by path (`scan::pair` rule 1, Defect AD's shape) can hand each record
+/// the other's bytes exactly as a file swap does. So those pairs are recorded
+/// as swaps, by source, and the coverage line says how many there were; if the
+/// workload never produces the state, that count is the proof.
+fn record_folder_swap(world: &World, device: &jd_sim::engine::Device, x: &str, y: &str) {
+    let under = |dir: &str| -> Vec<(String, Vec<u8>)> {
+        device
+            .fs
+            .all_paths()
+            .into_iter()
+            .filter(|p| p.starts_with(&format!("{dir}/")))
+            .filter_map(|p| device.fs.peek(&p).map(|b| (p[dir.len() + 1..].to_string(), b)))
+            .collect()
+    };
+    let in_y: std::collections::BTreeMap<String, Vec<u8>> = under(y).into_iter().collect();
+    let sealed = device.fs.under_sealed_dir(x) || device.fs.under_sealed_dir(y);
+    for (rel, body_x) in under(x) {
+        if let Some(body_y) = in_y.get(&rel) {
+            world.record_swap_pair(&body_x, body_y, "folders", sealed);
+        }
+    }
+}
+
+/// Did any one file end up holding two bodies a swap had separated?
+///
+/// A swap destroys nothing: both bodies are still on the disk when it returns,
+/// standing at each other's names. So from that instant those two contents
+/// belong to two DIFFERENT files, permanently. Any single server entity whose
+/// version history holds BOTH of them was handed a stranger's bytes and
+/// recorded them as its own edit -- the damage Defect AI pins on two files,
+/// run estate-wide. A user restoring an old version of such a file gets the
+/// other file.
+///
+/// Deliberately narrower than "no chain may hold a stranger's body". A
+/// conflict copy legitimately duplicates one body into a second entity, so a
+/// shared body proves nothing on its own; holding BOTH SIDES of a swap cannot
+/// happen by copying and has no innocent reading. It is blind to poisoning
+/// that arrives any other way, and says so: the report is "N swap-separated
+/// pairs held by one entity", never "N poisoned chains".
+///
+/// One residual, counted: it reads version blobs raw, and for a file that was
+/// sealed when the swap was made the server holds ciphertext, which never
+/// hashes like the plaintext pair. Poisoning that stays inside the vault is
+/// invisible here (the sealed oracle sees only the half that crosses the
+/// edge); `pairs_sealed` on the coverage line is how many of the recorded
+/// pairs this oracle could not judge.
+///
+/// Reports coverage, because an oracle that checked nothing would look
+/// identical to one that found nothing.
+fn assert_no_entity_holds_both_sides_of_a_swap(world: &World, seed: u64) {
+    let pairs = world.swap_pairs();
+    let versions = world.server.all_versions();
+    let mut bodies: std::collections::BTreeMap<i64, Vec<Vec<u8>>> = Default::default();
+    for v in &versions {
+        if let Some(b) = world.server.blob(&v.sha256) {
+            bodies.entry(v.file_id).or_default().push(b);
+        }
+    }
+    // One line per (entity, unordered pair): the same two bodies can be
+    // separated more than once, in either order, and that is one poisoning.
+    let mut seen: std::collections::BTreeSet<(i64, Vec<u8>, Vec<u8>)> = Default::default();
+    let mut held: Vec<String> = Vec::new();
+    for p in &pairs {
+        let (lo, hi) = if p.a <= p.b { (&p.a, &p.b) } else { (&p.b, &p.a) };
+        for (id, chain) in &bodies {
+            if chain.contains(lo) && chain.contains(hi) && seen.insert((*id, lo.clone(), hi.clone())) {
+                held.push(format!(
+                    "file {id} holds {:?} and {:?} (separated by {})",
+                    String::from_utf8_lossy(lo),
+                    String::from_utf8_lossy(hi),
+                    p.source
+                ));
+            }
+        }
+    }
+    let by_source = |src: &str| pairs.iter().filter(|p| p.source == src).count();
+    eprintln!(
+        "CHAIN-ORACLE seed={seed} pairs={} chaos={} slots={} rotation={} folders={} \
+         pairs_sealed={} entities_with_versions={} versions={} held_by_one_entity={}",
+        pairs.len(),
+        by_source("chaos"),
+        by_source("slots"),
+        by_source("rotation"),
+        by_source("folders"),
+        pairs.iter().filter(|p| p.sealed).count(),
+        bodies.len(),
+        versions.len(),
+        held.len()
+    );
+    assert!(
+        held.is_empty(),
+        "seed {seed}: {} swap-separated pair(s) held by one entity: {}",
+        held.len(),
+        held.join("; ")
+    );
+}
+
 fn workload_core(
     seed: u64,
     steps: usize,
@@ -373,7 +501,11 @@ fn workload_core(
     if std::env::var("OPS").is_ok() {
         println!("  KILLS {kills_made}");
     }
-    if world.settle().is_none() {
+    let settled = world.settle();
+    if let Ok(path) = std::env::var("JD_JOURNAL") {
+        std::fs::write(&path, seed_trace(&world).join("\n")).unwrap();
+    }
+    if settled.is_none() {
         let mut lines = Vec::new();
         for d in &world.devices {
             for op in d.store.queued_ops().unwrap() {
@@ -401,29 +533,77 @@ fn workload_core(
         }
         panic!("seed {seed} never settled\n{}", lines.join("\n"));
     }
-    assert_nothing_lost(&world, &committed);
-    assert_converged(&world);
-    // The other two invariants the scenario suite checks. The sweep ran without
-    // them for its whole life, so the two shapes they catch -- an entry whose
-    // parent chain no longer reaches the root, and a live item on the server
-    // under a trashed folder -- had thousands of seeds to hide in and never had
-    // to survive one.
-    assert_no_entry_is_stranded(&world);
-    assert_no_live_orphan_on_the_server(&world);
-    jd_sim::scenario::assert_no_two_records_on_one_directory(&world);
+    // Every oracle runs, and every one that fires is named. Run one after
+    // another as assertions, the first red hid the rest: a seed red on the
+    // sealed oracle that a fix turned green could stay red on the chain oracle
+    // and read as "still red", with the chain never mentioned. So order does
+    // not matter here and a seed's verdict is the list of what fired.
+    //
+    // The stranded and orphan checks are the two invariants the scenario
+    // suite always had; the sweep ran without them for its whole life, so the
+    // shapes they catch had thousands of seeds to hide in.
+    let mut oracles: Vec<(&str, Box<dyn Fn() + '_>)> = vec![
+        ("nothing_lost", Box::new(|| assert_nothing_lost(&world, &committed))),
+        ("converged", Box::new(|| assert_converged(&world))),
+        ("no_entry_stranded", Box::new(|| assert_no_entry_is_stranded(&world))),
+        ("no_live_orphan", Box::new(|| assert_no_live_orphan_on_the_server(&world))),
+        ("one_record_per_directory", Box::new(|| {
+            jd_sim::scenario::assert_no_two_records_on_one_directory(&world)
+        })),
+        ("no_entity_holds_both_sides_of_a_swap", Box::new(|| {
+            assert_no_entity_holds_both_sides_of_a_swap(&world, seed)
+        })),
+    ];
     if vault.any() {
-        assert_nothing_in_the_vault_is_readable(&world, seed);
-        jd_sim::scenario::assert_the_vault_opens(&world);
-        jd_sim::scenario::assert_no_ciphertext_on_a_keyless_disk(&world);
+        oracles.push(("vault_unreadable", Box::new(|| assert_nothing_in_the_vault_is_readable(&world, seed))));
+        oracles.push(("vault_opens", Box::new(|| jd_sim::scenario::assert_the_vault_opens(&world))));
+        oracles.push(("no_ciphertext_on_a_keyless_disk", Box::new(|| {
+            jd_sim::scenario::assert_no_ciphertext_on_a_keyless_disk(&world)
+        })));
     }
     if vault == Vault::FolderRings {
-        assert_sealed_content_never_reached_the_clear(&world, seed);
+        oracles.push(("sealed_never_in_the_clear", Box::new(|| {
+            assert_sealed_content_never_reached_the_clear(&world, seed)
+        })));
     }
     if vault == Vault::Shared {
         // Only meaningful when everything is inside the vault. In a mixed world
         // most names are plaintext by design, and checking them against the
         // server would flag the workload's own ordinary files.
-        assert_the_server_was_never_told_a_real_name(&world, root, seed);
+        oracles.push(("server_never_told_a_real_name", Box::new(|| {
+            assert_the_server_was_never_told_a_real_name(&world, root, seed)
+        })));
+    }
+    // What each device is telling the user at the end, by kind: a seed that
+    // did not converge is a hold only if an issue says so; non-converged with
+    // no open issue is a livelock, and the two must not read alike.
+    {
+        let mut kinds: std::collections::BTreeMap<String, usize> = Default::default();
+        for d in &world.devices {
+            for issue in d.store.open_issues().unwrap() {
+                *kinds.entry(issue.kind).or_default() += 1;
+            }
+        }
+        eprintln!("ISSUES seed={seed} open={kinds:?}");
+    }
+    let mut fired: Vec<(&str, String)> = Vec::new();
+    for (name, oracle) in oracles {
+        if let Err(e) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(oracle)) {
+            let why = e
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_else(|| "?".into());
+            fired.push((name, why.replace('\n', " ")));
+        }
+    }
+    if !fired.is_empty() {
+        panic!(
+            "seed {seed}: {} oracle(s) fired [{}]: {}",
+            fired.len(),
+            fired.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(", "),
+            fired.iter().map(|(_, w)| w.as_str()).collect::<Vec<_>>().join(" || ")
+        );
     }
     kills_made
 }
@@ -443,36 +623,307 @@ fn assert_nothing_in_the_vault_is_readable(world: &World, seed: u64) {
 }
 
 /// What the user sealed is never on the server in the clear, wherever it ended
-/// up.
+/// up -- every sealed body, every version of it.
 ///
-/// `assert_nothing_in_the_vault_is_readable` asks whether the server holds
-/// plaintext INSIDE a vault. Defect AD leaked the other way: the vault's
-/// contents ended up OUTSIDE it, in a folder where being plaintext is perfectly
-/// legal, so nothing in the tree and nothing in that assertion could object. The
-/// only way to see it is to remember what was sealed and go looking for those
-/// bytes anywhere the server can read them.
+/// `assert_nothing_in_the_vault_is_readable` asks whether the server holds a
+/// file FLAGGED plain inside a vault. Defect AD leaked the other way: the
+/// vault's contents ended up OUTSIDE it, in a folder where being plaintext is
+/// perfectly legal, so nothing in the tree and nothing in that assertion could
+/// object. The only way to see it is to remember what was sealed and go
+/// looking for those bytes anywhere the server can read them.
+///
+/// For its first months this remembered ONE body, the ring file written at
+/// setup, and one name. Every body the workload itself wrote into the vault --
+/// most of what is sealed in a run -- was invisible to it, and the leak on the
+/// three-device arm was seen only by the stranded-file check, by accident. So
+/// every seed count taken before 2026-09-12 was taken against an oracle that
+/// saw a fraction of leaks (`specs/drive_sync_reset.md`, WP1a).
+///
+/// **What "sealed" means here: the user wrote it into the folder they
+/// sealed.** Every body the user wrote is on record in the disk itself
+/// (`MemFs::user_writes`), and a body is sealed if, at the write, it stood
+/// under `Private/` BY NAME or under a directory the harness marked sealed at
+/// setup BY IDENTITY (`MemFs::mark_sealed_dir`: the vault root and the
+/// encrypted ring, on every disk; the mark travels with the directory through
+/// every rename, the user's and the engine's).
+///
+/// Two rules because the two folders are trusted differently. `Private` the
+/// user never renames (`is_movable` refuses it and it never enters the
+/// workload's folder list), so the NAME is what they trust: the ENGINE can stand a
+/// plain folder at `Private/` on a device (the Defect AG shape), and a body
+/// the user then writes there goes up in the clear and this oracle goes red.
+/// That is a true positive -- the user trusted the name and the name
+/// protected nothing -- and it is the class the reset exists to see. It is
+/// not a false positive, and it does not get a subtraction. The RINGS the
+/// user trades by hand all run long, so a name says nothing: a write into
+/// `ring-1/` after a swap lands in whichever folder wears the name, and the
+/// first cut of this oracle read every such write as sealed (hostile2 74400:
+/// a landing-time save into a plain ring wearing `ring-1`, counted as a
+/// leak). So a ring write is sealed by the mark or not at all. A write into
+/// an UNMARKED directory under a ring name is, while the marks are intact,
+/// simply a write into one of the two plain rings by identity (74400's
+/// landing save is that case) and plain is the right answer; it is
+/// unattributable only when the sealed ring's mark was dropped, which is the
+/// engine removing that directory and minting another at the name. Both are
+/// treated as the user's own plain publication (exempted, like a copy), the
+/// conservative reading, and counted together beside the verdict as
+/// `unattributed_ring_writes` so a seed the exemption hollows out is visible
+/// as such -- the count is not a count of mysteries.
+///
+/// Three checks, each named in its failure:
+///
+/// 1. **Bodies.** Every sealed body's plaintext hash is absent from the
+///    server's blobs. Cumulative for free: the mock's blob store is
+///    content-addressed and never forgets, so an old version's plaintext is
+///    found the same as the current one. MINUS every body the user later wrote
+///    somewhere plain by their own hand: action 16 duplicates a file into any
+///    folder, vault edge not consulted, so the workload itself copies sealed
+///    bytes into the clear and the engine is right to upload them. That
+///    exempts the BODY, so the sealed original of a body the user also copied
+///    plain is invisible to this check if it is published OUTSIDE the vault
+///    (the AJ shape, bounded to bodies action 16 copied out); the mock cannot
+///    tell which upload carried it. The exempted count is printed beside the
+///    verdict so a seed the exemption hollows out is visible as such.
+/// 2. **Sealed in name only.** No version of a file the server flags
+///    encrypted carries the hash of ANY body the user wrote, exempt or not.
+///    Ciphertext never hashes like plaintext, so a match is a plaintext body
+///    that went up under the encrypted flag -- the inside half of what the
+///    subtraction cannot see, and the shape the flag-only check above misses.
+/// 3. **Names.** A leaf name the user only ever wrote or renamed onto under a
+///    sealed prefix (renames count: they place a name without a body) must not
+///    stand on the server as a stored title. Exact leaf match, NFC on both
+///    sides so a decomposing volume's spelling compares with the server's; a
+///    conflict copy of a sealed file wears the real name inside a longer one
+///    and is not matched, and its body is covered by check 1. Folder names
+///    inside a vault are plaintext by design and are not checked.
 ///
 /// Sound here precisely because the workload refuses to generate a vault
-/// crossing (`same_side_of_the_vault`): no legitimate conversion can happen in a
-/// sweep, so sealed bytes in the clear are a leak and never a feature. That is
-/// NOT true of the engine at large, where an explicit drag out of a vault
-/// converts by design -- which is why this lives here and not in the shared
-/// invariants.
+/// crossing: no legitimate conversion can happen in a sweep, so sealed bytes in
+/// the clear are a leak and never a feature. That is NOT true of the engine at
+/// large, where an explicit drag out of a vault converts by design -- which is
+/// why this lives here and not in the shared invariants.
 fn assert_sealed_content_never_reached_the_clear(world: &World, seed: u64) {
-    let sealed = jd_sim::sha256_hex(&sealed_ring_body(seed));
-    assert!(
-        world.server.blob(&sealed).is_none(),
-        "seed {seed}: the plaintext of a file the user sealed reached the server"
-    );
-    let leaked: Vec<String> = world
-        .server
-        .tree()
-        .into_keys()
-        .filter(|p| p.ends_with("sealed.txt"))
+    #[derive(PartialEq)]
+    enum Side {
+        Sealed,
+        Plain,
+        Unattributed,
+    }
+    let under = |path: &str, top: &str| path == top || path.starts_with(&format!("{top}/"));
+    let side = |path: &str, in_sealed_dir: bool| {
+        if in_sealed_dir || under(path, VAULT_ROOT) {
+            Side::Sealed
+        } else if RING_NAMES.iter().any(|r| under(path, r)) {
+            Side::Unattributed
+        } else {
+            Side::Plain
+        }
+    };
+    let leaf = |path: &str| jd_vfs::nfc(path.rsplit('/').next().unwrap_or(path));
+    // Hash -> where it was first written, on each side.
+    let mut sealed_bodies: std::collections::BTreeMap<String, String> = Default::default();
+    let mut plain_bodies: std::collections::BTreeMap<String, String> = Default::default();
+    let mut sealed_names: std::collections::BTreeSet<String> = Default::default();
+    let mut plain_names: std::collections::BTreeSet<String> = Default::default();
+    let mut unattributed = 0usize;
+    for d in &world.devices {
+        for w in d.fs.user_writes() {
+            match side(&w.path, w.in_sealed_dir) {
+                Side::Sealed => {
+                    sealed_bodies.entry(w.sha256).or_insert(w.path.clone());
+                    sealed_names.insert(leaf(&w.path));
+                }
+                Side::Plain | Side::Unattributed => {
+                    if side(&w.path, w.in_sealed_dir) == Side::Unattributed {
+                        unattributed += 1;
+                    }
+                    plain_bodies.entry(w.sha256).or_insert(w.path.clone());
+                    plain_names.insert(leaf(&w.path));
+                }
+            }
+        }
+        for (path, in_sealed_dir) in d.fs.user_renames() {
+            match side(&path, in_sealed_dir) {
+                Side::Sealed => {
+                    sealed_names.insert(leaf(&path));
+                }
+                Side::Plain | Side::Unattributed => {
+                    if side(&path, in_sealed_dir) == Side::Unattributed {
+                        unattributed += 1;
+                    }
+                    plain_names.insert(leaf(&path));
+                }
+            }
+        }
+    }
+    // Named, not only counted: an exemption that survives unique bodies is
+    // either the copy arm doing its job or a body with two origins, and the
+    // line has to let a reader tell which.
+    let exempted: Vec<String> = sealed_bodies
+        .iter()
+        .filter_map(|(h, at)| plain_bodies.get(h).map(|plain_at| format!("{at} -> {plain_at}")))
         .collect();
+    eprintln!(
+        "SEALED-ORACLE seed={seed} sealed_bodies={} exempted_as_copied_plain={} \
+         sealed_names={} unattributed_ring_writes={unattributed} exempted={exempted:?}",
+        sealed_bodies.len(),
+        exempted.len(),
+        sealed_names.len()
+    );
+    let tree = world.server.tree();
+    let mut leaked = Vec::new();
+    for (hash, written_at) in &sealed_bodies {
+        if plain_bodies.contains_key(hash) || world.server.blob(hash).is_none() {
+            continue;
+        }
+        let standing_at: Vec<&String> = tree
+            .iter()
+            .filter(|(_, h)| h.as_deref() == Some(hash.as_str()))
+            .map(|(p, _)| p)
+            .collect();
+        leaked.push(format!("{} (written at {written_at}) now at {standing_at:?}", &hash[..8]));
+    }
     assert!(
         leaked.is_empty(),
-        "seed {seed}: the real name of a sealed file reached the server: {leaked:?}"
+        "seed {seed}: the plaintext of {} file(s) the user sealed reached the server: {}",
+        leaked.len(),
+        leaked.join("; ")
+    );
+    let encrypted = world.server.encrypted_file_ids();
+    let in_name_only: Vec<String> = world
+        .server
+        .all_versions()
+        .into_iter()
+        .filter(|v| encrypted.contains(&v.file_id))
+        .filter(|v| sealed_bodies.contains_key(&v.sha256) || plain_bodies.contains_key(&v.sha256))
+        .map(|v| format!("file {} version {} ({})", v.file_id, v.change_id, &v.sha256[..8]))
+        .collect();
+    assert!(
+        in_name_only.is_empty(),
+        "seed {seed}: a file the server flags encrypted holds a user's plaintext: {in_name_only:?}"
+    );
+    let told: Vec<&String> = tree
+        .iter()
+        .filter(|(_, hash)| hash.is_some())
+        .map(|(p, _)| p)
+        .filter(|p| {
+            let name = leaf(p);
+            sealed_names.contains(&name) && !plain_names.contains(&name)
+        })
+        .collect();
+    assert!(
+        told.is_empty(),
+        "seed {seed}: the real name of a sealed file reached the server: {told:?}"
+    );
+}
+
+/// The sealed oracle sees a file the WORKLOAD sealed, not only the ring file.
+///
+/// The pin for the instrument itself. Until 2026-09-12 the oracle knew one
+/// hash, the ring body written at setup, so a sealed body the workload wrote
+/// could stand on the server in the clear and the check stayed green -- which
+/// is what happened on the three-device arm, where only the stranded-file
+/// check noticed. Here a user writes into the vault, the world settles, and
+/// then the server is handed that plaintext at a plain path by the harness's
+/// own hand, the way a confused engine would upload it. The oracle must
+/// object, and must object with the body's name; the ring file is untouched
+/// so the old one-hash check would have had nothing to say.
+#[test]
+fn the_sealed_oracle_sees_a_file_the_workload_sealed() {
+    let seed = 1;
+    let world = sweep_world(seed, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], 0, false, Vault::FolderRings);
+    let laptop = world.device("laptop");
+    let body = b"a budget the user sealed and nobody copied";
+    laptop.fs.user_write(&format!("{VAULT_ROOT}/budget.xlsx"), body);
+    assert!(world.settle().is_some());
+    // The world is clean: sealed on both devices, ciphertext on the server.
+    assert_sealed_content_never_reached_the_clear(&world, seed);
+    // Now the disclosure, under a stranger's name so the name check cannot
+    // be what fires.
+    world.server.seed_file(None, "quarterly.dat", body);
+    let verdict = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        assert_sealed_content_never_reached_the_clear(&world, seed)
+    }));
+    let why = match verdict {
+        Ok(()) => panic!("the oracle passed a sealed body standing plain on the server"),
+        Err(e) => e.downcast_ref::<String>().cloned().unwrap_or_default(),
+    };
+    assert!(
+        why.contains("Private/budget.xlsx") && why.contains("quarterly.dat"),
+        "the oracle fired without naming where the body was sealed and where it stands: {why}"
+    );
+    // And the subtraction: the same body copied plain by the user is theirs
+    // to publish, so the same server state is then no leak.
+    laptop.fs.user_write("Copy of budget.xlsx", body);
+    assert_sealed_content_never_reached_the_clear(&world, seed);
+    // But not sealed in name only. The exempted body standing as a version of
+    // the file the server flags encrypted is the inside half the subtraction
+    // cannot see, and the second check must catch it on its own.
+    let sealed_id = world
+        .server
+        .vault_files()
+        .into_iter()
+        .find(|f| f.folder_path == VAULT_ROOT)
+        .expect("the sealed file is on the server")
+        .id;
+    world.server.rot_ciphertext(sealed_id, body);
+    let verdict = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        assert_sealed_content_never_reached_the_clear(&world, seed)
+    }));
+    let why = match verdict {
+        Ok(()) => panic!("the oracle passed a user's plaintext as a version of an encrypted file"),
+        Err(e) => e.downcast_ref::<String>().cloned().unwrap_or_default(),
+    };
+    assert!(
+        why.contains("flags encrypted") && why.contains(&format!("file {sealed_id} ")),
+        "the oracle fired for the wrong reason: {why}"
+    );
+}
+
+/// The chain oracle sees Defect AI: two files trade names and each file's
+/// history is no longer its own.
+///
+/// No vault, no faults, one device: a person renames two files past each
+/// other through a scratch name, the way anyone swaps a draft for a final.
+/// The TREE ends correct, so every end-state oracle is green; what the chain
+/// oracle asks is whether either server entity now holds both bodies. On the
+/// engine as it stands both do (`scan::pair` rule 1 pairs by path without
+/// the inode and hands each record the other's bytes as an edit of itself),
+/// and this test asserts the oracle SAYS so, naming both entities and both
+/// bodies -- the instrument's own pin. It is the AI repro with the
+/// expectation inverted, and that is deliberate: the day AH's fix lands this
+/// test goes red with "the chain oracle did not fire", and that red is the
+/// signal to flip it into AI's regression pin, asserting green. It cannot
+/// pass silently in either world.
+#[test]
+fn the_chain_oracle_sees_two_files_trading_names() {
+    let seed = 9_950;
+    let world = World::of(seed, &[("laptop", Platform::Linux)]);
+    let laptop = world.device("laptop");
+    let a = b"the content that belongs to A";
+    let b = b"the content that belongs to B";
+    laptop.fs.user_write("a.txt", a);
+    laptop.fs.user_write("b.txt", b);
+    assert!(world.settle().is_some(), "both files go up");
+    assert_no_entity_holds_both_sides_of_a_swap(&world, seed);
+    world.record_swap_pair(a, b, "slots", false);
+    laptop.fs.user_rename("a.txt", ".swap.tmp");
+    laptop.fs.user_rename("b.txt", "a.txt");
+    laptop.fs.user_rename(".swap.tmp", "b.txt");
+    assert!(world.settle().is_some(), "the swap settles");
+    let verdict = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        assert_no_entity_holds_both_sides_of_a_swap(&world, seed)
+    }));
+    let why = match verdict {
+        Ok(()) => panic!(
+            "the chain oracle did not fire on two files trading names: either Defect AH is \
+             fixed (then flip this test into AI's regression pin) or the oracle is blind"
+        ),
+        Err(e) => e.downcast_ref::<String>().cloned().unwrap_or_default(),
+    };
+    assert!(
+        why.contains("file 901 holds") && why.contains("file 902 holds") && why.contains("belongs to A"),
+        "the oracle fired without naming both entities and the bodies: {why}"
     );
 }
 
@@ -804,9 +1255,12 @@ fn drive(
                 if let Some(p) = rng.pick(&files).cloned() {
                     if device.fs.exists(&p) {
                         let tmp = format!("{p}.tmp{step}");
+                        // Step and device, like every fresh body: a body that
+                        // can be written twice gives an oracle two origins for
+                        // one hash (Defect AI's record: `saved 12` twice).
                         device
                             .fs
-                            .user_write(&tmp, format!("saved {step}").as_bytes());
+                            .user_write(&tmp, format!("saved {step} {}", device.name).as_bytes());
                         device.fs.user_rename(&tmp, &p);
                     }
                 }
@@ -899,6 +1353,9 @@ fn drive(
                 if here.len() == RING_NAMES.len() {
                     let via = format!(".ring-swap-{step}.tmp");
                     if rng.below(3) == 0 {
+                        record_folder_swap(world, device, &here[0], &here[1]);
+                        record_folder_swap(world, device, &here[1], &here[2]);
+                        record_folder_swap(world, device, &here[2], &here[0]);
                         device.fs.user_rename(&here[0], &via);
                         device.fs.user_rename(&here[1], &here[0]);
                         device.fs.user_rename(&here[2], &here[1]);
@@ -906,6 +1363,7 @@ fn drive(
                     } else {
                         let i = rng.below(3) as usize;
                         let j = (i + 1 + rng.below(2) as usize) % 3;
+                        record_folder_swap(world, device, &here[i], &here[j]);
                         device.fs.user_rename(&here[i], &via);
                         device.fs.user_rename(&here[j], &here[i]);
                         device.fs.user_rename(&via, &here[j]);
@@ -924,13 +1382,18 @@ fn drive(
                     for (n, s) in slots.iter().enumerate() {
                         device
                             .fs
-                            .user_write(s, format!("slot {n} from {}", device.name).as_bytes());
+                            .user_write(s, format!("slot {n} from {} at {step}", device.name).as_bytes());
                         files.push(s.clone());
                     }
                 } else if rng.below(3) == 0 {
                     // Three-way rotation: a→tmp, b→a, c→b, tmp→c. The same trap
                     // with a longer cycle, which is where an implementation that
                     // special-cased pairs falls over.
+                    let body = |s: &str| device.fs.peek(s).unwrap_or_default();
+                    let (a, b, c) = (body(&slots[0]), body(&slots[1]), body(&slots[2]));
+                    world.record_swap_pair(&a, &b, "rotation", false);
+                    world.record_swap_pair(&b, &c, "rotation", false);
+                    world.record_swap_pair(&c, &a, "rotation", false);
                     let via = join(&base, &format!(".rotate-{step}.tmp"));
                     device.fs.user_rename(&slots[0], &via);
                     device.fs.user_rename(&slots[1], &slots[0]);
@@ -939,6 +1402,8 @@ fn drive(
                 } else {
                     let i = rng.below(3) as usize;
                     let j = (i + 1 + rng.below(2) as usize) % 3;
+                    let body = |s: &str| device.fs.peek(s).unwrap_or_default();
+                    world.record_swap_pair(&body(&slots[i]), &body(&slots[j]), "slots", false);
                     let via = join(&base, &format!(".swap-{step}.tmp"));
                     device.fs.user_rename(&slots[i], &via);
                     device.fs.user_rename(&slots[j], &slots[i]);
@@ -1093,6 +1558,96 @@ fn drive(
     }
 }
 
+/// Everything a seed leaves behind that a second run of it must leave again:
+/// every pass's plan and report in order, then each disk, then the server as
+/// the key holder reads it.
+///
+/// The server is read through the owner's view and not raw, on purpose. A
+/// sealed file's stored name is `enc-<content id>` and its hash is of
+/// ciphertext, and both are drawn from the OS's randomness on every upload
+/// (`jd_crypto::drive::new_content_id`, `FileKey::generate`). Two runs of one
+/// seed differ there by construction, and reading that as "the seed ran a
+/// different sequence" is exactly the mistake B10 was -- an `enc=true` upload
+/// probe printed its content id and it was read as a hash of the bytes.
+fn seed_trace(world: &World) -> Vec<String> {
+    let mut lines = world.journal();
+    for d in &world.devices {
+        for (path, hash) in jd_sim::scenario::disk_tree(d) {
+            lines.push(format!("disk {} {path:?} {hash:?}", d.name));
+        }
+    }
+    for (path, hash) in jd_sim::scenario::owner_view_of_the_server(world) {
+        lines.push(format!("server {path:?} {hash:?}"));
+    }
+    lines
+}
+
+/// One seed, one trace.
+///
+/// Every measurement in the reset (`specs/drive_sync_reset.md`, WP1f) assumes
+/// a seed gives one answer: remove a belt, re-run the same seeds, a moved
+/// number was not inert. That holds only if nothing in the engine decides
+/// differently from one process to the next, and the obvious way it would is a
+/// `HashMap` iterated at a decision site -- the default hasher is seeded per
+/// thread, so two threads are two hash orders. So each seed runs on two
+/// threads, the test first shows the two threads' hash orders differ, and then
+/// the traces must match line for line; the first line that does not is
+/// named, which is where the sorted iteration would go.
+///
+/// One seed per ring arm shape: two-device clean, two-device chaos, and the
+/// kill arm across platforms. Not the oracles -- a seed that leaks is still
+/// required to leak the same way twice, and that is the property here.
+///
+/// The plan lines carry provisional server ids, allocated in decision order,
+/// and they stay in the comparison: a red on ids alone means a device planned
+/// in a different order, which is exactly a divergent op to sort at its site
+/// and never a reason to loosen the field.
+#[test]
+fn one_seed_leaves_one_trace() {
+    let shapes: [(&str, u64, usize, Vec<(&str, Platform)>, bool, bool); 3] = [
+        ("clean2", 74023, 40, vec![("laptop", Platform::Linux), ("desktop", Platform::Linux)], false, false),
+        ("hostile2", 74423, 30, vec![("laptop", Platform::Linux), ("desktop", Platform::Linux)], true, false),
+        ("kill2", 75104, 30, vec![("mac", Platform::MacOs), ("pc", Platform::Windows)], true, true),
+    ];
+    for (arm, seed, steps, devices, chaos, kills) in shapes {
+        let run = || {
+            let devices = devices.clone();
+            std::thread::spawn(move || {
+                // What this thread's hash order looks like, so the test can
+                // show the two threads really did iterate differently. That
+                // the default hasher is seeded per thread is a detail of the
+                // standard library; if it ever stopped being one, this test
+                // would compare one order with itself and stay green for ever.
+                let order: Vec<u32> = (0..64u32)
+                    .collect::<std::collections::HashSet<u32>>()
+                    .into_iter()
+                    .collect();
+                let root = sweep_root(Vault::FolderRings);
+                let world = sweep_world(seed, &devices, steps, chaos, Vault::FolderRings);
+                drive(&world, seed, steps, chaos, root, Vault::FolderRings, kills, Names::Ordinary);
+                // Settling is part of the trace; whether it settled is not the
+                // question here.
+                let _ = world.settle();
+                (order, seed_trace(&world))
+            })
+        };
+        let (a, b) = (run(), run());
+        let ((order_a, a), (order_b, b)) = (a.join().unwrap(), b.join().unwrap());
+        assert_ne!(
+            order_a, order_b,
+            "{arm}: both threads iterate a HashMap in one order, so this test cannot see what it is for"
+        );
+        let first = a.iter().zip(b.iter()).position(|(x, y)| x != y);
+        assert!(
+            first.is_none() && a.len() == b.len(),
+            "{arm} seed {seed}: two runs left two traces; first difference at line {}:\n  {}\n  {}",
+            first.unwrap_or(a.len().min(b.len())),
+            first.map(|i| a[i].as_str()).unwrap_or("(end)"),
+            first.map(|i| b[i].as_str()).unwrap_or("(end)"),
+        );
+    }
+}
+
 /// Are these two paths on the same side of the vault's edge?
 ///
 /// Encryption is a property of where a thing lives, and the server cannot
@@ -1107,9 +1662,17 @@ fn same_side_of_the_vault(a: &str, b: &str) -> bool {
 
 /// A folder the workload may move or delete. The root it all hangs off is not
 /// one: deleting it takes the whole world with it, and for a vault sweep it
-/// would leave the rest of the run with no vault to test.
+/// would leave the rest of the run with no vault to test. Nor is the vault
+/// root itself: the user never renames it, and two things rest on that --
+/// `same_side_of_the_vault` is a name test on it, and the sealed oracle reads
+/// a write under its NAME as sealed by the user's intent, so a plain directory
+/// standing there can only be the engine's doing. Today `Private` never
+/// enters `dirs` at all (the workload reaches into the vault through
+/// `into_the_vault` and pushes only `Private/Sub N`), so refusing it here
+/// changes no candidate list and no draw; it makes the rule hold if that ever
+/// changes.
 fn is_movable(dir: &str, root: &str) -> bool {
-    !dir.is_empty() && dir != root
+    !dir.is_empty() && dir != root && dir != VAULT_ROOT
 }
 
 fn sweep(
@@ -2715,15 +3278,17 @@ fn frozen_park_onto_a_strangers_name_seed() {
         ("pc", Platform::Windows),
         ("disk", Platform::Decomposing),
     ];
-    workload_core(
-        4_123_847,
-        60,
-        &refs,
-        true,
-        Vault::None,
-        false,
-        Names::WindowsHostile,
-    );
+    red_only_on_the_chain_oracle(|| {
+        workload_core(
+            4_123_847,
+            60,
+            &refs,
+            true,
+            Vault::None,
+            false,
+            Names::WindowsHostile,
+        );
+    });
 }
 
 /// The seed that proves a park stands down for work it is blocking.
@@ -2861,7 +3426,44 @@ fn frozen_contested_name_loop_seeds() {
         ("pc", Platform::Windows),
         ("disk", Platform::Decomposing),
     ];
-    for seed in [111_740u64, 111_201, 111_120] {
-        workload_core(seed, 70, &refs, true, Vault::None, false, Names::Ordinary);
+    for (seed, poisoned_by_ah) in [(111_740u64, false), (111_201, true), (111_120, true)] {
+        let run = || {
+            workload_core(seed, 70, &refs, true, Vault::None, false, Names::Ordinary);
+        };
+        if poisoned_by_ah {
+            red_only_on_the_chain_oracle(run);
+        } else {
+            run();
+        }
     }
+}
+
+/// A frozen seed is green on everything but Defect AI's oracle, and says so.
+///
+/// The chain oracle (`assert_no_entity_holds_both_sides_of_a_swap`) landed
+/// on 2026-09-12 against an engine that still has Defect AH, whose fix has an
+/// owner decision pending (`specs/drive_sync_reset.md`, Open). Every chaos
+/// seed that swaps names is poisoned by it, the frozen seeds included, and
+/// each of them pins something ELSE that must stay green. So a frozen chaos
+/// seed is required to fire exactly that one oracle and no other: any second
+/// name in the list is the regression the pin exists for, and the chain
+/// oracle going quiet is AH fixed -- at which point this wrapper comes off
+/// and the seed is green outright. Not an exclusion list: the expectation is
+/// asserted both ways.
+fn red_only_on_the_chain_oracle(run: impl FnOnce() + std::panic::UnwindSafe) {
+    let why = match std::panic::catch_unwind(run) {
+        Ok(()) => panic!(
+            "the chain oracle did not fire on a frozen chaos seed: Defect AH is fixed, \
+             remove red_only_on_the_chain_oracle from this pin"
+        ),
+        Err(e) => e
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_default(),
+    };
+    assert!(
+        why.contains("1 oracle(s) fired [no_entity_holds_both_sides_of_a_swap]"),
+        "a frozen seed fired something other than the chain oracle: {why}"
+    );
 }

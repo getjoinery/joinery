@@ -1218,7 +1218,7 @@ impl Store {
             .conn
             .query_row(
                 "SELECT entity_type, server_id FROM local_index
-                  WHERE file_id = ?1 AND entity_type IS NOT NULL
+                  WHERE file_id = ?1 AND entity_type = 'file'
                   ORDER BY mtime_ns DESC LIMIT 1",
                 params![file_id as i64],
                 |r| Ok((r.get(0)?, r.get(1)?)),

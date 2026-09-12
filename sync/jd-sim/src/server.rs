@@ -50,6 +50,16 @@ struct FolderRow {
     encrypted: bool,
 }
 
+/// One folder as the server knows it, for oracles that ask by id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FolderFact {
+    pub id: i64,
+    pub parent: Option<i64>,
+    pub name: String,
+    pub encrypted: bool,
+    pub trashed: bool,
+}
+
 #[derive(Debug, Clone)]
 struct FileRow {
     id: i64,
@@ -457,6 +467,37 @@ impl MockServer {
     /// Expire every outstanding signed URL — the 24-hour sweep, on demand.
     pub fn expire_signed_urls(&self) {
         self.state.lock().unwrap().signed.clear();
+    }
+
+    /// Every folder the server holds, live or trashed, as the facts an oracle
+    /// asks about identity: which id wears which name, under which parent,
+    /// with which protection. A tree cannot answer that -- a folder that has
+    /// stopped being the vault and a vault that has moved can draw the same
+    /// picture -- so this is asked by id.
+    pub fn folders(&self) -> Vec<FolderFact> {
+        let st = self.state.lock().unwrap();
+        let mut out: Vec<FolderFact> = st
+            .folders
+            .values()
+            .map(|f| FolderFact {
+                id: f.id,
+                parent: f.parent,
+                name: f.name.clone(),
+                encrypted: f.encrypted,
+                trashed: f.trashed,
+            })
+            .collect();
+        out.sort_by_key(|f| f.id);
+        out
+    }
+
+    /// Every file the server holds as encrypted, trashed or not. What it
+    /// stores for these is a placeholder name and ciphertext; a version of one
+    /// whose bytes are a user's plaintext is a file that went up sealed in
+    /// name only.
+    pub fn encrypted_file_ids(&self) -> std::collections::BTreeSet<i64> {
+        let st = self.state.lock().unwrap();
+        st.files.values().filter(|f| f.encrypted).map(|f| f.id).collect()
     }
 
     /// Every content ever committed. The oracle for "nothing was lost".

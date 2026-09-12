@@ -1,6 +1,10 @@
 # Directory identity
 
-**Status: specified, not built. 2026-09-10.**
+**Status: being built as WP2 of `drive_sync_reset.md`, from 2026-09-12.** The
+two decisions that spec makes (an encrypted folder's id may claim; no id
+falls back to today's rules), its precedence table, and its reader-by-reader
+bars govern the build; where this document and that one differ, that one is
+current.
 
 A folder record does not know which directory on the disk is its own. It finds
 out by looking at what stands at the path it expects and what is inside it. That
@@ -27,9 +31,12 @@ an inode, stable across renames and moves within a volume, exactly as files do.
 Nothing reads it.
 
 1. **The VFS reports a `file_id` for directories.** `DirEntry` already carries a
-   `fingerprint` slot; `vfs.fingerprint` returns `None` for a directory today,
-   which is what `make_room`'s comment records. Real and mock both learn to
-   answer. Size and mtime stay meaningless for a directory: only the id is read.
+   `fingerprint` slot and answers for a directory in `read_dir`; a new
+   `Vfs::directory_id(path)` answers for a path. `vfs.fingerprint` KEEPS
+   returning `None` for a directory: twelve executor sites read its `Some`
+   as "a file stands here", which is what `make_room`'s comment records, and
+   they must not change meaning. Real and mock both learn to answer. Size
+   and mtime stay meaningless for a directory: only the id is read.
 2. **Folder entries record it.** The `synced_fp_file_id` column already exists on
    `entries`. A folder writes its directory's id there when it materializes one
    or adopts one, exactly as a file records its inode.
@@ -58,18 +65,20 @@ names and contents is right in both worlds**, because the two worlds are
 identical in names and contents. Only the directory's own identity separates
 them.
 
-## What lands before it
+## What lands before it -- superseded 2026-09-12
 
-An encrypted folder whose pairing rests on contents alone -- its directory
-standing empty at its agreed path while its known child sits under another
-directory -- is HELD. Folder and file both `Unsyncable`, one issue naming both
-readings: *"Private was emptied and Plain holds its file: was Private renamed,
-or was the file moved out?"* No rename pushed, no conversion, no adoption of
-either directory. The `empty_and_encrypted` ambiguous arm already says exactly
-this for its own case.
-
-A hold costs a stall with a sentence the user can act on. Both alternatives cost
-a vault.
+This section proposed a HOLD for an encrypted folder whose pairing rests on
+contents alone (its directory standing empty at its agreed path while its
+known child sits under another directory), to land ahead of the identity
+work. It never landed, and the reset spec supersedes it: the identity work
+is being built directly, and in it the id world decides by identity (the
+standing directory that carries the record's id IS the folder, so the child
+under another directory moved out -- a drag, which converts) while the no-id
+world runs today's rules for one pass and re-records the id on the next
+corroborated pairing. A hold in front of that would stall the ordinary
+drag-out to buy one pass of protection in a world the fix makes rare. The
+`empty_and_encrypted` ambiguous arm in `pass.rs` is a different case (a
+missing vault beside a new empty directory) and stays as it is.
 
 ## Tests
 
@@ -93,7 +102,10 @@ a vault.
 
 **A directory's `file_id` inherits every rule `synced_fp_file_id` already lives
 under**, which settles both questions in one sentence: *it funds order, never
-identity*.
+identity* -- with one exception the reset spec decides: an ENCRYPTED folder's
+recorded id may claim the directory that carries it, because a wrong claim
+over-seals and over-sealing never publishes, while the alternative is a hold
+on every rename of an empty vault.
 
 - **It corroborates, it never claims.** The id confirms a pairing the existing
   rules already proposed from name, parent and contents; it never proposes one

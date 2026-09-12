@@ -6,6 +6,21 @@ failing seed — every one of these was green in a 36,170-seed run.
 
 ---
 
+**Which oracle a number was taken on (R3 of `drive_sync_reset.md`).** Every
+per-seed count of sealed leaks in this document dated before 2026-09-12 --
+every "N of 40 seeds leak", every ring-arm figure, the named-pair table in the
+reset spec -- was taken on `assert_sealed_content_never_reached_the_clear`
+in its ONE-FILE form: it knew the hash of the ring file written at setup and
+the name `sealed.txt`, and nothing else. A body the workload itself sealed
+could stand plain on the server and that oracle stayed green. Those numbers
+are struck as leak counts and stand only as counts of "the ring file leaked".
+From 2026-09-12 the oracle is the EVERY-FILE form (every user write recorded
+by the disk, sealed by prefix, minus bodies the user copied plain), and every
+number after that date says so. The two are not comparable; do not put one
+beside the other without the label.
+
+---
+
 ## The pattern worth keeping
 
 Three separate defects this week came from the same place: **the simulator
@@ -3413,35 +3428,53 @@ probe census on one seed showed 13 ASIDE, 24 MINT, 329 UPLOAD and 1356 XING
 lines, so the zeros could only have been bad greps. The rule that caught it: a
 zero from a probe is only evidence once that probe has been shown to fire.
 
-**B10 -- the sweep is not trace-reproducible: the same seed runs a different
-action sequence each time.** Found 2026-09-10 while chasing the nine unexplained
+**B10 -- CLOSED 2026-09-12 as a misread of the probe. The sweep IS
+trace-reproducible.** Found 2026-09-10 while chasing the nine unexplained
 hostile seeds. Seed 75104, same binary, two consecutive runs:
 
     run 1  120 uploads  22 mints  aside=0 create=0 rescue=0 convert=0
     run 2  120 uploads  22 mints  aside=0 create=0 rescue=0 convert=0
     but:   "Report 13.docx" content 2bcdab30 in one run, fb04850e in the other
 
-Totals and route markers match; the BYTES do not. Workload bodies are
-`format!("body {step} {}", device.name)`, wholly determined by step and device,
-so a different body at the same path means a different STEP or DEVICE wrote it.
-The action sequence therefore differs between processes for one seed.
+That was read as: bodies are `format!("body {step} {}", device.name)`, so a
+different body at one path means a different step or device wrote it, so the
+action sequence differs between processes. It does not. The two probe lines
+were `UPLOAD dev=mac ... enc=true content=Some("2bcdab30")` into parent 501,
+the vault, and for an encrypted upload `content` is the entity's content id:
+`jd_crypto::drive::new_content_id`, sixteen bytes from `OsRng`, a random label
+for the ciphertext and not a hash of anything. The file key is drawn the same
+way. So that field differs on every run by construction and says nothing about
+what the workload did. The probe printed one field whose meaning depends on a
+branch -- a hash of the bytes when `enc=false`, a random name when `enc=true`
+-- and it was read as the first meaning on a line that said the second.
 
-**What this does and does not cost.** Outcome-level stability has held in
-practice all campaign -- the same eleven clean seeds and the same twenty-two
-hostile seeds reproduce run after run -- and route attribution reproduced
-exactly on the seed tested. What is NOT reproducible is the trace: a failing
-seed re-run for diagnosis executes a different sequence, so a line number, an
-entity id, or a step index taken from one run may not exist in the next. Every
-per-seed trace in this document should be read as "a run of that seed", not
-"the run".
+**The measurement that closed it** (engine `df2f5c88`, harness uncommitted; the reset's WP1f): a
+per-pass journal on `World` (device, plan, exec report, in order) plus every
+device's plaintext disk tree and the server tree, dumped at the end of a seed
+with `JD_JOURNAL=<file>` on `scratch_arm_one`. Four seeds, three processes
+each -- kill2 75104, hostile2 74423, clean2 74023, clean3 74826 -- the journal
+and every disk line byte-identical across processes on all four. The only
+lines that differed were the server's entries for sealed files: the
+`enc-<content id>` name and the ciphertext hash, both random by design. Read
+through the key holder's view of the server (names and hashes in the plaintext
+domain) those match too. `one_seed_leaves_one_trace` in `zz_sweep.rs` keeps
+it that way: one seed per arm shape on two threads, the threads first shown to
+iterate a `HashMap` in two orders, then the whole trace compared line for line
+and the first difference named. No engine change was made, because no divergent
+op was found to sort at.
 
-Cause not established. A shared RNG consumed in a device order that is not fixed
-is the obvious candidate and has NOT been confirmed.
+**What it costs the record:** nothing that was written. Every per-seed trace
+in this document IS the run of that seed, and the "a run of that seed" caveat
+that stood here for two days is withdrawn. What it adds to the rules: R6 gains
+a fifth trap -- a probe field whose meaning differs by branch. And the seam
+for making even the ciphertext reproducible already exists
+(`new_content_id_with_rng`, `FileKey` take any `RngCore`); seeding the sim's
+crypto RNG is a small separate step nobody needs yet.
 
 **THE NINE, ANSWERED AT THE LEVEL OF *WHERE*: the sealed bytes are adopted into
 ORDINARY WORKLOAD FILES' identities.** The oracle now names the path it found
 the plaintext at (public-html-0e's probe -- one line, reads the END STATE, so it
-is immune to B10's trace nondeterminism, and strictly better than the
+reads the same on every run of a seed, and strictly better than the
 upload-site hash it replaced):
 
     75104  "Contested Folder/contested (conflicted copy ... from pc).txt"

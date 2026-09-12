@@ -115,7 +115,24 @@ pub struct DirEntry {
     /// decomposed). Comparison goes through [`comparison_key`], never this.
     pub name: String,
     pub kind: EntryKind,
+    /// For a file, the whole fingerprint. For a directory, its identity and
+    /// nothing else: `file_id` is the directory's inode (or file index), and
+    /// `size` and `mtime_ns` are 0 and mean nothing -- a directory's mtime
+    /// moves whenever a child is made, and nothing here may read it. A
+    /// symlink or anything else carries `None`.
     pub fingerprint: Option<Fingerprint>,
+}
+
+impl Fingerprint {
+    /// A directory's fingerprint: its identity, with the fields that mean
+    /// nothing for a directory pinned to zero so nobody compares them.
+    pub fn of_directory(file_id: u64) -> Fingerprint {
+        Fingerprint {
+            size: 0,
+            mtime_ns: 0,
+            file_id,
+        }
+    }
 }
 
 /// A handle to a spool file being filled before it becomes visible.
@@ -205,7 +222,19 @@ pub trait Vfs: Send + Sync {
     /// safety stays a property of the default listing instead of a convention
     /// every future caller has to remember.
     fn read_dir_all(&self, path: &Path) -> VfsResult<Vec<DirEntry>>;
+    /// The fingerprint of the FILE at this path. `None` for a directory as
+    /// well as for nothing at all: a dozen callers read `Some` as "a file
+    /// stands here" and `None` as "the way is clear or a directory is in it",
+    /// and that reading is load-bearing (`make_room`). A directory's identity
+    /// is asked through [`Vfs::directory_id`] or read off its [`DirEntry`].
     fn fingerprint(&self, path: &Path) -> VfsResult<Option<Fingerprint>>;
+    /// The identity of the DIRECTORY at this path -- its inode, or file index
+    /// on Windows -- stable across renames and moves within a volume, exactly
+    /// as a file's is. `None` for a file, a symlink, or nothing. `Some(0)`
+    /// where a directory stands but its identity could not be read (a handle
+    /// that would not open), which every reader treats as "unknown", never as
+    /// a match.
+    fn directory_id(&self, path: &Path) -> VfsResult<Option<u64>>;
     fn hash(&self, path: &Path) -> VfsResult<String>;
 
     fn create_dir(&self, path: &Path) -> VfsResult<()>;

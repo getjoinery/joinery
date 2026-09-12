@@ -27,7 +27,7 @@
 //! one over the same `MemFs`, which is exactly what a restart is: the disk is
 //! still there, and everything the process was holding is gone.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -104,6 +104,50 @@ struct MemFsState {
     /// Spool files in flight, by their temporary name.
     spools: BTreeMap<String, Vec<u8>>,
     next_spool: u64,
+    /// Every body the user wrote, as (path, sha256), in order.
+    ///
+    /// The one record of what the user put where. An oracle that wants to know
+    /// which bytes were sealed when they were written -- and which of those the
+    /// user later copied somewhere plain by their own hand -- reads it here
+    /// rather than from a list the generator keeps, because the chaos writers
+    /// and the safe-save's temporary do not go through the generator's list
+    /// and do go through [`MemFs::user_write`].
+    user_writes: Vec<UserWrite>,
+    /// Every file path the user gave a file by renaming, in order: the file
+    /// itself, or every file under a folder they renamed. Each with whether
+    /// it then stood under a directory marked sealed.
+    ///
+    /// A rename writes no body, so it is not in `user_writes`, but it does
+    /// put a NAME somewhere, and an oracle asking which names the user only
+    /// ever used inside a vault has to see it. Without this, a plain file
+    /// renamed to a name that also exists sealed read as the sealed name
+    /// reaching the server (seed 74000 on the two-device ring arm).
+    user_renames: Vec<(String, bool)>,
+    /// Directories the harness has declared sealed, by their current path.
+    ///
+    /// The one piece of directory identity this disk keeps, and it keeps it
+    /// for the harness only: the engine cannot see it. A mark travels with
+    /// the directory through every rename, the user's or the engine's, and
+    /// dies with it, so "was this write inside the folder the user sealed"
+    /// can be answered after the folder has traded names -- which a path
+    /// prefix cannot, because the ring arm trades the encrypted ring's name
+    /// onto plain folders all run long. A directory the engine mints afresh
+    /// under a sealed name carries no mark: it is not the folder the user
+    /// sealed, whatever it is called.
+    sealed_dirs: BTreeSet<String>,
+    /// Every directory answers 0 for its identity. See
+    /// [`MemFs::directory_ids_unreadable`].
+    directory_ids_unreadable: bool,
+}
+
+/// One body the user wrote, and where it stood when they did.
+#[derive(Clone, Debug)]
+pub struct UserWrite {
+    /// The path as stored, so a decomposing volume reports the form it kept.
+    pub path: String,
+    pub sha256: String,
+    /// Under a directory marked sealed at the moment of the write.
+    pub in_sealed_dir: bool,
 }
 
 /// The virtual disk. Cloning shares it — that is what makes "restart the
@@ -137,10 +181,14 @@ impl MemFs {
     pub fn new(personality: Personality, clock: SimClock) -> MemFs {
         let mut nodes = BTreeMap::new();
         nodes.insert(String::new(), Node::Dir);
+        // The root is a directory like any other and carries an id like any
+        // other; the first one handed out.
+        let mut file_ids = BTreeMap::new();
+        file_ids.insert(String::new(), 1000);
         MemFs {
             state: Arc::new(Mutex::new(MemFsState {
                 nodes,
-                file_ids: BTreeMap::new(),
+                file_ids,
                 next_file_id: 1000,
                 freed_ids: Vec::new(),
                 reuse_file_ids: false,
@@ -149,6 +197,10 @@ impl MemFs {
                 failures: Vec::new(),
                 spools: BTreeMap::new(),
                 next_spool: 0,
+                user_writes: Vec::new(),
+                user_renames: Vec::new(),
+                sealed_dirs: BTreeSet::new(),
+                directory_ids_unreadable: false,
             })),
             personality,
             clock,
@@ -198,6 +250,45 @@ impl MemFs {
         self.state.lock().unwrap().reuse_file_ids = on;
     }
 
+    /// Report every directory's identity as 0 -- the Windows world where the
+    /// handle a file index needs will not open. A reader that treats 0 as an
+    /// id would pair every directory with every other; the scenario that
+    /// turns this on is asking whether it does.
+    pub fn directory_ids_unreadable(&self, on: bool) {
+        self.state.lock().unwrap().directory_ids_unreadable = on;
+    }
+
+    /// Give every file and directory a fresh identity, keeping everything
+    /// else: the disk after a restore from backup, a copy onto a new volume,
+    /// or a re-created sync root. Every id the engine has recorded is now
+    /// stale and stands nowhere, which is the world decision 2 of the reset's
+    /// WP2 falls back from.
+    pub fn renumber_every_id(&self) {
+        let mut st = self.state.lock().unwrap();
+        let keys: Vec<String> = st.file_ids.keys().cloned().collect();
+        for k in keys {
+            let id = Self::alloc_id(&mut st);
+            st.file_ids.insert(k, id);
+        }
+    }
+
+    /// Give every DIRECTORY a fresh identity and leave the files alone: the
+    /// world an install that predates directory identity wakes up in, where
+    /// files have their inodes on record and folders have nothing yet.
+    pub fn renumber_directory_ids(&self) {
+        let mut st = self.state.lock().unwrap();
+        let keys: Vec<String> = st
+            .file_ids
+            .keys()
+            .filter(|k| matches!(st.nodes.get(*k), Some(Node::Dir)))
+            .cloned()
+            .collect();
+        for k in keys {
+            let id = Self::alloc_id(&mut st);
+            st.file_ids.insert(k, id);
+        }
+    }
+
     /// Take the sync root away, or give it back.
     pub fn set_root_available(&self, available: bool) {
         self.state.lock().unwrap().root_available = available;
@@ -240,6 +331,12 @@ impl MemFs {
             st.file_ids.insert(key.clone(), id);
         }
         Self::watch_loss(&st, &key, "the user saving over it");
+        let in_sealed_dir = Self::under_a_sealed_dir(&st, &key);
+        st.user_writes.push(UserWrite {
+            path: key.clone(),
+            sha256: crate::sha256_hex(bytes),
+            in_sealed_dir,
+        });
         st.nodes.insert(
             key,
             Node::File {
@@ -247,6 +344,35 @@ impl MemFs {
                 mtime_ns: mtime,
             },
         );
+    }
+
+    /// Every body the user has written to this disk, in the order written.
+    pub fn user_writes(&self) -> Vec<UserWrite> {
+        self.state.lock().unwrap().user_writes.clone()
+    }
+
+    /// Declare the directory at this path sealed, for the harness's own
+    /// bookkeeping. See `MemFsState::sealed_dirs`.
+    pub fn mark_sealed_dir(&self, path: &str) {
+        let key = self.store_path(path);
+        let mut st = self.state.lock().unwrap();
+        assert!(
+            matches!(st.nodes.get(&key), Some(Node::Dir)),
+            "mark_sealed_dir: no directory at {key}"
+        );
+        st.sealed_dirs.insert(key);
+    }
+
+    /// Does a directory marked sealed stand above this path right now?
+    pub fn under_sealed_dir(&self, path: &str) -> bool {
+        let key = self.store_path(path);
+        Self::under_a_sealed_dir(&self.state.lock().unwrap(), &key)
+    }
+
+    fn under_a_sealed_dir(st: &MemFsState, key: &str) -> bool {
+        st.sealed_dirs
+            .iter()
+            .any(|d| key == d || key.starts_with(&format!("{d}/")))
     }
 
     /// A user creating a folder.
@@ -262,7 +388,7 @@ impl MemFs {
              is not there.",
         );
         Self::ensure_parents(&mut st, &key);
-        st.nodes.entry(key).or_insert(Node::Dir);
+        Self::make_dir(&mut st, &key);
     }
 
     /// A user deleting something outright — no trash, gone. Releases the file
@@ -279,6 +405,7 @@ impl MemFs {
         for v in victims {
             Self::watch_loss(&st, &v, "the user deleting it");
             st.nodes.remove(&v);
+            st.sealed_dirs.remove(&v);
             if let Some(id) = st.file_ids.remove(&v) {
                 st.freed_ids.push(id);
             }
@@ -293,6 +420,21 @@ impl MemFs {
         Self::refuse_impossible(&st, &t, "move something");
         Self::ensure_parents(&mut st, &t);
         Self::move_subtree(&mut st, &f, &t);
+        let placed: Vec<(String, bool)> = st
+            .nodes
+            .iter()
+            .filter(|(k, n)| {
+                matches!(n, Node::File { .. }) && (**k == t || k.starts_with(&format!("{t}/")))
+            })
+            .map(|(k, _)| (k.clone(), Self::under_a_sealed_dir(&st, k)))
+            .collect();
+        st.user_renames.extend(placed);
+    }
+
+    /// Every file path the user has renamed something onto, in order, with
+    /// whether it then stood under a directory marked sealed.
+    pub fn user_renames(&self) -> Vec<(String, bool)> {
+        self.state.lock().unwrap().user_renames.clone()
     }
 
     /// Set an mtime by hand, including backwards. Filesystems and restore tools
@@ -519,9 +661,22 @@ impl MemFs {
     fn ensure_parents(st: &mut MemFsState, key: &str) {
         let parts: Vec<&str> = key.split('/').collect();
         for i in 1..parts.len() {
-            let prefix = parts[..i].join("/");
-            st.nodes.entry(prefix).or_insert(Node::Dir);
+            Self::make_dir(st, &parts[..i].join("/"));
         }
+    }
+
+    /// A directory at this key, made if it is not there, with an identity of
+    /// its own. Directories carry ids from the same pool as files, kept in
+    /// the same map, so a rename carries the id and a removal releases it
+    /// (and, under `reuse_file_ids`, hands it out again) exactly as for a
+    /// file -- the recycled-directory world is reachable from a scenario.
+    fn make_dir(st: &mut MemFsState, key: &str) {
+        if st.nodes.contains_key(key) {
+            return;
+        }
+        st.nodes.insert(key.to_string(), Node::Dir);
+        let id = Self::alloc_id(st);
+        st.file_ids.insert(key.to_string(), id);
     }
 
     /// Say where content stopped existing, when `LOSE` names its hash.
@@ -571,7 +726,10 @@ impl MemFs {
                 st.nodes.insert(new.clone(), node);
             }
             if let Some(id) = st.file_ids.remove(&old) {
-                st.file_ids.insert(new, id);
+                st.file_ids.insert(new.clone(), id);
+            }
+            if st.sealed_dirs.remove(&old) {
+                st.sealed_dirs.insert(new);
             }
         }
     }
@@ -601,6 +759,14 @@ impl MemFs {
                 source: std::io::Error::other("simulated I/O error"),
             },
         })
+    }
+
+    /// A directory's identity, or 0 when this disk cannot read one.
+    fn directory_id_of(st: &MemFsState, key: &str) -> u64 {
+        if st.directory_ids_unreadable {
+            return 0;
+        }
+        st.file_ids.get(key).copied().unwrap_or(0)
     }
 
     fn fingerprint_of(st: &MemFsState, key: &str) -> Option<Fingerprint> {
@@ -662,7 +828,10 @@ impl MemFs {
                     Node::Dir => EntryKind::Directory,
                     Node::File { .. } => EntryKind::File,
                 },
-                fingerprint: Self::fingerprint_of(&st, k),
+                fingerprint: match node {
+                    Node::Dir => Some(Fingerprint::of_directory(Self::directory_id_of(&st, k))),
+                    Node::File { .. } => Self::fingerprint_of(&st, k),
+                },
             });
         }
         Ok(out)
@@ -695,6 +864,16 @@ impl Vfs for MemFs {
         self.check_failure(FsOp::Fingerprint, &key, path)?;
         let st = self.state.lock().unwrap();
         Ok(Self::fingerprint_of(&st, &key))
+    }
+
+    fn directory_id(&self, path: &Path) -> VfsResult<Option<u64>> {
+        let key = self.key_for(path)?;
+        self.check_failure(FsOp::Fingerprint, &key, path)?;
+        let st = self.state.lock().unwrap();
+        Ok(match st.nodes.get(&key) {
+            Some(Node::Dir) => Some(Self::directory_id_of(&st, &key)),
+            _ => None,
+        })
     }
 
     fn hash(&self, path: &Path) -> VfsResult<String> {
@@ -736,7 +915,7 @@ impl Vfs for MemFs {
             return Err(VfsError::AlreadyExists(Self::path_of(&blocker)));
         }
         Self::ensure_parents(&mut st, &key);
-        st.nodes.insert(key, Node::Dir);
+        Self::make_dir(&mut st, &key);
         Ok(())
     }
 
@@ -833,6 +1012,7 @@ impl Vfs for MemFs {
             if let Some(node) = st.nodes.remove(&v) {
                 st.trash.push((v.clone(), node));
             }
+            st.sealed_dirs.remove(&v);
             if let Some(id) = st.file_ids.remove(&v) {
                 st.freed_ids.push(id);
             }
@@ -1067,6 +1247,34 @@ mod tests {
         let mut got = Vec::new();
         r.read_to_end(&mut got).unwrap();
         assert_eq!(got, b"hello");
+    }
+
+    #[test]
+    fn a_directory_carries_an_identity_that_survives_a_rename_and_dies_with_it() {
+        let f = fs();
+        f.user_mkdir("one");
+        f.user_mkdir("two");
+        let one = f.directory_id(&p("one")).unwrap().unwrap();
+        let two = f.directory_id(&p("two")).unwrap().unwrap();
+        assert_ne!(one, two);
+        assert_eq!(f.fingerprint(&p("one")).unwrap(), None, "fingerprint stays None for a directory");
+        f.user_rename("one", "uno");
+        assert_eq!(f.directory_id(&p("uno")).unwrap(), Some(one));
+        assert_eq!(f.directory_id(&p("one")).unwrap(), None);
+        // Folders made on the way to a nested file get ids too, and the
+        // listing reports them.
+        f.user_write("uno/deep/f.txt", b"x");
+        let deep = f.directory_id(&p("uno/deep")).unwrap().unwrap();
+        let listed = f.read_dir(&p("uno")).unwrap();
+        assert_eq!(listed[0].fingerprint, Some(Fingerprint::of_directory(deep)));
+        assert_eq!(f.directory_id(&p("uno/deep/f.txt")).unwrap(), None);
+        // Removed, the id is released; with reuse on, the next directory made
+        // gets it back -- the recycled-directory world a scenario can reach.
+        f.user_remove("two");
+        assert_eq!(f.directory_id(&p("two")).unwrap(), None);
+        f.reuse_file_ids(true);
+        f.user_mkdir("three");
+        assert_eq!(f.directory_id(&p("three")).unwrap(), Some(two));
     }
 
     #[test]

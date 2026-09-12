@@ -268,15 +268,18 @@ pub fn run_pass(
     // the loop below can treat it like any other entry. Folders first: a new
     // file inside a new folder cannot say where it lives until the folder has
     // one.
-    let dirs_on_disk = observed_dirs(env)?;
+    let (dirs_on_disk, dir_identity) = observed_dirs(env)?;
     let mut folder_ids = folder_paths(env)?;
+    // What each folder record says its own path is, before this pass moves
+    // anything: the only pairings a record may learn its directory from.
+    let agreed_paths = folder_ids.clone();
 
     // A folder the user renamed is a folder, renamed — not a new folder plus a
     // thousand files that moved into it. Without this the old folder is left
     // behind on the server, everything inside is re-parented one file at a
     // time, and the folder's sharing and history stay with a shell nobody can
     // see any more.
-    let folders = detect_folder_moves(env, &observed, &dirs_on_disk, &mut folder_ids)?;
+    let folders = detect_folder_moves(env, &observed, &dirs_on_disk, &dir_identity, &mut folder_ids)?;
 
     // The recorded paths of the folders not yet on this disk in their own
     // right, keyed the way the disk keys names. A directory is matched to
@@ -309,6 +312,12 @@ pub fn run_pass(
         }
     }
     for dir in &dirs_on_disk {
+        // A tracked folder's own directory, standing apart from its files:
+        // not a new folder, and not adopted as one while the disagreement is
+        // unresolved.
+        if folders.held.contains(dir) || folders.held.iter().any(|h| dir.starts_with(&format!("{h}/"))) {
+            continue;
+        }
         let matched = match folder_ids.get(dir) {
             Some(&id) => Some((dir.clone(), id)),
             None => unmaterialized_by_key.get(&fold(dir)).cloned().flatten(),
@@ -372,6 +381,7 @@ pub fn run_pass(
     }
     let mut folders = folders;
     folders.place_deferred(env, &folder_ids)?;
+    record_directory_identities(env, &agreed_paths, &dir_identity)?;
     // Slots already spoken for by an entry whose bytes have not arrived yet.
     //
     // `known_local` deliberately leaves those entries out -- there is no local
@@ -916,7 +926,43 @@ pub fn run_pass(
         // the very next pass: the device never quiet, the queue always empty,
         // one issue raised the first time round and nothing after it. Seeds
         // 78350 and 78495 each spent a whole campaign there.
-        if let Some(crossing) = crossing_a_vault_edge(env, &entry, &local)? {
+        // The directory the file stands in now, by identity: the directory
+        // the scan resolved its destination parent to.
+        let dir_of_folder = |pid: Option<i64>| -> Option<u64> {
+            match pid {
+                None => None,
+                Some(pid) => folder_ids
+                    .iter()
+                    .find(|(_, id)| **id == pid)
+                    .and_then(|(path, _)| dir_identity.get(path))
+                    .copied(),
+            }
+        };
+        let standing_in = match &local {
+            Delta::Moved { to } | Delta::MovedAndEdited { to, .. } if entry.id.entity_type == EntityType::File => {
+                let agreed_parent = entry
+                    .synced_placement
+                    .as_ref()
+                    .map(|p| p.parent)
+                    .unwrap_or(entry.remote.parent);
+                StandingIn {
+                    file: dir_of_folder(to.parent),
+                    agreed_parent: dir_of_folder(agreed_parent),
+                }
+            }
+            _ => StandingIn::default(),
+        };
+        if let Some(crossing) = crossing_a_vault_edge(env, &entry, &local, standing_in)? {
+            if crossing == Crossing::NotADrag {
+                env.store.raise_issue(
+                    Some(entry.id),
+                    "withdrawn",
+                    "this file is still in the folder it was in; the folder was misread and \
+                     nothing is moved or converted until the folder scan reads it right",
+                    (env.now_ms)() as i64,
+                )?;
+                continue;
+            }
             if crossing == Crossing::OutOfReach {
                 // A vault folder on its way out. Say so, once, and do not plan
                 // the move: the server refuses it, and asking again next pass
@@ -1749,11 +1795,19 @@ fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
 }
 
 /// Directories on disk, relative to the root.
-fn observed_dirs(env: &ExecEnv) -> Result<Vec<String>, ExecError> {
+/// Every directory on the disk, shallowest first, and each one's identity
+/// -- the id the filesystem gives it, 0 where it could not be read.
+///
+/// The identities cover the engine's own scratch directories too (a park
+/// under a `.jd-` name), which the listing leaves out: whether an id stands
+/// on this disk is a fact about the disk, and a parked folder's directory
+/// stands as surely as any other.
+fn observed_dirs(env: &ExecEnv) -> Result<(Vec<String>, HashMap<String, u64>), ExecError> {
     let Some(root) = env.vfs.root() else {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), HashMap::new()));
     };
     let mut out = Vec::new();
+    let mut identity = HashMap::new();
     let mut queue = vec![(root, String::new())];
     let mut guard = 0;
     while let Some((dir, rel)) = queue.pop() {
@@ -1761,8 +1815,8 @@ fn observed_dirs(env: &ExecEnv) -> Result<Vec<String>, ExecError> {
         if guard > 100_000 {
             return Err(ExecError::Contract("the local walk does not end".into()));
         }
-        for child in env.vfs.read_dir(&dir)? {
-            if jd_vfs::is_internal(&child.name) || child.kind != jd_vfs::EntryKind::Directory {
+        for child in env.vfs.read_dir_all(&dir)? {
+            if child.kind != jd_vfs::EntryKind::Directory {
                 continue;
             }
             let path = if rel.is_empty() {
@@ -1770,6 +1824,12 @@ fn observed_dirs(env: &ExecEnv) -> Result<Vec<String>, ExecError> {
             } else {
                 format!("{rel}/{}", child.name)
             };
+            identity.insert(path.clone(), child.fingerprint.map(|fp| fp.file_id).unwrap_or(0));
+            if jd_vfs::is_internal(&child.name) {
+                // Known to stand, never listed, and not walked into: what a
+                // park holds is the finisher's business.
+                continue;
+            }
             queue.push((dir.join(&child.name), path.clone()));
             out.push(path);
         }
@@ -1777,7 +1837,63 @@ fn observed_dirs(env: &ExecEnv) -> Result<Vec<String>, ExecError> {
     // Shallowest first, so a parent always has an identity before its children
     // need one.
     out.sort_by_key(|p| (depth_of(p), p.clone()));
-    Ok(out)
+    Ok((out, identity))
+}
+
+/// A folder record learns which directory is its own.
+///
+/// A folder record never knew: it found its directory by looking at what
+/// stood at the path it expected and what was inside, and that inference
+/// fails exactly when files and folders move at once (Defects AC, AD, AE, AF,
+/// AG, AJ -- `specs/drive_directory_identity.md`). The directory itself has
+/// always known: it has an id, stable across renames, exactly as a file has
+/// an inode. This is where the record writes it down.
+///
+/// Recording only, and only from the directory standing at the record's OWN
+/// agreed path -- never from a pairing the contents rule made this pass. A
+/// record with no id yet, paired by contents to a directory its files
+/// moved into (the AG shape, on an install that predates this or after a
+/// restore), would otherwise cache the wrong directory as its own and every
+/// reader would corroborate it for the life of the record. So the pairs come
+/// from `folder_paths` as they stood before the scan moved anything; a
+/// folder renamed before it had an id learns it one pass after the rename
+/// is agreed, which is the whole cost. The record must have a settled
+/// placement, and either no id yet or one that stands nowhere on this disk
+/// any more (a restore, a re-created root, a volume swap -- the id is a
+/// cache of evidence and its absence is ordinary). A record whose id stands
+/// ELSEWHERE is left alone: that disagreement is evidence, and reading it is
+/// the readers' job, not this one's. Nothing here changes what the engine
+/// plans; what it changes is what the next pass can know.
+fn record_directory_identities(
+    env: &ExecEnv,
+    agreed_paths: &HashMap<String, i64>,
+    dir_identity: &HashMap<String, u64>,
+) -> Result<(), ExecError> {
+    let on_disk: std::collections::HashSet<u64> =
+        dir_identity.values().copied().filter(|id| *id != 0).collect();
+    for (path, server_id) in agreed_paths {
+        let Some(&id) = dir_identity.get(path) else {
+            continue;
+        };
+        if id == 0 {
+            continue;
+        }
+        let Some(mut entry) = env.store.get_entry(EntityId::folder(*server_id))? else {
+            continue;
+        };
+        if entry.synced_placement.is_none() {
+            continue;
+        }
+        let stale = match entry.synced_fingerprint {
+            None => true,
+            Some(fp) => !on_disk.contains(&fp.file_id),
+        };
+        if stale {
+            entry.synced_fingerprint = Some(jd_vfs::Fingerprint::of_directory(id));
+            env.store.put_entry(&entry)?;
+        }
+    }
+    Ok(())
 }
 
 /// A source waiting on a keyless vault is held, not frozen.
@@ -2144,6 +2260,12 @@ struct FolderScan {
     /// folder the user renamed was trashed and minted again -- its grants
     /// gone, for a rename of the folder above it.
     deferred: Vec<(EntityId, String)>,
+    /// Directories that are somebody's -- a tracked folder's own directory
+    /// standing where its files did not follow it -- and must not be adopted
+    /// as new folders while that disagreement stands. Nothing under one is
+    /// placed this pass; the folder's record is present and unmoved, and an
+    /// issue names both readings.
+    held: std::collections::HashSet<String>,
 }
 
 impl FolderScan {
@@ -2209,15 +2331,34 @@ impl FolderScan {
 /// as one folder removed and another created. Nothing is lost by that — an empty
 /// folder holds nothing — and the alternative, guessing from the name, would
 /// pair two unrelated folders and drag one's sharing onto the other.
+/// The issue a folder carries while its directory stands in one place and
+/// its files in another (row 5 of the reset's WP2 table). Open, it is the
+/// hold; dismissed, the hold is lifted.
+pub(crate) const DIRECTORY_DISAGREES: &str = "directory_disagrees";
+
 fn detect_folder_moves(
     env: &ExecEnv,
     observed: &[ObservedFile],
     dirs_on_disk: &[String],
+    dir_identity: &HashMap<String, u64>,
     folder_ids: &mut HashMap<String, i64>,
 ) -> Result<FolderScan, ExecError> {
     let mut scan = FolderScan::default();
     // Where each tracked folder believes it is, and which of those are gone.
     let mut tracked: HashMap<String, EntityId> = HashMap::new();
+    // Which directory each tracked folder knows to be its own, where it
+    // knows (`record_directory_identities`), and which are vaults.
+    let mut record_identity: HashMap<EntityId, u64> = HashMap::new();
+    let mut encrypted: std::collections::HashSet<EntityId> = std::collections::HashSet::new();
+    // Records that resolve to a path another record holds; see the tracked
+    // loop. They join the contested pool below.
+    let mut evicted: Vec<(String, EntityId)> = Vec::new();
+    // Where each directory identity stands on this disk right now.
+    let where_id_stands: HashMap<u64, &String> = dir_identity
+        .iter()
+        .filter(|(_, id)| **id != 0)
+        .map(|(path, id)| (*id, path))
+        .collect();
     // Which folder the record puts each tracked file in -- the parent id read
     // straight off the entry, no path resolved. Used only by the cheap question
     // below, and gathered here so it costs a field rather than a second pass.
@@ -2232,10 +2373,97 @@ fn detect_folder_moves(
         if entry.id.entity_type != EntityType::Folder || entry.id.is_provisional() {
             continue;
         }
+        let own_id = entry.synced_fingerprint.map(|fp| fp.file_id).filter(|id| *id != 0);
         if let Some(path) = relative_path(env, &entry)? {
-            tracked.insert(path, entry.id);
+            // Two records can resolve to ONE path -- a record that lags a
+            // name trade beside the record the server has since put there --
+            // and a map keyed by path can hold only one. It used to keep
+            // whichever came last: the other simply vanished from the scan,
+            // neither present nor in any pool, was read as gone, and was
+            // re-materialized as a fresh directory while its real one stood
+            // orphaned and was minted plain (clean2 74037, the vault). The
+            // directory standing at the path decides who is at it: the record
+            // whose own id it carries keeps the path, the other is evicted
+            // into the contested pool -- its path holds a directory that is
+            // not its own -- and found from there by identity or contents.
+            match tracked.get(&path).copied() {
+                None => {
+                    tracked.insert(path, entry.id);
+                }
+                Some(holder) => {
+                    let here = dir_identity.get(&path).copied().filter(|id| *id != 0);
+                    let holder_id = record_identity.get(&holder).copied();
+                    let holder_owns = here.is_some() && holder_id == here;
+                    let mine = here.is_some() && own_id == here;
+                    // Known to stand somewhere ELSE on this disk: not at this
+                    // path, whoever else is.
+                    let elsewhere = |id: Option<u64>| {
+                        id.is_some_and(|id| Some(id) != here && where_id_stands.contains_key(&id))
+                    };
+                    // The one that owns the directory here stays; failing
+                    // that, the one known to stand elsewhere goes.
+                    let evict_holder = (mine && !holder_owns)
+                        || (!mine && !holder_owns && elsewhere(holder_id) && !elsewhere(own_id));
+                    let evict_newcomer = (holder_owns && !mine)
+                        || (!mine && !holder_owns && elsewhere(own_id) && !elsewhere(holder_id));
+                    if evict_holder && !evict_newcomer {
+                        evicted.push((path.clone(), holder));
+                        tracked.insert(path, entry.id);
+                    } else if evict_newcomer && !evict_holder {
+                        evicted.push((path, entry.id));
+                    } else {
+                        // Identity cannot say (neither knows its directory, or
+                        // both claim it): today's reading, the later record
+                        // takes the path and the earlier one is left to the
+                        // pools by whatever else the scan finds.
+                        tracked.insert(path, entry.id);
+                    }
+                }
+            }
+        }
+        if let Some(id) = own_id {
+            record_identity.insert(entry.id, id);
+        }
+        if entry.is_encrypted {
+            encrypted.insert(entry.id);
         }
     }
+    // A folder already held because its directory and its files went
+    // different ways stays held -- present, unmoved, its directory not
+    // adopted -- until the user puts one of them back. The hold is the open
+    // issue itself: it lifts when the folder's directory stands at its own
+    // path again (corroborated above) or is gone, and either way the issue
+    // is dismissed here. Without this the hold lasted one pass: the files,
+    // once placed elsewhere, no longer proposed anything, and the folder read
+    // as an ordinary deletion the pass after the user was told it would not.
+    let mut held_ids: Vec<EntityId> = Vec::new();
+    let mut held_by_issue: Vec<(EntityId, i64, Option<&String>)> = Vec::new();
+    for issue in env.store.open_issues()? {
+        if issue.kind != DIRECTORY_DISAGREES {
+            continue;
+        }
+        let Some(id) = issue.entity else { continue };
+        let stands_at = record_identity.get(&id).and_then(|rid| where_id_stands.get(rid)).copied();
+        held_by_issue.push((id, issue.issue_id, stands_at));
+    }
+    for (id, issue_id, stands_at) in held_by_issue {
+        // Lifted only when the directory stands at the record's own path
+        // again (corroborated above) or nowhere. Never because something
+        // else took it: that is the outcome the hold exists to prevent.
+        let at_own_path = tracked
+            .iter()
+            .any(|(path, tid)| *tid == id && stands_at == Some(path));
+        match stands_at {
+            None => env.store.dismiss_issue(issue_id)?,
+            Some(_) if at_own_path => env.store.dismiss_issue(issue_id)?,
+            Some(d) => {
+                scan.present.insert(id);
+                scan.held.insert(d.clone());
+                held_ids.push(id);
+            }
+        }
+    }
+
     // Folders whose believed path holds no directory. These have plainly moved
     // or gone, and the check is cheap enough to make first.
     let mut missing: Vec<(String, EntityId)> = Vec::new();
@@ -2321,11 +2549,73 @@ fn detect_folder_moves(
     let by_path: HashMap<&str, &ObservedFile> =
         observed.iter().map(|o| (o.path.as_str(), o)).collect();
 
+    // A known child FOLDER is contents too, by identity: for each tracked
+    // folder, the ids of the folders it holds, where they know them. The only
+    // evidence a folder of subfolders and nothing loose has once a subfolder
+    // was renamed too (Defect Q's shape, one level deeper: `A -> X`, `X/B ->
+    // X/C`). Counted ONLY beside the parent's own id standing at the same
+    // candidate: a child under a directory says where the child went, not
+    // where the parent did -- the user moving `B` into a brand-new `X` and
+    // deleting `A` puts `B` under `X` just the same, and pairing `A` to `X`
+    // on that would carry `A`'s grants onto a folder the user made fresh (the
+    // decision `renaming_a_folder_and_its_subfolder_together…` records). The
+    // parent's id at `X` is what tells the two apart, and a plain folder's
+    // own id may not claim on its own; the two together are a rename.
+    let mut child_folders: HashMap<EntityId, Vec<u64>> = HashMap::new();
+    for entry in all_entries(env)? {
+        if entry.id.entity_type != EntityType::Folder {
+            continue;
+        }
+        let (Some(parent), Some(own)) = (
+            entry.local_placement().parent,
+            entry.synced_fingerprint.map(|fp| fp.file_id).filter(|id| *id != 0),
+        ) else {
+            continue;
+        };
+        child_folders.entry(EntityId::folder(parent)).or_default().push(own);
+    }
+    // Is one of this folder's child directories standing directly under the
+    // directory at `path`, AND is that directory the folder's own? Directly:
+    // the child's own directory, not a file credited up the chain.
+    let child_folder_under = |id: &EntityId, path: &str| -> bool {
+        let own_here = record_identity
+            .get(id)
+            .is_some_and(|own| dir_identity.get(path).is_some_and(|here| here == own));
+        own_here
+            && child_folders.get(id).is_some_and(|kids| {
+                kids.iter().any(|kid| {
+                    where_id_stands
+                        .get(kid)
+                        .is_some_and(|at| at.rsplit_once('/').map(|(dir, _)| dir) == Some(path))
+                })
+            })
+    };
+
     // Does the directory standing at this path hold any of the files this
     // folder is known to contain? Identity on this volume, not names: the same
     // file_id at the same place is the folder itself, and nothing else can
     // counterfeit it.
     let corroborated = |path: &String| -> bool {
+        // The directory's own identity, where both sides know it, settles it
+        // before any contents are consulted: the record's directory standing
+        // at its path IS the folder, however empty (the files that stand
+        // elsewhere moved OUT of it -- Defect AG), and a directory with
+        // another identity is NOT the folder, however full (a stranger wearing
+        // its name). Where either side does not know, the contents decide as
+        // they always did.
+        // Both sides must KNOW, and the record's id must stand somewhere on
+        // this disk: an id that stands nowhere (a restore, a re-created root,
+        // a directory deleted and remade under its name) is no evidence at
+        // all, never "not mine" -- read that way, every folder on a restored
+        // disk was contested for a pass.
+        if let (Some(rec), Some(here)) = (
+            tracked.get(path).and_then(|id| record_identity.get(id)),
+            dir_identity.get(path).filter(|id| **id != 0),
+        ) {
+            if where_id_stands.contains_key(rec) {
+                return rec == here;
+            }
+        }
         let Some(kids) = children.get(path) else {
             // Nothing to check it by -- an empty folder, or one whose files
             // have never been agreed. The path standing is all the evidence
@@ -2392,13 +2682,21 @@ fn detect_folder_moves(
     // because on its own it is also what one file moved out of a folder looks
     // like. Read as a RING it is unambiguous, and that is the only way it is
     // read below.
-    let contested: Vec<(String, EntityId)> = tracked
+    let mut contested: Vec<(String, EntityId)> = tracked
         .iter()
         .filter(|(path, _)| {
             dirs_on_disk.contains(*path) && !corroborated(path) && !holds_nothing_known(path)
         })
         .map(|(path, id)| (path.clone(), *id))
         .collect();
+    // An evicted record's path holds a directory that is not its own by
+    // definition; whether that directory holds anything known is beside the
+    // point, because it is somebody else's. Contested, and looked for.
+    for (path, id) in &evicted {
+        if !contested.iter().any(|(_, c)| c == id) {
+            contested.push((path.clone(), *id));
+        }
+    }
     if missing.is_empty() && displaced.is_empty() && contested.is_empty() {
         return Ok(scan);
     }
@@ -2426,28 +2724,52 @@ fn detect_folder_moves(
     // strands whatever else was in it. A renaming folder takes everything with
     // it; a folder that has merely lent out a file does not.
     let moved_wholesale = |old_path: &String, candidate: &str| -> bool {
-        let Some(kids) = children.get(old_path) else {
-            return false;
-        };
         let mut here = 0;
+        // A child folder standing under the candidate, beside the folder's
+        // own id there, counts as here -- and a file inside THAT child
+        // directory is here too, whatever the child is now called: a
+        // subfolder renamed along with its parent carries its files inside
+        // it, and asking for them at the old relative path would read the
+        // whole folder as moved elsewhere.
+        let mut child_dirs_here: Vec<&String> = Vec::new();
+        if let Some(id) = tracked.get(old_path) {
+            if child_folder_under(id, candidate) {
+                here += 1;
+                if let Some(kids) = child_folders.get(id) {
+                    for kid in kids {
+                        if let Some(at) = where_id_stands.get(kid) {
+                            if at.rsplit_once('/').map(|(dir, _)| dir) == Some(candidate) {
+                                child_dirs_here.push(at);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let kids = children.get(old_path).map(|k| k.as_slice()).unwrap_or(&[]);
         for (name, file_id) in kids {
             match by_file_id.get(file_id) {
                 // Not on this disk at all any more. Deleted, or never written
                 // here. It says nothing either way, so it does not object.
                 None => continue,
                 Some(o) if o.path == format!("{candidate}/{name}") => here += 1,
+                Some(o) if child_dirs_here.iter().any(|d| o.path.starts_with(&format!("{d}/"))) => {
+                    here += 1
+                }
                 Some(_) => return false,
             }
         }
         here > 0
     };
 
-    let mut claimed: Vec<EntityId> = Vec::new();
+    let mut claimed: Vec<EntityId> = held_ids.clone();
     // Shallowest first, so a renamed parent is resolved before the folders
     // inside it are asked where they live.
+    // A held directory (see `FolderScan::held`) is somebody's and is not a
+    // candidate for anyone else.
     let mut candidates: Vec<&String> = dirs_on_disk
         .iter()
-        .filter(|d| !folder_ids.contains_key(*d))
+        .filter(|d| !folder_ids.contains_key(*d) && !scan.held.contains(*d))
         .collect();
     candidates.sort_by_key(|d| (depth_of(d), d.to_string()));
     let mut taken: std::collections::HashSet<&String> = std::collections::HashSet::new();
@@ -2579,6 +2901,62 @@ fn detect_folder_moves(
         }
     }
 
+    // A vault's own directory, standing somewhere else under another name, is
+    // the vault: an ENCRYPTED folder's identity may claim (the reset's WP2,
+    // decision 1). No contents are needed -- this is the empty vault the user
+    // renamed and then made a new empty folder under its old name, which no
+    // contents rule can tell from AG because the two worlds are identical in
+    // names and contents. Missing, displaced or contested alike: a vault
+    // whose old path now holds a stranger full of somebody else's files is
+    // still the vault wherever its directory stands (the executor's step-aside
+    // under a conflict name left exactly that on clean2 74033). A wrong claim, on an id recycled onto a plain
+    // directory after the vault was deleted, over-seals that directory and
+    // publishes nothing; the alternative is a hold on every rename of an
+    // empty vault. Plain folders never claim: their id corroborates a
+    // proposal the contents make, below, and does nothing on its own.
+    for (old_path, id) in missing.iter().chain(displaced.iter()).chain(contested.iter()) {
+        if !encrypted.contains(id) || claimed.contains(id) {
+            continue;
+        }
+        let Some(candidate) = record_identity.get(id).and_then(|rid| where_id_stands.get(rid)) else {
+            continue;
+        };
+        if taken.contains(candidate)
+            || folder_ids.contains_key(*candidate)
+            || scan.held.contains(*candidate)
+            || *candidate == old_path
+        {
+            continue;
+        }
+        // The server is already moving ANOTHER folder onto this path: two
+        // renames met at one name, and the claim would plan a local move
+        // that the remote move overtakes every pass, for ever (clean2 74033
+        // on the first cut). The remote move lands first; the vault's
+        // directory is still its own and is claimed on a later pass, from
+        // wherever the room-making put it.
+        if remote_wants.get(*candidate).is_some_and(|w| w != id) {
+            continue;
+        }
+        claimed.push(*id);
+        taken.insert(candidate);
+        scan.present.insert(*id);
+        folder_ids.insert((*candidate).clone(), id.server_id);
+        folder_ids.remove(old_path);
+        match placement_of(candidate, folder_ids) {
+            Some(placement) => {
+                let unchanged = env
+                    .store
+                    .get_entry(*id)?
+                    .and_then(|e| e.synced_placement.clone())
+                    .is_some_and(|p| p == placement);
+                if !unchanged {
+                    scan.moves.insert(*id, placement);
+                }
+            }
+            None => scan.deferred.push((*id, (*candidate).clone())),
+        }
+    }
+
     // `contested` differs from `displaced` in ONE respect: what the folder's OLD
     // path holds. That is evidence about somebody else, never about where MY
     // files went, so it cannot be a reason to refuse to look for them. The ring
@@ -2643,9 +3021,7 @@ fn detect_folder_moves(
                 if claimed.contains(id) {
                     continue;
                 }
-                let Some(kids) = children.get(old_path) else {
-                    continue;
-                };
+                let kids = children.get(old_path).map(|k| k.as_slice()).unwrap_or(&[]);
                 let matched = kids
                     .iter()
                     .filter(|(name, file_id)| {
@@ -2653,12 +3029,48 @@ fn detect_folder_moves(
                             .get(format!("{candidate}/{name}").as_str())
                             .is_some_and(|o| o.fingerprint.file_id == *file_id)
                     })
-                    .count();
+                    .count()
+                    + usize::from(child_folder_under(id, candidate));
                 if matched == 0 {
                     continue;
                 }
                 if whole_only && !moved_wholesale(old_path, candidate) {
                     continue;
+                }
+                // The contents propose this directory; where does the
+                // folder's OWN directory stand? At this same one: the
+                // strongest corroboration there is. Somewhere else on this
+                // disk: the files went one way and the directory another,
+                // and the two readings cannot both be right. Neither is
+                // taken -- the folder is left where its directory stands,
+                // present and unmoved, and the disagreement is said out loud
+                // rather than resolved by whichever rule ran first.
+                if let Some(stands_at) = record_identity.get(id).and_then(|rid| where_id_stands.get(rid)) {
+                    if **stands_at != **candidate && **stands_at != *old_path {
+                        scan.present.insert(*id);
+                        scan.held.insert((*stands_at).clone());
+                        taken.insert(*stands_at);
+                        // Once per folder per pass, whatever the candidates
+                        // say: the hold is one fact.
+                        let already = env
+                            .store
+                            .open_issues()?
+                            .iter()
+                            .any(|i| i.kind == DIRECTORY_DISAGREES && i.entity == Some(*id));
+                        if !already {
+                            env.store.raise_issue(
+                                Some(*id),
+                                DIRECTORY_DISAGREES,
+                                &format!(
+                                    "the folder {old_path} is standing at {stands_at} but its files \
+                                     are under {candidate}: was the folder renamed, or were the files \
+                                     moved out? Nothing is moved until one of them is put back",
+                                ),
+                                (env.now_ms)() as i64,
+                            )?;
+                        }
+                        continue;
+                    }
                 }
                 // The most corroborated match wins, and ties break on the folder id
                 // so two devices reach the same answer.
@@ -2819,6 +3231,53 @@ fn detect_folder_moves(
             }
         }
     }
+    // An evicted record that matched nothing -- a plain EMPTY folder whose
+    // directory a room-making moved aside under a conflict name, its path
+    // now another record's by identity -- is left to today's reading: not
+    // present, so read as deleted, and its directory minted as a new folder.
+    // A hold was tried here (present, directory kept from adoption, an issue
+    // naming both facts) and it livelocked plat3 75415: the held record kept
+    // a placement at a path it did not own, its move from there was refused
+    // every pass as not its directory, and the folder the server wanted at
+    // that path could never be created behind it. A plain folder may not
+    // claim, so nothing could lift it. That is the empty-plain residual the
+    // reset spec states for the owner, and this shape is in it.
+
+    // A directory whose identity belongs to a folder still alive here is that
+    // folder, whatever it is called and whatever it holds, and is never
+    // minted as a new one: the day it is, the folder has two records, and a
+    // sealed file inside it is read as moved into a plain folder. It happens
+    // when the folder could not be placed on it this pass -- the server is
+    // moving another folder onto the name, and the claim waits for that move
+    // to land (clean2 74033: the vault's directory, standing at the name the
+    // server wanted for the plain ring, was minted plain in the same pass).
+    // Held instead: nothing under it is placed this pass, and the claim takes
+    // it from wherever the room-making leaves it. A record read as deleted
+    // this pass (not present) holds nothing: a recycled id on a stranger is
+    // the stranger's, and the stranger is minted as row 7 says.
+    //
+    // ENCRYPTED folders only, because only they claim. A plain folder's id
+    // corroborates a proposal its contents make and never claims on its own
+    // (a recycled id must not hand a stranger's files a folder's history), so
+    // holding a plain folder's directory from the mint would hold it for ever
+    // when no proposal comes -- a parent renamed and its subfolder renamed
+    // and its old name rebuilt, say (`renaming_a_folder_and_its_subfolder_
+    // with_the_old_name_rebuilt_keeps_the_subfolder`): the plain folder keeps
+    // today's reading, a fresh record on its directory, until plain folders
+    // are allowed to claim. Named as open in the reset spec.
+    let alive_ids: std::collections::HashSet<u64> = record_identity
+        .iter()
+        .filter(|(id, _)| scan.present.contains(*id) && encrypted.contains(*id))
+        .map(|(_, rid)| *rid)
+        .collect();
+    for dir in dirs_on_disk {
+        if folder_ids.contains_key(dir) || taken.contains(dir) {
+            continue;
+        }
+        if dir_identity.get(dir).is_some_and(|id| *id != 0 && alive_ids.contains(id)) {
+            scan.held.insert(dir.clone());
+        }
+    }
     Ok(scan)
 }
 
@@ -2897,6 +3356,11 @@ enum Crossing {
     Convert,
     /// Refused by the server and not something this client can do instead.
     OutOfReach,
+    /// The file is standing in the very directory its folder record owns:
+    /// nothing was dragged, the FOLDER was misread. Not converted -- a
+    /// conversion here publishes a vault on the strength of a misreading --
+    /// and not moved; said once, and left for the folder scan to put right.
+    NotADrag,
 }
 
 /// Would this local move carry the entry across the edge of a vault, and if so
@@ -2925,10 +3389,20 @@ enum Crossing {
 /// is plaintext and says so; a folder is only an answer if this store holds it.
 /// An unresolved parent reads as plaintext, and reading one as plaintext here
 /// would trash the server's copy of a vault file that never left the vault.
+/// Where things stand by directory identity when a move is judged: the
+/// directory the file is in now, and the directory the scan has put its
+/// agreed parent folder on. Either is `None` where nothing can be said.
+#[derive(Debug, Clone, Copy, Default)]
+struct StandingIn {
+    file: Option<u64>,
+    agreed_parent: Option<u64>,
+}
+
 fn crossing_a_vault_edge(
     env: &ExecEnv,
     entry: &Entry,
     local: &Delta,
+    standing_in: StandingIn,
 ) -> Result<Option<Crossing>, ExecError> {
     let to = match local {
         Delta::Moved { to } | Delta::MovedAndEdited { to, .. } => to,
@@ -2958,6 +3432,46 @@ fn crossing_a_vault_edge(
     if destination == entry.is_encrypted {
         return Ok(None);
     }
+    // Did the FILE change directory, or only the reading of which folder its
+    // directory is? `standing_in.file` is the directory the scan resolved the
+    // destination FOLDER to, found through the path map -- the same thing as
+    // the directory the file physically stands in for as long as that map is
+    // keyed by the path a directory stands at, which it is; the day a record
+    // is placed in it on a directory that is not at its path, this stops
+    // meaning what it says. A user drag puts the file under another directory; the
+    // engine re-attributing a directory around a file that never moved does
+    // not, and converting on that publishes a vault for a misreading (Defect
+    // AF, route 4: a name trade read as a move across the edge). Asked of
+    // the directory the file stands in NOW against the id its agreed parent
+    // folder recorded as its own. Unknown or 0 on either side is no evidence
+    // -- a restore, a re-created root, a Windows handle that would not open
+    // -- and falls to the rule above, never to "changed" (P1, P2 of the
+    // reset's WP2).
+    //
+    // With one more question, because a folder dragged across the edge takes
+    // its files with it and none of them changed directory either: where has
+    // the scan put the agreed parent folder? On its own directory, or on no
+    // directory at all this pass (it crossed the edge itself and a claimant
+    // stands in for it): the folder crossed and the file crossed inside it,
+    // a real conversion. On some OTHER directory: the folder was put where
+    // its directory is not, and that is the misreading.
+    if entry.id.entity_type == EntityType::File {
+        let owned = match agreed_parent {
+            None => None,
+            Some(id) => env
+                .store
+                .get_entry(EntityId::folder(id))?
+                .and_then(|f| f.synced_fingerprint)
+                .map(|fp| fp.file_id)
+                .filter(|id| *id != 0),
+        };
+        if let (Some(owned), Some(here)) = (owned, standing_in.file.filter(|id| *id != 0)) {
+            let parent_put_elsewhere = standing_in.agreed_parent.is_some_and(|d| d != 0 && d != owned);
+            if owned == here && parent_put_elsewhere {
+                return Ok(Some(Crossing::NotADrag));
+            }
+        }
+    }
     if entry.id.entity_type == EntityType::File || destination {
         Ok(Some(Crossing::Convert))
     } else {
@@ -2982,6 +3496,10 @@ fn plaintext_source_of(
     Ok(all_entries(env)?
         .into_iter()
         .filter(|e| !e.id.is_provisional() && !e.is_encrypted && !e.remote_deleted)
+        // Files only: a folder record carries its directory's id in the same
+        // slot now, and an inode a deleted directory gave up can be a file's
+        // next.
+        .filter(|e| e.id.entity_type == EntityType::File)
         .filter(|e| e.synced_fingerprint.is_some_and(|fp| fp.file_id == file_id))
         .find(|e| match relative_path(env, e) {
             Ok(Some(path)) => !observed.iter().any(|o| o.path == path),

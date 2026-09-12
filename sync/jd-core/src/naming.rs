@@ -251,11 +251,34 @@ pub fn apply_naming(
     // is actually competing with. See `competing_placement` for the one case
     // where that is not true.
     let mut by_parent: HashMap<Option<i64>, Vec<Entry>> = HashMap::new();
+    let held: std::collections::HashSet<EntityId> = env
+        .store
+        .open_issues()?
+        .into_iter()
+        .filter(|i| i.kind == crate::pass::DIRECTORY_DISAGREES)
+        .filter_map(|i| i.entity)
+        .collect();
     for entry in crate::pass::all_entries(env)? {
         // Out of scope is a deliberate absence, and something the server has
         // already deleted is on its way out. Neither should hold a slot against
         // a sibling that wants to exist.
         if entry.status == LocalStatus::OutOfScope || entry.remote_deleted {
+            continue;
+        }
+        // A folder the scan is HOLDING -- its directory known to stand at a
+        // third path, its files elsewhere, `directory_disagrees` open -- is
+        // present and unmoved, but it holds no NAME at the path its record
+        // still says, and it is not judged there. Judged there, when the
+        // server sent another folder to that name, the duplicate verdict made
+        // it give up its stale placement and it was re-created as a FRESH
+        // directory under its new server name while its own directory stood
+        // orphaned -- a live record's directory re-minted as a stranger on
+        // the next pass, the AJ family (the row-5 pin, extended: red with
+        // this skip out). A hold may hold the record's own directory, never a
+        // path. Asked of the issue and not of the disk: a record whose
+        // directory stands elsewhere for one pass during the user's own trade
+        // is mid-cycle, and naming's park is what carries that trade through.
+        if held.contains(&entry.id) {
             continue;
         }
         by_parent
@@ -949,6 +972,9 @@ mod tests {
             Ok(Vec::new())
         }
         fn fingerprint(&self, _p: &std::path::Path) -> jd_vfs::VfsResult<Option<Fingerprint>> {
+            Ok(None)
+        }
+        fn directory_id(&self, _p: &std::path::Path) -> jd_vfs::VfsResult<Option<u64>> {
             Ok(None)
         }
         fn hash(&self, _p: &std::path::Path) -> jd_vfs::VfsResult<String> {
