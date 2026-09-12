@@ -370,6 +370,13 @@ if ($current_type_id) {
 				$formwriter->textarea($field_name, $field_label, $field_options);
 			} elseif ($field_type === 'richtext') {
 				$field_options['htmlmode'] = 'yes';
+				// "cleanup": button (default) | always | none; "view": visual | source
+				if (isset($field['cleanup'])) {
+					$field_options['editor_cleanup'] = $field['cleanup'];
+				}
+				if (isset($field['view'])) {
+					$field_options['editor_view'] = $field['view'];
+				}
 				$formwriter->textbox($field_name, $field_label, $field_options);
 			} elseif ($field_type === 'imageselector') {
 				// Pass through any imageselector-specific options from schema

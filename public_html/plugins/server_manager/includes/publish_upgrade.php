@@ -681,7 +681,7 @@
 
 		// Copy public_html excluding themes and plugins content
 		// Note: Use anchored patterns (/theme/*, /plugins/*) to only exclude top-level directories,
-		// not subdirectories like assets/vendor/Trumbowyg-2-26/dist/plugins/
+		// not subdirectories such as assets/vendor/*/plugins/
 		$rsync_core_cmd = sprintf(
 			// agent_dist.* excludes the SWAP LEAVINGS, never agent_dist itself:
 			// the publisher moves the previous bundle to agent_dist.old before

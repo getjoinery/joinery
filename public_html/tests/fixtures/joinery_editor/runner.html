@@ -1,0 +1,360 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Joinery editor fixtures</title>
+<!--
+	Browser-side fixtures for assets/js/html-cleanup.js and assets/js/joinery-editor.js.
+	tests/unit/joinery_editor_test.php loads this page in headless Chrome and reads
+	the <li data-result> rows the script below writes. Open it in a browser to see
+	the same rows by eye.
+-->
+<link rel="stylesheet" href="../../../assets/css/joinery-editor.css">
+<script>
+	// The markdown preview posts through the shared API transport; without one
+	// the editor removes its view buttons. A stub keeps them for the fixtures.
+	window.joineryApi = { post: function () { return Promise.resolve({ html: '<p>stub</p>' }); } };
+</script>
+<script src="../../../assets/js/html-cleanup.js"></script>
+<script src="../../../assets/js/joinery-editor.js"></script>
+<style>
+	body { font: 14px/1.4 system-ui, sans-serif; margin: 20px; }
+	li[data-result="pass"] { color: #2f7d4f; }
+	li[data-result="fail"] { color: #b3261e; }
+	li code { display: block; white-space: pre-wrap; color: #333; }
+</style>
+</head>
+<body>
+<h1>Joinery editor fixtures</h1>
+<ul id="results"></ul>
+<div id="stage"></div>
+
+<script>
+(function () {
+	'use strict';
+
+	var results = document.getElementById('results');
+	var stage = document.getElementById('stage');
+	var counts = { pass: 0, fail: 0 };
+
+	function report(name, ok, detail) {
+		var li = document.createElement('li');
+		li.setAttribute('data-result', ok ? 'pass' : 'fail');
+		li.setAttribute('data-name', name);
+		li.textContent = (ok ? 'PASS ' : 'FAIL ') + name;
+		if (!ok && detail) {
+			var code = document.createElement('code');
+			code.textContent = detail;
+			li.appendChild(code);
+		}
+		results.appendChild(li);
+		counts[ok ? 'pass' : 'fail']++;
+	}
+
+	function same(name, got, want) {
+		report(name, got === want, 'got:  ' + got + '\nwant: ' + want);
+	}
+
+	function attempt(name, fn) {
+		try { fn(); }
+		catch (e) { report(name, false, 'threw: ' + (e && e.stack || e)); }
+	}
+
+	/* ========================================================== cleanup */
+
+	var cleanup = window.joineryHtmlCleanup.cleanup;
+
+	var CLEANUP = [
+		['keep tag, strip attributes, style reduced to text-align',
+			'<p class="x" id="y" style="color:red; text-align:center">Hi</p>',
+			'<p style="text-align: center">Hi</p>'],
+		['a keeps href title target rel only',
+			'<a href="/x" title="t" target="_blank" rel="noopener" onclick="z()" class="c">l</a>',
+			'<p><a href="/x" title="t" target="_blank" rel="noopener">l</a></p>'],
+		['img keeps src alt width height only',
+			'<img src="/i.png" alt="a" width="10" height="5" style="x" data-y="1">',
+			'<p><img src="/i.png" alt="a" width="10" height="5"></p>'],
+		['iframe keeps src width height allow allowfullscreen',
+			'<iframe src="https://e" width="1" height="2" allow="fullscreen" allowfullscreen="" frameborder="0"></iframe>',
+			'<p><iframe src="https://e" width="1" height="2" allow="fullscreen" allowfullscreen=""></iframe></p>'],
+		['video keeps src controls width height poster',
+			'<video src="/v.mp4" controls="" width="1" height="2" poster="/p.png" autoplay=""></video>',
+			'<p><video src="/v.mp4" controls="" width="1" height="2" poster="/p.png"></video></p>'],
+		['rename b i s strike',
+			'<b>a</b><i>b</i><s>c</s><strike>d</strike>',
+			'<p><strong>a</strong><em>b</em><del>c</del><del>d</del></p>'],
+		['rename div to p',
+			'<div class="row">text</div>',
+			'<p>text</p>'],
+		['drop script style form input button template and comments',
+			'<p>a</p><script>x()<\/script><style>p{}</style><form><input></form><button>b</button><template>t</template><!-- c --><p>b</p>',
+			'<p>a</p><p>b</p>'],
+		['unwrap section span font center',
+			'<section class="s"><span style="color:red">a</span><font>b</font><center>c</center></section>',
+			'<p>abc</p>'],
+		['the Office paste shape',
+			'<html xmlns:o="urn:schemas-microsoft-com:office:office"><head><meta charset="utf-8"><style>p.MsoNormal{margin:0}</style></head><body>'
+				+ '<p class="MsoNormal" style="margin-bottom:0cm"><b><span style="font-size:12pt">Hello</span></b><o:p></o:p></p>'
+				+ '<p class=MsoNormal>&nbsp;</p><p class=MsoNormal>World</p></body></html>',
+			'<p><strong>Hello</strong></p><p>World</p>'],
+		['nested inline tags of the same kind are unwrapped',
+			'<strong>a<strong>b</strong></strong><em><em>c</em></em>',
+			'<p><strong>ab</strong><em>c</em></p>'],
+		['a p holding a block is unwrapped, blocks never nest in paragraphs',
+			'<div><div>inner</div>tail</div>',
+			'<p>inner</p><p>tail</p>'],
+		['empty p and inline elements go; br and img keep theirs',
+			'<p></p><p> </p><p><br></p><p><img src="/a.png"></p><strong></strong><p>x<em></em></p>',
+			'<p><br></p><p><img src="/a.png"></p><p>x</p>'],
+		['nbsp runs collapse outside pre',
+			'<p>a&nbsp;&nbsp;b</p><pre>x&nbsp;&nbsp;y</pre>',
+			'<p>a b</p><pre>x&nbsp;&nbsp;y</pre>'],
+		['pre contents are verbatim, its own attributes are not',
+			'<pre class="lang"><span class="k">if</span> <b>x</b></pre>',
+			'<pre><span class="k">if</span> <b>x</b></pre>'],
+		['javascript: and data: urls are removed',
+			'<a href="javascript:alert(1)">a</a><img src="data:image/png;base64,xx">',
+			'<p><a>a</a><img></p>'],
+		['top-level text and inline runs are wrapped; whitespace between blocks is not',
+			'hello <em>there</em>\n<p>x</p>\n',
+			'<p>hello <em>there</em></p><p>x</p>'],
+		['table structure survives without attributes',
+			'<table border="1"><thead><tr><th>h</th></tr></thead><tbody><tr><td>d</td></tr></tbody></table>',
+			'<table><thead><tr><th>h</th></tr></thead><tbody><tr><td>d</td></tr></tbody></table>'],
+		['headings, quote, lists and hr are kept bare',
+			'<h2 class="x">T</h2><blockquote cite="u"><p>q</p></blockquote><ol start="3"><li>i</li></ol><hr class="y">',
+			'<h2>T</h2><blockquote><p>q</p></blockquote><ol><li>i</li></ol><hr>'],
+		['sup sub del code survive as inline',
+			'<p>x<sup>2</sup> H<sub>2</sub>O <del>no</del> <code class="c">k</code></p>',
+			'<p>x<sup>2</sup> H<sub>2</sub>O <del>no</del> <code>k</code></p>']
+	];
+
+	CLEANUP.forEach(function (row) {
+		attempt('cleanup: ' + row[0], function () {
+			same('cleanup: ' + row[0], cleanup(row[1]), row[2]);
+		});
+	});
+
+	attempt('cleanup: idempotent', function () {
+		var once = cleanup(CLEANUP[9][1]);
+		same('cleanup: idempotent', cleanup(once), once);
+	});
+
+	/* =========================================================== editor */
+
+	function button(action, face) {
+		return '<button type="button" data-jy-ed-action="' + action + '">' + face + '</button>';
+	}
+
+	/** The same chrome FormWriterV2HTML5::editorChrome() emits, reduced to what the fixtures press. */
+	function makeEditor(dialect, value, attrs) {
+		var view = attrs.view || (dialect === 'html' ? 'visual' : 'write');
+		var html = '<form><div class="jy-ed" data-jy-editor="' + dialect + '"'
+			+ ' data-jy-ed-initial-view="' + view + '" data-mode="' + view + '"'
+			+ (dialect === 'html' ? ' data-jy-ed-cleanup="' + (attrs.cleanup || 'button') + '"' : '') + '>'
+			+ '<div class="jy-ed-toolbar" role="toolbar">';
+		if (dialect === 'html') {
+			html += button('bold', 'B') + button('link', 'Link') + button('cleanup', 'Clean up');
+			html += '<span class="jy-ed-views"><button type="button" data-jy-ed-view="visual">Visual</button>'
+				+ '<button type="button" data-jy-ed-view="source">Source</button></span>';
+		} else {
+			html += button('bold', 'B') + button('h2', 'H2') + button('ul', 'List') + button('link', 'Link');
+			html += '<span class="jy-ed-views"><button type="button" data-jy-ed-view="write">Write</button>'
+				+ '<button type="button" data-jy-ed-view="split">Split</button></span>';
+		}
+		html += '</div><div class="jy-ed-panes">';
+		if (dialect === 'html') html += '<div class="jy-ed-surface"></div>';
+		html += '<textarea name="f"' + (attrs.required ? ' required' : '') + '></textarea>';
+		if (dialect === 'markdown') html += '<div class="jy-ed-preview markdown-content"></div>';
+		html += '</div></div></form>';
+
+		var holder = document.createElement('div');
+		holder.innerHTML = html;
+		stage.appendChild(holder);
+		var root = holder.querySelector('.jy-ed');
+		var ta = root.querySelector('textarea');
+		ta.value = value;
+		var state = window.joineryEditor.init(root);
+		return { root: root, ta: ta, state: state, surface: root.querySelector('.jy-ed-surface'),
+			form: holder.querySelector('form'), holder: holder,
+			press: function (action) { root.querySelector('[data-jy-ed-action="' + action + '"]').click(); },
+			view: function (v) { root.querySelector('[data-jy-ed-view="' + v + '"]').click(); } };
+	}
+
+	function selectText(el, text) {
+		var walker = document.createNodeIterator(el, 4);
+		var node;
+		while ((node = walker.nextNode())) {
+			var at = node.nodeValue.indexOf(text);
+			if (at !== -1) {
+				var range = document.createRange();
+				range.setStart(node, at);
+				range.setEnd(node, at + text.length);
+				var sel = window.getSelection();
+				sel.removeAllRanges();
+				sel.addRange(range);
+				return true;
+			}
+		}
+		return false;
+	}
+
+	var SVG_BLOCK = '<section class="hero"><svg viewBox="0 0 1 1"><circle r="1"></circle></svg><p>caption</p></section>';
+
+	attempt('editor: byte-identical until edited', function () {
+		var ed = makeEditor('html', SVG_BLOCK, {});
+		report('editor: initialised', !!ed.state);
+		same('editor: textarea untouched on load', ed.ta.value, SVG_BLOCK);
+		report('editor: surface holds the svg', !!ed.surface.querySelector('svg'));
+		report('editor: not edited yet', ed.state.edited === false);
+
+		ed.surface.focus();
+		report('editor: caret in caption', selectText(ed.surface, 'caption'));
+		window.getSelection().collapseToEnd();
+		var ok = document.execCommand('insertText', false, 'hi');
+		report('editor: insertText ran', ok);
+		report('editor: an edit writes the full surface, svg-only block is not emptied',
+			ed.ta.value.indexOf('<svg') !== -1 && ed.ta.value.indexOf('hi') !== -1, ed.ta.value);
+		report('editor: edited flag set', ed.state.edited === true);
+	});
+
+	attempt('editor: validation can see the hidden textarea', function () {
+		var ed = makeEditor('html', '<p>x</p>', { required: true });
+		var visible = ed.ta.checkVisibility ? ed.ta.checkVisibility() : null;
+		report('editor: textarea checkVisibility() is true in visual view', visible === true, String(visible));
+		var box = ed.ta.getBoundingClientRect();
+		report('editor: textarea is a 1px box, not display:none', box.width <= 1 && box.height <= 1, box.width + 'x' + box.height);
+		report('editor: surface is the visible pane', ed.surface.getBoundingClientRect().height > 100);
+	});
+
+	attempt('editor: cleanup always cleans the surface on load, not the field', function () {
+		var ed = makeEditor('html', '<div class="x">a</div>', { cleanup: 'always' });
+		same('editor: always — surface cleaned', ed.surface.innerHTML, '<p>a</p>');
+		same('editor: always — textarea untouched', ed.ta.value, '<div class="x">a</div>');
+	});
+
+	attempt('editor: the cleanup button cleans the whole field', function () {
+		var ed = makeEditor('html', '<div class="x"><b>a</b></div>', {});
+		report('editor: button mode — surface raw', ed.surface.querySelector('div.x') !== null);
+		ed.press('cleanup');
+		same('editor: button — textarea holds the cleaned markup', ed.ta.value, '<p><strong>a</strong></p>');
+		same('editor: button — surface matches', ed.surface.innerHTML, '<p><strong>a</strong></p>');
+		var btn = ed.root.querySelector('[data-jy-ed-action="cleanup"]');
+		same('editor: button now offers undo', btn.textContent, 'Undo clean up');
+		ed.press('cleanup');
+		same('editor: undo restores the raw markup', ed.ta.value, '<div class="x"><b>a</b></div>');
+		same('editor: button reads Clean up again', btn.textContent, 'Clean up');
+		ed.press('cleanup');
+		ed.surface.dispatchEvent(new Event('input', { bubbles: true }));
+		same('editor: an edit after cleaning ends the undo offer', btn.textContent, 'Clean up');
+	});
+
+	attempt('editor: a command renames engine tags inside the range only', function () {
+		var ed = makeEditor('html', '<p>abc</p><p><b>keep</b></p>', {});
+		report('editor: select b', selectText(ed.surface, 'b'));
+		ed.press('bold');
+		report('editor: bold emitted strong, not b, in the selection',
+			/<p>a<strong>b<\/strong>c<\/p>/.test(ed.ta.value), ed.ta.value);
+		report('editor: the untouched b outside the selection is left alone',
+			ed.ta.value.indexOf('<p><b>keep</b></p>') !== -1, ed.ta.value);
+	});
+
+	attempt('editor: source view is the textarea; visual re-parses it', function () {
+		var ed = makeEditor('html', '<p>one</p>', { view: 'source' });
+		same('editor: opens in source', ed.root.getAttribute('data-mode'), 'source');
+		report('editor: surface empty until visual', ed.surface.innerHTML === '');
+		var hidden = ed.surface.checkVisibility ? ed.surface.checkVisibility() : null;
+		report('editor: surface hidden in source view', hidden === false, String(hidden));
+		ed.ta.value = '<p>two</p>';
+		ed.view('visual');
+		same('editor: visual shows the source edit', ed.surface.innerHTML, '<p>two</p>');
+		same('editor: textarea still the source edit', ed.ta.value, '<p>two</p>');
+	});
+
+	attempt('editor: before submit, always-mode cleans before the validator reads', function () {
+		var ed = makeEditor('html', '<p>a</p>', { cleanup: 'always' });
+		ed.surface.innerHTML = '<div class="q">q</div>';
+		ed.surface.dispatchEvent(new Event('input', { bubbles: true }));
+		same('editor: edit synced raw', ed.ta.value, '<div class="q">q</div>');
+		var seen = null;
+		ed.form.addEventListener('submit', function (e) { seen = ed.ta.value; e.preventDefault(); });
+		ed.form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+		same('editor: bubble-phase listener saw the cleaned value', seen, '<p>q</p>');
+	});
+
+	attempt('editor: link popover inserts an anchor', function () {
+		var ed = makeEditor('html', '<p>read this</p>', {});
+		report('editor: select this', selectText(ed.surface, 'this'));
+		ed.press('link');
+		var pop = ed.root.querySelector('.jy-ed-pop');
+		report('editor: popover opened', !!pop);
+		same('editor: popover text prefilled from selection', pop.querySelector('input[name=text]').value, 'this');
+		pop.querySelector('input[name=url]').value = 'https://x.test/';
+		pop.querySelector('input[name=blank]').checked = true;
+		pop.querySelector('.jy-ed-pop-submit').click();
+		report('editor: anchor inserted with target and rel',
+			/<a href="https:\/\/x\.test\/" target="_blank" rel="noopener">this<\/a>/.test(ed.ta.value), ed.ta.value);
+	});
+
+	/* ========================================================= markdown */
+
+	attempt('markdown: bold wraps the selection', function () {
+		var ed = makeEditor('markdown', 'hello world', {});
+		ed.ta.focus();
+		ed.ta.setSelectionRange(6, 11);
+		ed.press('bold');
+		same('markdown: bold', ed.ta.value, 'hello **world**');
+		ed.press('bold');
+		same('markdown: bold again unwraps', ed.ta.value, 'hello world');
+	});
+
+	attempt('markdown: heading toggles on and off', function () {
+		var ed = makeEditor('markdown', 'title', {});
+		ed.ta.focus();
+		ed.ta.setSelectionRange(2, 2);
+		ed.press('h2');
+		same('markdown: h2 on', ed.ta.value, '## title');
+		ed.press('h2');
+		same('markdown: h2 off', ed.ta.value, 'title');
+	});
+
+	attempt('markdown: list continuation on Enter', function () {
+		var ed = makeEditor('markdown', '- item', {});
+		ed.ta.focus();
+		ed.ta.setSelectionRange(6, 6);
+		ed.ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+		same('markdown: Enter continues the list', ed.ta.value, '- item\n- ');
+		ed.ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+		same('markdown: Enter on an empty marker ends the list', ed.ta.value, '- item\n');
+	});
+
+	attempt('markdown: link popover writes [text](url)', function () {
+		var ed = makeEditor('markdown', 'see docs', {});
+		ed.ta.focus();
+		ed.ta.setSelectionRange(4, 8);
+		ed.press('link');
+		var pop = ed.root.querySelector('.jy-ed-pop');
+		report('markdown: popover opened', !!pop);
+		pop.querySelector('input[name=url]').value = '/docs';
+		pop.querySelector('.jy-ed-pop-submit').click();
+		same('markdown: link', ed.ta.value, 'see [docs](/docs)');
+	});
+
+	attempt('markdown: the textarea keeps its value on view change', function () {
+		var ed = makeEditor('markdown', '# h', {});
+		ed.view('split');
+		same('markdown: split view set', ed.root.getAttribute('data-mode'), 'split');
+		same('markdown: value untouched', ed.ta.value, '# h');
+	});
+
+	var summary = document.createElement('p');
+	summary.id = 'summary';
+	summary.setAttribute('data-pass', counts.pass);
+	summary.setAttribute('data-fail', counts.fail);
+	summary.textContent = counts.pass + ' passed, ' + counts.fail + ' failed';
+	document.body.insertBefore(summary, results);
+	document.body.setAttribute('data-done', '1');
+})();
+</script>
+</body>
+</html>

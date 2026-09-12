@@ -5,7 +5,8 @@
  * Pure HTML5 form generation with semantic markup and no CSS framework dependencies.
  * Provides accessible, standards-compliant forms that any theme can style.
  *
- * @version 2.4.1 - jQuery for the Trumbowyg editor is served from assets/vendor, not a CDN (CSP has no script CDN)
+ * @version 2.5.0 - One editor for htmlmode and markdownmode (assets/js/joinery-editor.js): editor_view and editor_cleanup options, no jQuery
+ * @changelog 2.4.1 - jQuery for the Trumbowyg editor is served from assets/vendor, not a CDN (CSP has no script CDN)
  * @changelog 2.4.0 - textbox markdownmode option: toolbar + server-rendered live preview (assets/js/markdown-editor.js)
  * @changelog 2.3.0 - renderTextInput emits the help_modal trigger/template (text, password and number fields)
  * @changelog 2.2.0 - Phase 2: shared AJAX script, visibility moved to base, buildCommonAttributes in renderTextInput
@@ -791,7 +792,9 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
      *
      * @param string $name Field name
      * @param string $label Field label
-     * @param array $options Field options (including 'htmlmode' => 'yes' for rich text)
+     * @param array $options Field options: 'htmlmode' or 'markdownmode' picks the
+     *                       editor dialect; 'editor_view' the opening view;
+     *                       'editor_cleanup' (html only) button|always|none.
      */
     public function textbox($name, $label = '', $options = []) {
         // THIS OVERRIDE USED TO SKIP REGISTRATION ENTIRELY, and it was the only
@@ -824,131 +827,21 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
         $class = $options['class'] ?? 'form-control';
         $id = $options['id'] ?? $name;
 
+        // The editor dialect, or null for a plain textarea. editor_view and
+        // editor_cleanup are checked against the dialect at definition time,
+        // so a view from the wrong dialect is a thrown exception on the dev
+        // box, not a field that quietly opens the wrong way.
+        $dialect = $htmlmode === 'yes' ? 'html' : ($markdownmode === 'yes' ? 'markdown' : null);
+        $editor = self::editorOptions($name, $dialect,
+            $options['editor_view'] ?? null, $options['editor_cleanup'] ?? null);
+
         $has_errors = isset($this->errors[$name]);
         if ($has_errors) {
             $class .= ' is-invalid';
         }
 
-        if ($htmlmode === 'yes') {
-            // Load Trumbowyg CSS
-            echo '<link rel="stylesheet" href="/assets/vendor/Trumbowyg-2-26/dist/ui/trumbowyg.min.css">';
-            // Conditionally load jQuery (if not already present) then load Trumbowyg
-            echo '<script type="text/javascript">
-            (function() {
-                var editorId = "' . htmlspecialchars($id) . '";
-                var trumbowygScripts = [
-                    "/assets/vendor/Trumbowyg-2-26/dist/trumbowyg.min.js",
-                    "/assets/vendor/Trumbowyg-2-26/dist/plugins/cleanpaste/trumbowyg.cleanpaste.min.js",
-                    "/assets/vendor/Trumbowyg-2-26/dist/plugins/preformatted/trumbowyg.preformatted.min.js",
-                    "/assets/vendor/Trumbowyg-2-26/dist/plugins/allowtagsfrompaste/trumbowyg.allowtagsfrompaste.min.js"
-                ];
-
-                function initTrumbowyg() {
-                    if (typeof jQuery.fn.trumbowyg === "function") {
-                        jQuery("#" + editorId).trumbowyg({
-                            svgPath: "/assets/vendor/Trumbowyg-2-26/dist/ui/icons.svg",
-                            autogrow: false,
-                            autogrowOnEnter: false,
-                            btns: [
-                                ["viewHTML"],
-                                ["undo", "redo"],
-                                ["formatting"],
-                                ["strong", "em", "del"],
-                                ["superscript", "subscript"],
-                                ["link"],
-                                ["insertImage"],
-                                ["preformatted"],
-                                ["justifyLeft", "justifyCenter", "justifyRight", "justifyFull"],
-                                ["unorderedList", "orderedList"],
-                                ["horizontalRule"],
-                                ["removeformat"],
-                                ["fullscreen"]
-                            ],
-                            semantic: {
-                                "div": "div"
-                            },
-                            plugins: {
-                                allowTagsFromPaste: {
-                                    allowedTags: ["p", "br", "blockquote", "b", "i", "strong", "em", "ul", "li", "ol", "a", "code", "pre", "h1", "h2", "h3", "h4", "h5", "embed", "table", "tr", "td", "th", "img", "video"]
-                                }
-                            }
-                        });
-                    }
-                }
-
-                // Load a script and call callback when done
-                function loadScript(url, callback) {
-                    var script = document.createElement("script");
-                    script.type = "text/javascript";
-                    script.src = url;
-                    script.onload = callback;
-                    script.onerror = function() {
-                        console.error("Failed to load script: " + url);
-                    };
-                    document.head.appendChild(script);
-                }
-
-                // Load scripts sequentially
-                function loadScriptsSequentially(scripts, index, callback) {
-                    if (index >= scripts.length) {
-                        callback();
-                        return;
-                    }
-                    loadScript(scripts[index], function() {
-                        loadScriptsSequentially(scripts, index + 1, callback);
-                    });
-                }
-
-                // Main initialization
-                function initEditor() {
-                    // Temporarily disable module detection to force browser global approach
-                    var originalDefine = window.define;
-                    var originalExports = window.exports;
-                    delete window.define;
-                    delete window.exports;
-
-                    loadScriptsSequentially(trumbowygScripts, 0, function() {
-                        // Restore module detection
-                        if (originalDefine) window.define = originalDefine;
-                        if (originalExports) window.exports = originalExports;
-                        initTrumbowyg();
-                    });
-                }
-
-                // Check if jQuery is loaded, if not load it first
-                if (typeof jQuery === "undefined") {
-                    loadScript("/assets/vendor/jquery-3.7.1/jquery.min.js", function() {
-                        if (document.readyState === "loading") {
-                            document.addEventListener("DOMContentLoaded", initEditor);
-                        } else {
-                            initEditor();
-                        }
-                    });
-                } else {
-                    if (document.readyState === "loading") {
-                        document.addEventListener("DOMContentLoaded", initEditor);
-                    } else {
-                        initEditor();
-                    }
-                }
-            })();
-            </script>';
-            echo '<style>
-            .trumbowyg-box,
-            .trumbowyg-editor,
-            .trumbowyg-textarea {
-                height: 500px;
-            }
-            .trumbowyg-box.trumbowyg-fullscreen,
-            .trumbowyg-box.trumbowyg-fullscreen .trumbowyg-editor,
-            .trumbowyg-box.trumbowyg-fullscreen .trumbowyg-textarea {
-                height: 100%;
-            }
-            </style>';
-        }
-
-        if ($markdownmode === 'yes') {
-            self::emitMarkdownEditorAssets();
+        if ($dialect !== null) {
+            self::emitEditorAssets($dialect);
         }
 
         // Output textarea
@@ -962,14 +855,20 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
             $html .= '</label>';
         }
 
-        if ($markdownmode === 'yes') {
-            $html .= self::markdownEditorChrome($options);
+        $chrome = null;
+        if ($dialect !== null) {
+            $chrome = self::editorChrome($dialect, [
+                'view' => $editor['view'],
+                'cleanup' => $editor['cleanup'],
+                'label' => $label,
+            ]);
+            $html .= $chrome['open'];
         }
 
         $html .= '<textarea';
         $html .= ' name="' . htmlspecialchars($name) . '"';
         $html .= ' id="' . htmlspecialchars($id) . '"';
-        $html .= ' class="' . htmlspecialchars($class) . ($htmlmode === 'yes' ? ' html_editable' : '') . '"';
+        $html .= ' class="' . htmlspecialchars($class) . '"';
         $html .= ' rows="' . intval($rows) . '"';
         $html .= ' cols="' . intval($cols) . '"';
 
@@ -996,9 +895,8 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
         $html .= htmlspecialchars($value);
         $html .= '</textarea>';
 
-        if ($markdownmode === 'yes') {
-            $html .= '<div class="jy-md-preview markdown-content" data-jy-md-preview></div>';
-            $html .= '</div></div>';   // .jy-md-panes, .jy-md
+        if ($chrome !== null) {
+            $html .= $chrome['close'];
         }
 
         if ($has_errors) {
@@ -1021,92 +919,211 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
     }
 
     /**
-     * The markdown editor's stylesheet and script, emitted once per request
-     * however many markdown fields a page carries.
+     * Resolve and check the editor options for a textbox.
      *
-     * The script self-initializes from the data attributes below rather than
-     * from an inline call, so a page carrying a markdown field needs no inline
-     * <script> and stays clean under a strict Content-Security-Policy.
+     * editor_view is the opening view: 'visual' (default) or 'source' for the
+     * html dialect; 'write' (default), 'split' or 'preview' for markdown.
+     * editor_cleanup is html-only: 'button' (default; the Clean up button is
+     * offered), 'always' (the field holds prose: pasted and saved content is
+     * cleaned, though an untouched field is still saved untouched) or 'none'
+     * (the field holds markup; no button).
+     *
+     * @param string      $name    Field name, for the message
+     * @param string|null $dialect 'html', 'markdown' or null for a plain textarea
+     * @param mixed       $view    The editor_view option as passed
+     * @param mixed       $cleanup The editor_cleanup option as passed
+     * @return array{view: ?string, cleanup: ?string}
+     * @throws Exception when an option does not fit the dialect
      */
-    private static function emitMarkdownEditorAssets() {
-        static $emitted = false;
-        if ($emitted) {
-            return;
+    private static function editorOptions($name, $dialect, $view, $cleanup) {
+        $views = [
+            'html' => ['visual', 'source'],
+            'markdown' => ['write', 'split', 'preview'],
+        ];
+        if ($dialect === null) {
+            if ($view !== null || $cleanup !== null) {
+                throw new Exception("FormWriter: field '{$name}' passes editor_view or editor_cleanup without htmlmode or markdownmode; a plain textarea has no editor.");
+            }
+            return ['view' => null, 'cleanup' => null];
         }
-        $emitted = true;
-
-        require_once(PathHelper::getIncludePath('includes/MarkdownRenderer.php'));
-
-        $css = PathHelper::getIncludePath('assets/css/markdown-editor.css');
-        $js = PathHelper::getIncludePath('assets/js/markdown-editor.js');
-
-        echo '<link rel="stylesheet" href="/assets/css/markdown-editor.css?v='
-            . (is_file($css) ? filemtime($css) : '1') . '">';
-        // The preview pane renders what MarkdownRenderer produces, so it needs
-        // the same .markdown-content rules the finished page uses.
-        echo '<style>' . MarkdownRenderer::get_css() . '</style>';
-        echo '<script src="/assets/js/markdown-editor.js?v='
-            . (is_file($js) ? filemtime($js) : '1') . '" defer></script>';
+        if ($view === null) {
+            $view = $views[$dialect][0];
+        }
+        if (!in_array($view, $views[$dialect], true)) {
+            throw new Exception("FormWriter: field '{$name}' asks for editor_view '{$view}', which is not a {$dialect} view; use one of "
+                . implode(', ', $views[$dialect]) . '.');
+        }
+        if ($dialect === 'markdown') {
+            if ($cleanup !== null) {
+                throw new Exception("FormWriter: field '{$name}' passes editor_cleanup with markdownmode; cleanup applies to HTML only.");
+            }
+            return ['view' => $view, 'cleanup' => null];
+        }
+        if ($cleanup === null) {
+            $cleanup = 'button';
+        }
+        if (!in_array($cleanup, ['button', 'always', 'none'], true)) {
+            throw new Exception("FormWriter: field '{$name}' asks for editor_cleanup '{$cleanup}'; use button, always or none.");
+        }
+        return ['view' => $view, 'cleanup' => $cleanup];
     }
 
     /**
-     * The wrapper and toolbar that sit around a markdown textarea. The closing
-     * tags are emitted after the textarea by textbox().
+     * The editor's stylesheet and scripts, emitted once per request however
+     * many editor fields a page carries. The markdown dialect also carries the
+     * .markdown-content rules its preview pane renders with, once.
      *
-     * @param array $options Field options; 'markdown_mode' picks the starting
-     *                       view ('write', 'split' or 'preview').
+     * The script self-initialises from the wrapper's data attributes, so a
+     * page carrying an editor needs no inline <script> and stays clean under
+     * the Content-Security-Policy.
+     *
+     * Public so a repeater can emit the assets before its <template> row: a
+     * <link> or <script> echoed inside a template never loads.
+     *
+     * @param string $dialect 'html' or 'markdown'
      */
-    private static function markdownEditorChrome($options) {
-        $initial = $options['markdown_mode'] ?? 'write';
-        if (!in_array($initial, array('write', 'split', 'preview'), true)) {
-            $initial = 'write';
+    public static function emitEditorAssets($dialect) {
+        static $emitted = false;
+        static $markdown_css = false;
+
+        if (!$emitted) {
+            $emitted = true;
+            $css = PathHelper::getIncludePath('assets/css/joinery-editor.css');
+            $cleanup = PathHelper::getIncludePath('assets/js/html-cleanup.js');
+            $js = PathHelper::getIncludePath('assets/js/joinery-editor.js');
+            echo '<link rel="stylesheet" href="/assets/css/joinery-editor.css?v='
+                . (is_file($css) ? filemtime($css) : '1') . '">';
+            echo '<script src="/assets/js/html-cleanup.js?v='
+                . (is_file($cleanup) ? filemtime($cleanup) : '1') . '" defer></script>';
+            echo '<script src="/assets/js/joinery-editor.js?v='
+                . (is_file($js) ? filemtime($js) : '1') . '" defer></script>';
         }
 
-        $buttons = array(
-            array('bold', 'B', 'Bold', 'jy-md-bold', 'Bold (Ctrl+B)'),
-            array('italic', 'I', 'Italic', 'jy-md-italic', 'Italic (Ctrl+I)'),
-            array('code', '<>', 'Inline code', 'jy-md-mono', 'Inline code'),
-            array(null, null, null, null, null),
-            array('h1', 'H1', 'Heading 1', '', 'Heading 1'),
-            array('h2', 'H2', 'Heading 2', '', 'Heading 2'),
-            array('h3', 'H3', 'Heading 3', '', 'Heading 3'),
-            array(null, null, null, null, null),
-            array('ul', '&bull; List', 'Bulleted list', '', 'Bulleted list'),
-            array('ol', '1. List', 'Numbered list', '', 'Numbered list'),
-            array('quote', '&ldquo;', 'Quote', '', 'Block quote'),
-            array(null, null, null, null, null),
-            array('link', 'Link', 'Link', '', 'Link (Ctrl+K)'),
-            array('codeblock', 'Code block', 'Code block', '', 'Code block'),
-            array('table', 'Table', 'Table', '', 'Table'),
-        );
+        if ($dialect === 'markdown' && !$markdown_css) {
+            $markdown_css = true;
+            // The preview pane renders what MarkdownRenderer produces, so it
+            // needs the same .markdown-content rules the finished page uses.
+            echo '<style>' . MarkdownRenderer::get_css() . '</style>';
+        }
+    }
 
-        $html = '<div class="jy-md" data-jy-markdown-editor data-mode="' . htmlspecialchars($initial) . '"'
-            . ' data-jy-md-initial-mode="' . htmlspecialchars($initial) . '">';
-        $html .= '<div class="jy-md-toolbar" role="toolbar" aria-label="Markdown formatting">';
+    /**
+     * The wrapper and toolbar that sit around an editor textarea.
+     *
+     * Returns the markup that goes before the textarea ('open') and after it
+     * ('close'). The toolbar is a per-dialect button table; the script binds
+     * by data-jy-ed-action and data-jy-ed-view, so nothing here is inline
+     * script. A cloned repeater row carries this markup already.
+     *
+     * @param string $dialect 'html' or 'markdown'
+     * @param array  $options view, cleanup (html only), label
+     * @return array{open: string, close: string}
+     */
+    private static function editorChrome($dialect, $options) {
+        $view = $options['view'];
+        $cleanup = $options['cleanup'] ?? null;
+        $sep = [null, null, null, null, null];
+
+        if ($dialect === 'html') {
+            // [action, face, aria-label, class, title]
+            $buttons = [
+                ['undo', '&#8630;', 'Undo', '', 'Undo (Ctrl+Z)'],
+                ['redo', '&#8631;', 'Redo', '', 'Redo (Ctrl+Y)'],
+                $sep,
+                ['format', 'Format &#9662;', 'Block format', '', 'Paragraph, headings, quote, code block'],
+                $sep,
+                ['bold', 'B', 'Bold', 'jy-ed-bold', 'Bold (Ctrl+B)'],
+                ['italic', 'I', 'Italic', 'jy-ed-italic', 'Italic (Ctrl+I)'],
+                ['del', 'S', 'Strikethrough', 'jy-ed-strike', 'Strikethrough'],
+                ['sup', 'x&sup2;', 'Superscript', '', 'Superscript'],
+                ['sub', 'x&#8322;', 'Subscript', '', 'Subscript'],
+                $sep,
+                ['link', 'Link', 'Link', '', 'Link (Ctrl+K)'],
+                ['image', 'Image', 'Image', '', 'Image'],
+                $sep,
+                ['ul', '&bull; List', 'Bulleted list', '', 'Bulleted list'],
+                ['ol', '1. List', 'Numbered list', '', 'Numbered list'],
+                $sep,
+                ['align-left', 'Left', 'Align left', 'jy-ed-small', 'Align left'],
+                ['align-center', 'Center', 'Align center', 'jy-ed-small', 'Align center'],
+                ['align-right', 'Right', 'Align right', 'jy-ed-small', 'Align right'],
+                ['align-justify', 'Justify', 'Justify', 'jy-ed-small', 'Justify'],
+                $sep,
+                ['hr', '&mdash;', 'Horizontal rule', '', 'Horizontal rule'],
+                ['removeformat', 'Clear', 'Remove formatting', 'jy-ed-small', 'Remove formatting from the selection'],
+            ];
+            if ($cleanup !== 'none') {
+                $buttons[] = ['cleanup', 'Clean up', 'Clean up markup', 'jy-ed-small',
+                    'Tidy the whole field to plain prose markup (one undo step)'];
+            }
+            $views = ['visual' => 'Visual', 'source' => 'Source'];
+            $toolbar_label = 'Formatting';
+        } else {
+            $buttons = [
+                ['bold', 'B', 'Bold', 'jy-ed-bold', 'Bold (Ctrl+B)'],
+                ['italic', 'I', 'Italic', 'jy-ed-italic', 'Italic (Ctrl+I)'],
+                ['code', '&lt;&gt;', 'Inline code', 'jy-ed-mono', 'Inline code'],
+                $sep,
+                ['h1', 'H1', 'Heading 1', '', 'Heading 1'],
+                ['h2', 'H2', 'Heading 2', '', 'Heading 2'],
+                ['h3', 'H3', 'Heading 3', '', 'Heading 3'],
+                $sep,
+                ['ul', '&bull; List', 'Bulleted list', '', 'Bulleted list'],
+                ['ol', '1. List', 'Numbered list', '', 'Numbered list'],
+                ['quote', '&ldquo;', 'Quote', '', 'Block quote'],
+                $sep,
+                ['link', 'Link', 'Link', '', 'Link (Ctrl+K)'],
+                ['image', 'Image', 'Image', '', 'Image'],
+                ['codeblock', 'Code block', 'Code block', '', 'Code block'],
+                ['table', 'Table', 'Table', '', 'Table'],
+            ];
+            $views = ['write' => 'Write', 'split' => 'Split', 'preview' => 'Preview'];
+            $toolbar_label = 'Markdown formatting';
+        }
+
+        $open = '<div class="jy-ed" data-jy-editor="' . $dialect . '"'
+            . ' data-jy-ed-initial-view="' . htmlspecialchars($view) . '"'
+            . ' data-mode="' . htmlspecialchars($view) . '"';
+        if ($dialect === 'html') {
+            $open .= ' data-jy-ed-cleanup="' . htmlspecialchars($cleanup) . '"';
+        }
+        $open .= '>';
+        $open .= '<div class="jy-ed-toolbar" role="toolbar" aria-label="' . htmlspecialchars($toolbar_label) . '">';
 
         foreach ($buttons as $button) {
-            list($action, $face, $label, $class, $title) = $button;
+            list($action, $face, $aria, $class, $title) = $button;
             if ($action === null) {
-                $html .= '<span class="jy-md-sep" aria-hidden="true"></span>';
+                $open .= '<span class="jy-ed-sep" aria-hidden="true"></span>';
                 continue;
             }
-            $html .= '<button type="button" class="' . htmlspecialchars($class) . '"'
-                . ' data-jy-md-action="' . htmlspecialchars($action) . '"'
+            $open .= '<button type="button" class="' . htmlspecialchars($class) . '"'
+                . ' data-jy-ed-action="' . htmlspecialchars($action) . '"'
                 . ' title="' . htmlspecialchars($title) . '"'
-                . ' aria-label="' . htmlspecialchars($label) . '">' . $face . '</button>';
+                . ' aria-label="' . htmlspecialchars($aria) . '">' . $face . '</button>';
         }
 
-        $html .= '<span class="jy-md-modes">';
-        foreach (array('write' => 'Write', 'split' => 'Split', 'preview' => 'Preview') as $mode => $face) {
-            $html .= '<button type="button" data-jy-md-mode="' . $mode . '"'
-                . ' aria-pressed="' . ($mode === $initial ? 'true' : 'false') . '"'
+        $open .= '<span class="jy-ed-views">';
+        foreach ($views as $key => $face) {
+            $open .= '<button type="button" data-jy-ed-view="' . $key . '"'
+                . ' aria-pressed="' . ($key === $view ? 'true' : 'false') . '"'
                 . ' title="' . $face . ' view">' . $face . '</button>';
         }
-        $html .= '</span>';
+        $open .= '<button type="button" data-jy-ed-action="fullscreen" aria-pressed="false"'
+            . ' title="Fullscreen (Esc to leave)" aria-label="Fullscreen">&#9974;</button>';
+        $open .= '</span>';
 
-        $html .= '</div><div class="jy-md-panes">';
+        $open .= '</div><div class="jy-ed-panes">';
 
-        return $html;
+        if ($dialect === 'html') {
+            $open .= '<div class="jy-ed-surface" role="textbox" aria-multiline="true"'
+                . ' aria-label="' . htmlspecialchars($options['label'] !== '' ? $options['label'] : 'Rich text') . '"></div>';
+            $close = '</div></div>';   // .jy-ed-panes, .jy-ed
+        } else {
+            $close = '<div class="jy-ed-preview markdown-content"></div>'
+                . '</div></div>';   // .jy-ed-panes, .jy-ed
+        }
+
+        return ['open' => $open, 'close' => $close];
     }
 
     /**
@@ -1126,6 +1143,12 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
             'readonly' => $data['readonly'],
             'disabled' => $data['disabled'],
         ];
+        if ($data['editor_view'] !== null) {
+            $options['editor_view'] = $data['editor_view'];
+        }
+        if ($data['editor_cleanup'] !== null) {
+            $options['editor_cleanup'] = $data['editor_cleanup'];
+        }
         ob_start();
         $this->textbox($data['name'], $data['label'], $options);
         return ob_get_clean();

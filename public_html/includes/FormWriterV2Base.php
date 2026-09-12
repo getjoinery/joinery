@@ -3978,6 +3978,8 @@ JS;
             'class' => $options['class'] ?? '',
             'rows' => $options['rows'] ?? 10,
             'htmlmode' => !empty($options['htmlmode']),
+            'editor_view' => $options['editor_view'] ?? null,
+            'editor_cleanup' => $options['editor_cleanup'] ?? null,
             'readonly' => !empty($options['readonly']),
             'disabled' => !empty($options['disabled']),
             'has_errors' => isset($this->errors[$name]),
@@ -5379,6 +5381,16 @@ JS;
             }
         }
 
+        // A rich-text sub-field emits the editor's <link> and <script> the
+        // first time it renders. If that first time is inside the <template>
+        // row (an empty repeater), nothing loads; emit them here first.
+        foreach ($subfields as $subfield) {
+            if (($subfield['type'] ?? '') === 'richtext' && method_exists($this, 'emitEditorAssets')) {
+                static::emitEditorAssets('html');
+                break;
+            }
+        }
+
         // Repeater container - data-name used by JavaScript for targeting
         echo '<div class="repeater mb-4" data-name="' . htmlspecialchars($name) . '"';
         if ($min !== null) echo ' data-min="' . $min . '"';
@@ -5471,6 +5483,10 @@ document.addEventListener("DOMContentLoaded", function() {
 
             items.insertAdjacentHTML("beforeend", html);
             updateRepeaterState(repeater);
+            var added = items.lastElementChild;
+            if (added) {
+                added.dispatchEvent(new CustomEvent("jy-repeater-row-added", { bubbles: true }));
+            }
         }
     });
 
@@ -5557,6 +5573,22 @@ document.addEventListener("DOMContentLoaded", function() {
                 'validation' => false
             ];
 
+            // richtext is a schema type, not a FormWriter method: it is a
+            // textbox in the html dialect, with the schema's cleanup and view.
+            if ($method === 'richtext') {
+                $method = 'textbox';
+                $field_options['htmlmode'] = 'yes';
+                if (isset($subfield['cleanup'])) {
+                    $field_options['editor_cleanup'] = $subfield['cleanup'];
+                }
+                if (isset($subfield['view'])) {
+                    $field_options['editor_view'] = $subfield['view'];
+                }
+                if (isset($subfield['rows'])) {
+                    $field_options['rows'] = intval($subfield['rows']);
+                }
+            }
+
             // Pass through common schema properties
             $passthrough_props = ['placeholder', 'required', 'min', 'max', 'step'];
             foreach ($passthrough_props as $prop) {
@@ -5602,9 +5634,10 @@ document.addEventListener("DOMContentLoaded", function() {
             $col_class = 'col-md-3';
         }
 
-        // Render regular fields
+        // Render regular fields; an editor takes the whole row width
         foreach ($regular_fields as $subfield) {
-            $render_subfield($subfield, $name, $index, $values, $col_class);
+            $render_subfield($subfield, $name, $index, $values,
+                (($subfield['type'] ?? '') === 'richtext') ? 'col-12' : $col_class);
         }
 
         // Remove button

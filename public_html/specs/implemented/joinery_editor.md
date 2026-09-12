@@ -1,10 +1,23 @@
 # Joinery editor: one editing surface for HTML and markdown fields
 
-**Status:** Spec, written 2026-09-12. Replaces Trumbowyg (and with it the
-platform's last jQuery load) and absorbs the markdown editor
-(`assets/js/markdown-editor.js`) so the platform has one editor with two
-dialects. Owner decisions: the browser's built-in editing commands ("the easy
-way"); D1 decided, cleanup runs in JavaScript only. Nothing built yet.
+**Status:** Implemented 2026-09-12 (WP1–WP4, same day as the spec). Replaces
+Trumbowyg (and with it the platform's last jQuery load) and absorbs the
+markdown editor (`assets/js/markdown-editor.js`) so the platform has one
+editor with two dialects. Owner decisions: the browser's built-in editing
+commands ("the easy way"); D1 decided, cleanup runs in JavaScript only.
+
+Two things settled during the build, both in the tests:
+
+- **Clean up is reversible through its own button, not native undo.** Chrome
+  keeps the outermost block of the old content whenever the whole selection
+  is replaced through `insertHTML` (probed: `<div class="x">…</div>` survives
+  every variant, so the button could never produce exact output through the
+  undo stack). The button therefore writes the surface directly and reads
+  **Undo clean up** until the next edit; one saved string, cleared on input.
+- **A component's DB schema row catches up on the next sync.** On dev the
+  `custom_html` row still carries the old schema until "Sync with Filesystem"
+  (admin Plugins page) or an upgrade runs; that is the deployment step for
+  every node and it is a database write, so it is the owner's.
 
 ## The goal, in one sentence
 
@@ -222,11 +235,15 @@ input button textarea select template`, and comments.
 Unwrap, keeping children: every other tag (`span section article font
 center` and the Office `o:p` family included).
 
-Structure: wrap top-level text and inline runs in `p`; remove `p` and inline
+Structure: wrap top-level text and inline runs in `p`; a `p` that ends up
+holding a block (a renamed `div` inside a `div`, a list inside a paragraph)
+is unwrapped so blocks never nest in paragraphs; remove `p` and inline
 elements with no text and no `img`/`br`/`hr`/`iframe`/`video` inside; unwrap
 an inline element nested in the same tag; collapse `&nbsp;` runs to a space
 outside `pre`. `pre` contents are kept verbatim. `href`/`src` with a
-`javascript:` or `data:` scheme are removed.
+`javascript:` or `data:` scheme are removed. Order: drop, rename, unwrap,
+attributes, then structure, so each pass sees only tags the earlier passes
+allowed.
 
 The rule table is data (one object at the top of `html-cleanup.js`), so a
 future profile is another table, not another routine.
@@ -251,13 +268,17 @@ dialect throws at definition time.
 
 | Value | Button | Paste | Load | Before submit |
 |-------|--------|-------|------|---------------|
-| `button` (default) | shown; cleans the whole surface as one undoable step | browser default | nothing | nothing |
+| `button` (default) | shown; cleans the whole surface, then reads "Undo clean up" until the next edit | browser default | nothing | nothing |
 | `always` | shown | clipboard HTML is cleaned before insertion; plain text inserted as text | surface cleaned (textarea untouched until first edit) | if edited, surface cleaned and written |
 | `none` | hidden | browser default | nothing | nothing |
 
 `always` is the developer saying "this field holds prose": whatever is saved
 through it is clean, but an untouched field is still saved untouched.
 `none` is for a field whose whole point is markup.
+
+The before-submit step runs from a capture-phase `submit` listener, so the
+textarea is already clean when `joinery-validate.js` reads it. A field whose
+content cleans down to nothing then fails `required` the way it should.
 
 Component schemas pass both through: a `richtext` field may carry
 `"cleanup"` and `"view"`, mapped by `adm/admin_component_edit.php` alongside
@@ -298,7 +319,13 @@ deployment; no database write.
 ## Tests
 
 - `tests/unit/joinery_editor_test.php` — safe tier, `env: dev-only`,
-  `needs: [chrome]`. Runs `google-chrome --headless --dump-dom` over
+  `needs: [chrome]`. The runner treats a need it does not recognise as met,
+  so `harness_unmet_needs()` in `tests/run.php` gains a `chrome` case
+  (probe `command -v google-chrome`), otherwise the suite would fail hard
+  on a box without a browser instead of skipping. Headless Chrome is
+  confirmed working as the dev user
+  (`google-chrome --headless=new --disable-gpu --no-sandbox --dump-dom`).
+  Runs it over
   `tests/fixtures/joinery_editor/runner.html`, which loads `html-cleanup.js`
   and the editor, applies each fixture, and prints pass/fail into the DOM for
   the harness to read. Fixtures cover every row of the cleanup rule table,

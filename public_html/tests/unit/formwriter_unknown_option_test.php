@@ -103,6 +103,14 @@ check(isset($known['options']) && isset($known['value']) && isset($known['requir
 check(!isset($known['help_text']),
 	'help_text is not an option — which is the whole point, since it looks like one');
 
+// The editor's two options are read by the renderer; the markdown editor's
+// old view option is not read by anything and must be refused like any other
+// dead key.
+check(isset($known['editor_view']) && isset($known['editor_cleanup']),
+	'editor_view and editor_cleanup are read by the textbox renderer');
+check(!isset($known['markdown_mode']),
+	'markdown_mode is not an option (editor_view is the view selector)');
+
 // ---------------------------------------------------------------------------
 section('An unknown option stops the page instead of being ignored');
 // ---------------------------------------------------------------------------
