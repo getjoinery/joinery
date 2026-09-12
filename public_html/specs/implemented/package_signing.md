@@ -1,10 +1,11 @@
 # Package signing: what root will install, and how the owner overrides it
 
-**Status:** Spec, written 2026-09-11 from the owner's design (below). Closes
-S9 of `security_inventory.md`. D1 decided (Option 1, owner 2026-09-11).
-**BUILT 2026-09-12, two review rounds accepted, uncommitted.** Open: the
-owner's commit, a release, and WP8 on jeremytunnell (asks first: the unsigned
-step emails every superadmin).
+**Status:** IMPLEMENTED. Written 2026-09-11 from the owner's design (below);
+closes S9 of `security_inventory.md`; D1 decided (Option 1, owner 2026-09-11).
+WP1–WP7 committed 2026-09-12 (8a6883eb, 81f04561) after two accepted review
+rounds. Moved to implemented/ 2026-09-12 with the live proof (WP8) still to
+run after the next release; that proof is tracked on the running to-do list,
+not here.
 
 ## The goal, in one sentence
 
