@@ -14,6 +14,7 @@ function persona_browser_feed_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('plugins/persona_browser/data/persona_feed_items_class.php'));
     require_once(PathHelper::getIncludePath('plugins/persona_browser/data/persona_stories_class.php'));
     require_once(PathHelper::getIncludePath('plugins/persona_browser/data/persona_blocked_senders_class.php'));
+    require_once(PathHelper::getIncludePath('plugins/persona_browser/data/persona_allowed_senders_class.php'));
 
     $session = SessionControl::get_instance();
     if (!$session->is_logged_in()) {
@@ -40,6 +41,9 @@ function persona_browser_feed_logic(array $input): LogicResult {
     // display, past and future. Compared case-insensitively: Facebook display
     // names vary in casing between captures.
     $blocked = PersonaBlockedSender::blocked_author_set(PersonaFeedItem::OWNER_INSTANCE, 'facebook');
+    // Senders the owner always wants to see — shown whatever the ad verdict
+    // says, and shown without the ad badge: the owner has already decided.
+    $allowed = PersonaAllowedSender::allowed_author_set(PersonaFeedItem::OWNER_INSTANCE, 'facebook');
 
     $rows = new MultiPersonaFeedItem(
         ['owner_user_id' => PersonaFeedItem::OWNER_INSTANCE, 'persona' => 'facebook', 'deleted' => false],
@@ -49,16 +53,18 @@ function persona_browser_feed_logic(array $input): LogicResult {
 
     $items = [];
     foreach ($rows as $row) {
+        $author = (string)$row->get('pfi_author');
+        $author_key = mb_strtolower(trim($author));
+        $is_allowed = isset($allowed[$author_key]);
         // Hide confirmed ads only — an unjudged post (pfi_is_ad NULL) still shows.
-        if ($hide_ads && !empty($row->get('pfi_is_ad'))) {
+        if ($hide_ads && !$is_allowed && !empty($row->get('pfi_is_ad'))) {
             continue;
         }
         // Reels are identified by the service's canonical dedup key prefix.
         if ($hide_reels && strncmp((string)$row->get('pfi_dedup_key'), 'reel:', 5) === 0) {
             continue;
         }
-        $author = (string)$row->get('pfi_author');
-        if ($blocked && isset($blocked[mb_strtolower(trim($author))])) {
+        if (isset($blocked[$author_key])) {
             continue;
         }
         $items[] = [
@@ -70,8 +76,8 @@ function persona_browser_feed_logic(array $input): LogicResult {
             'link'      => (string)$row->get('pfi_link'),
             'media'     => $row->media_files(),
             'seen'      => $row->get_local('pfi_first_seen_time', 'M j, Y g:i A'),
-            'is_ad'     => $row->get('pfi_is_ad'),   // NULL = not yet judged
-            'ad_reason' => (string)$row->get('pfi_ad_reason'),
+            'is_ad'     => $is_allowed ? null : $row->get('pfi_is_ad'),   // NULL = not judged, or allowed sender
+            'ad_reason' => $is_allowed ? '' : (string)$row->get('pfi_ad_reason'),
         ];
     }
 

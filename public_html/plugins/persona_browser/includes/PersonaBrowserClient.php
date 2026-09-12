@@ -25,9 +25,16 @@ class PersonaBrowserClient {
         return $this->endpoint !== '' && $this->token !== '';
     }
 
+    /**
+     * One feed read is ~100-120s of scrolling, and the service runs reads one at
+     * a time per persona — so a caller that arrives while another site's hourly
+     * fetch is in progress waits for that read AND its own. The wait covers two
+     * reads with margin; a shorter one made the second caller time out every
+     * hour while the service was busy doing exactly what it was asked.
+     */
     private function http() {
         require_once(PathHelper::getComposerAutoloadPath());
-        return new \GuzzleHttp\Client(['timeout' => 120, 'connect_timeout' => 5]);
+        return new \GuzzleHttp\Client(['timeout' => 300, 'connect_timeout' => 5]);
     }
 
     /**

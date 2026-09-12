@@ -1,6 +1,6 @@
 {
     "name": "Persona Browser",
-    "version": "0.11.69",
+    "version": "0.11.71",
     "host_installer": "provisioning/relocate_media_cache.sh",
     "description": "Reads your own social feed through a real logged-in browser on a Mac and shows it on a clean profile page. Experimental; Facebook only.",
     "author": "Joinery",
@@ -17,9 +17,9 @@
             "order": 40,
             "items": [
                 {
-                    "slug": "persona-blocked-senders",
-                    "title": "Blocked Senders",
-                    "url": "/plugins/persona_browser/admin/admin_persona_blocked_senders",
+                    "slug": "persona-senders",
+                    "title": "Senders",
+                    "url": "/plugins/persona_browser/admin/admin_persona_senders",
                     "order": 1
                 }
             ]
@@ -75,7 +75,7 @@
             "group": "display",
             "label": "Auto-block a sender after this many ad posts",
             "type": "number",
-            "helptext": "When the AI has judged this many of one creator's posts to be advertisements, that creator is added to Blocked Senders automatically. Unblocking them there is final — they are never auto-blocked again. 0 turns auto-blocking off.",
+            "helptext": "When the AI has judged this many of one creator's posts to be advertisements, that creator is blocked automatically (see Senders). A sender on the allowed list is never auto-blocked. 0 turns auto-blocking off.",
             "validation": {
                 "min": 0
             }

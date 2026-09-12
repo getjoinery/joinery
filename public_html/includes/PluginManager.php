@@ -13,6 +13,10 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
  * This consolidated class replaces the previous multi-class structure with
  * a single cohesive manager that extends AbstractExtensionManager
  *
+ * @version 1.4 - activate() creates the plugin's declared unique constraints
+ *                and indexes, the pass sync() runs on every deploy; a plugin
+ *                activated by hand no longer waits for the next deploy to get
+ *                its unique_with indexes
  * @version 1.3 - refreshFromUpstream() and refuse_from_web() live on
  *                AbstractExtensionManager, so a theme fetches and verifies the
  *                same way (specs/package_signing.md WP4)
@@ -790,13 +794,33 @@ class PluginManager extends AbstractExtensionManager {
             throw new Exception("Plugin '$name' table update failed: " . implode('; ', $table_result['errors']));
         }
 
-        // Materialize declared foreign keys on the plugin's tables
-        $fk_result = $database_updater->manageForeignKeys(LibraryFunctions::discover_model_classes([
+        $plugin_classes = LibraryFunctions::discover_model_classes([
             'require_tablename' => true,
             'require_field_specifications' => true,
             'include_plugins' => true,
             'plugin_filter' => $name
-        ]));
+        ]);
+
+        // The unique constraints and indexes a plugin's classes declare
+        // (`unique` / `unique_with` / `index_with`) are the same pass sync()
+        // runs on every deploy, and they need an upgrade-mode updater to be
+        // created at all. Without this step here, a plugin activated by hand
+        // ran with its at-most-once rules enforced only by the model layer
+        // until the next deploy or Sync — an ON CONFLICT against the declared
+        // key failed on a table that looked complete. The tables are new or
+        // already in sync, so the upgrade gating is safe.
+        $schema_updater = new DatabaseUpdater(false, true /* upgrade */, false);
+        $constraint_result = $schema_updater->manageUniqueConstraints($plugin_classes);
+        if (!empty($constraint_result['errors'])) {
+            throw new Exception("Plugin '$name' unique constraint sync failed: " . implode('; ', $constraint_result['errors']));
+        }
+        $index_result = $schema_updater->manageIndexes($plugin_classes);
+        if (!empty($index_result['errors'])) {
+            throw new Exception("Plugin '$name' index sync failed: " . implode('; ', $index_result['errors']));
+        }
+
+        // Materialize declared foreign keys on the plugin's tables
+        $fk_result = $database_updater->manageForeignKeys($plugin_classes);
         if (!empty($fk_result['errors'])) {
             throw new Exception("Plugin '$name' foreign key sync failed: " . implode('; ', $fk_result['errors']));
         }
