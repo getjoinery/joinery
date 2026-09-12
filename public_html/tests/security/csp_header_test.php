@@ -22,7 +22,7 @@
  *
  * Run: php tests/run.php safe --filter=csp_header
  *
- * @version 1.0
+ * @version 1.1 - no CDN, hosts not schemes, and the tree sweep that keeps the inventory current
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
@@ -57,12 +57,25 @@ check($has('script-src', 'https://js.stripe.com') && $has('frame-src', 'https://
 	'Stripe: script and its frames');
 check($has('script-src', 'https://www.paypal.com') && $has('frame-src', 'https://www.paypal.com') && $has('form-action', 'https://www.paypal.com'),
 	'PayPal: script, frames and the redirect form');
-check($has('script-src', 'https://js.hcaptcha.com') && $has('frame-src', 'https://*.hcaptcha.com'), 'hCaptcha: script and frame');
+check($has('script-src', 'https://*.hcaptcha.com') && $has('frame-src', 'https://*.hcaptcha.com'), 'hCaptcha: script and frame');
 check($has('script-src', 'https://www.google.com') && $has('frame-src', 'https://www.google.com'), 'reCAPTCHA: script and frame');
 check($has('frame-src', 'https://www.youtube.com') && $has('frame-src', 'https://www.youtube-nocookie.com'), 'YouTube embeds');
-check($has('style-src', 'https://fonts.googleapis.com') && $has('font-src', 'https:'), 'Google Fonts');
-foreach (array('https://cdn.tailwindcss.com', 'https://cdnjs.cloudflare.com', 'https://cdn.jsdelivr.net') as $cdn) {
-	check($has('script-src', $cdn), "theme script CDN: {$cdn}");
+check($has('style-src', 'https://fonts.googleapis.com') && $has('font-src', 'https://fonts.gstatic.com'), 'Google Fonts: stylesheet host and font-file host');
+check($has('frame-src', 'https://player.vimeo.com'), 'Vimeo player');
+check($has('script-src', 'https://static.cloudflareinsights.com') && $has('connect-src', 'https://cloudflareinsights.com'),
+	'Cloudflare Web Analytics beacon (injected at the edge, invisible to the tree sweep)');
+foreach (array('https://fast.wistia.net', 'https://www.loom.com', 'https://player.twitch.tv', 'https://open.spotify.com',
+	'https://w.soundcloud.com', 'https://calendly.com', 'https://*.typeform.com', 'https://docs.google.com',
+	'https://calendar.google.com', 'https://www.eventbrite.com', 'https://www.openstreetmap.org', 'https://codepen.io') as $embed) {
+	check($has('frame-src', $embed) && !$has('script-src', $embed), "embeddable product is a frame host only: {$embed}");
+}
+check($has('connect-src', 'https://api.stripe.com') && $has('connect-src', 'https://www.paypal.com') && $has('connect-src', 'https://*.hcaptcha.com'),
+	'connect-src: the payment and captcha APIs the embedded scripts call');
+foreach (array('script-src', 'style-src', 'font-src', 'connect-src', 'frame-src') as $d) {
+	check(!$has($d, 'https:') && !$has($d, 'wss:') && !$has($d, '*'), "{$d} names hosts, never a bare scheme");
+}
+foreach (array('cdn.tailwindcss.com', 'cdnjs.cloudflare.com', 'cdn.jsdelivr.net', 'unpkg.com', 'code.jquery.com', 'esm.sh') as $cdn) {
+	check(strpos($value, $cdn) === false, "no general-purpose CDN: {$cdn}");
 }
 check($has('img-src', 'data:') && $has('img-src', 'blob:') && $has('img-src', 'https:'), 'images: data:, blob: and any https host');
 check($has('object-src', "'none'"), "object-src 'none' — plugins and embeds are closed");
@@ -72,6 +85,59 @@ check(strpos($value, 'http:') === false, 'no plain-http source anywhere');
 check(!preg_match('/\*(?![.-])/', str_replace("'", '', $value)) || strpos($value, ' * ') === false, "no bare wildcard source");
 check(substr_count($value, ';') === count($policy) - 1 && strpos($value, 'default-src ') === 0, 'serialized as "directive sources; ..." starting with default-src');
 check(!preg_match('/[\r\n]/', $value), 'single header line');
+
+section('Every external host the tree loads is in the policy (the standing inventory)');
+// Walk the browser-facing code for <script src>, stylesheet <link>, @import,
+// <iframe src> and CSS url() that name another https host, and hold each one
+// against the directive it belongs to. A new third party fails here until
+// csp_policy() lists it or the asset ships locally; docs and tests are not
+// swept, and neither is anything under a vendor directory.
+$root = realpath(__DIR__ . '/../..');
+$skip = '#/(\.git|node_modules|docs|specs|tests|theme-sources|cache|logs|uploads|backups|\.claude|\.playwright-mcp|vendor|content_staging)(/|$)#';
+$allowed = function ($directive, $host) use ($policy) {
+	foreach ($policy[$directive] as $src) {
+		if ($src === "https://{$host}") return true;
+		if (strpos($src, 'https://*.') === 0 && substr($host, -strlen(substr($src, 9))) === substr($src, 9)) return true;
+	}
+	return false;
+};
+$found = array();
+$it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS));
+foreach ($it as $file) {
+	$path = $file->getPathname();
+	if (preg_match($skip, $path) || !preg_match('#\.(php|js|css|html)$#', $path)) continue;
+	$src = @file_get_contents($path);
+	if ($src === false) continue;
+	$rel = substr($path, strlen($root) + 1);
+	$pairs = array(
+		'script-src' => '#<script[^>]+src=["\']https://([a-z0-9.-]+)#i',
+		'style-src'  => '#(?:<link[^>]+rel=["\']stylesheet["\'][^>]+href=|<link[^>]+href=["\'][^"\']*\.css[^>]*?|@import\s+(?:url\()?["\']?)https://([a-z0-9.-]+)#i',
+		'frame-src'  => '#<iframe[^>]+src=["\']https://([a-z0-9.-]+)#i',
+	);
+	foreach ($pairs as $directive => $re) {
+		if (preg_match_all($re, $src, $m)) {
+			foreach ($m[1] as $host) $found[$directive][strtolower($host)][] = $rel;
+		}
+	}
+}
+foreach (array('script-src', 'style-src', 'frame-src') as $directive) {
+	$hosts = isset($found[$directive]) ? $found[$directive] : array();
+	ksort($hosts);
+	foreach ($hosts as $host => $files) {
+		check($allowed($directive, $host), "{$directive} allows {$host}", 'loaded by ' . implode(', ', array_unique($files)));
+	}
+	check(count($hosts) > 0 || $directive === 'frame-src', "the sweep saw at least one external {$directive} load (it is looking at the right tree)");
+}
+
+section('Every OAuth provider consent host is in form-action (a POST redirects there)');
+foreach (glob($root . '/includes/oauth/providers/*OAuthProvider.php') as $pf) {
+	if (preg_match_all('#https://([a-z0-9.-]+)/[^\'"\s]*(?:/authorize|/auth)(?:[?\'"\s]|$)#i', file_get_contents($pf), $m)) {
+		foreach (array_unique($m[1]) as $host) {
+			check($allowed('form-action', strtolower($host)), "form-action allows {$host}", basename($pf));
+		}
+	}
+}
+check(count(glob($root . '/includes/oauth/providers/*OAuthProvider.php')) >= 3, 'the provider sweep saw the provider catalog');
 
 section('The live site sends what the builder says, for the settings it has');
 $settings = Globalvars::get_instance();

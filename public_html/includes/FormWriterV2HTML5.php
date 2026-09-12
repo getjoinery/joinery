@@ -5,7 +5,7 @@
  * Pure HTML5 form generation with semantic markup and no CSS framework dependencies.
  * Provides accessible, standards-compliant forms that any theme can style.
  *
- * @version 2.4.0
+ * @version 2.4.1 - jQuery for the Trumbowyg editor is served from assets/vendor, not a CDN (CSP has no script CDN)
  * @changelog 2.4.0 - textbox markdownmode option: toolbar + server-rendered live preview (assets/js/markdown-editor.js)
  * @changelog 2.3.0 - renderTextInput emits the help_modal trigger/template (text, password and number fields)
  * @changelog 2.2.0 - Phase 2: shared AJAX script, visibility moved to base, buildCommonAttributes in renderTextInput
@@ -917,7 +917,7 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
 
                 // Check if jQuery is loaded, if not load it first
                 if (typeof jQuery === "undefined") {
-                    loadScript("https://code.jquery.com/jquery-3.7.1.min.js", function() {
+                    loadScript("/assets/vendor/jquery-3.7.1/jquery.min.js", function() {
                         if (document.readyState === "loading") {
                             document.addEventListener("DOMContentLoaded", initEditor);
                         } else {
