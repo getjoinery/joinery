@@ -56,7 +56,7 @@ $formwriter->textbox('doc_content', 'Markdown', array(
 	'rows'          => 34,
 	'cols'          => 100,
 	'markdownmode'  => 'yes',
-	'markdown_mode' => 'split',
+	'editor_view'   => 'split',
 	'helptext'      => 'The whole file. The first H1 becomes the page title, and the first paragraph becomes its meta description on the public site.',
 ));
 

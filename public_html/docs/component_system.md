@@ -744,7 +744,7 @@ $all_fields = $component_type->get_default_config(true);
 | `textinput` | Single-line text | - |
 | `textarea` | Multi-line text, stored exactly as typed | `rows` |
 | `textbox` | Alias for textarea | `rows` |
-| `richtext` | WYSIWYG editor (Trumbowyg) | - |
+| `richtext` | The platform editor in its HTML dialect (`textbox` with `htmlmode`) | `cleanup` (`button`, `always`, `none`), `view` (`visual`, `source`), `rows` |
 | `checkboxinput` | Boolean checkbox | - |
 | `dropinput` | Dropdown select | `options` |
 | `radioinput` | Radio buttons | `options` |
@@ -759,12 +759,18 @@ $all_fields = $component_type->get_default_config(true);
 | `hiddeninput` | Hidden field | - |
 | `repeater` | Repeatable field group | `fields`, `item_label`, `min`, `max` |
 
-A field holding markup the author wrote by hand — a whole page section, an
-embed, anything with layout wrappers — is a `textarea` with a generous `rows`,
-not a `richtext`. The WYSIWYG parses what it is given and re-serialises it from
-its own document model, and its paste filter allows only prose tags, so
-`div`, `section` and the classes on them are dropped on save. `richtext` is for
-fields that hold prose: a paragraph of copy, a caption, a post body.
+A `richtext` field saves what the author wrote: an untouched field is stored
+byte for byte, and a visual edit keeps `div`, `section`, classes, inline
+styles and SVG. `cleanup` and `view` tune it per field. A field holding
+markup the author wrote by hand — a whole page section, an embed, anything
+with layout wrappers — declares `"cleanup": "none", "view": "source"` (see
+`custom_html.json`), so it opens as source and offers no Clean up button. A
+field that holds prose — a paragraph of copy, a caption, a post body — takes
+the defaults: it opens visual, and the author can press Clean up to reduce
+pasted markup to plain prose tags. `"cleanup": "always"` makes that cleanup
+automatic on paste and save. Inside a `repeater`, a `richtext` sub-field gets
+the same editor, on saved rows and on rows added after load. See
+[FormWriter § Editor](formwriter.md#editor-htmlmode-markdownmode).
 
 ### Field Options
 

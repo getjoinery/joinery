@@ -44,7 +44,7 @@ running anything:
  * name: cloud_offload_engine
  * tier: safe            # safe | db | test-db | live
  * env: dev-only         # any | prod-verify | dev-only
- * needs: []             # e.g. [stripe-test-keys, macmini, mailgun, b2, rust, curl]
+ * needs: []             # e.g. [stripe-test-keys, macmini, mailgun, b2, rust, curl, chrome]
  * covers: []            # optional repo-relative globs the suite reaches WITHOUT loading
  * timeout: 180          # optional wall-clock cap in seconds (default 180, max 1800)
  */
@@ -228,7 +228,7 @@ test simply does not run until its header is corrected. `env` fails closed the
 same way, defaulting to `dev-only`.
 
 A test's `needs` are enforced: before running, the runner probes each declared
-dependency (`macmini`, `node`, `rust`, `curl`, `stripe-test-keys`, `mailgun`, `b2`, …). An unmet
+dependency (`macmini`, `node`, `rust`, `curl`, `chrome`, `stripe-test-keys`, `mailgun`, `b2`, …). An unmet
 need makes the test a reported **SKIP** with its reason — never a silent pass and
 never a hard failure — so a box without the dependency stays green honestly. An
 unrecognized need name is treated as met (it never blindly skips).

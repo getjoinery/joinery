@@ -175,6 +175,11 @@ function harness_unmet_needs(array $needs) {
 				case 'curl':
 					$cache[$need] = trim((string)shell_exec('command -v curl 2>/dev/null')) !== '';
 					break;
+				case 'chrome':
+					// Headless Chrome drives the browser-side fixtures (the
+					// editor). A box without it skips those suites and says so.
+					$cache[$need] = trim((string)shell_exec('command -v google-chrome 2>/dev/null')) !== '';
+					break;
 				case 'rust':
 					// rustup installs per-user without touching PATH for other
 					// accounts (the web dashboard runs as a different user than

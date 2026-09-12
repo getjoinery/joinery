@@ -38,57 +38,6 @@ echo PublicPage::BeginPage('FormWriter v2 HTML5 Test - Complete Feature Demonstr
 // Load FormWriter v2 HTML5
 require_once(PathHelper::getIncludePath('includes/FormWriterV2HTML5.php'));
 
-// Helper function for rich text editor textarea
-$trumbowyg_loaded = false;
-function add_rich_text_textarea($formwriter, $name, $label, $options = []) {
-    global $trumbowyg_loaded;
-
-    // Load Trumbowyg scripts only once
-    if (!$trumbowyg_loaded) {
-        echo '<link rel="stylesheet" href="/assets/vendor/Trumbowyg-2-26/dist/ui/trumbowyg.min.css">';
-        echo '<script src="/assets/vendor/Trumbowyg-2-26/dist/trumbowyg.min.js"></script>';
-        echo '<script src="/assets/vendor/Trumbowyg-2-26/dist/plugins/cleanpaste/trumbowyg.cleanpaste.min.js"></script>';
-        echo '<script src="/assets/vendor/Trumbowyg-2-26/dist/plugins/preformatted/trumbowyg.preformatted.min.js"></script>';
-        echo '<script src="/assets/vendor/Trumbowyg-2-26/dist/plugins/allowtagsfrompaste/trumbowyg.allowtagsfrompaste.min.js"></script>';
-
-        echo '<style>';
-        echo '.trumbowyg-box, .trumbowyg-editor, .trumbowyg-textarea { height: 500px; }';
-        echo '.trumbowyg-box.trumbowyg-fullscreen, .trumbowyg-box.trumbowyg-fullscreen .trumbowyg-editor, .trumbowyg-box.trumbowyg-fullscreen .trumbowyg-textarea { height: 100%; }';
-        echo '</style>';
-
-        $trumbowyg_loaded = true;
-    }
-
-    // Ensure the textarea has the html_editable class
-    if (isset($options['class'])) {
-        $options['class'] .= ' html_editable';
-    } else {
-        $options['class'] = 'form-control html_editable';
-    }
-
-    // Add the textarea field
-    $formwriter->textarea($name, $label, $options);
-
-    // Initialize Trumbowyg for this specific textarea
-    echo '<script type="text/javascript">';
-    echo '$(document).ready(function() {';
-    echo '    $("#' . htmlspecialchars($name) . '").trumbowyg({';
-    echo '        autogrow: false,';
-    echo '        autogrowOnEnter: false,';
-    echo '        btns: [';
-    echo '            ["viewHTML"], ["undo", "redo"], ["formatting"],';
-    echo '            ["strong", "em", "del"], ["superscript", "subscript"],';
-    echo '            ["link"], ["insertImage"], ["preformatted"],';
-    echo '            ["justifyLeft", "justifyCenter", "justifyRight", "justifyFull"],';
-    echo '            ["unorderedList", "orderedList"], ["horizontalRule"],';
-    echo '            ["removeformat"], ["fullscreen"]';
-    echo '        ],';
-    echo '        plugins: { allowTagsFromPaste: { allowedTags: ["p", "br","blockquote", "b", "i", "strong", "em", "ul", "li", "ol", "a","code","pre","h1","h2","h3","h4","h5","embed","table","tr","td","th","img","video"] } }';
-    echo '    });';
-    echo '});';
-    echo '</script>';
-}
-
 // ============================================================================
 // DEMONSTRATION: VALUES AUTO-FILLING
 // ============================================================================

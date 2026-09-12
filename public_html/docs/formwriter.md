@@ -412,36 +412,77 @@ $formwriter->textarea('description', 'Description', [
 ]);
 ```
 
-### Markdown editor (`markdownmode`)
+### Editor (`htmlmode`, `markdownmode`)
 
-A textbox with `markdownmode` renders a markdown editing surface instead of a
-bare textarea: a formatting toolbar, keyboard shortcuts (Ctrl/Cmd+B, +I, +K),
-list continuation on Enter, and a live preview.
+A textbox with `htmlmode` or `markdownmode` renders the platform editor
+(`assets/js/joinery-editor.js`) around the textarea: one toolbar, one view
+switcher, fullscreen, keyboard shortcuts (Ctrl/Cmd+B, +I, +K) and link and
+image popovers. The option picks the **dialect**:
+
+| | `htmlmode` | `markdownmode` |
+|---|---|---|
+| Field value | HTML | markdown source |
+| Editing surface | a contenteditable area over the textarea | the textarea itself |
+| Views (`editor_view`) | `visual` (default), `source` | `write` (default), `split`, `preview` |
+| Preview | the surface | rendered by the server through the `markdown_preview` action and `MarkdownRenderer`, so nothing drifts from the finished page |
+| Cleanup (`editor_cleanup`) | `button` (default), `always`, `none` | not applicable |
 
 ```php
+$formwriter->textbox('body', 'Body', [
+    'htmlmode'       => 'yes',
+    'editor_view'    => 'visual',   // or 'source'
+    'editor_cleanup' => 'button',   // 'button', 'always' or 'none'
+]);
+
 $formwriter->textbox('doc_content', 'Markdown', [
-    'rows'          => 34,
-    'markdownmode'  => 'yes',
-    'markdown_mode' => 'split',   // 'write' (default), 'split' or 'preview'
+    'rows'         => 34,
+    'markdownmode' => 'yes',
+    'editor_view'  => 'split',      // 'write', 'split' or 'preview'
 ]);
 ```
 
-The field's value stays markdown source. Nothing is round-tripped through HTML,
-so a save rewrites only the text the author actually changed — which is what
-keeps a diff readable when the field is backed by a file under version control.
+**The textarea is the field, always.** It keeps its name, stays in the form,
+is what the form posts, and is what validation reads (`required`, `minlength`
+and the rest keep working on an editor field). In the HTML dialect the
+surface writes its full content to the textarea on every edit and **never
+before the first edit**: open, look, Save stores byte for byte what was
+loaded. Anything the DOM can hold survives a visual edit — `section`, `div`,
+classes, inline styles, `data-*`, SVG, comments. The markdown dialect edits
+the textarea directly, so a save rewrites only the text the author changed,
+which keeps a diff readable when the field is backed by a file under version
+control.
 
-The preview is rendered by the server, through the `markdown_preview` API
-action and `MarkdownRenderer`, so an author sees exactly what the finished page
-will show. There is no second markdown grammar in JavaScript to drift out of
-step with the PHP one.
+**Cleanup** (`assets/js/html-cleanup.js`) tidies a field to plain prose
+markup: keeps `p br h1`–`h6 blockquote pre code strong em del sub sup ul ol
+li hr table thead tbody tr th td` bare (`style` reduced to `text-align`), `a`
+with `href title target rel`, `img` with `src alt width height`, `iframe` and
+`video` with their playback attributes; renames `b i s strike div` to `strong
+em del del p`; drops `script style form input button` and comments; unwraps
+every other tag; wraps loose text in `p`, removes empty paragraphs and
+collapses `&nbsp;` runs. `pre` contents are kept verbatim. `javascript:` and
+`data:` URLs are removed. The rule table is data at the top of the file.
 
-`markdownmode` and `htmlmode` are mutually exclusive — a textarea edits one
-language or the other, and asking for both throws.
+| `editor_cleanup` | Button | Paste | Load | Before submit |
+|---|---|---|---|---|
+| `button` | shown; cleans the whole field, then reads **Undo clean up** until the next edit | browser default | nothing | nothing |
+| `always` | shown | clipboard HTML is cleaned before insertion | surface cleaned; textarea untouched until the first edit | if edited, cleaned before validation reads it |
+| `none` | hidden | browser default | nothing | nothing |
 
-Assets (`assets/css/markdown-editor.css`, `assets/js/markdown-editor.js`) are
-emitted once per request however many markdown fields a page carries, and the
-script self-initializes from data attributes, so a page carrying one needs no
-inline `<script>`.
+`always` is the developer saying "this field holds prose"; `none` is for a
+field whose whole point is markup, opened with `editor_view => 'source'`.
+Cleanup runs in the browser only. It is an editing convenience for admin
+authors, not a security control; a member-facing rich-text field needs a
+server-side sanitizer.
+
+Definition-time checks: `htmlmode` and `markdownmode` together, a view from
+the other dialect, `editor_cleanup` with `markdownmode`, or either option on
+a plain textarea all throw.
+
+Assets (`assets/css/joinery-editor.css`, `assets/js/html-cleanup.js`,
+`assets/js/joinery-editor.js`) are emitted once per request however many
+editor fields a page carries; the script self-initialises from data
+attributes and on rows a repeater adds, so a page carrying an editor needs no
+inline `<script>`. Browser-side fixtures: `tests/unit/joinery_editor_test.php`.
 
 ### Checkbox
 
@@ -1868,7 +1909,7 @@ class FormWriterV2MyTheme extends FormWriterV2Base {
 | `renderSubmitButton` | `name, label, id, class, disabled, onclick` |
 | `renderTextarea` | `name, label, id, value, placeholder, class, rows, cols, readonly, disabled, required, minlength, maxlength, onchange, has_errors, errors, helptext` |
 | `renderCheckboxList` | `name, label, id, options_list, checked (array), disabled (array), readonly (array), type, has_errors, errors, helptext` |
-| `renderTextbox` | `name, label, id, value, class, rows, htmlmode, readonly, disabled, has_errors, errors, helptext` |
+| `renderTextbox` | `name, label, id, value, class, rows, htmlmode, editor_view, editor_cleanup, readonly, disabled, has_errors, errors, helptext` |
 | `renderImageInput` | `name, label, id, value, images, preview_size, class, disabled, has_errors, errors, helptext` |
 
 ### Adding a New Option

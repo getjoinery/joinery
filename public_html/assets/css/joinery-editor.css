@@ -1,0 +1,256 @@
+/**
+ * Joinery editor — styles for the FormWriter htmlmode / markdownmode surface.
+ * Vanilla CSS, no framework. Pairs with assets/js/joinery-editor.js.
+ *
+ * One wrapper, .jy-ed[data-jy-editor="html|markdown"]; the view lives in
+ * data-mode (html: visual|source; markdown: write|split|preview).
+ *
+ * @version 1.0.0
+ */
+
+.jy-ed {
+	position: relative;
+	border: 1px solid #d5d9de;
+	border-radius: 6px;
+	background: #fff;
+}
+
+/* ------------------------------------------------------------- toolbar */
+
+.jy-ed-toolbar {
+	position: relative;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 2px;
+	padding: 6px;
+	border-bottom: 1px solid #e5e5e5;
+	background: #f7f8f9;
+	border-radius: 6px 6px 0 0;
+}
+
+.jy-ed-toolbar button {
+	min-width: 30px;
+	height: 28px;
+	padding: 0 7px;
+	border: 1px solid transparent;
+	border-radius: 4px;
+	background: transparent;
+	color: #3b4148;
+	font: inherit;
+	font-size: 13px;
+	line-height: 1;
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.jy-ed-toolbar button:hover:not(:disabled) { background: #e8ebee; }
+.jy-ed-toolbar button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 1px; }
+.jy-ed-toolbar button:disabled { opacity: .4; cursor: default; }
+.jy-ed-toolbar button.is-active,
+.jy-ed-toolbar button[aria-pressed="true"] { background: #e8f0fe; border-color: #c6dafc; color: #1a73e8; }
+
+.jy-ed-toolbar .jy-ed-bold { font-weight: 700; }
+.jy-ed-toolbar .jy-ed-italic { font-style: italic; }
+.jy-ed-toolbar .jy-ed-strike { text-decoration: line-through; }
+.jy-ed-toolbar .jy-ed-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.jy-ed-toolbar .jy-ed-small { font-size: 12px; }
+
+.jy-ed-sep {
+	width: 1px;
+	height: 18px;
+	margin: 0 4px;
+	background: #dcdfe3;
+}
+
+.jy-ed-views { margin-left: auto; display: flex; gap: 2px; }
+
+/* ------------------------------------------------------------- popover */
+
+.jy-ed-pop {
+	position: absolute;
+	z-index: 30;
+	min-width: 260px;
+	padding: 10px;
+	border: 1px solid #c8ccd4;
+	border-radius: 6px;
+	background: #fff;
+	box-shadow: 0 6px 20px rgba(0, 0, 0, .12);
+	font-size: 13px;
+}
+
+.jy-ed-pop-field { display: block; margin-bottom: 8px; }
+.jy-ed-pop-field span { display: block; margin-bottom: 3px; color: #5a6170; font-size: 12px; }
+.jy-ed-pop-field input[type="text"] {
+	width: 100%;
+	box-sizing: border-box;
+	padding: 5px 7px;
+	border: 1px solid #c8ccd4;
+	border-radius: 4px;
+	font: inherit;
+}
+
+.jy-ed-pop-check { display: block; margin-bottom: 8px; color: #3b4148; }
+
+.jy-ed-pop-actions { display: flex; justify-content: flex-end; }
+.jy-ed-pop-submit {
+	padding: 6px 12px;
+	border: 1px solid #4a6886;
+	border-radius: 4px;
+	background: #5b7a99;
+	color: #fff;
+	font: inherit;
+	font-size: 13px;
+	cursor: pointer;
+}
+.jy-ed-pop-submit:hover { background: #4a6886; }
+
+.jy-ed-pop-menu { display: flex; flex-direction: column; min-width: 160px; padding: 4px; }
+.jy-ed-pop-menu button {
+	text-align: left;
+	padding: 6px 10px;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	font: inherit;
+	cursor: pointer;
+}
+.jy-ed-pop-menu button:hover { background: #e8ebee; }
+.jy-ed-pop-menu .jy-ed-fmt-h1 { font-size: 20px; font-weight: 700; }
+.jy-ed-pop-menu .jy-ed-fmt-h2 { font-size: 17px; font-weight: 700; }
+.jy-ed-pop-menu .jy-ed-fmt-h3 { font-size: 15px; font-weight: 700; }
+.jy-ed-pop-menu .jy-ed-fmt-h4 { font-weight: 700; }
+.jy-ed-pop-menu .jy-ed-fmt-blockquote { border-left: 3px solid #c8ccd4; font-style: italic; }
+.jy-ed-pop-menu .jy-ed-fmt-pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+/* --------------------------------------------------------------- panes */
+
+.jy-ed-panes { display: flex; align-items: stretch; position: relative; }
+
+.jy-ed-panes > textarea {
+	flex: 1 1 100%;
+	min-width: 0;
+	margin: 0;
+	padding: 12px 14px;
+	border: 0;
+	border-radius: 0 0 6px 6px;
+	background: #fff;
+	color: #222;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	font-size: 13.5px;
+	line-height: 1.6;
+	resize: vertical;
+}
+
+.jy-ed-panes > textarea:focus { outline: none; box-shadow: none; }
+
+/* ---------------------------------------------------------------- html */
+
+.jy-ed[data-jy-editor="html"] .jy-ed-surface {
+	flex: 1 1 100%;
+	min-width: 0;
+	height: 500px;
+	padding: 12px 14px;
+	overflow-y: auto;
+	box-sizing: border-box;
+	background: #fff;
+	color: #222;
+	line-height: 1.5;
+	border-radius: 0 0 6px 6px;
+}
+
+.jy-ed[data-jy-editor="html"] .jy-ed-surface:focus { outline: none; }
+.jy-ed[data-jy-editor="html"] .jy-ed-surface[contenteditable="false"] { background: #f7f8f9; color: #5a6170; }
+.jy-ed[data-jy-editor="html"] .jy-ed-surface > :first-child { margin-top: 0; }
+.jy-ed[data-jy-editor="html"] .jy-ed-surface img { max-width: 100%; }
+.jy-ed[data-jy-editor="html"] .jy-ed-surface pre {
+	padding: 8px 10px;
+	background: #f4f5f7;
+	border-radius: 4px;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	white-space: pre-wrap;
+}
+.jy-ed[data-jy-editor="html"] .jy-ed-surface blockquote {
+	margin: 0 0 1em;
+	padding-left: 12px;
+	border-left: 3px solid #c8ccd4;
+	color: #5a6170;
+}
+.jy-ed[data-jy-editor="html"] .jy-ed-surface table { border-collapse: collapse; }
+.jy-ed[data-jy-editor="html"] .jy-ed-surface td,
+.jy-ed[data-jy-editor="html"] .jy-ed-surface th { border: 1px solid #dcdfe3; padding: 4px 8px; }
+
+.jy-ed[data-jy-editor="html"] .jy-ed-panes > textarea { height: 500px; resize: none; }
+
+/* Visual view: the textarea stays in the form, in layout, and visible to
+ * validation (checkVisibility() is true for a 1px, zero-opacity box, false
+ * for display:none), but not to the eye. */
+.jy-ed[data-jy-editor="html"][data-mode="visual"] .jy-ed-panes > textarea {
+	position: absolute;
+	left: 0;
+	bottom: 0;
+	width: 1px !important;
+	height: 1px !important;
+	min-height: 0;
+	padding: 0;
+	opacity: 0;
+	overflow: hidden;
+	pointer-events: none;
+	flex: none;
+}
+
+.jy-ed[data-jy-editor="html"][data-mode="source"] .jy-ed-surface { display: none; }
+
+/* ------------------------------------------------------------ markdown */
+
+.jy-ed[data-jy-editor="markdown"] .jy-ed-panes > textarea { min-height: 320px; }
+
+.jy-ed-preview {
+	flex: 1 1 50%;
+	min-width: 0;
+	padding: 12px 18px;
+	overflow-y: auto;
+	background: #fff;
+	border-left: 1px solid #e5e5e5;
+	border-radius: 0 0 6px 0;
+}
+
+.jy-ed-preview > :first-child { margin-top: 0; }
+
+.jy-ed[data-jy-editor="markdown"][data-mode="write"] .jy-ed-preview { display: none; }
+.jy-ed[data-jy-editor="markdown"][data-mode="split"] > .jy-ed-panes > textarea { flex-basis: 50%; }
+.jy-ed[data-jy-editor="markdown"][data-mode="preview"] > .jy-ed-panes > textarea { display: none; }
+.jy-ed[data-jy-editor="markdown"][data-mode="preview"] .jy-ed-preview { border-left: 0; }
+
+@media (max-width: 800px) {
+	.jy-ed[data-jy-editor="markdown"][data-mode="split"] > .jy-ed-panes { flex-direction: column; }
+	.jy-ed[data-jy-editor="markdown"][data-mode="split"] .jy-ed-preview {
+		border-left: 0;
+		border-top: 1px solid #e5e5e5;
+	}
+}
+
+/* ---------------------------------------------------------- fullscreen */
+
+.jy-ed.is-fullscreen {
+	position: fixed;
+	inset: 0;
+	z-index: 1000;
+	display: flex;
+	flex-direction: column;
+	border: 0;
+	border-radius: 0;
+}
+
+.jy-ed.is-fullscreen .jy-ed-toolbar { border-radius: 0; }
+.jy-ed.is-fullscreen .jy-ed-panes { flex: 1 1 auto; min-height: 0; }
+.jy-ed.is-fullscreen .jy-ed-surface,
+.jy-ed.is-fullscreen .jy-ed-panes > textarea,
+.jy-ed.is-fullscreen .jy-ed-preview {
+	height: 100% !important;
+	min-height: 0;
+	border-radius: 0;
+}
+.jy-ed.is-fullscreen[data-jy-editor="html"][data-mode="visual"] .jy-ed-panes > textarea { height: 1px !important; }
+
+html.jy-ed-fullscreen-open { overflow: hidden; }
