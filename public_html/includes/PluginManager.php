@@ -9,9 +9,23 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
 /**
  * PluginManager - Comprehensive plugin management including installation,
  * activation, dependencies, and migrations
- * 
+ *
  * This consolidated class replaces the previous multi-class structure with
  * a single cohesive manager that extends AbstractExtensionManager
+ *
+ * @version 1.3 - refreshFromUpstream() and refuse_from_web() live on
+ *                AbstractExtensionManager, so a theme fetches and verifies the
+ *                same way (specs/package_signing.md WP4)
+ * @version 1.2 - refreshFromUpstream() sets the old copy aside as
+ *                plugins/.refresh-<name>-<pid> and sweeps stale ones first, so
+ *                a crash mid-refresh leaves nothing plugin-shaped for a sync
+ *                to register (review round 1, R2)
+ * @version 1.1 - refreshFromUpstream() downloads into a root-owned working
+ *                directory, verifies the package there (PackageSignature) and
+ *                only then replaces plugins/<name>; anything but `signed`
+ *                throws PackageUnverifiedException and the on-disk copy is
+ *                untouched (specs/package_signing.md WP2). Returns whether it
+ *                placed anything.
  */
 /**
  * Activation needs composer packages that are not installed, and installing
@@ -965,100 +979,6 @@ class PluginManager extends AbstractExtensionManager {
     }
 
     /**
-     * Fetch a fresh plugin archive from the upgrade endpoint and extract it over
-     * plugins/{name}/. The upgrade endpoint is the authoritative source of truth
-     * for published plugin files; this runs at install time so stale on-disk code
-     * (e.g. after an uninstall/reinstall cycle) gets replaced with upstream.
-     *
-     * Does not read the on-disk plugin.json to decide — the endpoint's response
-     * is what determines whether this plugin is upstream-published. A 404 means
-     * the plugin is not in the publisher's catalog (included_in_publish=false);
-     * any other failure means the endpoint is unreachable or the transfer failed.
-     *
-     * Failure modes are non-fatal: install falls through to on-disk files.
-     *
-     * @param string $name Plugin name
-     */
-    public function refreshFromUpstream($name) {
-        self::refuse_from_web('refreshFromUpstream');
-
-        // The origin has no upstream — these files are what it publishes. A
-        // self-download would tar this tree and extract it back over itself,
-        // and the publisher caches archives per version, so an edit made
-        // without a version bump would be overwritten by the cached copy of
-        // the code it replaced. On-disk is authoritative here.
-        if (MarketplaceClient::is_root()) {
-            return;
-        }
-
-        $upgrade_source = MarketplaceClient::source();
-
-        if (empty($upgrade_source)) {
-            error_log("refreshFromUpstream: no source configured; skipping refresh for '$name'");
-            return;
-        }
-
-        $url = rtrim($upgrade_source, '/') . '/admin/server_manager/publish_theme'
-             . '?download=' . urlencode($name) . '&type=plugin';
-
-        // Append .tar.gz so PharData recognizes the archive format on extract.
-        $temp_base = tempnam(sys_get_temp_dir(), 'joinery_plugin_');
-        $temp_file = $temp_base . '.tar.gz';
-        @unlink($temp_base);
-        $fp = fopen($temp_file, 'w');
-        if (!$fp) {
-            @unlink($temp_file);
-            error_log("refreshFromUpstream: could not open temp file for '$name'");
-            return;
-        }
-
-        $ch = curl_init();
-        curl_setopt_array($ch, [
-            CURLOPT_URL => $url,
-            CURLOPT_FILE => $fp,
-            CURLOPT_TIMEOUT => 120,
-            CURLOPT_CONNECTTIMEOUT => 30,
-            CURLOPT_FOLLOWLOCATION => true,
-        ]);
-        $ok = curl_exec($ch);
-        $curl_error = curl_error($ch);
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        fclose($fp);
-
-        if ($http_code === 404) {
-            // Custom plugin — upstream doesn't know about it. On-disk files are source of truth.
-            @unlink($temp_file);
-            return;
-        }
-
-        if (!$ok || $http_code !== 200 || filesize($temp_file) < 100) {
-            @unlink($temp_file);
-            error_log("refreshFromUpstream: fetch failed for '$name' (HTTP $http_code" .
-                      ($curl_error ? ", curl: $curl_error" : '') . "); falling back to on-disk files");
-            return;
-        }
-
-        $plugins_root = PathHelper::getAbsolutePath('plugins');
-        if (!is_dir($plugins_root)) {
-            @unlink($temp_file);
-            error_log("refreshFromUpstream: plugins root directory not found; skipping refresh for '$name'");
-            return;
-        }
-
-        // Archive root contains the plugin directory (e.g. bookings/data/...),
-        // so extracting into plugins/ overwrites plugins/{name}/ contents in-place.
-        // PharData (PHP-native) avoids the chmod-on-existing-directory failures
-        // the tar binary hits in mixed-ownership dev environments.
-        try {
-            $phar = new PharData($temp_file);
-            $phar->extractTo($plugins_root, null, true);
-        } catch (Exception $e) {
-            error_log("refreshFromUpstream: extract failed for '$name': " . $e->getMessage());
-        }
-        @unlink($temp_file);
-    }
-
-    /**
      * Install a plugin — creates tables, runs migrations, sets status=inactive.
      * Transaction-wrapped. Validates first; rolls back on failure.
      *
@@ -1620,19 +1540,6 @@ class PluginManager extends AbstractExtensionManager {
     }
 
     /**
-     * Refuse to write the tree from inside a web request.
-     *
-     * The tree belongs to root and the PHP pool cannot write it
-     * (specs/implemented/read_only_tree.md), so these would fail anyway — as a permission
-     * error somewhere in the middle of an extraction, with half a plugin on
-     * disk. Refusing at the door instead means the failure names the cause and
-     * the remedy, and it keeps a future caller from quietly reintroducing a
-     * tree write from a page.
-     *
-     * The CLI callers (utils/install_extension.php, run by the root actor) go
-     * straight through.
-     */
-    /**
      * The account that owns the code tree — root on a node, the developer's
      * account on a development box. Read off public_html rather than named,
      * because it differs per machine and a hardcoded name would be wrong on
@@ -1649,15 +1556,6 @@ class PluginManager extends AbstractExtensionManager {
         return is_array($pw) && !empty($pw['name']) ? (string)$pw['name'] : 'root';
     }
 
-    protected static function refuse_from_web($method) {
-        if (php_sapi_name() === 'cli') {
-            return;
-        }
-        throw new Exception(
-            'PluginManager::' . $method . '() writes the code tree, which a web request cannot do. '
-            . 'Submit a root request instead (RootRequest::submit) and let the host converger carry it out.');
-    }
-    
     /**
      * Get all plugins that depend on a given plugin
      * @param string $plugin_name Plugin name

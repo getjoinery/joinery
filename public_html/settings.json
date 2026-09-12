@@ -1968,7 +1968,12 @@
       "group": "upgrade",
       "label": "Upgrade source",
       "type": "text",
-      "helptext": "The deployment this site pulls upgrades from."
+      "helptext": "The deployment this site fetches upgrades and marketplace extensions from: https, a host name, an optional port, nothing else. Root verifies every archive it downloads against the release key before deploying it, so this setting chooses where a verified archive comes from and nothing more; a source serving anything else gets a refused upgrade.",
+      "vault_gated": true,
+      "validation": {
+        "pattern": "/^https:\\/\\/[A-Za-z0-9.-]+(:[0-9]+)?$/",
+        "messages": { "pattern": "An https URL with a host name and optional port, and nothing after it (https://example.com or https://example.com:8443)." }
+      }
     },
     {
       "name": "root_node",

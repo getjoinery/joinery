@@ -225,30 +225,41 @@ The two distribution flags on the plugin's manifest govern the distribution pipe
 3. Downloads each published theme archive (`theme-THEMENAME-X.XX.upg.zip`) — themes the source published with `included_in_publish: true`
 4. Downloads an archive (`plugin-PLUGINNAME-X.XX.upg.zip`) for each plugin with a row in `plg_plugins`
 5. If any theme/plugin archive is unavailable (404), logs a warning and continues
-6. Extracts and validates all archives
-7. Performs deployment with rollback protection
+6. Extracts each archive and verifies its signature (below)
+7. Validates the staged tree
+8. Performs deployment with rollback protection
+
+#### What root verifies before a deploy
+
+Every archive the publisher ships carries a signed listing of its files: `RELEASE_MANIFEST` (the sha256 of every shipped file, paths relative to the site root) and `RELEASE_MANIFEST.sig`, an Ed25519 signature over it. A node holds the public key(s) in `config/release_verify_keys` — root's, 0644, one base64 key per line — written by the host converger on every tick from the agent bundle's `manifest.json` in the tree (`signing_public_key`), and by `install.sh` from `<upgrade source>/utils/upgrade?serve-verify-key=1` on a box whose tree ships no bundle. The upgrade writes it from the same bundle when it finds none.
+
+`PackageSignature::verify()` (`includes/PackageSignature.php`) reads the pair back and answers with one verdict. `signed` means the signature verifies against a key in the file, every file present is listed with a matching hash, and every listed file is present. Everything else is its own verdict with a sentence: `unsigned` (no manifest or signature), `unknown_key` (signed by a key this node does not hold), `no_keys` (no usable key on this node), `tampered` (a file's bytes differ from its signed hash), `extra_file` (a file, or a symlink, beside the signed set), `missing_file`, `unreadable` (not the format the publisher writes, or a manifest describing a different directory). Paths a manifest never lists — `.git`, `cache`, `logs`, `uploads`, `backups`, `specs`, `.claude`, `node_modules` anywhere; `config` and `vendor` at the site root only; `.gitignore` and the manifest pair themselves — are neither required nor counted against a package. A plugin's own `vendor/` and `config/` are listed and checked.
+
+The upgrade verifies at every point where bytes would otherwise move from the archive into the live tree, and before anything reads them:
+
+- the **core archive**, as a whole, right after extraction into staging and before the self-update copies any of its files into live;
+- the **staged core again on the re-run** after a self-update, because staging lives under `uploads/` and could have changed in between;
+- **each theme and plugin archive**, after its extraction into staging, with the listing required to describe exactly `public_html/theme/<name>` or `public_html/plugins/<name>`.
+
+Any verdict but `signed` aborts with `Upgrade refused: … verdict: <name>: <why>` and nothing is deployed. `upgrade_source` therefore chooses where a verified archive is fetched from and nothing more: pointing it elsewhere gets a refused upgrade, not somebody else's code running as root. The origin (`root_node`) upgrades from nothing and aborts before any of this. The same verifier gates `install_extension.php` — a marketplace download is verified in a root-owned working directory before it replaces `plugins/<name>`, and a staged upload after the copy out of staging. A plugin that is not in the upgrade source's catalog installs by name from the files already on disk only when they verify; the publishing box, which holds `config/agent_signing_key`, trusts its own tree.
 
 #### Deployment self-update (read before editing `upgrade.php`)
 
-A release can change the deployment tooling itself, so before deploying anything the upgrade compares four files between the staged archive and the live site:
+A release can change the deployment tooling itself, so before deploying anything the upgrade compares five files between the staged archive and the live site:
 
 ```
 utils/upgrade.php
 utils/update_database.php
 includes/DatabaseUpdater.php
 includes/DeploymentHelper.php
+includes/PackageSignature.php
 ```
 
-Any that differ are copied to live immediately and the pipeline re-executes from the start, so a release is applied by its own tooling rather than by the previous version's.
+Any that differ are copied to live immediately and the pipeline re-executes from the start, so a release is applied by its own tooling rather than by the previous version's. The comparison runs from the fully staged tree, after the whole archive has verified; nothing is copied out of an archive before that.
 
-The comparison happens twice, and both passes take all four together:
+**All five move as one set, never individually.** They call each other, so refreshing a subset produces a new file running against an old API — which is the same breakage the self-update exists to prevent, arrived at from the other direction.
 
-1. **Early** — straight out of the downloaded tarball, before staging is cleared or anything is extracted. A bug anywhere in the pipeline is then one upgrade attempt away from fixing itself.
-2. **Post-extract** — again from the fully staged tree, so a file the tarball listing missed is still caught.
-
-**All four move as one set, never individually.** They call each other, so refreshing a subset produces a new file running against an old API — which is the same breakage the self-update exists to prevent, arrived at from the other direction.
-
-**The rule this imposes:** during that window the new `upgrade.php` is running against the **old** core — every file outside the set of four is still the previous release. Anything those four call must therefore already exist on the oldest site expected to upgrade, or travel inside that same set.
+**The rule this imposes:** during that window the new `upgrade.php` is running against the **old** core — every file outside the set of five is still the previous release. Anything those five call must therefore already exist on the oldest site expected to upgrade, or travel inside that same set. The verifier is the one member that can be absent on the re-run (a node whose previous release predates it): `upgrade.php` then loads `includes/PackageSignature.php` from the staged release for that run and says so, which is the same trust the previous `upgrade.php` placed in the archive when it copied the deployment files out of it.
 
 Calling a newly added core method from `upgrade.php` is the specific way this breaks, and it breaks hard: the re-run hits an undefined method and aborts *before* it can deliver the file that defines it. Every retry aborts identically, and the node needs files copied in by hand.
 
@@ -369,17 +380,18 @@ https://yoursite.com/admin/server_manager/publish_theme?list=themes
 
 ```
 1. Download/extract to staging directory
-2. DeploymentHelper validates:
+2. PackageSignature verifies every archive against config/release_verify_keys
+3. DeploymentHelper validates:
    - PHP syntax on all files
    - Plugin class loading
    - Bootstrap/core components
-3. DeploymentHelper preserves extensions marked `receives_upgrades: false`
-4. Backup current installation to public_html_last/
-5. Deploy staged files to public_html/
-6. Sync staged maintenance_scripts/ into the site root
-7. Run database migrations (update_database.php)
-8. Run composer_install_if_needed.php
-9. Fix permissions (`fix_permissions.sh --production`: the code to root at 755/644, the data to www-data)
+4. DeploymentHelper preserves extensions marked `receives_upgrades: false`
+5. Backup current installation to public_html_last/
+6. Deploy staged files to public_html/
+7. Sync staged maintenance_scripts/ into the site root
+8. Run database migrations (update_database.php)
+9. Run composer_install_if_needed.php
+10. Fix permissions (`fix_permissions.sh --production`: the code to root at 755/644, the data to www-data)
 
 If ANY step fails → Automatic rollback
 ```
@@ -619,7 +631,9 @@ writes into `{site}/cache/root_requests/` naming a kind from a fixed list.
 | kind | what root does |
 |---|---|
 | `upgrade` | `php utils/upgrade.php --verbose` |
-| `install_plugin` | fetch a plugin by name from the upgrade source and install it |
+| `install_plugin` `{name}` | fetch a plugin by name from the upgrade source into a working directory of root's own, verify it, and install it |
+| `install_theme` `{name}` | the same for a theme |
+| `install_package` `{type, staged_dir, unsigned_ack?}` | verify a staged upload and install it; an unverified one only with the owner's acknowledgement, under the unsigned restrictions |
 | `reconcile_composer` | install a plugin's declared composer packages |
 | `write_agent_files` | write `CLAUDE.md` and its siblings from the database |
 | `save_doc` | write one file under `docs/`, in the directory the key names |
@@ -629,35 +643,90 @@ A **name** crosses, never a command. The arguments stay in the file and are read
 by the PHP that acts on them, so nothing a web request wrote becomes a shell
 word — and no argument names a place. `save_doc` carries the document key, and
 root derives the directory from it: `plugin/<name>/…` is that plugin's `docs/`
-and anything else is core's.
+and anything else is core's. `install_package` carries `<staging id>/<name>`,
+and root resolves it under `uploads/staging/` and nowhere else.
 
-### Why there is no kind for installing an uploaded package
+### Installing an uploaded package
 
 The queue and `uploads/staging/` are both writable by the web user — they have
 to be, the web side writes them — so a request file proves that *something
 running as the web user* wrote it, and never that an operator asked. A kind that
-installed a staged directory would therefore turn the one bug this whole model
-is about into root code execution: stage a `plugin.json` and a
-`migrations/migrations.php`, queue the request, and root moves the directory
-into `plugins/` and includes the migration as root. No activation needed.
+moved a staged directory into the tree on the request's say-so would therefore
+turn the one bug this whole model is about into root code execution: stage a
+`plugin.json` and a `migrations/migrations.php`, queue the request, and root
+moves the directory into `plugins/` and includes the migration as root.
 
-The kinds that remain cannot be used that way. `upgrade` and `install_plugin`
-fetch from the configured upgrade source, so the bytes come from somewhere the
-attacker does not control; the rest write a `.md`, a docs file, or one boolean
-in a theme manifest.
+So root does not trust the request. The admin page accepts the upload, unpacks
+it under `uploads/staging/` — outside the tree, where a path escape or a symlink
+fails as `www-data` and can do nothing — and submits `install_package`. Root
+(`utils/install_extension.php --staged=<dir>`, run by `utils/root_request.php`)
+copies the staged directory into a temporary directory of its own, and asks
+**who built it**: `PackageSignature::verify()` against `config/release_verify_keys`
+(see [What root verifies before a deploy](#what-root-verifies-before-a-deploy)).
 
-Installing an uploaded package is a shell command. The admin page still accepts
-the upload, unpacks it under `uploads/staging/` — outside the tree, where a path
-escape or a symlink fails as `www-data` and can do nothing — and then shows the
-command to finish it:
+- **`signed`** — the bytes are exactly what our release key signed, whoever
+  queued the request. Root copies them into the tree and runs the database
+  half (tables, migrations, the row) as it does for a marketplace install. The
+  row records `plg_trust = 'signed'` (`thm_trust` for a theme).
+- **anything else** — the request fails with exit 3 and the verdict in its
+  transcript, the staged bytes stay where they are, and the request panel on
+  the Plugins or Themes page opens **the warning**: installing an unsigned
+  package is extremely dangerous; it gets everything the site has, including
+  all mail. The page shows the package's name, version, author and file count,
+  the verdict, and one button, **Install anyway**. That button is a POST behind
+  the second-factor step-up (`SessionControl::require_recent_second_factor`;
+  an account with no second factor cannot press it). Once confirmed, the page
+  mints an acknowledgement naming the step-up marker
+  (`PackageAcknowledgement::mint`) and submits `install_package` again with it.
+  Root checks the acknowledgement before anything moves
+  (`PackageAcknowledgement::check`: the named marker row exists, is a `stepup`
+  for the session the acknowledgement names, was fresh when the warning was
+  answered, the acknowledgement is under fifty minutes old, and the requester
+  is a live superadmin) and installs under the **unsigned restrictions**:
+  the database half runs as `www-data` (`install_extension.php` re-executes
+  itself with `--register` under `runuser`, and refuses rather than falling
+  back to root when it cannot); root then records `plg_trust = 'unsigned'`,
+  writes an `unsigned_package_installed` event-log row, and emails every
+  superadmin the name, version, approver, time and address with the warning
+  repeated. The plugin's `host_installer` is never run
+  ([the converger skips it](#a-host-installer-runs-only-out-of-a-package-we-built)),
+  the page shows an **Unsigned** badge for as long as the row exists, and the
+  health panel lists it.
+
+The marketplace has no acknowledgement path: it is first-party only, so a
+marketplace archive that does not verify is a publishing defect and
+`install_plugin` / `install_theme` refuse it outright.
+
+The shell form still works for a self-hoster with one, and is the same code:
 
 ```
-sudo -u <tree owner> php utils/install_extension.php plugin --staged=<dir>
+sudo -u <tree owner> php utils/install_extension.php plugin --staged=<dir> [--replace] [--acknowledged]
 ```
 
-A shell is the thing an attacker who can write one file does not have, and that
-is the whole difference. `--replace` is needed to overwrite an extension that is
-already installed; the copy it replaces is kept beside it.
+`--replace` is needed to overwrite an extension that is already installed; the
+copy it replaces is kept beside it. `--acknowledged` is the operator's answer to
+the warning the command prints for an unverified package; the restrictions
+apply exactly as they do from the page, with "an operator at a shell" as the
+approver.
+
+What a web-tier attacker gets from this: someone already running code as the
+web user can write the step-up marker row and forge the acknowledgement, and
+root will copy their PHP into `plugins/` — under the restrictions, with every
+superadmin told. That is the accepted residual (the read-only tree's "nothing
+persists" becomes "nothing persists unless they forge one row"); root never runs
+their code as root. A stolen admin session cannot do it at all: the marker
+needs the second factor at the keyboard.
+
+### A host installer runs only out of a package we built
+
+The converger runs every active plugin's declared `host_installer` as root.
+Before it does, it verifies the plugin directory — `php utils/verify_package.php
+<dir>`, a thin CLI over `PackageSignature` — and skips the installer, with the
+verdict in `logs/host_converger.log`, on anything but `signed`. An unsigned
+plugin stays installed and active; it simply never has a script run as root out
+of its directory. The publishing box, which holds `config/agent_signing_key`,
+trusts its own tree: every plugin there is the source the archives are built
+from, and its live manifests are stale the moment a file is edited.
 
 The host converger carries them out — a root timer running every minute, plus a
 `.path` unit that fires the moment a request is queued, so an operator watching
@@ -867,6 +936,8 @@ The sweep compiles rather than lints: `opcache_compile_file()` parses without ex
 
 ### Where a site's `upgrade_source` comes from
 
+The setting is bounded: an `https` origin with a host name and optional port and nothing after it, vault gated like every setting that decides what the server runs. Root verifies every archive it downloads against the release key before deploying it, so the setting chooses where a verified archive is fetched from and nothing more — pointing it at a server serving anything else gets a refused upgrade with the verdict, and the bound keeps a typo from becoming that refusal.
+
 It is not a decision anyone makes twice. `_site_init.sh` writes it at install time from the endpoint the install actually fetched its code from — `install.sh`'s `UPGRADE_SERVER`, which defaults to `https://getjoinery.com` and is overridden with `--upgrade-server=URL`. One rule covers both audiences: leave the flag off and the site tracks stable releases; pass it and the site follows wherever it was installed from.
 
 Clones are the exception: `UPGRADE_SERVER` points at the clone source for the duration of a clone, and that is a peer site rather than a release endpoint, so the cloned database keeps the source's own `upgrade_source`.
@@ -958,8 +1029,10 @@ The client is core and ships to every site; only the *source* site needs the ser
 1. `MarketplaceClient` fetches the catalog from the upgrade server (`publish_theme?list=themes` and `?list=plugins`)
 2. Compares with locally installed themes/plugins
 3. Shows a card grid with install buttons for items not yet installed
-4. Install downloads the tar.gz archive and extracts it via `AbstractExtensionManager::installFromTarGz()`
+4. Install queues an `install_plugin` / `install_theme` root request and the page shows its transcript; root downloads the tar.gz into a working directory of its own, verifies it against the release key (`PackageSignature`), and only then puts it in place (`AbstractExtensionManager::refreshFromUpstream()`, run by `utils/install_extension.php`). The API action answers with the request id, which the caller polls through `root_request_status`.
 5. After install, files are on disk and synced to the database — user must activate separately via Themes or Plugins admin page
+
+The marketplace is first-party only: an archive from it that does not verify is refused outright. Nothing in the web tier downloads or extracts an archive; `installFromTarGz()`, `installFromZip()` and `refreshFromUpstream()` throw from a web request.
 
 ### Prerequisites
 
@@ -969,8 +1042,8 @@ The client is core and ships to every site; only the *source* site needs the ser
 
 ### Overwrite Protection
 
-- **Extensions with `receives_upgrades: true`** (or those without a manifest) can be reinstalled/replaced from the marketplace
-- **Extensions with `receives_upgrades: false`** are protected — the marketplace refuses to overwrite them
+- A marketplace install of a name already on disk replaces the directory with the verified archive (`refreshFromUpstream()` sets the old copy aside as `.refresh-<name>-<pid>` until the new one is fully in place, and sweeps a stale one at its next run)
+- **Extensions with `receives_upgrades: false`** are preserved by the upgrade; an uploaded package that names an installed extension needs `--replace`, and the copy it replaces is kept beside it
 
 ### Catalog Endpoint Fields
 

@@ -111,6 +111,24 @@ check(!TreeManifestPublisher::excluded('public_html/plugins/mailbox/config/defau
 check(!TreeManifestPublisher::excluded('public_html/utils/upgrade.php'),
 	'ordinary shipped files are covered');
 
+// vendor/ is excluded at the site root only. The site's own Composer tree is
+// not shipped; a plugin's is part of the plugin, and a signed archive that
+// could carry an unsigned Composer tree would be a signed archive carrying
+// whatever it liked (specs/package_signing.md WP0, B3).
+check(TreeManifestPublisher::excluded('vendor/autoload.php'),
+	'the site root\'s Composer tree is not listed');
+check(!TreeManifestPublisher::excluded('public_html/plugins/mailbox/vendor/autoload.php'),
+	'a plugin\'s vendor/ is listed',
+	'excluding vendor anywhere let a signed plugin archive carry unsigned code');
+check(!TreeManifestPublisher::excluded('public_html/assets/vendor/lib/x.js'),
+	'so is a vendored asset under public_html');
+// The rule is the verifier's, not a copy of it: two lists would drift, and
+// the one that drifted looser is the one that would matter.
+check(TreeManifestPublisher::excluded('public_html/plugins/x/cache/y')
+	=== PackageSignature::excluded('public_html/plugins/x/cache/y')
+	&& TreeManifestPublisher::excluded('vendor/x') === PackageSignature::excluded('vendor/x'),
+	'the writer and the node-side verifier share one exclusion rule');
+
 section('The signature verifies, and is checked before it ships');
 
 $keys = tm_keys();

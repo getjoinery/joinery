@@ -10,6 +10,13 @@ if (!class_exists('PublicPage', false)) {
     class PublicPage extends PublicPageJoinerySystem {}
 }
 
+/**
+ * AdminPage — the admin interface's page object.
+ *
+ * @version 1.1 - root_request_panel() takes the URL to open when an
+ *                install_package request is refused as unverified (exit 3),
+ *                so the warning page follows the refusal (specs/package_signing.md WP6)
+ */
 class AdminPage extends PublicPage {
 
     /**
@@ -61,16 +68,29 @@ class AdminPage extends PublicPage {
 	 * browser-session credential, every two seconds, and stops the moment the
 	 * request reaches done or failed.
 	 *
-	 * @param string $id The request id returned by RootRequest::submit()
+	 * An install_package request that root refused because the package did
+	 * not verify fails with exit 3 (RootRequest::EXIT_UNVERIFIED), and that
+	 * outcome has a next step: the warning page. $unverified_url, when given,
+	 * is where the panel sends the browser at that moment, so the operator
+	 * sees the warning rather than a failed request they have to interpret
+	 * (specs/package_signing.md WP6).
+	 *
+	 * @param string $id             The request id returned by RootRequest::submit()
+	 * @param string $unverified_url Same-site URL to go to on exit 3, or ''
 	 * @return string HTML
 	 */
-	public static function root_request_panel($id) {
+	public static function root_request_panel($id, $unverified_url = '') {
 		$id = (string)$id;
 		if ($id === '') {
 			return '';
 		}
 		$safe = htmlspecialchars($id, ENT_QUOTES, 'UTF-8');
 		$json = json_encode($id);
+		$unverified_url = (string)$unverified_url;
+		if ($unverified_url !== '' && ($unverified_url[0] !== '/' || (isset($unverified_url[1]) && $unverified_url[1] === '/'))) {
+			$unverified_url = '';           // same-site relative only, never an open redirect
+		}
+		$json_unverified = json_encode($unverified_url);
 
 		return <<<HTML
 <div class="jy-rootreq" data-request="{$safe}" data-state="queued">
@@ -96,6 +116,7 @@ class AdminPage extends PublicPage {
 <script>
 (function () {
 	var id = {$json};
+	var unverifiedUrl = {$json_unverified};
 	var box = document.querySelector('.jy-rootreq[data-request="' + id + '"]');
 	if (!box) { return; }
 	var stateEl = box.querySelector('.jy-rootreq__state');
@@ -118,6 +139,12 @@ class AdminPage extends PublicPage {
 			if (data.transcript && data.transcript !== logEl.textContent) {
 				logEl.textContent = data.transcript;
 				logEl.scrollTop = logEl.scrollHeight;
+			}
+			if (data.state === 'failed' && data.exit_code === 3 && unverifiedUrl) {
+				// Not ours: the warning page decides what happens next.
+				noteEl.textContent = 'the package did not verify — opening the warning';
+				window.location = unverifiedUrl;
+				return;
 			}
 			if (data.state === 'queued' && data.actor !== 'present') {
 				noteEl.textContent = 'waiting for this machine’s root actor';

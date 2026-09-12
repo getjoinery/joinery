@@ -1,6 +1,12 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
+/**
+ * admin_plugins_logic — the Plugins page.
+ *
+ * @version 1.1 - an upload is a root request that root verifies; a refused
+ *                one shows the warning and Install anyway (specs/package_signing.md WP6)
+ */
 function admin_plugins_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
@@ -18,8 +24,9 @@ function admin_plugins_logic(array $input): LogicResult {
 	// Set when an action was queued for the root actor rather than done here;
 	// the view renders the live transcript panel for it.
 	$root_request_id = '';
-	// Set when an upload was staged and the operator has to finish it in a shell.
-	$staged_command = '';
+	// Set when root refused an uploaded package as not ours and the operator
+	// is looking at the warning (specs/package_signing.md WP6).
+	$unsigned_warning = null;
 
 	// Check if plugin system is properly set up
 	$system_health = null;
@@ -46,36 +53,64 @@ function admin_plugins_logic(array $input): LogicResult {
 	// Handle form submissions and GET actions
 	$action = isset($input['action']) ? $input['action'] : (isset($input['action']) ? $input['action'] : '');
 	$plugin_name = isset($input['plugin_name']) ? $input['plugin_name'] : (isset($input['plugin_name']) ? $input['plugin_name'] : '');
-	if ($action || $input) {
+	// An action, or the one GET that is not one: the warning for a refused
+	// upload. A bare ?show_upload=1 used to fall through to "Invalid plugin
+	// name" because any input at all was treated as an action.
+	if ($action !== '' || isset($input['unsigned'])) {
 
 		// Handle upload action separately as it doesn't require plugin_name
 		if ($action === 'upload') {
 			// The upload is unpacked and checked here, under uploads/staging,
 			// outside the tree — a path escape or a symlink fails as www-data,
-			// where it can do nothing. Installing it is a SHELL command, not a
-			// root request: this queue is www-data-writable, so a request file
-			// proves only that something running as the web user wrote it, and
-			// a kind that installed a staged directory would turn one
-			// file-write bug into root code execution (a staged
-			// migrations/migrations.php is included as root). See
-			// RootRequest::NO_PACKAGE_KIND.
+			// where it can do nothing. Root is then asked to install it, and
+			// root verifies it against the release key before it moves a
+			// byte (RootRequest::PACKAGE_KIND): ours installs, anything else
+			// comes back as the warning below.
 			try {
 				if (isset($_FILES['plugin_zip']) && $_FILES['plugin_zip']['error'] === UPLOAD_ERR_OK) {
-					$plugin_manager = new PluginManager();
-					$staged = $plugin_manager->stage($_FILES['plugin_zip']['tmp_name']);
-					$staged_command = 'sudo -u ' . escapeshellarg(PluginManager::tree_owner_name()) . ' php '
-						. escapeshellarg(PathHelper::getIncludePath('utils/install_extension.php'))
-						. ' plugin --staged=' . escapeshellarg($staged['dir']);
-					$message = 'Plugin "' . htmlspecialchars($staged['name'])
-						. '" was unpacked and checked. Installing an uploaded package writes code into '
-						. 'the tree, which is done from a shell rather than from this page — run:';
-					$message_type = 'warning';
+					$queued = PackageInstallPage::upload('plugin', $_FILES['plugin_zip']['tmp_name'], (int)$session->get_user_id());
+					$root_request_id = $queued['request_id'];
+					$message = 'Plugin "' . htmlspecialchars($queued['name'])
+						. '" was unpacked and checked, and root is asked to verify and install it.';
+					$message_type = 'success';
 				} else {
 					$message = "Upload failed. Please check the file and try again.";
 					$message_type = 'danger';
 				}
 			} catch (Exception $e) {
 				$message = 'Upload failed: ' . htmlspecialchars($e->getMessage());
+				$message_type = 'danger';
+			}
+		} elseif ($action === 'install_anyway') {
+			// The owner has read the warning. Behind the second-factor
+			// step-up; then the acknowledgement is minted and root is asked
+			// again, this time with it.
+			$formwriter = new FormWriterV2HTML5(PackageInstallPage::FORM_ID);
+			$request_id = (string)($input['request'] ?? '');
+			if (!$formwriter->validateCSRF($input)) {
+				$message = 'Invalid or expired request token. Please try again.';
+				$message_type = 'danger';
+			} else {
+				try {
+					$outcome = PackageInstallPage::acknowledge('plugin', $request_id, $session,
+						'/admin/admin_plugins?unsigned=' . rawurlencode($request_id));
+					if ($outcome instanceof LogicResult) {
+						return $outcome;                // confirm the second factor, then press again
+					}
+					$root_request_id = $outcome;
+					$message = 'Acknowledged. Root is asked to install the unsigned plugin under the unsigned restrictions.';
+					$message_type = 'warning';
+				} catch (Exception $e) {
+					$message = htmlspecialchars($e->getMessage());
+					$message_type = 'danger';
+				}
+			}
+		} elseif (isset($input['unsigned'])) {
+			// Root refused an upload as not ours: show the warning for it.
+			$why = '';
+			$unsigned_warning = PackageInstallPage::refused('plugin', (string)$input['unsigned'], $session, $why);
+			if ($unsigned_warning === null) {
+				$message = htmlspecialchars($why);
 				$message_type = 'danger';
 			}
 		} elseif ($action === 'sync_filesystem') {
@@ -248,7 +283,7 @@ function admin_plugins_logic(array $input): LogicResult {
 		'plugins' => $plugins,
 		'provisioning_plugins' => $provisioning_plugins,
 		'root_request_id' => $root_request_id,
-		'staged_command' => $staged_command,
+		'unsigned_warning' => $unsigned_warning,
 		'root_actor_notice' => AdminPage::root_actor_notice()
 	));
 }

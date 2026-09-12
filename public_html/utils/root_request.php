@@ -24,6 +24,10 @@
  * Exit 0 = done. Anything else is recorded against the request and shown to
  * whoever submitted it.
  *
+ * @version 1.1 - install_package: verify a staged upload, or install it under
+ *                the unsigned restrictions on the owner's acknowledgement
+ *                (specs/package_signing.md WP3). install_plugin's refusal of
+ *                an unverified download is install_extension.php's.
  * @version 1.0
  */
 
@@ -105,11 +109,57 @@ switch ($kind) {
 		exit((int)$code);
 
 	case 'install_plugin':
-		// By name only, from the configured upgrade source. There is no kind
-		// that installs a staged upload: see RootRequest::NO_PACKAGE_KIND.
+	case 'install_theme':
+		// By name only, from the configured upgrade source. The download is
+		// verified in a root-owned working directory before it replaces
+		// anything; the marketplace is first-party, so an unverified archive
+		// there is refused outright (exit 3, verdict in the transcript).
 		$cmd = escapeshellarg(PHP_BINARY) . ' '
 			. escapeshellarg(PathHelper::getIncludePath('utils/install_extension.php'))
-			. ' plugin ' . escapeshellarg((string)($args['name'] ?? ''));
+			. ($kind === 'install_theme' ? ' theme ' : ' plugin ') . escapeshellarg((string)($args['name'] ?? ''));
+		passthru($cmd, $code);
+		exit((int)$code);
+
+	case 'install_package':
+		// A staged upload. Root verifies it before it moves it (the reasoning
+		// is on RootRequest::PACKAGE_KIND); install_extension.php does the
+		// verifying and the moving. What is decided HERE is whether the
+		// request carries the owner's acknowledgement of an unsigned package,
+		// because that is read from the database and the request, and the
+		// installer should never have to trust a flag on its command line
+		// from anything but this dispatcher or an operator at a shell.
+		$type = (string)($args['type'] ?? '');
+		$staged = (string)($args['staged_dir'] ?? '');
+		if (!in_array($type, array('plugin', 'theme'), true) || $staged === '') {
+			fwrite(STDERR, "root_request: install_package needs type (plugin|theme) and staged_dir\n");
+			exit(2);
+		}
+		// The directory is named relative to uploads/staging and may not
+		// leave it. install_extension.php checks the resolved path again.
+		if (preg_match('~^[A-Za-z0-9_][A-Za-z0-9_.-]*/[A-Za-z0-9_][A-Za-z0-9_-]*$~', $staged) !== 1) {
+			fwrite(STDERR, "root_request: staged_dir is not <staging id>/<name>\n");
+			exit(2);
+		}
+		$staged_path = $site_root . '/uploads/staging/' . $staged;
+
+		$cmd = escapeshellarg(PHP_BINARY) . ' '
+			. escapeshellarg(PathHelper::getIncludePath('utils/install_extension.php'))
+			. ' ' . $type . ' --staged=' . escapeshellarg($staged_path);
+
+		if (isset($args['unsigned_ack'])) {
+			$ack = is_array($args['unsigned_ack']) ? $args['unsigned_ack'] : array();
+			$requested_by = (int)($request['requested_by'] ?? 0);
+			$refusal = PackageAcknowledgement::check($ack, $requested_by);
+			if ($refusal !== '') {
+				fwrite(STDERR, "root_request: the acknowledgement does not stand: $refusal\n");
+				exit(2);
+			}
+			echo "acknowledgement: stands (user $requested_by, marker " . (int)$ack['marker'] . ")\n";
+			$cmd .= ' --acknowledged'
+				. ' --approved-by=' . escapeshellarg((string)$requested_by)
+				. ' --approved-ip=' . escapeshellarg((string)($ack['ip'] ?? ''))
+				. ' --approved-at=' . escapeshellarg((string)(int)($ack['at'] ?? 0));
+		}
 		passthru($cmd, $code);
 		exit((int)$code);
 

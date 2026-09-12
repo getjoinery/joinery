@@ -2,6 +2,11 @@
 require_once(__DIR__ . '/../includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 
+/**
+ * Theme — a theme's database row.
+ *
+ * @version 1.1 - thm_trust records who built the installed files (specs/package_signing.md WP3)
+ */
 class Theme extends SystemBase {    public static $prefix = 'thm';
     public static $tablename = 'thm_themes';
     public static $pkey_column = 'thm_theme_id';
@@ -55,6 +60,12 @@ class Theme extends SystemBase {    public static $prefix = 'thm';
         'thm_receives_upgrades' => array('type'=>'bool', 'default'=>true),
 
         'thm_is_system' => array('type'=>'bool', 'default'=>false),
+
+        // Who built the files root installed: 'signed' or 'unsigned' (installed
+        // on the owner's acknowledgement of the warning). Set by root at install
+        // from the verdict; NULL on a row that predates the record
+        // (specs/package_signing.md WP3, R5).
+        'thm_trust' => array('type'=>'varchar(16)', 'is_nullable'=>true),
 
         'thm_status' => array('type'=>'varchar(20)', 'default'=>'installed'),
     

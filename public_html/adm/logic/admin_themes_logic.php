@@ -1,6 +1,12 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
+/**
+ * admin_themes_logic — the Themes page.
+ *
+ * @version 1.1 - an upload is a root request that root verifies; a refused
+ *                one shows the warning and Install anyway (specs/package_signing.md WP6)
+ */
 function admin_themes_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
@@ -17,12 +23,20 @@ function admin_themes_logic(array $input): LogicResult {
 	$error = '';
 	// Set when an action was queued for the root actor rather than done here.
 	$root_request_id = '';
-	// Set when an upload was staged and the operator has to finish it in a shell.
-	$staged_command = '';
+	// Set when root refused an uploaded package as not ours and the operator
+	// is looking at the warning (specs/package_signing.md WP6).
+	$unsigned_warning = null;
 
 	// Handle form submissions and GET actions
 	$action = isset($input['action']) ? $input['action'] : (isset($input['action']) ? $input['action'] : null);
-	if ($action || $input) {
+	if (isset($input['unsigned'])) {
+		// Root refused an upload as not ours: show the warning for it.
+		$why = '';
+		$unsigned_warning = PackageInstallPage::refused('theme', (string)$input['unsigned'], $session, $why);
+		if ($unsigned_warning === null) {
+			$error = $why;
+		}
+	} elseif ($action || $input) {
 		try {
 			if ($action) {
 				switch ($action) {
@@ -92,22 +106,35 @@ function admin_themes_logic(array $input): LogicResult {
 
 					case 'upload':
 						// Unpacked and checked here, under uploads/staging,
-						// outside the tree. Installed from a shell: a theme is
-						// PHP, and this queue is www-data-writable, so a kind
-						// that installed a staged directory would turn one
-						// file-write bug into code the site runs. See
-						// RootRequest::NO_PACKAGE_KIND.
+						// outside the tree. Root is then asked to install it,
+						// and root verifies it against the release key before
+						// it moves a byte (RootRequest::PACKAGE_KIND): ours
+						// installs, anything else comes back as the warning.
 						if (isset($_FILES['theme_zip']) && $_FILES['theme_zip']['error'] === UPLOAD_ERR_OK) {
-							$staged = $theme_manager->stage($_FILES['theme_zip']['tmp_name']);
-							$staged_command = 'sudo -u ' . escapeshellarg(PluginManager::tree_owner_name()) . ' php '
-								. escapeshellarg(PathHelper::getIncludePath('utils/install_extension.php'))
-								. ' theme --staged=' . escapeshellarg($staged['dir']);
-							$message = "Theme '" . $staged['name'] . "' was unpacked and checked. Installing an "
-								. 'uploaded package writes code into the tree, which is done from a shell '
-								. 'rather than from this page — run:';
+							$queued = PackageInstallPage::upload('theme', $_FILES['theme_zip']['tmp_name'], (int)$session->get_user_id());
+							$root_request_id = $queued['request_id'];
+							$message = "Theme '" . $queued['name'] . "' was unpacked and checked, and root is asked to verify and install it.";
 						} else {
 							$error = "Upload failed. Please check the file and try again.";
 						}
+						break;
+
+					case 'install_anyway':
+						// The owner has read the warning. Behind the
+						// second-factor step-up; then the acknowledgement is
+						// minted and root is asked again, this time with it.
+						$formwriter = new FormWriterV2HTML5(PackageInstallPage::FORM_ID);
+						$request_id = (string)($input['request'] ?? '');
+						if (!$formwriter->validateCSRF($input)) {
+							throw new Exception('Invalid or expired request token. Please try again.');
+						}
+						$outcome = PackageInstallPage::acknowledge('theme', $request_id, $session,
+							'/admin/admin_themes?unsigned=' . rawurlencode($request_id));
+						if ($outcome instanceof LogicResult) {
+							return $outcome;            // confirm the second factor, then press again
+						}
+						$root_request_id = $outcome;
+						$message = 'Acknowledged. Root is asked to install the unsigned theme under the unsigned restrictions.';
 						break;
 
 					case 'delete':
@@ -160,7 +187,7 @@ function admin_themes_logic(array $input): LogicResult {
 		'error' => $error,
 		'themes' => $themes,
 		'root_request_id' => $root_request_id,
-		'staged_command' => $staged_command,
+		'unsigned_warning' => $unsigned_warning,
 		'root_actor_notice' => AdminPage::root_actor_notice()
 	));
 }

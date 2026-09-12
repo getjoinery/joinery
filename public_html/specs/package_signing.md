@@ -1,8 +1,10 @@
 # Package signing: what root will install, and how the owner overrides it
 
 **Status:** Spec, written 2026-09-11 from the owner's design (below). Closes
-S9 of `security_inventory.md`. D1 decided (Option 1, owner 2026-09-11). Ready
-for an executor. Unbuilt.
+S9 of `security_inventory.md`. D1 decided (Option 1, owner 2026-09-11).
+**BUILT 2026-09-12, two review rounds accepted, uncommitted.** Open: the
+owner's commit, a release, and WP8 on jeremytunnell (asks first: the unsigned
+step emails every superadmin).
 
 ## The goal, in one sentence
 
@@ -339,6 +341,64 @@ without touching the page.
   verifies before a deploy), `implemented/read_only_tree.md` is never edited —
   the kind's own doc block carries the reasoning now.
 - `DocumentText::JAIL_REQUIRED` and every `VaultHealth` row stay advisory.
+
+## Review round 1 (2026-09-11), STOP POINT 1
+
+Verified by the reviewer against real archives with the real key:
+`mailbox-1.115.1` and `scrolldaddy-1.0.8` verify `signed`; `joinery-core-0.8.388`
+fails `extra_file` on exactly the 23 `public_html/assets/vendor` files it was
+published without listing, with nothing else extra, nothing missing and no
+symlinks. The release that carries this code is built under the new rule, so
+no separate publish-once step exists. `?serve-verify-key=1` answers 200 with
+one key line on dev.
+
+- **R1 — the early self-update block in `upgrade.php` is dead and the new
+  check inside it is wrong.** `tar` is asked for `utils/upgrade.php` while the
+  members are `./public_html/utils/upgrade.php`, so nothing is ever copied
+  early; and `verifyListed()` is handed `utils/...` paths while the manifest
+  lists `public_html/utils/...`, so it would refuse if the block ever ran.
+  Delete the block; the post-extraction self-update is the one that works.
+- **R2 — a crash mid-refresh leaves `plugins/<name>.refresh.<pid>`**, a
+  plugin-shaped directory a filesystem sync can register. Set the old copy
+  aside under a dot-prefixed name and sweep stale ones at the start.
+- **R3 — recorded, not for this round:** `release_verify_keys` is append-only,
+  so a compromised key cannot be retired from a node. Belongs with
+  `per_channel_release_signing.md`.
+- **R4 — for WP3:** `PackageAcknowledgement::check()` scans every `stepup`
+  marker. Carry the marker row's id in the acknowledgement so root reads one
+  row and compares its session hash.
+- **R5 — for WP6:** `thm_trust` beside `plg_trust` is approved.
+- Accepted as written: the transition-only load of the verifier from staging;
+  `verify()` taking an optional key file; the exclusion rule living in core.
+
+## Review round 2 (2026-09-12), STOP POINT 2
+
+Verified by the reviewer: `php tests/run.php --changed` 21/21; the verifier
+run with the real key over every live plugin and theme directory on
+jeremytunnell (nine plugins, four themes) answers `signed` for all of them, so
+the host-installer gate stops nothing on a real node. The existing step-up
+pattern (redirect, lost POST, press again) is what the mailbox domain editor
+does, so the warning page's two presses match the platform.
+
+- **R1 — the converger honours the test hooks as root.** `JOINERY_VERIFY_PACKAGE`
+  chooses the file `php` runs as root, `JOINERY_VERIFY_KEYS` skips the key
+  file's ownership guard, `JOINERY_ACTIVE_PLUGINS` chooses whose installer
+  runs. Nothing in a timer's environment sets them today, and that is one
+  `env_keep` line away from not being true. Ignore all three when the
+  effective uid is 0 and log one line saying so; the gate runs unprivileged
+  and loses nothing.
+- **R2 — a marketplace theme is marked `receives_upgrades = false`.**
+  `install_extension_register()` sets it for every theme it registers,
+  which was right when the by-name form only registered what was on disk
+  and is wrong now that it fetches from the marketplace: the next upgrade
+  would preserve a theme we ship. Set it only for the staged (uploaded)
+  form.
+- Accepted as written: the acknowledgement naming its marker row; the
+  unsigned database half re-executed as the web user with a refusal rather
+  than a root fallback; the `.refresh-` aside; the two new columns; the
+  `upgrade_source` bound; the event-log row and the superadmin email.
+- **WP8** runs after the release, on jeremytunnell, with the owner's say-so
+  for the unsigned step, because that step emails every superadmin.
 
 ## Where things are (for the executor)
 

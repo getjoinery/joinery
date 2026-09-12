@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+#VERSION 2.75 - Writes config/release_verify_keys on a bare-metal install whose
+#               tree ships no agent bundle to read the key from: fetched once
+#               from <upgrade server>/utils/upgrade?serve-verify-key=1, over
+#               TLS only, root:root 0644 (specs/package_signing.md WP1). Trust
+#               on first use - the same trust the install just placed in the
+#               code it downloaded from there. Root verifies every package
+#               against that file before it goes into the tree.
 #VERSION 2.74 - Review round 1 of specs/implemented/tls_and_origin_trust.md. WP12: the
 #               placeholder certificate (_placeholder_cert.sh) is minted by
 #               write_universal_vhost in both modes, so the :443 host answers
@@ -1643,6 +1650,41 @@ download_themes_and_plugins() {
 # script primitives, apply_update among them. upgrade.php does the same copy
 # on every upgrade — this is the install-time half. A release that ships no
 # manifest is left alone, silently: the agent reports that state itself.
+# The key root verifies every package against (specs/package_signing.md WP1).
+# The host converger writes it from the agent bundle in the tree on every
+# tick; a tree that ships no bundle takes it from the upgrade server once,
+# here, over TLS - the same trust this install just placed in the code it
+# downloaded from there. Never over plain http, and never replacing a file
+# that is already there.
+write_release_verify_key() {
+    local site_root="$1"
+    local keys_file="${site_root}/config/release_verify_keys"
+    local manifest="${site_root}/public_html/agent_dist/manifest.json"
+    [ -f "$keys_file" ] && return 0
+    if [ -f "$manifest" ] && grep -q '"signing_public_key"' "$manifest" 2>/dev/null; then
+        return 0    # the converger writes it from the bundle
+    fi
+    case "$UPGRADE_SERVER" in
+        https://*) ;;
+        *)
+            print_warning "Upgrade server $UPGRADE_SERVER is not https; the release verification key is not fetched over plain http. Installs and upgrades are refused until config/release_verify_keys exists."
+            return 0
+            ;;
+    esac
+    local keys
+    keys="$(curl -sf --max-time 20 "${UPGRADE_SERVER}/utils/upgrade?serve-verify-key=1" 2>/dev/null \
+        | grep -E '^[A-Za-z0-9+/]{43}=$' || true)"
+    if [ -z "$keys" ]; then
+        print_warning "Could not fetch the release verification key from $UPGRADE_SERVER; installs and upgrades are refused until config/release_verify_keys exists"
+        return 0
+    fi
+    [ -d "${site_root}/config" ] || return 0
+    printf '%s\n' "$keys" > "$keys_file" || return 0
+    chown root:root "$keys_file" 2>/dev/null || true
+    chmod 644 "$keys_file"
+    print_success "Release verification key written from $UPGRADE_SERVER"
+}
+
 deploy_release_manifest() {
     local src_root="$1" dest_root="$2" mf
     for mf in RELEASE_MANIFEST RELEASE_MANIFEST.sig; do
@@ -4652,6 +4694,10 @@ do_site_baremetal() {
             print_warning "Could not enable the agent; the site is installed and it can be turned on from Admin → System → Management Node"
         fi
     fi
+
+    # The key root verifies packages against, before the converger's first
+    # run: it writes the same file from the bundle when the tree ships one.
+    write_release_verify_key "/var/www/html/${SITENAME}"
 
     # Run core and active plugins' declared host installers (idempotent; the
     # agent installer is the core one, and matters when cloning from a site with

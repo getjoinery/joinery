@@ -25,6 +25,12 @@
  * that repairs a broken box would mean a box too broken to reach its database
  * is a box that cannot be repaired.
  *
+ * @version 1.1 - install_package: root verifies a staged package before it
+ *                moves it, so the kind the read-only tree left out is back
+ *                (specs/package_signing.md WP3). request() reads a request's
+ *                body back for the page that has to answer a refusal.
+ *                install_theme is install_plugin for a theme, so the
+ *                marketplace page and the API install both by request (WP4).
  * @version 1.0
  */
 class RootRequest {
@@ -39,7 +45,9 @@ class RootRequest {
 	 */
 	const KINDS = array(
 		'upgrade',                 // php utils/upgrade.php --verbose
-		'install_plugin',          // fetch from the upgrade source + DB install
+		'install_plugin',          // fetch from the upgrade source, verify, DB install
+		'install_theme',           // the same for a theme
+		'install_package',         // a staged upload: verify, then install (see below)
 		'reconcile_composer',
 		'write_agent_files',
 		'save_doc',
@@ -47,30 +55,50 @@ class RootRequest {
 	);
 
 	/**
-	 * WHY THERE IS NO KIND FOR INSTALLING AN UPLOADED PACKAGE.
+	 * install_package {type, staged_dir, unsigned_ack?} — install a package the
+	 * web side unpacked and checked under uploads/staging.
 	 *
-	 * Both this queue and uploads/staging are www-data-writable — they have to
-	 * be, the web side writes them — so a request file proves only that
-	 * something running as the web user wrote it, never that an operator asked.
-	 * A kind that installed a staged directory would therefore turn the spec's
-	 * own premise (one bug that lets an attacker write one file) into root code
-	 * execution: stage a plugin.json and a migrations/migrations.php, queue the
-	 * request, and root moves it into plugins/ and includes the migration.
+	 * WHY THIS KIND IS SAFE TO HAVE. Both this queue and uploads/staging are
+	 * www-data-writable — they have to be, the web side writes them — so a
+	 * request file proves only that something running as the web user wrote
+	 * it, never that an operator asked. A kind that moved a staged directory
+	 * into the tree on the strength of the request alone would turn the
+	 * read-only tree's own premise (one bug that lets an attacker write one
+	 * file) into root code execution: stage a plugin.json and a
+	 * migrations/migrations.php, queue the request, and root moves it into
+	 * plugins/ and includes the migration.
 	 *
-	 * The kinds that remain cannot be abused that way. `upgrade` and
-	 * `install_plugin` fetch from the configured upgrade source, so the bytes
-	 * come from somewhere the attacker does not control; the rest write a .md,
-	 * a docs file, or one boolean in a theme manifest.
+	 * So root does not trust the request. It copies the staged directory into
+	 * a working directory of its own and asks who built it
+	 * (PackageSignature::verify, against config/release_verify_keys — a file
+	 * root owns). A package our release key signed installs: the bytes came
+	 * from us whoever queued the request, which is the same trust
+	 * `install_plugin` places in a marketplace download. Anything else is
+	 * refused, and the request fails with exit 3 and the verdict in its
+	 * transcript.
 	 *
-	 * Installing an uploaded package is a shell command:
+	 * The one way past the refusal is `unsigned_ack`: the owner's answer to
+	 * the warning page, minted by PackageAcknowledgement::mint() behind a
+	 * fresh second-factor confirmation and checked by root through
+	 * PackageAcknowledgement::check() before anything moves. An acknowledged
+	 * unsigned package installs under the unsigned restrictions: its
+	 * migrations run as the web user rather than root, its row records
+	 * plg_trust = 'unsigned' (thm_trust for a theme), every superadmin is
+	 * emailed, and the event log has a row. The marker behind the
+	 * acknowledgement is a database row, which the pool writes — so an
+	 * attacker already running code in the web tier can forge one and have
+	 * root copy PHP into the tree. That attacker is the accepted residual;
+	 * what they cannot do is run anything as root, and what a stolen admin
+	 * session cannot do is produce the marker at all.
 	 *
-	 *     php utils/install_extension.php plugin --staged=<dir>
+	 * The shell command still works for a self-hoster with one:
 	 *
-	 * The admin page still unpacks and checks the upload, and then shows that
-	 * command. A shell is a thing an attacker who can write one file does not
-	 * have, and that is the whole difference.
+	 *     php utils/install_extension.php plugin --staged=<dir> [--acknowledged]
 	 */
-	const NO_PACKAGE_KIND = true;
+	const PACKAGE_KIND = 'install_package';
+
+	/** The exit code a refused-unverified install_package records: the one outcome with a next step for the operator. */
+	const EXIT_UNVERIFIED = 3;
 
 	/** Where requests, their transcripts and their outcomes live. */
 	const QUEUE_DIR = 'cache/root_requests';
@@ -192,6 +220,28 @@ class RootRequest {
 		}
 
 		return $out;
+	}
+
+	/**
+	 * A request's body — kind, args, requested_by, requested_at — wherever it
+	 * is in the queue, or null when there is no such request. The warning
+	 * page reads a refused install_package back through this to learn what
+	 * was staged, rather than trusting a directory named in the URL.
+	 */
+	public static function request(string $id): ?array {
+		$id = self::clean_id($id);
+		if ($id === '') {
+			return null;
+		}
+		foreach (array('', 'running/', 'done/', 'failed/') as $sub) {
+			$path = self::queue_dir() . '/' . $sub . $id . '.json';
+			if (!is_file($path)) {
+				continue;
+			}
+			$body = json_decode((string)@file_get_contents($path), true);
+			return is_array($body) ? $body : null;
+		}
+		return null;
 	}
 
 	/** The run's output so far. Empty until the runner has started it. */

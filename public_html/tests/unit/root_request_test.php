@@ -19,6 +19,7 @@
  *
  * Run: php tests/unit/root_request_test.php
  *
+ * @version 1.1 - install_package is a kind, because root verifies before it moves (specs/package_signing.md WP3)
  * @version 1.0
  */
 
@@ -53,33 +54,47 @@ foreach (RootRequest::KINDS as $kind) {
 		"the dispatcher handles the kind '$kind'");
 }
 
-// The kind that must never exist.
+// The kind that installs a staged upload, and why it is safe to have.
 //
 // This queue and uploads/staging are both www-data-writable — they have to be —
 // so a request file proves only that something running as the web user wrote
-// it. A kind that installed a staged directory would therefore turn the spec's
-// own premise (one bug that lets an attacker write one file) into root code
-// execution: stage a plugin.json and a migrations/migrations.php, queue the
-// request, and root moves it into plugins/ and includes the migration as root.
-foreach (array('install_plugin_package', 'install_theme_package') as $forbidden) {
-	check(!in_array($forbidden, RootRequest::KINDS, true),
-		"'$forbidden' is not a kind",
-		'installing an uploaded package is a shell command, not something the web user can ask for');
-	check(strpos($dispatcher, "case '" . $forbidden . "'") === false,
-		"and the dispatcher has no handler for it");
-	check(strpos($runner, $forbidden) === false,
-		"and the runner's kind list does not carry it",
-		'a kind the runner accepts and the web side cannot name is a hole with no door');
-	$threw = false;
-	try { RootRequest::submit($forbidden, array('staged' => '/tmp/x')); }
-	catch (InvalidArgumentException $e) { $threw = true; }
-	check($threw, "and submitting it is refused");
-}
+// it. A kind that moved a staged directory into the tree on the request's say-so
+// would turn the spec's own premise (one bug that lets an attacker write one
+// file) into root code execution. So root does not trust the request: it
+// verifies the package against the release key before it moves anything, and
+// the only way past a refusal is the owner's acknowledgement, checked by root
+// against the second-factor marker (specs/package_signing.md WP3).
+check(RootRequest::PACKAGE_KIND === 'install_package' && in_array('install_package', RootRequest::KINDS, true),
+	"'install_package' is a kind");
+$package_case = substr($dispatcher, strpos($dispatcher, "case 'install_package'"));
+$package_case = substr($package_case, 0, strpos($package_case, "\tcase '"));
+check(strpos($package_case, 'PackageAcknowledgement::check($ack, $requested_by)') !== false,
+	'the dispatcher checks an acknowledgement against the marker before it passes --acknowledged');
+check(strpos($package_case, "--staged=' . escapeshellarg(\$staged_path)") !== false
+	&& strpos($package_case, "\$site_root . '/uploads/staging/' . \$staged") !== false,
+	'and hands the installer a path under uploads/staging built from the request, never a path the request named');
+check(strpos($package_case, "preg_match('~^[A-Za-z0-9_][A-Za-z0-9_.-]*/[A-Za-z0-9_][A-Za-z0-9_-]*$~', \$staged)") !== false,
+	'the staged directory is <staging id>/<name> and nothing else');
+check(strpos($package_case, "\$args['acknowledged']") === false && strpos($package_case, "\$args['approved") === false,
+	'the request cannot claim the acknowledgement was checked; only the dispatcher says so');
+$installer = (string)file_get_contents(PathHelper::getIncludePath('utils/install_extension.php'));
+$verify_at = strpos($installer, 'install_extension_verify($dir, $tree_rel . $staged_name)');
+$move_at   = strpos($installer, 'install_extension_copy_tree($dir, $target)');
+check($verify_at !== false && $move_at !== false && $verify_at < $move_at,
+	'the installer verifies the staged copy before it moves it');
+check(strpos($installer, "install_extension_register_as_web_user(\$type, \$name, \$staged !== '')") !== false
+	&& strpos($installer, "runuser") !== false,
+	'an acknowledged unsigned package runs its database half as the web user, never root');
+check(strpos($installer, "refusing to run them as root") !== false,
+	'and refuses rather than falling back to root when it cannot switch accounts');
+check(strpos($installer, "'unsigned_package_installed'") !== false
+	&& strpos($installer, 'EmailSender::quickSend($to, $subject, $body)') !== false,
+	'every superadmin is emailed and the event log has a row');
 
-// Every kind that remains either fetches from the configured upgrade source or
-// writes something that is not executed. If that stops being true, this is the
-// check that should stop it.
-check(count(RootRequest::KINDS) === 6, 'there are six kinds', implode(', ', RootRequest::KINDS));
+// Every kind either fetches from the configured upgrade source and verifies,
+// verifies a staged upload, or writes something that is not executed. If that
+// stops being true, this is the check that should stop it.
+check(count(RootRequest::KINDS) === 8, 'there are eight kinds', implode(', ', RootRequest::KINDS));
 
 section('A request names the document, never the directory');
 

@@ -1,4 +1,9 @@
 <?php
+/**
+ * admin_marketplace_logic — the marketplace page: catalog, and installs by root request.
+ *
+ * @version 1.1 - Install queues a root request and the page shows its transcript (specs/package_signing.md WP4)
+ */
 function admin_marketplace_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -17,6 +22,11 @@ function admin_marketplace_logic(array $input): LogicResult {
 	$page_vars = array();
 	$page_vars['settings'] = $settings;
 	$page_vars['session'] = $session;
+	// An install is a root request; the page that queued one watches its
+	// transcript here rather than claiming it is done.
+	$page_vars['root_request_id'] = RootRequest::status((string)($input['request'] ?? ''))['state'] === 'unknown'
+		? '' : (string)$input['request'];
+	$page_vars['root_actor_notice'] = AdminPage::root_actor_notice();
 
 	$upgrade_source = MarketplaceClient::source();
 	if ($upgrade_source === null) {
@@ -58,16 +68,16 @@ function admin_marketplace_handle_install(array $input, $session): LogicResult {
 	$type = ($input['type'] ?? '') === 'plugin' ? 'plugin' : 'theme';
 
 	try {
-		$installed_name = MarketplaceClient::install($type, $input['name'] ?? '');
-
-		$admin_page = $type === 'plugin' ? '/admin/admin_plugins' : '/admin/admin_themes';
+		// Root fetches, verifies and installs; this page shows the transcript.
+		$request_id = MarketplaceClient::install($type, $input['name'] ?? '', (int)$session->get_user_id());
 		$session->save_message(new DisplayMessage(
-			ucfirst($type) . " '" . htmlspecialchars($installed_name) . "' installed successfully. Activate it below.",
-			'Installed',
+			ucfirst($type) . " '" . htmlspecialchars(basename((string)($input['name'] ?? ''))) . "' is queued for installation. "
+			. 'When the request below reads Done, activate it on the ' . ($type === 'plugin' ? 'Plugins' : 'Themes') . ' page.',
+			'Queued',
 			NULL,
 			DisplayMessage::MESSAGE_ANNOUNCEMENT
 		));
-		return LogicResult::redirect($admin_page);
+		return LogicResult::redirect('/admin/admin_marketplace?request=' . urlencode($request_id));
 	} catch (Exception $e) {
 		$session->save_message(new DisplayMessage(
 			'Install failed: ' . htmlspecialchars($e->getMessage()),

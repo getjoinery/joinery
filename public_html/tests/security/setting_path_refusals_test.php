@@ -17,6 +17,7 @@
  *  - PathHelper refuses a theme name that is not a folder name, whatever
  *    the setting says.
  *
+ * @version 1.1 - upgrade_source (specs/package_signing.md WP7)
  * @version 1.0
  */
 require_once(__DIR__ . '/../lib/harness.php');
@@ -64,8 +65,23 @@ foreach (['node_dir', 'apache_error_log', 'server_manager_agent_source_path'] as
 	}
 }
 
+section('upgrade_source: an https origin and nothing else (specs/package_signing.md WP7)');
+// The setting that became a download. Root verifies every archive it fetches
+// against the release key, so the setting can only choose where a verified
+// archive comes from; the bound keeps a typo from becoming a refused upgrade,
+// and keeps the fetch off plain http.
+foreach (['https://getjoinery.com', 'https://dev.getjoinery.com', 'https://node.example.org:8443', 'https://10.0.0.5'] as $ok) {
+	check(!refused_by_declaration('upgrade_source', $ok), "upgrade_source accepts '$ok'");
+}
+foreach (['http://getjoinery.com', 'https://getjoinery.com/', 'https://getjoinery.com/path', 'getjoinery.com',
+          'https://evil.example/?x=', 'https://a b', "https://x.example\nhttps://y", 'ftp://x.example'] as $bad) {
+	check(refused_by_declaration('upgrade_source', $bad), "upgrade_source refuses " . json_encode($bad));
+}
+// Empty is "no source": the marketplace and the upgrade both say so and fetch nothing.
+check(!refused_by_declaration('upgrade_source', ''), "upgrade_source accepts empty, which means no source");
+
 section('Changing one is a credential event');
-foreach (['allowed_upload_extensions', 'composerAutoLoad', 'theme_template', 'active_theme_plugin', 'node_dir', 'server_manager_agent_source_path'] as $name) {
+foreach (['allowed_upload_extensions', 'composerAutoLoad', 'theme_template', 'active_theme_plugin', 'node_dir', 'server_manager_agent_source_path', 'upgrade_source'] as $name) {
 	check(SettingsDeclarations::isVaultGated($name), "$name is vault gated");
 }
 
