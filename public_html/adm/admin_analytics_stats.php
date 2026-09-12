@@ -40,7 +40,7 @@ if (!empty($page_vars['rollup_notice'])) {
 
 ?>
 <div style="width: 1000px; height: 500px;">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@2.8.0"></script>
+<script src="/assets/vendor/chart.js-2.8.0/Chart.min.js"></script>
 <canvas id="myChart" ></canvas>
 </div>
 <script>

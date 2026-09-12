@@ -89,7 +89,7 @@ foreach ($page_vars['time_series'] as $src => $points) {
 ?>
 <h3>Visits over time — top sources</h3>
 <div style="width: 1000px; height: 400px;">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@2.8.0"></script>
+<script src="/assets/vendor/chart.js-2.8.0/Chart.min.js"></script>
 <canvas id="attributionChart"></canvas>
 </div>
 <script>

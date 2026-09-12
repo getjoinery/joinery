@@ -969,45 +969,82 @@ abstract class PublicPageBase {
 	 *
 	 * Tells the browser where scripts, styles, frames and the rest may come
 	 * from, so an injected script or an exfiltration to an unlisted host is
-	 * stopped by the browser itself. This is the permissive policy: 'unsafe-inline'
-	 * stays for scripts and styles because FormWriter output, the views and the
-	 * plugins rely on inline handlers and style blocks throughout — removing
-	 * them is the strict-CSP project (specs/content_security_policy.md, Future),
-	 * not this policy. What it does close: scripts and frames from any host not
-	 * listed here, plugins and objects entirely, and framing by other sites.
+	 * stopped by the browser itself. 'unsafe-inline' stays for scripts and
+	 * styles because FormWriter output, the views and the plugins rely on
+	 * inline handlers and style blocks throughout — removing them is the
+	 * strict-CSP project (specs/content_security_policy.md, Future), not this
+	 * policy. What it does close: scripts, styles, fonts, frames and fetches
+	 * from any host not listed here, plugins and objects entirely, and framing
+	 * by other sites.
 	 *
-	 * The listed hosts are the third parties pages actually load: the payment
-	 * providers (script + their checkout frames), hCaptcha and reCAPTCHA,
-	 * YouTube and Vimeo embeds, Google Fonts, and the script CDNs themes
-	 * declare. Plugins load every asset locally; there is no way for a plugin
-	 * to add a host here, and one that needs to shows up in the console as a
-	 * violation.
+	 * Every host here is a single-purpose vendor the platform itself embeds:
+	 * the payment providers (script, checkout frames, their API calls, the
+	 * redirect form), hCaptcha and reCAPTCHA, YouTube and Vimeo players, and
+	 * Google Fonts (stylesheet + font files) — plus, in frame-src only, the
+	 * embeddable products operators paste into content. There is deliberately no
+	 * general-purpose script CDN (cdnjs, jsdelivr, unpkg, code.jquery.com,
+	 * cdn.tailwindcss.com): allowing one lets an injected tag load any library
+	 * that CDN hosts, including the ones written to defeat a CSP, so the
+	 * allowlist would be worth nothing. Every library the platform uses ships
+	 * under assets/vendor or the theme; plugins load every asset locally.
+	 * Images and media stay open to any https host — operator content and
+	 * the mail reader load them from everywhere (security_inventory.md S8).
+	 *
+	 * tests/security/csp_header_test.php pins the shape, including the
+	 * absence of a script CDN and of a bare https: in connect-src.
 	 */
 	public static function csp_policy() {
 		return array(
 			'default-src'     => array("'self'"),
 			'script-src'      => array("'self'", "'unsafe-inline'",
-				'https://js.stripe.com', 'https://www.paypal.com', 'https://www.paypalobjects.com',
-				'https://js.hcaptcha.com', 'https://*.hcaptcha.com',
+				'https://js.stripe.com',
+				'https://www.paypal.com', 'https://www.paypalobjects.com',
+				'https://hcaptcha.com', 'https://*.hcaptcha.com',
 				'https://www.google.com', 'https://www.gstatic.com',
-				'https://cdn.tailwindcss.com', 'https://cdnjs.cloudflare.com', 'https://cdn.jsdelivr.net'),
-			'style-src'       => array("'self'", "'unsafe-inline'", 'https://fonts.googleapis.com',
-				'https://cdnjs.cloudflare.com', 'https://cdn.jsdelivr.net'),
+				// Cloudflare injects its Web Analytics beacon at the edge on a
+				// zone that has it on; the proxy already carries every byte of
+				// the site, so its own beacon host adds no trust. Turn the
+				// beacon itself off in the Cloudflare zone, not here.
+				'https://static.cloudflareinsights.com'),
+			'style-src'       => array("'self'", "'unsafe-inline'",
+				'https://fonts.googleapis.com',
+				'https://hcaptcha.com', 'https://*.hcaptcha.com'),
 			'img-src'         => array("'self'", 'data:', 'blob:', 'https:'),
-			'font-src'        => array("'self'", 'data:', 'https:'),
+			'font-src'        => array("'self'", 'data:', 'https://fonts.gstatic.com'),
 			'media-src'       => array("'self'", 'blob:', 'https:'),
-			'connect-src'     => array("'self'", 'https:', 'wss:'),
+			'connect-src'     => array("'self'",
+				'https://api.stripe.com', 'https://r.stripe.com', 'https://m.stripe.network',
+				'https://www.paypal.com', 'https://www.sandbox.paypal.com', 'https://*.paypal.com',
+				'https://hcaptcha.com', 'https://*.hcaptcha.com',
+				'https://cloudflareinsights.com'),
 			'frame-src'       => array("'self'",
 				'https://js.stripe.com', 'https://hooks.stripe.com', 'https://checkout.stripe.com',
+				'https://m.stripe.network',
 				'https://www.paypal.com', 'https://www.sandbox.paypal.com',
-				'https://*.hcaptcha.com', 'https://www.google.com',
+				'https://hcaptcha.com', 'https://*.hcaptcha.com',
+				'https://www.google.com', 'https://recaptcha.google.com',
 				'https://www.youtube.com', 'https://www.youtube-nocookie.com',
-				'https://player.vimeo.com'),
+				'https://player.vimeo.com',
+				// Embeddable products an operator pastes into content. A frame
+				// is walled off from the page, so a single-product frame host
+				// is safe to list even if that vendor is compromised; the same
+				// is not true of a script host, so this block is frames only.
+				'https://fast.wistia.net', 'https://fast.wistia.com', 'https://www.loom.com',
+				'https://player.twitch.tv', 'https://clips.twitch.tv',
+				'https://open.spotify.com', 'https://w.soundcloud.com',
+				'https://calendly.com', 'https://*.typeform.com',
+				'https://docs.google.com', 'https://calendar.google.com', 'https://www.eventbrite.com',
+				'https://www.openstreetmap.org', 'https://codepen.io'),
 			'worker-src'      => array("'self'", 'blob:'),
 			'object-src'      => array("'none'"),
 			'base-uri'        => array("'self'"),
+			// form-action also governs where a POST may be redirected to in
+			// Chrome, so the OAuth consent hops (a POST mints the state, then
+			// redirects to the provider) are listed alongside the payment redirects.
 			'form-action'     => array("'self'", 'https://www.paypal.com', 'https://www.sandbox.paypal.com',
-				'https://checkout.stripe.com'),
+				'https://checkout.stripe.com',
+				'https://accounts.google.com', 'https://login.linode.com',
+				'https://cloud.digitalocean.com', 'https://dnsimple.com'),
 			'frame-ancestors' => array("'self'"),
 		);
 	}

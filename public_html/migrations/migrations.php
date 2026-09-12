@@ -1415,3 +1415,12 @@
 	$migration['migration_file'] = 'system_user_no_permission.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// The Content-Security-Policy is on and enforced everywhere; rows seeded
+	// under the earlier off / report-only default move to the same state.
+	$migration = array();
+	$migration['database_version'] = '184';
+	$migration['test'] = "SELECT CASE WHEN EXISTS(SELECT 1 FROM stg_settings WHERE (stg_name = 'enable_csp' AND stg_value <> '1') OR (stg_name = 'csp_report_only' AND stg_value <> '0')) THEN 0 ELSE 1 END AS count";
+	$migration['migration_file'] = NULL;
+	$migration['migration_sql'] = "UPDATE stg_settings SET stg_value = CASE stg_name WHEN 'enable_csp' THEN '1' ELSE '0' END, stg_update_time = now() WHERE (stg_name = 'enable_csp' AND stg_value <> '1') OR (stg_name = 'csp_report_only' AND stg_value <> '0')";
+	$migrations[] = $migration;
