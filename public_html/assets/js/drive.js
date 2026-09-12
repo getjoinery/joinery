@@ -1,5 +1,9 @@
 /* Drive — member file storage client. Vanilla JS, talks to /api/v1 drive_*
- * actions through the shared joineryApi transport (browser-session credential). */
+ * actions through the shared joineryApi transport (browser-session credential).
+ *
+ * Views: 'mine' (folder browse), 'shared', 'starred', 'trash', and 'source' —
+ * the member's own files another feature stored (mail attachments, chat
+ * uploads, photos), listed read-only from the rail's "Also in your account". */
 (function () {
 	'use strict';
 
@@ -10,6 +14,9 @@
 	var SCOPE = CFG.vaultScope || 'drive';
 	var state = {
 		view: 'mine',
+		source: null,          // origin tag while view === 'source'
+		sourceLabel: '',
+		otherSources: [],      // [{key,label,count}] for the rail
 		folderId: 0,
 		folderEncrypted: false,
 		viewMode: 'list',
@@ -193,15 +200,29 @@
 
 	// ---- rendering ---------------------------------------------------------
 	function render(data) {
+		// The server's answer says which view it listed (the first paint can
+		// arrive at ?view=…&source=…), so the rail follows the listing.
+		if (data.view && data.view !== 'folders') {
+			state.view = data.view;
+			state.source = (data.view === 'source') ? (data.source || null) : null;
+			setActiveNav(state.view);
+		}
 		state.items = data.items || [];
 		state.breadcrumb = data.breadcrumb || [];
 		state.folderEncrypted = !!(data.folder && data.folder.encrypted);
 		state.folderLevel = (data.folder && data.folder.protection_level) || 'standard';
 		if (data.usage) state.usage = data.usage;
+		if (typeof data.site_storage !== 'undefined') renderSiteMeter(data.site_storage);
 		if (typeof data.folder_id !== 'undefined') state.folderId = data.folder_id || 0;
+		if (data.other_sources) { state.otherSources = data.other_sources; }
+		if (state.view === 'source') {
+			state.otherSources.forEach(function (src) { if (src.key === state.source) state.sourceLabel = src.label; });
+		}
+		renderOtherSources();
 		renderBreadcrumb();
 		renderItems();
 		renderMeter();
+		renderToolbar();
 		if (data.truncated) toast('Showing the first 2000 items.');
 	}
 
@@ -209,7 +230,7 @@
 		var bc = $('drvBreadcrumb');
 		bc.innerHTML = '';
 		if (state.view !== 'mine') {
-			var label = { shared: 'Shared with me', starred: 'Starred', trash: 'Trash' }[state.view] || '';
+			var label = { shared: 'Shared with me', starred: 'Starred', trash: 'Trash', source: state.sourceLabel }[state.view] || '';
 			bc.appendChild(el('span', 'crumb', label));
 			return;
 		}
@@ -222,6 +243,38 @@
 			a.onclick = function () { openFolder(c.id); };
 			bc.appendChild(a);
 		});
+	}
+
+	// The rail's second list: every other place this member's files live, with
+	// a count. Absent entirely when there is nothing to show.
+	function renderOtherSources() {
+		var wrap = $('drvOtherSources'), nav = $('drvOtherNav');
+		if (!wrap || !nav) return;
+		nav.innerHTML = '';
+		var list = state.otherSources || [];
+		wrap.hidden = !list.length;
+		list.forEach(function (src) {
+			var b = el('button', 'drv-nav-item' + (state.view === 'source' && state.source === src.key ? ' active' : ''), src.label);
+			b.type = 'button';
+			b.dataset.view = 'source';
+			b.dataset.source = src.key;
+			b.appendChild(el('span', 'drv-nav-count', String(src.count)));
+			b.onclick = function () { switchView('source', src.key, src.label); };
+			nav.appendChild(b);
+		});
+	}
+
+	// What the toolbar offers depends on where we are: a source view lists
+	// files another feature owns, so there is nothing to create or upload here.
+	function renderToolbar() {
+		var isSource = state.view === 'source';
+		$('drvNewFolderBtn').hidden = isSource;
+		$('drvUploadBtn').hidden = isSource;
+		var note = $('drvSourceNote');
+		if (note) {
+			note.hidden = !isSource;
+			note.textContent = isSource ? 'These files were stored by another feature. Open or download them here; manage them where they came from.' : '';
+		}
 	}
 
 	function renderItems() {
@@ -335,7 +388,7 @@
 		else meta.textContent = fmtDate(it.create_time);
 		row.appendChild(meta);
 
-		if (it.entity_type === 'file' && state.view !== 'trash') {
+		if (it.entity_type === 'file' && state.view !== 'trash' && state.view !== 'source') {
 			var star = el('button', 'drv-star' + (it.starred ? '' : ' off'));
 			star.type = 'button';
 			star.innerHTML = ICONS.star;
@@ -363,22 +416,46 @@
 		var fill = $('drvMeterFill');
 		fill.style.width = pct + '%';
 		fill.classList.toggle('full', pct >= 100);
+		// Quota 0 is no quota: the number stands alone and the bar stays empty.
 		$('drvMeterLabel').textContent = quota > 0
 			? humanBytes(used) + ' of ' + humanBytes(quota) + ' used'
 			: humanBytes(used) + ' used';
 		var up = $('drvUpgrade');
 		if (quota > 0 && used >= quota) {
 			up.hidden = false;
-			up.innerHTML = '<a class="jy-btn jy-btn-primary" href="/pricing">Get more storage</a>';
+			up.innerHTML = '<a class="btn btn-primary" href="/pricing">Get more storage</a>';
 		} else {
 			up.hidden = true;
 		}
+	}
+
+	// The admin's site-wide meter: what everyone's files weigh as stored, and
+	// what the server has left. Only present in the payload for an admin.
+	function renderSiteMeter(site) {
+		var box = $('drvSiteMeter');
+		if (!box) return;
+		if (!site) { box.hidden = true; return; }
+		box.hidden = false;
+		var used = site.bytes_used || 0, avail = site.bytes_available;
+		var usedText = humanBytes(used) + ' used by ' + (site.files || 0).toLocaleString() + ' files';
+		if (site.bytes_cloud) usedText += ' (' + humanBytes(site.bytes_cloud) + ' of it in cloud storage)';
+		$('drvSiteUsed').textContent = usedText;
+		$('drvSiteAvail').textContent = (avail === null || typeof avail === 'undefined')
+			? 'Free space on this server: unknown'
+			: humanBytes(avail) + ' available on this server';
+		// The bar is local bytes against local bytes + what's left: how full the disk is.
+		var local = site.bytes_local || 0;
+		var pct = (avail !== null && typeof avail !== 'undefined' && (local + avail) > 0) ? Math.min(100, Math.round(local / (local + avail) * 100)) : 0;
+		var fill = $('drvSiteMeterFill');
+		fill.style.width = pct + '%';
+		fill.classList.toggle('full', pct >= 95);
 	}
 
 	// ---- data --------------------------------------------------------------
 	function load() {
 		var body = { view: state.view };
 		if (state.view === 'mine') body.folder_id = state.folderId;
+		if (state.view === 'source') body.source = state.source;
 		return api.post('drive_list', body).then(render).catch(function (e) { toast(e.message || 'Could not load Drive.'); });
 	}
 
@@ -395,11 +472,18 @@
 			openFolder(it.id);
 		} else if (it.encrypted) {
 			downloadEncrypted(it);
-		} else if (it.protection_level === 'private') {
+		} else if (it.protection_level === 'private' || it.requires_window) {
 			openSealed(it);
 		} else {
 			if (it.download_url) window.open(it.download_url, '_blank');
 		}
+	}
+
+	// The one action every file has, whatever custody it is under.
+	function downloadItem(it) {
+		if (it.encrypted) { downloadEncrypted(it); }
+		else if (it.protection_level === 'private' || it.requires_window) { openSealed(it); }
+		else if (it.download_url) { window.open(it.download_url, '_blank'); }
 	}
 
 	// A Private file's bytes are opened by the SERVER, inside the owner's unlock
@@ -466,8 +550,11 @@
 		if (state.view === 'trash') {
 			opts.push(['Restore', function () { doRestore(it); }]);
 			opts.push(['Delete forever', function () { confirmDelete(it); }, true]);
+		} else if (state.view === 'source') {
+			// Another feature's file: Drive can hand it over, nothing more.
+			opts.push(['Download', function () { downloadItem(it); }]);
 		} else {
-			if (it.entity_type === 'file') opts.push(['Download', function () { if (it.encrypted) { downloadEncrypted(it); } else if (it.protection_level === 'private') { openSealed(it); } else if (it.download_url) { window.open(it.download_url, '_blank'); } }]);
+			if (it.entity_type === 'file') opts.push(['Download', function () { downloadItem(it); }]);
 			opts.push(['Rename', function () { openRename(it); }]);
 			opts.push(['Move to…', function () { openMove(it); }]);
 			if (it.entity_type === 'file') opts.push([it.starred ? 'Unstar' : 'Star', function () { toggleStar(it, {classList:{toggle:function(){}}}); }]);
@@ -964,7 +1051,7 @@
 			r.versions.forEach(function (v) {
 				var row = el('div', 'drv-version-row');
 				row.appendChild(el('span', 'drv-version-label', 'v' + v.version_number + ' · ' + humanBytes(v.size) + ' · ' + fmtDate(v.create_time)));
-				var b = el('button', 'jy-btn jy-btn-secondary', 'Restore');
+				var b = el('button', 'btn btn-secondary', 'Restore');
 				b.type = 'button';
 				b.onclick = function () {
 					api.post('drive_version_restore', { file_id: it.id, version_id: v.version_id })
@@ -980,7 +1067,7 @@
 	// ---- upload (resumable chunk protocol, per-file progress) --------------
 	function uploadFiles(files) {
 		if (!files || !files.length) return;
-		if (!CFG.quotaBytes || !CFG.maxFileBytes) { toast('Uploads are not available on your plan.'); return; }
+		if (state.view === 'source') { toast('Switch to My Drive to upload.'); return; }
 		Array.prototype.forEach.call(files, function (f) { uploadOne(f); });
 	}
 
@@ -1006,7 +1093,7 @@
 		function fail(msg) { row.classList.add('error'); pct.textContent = msg || 'failed'; }
 		function done() { row.classList.add('done'); span.style.width = '100%'; pct.textContent = 'done'; setTimeout(function () { row.remove(); }, 1500); load(); }
 
-		if (file.size > CFG.maxFileBytes) { fail('too large'); return; }
+		if (CFG.maxFileBytes && file.size > CFG.maxFileBytes) { fail('too large'); return; }
 
 		var encrypted = state.view === 'mine' && state.folderId && state.folderEncrypted;
 
@@ -1091,9 +1178,12 @@
 		var btns = document.querySelectorAll('#drvNav .drv-nav-item');
 		Array.prototype.forEach.call(btns, function (b) { b.classList.toggle('active', b.dataset.view === view); });
 	}
-	function switchView(view) {
+	function switchView(view, source, sourceLabel) {
 		state.view = view; state.folderId = 0;
+		state.source = (view === 'source') ? (source || null) : null;
+		state.sourceLabel = (view === 'source') ? (sourceLabel || '') : '';
 		setActiveNav(view);
+		renderOtherSources();
 		load();
 	}
 	function toggleViewMode() {
@@ -1108,7 +1198,11 @@
 		var q = $('drvSearch').value.trim();
 		searchTimer = setTimeout(function () {
 			if (!q) { load(); return; }
-			api.post('drive_list', { search: q }).then(render).catch(function (e) { toast(e.message || 'Search failed.'); });
+			// Inside a source view the search stays in that source; elsewhere it
+			// spans the member's Drive files and what is shared with them.
+			var body = { search: q };
+			if (state.view === 'source') { body.view = 'source'; body.source = state.source; }
+			api.post('drive_list', body).then(render).catch(function (e) { toast(e.message || 'Search failed.'); });
 		}, 300);
 	}
 

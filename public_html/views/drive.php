@@ -2,7 +2,7 @@
 /**
  * Drive — member file storage page.
  *
- * @version 1.0
+ * @version 1.1
  */
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('drive_logic.php', 'logic'));
@@ -53,10 +53,20 @@ $protection_fw = $page->getFormWriter('drive_protection', array('action' => '/dr
 					<button type="button" class="drv-nav-item" data-view="starred">Starred</button>
 					<button type="button" class="drv-nav-item" data-view="trash">Trash</button>
 				</nav>
+				<div class="drv-rail-section" id="drvOtherSources" hidden>
+					<div class="drv-rail-heading">Also in your account</div>
+					<nav class="drv-nav" id="drvOtherNav" aria-label="Files stored by other features"></nav>
+				</div>
 				<div class="drv-meter" id="drvMeter">
 					<div class="drv-meter-track"><div class="drv-meter-fill" id="drvMeterFill"></div></div>
 					<div class="drv-meter-label" id="drvMeterLabel">&nbsp;</div>
 					<div id="drvUpgrade" class="drv-upgrade" hidden></div>
+				</div>
+				<div class="drv-meter drv-site-meter" id="drvSiteMeter" hidden>
+					<div class="drv-rail-heading">Everyone on this site</div>
+					<div class="drv-meter-track"><div class="drv-meter-fill" id="drvSiteMeterFill"></div></div>
+					<div class="drv-meter-label" id="drvSiteUsed"></div>
+					<div class="drv-meter-label" id="drvSiteAvail"></div>
 				</div>
 			</aside>
 
@@ -64,12 +74,14 @@ $protection_fw = $page->getFormWriter('drive_protection', array('action' => '/dr
 				<div class="drv-toolbar">
 					<nav class="drv-breadcrumb" id="drvBreadcrumb" aria-label="folder path"></nav>
 					<div class="drv-actions">
-						<input type="search" id="drvSearch" class="drv-search" placeholder="Search files" aria-label="Search files">
-						<button type="button" id="drvNewFolderBtn" class="jy-btn jy-btn-secondary">New folder</button>
-						<button type="button" id="drvUploadBtn" class="jy-btn jy-btn-primary">Upload</button>
-						<button type="button" id="drvViewToggle" class="jy-btn jy-btn-secondary" title="Toggle list / grid" aria-label="Toggle list or grid view">Grid</button>
+						<input type="search" id="drvSearch" class="drv-search" placeholder="Search files" aria-label="Search files" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other">
+						<button type="button" id="drvNewFolderBtn" class="btn btn-secondary">New folder</button>
+						<button type="button" id="drvUploadBtn" class="btn btn-primary">Upload</button>
+						<button type="button" id="drvViewToggle" class="btn btn-secondary" title="Toggle list / grid" aria-label="Toggle list or grid view">Grid</button>
 					</div>
 				</div>
+
+				<p class="drv-source-note" id="drvSourceNote" hidden></p>
 
 				<div class="drv-dropzone" id="drvDropzone">
 					<div class="drv-items drv-view-list" id="drvItems" role="list"></div>
@@ -85,9 +97,9 @@ $protection_fw = $page->getFormWriter('drive_protection', array('action' => '/dr
 </div>
 
 <input type="file" id="drvFileInput" multiple hidden>
-<div class="drv-menu" id="drvMenu" role="menu" hidden></div>
+<div class="jy-ui drv-menu" id="drvMenu" role="menu" hidden></div>
 
-<dialog id="drvNewFolderDialog" class="drv-dialog">
+<dialog id="drvNewFolderDialog" class="jy-ui drv-dialog">
 	<h3>New folder</h3>
 	<?php
 	$new_folder_fw->begin_form();
@@ -110,13 +122,13 @@ $protection_fw = $page->getFormWriter('drive_protection', array('action' => '/dr
 	?>
 	</div>
 	<div class="drv-dialog-actions">
-		<button type="button" class="jy-btn jy-btn-secondary" data-close>Cancel</button>
-		<button type="submit" class="jy-btn jy-btn-primary">Create</button>
+		<button type="button" class="btn btn-secondary" data-close>Cancel</button>
+		<button type="submit" class="btn btn-primary">Create</button>
 	</div>
 	<?php $new_folder_fw->end_form(); ?>
 </dialog>
 
-<dialog id="drvVaultDialog" class="drv-dialog">
+<dialog id="drvVaultDialog" class="jy-ui drv-dialog">
 	<div id="drvVaultSetup" hidden>
 		<h3>Set up your Drive vault</h3>
 		<p style="font-size:.9rem;opacity:.85;">Encrypted files are locked with a key only your devices ever hold. Choose how you'll unlock it. If you lose every unlocker, encrypted files are permanently gone — there is no recovery.</p>
@@ -125,61 +137,61 @@ $protection_fw = $page->getFormWriter('drive_protection', array('action' => '/dr
 			<input type="password" id="drvVaultSetupPp" class="drv-search" style="width:100%;" placeholder="Passphrase (min 10 chars)" autocomplete="new-password">
 		</div>
 		<div class="drv-dialog-actions" style="justify-content:flex-start;flex-wrap:wrap;">
-			<button type="button" class="jy-btn jy-btn-primary" id="drvVaultSetupPasskey">Set up with a passkey</button>
-			<button type="button" class="jy-btn jy-btn-secondary" id="drvVaultSetupPpToggle">Use a passphrase</button>
-			<button type="button" class="jy-btn jy-btn-primary" id="drvVaultSetupPpGo" hidden>Set up with passphrase</button>
+			<button type="button" class="btn btn-primary" id="drvVaultSetupPasskey">Set up with a passkey</button>
+			<button type="button" class="btn btn-secondary" id="drvVaultSetupPpToggle">Use a passphrase</button>
+			<button type="button" class="btn btn-primary" id="drvVaultSetupPpGo" hidden>Set up with passphrase</button>
 		</div>
 		<div id="drvVaultRecovery" hidden style="margin-top:.6rem;">
 			<p style="font-size:.9rem;"><strong>Save your recovery keys</strong> — shown once. They are the only way back in if you lose your passkey and passphrase.</p>
 			<pre id="drvVaultRecoveryCodes" style="white-space:pre-wrap;font-size:.8rem;background:rgba(127,127,127,.1);padding:.6rem;border-radius:8px;"></pre>
-			<button type="button" class="jy-btn jy-btn-primary" id="drvVaultRecoveryDone">I've saved them — continue</button>
+			<button type="button" class="btn btn-primary" id="drvVaultRecoveryDone">I've saved them — continue</button>
 		</div>
 	</div>
 	<div id="drvVaultUnlock" hidden>
 		<h3>Unlock your Drive vault</h3>
-		<button type="button" class="jy-btn jy-btn-primary jy-btn-block" id="drvVaultUnlockPasskey" style="width:100%;margin-bottom:.5rem;">Unlock with a passkey</button>
+		<button type="button" class="btn btn-primary btn-block" id="drvVaultUnlockPasskey" style="width:100%;margin-bottom:.5rem;">Unlock with a passkey</button>
 		<div style="margin:.4rem 0;">
 			<input type="password" id="drvVaultUnlockPp" class="drv-search" style="width:100%;" placeholder="Passphrase" autocomplete="current-password">
-			<button type="button" class="jy-btn jy-btn-secondary" id="drvVaultUnlockPpGo" style="margin-top:.35rem;">Unlock with passphrase</button>
+			<button type="button" class="btn btn-secondary" id="drvVaultUnlockPpGo" style="margin-top:.35rem;">Unlock with passphrase</button>
 		</div>
 		<div style="margin:.4rem 0;">
 			<input type="text" id="drvVaultUnlockRec" class="drv-search" style="width:100%;" placeholder="Recovery key" autocomplete="off">
-			<button type="button" class="jy-btn jy-btn-secondary" id="drvVaultUnlockRecGo" style="margin-top:.35rem;">Unlock with recovery key</button>
+			<button type="button" class="btn btn-secondary" id="drvVaultUnlockRecGo" style="margin-top:.35rem;">Unlock with recovery key</button>
 		</div>
 	</div>
 	<p class="drv-vault-error" id="drvVaultError" role="alert" hidden style="color:#e0533d;font-size:.85rem;"></p>
 	<div class="drv-dialog-actions">
-		<button type="button" class="jy-btn jy-btn-secondary" data-close>Cancel</button>
+		<button type="button" class="btn btn-secondary" data-close>Cancel</button>
 	</div>
 </dialog>
 
-<dialog id="drvRenameDialog" class="drv-dialog">
+<dialog id="drvRenameDialog" class="jy-ui drv-dialog">
 	<h3>Rename</h3>
 	<?php
 	$rename_fw->begin_form();
 	$rename_fw->textinput('drv_rename_name', 'New name', array('id' => 'drvRenameName', 'required' => true, 'maxlength' => 255));
 	?>
 	<div class="drv-dialog-actions">
-		<button type="button" class="jy-btn jy-btn-secondary" data-close>Cancel</button>
-		<button type="submit" class="jy-btn jy-btn-primary">Save</button>
+		<button type="button" class="btn btn-secondary" data-close>Cancel</button>
+		<button type="submit" class="btn btn-primary">Save</button>
 	</div>
 	<?php $rename_fw->end_form(); ?>
 </dialog>
 
-<dialog id="drvMoveDialog" class="drv-dialog">
+<dialog id="drvMoveDialog" class="jy-ui drv-dialog">
 	<h3>Move to</h3>
 	<?php
 	$move_fw->begin_form();
 	$move_fw->dropinput('drv_move_parent', 'Destination', array('id' => 'drvMoveParent', 'options' => array('0' => 'My Drive (root)')));
 	?>
 	<div class="drv-dialog-actions">
-		<button type="button" class="jy-btn jy-btn-secondary" data-close>Cancel</button>
-		<button type="submit" class="jy-btn jy-btn-primary">Move</button>
+		<button type="button" class="btn btn-secondary" data-close>Cancel</button>
+		<button type="submit" class="btn btn-primary">Move</button>
 	</div>
 	<?php $move_fw->end_form(); ?>
 </dialog>
 
-<dialog id="drvProtectionDialog" class="drv-dialog">
+<dialog id="drvProtectionDialog" class="jy-ui drv-dialog">
 	<h3>Protection for <span id="drvProtectionFolder"></span></h3>
 	<?php
 	$protection_fw->begin_form();
@@ -198,30 +210,30 @@ $protection_fw = $page->getFormWriter('drive_protection', array('action' => '/dr
 		<span data-ceremony-text>Starting…</span>
 	</div>
 	<div class="drv-dialog-actions">
-		<button type="button" class="jy-btn jy-btn-secondary" data-close>Cancel</button>
-		<button type="submit" class="jy-btn jy-btn-primary" id="drvProtectionApply">Apply</button>
+		<button type="button" class="btn btn-secondary" data-close>Cancel</button>
+		<button type="submit" class="btn btn-primary" id="drvProtectionApply">Apply</button>
 	</div>
 	<?php $protection_fw->end_form(); ?>
 </dialog>
 
-<dialog id="drvConfirmDialog" class="drv-dialog">
+<dialog id="drvConfirmDialog" class="jy-ui drv-dialog">
 	<h3 id="drvConfirmTitle">Delete forever?</h3>
 	<p id="drvConfirmBody"></p>
 	<div class="drv-dialog-actions">
-		<button type="button" class="jy-btn jy-btn-secondary" data-close>Cancel</button>
-		<button type="button" class="jy-btn jy-btn-danger" id="drvConfirmOk">Delete forever</button>
+		<button type="button" class="btn btn-secondary" data-close>Cancel</button>
+		<button type="button" class="btn btn-danger" id="drvConfirmOk">Delete forever</button>
 	</div>
 </dialog>
 
-<dialog id="drvVersionsDialog" class="drv-dialog">
+<dialog id="drvVersionsDialog" class="jy-ui drv-dialog">
 	<h3 id="drvVersionsTitle">Version history</h3>
 	<div id="drvVersionsBody" class="drv-versions"></div>
 	<div class="drv-dialog-actions">
-		<button type="button" class="jy-btn jy-btn-secondary" data-close>Close</button>
+		<button type="button" class="btn btn-secondary" data-close>Close</button>
 	</div>
 </dialog>
 
-<dialog id="drvShareDialog" class="drv-dialog">
+<dialog id="drvShareDialog" class="jy-ui drv-dialog">
 	<h3 id="drvShareTitle">Share</h3>
 
 	<h4 class="drv-share-h">People with access</h4>
@@ -233,7 +245,7 @@ $protection_fw = $page->getFormWriter('drive_protection', array('action' => '/dr
 	$add_person_fw->dropinput('drv_share_role', 'Role', array('id' => 'drvShareRole', 'options' => array('viewer' => 'Viewer', 'editor' => 'Editor')));
 	?>
 	<div class="drv-dialog-actions" style="justify-content:flex-start;">
-		<button type="submit" class="jy-btn jy-btn-secondary">Add person</button>
+		<button type="submit" class="btn btn-secondary">Add person</button>
 	</div>
 	<?php $add_person_fw->end_form(); ?>
 
@@ -249,13 +261,13 @@ $protection_fw = $page->getFormWriter('drive_protection', array('action' => '/dr
 		$link_fw->passwordinput('drv_link_pw', 'Password (optional)', array('id' => 'drvLinkPw'));
 		?>
 		<div class="drv-dialog-actions" style="justify-content:flex-start;">
-			<button type="submit" class="jy-btn jy-btn-secondary">Create link</button>
+			<button type="submit" class="btn btn-secondary">Create link</button>
 		</div>
 		<?php $link_fw->end_form(); ?>
 	</div>
 
 	<div class="drv-dialog-actions">
-		<button type="button" class="jy-btn jy-btn-primary" data-close>Done</button>
+		<button type="button" class="btn btn-primary" data-close>Done</button>
 	</div>
 </dialog>
 
@@ -266,11 +278,17 @@ $protection_fw = $page->getFormWriter('drive_protection', array('action' => '/dr
 .drv-nav-item{text-align:left;background:transparent;border:0;padding:.55rem .75rem;border-radius:8px;cursor:pointer;font:inherit;color:inherit}
 .drv-nav-item:hover{background:rgba(127,127,127,.12)}
 .drv-nav-item.active{background:rgba(80,120,255,.16);font-weight:600}
+.drv-rail-section{margin-top:1.25rem}
+.drv-rail-heading{font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;opacity:.6;padding:0 .75rem .35rem}
+.drv-nav-count{float:right;opacity:.55;font-size:.8rem;font-weight:400}
+.drv-source-note{font-size:.82rem;opacity:.65;margin:0 0 .6rem}
 .drv-meter{margin-top:1.25rem;font-size:.82rem}
 .drv-meter-track{height:8px;border-radius:6px;background:rgba(127,127,127,.2);overflow:hidden}
 .drv-meter-fill{height:100%;width:0;background:#5078ff;transition:width .3s}
 .drv-meter-fill.full{background:#e0533d}
 .drv-meter-label{margin-top:.4rem;opacity:.8}
+.drv-site-meter .drv-rail-heading{padding-left:0;margin-bottom:.4rem}
+.drv-site-meter .drv-meter-label{margin-top:.25rem}
 .drv-upgrade{margin-top:.5rem}
 .drv-main{flex:1 1 auto;min-width:0}
 .drv-toolbar{display:flex;flex-wrap:wrap;gap:.6rem;align-items:center;justify-content:space-between;margin-bottom:.75rem}
@@ -310,7 +328,6 @@ $protection_fw = $page->getFormWriter('drive_protection', array('action' => '/dr
 .drv-dialog::backdrop{background:rgba(0,0,0,.4)}
 .drv-dialog h3{margin:0 0 .8rem}
 .drv-dialog-actions{display:flex;justify-content:flex-end;gap:.5rem;margin-top:1rem}
-.jy-btn-danger{background:#e0533d;color:#fff;border:0}
 .drv-uploads{margin-top:1rem;display:flex;flex-direction:column;gap:.4rem}
 .drv-upload-row{display:flex;align-items:center;gap:.6rem;font-size:.85rem}
 .drv-upload-bar{flex:1 1 auto;height:6px;border-radius:4px;background:rgba(127,127,127,.2);overflow:hidden}
@@ -339,7 +356,6 @@ $protection_fw = $page->getFormWriter('drive_protection', array('action' => '/dr
 .drv-ceremony-dot[data-state=done]{background:#188038}
 .drv-ceremony-dot[data-state=error]{background:#b3261e}
 .drv-crumb-lock{opacity:.7}
-.jy-btn-block{display:block;width:100%}
 @media(max-width:720px){.drv-app{flex-direction:column}.drv-rail{position:static;width:100%;flex-basis:auto}.drv-nav{flex-direction:row;flex-wrap:wrap}}
 </style>
 

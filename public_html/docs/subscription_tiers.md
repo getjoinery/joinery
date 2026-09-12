@@ -77,8 +77,8 @@ and are not prefixed. The member Drive defines four:
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `drive_storage_bytes` | integer | Total Drive storage per member. `0` disables uploads. |
-| `drive_max_file_bytes` | integer | Largest single file a member may upload. `0` disables uploads. |
+| `drive_storage_bytes` | integer | Storage per member, counting every file they own. `0` means no limit. |
+| `drive_max_file_bytes` | integer | Largest single file a member may upload. `0` means no limit. |
 | `drive_share_links` | boolean | Whether the member may mint public share links. |
 | `drive_versioning_depth` | integer | Prior versions kept per file. `0` keeps only the current version. |
 

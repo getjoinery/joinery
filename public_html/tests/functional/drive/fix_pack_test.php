@@ -35,14 +35,6 @@ require_once(PathHelper::getIncludePath('logic/drive_upload_complete_logic.php')
 $dblink = DbConnector::get_instance()->get_db_link();
 
 $made_files = array(); $made_folders = array();
-harness_defer(function () use (&$made_files, &$made_folders) {
-	$dblink = DbConnector::get_instance()->get_db_link();
-	foreach ($made_files as $fid) { $f = new File((int)$fid, true); if ($f->key) { $f->permanent_delete(); } }
-	foreach (array_reverse($made_folders) as $fid) {
-		$dblink->prepare("DELETE FROM fga_file_access_grants WHERE fga_entity_type='folder' AND fga_entity_id=?")->execute(array((int)$fid));
-		$dblink->prepare("DELETE FROM fol_folders WHERE fol_folder_id=?")->execute(array((int)$fid));
-	}
-});
 
 harness_set_setting_mem('drive_active', '1');
 
@@ -93,6 +85,16 @@ function fixpack_fill_upload($raw_token, $content) {
 $ownerA  = make_user('fixowner');
 $editorB = make_user('fixeditor');
 $viewerC = make_user('fixviewer');
+// Deferred steps run last-registered first: files and folders go before their
+// owners, so the user teardown never cascades into rows this step still expects.
+harness_defer(function () use (&$made_files, &$made_folders) {
+	$dblink = DbConnector::get_instance()->get_db_link();
+	foreach ($made_files as $fid) { $f = new File((int)$fid, true); if ($f->key) { $f->permanent_delete(); } }
+	foreach (array_reverse($made_folders) as $fid) {
+		$dblink->prepare("DELETE FROM fga_file_access_grants WHERE fga_entity_type='folder' AND fga_entity_id=?")->execute(array((int)$fid));
+		$dblink->prepare("DELETE FROM fol_folders WHERE fol_folder_id=?")->execute(array((int)$fid));
+	}
+});
 fixpack_enroll($ownerA->key, $tier_group);
 fixpack_enroll($editorB->key, $tier_group);
 

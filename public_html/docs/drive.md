@@ -199,6 +199,26 @@ model of its own:
 | `FileChange` | `fch_file_changes` | Append-only change feed; the primary key IS the sync cursor. |
 | `FileUpload` | `fup_file_uploads` | Pending state for a resumable upload. |
 
+### The other places a member's files live
+
+The Drive rail has a second list, **Also in your account**: one entry per
+listable origin tag other than `drive` under which the member owns at least one
+live file, with its count — *Mail attachments*, *AI chat uploads*, *Photos*,
+*Unclassified* for rows older than the tags. `drive_list` returns them as
+`other_sources` on every response (`DriveHelper::other_sources_for_user`), and
+`view=source&source=<tag>` lists that source: the caller's own files only,
+newest first, a `search` staying inside the source. A source view is
+**read-only** — Drive hands the file over and nothing more; renaming, moving or
+deleting it belongs to the feature that stored it. Drive's own tag and every
+`internal` tag are refused as a source view.
+
+A file whose source opens through a decrypt hook (`File::source_opens_through_hook`
+— a mail attachment sealed under its message key) is exported with
+`requires_window: true`, no thumbnail URL (the stored bytes are that consumer's
+ciphertext; a variant resized from them would be noise), and `syncable: false`.
+The page opens it the way it opens a Private file: a HEAD, an unlock on 423,
+then the download.
+
 Access and tree logic lives in `includes/DriveHelper.php`; the verbs are `drive_*`
 API actions (`logic/drive_*_logic.php`, each with a `_logic_descriptor()`), which
 page JavaScript (`assets/js/drive.js`) calls with the browser-session credential.
@@ -432,7 +452,9 @@ contract for sync clients:
    `DriveHelper::encrypted_size_ceiling()` — the cap plus the client
    container's fixed per-chunk overhead, since the cap means plaintext bytes
    and the upload arrives as ciphertext) and quota (`bytes_used + size_bytes <=
-   drive_storage_bytes`) **of the owner who will be billed** — the target
+   drive_storage_bytes`) **of the owner who will be billed** — either limit at
+   0 is no limit, and the disk-space reserve (`FileUpload::space_refusal`) is
+   then the only bound — the target
    file's owner, else the destination folder's owner, else the actor. If
    `sha256` matches a private blob **the actor already possesses** it
    **short-circuits**: retain the blob, create the `File` (or a new
@@ -461,7 +483,7 @@ contract for sync clients:
    (when given) the sha256, re-validates write access, and **enforces the quota
    here, where bytes are admitted to storage**: under a per-owner advisory lock
    it recomputes usage fresh and rejects the complete if the upload would land
-   past `drive_storage_bytes` (the init check is only a fast-fail — N uploads
+   past a non-zero `drive_storage_bytes` (the init check is only a fast-fail — N uploads
    opened while under quota cannot all complete past it; a rejected upload
    keeps its pending row so the user can free space and retry). Then it ingests
    through `FileBlob::createFromPath` (server-side dedup applies — the server
@@ -496,19 +518,42 @@ to `drive_upload_init`.
 
 ## Quota accounting
 
-`DriveUsage` is **recomputed, never incremented** — `DriveUsage::recompute($user)`
-sums the blob sizes of the user's **Drive** files (`fil_source = 'drive'`) plus
-the versions of those files, inside the caller's transaction, after every
-upload / new version / restore / permanent delete. Version bytes bill the
-**file's owner** (a version row's `fvr_usr_user_id` records who saved it —
-audit only, since an editor may save a version of someone else's file), and an
-upload into a shared folder bills the folder owner, per the single-owner-tree
-rule above. Each logical file bills its full size even when its bytes are
-deduped onto a shared blob (dedup saves disk, not quota); trashed files count
-until purged. `DriveUsage::current_bytes($user)` is a row-free read for the
-storage meter (the `/drive` page render is a GET and must not create a row). The
-daily `DriveUsageReconcile` task re-runs the sum for every file-owning user as a
-drift backstop.
+**Everything a member owns counts.** `DriveUsage::sum_for_user($user)` sums the
+blob sizes of every file with the member's id on it — a Drive upload, a mail
+attachment, a photo, a chat upload, a legacy untagged row — plus the prior
+versions of their files, excluding only the system's own internal sources
+(`File::internal_sources()`, files the member can neither see nor free).
+Trashed files count until purged. Version bytes bill the **file's owner** (a
+version row's `fvr_usr_user_id` records who saved it — audit only, since an
+editor may save a version of someone else's file), and an upload into a shared
+folder bills the folder owner, per the single-owner-tree rule above. Each
+logical file bills its full size even when its bytes are deduped onto a shared
+blob (dedup saves disk, not quota).
+
+The sum is **computed when asked, never incremented**: files arrive through
+every subsystem, most of which know nothing about Drive, so a cached counter
+would go stale the moment an attachment landed. The meter
+(`DriveUsage::current_bytes`) and both upload gates read the live sum;
+`DriveUsage::recompute($user)` persists it to `dru_drive_usage` after Drive's own
+mutations (upload / new version / restore / permanent delete), and the daily
+`DriveUsageReconcile` task re-runs it for every file-owning user. The sum walks
+`fil_files` by `fil_usr_user_id`, which is indexed for it.
+
+A quota of 0 is **no quota**: the meter shows the number alone, and uploads are
+bounded only by the server's disk-space reserve.
+
+### The admin's site-wide meter
+
+An admin (permission ≥ 5) sees a second widget under their own meter,
+**Everyone on this site**: what every member's files weigh as stored and what
+this server has left. `drive_list` returns it as `site_storage` (null for a
+member) from `DriveUsage::site_totals()` — counted over **blobs**, not files, so
+a deduped byte is counted once, and split into `bytes_local` / `bytes_cloud`
+because a blob offloaded to the cloud bucket takes no room here.
+`bytes_available` is the free space where uploads land, net of the reserve
+uploads keep (`DiskSpace::DEFAULT_FLOOR_BYTES`), so it is what can actually
+still be stored; it is null, and shown as unknown, when the host hides
+`disk_free_space`.
 
 ## Trash
 
@@ -656,6 +701,7 @@ Settings (`settings.json`): `drive_active` (`'0'`), `drive_max_folder_depth`
 
 Tier features (`includes/core_tier_features.json`), read via
 `SubscriptionTier::getUserFeature($uid, $key, $default)`: `drive_storage_bytes`
-(total quota; 0 disables uploads), `drive_max_file_bytes` (per-file cap; 0
-disables), `drive_share_links` (boolean), `drive_versioning_depth` (versions
-kept). All default to the fail-closed value for a tierless member.
+(quota over everything the member owns; 0 is no quota), `drive_max_file_bytes`
+(per-file cap; 0 is no cap), `drive_share_links` (boolean),
+`drive_versioning_depth` (versions kept). A tierless member — the owner of a
+self-hosted site — uploads without limit, bounded by the disk-space reserve.

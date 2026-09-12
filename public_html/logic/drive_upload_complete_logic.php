@@ -220,9 +220,10 @@ function drive_upload_complete_logic(array $input): LogicResult {
 	DriveHelper::quota_lock($owner_id);
 	try {
 		require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
+		// Quota 0 is no quota; the disk-space reserve is the only bound then.
 		$quota = (int)SubscriptionTier::getUserFeature($owner_id, 'drive_storage_bytes', 0);
 		$current = DriveUsage::recompute($owner_id);
-		if ($quota <= 0 || $current + $expected > $quota) {
+		if ($quota > 0 && $current + $expected > $quota) {
 			return LogicResult::error('That upload would exceed the storage quota.');
 		}
 

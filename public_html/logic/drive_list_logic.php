@@ -2,8 +2,11 @@
 
 /**
  * drive_list — the listing behind every Drive view. Returns a folder's children
- * (folders + files), or the Starred / Trash / Shared-with-me collections, plus
- * the breadcrumb and the storage meter. Read-only.
+ * (folders + files), or the Starred / Trash / Shared-with-me collections, or a
+ * "source" view — the member's own files another subsystem stored (mail
+ * attachments, chat uploads, photos), read-only, newest first — plus the
+ * breadcrumb, the storage meter and the rail's list of those other sources
+ * with counts. Read-only.
  *
  * Listings cap at DRIVE_LIST_CAP children and set 'truncated' past the cap.
  * `offset` skips that many children first (same deterministic ordering:
@@ -41,6 +44,7 @@ function drive_list_logic(array $input): LogicResult {
 	$folder_id = (isset($input['folder_id']) && (int)$input['folder_id'] > 0) ? (int)$input['folder_id'] : 0;
 	$search    = trim((string)($input['search'] ?? ''));
 	$offset    = max(0, (int)($input['offset'] ?? 0));
+	$source    = (string)($input['source'] ?? '');
 
 	$folders = array();
 	$files   = array();
@@ -56,7 +60,30 @@ function drive_list_logic(array $input): LogicResult {
 		));
 	}
 
-	if ($search !== '') {
+	if ($view === 'source') {
+		// Files another subsystem stored for this member. Ownership is the
+		// whole access rule (no folders, no grants), a search stays inside the
+		// source, and nothing here is Drive's to rename, move or trash — the
+		// owning subsystem (the mailbox, the chat) does that.
+		if (!in_array($source, DriveHelper::browsable_other_sources(), true)) {
+			return LogicResult::error('Unknown file source.');
+		}
+		$opts = array('user_id' => $user_id, 'deleted' => false);
+		// The catalog's stand-in for "no origin tag" is only reachable through
+		// the allowlist form (fil_source = ? never matches NULL).
+		if ($source === File::SOURCE_UNCLASSIFIED) {
+			$opts['sources'] = array(File::SOURCE_UNCLASSIFIED);
+		} else {
+			$opts['source'] = $source;
+		}
+		if ($search !== '') {
+			$opts['title_like'] = $search;
+		}
+		$rows = new MultiFile($opts, array('fil_create_time' => 'DESC', 'fil_file_id' => 'DESC'));
+		foreach ($rows as $f) {
+			$files[] = $f;
+		}
+	} elseif ($search !== '') {
 		$files = _drive_list_search($user_id, $search);
 	} elseif ($view === 'starred') {
 		$starred_ids = array_keys(DriveHelper::starred_file_ids($user_id));
@@ -164,14 +191,35 @@ function drive_list_logic(array $input): LogicResult {
 		}
 	}
 
-	// Read-only usage: never create the row here (drive_list also renders the page
-	// on a GET). The row is materialized by recompute after a mutation.
+	// The meter: everything the member owns, summed live (nothing written on
+	// this GET). Quota 0 is no quota — the meter then shows the number alone.
 	$bytes_used = DriveUsage::current_bytes($user_id);
 	$quota = (int)SubscriptionTier::getUserFeature($user_id, 'drive_storage_bytes', 0);
+
+	// The admin's second widget: what every member's files weigh as stored,
+	// and what this server has left. Free space is measured where uploads land
+	// and reported net of the reserve uploads keep (DiskSpace::DEFAULT_FLOOR_BYTES),
+	// so "available" is what can actually still be stored. Null when the host
+	// hides disk_free_space — an unknown is reported as unknown, not as 0.
+	$site_storage = null;
+	if ($session->get_permission() >= 5) {
+		require_once(PathHelper::getIncludePath('includes/DiskSpace.php'));
+		$totals = DriveUsage::site_totals();
+		$upload_dir = (string)$settings->get_setting('upload_dir');
+		$free = DiskSpace::leastFreeBytes(array($upload_dir !== '' ? $upload_dir : '/'));
+		$site_storage = array(
+			'bytes_used'      => $totals['bytes_total'],
+			'bytes_local'     => $totals['bytes_local'],
+			'bytes_cloud'     => $totals['bytes_cloud'],
+			'files'           => $totals['files'],
+			'bytes_available' => ($free === null) ? null : max(0, $free - DiskSpace::DEFAULT_FLOOR_BYTES),
+		);
+	}
 
 	return LogicResult::render(array(
 		'ok'         => true,
 		'view'       => $view,
+		'source'     => ($view === 'source') ? $source : null,
 		'folder_id'  => $folder_id,
 		'folder'     => $current_folder ? DriveHelper::folder_export($current_folder) : null,
 		'breadcrumb' => $breadcrumb,
@@ -181,6 +229,10 @@ function drive_list_logic(array $input): LogicResult {
 			'bytes_used'  => $bytes_used,
 			'quota_bytes' => $quota,
 		),
+		'site_storage' => $site_storage,
+		// The rail's "Also in your account" entries, recounted on every load
+		// so a newly arrived attachment shows up without a page reload.
+		'other_sources' => DriveHelper::other_sources_for_user($user_id),
 	));
 }
 
@@ -293,15 +345,16 @@ function _drive_list_shared($user_id) {
 
 function drive_list_logic_descriptor(): array {
 	return array(
-		'description'      => 'List a Drive folder\'s contents, or the Starred / Trash / Shared-with-me collections.',
+		'description'      => 'List a Drive folder\'s contents, the Starred / Trash / Shared-with-me collections, or the caller\'s own files stored by another subsystem (view=source with a source tag from other_sources).',
 		'requires_session' => true,
 		'requires_setting' => 'drive_active',
 		'mutates'          => false,
 		'auth'             => array('capability' => 'read'),
 		'input'            => array(
 			'folder_id' => array('type' => 'int', 'required' => false, 'label' => 'Folder id (omit for root)'),
-			'view'      => array('type' => 'string', 'required' => false, 'enum' => array('mine', 'starred', 'trash', 'shared', 'folders'), 'label' => 'View'),
-			'search'    => array('type' => 'string', 'required' => false, 'max_length' => 255, 'label' => 'Filename search'),
+			'view'      => array('type' => 'string', 'required' => false, 'enum' => array('mine', 'starred', 'trash', 'shared', 'folders', 'source'), 'label' => 'View'),
+			'source'    => array('type' => 'string', 'required' => false, 'max_length' => 64, 'label' => 'Origin tag for view=source (one of the other_sources keys the listing returns)'),
+			'search'    => array('type' => 'string', 'required' => false, 'max_length' => 255, 'label' => 'Filename search (inside the source for view=source)'),
 			'offset'    => array('type' => 'int', 'required' => false, 'min' => 0, 'label' => 'Children to skip (page while truncated is true)'),
 		),
 	);

@@ -341,10 +341,17 @@ class DriveHelper {
 		$encrypted = ($level === ProtectionLevel::FORTRESS);
 		$sealed    = ($level === ProtectionLevel::PRIVATE_);
 		$mime = $file->get('fil_type');
+		// A file another subsystem stored (a mail attachment, a chat upload)
+		// listed on Drive's "also in your account" views: when its source opens
+		// through a decrypt hook the stored bytes are that consumer's
+		// ciphertext, so no thumbnail is offered — a variant resized from them
+		// would be noise — and the download needs the owner's window open.
+		$hook_opened = ($file->get('fil_source') !== File::SOURCE_DRIVE)
+			&& File::source_opens_through_hook($file->get('fil_source'));
 		// A sealed file's fil_type is the real one (sniffed before sealing), so
 		// the UI can show it as an image and ask for its thumbnail — that thumb
 		// is sealed too and opens in-window. Only Fortress is opaque here.
-		$is_image = $encrypted ? false : File::is_inline_safe_type($mime);
+		$is_image = ($encrypted || $hook_opened) ? false : File::is_inline_safe_type($mime);
 
 		// The member is shown plaintext bytes; the blob measures ciphertext.
 		if ($sealed) {
@@ -365,6 +372,7 @@ class DriveHelper {
 		$out = array(
 			'entity_type'  => self::ENTITY_FILE,
 			'id'           => $file_id,
+			'source'       => $file->get('fil_source') ?: File::SOURCE_UNCLASSIFIED,
 			'name'         => $file->get('fil_title'),
 			'size'         => (int)$size,
 			'mime'         => $mime,
@@ -388,7 +396,7 @@ class DriveHelper {
 			'protection_level' => $level,
 			// A sync client cannot open a sealed file — it holds no unlock
 			// window — so Private files are excluded from sync (docs/drive.md).
-			'syncable'        => !$sealed,
+			'syncable'        => !$sealed && !$hook_opened,
 		);
 		if ($sealed) {
 			// Server custody: the server holds the key wrapping and opens the
@@ -417,6 +425,12 @@ class DriveHelper {
 			if ($thumb !== null) {
 				$out['thumb_url'] = $file->mintSignedUrl($thumb, 3600);
 			}
+		} elseif ($hook_opened) {
+			// The consumer that stored it opens it inside the owner's window
+			// (File::serve_from_path answers 423 until then), the same contract
+			// as a Private file, minus the thumbnail.
+			$out['encrypted'] = false;
+			$out['requires_window'] = true;
 		} elseif ($is_image) {
 			$out['encrypted'] = false;
 			$thumb = $with_urls ? self::thumb_size_key() : null;
@@ -425,6 +439,50 @@ class DriveHelper {
 			}
 		} else {
 			$out['encrypted'] = false;
+		}
+		return $out;
+	}
+
+	/**
+	 * The other places this member's files live — every listable origin tag
+	 * other than Drive's own with at least one live file owned by them, with
+	 * its count. This is what the Drive rail offers under "Also in your
+	 * account": a mail attachment or a chat upload is the member's file and
+	 * counts against nothing here, but it is theirs to find and download.
+	 *
+	 * @return array<int,array{key:string,label:string,count:int}>
+	 */
+	public static function other_sources_for_user($user_id) {
+		self::require_classes();
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$q = $dblink->prepare(
+			"SELECT COALESCE(fil_source, :none) AS src, COUNT(*) AS n
+			   FROM fil_files
+			  WHERE fil_usr_user_id = :uid AND fil_delete_time IS NULL
+			  GROUP BY 1");
+		$q->execute(array(':uid' => (int)$user_id, ':none' => File::SOURCE_UNCLASSIFIED));
+		$counts = array();
+		foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+			$counts[(string)$row['src']] = (int)$row['n'];
+		}
+		$out = array();
+		foreach (File::source_catalog() as $key => $spec) {
+			if ($key === File::SOURCE_DRIVE || !empty($spec['internal']) || empty($counts[$key])) {
+				continue;
+			}
+			$out[] = array('key' => $key, 'label' => $spec['label'], 'count' => $counts[$key]);
+		}
+		return $out;
+	}
+
+	/** The origin tags a Drive "source" view may show: listable, and not Drive's own. */
+	public static function browsable_other_sources() {
+		self::require_classes();
+		$out = array();
+		foreach (File::source_catalog() as $key => $spec) {
+			if ($key !== File::SOURCE_DRIVE && empty($spec['internal'])) {
+				$out[] = $key;
+			}
 		}
 		return $out;
 	}

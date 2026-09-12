@@ -2,7 +2,7 @@
 /**
  * Public share page for /s/{token}. Anonymous-safe.
  *
- * @version 1.0
+ * @version 1.1
  */
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('share_logic.php', 'logic'));
@@ -39,7 +39,7 @@ function share_human_bytes($n) {
 			$fw = $page->getFormWriter('drive_share_password', array('action' => '/s/' . rawurlencode($page_vars['token']), 'method' => 'POST'));
 			$fw->begin_form();
 			$fw->passwordinput('drv_link_password', 'Password', array('required' => true));
-			$fw->submitbutton('btn_submit', 'View', array('class' => 'jy-btn jy-btn-primary'));
+			$fw->submitbutton('btn_submit', 'View', array('class' => 'btn btn-primary'));
 			$fw->end_form();
 			?>
 
@@ -49,7 +49,7 @@ function share_human_bytes($n) {
 				<div id="shareEncThumb"></div>
 				<p style="opacity:.7;margin:.4rem 0;">🔒 <span id="shareEncMeta"><?php echo share_human_bytes($f['size']); ?> · encrypted</span></p>
 				<p id="shareEncStatus" style="opacity:.7;">This file is end-to-end encrypted. It is decrypted in your browser using the key in your link.</p>
-				<p><button type="button" class="jy-btn jy-btn-primary" id="shareEncDownload" disabled>Decrypt &amp; download</button></p>
+				<p><button type="button" class="btn btn-primary" id="shareEncDownload" disabled>Decrypt &amp; download</button></p>
 				<p id="shareEncError" style="color:#e0533d;" hidden></p>
 			</div>
 			<script>
@@ -70,7 +70,7 @@ function share_human_bytes($n) {
 					<img src="<?php echo htmlspecialchars($f['preview_url']); ?>" alt="" style="max-width:100%;max-height:60vh;border-radius:8px;margin-bottom:1rem;">
 				<?php endif; ?>
 				<p style="opacity:.7;margin:.4rem 0;"><?php echo share_human_bytes($f['size']); ?> · <?php echo htmlspecialchars($f['mime'] ?: 'file'); ?></p>
-				<p><a class="jy-btn jy-btn-primary" href="<?php echo htmlspecialchars($f['download_url']); ?>" download>Download</a></p>
+				<p><a class="btn btn-primary" href="<?php echo htmlspecialchars($f['download_url']); ?>" download>Download</a></p>
 			</div>
 
 		<?php elseif (($page_vars['entity_type'] ?? '') === 'folder'): ?>
@@ -93,7 +93,7 @@ function share_human_bytes($n) {
 							<?php else: ?>
 								<span aria-hidden="true"><?php echo $it['is_image'] ? '🖼️' : '📄'; ?></span>
 								<span style="flex:1;"><?php echo htmlspecialchars($it['name']); ?></span>
-								<a class="jy-btn jy-btn-secondary" href="<?php echo htmlspecialchars($it['download_url']); ?>" download>Download</a>
+								<a class="btn btn-secondary" href="<?php echo htmlspecialchars($it['download_url']); ?>" download>Download</a>
 							<?php endif; ?>
 						</li>
 					<?php endforeach; ?>

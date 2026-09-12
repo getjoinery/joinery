@@ -45,7 +45,11 @@ interface FileStreamingDecryptor {
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
- * @version 1.10.3
+ * @version 1.11.0
+ * @changelog 1.11.0 - source_opens_through_hook(): a listing can ask whether a
+ *   source's bytes are opened server-side, so it never mints a thumbnail URL
+ *   for ciphertext. fil_usr_user_id indexed: DriveUsage sums a member's files
+ *   by it.
  * @changelog 1.10.3 - permanent_delete flushes the at-zero blob reclaim it
  *   deferred against its own transaction, so bytes are freed at the call
  *   rather than at process shutdown.
@@ -233,7 +237,7 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	    'fil_title' => array('type'=>'varchar(255)'),
 	    'fil_description' => array('type'=>'text'),
 	    'fil_type' => array('type'=>'varchar(128)'),
-	    'fil_usr_user_id' => array('type'=>'int4'),
+	    'fil_usr_user_id' => array('type'=>'int4', 'index'=>true),
 	    'fil_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	    'fil_delete_time' => array('type'=>'timestamp(6)'),
 	    'fil_min_permission' => array('type'=>'int2'),
@@ -926,6 +930,24 @@ public static function get_by_name($name, $search_deleted = false) {
 	 */
 	public static function registerStreamingDecryptHook(string $source, callable $opener): void {
 		self::$streaming_decrypt_hooks[$source] = $opener;
+	}
+
+	/**
+	 * Are this source's bytes opened by the SERVER at serve time — does a
+	 * consumer hold a decrypt hook (either shape) for the tag? A listing that
+	 * shows such a file must not promise a thumbnail (a variant made from the
+	 * stored bytes would be resized ciphertext) and should expect a 423 when the
+	 * owner's window is shut. Loads the consumer bootstraps first, because hooks
+	 * are registered lazily and an unloaded registry would answer "no" for every
+	 * source.
+	 */
+	public static function source_opens_through_hook($source): bool {
+		if ($source === null || $source === '') {
+			return false;
+		}
+		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+		VaultUnlock::loadConsumerBootstraps();
+		return isset(self::$decrypt_hooks[$source]) || isset(self::$streaming_decrypt_hooks[$source]);
 	}
 
 	private function resolve_streaming_decryptor($size_key = null) {
