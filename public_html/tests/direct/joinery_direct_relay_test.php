@@ -47,7 +47,7 @@ class RelayTestHandler implements DirectKindHandler {
 	public function gate(DirectEnvelope $envelope): bool { return true; }
 	public function ingest(DirectEnvelope $envelope, array $parts, bool $gate_accepted): void {
 		$bodies = array();
-		foreach ($parts as $part) { $bodies[] = $part->open($envelope->vaultSecretKey()); }
+		foreach ($parts as $part) { $bodies[] = $part->open($envelope->vaultKey()); }
 		self::$ingested[] = array(
 			'recipient' => $envelope->recipient(), 'accepted' => $gate_accepted,
 			'alias_id' => $envelope->recipientAliasId(), 'bodies' => $bodies,

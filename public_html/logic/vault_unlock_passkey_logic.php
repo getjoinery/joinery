@@ -4,7 +4,6 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 function vault_unlock_passkey_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/PasskeyService.php'));
-	require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
 	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 	require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 	require_once(PathHelper::getIncludePath('data/user_encryption_wrappings_class.php'));
@@ -63,15 +62,14 @@ function vault_unlock_passkey_logic(array $input): LogicResult {
 		}
 	}
 
+	// The unwrap happens inside the key holder: what comes back is a window,
+	// never the secret (docs/sealed_vault.md § The unlock window).
 	try {
-		$box = new SealedBox();
-		$ad = UserEncryptionWrapping::adFor($vault->key, $wrapping->key);
-		$secret_key = $box->unwrapKey($wrapping->get('uew_wrapped_secret_key'), $prf_output, $ad);
+		VaultUnlock::open($user->key, $wrapping->unlocker($prf_output), [], UserEncryptionVault::SCOPE_USER,
+			null, VaultAudit::VIA_PASSKEY);
 	} catch (Exception $e) {
 		return LogicResult::error('Could not unlock your vault with this passkey.');
 	}
-
-	VaultUnlock::open($user->key, $secret_key, UserEncryptionVault::SCOPE_USER, null, VaultAudit::VIA_PASSKEY);
 
 	return LogicResult::render(['unlocked' => true]);
 }

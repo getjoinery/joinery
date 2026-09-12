@@ -30,14 +30,14 @@
  * imc_address is ciphertext. Hashing the alias id alongside the address is what makes the
  * (hash, user) unique constraint mean one row per (user, MAILBOX, address) without a composite
  * key over a column that is itself ciphertext. For a vault holder it is a KEYED hash (HMAC
- * under a subkey derived from the in-window vault secret) so it never leaks the sealed address
- * to an attacker with only DB access; for a user with no vault it is a plain SHA-256 (the
- * address column is plaintext anyway). See MailboxContacts::addressHash(). A vault rotation
- * changes the derived key, so a re-added address may land a second row post-rotation —
- * harmless, because the contacts payload also de-duplicates by decrypted address on read (this
- * store is a cache).
+ * under the user's contact-index key, MailboxContactIndexKey, sealed to their vault and
+ * opened in-window) so it never leaks the sealed address to an attacker with only DB access;
+ * for a user with no vault it is a plain SHA-256 (the address column is plaintext anyway).
+ * See MailboxContacts::addressHash(). The index key rides the ordinary reseal path, so a vault
+ * rotation leaves every hash valid; the contacts payload still de-duplicates by decrypted
+ * address on read (this store is a cache), so a stray second row is harmless.
  *
- * @version 1.3
+ * @version 1.4
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));

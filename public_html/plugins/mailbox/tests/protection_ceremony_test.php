@@ -28,6 +28,7 @@
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
+require_once(__DIR__ . '/../../../tests/lib/vault_fixtures.php');
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protection_ceremony.php'));
 require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
 
@@ -315,7 +316,7 @@ try {
 	require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
 	$crypto = new VaultCrypto();
 	$dek = $crypto->openItemDek((string)$sealed_row['iem_sealed_key'],
-		SealedBox::b64url(sodium_crypto_box_secretkey($keypair)));
+		vault_fixture_key(SealedBox::b64url(sodium_crypto_box_secretkey($keypair))));
 	check(is_string($dek) && $dek !== '', 'the holder\'s secret key opens the row DEK');
 
 	// A mailbox with no vault-holding owner is skipped, never half-sealed.

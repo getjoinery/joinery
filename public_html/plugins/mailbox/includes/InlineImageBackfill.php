@@ -77,7 +77,7 @@ class InlineImageBackfill {
 	 * rows became file-backed. Every attempted row is stamped first, so a
 	 * failure backs off instead of retrying on the next heartbeat.
 	 */
-	public static function drainForUser(int $user_id, string $secret_key, int $max = self::DEFAULT_MAX,
+	public static function drainForUser(int $user_id, VaultKey $key, int $max = self::DEFAULT_MAX,
 			?float $deadline = null): int {
 		if ($user_id <= 0) {
 			return 0;

@@ -149,12 +149,12 @@ class RecipeRun extends SystemBase {
         if ($owner <= 0 || $key === '') {
             return null;
         }
-        $secret = VaultUnlock::secretKey($owner);
-        if ($secret === null) {
+        $vault_key = VaultUnlock::secretKey($owner);
+        if ($vault_key === null) {
             return null;
         }
         $crypto = new VaultCrypto();
-        $this->content_dek = $crypto->openItemDek($key, $secret);
+        $this->content_dek = $crypto->openItemDek($key, $vault_key);
         return $this->content_dek;
     }
 

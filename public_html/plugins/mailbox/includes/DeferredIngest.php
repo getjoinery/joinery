@@ -52,7 +52,7 @@ class DeferredIngest {
 
 	/**
 	 * Parse pending-parse messages owned by $user_id, using their in-window
-	 * vault secret. Returns the number of messages parsed. Per-message failures are
+	 * vault key. Returns the number of messages parsed. Per-message failures are
 	 * logged and the row is left pending (retried at the next drain) — one bad blob
 	 * never stalls the rest of the backlog.
 	 *
@@ -61,9 +61,9 @@ class DeferredIngest {
 	 * may overrun it — the same contract every VaultDeferredWork consumer has.
 	 * Null means no deadline (the mailbox-view call sites, bounded by $max).
 	 */
-	public static function drainForUser(int $user_id, string $secret_key, int $max = self::DEFAULT_MAX,
+	public static function drainForUser(int $user_id, VaultKey $key, int $max = self::DEFAULT_MAX,
 			?float $deadline = null): int {
-		if ($user_id <= 0 || $secret_key === '') {
+		if ($user_id <= 0) {
 			return 0;
 		}
 
@@ -87,8 +87,8 @@ class DeferredIngest {
 				// their own plaintext, not from anything sealed. Nothing one
 				// message decrypts is in play when the next one starts.
 				$msg = new InboundEmailMessage(intval($id), TRUE);
-				$done = SealedEgressGuard::isolate(function () use ($router, $msg, $secret_key) {
-					return $router->parsePendingMessage($msg, $secret_key);
+				$done = SealedEgressGuard::isolate(function () use ($router, $msg, $key) {
+					return $router->parsePendingMessage($msg, $key);
 				});
 				if ($done) {
 					$parsed++;

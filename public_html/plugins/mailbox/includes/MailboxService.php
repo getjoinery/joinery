@@ -1045,8 +1045,8 @@ class MailboxService {
 			$vault = count($index_scope) ? UserEncryptionVault::loadForUser($viewer_id) : null;
 
 			if ($vault !== null && InboundEmailMessage::scopeSealedContentActive($index_scope)) {
-				$secret = VaultUnlock::secretKey($viewer_id);
-				if ($secret === null) {
+				$key = VaultUnlock::secretKey($viewer_id);
+				if ($key === null) {
 					$search_locked = true;
 					$where[] = $fts_sql;
 					$params[] = $filters['q'];
@@ -1057,7 +1057,7 @@ class MailboxService {
 					// the 'mailbox_fts_fold' deferred-work consumer; until it
 					// catches up, the response says the index is still building.
 					$index = new MailboxIndex();
-					$fold = $index->fold($viewer_id, $secret,
+					$fold = $index->fold($viewer_id, $key,
 						microtime(true) + self::SEARCH_FOLD_BUDGET_SECONDS);
 					if (empty($fold['complete'])) {
 						$this->search_indexing = array(
@@ -1467,12 +1467,12 @@ class MailboxService {
 			if ($vault === null) {
 				return;
 			}
-			$secret = VaultUnlock::secretKey($owner_id);
-			if ($secret === null) {
+			$key = VaultUnlock::secretKey($owner_id);
+			if ($key === null) {
 				return; // locked — nothing to parse until the next unlocked view
 			}
 			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/DeferredIngest.php'));
-			DeferredIngest::drainForUser($owner_id, $secret);
+			DeferredIngest::drainForUser($owner_id, $key);
 		} catch (\Throwable $e) {
 			error_log('MailboxService: relay backlog drain failed for owner ' . $owner_id . ': ' . $e->getMessage());
 		}

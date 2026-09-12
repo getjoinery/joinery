@@ -789,7 +789,7 @@ class InboundEmailRouter {
 	 * parsed, or no sealed blob). Throws only on a genuine crypto/parse failure so
 	 * the caller can leave the row pending and retry at the next unlock.
 	 */
-	public function parsePendingMessage(InboundEmailMessage $msg, string $secret_key): bool {
+	public function parsePendingMessage(InboundEmailMessage $msg, VaultKey $key): bool {
 		if (!$msg->get('iem_pending_parse')) {
 			return false;
 		}
@@ -808,7 +808,7 @@ class InboundEmailRouter {
 		// is NOT a read of stored sealed content, which is why the hot-turn rule
 		// stays off here and only here. See the method's contract.
 		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
-		$raw = (new VaultCrypto())->openHeldDeliveryBlob($sealed_raw, $secret_key);
+		$raw = (new VaultCrypto())->openHeldDeliveryBlob($sealed_raw, $key);
 
 		$parsed = $this->parseEmail($raw);
 
@@ -993,9 +993,9 @@ class InboundEmailRouter {
 	 * bypasses the spam apparatus for no one; it is simply filed, never bounced
 	 * and never returned to the sender.
 	 *
-	 * $vault_secret_key is present only on the deferred path (the sealed tiers,
-	 * at unlock), where it opens the sealed parts. On the live path the parts
-	 * arrived plaintext under TLS and it is null.
+	 * The envelope's vault key is present only on the deferred path (the sealed
+	 * tiers, at unlock), where it opens the sealed parts. On the live path the
+	 * parts arrived plaintext under TLS and it is null.
 	 *
 	 * @param array $meta  sender, subject, recipient, message_id, references,
 	 *                     in_reply_to, received_time

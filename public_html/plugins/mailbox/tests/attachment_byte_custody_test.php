@@ -260,7 +260,7 @@ $find_message = function (string $mid) use ($db, $alias_id): ?int {
 };
 
 $open_window = function (string $secret) use ($uid) {
-	VaultUnlock::open($uid, $secret, UserEncryptionVault::SCOPE_USER,
+	vault_fixture_open_window($uid, $secret, UserEncryptionVault::SCOPE_USER,
 		array('idle' => null, 'absolute' => null));
 };
 
@@ -378,7 +378,7 @@ check((int)$sealed_file->get('fil_plain_size_bytes') === strlen($pdf),
 	(string)$sealed_file->get('fil_plain_size_bytes'));
 
 // The key really does open with the owner's vault secret.
-$fk_direct = $crypto->openItemDek((string)$sealed_file->get('fil_sealed_key'), $kp1['secret']);
+$fk_direct = $crypto->openItemDek((string)$sealed_file->get('fil_sealed_key'), vault_fixture_key($kp1['secret']));
 check(SealedFileContainer::openBytes($sealed_file->read_bytes('original'), $fk_direct) === $pdf,
 	'sealed: the container opens with the owner vault key and yields the original bytes');
 
@@ -654,14 +654,14 @@ VaultUnlock::lockAll($uid);
 $callbacks = VaultUnlock::resealCallbacks();
 check(count($callbacks) >= 1, 'reseal callbacks are registered');
 foreach ($callbacks as $cb) {
-	call_user_func($cb, $uid, $kp1['secret'], 1, $kp2['public'], 2);
+	call_user_func($cb, $uid, vault_fixture_key($kp1['secret']), 1, $kp2['public'], 2);
 }
 
 $sealed_file->load();
 check((int)$sealed_file->get('fil_key_generation') === 2,
 	'rotation: the adopted attachment moved to the new generation with the Drive sweep — no new code',
 	(string)$sealed_file->get('fil_key_generation'));
-$fk_after = $crypto->openItemDek((string)$sealed_file->get('fil_sealed_key'), $kp2['secret']);
+$fk_after = $crypto->openItemDek((string)$sealed_file->get('fil_sealed_key'), vault_fixture_key($kp2['secret']));
 check(SealedFileContainer::openBytes($sealed_file->read_bytes('original'), $fk_after) === $pdf,
 	'rotation: and it still opens afterwards, with the same bytes');
 

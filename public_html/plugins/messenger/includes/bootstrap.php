@@ -40,10 +40,10 @@ File::registerStreamingDecryptHook(File::SOURCE_MESSENGER_ATTACHMENT, function (
 // generation being drained and rewrites no message and no attachment. Every
 // grant is attempted and any failure throws, so the ceremony cannot retire the
 // old wrappings while a conversation still depends on them.
-VaultUnlock::onReseal(function (int $user_id, string $old_secret_key, int $old_key_generation,
+VaultUnlock::onReseal(function (int $user_id, VaultKey $old_key, int $old_key_generation,
 		string $new_public_key, int $new_key_generation) {
 	$result = ConversationKeyGrant::resealForUser(
-		$user_id, $old_secret_key, $old_key_generation, $new_public_key, $new_key_generation);
+		$user_id, $old_key, $old_key_generation, $new_public_key, $new_key_generation);
 
 	if ($result['failed'] > 0) {
 		throw new RuntimeException(

@@ -487,7 +487,7 @@ class RecipeVaultScope {
 	 *
 	 * A recipe already mid-run elsewhere is skipped rather than doubled up.
 	 */
-	public static function drain(int $user_id, string $secret_key, float $deadline): int {
+	public static function drain(int $user_id, VaultKey $key, float $deadline): int {
 		$ran = 0;
 		foreach (self::pendingForOwner($user_id) as $recipe) {
 			if (microtime(true) >= $deadline) {

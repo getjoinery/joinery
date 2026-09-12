@@ -590,14 +590,14 @@ function mailbox_protection_unseal_batch(?InboundEmailDomain $domain, int $calle
 		return array('own' => intval($row['own'] ?? 0), 'others' => intval($row['others'] ?? 0));
 	};
 
-	$secret = VaultUnlock::secretKey($caller_user_id);
-	if ($secret === null) {
+	$key = VaultUnlock::secretKey($caller_user_id);
+	if ($key === null) {
 		$c = $counts();
 		return array('unsealed' => 0, 'own_remaining' => $c['own'], 'others_remaining' => $c['others'], 'locked' => true);
 	}
 
 	// Pending-parse rows first — DeferredIngest is caller-scoped already.
-	DeferredIngest::drainForUser($caller_user_id, $secret);
+	DeferredIngest::drainForUser($caller_user_id, $key);
 
 	$stmt = $db->prepare(
 		"SELECT m.iem_inbound_email_message_id FROM iem_inbound_email_messages m

@@ -92,7 +92,7 @@ $vault->save();
 harness_register_row('uev_user_encryption_vaults', 'uev_user_encryption_vault_id', (int)$vault->key);
 
 $open_window = function () use ($owner_id, $secret) {
-	VaultUnlock::open($owner_id, $secret, UserEncryptionVault::SCOPE_USER,
+	vault_fixture_open_window($owner_id, $secret, UserEncryptionVault::SCOPE_USER,
 		array('idle' => null, 'absolute' => null));
 };
 $open_window();

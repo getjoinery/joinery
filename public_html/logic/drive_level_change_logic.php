@@ -91,7 +91,7 @@ function drive_level_change_logic(array $input): LogicResult {
 		// Lowering reads every sealed file, so the window has to be open before
 		// the promise is dropped — not halfway through.
 		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
-		if (VaultUnlock::secretKey($user_id) === null) {
+		if (!VaultUnlock::isOpen($user_id)) {
 			return LogicResult::error('Unlock your vault to make this folder Standard again.');
 		}
 	}

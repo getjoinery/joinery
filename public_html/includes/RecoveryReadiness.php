@@ -355,6 +355,10 @@ class RecoveryReadiness {
 		));
 		$wrappings->load();
 
+		// A dry run is an open that becomes nothing: the key holder unwraps
+		// under the code's KEK (VaultUnlock::openKey, no window armed) and the
+		// result is dropped. The secret is never in hand here.
+		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 		$box = new SealedBox();
 		$keks = array();
 		foreach ($wrappings as $wrapping) {
@@ -373,11 +377,7 @@ class RecoveryReadiness {
 				continue;
 			}
 			try {
-				$ad = UserEncryptionWrapping::adFor((int)$vault->key, $wrapping->key);
-				$secret = $box->unwrapKey($wrapping->get('uew_wrapped_secret_key'), $keks[$salt], $ad);
-				if (is_string($secret)) {
-					sodium_memzero($secret);
-				}
+				VaultUnlock::openKey((int)$user_id, $wrapping->unlocker($keks[$salt]), array(), (string)$scope);
 				return array('ok' => true, 'message' => 'That code works. It was not used up by this check.');
 			} catch (Exception $e) {
 				continue; // wrong code for this row — try the next

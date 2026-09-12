@@ -57,14 +57,14 @@ $window_ok = vault_apcu_usable() && vault_ensure_session();
 /** Open the owner's window for the in-process reads. */
 function drvpriv_unlock($owner_id, $secret) {
 	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
-	VaultUnlock::open((int)$owner_id, $secret, 'user', array('idle' => null, 'absolute' => null));
+	vault_fixture_open_window((int)$owner_id, $secret, 'user', array('idle' => null, 'absolute' => null));
 }
 function drvpriv_lock($owner_id) {
 	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 	VaultUnlock::close((int)$owner_id, 'user');
 }
 
-$secret = $kp['secret']; // VaultUnlock holds the b64url form — SealedBox::openDek decodes it
+$secret = $kp['secret']; // the b64url form a fixture wraps into a VaultKey
 
 /** A Private folder owned by $owner. */
 function drvpriv_folder($owner_id, $level, &$made_folders, $parent = null) {
@@ -290,7 +290,7 @@ $dblink->prepare("UPDATE fil_files SET fil_key_generation = 7 WHERE fil_file_id 
 $other_before = (string)(new File((int)($big->key ?? 0), true))->get('fil_sealed_key');
 
 foreach ($callbacks as $cb) {
-	$cb((int)$owner->key, $secret, 1, $new_kp['public'], 2);
+	$cb((int)$owner->key, vault_fixture_key($secret), 1, $new_kp['public'], 2);
 }
 
 $after_row = new File($file->key, true);

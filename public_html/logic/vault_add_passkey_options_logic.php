@@ -20,12 +20,11 @@ function vault_add_passkey_options_logic(array $input): LogicResult {
 	if (!UserEncryptionVault::loadForUser($user->key)) {
 		return LogicResult::error('Set up your vault before adding another passkey to it.');
 	}
-	// Wrapping the vault secret under a new credential needs the secret
-	// itself, which only exists in-window - the caller must already be
-	// unlocked (e.g. via the passkey/recovery/passphrase they already hold).
-	if (!VaultUnlock::isOpen($user->key, UserEncryptionVault::SCOPE_USER)) {
-		return LogicResult::error('Unlock your vault before adding another passkey to it.', ['locked' => true]);
-	}
+	// No open window is needed here: wrapping the vault secret under the new
+	// credential happens in vault_add_passkey_verify, in the same request that
+	// presents a fresh tap of an unlocker the vault already has
+	// (specs/unseal_daemon.md B1). This ceremony only derives the NEW
+	// passkey's KEK.
 
 	// Activation is per-credential, so the ceremony is scoped to the passkey the
 	// caller named. Unscoped, the browser decides which credential answers: pick
@@ -37,8 +36,10 @@ function vault_add_passkey_options_logic(array $input): LogicResult {
 
 	try {
 		$service = new PasskeyService();
+		// Tagged so it can stand beside the unlocker's own vault-kek ceremony,
+		// which vault_unlock_options mints for the same request.
 		$options = $service->getDerivationOptions($user, 'vault-kek',
-			$credential_id ? [$credential_id] : null);
+			$credential_id ? [$credential_id] : null, 'add');
 	} catch (Exception $e) {
 		return LogicResult::error($e->getMessage());
 	}
@@ -50,7 +51,7 @@ function vault_add_passkey_options_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
-		'description' => 'Begin adding a vault wrapping for another PRF-capable passkey (returns WebAuthn PRF request options); pass credential_id to scope the ceremony to one passkey; vault must already be unlocked',
+		'description' => 'Begin adding a vault wrapping for another PRF-capable passkey (returns WebAuthn PRF request options); pass credential_id to scope the ceremony to one passkey; the verify step also takes a fresh unlocker',
 	];
 }
 ?>

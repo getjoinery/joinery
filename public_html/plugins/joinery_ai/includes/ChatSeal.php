@@ -187,10 +187,10 @@ class ChatSeal {
         try {
             if ($msg->get('aim_content_sealed') && (string)$msg->get('aim_sealed_key') !== '') {
                 $owner  = (int)$conv->get('aic_owner_user_id');
-                $secret = VaultUnlock::secretKey($owner);
-                if ($secret === null) throw new VaultLockedException();
+                $key = VaultUnlock::secretKey($owner);
+                if ($key === null) throw new VaultLockedException();
                 $crypto = new VaultCrypto();
-                $dek = $crypto->openItemDek((string)$msg->get('aim_sealed_key'), $secret);
+                $dek = $crypto->openItemDek((string)$msg->get('aim_sealed_key'), $key);
                 return ['aim_error' => $crypto->sealField($error, $dek, self::messageAd((int)$msg->key, 'aim_error'))];
             }
             return self::sealMessageColumns((int)$msg->key, $conv, ['aim_error' => $error]);
@@ -214,20 +214,20 @@ class ChatSeal {
             return self::sealMessageColumns((int)$msg->key, $conv, [$column => $stored]);
         }
         $owner  = (int)$conv->get('aic_owner_user_id');
-        $secret = VaultUnlock::secretKey($owner);
-        if ($secret === null) throw new VaultLockedException();
+        $key = VaultUnlock::secretKey($owner);
+        if ($key === null) throw new VaultLockedException();
         $crypto = new VaultCrypto();
-        $dek = $crypto->openItemDek((string)$msg->get('aim_sealed_key'), $secret);
+        $dek = $crypto->openItemDek((string)$msg->get('aim_sealed_key'), $key);
         return [$column => $crypto->sealField((string)$stored, $dek, self::messageAd((int)$msg->key, $column))];
     }
 
     /** Open one sealed message column — behind AiConversationMessage::decryptSealedField(). */
     public static function openMessageField(int $message_id, int $owner_id, string $sealed_key,
             string $column, string $ciphertext): string {
-        $secret = VaultUnlock::secretKey($owner_id);
-        if ($secret === null) throw new VaultLockedException();
+        $key = VaultUnlock::secretKey($owner_id);
+        if ($key === null) throw new VaultLockedException();
         $crypto = new VaultCrypto();
-        $dek = $crypto->openItemDek($sealed_key, $secret);
+        $dek = $crypto->openItemDek($sealed_key, $key);
         return $crypto->openField($ciphertext, $dek, self::messageAd($message_id, $column));
     }
 
@@ -267,20 +267,20 @@ class ChatSeal {
             return self::sealConversationColumns((int)$c->key, $c, [$column => $plain]);
         }
         $owner  = (int)$c->get('aic_owner_user_id');
-        $secret = VaultUnlock::secretKey($owner);
-        if ($secret === null) throw new VaultLockedException();
+        $key = VaultUnlock::secretKey($owner);
+        if ($key === null) throw new VaultLockedException();
         $crypto = new VaultCrypto();
-        $dek = $crypto->openItemDek((string)$c->get('aic_sealed_key'), $secret);
+        $dek = $crypto->openItemDek((string)$c->get('aic_sealed_key'), $key);
         return [$column => $crypto->sealField((string)$plain, $dek, self::conversationAd((int)$c->key, self::conversationToken($column)))];
     }
 
     /** Open a sealed conversation column — behind AiConversation::decryptSealedField(). */
     public static function openConversationField(int $conversation_id, int $owner_id, string $sealed_key,
             string $column, string $ciphertext): string {
-        $secret = VaultUnlock::secretKey($owner_id);
-        if ($secret === null) throw new VaultLockedException();
+        $key = VaultUnlock::secretKey($owner_id);
+        if ($key === null) throw new VaultLockedException();
         $crypto = new VaultCrypto();
-        $dek = $crypto->openItemDek($sealed_key, $secret);
+        $dek = $crypto->openItemDek($sealed_key, $key);
         return $crypto->openField($ciphertext, $dek, self::conversationAd($conversation_id, self::conversationToken($column)));
     }
 
@@ -291,10 +291,10 @@ class ChatSeal {
         $owner = (int)$msg->get('aim_sealed_owner_user_id');
         $sealed_key = (string)$msg->get('aim_sealed_key');
         if ($owner <= 0 || $sealed_key === '') throw new VaultLockedException();
-        $secret = VaultUnlock::secretKey($owner);
-        if ($secret === null) throw new VaultLockedException();
+        $key = VaultUnlock::secretKey($owner);
+        if ($key === null) throw new VaultLockedException();
         $crypto = new VaultCrypto();
-        $dek = $crypto->openItemDek($sealed_key, $secret);
+        $dek = $crypto->openItemDek($sealed_key, $key);
         return $crypto->openField($ciphertext, $dek, self::attachmentBytesAd((int)$msg->key, $attachment_id));
     }
 
@@ -305,10 +305,10 @@ class ChatSeal {
         $owner = (int)$msg->get('aim_sealed_owner_user_id');
         $sealed_key = (string)$msg->get('aim_sealed_key');
         if ($owner <= 0 || $sealed_key === '') throw new VaultLockedException();
-        $secret = VaultUnlock::secretKey($owner);
-        if ($secret === null) throw new VaultLockedException();
+        $key = VaultUnlock::secretKey($owner);
+        if ($key === null) throw new VaultLockedException();
         $crypto = new VaultCrypto();
-        $dek = $crypto->openItemDek($sealed_key, $secret);
+        $dek = $crypto->openItemDek($sealed_key, $key);
         return $crypto->openField($ciphertext, $dek, self::attachmentTextAd((int)$msg->key, (int)$att->key));
     }
 
@@ -324,10 +324,10 @@ class ChatSeal {
         if ($owner <= 0 || $sealed_key === '') {
             throw new RuntimeException('ChatSeal: owning message is not sealed; cannot seal its attachment.');
         }
-        $secret = VaultUnlock::secretKey($owner);
-        if ($secret === null) throw new VaultLockedException();
+        $key = VaultUnlock::secretKey($owner);
+        if ($key === null) throw new VaultLockedException();
         $crypto = new VaultCrypto();
-        $dek = $crypto->openItemDek($sealed_key, $secret);
+        $dek = $crypto->openItemDek($sealed_key, $key);
         return [
             'text'  => ($text  === null || $text  === '') ? $text
                        : $crypto->sealField($text, $dek, self::attachmentTextAd((int)$msg->key, $attachment_id)),

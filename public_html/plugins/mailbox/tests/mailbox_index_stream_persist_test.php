@@ -27,6 +27,7 @@
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
+require_once(__DIR__ . '/../../../tests/lib/vault_fixtures.php');
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
@@ -114,7 +115,7 @@ $idx->wipe($uid);
 section('the persisted blob is stream-format');
 
 $m1 = $make_msg('First', 'alpha streamkwone');
-$idx->fold($uid, $kp['secret']);
+$idx->fold($uid, vault_fixture_key($kp['secret']));
 
 $fil_1 = $blob_file_id();
 harness_register_model('File', $fil_1);
@@ -128,11 +129,11 @@ check($idx->search($uid, 'streamkwone') === array($m1), 'the folded message is s
 
 section('a fold that changed nothing writes nothing');
 
-$idx->fold($uid, $kp['secret']);
+$idx->fold($uid, vault_fixture_key($kp['secret']));
 check($blob_file_id() === $fil_1, 'no new mail, no refolds — the blob id holds', 'fil=' . $blob_file_id());
 
 $m2 = $make_msg('Second', 'beta streamkwtwo');
-$idx->fold($uid, $kp['secret']);
+$idx->fold($uid, vault_fixture_key($kp['secret']));
 $fil_2 = $blob_file_id();
 harness_register_model('File', $fil_2);
 check($fil_2 > 0 && $fil_2 !== $fil_1, 'one new row rotates the blob', "was $fil_1 now $fil_2");
@@ -144,7 +145,7 @@ section('wipe + ensureOpen restores from the stream blob');
 
 $idx->wipe($uid);
 check(!is_file($idx->shmPath($uid)), 'the working copy is gone');
-$idx->fold($uid, $kp['secret']);
+$idx->fold($uid, vault_fixture_key($kp['secret']));
 check($idx->search($uid, 'streamkwtwo') === array($m2), 'search works again after the restore');
 check($blob_file_id() === $fil_2,
 	'the blob id held — restored, not rebuilt (a rebuild always re-persists), and nothing new meant no write',
@@ -174,7 +175,7 @@ $bk->set('imi_sealed_key', $crypto->sealItemDek($dek, $kp['public']));
 $bk->save();
 
 $idx->wipe($uid);
-$idx->fold($uid, $kp['secret']);
+$idx->fold($uid, vault_fixture_key($kp['secret']));
 check($idx->search($uid, 'streamkwone') === array($m1) && $idx->search($uid, 'streamkwtwo') === array($m2),
 	'the rebuild produced a searchable index');
 $fil_3 = $blob_file_id();
@@ -194,7 +195,7 @@ $bk = InboundMailboxSearchIndex::loadOrCreateForUser($uid);
 $bk->set('imi_format', MailboxIndex::FORMAT - 1);
 $bk->save();
 $idx->wipe($uid);
-$idx->fold($uid, $kp['secret']);
+$idx->fold($uid, vault_fixture_key($kp['secret']));
 $fil_4 = $blob_file_id();
 harness_register_model('File', $fil_4);
 check($fil_4 > 0 && $fil_4 !== $fil_3, 'a mismatched stamp skips the restore and rebuilds', "before=$fil_3 now=$fil_4");

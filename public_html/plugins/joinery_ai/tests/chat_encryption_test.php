@@ -94,13 +94,13 @@ check((int)$raw_msg['aim_key_generation'] === 1, 'aim_key_generation matches the
 
 // ---- Crypto roundtrip (opens directly with the secret) -------------------
 section('Crypto roundtrip');
-$dek = $crypto->openItemDek((string)$raw_msg['aim_sealed_key'], $kp1['secret']);
+$dek = $crypto->openItemDek((string)$raw_msg['aim_sealed_key'], vault_fixture_key($kp1['secret']));
 $plain = $crypto->openField((string)$raw_msg['aim_content'], $dek, ChatSeal::messageAd((int)$msg->key, 'aim_content'));
 check($plain === 'The target is undervalued at 4x EBITDA.', 'aim_content decrypts to the original plaintext');
 $tcjson = $crypto->openField((string)$raw_msg['aim_tool_calls'], $dek, ChatSeal::messageAd((int)$msg->key, 'aim_tool_calls'));
 $tc = json_decode($tcjson, true);
 check(is_array($tc) && $tc[0]['name'] === 'query_model', 'aim_tool_calls decrypts + json_decodes to the trace');
-$cdek = $crypto->openItemDek((string)$raw_conv['aic_sealed_key'], $kp1['secret']);
+$cdek = $crypto->openItemDek((string)$raw_conv['aic_sealed_key'], vault_fixture_key($kp1['secret']));
 $ptitle = $crypto->openField((string)$raw_conv['aic_title'], $cdek, ChatSeal::conversationAd((int)$conv->key, 'title'));
 check($ptitle === 'Merger due diligence', 'aic_title decrypts to the original');
 // AD splice defense: the message body must NOT open under the wrong AD.
@@ -160,7 +160,7 @@ check($ok_local, 'a Fortress chat on a local model resolves to the local endpoin
 section('Rotation re-seal');
 $callbacks = VaultUnlock::resealCallbacks();   // triggers loadConsumerBootstraps()
 check(count($callbacks) >= 1, 'a chat re-seal callback is registered via the bootstrap');
-foreach ($callbacks as $cb) { call_user_func($cb, $uid, $kp1['secret'], 1, $kp2['public'], 2); }
+foreach ($callbacks as $cb) { call_user_func($cb, $uid, vault_fixture_key($kp1['secret']), 1, $kp2['public'], 2); }
 
 $raw_msg2 = (function () use ($db, $msg) {
     $s = $db->prepare('SELECT * FROM aim_conversation_messages WHERE aim_message_id = ?');
@@ -173,12 +173,12 @@ $raw_conv2 = (function () use ($db, $conv) {
 check((int)$raw_msg2['aim_key_generation'] === 2, 'message DEK moved to generation 2');
 check((int)$raw_conv2['aic_key_generation'] === 2, 'conversation DEK moved to generation 2');
 // The new sealed key opens under the NEW secret and yields the same content.
-$dek2 = $crypto->openItemDek((string)$raw_msg2['aim_sealed_key'], $kp2['secret']);
+$dek2 = $crypto->openItemDek((string)$raw_msg2['aim_sealed_key'], vault_fixture_key($kp2['secret']));
 $plain2 = $crypto->openField((string)$raw_msg2['aim_content'], $dek2, ChatSeal::messageAd((int)$msg->key, 'aim_content'));
 check($plain2 === 'The target is undervalued at 4x EBITDA.', 'content re-seals to the new key with identical plaintext');
 // The OLD secret no longer opens the re-sealed key.
 $old_fails = false;
-try { $crypto->openItemDek((string)$raw_msg2['aim_sealed_key'], $kp1['secret']); } catch (Throwable $e) { $old_fails = true; }
+try { $crypto->openItemDek((string)$raw_msg2['aim_sealed_key'], vault_fixture_key($kp1['secret'])); } catch (Throwable $e) { $old_fails = true; }
 check($old_fails, 'the old key no longer opens the re-sealed DEK');
 
 // ---- In-window decrypt via the get() hook (needs APCu) -------------------
@@ -187,7 +187,7 @@ if (!vault_apcu_usable() || !$has_session || session_id() === '') {
     harness_skip('APCu/session unavailable (run with -d apc.enable_cli=1) — window-based decrypt path skipped');
 } else {
     // Open the window with the CURRENT (gen-2) secret, since rotation moved the DEKs.
-    VaultUnlock::open($uid, $kp2['secret'], UserEncryptionVault::SCOPE_USER);
+    vault_fixture_open_window($uid, $kp2['secret'], UserEncryptionVault::SCOPE_USER);
     $c2 = new AiConversation((int)$conv->key, TRUE);
     check(trim((string)$c2->get('aic_title')) === 'Merger due diligence', 'get() decrypts aic_title in-window');
     $m2 = new AiConversationMessage((int)$msg->key, TRUE);
@@ -196,7 +196,8 @@ if (!vault_apcu_usable() || !$has_session || session_id() === '') {
     check(($summary_open['locked'] ?? false) === false && $summary_open['title'] === 'Merger due diligence',
         'conversationSummary reveals the real title once unlocked');
     // One window, both consumers: the same secretKey serves any consumer.
-    check(VaultUnlock::secretKey($uid, UserEncryptionVault::SCOPE_USER) === $kp2['secret'],
+    $shared = VaultUnlock::secretKey($uid, UserEncryptionVault::SCOPE_USER);
+    check($shared instanceof VaultKey && $shared->id() === vault_fixture_key($kp2['secret'])->id(),
         'the one open window serves every server-custody consumer (mail + chat share it)');
     VaultUnlock::close($uid, UserEncryptionVault::SCOPE_USER);
 }

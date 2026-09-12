@@ -3,7 +3,7 @@
  * VaultDeferredWork — work that can only run while a user's vault is unlocked
  * (specs/in_window_deferred_work.md).
  *
- * The vault secret key lives in APCu keyed to the browser session, so a CLI
+ * The vault key is held for the browser session, so a CLI
  * process can never hold a window: VaultUnlock::secretKey() returns null under
  * the CLI SAPI by construction. Anything that must read sealed content
  * therefore cannot run from cron — it has to run inside a web request carrying
@@ -33,6 +33,7 @@
  * stamping for the duration — including for consumer code that reaches
  * VaultUnlock::secretKey() on its own.
  *
+ * @version 1.1.0 - drain callbacks receive the window's VaultKey, not bytes
  * @version 1.0.0
  */
 
@@ -64,7 +65,7 @@ class VaultDeferredWork {
 	 * @param callable $has_work  fn(int $user_id): bool — must be a cheap
 	 *                            indexed query. Never decrypts, never calls a
 	 *                            model; it runs on every heartbeat.
-	 * @param callable $drain     fn(int $user_id, string $secret_key, float $deadline): int
+	 * @param callable $drain     fn(int $user_id, VaultKey $key, float $deadline): int
 	 *                            — do work until $deadline (a microtime(true)
 	 *                            value), return how many items were completed.
 	 */
@@ -134,12 +135,12 @@ class VaultDeferredWork {
 		// reads of secretKey() are covered too.
 		$locked = true;
 		self::withBackgroundWork(function () use ($user_id, $scope, $deadline, &$done, &$locked) {
-			$secret = VaultUnlock::secretKey($user_id, $scope);
-			if ($secret === null) {
+			$key = VaultUnlock::secretKey($user_id, $scope);
+			if ($key === null) {
 				return;   // locked, lapsed, or ended by policy — nothing to do
 			}
 			$locked = false;
-			self::runTurns($user_id, $secret, $deadline, $done);
+			self::runTurns($user_id, $key, $deadline, $done);
 		});
 
 		if ($locked) {
@@ -159,7 +160,7 @@ class VaultDeferredWork {
 	 * starting each item and a turn may overrun it by one item. That is
 	 * accepted (specs/in_window_deferred_work.md § Keeping it small).
 	 */
-	private static function runTurns(int $user_id, string $secret, float $deadline, array &$done): void {
+	private static function runTurns(int $user_id, VaultKey $key, float $deadline, array &$done): void {
 		while (microtime(true) < $deadline) {
 			$active = self::activeConsumers($user_id);
 			if (empty($active)) {
@@ -173,7 +174,7 @@ class VaultDeferredWork {
 				$remaining = $deadline - microtime(true);
 				$turn_end = microtime(true) + max(self::MIN_TURN_SECONDS, $remaining / max(1, count($active)));
 				$turn_end = min($turn_end, $deadline);
-				$progressed += self::runOneTurn($id, $user_id, $secret, $turn_end, $done);
+				$progressed += self::runOneTurn($id, $user_id, $key, $turn_end, $done);
 			}
 			if ($progressed === 0) {
 				return;   // a full pass did nothing — stop rather than spin
@@ -189,12 +190,12 @@ class VaultDeferredWork {
 	 * A consumer that throws is logged and skipped. It stays registered and is
 	 * retried on the next drain — one broken feature never stalls the others.
 	 */
-	private static function runOneTurn(string $id, int $user_id, string $secret, float $turn_end, array &$done): int {
+	private static function runOneTurn(string $id, int $user_id, VaultKey $key, float $turn_end, array &$done): int {
 		if (!self::tryLock($id, $user_id)) {
 			return 0;
 		}
 		try {
-			$count = (int)call_user_func(self::$consumers[$id]['drain'], $user_id, $secret, $turn_end);
+			$count = (int)call_user_func(self::$consumers[$id]['drain'], $user_id, $key, $turn_end);
 			if ($count > 0) {
 				$done[$id] = ($done[$id] ?? 0) + $count;
 			}

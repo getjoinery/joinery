@@ -195,8 +195,9 @@ try {
 	// =====================================================================
 	section('unlocked: the index answers for every mailbox the viewer holds');
 
-	VaultUnlock::open($owner_id, $secret_b64);
-	check(VaultUnlock::secretKey($owner_id) === $secret_b64, 'the window is open');
+	vault_fixture_open_window($owner_id, $secret_b64);
+	$open_key = VaultUnlock::secretKey($owner_id);
+	check($open_key instanceof VaultKey && $open_key->id() === vault_fixture_key($secret_b64)->id(), 'the window is open');
 
 	$all = $svc->listThreads(null, array('q' => 'orleanskw'));
 	check(empty($all['search_locked']), 'the all-mailboxes search is not locked');

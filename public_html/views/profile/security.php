@@ -495,14 +495,19 @@
                 // passkey — without it the browser would accept any enrolled
                 // credential and activate whichever one the user happened to
                 // touch, leaving the row they clicked still reading "Not
-                // activated". Returns the label the server actually activated.
+                // activated". Two prompts: the NEW passkey derives its key,
+                // then an unlocker the vault already has confirms it's you —
+                // the wrapping is produced only in the request that presents
+                // both. Returns the label the server actually activated.
                 async function runVaultActivation(credentialId) {
                     var options = await apiFetch('/api/v1/action/vault_add_passkey_options', {
                         method: 'POST',
                         body: JSON.stringify({ credential_id: credentialId }),
                     });
                     var credential = (await JoineryPasskeys.derive(options.data.options)).response;
-                    var result = await apiFetch('/api/v1/action/vault_add_passkey_verify', { method: 'POST', body: JSON.stringify({ credential: credential }) });
+                    var unlocker = await JoineryVaultLock.collectUnlocker('to let this passkey open your vault');
+                    if (!unlocker) { throw new Error('Confirmation was cancelled.'); }
+                    var result = await apiFetch('/api/v1/action/vault_add_passkey_verify', { method: 'POST', body: JSON.stringify({ credential: credential, unlocker: unlocker }) });
                     document.dispatchEvent(new CustomEvent('joinery:vault-changed'));
                     return (result.data && result.data.label) || 'Passkey';
                 }
@@ -582,9 +587,23 @@
                         if (currentPassword) body.current_password = currentPassword;
                         var options = await apiFetch('/api/v1/action/passkey_register_options', { method: 'POST', body: JSON.stringify(body) });
                         var credential = await JoineryPasskeys.register(options.data.options);
+                        // Vault-active by default: the creation just derived the
+                        // vault key, and the same request can write its wrapping
+                        // when an unlocker the vault already has confirms it's
+                        // you. Backing out here just leaves the passkey enrolled
+                        // and not yet activated — the Activate action remains.
+                        var unlocker = null;
+                        if (vaultStatus && window.JoineryVaultLock) {
+                            showFlowHint('One more step — confirm with a passkey, bypass phrase or recovery code you already have, so the new passkey can open your vault too.');
+                            try {
+                                unlocker = await JoineryVaultLock.collectUnlocker('to let the new passkey open your vault');
+                            } catch (e) {
+                                unlocker = null;
+                            }
+                        }
                         var regResult = await apiFetch('/api/v1/action/passkey_register_verify', {
                             method: 'POST',
-                            body: JSON.stringify({ credential: credential, label: label }),
+                            body: JSON.stringify({ credential: credential, label: label, unlocker: unlocker }),
                         });
                         // First factor enrolled: sign-in behavior just changed — say so
                         // inline, once, right where the enrollment happened.
@@ -636,26 +655,14 @@
                             return;
                         }
 
-                        // Vault-active by default: when a vault exists and is
-                        // unlocked, the new passkey should unlock it too. Best
-                        // case the server already did it — the authenticator
-                        // evaluated the vault secret during the creation
-                        // ceremony itself (vault_activated) and there is
-                        // nothing to prompt for. Otherwise chain into the
-                        // activation ceremony — one more touch, of the new
-                        // passkey. Skipped/failed just leaves the badge on
-                        // "Not activated" with the action in its menu.
-                        // (The reload above already painted the Vault active
-                        // badge in the activated case; there is nothing to do.)
-                        if (!(regResult.data && regResult.data.vault_activated)
-                                && vaultStatus && vaultStatus.unlocked) {
-                            showFlowHint('One more touch — use the NEW passkey again to let it unlock your vault.');
-                            try {
-                                await runVaultActivation(newId);
-                            } catch (e) {
-                                JoineryModal.alert('The passkey was added, but is not activated for your vault yet: '
-                                    + (e.message || 'activation failed.') + ' You can activate it any time from its Actions menu.');
-                            }
+                        // The activation rode inside passkey_register_verify
+                        // (the reload above already painted the Vault active
+                        // badge). A refusal says why; a cancelled confirmation
+                        // says nothing and leaves the Activate action in the
+                        // passkey's menu.
+                        if (regResult.data && !regResult.data.vault_activated && regResult.data.vault_activation_error) {
+                            JoineryModal.alert('The passkey was added, but is not activated for your vault yet: '
+                                + regResult.data.vault_activation_error + ' You can activate it any time from its Actions menu.');
                         }
                         if (window.jyMaybeReturn && jyMaybeReturn()) return;
                     } catch (e) {
@@ -830,8 +837,11 @@
                             notSetUp.classList.add('d-none');
                             locked.classList.remove('d-none');
                             unlocked.classList.add('d-none');
-                            setActionsVisible(false);
+                            // Every action here confirms with an unlocker of its
+                            // own, so none needs the window open first.
+                            setActionsVisible(true);
                             document.getElementById('vault-unlock-passphrase-btn').classList.toggle('d-none', !status.has_passphrase);
+                            document.getElementById('vault-passphrase-remove-btn').classList.toggle('d-none', !status.has_passphrase);
                         } else {
                             notSetUp.classList.add('d-none');
                             locked.classList.add('d-none');
@@ -933,7 +943,9 @@
                 document.getElementById('vault-regenerate-codes-btn').addEventListener('click', async function () {
                     if (!await JoineryModal.confirmAsync('This invalidates all existing recovery codes. Continue?', { confirmLabel: 'Regenerate' })) return;
                     try {
-                        var result = await apiFetch('/api/v1/action/vault_regenerate_codes', { method: 'POST', body: '{}' });
+                        var unlocker = await JoineryVaultLock.collectUnlocker('to replace your recovery codes');
+                        if (!unlocker) return;
+                        var result = await apiFetch('/api/v1/action/vault_regenerate_codes', { method: 'POST', body: JSON.stringify({ unlocker: unlocker }) });
                         showCodes(result.data.recovery_codes, null);
                     } catch (e) {
                         JoineryModal.alert(e.message || 'Could not regenerate recovery codes.');
@@ -945,7 +957,9 @@
                     var passphrase = await JoineryModal.promptAsync('Set a bypass phrase (12+ characters):', { inputType: 'password', confirmLabel: 'Save' });
                     if (!passphrase) return;
                     try {
-                        await apiFetch('/api/v1/action/vault_passphrase_enroll', { method: 'POST', body: JSON.stringify({ passphrase: passphrase }) });
+                        var unlocker = await JoineryVaultLock.collectUnlocker('to add your bypass phrase');
+                        if (!unlocker) return;
+                        await apiFetch('/api/v1/action/vault_passphrase_enroll', { method: 'POST', body: JSON.stringify({ passphrase: passphrase, unlocker: unlocker }) });
                         await refresh();
                         JoineryModal.alert('Bypass phrase added.');
                     } catch (e) {

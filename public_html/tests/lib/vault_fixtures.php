@@ -83,6 +83,38 @@ function vault_fixture_client_vault(int $user_id, string $public_key, string $sc
 	return $id;
 }
 
+/**
+ * A VaultKey for a keypair the test minted itself (SealedBox::generateKeypair()):
+ * the secret is wrapped under a throwaway KEK and opened exactly the way the
+ * platform opens one — VaultUnlock::openKey() — so the test never needs a
+ * constructor for the bytes and exercises the real seam.
+ */
+function vault_fixture_key(string $secret_b64): VaultKey {
+	$box = new SealedBox();
+	$kek = random_bytes(32);
+	$ad = 'vault-test:' . bin2hex(random_bytes(4));
+	$unlocker = ['wrapped' => $box->wrapKey($secret_b64, $kek, $ad), 'kek' => $kek, 'ad' => $ad];
+	return VaultUnlock::openKey(0, $unlocker, [], UserEncryptionVault::SCOPE_USER)['key'];
+}
+
+/**
+ * Arm the current session's window with a test keypair's secret — the fixture
+ * form of VaultUnlock::open() for suites that seal content to a keypair they
+ * generated. Returns the key so the suite can compare ids or open with it.
+ */
+function vault_fixture_open_window(int $user_id, string $secret_b64, string $scope = UserEncryptionVault::SCOPE_USER,
+		?array $caps = null, string $via = VaultAudit::VIA_UNKNOWN): VaultKey {
+	$key = vault_fixture_key($secret_b64);
+	VaultUnlock::arm($user_id, $key, $scope, $caps, $via);
+	return $key;
+}
+
+/** A VaultKey for a keypair nobody sealed anything to — for a consumer that
+ *  takes a key it will not use (a fold over plaintext-only rows). */
+function vault_fixture_dummy_key(): VaultKey {
+	return vault_fixture_key((new SealedBox())->generateKeypair()['secret']);
+}
+
 /** True when APCu actually works in this process (CLI needs apc.enable_cli=1). */
 function vault_apcu_usable(): bool {
 	if (!function_exists('apcu_store')) {

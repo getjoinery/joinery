@@ -47,8 +47,8 @@ VaultDeferredWork::register(
     function (int $user_id): bool {
         return RecipeVaultScope::hasWork($user_id);
     },
-    function (int $user_id, string $secret_key, float $deadline): int {
-        return RecipeVaultScope::drain($user_id, $secret_key, $deadline);
+    function (int $user_id, VaultKey $key, float $deadline): int {
+        return RecipeVaultScope::drain($user_id, $key, $deadline);
     }
 );
 
@@ -83,7 +83,7 @@ File::registerDecryptHook(File::SOURCE_AI_CHAT_UPLOAD, function (string $ciphert
 // is touched. Fail-loud per the onReseal() contract: attempt every item, then
 // throw if any failed so the ceremony refuses to retire the old wrappings while
 // content is still sealed to them.
-VaultUnlock::onReseal(function (int $user_id, string $old_secret_key, int $old_key_generation, string $new_public_key, int $new_key_generation) {
+VaultUnlock::onReseal(function (int $user_id, VaultKey $old_key, int $old_key_generation, string $new_public_key, int $new_key_generation) {
     $db = DbConnector::get_instance()->get_db_link();
     $crypto = new VaultCrypto();
     $failed = 0;
@@ -101,7 +101,7 @@ VaultUnlock::onReseal(function (int $user_id, string $old_secret_key, int $old_k
         if ((string)$row['aic_sealed_key'] === '') { continue; }
         $attempted++;
         try {
-            $dek = $crypto->openItemDek((string)$row['aic_sealed_key'], $old_secret_key);
+            $dek = $crypto->openItemDek((string)$row['aic_sealed_key'], $old_key);
             $resealed = $crypto->sealItemDek($dek, $new_public_key);
             $u = $db->prepare(
                 'UPDATE aic_conversations SET aic_sealed_key = ?, aic_key_generation = ?
@@ -124,7 +124,7 @@ VaultUnlock::onReseal(function (int $user_id, string $old_secret_key, int $old_k
         if ((string)$row['aim_sealed_key'] === '') { continue; }
         $attempted++;
         try {
-            $dek = $crypto->openItemDek((string)$row['aim_sealed_key'], $old_secret_key);
+            $dek = $crypto->openItemDek((string)$row['aim_sealed_key'], $old_key);
             $resealed = $crypto->sealItemDek($dek, $new_public_key);
             $u = $db->prepare(
                 'UPDATE aim_conversation_messages SET aim_sealed_key = ?, aim_key_generation = ?

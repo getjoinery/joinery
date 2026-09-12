@@ -28,6 +28,7 @@
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
+require_once(__DIR__ . '/../../../tests/lib/vault_fixtures.php');
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxHtmlSanitizer.php'));
 require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
 require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
@@ -189,7 +190,7 @@ $row = $db->query('SELECT * FROM iem_inbound_email_messages WHERE iem_inbound_em
 check(!empty($row['iem_content_sealed']), 'sealed row flagged content_sealed');
 check($row['iem_bcc'] !== 'secret@x' && !empty($row['iem_bcc']), 'iem_bcc column now holds ciphertext', substr((string)$row['iem_bcc'], 0, 24));
 
-$open_dek = $crypto->openItemDek($row['iem_sealed_key'], $kp['secret']);
+$open_dek = $crypto->openItemDek($row['iem_sealed_key'], vault_fixture_key($kp['secret']));
 $bcc_plain = $crypto->openField($row['iem_bcc'], $open_dek, InboundEmailMessage::sealAd($sealed_id, 'iem_bcc'));
 check($bcc_plain === 'secret@x', 'sealed iem_bcc opens back to the original under AD iem_bcc', $bcc_plain);
 $rcpt_plain = $crypto->openField($row['iem_recipient'], $open_dek, InboundEmailMessage::sealAd($sealed_id, 'iem_recipient'));

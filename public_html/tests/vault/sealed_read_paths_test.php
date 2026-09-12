@@ -36,10 +36,21 @@
  * case against the held-in-transit criterion in review, loudly, instead of
  * copying the pattern.
  *
+ * A second, narrower pin covers the vault SECRET (specs/unseal_daemon.md § The
+ * PHP seam): the primitives that take or produce it — SealedBox::openDek,
+ * openBinary, unwrapKey, wrapKey and generateKeypair — are called from
+ * PoolVaultKey (the one class that holds the bytes), SealedBox itself, and
+ * the two places that use SealedBox with a key that is NOT a vault key (the
+ * relay transport keypair). VaultCrypto opens through VaultKey::unseal() and
+ * touches none of them. So the bytes are unreachable outside PoolVaultKey by
+ * test, not by convention, and a standalone wrap anywhere (spec B1) fails
+ * the suite.
+ *
  * Test files are excluded: suites drive the primitives directly to test them.
  *
  * Run: php tests/run.php safe --filter=sealed_read_paths
  *
+ * @version 1.2 - the vault-secret pin (openDek/openBinary/unwrapKey/wrapKey/generateKeypair)
  * @version 1.1
  */
 
@@ -52,32 +63,50 @@ const SRP_PATTERN = '/(?:->|::)\s*(?:openDek|openBinary|aeadDecrypt|openStreamFi
 
 /** The closed set, relative to public_html. */
 $allowed = array(
+	'includes/PoolVaultKey.php',
 	'includes/SealedBox.php',
 	'includes/VaultCrypto.php',
 	'plugins/mailbox/includes/RelaySpoolConsumer.php',
+);
+
+/** Instance calls only (`->openDek(`): every SealedBox primitive is an instance
+ *  method, and the instance shape keeps MailboxDkimSigner::generateKeypair()
+ *  (RSA, a static of another class) out of the match. */
+const SRP_SECRET_PATTERN = '/->\s*(?:openDek|openBinary|unwrapKey|wrapKey|generateKeypair)\s*\(/';
+
+/** Where the vault secret may be unwrapped, wrapped, minted or used to open. */
+$secret_allowed = array(
+	'includes/PoolVaultKey.php',                          // holds the bytes; the pool `open` and `unwrap`
+	'includes/SealedBox.php',                             // openDek() is unframeSeal() + openBinary()
+	'plugins/mailbox/includes/RelaySpoolConsumer.php',    // the SERVER's relay transport key, not a vault key
+	'plugins/mailbox/data/mailbox_relay_class.php',       // mints that transport keypair
 );
 
 $root = realpath(__DIR__ . '/../..');
 
 section('the low-level decrypt primitives have a closed caller set');
 
-$callers = array();
-$iterator = new RecursiveIteratorIterator(
-	new RecursiveCallbackFilterIterator(
-		new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),
-		function ($current) {
-			$name = $current->getFilename();
-			// Never descend into version control or dependency trees; test
-			// estates drive the primitives on purpose and are out of scope.
-			if ($current->isDir()) {
-				return $name !== '.git' && $name !== 'node_modules' && $name !== 'vendor'
-					&& $name !== 'tests';
+/** Every production .php file under public_html. */
+function srp_php_files(string $root): RecursiveIteratorIterator {
+	return new RecursiveIteratorIterator(
+		new RecursiveCallbackFilterIterator(
+			new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),
+			function ($current) {
+				$name = $current->getFilename();
+				// Never descend into version control or dependency trees; test
+				// estates drive the primitives on purpose and are out of scope.
+				if ($current->isDir()) {
+					return $name !== '.git' && $name !== 'node_modules' && $name !== 'vendor'
+						&& $name !== 'tests';
+				}
+				return substr($name, -4) === '.php';
 			}
-			return substr($name, -4) === '.php';
-		}
-	)
-);
-foreach ($iterator as $file) {
+		)
+	);
+}
+
+$callers = array();
+foreach (srp_php_files($root) as $file) {
 	$source = @file_get_contents($file->getPathname());
 	if ($source === false || !preg_match(SRP_PATTERN, $source)) {
 		continue;
@@ -101,5 +130,34 @@ foreach ($allowed as $expected) {
 		$expected . ' still uses the primitives it is allowlisted for',
 		in_array($expected, $callers, true) ? '' : 'it no longer matches — prune the allowlist');
 }
+
+section('the vault secret is unreachable outside PoolVaultKey');
+
+$secret_callers = array();
+foreach (srp_php_files($root) as $file) {
+	$source = @file_get_contents($file->getPathname());
+	if ($source === false || !preg_match(SRP_SECRET_PATTERN, $source)) {
+		continue;
+	}
+	$secret_callers[] = str_replace($root . '/', '', $file->getPathname());
+}
+sort($secret_callers);
+
+$unexpected = array_diff($secret_callers, $secret_allowed);
+check(count($unexpected) === 0,
+	'no file outside PoolVaultKey (and the two non-vault transport-key users) calls SealedBox::openDek/openBinary/'
+	. 'unwrapKey/wrapKey/generateKeypair — a vault key is used through VaultKey, and a wrapping is produced only by '
+	. 'VaultUnlock::open()/openKey() (specs/unseal_daemon.md B1)',
+	count($unexpected) ? ('new callers: ' . implode(', ', $unexpected)) : '');
+
+foreach ($secret_allowed as $expected) {
+	check(in_array($expected, $secret_callers, true),
+		$expected . ' still uses the secret-taking primitives it is allowlisted for',
+		in_array($expected, $secret_callers, true) ? '' : 'it no longer matches — prune the allowlist');
+}
+
+check(!file_exists($root . '/includes/VaultKey.php')
+		|| !preg_match('/function\s+(?:secret|bytes|export|wrap)\w*\s*\(/i', (string)file_get_contents($root . '/includes/VaultKey.php')),
+	'the VaultKey interface has no getter for the bytes and no wrap method');
 
 harness_finish();

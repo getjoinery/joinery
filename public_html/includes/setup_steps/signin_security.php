@@ -149,20 +149,22 @@ document.addEventListener('DOMContentLoaded', function () {
 				return;
 			}
 			var credential = await JoineryPasskeys.register(opts.options);
+			// If a vault already exists, the creation just derived its key and
+			// the verify can write the wrapping when an unlocker the vault
+			// already has confirms it — the same activation the security page
+			// runs. Best-effort: backing out leaves the passkey enrolled and
+			// the security page can finish it.
+			var unlocker = null;
+			if (window.JoineryVaultLock && window.JoineryVaultLock.collectUnlocker) {
+				try {
+					unlocker = await JoineryVaultLock.collectUnlocker('to let the new passkey open your vault');
+				} catch (e) { unlocker = null; }
+			}
 			var res = await joineryApi.post('passkey_register_verify', {
 				credential: credential,
-				label: 'Added during setup'
+				label: 'Added during setup',
+				unlocker: unlocker
 			});
-			// If a vault already exists and is unlocked, wrap it for the new
-			// passkey — the same auto-activation the security page attempts.
-			try {
-				var vs = await joineryApi.post('vault_status', {});
-				if (vs.set_up && vs.unlocked && res.passkey && res.passkey.vault_capability !== 'incapable') {
-					var o2 = await joineryApi.post('vault_add_passkey_options', { credential_id: res.passkey.pkc_passkey_credential_id });
-					var d = await JoineryPasskeys.derive(o2.options);
-					await joineryApi.post('vault_add_passkey_verify', { credential: d.response });
-				}
-			} catch (e) { /* activation is best-effort here; the security page can finish it */ }
 			window.location = '/setup?step=signin_security';
 		} catch (e) {
 			hint.textContent = e.message || 'The passkey could not be added.';

@@ -42,13 +42,13 @@ function vault_unlock_passphrase_logic(array $input): LogicResult {
 
 	try {
 		$ceremonies = new VaultCeremonies();
-		$secret_key = $ceremonies->unlockWithPassphrase($user, $vault, $passphrase);
+		$key = $ceremonies->unlockWithPassphrase($user, $vault, $passphrase);
 	} catch (VaultCeremonyException $e) {
 		RequestLogger::log('vault_unlock_passphrase', 'verify', false, ['user_id' => $user->key]);
 		return LogicResult::error($e->getMessage());
 	}
 
-	VaultUnlock::open($user->key, $secret_key, UserEncryptionVault::SCOPE_USER, null, VaultAudit::VIA_PASSPHRASE);
+	VaultUnlock::arm($user->key, $key, UserEncryptionVault::SCOPE_USER, null, VaultAudit::VIA_PASSPHRASE);
 	RequestLogger::log('vault_unlock_passphrase', 'verify', true, ['user_id' => $user->key]);
 
 	return LogicResult::render(['unlocked' => true]);

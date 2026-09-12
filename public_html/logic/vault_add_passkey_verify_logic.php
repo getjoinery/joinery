@@ -5,6 +5,7 @@ function vault_add_passkey_verify_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/PasskeyService.php'));
 	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+	require_once(PathHelper::getIncludePath('includes/VaultCeremonies.php'));
 	require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 	require_once(PathHelper::getIncludePath('data/user_encryption_wrappings_class.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
@@ -23,11 +24,6 @@ function vault_add_passkey_verify_logic(array $input): LogicResult {
 		return LogicResult::error('Set up your vault before adding another passkey to it.');
 	}
 
-	$secret_key = VaultUnlock::secretKey($user->key, UserEncryptionVault::SCOPE_USER);
-	if ($secret_key === null) {
-		return LogicResult::error('Unlock your vault before adding another passkey to it.', ['locked' => true]);
-	}
-
 	$credential = $input['credential'] ?? null;
 	if (!is_array($credential)) {
 		return LogicResult::error('Missing passkey credential response.');
@@ -35,7 +31,7 @@ function vault_add_passkey_verify_logic(array $input): LogicResult {
 
 	try {
 		$service = new PasskeyService();
-		[$derived_user, $passkey, $prf_output] = $service->verifyDerivation(json_encode($credential), 'vault-kek');
+		[$derived_user, $passkey, $prf_output] = $service->verifyDerivation(json_encode($credential), 'vault-kek', 'add');
 	} catch (Exception $e) {
 		return LogicResult::error($e->getMessage());
 	}
@@ -56,10 +52,22 @@ function vault_add_passkey_verify_logic(array $input): LogicResult {
 		return LogicResult::error('Your vault has an unfinished key rotation. Run the rotation again to complete it, then add this passkey.');
 	}
 
-	$wrapping = UserEncryptionWrapping::createWrapped(
-		$vault->key, UserEncryptionWrapping::TYPE_PASSKEY, $secret_key, $prf_output,
+	// The wrapping is produced only under a fresh tap of an unlocker the vault
+	// already has, in this same request (specs/unseal_daemon.md B1): reserve the
+	// row, open with the presented unlocker and the new KEK in the wrap list,
+	// store what comes back. The window that results is this session's.
+	$wrapping = UserEncryptionWrapping::reserve(
+		$vault->key, UserEncryptionWrapping::TYPE_PASSKEY,
 		$passkey->key, $passkey->get('pkc_label'), (int)$vault->get('uev_key_generation')
 	);
+	try {
+		$opened = (new VaultCeremonies())->openWithUnlocker($user, $vault, $input['unlocker'] ?? null,
+			[$wrapping->wrapEntry($prf_output)]);
+	} catch (VaultCeremonyException $e) {
+		$wrapping->soft_delete();
+		return LogicResult::error($e->getMessage(), ['unlocker_required' => true]);
+	}
+	$wrapping->storeWrapped($opened['wrappings'][0]);
 
 	// Name the credential that was actually activated, so the page can confirm it
 	// by label. Belt and braces alongside the scoping in
@@ -77,7 +85,7 @@ function vault_add_passkey_verify_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
-		'description' => 'Complete adding a vault wrapping for another PRF-capable passkey',
+		'description' => 'Complete adding a vault wrapping for another PRF-capable passkey; takes the new passkey\'s derivation (credential) and a fresh unlocker (unlocker: {credential} from vault_unlock_options, {passphrase} or {code}) in the same request',
 	];
 }
 ?>

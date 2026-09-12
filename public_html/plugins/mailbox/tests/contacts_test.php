@@ -35,6 +35,7 @@
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
+require_once(__DIR__ . '/../../../tests/lib/vault_fixtures.php');
 require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
 require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
 require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
@@ -211,10 +212,10 @@ $vault->save();
 harness_register_row('uev_user_encryption_vaults', 'uev_user_encryption_vault_id', (int)$vault->key);
 
 // No browser session in CLI, so VaultUnlock::secretKey() is null → the service would
-// refuse the add. Drive the sealed path directly with the keypair secret via a tiny
-// subclass that supplies the secret (mirrors an in-window add).
+// refuse the add. Drive the sealed path directly via a tiny subclass that supplies
+// a contact-index key (mirrors an in-window add).
 class TestSealedContacts extends MailboxContacts {
-	public $secret;
+	public $secret;   // stands in for the user's contact-index key (MailboxContactIndexKey)
 	public $alias_id = 0;
 	public function addInWindow(int $uid, array $tokens, UserEncryptionVault $vault) {
 		foreach ($tokens as $raw) {
@@ -244,7 +245,7 @@ class TestSealedContacts extends MailboxContacts {
 	}
 }
 $tsvc = new TestSealedContacts();
-$tsvc->secret = $kp['secret'];
+$tsvc->secret = random_bytes(32);
 $tsvc->alias_id = $work_alias;
 $tsvc->addInWindow($suid, array('Carol <carol@secret.example>'), $vault);
 
@@ -255,7 +256,7 @@ check($srow['imc_address'] !== 'carol@secret.example', 'address stored as cipher
 check($srow['imc_address_hash'] !== hash('sha256', 'joinery:contact:' . $work_alias . ':carol@secret.example'), 'sealed hash is a KEYED blind index (not the plain SHA-256)');
 
 $cid = intval($srow['imc_mailbox_contact_id']);
-$dek = $vc->openItemDek($srow['imc_sealed_key'], $kp['secret']);
+$dek = $vc->openItemDek($srow['imc_sealed_key'], vault_fixture_key($kp['secret']));
 $opened = $vc->openField($srow['imc_address'], $dek, MailboxContact::sealAd($cid, 'imc_address'));
 check($opened === 'carol@secret.example', 'sealed address opens back under the owner key + AD', $opened);
 $openedName = $vc->openField($srow['imc_display_name'], $dek, MailboxContact::sealAd($cid, 'imc_display_name'));

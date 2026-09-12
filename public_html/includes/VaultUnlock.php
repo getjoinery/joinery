@@ -3,7 +3,11 @@
  * VaultUnlock - the Sealed Vault's unlock window (docs/sealed_vault.md).
  *
  * One unlocker act (a passkey tap, a recovery code, a passphrase) unwraps a
- * user's vault secret key into APCu for a bounded, idle-extended window.
+ * user's vault secret key into a bounded, idle-extended window. What a
+ * consumer gets back is a VaultKey — an object that opens per-item DEKs and
+ * tells its public half, and has no getter for the bytes (specs/unseal_daemon.md
+ * § The PHP seam). Today the bytes sit in APCu behind that object
+ * (PoolVaultKey); the unseal daemon replaces the object, not the callers.
  * Every server-custody consumer of that scope shares the SAME window — mail
  * and chat both read `VaultUnlock::secretKey($user_id)` and both see it open
  * the instant either one unlocks. That is the whole UX point (one tap opens
@@ -23,7 +27,13 @@
  * is the only durable trace a window leaves — see docs/sealed_vault.md
  * § The audit log.
  *
- * @version 1.8
+ * @version 1.9
+ * @changelog 1.9 - the seam: secretKey() returns a VaultKey (PoolVaultKey today),
+ *   open() takes an unlocker plus a wrap list and is the ONLY producer of a
+ *   wrapping (spec B1); openKey() is the same without arming a window, for a
+ *   rotation's old-generation key and the recovery-code probe; arm() makes a
+ *   key the session's window; onReseal callbacks receive the old generation's
+ *   VaultKey.
  * @changelog 1.8 - open()/close()/lock()/lockAll() record the window's arming
  *   and its end (with the reason) via VaultAudit; an APCu expiry, which runs no
  *   code of its own, is noticed and logged by the next read of the owning
@@ -45,6 +55,9 @@
  *  window is closed. Generic hooks (the File decrypt hook, the sealed-field
  *  model hook) catch this and surface "locked", never an error. */
 class VaultLockedException extends Exception {}
+
+require_once(PathHelper::getIncludePath('includes/VaultKey.php'));
+require_once(PathHelper::getIncludePath('includes/PoolVaultKey.php'));
 
 class VaultUnlock {
 
@@ -121,21 +134,51 @@ class VaultUnlock {
 	}
 
 	/**
-	 * Unwrap and open the window for the current session. $caps carries the
+	 * Unwrap (or mint) a vault key WITHOUT making it the session's window —
+	 * the key holder's `open` operation on its own. Two uses need exactly this:
+	 * the rotation ceremony, whose old-generation key must be usable by every
+	 * resealer and must never become the window, and the recovery-code and
+	 * bypass-phrase probes, which try each wrapping until one opens.
+	 *
+	 * $unlocker is ['wrapped', 'kek', 'ad'] — the row's wrapping, the KEK the
+	 * presented credential derived, and that row's AD
+	 * (UserEncryptionWrapping::unlocker()) — or null to mint a fresh keypair
+	 * (setup, rotation). $wrap_under is a list of ['kek', 'ad'] entries
+	 * (UserEncryptionWrapping::wrapEntry()); the returned `wrappings` sit
+	 * under the same keys, in order. This call is the ONLY way a wrapping is
+	 * ever produced (specs/unseal_daemon.md B1): the secret is wrapped only in
+	 * the request that presented a real unlocker for it, or that minted it.
+	 *
+	 * $user_id and $scope tag the key for the holder; the pool path needs
+	 * neither, the daemon path files the window under them.
+	 *
+	 * @return array{key: VaultKey, wrappings: string[]}
+	 * @throws RuntimeException when the unlocker does not open the wrapping
+	 */
+	public static function openKey(int $user_id, ?array $unlocker, array $wrap_under = array(),
+			string $scope = 'user'): array {
+		return PoolVaultKey::open($unlocker, $wrap_under);
+	}
+
+	/**
+	 * Make $key this session's window for (user, scope). $caps carries the
 	 * end-event policy for this window: ['idle'=>?seconds, 'absolute'=>?seconds,
 	 * 'heartbeat'=>bool]. When null it is resolved from the user's max mail
 	 * security level (capsForUser) — the mail consumer's window policy — so every
 	 * existing caller gets the caps automatically. Records the arming metadata a
 	 * read-time check enforces.
 	 */
-	public static function open(int $user_id, string $secret_key, string $scope = 'user', ?array $caps = null,
+	public static function arm(int $user_id, VaultKey $key, string $scope = 'user', ?array $caps = null,
 			string $via = VaultAudit::VIA_UNKNOWN): void {
+		if (!$key instanceof PoolVaultKey) {
+			throw new RuntimeException('VaultUnlock::arm: this build holds keys in the pool only.');
+		}
 		if ($caps === null) {
 			$caps = self::capsForUser($user_id);
 		}
 		$sid = self::currentSessionId();
 		$now = time();
-		apcu_store(self::apcuKey($sid, $user_id, $scope), $secret_key, self::idleSeconds());
+		$key->storeInSlot(self::apcuKey($sid, $user_id, $scope), self::idleSeconds());
 		apcu_store(self::metaKey($sid, $user_id, $scope), array(
 			'armed'      => $now,
 			'content'    => $now,           // last content decrypt (idle cap basis)
@@ -146,6 +189,22 @@ class VaultUnlock {
 		self::touchWindowMarker($user_id, $scope);
 		self::rememberOpen($user_id, $scope, $via, $now);
 		VaultAudit::opened($user_id, $scope, $via, $caps, $sid);
+	}
+
+	/**
+	 * The ordinary unlock: openKey() then arm() — unwrap under the presented
+	 * unlocker (or mint), wrap under $wrap_under, and make the result the
+	 * current session's window. Returns what openKey() returns, so an
+	 * enrolment stores the wrappings it asked for and a consumer can use the
+	 * key at once.
+	 *
+	 * @return array{key: VaultKey, wrappings: string[]}
+	 */
+	public static function open(int $user_id, ?array $unlocker, array $wrap_under = array(),
+			string $scope = 'user', ?array $caps = null, string $via = VaultAudit::VIA_UNKNOWN): array {
+		$opened = self::openKey($user_id, $unlocker, $wrap_under, $scope);
+		self::arm($user_id, $opened['key'], $scope, $caps, $via);
+		return $opened;
 	}
 
 	/**
@@ -240,19 +299,23 @@ class VaultUnlock {
 	}
 
 	/**
-	 * The in-window secret key, or null when locked. Every content read calls
+	 * The in-window vault key, or null when locked. Every content read calls
 	 * this and treats null as "locked" — a one-tap unlock prompt, never an
 	 * error. Re-stores on every fetch (activity extension) and stamps the
 	 * content-decrypt time the Fortress idle cap measures from.
+	 *
+	 * The key comes back as a VaultKey: hand it to VaultCrypto::openItemDek()
+	 * or read publicKey(); there is nothing else to do with it. Code that only
+	 * needs to know whether the window is open asks isOpen() instead.
 	 */
-	public static function secretKey(int $user_id, string $scope = 'user'): ?string {
+	public static function secretKey(int $user_id, string $scope = 'user'): ?VaultKey {
 		$sid = self::currentSessionIdOrNull();
 		if ($sid === null) {
 			return null; // no session (a CLI/cron reader) can never hold a window - locked, not an error
 		}
-		$key = self::apcuKey($sid, $user_id, $scope);
-		$value = apcu_fetch($key, $success);
-		if (!$success) {
+		$slot = self::apcuKey($sid, $user_id, $scope);
+		$key = PoolVaultKey::fromSlot($slot);
+		if ($key === null) {
 			self::observeClosed($user_id, $scope);
 			return null;
 		}
@@ -264,7 +327,7 @@ class VaultUnlock {
 		// above still applied — suppression skips the accounting, never the
 		// policy (see $activity_suppressed).
 		if (!self::$activity_suppressed) {
-			apcu_store($key, $value, self::idleSeconds());
+			$key->storeInSlot($slot, self::idleSeconds());
 			self::touchWindowMarker($user_id, $scope);
 			self::stampMeta($sid, $user_id, $scope, 'content'); // this fetch IS a content decrypt
 		}
@@ -274,7 +337,7 @@ class VaultUnlock {
 		// anything — VaultCrypto::openField() does that.
 		require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
 		SealedEgressGuard::noteScopeOpened($user_id, $scope);
-		return $value;
+		return $key;
 	}
 
 	/**
@@ -552,13 +615,13 @@ class VaultUnlock {
 	 * key, bumping its per-item key-generation. Mirrors
 	 * PasskeyService::onPreRevoke()'s registry mechanism.
 	 *
-	 * Callback signature: function(int $user_id, string $old_secret_key,
+	 * Callback signature: function(int $user_id, VaultKey $old_key,
 	 * int $old_key_generation, string $new_public_key,
 	 * int $new_key_generation): void
 	 *
 	 * Contract (docs/sealed_vault.md § Key rotation): re-seal EXACTLY the
 	 * items whose per-item generation equals $old_key_generation — that is the
-	 * generation $old_secret_key belongs to, the only one it can open. Attempt
+	 * generation $old_key belongs to, the only one it can open. Attempt
 	 * every item, then THROW if any failed: the ceremony retires a
 	 * generation's wrappings only when its consumers confirmed the drain, so a
 	 * swallowed failure here would destroy the only path to that content.
@@ -587,13 +650,13 @@ class VaultUnlock {
 	 * @param string[] $model_classes SystemBase subclasses declaring $sealed_fields
 	 */
 	public static function modelReseal(array $model_classes): callable {
-		return function (int $user_id, string $old_secret_key, int $old_key_generation,
+		return function (int $user_id, VaultKey $old_key, int $old_key_generation,
 				string $new_public_key, int $new_key_generation) use ($model_classes) {
 			$attempted = 0;
 			$failed = 0;
 			$names = array();
 			foreach ($model_classes as $class) {
-				$result = $class::resealRows($user_id, $old_secret_key, $old_key_generation,
+				$result = $class::resealRows($user_id, $old_key, $old_key_generation,
 					$new_public_key, $new_key_generation);
 				$attempted += $result['attempted'];
 				$failed += $result['failed'];
@@ -860,7 +923,7 @@ class VaultUnlock {
 	public static function cleanupRevokedCredential(int $user_id, int $credential_id): void {
 		require_once(PathHelper::getIncludePath('data/user_encryption_wrappings_class.php'));
 
-		$wrappings = new MultiUserEncryptionWrapping(['credential_id' => $credential_id]);
+		$wrappings = new MultiUserEncryptionWrapping(['credential_id' => $credential_id, 'include_reserved' => true]);
 		$wrappings->load();
 		foreach ($wrappings as $wrapping) {
 			$wrapping->soft_delete();

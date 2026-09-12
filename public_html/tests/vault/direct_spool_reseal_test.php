@@ -34,10 +34,10 @@ $user_id = (int)$user->key;
 // Generation 1 (draining) and generation 2 (target) keypairs.
 $old_pair = sodium_crypto_box_keypair();
 $old_public = SealedBox::b64url(sodium_crypto_box_publickey($old_pair));
-$old_secret = SealedBox::b64url(sodium_crypto_box_secretkey($old_pair));
+$old_secret = vault_fixture_key(SealedBox::b64url(sodium_crypto_box_secretkey($old_pair)));
 $new_pair = sodium_crypto_box_keypair();
 $new_public = SealedBox::b64url(sodium_crypto_box_publickey($new_pair));
-$new_secret = SealedBox::b64url(sodium_crypto_box_secretkey($new_pair));
+$new_secret = vault_fixture_key(SealedBox::b64url(sodium_crypto_box_secretkey($new_pair)));
 
 $crypto = new VaultCrypto();
 

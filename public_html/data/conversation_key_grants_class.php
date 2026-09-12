@@ -135,7 +135,7 @@ class ConversationKeyGrant extends SystemBase {
 		// is re-checked and the entry dropped when it has closed since.
 		if (isset(self::$open_key_cache[$conversation_id])) {
 			$hit = self::$open_key_cache[$conversation_id];
-			if (VaultUnlock::secretKey($hit['user_id']) !== null) {
+			if (VaultUnlock::isOpen($hit['user_id'])) {
 				return $hit['dek'];
 			}
 			unset(self::$open_key_cache[$conversation_id]);
@@ -144,12 +144,12 @@ class ConversationKeyGrant extends SystemBase {
 		$crypto = new VaultCrypto();
 		$rows = new MultiConversationKeyGrant(array('conversation_id' => $conversation_id));
 		foreach ($rows as $row) {
-			$secret = VaultUnlock::secretKey((int)$row->get('ckg_usr_user_id'));
-			if ($secret === null) {
+			$key = VaultUnlock::secretKey((int)$row->get('ckg_usr_user_id'));
+			if ($key === null) {
 				continue;
 			}
 			try {
-				$dek = $crypto->openItemDek((string)$row->get('ckg_wrapped_key'), $secret);
+				$dek = $crypto->openItemDek((string)$row->get('ckg_wrapped_key'), $key);
 				self::$open_key_cache[$conversation_id] = array(
 					'user_id' => (int)$row->get('ckg_usr_user_id'),
 					'dek'     => $dek,
@@ -173,7 +173,7 @@ class ConversationKeyGrant extends SystemBase {
 	 *
 	 * @return array{attempted:int,failed:int}
 	 */
-	public static function resealForUser(int $user_id, string $old_secret_key, int $old_key_generation,
+	public static function resealForUser(int $user_id, VaultKey $old_key, int $old_key_generation,
 			string $new_public_key, int $new_key_generation): array {
 
 		$crypto = new VaultCrypto();
@@ -187,7 +187,7 @@ class ConversationKeyGrant extends SystemBase {
 		foreach ($rows as $row) {
 			$attempted++;
 			try {
-				$dek = $crypto->openItemDek((string)$row->get('ckg_wrapped_key'), $old_secret_key);
+				$dek = $crypto->openItemDek((string)$row->get('ckg_wrapped_key'), $old_key);
 				$row->set('ckg_wrapped_key', $crypto->sealItemDek($dek, $new_public_key));
 				$row->set('ckg_key_generation', $new_key_generation);
 				$row->save();

@@ -914,12 +914,12 @@ class InboundEmailMessage extends SystemBase {
 	public static function unwrapDekInWindow(int $owner_id, string $sealed_key): ?string {
 		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
-		$secret = VaultUnlock::secretKey($owner_id);
-		if ($secret === null) {
+		$key = VaultUnlock::secretKey($owner_id);
+		if ($key === null) {
 			return null;
 		}
 		$crypto = new VaultCrypto();
-		return $crypto->openItemDek($sealed_key, $secret);
+		return $crypto->openItemDek($sealed_key, $key);
 	}
 
 	/** @return array{crypto:VaultCrypto,dek:string} */
@@ -927,12 +927,12 @@ class InboundEmailMessage extends SystemBase {
 		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
 
-		$secret = VaultUnlock::secretKey($owner_id);
-		if ($secret === null) {
+		$key = VaultUnlock::secretKey($owner_id);
+		if ($key === null) {
 			throw new VaultLockedException();
 		}
 		$crypto = new VaultCrypto();
-		$dek = $crypto->openItemDek($sealed_key, $secret);
+		$dek = $crypto->openItemDek($sealed_key, $key);
 		return array('crypto' => $crypto, 'dek' => $dek);
 	}
 

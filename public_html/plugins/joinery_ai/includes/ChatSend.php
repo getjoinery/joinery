@@ -70,7 +70,7 @@ class ChatSend {
      * unlocks then resubmits.
      */
     public static function lockedForWrite(int $uid, bool $protected): bool {
-        return $protected && VaultUnlock::secretKey($uid) === null;
+        return $protected && !VaultUnlock::isOpen($uid);
     }
 
     /**

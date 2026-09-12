@@ -24,6 +24,7 @@
 
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
+require_once(__DIR__ . '/../lib/vault_fixtures.php');
 
 require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectProtocol.php'));
 require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectIdentity.php'));
@@ -129,7 +130,7 @@ check(strpos($sealed, 'v1.seal.') !== 0,
 	'and carries none of the DEK text wrapping');
 check(DirectProtocol::sealedSizeCeiling(strlen($plain)) === strlen($sealed),
 	'the ceiling the receiver computes from the declared size matches the sealed bytes exactly');
-check((new VaultCrypto())->openBulkDelivery($sealed, $kp['secret']) === $plain,
+check((new VaultCrypto())->openBulkDelivery($sealed, vault_fixture_key($kp['secret'])) === $plain,
 	'and the recipient opens it back to the original bytes');
 
 // ---------------------------------------------------------------------------
@@ -291,7 +292,7 @@ check(!$spoofed->senderIsAligned(),
 	'a From claiming another domain than the one that signed is NOT aligned — a spoofed From cannot borrow a place in your contacts');
 
 check($typed->transport() === 'joinery_direct', 'the transport tag a kind records is fixed');
-check($typed->vaultSecretKey() === null,
-	'a live-path envelope carries no vault secret — that only exists on the deferred path');
+check($typed->vaultKey() === null,
+	'a live-path envelope carries no vault key — that only exists on the deferred path');
 
 harness_finish();

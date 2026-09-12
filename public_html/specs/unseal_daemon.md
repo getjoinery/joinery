@@ -4,7 +4,16 @@
 operations folded to four; B1, a key-export door in the first draft, closed;
 recovery redesigned as a self-healing ladder after the owner ruled out any
 shell step). Closes S13 in `security_inventory.md`,
-the second of the four separations ("keys leave the pool"). Nothing is built.
+the second of the four separations ("keys leave the pool"). **WP1 built
+2026-09-12** (uncommitted): the `VaultKey` seam is in, pool-held — every
+production site and resealer takes the object, the four enrolments take a
+fresh unlocker and wrap through `open()`, `MailboxContacts` keys its blind
+index by a sealed per-user key (`MailboxContactIndexKey`, table
+`mck_mailbox_contact_index_keys`, created on dev), and
+`sealed_read_paths_test` pins the secret-taking `SealedBox` primitives to
+`PoolVaultKey`; a reserved wrapping row (empty, between `reserve()` and
+`storeWrapped()`) is excluded from every query and retired by the next
+`reserve()` for the same unlocker. `php tests/run.php db --changed` green (413 suites). WP2–WP6 unbuilt.
 The design is Mitigation A of `vault_key_memory_exposure.md`, worked through
 against the code as it is today; that spec's open decision 1 is answered here.
 
@@ -232,8 +241,12 @@ Two implementations. `DaemonVaultKey` holds a handle and talks to the socket.
 where the daemon was never installed (below). Nothing outside `PoolVaultKey` can read the
 bytes: there is no getter, and `tests/vault/sealed_read_paths_test.php`, which
 already pins the three open methods, gains a check that `SealedBox::openDek`,
-`openBinary`, `unwrapKey` and `generateKeypair` are called from `PoolVaultKey`,
-`VaultCrypto` and the client-custody storage class only. `VaultCrypto`'s DEK
+`openBinary`, `unwrapKey`, `wrapKey` and `generateKeypair` are called from
+`PoolVaultKey` (and `SealedBox` itself) only, with two named exceptions that
+use `SealedBox` with a key that is not a vault key: `RelaySpoolConsumer`
+opens relay spool envelopes with the server's own transport secret, and
+`mailbox_relay_class` mints that transport keypair. `VaultCrypto` opens
+through `VaultKey::unseal()` and touches none of them. `VaultCrypto`'s DEK
 memo keys on the handle's id instead of the secret bytes, so a request still
 unwraps each row once, and gains `openItemDeks(array $sealed, VaultKey $key)`,
 which fills the memo from one round trip. The callers that already hold a set

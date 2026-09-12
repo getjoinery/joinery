@@ -45,6 +45,7 @@ function mr_vault(string $suffix): array {
 		'vault'   => $vault,
 		'public'  => SealedBox::b64url(sodium_crypto_box_publickey($keypair)),
 		'secret'  => SealedBox::b64url(sodium_crypto_box_secretkey($keypair)),
+		'key'     => vault_fixture_key(SealedBox::b64url(sodium_crypto_box_secretkey($keypair))),
 	);
 }
 
@@ -75,7 +76,7 @@ $owner   = mr_vault('Owner');
 $other   = mr_vault('Other');
 $new_keypair  = sodium_crypto_box_keypair();
 $new_public   = SealedBox::b64url(sodium_crypto_box_publickey($new_keypair));
-$new_secret   = SealedBox::b64url(sodium_crypto_box_secretkey($new_keypair));
+$new_secret   = vault_fixture_key(SealedBox::b64url(sodium_crypto_box_secretkey($new_keypair)));
 
 $draining  = mr_contact($owner, 'draining@example.com', 1);
 $already   = mr_contact($owner, 'already@example.com', 2);
@@ -88,7 +89,7 @@ $stranger_key     = (string)mr_raw($stranger)['imc_sealed_key'];
 // ---------------------------------------------------------------------------
 section('The re-seal moves exactly the draining generation, for one member');
 // ---------------------------------------------------------------------------
-$result = MailboxContact::resealRows($owner['user_id'], $owner['secret'], 1, $new_public, 2);
+$result = MailboxContact::resealRows($owner['user_id'], $owner['key'], 1, $new_public, 2);
 check($result['attempted'] === 1, 'exactly one row was on the draining generation');
 check($result['failed'] === 0, 'and it re-sealed cleanly');
 
@@ -118,7 +119,7 @@ $q = DbConnector::get_instance()->get_db_link()->prepare(
 $q->execute(array('v1.aead.not-a-real-wrapping', $corrupt));
 
 $fine = mr_contact($owner, 'fine@example.com', 3);
-$result = MailboxContact::resealRows($owner['user_id'], $owner['secret'], 3, $new_public, 4);
+$result = MailboxContact::resealRows($owner['user_id'], $owner['key'], 3, $new_public, 4);
 check($result['attempted'] === 2, 'both generation-3 rows were attempted');
 check($result['failed'] === 1, 'the damaged one is reported as a failure');
 check((int)mr_raw($fine)['imc_key_generation'] === 4,
@@ -131,7 +132,7 @@ $callback = VaultUnlock::modelReseal(array(MailboxContact::class));
 check(is_callable($callback), 'modelReseal() hands back a callback with the onReseal signature');
 
 $clean = mr_contact($owner, 'clean@example.com', 5);
-$callback($owner['user_id'], $owner['secret'], 5, $new_public, 6);
+$callback($owner['user_id'], $owner['key'], 5, $new_public, 6);
 check((int)mr_raw($clean)['imc_key_generation'] === 6, 'a clean pass re-seals and returns quietly');
 
 $broken = mr_contact($owner, 'broken@example.com', 7);
@@ -139,7 +140,7 @@ $q->execute(array('v1.aead.also-not-real', $broken));
 $threw = false;
 $message = '';
 try {
-	$callback($owner['user_id'], $owner['secret'], 7, $new_public, 8);
+	$callback($owner['user_id'], $owner['key'], 7, $new_public, 8);
 } catch (RuntimeException $e) {
 	$threw = true;
 	$message = $e->getMessage();
@@ -152,7 +153,7 @@ section('A model with no sealing columns is refused rather than half-rotated');
 // ---------------------------------------------------------------------------
 $threw = false;
 try {
-	User::resealRows($owner['user_id'], $owner['secret'], 1, $new_public, 2);
+	User::resealRows($owner['user_id'], $owner['key'], 1, $new_public, 2);
 } catch (RuntimeException $e) {
 	$threw = true;
 }

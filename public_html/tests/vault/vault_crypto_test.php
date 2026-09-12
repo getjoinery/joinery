@@ -16,15 +16,18 @@ if (!extension_loaded('sodium')) {
 	harness_finish();
 }
 
+require_once(__DIR__ . '/../lib/vault_fixtures.php');
+
 $box = new SealedBox();
 $crypto = new VaultCrypto();
 $kp = $box->generateKeypair();
+$key = vault_fixture_key($kp['secret']);
 
 section('Envelope dance');
 $dek = $crypto->newItemDek();
 check(strlen($dek) === 32, 'item DEK is 32 bytes');
 $sealed_key = $crypto->sealItemDek($dek, $kp['public']);
-check($crypto->openItemDek($sealed_key, $kp['secret']) === $dek, 'DEK seal/open round trip');
+check($crypto->openItemDek($sealed_key, $key) === $dek, 'DEK seal/open round trip');
 $blob = $crypto->sealField('the plaintext body', $dek, 'mail:42:body');
 check($crypto->openField($blob, $dek, 'mail:42:body') === 'the plaintext body', 'field seal/open round trip');
 
@@ -44,13 +47,13 @@ check($threw, 'row A ciphertext with row B AD throws');
 // Swap the sealed DEKs between rows: opening row A's blob with row B's DEK
 // (what a spliced sealed_key column would yield) must fail even with the
 // correct AD.
-$dek_swapped = $crypto->openItemDek($sealed_b, $kp['secret']);
+$dek_swapped = $crypto->openItemDek($sealed_b, $key);
 $threw = false;
 try { $crypto->openField($blob_a, $dek_swapped, 'mail:1:body'); } catch (Exception $e) { $threw = true; }
 check($threw, 'row A ciphertext with row B DEK throws (sealed-key splice)');
 
 $threw = false;
-try { $crypto->openItemDek($sealed_a, $box->generateKeypair()['secret']); } catch (Exception $e) { $threw = true; }
+try { $crypto->openItemDek($sealed_a, vault_fixture_key($box->generateKeypair()['secret'])); } catch (Exception $e) { $threw = true; }
 check($threw, 'a sealed DEK never opens under a different vault key');
 
 section('DEK unwrapping is memoized without changing what opens');
@@ -58,26 +61,39 @@ section('DEK unwrapping is memoized without changing what opens');
 // sealed COLUMN and always yields the same DEK. The cache must be invisible:
 // same answer repeated, different blobs still distinct, and a wrong secret
 // still refused rather than served from a neighbouring entry.
-check($crypto->openItemDek($sealed_a, $kp['secret']) === $dek_a, 'repeat unwrap returns the same DEK');
-check($crypto->openItemDek($sealed_a, $kp['secret']) === $dek_a, 'and again, from the memo');
-check($crypto->openItemDek($sealed_b, $kp['secret']) === $dek_b, 'a different blob still unwraps to its own DEK');
+check($crypto->openItemDek($sealed_a, $key) === $dek_a, 'repeat unwrap returns the same DEK');
+check($crypto->openItemDek($sealed_a, $key) === $dek_a, 'and again, from the memo');
+check($crypto->openItemDek($sealed_b, $key) === $dek_b, 'a different blob still unwraps to its own DEK');
 check($dek_a !== $dek_b, 'the two DEKs were never conflated');
 
 // A second vault whose secret cannot open this blob must still throw AFTER the
 // blob has been cached under the right secret — the memo keys on both inputs,
 // so a wrong secret can never be answered from an entry it did not earn.
-$other = $box->generateKeypair();
+$other = vault_fixture_key($box->generateKeypair()['secret']);
 $threw = false;
-try { $crypto->openItemDek($sealed_a, $other['secret']); } catch (Exception $e) { $threw = true; }
+try { $crypto->openItemDek($sealed_a, $other); } catch (Exception $e) { $threw = true; }
 check($threw, 'a cached blob still refuses the wrong secret');
+
+// Two objects for the same key share an id, so the memo hits across fetches
+// of the same window.
+$same = vault_fixture_key($kp['secret']);
+check($same->id() === $key->id() && $same->id() !== $other->id(), 'VaultKey::id() is stable per key and distinct per key');
+check($same->publicKey() === $kp['public'], 'VaultKey::publicKey() is the keypair\'s public half');
+
+section('openItemDeks opens a batch in one call');
+$batch = $crypto->openItemDeks(array('a' => $sealed_a, 'b' => $sealed_b), $key);
+check($batch['a'] === $dek_a && $batch['b'] === $dek_b, 'a batch returns each DEK under its own key');
+$threw = false;
+try { $crypto->openItemDeks(array($sealed_a, 'v1.seal.notbase64!'), $key); } catch (Exception $e) { $threw = true; }
+check($threw, 'a malformed blob in a batch throws rather than returning partially');
 
 // A fresh instance shares the memo (it is process-lived, not per object), and
 // forgetItemDeks() drops it — that is what VaultUnlock::lock() relies on so
 // keys unwrapped under a window cannot outlive it.
 $crypto2 = new VaultCrypto();
-check($crypto2->openItemDek($sealed_a, $kp['secret']) === $dek_a, 'a second instance opens the same DEK');
+check($crypto2->openItemDek($sealed_a, $key) === $dek_a, 'a second instance opens the same DEK');
 VaultCrypto::forgetItemDeks();
-check($crypto->openItemDek($sealed_a, $kp['secret']) === $dek_a, 'unwrapping still works after the memo is dropped');
+check($crypto->openItemDek($sealed_a, $key) === $dek_a, 'unwrapping still works after the memo is dropped');
 
 harness_finish();
 ?>

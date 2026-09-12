@@ -137,7 +137,7 @@ try {
 	harness_register_model('File', intval($file->key));
 	$crypto = new VaultCrypto();
 	$m1_dek = $crypto->openItemDek((string)lu_row($m1)['iem_sealed_key'],
-		SealedBox::b64url(sodium_crypto_box_secretkey($owner_kp)));
+		vault_fixture_key(SealedBox::b64url(sodium_crypto_box_secretkey($owner_kp))));
 	$file->replace_bytes($crypto->sealField($att_plain, $m1_dek, InboundEmailMessage::attachmentAd($m1, '2')));
 	$att = new InboundMessageAttachment(NULL);
 	$att->set('ima_iem_inbound_email_message_id', $m1);
@@ -185,7 +185,7 @@ try {
 	// -----------------------------------------------------------------------
 	section('window open: history converges, caller-scoped, bounded');
 
-	VaultUnlock::open($owner_id, SealedBox::b64url(sodium_crypto_box_secretkey($owner_kp)));
+	vault_fixture_open_window($owner_id, SealedBox::b64url(sodium_crypto_box_secretkey($owner_kp)));
 	harness_defer(function () use ($owner_id) { VaultUnlock::lockAll($owner_id); });
 
 	$res = mailbox_protection_unseal_batch($dom, $owner_id, 2);

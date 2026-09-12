@@ -5,6 +5,7 @@ function vault_passphrase_enroll_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
 	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+	require_once(PathHelper::getIncludePath('includes/VaultCeremonies.php'));
 	require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 	require_once(PathHelper::getIncludePath('data/user_encryption_wrappings_class.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
@@ -27,11 +28,6 @@ function vault_passphrase_enroll_logic(array $input): LogicResult {
 		return LogicResult::error('Please re-confirm with an existing passkey before adding a bypass phrase.');
 	}
 
-	$secret_key = VaultUnlock::secretKey($user->key, UserEncryptionVault::SCOPE_USER);
-	if ($secret_key === null) {
-		return LogicResult::error('Unlock your vault before adding a bypass phrase.', ['locked' => true]);
-	}
-
 	$passphrase = isset($input['passphrase']) ? (string)$input['passphrase'] : '';
 	if (strlen($passphrase) < SealedBox::PASSPHRASE_MIN_CHARS) {
 		return LogicResult::error('Your bypass phrase must be at least ' . SealedBox::PASSPHRASE_MIN_CHARS . ' characters.');
@@ -43,16 +39,32 @@ function vault_passphrase_enroll_logic(array $input): LogicResult {
 		return LogicResult::error('Your vault has an unfinished key rotation. Run the rotation again to complete it, then add your bypass phrase again.');
 	}
 
+	// The phrase's wrapping is produced only under a fresh tap of an unlocker
+	// the vault already has, in this same request (specs/unseal_daemon.md B1).
+	// The old phrase stays live until the new one is stored, so it can itself
+	// be the unlocker that replaces it.
 	$existing = new MultiUserEncryptionWrapping(['vault_id' => $vault->key, 'unlocker_type' => UserEncryptionWrapping::TYPE_PASSPHRASE]);
 	$existing->load();
+	$old_rows = [];
 	foreach ($existing as $wrapping) {
-		$wrapping->soft_delete();
+		$old_rows[] = $wrapping;
 	}
 
 	$box = new SealedBox();
 	$salt = (string)$vault->get('uev_salt');
 	$kek = $box->kekFromPassphrase($passphrase, $salt);
-	UserEncryptionWrapping::createWrapped($vault->key, UserEncryptionWrapping::TYPE_PASSPHRASE, $secret_key, $kek, null, null, (int)$vault->get('uev_key_generation'), $salt);
+	$wrapping = UserEncryptionWrapping::reserve($vault->key, UserEncryptionWrapping::TYPE_PASSPHRASE, null, null, (int)$vault->get('uev_key_generation'), $salt);
+	try {
+		$opened = (new VaultCeremonies())->openWithUnlocker($user, $vault, $input['unlocker'] ?? null,
+			[$wrapping->wrapEntry($kek)]);
+	} catch (VaultCeremonyException $e) {
+		$wrapping->soft_delete();
+		return LogicResult::error($e->getMessage(), ['unlocker_required' => true]);
+	}
+	$wrapping->storeWrapped($opened['wrappings'][0]);
+	foreach ($old_rows as $old) {
+		$old->soft_delete();
+	}
 
 	return LogicResult::render(['enrolled' => true]);
 }
@@ -61,7 +73,7 @@ function vault_passphrase_enroll_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
-		'description' => 'Add (or replace) the optional vault bypass phrase unlocker; requires a recent step-up and an unlocked vault',
+		'description' => 'Add (or replace) the optional vault bypass phrase unlocker; requires a recent step-up and a fresh unlocker (unlocker: {credential} from vault_unlock_options, {passphrase} or {code}) in the same request',
 	];
 }
 ?>

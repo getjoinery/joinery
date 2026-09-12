@@ -31,6 +31,7 @@
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
+require_once(__DIR__ . '/../../../tests/lib/vault_fixtures.php');
 
 require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
 if (!PluginHelper::isPluginActive('mailbox')) {
@@ -234,7 +235,7 @@ check(in_array($row['iem_content_sealed'], array('t', true, '1', 1), true),
 check(strpos((string)$row['iem_raw_headers'], 'v1.aead.') === 0,
 	'iem_raw_headers holds ciphertext, never plaintext');
 
-$dek = $crypto->openItemDek((string)$row['iem_sealed_key'], $kp['secret']);
+$dek = $crypto->openItemDek((string)$row['iem_sealed_key'], vault_fixture_key($kp['secret']));
 $opened = $crypto->openField((string)$row['iem_raw_headers'], $dek, InboundEmailMessage::sealAd($sealed_id, 'iem_raw_headers'));
 check($opened === $router->rawHeaderBlock($raw),
 	'the sealed block opens with the row DEK to the exact wire headers');

@@ -33,6 +33,7 @@
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
+require_once(__DIR__ . '/../../../tests/lib/vault_fixtures.php');
 
 require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
 if (!PluginHelper::isPluginActive('mailbox')) {
@@ -247,13 +248,13 @@ $stmt = $db->prepare('UPDATE iem_inbound_email_messages SET iem_reseal_pending =
 $stmt->execute(array($sealed_id));
 check(PromotedRowRepair::hasWork($uid), 'hasWork finds the debt with the flag down (pre-flag rows heal too)');
 
-$done = PromotedRowRepair::drainForUser($uid, $kp['secret']);
+$done = PromotedRowRepair::drainForUser($uid, vault_fixture_key($kp['secret']));
 check($done >= 1, 'drain repaired the row');
 
 $row = $read_row($sealed_id);
 check(strpos((string)$row['iem_recipient'], 'v1.aead.') === 0, 'recipient is sealed now');
 check(!pg_truth($row['iem_reseal_pending']), 'flag cleared');
-$dek = $crypto->openItemDek($row['iem_sealed_key'], $kp['secret']);
+$dek = $crypto->openItemDek($row['iem_sealed_key'], vault_fixture_key($kp['secret']));
 $opened = $crypto->openField($row['iem_recipient'], $dek,
 	InboundEmailMessage::sealAd($sealed_id, 'iem_recipient'));
 check($opened === $alias_addr, 'sealed under the row\'s EXISTING DEK — original value, same key as the body');
@@ -292,7 +293,7 @@ $promote($dup_id);
 check($read_row($dup_id)['iem_direction'] === 'outbound',
 	'duplicate promoted (the sealed sibling recipient is ciphertext, so the stand-down guard cannot see it)');
 
-$done = PromotedRowRepair::drainForUser($uid, $kp['secret']);
+$done = PromotedRowRepair::drainForUser($uid, vault_fixture_key($kp['secret']));
 check($done >= 1, 'drain processed the duplicate');
 
 $dup = $read_row($dup_id);

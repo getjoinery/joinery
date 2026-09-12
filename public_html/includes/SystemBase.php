@@ -837,12 +837,12 @@ abstract class SystemBase {
 		if ($owner_id === null) {
 			throw new VaultLockedException();
 		}
-		$secret = VaultUnlock::secretKey($owner_id);
-		if ($secret === null) {
+		$key = VaultUnlock::secretKey($owner_id);
+		if ($key === null) {
 			throw new VaultLockedException();
 		}
 		$crypto = new VaultCrypto();
-		$dek = $crypto->openItemDek((string)$row[static::sealedKeyColumn()], $secret);
+		$dek = $crypto->openItemDek((string)$row[static::sealedKeyColumn()], $key);
 		return $crypto->openField($ciphertext, $dek,
 			static::sealAd(intval($row[static::$pkey_column] ?? 0), $field));
 	}
@@ -1163,12 +1163,12 @@ abstract class SystemBase {
 			throw new RuntimeException(get_called_class() . ': row ' . $this->key
 				. ' is flagged sealed but carries no wrapped key.');
 		}
-		$secret = VaultUnlock::secretKey($owner_id);
-		if ($secret === null) {
+		$key = VaultUnlock::secretKey($owner_id);
+		if ($key === null) {
 			throw new VaultLockedException();
 		}
 		$crypto = new VaultCrypto();
-		return $crypto->openItemDek($sealed, $secret);
+		return $crypto->openItemDek($sealed, $key);
 	}
 
 	/**
@@ -1206,7 +1206,7 @@ abstract class SystemBase {
 	 * regardless of how much content a member holds.
 	 *
 	 * Scoped to $old_generation exactly, because that is the only generation
-	 * $old_secret_key can open — a row already on the new generation would fail
+	 * $old_key can open — a row already on the new generation would fail
 	 * to unwrap and read as a rotation failure. A model with no generation column
 	 * cannot be scoped that way and is refused rather than half-rotated.
 	 *
@@ -1225,7 +1225,7 @@ abstract class SystemBase {
 	 *
 	 * @return array{attempted:int, failed:int}
 	 */
-	public static function resealRows(int $user_id, string $old_secret_key, int $old_generation,
+	public static function resealRows(int $user_id, VaultKey $old_key, int $old_generation,
 			string $new_public_key, int $new_generation): array {
 		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
 
@@ -1271,7 +1271,7 @@ abstract class SystemBase {
 			$attempted++;
 			$row_id = intval($row[static::$pkey_column] ?? 0);
 			try {
-				$dek = $crypto->openItemDek($sealed, $old_secret_key);
+				$dek = $crypto->openItemDek($sealed, $old_key);
 				$update->execute(array($crypto->sealItemDek($dek, $new_public_key), $new_generation, $row_id));
 			} catch (Throwable $e) {
 				$failed++;
