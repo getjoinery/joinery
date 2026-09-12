@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   Joinery Default UI Kit  ·  custom.css  ·  v2.11.0
+   Joinery Default UI Kit  ·  custom.css  ·  v2.12.0
    Pure Slate design. Themeable values live in --jy-* tokens on
    :root so branded themes can override them without understanding
    internals. Component rules are scoped under .jy-ui to prevent
@@ -82,6 +82,14 @@
    default theme is active. Branded themes are unaffected even
    though base.css/custom.css load on every page.
    ─────────────────────────────────────────────────────────── */
+
+/* The hidden attribute means hidden, on every theme. The browser's own rule
+   for it is a plain display:none that any author rule with a display value
+   overrides — so a component styled display:flex and closed with
+   el.hidden = true stayed on screen as an empty box (the Drive context menu,
+   the AI drawer overlay, the mailbox bulk bar all hit this and each grew a
+   local .x[hidden] rule). One rule here, and no component needs its own. */
+[hidden] { display: none !important; }
 
 /* No default body margin, and a stable scrollbar gutter: both keep the
    header from shifting when navigating between scrolling pages and

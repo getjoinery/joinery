@@ -48,7 +48,7 @@
                 ]);
                 $formwriter->begin_form();
                 devices_link_logic_form($formwriter, $page_vars, array_merge($_GET, $_POST));
-                echo '<button type="button" id="dlkDeny" class="jy-btn jy-btn-secondary">Not me — refuse</button>';
+                echo '<button type="button" id="dlkDeny" class="btn btn-secondary">Not me — refuse</button>';
                 $formwriter->end_form();
                 ?>
             </div>
@@ -63,13 +63,13 @@
                 $vaultform = $page->getFormWriter('vaultform');
                 $vaultform->begin_form();
                 if (!empty($page_vars['passkeys_enabled'])) {
-                    echo '<button type="button" id="dlkUnlockPasskey" class="jy-btn jy-btn-primary">Unlock with a passkey</button>';
+                    echo '<button type="button" id="dlkUnlockPasskey" class="btn btn-primary">Unlock with a passkey</button>';
                 }
                 $vaultform->passwordinput('dlk_passphrase', 'Or use your vault passphrase', [
                     'required' => false,
                 ]);
-                echo '<button type="button" id="dlkUnlockPp" class="jy-btn">Unlock with passphrase</button>';
-                echo '<button type="button" class="jy-btn jy-btn-secondary" data-dlk-close>Cancel</button>';
+                echo '<button type="button" id="dlkUnlockPp" class="btn btn-secondary">Unlock with passphrase</button>';
+                echo '<button type="button" class="btn btn-secondary" data-dlk-close>Cancel</button>';
                 $vaultform->end_form();
                 ?>
             </dialog>

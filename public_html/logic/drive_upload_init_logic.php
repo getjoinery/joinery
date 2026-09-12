@@ -123,22 +123,22 @@ function drive_upload_init_logic(array $input): LogicResult {
 		return LogicResult::error('An encrypted upload carries its modification time inside its encrypted metadata, not as a parameter.');
 	}
 
-	// Tier gates — the owner's plan, since the owner is billed. The per-file cap
-	// means PLAINTEXT bytes; an encrypted upload arrives as ciphertext (a fixed
-	// 32 bytes per 4 MiB chunk larger), so a vault destination is gated against
-	// the deterministic ciphertext ceiling — a file that fits the cap must not
-	// fail only because its destination is encrypted.
+	// Tier gates — the owner's plan, since the owner is billed. Either value at
+	// 0 is "no limit": a member on no plan (the owner of a self-hosted site)
+	// uploads freely, bounded only by the disk below. The per-file cap means
+	// PLAINTEXT bytes; an encrypted upload arrives as ciphertext (a fixed 32
+	// bytes per 4 MiB chunk larger), so a vault destination is gated against the
+	// deterministic ciphertext ceiling — a file that fits the cap must not fail
+	// only because its destination is encrypted.
 	$max_file = (int)SubscriptionTier::getUserFeature($owner_id, 'drive_max_file_bytes', 0);
 	$quota    = (int)SubscriptionTier::getUserFeature($owner_id, 'drive_storage_bytes', 0);
-	if ($quota <= 0 || $max_file <= 0) {
-		return LogicResult::error('Uploads are not available on the owner\'s current plan.');
+	if ($max_file > 0) {
+		$size_cap = $encrypted ? DriveHelper::encrypted_size_ceiling($max_file) : $max_file;
+		if ($size_bytes > $size_cap) {
+			return LogicResult::error('That file is larger than the per-file limit.');
+		}
 	}
-	$size_cap = $encrypted ? DriveHelper::encrypted_size_ceiling($max_file) : $max_file;
-	if ($size_bytes > $size_cap) {
-		return LogicResult::error('That file is larger than the per-file limit.');
-	}
-	$usage = DriveUsage::for_user($owner_id);
-	if ((int)$usage->get('dru_bytes_used') + $size_bytes > $quota) {
+	if ($quota > 0 && DriveUsage::current_bytes($owner_id) + $size_bytes > $quota) {
 		return LogicResult::error('That upload would exceed the storage quota.');
 	}
 

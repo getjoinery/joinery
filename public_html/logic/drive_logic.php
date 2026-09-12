@@ -27,6 +27,7 @@ function drive_logic(array $input): LogicResult {
 	$listing = drive_list_logic(array(
 		'folder_id' => isset($input['folder_id']) ? (int)$input['folder_id'] : 0,
 		'view'      => isset($input['view']) ? (string)$input['view'] : 'mine',
+		'source'    => isset($input['source']) ? (string)$input['source'] : '',
 	));
 	$initial = ($listing instanceof LogicResult && $listing->error === null) ? $listing->data : array('items' => array());
 
