@@ -11,7 +11,7 @@ require_once(PathHelper::getComposerAutoloadPath());
 use Postmark\PostmarkClient;
 use Postmark\Models\PostmarkException;
 
-class PostmarkProvider implements EmailServiceProvider {
+class PostmarkProvider implements EmailServiceProvider, SingleKeyProvider {
 
     public static function getKey(): string {
         return 'postmark';
@@ -19,6 +19,11 @@ class PostmarkProvider implements EmailServiceProvider {
 
     public static function getLabel(): string {
         return 'Postmark';
+    }
+
+    /** A server token is a UUID. */
+    public static function apiKeyPattern(): string {
+        return '/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i';
     }
 
     public static function getSpfMechanism(string $domain): string

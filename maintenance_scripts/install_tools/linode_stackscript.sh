@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#VERSION 1.9 - The sending key names no provider; the installer detects it.
 #VERSION 1.8 - Nothing here sets a service up any more: the DNS token, the
 #               sending key and the bucket are handed to install.sh in the
 #               environment, and _site_init.sh does the work for every install
@@ -81,8 +82,8 @@
 #                           and its mail records are published through the
 #                           kept DNS token. The wizard then opens on the
 #                           delivery proof, or on a DNS wait. Never printed.
-#   JOINERY_MAIL_PROVIDER   optional — which provider the key belongs to
-#                           (default smtp2go, the one the quickstart uses).
+#   JOINERY_MAIL_PROVIDER   optional — which provider the key belongs to.
+#                           Blank means the installer tells from the key.
 #   JOINERY_BACKUP_BUCKET   optional — a bucket for backups. With the two keys
 #   JOINERY_BACKUP_KEY_ID     below it becomes the scheduled backup target
 #   JOINERY_BACKUP_KEY        after a connection test
@@ -136,7 +137,7 @@ TOKEN_USABLE=false
 DNS_OUTCOME="skipped: no Linode token was supplied"
 BUNDLE="${JOINERY_INSTALL_BUNDLE:-personal}"
 MAIL_API_KEY="${JOINERY_MAIL_API_KEY:-}"
-MAIL_PROVIDER="${JOINERY_MAIL_PROVIDER:-smtp2go}"
+MAIL_PROVIDER="${JOINERY_MAIL_PROVIDER:-}"
 BACKUP_BUCKET="${JOINERY_BACKUP_BUCKET:-}"
 BACKUP_KEY_ID="${JOINERY_BACKUP_KEY_ID:-}"
 BACKUP_KEY="${JOINERY_BACKUP_KEY:-}"
@@ -189,7 +190,7 @@ fi
 echo "Admin:  $ADMIN_EMAIL"
 echo "Bundle: $BUNDLE"
 if [ -n "$MAIL_API_KEY" ]; then
-    echo "Email:  set up during install ($MAIL_PROVIDER key supplied)"
+    echo "Email:  set up during install (sending key supplied${MAIL_PROVIDER:+, $MAIL_PROVIDER})"
 fi
 if [ -n "$BACKUP_BUCKET" ]; then
     echo "Backup: $BACKUP_PROVIDER bucket $BACKUP_BUCKET"
@@ -418,7 +419,9 @@ MAIL_API_KEY_SUPPLIED=""
 if [ -n "$MAIL_API_KEY" ]; then
     MAIL_API_KEY_SUPPLIED=1
     export JOINERY_MAIL_API_KEY="$MAIL_API_KEY"
-    export JOINERY_MAIL_PROVIDER="$MAIL_PROVIDER"
+    if [ -n "$MAIL_PROVIDER" ]; then
+        export JOINERY_MAIL_PROVIDER="$MAIL_PROVIDER"
+    fi
 fi
 if [ -n "$BACKUP_BUCKET" ]; then
     export JOINERY_BACKUP_BUCKET="$BACKUP_BUCKET"

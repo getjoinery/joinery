@@ -11,6 +11,8 @@
  * This file also declares the optional RawMessageRelay, ApiSubmissionRelay,
  * DkimRecordSource, and SendingDomainRegistrar capabilities (below).
  *
+ * @version 1.7 - SingleKeyProvider: a provider one API key configures declares the shape of
+ *                its keys, which is what lets an installer tell which provider issued a key
  * @version 1.6
  */
 interface EmailServiceProvider {
@@ -200,4 +202,26 @@ interface SendingDomainRegistrar {
      * @return array{status:'ok'|'error'|'unreachable', error?:string}
      */
     public static function createSendingDomain(string $domain): array;
+}
+
+/**
+ * A provider that one API key configures end to end: its settings group
+ * declares exactly one secret, and the key alone is enough to send. Declaring
+ * the shape of its keys is the opt-in — SMTP has one secret too (a password)
+ * but needs a host and a port beside it, and does not opt in.
+ *
+ * EmailSender::providersForApiKey() reads these to tell which provider issued
+ * a key the deployer pasted with no provider named; a key no pattern matches
+ * is tried live against every provider that opted in, so a provider whose key
+ * format changes still resolves, one round trip slower.
+ *
+ * @version 1.0
+ */
+interface SingleKeyProvider {
+    /**
+     * A PCRE (delimiters included) that this provider's API keys match and,
+     * as far as the provider's documented format allows, no other provider's
+     * keys do.
+     */
+    public static function apiKeyPattern(): string;
 }

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.3 - The sending provider is detected from the key when none is named.
 # VERSION: 3.2 - Three optional services a fresh site can be handed at install,
 #                honoured here so every path that reaches this script - bare
 #                metal, Docker, the Linode StackScript - takes the same inputs:
@@ -77,9 +78,10 @@
 #                            utils/install_dns_credential.php takes:
 #                            {"driver":"linode","credential":{"access_token":"..."}}
 #   JOINERY_MAIL_API_KEY     a sending provider's API key: email is set up now
-#                            (utils/install_mail_provider.php), with
-#                            JOINERY_MAIL_PROVIDER (default smtp2go) and
-#                            JOINERY_MAIL_FROM (default derived) alongside
+#                            (utils/install_mail_provider.php). The provider is
+#                            detected from the key unless JOINERY_MAIL_PROVIDER
+#                            names it; JOINERY_MAIL_FROM (default derived)
+#                            alongside
 #   JOINERY_BACKUP_BUCKET    a bucket that becomes the scheduled backup target
 #   JOINERY_BACKUP_KEY_ID    (utils/install_backup_target.php), with
 #   JOINERY_BACKUP_KEY       JOINERY_BACKUP_PROVIDER (b2 default, s3, linode)
@@ -756,7 +758,7 @@ if [ -z "$CLONE_FROM" ] && [ "$DB_EXISTS" = false ]; then
 
     if [ -n "${JOINERY_MAIL_API_KEY:-}" ]; then
         MAIL_TOOL="$SITE_UTILS/install_mail_provider.php"
-        log "Setting up email with the supplied ${JOINERY_MAIL_PROVIDER:-smtp2go} key..."
+        log "Setting up email with the supplied sending key${JOINERY_MAIL_PROVIDER:+ ($JOINERY_MAIL_PROVIDER)}..."
         if [ ! -f "$MAIL_TOOL" ]; then
             MAIL_OUTCOME="failed: install_mail_provider.php is not in this release"
         else

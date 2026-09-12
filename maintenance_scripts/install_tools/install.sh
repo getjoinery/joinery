@@ -3508,7 +3508,7 @@ do_site_create() {
                 echo "    JOINERY_ADMIN_PASSWORD   the admin password the owner chose (else generated)"
                 echo "    JOINERY_INSTALL_BUNDLE   plugin bundle, default personal; none skips it"
                 echo "    JOINERY_MAIL_API_KEY     sending key: email is set up during the install"
-                echo "    JOINERY_MAIL_PROVIDER    which provider the key is for (default smtp2go)"
+                echo "    JOINERY_MAIL_PROVIDER    which provider the key is for (blank: detected from the key)"
                 echo "    JOINERY_BACKUP_BUCKET    bucket that becomes the backup target, with"
                 echo "    JOINERY_BACKUP_KEY_ID    JOINERY_BACKUP_KEY (and JOINERY_BACKUP_PROVIDER"
                 echo "                             b2/s3/linode, JOINERY_BACKUP_REGION for s3/linode)"

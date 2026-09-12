@@ -185,6 +185,31 @@ class EmailSender {
     }
 
     /**
+     * Which single-key providers could have issued $key, most likely first:
+     * those whose declared key shape matches, and — when none does — every
+     * provider that opted in (SingleKeyProvider), so a caller can try them
+     * live in order. Providers that need more than one key are never listed.
+     *
+     * @return array<string,string> provider key => class, in trial order
+     */
+    public static function providersForApiKey(string $key): array {
+        $key = trim($key);
+        $single = array();
+        foreach (self::discoverProviders() as $provider_key => $class) {
+            if (in_array('SingleKeyProvider', class_implements($class) ?: array(), true)) {
+                $single[$provider_key] = $class;
+            }
+        }
+        $matched = array();
+        foreach ($single as $provider_key => $class) {
+            if ($key !== '' && preg_match($class::apiKeyPattern(), $key) === 1) {
+                $matched[$provider_key] = $class;
+            }
+        }
+        return $matched ?: $single;
+    }
+
+    /**
      * Reset the cached provider list (useful for testing).
      */
     public static function resetProviderCache(): void {
