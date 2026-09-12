@@ -13,6 +13,9 @@
  * /admin/admin_marketplace page and the marketplace_catalog /
  * marketplace_install API actions.
  *
+ * @version 1.3.0 - install() queues a root request and returns its id; the
+ *                  pool never downloads or extracts an archive
+ *                  (specs/package_signing.md WP4)
  * @version 1.2.0
  */
 
@@ -217,25 +220,33 @@ class MarketplaceClient {
 	}
 
 	/**
-	 * Download an extension archive from the source and install it.
+	 * Ask root to fetch an extension from the source and install it.
 	 *
-	 * Delegates the archive handling to PluginManager/ThemeManager
-	 * installFromTarGz(), which enforces the receives_upgrades: false
-	 * overwrite refusal, then syncs so the extension is registered and
-	 * ready to activate.
+	 * The tree belongs to root and the pool cannot write it, so this queues an
+	 * install_plugin / install_theme root request and returns its id; the
+	 * caller watches RootRequest::status() and the transcript. Root downloads
+	 * into a working directory of its own, verifies the archive against the
+	 * release key (PackageSignature), and only then puts it in place — a
+	 * marketplace archive that does not verify is refused outright, since the
+	 * marketplace is first-party (specs/package_signing.md WP4).
 	 *
-	 * @param string $type 'theme' or 'plugin'
-	 * @param string $name Directory name as listed in the catalog
-	 * @return string Installed extension name
-	 * @throws Exception on download or install failure
+	 * @param string   $type    'theme' or 'plugin'
+	 * @param string   $name    Directory name as listed in the catalog
+	 * @param int|null $user_id Who asked, recorded on the request
+	 * @return string The root request id
+	 * @throws InvalidArgumentException on a bad type or name; Exception on the origin
 	 */
-	public static function install($type, $name) {
+	public static function install($type, $name, $user_id = null) {
 		if ($type !== 'theme' && $type !== 'plugin') {
 			throw new InvalidArgumentException("Install type must be 'theme' or 'plugin', got '$type'");
 		}
 		$name = basename((string)$name);
 		if ($name === '' || $name === '.' || $name === '..') {
 			throw new InvalidArgumentException('No item specified.');
+		}
+		$manager = ($type === 'plugin') ? new PluginManager() : new ThemeManager();
+		if (!$manager->validateName($name)) {
+			throw new InvalidArgumentException("Invalid $type name: $name");
 		}
 		// On the origin the catalog is this site's own disk, so every entry in
 		// it is already installed and an install can only mean overwriting the
@@ -245,48 +256,11 @@ class MarketplaceClient {
 		if (self::is_root()) {
 			throw new Exception('This site publishes the marketplace catalog, so its extensions are already here. Installing one would overwrite the working copy with an archive of itself.');
 		}
-
-		$source = self::source();
-		if ($source === null) {
+		if (self::source() === null) {
 			throw new Exception('No upgrade source configured. Set the upgrade_source setting to use the marketplace.');
 		}
-
-		$download_url = $source . '/admin/server_manager/publish_theme?download=' . urlencode($name);
-		if ($type === 'plugin') {
-			$download_url .= '&type=plugin';
-		}
-
-		$temp_file = tempnam(sys_get_temp_dir(), 'mkt_') . '.tar.gz';
-
-		$ch = curl_init($download_url);
-		$fp = fopen($temp_file, 'w');
-		curl_setopt_array($ch, [
-			CURLOPT_FILE => $fp,
-			CURLOPT_TIMEOUT => 120,
-			CURLOPT_FOLLOWLOCATION => true,
-			CURLOPT_SSL_VERIFYPEER => true,
-		]);
-		curl_exec($ch);
-		$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-		$curl_error = curl_error($ch);
-		curl_close($ch);
-		fclose($fp);
-
-		if ($http_code !== 200) {
-			@unlink($temp_file);
-			throw new Exception("Failed to download $type '$name': HTTP $http_code" . ($curl_error ? " ($curl_error)" : ''));
-		}
-
-		try {
-			$manager = ($type === 'plugin') ? new PluginManager() : new ThemeManager();
-
-			$installed_name = $manager->installFromTarGz($temp_file);
-			$manager->sync();
-
-			return $installed_name;
-		} finally {
-			@unlink($temp_file);
-		}
+		return RootRequest::submit($type === 'plugin' ? 'install_plugin' : 'install_theme',
+			array('name' => $name), $user_id === null ? null : (int)$user_id);
 	}
 }
 ?>

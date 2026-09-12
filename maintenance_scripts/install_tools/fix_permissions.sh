@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+#VERSION 4.3 - config/release_verify_keys is pinned root:root 0644 and pruned
+#              from the config/ data sweep, which would otherwise hand it to
+#              the web user 0770 - a key file the pool can write is one the
+#              pool can add a key to (specs/package_signing.md WP1).
 #VERSION 4.2 - The record is authoritative once written. --dev and --production
 #              decide only what is recorded the first time. upgrade.php passes
 #              --production on every site it upgrades, developer checkout
@@ -208,6 +212,9 @@ PINNED=(
     # sweep does not make it group-writable in between — the converger refuses
     # to trust a tree_owner file anyone but root or the owner could have written.
     "$SITE_ROOT/config/tree_owner"
+    # Root's alone for the same reason: PackageSignature refuses a key file
+    # anyone but root or the tree owner could have written.
+    "$SITE_ROOT/config/release_verify_keys"
     "$SITE_ROOT/config/relay_pull_key"
     "$SITE_ROOT/config/backup_site_key"
     "$SITE_ROOT/config/agent_signing_key"
@@ -403,6 +410,16 @@ if [ -f "$CRED_FILE" ]; then
     echo "  Pinning $CRED_FILE to 600 root:root..."
     chown root:root "$CRED_FILE" 2>/dev/null || true
     chmod 600 "$CRED_FILE"
+fi
+
+# The keys root verifies every package against before it goes into the tree.
+# Public keys, so the pool may read them; root:root 0644 so only root can
+# change which keys count. Written by the host converger; re-pinned here.
+VERIFY_KEYS="$SITE_ROOT/config/release_verify_keys"
+if [ -f "$VERIFY_KEYS" ]; then
+    echo "  Pinning $VERIFY_KEYS to 644 root:root..."
+    chown root:root "$VERIFY_KEYS" 2>/dev/null || true
+    chmod 644 "$VERIFY_KEYS"
 fi
 
 # --- Record who owns this tree -----------------------------------------------

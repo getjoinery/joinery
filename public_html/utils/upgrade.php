@@ -21,6 +21,27 @@
 	 *                         means every site. It decides catalog LISTING only — the
 	 *                         extension is still published, still upgraded on the sites
 	 *                         running it, and still downloadable by name.
+	 *
+	 * WHAT ROOT VERIFIES BEFORE A DEPLOY (specs/package_signing.md WP2). The
+	 * core archive and every theme and plugin archive carry a signed
+	 * RELEASE_MANIFEST. After each is extracted into staging and before any
+	 * of it is copied anywhere — the self-update's deployment files
+	 * included — PackageSignature::verify() checks the signature against
+	 * config/release_verify_keys and every file against the listing. Anything
+	 * but `signed` aborts the upgrade with the verdict, so `upgrade_source`
+	 * chooses where a verified archive is fetched from and nothing more. The
+	 * check runs again on the re-run after a self-update, because staging
+	 * lives under uploads/ and could have changed in between. The origin
+	 * (root_node) upgrades from nothing and aborts before any of this.
+	 *
+	 * @version 1.1 - verifies every archive before it deploys it; serves
+	 *                ?serve-verify-key=1 so a fresh install can fetch the
+	 *                release key from its upgrade source. The early
+	 *                self-update block is gone: it asked tar for
+	 *                utils/upgrade.php while the members are
+	 *                ./public_html/utils/upgrade.php, so it never copied
+	 *                anything; the post-extraction self-update is the one
+	 *                that works (review round 1, R1).
 	 */
 
 	// Detect CLI mode early to avoid loading unnecessary UI components
@@ -242,6 +263,70 @@
 		exit(1);
 	}
 
+	// The verifier, or the transition to it. Every release since the manifest
+	// gate carries includes/PackageSignature.php, and it travels with the
+	// self-update set below so a newer verifier lands before it is needed. On
+	// the one upgrade that first brings it, the re-run after the self-update
+	// is a new upgrade.php against a live includes/ that has no verifier yet;
+	// staging has it, and it is loaded from there for that run, said out loud.
+	// That is the same trust the old upgrade.php just placed in the archive
+	// when it copied the deployment files out of it and re-ran.
+	function upgrade_verifier_ready($stage_directory) {
+		if (class_exists('PackageSignature')) {
+			return true;
+		}
+		$staged = rtrim($stage_directory, '/') . '/includes/PackageSignature.php';
+		if (is_file($staged)) {
+			upgrade_echo('The verifier is not on this node yet; using the one in the staged release for this run.<br>');
+			require_once($staged);
+			return class_exists('PackageSignature', false);
+		}
+		return false;
+	}
+
+	// The release verification key file, when this node has none yet: the same
+	// answer the host converger writes on every tick, from the same source —
+	// the agent bundle's manifest in the live tree, which root installed. An
+	// upgrade that ran before the converger's first tick with the new runner
+	// would otherwise refuse every archive for want of a key.
+	function upgrade_ensure_verify_keys($full_site_dir, $live_directory) {
+		$keys_file = $full_site_dir . '/config/release_verify_keys';
+		if (is_file($keys_file) && PackageSignature::readKeys($keys_file) !== array()) {
+			return;
+		}
+		$manifest = json_decode((string)@file_get_contents($live_directory . '/agent_dist/manifest.json'), true);
+		$key = is_array($manifest) ? trim((string)($manifest['signing_public_key'] ?? '')) : '';
+		$raw = $key !== '' ? base64_decode($key, true) : false;
+		if ($raw === false || strlen($raw) !== SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES) {
+			return;
+		}
+		$existing = is_file($keys_file) ? (string)@file_get_contents($keys_file) : '';
+		if (@file_put_contents($keys_file, rtrim($existing, "\n") . ($existing !== '' ? "\n" : '') . base64_encode($raw) . "\n") !== false) {
+			@chmod($keys_file, 0644);
+			upgrade_echo('Release verification key written to config/release_verify_keys from the agent bundle in the live tree.<br>');
+		}
+	}
+
+	// Refuse to deploy anything that did not verify. The verdict is the
+	// transcript's record of why: a stranger's archive, a byte changed, a file
+	// beside the signed set, a node with no key. Nothing in staging is copied
+	// anywhere before this has said `signed`.
+	function upgrade_verify_staged($dir, $expected_root, $label) {
+		$verdict = PackageSignature::verify($dir);
+		if ($verdict->signed() && $verdict->root !== $expected_root) {
+			$verdict = new PackageVerdict(PackageSignature::UNREADABLE,
+				'the manifest describes ' . $verdict->root . ', not ' . ($expected_root === '' ? 'a site root' : $expected_root),
+				$verdict->root, $verdict->key);
+		}
+		if (!$verdict->signed()) {
+			upgrade_abort('Upgrade refused: the ' . $label . ' did not verify',
+				'verdict: ' . htmlspecialchars($verdict->line()) . '<br>'
+				. 'Nothing has been deployed. The archive came from the configured upgrade source; '
+				. 'if that is the right place, the archive there is not one our release key signed.');
+		}
+		upgrade_echo(htmlspecialchars($label) . ' verified: ' . (int)$verdict->files . ' files signed<br>');
+	}
+
 	// A tree that cannot be given its ownership and modes does not get to run.
 	// The old fallback here was `chmod -R 770` over the live directory, which
 	// made every file the PHP pool executes writable by the PHP pool — the exact
@@ -403,7 +488,7 @@
 	//IF WE ARE ACTING AS A SERVER, AND SOMEONE REQUESTS THE INFO FOR UPGRADING
 	//
 	// method_exists, not a bare call: this file self-updates AHEAD of the rest
-	// of the release (see EARLY SELF-UPDATE below), so on the re-run it is a new
+	// of the release (see SELF-UPDATE CHECK below), so on the re-run it is a new
 	// upgrade.php executing against the site's OLD includes/. Any helper method
 	// added in the same release as a call to it is therefore absent on that pass.
 	// An unguarded call fatals here — before the block that would deliver the new
@@ -413,6 +498,37 @@
 	$is_upgrade_server = method_exists('DeploymentHelper', 'isUpgradeServer')
 		? DeploymentHelper::isUpgradeServer()
 		: false;
+
+	// The public key(s) a node verifies our releases against, one base64 line
+	// each (specs/package_signing.md WP1). A publishing box answers with its
+	// own key; any site also answers with the keys it verifies against, so a
+	// site that republishes what it received serves the key that signed it.
+	// Public keys, so no session is asked for; a fresh install fetches this
+	// once over TLS when its tree ships no agent bundle to read the key from.
+	if (!$is_cli && isset($_GET['serve-verify-key']) && $_GET['serve-verify-key'] && class_exists('PackageSignature')) {
+		$verify_key_lines = array();
+		$own_public = $full_site_dir . '/config/agent_signing_key.pub';
+		if (is_file($own_public)) {
+			$own_raw = base64_decode(trim((string)@file_get_contents($own_public)), true);
+			if ($own_raw !== false && strlen($own_raw) === SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES) {
+				$verify_key_lines[] = base64_encode($own_raw);
+			}
+		}
+		foreach (PackageSignature::readKeys($full_site_dir . '/config/release_verify_keys') as $verify_key) {
+			$verify_key_lines[] = base64_encode($verify_key);
+		}
+		$verify_key_lines = array_values(array_unique($verify_key_lines));
+		header('Content-Type: text/plain; charset=utf-8');
+		if ($verify_key_lines === array()) {
+			http_response_code(404);
+			echo "no release verification key on this site\n";
+			exit;
+		}
+		http_response_code(200);
+		echo implode("\n", $verify_key_lines) . "\n";
+		exit;
+	}
+
 	if(isset($_GET['serve-upgrade']) && $_GET['serve-upgrade'] && $is_upgrade_server){
 		require_once(PathHelper::getIncludePath('/data/upgrades_class.php'));
 		$response = array();
@@ -822,113 +938,6 @@
 		$core_size_mb = round(filesize($file_download_location) / 1024 / 1024, 2);
 		upgrade_echo("✓ Core archive downloaded ({$core_size_mb} MB)<br>");
 
-		// =====================================================
-		// EARLY SELF-UPDATE — refresh the deployment files first
-		// =====================================================
-		// Extract the deployment files from the tarball and self-update BEFORE
-		// any failure-prone step (staging-clear, extract, sync, etc). This
-		// guarantees that a bug in the upgrade pipeline is one upgrade attempt
-		// away from being fixed automatically — no manual intervention needed.
-		//
-		// ALL FOUR travel together, not upgrade.php alone. They call each other:
-		// a new upgrade.php landing beside an old DeploymentHelper is a new file
-		// running against an old API, and any method the release added is missing
-		// on the re-run. Refreshing one and re-execing was exactly that bug.
-		//
-		// Cost: one extra tarball download per upgrade-with-self-update (the
-		// re-run will download again, since staging is still empty). Worth it
-		// to keep the pipeline self-healing.
-		//
-		// The post-extract self-update block below re-checks the same set from
-		// the fully extracted staging tree, so a file missing from this tarball
-		// listing is still caught there.
-		$early_su_files = [
-			'utils/upgrade.php',
-			'utils/update_database.php',
-			'includes/DatabaseUpdater.php',
-			'includes/DeploymentHelper.php',
-		];
-		$early_su_tmp = sys_get_temp_dir() . '/joinery_su_' . getmypid();
-		@mkdir($early_su_tmp, 0770, true);
-		exec(sprintf(
-			'tar -xzf %s -C %s %s 2>&1',
-			escapeshellarg($file_download_location),
-			escapeshellarg($early_su_tmp),
-			implode(' ', array_map('escapeshellarg', $early_su_files))
-		), $early_su_out, $early_su_exit);
-
-		// Which of them actually differ from live. An absent staged file means
-		// this tarball does not carry it — leave live alone rather than delete.
-		$early_su_changed = [];
-		if ($early_su_exit === 0) {
-			foreach ($early_su_files as $rel_path) {
-				$staged = $early_su_tmp . '/' . $rel_path;
-				$live   = $live_directory . '/' . $rel_path;
-				if (file_exists($staged) && file_exists($live)
-						&& md5_file($staged) !== md5_file($live)) {
-					$early_su_changed[] = $rel_path;
-				}
-			}
-		}
-
-		$early_su_cleanup = function () use ($early_su_tmp, $early_su_files) {
-			foreach ($early_su_files as $rel_path) {
-				@unlink($early_su_tmp . '/' . $rel_path);
-			}
-			@rmdir($early_su_tmp . '/utils');
-			@rmdir($early_su_tmp . '/includes');
-			@rmdir($early_su_tmp);
-		};
-
-		if (!empty($early_su_changed)) {
-			// All-or-nothing: a partial copy is the split-version state this
-			// block exists to prevent, so any failure abandons the early
-			// refresh and lets the post-extract block do it properly.
-			$early_su_copied = true;
-			foreach ($early_su_changed as $rel_path) {
-				$live = $live_directory . '/' . $rel_path;
-				if (@copy($early_su_tmp . '/' . $rel_path, $live)) {
-					if (function_exists('opcache_invalidate')) {
-						opcache_invalidate($live, true);
-					}
-				} else {
-					$early_su_copied = false;
-					error_log('Early self-update: copy of ' . $rel_path
-						. ' failed — proceeding with live versions');
-					break;
-				}
-			}
-
-			if ($early_su_copied) {
-				$early_su_cleanup();
-
-				$refreshed = implode(', ', $early_su_changed);
-				if ($is_cli) {
-					echo "\n════════════════════════════════════════════════════════════\n";
-					echo "  UPGRADE PIPELINE REFRESHED\n";
-					echo "════════════════════════════════════════════════════════════\n\n";
-					echo "  Refreshed from the source: {$refreshed}\n";
-					self_update_cli_rerun();
-				} else {
-					out_step('Upgrade Pipeline Refreshed');
-					echo '<div style="border: 3px solid #0066cc; padding: 20px; margin: 20px 0; background-color: #e7f3ff; color: #004085;">';
-					echo '<h2 style="margin-top: 0; color: #0066cc;">Upgrade Pipeline Refreshed</h2>';
-					echo '<p>Refreshed from the source: ' . htmlspecialchars($refreshed) . '</p>';
-					echo '<p><strong>Please click the button below to continue with the new orchestrator.</strong></p>';
-					echo '<form method="POST" action="/utils/upgrade">';
-					echo '<input type="hidden" name="confirm" value="1">';
-					if ($force_upgrade) echo '<input type="hidden" name="force-upgrade" value="1">';
-					if ($verbose) echo '<input type="hidden" name="verbose" value="1">';
-					echo '<button type="submit" style="background-color: #0066cc; color: white; padding: 12px 24px; font-size: 16px; border: none; cursor: pointer; border-radius: 4px;">Continue Upgrade</button>';
-					echo '</form>';
-					echo '</div>';
-				}
-				exit(0);
-			}
-		}
-		// Cleanup tmp regardless
-		$early_su_cleanup();
-
 		//CLEAR OLD STAGED FILES — bulletproof: nuke the directory entirely
 		//and recreate empty. Robust against dotfiles, restrictive perms,
 		//weird ownership, anything short of an immutable bit on the parent.
@@ -989,6 +998,22 @@
 			}
 		}
 
+		// =====================================================
+		// VERIFY THE CORE ARCHIVE
+		// =====================================================
+		// Before the self-update below copies a byte of it into live, and
+		// before anything else reads it. Every file in staging is checked
+		// against the signed listing; the theme and plugin archives are
+		// verified one by one as they are extracted, further down.
+		if (upgrade_verifier_ready($stage_directory)) {
+			upgrade_ensure_verify_keys($full_site_dir, $live_directory);
+			upgrade_verify_staged($stage_location, '', 'core archive');
+		} else {
+			upgrade_abort('Upgrade refused: no verifier',
+				'This node has no includes/PackageSignature.php and the staged release carries none, '
+				. 'so the archive cannot be verified. Nothing has been deployed.');
+		}
+
 		// Prefer the VERSION file baked into the tarball over the server's JSON response.
 		// If it exists, it's authoritative. The JSON response stays as back-compat for
 		// tarballs published before VERSION was introduced.
@@ -1014,6 +1039,7 @@
 			'utils/update_database.php',
 			'includes/DatabaseUpdater.php',
 			'includes/DeploymentHelper.php',
+			'includes/PackageSignature.php',
 		];
 
 		$files_needing_update = [];
@@ -1096,6 +1122,20 @@
 		}
 
 		} // end if (!$resuming_after_self_update)
+
+		// The re-run after a self-update picks staging up where the previous
+		// run left it — and staging is under uploads/, which the web user can
+		// write. So it is verified again here, before the extension archives
+		// land in it and before anything is copied out of it.
+		if ($resuming_after_self_update) {
+			if (!upgrade_verifier_ready($stage_directory)) {
+				upgrade_abort('Upgrade refused: no verifier',
+					'This node has no includes/PackageSignature.php and the staged release carries none, '
+					. 'so the archive cannot be verified. Nothing has been deployed.');
+			}
+			upgrade_ensure_verify_keys($full_site_dir, $live_directory);
+			upgrade_verify_staged($stage_location, '', 'staged core archive');
+		}
 
 		// =====================================================
 		// CHECK FOR REQUIRED THEMES/PLUGINS NOT YET INSTALLED
@@ -2211,6 +2251,10 @@
 			flush();
 			$result = DeploymentHelper::downloadAndExtract($url, $stage_directory . '/' . $target_subdir . '/', $name);
 			if ($result['success']) {
+				// Extracted into staging; not yet trusted. The archive's own
+				// signed listing has to describe exactly this directory.
+				upgrade_verify_staged($stage_directory . '/' . $target_subdir . '/' . $name,
+					'public_html/' . $target_subdir . '/' . $name, $type . ' ' . $name);
 				upgrade_echo(" ✓<br>");
 				$count++;
 			} else {

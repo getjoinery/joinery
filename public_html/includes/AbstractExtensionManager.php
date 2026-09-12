@@ -7,6 +7,19 @@ require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 /**
  * Abstract base class for managing extensions (themes and plugins)
  * Provides shared functionality for installation, validation, and management
+ *
+ * NOTHING HERE WRITES THE TREE FROM A WEB REQUEST. The tree belongs to root
+ * (specs/implemented/read_only_tree.md): a page stages an upload and submits a
+ * root request; root fetches, verifies and installs through
+ * utils/install_extension.php. refreshFromUpstream(), installFromZip() and
+ * installFromTarGz() refuse at the door when called under the web server.
+ *
+ * @version 1.1 - refreshFromUpstream() (fetch into a root-owned working
+ *                directory, verify with PackageSignature, then replace) and
+ *                refuse_from_web() are shared by both managers, so a theme is
+ *                fetched and verified exactly as a plugin is; installFromZip()
+ *                and installFromTarGz() refuse from the web
+ *                (specs/package_signing.md WP4)
  */
 abstract class AbstractExtensionManager {
 
@@ -248,6 +261,207 @@ abstract class AbstractExtensionManager {
      */
     abstract protected function getActiveFilterOptions();
 
+    // ========== Fetch from the upgrade source ==========
+
+    /**
+     * Fetch a fresh archive for this extension type from the upgrade endpoint, verify it, and
+     * put it in place as {extension_dir}/{name}/. The upgrade endpoint is the
+     * authoritative source of truth for published extension files; this runs at
+     * install time so stale on-disk code (e.g. after an uninstall/reinstall
+     * cycle) gets replaced with upstream.
+     *
+     * Does not read the on-disk manifest to decide — the endpoint's response
+     * is what determines whether this plugin is upstream-published. A 404 means
+     * the plugin is not in the publisher's catalog (included_in_publish=false);
+     * any other failure means the endpoint is unreachable or the transfer failed.
+     *
+     * NOTHING IS PLACED UNVERIFIED. The archive is extracted into a working
+     * directory only root can write, verified there against the node's release
+     * keys, and only a `signed` package replaces the live directory. Any other
+     * verdict throws PackageUnverifiedException with the verdict in it, and
+     * the live directory is exactly as it was (specs/package_signing.md WP2).
+     *
+     * Fetch failures stay non-fatal: the caller falls through to on-disk files,
+     * which it then verifies for itself.
+     *
+     * @param string $name Extension directory name
+     * @return bool True when a verified package was placed; false when nothing
+     *              was fetched (origin, no source, not in the catalog, transfer failed)
+     * @throws PackageUnverifiedException when the fetched package is not ours
+     */
+    public function refreshFromUpstream($name) {
+        self::refuse_from_web('refreshFromUpstream');
+
+        // The origin has no upstream — these files are what it publishes. A
+        // self-download would tar this tree and extract it back over itself,
+        // and the publisher caches archives per version, so an edit made
+        // without a version bump would be overwritten by the cached copy of
+        // the code it replaced. On-disk is authoritative here.
+        if (MarketplaceClient::is_root()) {
+            return false;
+        }
+
+        $upgrade_source = MarketplaceClient::source();
+
+        if (empty($upgrade_source)) {
+            error_log("refreshFromUpstream: no source configured; skipping refresh for '$name'");
+            return false;
+        }
+
+        $url = rtrim($upgrade_source, '/') . '/admin/server_manager/publish_theme'
+             . '?download=' . urlencode($name) . ($this->extension_type === 'plugin' ? '&type=plugin' : '');
+
+        // Append .tar.gz so PharData recognizes the archive format on extract.
+        $temp_base = tempnam(sys_get_temp_dir(), 'joinery_' . $this->extension_type . '_');
+        $temp_file = $temp_base . '.tar.gz';
+        @unlink($temp_base);
+        $fp = fopen($temp_file, 'w');
+        if (!$fp) {
+            @unlink($temp_file);
+            error_log("refreshFromUpstream: could not open temp file for '$name'");
+            return false;
+        }
+
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_URL => $url,
+            CURLOPT_FILE => $fp,
+            CURLOPT_TIMEOUT => 120,
+            CURLOPT_CONNECTTIMEOUT => 30,
+            CURLOPT_FOLLOWLOCATION => true,
+        ]);
+        $ok = curl_exec($ch);
+        $curl_error = curl_error($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        fclose($fp);
+
+        if ($http_code === 404) {
+            // Not in the catalog — upstream doesn't know about it. On-disk files are source of truth.
+            @unlink($temp_file);
+            return false;
+        }
+
+        if (!$ok || $http_code !== 200 || filesize($temp_file) < 100) {
+            @unlink($temp_file);
+            error_log("refreshFromUpstream: fetch failed for '$name' (HTTP $http_code" .
+                      ($curl_error ? ", curl: $curl_error" : '') . "); falling back to on-disk files");
+            return false;
+        }
+
+        $plugins_root = PathHelper::getAbsolutePath($this->extension_dir);
+        if (!is_dir($plugins_root)) {
+            @unlink($temp_file);
+            error_log("refreshFromUpstream: {$this->extension_dir} root directory not found; skipping refresh for '$name'");
+            return false;
+        }
+
+        $rmtree = function ($path) use (&$rmtree) {
+            if (!is_dir($path) || is_link($path)) { @unlink($path); return; }
+            foreach (scandir($path) ?: array() as $e) {
+                if ($e === '.' || $e === '..') continue;
+                $rmtree($path . '/' . $e);
+            }
+            @rmdir($path);
+        };
+
+        // A run killed between setting the old copy aside and removing it
+        // leaves {extension_dir}/.refresh-<name>-<pid>. Dot-prefixed so no
+        // filesystem sync registers it as an extension; swept here so it does
+        // not outlive the crash that made it.
+        foreach (glob($plugins_root . '/.refresh-*') ?: array() as $stale) {
+            $rmtree($stale);
+        }
+
+        // Into a working directory of our own, never over the live tree. The
+        // archive root contains the extension directory (e.g. bookings/data/...),
+        // so it lands at $work/{name}. mktemp -d creates it 0700 in one step.
+        $work = trim((string)shell_exec('mktemp -d 2>/dev/null'));
+        if ($work === '' || !is_dir($work)) {
+            @unlink($temp_file);
+            throw new Exception("refreshFromUpstream: could not make a working directory for '$name'");
+        }
+        try {
+            $phar = new PharData($temp_file);
+            $phar->extractTo($work, null, true);
+        } catch (Exception $e) {
+            @unlink($temp_file);
+            $rmtree($work);
+            error_log("refreshFromUpstream: extract failed for '$name': " . $e->getMessage());
+            return false;
+        }
+        @unlink($temp_file);
+
+        $fetched = $work . '/' . $name;
+        if (!is_dir($fetched)) {
+            $rmtree($work);
+            throw new PackageUnverifiedException(new PackageVerdict(PackageSignature::UNREADABLE,
+                "the archive for '$name' does not contain a directory called '$name'"));
+        }
+
+        // Who built it. Only `signed`, describing this very directory, goes on.
+        $expected_root = 'public_html/' . $this->extension_dir . '/' . $name;
+        $verdict = PackageSignature::verify($fetched);
+        if ($verdict->signed() && $verdict->root !== $expected_root) {
+            $verdict = new PackageVerdict(PackageSignature::UNREADABLE,
+                'the manifest describes ' . $verdict->root . ', not ' . $expected_root,
+                $verdict->root, $verdict->key);
+        }
+        if (!$verdict->signed()) {
+            $rmtree($work);
+            throw new PackageUnverifiedException($verdict);
+        }
+
+        // Verified: replace the live directory with the verified copy. Copy,
+        // not rename — the working directory and the tree can be different
+        // filesystems in a container. The previous copy is set aside first and
+        // removed only once the new one is fully in place.
+        $target = $plugins_root . '/' . $name;
+        $aside = null;
+        if (is_dir($target)) {
+            $aside = $plugins_root . '/.refresh-' . $name . '-' . getmypid();
+            if (!@rename($target, $aside)) {
+                $rmtree($work);
+                throw new Exception("refreshFromUpstream: could not move the existing '$name' aside");
+            }
+        }
+        $copy_out = array();
+        $copy_rc = 0;
+        exec('cp -a --no-dereference ' . escapeshellarg($fetched) . ' ' . escapeshellarg($target) . ' 2>&1', $copy_out, $copy_rc);
+        if ($copy_rc !== 0 || !is_dir($target)) {
+            $rmtree($target);
+            if ($aside !== null) { @rename($aside, $target); }
+            $rmtree($work);
+            throw new Exception("refreshFromUpstream: could not place the verified '$name' (" . implode(' ', array_slice($copy_out, -2)) . ')');
+        }
+        if ($aside !== null) {
+            $rmtree($aside);
+        }
+        $rmtree($work);
+        return true;
+    }
+
+    /**
+     * Refuse to write the tree from inside a web request.
+     *
+     * The tree belongs to root and the PHP pool cannot write it
+     * (specs/implemented/read_only_tree.md), so these would fail anyway — as a
+     * permission error somewhere in the middle of an extraction, with half an
+     * extension on disk. Refusing at the door instead means the failure names
+     * the cause and the remedy, and it keeps a future caller from quietly
+     * reintroducing a tree write from a page.
+     *
+     * The CLI callers (utils/install_extension.php, run by the root actor) go
+     * straight through.
+     */
+    protected static function refuse_from_web($method) {
+        if (php_sapi_name() === 'cli') {
+            return;
+        }
+        throw new Exception(
+            static::class . '::' . $method . '() writes the code tree, which a web request cannot do. '
+            . 'Submit a root request instead (RootRequest::submit) and let the host converger carry it out.');
+    }
+
     // ========== Install from ZIP ==========
 
     /**
@@ -256,6 +470,7 @@ abstract class AbstractExtensionManager {
      * @return string Extension name that was installed
      */
     public function installFromZip($zip_path) {
+        self::refuse_from_web('installFromZip');
         // Check for zip extension
         if (!extension_loaded('zip')) {
             throw new Exception("PHP zip extension is required but not installed");
@@ -324,6 +539,7 @@ abstract class AbstractExtensionManager {
      * @throws Exception on failure
      */
     public function installFromTarGz($tar_path) {
+        self::refuse_from_web('installFromTarGz');
         if (!file_exists($tar_path)) {
             throw new Exception("Archive not found: $tar_path");
         }

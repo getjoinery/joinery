@@ -15,7 +15,9 @@
 #
 # The installer's unit text is rendered and parsed too, without installing it.
 # The certificate summary the runner writes for the admin notice is pinned from
-# a fixture lineage (specs/implemented/tls_and_origin_trust.md WP11).
+# a fixture lineage (specs/implemented/tls_and_origin_trust.md WP11). The
+# release verification key the runner writes from the agent bundle is pinned
+# from a throwaway key (specs/package_signing.md WP1).
 
 set -u
 TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/maintenance_scripts/install_tools"
@@ -275,6 +277,109 @@ chk "and says letsencrypt is absent" "$(read_summary 'd["letsencrypt"]')" "False
 rm -f "$SUMMARY"
 bash "$RUNNER" --site-root="$T" >/dev/null 2>&1
 chk "a run without root writes no summary" "$(test -f "$SUMMARY" && echo written || echo none)" "none"
+
+echo "== a run writes config/release_verify_keys from the agent bundle (specs/package_signing.md WP1) =="
+# Root verifies every package against this file before it goes into the tree.
+# The key is the agent bundle's, read from the tree; written when absent,
+# appended when the bundle carries one the file lacks, never replaced. A
+# throwaway key stands in for the bundle's; nothing here is a real key.
+mkdir -p "$T/public_html/agent_dist"
+KEY_A="$(php -r 'echo base64_encode(sodium_crypto_sign_publickey(sodium_crypto_sign_keypair()));')"
+KEY_B="$(php -r 'echo base64_encode(sodium_crypto_sign_publickey(sodium_crypto_sign_keypair()));')"
+KEYS="$T/config/release_verify_keys"
+rm -f "$KEYS"
+printf '{"version":"1.0","signing_public_key":"%s"}\n' "$KEY_A" > "$T/public_html/agent_dist/manifest.json"
+out=$(JOINERY_CONVERGER_ENTRY=/dev/null bash "$T/nogate.sh" --site-root="$T" 2>&1)
+chk "the run says it wrote the key" "$(echo "$out" | grep -c "release key: config/release_verify_keys carries")" "1"
+chk "the file holds the bundle's key" "$(cat "$KEYS" 2>/dev/null)" "$KEY_A"
+out=$(JOINERY_CONVERGER_ENTRY=/dev/null bash "$T/nogate.sh" --site-root="$T" 2>&1)
+chk "a second tick writes nothing" "$(echo "$out" | grep -c "release key:")" "0"
+chk "and the file still holds one key" "$(wc -l < "$KEYS")" "1"
+# A new bundle with a new key: appended, the old one kept, so packages signed
+# under either keep verifying across a channel change.
+printf '{"version":"1.1","signing_public_key":"%s"}\n' "$KEY_B" > "$T/public_html/agent_dist/manifest.json"
+JOINERY_CONVERGER_ENTRY=/dev/null bash "$T/nogate.sh" --site-root="$T" >/dev/null 2>&1
+chk "a bundle with a new key appends it" "$(wc -l < "$KEYS")" "2"
+chk "and keeps the old one" "$(grep -cxF "$KEY_A" "$KEYS")" "1"
+# A manifest with no usable key writes nothing rather than an empty line.
+printf '{"version":"1.2","signing_public_key":"not-a-key"}\n' > "$T/public_html/agent_dist/manifest.json"
+JOINERY_CONVERGER_ENTRY=/dev/null bash "$T/nogate.sh" --site-root="$T" >/dev/null 2>&1
+chk "a malformed bundle key is not written" "$(wc -l < "$KEYS")" "2"
+# The runner as it really runs, without root: it must not write the file.
+rm -f "$KEYS"
+printf '{"version":"1.0","signing_public_key":"%s"}\n' "$KEY_A" > "$T/public_html/agent_dist/manifest.json"
+bash "$RUNNER" --site-root="$T" >/dev/null 2>&1
+chk "a run without root writes no key file" "$(test -f "$KEYS" && echo written || echo none)" "none"
+# fix_permissions.sh must leave it root's: the config/ data sweep would hand
+# it to the web user 0770, and a key file the pool can write is a key file the
+# pool can add a key to.
+FIXP="$TOOLS/fix_permissions.sh"
+chk "fix_permissions.sh pins the key file" "$(grep -c 'VERIFY_KEYS="\$SITE_ROOT/config/release_verify_keys"' "$FIXP")" "1"
+chk "root:root 0644" "$(sed -n '/^VERIFY_KEYS=/,/^fi$/p' "$FIXP" | grep -c 'chown root:root "\$VERIFY_KEYS"\|chmod 644 "\$VERIFY_KEYS"')" "2"
+chk "and prunes it from the config/ data sweep" "$(sed -n '/^PINNED=(/,/^)$/p' "$FIXP" | grep -c 'config/release_verify_keys')" "1"
+
+echo "== a host installer runs only out of a package we built (specs/package_signing.md WP5) =="
+# Ownership says root put the plugin there; the signature says we built it. A
+# plugin installed on the owner's acknowledgement stays installed and never
+# has a script run as root out of its directory. A throwaway key signs the
+# fixture; the real verifier is pointed at from the fixture tree.
+PH="$T/public_html"
+# The bundle manifest from the key-file section above would have the runner
+# rewrite the key file on every tick; this section supplies its own key.
+rm -rf "$PH/plugins/signedp" "$PH/plugins/unsignedp" "$T/config/agent_signing_key" "$PH/agent_dist"
+php -r '
+    $T = $argv[1];
+    require $argv[2] . "/includes/PathHelper.php";
+    $pair = sodium_crypto_sign_keypair();
+    $keys = array("secret" => sodium_crypto_sign_secretkey($pair), "public" => sodium_crypto_sign_publickey($pair));
+    file_put_contents("$T/config/release_verify_keys", base64_encode($keys["public"]) . "\n");
+    foreach (array("signedp", "unsignedp") as $n) {
+        $d = "$T/public_html/plugins/$n";
+        @mkdir("$d/install", 0755, true);
+        file_put_contents("$d/plugin.json", json_encode(array("name" => $n, "host_installer" => "install/host.sh")));
+        file_put_contents("$d/install/host.sh", "#!/bin/bash\necho ran-$n\n");
+        chmod("$d/install/host.sh", 0755);
+        chmod("$d/plugin.json", 0644);
+    }
+    TreeManifestPublisher::write("$T/public_html/plugins/signedp", $T, $keys);
+' "$T" "$(dirname "$(dirname "$TOOLS")")/public_html" >/dev/null 2>&1
+export JOINERY_VERIFY_PACKAGE="$(dirname "$(dirname "$TOOLS")")/public_html/utils/verify_package.php"
+export JOINERY_VERIFY_KEYS="$T/config/release_verify_keys"
+out=$(JOINERY_CONVERGER_ENTRY=/dev/null JOINERY_ACTIVE_PLUGINS=$'signedp\nunsignedp' bash "$T/nogate.sh" --site-root="$T" 2>&1)
+chk "the signed plugin's installer runs" "$(echo "$out" | grep -c '^ran-signedp$')" "1"
+chk "the unsigned plugin's installer does not" "$(echo "$out" | grep -c '^ran-unsignedp$')" "0"
+chk "and the log says why" "$(echo "$out" | grep -c 'unsignedp: not a package we built - host installer skipped (verdict: unsigned')" "1"
+# One byte changed in a signed plugin, and its installer no longer runs.
+echo '# edited' >> "$PH/plugins/signedp/install/host.sh"
+out=$(JOINERY_CONVERGER_ENTRY=/dev/null JOINERY_ACTIVE_PLUGINS='signedp' bash "$T/nogate.sh" --site-root="$T" 2>&1)
+chk "a signed plugin edited after signing is skipped" "$(echo "$out" | grep -c '^ran-signedp$')" "0"
+chk "with the tampered verdict" "$(echo "$out" | grep -c 'host installer skipped (verdict: tampered')" "1"
+# No key file: nothing verifies, nothing runs, and the reason is the key.
+mv "$T/config/release_verify_keys" "$T/config/release_verify_keys.off"
+out=$(JOINERY_CONVERGER_ENTRY=/dev/null JOINERY_ACTIVE_PLUGINS='signedp' bash "$T/nogate.sh" --site-root="$T" 2>&1)
+chk "with no key file nothing runs" "$(echo "$out" | grep -c '^ran-')" "0"
+chk "and the reason is no_keys" "$(echo "$out" | grep -c 'host installer skipped (verdict: no_keys')" "1"
+mv "$T/config/release_verify_keys.off" "$T/config/release_verify_keys"
+# The publishing box trusts its own tree: the key's secret half is the tell.
+touch "$T/config/agent_signing_key"
+out=$(JOINERY_CONVERGER_ENTRY=/dev/null JOINERY_ACTIVE_PLUGINS='unsignedp' bash "$T/nogate.sh" --site-root="$T" 2>&1)
+chk "the publishing box runs its own unsigned plugin's installer" "$(echo "$out" | grep -c '^ran-unsignedp$')" "1"
+rm -f "$T/config/agent_signing_key"
+# A tree without the verifier runs nothing rather than everything.
+out=$(JOINERY_CONVERGER_ENTRY=/dev/null JOINERY_ACTIVE_PLUGINS='signedp' JOINERY_VERIFY_PACKAGE="$T/no-such-tool.php" bash "$T/nogate.sh" --site-root="$T" 2>&1)
+chk "no verifier means no installer runs" "$(echo "$out" | grep -c '^ran-')" "0"
+chk "and says so" "$(echo "$out" | grep -c 'no verify_package.php to check the package with')" "1"
+# The hooks are honoured only because this gate is not root: every check above
+# depended on them, and none of them was reported ignored. Root's refusal is
+# text-pinned in installer_contract_test, since this gate cannot run as root.
+chk "an unprivileged run honours the hooks without saying it ignored one" "$(echo "$out" | grep -c 'hook ignored')" "0"
+unset JOINERY_VERIFY_PACKAGE JOINERY_VERIFY_KEYS
+# The verification sits after the ownership refusal and before the run.
+chk "verification follows the ownership refusal" \
+    "$( [ "$(grep -n 'plugin_package_verified "\${PLUGIN}"' "$RUNNER" | cut -d: -f1)" -gt "$(grep -n 'installer_is_trusted "\${INSTALLER}"' "$RUNNER" | cut -d: -f1)" ] && echo yes )" "yes"
+chk "and precedes the run" \
+    "$( [ "$(grep -n 'plugin_package_verified "\${PLUGIN}"' "$RUNNER" | cut -d: -f1)" -lt "$(grep -n 'running \${INSTALLER_REL}' "$RUNNER" | cut -d: -f1)" ] && echo yes )" "yes"
+chk "the kind list carries install_package and install_theme" "$(grep -c 'upgrade|install_plugin|install_theme|install_package|reconcile_composer' "$RUNNER")" "1"
 
 echo
 echo "host_converger gate: $passed passed, $failed failed"

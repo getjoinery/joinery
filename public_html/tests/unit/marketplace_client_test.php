@@ -16,6 +16,8 @@
  * token the submitted page carries, and must refuse its replay.
  *
  * Run: php tests/unit/marketplace_client_test.php
+ *
+ * @version 1.1 - install() is a root request (specs/package_signing.md WP4)
  */
 
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
@@ -58,6 +60,33 @@ check(mkt_threw(function () { MarketplaceClient::install('plugin', '..'); }, 'In
 	'A traversal name is refused');
 check(mkt_threw(function () { MarketplaceClient::fetch_catalog('theme'); }, 'InvalidArgumentException'),
 	"fetch_catalog takes the list nouns 'themes'/'plugins', not the singular");
+check(mkt_threw(function () { MarketplaceClient::install('plugin', 'has space'); }, 'InvalidArgumentException'),
+	'A name the manager would not accept is refused');
+
+// ------------------------------------------------------- no install from the pool
+
+section('install() asks root; the pool never writes the tree (specs/package_signing.md WP4)');
+
+// The tree belongs to root. install() queues install_plugin / install_theme
+// and answers with the request id; root downloads, verifies against the
+// release key, and installs. Every entry point that used to extract an
+// archive from a web request refuses at the door.
+$mc_src = (string)file_get_contents(PathHelper::getIncludePath('includes/MarketplaceClient.php'));
+check(strpos($mc_src, "RootRequest::submit(\$type === 'plugin' ? 'install_plugin' : 'install_theme'") !== false,
+	'install() submits a root request of the right kind');
+$mc_install = substr($mc_src, strpos($mc_src, 'public static function install('));
+check(strpos($mc_src, 'installFromTarGz') === false && strpos($mc_install, 'curl_init') === false
+	&& strpos($mc_install, 'CURLOPT_FILE') === false,
+	'and downloads nothing itself (the catalog fetch above it reads JSON and writes nothing)');
+$aem_src = (string)file_get_contents(PathHelper::getIncludePath('includes/AbstractExtensionManager.php'));
+foreach (array('installFromZip', 'installFromTarGz', 'refreshFromUpstream') as $entry) {
+	$at = strpos($aem_src, 'public function ' . $entry . '(');
+	$body = $at === false ? '' : substr($aem_src, $at, 400);
+	check(strpos($body, "self::refuse_from_web('" . $entry . "')") !== false,
+		$entry . '() refuses from a web request at the door');
+}
+check(strpos((string)file_get_contents(PathHelper::getIncludePath('logic/marketplace_install_logic.php')), "'request_id' => \$request_id") !== false,
+	'the API install answers with the request id for the caller to poll');
 
 // ------------------------------------------------------- audience visibility
 
@@ -128,6 +157,8 @@ if (MarketplaceClient::is_root()) {
 	// cached archive of itself.
 	check(mkt_threw(function () { MarketplaceClient::install('theme', 'default'); }, 'Exception'),
 		'The origin refuses an install that would overwrite its own working copy');
+	check(RootRequest::pending() === array() || !in_array('install_theme', array_column(RootRequest::pending(), 'kind'), true),
+		'and queues nothing');
 	check(MarketplaceClient::source() === 'https://' . $root || MarketplaceClient::source() === 'http://' . $root,
 		'and it sources the catalog from itself rather than from upgrade_source',
 		'source() is ' . var_export(MarketplaceClient::source(), true));

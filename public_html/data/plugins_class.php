@@ -8,6 +8,11 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 class PluginException extends SystemBaseException {}
 class PluginNotSentException extends PluginException {};
 
+/**
+ * Plugin — a plugin's database row.
+ *
+ * @version 1.1 - plg_trust records who built the installed files (specs/package_signing.md WP3)
+ */
 class Plugin extends SystemBase {	public static $prefix = 'plg';
 	public static $tablename = 'plg_plugins';
 	public static $pkey_column = 'plg_plugin_id';
@@ -40,6 +45,11 @@ class Plugin extends SystemBase {	public static $prefix = 'plg';
 	    'plg_metadata' => array('type'=>'text'),
 	    'plg_receives_upgrades' => array('type'=>'bool', 'default'=>true),
 	    'plg_is_system' => array('type'=>'bool', 'default'=>false),
+	    // Who built the files root installed: 'signed' (our release key
+	    // verified them) or 'unsigned' (installed on the owner's acknowledgement
+	    // of the warning). Set by root at install from the verdict, never by a
+	    // page; NULL on a row that predates the record (specs/package_signing.md WP3).
+	    'plg_trust' => array('type'=>'varchar(16)', 'is_nullable'=>true),
 	    'plg_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	    'plg_update_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);

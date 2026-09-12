@@ -41,6 +41,17 @@
  * manifests means the agent resolves a path the same way whichever artifact owns
  * it.
  *
+ * WHAT IS LEFT OUT is not decided here. The node-side verifier
+ * (includes/PackageSignature.php) walks an unpacked archive and has to skip
+ * exactly the paths this writer skipped, or every archive that carries a
+ * config/ template fails its own check — so the rule lives in core, where the
+ * verifier can read it on a node with this plugin inactive, and excluded()
+ * here is that rule. vendor/ is excluded at the site root only: a plugin's
+ * Composer tree ships with the plugin and is listed (specs/package_signing.md WP0).
+ *
+ * @version 1.2 - the exclusion rule is PackageSignature's; vendor/ inside an
+ *                artifact is listed, so a signed plugin cannot carry an unsigned
+ *                Composer tree (specs/package_signing.md WP0, B3)
  * @version 1.1 - authority() decides whether this site may sign at all, and publish_artifact()
  *                carries the received manifest forward when it may not
  * @version 1.0
@@ -48,27 +59,9 @@
 
 class TreeManifestPublisher {
 
-	/** The manifest and its detached signature, at the root of each artifact. */
-	const MANIFEST_NAME  = 'RELEASE_MANIFEST';
-	const SIGNATURE_NAME = 'RELEASE_MANIFEST.sig';
-
-	/**
-	 * Paths never listed, matched against the site-root-relative path.
-	 *
-	 * Two kinds of thing are excluded, for two different reasons. Site-local
-	 * mutable state (config/, logs/, cache/, uploads/, backups/) is excluded
-	 * because it is not shipped and differs on every node — listing it would
-	 * make every manifest wrong the moment the site ran. Development and
-	 * packaging debris (.git, specs/) is excluded because it is not shipped
-	 * either.
-	 *
-	 * The manifest and its signature exclude themselves, necessarily: a file
-	 * cannot contain its own hash.
-	 */
-	private static $excluded_segments = array('.git', 'cache', 'logs', 'uploads', 'backups', 'specs', '.claude', 'node_modules', 'vendor');
-	private static $excluded_basenames = array('.gitignore', self::MANIFEST_NAME, self::SIGNATURE_NAME);
-	/** Excluded only at the top level of the site root — a plugin may legitimately ship a config/ directory. */
-	private static $excluded_top_level = array('config');
+	/** The manifest and its detached signature, at the root of each artifact — the names the verifier reads. */
+	const MANIFEST_NAME  = PackageSignature::MANIFEST_NAME;
+	const SIGNATURE_NAME = PackageSignature::SIGNATURE_NAME;
 
 	/**
 	 * Whether this site may sign a tree manifest, and with what.
@@ -272,21 +265,13 @@ class TreeManifestPublisher {
 		return $body;
 	}
 
-	/** Whether a site-root-relative path is left out of the manifest. */
+	/**
+	 * Whether a site-root-relative path is left out of the manifest. The
+	 * verifier's rule, verbatim: what this writer skips and what the node-side
+	 * walk skips are one list (PackageSignature::EXCLUDED_SEGMENTS,
+	 * EXCLUDED_TOP_LEVEL, EXCLUDED_BASENAMES).
+	 */
 	public static function excluded($rel) {
-		$segments = explode('/', $rel);
-
-		if (in_array(basename($rel), self::$excluded_basenames, true)) {
-			return true;
-		}
-		if (in_array($segments[0], self::$excluded_top_level, true)) {
-			return true;
-		}
-		foreach ($segments as $segment) {
-			if (in_array($segment, self::$excluded_segments, true)) {
-				return true;
-			}
-		}
-		return false;
+		return PackageSignature::excluded((string)$rel);
 	}
 }

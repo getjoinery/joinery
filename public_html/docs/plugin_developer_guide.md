@@ -376,6 +376,16 @@ A plugin that needs something installed on the host declares it; the platform in
   web user could edit would be a root shell for anyone who found one bug in the
   web stack. Ordinary permissions from `fix_permissions.sh` satisfy this; a
   refusal means something re-owned part of the tree.
+- **In a package Joinery built.** Ownership says root put the plugin there; the
+  signature says we built it. Before running a plugin's installer the runner
+  verifies the plugin directory against its signed `RELEASE_MANIFEST`
+  (`php utils/verify_package.php <dir>`, see [What a package carries](#what-a-package-carries))
+  and skips it, with the verdict in the log, on anything but `signed`. A plugin
+  installed on a superadmin's acknowledgement of the unsigned warning stays
+  installed and active; it simply never has a script run as root out of its
+  directory. The publishing box — the one that holds `config/agent_signing_key`
+  — trusts its own tree, because every plugin there is the source the archives
+  are built from.
 
 The runner `maintenance_scripts/install_tools/_plugin_installers_start.sh` executes every **active** plugin's declared installer at the root moments without systemd: the container `CMD` (every start), `install.sh` site builds, and `upgrade.php`. On a bare-metal node, activating a plugin after install has no such moment — run the installers on demand from the node's detail page in Server Manager (Actions → Run Plugin Installers), which queues a `run_plugin_installers` job. The runner is fail-safe — an installer failure logs a warning and never blocks container start. The Mailbox plugin's `provisioning/install_email.sh` is the reference implementation.
 
@@ -403,20 +413,62 @@ What this rules out in practice:
   `uploads/staging/` and checks it there — no path escapes, no symlinks, a
   manifest present, and the entries summing under
   `AbstractExtensionManager::MAX_UNPACKED_BYTES` so a small archive cannot fill
-  the volume — and the install itself is a shell command
-  (`php utils/install_extension.php plugin --staged=<dir>`). That command copies
-  the staged directory into a root-owned temporary directory before it reads
-  anything in it, and checks the copy: staging belongs to the web user, so
-  checking it and then installing from it leaves a window in between. It is
-  deliberately
-  not something the web side can ask root to do: the staging area and the
-  request queue are both web-writable, so a request to install a staged
-  directory would prove nothing about who asked, and a staged
-  `migrations/migrations.php` is included as root.
+  the volume — and submits an `install_package` root request naming the staged
+  directory. Root copies the staged directory into a temporary directory of its
+  own before it reads anything in it (staging belongs to the web user, so
+  checking it and then installing from it would leave a window in between),
+  verifies the copy against its signed `RELEASE_MANIFEST`, and installs it only
+  when the verdict is `signed` — or, for anything else, only on the
+  acknowledgement described under [What a package carries](#what-a-package-carries).
+  The request queue and the staging area are both web-writable, so the request
+  proves nothing about who asked; the signature and the acknowledgement are what
+  root trusts. The shell form, `php utils/install_extension.php plugin --staged=<dir>
+  [--acknowledged]`, is the same code for a self-hoster with a shell.
 
-`PluginManager::refreshFromUpstream()` and `installPlugin()` throw from a web
-request, so a caller that tries finds out at the door rather than half way
-through an extraction.
+`AbstractExtensionManager::refreshFromUpstream()`, `installFromZip()` and
+`installFromTarGz()` throw from a web request, so a caller that tries finds out
+at the door rather than half way through an extraction.
+
+#### What a package carries
+
+Every plugin and theme archive the publisher ships carries a signed listing of
+its files: `RELEASE_MANIFEST` — one line per file, `<sha256>  <path>`, paths
+relative to the site root (`public_html/plugins/<name>/...`), sorted — and
+`RELEASE_MANIFEST.sig`, an Ed25519 signature over it by the release key. The
+publisher writes the pair into the plugin directory at publish time
+(`TreeManifestPublisher::write()`); a plugin author does nothing to get one and
+cannot produce one. The listing covers every file under the plugin directory,
+the plugin's own `vendor/` and `config/` included; only `.git`, `cache`, `logs`,
+`uploads`, `backups`, `specs`, `.claude`, `node_modules`, `.gitignore` and the
+pair itself are outside it.
+
+On a node, root verifies a package against the keys in
+`config/release_verify_keys` before it puts it in the tree
+(`PackageSignature::verify()`, `includes/PackageSignature.php`): the signature
+must verify against a key in the file, every file present must be listed with a
+matching hash, and every listed file must be present. That is what makes a
+package **signed**. The marketplace is first-party only, so a marketplace
+download that does not verify is refused outright.
+
+Everything else is **unsigned**: a package with no manifest, one signed by a
+key the node does not hold, one whose bytes changed after signing, one with a
+file added or removed. An uploaded unsigned package installs only after a
+superadmin has read the warning the Plugins or Themes page shows for it —
+installing an unsigned package is extremely dangerous; it gets everything the
+site has, including all mail — and pressed **Install anyway** behind a fresh
+second-factor confirmation. An account with no second factor cannot give that
+answer. Root checks the acknowledgement against the second-factor marker
+(`PackageAcknowledgement`) and then installs under the **unsigned
+restrictions**: the plugin's table creation and migrations run as the web
+server user, never root; the row records `plg_trust = 'unsigned'` (`thm_trust`
+for a theme) and the page shows an **Unsigned** badge for as long as the row
+exists; every superadmin is emailed with the name, version, who approved it,
+when and from where; the event log has an `unsigned_package_installed` row;
+and the plugin's `host_installer` is never run. The health panel lists every
+unsigned plugin and theme present.
+
+Signed packages — from the marketplace, or the same archive uploaded as a ZIP
+— install with no prompt, and their row records `plg_trust = 'signed'`.
 
 #### Deprecation Fields
 

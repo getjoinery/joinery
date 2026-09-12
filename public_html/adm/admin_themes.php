@@ -1,4 +1,5 @@
 <?php
+// @version 1.1 - the Unsigned badge, the warning block and the request panel's hand-off (specs/package_signing.md WP6)
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
@@ -19,7 +20,9 @@ $error = $page_vars['error'];
 // rather than claiming it is finished (specs/read_only_tree.md).
 $root_request_id = $page_vars['root_request_id'] ?? '';
 $root_actor_notice = $page_vars['root_actor_notice'] ?? '';
-$staged_command = $page_vars['staged_command'] ?? '';
+// Root refused an uploaded package as not ours: the warning, and Install
+// anyway (specs/package_signing.md WP6).
+$unsigned_warning = $page_vars['unsigned_warning'] ?? null;
 $themes = $page_vars['themes'];
 
 $page = new AdminPage();
@@ -57,11 +60,12 @@ $page->begin_box(array('altlinks' => $altlinks));
             <?php endif; ?>
 
             <?= $root_actor_notice ?>
-            <?php if ($staged_command): ?>
-            <pre style="padding:.75rem .9rem;background:#18181b;color:#e4e4e7;border-radius:6px;overflow-x:auto;user-select:all;"><?= htmlspecialchars($staged_command) ?></pre>
-        <?php endif; ?>
-        <?php if ($root_request_id): ?>
-                <?= AdminPage::root_request_panel($root_request_id) ?>
+            <?php if ($unsigned_warning): ?>
+                <?= PackageInstallPage::warning_html($unsigned_warning, '/admin/admin_themes', $page) ?>
+            <?php endif; ?>
+            <?php if ($root_request_id): ?>
+                <?= AdminPage::root_request_panel($root_request_id,
+                    '/admin/admin_themes?unsigned=' . rawurlencode($root_request_id)) ?>
             <?php endif; ?>
             
             <?php if (isset($_GET['show_upload'])): ?>
@@ -153,6 +157,12 @@ $page->begin_box(array('altlinks' => $altlinks));
                                 }
                                 if (!$receives_upgrades) {
                                     $badges[] = '<span class="badge bg-warning">Upgrades disabled</span>';
+                                }
+                                // Installed on the owner's acknowledgement of
+                                // the warning: not built by Joinery. Stays for
+                                // as long as the row does.
+                                if ($theme && (string)$theme->get('thm_trust') === 'unsigned') {
+                                    $badges[] = '<span class="badge bg-danger" title="Not built by Joinery; installed on a superadmin\'s acknowledgement of the warning.">Unsigned</span>';
                                 }
                                 $type_badge = implode(' ', $badges);
 

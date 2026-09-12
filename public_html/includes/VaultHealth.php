@@ -22,6 +22,11 @@
  * so tests/vault/vault_health_test.php can hand it a fixture and cover every
  * branch on any box.
  *
+ * @version 1.7 - a ninth row: the unsigned plugins and themes present, by
+ *   name — advice, never a gate (specs/package_signing.md WP6)
+ * @version 1.6 - an eighth check: config/release_verify_keys is present, so
+ *   root can tell our archives from a stranger's before it installs one
+ *   (specs/package_signing.md WP1)
  * @version 1.5 - a seventh check: this box's own TLS certificate renews on
  *   schedule, read from the summary the host converger writes
  *   (specs/implemented/tls_and_origin_trust.md WP11)
@@ -56,7 +61,79 @@ class VaultHealth {
 			self::checkParserJail(),
 			self::checkHostConverger(),
 			self::checkCertificates(),
+			self::checkReleaseVerifyKeys(),
+			self::checkUnsignedExtensions(),
 		];
+	}
+
+	/**
+	 * Every plugin and theme installed on a superadmin's acknowledgement of
+	 * the unsigned warning, by name. Each has everything the site has and
+	 * nobody we know wrote it; the owner said yes, and this row is where
+	 * that stays visible. Advice, never a gate: nothing here deactivates
+	 * anything.
+	 *
+	 * @param array|null $unsigned Injected for tests: ['plugins' => [...names], 'themes' => [...names]]
+	 */
+	public static function checkUnsignedExtensions(?array $unsigned = null): array {
+		$key = 'unsigned_extensions';
+		$label = 'Every installed plugin and theme was built by Joinery';
+		if ($unsigned === null) {
+			$unsigned = ['plugins' => [], 'themes' => []];
+			try {
+				foreach (new MultiPlugin(['plg_trust' => 'unsigned']) as $p) {
+					$unsigned['plugins'][] = (string)$p->get('plg_name');
+				}
+				foreach (new MultiTheme(['thm_trust' => 'unsigned']) as $t) {
+					$unsigned['themes'][] = (string)$t->get('thm_name');
+				}
+			} catch (\Throwable $e) {
+				return ['key' => $key, 'label' => $label, 'state' => 'unknown',
+					'reason' => 'Could not read the plugin and theme registry: ' . $e->getMessage()];
+			}
+		}
+		$plugins = array_values(array_filter(array_map('strval', $unsigned['plugins'] ?? [])));
+		$themes  = array_values(array_filter(array_map('strval', $unsigned['themes'] ?? [])));
+		if ($plugins === [] && $themes === []) {
+			return ['key' => $key, 'label' => $label, 'state' => 'verified', 'reason' => ''];
+		}
+		$parts = [];
+		if ($plugins !== []) {
+			$parts[] = count($plugins) . ' unsigned plugin' . (count($plugins) === 1 ? '' : 's') . ' (' . implode(', ', $plugins) . ')';
+		}
+		if ($themes !== []) {
+			$parts[] = count($themes) . ' unsigned theme' . (count($themes) === 1 ? '' : 's') . ' (' . implode(', ', $themes) . ')';
+		}
+		return ['key' => $key, 'label' => $label, 'state' => 'unmet',
+			'reason' => 'Installed on a superadmin\'s acknowledgement of the warning, not built by Joinery: '
+				. implode('; ', $parts) . '. Each has access to everything on this site, including all mail. '
+				. 'Their host installers are never run as root. Uninstall any you did not mean to keep.'];
+	}
+
+	/**
+	 * Root installs code only after PackageSignature has matched the archive
+	 * against the keys in config/release_verify_keys. With no key file every
+	 * install and every upgrade is refused for want of a key, which is safe
+	 * and useless; the host converger writes the file from the agent bundle
+	 * on every tick, so its absence means the converger has not run since
+	 * this release arrived, or the tree ships no bundle to read it from.
+	 *
+	 * @param string|null $keys_file Injected for tests; the node's own otherwise.
+	 */
+	public static function checkReleaseVerifyKeys(?string $keys_file = null): array {
+		$key = 'release_verify_keys';
+		$label = 'Root holds the release key it verifies packages against';
+		$keys_file = $keys_file ?? PackageSignature::keysPath();
+		$count = count(PackageSignature::readKeys($keys_file));
+		if ($count > 0) {
+			return ['key' => $key, 'label' => $label, 'state' => 'verified', 'reason' => ''];
+		}
+		return ['key' => $key, 'label' => $label, 'state' => 'unmet',
+			'reason' => 'There is no usable key in ' . PackageSignature::KEYS_FILE . ', so every plugin, theme and '
+				. 'core upgrade is refused as unverifiable until there is one. The host converger writes it from '
+				. 'the agent bundle in the tree on its next run: ' . HostConvergerNotice::installCommand()
+				. ' A box whose tree ships no bundle takes the key from its upgrade source at install '
+				. '(install.sh, ?serve-verify-key=1).'];
 	}
 
 	/**

@@ -12,6 +12,9 @@
  * branches are driven here with fixtures rather than with whatever this box
  * happens to be (specs/vault_exposure_quick_fixes.md Q2-Q4).
  *
+ * @version 1.6 - the unsigned-extensions row (specs/package_signing.md WP6)
+ * @version 1.5 - the release-key row counts among the host facts, and is
+ *   driven from a fixture key file (specs/package_signing.md WP1)
  * @version 1.4 - the certificate row counts among the host facts
  * @version 1.3 - the host converger check
  * @version 1.2 - the parser jail check
@@ -25,7 +28,7 @@ require_once(PathHelper::getIncludePath('includes/VaultHealth.php'));
 
 section('Report shape');
 $checks = VaultHealth::runAll();
-check(count($checks) === 7, 'runAll reports the seven host facts');
+check(count($checks) === 9, 'runAll reports the nine host facts');
 $valid_states = ['verified', 'unmet', 'unknown'];
 $all_valid = true;
 $has_fields = true;
@@ -208,6 +211,34 @@ foreach (glob($fx . '/dev/*') as $f) { if (is_file($f)) unlink($f); }
 foreach (glob($fx . '/swaps_*') as $f) { unlink($f); }
 foreach (['dm-0', 'dm-1', 'dm-2'] as $d) { @unlink($fx . "/sys/block/$d/dm/uuid"); rmdir($fx . "/sys/block/$d/dm"); rmdir($fx . "/sys/block/$d"); }
 rmdir($fx . '/sys/block'); rmdir($fx . '/sys'); rmdir($fx . '/dev/mapper'); rmdir($fx . '/dev'); rmdir($fx);
+
+section('Release verification key (specs/package_signing.md WP1)');
+// Root installs nothing it cannot verify, and it verifies against this file;
+// with no usable key every install is refused, which is safe and useless, so
+// the row says so and names the converger that writes it.
+$kf = harness_scratch_dir('vault_health') . '/release_verify_keys';
+@unlink($kf);
+$r = VaultHealth::checkReleaseVerifyKeys($kf);
+check($r['state'] === 'unmet', 'no key file is unmet', $r['reason']);
+check(strpos($r['reason'], 'install_host_converger.sh') !== false, 'and the reason names the converger that writes it');
+file_put_contents($kf, "# no keys\n");
+check(VaultHealth::checkReleaseVerifyKeys($kf)['state'] === 'unmet', 'a key file with no usable key is unmet');
+file_put_contents($kf, base64_encode(str_repeat("\x01", SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES)) . "\n");
+check(VaultHealth::checkReleaseVerifyKeys($kf)['state'] === 'verified', 'one well-formed key is verified');
+@unlink($kf);
+
+section('Unsigned plugins and themes present (specs/package_signing.md WP6)');
+// Advice, never a gate: the row names what the owner acknowledged and
+// nothing else happens.
+check(VaultHealth::checkUnsignedExtensions(['plugins' => [], 'themes' => []])['state'] === 'verified',
+	'none present is verified');
+$r = VaultHealth::checkUnsignedExtensions(['plugins' => ['stranger'], 'themes' => ['odd_theme', 'other']]);
+check($r['state'] === 'unmet', 'any present is unmet', $r['reason']);
+check(strpos($r['reason'], '1 unsigned plugin (stranger)') !== false
+	&& strpos($r['reason'], '2 unsigned themes (odd_theme, other)') !== false,
+	'and the reason names each one');
+check(strpos($r['reason'], 'all mail') !== false, 'and repeats what the owner gave away');
+check(strpos($r['reason'], 'never run as root') !== false, 'and says their host installers never run');
 
 harness_finish();
 ?>

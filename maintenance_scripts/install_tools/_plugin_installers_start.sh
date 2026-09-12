@@ -3,6 +3,20 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.13 - Root ignores the test hooks (JOINERY_VERIFY_PACKAGE,
+#                 JOINERY_VERIFY_KEYS, JOINERY_ACTIVE_PLUGINS) and logs that it
+#                 did; only an unprivileged run - the gate - honours them
+#                 (review round 2, R1).
+# Version: 2.12 - A plugin's host_installer runs only out of a directory the
+#                 release key signed (utils/verify_package.php says so), except
+#                 on the publishing box, which trusts its own tree
+#                 (specs/package_signing.md WP5). The kind list carries
+#                 install_theme and install_package (WP3, WP4).
+# Version: 2.11 - Writes config/release_verify_keys from the agent bundle's
+#                 manifest on every tick, root:root 0644, appending a key the
+#                 file lacks and never replacing one (specs/package_signing.md
+#                 WP1). Root verifies every package against it before the
+#                 package touches the tree.
 # Version: 2.10 - When fix_permissions.sh fails, the log line carries the last
 #                 lines of its stderr, not only the fact (review round 1, R4b).
 # Version: 2.9 - Writes cache/certificates.json after the installers: every
@@ -397,6 +411,48 @@ else
     echo "config secrets: _config_secrets.sh missing - keys will not be minted" >&2
 fi
 
+# --- The release verification key (specs/package_signing.md WP1) -------------
+# Root puts code on this box only after PackageSignature has matched the
+# package against the keys in config/release_verify_keys. The key comes from
+# the agent bundle's manifest in the tree: root-owned, installed by root, and
+# the same key the agent binary was built to verify against. Written when
+# absent, appended when the bundle carries a key the file lacks, never
+# replaced - a key from an earlier bundle survives a channel change, so the
+# packages signed under it keep verifying. Every tick, because it is one file
+# read; root:root 0644 so the pool can read it and nobody but root can write
+# it (PackageSignature refuses a key file anyone else could have written).
+write_release_verify_keys() {
+    [[ "$(id -u)" == "0" ]] || return 0
+    local manifest="${PUBLIC_HTML}/agent_dist/manifest.json"
+    local keys_file="${SITE_ROOT}/config/release_verify_keys"
+    [[ -f "${manifest}" ]] || return 0
+    command -v php >/dev/null 2>&1 || return 0
+    local key
+    key="$(php -r '
+        $m = json_decode((string)@file_get_contents($argv[1]), true);
+        $k = is_array($m) ? trim((string)($m["signing_public_key"] ?? "")) : "";
+        $raw = $k !== "" ? base64_decode($k, true) : false;
+        echo ($raw !== false && strlen($raw) === 32) ? base64_encode($raw) : "";
+    ' "${manifest}" 2>/dev/null || true)"
+    [[ -n "${key}" ]] || return 0
+    if [[ -f "${keys_file}" ]] && grep -qxF "${key}" "${keys_file}" 2>/dev/null; then
+        # Already carried. Only the mode is asserted, so a sweep that loosened
+        # it is undone here rather than at the next converge.
+        chown root:root "${keys_file}" 2>/dev/null || true
+        chmod 644 "${keys_file}" 2>/dev/null || true
+        return 0
+    fi
+    [[ -d "${SITE_ROOT}/config" ]] || return 0
+    if printf '%s\n' "${key}" >> "${keys_file}" 2>/dev/null; then
+        chown root:root "${keys_file}" 2>/dev/null || true
+        chmod 644 "${keys_file}" 2>/dev/null || true
+        echo "release key: config/release_verify_keys carries the agent bundle's signing key"
+    else
+        echo "release key: WARNING - could not write ${keys_file}" >&2
+    fi
+}
+write_release_verify_keys
+
 # --- An installer this box did not author is not run -------------------------
 # Every script below is executed AS ROOT. The tree owner is whoever owns
 # public_html — root on a node, the developer account on the developer box — and
@@ -603,6 +659,56 @@ done
 # and "there is nothing to run" are different facts about a machine, and reading
 # the first as the second is how a partial run looks like a clean one.
 
+# --- Only a package we built gets its host installer run ---------------------
+# Every script below runs as root, and a plugin's host_installer is a plugin's
+# own file. The ownership refusal above says root PUT it there; this says WE
+# BUILT it: utils/verify_package.php checks the plugin directory against its
+# signed listing and the keys in config/release_verify_keys
+# (specs/package_signing.md WP5). A plugin installed on the owner's
+# acknowledgement of the unsigned warning stays installed and active - it
+# simply never has a script run as root out of its directory, and the log
+# says so on every converge.
+#
+# The publishing box is the one exemption: it holds the secret half of the
+# release key, every plugin there is the source the archives are built from,
+# and its live manifests are stale the moment a file is edited.
+#
+# JOINERY_VERIFY_PACKAGE, JOINERY_VERIFY_KEYS and JOINERY_ACTIVE_PLUGINS point
+# a test at the real tool, a throwaway key and a fixture's plugin list. They
+# are honoured only when this is NOT root: the gate runs unprivileged, and a
+# root run - the timer, the container start, an operator's sudo - uses its own
+# tool, its own key file (with the ownership guard an explicit key path skips)
+# and the database's answer, whatever the environment says. Root says once
+# that it ignored a hook, so a stray one is visible rather than silent.
+if [[ "$(id -u)" == "0" ]]; then
+    for _hook in JOINERY_VERIFY_PACKAGE JOINERY_VERIFY_KEYS JOINERY_ACTIVE_PLUGINS; do
+        if [[ -n "${!_hook:-}" ]]; then
+            echo "plugin installers: ${_hook} is set but this is root - hook ignored" >&2
+            unset "${_hook}"
+        fi
+    done
+fi
+VERIFY_TOOL="${JOINERY_VERIFY_PACKAGE:-${PUBLIC_HTML}/utils/verify_package.php}"
+plugin_package_verified() {
+    local plugin="$1"
+    local dir="${PUBLIC_HTML}/plugins/${plugin}"
+    if [[ -f "${SITE_ROOT}/config/agent_signing_key" ]]; then
+        return 0
+    fi
+    if [[ ! -f "${VERIFY_TOOL}" ]]; then
+        echo "plugin installers: ${plugin}: no verify_package.php to check the package with - host installer skipped" >&2
+        return 1
+    fi
+    local -a keys_arg=()
+    [[ -n "${JOINERY_VERIFY_KEYS:-}" ]] && keys_arg=(--keys="${JOINERY_VERIFY_KEYS}")
+    local out
+    if out="$(php "${VERIFY_TOOL}" "${dir}" "${keys_arg[@]+"${keys_arg[@]}"}" 2>&1)"; then
+        return 0
+    fi
+    echo "plugin installers: ${plugin}: not a package we built - host installer skipped (${out##*$'\n'})" >&2
+    return 1
+}
+
 # Wrapped in a function so that "nothing to run here" returns rather than ends
 # the script: the queued root requests below are a separate job, and a site with
 # no active plugins is still a site that can have asked for an upgrade.
@@ -613,7 +719,12 @@ if ! command -v php >/dev/null 2>&1; then
     return 0
 fi
 
-if ! ACTIVE_PLUGINS="$(read_active_plugins)"; then
+if [[ -n "${JOINERY_ACTIVE_PLUGINS:-}" ]]; then
+    # A gate's fixture tree has no database; it names the plugins whose
+    # installers it expects to see run or skipped. Nothing in a root timer's
+    # environment sets this.
+    ACTIVE_PLUGINS="${JOINERY_ACTIVE_PLUGINS}"
+elif ! ACTIVE_PLUGINS="$(read_active_plugins)"; then
     echo "plugin installers: could not read the site database - skipping" >&2
     CONVERGE_OUTCOME="db-unreachable"
     # Transient: drop the stamp so the next tick tries again rather than
@@ -656,6 +767,13 @@ for PLUGIN in ${ACTIVE_PLUGINS}; do
 
     if ! installer_is_trusted "${INSTALLER}"; then
         CONVERGE_OUTCOME="installer-refused"
+        continue
+    fi
+
+    # Who built it. Ownership says root put it there; the signature says we
+    # did. An unsigned plugin (installed on the owner's acknowledgement) keeps
+    # its files and its row, and never gets a script run as root out of it.
+    if ! plugin_package_verified "${PLUGIN}"; then
         continue
     fi
 
@@ -846,12 +964,11 @@ run_root_requests() {
         ' "${req}" 2>/dev/null || true)"
 
         case "${kind}" in
-            # The same six as RootRequest::KINDS, and no more. There is
-            # deliberately no kind that installs an uploaded package: the queue
-            # is www-data-writable, so such a request would prove only that
-            # something running as the web user wrote it, and root would move a
-            # staged directory into the tree on the strength of it.
-            upgrade|install_plugin|reconcile_composer|\
+            # The same eight as RootRequest::KINDS, and no more. install_package
+            # installs a staged upload only after root has verified it against
+            # the release key, or on the owner's acknowledgement checked
+            # against the second-factor marker (RootRequest::PACKAGE_KIND).
+            upgrade|install_plugin|install_theme|install_package|reconcile_composer|\
             write_agent_files|save_doc|set_receives_upgrades) : ;;
             *)
                 echo "root request: ${id} names no known kind - refused" >&2

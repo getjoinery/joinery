@@ -1672,6 +1672,131 @@ check($derives('production', 'www-data') === 'root',
 @rmdir($fp . '/public_html');
 @rmdir($fp);
 
+section('Root holds the key it verifies packages against (specs/package_signing.md WP1)');
+
+// Root installs nothing it cannot verify, and it verifies against
+// config/release_verify_keys. Three things put the file there and one thing
+// keeps it root's; each is pinned as text because a box that lacks the file
+// refuses every install, which is safe and useless, and nobody sees that until
+// a stranger's node cannot take a plugin.
+$runner_wp1 = (string)file_get_contents($plugin_start);
+check(strpos($runner_wp1, 'write_release_verify_keys() {') !== false
+    && preg_match('/^write_release_verify_keys$/m', $runner_wp1) === 1,
+    'the converger writes the key file on every tick');
+check(strpos($runner_wp1, 'agent_dist/manifest.json') !== false
+    && strpos($runner_wp1, 'signing_public_key') !== false,
+    'from the agent bundle\'s manifest in the tree',
+    'root-owned, installed by root, and the key the agent binary was built to verify against');
+check(strpos($runner_wp1, 'grep -qxF "${key}" "${keys_file}"') !== false
+    && strpos($runner_wp1, '>> "${keys_file}"') !== false,
+    'appending a key the file lacks, never replacing one',
+    'a key from an earlier bundle survives a channel change');
+$wrk = substr($runner_wp1, strpos($runner_wp1, 'write_release_verify_keys() {'));
+$wrk = substr($wrk, 0, strpos($wrk, "\n}\n"));
+check(strpos($wrk, '[[ "$(id -u)" == "0" ]] || return 0') !== false, 'and only as root');
+check(strpos($wrk, 'chown root:root "${keys_file}"') !== false && strpos($wrk, 'chmod 644 "${keys_file}"') !== false,
+    'root:root 0644: the pool reads it, only root changes which keys count');
+
+check(strpos($install_src, 'write_release_verify_key() {') !== false
+    && strpos($install_src, 'write_release_verify_key "/var/www/html/${SITENAME}"') !== false,
+    'install.sh writes the key on a bare-metal install');
+check(strpos($install_src, 'utils/upgrade?serve-verify-key=1') !== false,
+    'fetching it from the upgrade server when the tree ships no bundle');
+check(strpos($install_src, 'https://*) ;;') !== false
+    && strpos($install_src, 'not fetched over plain http') !== false,
+    'and never over plain http');
+check(strpos($install_src, '[ -f "$keys_file" ] && return 0') !== false,
+    'never replacing a file that is already there');
+check(strpos($upgrade_src, "\$_GET['serve-verify-key']") !== false
+    && strpos($upgrade_src, 'agent_signing_key.pub') !== false,
+    'upgrade.php serves the endpoint, from its own public key on a publishing box');
+check(strpos($upgrade_src, "readKeys(\$full_site_dir . '/config/release_verify_keys')") !== false,
+    'and from the keys it verifies against otherwise');
+
+$fix_perms_wp1 = (string)file_get_contents(dirname(PathHelper::getRootDir())
+    . '/maintenance_scripts/install_tools/fix_permissions.sh');
+check(strpos($fix_perms_wp1, '"$SITE_ROOT/config/release_verify_keys"') !== false
+    && strpos($fix_perms_wp1, 'VERIFY_KEYS="$SITE_ROOT/config/release_verify_keys"') !== false,
+    'fix_permissions.sh pins the key file root:root 0644 and prunes it from the config/ sweep',
+    'the sweep would otherwise hand it to the web user 0770, and PackageSignature refuses such a file');
+
+section('Root ignores the converger\'s test hooks (specs/package_signing.md review round 2, R1)');
+
+// JOINERY_VERIFY_PACKAGE, JOINERY_VERIFY_KEYS and JOINERY_ACTIVE_PLUGINS let the
+// gate point an unprivileged run at the real verifier, a throwaway key and a
+// fixture's plugin list. A root run - the timer, a container start, sudo -
+// must use its own tool, its own key file and the database whatever the
+// environment says: an environment variable is not something root takes
+// orders from. The gate cannot run as root, so the refusal is pinned as text
+// and executed with `id` shadowed.
+$runner_r1 = (string)file_get_contents($plugin_start);
+$hook_block = '';
+if (preg_match('/^if \[\[ "\$\(id -u\)" == "0" \]\]; then\n(?:.*\n)*?^fi$/m', $runner_r1, $m)
+    && strpos($m[0], 'hook ignored') !== false) {
+    $hook_block = $m[0];
+}
+check($hook_block !== '', 'the runner has a block that runs only as root and mentions an ignored hook');
+foreach (array('JOINERY_VERIFY_PACKAGE', 'JOINERY_VERIFY_KEYS', 'JOINERY_ACTIVE_PLUGINS') as $hook) {
+    check(strpos($hook_block, $hook) !== false, "it covers $hook");
+}
+check(strpos($hook_block, 'unset "${_hook}"') !== false, 'and unsets the hook rather than merely warning');
+$block_at = strpos($runner_r1, $hook_block);
+check($block_at !== false && $block_at < strpos($runner_r1, 'VERIFY_TOOL="${JOINERY_VERIFY_PACKAGE:-')
+    && $block_at < strpos($runner_r1, 'if [[ -n "${JOINERY_ACTIVE_PLUGINS:-}" ]]; then'),
+    'before any of them is read');
+
+// Executed: the block alone, with `id` answering 0, drops every hook and says
+// so once each; with `id` answering 1000, keeps them and says nothing.
+$drive = function (string $uid) use ($hook_block): array {
+    $script = 'id() { echo ' . escapeshellarg($uid) . '; }' . "\n"
+        . 'JOINERY_VERIFY_PACKAGE=/x JOINERY_VERIFY_KEYS=/y JOINERY_ACTIVE_PLUGINS=z' . "\n"
+        . $hook_block . "\n"
+        . 'echo "P=${JOINERY_VERIFY_PACKAGE:-} K=${JOINERY_VERIFY_KEYS:-} A=${JOINERY_ACTIVE_PLUGINS:-}"' . "\n";
+    $path = sys_get_temp_dir() . '/joinery_r1_' . getmypid() . '.sh';
+    file_put_contents($path, $script);
+    $out = (string)shell_exec('bash ' . escapeshellarg($path) . ' 2>&1');
+    @unlink($path);
+    return array('out' => $out, 'ignored' => substr_count($out, 'hook ignored'));
+};
+$as_root = $drive('0');
+check(strpos($as_root['out'], 'P= K= A=') !== false, 'as root, every hook is dropped', $as_root['out']);
+check($as_root['ignored'] === 3, 'and each is reported ignored, once', $as_root['out']);
+$as_user = $drive('1000');
+check(strpos($as_user['out'], 'P=/x K=/y A=z') !== false, 'unprivileged, every hook is kept', $as_user['out']);
+check($as_user['ignored'] === 0, 'and nothing is reported', $as_user['out']);
+
+section('An upgrade verifies every archive before it deploys it (specs/package_signing.md WP2)');
+
+// The one setting that became root code execution: `upgrade_source` names
+// where an archive is fetched from, and nothing in the archive was checked.
+// Now nothing leaves staging for the live tree until PackageSignature has
+// said `signed` - the core, the deployment files the self-update copies, and
+// every theme and plugin archive, each before anything reads it.
+check(strpos($upgrade_src, "upgrade_verify_staged(\$stage_location, '', 'core archive')") !== false,
+    'the core archive is verified as a whole after extraction');
+$verify_core_at = strpos($upgrade_src, "upgrade_verify_staged(\$stage_location, '', 'core archive')");
+$self_update_at = strpos($upgrade_src, '// SELF-UPDATE CHECK');
+check($verify_core_at !== false && $self_update_at !== false && $verify_core_at < $self_update_at,
+    'before the post-extract self-update copies any of it into live');
+check(strpos($upgrade_src, "upgrade_verify_staged(\$stage_location, '', 'staged core archive')") !== false
+    && strpos($upgrade_src, 'if ($resuming_after_self_update) {') !== false,
+    'and again on the re-run after a self-update, because staging is under uploads/');
+// The early self-update (four files pulled out of the tarball before
+// extraction) asked tar for utils/upgrade.php while the members are
+// ./public_html/utils/upgrade.php, so it never copied anything; its check
+// would have handed the verifier the wrong paths. Gone, not fixed: a copy out
+// of an archive nobody has verified yet is the wrong shape either way.
+check(strpos($upgrade_src, 'EARLY SELF-UPDATE') === false && strpos($upgrade_src, 'early_su_') === false,
+    'there is no self-update before the whole archive has been extracted and verified');
+check(strpos($upgrade_src, "upgrade_verify_staged(\$stage_directory . '/' . \$target_subdir . '/' . \$name,") !== false,
+    'each theme and plugin archive is verified after its own extraction');
+check(strpos($upgrade_src, "'public_html/' . \$target_subdir . '/' . \$name, \$type . ' ' . \$name)") !== false,
+    'with its listing required to describe exactly that directory');
+check(strpos($upgrade_src, "upgrade_abort('Upgrade refused: the ' . \$label . ' did not verify'") !== false,
+    'and any verdict but signed aborts the upgrade with the verdict');
+check(substr_count($upgrade_src, "'includes/PackageSignature.php',") === 1,
+    'the verifier travels in the self-update set, so a newer one lands before it is needed');
+
 section('The database password never becomes a command line');
 
 // argv is readable by every account on the box through ps, for as long as the

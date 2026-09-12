@@ -1,5 +1,6 @@
 <?php
 // PathHelper, Globalvars, SessionControl are pre-loaded by the front controller.
+// @version 1.1 - shows the root request panel for a queued install (specs/package_signing.md WP4)
 
 require_once(PathHelper::getIncludePath('adm/logic/admin_marketplace_logic.php'));
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -14,6 +15,10 @@ $themes = $page_vars['themes'] ?? array();
 $plugins = $page_vars['plugins'] ?? array();
 $upgrade_source = $page_vars['upgrade_source'] ?? '';
 $catalog_error = $page_vars['catalog_error'] ?? false;
+// An install is carried out by root; the page shows the queued request's
+// transcript rather than claiming it is finished (specs/package_signing.md WP4).
+$root_request_id = $page_vars['root_request_id'] ?? '';
+$root_actor_notice = $page_vars['root_actor_notice'] ?? '';
 
 $page = new AdminPage();
 
@@ -125,6 +130,11 @@ function marketplace_render_card(array $item, string $type, string $csrf_token) 
 		<div class="col-12">
 			<?php if ($error): ?>
 				<div class="alert alert-danger"><?= htmlspecialchars($error) ?></div>
+			<?php endif; ?>
+
+			<?= $root_actor_notice ?>
+			<?php if ($root_request_id): ?>
+				<?= AdminPage::root_request_panel($root_request_id) ?>
 			<?php endif; ?>
 
 			<?php if ($catalog_error && empty($error)): ?>
