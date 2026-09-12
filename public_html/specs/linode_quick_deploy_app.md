@@ -4,8 +4,8 @@
 remains is the submission itself.
 
 **The mechanism is done.** `specs/implemented/linode_stackscript.md` shipped
-2026-08-11: StackScript **2185451** is public at
-`https://cloud.linode.com/stackscripts/2185451`, targeting `linode/ubuntu26.04`
+2026-08-11: StackScript **2217113** (on the getjoinery Linode account since 2026-09-12; formerly 2185451 on a personal account) is public at
+`https://cloud.linode.com/stackscripts/2217113`, targeting `linode/ubuntu26.04`
 with the domain field required. Phases 0–2 are implemented and Gaps 3–7 are
 closed in code — including **Gap 3 (SSL without console intervention)**, the hard
 Akamai requirement, now a systemd timer that resolves the domain, issues the

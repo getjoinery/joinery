@@ -228,7 +228,7 @@ welcome email and `ProvisionPendingSsl` keep the same order-item linkage.
 round trip, no join-approval redesign, no new completion path.
 
 **An earlier draft of this spec proposed exactly those four things** — routing
-provisioning through StackScript 2185451, teaching the driver `user-data`,
+provisioning through StackScript 2217113, teaching the driver `user-data`,
 rewriting the published script to carry a plane URL, and inventing a completion
 path to replace the vanished install job. All of it existed only to avoid using
 the root password. The owner's minimal-change test is what caught it.
