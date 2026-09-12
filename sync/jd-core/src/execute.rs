@@ -3578,21 +3578,45 @@ fn move_local(
     // own path IS the destination by construction and the test collapsed to
     // "is a directory there" -- the very question that cannot be answered.
     // What it read was a directory `download` had minted on the way to a file.
+    //
+    // The directory CAN answer it now, where both it and the record know
+    // their identity (`specs/drive_directory_identity.md`, the reset's WP2):
+    // the directory at `from` carrying this folder's own id is this folder's,
+    // whatever any other record's placement says -- records lag the disk by
+    // a pass after a name trade, and reading them here refused a folder its
+    // own directory for ever (clean2 74033: the server's move of the plain
+    // ring, its source directory judged another folder's by a stale
+    // placement, overtaken every pass). A directory carrying a DIFFERENT id
+    // is not this folder's, however the records read. Where either side
+    // does not know, the records decide as they did.
     if entry.id.entity_type == EntityType::Folder && from != dest {
-        for other in env.store.every_entry()? {
-            if other.id == entry.id
-                || other.id.entity_type != EntityType::Folder
-                || other.remote_deleted
-                || (other.synced_placement.is_none() && other.stand_in.is_none())
-            {
-                continue;
+        let mine = entry.synced_fingerprint.map(|fp| fp.file_id).filter(|id| *id != 0);
+        let there = env.vfs.directory_id(&from)?.filter(|id| *id != 0);
+        match (mine, there) {
+            (Some(mine), Some(there)) if mine == there => {}
+            (Some(_), Some(_)) => {
+                return Ok(OpOutcome::Overtaken(format!(
+                    "{} is not this folder's directory; deciding again from what is there now",
+                    from.display(),
+                )));
             }
-            if let Placed::At(theirs) = local_path(env, &other)? {
-                if theirs == from {
-                    return Ok(OpOutcome::Overtaken(format!(
-                        "{} belongs to another folder; deciding again from what is there now",
-                        from.display(),
-                    )));
+            _ => {
+                for other in env.store.every_entry()? {
+                    if other.id == entry.id
+                        || other.id.entity_type != EntityType::Folder
+                        || other.remote_deleted
+                        || (other.synced_placement.is_none() && other.stand_in.is_none())
+                    {
+                        continue;
+                    }
+                    if let Placed::At(theirs) = local_path(env, &other)? {
+                        if theirs == from {
+                            return Ok(OpOutcome::Overtaken(format!(
+                                "{} belongs to another folder; deciding again from what is there now",
+                                from.display(),
+                            )));
+                        }
+                    }
                 }
             }
         }
@@ -3927,33 +3951,57 @@ fn unmaterialize_and_park(
         // record, not the path. There is nothing of ours to give up in that
         // case -- the record is what has to change, and the directory belongs
         // to somebody who is looking after it.
-        for other in env.store.every_entry()? {
-            if other.id == entry.id
-                || other.id.entity_type != EntityType::Folder
-                || other.remote_deleted
-                || matches!(other.status, LocalStatus::Unsyncable(_))
-                || (other.synced_placement.is_none() && other.stand_in.is_none())
-            {
-                continue;
-            }
-            if let Placed::At(theirs) = local_path(env, &other)? {
-                if theirs == path {
-                    entry.synced_placement = None;
-                    entry.synced_fingerprint = None;
-                    entry.synced_content = None;
-                    entry.synced_remote_content = None;
-                    entry.local_name = None;
-                    entry.status = LocalStatus::Unsyncable(reason.clone());
-                    env.store.put_entry(&entry)?;
-                    env.store.raise_issue(
-                        Some(entry.id),
-                        "unsyncable",
-                        &format!("{reason:?}"),
-                        (env.now_ms)() as i64,
-                    )?;
-                    return Ok(OpOutcome::Done);
+        //
+        // Asked of the DIRECTORY first, where both it and this record know
+        // their identity (the reset's WP2): our own id standing here means
+        // it is ours whatever a lagging record says; another id means it is
+        // not. On clean2 74037 a remote rotation applied in rank order moved
+        // the vault's directory aside, a record that lagged the user's own
+        // rotation then said another folder stood at the vault's path, and
+        // this arm disowned the vault -- placement, id and all -- so the
+        // next scan found its directory with no record and minted it plain.
+        let disown = {
+            let mine = entry.synced_fingerprint.map(|fp| fp.file_id).filter(|id| *id != 0);
+            let there = env.vfs.directory_id(&path)?.filter(|id| *id != 0);
+            match (mine, there) {
+                (Some(mine), Some(there)) => mine != there,
+                _ => {
+                    let mut anothers = false;
+                    for other in env.store.every_entry()? {
+                        if other.id == entry.id
+                            || other.id.entity_type != EntityType::Folder
+                            || other.remote_deleted
+                            || matches!(other.status, LocalStatus::Unsyncable(_))
+                            || (other.synced_placement.is_none() && other.stand_in.is_none())
+                        {
+                            continue;
+                        }
+                        if let Placed::At(theirs) = local_path(env, &other)? {
+                            if theirs == path {
+                                anothers = true;
+                                break;
+                            }
+                        }
+                    }
+                    anothers
                 }
             }
+        };
+        if disown {
+            entry.synced_placement = None;
+            entry.synced_fingerprint = None;
+            entry.synced_content = None;
+            entry.synced_remote_content = None;
+            entry.local_name = None;
+            entry.status = LocalStatus::Unsyncable(reason.clone());
+            env.store.put_entry(&entry)?;
+            env.store.raise_issue(
+                Some(entry.id),
+                "unsyncable",
+                &format!("{reason:?}"),
+                (env.now_ms)() as i64,
+            )?;
+            return Ok(OpOutcome::Done);
         }
         // Whose COPY is inside this directory, which is not the same question as
         // whose record the server files under this folder.
@@ -4020,7 +4068,9 @@ fn unmaterialize_and_park(
         let mut agreed_here: std::collections::HashMap<u64, jd_vfs::Fingerprint> =
             std::collections::HashMap::new();
         for under in &inside {
-            if under.synced_content.is_none() {
+            // Files only, said so: a folder record carries its directory's
+            // id in the same slot, and this map is keyed by file inode.
+            if under.id.entity_type != EntityType::File || under.synced_content.is_none() {
                 continue;
             }
             if let Some(fingerprint) = under.synced_fingerprint {
@@ -4268,6 +4318,15 @@ fn is_on_the_server(
     child: &jd_vfs::DirEntry,
     agreed_here: &std::collections::HashMap<u64, jd_vfs::Fingerprint>,
 ) -> Result<bool, ExecError> {
+    // Files only. A directory's listing entry carries a fingerprint too now
+    // (its identity, with size and mtime zeroed), and comparing that against
+    // a file record would answer nonsense quietly; the caller switches on the
+    // kind before asking, and this says so the day one does not.
+    debug_assert!(
+        child.kind == jd_vfs::EntryKind::File,
+        "is_on_the_server asked about {:?}, which is not a file",
+        child.name
+    );
     let Some(fp) = child.fingerprint else {
         return Ok(false);
     };
@@ -4495,7 +4554,9 @@ fn forget_folder_the_server_confirms(env: &ExecEnv, root: EntityId) -> Result<()
         Ok(env
             .store
             .get_entry(*id)?
-            .filter(|e| e.is_encrypted)
+            // A FILE that is sealed: a sealed subfolder carries its directory's
+            // id in the same slot, and `still_here` is a set of file inodes.
+            .filter(|e| e.is_encrypted && e.id.entity_type == EntityType::File)
             .and_then(|e| e.synced_fingerprint)
             .is_some_and(|f| f.file_id != 0 && still_here.contains(&f.file_id)))
     };

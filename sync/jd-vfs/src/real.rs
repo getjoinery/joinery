@@ -153,10 +153,12 @@ include_internal: bool,
         out.push(DirEntry {
             name,
             kind,
-            fingerprint: if kind == EntryKind::File {
-                Some(fingerprint_of(&entry.path(), &md))
-            } else {
-                None
+            fingerprint: match kind {
+                EntryKind::File => Some(fingerprint_of(&entry.path(), &md)),
+                EntryKind::Directory => {
+                    Some(Fingerprint::of_directory(directory_id_of(&entry.path(), &md)))
+                }
+                _ => None,
             },
         });
     }
@@ -230,6 +232,23 @@ fn fingerprint_of(_path: &Path, md: &fs::Metadata) -> Fingerprint {
             .saturating_add(md.mtime_nsec() as u64),
         file_id: md.ino(),
     }
+}
+
+/// A directory's identity: its inode. The same thing a file's is, read the
+/// same way; only the callers differ.
+#[cfg(unix)]
+fn directory_id_of(_path: &Path, md: &fs::Metadata) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+    md.ino()
+}
+
+/// A directory's identity on Windows: its file index, through a handle opened
+/// with `FILE_FLAG_BACKUP_SEMANTICS` (`file_index` already asks for it, since
+/// without it a directory cannot be opened at all). 0 when the handle would
+/// not open, which reads as "unknown" everywhere, never as a match.
+#[cfg(windows)]
+fn directory_id_of(path: &Path, _md: &fs::Metadata) -> u64 {
+    file_index(path).unwrap_or(0)
 }
 
 /// The Windows equivalent of an inode: the volume's file index.
@@ -318,6 +337,19 @@ impl Vfs for OsVfs {
             Ok(md) if md.is_file() => Ok(Some(fingerprint_of(path, &md))),
             Ok(_) => Ok(None),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(io_err(path, e)),
+        }
+    }
+
+    fn directory_id(&self, path: &Path) -> VfsResult<Option<u64>> {
+        match path.symlink_metadata() {
+            // symlink_metadata, so a symlink to a directory is not a directory
+            // here, exactly as it is not one in a listing.
+            Ok(md) if md.is_dir() && !md.file_type().is_symlink() => {
+                Ok(Some(directory_id_of(path, &md)))
+            }
+            Ok(_) => Ok(None),
+            Err(e) if not_there(&e) => Ok(None),
             Err(e) => Err(io_err(path, e)),
         }
     }
@@ -945,6 +977,34 @@ mod tests {
         let after = v.fingerprint(&p).unwrap().unwrap();
 
         assert!(!after.unchanged_from(&before, &Personality::native()));
+    }
+
+    #[test]
+    fn a_directory_keeps_its_identity_across_a_rename_and_two_directories_differ() {
+        // What directory identity rests on (`specs/drive_directory_identity.md`):
+        // the id is stable across a rename within the volume, two directories
+        // never share one, and `fingerprint` still answers None for a
+        // directory because a dozen callers read its Some as "a file is here".
+        let d = TempDir::new("dirid");
+        let v = vfs(&d);
+        let root = v.root().unwrap();
+        fs::create_dir(root.join("one")).unwrap();
+        fs::create_dir(root.join("two")).unwrap();
+        let one = v.directory_id(&root.join("one")).unwrap().unwrap();
+        let two = v.directory_id(&root.join("two")).unwrap().unwrap();
+        assert_ne!(one, two, "two directories share one id");
+        assert_ne!(one, 0, "an id of 0 means unknown, and this one is known");
+        fs::rename(root.join("one"), root.join("uno")).unwrap();
+        assert_eq!(v.directory_id(&root.join("uno")).unwrap(), Some(one), "a rename changed the id");
+        assert_eq!(v.directory_id(&root.join("one")).unwrap(), None);
+        assert_eq!(v.fingerprint(&root.join("uno")).unwrap(), None, "fingerprint must stay None for a directory");
+        fs::write(root.join("f.txt"), b"x").unwrap();
+        assert_eq!(v.directory_id(&root.join("f.txt")).unwrap(), None, "a file has no directory id");
+        // And the listing carries the same id, with the fields that mean
+        // nothing for a directory pinned to zero.
+        let listed = v.read_dir(&root).unwrap();
+        let uno = listed.iter().find(|e| e.name == "uno").unwrap();
+        assert_eq!(uno.fingerprint, Some(Fingerprint::of_directory(one)));
     }
 
     #[test]

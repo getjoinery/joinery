@@ -2301,6 +2301,857 @@ fn a_sealed_file_dragged_into_a_brand_new_folder_still_converts() {
     );
 }
 
+/// Defect AG: dragging the ONLY file out of a vault must not rename the vault
+/// onto the new folder.
+///
+/// One keyed device, a vault holding one sealed file, a new folder, one drag.
+/// The user's intent could not be plainer: the file leaves, the vault stays.
+/// The engine as it stands reads it the other way: the vault's record pairs
+/// with the directory holding its only known child, the VAULT is renamed
+/// onto `Plain`, and a new PLAIN folder inherits the name `Private` -- so
+/// everything the user saves into the name they trust afterwards is
+/// published. `holds_nothing_known` protects a folder only while tracked
+/// content stands under it, and a one-file vault loses that the moment the
+/// file leaves. Directory identity (`specs/drive_directory_identity.md`,
+/// the reset's WP2) is the fix: the vault's record knows its directory, and
+/// an empty directory it still owns is not a directory it has left.
+///
+/// Asked by ID, never by tree: the tree after AG is byte-identical to the
+/// correct one. The folder the server seeded as the vault must still wear
+/// `Private` and its protection; the new folder is plain; the file is on the
+/// server in the clear under `Plain`. RED on `df2f5c88` (501 renamed onto
+/// `Plain`, a plain 502 wearing `Private`); green since the folder scan
+/// corroborates by identity.
+///
+/// Both provenances, measured identical: the sealed file downloaded, and the
+/// sealed file written on this device.
+fn a_vault_keeps_its_name_when_its_only_file_is_dragged_out(written_locally: bool) {
+    let vault = SimVault::new(9_951);
+    let mut world = World::new(9_951, &["holder"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    let body = b"the only thing in the vault";
+    if written_locally {
+        assert!(world.settle().is_some(), "the vault comes down");
+        world.device("holder").fs.user_write("Private/y.txt", body);
+    } else {
+        world.server.seed_vault_file(Some(private), "y.txt", body, &vault.public_key_b64);
+    }
+    assert!(world.settle().is_some(), "the sealed file is everywhere it should be");
+
+    let holder = world.device("holder");
+    holder.fs.user_mkdir("Plain");
+    holder.fs.user_rename("Private/y.txt", "Plain/y.txt");
+    assert!(world.settle().is_some(), "the drag-out has to settle");
+
+    let folders = world.server.folders();
+    let the_vault = folders.iter().find(|f| f.id == private).expect("the vault is still a folder");
+    assert!(
+        the_vault.name == "Private" && the_vault.encrypted && !the_vault.trashed && the_vault.parent.is_none(),
+        "the vault is no longer the folder the user trusts: {the_vault:?}; all folders {folders:?}"
+    );
+    let plain = folders.iter().find(|f| f.name == "Plain" && !f.trashed).expect("Plain reached the server");
+    assert!(!plain.encrypted, "the new folder was made a vault: {plain:?}");
+    assert!(
+        !folders.iter().any(|f| f.id != private && f.name == "Private" && !f.trashed),
+        "a second folder wears the vault's name: {folders:?}"
+    );
+    let sha = jd_sim::sha256_hex(body);
+    assert!(
+        world.server.tree().get("Plain/y.txt").and_then(|h| h.as_deref()) == Some(sha.as_str()),
+        "the dragged-out file is not on the server in the clear under Plain: {:?}",
+        world.server.tree()
+    );
+}
+
+#[test]
+fn a_vault_keeps_its_name_when_its_only_downloaded_file_is_dragged_out() {
+    a_vault_keeps_its_name_when_its_only_file_is_dragged_out(false);
+}
+
+#[test]
+fn a_vault_keeps_its_name_when_its_only_local_file_is_dragged_out() {
+    a_vault_keeps_its_name_when_its_only_file_is_dragged_out(true);
+}
+
+/// AG's mirror: the user renames an EMPTY vault and makes a new empty folder
+/// under its old name, then saves into the renamed one. Nothing is published;
+/// the vault keeps its id and its protection under its new name.
+///
+/// Same disk and same server as AG, opposite intent, and the reason a
+/// standing-directory tie-break cannot be the fix: under it the sealed file
+/// reads as dragged out and is published. With the vault EMPTY no contents
+/// propose anything either way, which is the shape decision 1 of the reset's
+/// WP2 exists for: an ENCRYPTED folder's recorded id may claim, so the
+/// directory carrying the vault's id is the vault wherever it stands and
+/// whatever it holds. Before the claim, the standing directory at `Private`
+/// was read as the vault by path, `Plain` minted plain, and what the user
+/// then saved into the folder they renamed went up in the clear (RED on
+/// `df2f5c88`).
+#[test]
+fn a_renamed_empty_vault_stays_the_vault_when_its_old_name_is_reused() {
+    let vault = SimVault::new(9_952);
+    let mut world = World::new(9_952, &["holder"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some(), "the vault comes down");
+
+    let holder = world.device("holder");
+    holder.fs.user_rename("Private", "Plain");
+    holder.fs.user_mkdir("Private");
+    assert!(world.settle().is_some(), "the rename has to settle");
+    let body = b"saved into the folder the user renamed, sealed by their intent";
+    holder.fs.user_write("Plain/y.txt", body);
+    assert!(world.settle().is_some(), "the save has to settle");
+
+    let folders = world.server.folders();
+    let the_vault = folders.iter().find(|f| f.id == private).expect("the vault is still a folder");
+    assert!(
+        the_vault.name == "Plain" && the_vault.encrypted && !the_vault.trashed,
+        "the vault did not follow its rename, or lost its protection: {the_vault:?}; all folders {folders:?}"
+    );
+    let fresh = folders.iter().find(|f| f.name == "Private" && !f.trashed).expect("the new Private reached the server");
+    assert!(fresh.id != private && !fresh.encrypted, "the new empty folder took the vault's place: {fresh:?}");
+    let sha = jd_sim::sha256_hex(body);
+    assert!(
+        world.server.blob(&sha).is_none(),
+        "what the user saved into their renamed vault was published in the clear: {:?}",
+        world.server.tree()
+    );
+}
+
+/// The same rename with a file still inside: green today by the contents
+/// rule (the file proposes the pairing) and required to stay green when the
+/// id rule lands beside it.
+#[test]
+fn a_renamed_vault_with_a_file_inside_stays_the_vault_when_its_old_name_is_reused() {
+    let vault = SimVault::new(9_953);
+    let mut world = World::new(9_953, &["holder"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    let body = b"sealed, and staying that way";
+    world.server.seed_vault_file(Some(private), "y.txt", body, &vault.public_key_b64);
+    assert!(world.settle().is_some(), "the vault comes down");
+
+    let holder = world.device("holder");
+    holder.fs.user_rename("Private", "Plain");
+    holder.fs.user_mkdir("Private");
+    assert!(world.settle().is_some(), "the rename has to settle");
+
+    let folders = world.server.folders();
+    let the_vault = folders.iter().find(|f| f.id == private).expect("the vault is still a folder");
+    assert!(
+        the_vault.name == "Plain" && the_vault.encrypted && !the_vault.trashed,
+        "the vault did not follow its rename, or lost its protection: {the_vault:?}; all folders {folders:?}"
+    );
+    let fresh = folders.iter().find(|f| f.name == "Private" && !f.trashed).expect("the new Private reached the server");
+    assert!(fresh.id != private && !fresh.encrypted, "the new empty folder took the vault's place: {fresh:?}");
+    assert!(
+        world.server.blob(&jd_sim::sha256_hex(body)).is_none(),
+        "the sealed file was published in the clear: {:?}",
+        world.server.tree()
+    );
+}
+
+/// P1 of the reset's WP2: a restore drags nothing out of the vault.
+///
+/// The disk comes back with every file and directory under a fresh identity
+/// -- a restore from backup, a copy onto a new volume, a re-created sync
+/// root -- so every id the engine recorded now stands nowhere. A crossing
+/// rule written as "the file's parent id differs from the recorded one"
+/// reads every sealed file as dragged out on the first pass and converts
+/// the whole vault in the clear, a disclosure larger than AG. An unknown or
+/// vanished id on either side is NO evidence: the file falls to today's
+/// rules, nothing converts, nothing is published, and the ids are
+/// re-recorded. Green today (nothing reads ids) and required to stay green.
+#[test]
+fn a_restored_disk_with_fresh_ids_drags_nothing_out_of_the_vault() {
+    let vault = SimVault::new(9_954);
+    let mut world = World::new(9_954, &["holder"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    let a = b"sealed one";
+    let b = b"sealed two, in a subfolder";
+    world.server.seed_vault_file(Some(private), "a.txt", a, &vault.public_key_b64);
+    assert!(world.settle().is_some(), "the vault comes down");
+    let holder = world.device("holder");
+    holder.fs.user_mkdir("Private/Sub");
+    holder.fs.user_write("Private/Sub/b.txt", b);
+    holder.fs.user_mkdir("Plain");
+    holder.fs.user_write("Plain/p.txt", b"plain");
+    assert!(world.settle().is_some(), "everything is agreed before the restore");
+
+    holder.fs.renumber_every_id();
+    // One pass first, because the first pass after the restore is the one
+    // that could read every stale id as a move; then settle.
+    world.pass(holder);
+    assert!(world.settle().is_some(), "the restored disk has to settle");
+
+    for body in [&a[..], &b[..]] {
+        assert!(
+            world.server.blob(&jd_sim::sha256_hex(body)).is_none(),
+            "a restore published a sealed file in the clear: {:?}",
+            world.server.tree()
+        );
+    }
+    let folders = world.server.folders();
+    let the_vault = folders.iter().find(|f| f.id == private).unwrap();
+    assert!(the_vault.name == "Private" && the_vault.encrypted && !the_vault.trashed, "{folders:?}");
+    assert_eq!(
+        world.server.tree().keys().filter(|p| p.starts_with("Private/")).count(),
+        3,
+        "the vault lost or gained something across the restore: {:?}",
+        world.server.tree()
+    );
+}
+
+/// P2 of the reset's WP2: a directory id of 0 is not an id.
+///
+/// The Windows world where the handle a file index needs will not open:
+/// every directory reports 0 (`MemFs::directory_ids_unreadable`). Two
+/// directories both reporting 0 must not
+/// read as "the same" or as "unchanged" across a real drag; 0 on either
+/// side is unknown, and the drag converts exactly as today's rules convert
+/// it, by contents and path, with no stall. Green today; must stay green.
+#[test]
+fn unreadable_directory_ids_do_not_stop_a_drag_out_from_converting() {
+    let vault = SimVault::new(9_955);
+    let mut world = World::of(9_955, &[("pc", jd_sim::Platform::Windows)]);
+    world.give_vault("pc", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    let body = b"dragged out on a disk that cannot say which directory is which";
+    world.server.seed_vault_file(Some(private), "out.txt", body, &vault.public_key_b64);
+    world.server.seed_vault_file(Some(private), "stays.txt", b"stays sealed", &vault.public_key_b64);
+    let pc = world.device("pc");
+    pc.fs.directory_ids_unreadable(true);
+    assert!(world.settle().is_some(), "the vault comes down");
+
+    pc.fs.user_mkdir("Plain");
+    pc.fs.user_rename("Private/out.txt", "Plain/out.txt");
+    assert!(world.settle().is_some(), "the drag-out has to settle, not stall");
+
+    let tree = world.server.tree();
+    assert_eq!(
+        tree.get("Plain/out.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(body)),
+        "the drag-out did not convert: {tree:?}"
+    );
+    let folders = world.server.folders();
+    let the_vault = folders.iter().find(|f| f.id == private).unwrap();
+    assert!(the_vault.name == "Private" && the_vault.encrypted, "{folders:?}");
+    assert!(pc.store.open_issues().unwrap().is_empty(), "a stall: {:?}", pc.store.open_issues().unwrap());
+}
+
+/// P3 of the reset's WP2: a move the engine makes for the server is not a
+/// user drag.
+///
+/// Device A drags a file out of the vault and converts it. Device B's
+/// executor then moves ITS copy from `Private` to `Plain`, so on B the
+/// file's parent directory changed with no user action on B. B's next scan
+/// must read the file against the folder record it is NOW under (Plain, as
+/// the server says), never against a snapshot from before the executor
+/// moved it; read wrongly, B reports a second crossing and re-converts or
+/// re-seals. Both provenances of the file. Green today; must stay green.
+fn a_drag_out_on_one_device_is_not_a_second_crossing_on_the_other(written_locally: bool) {
+    let vault = SimVault::new(9_956);
+    let mut world = World::new(9_956, &["a", "b"]);
+    world.give_vault("a", &vault);
+    world.give_vault("b", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    let body = b"dragged out on a, moved for the server on b";
+    if written_locally {
+        assert!(world.settle().is_some());
+        world.device("a").fs.user_write("Private/out.txt", body);
+    } else {
+        world.server.seed_vault_file(Some(private), "out.txt", body, &vault.public_key_b64);
+    }
+    world.server.seed_vault_file(Some(private), "stays.txt", b"stays sealed", &vault.public_key_b64);
+    assert!(world.settle().is_some(), "both devices hold the vault");
+
+    let a = world.device("a");
+    a.fs.user_mkdir("Plain");
+    a.fs.user_rename("Private/out.txt", "Plain/out.txt");
+    assert!(world.settle().is_some(), "the drag-out has to settle on both devices");
+
+    let tree = world.server.tree();
+    assert_eq!(tree.get("Plain/out.txt").cloned().flatten(), Some(jd_sim::sha256_hex(body)), "{tree:?}");
+    let versions = world
+        .server
+        .all_versions()
+        .into_iter()
+        .filter(|v| v.sha256 == jd_sim::sha256_hex(body))
+        .count();
+    assert_eq!(versions, 1, "the plaintext went up more than once -- a second crossing: {:?}", world.server.all_versions());
+    for d in [a, world.device("b")] {
+        let disk = disk_tree(d);
+        assert_eq!(disk.get("Plain/out.txt").cloned().flatten(), Some(jd_sim::sha256_hex(body)), "{} {disk:?}", d.name);
+        assert!(!disk.contains_key("Private/out.txt"), "{} still has the sealed copy: {disk:?}", d.name);
+        assert!(d.store.open_issues().unwrap().is_empty(), "{}: {:?}", d.name, d.store.open_issues().unwrap());
+    }
+    // Six more rounds: a second crossing would show up as churn.
+    for _ in 0..6 {
+        for d in &world.devices {
+            world.clock.advance_secs(20 * 60);
+            assert!(world.pass(d).quiet(), "{} is still working after the drag-out settled", d.name);
+        }
+    }
+}
+
+#[test]
+fn a_downloaded_files_drag_out_on_one_device_is_not_a_second_crossing_on_the_other() {
+    a_drag_out_on_one_device_is_not_a_second_crossing_on_the_other(false);
+}
+
+#[test]
+fn a_locally_written_files_drag_out_on_one_device_is_not_a_second_crossing_on_the_other() {
+    a_drag_out_on_one_device_is_not_a_second_crossing_on_the_other(true);
+}
+
+/// A folder record knows which directory is its own (WP2 part b).
+///
+/// After a pass every settled folder record carries its directory's id in
+/// `synced_fingerprint` -- the same slot a file keeps its inode in -- and a
+/// rename leaves it unchanged, because the directory kept its identity. A
+/// restore hands every directory a fresh id; the record's old one then
+/// stands nowhere and is re-recorded on the next pass, never read as a
+/// move. Recording only: the readers that ask this are WP2 part c.
+#[test]
+fn a_folder_record_knows_its_directory_and_relearns_it_after_a_restore() {
+    let world = World::new(9_957, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_mkdir("Docs/Deep");
+    laptop.fs.user_write("Docs/Deep/f.txt", b"x");
+    assert!(world.settle().is_some());
+
+    let recorded = |d: &jd_sim::engine::Device, path: &str| -> Option<u64> {
+        let id = world.server.folder_id_at(path).expect("the folder is on the server");
+        d.store
+            .get_entry(jd_core::model::EntityId::folder(id))
+            .unwrap()
+            .expect("the record exists")
+            .synced_fingerprint
+            .map(|fp| fp.file_id)
+    };
+    for d in &world.devices {
+        for path in ["Docs", "Docs/Deep"] {
+            let on_disk = jd_vfs::Vfs::directory_id(&d.fs, std::path::Path::new(&format!("/sync/{path}"))).unwrap().unwrap();
+            assert_eq!(recorded(d, path), Some(on_disk), "{} does not know its directory for {path}", d.name);
+        }
+    }
+
+    // A rename keeps the directory, so it keeps the id -- and the folder
+    // that stood still keeps its own.
+    let docs_before = recorded(laptop, "Docs").unwrap();
+    let deep_before = recorded(laptop, "Docs/Deep").unwrap();
+    laptop.fs.user_rename("Docs/Deep", "Docs/Deeper");
+    assert!(world.settle().is_some());
+    assert_eq!(recorded(laptop, "Docs/Deeper"), Some(deep_before), "a rename changed the recorded identity");
+    assert_eq!(recorded(laptop, "Docs"), Some(docs_before), "a folder that stood still changed identity");
+
+    // A restore: every id fresh, the record's stale one stands nowhere, and
+    // the next pass re-records without reading a move into it.
+    laptop.fs.renumber_every_id();
+    world.pass(laptop);
+    let fresh = jd_vfs::Vfs::directory_id(&laptop.fs, std::path::Path::new("/sync/Docs/Deeper")).unwrap().unwrap();
+    assert_ne!(fresh, deep_before);
+    assert_eq!(recorded(laptop, "Docs/Deeper"), Some(fresh), "the stale id was not re-recorded");
+    assert!(world.settle().is_some());
+    assert_converged(&world);
+    assert_eq!(world.server.folders().iter().filter(|f| !f.trashed).count(), 2, "{:?}", world.server.folders());
+}
+
+/// Row 5 of the reset's WP2 table: the folder's own directory stands in one
+/// place and its files in another, and neither reading is taken.
+///
+/// A plain folder `Docs` holding `f.txt`. In one go the user renames `Docs`
+/// to `Moved` and moves `f.txt` out into a new folder `Other`. Read by
+/// contents alone, `Docs` is paired with `Other` -- the folder dragged after
+/// its one file, the AC shape, and `Moved` minted as a stranger. Read by
+/// identity alone, a plain folder's id may not claim (a recycled id would
+/// hand a stranger's files a folder's history). So the engine stands down:
+/// `Docs` is present and unmoved, `Moved` is held from adoption, `f.txt`
+/// lands in `Other`, and an issue names both readings. The user puts one of
+/// them back -- here, renames `Moved` back to `Docs` -- and the folder is
+/// corroborated by identity at its own path and everything settles with no
+/// folder trashed and none minted twice.
+#[test]
+fn a_folder_whose_directory_and_files_went_different_ways_is_held_not_guessed() {
+    let world = World::new(9_958, &["laptop"]);
+    let laptop = world.device("laptop");
+    let mut committed = Committed::default();
+    laptop.fs.user_mkdir("Docs");
+    laptop.fs.user_write("Docs/f.txt", b"the one file");
+    committed.note("Docs/f.txt", b"the one file");
+    assert!(world.settle().is_some());
+    let docs = world.server.folder_id_at("Docs").unwrap();
+
+    laptop.fs.user_rename("Docs", "Moved");
+    laptop.fs.user_mkdir("Other");
+    laptop.fs.user_rename("Moved/f.txt", "Other/f.txt");
+    committed.note("Other/f.txt", b"the one file");
+    world.pass(laptop);
+    world.pass(laptop);
+
+    let folders = world.server.folders();
+    let record = folders.iter().find(|f| f.id == docs).unwrap();
+    assert!(record.name == "Docs" && !record.trashed, "the folder was moved or trashed on a guess: {folders:?}");
+    assert!(!folders.iter().any(|f| f.name == "Moved" && !f.trashed), "the folder's own directory was adopted as a stranger: {folders:?}");
+    assert!(folders.iter().any(|f| f.name == "Other" && !f.trashed), "the new folder never reached the server: {folders:?}");
+    let issues: Vec<String> = laptop.store.open_issues().unwrap().into_iter().map(|i| i.detail).collect();
+    assert!(
+        issues.iter().any(|d| d.contains("standing at Moved") && d.contains("under Other")),
+        "nothing named both readings: {issues:?}"
+    );
+
+    // While the hold stands, the server sends another folder to the held
+    // record's OLD path -- built the way the real server can produce it,
+    // since it refuses two live siblings with one name: another device
+    // renames the old folder away, then creates the peer's folder at Docs
+    // through the real endpoint. A hold may hold the record's own
+    // directory, never a path: nothing stands at Docs here, and the peer's
+    // folder must land there rather than wait behind a record whose
+    // directory is elsewhere.
+    let held = |d: &jd_sim::engine::Device| {
+        d.store.open_issues().unwrap().into_iter().any(|i| i.kind == "directory_disagrees")
+    };
+    world
+        .server
+        .action("drive_rename", &serde_json::json!({ "entity_type": "folder", "entity_id": docs, "name": "Docs (old)" }))
+        .unwrap();
+    let peer = world
+        .server
+        .action("drive_folder_create", &serde_json::json!({ "name": "Docs" }))
+        .unwrap()["folder"]["id"]
+        .as_i64()
+        .expect("the create answers with the folder");
+    world.server.seed_file(Some(peer), "from-the-peer.txt", b"sent while Docs was held");
+    for _ in 0..4 {
+        world.clock.advance_secs(20 * 60);
+        world.pass(laptop);
+    }
+    assert_eq!(
+        disk_tree(laptop).get("Docs/from-the-peer.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(b"sent while Docs was held")),
+        "the peer's folder never landed at the held record's old path: {:?}",
+        disk_tree(laptop)
+    );
+    assert!(held(laptop), "the peer's folder lifted a hold that is about a different directory");
+
+    // The user resolves it. Its files are in Other and the peer's folder now
+    // holds Docs, so they delete the empty held directory: the hold lifts
+    // (its directory stands nowhere). The other device renamed that folder
+    // to Docs (old) meanwhile, and the engine's standing rule for a local
+    // delete meeting a server-side change is that the change wins and says
+    // so (DeleteLostToEdit): the folder comes back here, empty, under its
+    // new name. Nothing lost, nothing held, converged. (Renaming the held
+    // directory to a fresh name instead would keep it held -- a plain folder
+    // may not be followed by its id alone -- and that is stated as the plain
+    // residual's cost in the reset spec.)
+    laptop.fs.user_remove("Moved");
+    assert!(world.settle().is_some(), "never settled after the user removed the held directory");
+    assert!(!held(laptop), "the hold outlived its directory");
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+    let folders = world.server.folders();
+    assert!(folders.iter().any(|f| f.id == docs && f.name == "Docs (old)" && !f.trashed), "{folders:?}");
+    assert!(folders.iter().any(|f| f.id == peer && f.name == "Docs" && !f.trashed), "{folders:?}");
+    let tree = world.server.tree();
+    assert!(tree.contains_key("Other/f.txt") && tree.contains_key("Docs/from-the-peer.txt"), "{tree:?}");
+    let issues = laptop.store.open_issues().unwrap();
+    assert!(
+        issues.iter().all(|i| i.kind == "reconcile"),
+        "something other than the delete-lost-to-rename report is open: {issues:?}"
+    );
+}
+
+/// Row 7 of the reset's WP2 table, both halves: a directory id recycled onto
+/// a stranger after the folder's directory was deleted.
+///
+/// Plain: the record has no proposal (the stranger holds nothing of its), so
+/// nothing happens -- the record goes with its directory and the stranger is
+/// minted new; the id corroborates, never claims. Encrypted (decision 1): the
+/// claim lands on the stranger, which becomes the vault -- over-sealed,
+/// visibly, and nothing published. Both on `MemFs::reuse_file_ids`, which
+/// hands a released id to the next thing made.
+fn a_recycled_directory_id(encrypted: bool) {
+    let vault = SimVault::new(9_959);
+    let mut world = World::new(9_959, &["holder"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let id = if encrypted {
+        world.server.seed_encrypted_folder(None, "Gone")
+    } else {
+        world.server.seed_folder(None, "Gone")
+    };
+    assert!(world.settle().is_some());
+    let holder = world.device("holder");
+    holder.fs.reuse_file_ids(true);
+    let old_dir = jd_vfs::Vfs::directory_id(&holder.fs, std::path::Path::new("/sync/Gone")).unwrap().unwrap();
+    // Deleted, and the next directory the user makes wears its id. Both in
+    // one pass, so the engine meets the recycled id before it has read the
+    // deletion.
+    holder.fs.user_remove("Gone");
+    holder.fs.user_mkdir("Stranger");
+    assert_eq!(
+        jd_vfs::Vfs::directory_id(&holder.fs, std::path::Path::new("/sync/Stranger")).unwrap(),
+        Some(old_dir),
+        "the disk did not recycle the id, so this pins nothing"
+    );
+    let body = b"written into the stranger";
+    holder.fs.user_write("Stranger/s.txt", body);
+    assert!(world.settle().is_some());
+
+    let folders = world.server.folders();
+    let stranger = folders.iter().find(|f| f.name == "Stranger" && !f.trashed).expect("the stranger reached the server");
+    if encrypted {
+        // The vault's id claimed the stranger: it IS the vault now, sealed,
+        // under the stranger's name, with the user's file inside it sealed.
+        assert_eq!(stranger.id, id, "the recycled id did not claim: {folders:?}");
+        assert!(stranger.encrypted, "{folders:?}");
+        assert!(world.server.blob(&jd_sim::sha256_hex(body)).is_none(), "over-sealing published: {:?}", world.server.tree());
+    } else {
+        // Nothing to propose, so nothing claimed: the folder went with its
+        // directory and the stranger is its own new folder.
+        assert_ne!(stranger.id, id, "a plain folder claimed a stranger by id: {folders:?}");
+        assert!(!stranger.encrypted);
+        assert!(folders.iter().any(|f| f.id == id && f.trashed), "the deleted folder was not read as deleted: {folders:?}");
+        assert_eq!(world.server.tree().get("Stranger/s.txt").cloned().flatten(), Some(jd_sim::sha256_hex(body)));
+    }
+    assert_converged(&world);
+}
+
+#[test]
+fn a_recycled_directory_id_on_a_plain_folder_claims_nothing() {
+    a_recycled_directory_id(false);
+}
+
+#[test]
+fn a_recycled_directory_id_on_a_vault_over_seals_the_stranger_and_publishes_nothing() {
+    a_recycled_directory_id(true);
+}
+
+/// Decision 2's pin: with every id wiped, AG is what today's rules give for
+/// ONE pass, and the vault does not learn the wrong directory on the way.
+///
+/// The disk restored (every id fresh), then the AG drag in the same breath:
+/// the first pass has no identity to read and pairs by contents, so the
+/// first pass is AG's world. What must hold is that the record does NOT
+/// cache the new folder's directory as its own (`record_directory_identities`
+/// learns only from the record's agreed path), so once the user notices and
+/// puts the file back, the vault is corroborated at its own path by identity
+/// from then on.
+#[test]
+fn with_ids_wiped_the_vault_does_not_learn_the_wrong_directory() {
+    let vault = SimVault::new(9_960);
+    let mut world = World::new(9_960, &["holder"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    let body = b"the only thing in the vault";
+    world.server.seed_vault_file(Some(private), "y.txt", body, &vault.public_key_b64);
+    assert!(world.settle().is_some());
+    let holder = world.device("holder");
+
+    holder.fs.renumber_every_id();
+    holder.fs.user_mkdir("Plain");
+    holder.fs.user_rename("Private/y.txt", "Plain/y.txt");
+    world.pass(holder);
+    let plain_dir = jd_vfs::Vfs::directory_id(&holder.fs, std::path::Path::new("/sync/Plain")).unwrap().unwrap();
+    let recorded = holder
+        .store
+        .get_entry(jd_core::model::EntityId::folder(private))
+        .unwrap()
+        .and_then(|e| e.synced_fingerprint)
+        .map(|fp| fp.file_id);
+    assert_ne!(recorded, Some(plain_dir), "the vault learned the new folder's directory as its own");
+    assert!(world.settle().is_some());
+}
+
+/// A vanished id is no evidence (c6's C1 on reader 1): after a restore the
+/// user makes a new folder and moves ONE file into it while the rest stay.
+/// The folder's recorded id stands nowhere, so the contents decide, and the
+/// contents say the folder is at its path with most of its files still in
+/// it -- present, not contested, not dragged after the one file.
+#[test]
+fn a_restored_folder_with_a_vanished_id_is_read_by_its_contents() {
+    let world = World::new(9_961, &["laptop"]);
+    let laptop = world.device("laptop");
+    let mut committed = Committed::default();
+    laptop.fs.user_mkdir("Docs");
+    for n in ["a.txt", "b.txt", "c.txt"] {
+        laptop.fs.user_write(&format!("Docs/{n}"), n.as_bytes());
+        committed.note(&format!("Docs/{n}"), n.as_bytes());
+    }
+    assert!(world.settle().is_some());
+    let docs = world.server.folder_id_at("Docs").unwrap();
+
+    laptop.fs.renumber_every_id();
+    laptop.fs.user_mkdir("New");
+    laptop.fs.user_rename("Docs/a.txt", "New/a.txt");
+    committed.note("New/a.txt", b"a.txt");
+    world.pass(laptop);
+    let issues = laptop.store.open_issues().unwrap();
+    assert!(issues.is_empty(), "a vanished id was read as evidence: {issues:?}");
+    assert!(world.settle().is_some());
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+    let folders = world.server.folders();
+    assert!(folders.iter().any(|f| f.id == docs && f.name == "Docs" && !f.trashed), "{folders:?}");
+    assert_eq!(folders.iter().filter(|f| !f.trashed).count(), 2, "{folders:?}");
+    let tree = world.server.tree();
+    assert!(tree.contains_key("New/a.txt") && tree.contains_key("Docs/b.txt") && tree.contains_key("Docs/c.txt"), "{tree:?}");
+}
+
+/// A held directory is nobody's candidate (c6's C2 on reader 1): row 5, and
+/// then before the user resolves it a second folder's files are moved into
+/// the held directory. The hold survives, the directory is not adopted by
+/// the second folder, and the issue is not dismissed as if resolved.
+#[test]
+fn a_held_directory_is_not_adopted_by_a_folder_whose_files_land_in_it() {
+    let world = World::new(9_962, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_mkdir("Docs");
+    laptop.fs.user_write("Docs/f.txt", b"the one file");
+    laptop.fs.user_mkdir("Second");
+    laptop.fs.user_write("Second/s.txt", b"the second folder's file");
+    assert!(world.settle().is_some());
+    let docs = world.server.folder_id_at("Docs").unwrap();
+    let second = world.server.folder_id_at("Second").unwrap();
+
+    // Row 5 for Docs.
+    laptop.fs.user_rename("Docs", "Moved");
+    laptop.fs.user_mkdir("Other");
+    laptop.fs.user_rename("Moved/f.txt", "Other/f.txt");
+    world.pass(laptop);
+    world.pass(laptop);
+    let held = |d: &jd_sim::engine::Device| {
+        d.store.open_issues().unwrap().into_iter().any(|i| i.kind == "directory_disagrees")
+    };
+    assert!(held(laptop), "the hold never took");
+
+    // Now the second folder's file lands in the held directory.
+    laptop.fs.user_rename("Second/s.txt", "Moved/s.txt");
+    world.pass(laptop);
+    world.pass(laptop);
+    assert!(held(laptop), "the hold was lifted because something else moved in");
+    let folders = world.server.folders();
+    assert!(folders.iter().any(|f| f.id == docs && f.name == "Docs" && !f.trashed), "{folders:?}");
+    assert!(folders.iter().any(|f| f.id == second && f.name == "Second" && !f.trashed), "the second folder was dragged onto the held directory: {folders:?}");
+    assert!(!folders.iter().any(|f| f.name == "Moved" && !f.trashed), "the held directory was adopted: {folders:?}");
+
+    // The user resolves it: the directory goes back under its own name.
+    laptop.fs.user_rename("Moved", "Docs");
+    assert!(world.settle().is_some());
+    assert!(!held(laptop), "the hold outlived its cause: {:?}", laptop.store.open_issues().unwrap());
+    assert_converged(&world);
+    let folders = world.server.folders();
+    assert_eq!(folders.iter().filter(|f| !f.trashed).count(), 3, "{folders:?}");
+    let tree = world.server.tree();
+    assert!(tree.contains_key("Docs/s.txt") && tree.contains_key("Other/f.txt"), "{tree:?}");
+}
+
+/// Two devices trade the same three names differently, and the vault's
+/// directory ends up standing where the server wants a plain folder.
+///
+/// clean2 74033's shape (the reset's WP2, the move_local reader). The laptop
+/// rotates the three rings so the vault `ring-1` becomes `ring-2`; the
+/// desktop swaps the plain `ring-2` with the plain `ring-3`. The server now wants `ring-3`'s
+/// folder at `ring-2`, where the laptop's vault directory stands. Three
+/// things have to be true for the laptop to get through it: the server's
+/// move of the plain folder must be allowed to run -- its source directory
+/// is that folder's own by identity, whatever a lagging record says (the
+/// old ownership guard refused it every pass, and the pass never settled);
+/// the vault's directory, moved aside by the room-making under a conflict
+/// name, must not be minted as a new plain folder (it is a live vault's,
+/// by identity); and the vault's record must then follow its directory to
+/// the conflict name (the encrypted claim). The vault keeps its id and its
+/// protection under an honest conflict name, the plain folder wears
+/// `ring-2`, the sealed body is nowhere in the clear, and the world settles.
+/// Before the readers this leaked the sealed body under the conflict name.
+#[test]
+fn a_vault_whose_directory_stands_where_the_server_wants_a_plain_folder_keeps_its_identity() {
+    let vault = SimVault::new(9_963);
+    let mut world = World::new(9_963, &["laptop", "desktop"]);
+    world.give_vault("laptop", &vault);
+    world.give_vault("desktop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let v = world.server.seed_encrypted_folder(None, "ring-1");
+    let p = world.server.seed_folder(None, "ring-2");
+    let q = world.server.seed_folder(None, "ring-3");
+    let sealed = b"sealed, and staying that way through the trade";
+    world.server.seed_vault_file(Some(v), "sealed.txt", sealed, &vault.public_key_b64);
+    world.server.seed_file(Some(p), "p.txt", b"plain p");
+    world.server.seed_file(Some(q), "q.txt", b"plain q");
+    assert!(world.settle().is_some());
+
+    // The laptop rotates all three (1 -> 2 -> 3 -> 1); the desktop swaps
+    // the two plain ones.
+    let laptop = world.device("laptop");
+    laptop.fs.user_rename("ring-1", ".swap.tmp");
+    laptop.fs.user_rename("ring-3", "ring-1");
+    laptop.fs.user_rename("ring-2", "ring-3");
+    laptop.fs.user_rename(".swap.tmp", "ring-2");
+    let desktop = world.device("desktop");
+    desktop.fs.user_rename("ring-2", ".swap.tmp");
+    desktop.fs.user_rename("ring-3", "ring-2");
+    desktop.fs.user_rename(".swap.tmp", "ring-3");
+    // The desktop's trade reaches the server first.
+    world.pass(desktop);
+    assert!(world.settle().is_some(), "the two trades never settled");
+
+    let folders = world.server.folders();
+    let the_vault = folders.iter().find(|f| f.id == v).unwrap();
+    assert!(the_vault.encrypted && !the_vault.trashed, "the vault lost its protection or was trashed: {folders:?}");
+    assert!(
+        !folders.iter().any(|f| f.id != v && f.encrypted && !f.trashed),
+        "a second folder became a vault: {folders:?}"
+    );
+    assert!(
+        world.server.blob(&jd_sim::sha256_hex(sealed)).is_none(),
+        "the sealed body reached the server in the clear: {:?}",
+        world.server.tree()
+    );
+    let view = jd_sim::scenario::owner_view_of_the_server(&world);
+    assert_eq!(
+        view.iter().filter(|(path, h)| path.ends_with("/sealed.txt") && h.as_deref() == Some(jd_sim::sha256_hex(sealed).as_str())).count(),
+        1,
+        "the sealed file is not exactly once under the vault: {view:?}"
+    );
+    let sealed_under = view.keys().find(|path| path.ends_with("/sealed.txt")).unwrap().rsplit_once('/').unwrap().0.to_string();
+    assert_eq!(world.server.folder_id_at(&sealed_under), Some(v), "the sealed file is under a folder that is not the vault: {sealed_under} {folders:?}");
+    assert_converged(&world);
+    // What the user is told: the room-making and the race the server won,
+    // never a hold -- nothing here is left waiting on the user.
+    for d in &world.devices {
+        let issues = d.store.open_issues().unwrap();
+        assert!(
+            issues.iter().all(|i| i.kind == "kept_aside" || i.kind == "reconcile"),
+            "{}: {issues:?}",
+            d.name
+        );
+    }
+}
+
+/// An empty plain folder whose path another folder takes, by identity, is
+/// neither kept at a path it does not own nor read as deleted while its
+/// directory stands (E1 of the reset's WP2 review).
+///
+/// On the server, `P` (empty) is renamed to `Q` and `R` (with a file) is
+/// renamed onto `P`, and `R`'s move reaches this disk first: the room-making
+/// steps `P`'s directory aside under a conflict name, `R`'s directory now
+/// wears `P`, and `P`'s record -- still saying `P` -- collides with `R`'s.
+/// The directory at `P` is `R`'s own, so `P` is evicted. What happens then:
+/// the server's own rename of `P` to `Q` is applied to `P`'s directory from
+/// where the room-making left it, so `P` ends at `Q` under its own id,
+/// nothing is trashed on the server and the conflict-named directory is not
+/// minted new. The scan also carries a hold for the case where nothing
+/// places an evicted empty plain folder (`directory_disagrees`, lifted when
+/// its directory is put back or removed); this shape does not reach it,
+/// and no shape has yet -- a plain folder may not claim, so that branch is
+/// the stated fallback, not a path any pin exercises.
+#[test]
+fn an_empty_plain_folder_evicted_from_its_path_follows_the_servers_rename() {
+    let world = World::new(9_964, &["laptop"]);
+    let laptop = world.device("laptop");
+    let p = world.server.seed_folder(None, "P");
+    let r = world.server.seed_folder(None, "R");
+    world.server.seed_file(Some(r), "r.txt", b"inside R");
+    assert!(world.settle().is_some());
+    let p_dir = jd_vfs::Vfs::directory_id(&laptop.fs, std::path::Path::new("/sync/P")).unwrap().unwrap();
+
+    let act = |name: &str, body: serde_json::Value| world.server.action(name, &body).unwrap();
+    act("drive_rename", serde_json::json!({ "entity_type": "folder", "entity_id": p, "name": "Q" }));
+    act("drive_rename", serde_json::json!({ "entity_type": "folder", "entity_id": r, "name": "P" }));
+    for _ in 0..6 {
+        world.clock.advance_secs(20 * 60);
+        world.pass(laptop);
+    }
+
+    let folders = world.server.folders();
+    assert!(folders.iter().any(|f| f.id == p && !f.trashed), "the empty folder was trashed on the server: {folders:?}");
+    assert_eq!(folders.iter().filter(|f| !f.trashed).count(), 2, "a stray record was minted: {folders:?}");
+    // P's directory still stands, wherever the room-making put it, and it
+    // is P's.
+    let stands_at: Vec<String> = laptop
+        .fs
+        .all_paths()
+        .into_iter()
+        .filter(|path| jd_vfs::Vfs::directory_id(&laptop.fs, std::path::Path::new(&format!("/sync/{path}"))).unwrap() == Some(p_dir))
+        .collect();
+    assert_eq!(stands_at.len(), 1, "P's directory is gone or doubled: {stands_at:?}");
+    let issues = laptop.store.open_issues().unwrap();
+    assert_eq!(stands_at[0], "Q", "P's directory did not follow the server's rename: issues {issues:?}, folders {folders:?}");
+    assert_eq!(world.server.folder_id_at("Q"), Some(p));
+    assert_eq!(world.server.folder_id_at("P"), Some(r));
+    assert!(!issues.iter().any(|i| i.kind == "directory_disagrees"), "held where following was possible: {issues:?}");
+    assert!(world.settle().is_some());
+    assert_converged(&world);
+}
+
+/// The same race with `P`'s own rename refused by the disk once, so `R`'s
+/// move lands first and `P`'s directory is stepped aside under a conflict
+/// name before `P`'s record has moved: the eviction proper. `P` holds
+/// nothing, may not claim, and is held -- present, its directory kept from
+/// adoption, `directory_disagrees` naming both facts -- rather than kept at
+/// `R`'s path or trashed on the server. The user removes the stray
+/// directory and the hold lifts; the folder is then read as deleted, which
+/// it now is. (Following the server's rename onto the directory that
+/// carries the record's id would end this better; it is named in the reset
+/// spec as the improvement, not built.)
+#[test]
+fn an_empty_plain_folder_evicted_from_its_path_is_held_not_trashed_or_reminted() {
+    let world = World::new(9_965, &["laptop"]);
+    let laptop = world.device("laptop");
+    let p = world.server.seed_folder(None, "P");
+    let r = world.server.seed_folder(None, "R");
+    world.server.seed_file(Some(r), "r.txt", b"inside R");
+    assert!(world.settle().is_some());
+    let p_dir = jd_vfs::Vfs::directory_id(&laptop.fs, std::path::Path::new("/sync/P")).unwrap().unwrap();
+
+    let act = |name: &str, body: serde_json::Value| world.server.action(name, &body).unwrap();
+    act("drive_rename", serde_json::json!({ "entity_type": "folder", "entity_id": p, "name": "Q" }));
+    act("drive_rename", serde_json::json!({ "entity_type": "folder", "entity_id": r, "name": "P" }));
+    world.clock.advance_secs(20 * 60);
+    world.pass(laptop);
+    laptop.fs.fail_next(FsOp::Rename, Some("P"), FailureKind::Io, 1);
+    for _ in 0..6 {
+        world.clock.advance_secs(20 * 60);
+        world.pass(laptop);
+    }
+
+    let folders = world.server.folders();
+    assert!(folders.iter().any(|f| f.id == p && !f.trashed), "the empty folder was trashed on the server: {folders:?}");
+    assert_eq!(folders.iter().filter(|f| !f.trashed).count(), 2, "a stray record was minted: {folders:?}");
+    let stands_at: Vec<String> = laptop
+        .fs
+        .all_paths()
+        .into_iter()
+        .filter(|path| jd_vfs::Vfs::directory_id(&laptop.fs, std::path::Path::new(&format!("/sync/{path}"))).unwrap() == Some(p_dir))
+        .collect();
+    assert_eq!(stands_at.len(), 1, "P's directory is gone or doubled: {stands_at:?}");
+    assert_eq!(world.server.folder_id_at("P"), Some(r), "{folders:?}");
+    let issues = laptop.store.open_issues().unwrap();
+    let held = issues.iter().any(|i| i.kind == "directory_disagrees" && i.entity == Some(jd_core::model::EntityId::folder(p)));
+    let followed = stands_at[0] == "Q";
+    eprintln!("E1b outcome: held={held} followed={followed} stands_at={stands_at:?} issues={issues:?}");
+    assert!(held || followed, "P is neither held nor at Q: stands at {stands_at:?}, issues {issues:?}, folders {folders:?}");
+    if held {
+        laptop.fs.user_remove(&stands_at[0]);
+        assert!(world.settle().is_some());
+        assert!(!laptop.store.open_issues().unwrap().iter().any(|i| i.kind == "directory_disagrees"), "the hold outlived its directory");
+        assert!(world.server.folders().iter().any(|f| f.id == p && f.trashed), "{:?}", world.server.folders());
+    } else {
+        assert!(world.settle().is_some());
+    }
+    assert_converged(&world);
+}
+
 #[test]
 fn a_folder_going_to_the_trash_does_not_take_unuploaded_work_with_it() {
     // Trashing a folder is a single rename and everything underneath goes with
@@ -4803,17 +5654,22 @@ fn a_vault_files_case_twin_already_on_a_folding_disk_is_renamed_there() {
     );
 }
 
-/// Two empty vaults leave their places at once, beside one new directory:
-/// neither is guessed to be it, and the user is told.
+/// Two empty vaults leave their places at once, beside one new directory.
 ///
 /// The user deletes vault A and renames vault B to C in one pass. Read by
 /// position alone, A -- first in path order -- would be the one paired with
 /// C: A's deletion undone, its sharing carried onto the folder the user thinks
-/// is B, and B trashed. So with two claimants for one parent the rule stands
+/// is B, and B trashed.
+///
+/// Two worlds, one shape. Where the folder records know their directories
+/// (`specs/drive_directory_identity.md`, the reset's WP2), B's directory now
+/// stands at C and B is KNOWN to be C -- not guessed -- so B is renamed, A is
+/// deleted, and nothing needs saying. Where they do not (a restore handed
+/// every directory a fresh id before the user acted), the engine cannot tell
+/// and must not guess: with two claimants for one parent the rule stands
 /// down, C is what a plain folder would be, and an issue says so, because
-/// silence here is the very thing the rule exists to prevent.
-#[test]
-fn two_empty_vaults_leaving_at_once_are_not_guessed_at() {
+/// silence there is the very thing the rule exists to prevent.
+fn two_empty_vaults_leaving_at_once(ids_known: bool) {
     let vault = SimVault::new(9_231);
     let mut world = World::new(9_231, &["holder"]);
     world.give_vault("holder", &vault);
@@ -4823,6 +5679,9 @@ fn two_empty_vaults_leaving_at_once_are_not_guessed_at() {
     let b = world.server.seed_encrypted_folder(None, "B");
     assert!(world.settle().is_some());
     let holder = world.device("holder");
+    if !ids_known {
+        holder.fs.renumber_every_id();
+    }
     holder.fs.user_remove("A");
     holder.fs.user_rename("B", "C");
     assert!(world.settle().is_some());
@@ -4839,7 +5698,6 @@ fn two_empty_vaults_leaving_at_once_are_not_guessed_at() {
     };
     assert_eq!(stat(a)["deleted"], true, "the user's deletion of A was undone: {}", stat(a));
     assert_ne!(stat(a)["name"], "C", "A was guessed to be the renamed one: {}", stat(a));
-    assert_ne!(stat(b)["name"], "C", "B was guessed to be the renamed one: {}", stat(b));
     let said: Vec<String> = holder
         .store
         .open_issues()
@@ -4847,17 +5705,35 @@ fn two_empty_vaults_leaving_at_once_are_not_guessed_at() {
         .into_iter()
         .map(|i| i.detail)
         .collect();
-    assert!(
-        said.iter().any(|d| d.contains("cannot be told")),
-        "nothing told the user the rename could not be read: {said:?}"
-    );
+    if ids_known {
+        assert_eq!(stat(b)["name"], "C", "B's directory stands at C and B was not followed there: {}", stat(b));
+        assert_eq!(stat(b)["encrypted"], true, "{}", stat(b));
+        assert!(said.is_empty(), "the engine knew and still said it could not tell: {said:?}");
+    } else {
+        assert_ne!(stat(b)["name"], "C", "B was guessed to be the renamed one: {}", stat(b));
+        assert!(
+            said.iter().any(|d| d.contains("cannot be told")),
+            "nothing told the user the rename could not be read: {said:?}"
+        );
+    }
     assert_converged(&world);
 }
 
-/// ...and the same when the ambiguity is on the other side: one vault gone
-/// beside two new directories. Whichever side is plural, the user hears it.
 #[test]
-fn an_empty_vault_leaving_beside_two_new_folders_is_not_guessed_at() {
+fn two_empty_vaults_leaving_at_once_are_told_apart_by_their_directories() {
+    two_empty_vaults_leaving_at_once(true);
+}
+
+#[test]
+fn two_empty_vaults_leaving_at_once_are_not_guessed_at_when_their_directories_are_unknown() {
+    two_empty_vaults_leaving_at_once(false);
+}
+
+/// ...and the same when the ambiguity is on the other side: one vault gone
+/// beside two new directories. With its directory known the vault follows
+/// it to `Secret` and nothing needs saying; without, whichever side is
+/// plural, the user hears it.
+fn an_empty_vault_leaving_beside_two_new_folders(ids_known: bool) {
     let vault = SimVault::new(9_233);
     let mut world = World::new(9_233, &["holder"]);
     world.give_vault("holder", &vault);
@@ -4866,6 +5742,9 @@ fn an_empty_vault_leaving_beside_two_new_folders_is_not_guessed_at() {
     let vid = world.server.seed_encrypted_folder(None, "Private");
     assert!(world.settle().is_some());
     let holder = world.device("holder");
+    if !ids_known {
+        holder.fs.renumber_every_id();
+    }
     holder.fs.user_rename("Private", "Secret");
     holder.fs.user_mkdir("Other");
     assert!(world.settle().is_some());
@@ -4877,10 +5756,6 @@ fn an_empty_vault_leaving_beside_two_new_folders_is_not_guessed_at() {
         .into_iter()
         .map(|i| i.detail)
         .collect();
-    assert!(
-        said.iter().any(|d| d.contains("cannot be told")),
-        "nothing told the user the rename could not be read: {said:?}"
-    );
     let stat = world
         .server
         .action(
@@ -4889,7 +5764,26 @@ fn an_empty_vault_leaving_beside_two_new_folders_is_not_guessed_at() {
         )
         .unwrap();
     assert_ne!(stat["items"][0]["name"], "Other", "the vault was guessed onto the wrong folder: {stat}");
+    if ids_known {
+        assert_eq!(stat["items"][0]["name"], "Secret", "the vault's directory stands at Secret and it was not followed: {stat}");
+        assert!(said.is_empty(), "the engine knew and still said it could not tell: {said:?}");
+    } else {
+        assert!(
+            said.iter().any(|d| d.contains("cannot be told")),
+            "nothing told the user the rename could not be read: {said:?}"
+        );
+    }
     assert_converged(&world);
+}
+
+#[test]
+fn an_empty_vault_leaving_beside_two_new_folders_follows_its_directory() {
+    an_empty_vault_leaving_beside_two_new_folders(true);
+}
+
+#[test]
+fn an_empty_vault_leaving_beside_two_new_folders_is_not_guessed_at_when_its_directory_is_unknown() {
+    an_empty_vault_leaving_beside_two_new_folders(false);
 }
 
 /// A vault whose only content is an empty vault, renamed. Both keep their
@@ -5489,11 +6383,13 @@ fn two_stand_ins_whose_names_are_swapped_on_the_server_follow() {
     assert_nothing_lost(&world, &committed);
 }
 
-/// A parent and subfolder renamed together, with the parent's create landing
-/// while its answer is lost. The next pass learns the folder from the index
-/// and folds the provisional into it; the queued move into it has to be
-/// redirected at that fold too, or it is dropped and the parent's trash
-/// takes the subfolder with it.
+/// A parent and subfolder renamed together, with a folder create's answer
+/// lost. Written when the parent was re-minted (its create landing while its
+/// answer was lost, the next pass folding the provisional into the folder
+/// the index reported, the queued move into it redirected at the fold).
+/// With directory identity the parent is not re-minted -- it follows its
+/// directory to `X` -- so the lost answer costs nothing here; kept so that
+/// stays true.
 #[test]
 fn a_folded_provisional_parent_still_receives_the_move_into_it() {
     let world = World::new(9_266, &["laptop"]);
@@ -5522,7 +6418,12 @@ fn a_folded_provisional_parent_still_receives_the_move_into_it() {
     assert_nothing_lost(&world, &committed);
     assert_eq!(folder_name_of(&world, b), (false, "C".into()), "B lost its identity");
     assert_eq!(world.server.folder_id_at("X/C"), Some(b));
-    assert_ne!(world.server.folder_id_at("X").unwrap(), a);
+    // A is X: its own directory stands there with its child inside, so the
+    // rename is read as a rename (directory identity, the reset's WP2) and no
+    // provisional is minted for it at all -- the fold this pin was written
+    // for has nothing to fold. It stays because the lost answer must still
+    // cost nothing: converged, nothing lost, the subfolder inside its parent.
+    assert_eq!(world.server.folder_id_at("X"), Some(a), "A did not follow its directory to X");
     assert_eq!(world.server.tree().keys().collect::<Vec<_>>(), vec!["X", "X/C", "X/C/f.txt"]);
 }
 
@@ -8287,18 +9188,24 @@ fn folder_name_of(world: &World, id: i64) -> (bool, String) {
 
 /// A parent and the folder inside it renamed in one go: `A/B/f.txt`, `A`
 /// renamed to `X` and `B` to `C` before a pass. `B` is found under `X/C` by
-/// its file and keeps its identity. `A` has nothing of its own to be found
-/// by -- the relative path of its one file changed with `B`'s name -- so it
-/// is trashed and `X` is minted fresh. Nothing is lost and the trees agree;
-/// whatever was granted on `A` goes with it.
+/// its file and keeps its identity.
 ///
-/// Decided, not open. The rule that would find `A` -- pair a vanished folder
-/// with the new directory its relocated child folders now share -- cannot
-/// tell this from the user moving `B` into a brand-new `X` and deleting `A`,
-/// and in that reading it carries `A`'s grants onto a folder the user made
-/// fresh. A grant lost is visible and given again; a grant leaked is neither.
-#[test]
-fn renaming_a_folder_and_its_subfolder_together_keeps_the_subfolder_and_remints_the_parent() {
+/// Two worlds. Where the records know their directories (directory identity,
+/// the reset's WP2), `A`'s own directory stands at `X` with its child folder
+/// inside it, and that pair -- the parent's id AND a known child under it --
+/// is a rename: `A` keeps its identity, its sharing and its history under
+/// the name `X`. Where they do not (every directory handed a fresh id first,
+/// files untouched -- the world an install that predates directory identity
+/// wakes up in), `A` has nothing of its own to be found by -- the relative path
+/// of its one file changed with `B`'s name -- and the older decision holds:
+/// `A` is trashed and `X` minted fresh, because pairing a vanished folder
+/// with the directory its child folders now share cannot be told from the
+/// user moving `B` into a brand-new `X` and deleting `A`, and that reading
+/// carries `A`'s grants onto a folder the user made fresh. A grant lost is
+/// visible and given again; a grant leaked is neither. The parent's own id
+/// at `X` is exactly what tells the two apart, which is why the child alone
+/// never counts.
+fn renaming_a_folder_and_its_subfolder_together(ids_known: bool) {
     let world = World::new(9_244, &["laptop"]);
     let mut committed = Committed::default();
     let laptop = world.device("laptop");
@@ -8310,6 +9217,9 @@ fn renaming_a_folder_and_its_subfolder_together_keeps_the_subfolder_and_remints_
     let a = world.server.folder_id_at("A").unwrap();
     let b = world.server.folder_id_at("A/B").unwrap();
 
+    if !ids_known {
+        laptop.fs.renumber_directory_ids();
+    }
     laptop.fs.user_rename("A", "X");
     laptop.fs.user_rename("X/B", "X/C");
     committed.note("X/C/f.txt", body);
@@ -8317,18 +9227,34 @@ fn renaming_a_folder_and_its_subfolder_together_keeps_the_subfolder_and_remints_
     assert_converged(&world);
     assert_nothing_lost(&world, &committed);
     assert_eq!(folder_name_of(&world, b), (false, "C".into()), "B lost its identity");
-    assert_eq!(folder_name_of(&world, a), (true, "A".into()), "A was expected trashed, not paired");
     let x = world.server.folder_id_at("X").unwrap();
-    assert_ne!(x, a, "the fresh parent took A's identity");
+    if ids_known {
+        assert_eq!(x, a, "A did not follow its directory to X");
+        assert_eq!(folder_name_of(&world, a), (false, "X".into()), "{:?}", folder_name_of(&world, a));
+    } else {
+        assert_eq!(folder_name_of(&world, a), (true, "A".into()), "A was expected trashed, not paired");
+        assert_ne!(x, a, "the fresh parent took A's identity");
+    }
     assert_eq!(world.server.folder_id_at("X/C"), Some(b));
     assert_eq!(world.server.tree().keys().collect::<Vec<_>>(), vec!["X", "X/C", "X/C/f.txt"]);
 }
 
-/// The same shape with the old parent's name rebuilt empty behind it. The
-/// directory at `A` is `A` -- a folder still standing at its path is not
-/// deleted -- and `X` is minted fresh beside it. Same decision as above.
 #[test]
-fn renaming_a_folder_and_its_subfolder_with_the_old_name_rebuilt_keeps_the_subfolder() {
+fn renaming_a_folder_and_its_subfolder_together_keeps_both() {
+    renaming_a_folder_and_its_subfolder_together(true);
+}
+
+#[test]
+fn renaming_a_folder_and_its_subfolder_together_with_unknown_directories_keeps_the_subfolder_and_remints_the_parent() {
+    renaming_a_folder_and_its_subfolder_together(false);
+}
+
+/// The same shape with the old parent's name rebuilt empty behind it. With
+/// the directories known, `A` follows its directory to `X` and the rebuilt
+/// `A` is a new folder; without, the directory standing at `A` is read as
+/// `A` -- a folder still standing at its path is not deleted -- and `X` is
+/// minted fresh beside it. Same decision as above, both halves.
+fn renaming_a_folder_and_its_subfolder_with_the_old_name_rebuilt(ids_known: bool) {
     let world = World::new(9_245, &["laptop"]);
     let mut committed = Committed::default();
     let laptop = world.device("laptop");
@@ -8340,6 +9266,9 @@ fn renaming_a_folder_and_its_subfolder_with_the_old_name_rebuilt_keeps_the_subfo
     let a = world.server.folder_id_at("A").unwrap();
     let b = world.server.folder_id_at("A/B").unwrap();
 
+    if !ids_known {
+        laptop.fs.renumber_directory_ids();
+    }
     laptop.fs.user_rename("A", "X");
     laptop.fs.user_rename("X/B", "X/C");
     laptop.fs.user_mkdir("A");
@@ -8349,10 +9278,25 @@ fn renaming_a_folder_and_its_subfolder_with_the_old_name_rebuilt_keeps_the_subfo
     assert_nothing_lost(&world, &committed);
     assert_eq!(folder_name_of(&world, b), (false, "C".into()), "B lost its identity");
     assert_eq!(world.server.folder_id_at("X/C"), Some(b));
-    assert_eq!(world.server.folder_id_at("A"), Some(a), "the directory standing at A is A");
-    assert_ne!(world.server.folder_id_at("X").unwrap(), a);
+    if ids_known {
+        assert_eq!(world.server.folder_id_at("X"), Some(a), "A did not follow its directory to X");
+        assert_ne!(world.server.folder_id_at("A").unwrap(), a, "the rebuilt A took the old folder's identity");
+    } else {
+        assert_eq!(world.server.folder_id_at("A"), Some(a), "the directory standing at A is A");
+        assert_ne!(world.server.folder_id_at("X").unwrap(), a);
+    }
     let tree = world.server.tree();
     assert_eq!(tree.keys().collect::<Vec<_>>(), vec!["A", "X", "X/C", "X/C/f.txt"], "{tree:?}");
+}
+
+#[test]
+fn renaming_a_folder_and_its_subfolder_with_the_old_name_rebuilt_keeps_both() {
+    renaming_a_folder_and_its_subfolder_with_the_old_name_rebuilt(true);
+}
+
+#[test]
+fn renaming_a_folder_and_its_subfolder_with_the_old_name_rebuilt_and_unknown_directories_keeps_the_subfolder() {
+    renaming_a_folder_and_its_subfolder_with_the_old_name_rebuilt(false);
 }
 
 /// A subfolder moved out of its parent, which stays standing but empty, beside
@@ -9324,6 +10268,55 @@ fn a_park_mid_replacement_survives_its_create_being_refused_once() {
     assert!(!issues.iter().any(|i| i.kind == "parked"), "the park was swept: {issues:?}");
     assert_converged(&world);
     assert_nothing_lost(&world, &committed);
+}
+
+/// The same replacement, asked about identity (WP2 part b, c6's B3): while
+/// the old folder's directory stands parked under a scratch name and the
+/// namesake is created at its agreed path, the old record must not learn the
+/// namesake's directory as its own. Its directory still stands -- under a
+/// name the listing hides, which is why the identities are taken from the
+/// full listing -- so its id is not stale and is not overwritten. Settled,
+/// each of the two folder records carries the id of the directory it ends
+/// in, and no record changed id while its directory stood still.
+#[test]
+fn a_namesake_park_leaves_each_folder_record_with_its_own_directory() {
+    let world = World::new(9_286, &["laptop"]);
+    let laptop = world.device("laptop");
+    let old = world.server.seed_folder(None, "X");
+    world.server.seed_file(Some(old), "note.txt", b"kept through the replacement");
+    assert!(world.settle().is_some());
+    let recorded = |id: i64| -> Option<u64> {
+        laptop
+            .store
+            .get_entry(jd_core::model::EntityId::folder(id))
+            .unwrap()
+            .and_then(|e| e.synced_fingerprint)
+            .map(|fp| fp.file_id)
+    };
+    let on_disk = |path: &str| -> Option<u64> {
+        jd_vfs::Vfs::directory_id(&laptop.fs, std::path::Path::new(&format!("/sync/{path}"))).unwrap()
+    };
+    let old_dir = on_disk("X").expect("X stands");
+    assert_eq!(recorded(old), Some(old_dir), "the old folder knows its directory before anything moves");
+
+    let act = |name: &str, body: serde_json::Value| world.server.action(name, &body).unwrap();
+    act("drive_rename", serde_json::json!({ "entity_type": "folder", "entity_id": old, "name": "Y" }));
+    let new = world.server.seed_folder(None, "X");
+    act("drive_move", serde_json::json!({ "entity_type": "folder", "entity_id": old, "parent_id": new }));
+
+    world.pass(laptop);
+    laptop.fs.fail_next(FsOp::CreateDir, Some("X"), FailureKind::Io, 1);
+    world.pass(laptop);
+    assert!(laptop.fs.all_paths().iter().any(|p| p.contains(".jd-swap-")), "the park did not stand");
+    // The scan has run over the park at least once now.
+    world.pass(laptop);
+    assert_eq!(recorded(old), Some(old_dir), "the parked folder's record took another directory's id");
+    assert!(world.settle().is_some(), "never settled");
+
+    assert_eq!(on_disk("X/Y"), Some(old_dir), "the old directory did not end up under the namesake");
+    assert_eq!(recorded(old), Some(old_dir), "the old record lost its directory across the park");
+    assert_eq!(recorded(new), on_disk("X"), "the new folder does not know the directory it was made as");
+    assert_ne!(recorded(new), recorded(old));
 }
 
 /// The server renames a folder and gives its old name to a new one, and the
