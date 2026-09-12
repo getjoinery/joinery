@@ -1861,6 +1861,30 @@ fn scratch_clean_one() {
 
 #[test]
 #[ignore]
+fn scratch_arm_one() {
+    // One seed of any ring arm, shaped by env: ARM=clean2|hostile2|clean3|kill2|plat3.
+    let seed: u64 = std::env::var("SEED").unwrap().parse().unwrap();
+    let arm = std::env::var("ARM").unwrap_or_else(|_| "clean2".into());
+    std::panic::set_hook(Box::new(|_| {}));
+    let r = std::panic::catch_unwind(move || match arm.as_str() {
+        "hostile2" => workload_core(seed, 30, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], true, Vault::FolderRings, false, Names::Ordinary),
+        "clean3" => workload_core(seed, 40, &[("a", Platform::Linux), ("b", Platform::Linux), ("c", Platform::Linux)], false, Vault::FolderRings, false, Names::Ordinary),
+        "kill2" => workload_core(seed, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary),
+        "plat3" => workload_core(seed, 40, &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)], true, Vault::FolderRings, false, Names::Ordinary),
+        _ => workload_core(seed, 40, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], false, Vault::FolderRings, false, Names::Ordinary),
+    });
+    let _ = std::panic::take_hook();
+    let why = match r {
+        Err(e) => e.downcast_ref::<String>().cloned()
+            .or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_else(|| "?".into()),
+        Ok(_) => "(passed)".into(),
+    };
+    eprintln!("ARM seed={seed} why={why}");
+}
+
+#[test]
+#[ignore]
 fn scratch_ring_sweep() {
     let mut arms: Vec<Vec<(String, u64)>> = Vec::new();
     std::panic::set_hook(Box::new(|_| {}));

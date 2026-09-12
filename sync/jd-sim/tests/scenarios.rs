@@ -2270,6 +2270,37 @@ fn a_rescued_copy_is_recorded_under_the_name_it_actually_landed_on() {
     assert_invariants(&world, &committed);
 }
 
+/// A sealed file dragged into a folder the user has JUST made must still
+/// leave the vault (the designed drag-out) -- the new folder reaches the server
+/// and the file goes up in the clear under it. B1 (c6, 2026-09-12): the mint
+/// guard read the new folder as a renamed vault directory and held it for ever.
+#[test]
+fn a_sealed_file_dragged_into_a_brand_new_folder_still_converts() {
+    let vault = SimVault::new(9_950);
+    let mut world = World::new(9_950, &["holder"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    let body = b"the one being dragged out on purpose";
+    world.server.seed_vault_file(Some(private), "out.txt", body, &vault.public_key_b64);
+    world.server.seed_vault_file(Some(private), "stays.txt", b"the one that stays sealed", &vault.public_key_b64);
+    assert!(world.settle().is_some(), "the vault comes down");
+
+    let holder = world.device("holder");
+    holder.fs.user_mkdir("New");
+    holder.fs.user_rename("Private/out.txt", "New/out.txt");
+    assert!(world.settle().is_some(), "the drag-out has to settle");
+
+    let tree = world.server.tree();
+    assert!(tree.contains_key("New"), "the new folder never reached the server: {:?}", tree.keys().collect::<Vec<_>>());
+    let sha = jd_sim::sha256_hex(body);
+    assert!(
+        tree.get("New/out.txt").and_then(|h| h.as_deref()) == Some(sha.as_str()),
+        "the dragged-out file is not on the server in the clear under New: {:?}",
+        tree.iter().collect::<Vec<_>>()
+    );
+}
+
 #[test]
 fn a_folder_going_to_the_trash_does_not_take_unuploaded_work_with_it() {
     // Trashing a folder is a single rename and everything underneath goes with

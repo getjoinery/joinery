@@ -5479,3 +5479,94 @@ deletes hardlinked files.
 **Read every probe before quoting its number.** Three separate findings this
 session came from a measurement whose NEGATIVE answer and whose ABSENT answer
 were the same value, and a fourth from counting upload attempts as disclosures.
+
+
+## After the commit: the rest of the estate, and one regression (2026-09-12)
+
+The four fixes went in as 87ca2389, measured only on the two-device clean arm.
+Measured on the rest of the ring estate, pristine engine (87ca2389^) against
+the committed one, same seed bands:
+
+    arm                       before    after
+    clean, 2 devices            11         1
+    hostile, 2 devices          21        16
+    clean, 3 devices            11         4   <- 3 leaks and ONE ORPHAN
+
+**Seed 74826 on the three-device arm PASSED before the commit and stranded a
+file after it** -- a regression, and a strand is what the commit's own guards
+are supposed to trade a disclosure for, not to create. Bisected across the four
+fixes with temporary gates: it needs fix 2 AND fix 3 together; skipping either
+one passes.
+
+**What fix 3 did on that seed:**
+
+    MATCH pool=contested folder=Folder:501 believed="Private"
+          candidate="Private/Sub 3 (26)"
+
+**It matched the vault root onto a directory inside itself.** `moved_wholesale`
+answers yes when a folder's FILES have been moved down into a new subdirectory
+of it -- the files moved, the folder did not -- and acting on that reparents
+the folder under itself. The server refuses (the `withdrawn` issue on 501 says
+a vault sits only at the root), the old key is dropped from the map, and the
+directory still standing at `Private` is adopted as a plain twin, `Private
+(conflicted copy ... from b)`. A sealed file then sits under that plain twin,
+and fix 2 -- correctly -- refuses to mint its folder plain. The strand is fix
+2 doing its job on a state fix 3 created.
+
+**On the pristine engine this seed ends with every file under `Private/`
+encrypted and no twin at all.** So the twin is new, and the commit made it.
+
+**The sealed oracle could not see any of this.** It watches the one ring file
+by hash; DOC-29.TXT is a workload file written into the vault, and only the
+strand oracle noticed. Worth carrying forward: **the sealed oracle is blind to
+workload files in the vault**, and a leak of one of those would read as green.
+
+**Two follow-up changes, each measured necessary on its own:**
+
+    fix 3 gains a fourth refusal, contested pool only:
+        a folder is never matched onto a candidate inside its own subtree
+    fix 2 is narrowed on two axes:
+        DIRECT children only -- a sealed file two levels down sits in a
+          subdirectory that keeps its own identity; minting the directory
+          above it reparents nothing sealed
+        PLAIN mints only -- a directory inside a vault mints as an encrypted
+          folder, and a sealed file moving into an encrypted folder discloses
+          nothing
+
+    With both:      clean2 1 red, clean3 3 red / 0 orphans, hostile2 16 red
+    Subtree refusal alone (belt unnarrowed):  clean3 4 red, 74826 STILL orphans
+    So both stand; neither closes 74826 by itself.
+
+    scenario suite 201 pass, jd-core 148, executor 44, platforms 17 -- unchanged.
+
+**Two follow-up findings for the running list:** the sealed oracle's blind spot
+above; and the hostile arm's remaining 16, which none of this reaches and which
+have not been traced.
+
+
+## Fix 2 withdrawn -- B1 (2026-09-12, c6)
+
+The mint guard in 87ca2389 blocks a designed behaviour and no arm or pin could
+see it. A user makes a new folder and drags a sealed file into it: on
+87ca2389^ the folder reaches the server and the file goes up in the clear
+under it, in 4 rounds; on 87ca2389 the guard reads the new folder as a lost
+vault directory and holds it for ever with an issue that says it will sync
+once the folder is recognised, which a new folder never is.
+
+    pin: a_sealed_file_dragged_into_a_brand_new_folder_still_converts
+         87ca2389^ GREEN  ->  87ca2389 RED  ->  fix 2 removed GREEN
+
+Withdrawn, with the "direct children" narrowing that belonged to it. Kept:
+fixes 1, 3 and 4, plus the subtree refusal (a folder is never matched into
+its own descendant). Measured on the named pair:
+
+    arm                   87ca2389^   87ca2389   fix 2 out
+    clean, 2 devices          11          1          4
+    clean, 3 devices          11          4          7
+    hostile, 2 devices        21         16         17
+    scenario suite           201        201        202 (B1 added)
+
+Seven seeds on two synthetic arms were the price of a real user action that
+silently never syncs. The guard cannot tell the two apart without directory
+identity, which is what `drive_sync_reset.md` is for. Every number above this
+section that credits fix 2 is superseded by this table.
