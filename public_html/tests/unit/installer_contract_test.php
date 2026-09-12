@@ -83,16 +83,18 @@ check(strpos($install_src, 'print_ssl_deferred_notice') !== false,
 	'the closing summary prints the deferred-SSL notice');
 
 // The doc and the behavior drifting apart is what made this defect expensive:
-// quickstart.md described the graceful path for as long as the script aborted.
+// the quickstart described the graceful path for as long as the script aborted.
 // The quickstart is the StackScript path, where the retry timer issues the
-// certificate on its own once DNS points here; what it promises is that the
-// site works over http meanwhile and the padlock arrives by itself.
+// certificate on its own once DNS points here. Its text lives on
+// getjoinery.com (content pack, outside this repo); what the repo keeps is a
+// link page, pinned here so the docs never grow a second copy that can drift.
 check(strpos($install_src, 'sysadmin_tools/setup_ssl.sh') !== false,
 	'install.sh names the command that issues the certificate later');
-check(stripos($quickstart_md, 'works in the meantime') !== false,
-	'quickstart.md says the site works over http while DNS spreads');
-check(stripos($quickstart_md, 'switches on by itself') !== false,
-	'quickstart.md says HTTPS arrives on its own once the domain connects');
+check(strpos($quickstart_md, 'https://getjoinery.com/page/quickstart') !== false,
+	'docs/quickstart.md links the live quick start');
+check(stripos($quickstart_md, '## Step') === false,
+	'and carries no walkthrough of its own',
+	'the quick start has one copy, on getjoinery.com');
 
 
 section('Server hardening keeps someone able to log in');
@@ -788,7 +790,7 @@ foreach (array('JOINERY_MAIL_API_KEY', 'JOINERY_BACKUP_KEY', 'JOINERY_BACKUP_BUC
 // because a site with no domain can get no certificate, and every link and
 // canonical URL it emits names an IP address. Blank is a state worth passing
 // through during setup, not one worth deploying into — and an empty box beside
-// "Site domain" reads as optional, which is how a placeholder that never
+// "Your domain" reads as optional, which is how a placeholder that never
 // resolves ends up naming somebody's site.
 $domain_udf = '';
 if (preg_match('/<UDF name="JOINERY_DOMAIN"[^>]*>/', $wrapper_src, $dm)) {

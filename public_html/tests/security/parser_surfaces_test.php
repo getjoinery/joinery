@@ -40,7 +40,6 @@ $allowed = array(
 	'includes/DocumentText.php'                          => 'the sandbox side lives in the same class as the parent side',
 	'utils/extract_document_text.php'                    => 'the extraction subprocess itself',
 	'includes/AbstractExtensionManager.php'              => 'a theme or plugin package the owner installed or we signed (S9)',
-	'includes/PluginManager.php'                         => 'a plugin package the owner installed or we signed (S9)',
 	'utils/upgrade.php'                                  => 'our own signed release archive',
 	'plugins/server_manager/includes/publish_upgrade.php' => 'the archive we are building',
 	'includes/EmailTemplate.php'                         => 'the deployment\'s own email templates',

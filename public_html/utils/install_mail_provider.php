@@ -19,12 +19,15 @@
  * visible to every process on the box:
  *
  *   JOINERY_MAIL_API_KEY    required — the provider's API key
- *   JOINERY_MAIL_PROVIDER   optional — a discovered provider key (default
- *                           smtp2go). The provider must be one a single key
- *                           configures: it registers sending domains through
- *                           its API (SendingDomainRegistrar) and its settings
- *                           group declares exactly one secret, which is where
- *                           the key goes. SMTP is neither.
+ *   JOINERY_MAIL_PROVIDER   optional — a discovered provider key. Blank means
+ *                           detect it from the key: the providers one key
+ *                           configures (SingleKeyProvider) declare the shape
+ *                           of their keys, and a key no shape matches is
+ *                           tried live against each of them in turn. Named
+ *                           or detected, the provider must be a
+ *                           SingleKeyProvider whose settings group declares
+ *                           exactly one secret, which is where the key goes;
+ *                           SMTP is neither.
  *   JOINERY_MAIL_FROM       optional — the From address, which is also the
  *                           owner's mailbox here. Blank derives it: the admin
  *                           address itself when it is on the site's domain,
@@ -48,6 +51,10 @@
  * the sending domain), reason= on error. Exits 0 on success, 2 on unusable
  * input, 1 when the provider rejected the key or a write failed.
  *
+ * @version 1.1 - the provider is detected from the key when none is named
+ *                (EmailSender::providersForApiKey), tried live in order; a
+ *                provider without a registrar API is accepted and simply
+ *                skips registration, as the wizard does
  * @version 1.0
  */
 if (php_sapi_name() !== 'cli') {
@@ -74,36 +81,47 @@ function install_mail_provider_line(string $value): string {
 	return str_replace(array("\r", "\n"), ' ', $value);
 }
 
-$service     = strtolower(trim((string)getenv('JOINERY_MAIL_PROVIDER')));
+$named       = strtolower(trim((string)getenv('JOINERY_MAIL_PROVIDER')));
 $api_key     = trim((string)getenv('JOINERY_MAIL_API_KEY'));
 $from        = strtolower(trim((string)getenv('JOINERY_MAIL_FROM')));
 $admin_email = strtolower(trim((string)getenv('JOINERY_ADMIN_EMAIL')));
-if ($service === '') {
-	$service = 'smtp2go';
-}
 if ($api_key === '') {
 	install_mail_provider_fail('JOINERY_MAIL_API_KEY is required.', 2);
 }
 
-// ---- The provider, and the one setting its key belongs in ----
+// ---- The candidate providers, and the one setting each key belongs in ----
+// Named: that one provider. Blank: whichever single-key providers the key's
+// shape points at, or all of them when no shape matches — tried live in
+// order below, the first the provider accepts wins.
 $providers = EmailSender::getDiscoveredProviders();
-$provider_class = $providers[$service] ?? null;
-if ($provider_class === null) {
-	install_mail_provider_fail("'$service' is not an email provider this site knows (" . implode(', ', array_keys($providers)) . ').', 2);
-}
-$registrar = in_array('SendingDomainRegistrar', class_implements($provider_class) ?: array(), true);
-$key_settings = array();
-foreach (SettingsFieldRenderer::namesFor('email_provider_' . $service, 'core') as $name) {
-	if (SettingsDeclarations::isSecret($name)) {
-		$key_settings[] = $name;
+if ($named !== '') {
+	if (!isset($providers[$named])) {
+		install_mail_provider_fail("'$named' is not an email provider this site knows (" . implode(', ', array_keys($providers)) . ').', 2);
+	}
+	if (!in_array('SingleKeyProvider', class_implements($providers[$named]) ?: array(), true)) {
+		install_mail_provider_fail($providers[$named]::getLabel() . ' is not set up from a single key; use the setup wizard.', 2);
+	}
+	$candidates = array($named => $providers[$named]);
+} else {
+	$candidates = EmailSender::providersForApiKey($api_key);
+	if (!$candidates) {
+		install_mail_provider_fail('No provider on this site is set up from a single key.', 2);
 	}
 }
-if (!$registrar || count($key_settings) !== 1) {
-	install_mail_provider_fail($provider_class::getLabel() . ' is not set up from a single key ('
-		. ($registrar ? 'its settings declare ' . count($key_settings) . ' secrets' : 'it has no API to register a sending domain')
-		. '); use the setup wizard.', 2);
+$key_settings = array();
+foreach ($candidates as $candidate_key => $candidate_class) {
+	$secrets = array();
+	foreach (SettingsFieldRenderer::namesFor('email_provider_' . $candidate_key, 'core') as $name) {
+		if (SettingsDeclarations::isSecret($name)) {
+			$secrets[] = $name;
+		}
+	}
+	if (count($secrets) !== 1) {
+		install_mail_provider_fail($candidate_class::getLabel() . ' declares ' . count($secrets)
+			. ' secret settings, so a single key cannot configure it; use the setup wizard.', 2);
+	}
+	$key_settings[$candidate_key] = $secrets[0];
 }
-$key_setting = $key_settings[0];
 
 // ---- The owner: the account the mailbox is granted to ----
 $owner = null;
@@ -155,59 +173,87 @@ if (!filter_var($from, FILTER_VALIDATE_EMAIL)) {
 $sending_domain = strtolower(rtrim(substr($from, strrpos($from, '@') + 1), '.'));
 
 // ---- Write, then validate against what was written (as the wizard does) ----
-$writes = array(
-	'email_service' => $service,
-	'defaultemail'  => $from,
-	$key_setting    => $api_key,
-);
+// One candidate at a time: write its settings, ask it whether the key is
+// good, and on a refusal put every row back exactly before trying the next.
+// What was there before is read straight from the table (the settings
+// singleton memoizes), so a rejected key leaves the site as it was found.
+$from_name = '';
 if (trim((string)$settings->get_setting('defaultemailname')) === '') {
 	$from_name = trim(trim((string)$owner->get('usr_first_name')) . ' ' . trim((string)$owner->get('usr_last_name')));
 	if ($from_name === '') {
 		$from_name = trim((string)$settings->get_setting('site_name'));
 	}
-	$writes['defaultemailname'] = $from_name !== '' ? $from_name : $sending_domain;
+	if ($from_name === '') {
+		$from_name = $sending_domain;
+	}
 }
-if ($service === 'mailgun') {
-	// The Mailgun sending domain is the From address's domain — the wizard
-	// asks no separate question for it, and neither does this.
-	$writes['mailgun_domain'] = $sending_domain;
-}
-// What was there before, read straight from the table (the settings
-// singleton memoizes), so a rejected key puts every row back exactly.
-$previous = array();
 $read_raw = DbConnector::get_instance()->get_db_link()->prepare('SELECT stg_value FROM stg_settings WHERE stg_name = ?');
-foreach (array_keys($writes) as $name) {
-	$read_raw->execute(array($name));
-	$v = $read_raw->fetchColumn();
-	$previous[$name] = ($v === false || $v === null) ? '' : (string)$v;
-}
-$revert = function () use ($previous) {
-	foreach ($previous as $name => $value) {
-		Setting::put($name, $value);
+$service = '';
+$provider_class = null;
+$refusals = array();
+$touched = array();
+foreach ($candidates as $candidate_key => $candidate_class) {
+	$writes = array(
+		'email_service' => $candidate_key,
+		'defaultemail'  => $from,
+		$key_settings[$candidate_key] => $api_key,
+	);
+	if ($from_name !== '') {
+		$writes['defaultemailname'] = $from_name;
 	}
-};
-try {
-	foreach ($writes as $name => $value) {
-		Setting::put($name, $value);
+	if ($candidate_key === 'mailgun') {
+		// The Mailgun sending domain is the From address's domain — the wizard
+		// asks no separate question for it, and neither does this.
+		$writes['mailgun_domain'] = $sending_domain;
 	}
-} catch (Throwable $e) {
-	$revert();
-	install_mail_provider_fail('Could not write the email settings: ' . $e->getMessage(), 1);
-}
-
-$validation = EmailSender::validateService($service);
-if (empty($validation['valid'])) {
-	$revert();
-	install_mail_provider_fail($provider_class::getLabel() . ' is not fully configured: '
-		. implode(', ', (array)($validation['errors'] ?? array())), 1);
-}
-if (is_callable(array($provider_class, 'validateApiConnection'))) {
-	$live = $provider_class::validateApiConnection();
-	if (empty($live['success'])) {
+	$previous = array();
+	foreach (array_keys($writes) as $name) {
+		$read_raw->execute(array($name));
+		$v = $read_raw->fetchColumn();
+		$previous[$name] = ($v === false || $v === null) ? '' : (string)$v;
+	}
+	$touched = array_merge($touched, array_keys($writes));
+	// A value the settings singleton cached while this candidate was being
+	// asked must not answer for the next one, or for the ceremony after.
+	$revert = function () use ($previous, $settings) {
+		foreach ($previous as $name => $value) {
+			Setting::put($name, $value);
+			$settings->forget_setting($name);
+		}
+	};
+	try {
+		foreach ($writes as $name => $value) {
+			Setting::put($name, $value);
+		}
+	} catch (Throwable $e) {
 		$revert();
-		install_mail_provider_fail($provider_class::getLabel() . ' rejected the key: '
-			. (string)($live['error'] ?? ($live['label'] ?? 'unknown error')), 1);
+		install_mail_provider_fail('Could not write the email settings: ' . $e->getMessage(), 1);
 	}
+	EmailSender::resetProviderCache();
+	$validation = EmailSender::validateService($candidate_key);
+	if (empty($validation['valid'])) {
+		$revert();
+		$refusals[] = $candidate_class::getLabel() . ': not fully configured (' . implode(', ', (array)($validation['errors'] ?? array())) . ')';
+		continue;
+	}
+	if (is_callable(array($candidate_class, 'validateApiConnection'))) {
+		$live = $candidate_class::validateApiConnection();
+		if (empty($live['success'])) {
+			$revert();
+			$refusals[] = $candidate_class::getLabel() . ': ' . (string)($live['error'] ?? ($live['label'] ?? 'rejected the key'));
+			continue;
+		}
+	}
+	$service = $candidate_key;
+	$provider_class = $candidate_class;
+	break;
+}
+if ($provider_class === null) {
+	install_mail_provider_fail((count($candidates) === 1 ? 'The provider rejected the key' : 'No provider accepted the key')
+		. ' — ' . implode('; ', $refusals), 1);
+}
+foreach (array_unique($touched) as $name) {
+	$settings->forget_setting($name);
 }
 
 // ---- The wizard's own ceremony from here ----

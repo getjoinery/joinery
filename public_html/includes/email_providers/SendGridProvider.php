@@ -9,7 +9,7 @@
 require_once(PathHelper::getComposerAutoloadPath());
 require_once(PathHelper::getIncludePath('includes/InboundEmailProvider.php'));
 
-class SendGridProvider implements EmailServiceProvider, InboundEmailProvider {
+class SendGridProvider implements EmailServiceProvider, InboundEmailProvider, SingleKeyProvider {
 
     public static function getKey(): string {
         return 'sendgrid';
@@ -17,6 +17,11 @@ class SendGridProvider implements EmailServiceProvider, InboundEmailProvider {
 
     public static function getLabel(): string {
         return 'SendGrid';
+    }
+
+    /** SG. then two dot-separated base64url parts. */
+    public static function apiKeyPattern(): string {
+        return '/^SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}$/';
     }
 
     public static function getSpfMechanism(string $domain): string

@@ -27,6 +27,7 @@
  * envelope sender and no chosen envelope recipients, so it cannot express what
  * inbound forwarding needs. Forwarding keeps using the SMTP relay.
  *
+ * @version 1.1 - SingleKeyProvider: declares the shape of its API keys
  * @version 1.0
  */
 
@@ -35,7 +36,7 @@ require_once(PathHelper::getComposerAutoloadPath());
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
 
-class Smtp2GoProvider implements EmailServiceProvider, DkimRecordSource, SendingDomainRegistrar {
+class Smtp2GoProvider implements EmailServiceProvider, DkimRecordSource, SendingDomainRegistrar, SingleKeyProvider {
 
     /** The regionless endpoint, which serves accounts in every region. */
     const API_BASE = 'https://api.smtp2go.com/v3/';
@@ -68,6 +69,11 @@ class Smtp2GoProvider implements EmailServiceProvider, DkimRecordSource, Sending
 
     public static function getLabel(): string {
         return 'SMTP2GO';
+    }
+
+    /** SMTP2GO keys are api- and 32 characters. */
+    public static function apiKeyPattern(): string {
+        return '/^api-[A-Za-z0-9]{32}$/';
     }
 
     /**

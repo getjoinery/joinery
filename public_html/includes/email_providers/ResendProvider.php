@@ -8,7 +8,7 @@
 
 require_once(PathHelper::getComposerAutoloadPath());
 
-class ResendProvider implements EmailServiceProvider {
+class ResendProvider implements EmailServiceProvider, SingleKeyProvider {
 
     public static function getKey(): string {
         return 'resend';
@@ -16,6 +16,11 @@ class ResendProvider implements EmailServiceProvider {
 
     public static function getLabel(): string {
         return 'Resend';
+    }
+
+    /** re_ then the key body. */
+    public static function apiKeyPattern(): string {
+        return '/^re_[A-Za-z0-9_]{16,}$/';
     }
 
     /** @var array<string,string> Per-request cache of domain => mechanism. */

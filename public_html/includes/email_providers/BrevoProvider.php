@@ -20,7 +20,7 @@ use Brevo\TransactionalEmails\Types\SendTransacEmailRequestReplyTo;
 use Brevo\TransactionalEmails\Types\SendTransacEmailRequestSender;
 use Brevo\TransactionalEmails\Types\SendTransacEmailRequestToItem;
 
-class BrevoProvider implements EmailServiceProvider {
+class BrevoProvider implements EmailServiceProvider, SingleKeyProvider {
 
     public static function getKey(): string {
         return 'brevo';
@@ -28,6 +28,11 @@ class BrevoProvider implements EmailServiceProvider {
 
     public static function getLabel(): string {
         return 'Brevo';
+    }
+
+    /** xkeysib- then 64 hex, a dash and 16 characters. */
+    public static function apiKeyPattern(): string {
+        return '/^xkeysib-[0-9a-f]{64}-[A-Za-z0-9]{16}$/';
     }
 
     public static function getSpfMechanism(string $domain): string

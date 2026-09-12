@@ -24,6 +24,16 @@ class Globalvars {
 		return self::$instance_map[$root_dir];
 	}
 
+	/**
+	 * Drop a memoized value so the next get_setting() reads the table again.
+	 * For a process that writes a setting and then reads it back — an installer
+	 * trying one provider after another — where a value cached before the write
+	 * would otherwise answer for the rest of the process.
+	 */
+	public function forget_setting(string $setting): void {
+		unset($this->settings[$setting]);
+	}
+
 	public function get_setting($setting, $calculated_values=true, $fail_silently=false){
 		$found = 0;
 		if(isset($this->settings[$setting])){

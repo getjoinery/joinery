@@ -17,6 +17,7 @@
  * Implements SendingDomainRegistrar: the same API can create a sending domain,
  * which is what makes the machine sender ceremony's register step a button.
  *
+ * @version 1.8 - SingleKeyProvider: declares the shape of its API keys
  * @version 1.7
  * @changelog 1.7 - verifySendingDomain(): asks Mailgun to re-check a sending
  *   domain's DNS now and reports the fresh state, so a wizard's Check button
@@ -28,7 +29,7 @@ require_once(PathHelper::getIncludePath('includes/InboundEmailProvider.php'));
 
 use Mailgun\Mailgun;
 
-class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubmissionRelay, DkimRecordSource, SendingDomainRegistrar {
+class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubmissionRelay, DkimRecordSource, SendingDomainRegistrar, SingleKeyProvider {
 
     /** @var array<string,string> Per-request cache: sending domain => account state ('' = not in account / lookup failed). */
     private static $sending_domain_state = [];
@@ -48,6 +49,11 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
 
     public static function getLabel(): string {
         return 'Mailgun';
+    }
+
+    /** The older key- form and the current 32-8-8 hex form. */
+    public static function apiKeyPattern(): string {
+        return '/^(key-[0-9a-f]{32}|[0-9a-f]{32}-[0-9a-f]{8}-[0-9a-f]{8})$/i';
     }
 
     public static function getSpfMechanism(string $domain): string

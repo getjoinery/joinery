@@ -1,4 +1,12 @@
 #!/bin/bash
+#VERSION 1.9 - The sending key field names no provider: the installer tells
+#              which provider issued the key (SMTP2GO, Mailgun and the other
+#              single-key providers) and asks it.
+#VERSION 1.8 - The SSH key field is gone from the form (the handoff still honours
+#              JOINERY_SSH_KEY from the environment for a hand-run install), and
+#              the domain field is labelled 'Your domain'. Region, plan and
+#              firewall are the deployer's Create-form choices; a StackScript
+#              cannot preset or hide them, and every field it declares renders.
 #VERSION 1.7 - Four optional fields name two services the install sets up on
 #              the deployer's behalf: a sending key (email) and a backup bucket
 #              with its key pair (backups). Secrets are password-named so
@@ -40,7 +48,7 @@
 # at an address rather than a name, and moving to a real domain later means
 # reconfiguring rather than deploying. That state is worth passing through
 # during setup and not worth living in, so the form does not offer it -- and
-# a deployer who reads "Site domain" with an empty box next to it cannot tell
+# a deployer who reads "Your domain" with an empty box next to it cannot tell
 # whether leaving it blank is allowed, which is how a placeholder that never
 # resolves ends up naming somebody's site.
 #
@@ -61,10 +69,9 @@
 
 # <UDF name="JOINERY_ADMIN_EMAIL" label="Admin email address" example="you@example.com" />
 # <UDF name="JOINERY_ADMIN_PASSWORD" label="Admin password" example="Choose a strong password" />
-# <UDF name="JOINERY_DOMAIN" label="Site domain (point its DNS at this server for automatic HTTPS)" example="example.com" />
-# <UDF name="JOINERY_SSH_KEY" label="SSH public key for this server" default="" optional="true" />
+# <UDF name="JOINERY_DOMAIN" label="Your domain" example="example.com" />
 # <UDF name="JOINERY_LINODE_TOKEN_PASSWORD" label="Linode API token with the Domains Read/Write scope (only if your DNS is at Linode)" default="" optional="true" />
-# <UDF name="JOINERY_MAIL_API_KEY_PASSWORD" label="SMTP2GO API key (optional: sets up email during the install)" default="" optional="true" />
+# <UDF name="JOINERY_MAIL_API_KEY_PASSWORD" label="Email sending API key, e.g. from SMTP2GO or Mailgun (optional: sets up email during the install)" default="" optional="true" />
 # <UDF name="JOINERY_BACKUP_BUCKET" label="Backblaze B2 bucket for backups (optional: sets up backups during the install)" default="" optional="true" />
 # <UDF name="JOINERY_BACKUP_KEY_ID" label="Backblaze application key ID for that bucket" default="" optional="true" />
 # <UDF name="JOINERY_BACKUP_KEY_PASSWORD" label="Backblaze application key for that bucket" default="" optional="true" />
