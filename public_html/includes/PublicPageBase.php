@@ -1265,16 +1265,24 @@ abstract class PublicPageBase {
 		$typed_phrase  = isset($options['confirm_typed']) ? $options['confirm_typed'] : '';
 		$extra_class   = isset($options['class'])   ? ' ' . $options['class'] : '';
 
+		// The confirm text becomes a JavaScript string literal inside an HTML
+		// attribute, so it is encoded in that order: json_encode makes it a
+		// JS literal (an apostrophe or a quote in the text — a sender called
+		// O'Brien, a title with quotes — can never end the string), and the
+		// whole handler is then attribute-escaped. The browser undoes the
+		// attribute escaping before the JS parser sees the literal.
 		$btn_onclick = '';
 		if ($confirm_msg && $typed_phrase) {
 			// Irreversible action: the modal demands the exact phrase be typed
 			// before the confirm button enables.
-			$escaped        = addslashes(htmlspecialchars($confirm_msg, ENT_QUOTES));
-			$escaped_phrase = addslashes(htmlspecialchars($typed_phrase, ENT_QUOTES));
-			$btn_onclick = ' onclick="var f=this.closest(\'form\'); JoineryModal.confirmTyped(\'' . $escaped . '\', \'' . $escaped_phrase . '\', function(){ f.submit(); });"';
+			$js = 'var f=this.closest(\'form\'); JoineryModal.confirmTyped('
+				. self::js_literal($confirm_msg) . ', ' . self::js_literal($typed_phrase)
+				. ', function(){ f.submit(); });';
+			$btn_onclick = ' onclick="' . htmlspecialchars($js, ENT_QUOTES) . '"';
 		} else if ($confirm_msg) {
-			$escaped = addslashes(htmlspecialchars($confirm_msg, ENT_QUOTES));
-			$btn_onclick = ' onclick="var f=this.closest(\'form\'); JoineryModal.confirm(\'' . $escaped . '\', function(){ f.submit(); });"';
+			$js = 'var f=this.closest(\'form\'); JoineryModal.confirm('
+				. self::js_literal($confirm_msg) . ', function(){ f.submit(); });';
+			$btn_onclick = ' onclick="' . htmlspecialchars($js, ENT_QUOTES) . '"';
 		}
 
 		$html = '<form method="POST" action="' . htmlspecialchars($url) . '" style="display:inline;">';
@@ -1287,6 +1295,11 @@ abstract class PublicPageBase {
 		$html .= '</form>';
 
 		return $html;
+	}
+
+	/** A PHP string as a JavaScript string literal, safe to place inside markup. */
+	private static function js_literal($text) {
+		return json_encode((string)$text, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE);
 	}
 
 	public function public_footer($options=array()) {

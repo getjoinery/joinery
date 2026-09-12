@@ -140,6 +140,7 @@ $page->public_header(['title' => 'My Feed']);
                             <span class="pb-menu">
                                 <button type="button" class="pb-iconbtn pb-menu-btn" aria-label="Post options" aria-haspopup="true" aria-expanded="false">&#8942;</button>
                                 <div class="pb-menu-pop" hidden>
+                                    <button type="button" class="pb-menu-item pb-allow-btn">Allow sender</button>
                                     <button type="button" class="pb-menu-item pb-block-btn">Block sender</button>
                                 </div>
                             </span>
@@ -261,6 +262,26 @@ document.addEventListener('DOMContentLoaded', function () {
                 var key = author.trim().toLowerCase();
                 feed.querySelectorAll('.pb-post').forEach(function (p) {
                     if ((p.dataset.author || '').trim().toLowerCase() === key) removePost(p);
+                });
+            }).catch(function (err) { alert(err.message); });
+            return;
+        }
+
+        // Allowing changes nothing on screen right now — their posts are
+        // already showing — so the card just says it happened. From the next
+        // load they show without ad badges and never get hidden or blocked.
+        if (e.target.closest('.pb-allow-btn')) {
+            closeMenus();
+            var allowBtn = article.querySelector('.pb-allow-btn');
+            callAction('feed_allow_sender', { item_id: itemId }).then(function () {
+                allowBtn.textContent = 'Allowed \u2713';
+                allowBtn.disabled = true;
+                var key = article.dataset.author.trim().toLowerCase();
+                feed.querySelectorAll('.pb-post').forEach(function (p) {
+                    if ((p.dataset.author || '').trim().toLowerCase() !== key) return;
+                    p.classList.remove('is-ad');
+                    var badge = p.querySelector('.pb-badge-ad');
+                    if (badge) badge.remove();
                 });
             }).catch(function (err) { alert(err.message); });
         }
