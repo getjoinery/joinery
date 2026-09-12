@@ -6,6 +6,11 @@
  * step mounts an existing ceremony or panel; this logic owns only the shell:
  * step resolution, dismissal, "not now" decisions, and the welcome save.
  *
+ * @version 2.7
+ * @changelog 2.7 - The email step's provider registration and DNS publish are
+ *   two functions (_setup_mail_register, _setup_mail_publish) the wizard's
+ *   POSTs and utils/install_mail_provider.php both call, so an installer that
+ *   holds the sending key runs the same ceremony the wizard does.
  * @version 2.6
  * @changelog 2.6 - the Secure connection screen mounts the DNS publish box for
  *   the site's own address record (setup_https_dns_plan); its dns_action
@@ -318,22 +323,11 @@ function setup_logic(array $input): LogicResult {
 			}
 		}
 		if ($error === '') {
-			// The provider's dashboard errand, done by the platform: register
-			// the From domain as a sending domain when the provider's API can.
-			// A failure is not fatal to the save — the DNS stage names it and
-			// offers a retry button.
-			$sending_domain = _setup_sending_domain();
-			// The address is also the owner's mailbox: domain row, store alias
-			// and grant, provisioned now so the DNS published next routes mail
-			// that has somewhere to land. Every provider, registrar or not.
-			_setup_ensure_receiving_mailbox($viewer);
-			$provider_class = EmailSender::getDiscoveredProviders()[$service] ?? null;
-			if ($sending_domain !== '' && $provider_class !== null
-					&& in_array('SendingDomainRegistrar', class_implements($provider_class) ?: array(), true)) {
-				$reg = $provider_class::createSendingDomain($sending_domain);
+			$reg = _setup_mail_register($viewer, $service);
+			if ($reg['registered'] !== null) {
 				$_SESSION['setup_mail_send_result'] = array(
-					'registered' => (($reg['status'] ?? '') === 'ok'),
-					'register_error' => (string)($reg['error'] ?? ''),
+					'registered' => $reg['registered'],
+					'register_error' => $reg['register_error'],
 					'publish_summary' => '', 'publish_error' => '', 'checked_state' => '',
 				);
 			}
@@ -424,18 +418,11 @@ function setup_logic(array $input): LogicResult {
 						if ($missing) {
 							$notice['publish_error'] = 'Enter the ' . $driver_class::getLabel() . ' credential to publish.';
 						} else {
-							$publish = DnsPublishBox::publish($driver_class, $credential, $plan,
-								array(), DnsReconciler::APPLY_ADDITIVE);
+							$published = _setup_mail_publish($driver_class, $credential, $plan, $sending_domain, $provider_class);
 							unset($credential);   // the only copy, gone before the response is built
-							$notice['publish_summary'] = DnsPublishBox::summarizeResults($publish);
-							if (!empty($publish['error'])) {
-								$notice['publish_error'] = (string)$publish['error'];
-							}
-							// A publish worth doing is worth checking: ask the
-							// provider to look at the fresh records right away.
-							if ($notice['publish_error'] === '' && is_callable(array($provider_class, 'verifySendingDomain'))) {
-								$notice['checked_state'] = (string)$provider_class::verifySendingDomain($sending_domain);
-							}
+							$notice['publish_summary'] = $published['summary'];
+							$notice['publish_error'] = $published['error'];
+							$notice['checked_state'] = $published['checked_state'];
 						}
 					}
 				}
@@ -723,6 +710,57 @@ function _setup_ensure_receiving_mailbox(User $viewer): void {
 	if ((string)Globalvars::get_instance()->get_setting('mailbox_enabled') !== '1') {
 		Setting::put('mailbox_enabled', '1');
 	}
+}
+
+/**
+ * What follows a saved provider, for the wizard's save and for an installer
+ * that holds the key: the owner's mailbox for the From address (domain row,
+ * store alias, grant — the one address question is the whole consent), then
+ * the provider's dashboard errand, registering the From domain as a sending
+ * domain where the provider's API can. A registration failure is not fatal:
+ * the DNS stage names it and offers a retry button.
+ *
+ * @return array{registered: ?bool, register_error: string} registered is
+ *   null when the provider has no registrar API (nothing was attempted).
+ */
+function _setup_mail_register(User $viewer, string $service): array {
+	require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+	$out = array('registered' => null, 'register_error' => '');
+	_setup_ensure_receiving_mailbox($viewer);
+	$sending_domain = _setup_sending_domain();
+	$provider_class = EmailSender::getDiscoveredProviders()[$service] ?? null;
+	if ($sending_domain !== '' && $provider_class !== null
+			&& in_array('SendingDomainRegistrar', class_implements($provider_class) ?: array(), true)) {
+		$reg = $provider_class::createSendingDomain($sending_domain);
+		$out['registered'] = (($reg['status'] ?? '') === 'ok');
+		$out['register_error'] = (string)($reg['error'] ?? '');
+	}
+	return $out;
+}
+
+/**
+ * Write the mail plan through a DNS driver with a credential that lives in
+ * this call only, then ask the provider to look at the fresh records right
+ * away — a publish worth doing is worth checking. Shared by the wizard's
+ * publish button and utils/install_mail_provider.php.
+ *
+ * @return array{summary: string, error: string, checked_state: string}
+ */
+function _setup_mail_publish(string $driver_class, array $credential, DnsRecordPlan $plan,
+		string $sending_domain, ?string $provider_class): array {
+	require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
+	require_once(PathHelper::getIncludePath('includes/dns/DnsReconciler.php'));
+	$out = array('summary' => '', 'error' => '', 'checked_state' => '');
+	$publish = DnsPublishBox::publish($driver_class, $credential, $plan, array(), DnsReconciler::APPLY_ADDITIVE);
+	unset($credential);
+	$out['summary'] = DnsPublishBox::summarizeResults($publish);
+	if (!empty($publish['error'])) {
+		$out['error'] = (string)$publish['error'];
+	}
+	if ($out['error'] === '' && $provider_class !== null && is_callable(array($provider_class, 'verifySendingDomain'))) {
+		$out['checked_state'] = (string)$provider_class::verifySendingDomain($sending_domain);
+	}
+	return $out;
 }
 
 /**

@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.2 - Three optional services a fresh site can be handed at install,
+#                honoured here so every path that reaches this script - bare
+#                metal, Docker, the Linode StackScript - takes the same inputs:
+#                a DNS credential kept for the mail records (JOINERY_DNS_CREDENTIAL),
+#                a sending key that sets email up (JOINERY_MAIL_API_KEY), and a
+#                bucket that becomes the backup target (JOINERY_BACKUP_*). The
+#                outcomes are written to config/install_services.txt for the
+#                closing summary, and the credentials file's first-task advice
+#                says email is done when it is.
 # VERSION: 3.1 - The secret_box_key generator comes from _config_secrets.sh,
 #                shared with the root moments that mint it on a site older than
 #                the key. The web side no longer writes config at all
@@ -57,6 +66,24 @@
 #   --clone-key=KEY        Authentication key for clone source
 #   --skip-db-validation   Skip default admin/settings validation
 #   -q, --quiet            Suppress most output
+#
+# Environment (all optional; secrets travel here, never on argv):
+#   JOINERY_DB_PASSWORD      the site's database password (see above)
+#   JOINERY_ADMIN_EMAIL      the admin account's address
+#   JOINERY_ADMIN_PASSWORD   the admin password the owner chose (else generated)
+#   JOINERY_INSTALL_BUNDLE   plugin bundle, default personal; none skips it
+#   JOINERY_DNS_CREDENTIAL   a DNS credential kept for the wizard's one publish
+#                            of the mail records, as the JSON object
+#                            utils/install_dns_credential.php takes:
+#                            {"driver":"linode","credential":{"access_token":"..."}}
+#   JOINERY_MAIL_API_KEY     a sending provider's API key: email is set up now
+#                            (utils/install_mail_provider.php), with
+#                            JOINERY_MAIL_PROVIDER (default smtp2go) and
+#                            JOINERY_MAIL_FROM (default derived) alongside
+#   JOINERY_BACKUP_BUCKET    a bucket that becomes the scheduled backup target
+#   JOINERY_BACKUP_KEY_ID    (utils/install_backup_target.php), with
+#   JOINERY_BACKUP_KEY       JOINERY_BACKUP_PROVIDER (b2 default, s3, linode)
+#                            and JOINERY_BACKUP_REGION alongside
 
 set -e
 set +H  # Disable history expansion (prevents ! in passwords from being interpreted)
@@ -570,13 +597,9 @@ if [ -z "$CLONE_FROM" ] && [ "$DB_EXISTS" = false ]; then
                     printf 'Password: %s\n\n' "$ADMIN_PASSWORD"
                     printf 'You are asked to choose a new password at first sign-in.\n'
                     printf 'Delete this file once you have signed in.\n\n'
-                    printf 'FIRST TASK: set up email at\n'
-                    printf '  http://%s/admin/admin_settings_email\n\n' "$DOMAIN"
-                    printf 'A new site cannot send mail until you name a provider, and\n'
-                    printf 'password reset is the only way back into this account once the\n'
-                    printf 'password above stops working. Most hosts block outbound port 25,\n'
-                    printf 'so a mail server on this machine is generally not an option.\n'
                 } > "$CRED_FILE"
+                # The first-task paragraph is appended by the OPTIONAL SERVICES
+                # section below, which knows whether email was set up here.
                 log "Admin credentials written to $CRED_FILE (mode 600)"
             fi
         else
@@ -684,6 +707,128 @@ if [ -z "$CLONE_FROM" ] && [ "$DB_EXISTS" = false ] && [ "$BUNDLE_NAME" != "none
             log_error "Warning: the '$BUNDLE_NAME' bundle did not install cleanly."
             log_error "Install what you need from /admin/admin_plugins."
         fi
+    fi
+fi
+
+# =============================================================================
+# OPTIONAL SERVICES
+# =============================================================================
+#
+# What the deployer already had in hand when they started the install, done
+# now so the setup wizard finds it done: a DNS credential kept for the one
+# publish of the mail records, a sending key that configures email (the
+# wizard's own ceremony, run by utils/install_mail_provider.php), and a bucket
+# that becomes the backup target (utils/install_backup_target.php). Each is
+# independent, none is a condition of the install, and a failure is recorded
+# and left for the wizard to ask about. Fresh installs only, after the bundle,
+# because the mail half needs the mailbox plugin the bundle installs.
+#
+# The outcomes land in config/install_services.txt, one key=value line each
+# (mail=, backup=, dns_credential=; values start done:, failed: or skipped:),
+# which install.sh and the StackScript read for their closing summaries. The
+# tools print their secrets nowhere, so their output is safe in the log.
+SERVICES_FILE="${SITE_ROOT}/config/install_services.txt"
+MAIL_OUTCOME=""
+BACKUP_OUTCOME=""
+DNS_CRED_OUTCOME=""
+
+# The first line of a tool's output is its verdict; reason= says why on a failure.
+tool_reason() {
+    printf '%s\n' "$1" | sed -n 's/^reason=//p' | head -1
+}
+
+if [ -z "$CLONE_FROM" ] && [ "$DB_EXISTS" = false ]; then
+    SITE_UTILS="${SITE_ROOT}/public_html/utils"
+
+    if [ -n "${JOINERY_DNS_CREDENTIAL:-}" ]; then
+        DNS_CRED_TOOL="$SITE_UTILS/install_dns_credential.php"
+        if [ ! -f "$DNS_CRED_TOOL" ]; then
+            DNS_CRED_OUTCOME="failed: install_dns_credential.php is not in this release"
+        elif printf '%s' "$JOINERY_DNS_CREDENTIAL" | php "$DNS_CRED_TOOL" >/dev/null 2>&1; then
+            DNS_CRED_OUTCOME="done: kept for the one publish of the mail records"
+            log "DNS credential kept for the mail records (used once, then deleted)"
+        else
+            DNS_CRED_OUTCOME="failed: the credential could not be kept"
+            log_error "Warning: the DNS credential could not be kept - the wizard will ask for it when it adds the mail records."
+        fi
+    fi
+    unset JOINERY_DNS_CREDENTIAL
+
+    if [ -n "${JOINERY_MAIL_API_KEY:-}" ]; then
+        MAIL_TOOL="$SITE_UTILS/install_mail_provider.php"
+        log "Setting up email with the supplied ${JOINERY_MAIL_PROVIDER:-smtp2go} key..."
+        if [ ! -f "$MAIL_TOOL" ]; then
+            MAIL_OUTCOME="failed: install_mail_provider.php is not in this release"
+        else
+            # The key is already in this environment; the tool reads it there.
+            MAIL_OUT=$(php "$MAIL_TOOL" 2>&1) && MAIL_RC=0 || MAIL_RC=$?
+            printf '%s\n' "$MAIL_OUT"
+            if [ "$MAIL_RC" -eq 0 ]; then
+                MAIL_FROM=$(printf '%s\n' "$MAIL_OUT" | sed -n 's/^from=//p' | head -1)
+                MAIL_DNS=$(printf '%s\n' "$MAIL_OUT" | sed -n 's/^dns=//p' | head -1)
+                MAIL_STATE=$(printf '%s\n' "$MAIL_OUT" | sed -n 's/^state=//p' | head -1)
+                MAIL_OUTCOME="done: sending as ${MAIL_FROM}; DNS ${MAIL_DNS}; provider reports the domain ${MAIL_STATE}"
+                log "Email set up: sending as $MAIL_FROM"
+            else
+                MAIL_OUTCOME="failed: $(tool_reason "$MAIL_OUT")"
+                log_error "Warning: email was not set up - ${MAIL_OUTCOME#failed: }"
+            fi
+        fi
+    fi
+    unset JOINERY_MAIL_API_KEY
+
+    if [ -n "${JOINERY_BACKUP_BUCKET:-}" ]; then
+        BACKUP_TOOL="$SITE_UTILS/install_backup_target.php"
+        log "Pointing backups at the supplied bucket..."
+        if [ ! -f "$BACKUP_TOOL" ]; then
+            BACKUP_OUTCOME="failed: install_backup_target.php is not in this release"
+        else
+            BACKUP_OUT=$(php "$BACKUP_TOOL" 2>&1) && BACKUP_RC=0 || BACKUP_RC=$?
+            printf '%s\n' "$BACKUP_OUT"
+            if [ "$BACKUP_RC" -eq 0 ]; then
+                BACKUP_OUTCOME="done: ${JOINERY_BACKUP_PROVIDER:-b2} bucket ${JOINERY_BACKUP_BUCKET} is the backup target"
+                log "Backups point at $JOINERY_BACKUP_BUCKET"
+            else
+                BACKUP_OUTCOME="failed: $(tool_reason "$BACKUP_OUT")"
+                log_error "Warning: the backup bucket was not set - ${BACKUP_OUTCOME#failed: }"
+            fi
+        fi
+    fi
+    unset JOINERY_BACKUP_KEY
+
+    if [ -n "$MAIL_OUTCOME$BACKUP_OUTCOME$DNS_CRED_OUTCOME" ]; then
+        : > "$SERVICES_FILE"
+        chmod 600 "$SERVICES_FILE"
+        chown root:root "$SERVICES_FILE" 2>/dev/null || true
+        {
+            [ -n "$DNS_CRED_OUTCOME" ] && printf 'dns_credential=%s\n' "$DNS_CRED_OUTCOME"
+            [ -n "$MAIL_OUTCOME" ]     && printf 'mail=%s\n' "$MAIL_OUTCOME"
+            [ -n "$BACKUP_OUTCOME" ]   && printf 'backup=%s\n' "$BACKUP_OUTCOME"
+            true
+        } >> "$SERVICES_FILE"
+    fi
+
+    # The credentials file's first task, written now that it is known whether
+    # email is already set up. Only a generated password has a file.
+    if [ -n "${CRED_FILE:-}" ] && [ -f "$CRED_FILE" ]; then
+        case "$MAIL_OUTCOME" in
+            done:*)
+                {
+                    printf 'Email is set up: %s\n' "${MAIL_OUTCOME#done: }"
+                    printf 'The setup wizard will ask you to confirm a test message arrived.\n'
+                } >> "$CRED_FILE"
+                ;;
+            *)
+                {
+                    printf 'FIRST TASK: set up email at\n'
+                    printf '  http://%s/admin/admin_settings_email\n\n' "$DOMAIN"
+                    printf 'A new site cannot send mail until you name a provider, and\n'
+                    printf 'password reset is the only way back into this account once the\n'
+                    printf 'password above stops working. Most hosts block outbound port 25,\n'
+                    printf 'so a mail server on this machine is generally not an option.\n'
+                } >> "$CRED_FILE"
+                ;;
+        esac
     fi
 fi
 

@@ -15,6 +15,9 @@
  * seals; get_credentials() unseals. A legacy plaintext credential object reads
  * back unchanged, so existing rows migrate the next time they are saved.
  *
+ * @version 2.6 - complete_credentials(): a Backblaze credential's region and endpoint filled from
+ *                Backblaze's own authorize answer, shared by the Backups page, the setup wizard and
+ *                utils/install_backup_target.php
  * @version 2.5 - b2_s3_location(): region and endpoint from the S3 address Backblaze reports
  * @version 2.4 - bkt_mint_run_keys / can_mint_run_keys(): where the provider allows it, a node-bound
  *                run is handed a key minted for that run and pinned to that node's own prefix
@@ -201,6 +204,41 @@ class BackupTarget extends SystemBase {
 	 *
 	 * @return array{region:string, endpoint:string} both '' when the address is not a Backblaze S3 host
 	 */
+	/**
+	 * Fill what a form did not ask for. The forms hide region and endpoint
+	 * for Backblaze, so ask Backblaze: its authorize answer names the
+	 * account's S3 address, and the region is a label inside it. Without this
+	 * a B2 target cannot sign a request. Other providers' credentials pass
+	 * through untouched.
+	 *
+	 * @param array $creds {access_key, secret_key, region, endpoint}
+	 * @return array{creds: array, note: string} note is non-empty when
+	 *   Backblaze could not be asked; the connection test then says so.
+	 */
+	public static function complete_credentials(string $provider, array $creds): array {
+		$creds = array(
+			'access_key' => (string)($creds['access_key'] ?? ''),
+			'secret_key' => (string)($creds['secret_key'] ?? ''),
+			'region'     => trim((string)($creds['region'] ?? '')),
+			'endpoint'   => trim((string)($creds['endpoint'] ?? '')),
+		);
+		$note = '';
+		if ($provider === 'b2' && ($creds['region'] === '' || $creds['endpoint'] === '')
+				&& $creds['access_key'] !== '' && $creds['secret_key'] !== '') {
+			try {
+				$auth = (new B2Client($creds['access_key'], $creds['secret_key']))->authorize();
+				$loc = self::b2_s3_location((string)($auth['s3_endpoint'] ?? ''));
+				if ($loc['endpoint'] !== '') {
+					$creds['region'] = $creds['region'] !== '' ? $creds['region'] : $loc['region'];
+					$creds['endpoint'] = $creds['endpoint'] !== '' ? $creds['endpoint'] : $loc['endpoint'];
+				}
+			} catch (\Throwable $e) {
+				$note = 'Backblaze could not be asked for the bucket\'s S3 address (' . $e->getMessage() . ').';
+			}
+		}
+		return array('creds' => $creds, 'note' => $note);
+	}
+
 	public static function b2_s3_location(string $s3_api_url): array {
 		$host = (string)(parse_url(trim($s3_api_url), PHP_URL_HOST) ?: trim($s3_api_url));
 		if (!preg_match('/^s3\.([a-z]{2}-[a-z]+-\d{3})\.backblazeb2\.com$/i', $host, $m)) {
