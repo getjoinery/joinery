@@ -4029,7 +4029,34 @@ fn unmaterialize_and_park(
         }
         if env.vfs.read_dir(&path).is_ok() {
             if let Some(parent) = path.parent() {
-                let rescued = rescue_unsynced(env, &path, parent, &agreed_here)?;
+                let sealed_dirs = sealed_folder_dirs(env)?;
+                let mut refused: Vec<String> = Vec::new();
+                let rescued = rescue_unsynced(
+                    env,
+                    &path,
+                    parent,
+                    &agreed_here,
+                    entry.is_encrypted,
+                    &sealed_dirs,
+                    &mut refused,
+                )?;
+                if !refused.is_empty() {
+                    // Said out loud, because the alternative is a file the user
+                    // cannot find and was never told about.
+                    env.store.raise_issue(
+                        Some(entry.id),
+                        "sealed_not_rescued",
+                        &format!(
+                            "{} file(s) here are inside a vault and were left in the \
+                             folder rather than moved out of it, because moving them \
+                             out would publish them. They went to the trash with the \
+                             folder and can be recovered from there: {}",
+                            refused.len(),
+                            summarise(&refused),
+                        ),
+                        (env.now_ms)() as i64,
+                    )?;
+                }
                 if !rescued.is_empty() {
                     env.store.raise_issue(
                         Some(entry.id),
@@ -4195,6 +4222,25 @@ fn unmaterialize_and_park(
 
 /// A few names and a count, so one issue can describe a folder full of files
 /// without becoming unreadable.
+/// The absolute path of every folder this device tracks as encrypted. A
+/// rescue walking down through a trashed directory asks this at each level,
+/// so a vault standing inside a plain folder is recognised as one.
+fn sealed_folder_dirs(env: &ExecEnv) -> Result<std::collections::HashSet<PathBuf>, ExecError> {
+    let mut out = std::collections::HashSet::new();
+    let Some(root) = env.vfs.root() else {
+        return Ok(out);
+    };
+    for entry in crate::pass::all_entries(env)? {
+        if entry.id.entity_type != EntityType::Folder || !entry.is_encrypted {
+            continue;
+        }
+        if let Some(rel) = crate::pass::relative_path(env, &entry)? {
+            out.insert(root.join(rel));
+        }
+    }
+    Ok(out)
+}
+
 fn summarise(names: &[String]) -> String {
     const SHOWN: usize = 3;
     if names.len() <= SHOWN {
@@ -4272,6 +4318,9 @@ fn rescue_unsynced(
     folder: &std::path::Path,
     into: &std::path::Path,
     agreed_here: &std::collections::HashMap<u64, jd_vfs::Fingerprint>,
+    sealed: bool,
+    sealed_dirs: &std::collections::HashSet<PathBuf>,
+    refused: &mut Vec<String>,
 ) -> Result<Vec<String>, ExecError> {
     let mut rescued = Vec::new();
     let children = match env.vfs.read_dir(folder) {
@@ -4284,10 +4333,39 @@ fn rescue_unsynced(
         let path = folder.join(&child.name);
         match child.kind {
             jd_vfs::EntryKind::Directory => {
-                rescued.extend(rescue_unsynced(env, &path, into, agreed_here)?);
+                // Re-asked at every directory on the way down, and it can only
+                // ever become MORE sealed. The server refuses a vault under a
+                // plain folder, so on its rules this never differs from the
+                // parent's answer; it is written this way so the refusal does
+                // not depend on that rule staying true.
+                let sealed_here = sealed || sealed_dirs.contains(&path);
+                rescued.extend(rescue_unsynced(
+                    env,
+                    &path,
+                    into,
+                    agreed_here,
+                    sealed_here,
+                    sealed_dirs,
+                    refused,
+                )?);
             }
             jd_vfs::EntryKind::File => {
                 if is_on_the_server(env, &child, agreed_here)? {
+                    continue;
+                }
+                // A rescue carries a file OUT of the folder it was in and lets
+                // the scan pick it up as something new. Out of an ENCRYPTED
+                // folder that is a disclosure: the rescued copy stands in a
+                // plain directory, is minted as a plain file, and goes up with
+                // its real name and its bytes in the clear. The user sealed
+                // it; no engine housekeeping may unseal it.
+                //
+                // Leaving it costs nothing that cannot be recovered: the trash
+                // is a rename, so the file goes to the trash WITH its folder
+                // and can be brought back from there. The issue raised by the
+                // caller says exactly that.
+                if sealed {
+                    refused.push(child.name.clone());
                     continue;
                 }
                 // Its own name where that is free, because this is a rescue and
@@ -4389,12 +4467,49 @@ fn forget_folder_the_server_confirms(env: &ExecEnv, root: EntityId) -> Result<()
     }
 
     let answers = crate::pass::stat_all(env, &real)?;
+    // A SEALED record whose file is still on this disk is not disownable,
+    // whatever the server says about the entity. The believed path cannot
+    // answer that -- a folder-name trade moves the file without the engine
+    // knowing -- so the disk is asked for the inode, once, for the whole loop.
+    //
+    // Scoped to sealed records for the same reason the folder-mint guard is:
+    // forgetting a plain record whose file is still here is a mistake the
+    // engine recovers from (the file is re-minted and re-uploaded as itself,
+    // and three tests pin that). Forgetting a sealed one lets the next scan
+    // meet the file as a stranger and publish it, which nothing undoes.
+    //
+    // Both halves below carry the same test. For an entity the server calls
+    // deleted, `absorb_remote` writes exactly one thing -- `remote_deleted`
+    // -- and leaves placement, fingerprint and content alone. So what the
+    // skip preserves is that flag staying false: a kept record that said the
+    // server had deleted it would be read as a server deletion on the next
+    // pass and trashed locally, which is the outcome being refused.
+    //
+    // What the keep buys, measured: the file is not re-minted plain during
+    // this pass. The folder's local trash then takes the directory and the
+    // sealed file with it -- sealed, recoverable from the trash, never in the
+    // tree as a stranger. The record is left describing a file the trash
+    // holds; it does no harm there and is not the thing that publishes.
+    let still_here = crate::pass::inodes_on_disk(env)?;
+    let keep = |id: &EntityId| -> Result<bool, ExecError> {
+        Ok(env
+            .store
+            .get_entry(*id)?
+            .filter(|e| e.is_encrypted)
+            .and_then(|e| e.synced_fingerprint)
+            .is_some_and(|f| f.file_id != 0 && still_here.contains(&f.file_id)))
+    };
+    let mut kept_a_child = false;
     // Absorbed before anything is deleted, and deliberately including the ones
     // about to go: if this process dies between here and the deletes below,
     // every confirmed-gone descendant is left marked deleted and the next pass
     // clears it through the ordinary path, instead of the truth dying with the
     // process and the whole question being re-derived from nothing.
     for (id, state) in &answers {
+        if state.deleted && keep(id)? {
+            kept_a_child = true;
+            continue;
+        }
         crate::pass::absorb_remote(env, *id, state)?;
     }
     // `deleted` here is the server declining to show it to us, which is not
@@ -4412,8 +4527,19 @@ fn forget_folder_the_server_confirms(env: &ExecEnv, root: EntityId) -> Result<()
         .collect();
     for id in real {
         if gone.contains(&id) {
+            if keep(&id)? {
+                kept_a_child = true;
+                continue;
+            }
             env.store.forget_entry(id)?;
         }
+    }
+    // A kept child needs its parent chain to resolve, or it is kept in name
+    // only: `known_local` drops any entry whose path cannot be built, so the
+    // scan sees the file as untracked and mints it anyway. Forgetting the
+    // folder under a child just refused to be disowned undoes the refusal.
+    if kept_a_child {
+        return Ok(());
     }
     env.store.forget_entry(root)?;
     Ok(())
@@ -4528,7 +4654,32 @@ fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             }
         }
         if let Some(parent) = path.parent() {
-            let rescued = rescue_unsynced(env, &path, parent, &std::collections::HashMap::new())?;
+            let sealed_dirs = sealed_folder_dirs(env)?;
+            let mut refused: Vec<String> = Vec::new();
+            let rescued = rescue_unsynced(
+                env,
+                &path,
+                parent,
+                &std::collections::HashMap::new(),
+                entry.is_encrypted,
+                &sealed_dirs,
+                &mut refused,
+            )?;
+            if !refused.is_empty() {
+                env.store.raise_issue(
+                    Some(entry.id),
+                    "sealed_not_rescued",
+                    &format!(
+                        "{} file(s) here are inside a vault and were left in the \
+                         folder rather than moved out of it, because moving them \
+                         out would publish them. They went to the trash with the \
+                         folder and can be recovered from there: {}",
+                        refused.len(),
+                        summarise(&refused),
+                    ),
+                    (env.now_ms)() as i64,
+                )?;
+            }
             if !rescued.is_empty() {
                 let detail = format!(
                     "{} file(s) here had not reached the server yet and were moved to {} \

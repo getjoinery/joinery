@@ -1837,6 +1837,30 @@ fn scratch_marker_sweep() {
 /// signal, 16 arms reporting a known one is noise that buries the other 15.
 #[test]
 #[ignore]
+fn scratch_clean_one() {
+    // One seed with the CLEAN ring arm's exact shape (no chaos, no kills, two
+    // Linux devices, 40 steps), so a per-seed count can be taken. SEED=n.
+    let seed: u64 = std::env::var("SEED").unwrap().parse().unwrap();
+    std::panic::set_hook(Box::new(|_| {}));
+    let r = std::panic::catch_unwind(move || {
+        workload_core(
+            seed, 40,
+            &[("laptop", Platform::Linux), ("desktop", Platform::Linux)],
+            false, Vault::FolderRings, false, Names::Ordinary,
+        )
+    });
+    let _ = std::panic::take_hook();
+    let why = match r {
+        Err(e) => e.downcast_ref::<String>().cloned()
+            .or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_else(|| "?".into()),
+        Ok(_) => "(passed)".into(),
+    };
+    eprintln!("CLEAN seed={seed} why={why}");
+}
+
+#[test]
+#[ignore]
 fn scratch_ring_sweep() {
     let mut arms: Vec<Vec<(String, u64)>> = Vec::new();
     std::panic::set_hook(Box::new(|_| {}));
