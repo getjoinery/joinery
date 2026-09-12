@@ -263,38 +263,6 @@ pub fn run_pass(
     let observed = observe(env)?;
     let known = known_local(env)?;
     let scan = pair(&known, &observed);
-    // The inodes of files this device holds an ENCRYPTED record for, and which
-    // record each belongs to. Read by the folder-mint guard below.
-    //
-    // Scoped to sealed files deliberately. Reminting a directory that holds
-    // ordinary known files is a designed behaviour with pins of its own -- the
-    // engine folds the provisional into the real folder a pass later. A sealed
-    // file has no such fold: a plain mint around it has published it before
-    // anything folds. That is the one mint the engine cannot undo, and the
-    // only one this refuses.
-    //
-    // file_id 0 is skipped: it is what a real disk reports when a handle could
-    // not be opened, and one such sealed record would make every untracked
-    // directory holding a file_id-0 file unmintable.
-    let mut sealed_owner: HashMap<u64, EntityId> = HashMap::new();
-    for k in &known {
-        let Some(fp) = k.fingerprint.filter(|f| f.file_id != 0) else {
-            continue;
-        };
-        if env.store.get_entry(k.id)?.is_some_and(|e| e.is_encrypted) {
-            sealed_owner.insert(fp.file_id, k.id);
-        }
-    }
-    // Which sealed files the guard is holding this pass. A refused mint is a
-    // wait, and a wait nobody can see is a file that silently stops syncing
-    // for as long as the chain stays open -- for ever, if the folder at the
-    // far end is deleted meanwhile.
-    let mut held_by_the_mint_guard: Vec<EntityId> = Vec::new();
-    // Directories the guard has already refused this pass. Candidates come
-    // shallowest first, and a nested untracked directory under a refused one
-    // matches the same sealed files by prefix; without this, one held file
-    // raised one issue per ancestor.
-    let mut held_dirs: Vec<String> = Vec::new();
 
     // Anything on disk that nothing is tracking gets an identity now, so that
     // the loop below can treat it like any other entry. Folders first: a new
@@ -378,46 +346,6 @@ pub fn run_pass(
                 folder_ids.insert(dir.clone(), id.server_id);
             }
             continue;
-        }
-        // A directory holding a file the user sealed is not a new folder. It
-        // is that file's own folder, renamed under a name nothing recognised,
-        // and minting a second identity for it moves the sealed file into a
-        // PLAIN folder: a Convert, and the plaintext goes up under its real
-        // name.
-        //
-        // Left unminted, `placement_of` cannot answer for the files inside, so
-        // `local_delta` reports Delta::None for their moves -- the existing
-        // "its folder is not tracked yet" wait, not a deletion -- and the
-        // pairing still claims their observations, so nothing is read as a
-        // creation either.
-        {
-            if held_dirs.iter().any(|h| dir.starts_with(&format!("{h}/"))) {
-                continue;
-            }
-            let prefix = format!("{dir}/");
-            let held: Vec<EntityId> = observed
-                .iter()
-                .filter(|o| o.path.starts_with(&prefix))
-                .filter_map(|o| sealed_owner.get(&o.fingerprint.file_id).copied())
-                .collect();
-            if !held.is_empty() {
-                held_dirs.push(dir.clone());
-                for id in held {
-                    held_by_the_mint_guard.push(id);
-                    env.store.raise_issue(
-                        Some(id),
-                        "sealed_folder_unplaced",
-                        &format!(
-                            "a protected folder's file is standing in {dir}, a folder \
-                             this device cannot place yet. Nothing was uploaded and \
-                             nothing was deleted; it will sync once the folder is \
-                             recognised."
-                        ),
-                        (env.now_ms)() as i64,
-                    )?;
-                }
-                continue;
-            }
         }
         let Some(placement) = placement_of(dir, &folder_ids) else {
             continue;
@@ -563,23 +491,6 @@ pub fn run_pass(
 
     // ---- what each side did, per entry --------------------------------------
     let mut inputs: Vec<RoundInput> = Vec::new();
-    // A complaint ends when its particulars do. Same shape as the `unsyncable`
-    // dismissal above: what is held NOW is the whole truth, so an open issue
-    // for an entity the guard is no longer holding is withdrawn.
-    {
-        let held: std::collections::HashSet<EntityId> =
-            held_by_the_mint_guard.iter().copied().collect();
-        for issue in env.store.open_issues()? {
-            if issue.kind != "sealed_folder_unplaced" {
-                continue;
-            }
-            let Some(id) = issue.entity else { continue };
-            if !held.contains(&id) {
-                env.store.dismiss_issue(issue.issue_id)?;
-            }
-        }
-    }
-
     let resolve = |path: &str| placement_of(path, &folder_ids);
     // Anything already in the journal is spoken for. Deciding about it again
     // would queue a second operation doing the same job, once per pass, for as
@@ -2716,6 +2627,18 @@ fn detect_folder_moves(
                     if remote_wants.get(*candidate).is_some_and(|w| w != id) {
                         continue;
                     }
+                    // A folder cannot move into its own subtree. `moved_wholesale`
+                    // answers yes here when the folder's FILES were moved down
+                    // into a new subdirectory of it -- the files moved, the
+                    // folder did not -- and acting on that reparents the
+                    // folder under itself: refused by the server, its old key
+                    // dropped from the map, and the directory left standing at
+                    // its real path adopted as a plain twin. On the three-device
+                    // arm that twin was the vault root, and a sealed file ended
+                    // up under it (seed 74826).
+                    if candidate.starts_with(&format!("{old_path}/")) {
+                        continue;
+                    }
                 }
                 if claimed.contains(id) {
                     continue;
@@ -2910,6 +2833,7 @@ fn detect_folder_moves(
 /// path before it disowns a record, because the path a record REMEMBERS cannot
 /// say whether its file is still here -- a folder-name trade moves the file
 /// without the engine knowing -- and the inode can.
+
 pub(crate) fn inodes_on_disk(env: &ExecEnv) -> Result<std::collections::HashSet<u64>, ExecError> {
     Ok(observe(env)?.into_iter().map(|o| o.fingerprint.file_id).collect())
 }
