@@ -1,4 +1,19 @@
 #!/usr/bin/env bash
+#VERSION 1.8 - Nothing here sets a service up any more: the DNS token, the
+#               sending key and the bucket are handed to install.sh in the
+#               environment, and _site_init.sh does the work for every install
+#               path alike. The closing summary reads the outcomes _site_init.sh
+#               recorded (config/install_services.txt).
+#VERSION 1.7 - Two services the deploy form may name are set up during the
+#               install and found done in the setup wizard: a sending key
+#               configures email (provider, From address, the owner's mailbox,
+#               the domain registered at the provider, the mail records
+#               published through the kept DNS token, the provider asked to
+#               verify) and a bucket becomes the scheduled backup target after
+#               a connection test. Both optional; both leave the wizard to ask
+#               when absent or when they fail, and the closing summary says
+#               which. The recovery key and the delivery proof remain the
+#               owner's, in the wizard.
 #VERSION 1.6 - The DNS step's outcome is a fact the rest of the install reads,
 #               not a line that scrolls past. A refusal that waiting will not
 #               change (a zone another account holds, a token without the
@@ -57,6 +72,31 @@
 #                           wizard, whose email step uses it once to add the
 #                           mail records and deletes it.
 #   JOINERY_INSTALL_BUNDLE  optional — plugin bundle name, default personal.
+#   JOINERY_MAIL_API_KEY    optional — an API key at the sending provider.
+#                           With it, email is set up during the install
+#                           (utils/install_mail_provider.php): the From
+#                           address is derived from the admin address on the
+#                           site's domain, the owner's mailbox is provisioned
+#                           for it, the domain is registered at the provider,
+#                           and its mail records are published through the
+#                           kept DNS token. The wizard then opens on the
+#                           delivery proof, or on a DNS wait. Never printed.
+#   JOINERY_MAIL_PROVIDER   optional — which provider the key belongs to
+#                           (default smtp2go, the one the quickstart uses).
+#   JOINERY_BACKUP_BUCKET   optional — a bucket for backups. With the two keys
+#   JOINERY_BACKUP_KEY_ID     below it becomes the scheduled backup target
+#   JOINERY_BACKUP_KEY        after a connection test
+#                           (utils/install_backup_target.php). The recovery
+#                           key is a secret shown once to a human and stays
+#                           the wizard's. The secret key is never printed.
+#   JOINERY_BACKUP_PROVIDER optional — b2 (default), s3 or linode.
+#   JOINERY_BACKUP_REGION   optional — region for s3 and linode buckets.
+#
+# Neither service is a condition of the install. A key the provider rejects
+# or a bucket that cannot be reached is reported in the closing summary and
+# left for the setup wizard to ask for again; the site is installed either
+# way. All of it is done by _site_init.sh, which takes the same inputs from
+# any install path; this script only passes them on, in the environment.
 #
 # Failure is loud and immediate. A half-installed box that looks alive is worse
 # than one that stopped and said why: the whole run is in the deployment log at
@@ -95,6 +135,18 @@ TOKEN_USABLE=false
 # rather than a record still propagating.
 DNS_OUTCOME="skipped: no Linode token was supplied"
 BUNDLE="${JOINERY_INSTALL_BUNDLE:-personal}"
+MAIL_API_KEY="${JOINERY_MAIL_API_KEY:-}"
+MAIL_PROVIDER="${JOINERY_MAIL_PROVIDER:-smtp2go}"
+BACKUP_BUCKET="${JOINERY_BACKUP_BUCKET:-}"
+BACKUP_KEY_ID="${JOINERY_BACKUP_KEY_ID:-}"
+BACKUP_KEY="${JOINERY_BACKUP_KEY:-}"
+BACKUP_PROVIDER="${JOINERY_BACKUP_PROVIDER:-b2}"
+BACKUP_REGION="${JOINERY_BACKUP_REGION:-}"
+# How each optional service ended, for the closing summary. One of
+# skipped: ..., done: ..., failed: ... — "failed" means the wizard will ask
+# for it again, and the summary says so.
+MAIL_OUTCOME="skipped: no sending key was supplied"
+BACKUP_OUTCOME="skipped: no backup bucket was supplied"
 
 [ -n "$ADMIN_PASSWORD" ] || fail "No admin password was supplied. This field is required on the deploy form."
 [ -n "$ADMIN_EMAIL" ]    || fail "No admin email was supplied. This field is required on the deploy form."
@@ -136,6 +188,12 @@ else
 fi
 echo "Admin:  $ADMIN_EMAIL"
 echo "Bundle: $BUNDLE"
+if [ -n "$MAIL_API_KEY" ]; then
+    echo "Email:  set up during install ($MAIL_PROVIDER key supplied)"
+fi
+if [ -n "$BACKUP_BUCKET" ]; then
+    echo "Backup: $BACKUP_PROVIDER bucket $BACKUP_BUCKET"
+fi
 
 # ---------------------------------------------------------------------------
 # SSH key
@@ -335,6 +393,41 @@ export JOINERY_INSTALL_BUNDLE="$BUNDLE"
 # truth about it: a failed step is not "point it here whenever you are ready".
 export JOINERY_DNS_OUTCOME="$DNS_OUTCOME"
 
+# The three optional services, handed to _site_init.sh through the
+# environment like everything else it reads. It seals the token for the
+# wizard's one publish of the mail records, sets email up from the sending
+# key (publishing those records through the token in the same pass), and
+# points backups at the bucket — the same inputs and the same work on every
+# install path, so nothing here does any of it.
+#
+# The token proved usable above, and the setup wizard needs it once more, a
+# few minutes from now, for the mail records. Kept rather than pasted twice:
+# it is used once and deleted. Only a token of the shape Linode issues is
+# placed inside the JSON, since the value is interpolated into it.
+if [ "$TOKEN_USABLE" = true ]; then
+    case "$LINODE_TOKEN" in
+        *[!A-Za-z0-9_-]*) TOKEN_USABLE=false ;;
+    esac
+fi
+if [ "$TOKEN_USABLE" = true ]; then
+    export JOINERY_DNS_CREDENTIAL="{\"driver\":\"linode\",\"credential\":{\"access_token\":\"${LINODE_TOKEN}\"}}"
+fi
+unset LINODE_TOKEN
+LINODE_TOKEN=""
+MAIL_API_KEY_SUPPLIED=""
+if [ -n "$MAIL_API_KEY" ]; then
+    MAIL_API_KEY_SUPPLIED=1
+    export JOINERY_MAIL_API_KEY="$MAIL_API_KEY"
+    export JOINERY_MAIL_PROVIDER="$MAIL_PROVIDER"
+fi
+if [ -n "$BACKUP_BUCKET" ]; then
+    export JOINERY_BACKUP_BUCKET="$BACKUP_BUCKET"
+    export JOINERY_BACKUP_KEY_ID="$BACKUP_KEY_ID"
+    export JOINERY_BACKUP_KEY="$BACKUP_KEY"
+    export JOINERY_BACKUP_PROVIDER="$BACKUP_PROVIDER"
+    export JOINERY_BACKUP_REGION="$BACKUP_REGION"
+fi
+
 SITE_ARGS=(-y site --bare-metal "$SITENAME" -)
 if [ -n "$DOMAIN" ]; then
     SITE_ARGS+=("$DOMAIN")
@@ -345,28 +438,25 @@ fi
 unset JOINERY_ADMIN_PASSWORD
 ADMIN_PASSWORD=""
 
-# The token proved usable above, and the setup wizard needs it once more, a
-# few minutes from now, for the mail records. Seal it into the site rather
-# than ask the deployer to paste it twice: the wizard's publish uses it once
-# and deletes it. Handed over on stdin, never as an argument.
-if [ "$TOKEN_USABLE" = true ]; then
-    case "$LINODE_TOKEN" in
-        *[!A-Za-z0-9_-]*) TOKEN_USABLE=false ;;
-    esac
+unset JOINERY_MAIL_API_KEY JOINERY_BACKUP_KEY JOINERY_DNS_CREDENTIAL
+MAIL_API_KEY=""
+BACKUP_KEY=""
+
+# What _site_init.sh did with the services it was handed, from the file it
+# records them in; the summary below reads these.
+SERVICES_FILE="/var/www/html/${SITENAME}/config/install_services.txt"
+if [ -f "$SERVICES_FILE" ]; then
+    MAIL_RECORDED=$(sed -n 's/^mail=//p' "$SERVICES_FILE" | head -1)
+    BACKUP_RECORDED=$(sed -n 's/^backup=//p' "$SERVICES_FILE" | head -1)
+    [ -n "$MAIL_RECORDED" ] && MAIL_OUTCOME="$MAIL_RECORDED"
+    [ -n "$BACKUP_RECORDED" ] && BACKUP_OUTCOME="$BACKUP_RECORDED"
 fi
-if [ "$TOKEN_USABLE" = true ]; then
-    say "Keeping the DNS token for the setup wizard"
-    STORE_TOOL="/var/www/html/${SITENAME}/public_html/utils/install_dns_credential.php"
-    if [ -f "$STORE_TOOL" ] \
-        && printf '{"driver":"linode","credential":{"access_token":"%s"}}' "$LINODE_TOKEN" \
-            | php "$STORE_TOOL" >/dev/null 2>&1; then
-        echo "The wizard's email step will use it once to add the mail records, then delete it."
-    else
-        echo "Could not keep the token — the wizard will ask for it when it adds the mail records."
-    fi
+if [ -n "$MAIL_API_KEY_SUPPLIED" ] && [ -z "${MAIL_RECORDED:-}" ]; then
+    MAIL_OUTCOME="failed: the install recorded no outcome for it"
 fi
-unset LINODE_TOKEN
-LINODE_TOKEN=""
+if [ -n "$BACKUP_BUCKET" ] && [ -z "${BACKUP_RECORDED:-}" ]; then
+    BACKUP_OUTCOME="failed: the install recorded no outcome for it"
+fi
 
 say "Joinery is installed"
 SITE_HOST="$DOMAIN"
@@ -391,7 +481,33 @@ echo "Sign in at: ${SITE_HOST}/login"
 echo "Email:      $ADMIN_EMAIL"
 echo "Password:   the one you entered on the deploy form"
 echo ""
-echo "First, set up email — password reset needs it, and a new site has no"
-echo "mail provider yet. Linode blocks outbound port 25, so a mail server on this"
-echo "instance will not deliver; name a provider under Settings, Email."
+case "$MAIL_OUTCOME" in
+    done:*)
+        echo "Email:   ${MAIL_OUTCOME#done: }"
+        echo "         The setup wizard will ask you to confirm a test message arrived."
+        ;;
+    failed:*)
+        echo "Email:   NOT set up — ${MAIL_OUTCOME#failed: }"
+        echo "         The setup wizard will ask for the key again."
+        ;;
+esac
+case "$BACKUP_OUTCOME" in
+    done:*)
+        echo "Backups: ${BACKUP_OUTCOME#done: }"
+        echo "         The setup wizard will ask you to create the recovery key that turns them on."
+        ;;
+    failed:*)
+        echo "Backups: bucket NOT set — ${BACKUP_OUTCOME#failed: }"
+        echo "         The setup wizard will ask for the bucket again."
+        ;;
+esac
+case "$MAIL_OUTCOME" in
+    done:*) ;;
+    *)
+        echo ""
+        echo "First, set up email — password reset needs it, and a new site has no"
+        echo "mail provider yet. Linode blocks outbound port 25, so a mail server on this"
+        echo "instance will not deliver; name a provider under Settings, Email."
+        ;;
+esac
 exit 0

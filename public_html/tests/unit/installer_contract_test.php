@@ -772,6 +772,17 @@ check(preg_match('/UDF name="JOINERY_ADMIN_PASSWORD"/', $wrapper_src) === 1,
     'the admin password field is named so Linode masks it');
 check(preg_match('/UDF name="JOINERY_LINODE_TOKEN_PASSWORD"/', $wrapper_src) === 1,
     'and so is the API token');
+check(preg_match('/UDF name="JOINERY_MAIL_API_KEY_PASSWORD"/', $wrapper_src) === 1,
+    'and the sending key');
+check(preg_match('/UDF name="JOINERY_BACKUP_KEY_PASSWORD"/', $wrapper_src) === 1,
+    'and the backup bucket\'s secret key');
+// The wrapper's one translation: the masked names become the names the
+// handoff script reads. A field declared but never exported is a field the
+// deployer filled in for nothing.
+foreach (array('JOINERY_MAIL_API_KEY', 'JOINERY_BACKUP_KEY', 'JOINERY_BACKUP_BUCKET', 'JOINERY_BACKUP_KEY_ID') as $env) {
+    check(preg_match('/export ' . $env . '=/', $wrapper_src) === 1,
+        'the wrapper exports ' . $env . ' for the handoff');
+}
 
 // A field is required when it declares no default. The domain is required
 // because a site with no domain can get no certificate, and every link and
@@ -816,6 +827,10 @@ check(!preg_match('/echo[^\n]*\$\{?JOINERY_ADMIN_PASSWORD/', $handoff_src),
     'the handoff script never echoes the password');
 check(!preg_match('/echo[^\n]*\$\{?(JOINERY_)?LINODE_TOKEN/', $handoff_src),
     'and never echoes the API token');
+check(!preg_match('/echo[^\n]*\$\{?(JOINERY_)?MAIL_API_KEY/', $handoff_src),
+    'nor the sending key');
+check(!preg_match('/echo[^\n]*\$\{?(JOINERY_)?BACKUP_KEY\b/', $handoff_src),
+    'nor the backup secret key');
 
 // The quickstart's only DNS errand is pointing the nameservers at Linode: the
 // zone itself is created here when the account holds none, and a token that
@@ -828,15 +843,83 @@ check(strpos($handoff_src, 'Domains Read/Write scope') !== false,
 check(strpos($wrapper_src, 'Domains Read/Write') !== false,
     'the deploy form field names the token scope');
 // The wizard needs the same token minutes later for the mail records: a
-// usable one is sealed into the site (consumed on the wizard's publish) rather
-// than asked for twice, and it crosses on stdin, never on argv.
-check(strpos($handoff_src, 'utils/install_dns_credential.php') !== false
-    && preg_match('/printf[^\n]*LINODE_TOKEN[^\n]*\n[^\n]*\| php "\$STORE_TOOL"/', $handoff_src) === 1,
-    'the handoff seals a usable token into the site for the wizard, over stdin');
+// usable one is handed to the installer (JOINERY_DNS_CREDENTIAL) rather than
+// asked for twice, and _site_init.sh seals it into the site over stdin, never
+// argv, before the mail records are published through it.
+check(preg_match('/export JOINERY_DNS_CREDENTIAL=/', $handoff_src) === 1
+    && !preg_match('/install_dns_credential\.php/', preg_replace('/^#.*$/m', '', $handoff_src)),
+    'the handoff hands a usable token to the installer instead of sealing it itself');
+check(strpos($site_init_src, 'utils/install_dns_credential.php') !== false
+    && preg_match('/printf[^\n]*JOINERY_DNS_CREDENTIAL[^\n]*\| php "\$DNS_CRED_TOOL"/', $site_init_src) === 1,
+    '_site_init.sh seals it into the site for the wizard, over stdin');
 check(strpos($handoff_src, 'export JOINERY_ADMIN_PASSWORD') !== false
     && !preg_match('/install\.sh[^\n]*\$ADMIN_PASSWORD/', $handoff_src),
     'the password reaches install.sh through the environment, not an argument',
     'arguments are visible in ps to every user on the box');
+
+// The two services the form may name are set up by _site_init.sh — the one
+// place every install path passes through, so a hand-run install.sh takes
+// the same inputs — with their secrets crossing in the environment (a key on
+// argv is visible to every process on the box). Neither is a condition of
+// the install: a failure is recorded and named in the closing summaries.
+$mail_tool   = $site_root . '/public_html/utils/install_mail_provider.php';
+$backup_tool = $site_root . '/public_html/utils/install_backup_target.php';
+check(is_file($mail_tool) && is_file($backup_tool),
+    'the email and backup tools ship in the archive');
+$handoff_code = preg_replace('/^\s*#.*$/m', '', $handoff_src);
+check(preg_match('/export JOINERY_MAIL_API_KEY="\$MAIL_API_KEY"/', $handoff_src) === 1
+    && preg_match('/export JOINERY_BACKUP_KEY="\$BACKUP_KEY"/', $handoff_src) === 1
+    && strpos($handoff_code, 'install_mail_provider.php') === false
+    && strpos($handoff_code, 'install_backup_target.php') === false,
+    'the handoff exports the key and the bucket for the installer and runs no tool itself');
+check(strpos($site_init_src, 'utils/install_mail_provider.php') !== false
+    && preg_match('/MAIL_OUT=\$\(php "\$MAIL_TOOL" 2>&1\)/', $site_init_src) === 1,
+    '_site_init.sh sets up email with the key in the environment, not an argument');
+check(strpos($site_init_src, 'utils/install_backup_target.php') !== false
+    && preg_match('/BACKUP_OUT=\$\(php "\$BACKUP_TOOL" 2>&1\)/', $site_init_src) === 1,
+    'and points backups at the bucket the same way');
+check(preg_match('/JOINERY_MAIL_API_KEY/', $site_init_src) === 1
+    && preg_match('/JOINERY_BACKUP_BUCKET/', $site_init_src) === 1
+    && preg_match('/-z "\$CLONE_FROM" \] && \[ "\$DB_EXISTS" = false \]/', $site_init_src) === 1,
+    'the services are honoured on fresh installs only');
+check(!preg_match('/install_mail_provider\.php[^\n]*\|\| (fail|exit)/', $site_init_src)
+    && !preg_match('/install_backup_target\.php[^\n]*\|\| (fail|exit)/', $site_init_src)
+    && !preg_match('/MAIL_RC[^\n]*exit/', $site_init_src),
+    'neither service is a condition of the install',
+    'a rejected key must leave a running site and a wizard that asks again');
+check(strpos($site_init_src, 'install_services.txt') !== false
+    && strpos($site_init_src, 'MAIL_OUTCOME="failed:') !== false
+    && strpos($site_init_src, 'BACKUP_OUTCOME="failed:') !== false,
+    '_site_init.sh records each outcome in config/install_services.txt');
+check(strpos($install_src, 'install_services.txt') !== false
+    && strpos($install_src, 'The setup wizard will ask for the key again') !== false,
+    'install.sh\'s closing summary reads it and names what the wizard will ask for');
+check(strpos($handoff_src, 'install_services.txt') !== false
+    && strpos($handoff_src, 'The setup wizard will ask for the key again') !== false,
+    'and so does the handoff\'s');
+// Every input _site_init.sh reads has to cross into a container, where a
+// host-side export never reaches first boot. One list, checked against the
+// names the script actually reads.
+preg_match_all('/\$\{(JOINERY_[A-Z_]+)(?::-[^}]*)?\}/', $site_init_src, $read_names);
+$read_names = array_values(array_unique(array_diff($read_names[1], array('JOINERY_DB_PASSWORD'))));
+$missing_cross = array();
+foreach ($read_names as $name) {
+    if (!preg_match('/SITE_INIT_ENV_INPUTS=\([^)]*\b' . $name . '\b[^)]*\)/s', $install_src)) {
+        $missing_cross[] = $name;
+    }
+}
+check(empty($missing_cross),
+    'every environment input _site_init.sh reads is on install.sh\'s Docker crossing list',
+    empty($missing_cross) ? count($read_names) . ' inputs' : 'missing: ' . implode(', ', $missing_cross));
+check(preg_match('/for env_name in "\$\{SITE_INIT_ENV_INPUTS\[@\]\}"/', $install_src) === 1,
+    'and the crossing writes from that list');
+foreach (array($mail_tool, $backup_tool) as $tool) {
+    $tool_src = (string)file_get_contents($tool);
+    check(strpos($tool_src, '$argv') === false && strpos($tool_src, 'getenv(') !== false,
+        basename($tool) . ' reads its inputs from the environment and never from argv');
+    check(strpos($tool_src, "php_sapi_name() !== 'cli'") !== false,
+        'and is CLI-only');
+}
 
 // install.sh already hard-fails on the wrong OS a few lines into the handoff, so
 // a second check here would just be a second place to update.

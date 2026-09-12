@@ -1,6 +1,6 @@
 # Installation
 
-> **New to Joinery?** The [Quick Start guide](quickstart.md) walks you through renting a server, configuring your domain, and installing Joinery step by step — no prior experience required.
+> **New to Joinery?** The [Quick Start guide](https://getjoinery.com/page/quickstart) walks you through renting a server, configuring your domain, and installing Joinery step by step — no prior experience required.
 
 Deploy Joinery on a fresh Ubuntu 24.04 or 26.04 LTS server, either in a Docker container or directly on the host (bare-metal). The same `install.sh` script handles both — the deployment mode is auto-detected from whether a port is supplied. Docker mode is how you put several sites on one machine; it is not a sandbox — see [What Docker mode is](#what-docker-mode-is).
 
@@ -55,9 +55,13 @@ The deploy form asks for as little as it can — every field is a chance for som
 |---|---|---|
 | Admin email address | Yes | The admin account's address. Password reset needs a mailbox someone can receive at. |
 | Admin password | Yes | The password for that account. Masked in the UI and kept out of the deployment log, which is what the `password` in its field name buys. It is the password the owner keeps; no change is forced at first sign-in. |
-| Site domain | No | Blank brings the site up on the instance's IP. |
+| Site domain | Yes | The domain the site is installed as. A site with no domain can get no certificate and every link it emits names an IP address, so the form does not offer that state. `install.sh` run by hand still detects the IP when no domain is given. |
 | SSH public key | No | Placed in root's `authorized_keys` before server setup, which then mirrors it to `user1` with sudo and disables root login. Blank leaves root access as the provider configured it, so omitting it cannot lock anyone out. |
-| Linode API token | No | Only useful when the domain's nameservers point at Linode. Needs the Domains Read/Write scope. Creates the zone when the account holds none, then the A record, from the instance, so the first certificate attempt succeeds rather than the retry timer's. Never printed. Once it has proved usable it is sealed into the site for the setup wizard, whose email step uses it once to add the mail records and then deletes it. |
+| Linode API token | No | Only useful when the domain's nameservers point at Linode. Needs the Domains Read/Write scope. Creates the zone when the account holds none, then the A record, from the instance, so the first certificate attempt succeeds rather than the retry timer's. Never printed. Once it has proved usable it is sealed into the site for the one DNS publish of the mail records — made during the install when a sending key is supplied, otherwise by the setup wizard's email step — and deleted on use. |
+| SMTP2GO API key | No | Sets email up during the install, so the setup wizard's Email step opens on the delivery proof (or a DNS wait) instead of an empty form. `utils/install_mail_provider.php` runs the wizard's own ceremony: the From address is derived from the admin address on the site's domain, the owner's mailbox is provisioned for it, the domain is registered at SMTP2GO, its mail records are published through the kept Linode token, and SMTP2GO is asked to verify. A key SMTP2GO rejects leaves nothing configured and the wizard asks again; the closing summary says which happened. Never printed. |
+| Backblaze B2 bucket, key ID, key | No | Three fields that together point backups at a bucket during the install. `utils/install_backup_target.php` creates the target, fills the region and endpoint from Backblaze's own answer, tests the connection, and makes it the scheduled target — the same as the wizard's "Save and test". A bucket that cannot be reached is removed again and the wizard asks for one. The recovery key that turns nightly backups on is a secret shown once to a human and stays the wizard's. The key is never printed. |
+
+Neither optional service is a condition of the install. The StackScript only passes these fields on: `_site_init.sh` does the work, so a hand-run `install.sh site` takes the same inputs (see "Services set up at install" below).
 
 Nothing is asked that can be worked out. The site name comes from the domain (or the instance ID); the install is always bare-metal, one site per instance.
 
@@ -295,6 +299,24 @@ JOINERY_INSTALL_BUNDLE=personal sudo ./install.sh site mysite mysite.com
 sudo php /var/www/html/{sitename}/maintenance_scripts/sysadmin_tools/install_bundle.php --list
 sudo php /var/www/html/{sitename}/maintenance_scripts/sysadmin_tools/install_bundle.php --bundle=personal
 ```
+
+### Services set up at install
+
+Three things the setup wizard would otherwise ask for can be handed to `install.sh site` in the environment, on every path (bare metal, Docker, the StackScript). `_site_init.sh` honours them on fresh installs, after the plugin bundle, and none is a condition of the install: a failure is recorded and the wizard asks for that one again.
+
+| Variable | What it does |
+|---|---|
+| `JOINERY_MAIL_API_KEY` (+ `JOINERY_MAIL_PROVIDER`, default `smtp2go`; `JOINERY_MAIL_FROM`, default derived from the admin address on the site's domain) | Email is set up by `utils/install_mail_provider.php`, the wizard's own ceremony: From address, the owner's mailbox, the domain registered at the provider, its mail records published through the kept DNS credential, the provider asked to verify. The wizard then opens on the delivery proof. |
+| `JOINERY_BACKUP_BUCKET` + `JOINERY_BACKUP_KEY_ID` + `JOINERY_BACKUP_KEY` (+ `JOINERY_BACKUP_PROVIDER` b2/s3/linode, default b2; `JOINERY_BACKUP_REGION` for s3 and linode) | `utils/install_backup_target.php` creates the target, tests it, and makes it the scheduled one. The recovery key stays the wizard's. |
+| `JOINERY_DNS_CREDENTIAL` | The JSON `utils/install_dns_credential.php` takes, e.g. `{"driver":"linode","credential":{"access_token":"…"}}`, kept for the one publish of the mail records and deleted on use. |
+
+```bash
+JOINERY_MAIL_API_KEY=api-… \
+JOINERY_BACKUP_BUCKET=joinerybackups JOINERY_BACKUP_KEY_ID=… JOINERY_BACKUP_KEY=… \
+sudo -E ./install.sh site mysite mysite.com
+```
+
+Outcomes land in `{site root}/config/install_services.txt` (`mail=`, `backup=`, `dns_credential=`, each `done:`, `failed:` or `skipped:`), which the closing summary reads; the first-task email notice is printed only when email was not set up. On Docker, every `JOINERY_*` input `_site_init.sh` reads crosses into the container from one list in `install.sh` (`SITE_INIT_ENV_INPUTS`). Each tool is CLI-only, reads only the environment, and can be run by hand on an existing site.
 
 `JOINERY_INSTALL_BUNDLE=none` installs no plugins. Bundles are flat lists and never extend one another — they are alternative products rather than layers, so each names everything it wants.
 

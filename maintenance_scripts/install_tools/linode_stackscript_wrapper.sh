@@ -1,4 +1,9 @@
 #!/bin/bash
+#VERSION 1.7 - Four optional fields name two services the install sets up on
+#              the deployer's behalf: a sending key (email) and a backup bucket
+#              with its key pair (backups). Secrets are password-named so
+#              Linode masks them; the handoff script knows them by their real
+#              names, the same rename the API token already crosses through.
 #VERSION 1.6 - The deployment log keeps its tail. Output went through a process
 #              substitution, which nothing waits for, so the console session's
 #              teardown killed tee with the closing summary still unread in the
@@ -59,6 +64,10 @@
 # <UDF name="JOINERY_DOMAIN" label="Site domain (point its DNS at this server for automatic HTTPS)" example="example.com" />
 # <UDF name="JOINERY_SSH_KEY" label="SSH public key for this server" default="" optional="true" />
 # <UDF name="JOINERY_LINODE_TOKEN_PASSWORD" label="Linode API token with the Domains Read/Write scope (only if your DNS is at Linode)" default="" optional="true" />
+# <UDF name="JOINERY_MAIL_API_KEY_PASSWORD" label="SMTP2GO API key (optional: sets up email during the install)" default="" optional="true" />
+# <UDF name="JOINERY_BACKUP_BUCKET" label="Backblaze B2 bucket for backups (optional: sets up backups during the install)" default="" optional="true" />
+# <UDF name="JOINERY_BACKUP_KEY_ID" label="Backblaze application key ID for that bucket" default="" optional="true" />
+# <UDF name="JOINERY_BACKUP_KEY_PASSWORD" label="Backblaze application key for that bucket" default="" optional="true" />
 
 set -euo pipefail
 
@@ -100,6 +109,12 @@ run_install() {
     # it by its real name. This rename is the one translation the wrapper does.
     export JOINERY_LINODE_TOKEN="${JOINERY_LINODE_TOKEN_PASSWORD:-}"
     unset JOINERY_LINODE_TOKEN_PASSWORD
+    export JOINERY_MAIL_API_KEY="${JOINERY_MAIL_API_KEY_PASSWORD:-}"
+    unset JOINERY_MAIL_API_KEY_PASSWORD
+    export JOINERY_BACKUP_KEY="${JOINERY_BACKUP_KEY_PASSWORD:-}"
+    unset JOINERY_BACKUP_KEY_PASSWORD
+    export JOINERY_BACKUP_BUCKET="${JOINERY_BACKUP_BUCKET:-}"
+    export JOINERY_BACKUP_KEY_ID="${JOINERY_BACKUP_KEY_ID:-}"
 
     chmod +x "$HANDOFF"
     # Replaces this subshell, so the pipeline - and tee - outlive the handoff

@@ -775,6 +775,22 @@ as a green condition, so a fleet-backed node is not asked to configure a bucket
 it is already archived to; coverage goes stale on its own if the management
 node's runs stop.
 
+### A target an installer creates
+
+A first-boot installer that was handed a bucket and its key pair (the Linode
+deploy form's optional backup fields) creates the first target itself with
+`utils/install_backup_target.php`: the target is saved, a Backblaze
+credential's region and endpoint are filled from Backblaze's authorize answer
+(`BackupTarget::complete_credentials`, the same call the Backups page makes),
+the connection is tested, and a first target becomes the scheduled one. A
+target whose test fails is removed again so the setup wizard asks for one. The
+recovery key is never created here — it is shown once to a human — so nightly
+runs still wait on the wizard's key ceremony, exactly as they do for a target
+saved on the Backups page. Inputs are environment variables
+(`JOINERY_BACKUP_BUCKET`, `JOINERY_BACKUP_KEY_ID`, `JOINERY_BACKUP_KEY`,
+optional `JOINERY_BACKUP_PROVIDER` b2/s3/linode and `JOINERY_BACKUP_REGION`);
+the first output line is `INSTALL_BACKUP_TARGET=ok` or `=error`.
+
 ## Artifact naming
 
 `includes/BackupNaming.php` owns which files are backups, what each one is, and

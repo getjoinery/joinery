@@ -58,6 +58,15 @@
 #               every box: the old 2 GB was never derived, and no node has used more than
 #               half a gigabyte. apport is disabled: it keeps core dumps whatever the rlimit
 #               says. (specs/vault_exposure_quick_fixes.md Q5)
+#VERSION 2.68 - Three optional services `site` can be handed cross to _site_init.sh
+#               on every path: a kept DNS credential (JOINERY_DNS_CREDENTIAL), a
+#               sending key that sets email up (JOINERY_MAIL_API_KEY), and a
+#               bucket that becomes the backup target (JOINERY_BACKUP_*). On
+#               Docker every JOINERY_* input crosses into the container from one
+#               list, which also carries JOINERY_INSTALL_BUNDLE for the first
+#               time. The closing summary reads config/install_services.txt and
+#               says what was set up and what the wizard will still ask for; the
+#               first-task email notice is printed only when email is not done.
 #VERSION 2.67 - The closing summary tells a DNS failure from a DNS wait. A
 #               first-boot installer that tried to write the record and was
 #               refused for a reason waiting will not change hands the outcome
@@ -470,6 +479,19 @@ POSTGRES_PASSWORD_RECORD="/root/.joinery_postgres_password"
 POSTGRES_PASSWORD_GENERATED=0
 POSTGRES_PASSWORD_RECORDED=0
 
+# Everything _site_init.sh reads from the environment. On bare metal these are
+# simply inherited; on Docker they are copied into the container's env file
+# (do_site_docker) because a host-side export never reaches first boot. The
+# admin and database passwords are the same visibility trade as before: the
+# file is mode 600 and removed once the container has read it.
+SITE_INIT_ENV_INPUTS=(
+    JOINERY_ADMIN_EMAIL JOINERY_ADMIN_PASSWORD JOINERY_INSTALL_BUNDLE
+    JOINERY_DNS_CREDENTIAL
+    JOINERY_MAIL_API_KEY JOINERY_MAIL_PROVIDER JOINERY_MAIL_FROM
+    JOINERY_BACKUP_BUCKET JOINERY_BACKUP_KEY_ID JOINERY_BACKUP_KEY
+    JOINERY_BACKUP_PROVIDER JOINERY_BACKUP_REGION JOINERY_BACKUP_ENDPOINT
+)
+
 # This script's own version, read from the newest #VERSION header above rather
 # than restated here, so the number the help text prints is the number the file
 # actually carries. A second copy drifts the moment someone bumps the header.
@@ -600,14 +622,57 @@ print_admin_login() {
         echo -e "  Password: ${YELLOW}the one supplied at install time${NC}"
     fi
     echo ""
-    print_email_setup_notice
+    print_services_outcome "$(dirname "$cred_path")/install_services.txt" "$reader"
+}
+
+# What _site_init.sh did with the optional services it was handed (its
+# config/install_services.txt: mail=, backup=, dns_credential=, each done:,
+# failed: or skipped:), and the email first-task notice when email is not
+# done. A failed service names what the setup wizard will ask for again.
+#
+# $1 = path to the services file
+# $2 = optional command for reading it (docker sites need docker exec)
+print_services_outcome() {
+    local services_path="$1"
+    local reader="${2:-cat}"
+    local mail_outcome="" backup_outcome=""
+    mail_outcome=$($reader "$services_path" 2>/dev/null | sed -n 's/^mail=//p' | head -1 || true)
+    backup_outcome=$($reader "$services_path" 2>/dev/null | sed -n 's/^backup=//p' | head -1 || true)
+
+    case "$mail_outcome" in
+        done:*)
+            echo -e "Email:   ${GREEN}${mail_outcome#done: }${NC}"
+            echo "         The setup wizard will ask you to confirm a test message arrived."
+            ;;
+        failed:*)
+            echo -e "Email:   ${RED}NOT set up${NC} — ${mail_outcome#failed: }"
+            echo "         The setup wizard will ask for the key again."
+            ;;
+    esac
+    case "$backup_outcome" in
+        done:*)
+            echo -e "Backups: ${GREEN}${backup_outcome#done: }${NC}"
+            echo "         The setup wizard will ask you to create the recovery key that turns them on."
+            ;;
+        failed:*)
+            echo -e "Backups: ${RED}bucket NOT set${NC} — ${backup_outcome#failed: }"
+            echo "         The setup wizard will ask for the bucket again."
+            ;;
+    esac
+    if [ -n "$mail_outcome$backup_outcome" ]; then
+        echo ""
+    fi
+    case "$mail_outcome" in
+        done:*) ;;
+        *) print_email_setup_notice ;;
+    esac
 }
 
 # Configuring an email provider is the first task on any new deployment, and
 # the one that decides whether a forgotten password is a nuisance or a locked
-# door. Said unconditionally rather than only when it looks unconfigured: a
-# detection rule that guesses wrong is worse than one extra line for an admin
-# who has already done it.
+# door. Said whenever email was not set up during the install rather than
+# only when it looks unconfigured: a detection rule that guesses wrong is
+# worse than one extra line for an admin who has already done it.
 print_email_setup_notice() {
     echo -e "${YELLOW}First task: set up email${NC}"
     echo -e "  ${BLUE}http://${DOMAIN_NAME}/admin/admin_settings_email${NC}"
@@ -3439,6 +3504,16 @@ do_site_create() {
                 echo ""
                 echo "Site Options:"
                 echo "  --admin-email=EMAIL    Address for the admin account (default admin@example.com)"
+                echo "  Environment (optional, secrets never on argv):"
+                echo "    JOINERY_ADMIN_PASSWORD   the admin password the owner chose (else generated)"
+                echo "    JOINERY_INSTALL_BUNDLE   plugin bundle, default personal; none skips it"
+                echo "    JOINERY_MAIL_API_KEY     sending key: email is set up during the install"
+                echo "    JOINERY_MAIL_PROVIDER    which provider the key is for (default smtp2go)"
+                echo "    JOINERY_BACKUP_BUCKET    bucket that becomes the backup target, with"
+                echo "    JOINERY_BACKUP_KEY_ID    JOINERY_BACKUP_KEY (and JOINERY_BACKUP_PROVIDER"
+                echo "                             b2/s3/linode, JOINERY_BACKUP_REGION for s3/linode)"
+                echo "    JOINERY_DNS_CREDENTIAL   DNS credential kept for the mail records, as the"
+                echo "                             JSON utils/install_dns_credential.php takes"
                 echo "  --activate THEME       Set active theme after installation"
                 echo "  --with-test-site       Create companion test site (bare-metal only)"
                 echo "  --enable-agent         Run the Joinery agent (installed either way; off by default)"
@@ -4346,12 +4421,14 @@ EOF
     # too: on Docker it runs inside the container on first boot, so a host-side
     # export never reaches it. Same visibility trade as POSTGRES_PASSWORD
     # above; the file is mode 600 and removed once the container has read it.
-    if [ -n "${JOINERY_ADMIN_EMAIL:-}" ]; then
-        printf 'JOINERY_ADMIN_EMAIL=%s\n' "$JOINERY_ADMIN_EMAIL" >> "$ENV_FILE"
-    fi
-    if [ -n "${JOINERY_ADMIN_PASSWORD:-}" ]; then
-        printf 'JOINERY_ADMIN_PASSWORD=%s\n' "$JOINERY_ADMIN_PASSWORD" >> "$ENV_FILE"
-    fi
+    # One list, so a new _site_init.sh input is added here once and cannot be
+    # forgotten on the Docker path (JOINERY_INSTALL_BUNDLE once was).
+    local env_name
+    for env_name in "${SITE_INIT_ENV_INPUTS[@]}"; do
+        if [ -n "${!env_name:-}" ]; then
+            printf '%s=%s\n' "$env_name" "${!env_name}" >> "$ENV_FILE"
+        fi
+    done
     if [ -n "${UPGRADE_SERVER:-}" ]; then
         printf 'UPGRADE_SERVER=%s\n' "$UPGRADE_SERVER" >> "$ENV_FILE"
     fi
@@ -4906,6 +4983,11 @@ show_help() {
     echo ""
     echo "Site Command Options:"
     echo "  --admin-email=EMAIL    Address for the admin account (default admin@example.com)"
+    echo "  Environment (optional): JOINERY_ADMIN_PASSWORD, JOINERY_INSTALL_BUNDLE,"
+    echo "                         JOINERY_MAIL_API_KEY (+ JOINERY_MAIL_PROVIDER),"
+    echo "                         JOINERY_BACKUP_BUCKET + JOINERY_BACKUP_KEY_ID + JOINERY_BACKUP_KEY"
+    echo "                         (+ JOINERY_BACKUP_PROVIDER, JOINERY_BACKUP_REGION),"
+    echo "                         JOINERY_DNS_CREDENTIAL. See './install.sh site --help'."
     echo "  --activate THEME       Activate specified theme after installation"
     echo "  --with-test-site       Also create a test site (bare-metal only)"
     echo "  --enable-agent         Run the Joinery agent (installed either way; off by default)"

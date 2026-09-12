@@ -4,7 +4,7 @@ Welcome to the Joinery platform documentation. Select a topic from the sidebar, 
 
 ## Getting Started
 
-- [Quick Start](quickstart.md) -- **New? Start here.** Rent a server, point your domain, and install Joinery in about 15 minutes — no prior experience required
+- [Quick Start](https://getjoinery.com/page/quickstart) -- **New? Start here.** Rent a server, point your domain, and install Joinery from a web browser — no prior experience required
 - [Installation](installation.md) -- Full reference: Docker or bare-metal, SSL, domain management, multi-site, cloning
 
 ## Core Systems
