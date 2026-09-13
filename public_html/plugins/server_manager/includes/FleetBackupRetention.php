@@ -22,6 +22,12 @@
  * incrementals whose full is gone, which is not a smaller backup — it is no
  * backup, and it looks like a restore point right up until someone needs it.
  *
+ * @version 1.3 - check_shelf() answers in two parts: what is wrong with the backups it read, and
+ *                which manifests it could not read this pass — a transport error is reported by the
+ *                pass, never stamped as an incomplete backup; the reader is injectable for the test
+ * @version 1.2 - the shelf check: every artifact a chain's manifest names must be on the shelf at the
+ *                recorded size, and the manifest must carry its envelope. compare_manifest is the pure
+ *                rule; check_shelf reads each manifest off the listing prune() already takes
  * @version 1.1 - the pass also sizes the shelf, from the listing it already takes: the hosted
  *                tier's storage allowance needs no meter of its own
  * @version 1.0
@@ -58,13 +64,18 @@ class FleetBackupRetention {
 	 * shelf, and is measured AFTER the prune — which is what the customer is
 	 * actually keeping.
 	 *
+	 * The listing itself comes back too (`objects`, less what was pruned, and
+	 * the `base` it was taken under) so the shelf check can read from the same
+	 * testimony without listing again.
+	 *
 	 * @return array{kept:int, pruned:int, deleted_objects:int, error:string,
-	 *               listed:bool, newest_object_time:string, bytes:int}
+	 *               listed:bool, newest_object_time:string, bytes:int,
+	 *               objects:array, base:string}
 	 */
 	public static function prune($node, $target, $keep) {
 		$keep = max(1, (int)$keep);
 		$result = array('kept' => 0, 'pruned' => 0, 'deleted_objects' => 0, 'error' => '',
-			'listed' => false, 'newest_object_time' => '', 'bytes' => 0);
+			'listed' => false, 'newest_object_time' => '', 'bytes' => 0, 'objects' => array(), 'base' => '');
 
 		try {
 			$creds  = $target->get_credentials();
@@ -109,6 +120,12 @@ class FleetBackupRetention {
 			// reported no size for count as nothing: an under-count trips an
 			// allowance late, and an invented number trips it wrongly.
 			$result['bytes'] = self::total_bytes($objects, $pruned_keys);
+			$result['base']  = $base;
+			foreach ($objects as $obj) {
+				$key = is_array($obj) ? (string)($obj['key'] ?? $obj['Key'] ?? '') : '';
+				if ($key === '' || isset($pruned_keys[$key])) { continue; }
+				$result['objects'][] = $obj;
+			}
 		} catch (Throwable $e) {
 			// A shelf that could not be pruned is not a reason to skip the backup
 			// that was about to run. Too many restore points is a bill; no backup
@@ -221,5 +238,126 @@ class FleetBackupRetention {
 			if ($ts !== false && $ts > $newest) { $newest = $ts; }
 		}
 		return $newest > 0 ? gmdate('Y-m-d H:i:s', $newest) : '';
+	}
+
+	/**
+	 * The shelf check — level 1 of backup verification, and free: is every
+	 * backup on this node's shelf whole?
+	 *
+	 * For every chain the listing holds a manifest for, the manifest is read
+	 * (one small GET each) and compared to the listing: every artifact it names
+	 * must be present at the recorded size, and it must carry its envelope, or
+	 * there is no key to recover. This catches a partial upload, an object
+	 * deleted out from under retention, and a manifest rewritten after its
+	 * artifacts were pruned — three ways a backup can look present on the
+	 * dashboard and be nothing when it is needed.
+	 *
+	 * Two answers, kept apart because they mean different things:
+	 *
+	 *   problem  what is wrong with a backup whose manifest WAS read — one line
+	 *            naming it, '' when every backup read is whole. A fact about
+	 *            the shelf, stamped on the node's card.
+	 *   unread   manifests that could not be fetched this pass (a transport
+	 *            error, an HTTP status) — one line naming them, '' when all
+	 *            were read. A fact about this pass, not the shelf: reported in
+	 *            the pass and never stamped, so a network blip is not shown as
+	 *            an incomplete backup.
+	 *
+	 * Nothing here deletes or retries.
+	 *
+	 * @param array  $objects The listing under $base, as prune() returned it
+	 * @param string $base    The manager-profile prefix the listing was taken under
+	 * @param callable|null $read fn(string $key): array — the decoded manifest,
+	 *                      or throws; defaults to a signed GET from the bucket
+	 * @return array{problem:string, unread:string}
+	 */
+	public static function check_shelf(array $objects, $base, array $creds, $bucket, $read = null) {
+		$base = rtrim((string)$base, '/') . '/';
+		$present = array();      // chain dir => [name => size]
+		$manifests = array();    // chain dir => manifest key
+		foreach ($objects as $obj) {
+			if (!is_array($obj)) { continue; }
+			$key = (string)($obj['key'] ?? $obj['Key'] ?? '');
+			if ($key === '' || strpos($key, $base) !== 0) { continue; }
+			$rel = substr($key, strlen($base));
+			$parts = explode('/', $rel);
+			if (count($parts) !== 2 || strpos($parts[0], BackupChain::DIR_PREFIX) !== 0) { continue; }
+			list($dir, $name) = $parts;
+			$size = $obj['size'] ?? $obj['Size'] ?? null;
+			$present[$dir][$name] = is_numeric($size) ? (int)$size : null;
+			if ($name === BackupChain::MANIFEST_NAME) {
+				$manifests[$dir] = $key;
+			}
+		}
+
+		if ($read === null) {
+			$read = function ($key) use ($creds, $bucket) {
+				$resp = S3Signer::get($creds, $bucket, '/' . ltrim($key, '/'));
+				if ((int)($resp['status'] ?? 0) !== 200) {
+					throw new Exception('HTTP ' . (int)($resp['status'] ?? 0));
+				}
+				return BackupChain::decode((string)($resp['body'] ?? ''));
+			};
+		}
+
+		$problems = array();
+		$unread = array();
+		ksort($manifests);
+		foreach ($manifests as $dir => $key) {
+			try {
+				$manifest = $read($key);
+				if (!is_array($manifest)) {
+					throw new Exception('not a manifest');
+				}
+			} catch (Throwable $e) {
+				$unread[] = 'the manifest of the backup set ' . self::set_words($dir, null)
+					. ' could not be read (' . $e->getMessage() . ')';
+				continue;
+			}
+			$problem = self::compare_manifest($manifest, $present[$dir] ?? array());
+			if ($problem !== '') {
+				$problems[] = $problem;
+			}
+		}
+		return array('problem' => implode('; ', $problems), 'unread' => implode('; ', $unread));
+	}
+
+	/**
+	 * The pure rule behind the shelf check: one manifest against what the
+	 * listing holds under its directory, as [name => bytes]. Returns '' when
+	 * whole, otherwise one line saying what is wrong, in words a person reads
+	 * on the node's card.
+	 */
+	public static function compare_manifest(array $manifest, array $present) {
+		$set = self::set_words((string)($manifest['chain_id'] ?? ''), $manifest);
+		if (empty($manifest['envelope']) || !is_array($manifest['envelope'])) {
+			return 'the backup set ' . $set . ' has no envelope in its manifest, so no key can be recovered for it';
+		}
+		foreach (($manifest['runs'] ?? array()) as $run) {
+			foreach (($run['artifacts'] ?? array()) as $a) {
+				$name = (string)($a['name'] ?? '');
+				if ($name === '') { continue; }
+				if (!array_key_exists($name, $present)) {
+					return 'the backup set ' . $set . ' names ' . $name . ' in its manifest but it is not on the shelf';
+				}
+				$expected = (int)($a['bytes'] ?? 0);
+				$actual = $present[$name];
+				if ($expected > 0 && $actual !== null && $actual !== $expected) {
+					return 'the backup set ' . $set . ' holds ' . $name . ' at ' . $actual
+						. ' bytes on the shelf where its manifest records ' . $expected;
+				}
+			}
+		}
+		return '';
+	}
+
+	/** "begun 2026-09-12 04:45 UTC" for a person, from the manifest or the directory's stamp. */
+	private static function set_words($dir, $manifest) {
+		$created = is_array($manifest) ? (string)($manifest['created'] ?? '') : '';
+		$ts = $created !== '' ? strtotime($created) : false;
+		if ($ts === false && preg_match('/(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/', (string)$dir, $m)) {
+			$ts = gmmktime((int)$m[4], (int)$m[5], (int)$m[6], (int)$m[2], (int)$m[3], (int)$m[1]);
+		}
+		return $ts ? 'begun ' . gmdate('Y-m-d H:i', $ts) . ' UTC' : 'on the shelf';
 	}
 }

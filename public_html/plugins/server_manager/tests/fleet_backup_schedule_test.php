@@ -342,4 +342,244 @@ check(!NodeMonitorHealth::copy_opens_here(BackupProfile::MANAGER, $fpr_a, ''),
 check(!NodeMonitorHealth::copy_opens_here(BackupProfile::MANAGER, '', $fpr_a),
 	'a copy that recorded no recipient does not');
 
+// ── Verification ────────────────────────────────────────────────────────────
+section('A verify is due every verify_every_days, of a backup newer than the last verify');
+
+require_once(PathHelper::getIncludePath('includes/BackupVerifier.php'));
+$vnow = '2026-09-13 12:00:00';
+$vnode = function (array $extra) {
+	return new FbsHealthNode(array_merge(array(
+		'mgn_slug'                => 'demo',
+		'mgn_last_backup_time'    => '2026-09-13 04:45:00',
+		'mgn_last_backup_outcome' => 'success',
+	), $extra));
+};
+$vpolicy = array_merge($policy, array('verify_every_days' => 30));
+check(FleetBackupPolicy::DEFAULTS['verify_every_days'] === 30, 'the shipped default is every 30 days');
+check(FleetBackupPolicy::fleet_defaults()['verify_every_days'] === 30, 'and the fleet default reads it from the declared setting');
+
+check(FleetBackupPolicy::is_verify_due($vpolicy, $vnode(array()), $vnow),
+	'never verified and the first backup is hours old: due — the backup stamp comes from a completed upload, and on a daily node the next backup would always beat a settling wait');
+check(FleetBackupPolicy::is_verify_due($vpolicy, $vnode(array('mgn_last_backup_time' => '2026-09-11 04:45:00')), $vnow),
+	'never verified and the backup is older than a day: due');
+check(!FleetBackupPolicy::is_verify_due($vpolicy, $vnode(array(
+		'mgn_last_backup_time' => '2026-09-11 04:45:00', 'mgn_last_backup_outcome' => 'failed')), $vnow),
+	'no successful backup: never due — there is nothing to prove');
+check(!FleetBackupPolicy::is_verify_due($vpolicy, $vnode(array('mgn_last_backup_time' => null)), $vnow),
+	'no backup at all: never due');
+check(!FleetBackupPolicy::is_verify_due($vpolicy, $vnode(array('mgn_backup_verify_time' => '2026-08-15 12:00:00')), $vnow),
+	'verified 29 days ago: not due');
+check(FleetBackupPolicy::is_verify_due($vpolicy, $vnode(array('mgn_backup_verify_time' => '2026-08-13 11:00:00')), $vnow),
+	'verified 31 days ago and backed up since: due');
+check(!FleetBackupPolicy::is_verify_due($vpolicy, $vnode(array(
+		'mgn_backup_verify_time' => '2026-08-13 11:00:00', 'mgn_last_backup_time' => '2026-08-10 04:45:00')), $vnow),
+	'verified 31 days ago but no backup since: not due — the last verify still speaks for the newest backup');
+check(!FleetBackupPolicy::is_verify_due(array_merge($vpolicy, array('verify_every_days' => 0)),
+		$vnode(array('mgn_last_backup_time' => '2026-08-01 04:45:00')), $vnow),
+	'0 means never, however old the backup');
+check(FleetBackupPolicy::is_verify_due($vpolicy, $vnode(array(
+		'mgn_backup_verify_time' => '2026-08-13 11:00:00', 'mgn_backup_verify_outcome' => 'fail')), $vnow),
+	'a failed verify counts as a verify: due again only after the interval, never retried on the next tick');
+check(!FleetBackupPolicy::is_verify_due($vpolicy, $vnode(array(
+		'mgn_backup_verify_time' => '2026-09-12 11:00:00', 'mgn_backup_verify_outcome' => 'fail')), $vnow),
+	'and a verify that failed yesterday is not re-run today');
+
+// A verify that fails ON THE NODE exits 1, comes back as a failed job, and a
+// failed job is never folded into the node's columns: the stamp stays empty.
+// The attempt is the job, so the rule reads the job.
+check(!FleetBackupPolicy::is_verify_due($vpolicy, $vnode(array('mgn_last_backup_time' => '2026-09-11 04:45:00')), $vnow,
+		new FbsJob('2026-09-12 05:00:00')),
+	'never stamped, but a verify job was created yesterday (it failed): not due — the attempt counts, whatever the job\'s status');
+check(!FleetBackupPolicy::is_verify_due($vpolicy, $vnode(array('mgn_last_backup_time' => '2026-09-13 04:45:00')), $vnow,
+		new FbsJob('2026-09-12 05:00:00')),
+	'and a backup taken since that failed attempt does not bring it forward: due again only after the interval');
+check(FleetBackupPolicy::is_verify_due($vpolicy, $vnode(array('mgn_last_backup_time' => '2026-09-13 04:45:00')), $vnow,
+		new FbsJob('2026-08-13 05:00:00')),
+	'a failed attempt 31 days ago with a backup since: due');
+check(!FleetBackupPolicy::is_verify_due($vpolicy, $vnode(array(
+		'mgn_backup_verify_time' => '2026-08-01 12:00:00', 'mgn_last_backup_time' => '2026-09-13 04:45:00')), $vnow,
+		new FbsJob('2026-09-12 05:00:00')),
+	'an old stamp and a newer failed job: the newer of the two is the last attempt');
+check(FleetBackupPolicy::last_verify_attempt($vnode(array('mgn_backup_verify_time' => '2026-09-12 12:00:00')), new FbsJob('2026-09-12 05:00:00'))
+		=== strtotime('2026-09-12 12:00:00 UTC'),
+	'a stamp newer than the job (the job completed and was folded) is the last attempt');
+check(FleetBackupPolicy::last_verify_attempt($vnode(array()), null) === false, 'neither: never attempted');
+
+$vform = FleetBackupPolicy::from_form(array('policy_schedule' => 'daily', 'policy_verify_every_days' => '14'));
+check($vform['verify_every_days'] === 14, 'the policy editor\'s field is read', (string)$vform['verify_every_days']);
+$vform = FleetBackupPolicy::from_form(array('policy_schedule' => 'daily', 'policy_verify_every_days' => '-3'));
+check($vform['verify_every_days'] === 0, 'a negative interval normalizes to never');
+
+section('The card says whether a backup is verified restorable, in the page\'s words');
+
+$hn = function (array $extra) use ($now) {
+	return new FbsHealthNode(array_merge(array(
+		'mgn_slug'                      => 'demo',
+		'mgn_last_backup_time'          => gmdate('Y-m-d H:i:s', $now - 7200),
+		'mgn_last_backup_outcome'       => 'success',
+		'mgn_backup_shelf_checked_time' => gmdate('Y-m-d H:i:s', $now - 600),
+		'mgn_backup_shelf_newest_time'  => gmdate('Y-m-d H:i:s', $now - 7000),
+		'mgn_create_time'               => gmdate('Y-m-d H:i:s', $now - 10 * 86400),
+	), $extra));
+};
+$h = NodeMonitorHealth::fleet_backup_health($hn(array()), $vpolicy);
+check(!$h['is_problem'] && $h['label'] === 'Backed up' && strpos($h['detail'], 'Not yet verified restorable') !== false,
+	'never verified, ten days in: information on a healthy card, not a problem', $h['detail']);
+
+// The first backup is read from the job history; here it is handed in.
+$h = NodeMonitorHealth::verify_state($hn(array()), $vpolicy, $now - 50 * 86400);
+check($h['is_problem'] && $h['label'] === 'Backups never verified restorable',
+	'never verified, 50 days after the first backup: a problem', $h['label']);
+check(strpos($h['detail'], 'opened and read') !== false, 'in the page\'s words', $h['detail']);
+$h = NodeMonitorHealth::verify_state($hn(array()), $vpolicy, $now - 40 * 86400);
+check(!$h['is_problem'], 'and 40 days after: still information');
+
+$h = NodeMonitorHealth::fleet_backup_health($hn(array(
+	'mgn_backup_verify_time' => gmdate('Y-m-d H:i:s', $now - 5 * 86400), 'mgn_backup_verify_level' => 2,
+	'mgn_backup_verify_outcome' => 'pass',
+	'mgn_backup_verify_message' => 'Opened and read the backup of 2026-09-08 04:45 UTC: 3 archives, 717 MB, 1,842 files.')), $vpolicy);
+check(!$h['is_problem'] && strpos($h['detail'], 'Verified restorable 5 days ago (opened and read)') !== false,
+	'a pass five days ago: healthy, dated, named by level', $h['detail']);
+
+$h = NodeMonitorHealth::fleet_backup_health($hn(array(
+	'mgn_backup_verify_time' => gmdate('Y-m-d H:i:s', $now - 5 * 86400), 'mgn_backup_verify_level' => 3,
+	'mgn_backup_verify_outcome' => 'pass', 'mgn_backup_verify_message' => 'Rehearsed a restore of the backup of 2026-09-08 04:45 UTC: 3 archives, 717 MB, 1,842 files, 214 tables, 12 users.')), $vpolicy);
+check(!$h['is_problem'] && strpos($h['detail'], '(rehearsed)') !== false, 'a rehearsal is named as one', $h['detail']);
+
+$h = NodeMonitorHealth::fleet_backup_health($hn(array(
+	'mgn_backup_verify_time' => gmdate('Y-m-d H:i:s', $now - 5 * 86400), 'mgn_backup_verify_level' => 2,
+	'mgn_backup_verify_outcome' => 'fail',
+	'mgn_backup_verify_message' => 'Verification of the backup of 2026-09-08 04:45 UTC failed: files-0001.tar.gz.enc does not match its recorded hash.')), $vpolicy);
+check($h['is_problem'] && $h['label'] === 'Backup verification failed', 'a failed verify is a problem', $h['label']);
+check(strpos($h['detail'], 'The node said: Verification of the backup of 2026-09-08 04:45 UTC failed: files-0001') !== false
+	&& strpos($h['detail'], 'Nothing is retried automatically') !== false,
+	'with the node\'s own reason, and no automatic retry', $h['detail']);
+
+$h = NodeMonitorHealth::fleet_backup_health($hn(array(
+	'mgn_backup_verify_time' => gmdate('Y-m-d H:i:s', $now - 61 * 86400), 'mgn_backup_verify_level' => 2,
+	'mgn_backup_verify_outcome' => 'pass')), $vpolicy);
+check($h['is_problem'] && $h['label'] === 'Backup verification is stale' && strpos($h['detail'], '60 days') !== false,
+	'a pass older than 60 days is stale', $h['label'] . ' — ' . $h['detail']);
+$h = NodeMonitorHealth::fleet_backup_health($hn(array(
+	'mgn_backup_verify_time' => gmdate('Y-m-d H:i:s', $now - 59 * 86400), 'mgn_backup_verify_level' => 2,
+	'mgn_backup_verify_outcome' => 'pass')), $vpolicy);
+check(!$h['is_problem'], 'and 59 days is not');
+
+$h = NodeMonitorHealth::fleet_backup_health($hn(array(
+	'mgn_backup_verify_time' => gmdate('Y-m-d H:i:s', $now - 5 * 86400), 'mgn_backup_verify_level' => 2,
+	'mgn_backup_verify_outcome' => 'pass',
+	'mgn_backup_verify_message' => 'Could not verify the backup of 2026-09-12 04:45 UTC: needs 2.4 GB free, has 858.3 MB.')), $vpolicy);
+check(!$h['is_problem'] && strpos($h['detail'], 'Since then: Could not verify') !== false && strpos($h['detail'], 'needs 2.4 GB free, has 858.3 MB') !== false,
+	'a skip after a pass rides beside it with both numbers', $h['detail']);
+
+$h = NodeMonitorHealth::fleet_backup_health($hn(array(
+	'mgn_backup_shelf_problem' => 'the backup set begun 2026-09-12 04:45 UTC names files-0001.tar.gz.enc in its manifest but it is not on the shelf')), $vpolicy);
+check($h['is_problem'] && $h['label'] === 'A backup on the shelf is incomplete', 'a shelf problem is a problem', $h['label']);
+check(strpos($h['detail'], 'names files-0001.tar.gz.enc in its manifest but it is not on the shelf') !== false,
+	'with the pass\'s words', $h['detail']);
+
+$h = NodeMonitorHealth::fleet_backup_health($hn(array()), array_merge($vpolicy, array('verify_every_days' => 0)));
+check(!$h['is_problem'] && strpos($h['detail'], 'switched off') !== false,
+	'verification switched off is a decision, said as one', $h['detail']);
+
+foreach (array(
+	NodeMonitorHealth::fleet_backup_health($hn(array()), $vpolicy),
+	NodeMonitorHealth::fleet_backup_health($hn(array('mgn_backup_shelf_problem' => 'x')), $vpolicy),
+	NodeMonitorHealth::fleet_backup_health($hn(array('mgn_backup_verify_time' => gmdate('Y-m-d H:i:s', $now - 5 * 86400),
+		'mgn_backup_verify_level' => 2, 'mgn_backup_verify_outcome' => 'fail')), $vpolicy),
+) as $h) {
+	check(stripos($h['label'] . ' ' . $h['detail'], 'chain') === false && stripos($h['label'] . ' ' . $h['detail'], 'seq') === false
+		&& stripos($h['label'] . ' ' . $h['detail'], 'restore point') === false,
+		'nobody reads "chain", "seq" or "restore point" on the card', $h['label'] . ' — ' . $h['detail']);
+}
+
+section('The shelf check: every artifact a manifest names, at its size, and an envelope');
+
+$sm = array(
+	'version' => 1, 'chain_id' => 'chain-20260912_044520', 'created' => '2026-09-12T04:45:20Z',
+	'envelope' => array('version' => 1, 'recipients' => array()),
+	'runs' => array(
+		array('seq' => 0, 'level' => 0, 'artifacts' => array(
+			'files' => array('name' => 'files-0000.tar.gz.enc', 'bytes' => 1000),
+			'db'    => array('name' => 'db-0000.sql.gz.enc', 'bytes' => 100))),
+		array('seq' => 1, 'level' => 1, 'artifacts' => array(
+			'files' => array('name' => 'files-0001.tar.gz.enc', 'bytes' => 200),
+			'db'    => array('name' => 'db-0001.sql.gz.enc', 'bytes' => 110))),
+	),
+);
+$whole = array('manifest.json' => 900, 'files-0000.tar.gz.enc' => 1000, 'db-0000.sql.gz.enc' => 100,
+	'files-0001.tar.gz.enc' => 200, 'db-0001.sql.gz.enc' => 110);
+check(FleetBackupRetention::compare_manifest($sm, $whole) === '', 'a whole set has nothing to say');
+
+$short = $whole; $short['files-0001.tar.gz.enc'] = 150;
+$p = FleetBackupRetention::compare_manifest($sm, $short);
+check($p === 'the backup set begun 2026-09-12 04:45 UTC holds files-0001.tar.gz.enc at 150 bytes on the shelf where its manifest records 200',
+	'an artifact short by bytes is named with both numbers', $p);
+
+$missing = $whole; unset($missing['db-0001.sql.gz.enc']);
+$p = FleetBackupRetention::compare_manifest($sm, $missing);
+check($p === 'the backup set begun 2026-09-12 04:45 UTC names db-0001.sql.gz.enc in its manifest but it is not on the shelf',
+	'a missing artifact is named', $p);
+
+$no_env = $sm; unset($no_env['envelope']);
+$p = FleetBackupRetention::compare_manifest($no_env, $whole);
+check(strpos($p, 'has no envelope in its manifest, so no key can be recovered') !== false,
+	'a manifest with no envelope is a backup nobody can open', $p);
+
+$unsized = $whole; $unsized['files-0000.tar.gz.enc'] = null;
+check(FleetBackupRetention::compare_manifest($sm, $unsized) === '',
+	'an object the provider reported no size for is not called short');
+
+foreach (array($p, FleetBackupRetention::compare_manifest($sm, $short)) as $w) {
+	check(stripos($w, 'chain') === false, 'nobody reads "chain" in a shelf problem', $w);
+}
+
+// ── The whole shelf: a manifest that cannot be read is not an incomplete backup ──
+section('A manifest the shelf check could not read is this pass\'s problem, not the backup\'s');
+
+$base = 'joinery-backups/demo/manager';
+$listing = array();
+foreach ($whole as $name => $bytes) {
+	$listing[] = array('key' => $base . '/chain-20260912_044500/' . $name, 'size' => $bytes);
+}
+$older = array('chain_id' => 'chain-20260905_044500', 'envelope' => array('version' => 1),
+	'runs' => array(array('seq' => 0, 'level' => 0, 'artifacts' => array(
+		'files' => array('name' => 'files-0000.tar.gz.enc', 'bytes' => 700)))));
+$listing[] = array('key' => $base . '/chain-20260905_044500/manifest.json', 'size' => 500);
+$listing[] = array('key' => $base . '/chain-20260905_044500/files-0000.tar.gz.enc', 'size' => 700);
+$creds = array('access_key' => 'k', 'secret_key' => 's', 'region' => 'us-east-1', 'endpoint' => 'https://shelf.invalid');
+
+$reader = function (array $answers) {
+	return function ($key) use ($answers) {
+		foreach ($answers as $dir => $answer) {
+			if (strpos($key, '/' . $dir . '/') !== false) {
+				if ($answer instanceof Exception) { throw $answer; }
+				return $answer;
+			}
+		}
+		throw new Exception('unexpected key ' . $key);
+	};
+};
+
+$r = FleetBackupRetention::check_shelf($listing, $base, $creds, 'bucket',
+	$reader(array('chain-20260912_044500' => $sm, 'chain-20260905_044500' => $older)));
+check(is_array($r) && $r['problem'] === '' && $r['unread'] === '', 'both manifests read, both whole: nothing to say', json_encode($r));
+
+$r = FleetBackupRetention::check_shelf($listing, $base, $creds, 'bucket',
+	$reader(array('chain-20260912_044500' => $sm, 'chain-20260905_044500' => new Exception('curl failed: Could not resolve host: shelf.invalid'))));
+check(is_array($r) && $r['problem'] === '', 'one manifest unreachable: no backup is called incomplete', json_encode($r));
+check(is_array($r) && $r['unread'] === 'the manifest of the backup set begun 2026-09-05 04:45 UTC could not be read (curl failed: Could not resolve host: shelf.invalid)',
+	'the pass is told which manifest it could not read, and why', is_array($r) ? $r['unread'] : '');
+
+$short_listing = $listing;
+foreach ($short_listing as &$o) { if (basename($o['key']) === 'files-0001.tar.gz.enc') { $o['size'] = 150; } }
+unset($o);
+$r = FleetBackupRetention::check_shelf($short_listing, $base, $creds, 'bucket',
+	$reader(array('chain-20260912_044500' => $sm, 'chain-20260905_044500' => new Exception('HTTP 503'))));
+check(is_array($r) && strpos($r['problem'], 'holds files-0001.tar.gz.enc at 150 bytes') !== false
+	&& strpos($r['unread'], 'begun 2026-09-05 04:45 UTC could not be read (HTTP 503)') !== false,
+	'a real shortfall and an unread manifest in one pass are two answers, not one line', json_encode($r));
+check(is_array($r) && stripos($r['problem'], 'could not be read') === false,
+	'and "could not be read" never appears in what is stamped on the card');
+
 harness_finish();

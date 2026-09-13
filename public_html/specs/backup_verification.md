@@ -1,6 +1,6 @@
 # Backup Verification — proving a backup can be recovered without restoring it
 
-**Status:** Unbuilt, spec (2026-09-13), prepared for execution 2026-09-13. Owner
+**Status:** Built and reviewed 2026-09-13 (all five packages, review findings B1-B7 fixed); stays here until the owner's live gate below passes, then moves to implemented/. Owner
 asked for it after the 2026-09-13 backups review and called it important.
 
 **Decisions taken (owner, 2026-09-13):** level 2 every 30 days as the fleet default

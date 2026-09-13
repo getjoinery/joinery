@@ -12,6 +12,13 @@
  * whether it takes any. What it schedules here is this management node's copies,
  * under this management node's key.
  *
+ * The same pass also proves the backups it takes. Every retention listing is
+ * checked against each backup's own manifest (the shelf check, free), and every
+ * verify_every_days the node is asked to open and read its newest backup to the
+ * end (a verify_backup job, level 2). Verification is dispatched under the same
+ * concurrency cap as a backup and never on a node whose backup, stage or verify
+ * is still running.
+ *
  * Three rules keep a fleet of these from behaving like a thundering herd:
  *
  *   - each node's slot is derived from its slug, spread across a window, so
@@ -20,6 +27,13 @@
  *     slow node gets fewer backups rather than a queue;
  *   - no more than N run at once across the whole fleet.
  *
+ * @version 1.4 - a manifest the shelf check could not read is reported by the pass, not stamped as an
+ *                incomplete backup (the stamp is written only from a complete reading); the verify decision is handed the node's newest verify_backup job, so a verify
+ *                that failed on the node counts as attempted and is not re-dispatched every tick
+ * @version 1.3 - the pass verifies as well as backs up: the shelf check (level 1) runs on every
+ *                retention listing and stamps mgn_backup_shelf_problem, and a level 2 verify of the
+ *                newest backup is dispatched when the policy says one is due, under the same
+ *                concurrency cap and never beside a running backup, stage or verify
  * @version 1.2 - dispatch is gated on the node's own verified recovery key: a node without one is
  *                reported as awaiting it, not dispatched at and failed every cycle
  * @version 1.1 - build_backup_run() returns a primitive envelope only; an unpaired node throws
@@ -33,6 +47,7 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetBa
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/RecoveryKeyFleet.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupChainListHelper.php'));
 
 class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable {
 
@@ -53,6 +68,8 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 		$dispatched = array();
 		$skipped = array();
 		$problems = array();
+		$verified = array();
+		$verify_skipped = array();
 
 		foreach (FleetBackupPolicy::eligible_nodes() as $node) {
 			$policy = FleetBackupPolicy::for_node($node);
@@ -85,9 +102,52 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 				continue;
 			}
 
+			// A verify, when one is due, before the backup decision: it reads
+			// the plane-side stamps and the newest verify job only, and costs
+			// nothing unless it fires. It never runs beside a backup, a Prepare
+			// or another verify of the same node, and it takes a slot from the
+			// same concurrency budget.
+			$verify_job = ManagementJob::latestForNode($node->key, 'verify_backup');
+			if (FleetBackupPolicy::is_verify_due($policy, $node, $now, $verify_job)) {
+				$busy = self::active_backup_work($node->key);
+				if ($busy !== '') {
+					$verify_skipped[] = $slug . ' (' . $busy . ' still going)';
+				} elseif ($in_flight >= $max) {
+					$verify_skipped[] = $slug . ' (fleet concurrency limit)';
+				} elseif ($dry) {
+					$verified[] = $slug;
+					$in_flight++;
+					continue;   // the backup waits for the verify, as below
+				} else {
+					try {
+						self::dispatch_verify($node);
+						$verified[] = $slug;
+						$in_flight++;
+						// The backup of this node waits for its next tick: the
+						// verify reads the chain the backup would extend.
+						continue;
+					} catch (Throwable $e) {
+						$problems[] = $slug . ' verify: ' . $e->getMessage();
+						// Said on the card too, beside the last real result, the
+						// way a skip is: the node was not verified and this is why.
+						try {
+							$node->set('mgn_backup_verify_message', 'Could not start a verification: ' . $e->getMessage());
+							$node->save();
+						} catch (Throwable $inner) {
+							error_log('FleetBackupRun: could not record the verify problem for node '
+								. $slug . ': ' . $inner->getMessage());
+						}
+					}
+				}
+			}
+
 			$latest = ManagementJob::latestForNode($node->key, 'backup_run');
 			if ($latest && in_array($latest->get('mjb_status'), array('pending', 'running'), true)) {
 				$skipped[] = $slug . ' (previous run still going)';
+				continue;
+			}
+			if ($verify_job && in_array($verify_job->get('mjb_status'), array('pending', 'running'), true)) {
+				$skipped[] = $slug . ' (verification still going)';
 				continue;
 			}
 
@@ -132,6 +192,22 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 							// tier's storage allowance is measured against this figure and
 							// needs no meter of its own.
 							$node->set('mgn_backup_shelf_bytes', (int)($pruned['bytes'] ?? 0));
+							// The shelf check: is every backup on the shelf whole? Read
+							// from the listing just taken, one small GET per backup for
+							// its manifest. Empty when nothing is wrong; the health check
+							// turns anything else into a problem on the node's card. A
+							// manifest that could not be READ this pass is this pass's
+							// problem, said in the report; the stamp is written only from
+							// a complete reading, so a blip neither shows as an incomplete
+							// backup nor clears a real one found last time.
+							$shelf = FleetBackupRetention::check_shelf(
+								(array)($pruned['objects'] ?? array()), (string)($pruned['base'] ?? ''),
+								$target->get_credentials(), (string)$target->get('bkt_bucket'));
+							if ($shelf['unread'] !== '') {
+								$problems[] = $slug . ' shelf: ' . $shelf['unread'];
+							} else {
+								$node->set('mgn_backup_shelf_problem', $shelf['problem']);
+							}
 							$node->save();
 						} catch (Throwable $e) {
 							error_log('FleetBackupRun: could not stamp the shelf check for node '
@@ -164,6 +240,12 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 				. ' (' . implode(', ', $dispatched) . ')'
 			  : 'no nodes — none are due');
 		if ($skipped)  { $parts[] = 'skipped ' . implode(', ', $skipped); }
+		if ($verified) {
+			$parts[] = ($dry ? 'would verify ' : 'verifying ') . count($verified) . ' node'
+				. (count($verified) === 1 ? '' : 's') . ' by opening and reading the newest backup ('
+				. implode(', ', $verified) . ')';
+		}
+		if ($verify_skipped) { $parts[] = 'verification skipped ' . implode(', ', $verify_skipped); }
 		if ($problems) { $parts[] = 'problems: ' . implode('; ', $problems); }
 
 		return array(
@@ -177,12 +259,65 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 		);
 	}
 
-	/** How many manager-profile runs are already in flight across the fleet. */
+	/**
+	 * Dispatch a level 2 verify of this node's newest backup from here.
+	 *
+	 * The newest manager-profile chain on the shelf, as the Backups tab lists
+	 * it; the node picks the newest run inside it (no seq is sent). Always
+	 * level 2: a rehearsal is a person's decision, and no schedule can select
+	 * it.
+	 */
+	private static function dispatch_verify($node) {
+		$listed = BackupChainListHelper::for_node($node, 20);
+		if (!empty($listed['error'])) {
+			throw new Exception('the shelf could not be listed: ' . $listed['error']);
+		}
+		$newest = null;
+		foreach ($listed['chains'] as $chain) {
+			if (($chain['profile'] ?? '') === BackupProfile::MANAGER) { $newest = $chain; break; }
+		}
+		if ($newest === null) {
+			throw new Exception('no backup taken from here is on the shelf to verify');
+		}
+		$params = array(
+			'chain_id' => $newest['chain_id'],
+			'profile'  => BackupProfile::MANAGER,
+			'level'    => BackupVerifier::LEVEL_READ,
+		);
+		$built = JobCommandBuilder::build_verify_backup($node, $params);
+		ManagementJob::createFromBuild($node->key, 'verify_backup', $built, $params, null);
+	}
+
+	/** The job types that must not overlap a verify on one node. */
+	const BACKUP_WORK_TYPES = array('backup_run', 'stage_chain', 'verify_backup');
+
+	/**
+	 * Which backup-related job is pending or running on this node, named for
+	 * a person ('' when none). A verify reads the chain a backup may be
+	 * writing and a Prepare may be staging, so none of the three overlaps.
+	 */
+	private static function active_backup_work($node_id) {
+		$names = array('backup_run' => 'backup', 'stage_chain' => 'prepare', 'verify_backup' => 'verification');
+		foreach (self::BACKUP_WORK_TYPES as $type) {
+			$latest = ManagementJob::latestForNode((int)$node_id, $type);
+			if ($latest && in_array($latest->get('mjb_status'), array('pending', 'running'), true)) {
+				return $names[$type];
+			}
+		}
+		return '';
+	}
+
+	/**
+	 * How many backups and verifies are already in flight across the fleet.
+	 * One budget for both: a verify downloads and reads as much as a backup
+	 * uploads, and the cap is about the shelf and the network, not the kind of
+	 * job.
+	 */
 	private static function in_flight_count() {
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare(
 			"SELECT COUNT(*) FROM mjb_management_jobs
-			 WHERE mjb_job_type = 'backup_run' AND mjb_status IN ('pending', 'running')
+			 WHERE mjb_job_type IN ('backup_run', 'verify_backup') AND mjb_status IN ('pending', 'running')
 			   AND mjb_delete_time IS NULL");
 		$q->execute();
 		return (int)$q->fetchColumn();

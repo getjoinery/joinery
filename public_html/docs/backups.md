@@ -705,6 +705,163 @@ The archive's age is on the approval screen as an age, above the key box, becaus
 it is the one fact no automatic check can substitute for — a replayed archive is
 genuine, signed and openable, and only its date is wrong.
 
+## Verifying backups
+
+A backup that has never been opened is a hope. The shelf listing proves a backup
+is *present*; `restore_chain.sh --dry-run` proves it is *intact* against its
+manifest; Prepare proves the key this machine holds *opens* its envelope.
+Verification is the step that proves a backup is *recoverable*, without
+restoring it, and records the proof where people look: the site's own Backups
+page, the node's Backups tab on its management node, and the node's card on the
+management dashboard. The word every page uses is **verified restorable**, with
+a date, and the level it was proven at:
+
+| Level | Where it runs | What it does | What it proves | Cost |
+|---|---|---|---|---|
+| **Checked on the shelf** | The management node, on every retention listing | Every artifact each backup's manifest names is in the bucket listing at the recorded size, and the manifest carries its envelope | Present and complete | The listing the pass already takes, plus one small read per backup. Seconds, no disk |
+| **Opened and read** | The node (or the site itself), on a schedule | The set a restore of the run needs — the full, every incremental up to it, that run's database dump and metadata — is downloaded, checked against the manifest's sizes and hashes, decrypted with the machine's own key and read to the end: `tar -tz` for the archives, a full decompression and a header check for the dump | Decryptable and structurally sound with the key this machine holds | Downloads the whole set once; disk equal to the set, freed at the end; a minute or three |
+| **Rehearsed** | The node (or the site itself), only when a person asks | Opened and read, then the files are replayed into a scratch directory under the backup working area and the dump is loaded into a throwaway database on the machine's own PostgreSQL; what came back is counted (files, bytes, tables, rows in `usr_users` and the three largest tables) and both are deleted | Recoverable | The set plus roughly twice the site plus the database, freed at the end; a few minutes |
+
+Nothing on the live site is touched at any level. The run verified is always the
+newest: it is the one a restore would start from, and it exercises everything
+beneath it.
+
+**What no level proves, and how the ceremony closes it.** No level accepts a
+private key — for the same reason `stage_chain.php` refuses one, a key on the
+wire is a key in every job record — so none of them exercises the recovery
+private key an operator holds. That path is proven by the recovery-key ceremony
+on the Recovery Readiness page, which shows the private key opens a challenge
+sealed the way every envelope is. The two together are the proof: the ceremony
+shows the key opens an envelope, verification shows the envelope's contents are
+sound. The Backups page shows the two dates side by side for that reason.
+
+**The node's history row is the authority.** A verify stamps the run it opened
+(`bkh_verify_time`, `bkh_verify_level` 2 or 3, `bkh_verify_outcome` pass or
+fail, `bkh_verify_message` in plain words) whichever profile took the run. A
+verify that was *skipped* — not enough disk, a throwaway database that could not
+be created, a machine busy with a backup for too long — stamps the message
+only, because nothing was proven either way: the last real outcome stands and
+the skip's reason rides beside it. A request refused before anything was read
+is noted the same way. The management node's copy
+(`mgn_backup_verify_*`) is refreshed from the job's result lines and from the
+node's status report, so a verify the site ran itself is seen from the
+management node too.
+
+**A failed verify is surfaced exactly like a failed backup**, in the node's own
+words, and never triggers anything automatic — not a re-run, not a deletion,
+not a fresh full. A failing verify is a person's problem to look at.
+
+### The engine
+
+`utils/verify_backup.php` is the script a node runs (as the `verify_backup`
+agent primitive, or from the site's own scheduled task and Backups page). It
+takes JSON on stdin and nothing on argv: the chain, the profile, the level, a
+signed link to the manifest and a signed link to every object under the chain,
+keyed by bare name, and optionally the run. Everything about *what may be
+fetched* is `BackupStaging`'s, shared with Prepare, so a verify can never fetch
+something a Prepare would refuse: the manifest is read on the machine, the
+artifact list comes from `BackupChain::restore_plan()`, every fetch is checked
+against the upload ledger, and the chain key is recovered from the machine's
+own `config/backup_site_key`. `BackupVerifier` is the level 2 and 3 engine
+over an already-staged directory (`read_all`, `rehearse`, `disk_needed`).
+
+The script works in `{site}/backups/{profile}/verify-{pid}/`, under the same
+two locks as a backup run (so it never reads a chain a run is writing), checks
+free disk before downloading anything (the set for level 2; the set plus twice
+the full's files archive plus three times the dump for level 3), and removes
+its working directory, scratch tree and throwaway database on every exit path,
+including a fatal. The local sweep removes any `verify-*` directory older than
+a day that a killed process left behind.
+
+It answers with one key per line:
+
+```
+VERIFY_RESULT=pass|fail|skipped
+VERIFY_LEVEL=2|3
+VERIFY_RUN=<chain_id>/<seq>
+VERIFY_RUN_TIME=<manifest run time, UTC>
+VERIFY_ARTIFACTS=<n read>
+VERIFY_BYTES=<bytes read>
+VERIFY_FILES=<entries listed (2) or files restored (3)>
+VERIFY_TABLES=<n>                            (level 3 only)
+VERIFY_ROWS=usr_users:<n>,<table>:<n>,…      (level 3 only)
+VERIFY_DURATION=<seconds>
+VERIFY_REASON=<one line>                     (fail or skipped only)
+VERIFY_NEEDS_BYTES=<n>                       (skipped for disk only)
+VERIFY_FREE_BYTES=<n>                        (skipped for disk only)
+```
+
+Exit 0 on pass or skipped, 1 on fail, 2 on a request it could not understand. A
+skip's reason is `disk` (with both numbers, so the card can say "needs N free,
+has M"), `createdb`, or `busy`. An object retention deleted from under a verify
+in flight fails with reason `gone`, naming the object; the next pass verifies
+the newer backup, and the retention pass never holds a deletion for a verify —
+a verify must not be able to keep a backup alive.
+
+### The site's own backups
+
+A site verifies its own backups the same way: the **Backup verification**
+scheduled task (`tasks/BackupVerify.php`, switched on together with **Backup**
+by `BackupNightly`) opens and reads the site's newest own backup every
+`backup_verify_every_days` (30 by default; 0 never), signing the links from
+the site's own target through `S3Signer::presign_get` — no credential reaches
+the script. It is due when the interval has passed since the last verify (pass
+or fail) and a newer backup exists, or when nothing has ever been verified. A
+site that takes no backups of its own has nothing to verify and the task says
+so, once, as a skip. The Backups page's **Verify the newest backup** button
+runs the same thing on demand, and **Rehearse a restore** runs level 3; both
+run in the background like *Run a backup now* (the request crosses on the
+detached process's stdin, handed over on an explicit descriptor —
+`BackupVerifyLauncher::detach`), and the result lands on the run's row under
+Recent backups and in the Status box's **Last verified restorable** line. A
+verify that proves nothing either way — skipped for disk or a busy machine,
+or refused before it read anything — leaves its reason as the run's message
+with no outcome (`BackupVerifier::stamp_history` / `note_history`); the row
+says **not verified** with the reason, or **since then:** beside a proof that
+still stands, and the Status box says **Last attempt:** when it is about a
+backup no older than the last proof.
+
+`BackupVerifyLauncher` is the site side (`newest_run`, `due`, `request`, `run`,
+`start`).
+
+### Verifying by hand, with the recovery key
+
+`maintenance_scripts/sysadmin_tools/verify_backup.sh` drives the same engine
+over a chain directory an operator downloaded by hand, with a key the operator
+recovered. This is the **one verification path that exercises the recovery
+private key**, and the runbook for proving that the key in a password manager
+still opens a real backup:
+
+```bash
+# 1. Download the chain's whole directory from the bucket to DIR
+#    (manifest.json and every artifact it names).
+# 2. Recover the chain key with the recovery private key.
+php backup_envelope.php open --sidecar DIR/manifest.json \
+    --private /path/to/recovery.key --key-out /tmp/chain.key
+# 3. Open and read (level 2), or rehearse a restore (level 3).
+./verify_backup.sh --artifacts DIR --key-file /tmp/chain.key --level 2
+./verify_backup.sh --artifacts DIR --key-file /tmp/chain.key --level 3 [--seq N] [--project NAME]
+# 4. Shred the key file.
+shred -u /tmp/chain.key
+```
+
+It runs from a site's `maintenance_scripts/sysadmin_tools` (the engine is PHP
+in the `public_html` beside it, and a rehearsal uses `restore_chain.sh` and
+`restore_database.sh` from the same directory), prints the same `VERIFY_*`
+report, leaves the chain directory as it was (a rehearsal's `scratch/` is
+removed), and exits 0 on pass or skipped, 1 on fail, 2 on a request it could
+not understand. `--project` names the directory the archive carries, for a
+rehearsal; left out it is read from the archive, and a wrong name is refused.
+
+### Disk and egress
+
+Opened-and-read downloads the whole set each time; on Backblaze that is egress.
+At the monthly default on a 1 GB set it is inside the free allowance for a
+fleet of nodes; weekly across nine nodes would still be under 40 GB a month.
+A rehearsal needs scratch disk of roughly twice the site plus the database, and
+a PostgreSQL role that can create a database. Both are checked before anything
+is downloaded, and the machine says the numbers when it declines.
+
 ## The node tool
 
 `maintenance_scripts/sysadmin_tools/backup_envelope.php` reads a backup's key
@@ -752,6 +909,7 @@ other unreadable file fails the run rather than being skipped.
 | Script | What it does |
 |---|---|
 | `reconcile_site.sh` | A site's shape, read both ways: `--print-shape` records it for a backup, the default mode makes a restored site agree with the machine it landed on |
+| `verify_backup.sh` | Proves a downloaded chain restorable with a key the operator recovered — the one path that exercises the recovery private key; see [Verifying by hand](#verifying-by-hand-with-the-recovery-key) |
 | `arm_ssl_retry.sh` | Arms (or disarms) the DNS-gated certificate retry for a domain |
 
 `includes/BackupEnvelope.php` reads and writes the same format;
@@ -767,7 +925,9 @@ be started by editing a row in this site's task table. It is not active
 on install: a site with no target configured runs nothing and warns about
 nothing. Activate it on **Scheduled Tasks**, where its frequency and time are
 also set. It supports a dry run, which reports exactly what a real run would do
-without producing or deleting anything.
+without producing or deleting anything. The **Backup verification** task
+(`tasks/BackupVerify.php`) is switched on with it and proves the newest backup
+restorable on its own interval — see [Verifying backups](#verifying-backups).
 
 A run is recorded in `bkh_backup_history` before it starts and updated when it
 finishes — including when it fails. Every row carries `bkh_profile` (whose backup
@@ -827,6 +987,7 @@ plaintext and hand the restore engine a file it will not decrypt.
 | `backup_type` | `project` | Whole site, or database only |
 | `backup_mode` | `chain` | Incremental chains, or a full every time |
 | `backup_full_interval_days` | `7` | Days before a chain rolls to a fresh full |
+| `backup_verify_every_days` | `30` | Days between verifications of the newest backup by opening and reading it; 0 never |
 | `backup_retention_count` | `4` | Restore points (or chains) kept offsite |
 | `backup_output_dir` | `/backups` | Working directory backups are built in |
 | `backup_exclude` | — | Extra directory names to skip (build output, caches). A name matches a directory of that name at **any depth** — this is tar's exclude semantics, and it applies to the built-in skips (`vendor`, `cache`, `tmp`, `logs`, …) too |

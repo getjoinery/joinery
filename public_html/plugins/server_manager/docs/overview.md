@@ -197,7 +197,7 @@ The node detail page (`/admin/server_manager/node_detail?mgn_id=N&tab=...`) has 
 | Tab | Purpose |
 |-----|---------|
 | **Overview** | Status summary (health dot, disk/memory/load/postgres/version), action buttons (Check Status, Install Report on a node whose agent ships the primitive, Test Connection), recent jobs for this node, connection settings (collapsed by default), delete node. The Actions dropdown also offers **Run Plugin Installers** — queues a `run_plugin_installers` job that executes every active plugin's declared `host_installer` on the node as root (idempotent); this is how a bare-metal node picks up system-service configuration (e.g. the mail stack) after a plugin is activated, since it has no container-start moment |
-| **Backups** | Target indicator, run database/project backup, backup file browser with scan, per-file upload-to-cloud and delete, restore full project from a `.tar.gz` archive, restore from an incremental chain |
+| **Backups** | Target indicator, run database/project backup, backup file browser with scan, per-file upload-to-cloud and delete, restore full project from a `.tar.gz` archive, restore from an incremental chain; the Backups box states the last backup, the last full backup, the oldest held and **Last verified restorable**, and each run has Prepare, **Verify** and Restore |
 | **Database** | Restore from a backup file, and the record of database operations |
 | **Updates** | Version comparison (node vs management node), apply update |
 | **Jobs** | Job history filtered to this node, with status and type filters |
@@ -402,7 +402,10 @@ Only after the answer verifies does the host run the bundled, self-verifying `re
 | `retire_install_password` | The bootstrap's closing session, once every agent the install put on the machine is admitted: over the same password, write `/etc/ssh/sshd_config.d/00-joinery-agent-managed.conf` (password and keyboard-interactive authentication off, root limited to prohibit-password) and restart sshd, so the machine stops accepting it. `InstallJobExecutor` completes the job only after a fresh login with the password is refused; the provision pipeline then erases the sealed password | No |
 | `provision_certificate` | Issue the node's certificate as a primitive on the **issuer**: the node itself on bare metal, its host's own agent for a container (`for_node_id` names the site). Driven by `ProvisionPendingSsl`, which observes a certificate the machine already reports before asking | No |
 | `clone_export_arm` | Hand the SOURCE of a clone one export key for the length of a provision (empty disarms). The setting name is compiled into `utils/clone_export_arm.php` on the source | No |
-| `fleet_enroll` | Seed a new site's fleet-service URL and API key pair (three settings; the names are compiled into `utils/fleet_enroll.php`). The secret is blanked from the job row once the node answers | No || `backup_run` | This management node's own backup of a node. The node runs its backup engine — chain, envelope, upload, local sweep — with the bucket and a write-only credential supplied for that run and never stored there. What opens the archive is not supplied: the node seals to the recovery key it holds and has verified | No |
+| `fleet_enroll` | Seed a new site's fleet-service URL and API key pair (three settings; the names are compiled into `utils/fleet_enroll.php`). The secret is blanked from the job row once the node answers | No |
+| `backup_run` | This management node's own backup of a node. The node runs its backup engine — chain, envelope, upload, local sweep — with the bucket and a write-only credential supplied for that run and never stored there. What opens the archive is not supplied: the node seals to the recovery key it holds and has verified | No |
+| `stage_chain` | Put a whole backup chain back on the node, ready to restore: the plane signs a link to every object under the chain (`JobCommandBuilder::sign_chain_links`) and the node reads its own manifest, fetches what a restore of the run needs, checks each against its upload ledger and recovers the chain key from its own `backup_site_key`. The `stage_chain` **operate primitive** (script `utils/stage_chain.php`); no approval | No |
+| `verify_backup` | Prove one of the node's backups restorable without restoring it, as the `verify_backup` **operate primitive** (script `utils/verify_backup.php`, agent 1.24.0+): the same links as `stage_chain` plus a level — 2 opens and reads every artifact to the end, 3 rehearses a restore into a scratch tree and a throwaway database on the node. Nothing on the site is touched, so no approval; the schedule dispatches level 2, a person chooses 3. The `VERIFY_*` result lines stamp `mgn_backup_verify_*` (`JobResultProcessor::process_verify_backup`). See [Verifying backups](../../../docs/backups.md#verifying-backups) | No |
 | `decommission_node` | Permanently remove one container site from its shared host, as the `decommission_site` primitive on the **host's own paired agent** — the site itself approves its removal first (see [Removing a container site](#removing-a-container-site-decommission)) | **Yes** |
 
 Destructive operations auto-backup the target database before proceeding. The UI requires explicit confirmation checkboxes.
@@ -955,7 +958,7 @@ The **Backups** tab on each node includes a file browser that lists backup files
 - **Upload to cloud** — offered on rows that exist only on the node, when the node has an enabled cloud target. Creates an `upload_backup` job that pushes that one file from the node to the target. The transfer runs on the node, where the file already is; routing it through the management node would drag the archive down and push it straight back up. The local copy is kept regardless of the node's delete-after-upload setting — an operator asking for an offsite copy of a file they are looking at did not ask for that file to disappear, and deleting stays an explicit action. The button waits for the job's real verdict, so a failed transfer reports as failed with a link to the job output rather than reading as done
 - **Delete** — single Delete button per row that removes the file from every location it exists in (local, cloud, or both); the confirmation dialog names the file and locations explicitly
 - **Restore Full Project** — for `.tar.gz` archives, see the `restore_project` row in the Job Types table
-- **Backups** — one row per backup run on the node's shelf, newest first (when, full or incremental, who took it, size), with the last backup, the last full backup and the oldest backup held stated above the list; read from each chain's `manifest.json` by `BackupChainListHelper`. Restoring a run replays the last full before it and every incremental up to it, in order. Chain artifacts are deliberately absent from the flat file table above — listed there, `files-0003.tar.gz.enc` invites a restore of one incremental with no full under it, which restores nothing at all
+- **Backups** — one row per backup run on the node's shelf, newest first (when, full or incremental, who took it, size), with the last backup, the last full backup and the oldest backup held stated above the list; read from each chain's `manifest.json` by `BackupChainListHelper`. Restoring a run replays the last full before it and every incremental up to it, in order. Chain artifacts are deliberately absent from the flat file table above — listed there, `files-0003.tar.gz.enc` invites a restore of one incremental with no full under it, which restores nothing at all. **Last verified restorable** is stated with the three facts (level name, date, the node's own counts, or the reason it failed), and each run's **Verify** button opens a dialog with two choices, *Open and read* and *Rehearse a restore (needs about N free on the node)*, the room worked out from the runs' recorded sizes the way the node works it out before downloading. Either creates a `verify_backup` job; the poller reports what the node said, and a reload shows it above and on the node's card
 
 ### What a restore asks, and what it decides
 
@@ -1188,8 +1191,8 @@ The node detail Backups tab edits the policy, as one of three positions:
 - **Fleet default** stores nothing, so the node follows the fleet settings —
   including future changes to them.
 - **A schedule of its own** stores the full field set (frequency, window, mode,
-  retention, full interval), frozen against the fleet default: a value the
-  operator saw and saved is a value they chose.
+  retention, full interval, days between verifications), frozen against the
+  fleet default: a value the operator saw and saved is a value they chose.
 - **Off** stores exactly that decision, which is what lets the dashboard treat
   a node without fleet backups as somebody's choice rather than a gap.
 
@@ -1209,6 +1212,46 @@ Three rules keep a fleet from behaving like a thundering herd:
 Due is keyed on when the last run was *started*, not on whether it succeeded.
 Retrying a failing node every fifteen minutes until its next slot would hammer a
 machine that is already unwell.
+
+#### Verifying what was backed up
+
+The same pass proves the backups it takes, at two of the three levels described
+in [Verifying backups](../../../docs/backups.md#verifying-backups):
+
+- **The shelf check** runs on every retention listing, free: for each backup on
+  the node's manager shelf the pass reads the manifest (one small GET) and
+  checks every artifact it names is in the listing at the recorded size, and
+  that the manifest carries its envelope (`FleetBackupRetention::check_shelf`;
+  `compare_manifest` is the pure rule). What it finds is stamped on
+  `mgn_backup_shelf_problem` — one line in the pass's words, empty when every
+  backup is whole — and the health check turns anything else into **"A backup
+  on the shelf is incomplete"** on the node's card. It catches a partial
+  upload, an object deleted out from under retention, and a manifest rewritten
+  after its artifacts were pruned. A manifest the pass could not *read* (a
+  transport error, an HTTP status) is a fact about the pass, not the shelf: it
+  is named in the pass's report and the stamp is left as it was, so a network
+  blip is neither shown as an incomplete backup nor clears a real one found
+  last time. The check runs on every retention listing, which is once per
+  backup cycle for each node, not on every tick.
+- **Opened and read** is dispatched as a `verify_backup` job (level 2, of the
+  newest backup on the shelf) when `FleetBackupPolicy::is_verify_due()` says
+  so: the policy's `verify_every_days` is above zero (fleet default
+  `server_manager_fleet_backup_verify_every_days`, 30; 0 means never, stored
+  as a decision), the node has a successful backup from here, and either no
+  verify has ever been attempted, or the last attempt is older than the
+  interval and a newer backup exists. The last attempt is the later of the
+  node's verify stamp and the creation of its newest `verify_backup` job,
+  whatever became of that job (`FleetBackupPolicy::last_verify_attempt`): a
+  verify that fails on the node comes back as a failed job, and a failed job
+  is never folded into the node's columns, so the stamp alone would read
+  "never verified" and re-dispatch the whole download every tick. A verify
+  takes a slot from the same concurrency cap as a backup and is never
+  dispatched beside a running backup, Prepare or verify of the same node; a
+  backup due on the same tick waits for it. A failed verify is never retried
+  automatically. Level 3 is never scheduled: it is a person's choice on the
+  Backups tab.
+
+The pass message names verifies dispatched and skipped the way it names backups.
 
 #### What is reported, and what raises an alarm
 
@@ -1249,6 +1292,19 @@ everything else in the health picture is the node reporting on itself.
 
 A node with fleet backups switched off produces nothing either — that was
 somebody's decision.
+
+**Whether a backup is verified restorable is the next question the card
+answers**, from `mgn_backup_verify_*` (stamped by `process_verify_backup` from
+the job's `VERIFY_*` lines, and adopted from the node's own status report when
+the node verified itself and that is newer — `adopt_reported_verify`).
+`NodeMonitorHealth::verify_state()` gives four answers: a shelf problem (above)
+is a problem; a verify that failed is a problem, in the node's own words, with
+the note that nothing is retried automatically; a pass older than 60 days is
+**stale**, a problem; and never verified is information on a healthy card
+("Not yet verified restorable") until 45 days after the first backup from
+here, after which it is **"Backups never verified restorable"**. A verify that
+was skipped (not enough disk — "needs N free, has M" — or a busy machine)
+records only its reason, beside the last real result.
 
 #### Which key each node holds, and whether it can be backed up
 

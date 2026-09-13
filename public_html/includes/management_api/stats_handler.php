@@ -6,6 +6,10 @@
  * Output shape matches what JobResultProcessor::process_check_status produces
  * from SSH output, so the two transports populate mgn_last_status_data
  * identically.
+ *
+ * @version 1.1 - each backup profile's summary carries last_verify_time / _level / _outcome /
+ *                _message, so a management node learns of a verify the site ran itself
+ * @version 1.0
  */
 
 function stats_handler_api() {
@@ -229,6 +233,21 @@ function _mgmt_stats_backup_profile($profile) {
 		$ok->load();
 		foreach ($ok as $row) {
 			$out['last_success'] = (string)$row->get('bkh_start_time');
+		}
+
+		// When a backup of this profile was last proven restorable, from the
+		// stamp the verify left on the run it opened. A management node reads
+		// this to learn of a verify the site ran itself, so the two never
+		// disagree about whether the site's backups are verified.
+		$verified = new MultiBackupHistory(
+			array('profile' => $profile, 'verified' => true, 'deleted' => false),
+			array('bkh_verify_time' => 'DESC'), 1, 0);
+		$verified->load();
+		foreach ($verified as $row) {
+			$out['last_verify_time']    = (string)$row->get('bkh_verify_time');
+			$out['last_verify_level']   = (int)$row->get('bkh_verify_level');
+			$out['last_verify_outcome'] = (string)$row->get('bkh_verify_outcome');
+			$out['last_verify_message'] = (string)$row->get('bkh_verify_message');
 		}
 	} catch (Throwable $e) {
 		$out['error'] = 'history unreadable';

@@ -3,12 +3,14 @@
  * server_manager/backup_actions — backup browser actions.
  *
  * Input: action ∈ {refresh_list, delete_file, upload_file, download_file,
- * stage_chain, list_status} + node_id (+ target/local_path/cloud_path for
- * delete_file, local_path for upload_file, cloud_path for download_file,
- * chain_id/profile for stage_chain, job_id for list_status). Everything but
- * list_status creates a job; list_status returns the cached backup list.
- * Superadmin only (floor 10).
+ * stage_chain, verify_backup, list_status} + node_id (+ target/local_path/cloud_path
+ * for delete_file, local_path for upload_file, cloud_path for download_file,
+ * chain_id/profile[/seq] for stage_chain, chain_id/profile/level[/seq] for
+ * verify_backup, job_id for list_status). Everything but list_status creates a
+ * job; list_status returns the cached backup list. Superadmin only (floor 10).
  *
+ * @version 1.5.0 - verify_backup: prove a backup restorable on the node without restoring it, at
+ *                  level 2 (opened and read) or 3 (rehearsed into scratch), as a job like stage_chain
  * @version 1.4.0 - download_file and stage_chain: bring a cloud-only backup, or a whole
  *                  incremental chain, back onto the node so a restore has something to
  *                  restore from. Neither sends a bucket credential — the object is signed
@@ -277,6 +279,32 @@ function backup_actions_logic(array $input): LogicResult {
 		return LogicResult::render(['success' => true, 'job_id' => $job->key]);
 	}
 
+	// ── Prove a backup restorable, without restoring it ─────────────────────
+	//
+	// Same links as a Prepare, plus a level: 2 opens and reads every artifact
+	// to the end on the node; 3 rehearses a restore into a scratch tree and a
+	// throwaway database there. Nothing on the site is touched, so it is a job
+	// like staging — no approval — and the node's answer lands on its card.
+	if ($action === 'verify_backup') {
+		$params = [
+			'chain_id' => trim((string)($input['chain_id'] ?? '')),
+			'profile'  => trim((string)($input['profile'] ?? '')),
+			'level'    => (int)($input['level'] ?? 0),
+		];
+		if (isset($input['seq']) && $input['seq'] !== '') {
+			$params['seq'] = (int)$input['seq'];
+		}
+
+		try {
+			$built = JobCommandBuilder::build_verify_backup($node, $params);
+		} catch (Exception $e) {
+			return LogicResult::render(['success' => false, 'message' => $e->getMessage()]);
+		}
+
+		$job = ManagementJob::createFromBuild($node->key, 'verify_backup', $built, $params, $session->get_user_id());
+		return LogicResult::render(['success' => true, 'job_id' => $job->key]);
+	}
+
 	if ($action === 'list_status') {
 		$job_id = isset($input['job_id']) ? (int) $input['job_id'] : 0;
 
@@ -326,17 +354,21 @@ function backup_actions_logic(array $input): LogicResult {
 
 function backup_actions_logic_descriptor(): array {
 	return [
-		'description' => 'Backup browser actions (refresh_list / delete_file / upload_file / list_status) for a managed node.',
+		'description' => 'Backup browser actions (refresh_list / delete_file / upload_file / download_file / stage_chain / verify_backup / list_status) for a managed node.',
 		'mutates'     => true,
 		'requires_session'        => true,
 		'auth'        => ['min_user_permission' => 10],
 		'input'       => [
-			'action'     => ['type' => 'string', 'required' => false, 'enum' => ['refresh_list', 'delete_file', 'upload_file', 'download_file', 'stage_chain', 'list_status'], 'label' => 'Action'],
+			'action'     => ['type' => 'string', 'required' => false, 'enum' => ['refresh_list', 'delete_file', 'upload_file', 'download_file', 'stage_chain', 'verify_backup', 'list_status'], 'label' => 'Action'],
 			'node_id'    => ['type' => 'int',    'required' => false, 'label' => 'Node ID'],
 			'job_id'     => ['type' => 'int',    'required' => false, 'label' => 'Job ID (list_status)'],
 			'target'     => ['type' => 'string', 'required' => false, 'label' => 'Delete target'],
 			'local_path' => ['type' => 'string', 'required' => false, 'label' => 'Local path'],
 			'cloud_path' => ['type' => 'string', 'required' => false, 'label' => 'Cloud path'],
+			'chain_id'   => ['type' => 'string', 'required' => false, 'label' => 'Backup set (stage_chain / verify_backup)'],
+			'profile'    => ['type' => 'string', 'required' => false, 'label' => 'Whose shelf: site or manager'],
+			'seq'        => ['type' => 'int',    'required' => false, 'label' => 'Run within the set (default newest)'],
+			'level'      => ['type' => 'int',    'required' => false, 'label' => 'Verify level: 2 open and read, 3 rehearse (verify_backup)'],
 		],
 	];
 }

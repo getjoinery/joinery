@@ -628,6 +628,29 @@ supports dry run. See the
 [Server Manager overview](/plugins/server_manager/docs/overview.md) for the
 policy model and the `backup_run` job type.
 
+The same pass proves the backups it takes. Every retention listing is checked
+against each backup's own manifest (the shelf check, stamped on
+`mgn_backup_shelf_problem`), and when a node's policy says a verification is
+due (`verify_every_days`, fleet default 30) the pass dispatches a
+`verify_backup` job that opens and reads the node's newest backup to the end
+on the node — under the same concurrency cap, never beside a running backup,
+Prepare or verify of that node. See
+[Verifying backups](backups.md#verifying-backups).
+
+### BackupVerify — a site proving its own newest backup restorable
+
+The core **Backup verification** task (`tasks/BackupVerify.php`, daily) is
+switched on together with **Backup** by `BackupNightly`. Every
+`backup_verify_every_days` (30 by default; 0 never) it opens and reads the
+site's newest own backup: every archive the backup depends on is downloaded
+from the site's target with links the site signs itself, decrypted with the
+site's own key and read to the end, then removed. Nothing on the site is
+touched. The result is stamped on the backup's own history row, where the
+Backups page shows it as verified restorable. A site that takes no backups of
+its own has nothing to verify and the task skips, saying so; a dry run names
+the backup it would open and how big it is. It only ever runs level 2 — a
+rehearsal (level 3) is the Backups page's own button, a person's choice.
+
 ## Related Files
 
 | File | Purpose |
@@ -642,7 +665,8 @@ policy model and the `backup_run` job type.
 | `tasks/WeeklyEventsDigest.php` | Example email digest task |
 | `plugins/store/tasks/ReconcileSubscriptions.php` | Subscription backstop across all providers |
 | `plugins/mailbox/tasks/MailboxRelayReconcile.php` | Example ordered-phase task |
-| `plugins/server_manager/tasks/FleetBackupRun.php` | Fleet backup dispatch (manager profile) |
+| `plugins/server_manager/tasks/FleetBackupRun.php` | Fleet backup dispatch (manager profile), the shelf check and `verify_backup` dispatch |
+| `tasks/BackupVerify.php` | A site opening and reading its own newest backup on its interval |
 | `migrations/migration_scheduled_tasks_init.php` | Setup migration |
 
 ### Ordered-phase tasks

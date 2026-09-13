@@ -32,6 +32,9 @@
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
+ * @version 1.14
+ * @changelog 1.14 - The Backups step treats the nightly backup and its verification as one item:
+ *   BackupNightly switches both on, so the backup task being on is the whole answer.
  * @version 1.13
  * @changelog 1.13 - interruptExempt(): the login interrupt's exemption list in one place,
  *   now including /profile/security and /verify-stepup so the encryption step's
@@ -705,6 +708,8 @@ class SetupSteps {
 				require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
 				$key_ok = BackupRecoveryKey::is_ready();
 				require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
+				// Backup and its verification are one item: BackupNightly switches
+				// them on together, so the nightly backup being on is the answer.
 				$tasks = new MultiScheduledTask(array('task_class' => 'BackupRun', 'active' => true, 'deleted' => false));
 				$task_ok = $tasks->count_all() > 0;
 				if ($target_ok && $key_ok && $task_ok) {

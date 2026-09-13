@@ -11,6 +11,8 @@
  * So chains are listed as chains: one row per chain, with the runs inside it as
  * the restore points, read from the manifest that is the restore contract.
  *
+ * @version 1.2 - each run also carries its artifacts' sizes by kind (files, db, meta), so a page can
+ *                say how much room a rehearsal of that run needs without reading the manifest again
  * @version 1.1 - the shelf is resolved via JobCommandBuilder::get_target(), so a node that names no
  *                target still has its chains listed (from the sole enabled shelf) instead of appearing
  *                to have no restore points
@@ -50,7 +52,8 @@ class BackupChainListHelper {
 	/**
 	 * Chains on this node's shelf, newest first.
 	 *
-	 * Each: ['chain_id', 'created', 'updated', 'runs' => [['seq','level','time','bytes']], 'bytes'].
+	 * Each: ['chain_id', 'created', 'updated', 'runs' => [['seq','level','time','bytes',
+	 * 'artifacts' => [kind => bytes]]], 'bytes'].
 	 * Returns ['chains' => [...], 'error' => ?string]. An unreachable shelf is an
 	 * error to report, never an empty list — "no restore points" and "we could
 	 * not ask" must not look the same.
@@ -120,12 +123,17 @@ class BackupChainListHelper {
 			$runs = [];
 			foreach ($m['runs'] as $r) {
 				$bytes = 0;
-				foreach (($r['artifacts'] ?? []) as $a) { $bytes += (int)($a['bytes'] ?? 0); }
+				$by_kind = [];
+				foreach (($r['artifacts'] ?? []) as $kind => $a) {
+					$bytes += (int)($a['bytes'] ?? 0);
+					$by_kind[(string)$kind] = (int)($a['bytes'] ?? 0);
+				}
 				$runs[] = [
-					'seq'   => (int)($r['seq'] ?? count($runs)),
-					'level' => (int)($r['level'] ?? 1),
-					'time'  => (string)($r['time'] ?? ''),
-					'bytes' => $bytes,
+					'seq'       => (int)($r['seq'] ?? count($runs)),
+					'level'     => (int)($r['level'] ?? 1),
+					'time'      => (string)($r['time'] ?? ''),
+					'bytes'     => $bytes,
+					'artifacts' => $by_kind,
 				];
 			}
 

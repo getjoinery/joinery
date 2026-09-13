@@ -13,6 +13,12 @@
  * on that site's schedule, under its own key, and are not this management node's
  * to schedule, count or alarm about.
  *
+ * @version 1.2 - is_verify_due() keys the last verify on the ATTEMPT — the later of the node's stamp
+ *                and its newest verify_backup job's creation, whatever that job's status — so a
+ *                verify that failed on the node is not re-dispatched every tick; and no settling
+ *                wait after the first backup (last_verify_attempt is the shared reader)
+ * @version 1.1 - verify_every_days: how often a node's newest backup is verified restorable by
+ *                opening and reading it (30 by default, 0 never); is_verify_due() is the rule
  * @version 1.0
  */
 
@@ -29,7 +35,19 @@ class FleetBackupPolicy {
 		'type'               => 'project',
 		'keep'               => 4,
 		'full_interval_days' => 7,
+		// Days between verifications of the newest backup, by opening and
+		// reading it on the node. 0 means never — stored as a decision, like
+		// backups-off. The scheduled verify is always level 2; a rehearsal
+		// (level 3) is only ever asked for by a person and no schedule can
+		// select it.
+		'verify_every_days'  => 30,
 	);
+
+	/** A node never verified reads as a problem this long after its first backup. */
+	const NEVER_VERIFIED_GRACE_DAYS = 45;
+
+	/** A verify older than this is stale, whatever the policy interval says. */
+	const VERIFY_STALE_DAYS = 60;
 
 	/**
 	 * The effective policy for one node: fleet defaults, then the site's own
@@ -114,6 +132,7 @@ class FleetBackupPolicy {
 			'type'               => self::DEFAULTS['type'],
 			'keep'               => (int)($input['policy_keep'] ?? self::DEFAULTS['keep']),
 			'full_interval_days' => (int)($input['policy_full_interval_days'] ?? self::DEFAULTS['full_interval_days']),
+			'verify_every_days'  => (int)($input['policy_verify_every_days'] ?? self::DEFAULTS['verify_every_days']),
 		));
 	}
 
@@ -129,6 +148,7 @@ class FleetBackupPolicy {
 			'mode'               => 'server_manager_fleet_backup_mode',
 			'keep'               => 'server_manager_fleet_backup_keep',
 			'full_interval_days' => 'server_manager_fleet_backup_full_interval_days',
+			'verify_every_days'  => 'server_manager_fleet_backup_verify_every_days',
 		);
 		foreach ($map as $field => $setting) {
 			$value = $settings->get_setting($setting, true, true);
@@ -152,6 +172,7 @@ class FleetBackupPolicy {
 		$p['type']      = ((string)$p['type'] === 'database') ? 'database' : 'project';
 		$p['keep']      = max(1, (int)$p['keep']);
 		$p['full_interval_days'] = max(0, (int)$p['full_interval_days']);
+		$p['verify_every_days']  = max(0, (int)($p['verify_every_days'] ?? self::DEFAULTS['verify_every_days']));
 		$p['day_of_week'] = max(0, min(6, (int)$p['day_of_week']));
 		$p['window_minutes'] = max(1, (int)$p['window_minutes']);
 		if (!preg_match('/^([01]\d|2[0-3]):([0-5]\d)$/', (string)$p['window_start'])) {
@@ -218,5 +239,84 @@ class FleetBackupPolicy {
 		}
 
 		return true;
+	}
+
+	/**
+	 * Whether this node's newest backup is due to be verified restorable.
+	 *
+	 * Due when the policy asks for verification at all (verify_every_days > 0),
+	 * the node has a successful backup from here, and either
+	 *
+	 *   - no verify has ever been attempted, or
+	 *   - the last attempt is older than verify_every_days and a successful
+	 *     backup has been taken since it.
+	 *
+	 * "Attempted" is the word: the last verify is the LATER of the node's
+	 * verify stamp and the creation of its newest verify_backup job, whatever
+	 * became of that job. A verify that failed on the node comes back as a
+	 * failed job, and a failed job is never folded into the node's columns, so
+	 * the stamp alone would say "never verified" and re-dispatch the whole
+	 * download every tick until one passed. Keyed on the attempt, as is_due()
+	 * is for backups, a failing verify runs once per interval and is surfaced
+	 * as a problem by the health check in between. A pending or running job
+	 * counts the same way, so the rule never asks for a second verify beside
+	 * the first.
+	 *
+	 * No settling wait after the first backup: the stamp a backup leaves is
+	 * written from the node's own completed result, so the upload it names has
+	 * landed. The busy check in the pass keeps a verify off a chain a backup is
+	 * still extending.
+	 *
+	 * Reads the node's plane-side stamps and the one job row the pass already
+	 * holds, so it costs nothing per tick.
+	 *
+	 * @param string $now UTC 'Y-m-d H:i:s'
+	 * @param object|null $last_verify_job the node's newest verify_backup job, any status
+	 */
+	public static function is_verify_due(array $policy, $node, string $now, $last_verify_job = null): bool {
+		$every = (int)($policy['verify_every_days'] ?? 0);
+		if ($every <= 0) {
+			return false;
+		}
+		$now_ts = strtotime($now . ' UTC');
+		if ($now_ts === false) { return false; }
+
+		if ((string)$node->get('mgn_last_backup_outcome') !== 'success') {
+			return false;
+		}
+		$last_backup = trim((string)$node->get('mgn_last_backup_time'));
+		$backup_ts = ($last_backup !== '') ? strtotime($last_backup . ' UTC') : false;
+		if ($backup_ts === false) {
+			return false;
+		}
+
+		$verify_ts = self::last_verify_attempt($node, $last_verify_job);
+		if ($verify_ts === false) {
+			return true;    // never attempted, and there is a backup to prove
+		}
+		if ($backup_ts <= $verify_ts) {
+			return false;   // nothing newer than what was last verified
+		}
+		return ($now_ts - $verify_ts) >= ($every * 86400);
+	}
+
+	/**
+	 * When a verify of this node was last attempted: the later of the node's
+	 * verify stamp and the newest verify_backup job's creation. False when
+	 * neither exists.
+	 *
+	 * @return int|false
+	 */
+	public static function last_verify_attempt($node, $last_verify_job = null) {
+		$last_verify = trim((string)$node->get('mgn_backup_verify_time'));
+		$stamp_ts = ($last_verify !== '') ? strtotime($last_verify . ' UTC') : false;
+		$job_ts = false;
+		if ($last_verify_job) {
+			$created = trim((string)$last_verify_job->get('mjb_create_time'));
+			$job_ts = ($created !== '') ? strtotime($created . ' UTC') : false;
+		}
+		if ($stamp_ts === false) { return $job_ts; }
+		if ($job_ts === false) { return $stamp_ts; }
+		return max($stamp_ts, $job_ts);
 	}
 }

@@ -2,6 +2,7 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.18 - verify_backup has a claim budget sized to the agent's declared three hours
  * @version 1.17 - createJob() refuses a step list for anything but a bootstrap job. The agent's local
  *                 queue is gone, so InstallJobExecutor is the only step executor left and a step
  *                 list filed under any other type would sit 'pending' for ever
@@ -243,6 +244,9 @@ class ManagementJob extends SystemBase {
 		// A whole chain: a full plus every incremental, each of them possibly
 		// gigabytes. Sized to the agent's own declaration for it.
 		'stage_chain'           => 8700,  // 2h20m + slack
+		// A whole chain's transfer plus reading every byte of it, plus at level
+		// 3 a replay and a database load. Sized to the agent's declared 3h.
+		'verify_backup'         => 11400, // 3h + slack
 		// Removing a container site from its host: the teardown is minutes,
 		// the victim's approval window is the hour. Sized above the agent's
 		// declared 15m + ApprovalWindow.

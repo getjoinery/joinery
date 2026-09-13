@@ -2,6 +2,10 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.15 - mgn_backup_verify_time / _level / _outcome / _message: when this node last proved
+ *                 one of its backups restorable, stamped from the verify_backup job result and the
+ *                 status report; mgn_backup_shelf_problem: what the fleet pass's shelf check found
+ *                 wrong with a backup on the shelf, empty when every backup is whole
  * @version 1.14 - managed_by(): which management node this site's own agent is connected to, from the
  *                 agent_join_state setting; a plane that is another plane's node publishes from there
  * @version 1.13 - self_node(): the management node's record of itself, found by its own site URL.
@@ -135,6 +139,23 @@ class ManagedNode extends SystemBase {
 		// the provider returns each object's size, so the figure is free and is
 		// taken with the one credential that can see the whole shelf.
 		'mgn_backup_shelf_bytes'        => array('type'=>'int8'),
+		// What the fleet pass's shelf check found wrong: an artifact a manifest
+		// names that the listing does not hold, or holds at a different size,
+		// or a manifest with no envelope. One line of text, empty when every
+		// backup on the shelf is whole. Stamped on every pass from the same
+		// listing as the three columns above.
+		'mgn_backup_shelf_problem'      => array('type'=>'text'),
+		// When this node last proved one of its backups restorable, and how:
+		// level 2 (opened and read) or 3 (rehearsed), pass or fail, and the
+		// node's own words. Stamped from the verify_backup job's result lines
+		// and from the status report's backup summary (a verify the site ran
+		// itself). A verify that was skipped leaves the time alone and records
+		// the reason in the message. The node's history row is the authority;
+		// this is the management node's copy.
+		'mgn_backup_verify_time'        => array('type'=>'timestamp(6)'),
+		'mgn_backup_verify_level'       => array('type'=>'int4'),
+		'mgn_backup_verify_outcome'     => array('type'=>'varchar(20)'),
+		'mgn_backup_verify_message'     => array('type'=>'text'),
 		// Compared against the newest escrow row to detect a manually regenerated
 		// (un-escrowed) node key.
 		'mgn_enabled'             => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),

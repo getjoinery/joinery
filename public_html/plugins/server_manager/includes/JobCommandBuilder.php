@@ -8,6 +8,9 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.60 - verify_backup joins the primitive transport: build_verify_backup signs the same link
+ *                 set as stage_chain (the signing body is sign_chain_links, shared by both) and adds a
+ *                 level of 2 or 3; the node stages the set and proves it recoverable without a restore
  * @version 1.59 - retire_install_password reads sshd -T once and tests it without a pipe: under pipefail
  *                 `sshd -T | grep -q` returned 141 and a retired box read as still accepting passwords
  * @version 1.58 - a failed retire_install_password prints the effective sshd auth settings and every file that sets them
@@ -291,6 +294,10 @@ class JobCommandBuilder {
 		// How the node's first-boot install went, read off the logs it left.
 		// New in 1.23.0.
 		'install_report' => '1.23.0',
+		// Proving a backup restorable without restoring it: the node stages
+		// the set and reads it to the end, or rehearses a restore into scratch.
+		// The script it runs ships in the same release as the agent.
+		'verify_backup' => '1.24.0',
 	];
 
 	/**
@@ -1826,6 +1833,78 @@ class JobCommandBuilder {
 	}
 
 	public static function build_stage_chain_primitive($node, $params = []) {
+		$signed = self::sign_chain_links($node, $params, 'stage_chain');
+		return ['primitive' => 'stage_chain', 'params' => $signed['params']];
+	}
+
+	/**
+	 * Prove one of a node's backups recoverable, without restoring it.
+	 *
+	 * The same links stage_chain signs — every object under the chain's prefix,
+	 * keyed by bare name, the node deciding which it needs — plus a level: 2
+	 * opens and reads every artifact to the end; 3 rehearses a restore into a
+	 * scratch tree and a throwaway database on the node. Nothing on the live
+	 * site is touched at either level, which is what lets the fleet pass
+	 * dispatch a level 2 on a schedule with no approval. Level 3 is only ever
+	 * asked for by a person, and there is no schedule that can select it.
+	 *
+	 * ClassOperate on the node. The result comes back as VERIFY_* lines, read
+	 * by JobResultProcessor::process_verify_backup().
+	 */
+	public static function build_verify_backup($node, $params = []) {
+		if (!self::has_primitive($node, 'verify_backup')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot verify a backup: that needs a paired agent "
+				. 'of at least ' . self::PRIMITIVE_MIN_AGENT_VERSION['verify_backup'] . '.');
+		}
+		return self::build_verify_backup_primitive($node, $params);
+	}
+
+	public static function build_verify_backup_primitive($node, $params = []) {
+		require_once(PathHelper::getIncludePath('includes/BackupVerifier.php'));
+
+		// The level is checked before anything is listed or signed: a request
+		// for a level that does not exist should fail where the operator is
+		// standing, not after a round of presigning.
+		$level = isset($params['level']) && $params['level'] !== '' ? (int)$params['level'] : 0;
+		if (!BackupVerifier::is_runnable_level($level)) {
+			throw new Exception('Verifying a backup needs a level: 2 to open and read it, or 3 to rehearse a restore.');
+		}
+
+		$signed = self::sign_chain_links($node, $params, 'verify_backup');
+		$primitive_params = $signed['params'];
+		$primitive_params['level'] = $level;
+		return ['primitive' => 'verify_backup', 'params' => $primitive_params];
+	}
+
+	/**
+	 * Sign every object under one chain on a node's shelf, keyed by bare name.
+	 *
+	 * This is the whole of what the plane contributes to staging and to
+	 * verifying: it signs what is THERE, and the node picks from what its own
+	 * manifest names. A name in the manifest with no link here is a missing
+	 * object, and the node says so by name. The plane has no say in the chain's
+	 * layout and cannot express one — which is why the two primitives share
+	 * this body rather than each computing a link set of its own.
+	 *
+	 * The links expire with the claim budget of the primitive that carries
+	 * them ($operation), so a link never outlives its job.
+	 *
+	 * @return array ['params' => [chain_id, profile, manifest_url, artifact_urls, seq?]]
+	 */
+	/**
+	 * A shelf listing to use in place of the bucket's, for tests of the two
+	 * builders that sign links. Null in production. While set, links are
+	 * minted as https://shelf.invalid/… rather than presigned, so a test needs
+	 * no bucket credential and no network.
+	 */
+	private static $shelf_listing_for_tests = null;
+
+	public static function set_shelf_listing_for_tests(?array $listing) {
+		self::$shelf_listing_for_tests = $listing;
+	}
+
+	private static function sign_chain_links($node, array $params, $operation) {
 		require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
 		require_once(PathHelper::getIncludePath('includes/BackupChain.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupChainListHelper.php'));
@@ -1854,17 +1933,15 @@ class JobCommandBuilder {
 		$profile   = BackupProfile::normalize(trim((string)($params['profile'] ?? '')) ?: BackupProfile::MANAGER);
 		$chain_key = BackupChainListHelper::chain_path($target, $slug, $profile, $chain_id);
 
-		// Everything on the shelf under this chain, signed. Listed rather than
-		// computed: this plane signs what is THERE, and the node picks from what
-		// its own manifest names. A name in the manifest with no link here is a
-		// missing object, and the node says so by name.
-		$listing = S3Signer::list($creds, $target->get('bkt_bucket'), $chain_key . '/');
+		$listing = (self::$shelf_listing_for_tests !== null)
+			? self::$shelf_listing_for_tests
+			: S3Signer::list($creds, $target->get('bkt_bucket'), $chain_key . '/');
 		if (empty($listing) || !is_array($listing)) {
 			throw new Exception("Nothing is stored under {$chain_id} on this node's shelf, so there is "
 				. 'nothing to stage.');
 		}
 
-		$expires  = self::signed_link_seconds('stage_chain');
+		$expires  = self::signed_link_seconds($operation);
 		$manifest_url = '';
 		$artifact_urls = [];
 		foreach ($listing as $object) {
@@ -1872,8 +1949,16 @@ class JobCommandBuilder {
 			if ($key === '' || strpos($key, $chain_key . '/') !== 0) {
 				continue;
 			}
-			$name = basename($key);
-			$url  = S3Signer::presign_get($creds, $target->get('bkt_bucket'), '/' . ltrim($key, '/'), $expires);
+			// Directly under the chain, not nested. A stray object further down
+			// would take a bare name here and could shadow the link of the real
+			// artifact of that name; the manifest never names anything nested.
+			$name = substr($key, strlen($chain_key) + 1);
+			if ($name === '' || strpos($name, '/') !== false) {
+				continue;
+			}
+			$url  = (self::$shelf_listing_for_tests !== null)
+				? 'https://shelf.invalid/' . ltrim($key, '/') . '?X-Amz-Expires=' . $expires . '&X-Amz-Signature=test'
+				: S3Signer::presign_get($creds, $target->get('bkt_bucket'), '/' . ltrim($key, '/'), $expires);
 			if ($name === BackupChain::MANIFEST_NAME) {
 				$manifest_url = $url;
 				continue;
@@ -1919,7 +2004,7 @@ class JobCommandBuilder {
 				. 'single staging job can describe — start a fresh chain, or restore it from a shell.');
 		}
 
-		return ['primitive' => 'stage_chain', 'params' => $primitive_params];
+		return ['params' => $primitive_params];
 	}
 
 	/**
