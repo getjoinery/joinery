@@ -16,8 +16,9 @@ class PersonaStoryException extends SystemBaseException {}
  * refreshes what's still there, and permanently deletes what's gone —
  * a stored story row always represents a story Facebook currently offers.
  *
- * pss_position preserves the tray's own left-to-right order (the network
- * sorts unseen stories first), so the strip renders in the same order.
+ * pss_position records the tray's own left-to-right order (the network
+ * sorts unseen stories first). The feed page places a story by its first-seen
+ * time, like a post.
  */
 class PersonaStory extends SystemBase {
     public static $prefix = 'pss';

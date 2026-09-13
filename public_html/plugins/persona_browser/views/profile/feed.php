@@ -3,8 +3,9 @@
  * Persona Browser — My Feed (member)
  * URL: /profile/persona_browser/feed
  *
- * Shows stored feed posts (author, date, text, cached images, permalink).
- * New posts arrive hourly via FetchFeedTask; "Fetch now" triggers an
+ * Shows stored feed posts (author, date, text, cached images, permalink) and
+ * the network's current Stories as cards in the same list, newest-captured
+ * first. New posts arrive hourly via FetchFeedTask; "Fetch now" triggers an
  * out-of-band fetch. Experimental; Facebook only.
  */
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
@@ -65,12 +66,10 @@ $page->public_header(['title' => 'My Feed']);
         .pb-media img { width:100%; height:auto; border-radius:8px; display:block; }
         .pb-imgnote { margin-top:.6rem; font-size:.85rem; color:var(--jy-muted, #6b7280); font-style:italic; }
         .pb-link { margin-top:.6rem; font-size:.85rem; }
-        .pb-stories { display:flex; gap:.6rem; overflow-x:auto; padding-bottom:.5rem; margin-bottom:1rem; }
-        .pb-story { position:relative; flex:0 0 100px; height:160px; border-radius:12px; overflow:hidden; background:linear-gradient(160deg, #1877f2, #0a3d80); text-decoration:none; }
-        .pb-story img.pb-story-preview { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
-        .pb-story::after { content:""; position:absolute; inset:0; background:linear-gradient(to bottom, rgba(0,0,0,.25), transparent 35%, transparent 55%, rgba(0,0,0,.65)); }
-        .pb-story-avatar { position:absolute; top:.5rem; left:.5rem; width:32px; height:32px; border-radius:50%; border:3px solid #1877f2; object-fit:cover; z-index:1; background:#fff; }
-        .pb-story-name { position:absolute; left:.5rem; right:.5rem; bottom:.5rem; z-index:1; color:#fff; font-size:.75rem; font-weight:600; line-height:1.2; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+        .pb-badge-story { display:inline-block; font-size:.7rem; font-weight:700; letter-spacing:.03em; text-transform:uppercase; color:#fff; background:#1877f2; border-radius:4px; padding:.05rem .35rem; margin-right:.4rem; vertical-align:middle; }
+        .pb-story-frame { position:relative; display:block; width:min(100%, 270px); margin:.75rem auto 0; border-radius:8px; overflow:hidden; background:linear-gradient(160deg, #1877f2, #0a3d80); aspect-ratio:9/16; }
+        .pb-story-frame img.pb-story-preview { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+        .pb-story-avatar { position:absolute; top:.6rem; left:.6rem; width:40px; height:40px; border-radius:50%; border:3px solid #1877f2; object-fit:cover; z-index:1; background:#fff; }
         .pb-banner { border-radius:10px; padding:1rem 1.25rem; margin-bottom:1rem; }
         .pb-banner.info { background:#eef4ff; border:1px solid #c7d7fb; }
         .pb-banner.warn { background:#fff6e6; border:1px solid #f2d79b; }
@@ -79,7 +78,7 @@ $page->public_header(['title' => 'My Feed']);
         <div class="pb-feed">
 
             <div class="pb-toolbar">
-                <span class="jy-muted" id="pb-count"><?php echo count($items); ?> post<?php echo count($items) === 1 ? '' : 's'; ?></span>
+                <span class="jy-muted" id="pb-count"><?php echo count($items); ?> item<?php echo count($items) === 1 ? '' : 's'; ?></span>
                 <form method="post" action="/profile/persona_browser/feed">
                     <button class="jy-btn" type="submit" name="btn_fetch_now" value="1">&#8635; Refresh</button>
                 </form>
@@ -87,25 +86,6 @@ $page->public_header(['title' => 'My Feed']);
 
             <?php if (!empty($fetching)): ?>
                 <div class="pb-banner info">Checking Facebook for new posts — this takes ~30 seconds. Hit <strong>Refresh</strong> again shortly to see them.</div>
-            <?php endif; ?>
-
-            <?php if (!empty($stories)): ?>
-                <div class="pb-stories">
-                    <?php foreach ($stories as $story): ?>
-                    <a class="pb-story" href="<?php echo htmlspecialchars($story['link']); ?>" target="_blank" rel="noopener"
-                       title="<?php echo htmlspecialchars($story['author']); ?>'s story on Facebook">
-                        <?php if ($story['preview'] !== ''): ?>
-                            <img class="pb-story-preview" loading="lazy" alt=""
-                                 src="/profile/persona_browser/media?f=<?php echo urlencode($story['preview']); ?>">
-                        <?php endif; ?>
-                        <?php if ($story['avatar'] !== ''): ?>
-                            <img class="pb-story-avatar" loading="lazy" alt=""
-                                 src="/profile/persona_browser/media?f=<?php echo urlencode($story['avatar']); ?>">
-                        <?php endif; ?>
-                        <span class="pb-story-name"><?php echo htmlspecialchars($story['author']); ?></span>
-                    </a>
-                    <?php endforeach; ?>
-                </div>
             <?php endif; ?>
 
             <?php if (empty($items) && !$configured): ?>
@@ -119,6 +99,42 @@ $page->public_header(['title' => 'My Feed']);
 
             <?php else: ?>
                 <?php foreach ($items as $post): ?>
+                <?php if ($post['kind'] === 'story'): ?>
+                <article class="pb-post pb-net-<?php echo htmlspecialchars($post['persona']); ?> pb-story-card"
+                         data-author="<?php echo htmlspecialchars($post['author']); ?>">
+                    <div class="pb-head">
+                        <span class="pb-author">
+                            <?php if ($post['persona'] === 'facebook'): ?>
+                                <span class="pb-badge-net" title="Facebook"><svg viewBox="0 0 320 512" aria-hidden="true"><path d="M80 299.3V512H196V299.3h86.5l18-97.8H196V166.9c0-51.7 20.3-71.5 72.7-71.5c16.3 0 29.4 .4 37 1.2V7.9C291.4 4 256.4 0 236.2 0C129.3 0 80 50.5 80 159.4v42.1H14v97.8H80z"/></svg></span>
+                            <?php endif; ?>
+                            <span class="pb-badge-story">Story</span>
+                            <?php echo htmlspecialchars($post['author'] !== '' ? $post['author'] : 'Unknown'); ?>
+                        </span>
+                        <span class="pb-headside">
+                            <?php if (!empty($post['seen'])): ?>
+                                <span class="pb-date" title="When this story was first captured"><?php echo htmlspecialchars($post['seen']); ?></span>
+                            <?php endif; ?>
+                        </span>
+                    </div>
+                    <a class="pb-story-frame" href="<?php echo htmlspecialchars($post['link']); ?>" target="_blank" rel="noopener noreferrer"
+                       title="<?php echo htmlspecialchars($post['author']); ?>'s story on Facebook">
+                        <?php if ($post['preview'] !== ''): ?>
+                            <img class="pb-story-preview" loading="lazy" alt=""
+                                 src="/profile/persona_browser/media?f=<?php echo urlencode($post['preview']); ?>">
+                        <?php endif; ?>
+                        <?php if ($post['avatar'] !== ''): ?>
+                            <img class="pb-story-avatar" loading="lazy" alt=""
+                                 src="/profile/persona_browser/media?f=<?php echo urlencode($post['avatar']); ?>">
+                        <?php endif; ?>
+                    </a>
+                    <?php if ($post['link'] !== ''): ?>
+                        <div class="pb-link">
+                            <a href="<?php echo htmlspecialchars($post['link']); ?>" target="_blank" rel="noopener noreferrer">View story on Facebook &#8599;</a>
+                        </div>
+                    <?php endif; ?>
+                </article>
+                <?php continue; ?>
+                <?php endif; ?>
                 <article class="pb-post pb-net-<?php echo htmlspecialchars($post['persona']); ?><?php echo !empty($post['is_ad']) ? ' is-ad' : ''; ?>"
                          data-item-id="<?php echo (int)$post['id']; ?>"
                          data-author="<?php echo htmlspecialchars($post['author']); ?>">
@@ -212,7 +228,7 @@ document.addEventListener('DOMContentLoaded', function () {
         article.remove();
         var count = feed.querySelectorAll('.pb-post').length;
         var label = document.getElementById('pb-count');
-        if (label) label.textContent = count + ' post' + (count === 1 ? '' : 's');
+        if (label) label.textContent = count + ' item' + (count === 1 ? '' : 's');
     }
 
     // Long posts start clamped; a "Show more" toggle appears only when the
@@ -245,7 +261,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         var article = e.target.closest('.pb-post');
-        if (!article) return;
+        if (!article || !article.dataset.itemId) return;   // story cards carry no actions
         var itemId = parseInt(article.dataset.itemId, 10);
 
         if (e.target.closest('.pb-hide-btn')) {
