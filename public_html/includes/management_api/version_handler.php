@@ -3,6 +3,8 @@
  * GET /api/v1/management/version
  *
  * Detailed version info — system version, schema version, plugin versions.
+ *
+ * @version 1.1 - an uninstalled plugin's row is not a version this node runs (specs/post_release_fleet_defects.md B1)
  */
 
 function version_handler_api() {
@@ -34,7 +36,9 @@ function version_handler($request) {
 		$plugins->load();
 		foreach ($plugins as $p) {
 			$name = $p->get('plg_name');
-			if ($name) {
+			// An uninstalled row is the record of a plugin this node no
+			// longer has, not a version it runs.
+			if ($name && !$p->is_uninstalled()) {
 				$result['plugin_versions'][$name] = $p->get_version();
 			}
 		}

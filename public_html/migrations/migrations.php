@@ -631,15 +631,13 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
-	// ========== Collapse legacy plg_status='uninstalled' rows (v105) ==========
-	// The three-state lifecycle removes the 'uninstalled' status; any existing
-	// rows represent an operator's committed intent to uninstall that was left
-	// partially done under the old model. Finish the destructive half.
-	$migration = array();
-	$migration['database_version'] = '105';
-	$migration['migration_file'] = 'cleanup_uninstalled_plugins.php';
-	$migration['migration_sql'] = NULL;
-	$migrations[] = $migration;
+	// REMOVED: v105 (cleanup_uninstalled_plugins.php) deleted every
+	// plg_status='uninstalled' row for a model that had no such state. The
+	// state is back (specs/post_release_fleet_defects.md B1: a record with
+	// its data and files removed), every node has the v105 hash row, and a
+	// fresh install has no rows for it to find. A file migration is tracked
+	// by content hash, so leaving it in place would have re-run it - and
+	// deleted the records it now exists to keep - on any later edit.
 
 	// =============================================================================
 	// DECLARATIVE PROFILE MENU — shared menu infrastructure

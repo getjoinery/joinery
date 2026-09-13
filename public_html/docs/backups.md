@@ -474,7 +474,13 @@ and say so on its dashboard — see
 ## Uploads
 
 Artifacts reach the bucket through `S3Signer` — hand-rolled SigV4 against any
-S3-compatible endpoint, so the backup path carries no SDK dependency. An
+S3-compatible endpoint, so the backup path carries no SDK dependency. A
+Backblaze credential needs the account's region and S3 endpoint to sign, and
+the forms hide both: `BackupTarget::complete_credentials()` fills them from
+Backblaze's own authorize answer at save time, and `get_credentials()` fills
+them on read for a row that still lacks either, writing the completed
+credential back once (a server-initiated reconciliation) so the signer never
+sees an incomplete B2 credential. An
 artifact of 1 GiB or less goes up as one signed streamed PUT. Above that,
 `put_file()` switches to the **multipart API** on its own: no setting, no
 caller involvement. The threshold sits deliberately far below the 5 GB
@@ -768,6 +774,15 @@ finishes — including when it fails. Every row carries `bkh_profile` (whose bac
 it was) and `bkh_recovery_fpr` (which private key opens it), so a restore never
 has to infer from today's settings what was true when the archive was made. A site whose backups have been failing for a
 month looks identical to a healthy one if only successes are written down.
+
+**A failed site run is an admin notice.** From the first failure, every admin
+page (superadmin) carries the notice (`includes/SiteBackupNotice.php`, a core
+`AdminNotices` renderer): when the run failed, which target, and the engine's
+last line (`bkh_message`, colour codes stripped, the last `|`-joined segment).
+It reads the newest site-profile row; a run still recorded as running is not a
+failure, and a manager-profile row never speaks for the site's own backup. The
+next site-profile success clears it. A site that has never configured a target
+has no row and hears nothing.
 
 Because manager-profile rows land in the site's own database, the site can
 answer "does someone back me up?" locally: `BackupHistory::manager_coverage()`

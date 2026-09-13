@@ -17,6 +17,8 @@
  *
  * Run: php tests/unit/marketplace_client_test.php
  *
+ * @version 1.2 - published_names(): the day-old copy answers, a stale copy
+ *                stands in for a source that cannot be reached
  * @version 1.1 - install() is a root request (specs/package_signing.md WP4)
  */
 
@@ -208,6 +210,48 @@ check($same_request->validateCSRF(array('_csrf_token' => $same_request->getCSRFT
 
 check($same_request->validateCSRF(array('_csrf_token' => '')) === false, 'An empty token is refused');
 check($same_request->validateCSRF(array()) === false, 'A missing token is refused');
+
+// ------------------------------------------------- published_names(): the copy
+
+section('published_names answers from the day-old copy');
+
+// The copy lives in the site's cache/; whatever is there is put back after.
+$copy_file = PathHelper::getSiteRoot() . '/cache/marketplace_plugins.json';
+$had_copy = is_file($copy_file) ? file_get_contents($copy_file) : null;
+$had_mtime = is_file($copy_file) ? filemtime($copy_file) : null;
+harness_defer(function () use ($copy_file, $had_copy, $had_mtime) {
+	if ($had_copy === null) {
+		@unlink($copy_file);
+	} else {
+		file_put_contents($copy_file, $had_copy);
+		@touch($copy_file, $had_mtime);
+	}
+});
+
+check(mkt_threw(function () { MarketplaceClient::published_names('widgets'); }, 'InvalidArgumentException'),
+	'An unknown type is refused');
+
+file_put_contents($copy_file, json_encode(array('fetched' => time(), 'names' => array('alpha', 'beta'))));
+touch($copy_file, time() - 60);
+check(MarketplaceClient::published_names('plugins') === array('alpha', 'beta'),
+	'A fresh copy answers without the source being asked');
+check(filemtime($copy_file) <= time() - 59, 'and is not rewritten');
+
+// A copy older than a day is refreshed - on this box the source is not
+// reachable from a safe-tier test (no upgrade_source, or a fetch that fails),
+// and then the stale copy stands rather than nothing.
+touch($copy_file, time() - MarketplaceClient::PUBLISHED_NAMES_MAX_AGE - 5);
+$answer = MarketplaceClient::published_names('plugins');
+check(is_array($answer) && count($answer) >= 2,
+	'A stale copy is refreshed from the source, or stands when the source does not answer');
+check(in_array('alpha', $answer, true) || filemtime($copy_file) > time() - 60,
+	'either the stale names came back or a fresh copy was written');
+
+file_put_contents($copy_file, 'not json');
+touch($copy_file, time() - 60);
+$answer = MarketplaceClient::published_names('plugins');
+check($answer === null || (is_array($answer) && filemtime($copy_file) > time() - 60),
+	'A corrupt copy is ignored: the source is asked, and with no answer nothing is known (null)');
 
 harness_finish();
 ?>

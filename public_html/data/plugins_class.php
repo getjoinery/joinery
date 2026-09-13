@@ -11,9 +11,16 @@ class PluginNotSentException extends PluginException {};
 /**
  * Plugin — a plugin's database row.
  *
+ * @version 1.2 - the `uninstalled` status: uninstall keeps the row as the record
+ *                (plg_uninstalled_time) while root removes the files
+ *                (specs/post_release_fleet_defects.md B1)
  * @version 1.1 - plg_trust records who built the installed files (specs/package_signing.md WP3)
  */
-class Plugin extends SystemBase {	public static $prefix = 'plg';
+class Plugin extends SystemBase {
+	/** The status uninstall leaves behind (see plg_status). */
+	const STATUS_UNINSTALLED = 'uninstalled';
+
+	public static $prefix = 'plg';
 	public static $tablename = 'plg_plugins';
 	public static $pkey_column = 'plg_plugin_id';
 
@@ -40,7 +47,11 @@ class Plugin extends SystemBase {	public static $prefix = 'plg';
 	    'plg_installed_time' => array('type'=>'timestamp(6)'),
 	    'plg_last_activated_time' => array('type'=>'timestamp(6)'),
 	    'plg_last_deactivated_time' => array('type'=>'timestamp(6)'),
+	    // active | inactive | error | stale | uninstalled. `uninstalled` is the
+	    // record uninstall leaves: data gone, row kept, files removed by root
+	    // (RootRequest 'remove_plugin'); the one action on it is Install.
 	    'plg_status' => array('type'=>'varchar(20)'),
+	    'plg_uninstalled_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	    'plg_install_error' => array('type'=>'text'),
 	    'plg_metadata' => array('type'=>'text'),
 	    'plg_receives_upgrades' => array('type'=>'bool', 'default'=>true),
@@ -76,6 +87,26 @@ function authenticate_write($data) {
 	}
 	
 	/**
+	 * Uninstalled: data removed, row kept as the record, files removed by root
+	 * or already gone. Not an installed plugin for any list that means one.
+	 * @return bool
+	 */
+	public function is_uninstalled() {
+		return $this->get('plg_status') === self::STATUS_UNINSTALLED;
+	}
+
+	/**
+	 * The root request that removes this plugin's files, recorded by
+	 * PluginManager::uninstall() under a runtime key in plg_metadata (a `_`
+	 * key survives sync's metadata refresh). '' when none was queued.
+	 * @return string
+	 */
+	public function get_remove_request_id() {
+		$meta = json_decode((string)$this->get('plg_metadata'), true);
+		return is_array($meta) && isset($meta['_remove_request_id']) ? (string)$meta['_remove_request_id'] : '';
+	}
+
+	/**
 	 * Get plugin by plugin name
 	 * @param string $plugin_name Plugin directory name
 	 * @return Plugin|null
@@ -109,6 +140,9 @@ function authenticate_write($data) {
 				return '<span class="badge bg-info">Installed</span>';
 			case 'error':
 				return '<span class="badge bg-danger">Error</span>';
+			case self::STATUS_UNINSTALLED:
+				$when = $this->get('plg_uninstalled_time') ? ' ' . $this->get_local('plg_uninstalled_time', 'Y-m-d') : '';
+				return '<span class="badge bg-secondary">Uninstalled' . htmlspecialchars($when) . '</span>';
 			default:
 				if ($this->is_active()) {
 					return '<span class="badge bg-success">Active</span>';
@@ -370,10 +404,13 @@ class MultiPlugin extends SystemMultiBase {
             $plugins[] = $plugin_data;
         }
         
-        // Check for orphaned database records (plugins in DB but not on filesystem)
+        // Check for orphaned database records (plugins in DB but not on filesystem).
+        // An uninstalled row with no directory is not an orphan: it is the
+        // record uninstall leaves once root has removed the files.
         foreach ($plugins_lookup as $plugin_name => $plugin) {
             $plugin_path = $plugins_dir . '/' . $plugin_name;
             if (!is_dir($plugin_path)) {
+                $uninstalled = $plugin->is_uninstalled();
                 $plugin_data = array(
                     'name' => $plugin_name,
                     'directory_exists' => false,
@@ -383,9 +420,9 @@ class MultiPlugin extends SystemMultiBase {
                     'audience' => array(),
                     'plugin' => $plugin,
                     'is_active' => $plugin->is_active(),
-                    'status_badge' => '<span class="badge bg-warning">Missing</span>',
+                    'status_badge' => $uninstalled ? $plugin->get_status_badge() : '<span class="badge bg-warning">Missing</span>',
                     'display_name' => $plugin->get_display_name(),
-                    'description' => 'Plugin directory not found',
+                    'description' => $uninstalled ? 'Data and files removed' : 'Plugin directory not found',
                     'version' => null,
                     'author' => null
                 );

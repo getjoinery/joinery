@@ -19,6 +19,7 @@
  *
  * Run: php tests/unit/root_request_test.php
  *
+ * @version 1.2 - remove_plugin is a kind; root's checks before it deletes a plugin directory (specs/post_release_fleet_defects.md B1)
  * @version 1.1 - install_package is a kind, because root verifies before it moves (specs/package_signing.md WP3)
  * @version 1.0
  */
@@ -94,7 +95,83 @@ check(strpos($installer, "'unsigned_package_installed'") !== false
 // Every kind either fetches from the configured upgrade source and verifies,
 // verifies a staged upload, or writes something that is not executed. If that
 // stops being true, this is the check that should stop it.
-check(count(RootRequest::KINDS) === 8, 'there are eight kinds', implode(', ', RootRequest::KINDS));
+check(count(RootRequest::KINDS) === 9, 'there are nine kinds', implode(', ', RootRequest::KINDS));
+
+section('remove_plugin: root deletes a plugin directory only when the row and the manifest agree it may');
+
+// The file half of a plugin uninstall (specs/post_release_fleet_defects.md B1).
+// The queue is www-data-writable, so the request proves nothing; every check
+// below is what root does before it deletes, run here against a scratch
+// plugins directory and rows built by hand.
+check(in_array('remove_plugin', RootRequest::KINDS, true), "'remove_plugin' is a kind");
+$remove_case = substr($dispatcher, strpos($dispatcher, "case 'remove_plugin'"));
+$remove_case = substr($remove_case, 0, strpos($remove_case, "\n}\n"));
+$refusal_at = strpos($remove_case, 'PluginRemoval::refusal($name, $plugins_dir, $row)');
+$remove_at  = strpos($remove_case, 'PluginRemoval::remove($name, $plugins_dir)');
+check($refusal_at !== false && $remove_at !== false && $refusal_at < $remove_at,
+	'the dispatcher asks PluginRemoval::refusal() before PluginRemoval::remove()');
+check(strpos($remove_case, "PathHelper::getAbsolutePath('plugins')") !== false,
+	'and removes under the real plugins directory, never a path the request named');
+check(strpos($remove_case, 'Plugin::get_by_plugin_name($name)') !== false,
+	'the row is read from the database, not taken from the request');
+
+$rp = harness_scratch_dir('remove_plugin');
+@mkdir($rp . '/plugins/goodplug', 0700, true);
+file_put_contents($rp . '/plugins/goodplug/plugin.json', json_encode(array('name' => 'Good', 'version' => '1.0')));
+@mkdir($rp . '/plugins/sysplug', 0700, true);
+file_put_contents($rp . '/plugins/sysplug/plugin.json', json_encode(array('name' => 'Sys', 'is_system' => true)));
+@mkdir($rp . '/elsewhere/outside', 0700, true);
+file_put_contents($rp . '/elsewhere/outside/plugin.json', '{}');
+symlink($rp . '/elsewhere/outside', $rp . '/plugins/linked');
+$plugins_dir = $rp . '/plugins';
+
+$row = function (string $status, int $active = 0, bool $system = false) {
+	$p = new Plugin(null);
+	$p->set('plg_name', 'x');
+	$p->set('plg_status', $status);
+	$p->set('plg_active', $active);
+	$p->set('plg_is_system', $system);
+	return $p;
+};
+$uninstalled = $row('uninstalled');
+
+check(PluginRemoval::refusal('../etc', $plugins_dir, $uninstalled) !== '',
+	'a name with a path separator is refused before anything is looked at');
+check(PluginRemoval::refusal('', $plugins_dir, $uninstalled) !== '', 'an empty name is refused');
+check(PluginRemoval::refusal('-rf', $plugins_dir, $uninstalled) !== '', 'a name that does not start with a letter is refused');
+check(PluginRemoval::refusal('nosuch', $plugins_dir, $uninstalled) !== '', 'a name with no directory is refused');
+check(strpos(PluginRemoval::refusal('linked', $plugins_dir, $uninstalled), 'symlink') !== false,
+	'a symlink under plugins/ is refused, so nothing outside plugins/ is ever removed');
+check(strpos(PluginRemoval::refusal('sysplug', $plugins_dir, $uninstalled), 'is_system') !== false,
+	'a manifest that says is_system is refused whatever the row says');
+check(strpos(PluginRemoval::refusal('goodplug', $plugins_dir, null), 'no database row') !== false,
+	'no row: refused');
+check(strpos(PluginRemoval::refusal('goodplug', $plugins_dir, $row('inactive')), "'inactive', not uninstalled") !== false,
+	'an inactive row is refused: only the uninstalled state means the data is gone');
+check(PluginRemoval::refusal('goodplug', $plugins_dir, $row('active', 1)) !== '', 'an active row is refused');
+check(PluginRemoval::refusal('goodplug', $plugins_dir, $row('uninstalled', 1)) !== '', 'an uninstalled row still flagged active is refused');
+check(PluginRemoval::refusal('goodplug', $plugins_dir, $row('uninstalled', 0, true)) !== '', 'a row marked is_system is refused');
+check(PluginRemoval::refusal('goodplug', $plugins_dir, $uninstalled) === '',
+	'a real directory directly under plugins/, a plain manifest and an uninstalled row: allowed');
+check(is_dir($rp . '/plugins/goodplug') && is_dir($rp . '/plugins/sysplug') && is_link($rp . '/plugins/linked'),
+	'every refusal left the directories exactly as they were');
+
+// Removal never follows a symlink inside the plugin.
+@mkdir($rp . '/plugins/goodplug/sub', 0700, true);
+file_put_contents($rp . '/plugins/goodplug/sub/a.php', '<?php');
+file_put_contents($rp . '/elsewhere/outside/keep.txt', 'keep');
+symlink($rp . '/elsewhere/outside', $rp . '/plugins/goodplug/sub/link');
+$removed = PluginRemoval::remove('goodplug', $plugins_dir);
+check(!file_exists($rp . '/plugins/goodplug'), 'remove() deletes the plugin directory');
+check($removed >= 4, 'and counts what it removed', (string)$removed);
+check(is_file($rp . '/elsewhere/outside/keep.txt'), 'a symlink inside the plugin is unlinked, its target untouched');
+
+@unlink($rp . '/plugins/linked');
+@unlink($rp . '/elsewhere/outside/keep.txt');
+@unlink($rp . '/elsewhere/outside/plugin.json');
+@rmdir($rp . '/elsewhere/outside'); @rmdir($rp . '/elsewhere');
+@unlink($rp . '/plugins/sysplug/plugin.json'); @rmdir($rp . '/plugins/sysplug');
+@rmdir($rp . '/plugins'); @rmdir($rp);
 
 section('A request names the document, never the directory');
 

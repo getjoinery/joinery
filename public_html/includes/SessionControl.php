@@ -89,6 +89,12 @@ class DisplayMessage {
 	}
 }
 
+/**
+ * @version 1.1 - The Cloudflare edge ranges are read from includes/cloudflare_ip_ranges.txt,
+ *                the one list the installer also reads (B2); a request with no User-Agent
+ *                header reads as an empty agent, which crawlerDetect() already treats as a
+ *                crawler (B4.1) (specs/post_release_fleet_defects.md).
+ */
 class SessionControl{
 
 	// Mirror of VisitorEvent::TYPE_PAGE_VIEW so save_visitor_event() can branch
@@ -313,7 +319,7 @@ class SessionControl{
 
 	static function getOS() {
 
-		$user_agent = $_SERVER['HTTP_USER_AGENT'];
+		$user_agent = $_SERVER['HTTP_USER_AGENT'] ?? '';
 
 		$os_platform  = "Unknown OS Platform";
 
@@ -352,7 +358,7 @@ class SessionControl{
 	
 	static function getBrowser() {
 
-		$user_agent = $_SERVER['HTTP_USER_AGENT'];
+		$user_agent = $_SERVER['HTTP_USER_AGENT'] ?? '';
 
 		$browser        = "Unknown Browser";
 
@@ -446,7 +452,7 @@ class SessionControl{
 		}
 		
 		//IF A CRAWLER EXIT
-		if($this->crawlerDetect($_SERVER["HTTP_USER_AGENT"])){
+		if($this->crawlerDetect($_SERVER['HTTP_USER_AGENT'] ?? '')){
 			return false;
 		}
 		
@@ -1414,16 +1420,41 @@ class SessionControl{
 		return self::get_client_ip();
 	}
 
-	/** True when $ip is inside Cloudflare's published edge ranges (www.cloudflare.com/ips). */
+	/** Where the edge range list lives, relative to public_html. */
+	const CLOUDFLARE_RANGES_FILE = 'includes/cloudflare_ip_ranges.txt';
+
+	/**
+	 * Cloudflare's published edge ranges, one CIDR per entry, read from
+	 * CLOUDFLARE_RANGES_FILE. The installer (host_housekeeping.sh) reads the
+	 * same file for Apache's RemoteIPTrustedProxy lines, so the address PHP
+	 * trusts a CF-Connecting-IP from and the address fail2ban sees in the log
+	 * are decided by one list.
+	 *
+	 * @return string[]
+	 */
+	public static function cloudflare_edge_ranges(): array {
+		static $ranges = null;
+		if ($ranges !== null) {
+			return $ranges;
+		}
+		$ranges = array();
+		$lines = @file(PathHelper::getIncludePath(self::CLOUDFLARE_RANGES_FILE), FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+		foreach (is_array($lines) ? $lines : array() as $line) {
+			$line = trim($line);
+			if ($line === '' || $line[0] === '#' || strpos($line, '/') === false) {
+				continue;
+			}
+			$ranges[] = $line;
+		}
+		if ($ranges === array()) {
+			error_log('SessionControl: ' . self::CLOUDFLARE_RANGES_FILE . ' is missing or empty; no address is treated as a Cloudflare edge');
+		}
+		return $ranges;
+	}
+
+	/** True when $ip is inside Cloudflare's published edge ranges (cloudflare_edge_ranges()). */
 	public static function ip_is_cloudflare_edge(string $ip): bool {
-		static $ranges = array(
-			'173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22',
-			'141.101.64.0/18', '108.162.192.0/18', '190.93.240.0/20', '188.114.96.0/20',
-			'197.234.240.0/22', '198.41.128.0/17', '162.158.0.0/15', '104.16.0.0/13',
-			'104.24.0.0/14', '172.64.0.0/13', '131.0.72.0/22',
-			'2400:cb00::/32', '2606:4700::/32', '2803:f800::/32', '2405:b500::/32',
-			'2405:8100::/32', '2a06:98c0::/29', '2c0f:f248::/32',
-		);
+		$ranges = self::cloudflare_edge_ranges();
 		$packed = @inet_pton($ip);
 		if ($packed === false) {
 			return false;

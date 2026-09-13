@@ -1086,13 +1086,15 @@ Joinery AI is the worked example: `plugins/joinery_ai/recipes.json` declares a f
 
 **PluginManager is the single entry point for all lifecycle operations.** Plugin models (`Plugin`, `PluginHelper`) are pure CRUD — never call lifecycle methods directly on them.
 
-Three states: `active`, `inactive`, and *uninstalled* (no row at all).
+Four states on the row: `active`, `inactive`, `error`, and `uninstalled` — the record an uninstall leaves (data gone, files removed by root, one action: Install). A plugin on disk with no row is *not installed*.
 
 ```
 Discovery → Install → Activate ↔ Deactivate → Uninstall
               ↑                                    │
               └────────────── Install ─────────────┘
 ```
+
+A plugin whose `plugin.json` says `"is_system": true` cannot be uninstalled: it is the mark that means this site cannot run without it, and the upgrade fetches it for the same reason.
 
 **Install** (`PluginManager::install($name)`)
 1. Fetches a fresh archive from the upgrade endpoint and extracts over `plugins/{name}/`, so plugins with `included_in_publish: true` on the upgrade server get current code on every install; plugins not in the publisher's catalog 404 silently and install proceeds with on-disk files.
@@ -1130,7 +1132,7 @@ Sync is the recommended way to apply schema changes after code deploys. It is al
 3. Suspends active scheduled tasks (`sct_is_active = false`) — tasks resume on reactivation
 4. Sets `plg_active = 0`
 
-**Uninstall** (`PluginManager::uninstall($name)`) — **destructive, cannot be undone.** Plugin files stay on disk; everything else is removed.
+**Uninstall** (`PluginManager::uninstall($name, $requested_by = null)`) — **destructive, cannot be undone.** Refused for an active plugin, for one other installed plugins depend on, and for one marked `is_system` (on its row or in its manifest).
 
 1. Deletes declared settings (from current `plugin.json`). Settings dropped from a later manifest version are left as orphans.
 2. Deletes declared admin menus
@@ -1139,11 +1141,14 @@ Sync is the recommended way to apply schema changes after code deploys. It is al
 5. Deletes version, dependency, and migration records
 6. Runs `uninstall.php` hook if present. Tables are still available here for external teardown (e.g., revoking cached external state).
 7. Drops plugin tables and orphan sequences
-8. Deletes the `plg_plugins` row
+8. Marks the `plg_plugins` row `uninstalled` (`plg_uninstalled_time` set, `plg_active` cleared). The row stays as the record.
+9. Queues a `remove_plugin` root request (`RootRequest`) and records its id on the row (`plg_metadata._remove_request_id`). The tree belongs to root, so the files are root's to remove: the host timer carries the request out on its next tick, minutes not releases. Returns the request id ('' when the directory was already gone).
 
-**Hook failure is fatal.** If step 6 throws or returns false, steps 7 and 8 do NOT run — tables and the row remain intact. Steps 1–5 are idempotent, so the operator fixes the hook and re-runs uninstall. Use this to guard external work: if you can't revoke an API key, don't let the plugin's local state be destroyed.
+Root does not trust the request (the queue is web-writable). Before deleting, `PluginRemoval::refusal()` checks that the name is a plugin name, that `plugins/<name>` is a real directory directly under `plugins/`, that the manifest does not say `is_system`, and that the row reads `uninstalled` and not active; any check failing leaves the directory and records why in the request's transcript. `PluginRemoval::remove()` never follows a symlink inside the plugin.
 
-**After uninstall,** the plugin appears in the admin UI as "Inactive" with an **Install** action (no DB row, files still on disk). Reinstall goes through the normal install path — on install the upgrade-endpoint refresh pulls fresh published code, so stale on-disk files don't linger.
+**Hook failure is fatal.** If step 6 throws or returns false, steps 7 to 9 do NOT run — tables and the row remain intact. Steps 1–5 are idempotent, so the operator fixes the hook and re-runs uninstall. Use this to guard external work: if you can't revoke an API key, don't let the plugin's local state be destroyed.
+
+**After uninstall,** the Plugins page shows the row as **Uninstalled {date}**: "data removed; files being removed by the host" with the request's state while the directory exists, then "data and files removed" with one action, **Install** — the same `install_plugin` root request that fetches from the upgrade source, verifies and installs. For a plugin the source no longer publishes, Install is absent and the row says so. Install clears the stamp and the request record. Every list that means "installed plugins" leaves an `uninstalled` row out: `sync()` refreshes its metadata while the directory exists and never changes its status or adds a second row; the stale marker skips it; `getDependents()` ignores it; the management API's version list and the marketplace's local names omit it; activation refuses it.
 
 **Important:** The core `update_database.php` script excludes plugins from its main pipeline (`include_plugins => false`) because plugin tables have independent lifecycles. However, `update_database` runs a plugin/theme sync as its final step, so plugin schema changes are still applied when you run it.
 

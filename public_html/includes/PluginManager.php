@@ -13,6 +13,11 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
  * This consolidated class replaces the previous multi-class structure with
  * a single cohesive manager that extends AbstractExtensionManager
  *
+ * @version 1.5 - uninstall() keeps the row as the record (`uninstalled`,
+ *                plg_uninstalled_time) and asks root to remove the files
+ *                (RootRequest 'remove_plugin'); refuses an is_system plugin;
+ *                install() clears the record; getDependents() counts only
+ *                installed plugins (specs/post_release_fleet_defects.md B1)
  * @version 1.4 - activate() creates the plugin's declared unique constraints
  *                and indexes, the pass sync() runs on every deploy; a plugin
  *                activated by hand no longer waits for the next deploy to get
@@ -737,6 +742,11 @@ class PluginManager extends AbstractExtensionManager {
      * @throws Exception to roll back the transaction
      */
     protected function onActivate($name, $model, $dblink) {
+        // An uninstalled row has no tables: activating it would run the plugin
+        // over nothing. Install is the way back.
+        if ($model->is_uninstalled()) {
+            throw new Exception("Plugin '$name' is uninstalled. Install it before activating it.");
+        }
         // Reject plugin names that conflict with system URL segments.
         // Plugin names appear directly in URLs (/{name}/*, /profile/{name}/*),
         // so they must not collide with existing system paths.
@@ -1093,10 +1103,13 @@ class PluginManager extends AbstractExtensionManager {
             // Load metadata
             $this->loadMetadataIntoModel($plugin, $name);
 
-            // Update status
+            // Update status. A row left by an uninstall comes back as an
+            // installed plugin: the stamp and the removal request are cleared.
             $plugin->set('plg_installed_time', gmdate('Y-m-d H:i:s'));
             $plugin->set('plg_status', 'inactive');
+            $plugin->set('plg_uninstalled_time', null);
             $plugin->set('plg_install_error', null);
+            $this->setRemoveRequestId($plugin, '');
             $plugin->save();
 
             if ($this_transaction) {
@@ -1121,19 +1134,27 @@ class PluginManager extends AbstractExtensionManager {
     /**
      * Uninstall a plugin — destructive. Removes scaffolding (settings, menus,
      * deletion rules, scheduled tasks, version/dependency/migration records),
-     * runs the plugin's optional uninstall.php hook, drops plugin tables, and
-     * deletes the plg_plugins row. Files on disk are preserved.
+     * runs the plugin's optional uninstall.php hook, drops plugin tables, marks
+     * the plg_plugins row `uninstalled` (the row stays as the record), and asks
+     * root to remove the files: the tree is root's, so the web side queues a
+     * `remove_plugin` root request that the host timer carries out on its next
+     * tick, minutes not releases. Root checks the row is `uninstalled` and the
+     * manifest is not is_system before it deletes anything (PluginRemoval).
      *
-     * Plugin must be inactive before calling.
+     * Plugin must be inactive before calling. A plugin marked is_system (on
+     * its row or in its manifest) is refused: it is the mark that means this
+     * node cannot be without it, and the upgrade fetches it for that reason.
      *
      * Hook failure is fatal: if the hook throws or returns false, the table
-     * drop and row deletion are skipped. Scaffolding cleanup (steps 1-5) is
-     * idempotent, so the operator can fix the hook and re-run uninstall.
+     * drop and the status change are skipped. Scaffolding cleanup (steps 1-5)
+     * is idempotent, so the operator can fix the hook and re-run uninstall.
      *
-     * @param string $name Plugin name
+     * @param string   $name         Plugin name
+     * @param int|null $requested_by Who asked, recorded on the root request
+     * @return string The remove_plugin request id, or '' when the directory was already gone
      * @throws Exception on failure
      */
-    public function uninstall($name) {
+    public function uninstall($name, $requested_by = null) {
         $plugin = Plugin::get_by_plugin_name($name);
         if (!$plugin) {
             throw new Exception("Plugin '$name' not found in database.");
@@ -1141,6 +1162,11 @@ class PluginManager extends AbstractExtensionManager {
 
         if ($plugin->is_active()) {
             throw new Exception("Cannot uninstall active plugin '$name'. Deactivate it first.");
+        }
+
+        $manifest = $plugin->get_plugin_metadata();
+        if ((bool)$plugin->get('plg_is_system') || (is_array($manifest) && !empty($manifest['is_system']))) {
+            throw new Exception("Cannot uninstall system plugin '$name'. It is marked is_system: this site cannot run without it.");
         }
 
         $dependents = $this->getDependents($name);
@@ -1244,15 +1270,42 @@ class PluginManager extends AbstractExtensionManager {
             }
         }
 
-        // Step 8: Delete the plg_plugins row
-        $plugin->permanent_delete();
+        // Step 8: The row stays, as the record. Data is gone; the files are
+        // root's to remove. sync() leaves an uninstalled row alone, so the
+        // directory sitting there until root's next tick registers nothing.
+        $plugin->set('plg_status', Plugin::STATUS_UNINSTALLED);
+        $plugin->set('plg_active', 0);
+        $plugin->set('plg_uninstalled_time', gmdate('Y-m-d H:i:s'));
+        $plugin->set('plg_install_error', null);
 
-        // Step 9: Delete plugin files from disk
+        // Step 9: Ask root to remove the files. The request carries the name
+        // and nothing else; PluginRemoval::refusal() is what root checks.
+        $request_id = '';
         $plugin_dir = PathHelper::getAbsolutePath("plugins/{$name}");
         if (is_dir($plugin_dir)) {
-            require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-            LibraryFunctions::delete_directory($plugin_dir);
+            $request_id = RootRequest::submit('remove_plugin', array('name' => $name),
+                $requested_by === null ? null : (int)$requested_by);
         }
+        $this->setRemoveRequestId($plugin, $request_id);
+        $plugin->save();
+        return $request_id;
+    }
+
+    /**
+     * Record (or clear, with '') the remove_plugin request on the row, under a
+     * runtime key of plg_metadata so sync()'s metadata refresh carries it over.
+     */
+    protected function setRemoveRequestId(Plugin $plugin, string $request_id): void {
+        $meta = json_decode((string)$plugin->get('plg_metadata'), true);
+        if (!is_array($meta)) {
+            $meta = array();
+        }
+        if ($request_id === '') {
+            unset($meta['_remove_request_id']);
+        } else {
+            $meta['_remove_request_id'] = $request_id;
+        }
+        $plugin->set('plg_metadata', json_encode($meta));
     }
 
     // ========== Public API Methods (Backward Compatibility) ==========
@@ -1592,7 +1645,14 @@ class PluginManager extends AbstractExtensionManager {
         $deps->load();
         
         foreach ($deps as $dep) {
-            $dependents[] = $dep->get('pld_plugin_name');
+            $dependent = (string)$dep->get('pld_plugin_name');
+            // A dependency row belongs to an installed plugin. One whose row
+            // is uninstalled (or gone) depends on nothing any more.
+            $row = Plugin::get_by_plugin_name($dependent);
+            if ($row === null || $row->is_uninstalled()) {
+                continue;
+            }
+            $dependents[] = $dependent;
         }
         
         return array_unique($dependents);

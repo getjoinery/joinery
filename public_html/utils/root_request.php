@@ -24,6 +24,8 @@
  * Exit 0 = done. Anything else is recorded against the request and shown to
  * whoever submitted it.
  *
+ * @version 1.2 - remove_plugin: delete plugins/<name> after PluginRemoval's
+ *                checks pass (specs/post_release_fleet_defects.md B1).
  * @version 1.1 - install_package: verify a staged upload, or install it under
  *                the unsigned restrictions on the owner's acknowledgement
  *                (specs/package_signing.md WP3). install_plugin's refusal of
@@ -274,6 +276,27 @@ switch ($kind) {
 		}
 		root_request_own(PathHelper::getAbsolutePath('theme/' . $name));
 		echo "theme $name receives_upgrades=" . ($value ? 'true' : 'false') . "\n";
+		exit(0);
+	case 'remove_plugin':
+		// The file half of a plugin uninstall. The request carries a name; the
+		// queue is www-data-writable, so root believes none of it until the
+		// checks in PluginRemoval::refusal() pass: a plugin name, a real
+		// directory directly under plugins/, a manifest that does not say
+		// is_system, and a row that says uninstalled and not active. Any of
+		// them failing leaves the directory and says why (exit 1).
+		$name = (string)($args['name'] ?? '');
+		$plugins_dir = PathHelper::getAbsolutePath('plugins');
+		$row = null;
+		if ($name !== '' && Plugin::is_valid_plugin_name($name)) {
+			$row = Plugin::get_by_plugin_name($name);
+		}
+		$why = PluginRemoval::refusal($name, $plugins_dir, $row);
+		if ($why !== '') {
+			fwrite(STDERR, "root_request: remove_plugin refused: $why\n");
+			exit(1);
+		}
+		$count = PluginRemoval::remove($name, $plugins_dir);
+		echo "removed plugins/$name ($count files and directories)\n";
 		exit(0);
 }
 

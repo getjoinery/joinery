@@ -45,7 +45,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 		echo $formwriter->begin_form();
 	?>
       <div class="mb-4">
-		<?php echo $formwriter->textinput('email', 'Email', ['maxlength' => 255, 'value' => htmlspecialchars($page_vars['email'])]); ?>
+		<?php echo $formwriter->textinput('email', 'Email', ['maxlength' => 255, 'value' => htmlspecialchars((string)($page_vars['email'] ?? ''))]); ?>
 
       </div>
       <div class="mb-4">

@@ -12,10 +12,20 @@
  * Carries no page content of its own — every word on the rendered page comes
  * from the component blocks attached to the page record.
  *
+ * @version 1.1 - a request for the template's own path (GET /page_marketing) answers
+ *                404, as page_logic does for a page that does not exist; it used to
+ *                die with a 500 on a null $page (specs/post_release_fleet_defects.md B4.9)
  * @version 1.0
  */
 
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+
+// A template, not a page: the route fallback resolves any bare path to a
+// theme view, so this file can be reached with no page bound. No Page, no
+// page - the same answer page_logic gives for a slug that matches nothing.
+if (!isset($page) || !($page instanceof Page) || !$page->key) {
+	require_once(LibraryFunctions::display_404_page());
+}
 
 $marketing_page = $page;
 $marketing_body = $marketing_page->get_filled_content();

@@ -1,4 +1,5 @@
 <?php
+// @version 1.2 - the Uninstalled row: data removed, files being removed by the host, then Install (specs/post_release_fleet_defects.md B1)
 // @version 1.1 - the Unsigned badge, the warning block and the request panel's hand-off (specs/package_signing.md WP6)
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -20,6 +21,8 @@ $message_type = $page_vars['message_type'];
 $system_health = $page_vars['system_health'];
 $plugins = $page_vars['plugins'];
 $provisioning_plugins = $page_vars['provisioning_plugins'] ?? array();
+// Names the upgrade source publishes; null when it was not asked or did not answer.
+$published_plugins = $page_vars['published_plugins'] ?? null;
 // Installing a plugin writes the code tree, which only root does here, so the
 // page shows the queued request's progress rather than claiming it is finished
 // (specs/read_only_tree.md).
@@ -226,7 +229,26 @@ $page->begin_box(array('altlinks' => $altlinks));
                     }
                 }
 
-                if (!$plugin['directory_exists']) {
+                if ($plugin['plugin'] && $plugin['plugin']->is_uninstalled()) {
+                    // The record uninstall leaves. Data is gone; the files are
+                    // removed by the host on its next tick, and the request
+                    // that asked for it is named so its transcript can be read.
+                    if ($plugin['directory_exists']) {
+                        $status_cell .= '<br><small class="text-muted">Data removed; files being removed by the host';
+                        $remove_id = $plugin['plugin']->get_remove_request_id();
+                        if ($remove_id !== '') {
+                            $remove_state = RootRequest::status($remove_id);
+                            $status_cell .= ' (request ' . htmlspecialchars($remove_state['state']);
+                            if ($remove_state['state'] === 'failed') {
+                                $status_cell .= ', exit ' . (int)$remove_state['exit_code'] . '; see logs/root_requests/' . htmlspecialchars($remove_id) . '.log';
+                            }
+                            $status_cell .= ')';
+                        }
+                        $status_cell .= '</small>';
+                    } else {
+                        $status_cell .= '<br><small class="text-muted">Data and files removed</small>';
+                    }
+                } elseif (!$plugin['directory_exists']) {
                     $status_cell .= '<br><small class="text-warning"><i class="fas fa-exclamation-triangle"></i> Directory missing</small>';
                 }
 
@@ -268,9 +290,13 @@ $page->begin_box(array('altlinks' => $altlinks));
                     // Build actions array
                     $actions = array();
 
-                    $uninstall_warning = "This will drop all of this plugin\\'s tables, delete its data, and remove all plugin files from disk. This cannot be undone.";
+                    $uninstall_warning = "This will drop all of this plugin\\'s tables and delete its data now. The host removes the plugin files within a few minutes. This cannot be undone.";
 
-                    if (!$plugin['plugin'] || !$plugin_status) {
+                    if ($plugin_status === Plugin::STATUS_UNINSTALLED) {
+                        // Files still on disk: root is about to remove them, and
+                        // an install racing that removal helps nobody. No action
+                        // until the directory is gone.
+                    } elseif (!$plugin['plugin'] || !$plugin_status) {
                         // Not installed (no database record) — files on disk, awaiting install.
                         // Post-uninstall lands here too, since uninstall removes the row.
                         $actions['Install'] = "javascript:submitPluginAction('install', '$plugin_name')";
@@ -288,7 +314,9 @@ $page->begin_box(array('altlinks' => $altlinks));
                         }
                     }
 
-                    if (!empty($actions)) {
+                    if ($plugin_status === Plugin::STATUS_UNINSTALLED) {
+                        $action_cell = '<span class="text-muted">Files being removed</span>';
+                    } elseif (!empty($actions)) {
                         $action_cell = '<div class="dropdown">';
                         $action_cell .= '<button class="btn btn-soft-default dropdown-toggle" type="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
                         $action_cell .= '<div class="dropdown-menu dropdown-menu-end py-0">';
@@ -307,6 +335,21 @@ $page->begin_box(array('altlinks' => $altlinks));
                         $action_cell = '<span class="text-muted">No actions</span>';
                     }
 
+                    array_push($rowvalues, $action_cell);
+                } elseif ($plugin['plugin'] && $plugin['plugin']->is_uninstalled()) {
+                    // Files gone: the one action is Install, the same root
+                    // request that installs from the upgrade source - offered
+                    // only while the source publishes the plugin.
+                    $plugin_name = htmlspecialchars($plugin['name']);
+                    if ($published_plugins === null || in_array($plugin['name'], $published_plugins, true)) {
+                        $action_cell = '<div class="dropdown">';
+                        $action_cell .= '<button class="btn btn-soft-default dropdown-toggle" type="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
+                        $action_cell .= '<div class="dropdown-menu dropdown-menu-end py-0">';
+                        $action_cell .= '<a href="javascript:submitPluginAction(\'install\', \'' . $plugin_name . '\')" class="dropdown-item">Install</a>';
+                        $action_cell .= '</div></div>';
+                    } else {
+                        $action_cell = '<span class="text-muted">Not published by the upgrade source</span>';
+                    }
                     array_push($rowvalues, $action_cell);
                 } else {
                     array_push($rowvalues, '<em class="text-muted">N/A</em>');
@@ -330,6 +373,10 @@ $page->begin_box(array('altlinks' => $altlinks));
             $error_count = 0;
 
             foreach ($plugins as $plugin) {
+                if ($plugin['plugin'] && $plugin['plugin']->is_uninstalled()) {
+                    // A record, not an installed plugin and not a missing one.
+                    continue;
+                }
                 if (!$plugin['directory_exists']) {
                     $missing_count++;
                 } else {

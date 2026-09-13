@@ -13,6 +13,11 @@
  * /admin/admin_marketplace page and the marketplace_catalog /
  * marketplace_install API actions.
  *
+ * @version 1.3.2 - published_names(): the catalog's names, remembered for a day in
+ *                  cache/marketplace_<type>.json, for a page that must know whether
+ *                  the source still publishes something without asking on every load
+ * @version 1.3.1 - local_names('plugin') means present on disk, so an uninstalled
+ *                  plugin's record does not read as installed (specs/post_release_fleet_defects.md B1)
  * @version 1.3.0 - install() queues a root request and returns its id; the
  *                  pool never downloads or extracts an archive
  *                  (specs/package_signing.md WP4)
@@ -185,6 +190,57 @@ class MarketplaceClient {
 		return $data[$type] ?? array();
 	}
 
+	/** How long a remembered catalog answers for before the source is asked again. */
+	const PUBLISHED_NAMES_MAX_AGE = 86400;
+
+	/**
+	 * The directory names the source publishes for a type, from a copy kept
+	 * for a day in cache/marketplace_<type>.json.
+	 *
+	 * For a page that only needs "is this still published?" (the Plugins
+	 * page, for an uninstalled plugin's record). fetch_catalog() is a remote
+	 * call with a 15 second timeout; asked on every page load it would make
+	 * the page depend on the source being up, for as long as the record
+	 * exists. The copy is refreshed when it is older than a day, or when
+	 * there is none; a fetch that fails leaves the copy where it is, and
+	 * where there is no copy either the answer is null: unknown.
+	 *
+	 * @param string $type 'themes' or 'plugins'
+	 * @return array|null Directory names, or null when nothing is known
+	 */
+	public static function published_names($type) {
+		if ($type !== 'themes' && $type !== 'plugins') {
+			throw new InvalidArgumentException("Catalog type must be 'themes' or 'plugins', got '$type'");
+		}
+		$file = PathHelper::getSiteRoot() . '/cache/marketplace_' . $type . '.json';
+		$remembered = null;
+		if (is_file($file)) {
+			$decoded = json_decode((string)@file_get_contents($file), true);
+			if (is_array($decoded) && isset($decoded['names']) && is_array($decoded['names'])) {
+				$remembered = array_map('strval', $decoded['names']);
+				if (time() - (int)@filemtime($file) < self::PUBLISHED_NAMES_MAX_AGE) {
+					return $remembered;
+				}
+			}
+		}
+		$catalog = self::fetch_catalog($type);
+		if ($catalog === array()) {
+			return $remembered;
+		}
+		$names = array();
+		foreach ($catalog as $item) {
+			$name = (string)($item['directory_name'] ?? $item['name'] ?? '');
+			if ($name !== '') {
+				$names[] = $name;
+			}
+		}
+		$dir = dirname($file);
+		if (is_dir($dir) || @mkdir($dir, 0770, true) || is_dir($dir)) {
+			@file_put_contents($file, json_encode(array('fetched' => time(), 'names' => $names)), LOCK_EX);
+		}
+		return $names;
+	}
+
 	/**
 	 * Directory names of locally present extensions of a type, whatever their
 	 * install/active state — presence on disk is what "installed" means to
@@ -195,7 +251,12 @@ class MarketplaceClient {
 	 */
 	public static function local_names($type) {
 		if ($type === 'plugin') {
-			return array_column(MultiPlugin::get_all_plugins_with_status(), 'name');
+			// Presence on disk: a row whose directory is gone (an uninstalled
+			// plugin's record) is not installed here.
+			$present = array_filter(MultiPlugin::get_all_plugins_with_status(), function ($entry) {
+				return !empty($entry['directory_exists']);
+			});
+			return array_values(array_column($present, 'name'));
 		}
 		return array_column(Theme::get_all_themes_with_status(), 'name');
 	}

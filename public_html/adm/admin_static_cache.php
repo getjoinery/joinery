@@ -314,7 +314,7 @@ if (file_exists($index_file)) {
 
     foreach ($index as $hash => $entry) {
         // Skip the _config entry
-        if ($hash === '_config') continue;
+        if ($hash === StaticPageCache::CONFIG_KEY || $hash === StaticPageCache::LEGACY_CONFIG_KEY) continue;
 
         // Handle new array format with URL and status
         if (is_array($entry) && isset($entry['status'])) {

@@ -14,6 +14,9 @@ require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
  * utils/install_extension.php. refreshFromUpstream(), installFromZip() and
  * installFromTarGz() refuse at the door when called under the web server.
  *
+ * @version 1.2 - markStaleAgainstManifest() never touches an `uninstalled`
+ *                row: it is a record, not an installed extension
+ *                (specs/post_release_fleet_defects.md B1)
  * @version 1.1 - refreshFromUpstream() (fetch into a root-owned working
  *                directory, verify with PackageSignature, then replace) and
  *                refuse_from_web() are shared by both managers, so a theme is
@@ -894,11 +897,14 @@ abstract class AbstractExtensionManager {
         $model_class = $this->model_class;
         $table = $model_class::$tablename;
         $prefix = $this->table_prefix;
+        // An uninstalled row is a record, not an installed extension: its
+        // status is never changed by a sync (specs/post_release_fleet_defects.md B1).
         $sql = "UPDATE {$table}
                    SET {$prefix}_status = 'stale'
                  WHERE {$prefix}_receives_upgrades = true
                    AND {$prefix}_name <> ALL(?)
-                   AND {$prefix}_status <> 'stale'";
+                   AND {$prefix}_status <> 'stale'
+                   AND {$prefix}_status <> 'uninstalled'";
 
         // Pass a Postgres array literal ({a,b,c}) so the <> ALL filter works,
         // including when the manifest is empty (the literal becomes '{}' and

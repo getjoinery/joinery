@@ -5,6 +5,10 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 $page_vars = process_logic(events_logic(array_merge($_GET, $_POST, $params ?? [])));
 $page = new PublicPage();
+// A listing shows each event's date in the event's own timezone: that is the
+// date the organiser wrote down, and the right one whoever is looking. Written
+// here so the intent is on record (specs/post_release_fleet_defects.md B4.7).
+$tz = 'event';
 $page->public_header([
     'is_valid_page' => $is_valid_page,
 ]);

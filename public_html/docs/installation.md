@@ -181,7 +181,7 @@ The container is not a security boundary, and a site is not a sealed appliance t
 - **Containers take Docker's defaults.** No user-namespace remapping, no read-only root filesystem, no dropped capabilities. Processes start as root inside the container; Apache and PHP-FPM drop their workers to `www-data`.
 - **The site's web port answers on every interface.** `-p PORT:80` publishes there, and Docker's forwarding rules are consulted before UFW's, so a UFW rule does not close it — anyone who knows the port reaches the site directly, skipping the host proxy and its HTTPS redirect. The container's PostgreSQL port is the exception: it publishes on loopback only, and `install.sh docker` adds a `DOCKER-USER` rule dropping ports 9080-9099 arriving on the public interface.
 
-`install.sh docker` also does the host's housekeeping: a fail2ban SSH jail, a 100M cap on the system journal, Docker BuildKit garbage collection, at least 2G of swap, and cleared failed-login logs. It does not configure UFW on a Docker host — the UFW rules in this guide belong to bare-metal server setup.
+`install.sh docker` also does the host's housekeeping: fail2ban (see [fail2ban and the real client address](#fail2ban-and-the-real-client-address)), a 100M cap on the system journal, Docker BuildKit garbage collection, 1G of encrypted swap, apport off, and cleared failed-login logs. It does not configure UFW on a Docker host — the UFW rules in this guide belong to bare-metal server setup.
 
 So run Joinery containers on a machine you control, and put sites that must not reach each other on separate machines rather than in separate containers.
 
@@ -262,6 +262,20 @@ Turning off root SSH login is the one hardening step that can lock an operator o
 | Neither — root reached by password, no key installed | Leaves `PermitRootLogin` alone and says so. Disabling it here would leave nothing able to log in. |
 
 The third case is the only one that finishes with root password login still enabled. It is what you get on a provider that boots you a machine with a root password and no SSH key attached. On a self-hosted machine that password is the owner's only way in, so the installer leaves it on and relies on the fail2ban jail (three failures in ten minutes, banned for an hour) to limit guessing. On a machine a management node provisioned, the management node turns password login off itself once the machine's agents are admitted; see the Server Manager plugin's `retire_install_password` job.
+
+#### fail2ban and the real client address
+
+`maintenance_scripts/install_tools/host_housekeeping.sh` is the one implementation of "fail2ban is configured". It is a core host installer, so it runs at install, on every converge of the host timer (`_plugin_installers_start.sh`, `CORE_INSTALLERS`), and by hand:
+
+```bash
+sudo bash /var/www/html/SITE/maintenance_scripts/install_tools/host_housekeeping.sh
+```
+
+What it leaves behind, every time: `/etc/fail2ban/jail.d/joinery-sshd.local` (the SSH jail: three failures in ten minutes, banned for an hour) and, where Apache is installed **and logs the real client** (the `mod_remoteip` step below is in place), `jail.d/joinery-apache.local` (`apache-auth`, `apache-badbots`, `apache-noscript`, `apache-overflows`, each on the file backend and watching `/var/www/html/*/logs/` — a site's `access.log`/`error.log` and a Docker host's `proxy_access.log`/`proxy_error.log` — as well as `/var/log/apache2/`). Both are written whole, never appended to. Without the remoteip configuration an Apache log names the peer, which behind Cloudflare is an edge, so the Apache drop-in is removed rather than written and the output says why; the SSH jail is configured regardless. A `/etc/fail2ban/jail.local` that is `jail.conf` followed only by section headers, `enabled` lines and a ban policy (`bantime`, `findtime`, `maxretry`) for jails the drop-ins carry is deleted — that is a copy-and-append "enable fail2ban" in any wording, it repeats sections `jail.conf` already declares, and fail2ban 1.0.2 refuses to start on a repeated section; one with any other content is left alone and named in the output, with a warning when it repeats a section itself. The script then **proves** the service: it exits non-zero, with the journal's last lines, when `fail2ban` is not active afterwards or the `sshd` jail does not answer. SSH posture (`PasswordAuthentication`, `PermitRootLogin`) is read from `sshd -T` and reported, never changed.
+
+The range list is read from the site tree the script lives in (`SITE_ROOT/public_html/includes/cloudflare_ip_ranges.txt`). On a Docker host, whose site trees are inside the containers, run it from a checkout of the code or name the tree: `sudo bash host_housekeeping.sh "" /path/to/checkout`.
+
+A jail bans whatever address the log names, so the log must name the real client, and must name it **only when every hop between the client and Apache is a proxy we know**. The same script enables `mod_remoteip` with `conf-available/joinery-remoteip.conf`: `X-Forwarded-For` is trusted from Cloudflare's published edge ranges (`public_html/includes/cloudflare_ip_ranges.txt`, the one list `SessionControl` also trusts a `CF-Connecting-IP` from) and, inside a container, from the host's reverse proxy on the Docker bridge; the `combined` and `vhost_combined` log formats record that resolved client (`%a`). A forged forwarding header on a direct connection stops at the untrusted peer, so a ban can never be steered onto a third party. The Docker host's proxy vhost **appends** its peer to `X-Forwarded-For` rather than replacing it, so the container walks the chain right to left to the client. Behind an edge a ban is inert (the connections come from the edge); on a directly reached site it lands on the attacker.
 
 ### Create a site
 

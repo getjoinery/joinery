@@ -4,6 +4,12 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
 /**
  * admin_plugins_logic — the Plugins page.
  *
+ * @version 1.2.1 - "still published" comes from MarketplaceClient::published_names(),
+ *                  a copy kept for a day, not a catalog fetch on every page load
+ * @version 1.2 - uninstall keeps the row (`uninstalled`) and queues the file
+ *                removal for root; the page shows the request and offers
+ *                Install only for a plugin the source still publishes
+ *                (specs/post_release_fleet_defects.md B1)
  * @version 1.1 - an upload is a root request that root verifies; a refused
  *                one shows the warning and Install anyway (specs/package_signing.md WP6)
  */
@@ -220,8 +226,13 @@ function admin_plugins_logic(array $input): LogicResult {
 
 				} elseif ($action === 'uninstall') {
 					try {
-						$plugin_manager->uninstall($plugin_name);
-						$message = "Plugin '$plugin_name' uninstalled successfully.";
+						// Data goes now; the files are root's, so uninstall()
+						// queues their removal and the page shows that request.
+						$root_request_id = $plugin_manager->uninstall($plugin_name, (int)$session->get_user_id());
+						$message = 'Plugin "' . htmlspecialchars($plugin_name) . '" uninstalled: its tables and data are removed.'
+							. ($root_request_id !== ''
+								? ' The host removes its files within a few minutes.'
+								: ' Its files were already gone.');
 						$message_type = 'success';
 					} catch (Exception $e) {
 						$message = 'Uninstall failed: ' . htmlspecialchars($e->getMessage());
@@ -264,6 +275,24 @@ function admin_plugins_logic(array $input): LogicResult {
 	// Get all plugins with their status
 	$plugins = MultiPlugin::get_all_plugins_with_status();
 
+	// An uninstalled plugin whose files are gone has one action, Install, and
+	// only when the upgrade source still publishes it. The published names
+	// are looked up only when such a row exists, from the day-old copy
+	// MarketplaceClient keeps (the record is permanent; the page must not
+	// ask the source on every load). null means nothing is known, in which
+	// case Install is offered and the request's transcript says the truth.
+	$published_plugins = null;
+	foreach ($plugins as $entry) {
+		if ($entry['plugin'] && $entry['plugin']->is_uninstalled() && !$entry['directory_exists']) {
+			try {
+				$published_plugins = MarketplaceClient::published_names('plugins');
+			} catch (Throwable $e) {
+				error_log('admin_plugins_logic: catalog lookup failed: ' . $e->getMessage());
+			}
+			break;
+		}
+	}
+
 	// Determine which active plugins declare provisioners. This only reads
 	// plugin.json manifests — no provisioning checks are run here; those run
 	// asynchronously via ajax/check_provisioning.php after the page renders.
@@ -281,6 +310,7 @@ function admin_plugins_logic(array $input): LogicResult {
 		'message' => $message,
 		'message_type' => $message_type,
 		'plugins' => $plugins,
+		'published_plugins' => $published_plugins,
 		'provisioning_plugins' => $provisioning_plugins,
 		'root_request_id' => $root_request_id,
 		'unsigned_warning' => $unsigned_warning,

@@ -25,6 +25,10 @@
  * that repairs a broken box would mean a box too broken to reach its database
  * is a box that cannot be repaired.
  *
+ * @version 1.2 - remove_plugin: the file half of a plugin uninstall. The web
+ *                side marks the row uninstalled; root checks that (and the
+ *                manifest's is_system) before deleting the directory
+ *                (specs/post_release_fleet_defects.md B1).
  * @version 1.1 - install_package: root verifies a staged package before it
  *                moves it, so the kind the read-only tree left out is back
  *                (specs/package_signing.md WP3). request() reads a request's
@@ -52,6 +56,7 @@ class RootRequest {
 		'write_agent_files',
 		'save_doc',
 		'set_receives_upgrades',
+		'remove_plugin',           // delete plugins/<name> once its row says uninstalled (PluginRemoval)
 	);
 
 	/**

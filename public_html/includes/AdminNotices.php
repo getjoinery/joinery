@@ -19,6 +19,7 @@
  * is all a plugin needs. A renderer that throws is logged and skipped — an
  * admin page never fails to render because a notice could not decide.
  *
+ * @version 1.5 - site_backup joins the core notices (specs/post_release_fleet_defects.md B3)
  * @version 1.4 - certificates joins the core notices (specs/implemented/tls_and_origin_trust.md WP11)
  * @version 1.3 - host_converger joins the core notices (specs/implemented/host_converger.md)
  * @version 1.2 - parser_jail joins the core notices (specs/parser_jail.md)
@@ -52,6 +53,11 @@ class AdminNotices {
 			// Strict flip, says so to the admin who can run certbot. Silent
 			// while renewal is on schedule.
 			'certificates'   => array('CertificateNotice', 'render'),
+			// A site whose own scheduled backup last failed says so to the
+			// admin who can fix the target, from the first failure, with the
+			// engine's last line. Silent while runs succeed, and silent on a
+			// site that has never configured one.
+			'site_backup'    => array('SiteBackupNotice', 'render'),
 		);
 	}
 
