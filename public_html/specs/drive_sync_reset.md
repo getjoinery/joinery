@@ -1,9 +1,10 @@
 # Drive sync: the reset
 
 **Status: in progress. WP1f, WP1a, WP1b DONE 2026-09-12; WP2 (directory
-identity) landed in two units -- `4466080e` and the second unit of
-2026-09-13 (reading 6: clean arms 70 of 70 green, the twelve converged reds
-closed); WP1d and WP3 next. Every change reviewed by public-html-c6,
+identity) landed in two units -- `4466080e` and `5a347458` (reading 7, the
+post-commit re-run: identical to reading 6 per oracle and byte-identical
+traces); WP1d (the custody oracle) DONE 2026-09-13, harness only, findings
+C1-C3 recorded below; WP3 next. Every change reviewed by public-html-c6,
 approach before patch.**
 
 Testing is paused. No further guards land on the sync engine until the work
@@ -320,7 +321,7 @@ with the harness uncommitted; once the owner commits, the arms run once more
 on the named SHA and that run is quoted as the baseline. Per WP1f the two
 must match, which is the determinism check on real arms.
 
-## WP1d -- the custody oracle, per FOLDER
+## WP1d -- the custody oracle, per FOLDER -- DONE 2026-09-13
 
 `reference_estate_oracle_blind_to_custody` records that runtime state cannot
 answer custody and that the only surviving handle is a server id learned by the
@@ -339,6 +340,173 @@ oracle says how many it skipped.
 Lands beside WP2, baseline against the named pre-WP2 SHA. If observing ids
 cannot preserve the draw sequence, the arms are re-baselined once and the spec
 says so; the oracle is not skipped.
+**Landed 2026-09-13 (harness only; c6 graded traced).** The oracle is
+`assert_every_file_is_in_a_folder_the_user_put_it_in` in `zz_sweep.rs`, fed by
+a `Custody` ledger the workload keeps as it runs:
+
+- A folder is held by `(device, directory birth)`. `MemFs` mints a birth per
+  directory (once, in creation order, never reused; carried by rename, dropped
+  by remove: `birth_of`, `path_of_birth`). A birth and not a directory id
+  because the chaos arms recycle ids (`reuse_file_ids`), and a handle keyed by
+  id would expect the folder that inherited an id to hold the dead folder's
+  files.
+- A handle is LEARNED once, at the first pass point on that device after the
+  directory was written into, from `scenario::folder_record_at`: the
+  non-provisional, undeleted folder record whose local placement resolves to
+  the directory's current path (comparison keys; `Root` for the sync root).
+  Where two records resolve to the path and the directory's identity picks one
+  (`synced_fingerprint` = `file_id_of`), that one; where it picks none,
+  `Several` and the handle is not learned: `deferred` at a pass point,
+  `undecided` at settle, and every body under it goes unjudged. Never
+  relearned, so a later mis-pairing shows as files under the wrong id instead
+  of being absorbed. A store read only: no dice, no engine call. Every
+  directory standing at the start (root, `Private`, the rings) is a handle
+  learned before the first step, and every file standing then is an intent.
+- Intent is per FILE (the path at creation, followed through the workload's
+  renames, moves, slot swaps and rotations, aliases kept for the other device's
+  spelling): a file's candidates are every folder the workload ever placed it
+  in, on any device; the bodies are `(sha256, file)`. Per-file union rather
+  than per-body latest because one legitimate race would fire otherwise: E
+  edits `p` in F1 while D moves `p` to F2, and the edit rightly follows the
+  entity to F2. Bodies the chaos hooks wrote are attributed after settle to the
+  file at their path (adds candidates only); the chaos name-swapper's recorded
+  pairs union the two files' candidates and carry an unknown across.
+- The check, after settle, over every LIVE server file (plain: the stored
+  hash; sealed: decrypted as the owner, `open_as_the_owner`): the folder it
+  stands in is in the union of candidates of every intent carrying its body.
+  A fire is sorted before it is called misplaced: `rescued` (a candidate is
+  trashed on the server and the file stands under an ancestor of it -- the
+  rescue net's designed move), `reminted` (on some device the folder it stands
+  in resolves to the directory a candidate was learned from: one birth, two
+  ids, the row-6 residual measured), else `misplaced`.
+- Blind, and the line says so: `bodies_unknown` (none after attribution),
+  `unresolved` (a body with a never-learned candidate), `multi_candidate`
+  (moved between folders by the user: cannot discriminate), `late` (learned
+  after settle: the engine's final belief), `deferred`/`undecided`,
+  `sealed_unopened`. A directory learned after an engine mis-pairing inherits
+  that belief. The workload never crosses a vault edge with a folder
+  (`same_side_of_the_vault` refuses arms 7 and 14), so no folder-conversion
+  custody fact is reachable; the chaos file swapper can cross, files only, and
+  those bodies carry both sides' candidates. The ring rotation counterfeit
+  (folder id stays at the name, files cross) reads as misplaced here, which is
+  the finding it would be.
+- The workload makes no server-side placement (every arm is a disk action; the
+  one server-side hook renames a folder during creation), so the ledger takes
+  no server id directly; an arm that ever does `drive_move` by hand adds that.
+
+**Pin:** `a_file_that_keeps_its_bytes_and_loses_its_folder` -- `keep.txt` put
+in `Docs`, the server moves it into `Other` by the harness's hand, every device
+takes the move; converged, no stranded entry, no live orphan all green (blind
+is the point), the custody oracle fires once naming the file and both folders.
+
+**Finding C1 (frozen seed 3072116, `Vault::Shared`, mac + pc, no faults, no
+chaos):** `slot-3 (conflicted copy from mac) 2.dat` stands in `Private`; the
+user kept it in `Private/Shared`. Site: `scan::pair` rule 1 (same path,
+whatever the inode). mac's record for 902 still had local path
+`Private/Shared/slot-3.dat` (the server-side move of 902 to `Private` not yet
+applied on mac); the user's slot swap put another inode there (the former
+`slot-2.dat`, body 7714) and rule 1 read it as an EDIT of 902. Then
+`ApplyRemoteMove` carried that inode to `Private/slot-3.dat` and
+`preserve_local_as` (parent = `entry.remote.parent`) made the conflict copy
+beside the entity, one folder up from where the user had it. The move and the
+copy are the engine acting consistently on a wrong pairing; there is no
+independent cause at the conflict-copy site. Rule 1 paired inode 1016 to a
+record whose `synced_fingerprint` said 1015: the AH shape with the identity
+already in the record, which is what makes it WP3's and not a new letter.
+The seed is wrapped `red_only_on([every_file_in_a_folder_the_user_put_it_in])`
+naming C1; when C1 is fixed the wrapper comes off. Not fixed in this unit: the
+oracle is an instrument.
+
+**Finding C2 (kill2 75112 and 75115, read from the journal, not probed):**
+`contested.txt` stands in `Contested Folder` 510; the user put it in
+`Contested Folder` 506, which pc deleted at step 27. pc's pass then plans
+`TrashRemote 506` AND `CreateRemoteFolder -6 "Contested Folder"` with
+`contested.txt` under it: between the user's delete and pc's next scan a
+download of 506's file landed on pc and rebuilt the directory on the way, so
+the scan met a new directory holding a file and made a new folder of it. mac
+then trashed its own 506 (rescuing four never-uploaded files to the root) and
+downloaded 510. The user's delete is undone for one file, in a folder nobody
+made. 75115 is the same shape (`in-9-pc.txt`, 511 for 507). kill2 only
+(chaos + kills); not seen on hostile2 or plat3 in reading 8; whether the kill
+is needed is untraced. Goes to WP3's list beside the kill-arm resurrection
+shapes.
+
+**Finding C3 (kill2 75112 with swaps off, `r8swapoff`):** `ring-3.txt`
+stands at the root; the user put it in `ring-2` (504), which the server never
+trashed. The device's `rescued_from_trash` issue names folder 504 and the
+file: the rescue net fired on the engine's own local trash of a plain ring
+directory, not on a user deleting a vault subfolder. That is the shape WP3's
+bar for the rescue net (fires only on its legitimate shape) exists to catch,
+seen by an oracle for the first time: the custody oracle reads it as
+misplaced because the candidate folder is not trashed on the server. Sharper
+(c6, from the journal): no plan on either device ever carries a `TrashLocal`
+for 504 -- its ops are `CreateLocalFolder`, `ApplyLocalMove` on pc,
+`ApplyRemoteMove` on mac, then `CreateLocalFolder` AGAIN on mac at its next
+pass. The rescue net fired from inside another operation, not from a planned
+trash, and mac re-made the directory afterwards. That is WP3's lead.
+
+**Readings (2026-09-13).** R4 pair on ONE engine, `5a347458`: reading 7 =
+`zz_sweep.5a347458` (no custody oracle; also the WP1f post-commit re-run of
+reading 6: identical per oracle, traces identical to `tr_follow` 160 of 160)
+against reading 8 = `zz_sweep.custody` (7c5ec633cef8). Traces byte-identical
+160 of 160 (`tracediff` on `tr_5a347458` vs `tr_custody`): the ledger draws
+nothing. `delta.sh` 7 vs 8: sealed, chain and converged unmoved on every seed;
+only the custody column moves. Reading 8-base = the same harness on the
+`df2f5c88` engine (worktree, HEAD `jd-sim` + `jd-vfs`, `zz_sweep` only;
+`zz_sweep.custody_base` afd3453e9769), the baseline the section above named,
+quoted as custody fires INCLUDING learn-time mis-pairings (that engine pairs a
+local folder made under a name the server was bringing as the server's folder
+by path until naming parks it, and the learn reads that).
+
+    reading 8 (5a347458)     seeds fired checked multi unresolved late rescued reminted misplaced
+        clean2                40     0     530    48      21     120     0        2         0
+        hostile2              30     1     731   328      13     108     0        3         7
+        clean3                30     0     411    43       8     119     0        0         0
+        kill2                 30     6     756   293      16      68     7       16         7
+        plat3                 30     5    1303   422      34     171     0       21         7
+    reading 8-base (df2f5c88)
+        clean2                40     0     530    48      21     120     2       21         0
+        hostile2              30     0     756   336      14     110     1       55         0
+        clean3                30     0     409    43       8     119     1       17         0
+        kill2                 30     4     756   297      18      69     7       39         7
+        plat3                 30     2    1359   450      30     173     1       68         2
+
+deferred and undecided are 0 on every seed of both readings; bodies_unknown
+and sealed_unopened 0. Per-seed rows: `custody_seeds.sh` on
+`scratchpad/wp2/reading8` and `reading8base`.
+
+Read: the clean arms are custody-green on both engines (the oracle sees no
+right-bytes-wrong-folder in a calm world). `reminted` -- one directory, two
+server ids -- falls from 200 files on `df2f5c88` to 42 on `5a347458`: WP2
+stopped the engine minting a new folder for a directory it already had a
+record for, which is what the twelve converged reds and the leak signature
+were. Fired seeds, reading 8: hostile2 74424; kill2 75101 75111 75112 75115
+75121 75124; plat3 75401 75409 75412 75415 75426. Swap-off (`NOSWAP=1`, same
+binary, `scratchpad/wp2/r8swapoff`): TEN of the twelve are custody-green with
+the chaos name-swapper off -- AH residue, the same shape as C1 below (a ring
+file's conflict copy standing in the neighbouring ring: rule 1 pairs the
+swapped inode to the entity, the copy is made beside the entity). The two
+that stay red with swaps off are 75112 and 75115: finding C2. Reading 8-base
+fires on 75111 75112 75123 75124 75415 75421; the pair 8-base -> 8 is not a
+G->R claim about WP2 (the baseline's fires include learn-time beliefs) and is
+quoted only as the instrument's first two readings.
+
+**Blind, by count:** `unresolved` 92 files on reading 8 (a directory the user
+deleted before a pass on that device could read its record, or whose create
+never completed under faults: judged nowhere); `multi_candidate` 1134 of 3731
+files checked (moved between folders by the user or exchanged by the chaos
+swapper: the folder is one of several, so a wrong one among them is not
+seen); `late` 586 handles (learned after settle, from the engine's final
+belief). And `rescued` trusts the server's trashed flag whichever hand set it:
+a folder the engine trashes locally by itself and then `TrashRemote`s reads as
+rescued, not misplaced, so the rescue net's WP3 bar (fires only on its
+legitimate shape) needs its own instrument -- the `rescued_from_trash` issue
+naming a folder the user never deleted. C3 was seen only because 504 stayed
+live on the server. The oracle asserts on `misplaced` only; `rescued` and
+`reminted` are sorted counts that never fire (a reminted file is in the
+user's directory under a second id, which is converged's business; a rescue
+above a trashed candidate is the net's designed move).
+
 
 ## WP2 -- directory identity -- IN PROGRESS from 2026-09-12
 
@@ -1217,8 +1385,10 @@ belt in, before the belt lands.** B1 is what happens without this.
   `the_sealed_oracle_sees_a_file_the_workload_sealed`, landed.
 - WP1b: the swap chain oracle's own pin, RED on the pristine engine --
   `the_chain_oracle_sees_two_files_trading_names`, landed (asserts the fire).
-- WP1d: a file keeps its bytes and loses its folder; GREEN on today's oracles
-  (blind is the point), RED on the custody oracle for the right reason.
+- WP1d: `a_file_that_keeps_its_bytes_and_loses_its_folder` -- landed; GREEN on
+  converged, stranded and orphan (blind is the point), RED on the custody
+  oracle naming the file and both folders. Frozen 3072116 wrapped
+  `red_only_on([every_file_in_a_folder_the_user_put_it_in])` for C1.
 - WP2: the identity spec's pins plus the two decisions above, each RED without
   the fix before it is kept.
 - WP3: each belt's shape report, in the commit that removes it.
@@ -1228,13 +1398,20 @@ belt in, before the belt lands.** B1 is what happens without this.
 - The AH owner decision (crossing + `mine4`, or nothing) is outside this
   reset and blocks nothing in it; it is named so the hostile arm's residue
   after WP2 is read correctly.
-- WP1d's draw-sequence cost is unmeasured; the fallback is one re-baseline.
+- WP1d's draw-sequence cost: measured zero (traces byte-identical 160 of
+  160); no re-baseline was needed.
+- C2 (a download landing rebuilds a folder the user has just deleted, and
+  the scan makes a new server folder of it) and C3 (the rescue net firing on
+  a plain ring folder the server never trashed) are WP3's: C3 is exactly the
+  rescue net's bar, C2 goes beside the kill-arm resurrection shapes. C1 is
+  AH (owner decision A1).
 - plat3 75418, reading 2, first run: no verdict line, near-zero runtime,
   cause unknown (`scratchpad/wp1a/reading2/manifest.txt`; the host's kernel
   log shows no OOM or kill at 16:15). The runner now keeps the whole output
   and the exit status of any run with no verdict and the table counts it as
-  `no-verdict`, a red-unknown row. The post-commit re-run reproduces it or
-  closes it.
+  `no-verdict`, a red-unknown row. CLOSED: readings 3 through 8 (six runs of
+  the arm on four binaries) show no no-verdict row; 75418 has a verdict on
+  every one.
 - The chain oracle's blind share: `pairs_sealed` on the coverage line lands
   with the post-commit re-run and goes into the WP1b section as the oracle's
   stated coverage (4 of 7 on hostile2 74423 at first sight). It is the

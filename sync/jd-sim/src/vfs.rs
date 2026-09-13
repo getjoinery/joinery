@@ -93,6 +93,15 @@ struct MemFsState {
     /// delete releases it.
     file_ids: BTreeMap<String, u64>,
     next_file_id: u64,
+    /// Path -> the directory's birth: a number handed out once, in creation
+    /// order, and never again. An id is a disk fact and under `reuse_file_ids`
+    /// a deleted directory's id comes straight back on the next mkdir; a birth
+    /// is a harness fact, so an oracle that keeps a handle on a directory
+    /// across the run (`zz_sweep`'s custody oracle) keys it by birth and can
+    /// never mistake the folder that inherited an id for the one that died
+    /// with it. Carried by a rename like the id, dropped by a remove.
+    births: BTreeMap<String, u64>,
+    next_birth: u64,
     /// Ids released by deletes, handed out again when id reuse is enabled.
     freed_ids: Vec<u64>,
     reuse_file_ids: bool,
@@ -185,11 +194,15 @@ impl MemFs {
         // other; the first one handed out.
         let mut file_ids = BTreeMap::new();
         file_ids.insert(String::new(), 1000);
+        let mut births = BTreeMap::new();
+        births.insert(String::new(), 1);
         MemFs {
             state: Arc::new(Mutex::new(MemFsState {
                 nodes,
                 file_ids,
                 next_file_id: 1000,
+                births,
+                next_birth: 1,
                 freed_ids: Vec::new(),
                 reuse_file_ids: false,
                 trash: Vec::new(),
@@ -406,6 +419,7 @@ impl MemFs {
             Self::watch_loss(&st, &v, "the user deleting it");
             st.nodes.remove(&v);
             st.sealed_dirs.remove(&v);
+            st.births.remove(&v);
             if let Some(id) = st.file_ids.remove(&v) {
                 st.freed_ids.push(id);
             }
@@ -508,6 +522,20 @@ impl MemFs {
     pub fn file_id_of(&self, path: &str) -> Option<u64> {
         let key = self.store_path(path);
         self.state.lock().unwrap().file_ids.get(&key).copied()
+    }
+
+    /// The birth of the directory at this path (see `MemFsState::births`).
+    /// `None` for a file or for nothing.
+    pub fn birth_of(&self, path: &str) -> Option<u64> {
+        let key = self.store_path(path);
+        self.state.lock().unwrap().births.get(&key).copied()
+    }
+
+    /// Where the directory born as `birth` stands now, as stored; `None`
+    /// once it has been removed.
+    pub fn path_of_birth(&self, birth: u64) -> Option<String> {
+        let st = self.state.lock().unwrap();
+        st.births.iter().find(|(_, b)| **b == birth).map(|(k, _)| k.clone())
     }
 
     // ---- internals --------------------------------------------------------
@@ -677,6 +705,8 @@ impl MemFs {
         st.nodes.insert(key.to_string(), Node::Dir);
         let id = Self::alloc_id(st);
         st.file_ids.insert(key.to_string(), id);
+        st.next_birth += 1;
+        st.births.insert(key.to_string(), st.next_birth);
     }
 
     /// Say where content stopped existing, when `LOSE` names its hash.
@@ -727,6 +757,9 @@ impl MemFs {
             }
             if let Some(id) = st.file_ids.remove(&old) {
                 st.file_ids.insert(new.clone(), id);
+            }
+            if let Some(birth) = st.births.remove(&old) {
+                st.births.insert(new.clone(), birth);
             }
             if st.sealed_dirs.remove(&old) {
                 st.sealed_dirs.insert(new);
@@ -1013,6 +1046,7 @@ impl Vfs for MemFs {
                 st.trash.push((v.clone(), node));
             }
             st.sealed_dirs.remove(&v);
+            st.births.remove(&v);
             if let Some(id) = st.file_ids.remove(&v) {
                 st.freed_ids.push(id);
             }

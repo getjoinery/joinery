@@ -60,6 +60,20 @@ pub struct FolderFact {
     pub trashed: bool,
 }
 
+/// One file as the server holds it, for an oracle that asks about custody:
+/// which folder id it stands in and which bytes it carries.
+#[derive(Debug, Clone)]
+pub struct FileFact {
+    pub id: i64,
+    pub folder: Option<i64>,
+    pub name: String,
+    /// The hash of what is stored: the plaintext for an ordinary file, the
+    /// ciphertext for an encrypted one.
+    pub sha256: String,
+    pub encrypted: bool,
+    pub trashed: bool,
+}
+
 #[derive(Debug, Clone)]
 struct FileRow {
     id: i64,
@@ -483,6 +497,26 @@ impl MockServer {
                 id: f.id,
                 parent: f.parent,
                 name: f.name.clone(),
+                encrypted: f.encrypted,
+                trashed: f.trashed,
+            })
+            .collect();
+        out.sort_by_key(|f| f.id);
+        out
+    }
+
+    /// Every file the server holds, live or trashed, as the facts an oracle
+    /// asks about custody.
+    pub fn files(&self) -> Vec<FileFact> {
+        let st = self.state.lock().unwrap();
+        let mut out: Vec<FileFact> = st
+            .files
+            .values()
+            .map(|f| FileFact {
+                id: f.id,
+                folder: f.folder,
+                name: f.name.clone(),
+                sha256: f.sha256.clone(),
                 encrypted: f.encrypted,
                 trashed: f.trashed,
             })

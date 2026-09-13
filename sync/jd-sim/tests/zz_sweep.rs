@@ -473,6 +473,362 @@ fn assert_no_entity_holds_both_sides_of_a_swap(world: &World, seed: u64) {
     );
 }
 
+/// Where the user put each file: the custody oracle's record of intent.
+///
+/// `reference_estate_oracle_blind_to_custody`: convergence and no-loss cannot
+/// see right-bytes-wrong-folder (Defects AA, AB, AC), and the 09-05 attempt
+/// failed because it had to FIND each file again after settling, by hash or
+/// by path, and no such handle survives. The handle that does survive is a
+/// server FOLDER id, learned while the workload runs (`specs/drive_sync_reset.md`
+/// WP1d). So:
+///
+/// - A folder is held by `(device, directory birth)`. A birth, not an id: the
+///   chaos arms recycle ids, and a handle keyed by id would expect the folder
+///   that inherited an id to hold the dead folder's files.
+/// - It is LEARNED once, at the first pass point on that device after it was
+///   written into, from the record the device's store believes stands at the
+///   directory's current path -- a store read, no dice, no engine call. Never
+///   relearned: a later mis-pairing then shows as files under the wrong id
+///   instead of being absorbed as the new truth. A handle still unlearned at
+///   settle is learned then and counted `late`; a path two records claim is
+///   `deferred` to the next pass point rather than guessed, and one still
+///   claimed twice at settle stays unlearned (`undecided`).
+/// - Intent is per FILE, and a file's candidates are every folder the workload
+///   ever placed it in, on any device. Per-file union rather than per-body
+///   latest because one legitimate race would fire otherwise: E edits `p` in
+///   F1 while D moves `p` to F2, and the edit rightly follows the entity to
+///   F2. The chaos name-swapper exchanges any two files across folders by the
+///   harness's own hand; its recorded pairs union the two files' candidates.
+///
+/// The check, after settling, over every LIVE server file whose body the
+/// workload wrote: the folder it stands in is one of its candidates. Read
+/// [`assert_every_file_is_in_a_folder_the_user_put_it_in`] for the classes a
+/// fire is sorted into before it is called misplaced.
+#[derive(Default)]
+struct Custody {
+    /// Every directory the workload wrote into, by (device index, birth), and
+    /// the server folder learned for it: `None` = not learned yet, `Some(None)`
+    /// = the drive root.
+    handles: std::collections::BTreeMap<(usize, u64), Option<Option<i64>>>,
+    /// Learned only once the world had settled, so from the engine's final
+    /// belief rather than its first.
+    late: std::collections::BTreeSet<(usize, u64)>,
+    /// Pass points at which a handle was left unlearned because two records
+    /// claimed its path.
+    deferred: usize,
+    /// Handles still claimed by two records when the world settled. Never
+    /// learned: a belief taken on ambiguity would be a permanent false fire,
+    /// so the bodies under such a directory go unjudged instead.
+    undecided: std::collections::BTreeSet<(usize, u64)>,
+    /// A path as the workload knows it -> the file it means. Aliases are kept
+    /// across renames, since the other device still knows the old spelling.
+    file_of_path: std::collections::HashMap<String, usize>,
+    /// Per file, every handle it was placed in.
+    placed: Vec<Vec<(usize, u64)>>,
+    /// Every body the workload wrote, by hash, with the file it was written to.
+    intents: Vec<(String, usize)>,
+}
+
+impl Custody {
+    fn handle_of(&mut self, di: usize, device: &jd_sim::engine::Device, dir: &str) -> Option<(usize, u64)> {
+        let birth = device.fs.birth_of(dir)?;
+        self.handles.entry((di, birth)).or_insert(None);
+        Some((di, birth))
+    }
+
+    fn parent_of(path: &str) -> &str {
+        path.rsplit_once('/').map(|(d, _)| d).unwrap_or("")
+    }
+
+    fn file_key(&mut self, path: &str) -> usize {
+        if let Some(k) = self.file_of_path.get(path) {
+            return *k;
+        }
+        let k = self.placed.len();
+        self.placed.push(Vec::new());
+        self.file_of_path.insert(path.to_string(), k);
+        k
+    }
+
+    /// The user wrote `body` at `path` on this device; called after the write.
+    fn wrote(&mut self, di: usize, device: &jd_sim::engine::Device, path: &str, body: &[u8]) {
+        let key = self.file_key(path);
+        if let Some(h) = self.handle_of(di, device, Self::parent_of(path)) {
+            self.placed[key].push(h);
+        }
+        self.intents.push((jd_sim::sha256_hex(body), key));
+    }
+
+    /// The user renamed the file at `from` to `to` on this device; called after.
+    fn moved(&mut self, di: usize, device: &jd_sim::engine::Device, from: &str, to: &str) {
+        let key = self.file_key(from);
+        self.file_of_path.insert(to.to_string(), key);
+        if let Some(h) = self.handle_of(di, device, Self::parent_of(to)) {
+            self.placed[key].push(h);
+        }
+    }
+
+    /// Files exchanged names in one motion (a slot swap or rotation): after
+    /// it, each destination path means the file that stood at its source.
+    /// Set together, because the sources are also the destinations.
+    fn rotated(&mut self, moves: &[(&str, &str)]) {
+        let keys: Vec<usize> = moves.iter().map(|(from, _)| self.file_key(from)).collect();
+        for ((_, to), key) in moves.iter().zip(keys) {
+            self.file_of_path.insert(to.to_string(), key);
+        }
+    }
+
+    /// Every directory standing on this disk gets a handle now, and every
+    /// file standing on it is an intent: the setup's ring files were put in
+    /// their rings by the user as much as anything the workload writes.
+    /// Called before the workload starts, when the world is settled and the
+    /// engine's belief about every directory is the one it materialized it
+    /// from.
+    fn adopt_standing(&mut self, di: usize, device: &jd_sim::engine::Device) {
+        self.handle_of(di, device, "");
+        for p in device.fs.all_paths() {
+            match device.fs.peek(&p) {
+                Some(body) => self.wrote(di, device, &p, &body),
+                None => {
+                    self.handle_of(di, device, &p);
+                }
+            }
+        }
+    }
+
+    /// Bodies the harness wrote by its own hand mid-pass (the chaos save
+    /// hooks) are not in the ledger; attributed here, after the fact, to the
+    /// file standing at the path they were written to, so a body the chaos
+    /// swapper then exchanged with a user's file carries that file's
+    /// candidates across. Adds candidates only.
+    fn attribute_harness_writes(&mut self, world: &World) {
+        let known: std::collections::HashSet<String> =
+            self.intents.iter().map(|(h, _)| h.clone()).collect();
+        for (di, d) in world.devices.iter().enumerate() {
+            for w in d.fs.user_writes() {
+                if known.contains(&w.sha256) {
+                    continue;
+                }
+                let key = match self.file_of_path.get(&w.path) {
+                    Some(k) => *k,
+                    None => {
+                        let k = self.file_key(&w.path);
+                        if let Some(h) = self.handle_of(di, d, Self::parent_of(&w.path)) {
+                            self.placed[k].push(h);
+                        }
+                        k
+                    }
+                };
+                self.intents.push((w.sha256.clone(), key));
+            }
+        }
+    }
+
+    /// A pass point on this device: learn every handle of its that is still
+    /// unlearned and still standing.
+    fn learn(&mut self, di: usize, device: &jd_sim::engine::Device, late: bool) {
+        let unlearned: Vec<u64> = self
+            .handles
+            .iter()
+            .filter(|((d, _), v)| *d == di && v.is_none())
+            .map(|((_, b), _)| *b)
+            .collect();
+        for birth in unlearned {
+            let Some(path) = device.fs.path_of_birth(birth) else {
+                continue;
+            };
+            let learned = match jd_sim::scenario::folder_record_at(device, &path) {
+                jd_sim::scenario::FolderAt::Root => Some(None),
+                jd_sim::scenario::FolderAt::One(id) => Some(Some(id)),
+                jd_sim::scenario::FolderAt::Several(_) => {
+                    if late {
+                        self.undecided.insert((di, birth));
+                    } else {
+                        self.deferred += 1;
+                    }
+                    None
+                }
+                jd_sim::scenario::FolderAt::Nothing => None,
+            };
+            if learned.is_some() {
+                self.handles.insert((di, birth), learned);
+                if late {
+                    self.late.insert((di, birth));
+                }
+            }
+        }
+    }
+}
+
+/// Every live file whose body the user wrote stands in a folder the user put
+/// that file in. See [`Custody`] for what "put" means and how a folder is
+/// known.
+///
+/// A fire is sorted before it is called misplaced, because two designed
+/// custody changes and one known residual stand on the same signature:
+///
+/// - `rescued`: a candidate folder is trashed on the server and the file
+///   stands under one of that folder's ancestors -- the rescue net moving a
+///   never-uploaded file out of a folder the user deleted, by design.
+/// - `reminted`: on some device the folder the file stands in resolves to the
+///   very directory whose handle was learned as a candidate -- one birth, two
+///   server ids, the plain directory re-minted under a new id that the reset
+///   spec states as WP2's residual. A vault directory minted plain has the
+///   same signature and is a leak; the sealed oracle fires there too.
+/// - `misplaced`: none of the above. Right bytes, wrong folder.
+///
+/// Blind, and says so on its line: a body the workload did not write (chaos
+/// saves, landing saves) has no intent; a file whose candidates are several
+/// folders (moved between them by the user) cannot discriminate; a directory
+/// learned after an engine mis-pairing inherits that belief; a sealed file no
+/// key opens is skipped.
+fn assert_every_file_is_in_a_folder_the_user_put_it_in(world: &World, custody: &Custody, seed: u64) {
+    use std::collections::{BTreeMap, BTreeSet};
+    // Body hash -> every folder id it may stand in, over every intent that
+    // wrote it and every handle those files were placed in.
+    // A body whose files were placed in a folder that was never learned (the
+    // directory died before a pass on that device could read its record) has
+    // an unknown candidate, and a check against the rest would read a rescue
+    // or a chaos swap as a misplacement. Such a body is not judged, and the
+    // line counts it.
+    let resolve = |h: &(usize, u64)| -> Option<Option<i64>> { custody.handles.get(h).copied().flatten() };
+    let mut candidates: BTreeMap<String, BTreeSet<Option<i64>>> = BTreeMap::new();
+    let mut incomplete: BTreeSet<String> = BTreeSet::new();
+    for (hash, key) in &custody.intents {
+        let set = candidates.entry(hash.clone()).or_default();
+        for h in &custody.placed[*key] {
+            match resolve(h) {
+                Some(id) => {
+                    set.insert(id);
+                }
+                None => {
+                    incomplete.insert(hash.clone());
+                }
+            }
+        }
+    }
+    // The chaos name-swapper moved these bodies between folders by hand:
+    // each may now stand where the other was put, and an unknown on either
+    // side is an unknown on both.
+    for p in world.swap_pairs().iter().filter(|p| p.source == "chaos") {
+        let (a, b) = (jd_sim::sha256_hex(&p.a), jd_sim::sha256_hex(&p.b));
+        let ca = candidates.get(&a).cloned().unwrap_or_default();
+        let cb = candidates.get(&b).cloned().unwrap_or_default();
+        if incomplete.contains(&a) || incomplete.contains(&b) {
+            incomplete.insert(a.clone());
+            incomplete.insert(b.clone());
+        }
+        if !ca.is_empty() || !cb.is_empty() {
+            candidates.entry(a).or_default().extend(cb.iter().copied());
+            candidates.entry(b).or_default().extend(ca.iter().copied());
+        }
+    }
+    let folders: BTreeMap<i64, jd_sim::server::FolderFact> =
+        world.server.folders().into_iter().map(|f| (f.id, f)).collect();
+    let ancestors = |mut id: Option<i64>| -> BTreeSet<Option<i64>> {
+        let mut out = BTreeSet::new();
+        let mut guard = 0;
+        while let Some(f) = id.and_then(|i| folders.get(&i)) {
+            id = f.parent;
+            out.insert(id);
+            guard += 1;
+            if guard > 512 {
+                break;
+            }
+        }
+        out
+    };
+    let vault_files: BTreeMap<i64, jd_sim::server::VaultFile> =
+        world.server.vault_files().into_iter().map(|f| (f.id, f)).collect();
+    let (mut checked, mut unknown, mut sealed_unopened, mut multi, mut skipped_unresolved) = (0, 0, 0, 0, 0);
+    let mut rescued = Vec::new();
+    let mut reminted = Vec::new();
+    let mut misplaced = Vec::new();
+    for f in world.server.files().into_iter().filter(|f| !f.trashed) {
+        let (name, hash) = if f.encrypted {
+            match vault_files.get(&f.id).and_then(|vf| jd_sim::scenario::open_as_the_owner(world, vf)) {
+                Some((name, Some(h))) => (format!("{} = {name:?}", f.name), h),
+                _ => {
+                    sealed_unopened += 1;
+                    continue;
+                }
+            }
+        } else {
+            (f.name.clone(), f.sha256.clone())
+        };
+        let Some(set) = candidates.get(&hash) else {
+            unknown += 1;
+            continue;
+        };
+        if set.is_empty() || incomplete.contains(&hash) {
+            skipped_unresolved += 1;
+            continue;
+        }
+        checked += 1;
+        if set.len() > 1 {
+            multi += 1;
+        }
+        if set.contains(&f.folder) {
+            continue;
+        }
+        let stands_in = f.folder;
+        let wanted: Vec<Option<i64>> = set.iter().copied().collect();
+        let named = |id: &Option<i64>| -> String {
+            match id.and_then(|i| folders.get(&i)) {
+                Some(fo) => format!("{} {:?}{}", fo.id, fo.name, if fo.trashed { " trashed" } else { "" }),
+                None => "root".to_string(),
+            }
+        };
+        let line = format!(
+            "file {} ({}) stands in [{}], put in [{}]",
+            f.id,
+            name,
+            named(&stands_in),
+            wanted.iter().map(named).collect::<Vec<_>>().join(", ")
+        );
+        // Class 1: a candidate is trashed and the file stands above it.
+        if wanted.iter().any(|c| {
+            c.and_then(|i| folders.get(&i)).is_some_and(|cf| cf.trashed) && ancestors(*c).contains(&stands_in)
+        }) {
+            rescued.push(line);
+            continue;
+        }
+        // Class 2: on some device the folder it stands in is the directory a
+        // candidate was learned from.
+        let reminted_here = stands_in.is_some_and(|sid| {
+            world.devices.iter().enumerate().any(|(di, d)| {
+                jd_sim::scenario::local_path_of_folder(d, sid)
+                    .and_then(|p| d.fs.birth_of(&p))
+                    .is_some_and(|b| custody.handles.get(&(di, b)).copied().flatten().is_some_and(|learned| wanted.contains(&learned)))
+            })
+        });
+        if reminted_here {
+            reminted.push(line);
+            continue;
+        }
+        misplaced.push(line);
+    }
+    let learned = custody.handles.values().filter(|v| v.is_some()).count();
+    eprintln!(
+        "CUSTODY-ORACLE seed={seed} files_checked={checked} multi_candidate={multi} bodies_unknown={unknown} \
+         sealed_unopened={sealed_unopened} unresolved={skipped_unresolved} folders={} learned={learned} late={} \
+         deferred={} undecided={} rescued={} reminted={} misplaced={} rescued_lines={rescued:?} reminted_lines={reminted:?}",
+        custody.handles.len(),
+        custody.late.len(),
+        custody.deferred,
+        custody.undecided.len(),
+        rescued.len(),
+        reminted.len(),
+        misplaced.len(),
+    );
+    assert!(
+        misplaced.is_empty(),
+        "seed {seed}: {} file(s) stand in a folder the user never put them in: {}",
+        misplaced.len(),
+        misplaced.join("; ")
+    );
+}
+
 fn workload_core(
     seed: u64,
     steps: usize,
@@ -485,7 +841,7 @@ fn workload_core(
     let root = sweep_root(vault);
     let world = sweep_world(seed, devices, steps, chaos, vault);
     let committed = Committed::default();
-    drive(&world, seed, steps, chaos, root, vault, kills, names);
+    let mut custody = drive(&world, seed, steps, chaos, root, vault, kills, names);
     // Counted before settling, because settling is where a seed panics and a
     // panicking seed never reports anything.
     let kills_made = world.power_cycles();
@@ -502,6 +858,10 @@ fn workload_core(
         println!("  KILLS {kills_made}");
     }
     let settled = world.settle();
+    custody.attribute_harness_writes(&world);
+    for (di, d) in world.devices.iter().enumerate() {
+        custody.learn(di, d, true);
+    }
     if let Ok(path) = std::env::var("JD_JOURNAL") {
         std::fs::write(&path, seed_trace(&world).join("\n")).unwrap();
     }
@@ -552,6 +912,9 @@ fn workload_core(
         })),
         ("no_entity_holds_both_sides_of_a_swap", Box::new(|| {
             assert_no_entity_holds_both_sides_of_a_swap(&world, seed)
+        })),
+        ("every_file_in_a_folder_the_user_put_it_in", Box::new(|| {
+            assert_every_file_is_in_a_folder_the_user_put_it_in(&world, &custody, seed)
         })),
     ];
     if vault.any() {
@@ -932,6 +1295,68 @@ fn the_chain_oracle_sees_two_files_trading_names() {
     );
 }
 
+/// The custody oracle sees a file that keeps its bytes and loses its folder.
+///
+/// The pin for the instrument itself: the Defect AA shape, made by hand. A
+/// user puts `keep.txt` in `Docs`; the server then moves it into `Other`
+/// (here by the harness's hand, in life by an engine that followed a name),
+/// and every device takes the move. Both sides converge, nothing is lost,
+/// no record is stranded -- every oracle the sweep had before WP1d is green,
+/// which is the point (`reference_estate_oracle_blind_to_custody`). The
+/// custody oracle must object, naming the folder it stands in and the folder
+/// it was put in.
+#[test]
+fn a_file_that_keeps_its_bytes_and_loses_its_folder() {
+    let seed = 9_951;
+    let world = World::of(seed, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_mkdir("Docs");
+    laptop.fs.user_mkdir("Other");
+    laptop.fs.user_write("Docs/keep.txt", b"the body that belongs in Docs");
+    assert!(world.settle().is_some(), "the folders and the file go up");
+    let mut custody = Custody::default();
+    for (di, d) in world.devices.iter().enumerate() {
+        custody.adopt_standing(di, d);
+        custody.learn(di, d, false);
+    }
+    let docs = world.server.folder_id_at("Docs").unwrap();
+    let other = world.server.folder_id_at("Other").unwrap();
+    assert_every_file_is_in_a_folder_the_user_put_it_in(&world, &custody, seed);
+    let keep = world
+        .server
+        .files()
+        .into_iter()
+        .find(|f| f.name == "keep.txt")
+        .expect("keep.txt is on the server");
+    assert_eq!(keep.folder, Some(docs));
+    world
+        .server
+        .action(
+            "drive_move",
+            &serde_json::json!({ "entity_type": "file", "entity_id": keep.id, "parent_id": other }),
+        )
+        .unwrap();
+    assert!(world.settle().is_some(), "every device takes the move");
+    assert_converged(&world);
+    assert_no_entry_is_stranded(&world);
+    assert_no_live_orphan_on_the_server(&world);
+    assert!(
+        laptop.fs.exists("Other/keep.txt") && !laptop.fs.exists("Docs/keep.txt"),
+        "the move landed on the disk"
+    );
+    let verdict = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        assert_every_file_is_in_a_folder_the_user_put_it_in(&world, &custody, seed)
+    }));
+    let why = match verdict {
+        Ok(()) => panic!("the custody oracle did not fire on a file that lost its folder"),
+        Err(e) => e.downcast_ref::<String>().cloned().unwrap_or_default(),
+    };
+    assert!(
+        why.contains(&format!("file {} (keep.txt) stands in [{other} \"Other\"], put in [{docs} \"Docs\"]", keep.id)),
+        "the oracle fired without naming the file and both folders: {why}"
+    );
+}
+
 /// The server never learned what anything in the vault is called.
 ///
 /// An encrypted file's real name lives inside its metadata blob and its stored
@@ -1084,12 +1509,19 @@ fn drive(
     vault: Vault,
     kills: bool,
     names: Names,
-) {
+) -> Custody {
     let mut rng = SimRng::new(seed ^ 0x5EED_1234);
     if chaos {
         for d in &world.devices {
             d.net.set_faults(NetFaults::chaos());
         }
+    }
+    // The custody ledger. Every directory standing now was materialized by
+    // the engine from a record it holds, so its handle is learned at once.
+    let mut custody = Custody::default();
+    for (di, d) in world.devices.iter().enumerate() {
+        custody.adopt_standing(di, d);
+        custody.learn(di, d, false);
     }
 
     // Names that stress the parts the engine finds hard.
@@ -1177,7 +1609,8 @@ fn drive(
         std::collections::HashMap::new();
 
     for step in 0..steps {
-        let device = &world.devices[rng.below(world.devices.len() as u64) as usize];
+        let di = rng.below(world.devices.len() as u64) as usize;
+        let device = &world.devices[di];
         // In a mixed world the key holder reaches into the vault now and then,
         // and everyone else works around it. A device with no key never writes
         // there -- it cannot even see the folder, so a workload that made it
@@ -1228,6 +1661,7 @@ fn drive(
                 world.pass(device);
                 world.power_cycle(device);
             }
+            custody.learn(di, device, false);
             trace(world, &format!("step {step} kill on {}", device.name));
         }
 
@@ -1242,6 +1676,7 @@ fn drive(
                 let path = join(&dir, &leaf(step, device));
                 let body = format!("body {step} {}", device.name).into_bytes();
                 device.fs.user_write(&path, &body);
+                custody.wrote(di, device, &path, &body);
                 bodies.insert(path.clone(), body);
                 files.push(path);
             }
@@ -1251,6 +1686,7 @@ fn drive(
                     if device.fs.exists(&p) {
                         let body = format!("edit {step} {}", device.name).into_bytes();
                         device.fs.user_write(&p, &body);
+                        custody.wrote(di, device, &p, &body);
                         bodies.insert(p, body);
                     }
                 }
@@ -1263,10 +1699,12 @@ fn drive(
                         // Step and device, like every fresh body: a body that
                         // can be written twice gives an oracle two origins for
                         // one hash (Defect AI's record: `saved 12` twice).
-                        device
-                            .fs
-                            .user_write(&tmp, format!("saved {step} {}", device.name).as_bytes());
+                        let body = format!("saved {step} {}", device.name).into_bytes();
+                        device.fs.user_write(&tmp, &body);
                         device.fs.user_rename(&tmp, &p);
+                        // An edit of `p`, as far as intent goes: the temporary
+                        // is the application's business, not the user's.
+                        custody.wrote(di, device, &p, &body);
                     }
                 }
             }
@@ -1277,6 +1715,7 @@ fn drive(
                         let dir = p.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
                         let to = join(dir, &leaf(step + 1, device));
                         device.fs.user_rename(&p, &to);
+                        custody.moved(di, device, &p, &to);
                         files.push(to);
                     }
                 }
@@ -1296,6 +1735,7 @@ fn drive(
                         let to = join(&dir, &name);
                         if to != p && !device.fs.exists(&to) {
                             device.fs.user_rename(&p, &to);
+                            custody.moved(di, device, &p, &to);
                             files.push(to);
                         }
                     }
@@ -1385,9 +1825,9 @@ fn drive(
                 if !device.fs.exists(&slots[0]) {
                     device.fs.user_mkdir(&base);
                     for (n, s) in slots.iter().enumerate() {
-                        device
-                            .fs
-                            .user_write(s, format!("slot {n} from {} at {step}", device.name).as_bytes());
+                        let body = format!("slot {n} from {} at {step}", device.name).into_bytes();
+                        device.fs.user_write(s, &body);
+                        custody.wrote(di, device, s, &body);
                         files.push(s.clone());
                     }
                 } else if rng.below(3) == 0 {
@@ -1404,6 +1844,7 @@ fn drive(
                     device.fs.user_rename(&slots[1], &slots[0]);
                     device.fs.user_rename(&slots[2], &slots[1]);
                     device.fs.user_rename(&via, &slots[2]);
+                    custody.rotated(&[(&slots[0], &slots[2]), (&slots[1], &slots[0]), (&slots[2], &slots[1])]);
                 } else {
                     let i = rng.below(3) as usize;
                     let j = (i + 1 + rng.below(2) as usize) % 3;
@@ -1413,14 +1854,17 @@ fn drive(
                     device.fs.user_rename(&slots[i], &via);
                     device.fs.user_rename(&slots[j], &slots[i]);
                     device.fs.user_rename(&via, &slots[j]);
+                    custody.rotated(&[(&slots[i], &slots[j]), (&slots[j], &slots[i])]);
                 }
             }
             // Both devices reach for the same name at once.
             12 => {
                 let dir = rng.pick(&dirs).cloned().unwrap_or_default();
                 let path = join(&dir, "contested.txt");
-                for d in &world.devices {
-                    d.fs.user_write(&path, format!("{} at {step}", d.name).as_bytes());
+                for (dj, d) in world.devices.iter().enumerate() {
+                    let body = format!("{} at {step}", d.name).into_bytes();
+                    d.fs.user_write(&path, &body);
+                    custody.wrote(dj, d, &path, &body);
                 }
                 files.push(path);
             }
@@ -1473,6 +1917,7 @@ fn drive(
                             let to = join(&dir, &format!("Copy of {name}"));
                             if !device.fs.exists(&to) {
                                 device.fs.user_write(&to, &body);
+                                custody.wrote(di, device, &to, &body);
                                 bodies.insert(to.clone(), body);
                                 files.push(to);
                             }
@@ -1513,6 +1958,7 @@ fn drive(
                         let stale = join(&original, &format!("stale-{step}.txt"));
                         let body = format!("written through a path that moved {step}").into_bytes();
                         device.fs.user_write(&stale, &body);
+                        custody.wrote(di, device, &stale, &body);
                         bodies.insert(stale.clone(), body);
                         files.push(stale);
                         dirs.push(original);
@@ -1543,6 +1989,7 @@ fn drive(
                     let path = join(&shared, &format!("in-{step}-{}.txt", device.name));
                     let body = format!("into a folder that may be going {step}").into_bytes();
                     device.fs.user_write(&path, &body);
+                    custody.wrote(di, device, &path, &body);
                     bodies.insert(path.clone(), body);
                     files.push(path);
                 }
@@ -1551,6 +1998,7 @@ fn drive(
             _ => {
                 world.clock.advance_secs(20 * 60);
                 let out = world.pass(device);
+                custody.learn(di, device, false);
                 if std::env::var("OPS").is_ok() {
                     println!(
                         "  STEP {step} {} plan={:?} exec={:?}",
@@ -1561,6 +2009,7 @@ fn drive(
             }
         }
     }
+    custody
 }
 
 /// Everything a seed leaves behind that a second run of it must leave again:
@@ -3315,10 +3764,22 @@ fn frozen_park_onto_a_strangers_name_seed() {
 /// Standing down is not giving up. The clash is still there, so naming derives
 /// the park again a pass later, by which time the entity is free, the upload
 /// has run, and the copy on the disk is one the server holds.
+///
+/// Red on the custody oracle since it landed (2026-09-13), and required to be:
+/// the seed also carries finding C1 of `specs/drive_sync_reset.md` WP1d -- a
+/// slot file the user kept in `Private/Shared` is published as a conflict
+/// copy in `Private`, beside the entity a name-swap made the scan pair it
+/// with. The day that is fixed this wrapper comes off.
 #[test]
 fn frozen_park_standing_down_seed() {
     let refs: [(&str, Platform); 2] = [("mac", Platform::MacOs), ("pc", Platform::Windows)];
-    workload_core(3_072_116, 40, &refs, false, Vault::Shared, false, Names::Ordinary);
+    red_only_on(
+        &["every_file_in_a_folder_the_user_put_it_in"],
+        "the custody oracle did not fire on 3072116: finding C1 is fixed, remove red_only_on from this pin",
+        || {
+            workload_core(3_072_116, 40, &refs, false, Vault::Shared, false, Names::Ordinary);
+        },
+    );
 }
 
 /// The seed that proves an encrypted file keeps its own name across a retry.
@@ -3456,19 +3917,31 @@ fn frozen_contested_name_loop_seeds() {
 /// and the seed is green outright. Not an exclusion list: the expectation is
 /// asserted both ways.
 fn red_only_on_the_chain_oracle(run: impl FnOnce() + std::panic::UnwindSafe) {
+    red_only_on(
+        &["no_entity_holds_both_sides_of_a_swap"],
+        "the chain oracle did not fire on a frozen chaos seed: Defect AH is fixed, \
+         remove red_only_on_the_chain_oracle from this pin",
+        run,
+    );
+}
+
+/// A frozen seed is red on exactly these oracles and no other, asserted both
+/// ways: a name missing from the list is the regression the seed pins, and
+/// the list going quiet is the named finding fixed, at which point the
+/// wrapper comes off. `on_green` says which finding that would be.
+fn red_only_on(expected: &[&str], on_green: &str, run: impl FnOnce() + std::panic::UnwindSafe) {
     let why = match std::panic::catch_unwind(run) {
-        Ok(()) => panic!(
-            "the chain oracle did not fire on a frozen chaos seed: Defect AH is fixed, \
-             remove red_only_on_the_chain_oracle from this pin"
-        ),
+        Ok(()) => panic!("{on_green}"),
         Err(e) => e
             .downcast_ref::<String>()
             .cloned()
             .or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string()))
             .unwrap_or_default(),
     };
+    let wanted = format!("{} oracle(s) fired [{}]", expected.len(), expected.join(", "));
     assert!(
-        why.contains("1 oracle(s) fired [no_entity_holds_both_sides_of_a_swap]"),
-        "a frozen seed fired something other than the chain oracle: {why}"
+        why.contains(&wanted),
+        "a frozen seed fired something other than [{}]: {why}",
+        expected.join(", ")
     );
 }
