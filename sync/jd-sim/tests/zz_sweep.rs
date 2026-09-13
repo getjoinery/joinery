@@ -581,6 +581,11 @@ fn workload_core(
         let mut kinds: std::collections::BTreeMap<String, usize> = Default::default();
         for d in &world.devices {
             for issue in d.store.open_issues().unwrap() {
+                // The reporting kinds are counted; anything a person has to
+                // act on is named, so a hold can be read from the line.
+                if !matches!(issue.kind.as_str(), "kept_aside" | "reconcile" | "withdrawn") {
+                    eprintln!("ISSUE seed={seed} device={} kind={} entity={:?} detail={:?}", d.name, issue.kind, issue.entity, issue.detail);
+                }
                 *kinds.entry(issue.kind).or_default() += 1;
             }
         }

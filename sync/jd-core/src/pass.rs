@@ -210,6 +210,19 @@ pub fn run_pass(
             (env.now_ms)() as i64,
         )?;
     }
+    // A park's EVENT complaint -- a copy was moved to the trash, and comes
+    // back if the clash is resolved -- is over when the clash is resolved and
+    // the entry is released: the copy comes back by the ordinary path, and
+    // there is nothing left for the user to do or know. Left open after the
+    // release it named a file that was back and fine, and on a sweep trace a
+    // stall beside an open issue reads as a hold (B12).
+    for id in &out.naming.recovered {
+        for issue in env.store.open_issues()? {
+            if issue.kind == "parked" && issue.entity == Some(*id) {
+                env.store.dismiss_issue(issue.issue_id)?;
+            }
+        }
+    }
     // A name this disk cannot hold is a state, and states end: the rival gets
     // renamed, the clash clears, the entry goes away. The complaint has to end
     // with it, or the user is left with a permanent warning about a file that
@@ -2363,7 +2376,15 @@ fn detect_folder_moves(
     // straight off the entry, no path resolved. Used only by the cheap question
     // below, and gathered here so it costs a field rather than a second pass.
     let mut believed_parent: HashMap<u64, Option<i64>> = HashMap::new();
-    for entry in all_entries(env)? {
+    let entries = all_entries(env)?;
+    // Which live folder record knows each directory id as its own, before
+    // the walk below asks about any path.
+    let owned: HashMap<u64, EntityId> = entries
+        .iter()
+        .filter(|e| e.id.entity_type == EntityType::Folder && !e.id.is_provisional() && !e.remote_deleted)
+        .filter_map(|e| e.synced_fingerprint.map(|fp| fp.file_id).filter(|id| *id != 0).map(|id| (id, e.id)))
+        .collect();
+    for entry in entries {
         if entry.id.entity_type == EntityType::File {
             if let Some(fingerprint) = entry.synced_fingerprint {
                 believed_parent.insert(fingerprint.file_id, entry.local_placement().parent);
@@ -2375,6 +2396,37 @@ fn detect_folder_moves(
         }
         let own_id = entry.synced_fingerprint.map(|fp| fp.file_id).filter(|id| *id != 0);
         if let Some(path) = relative_path(env, &entry)? {
+            // A folder the server has told us about and nothing has created
+            // here yet -- no agreement, no stand-in -- has never stood
+            // anywhere, so a directory at its name is not evidence that it
+            // is present. Read by path alone it took the path: the directory
+            // there was accounted for, the record whose OWN directory it was
+            // could not be found at it (a plain folder corroborates and never
+            // claims, and a tracked path is no candidate), that record was
+            // read as deleted and its files as moved into the newcomer, and
+            // the create then adopted the directory. The user renaming a
+            // plain folder onto a name a peer had just used on the server
+            // lost the folder's identity to the peer's. Where the directory
+            // is KNOWN to be another live record's own, this record is not
+            // at it: its create will meet that directory, decline it by
+            // identity, and wait behind the owner's move. Where nobody knows
+            // the directory, today's reading stands (the user's own folder
+            // of that name is the server's folder arriving with an id).
+            let named_only = entry.synced_placement.is_none() && entry.stand_in.is_none();
+            if named_only
+                && dir_identity
+                    .get(&path)
+                    .copied()
+                    .filter(|id| *id != 0)
+                    .is_some_and(|here| owned.get(&here).is_some_and(|o| *o != entry.id))
+            {
+                // Out of the path map too (own key only), so the directory
+                // is a candidate for the record that owns it.
+                if folder_ids.get(&path) == Some(&entry.id.server_id) {
+                    folder_ids.remove(&path);
+                }
+                continue;
+            }
             // Two records can resolve to ONE path -- a record that lags a
             // name trade beside the record the server has since put there --
             // and a map keyed by path can hold only one. It used to keep
@@ -2464,6 +2516,18 @@ fn detect_folder_moves(
         }
     }
 
+    // The path map is keyed by path too, and `folder_paths` kept the LAST of
+    // two records that resolved to one path. `tracked` holds one record per
+    // path decided by identity, so the map takes that: right by
+    // construction, and every removal below is own-key-only -- a record
+    // matched elsewhere drops the key only if it is the one at it -- so a
+    // present record's directory is never dropped from the map and minted as
+    // a stranger behind a stale twin's departure (plat3 75412 with the swap
+    // verb off: the plain ring at its own path, its twin's stale record
+    // claimed away, the key dropped, the directory minted new).
+    for (path, id) in tracked.iter() {
+        folder_ids.insert(path.clone(), id.server_id);
+    }
     // Folders whose believed path holds no directory. These have plainly moved
     // or gone, and the check is cheap enough to make first.
     let mut missing: Vec<(String, EntityId)> = Vec::new();
@@ -2792,8 +2856,50 @@ fn detect_folder_moves(
     // ring is what carries the evidence, this can be read from the very
     // shape `displaced` has to refuse -- with no need to widen `displaced`,
     // which drags a folder after a single file.
+    //
+    // By identity first: the directory standing at a contested path that
+    // carries another tracked folder's own id is that folder arrived, whatever
+    // its files say. Contents alone could not close a ring whose plain members
+    // had had their files re-parented across passes (hostile2 74424: the three
+    // ring directories stood rotated, each record knowing its id, and only the
+    // vault's contents were still whole -- one arrival, no ring, every file
+    // inside withdrawn as not-a-drag for ever). Within a ring every member is
+    // live, tracked and standing, so this is not a plain folder claiming a
+    // stranger; it is three folders agreeing on where each other went.
+    // Contents decide where either side does not know.
+    //
+    // Not for a HELD record (its hold is about its own directory and it is
+    // not placed by anything but the user), not onto a held path, and not
+    // when more than one live record carries the id -- two records can carry
+    // one id for a pass after a trade, and picking one by map order would be
+    // picking by hash order; that is ambiguous, and contents decide.
     let mut arrived_at: HashMap<&String, EntityId> = HashMap::new();
     for (path, _) in contested.iter() {
+        let by_identity = if scan.held.contains(path.as_str()) {
+            None
+        } else {
+            dir_identity
+                .get(path.as_str())
+                .filter(|id| **id != 0)
+                .and_then(|here| {
+                    let mut carriers = record_identity
+                        .iter()
+                        .filter(|(id, rid)| {
+                            *rid == here
+                                && tracked.get(path.as_str()) != Some(*id)
+                                && !held_ids.contains(*id)
+                        })
+                        .map(|(id, _)| *id);
+                    match (carriers.next(), carriers.next()) {
+                        (Some(one), None) => Some(one),
+                        _ => None,
+                    }
+                })
+        };
+        if let Some(id) = by_identity {
+            arrived_at.insert(path, id);
+            continue;
+        }
         let mut found: Option<EntityId> = None;
         let mut ambiguous = false;
         for (other_path, other_id) in tracked.iter() {
@@ -2921,8 +3027,20 @@ fn detect_folder_moves(
         let Some(candidate) = record_identity.get(id).and_then(|rid| where_id_stands.get(rid)) else {
             continue;
         };
+        // A path another record merely NAMES, with no directory of its own
+        // here yet (a server folder not materialized on this disk), does not
+        // stand between a vault and its directory: that record's create is
+        // refused at the directory by identity and re-decided, and the vault
+        // takes what is its own. Left refused both ways, the two waited on
+        // each other for ever (plat3 75415 with the swap verb off).
+        let named_only = folder_ids
+            .get(*candidate)
+            .map(|sid| env.store.get_entry(EntityId::folder(*sid)))
+            .transpose()?
+            .flatten()
+            .is_some_and(|e| e.synced_placement.is_none() && e.stand_in.is_none());
         if taken.contains(candidate)
-            || folder_ids.contains_key(*candidate)
+            || (folder_ids.contains_key(*candidate) && !named_only)
             || scan.held.contains(*candidate)
             || *candidate == old_path
         {
@@ -2934,14 +3052,16 @@ fn detect_folder_moves(
         // on the first cut). The remote move lands first; the vault's
         // directory is still its own and is claimed on a later pass, from
         // wherever the room-making put it.
-        if remote_wants.get(*candidate).is_some_and(|w| w != id) {
+        if remote_wants.get(*candidate).is_some_and(|w| w != id && !named_only) {
             continue;
         }
         claimed.push(*id);
         taken.insert(candidate);
         scan.present.insert(*id);
         folder_ids.insert((*candidate).clone(), id.server_id);
-        folder_ids.remove(old_path);
+        if folder_ids.get(old_path) == Some(&id.server_id) {
+            folder_ids.remove(old_path);
+        }
         match placement_of(candidate, folder_ids) {
             Some(placement) => {
                 let unchanged = env
@@ -3094,7 +3214,7 @@ fn detect_folder_moves(
             // saved into it to the folder that moved away, and they would surface
             // under the new name. Dropping the key lets the directory be adopted
             // for what it is, with its own identity, on this same pass.
-            if old_path != **candidate {
+            if old_path != **candidate && folder_ids.get(&old_path) == Some(&id.server_id) {
                 folder_ids.remove(&old_path);
             }
             match placement_of(candidate, folder_ids) {
@@ -3224,7 +3344,9 @@ fn detect_folder_moves(
         taken.insert(candidate);
         scan.present.insert(id);
         folder_ids.insert((*candidate).clone(), id.server_id);
-        folder_ids.remove(&old_path);
+        if folder_ids.get(&old_path) == Some(&id.server_id) {
+            folder_ids.remove(&old_path);
+        }
         if let Some(placement) = placement_of(candidate, folder_ids) {
             if entry.synced_placement.as_ref() != Some(&placement) {
                 scan.moves.insert(id, placement);
