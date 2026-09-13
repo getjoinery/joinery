@@ -33,6 +33,9 @@
  * profile sweeps its own working directory by age, because the machine holding
  * the files is the only one that can.
  *
+ * @version 1.13 - sweep_local removes verify working directories older than a day, and the
+ *                 backup locks are acquirable by a verify (take_locks / release_locks) so a
+ *                 verify never reads a chain a run is writing
  * @version 1.12 - current_chain() reads only chain runs, so a standalone whole-site run in the same
  *                 profile no longer makes the next run forget the open chain and take a fresh full
  * @version 1.11 - a full backup a tenth the size of the previous full is recorded with a WARNING
@@ -88,6 +91,7 @@ require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
 require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
 require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
 require_once(PathHelper::getIncludePath('data/backup_history_class.php'));
+require_once(PathHelper::getIncludePath('includes/BackupVerifier.php'));
 
 class BackupRunnerException extends Exception {}
 
@@ -216,6 +220,35 @@ class BackupRunner {
 		}
 
 		return $result;
+	}
+
+	/**
+	 * Take the two backup locks for something that is not a backup run — a
+	 * verify reading a chain a run could be writing. Returns the handles, or
+	 * FALSE when either is held. release_locks() gives them back.
+	 *
+	 * The same two locks, for the same two reasons: the machine lock keeps a
+	 * verify's download and decrypt off a box already archiving itself, and the
+	 * profile lock keeps it from reading a manifest mid-rewrite. A run that
+	 * finds them held skips its tick exactly as it would for another run.
+	 */
+	public static function take_locks(array $plan) {
+		$machine = self::acquire_lock(BackupProfile::machine_lock_path($plan['base_dir']), $plan['base_dir']);
+		if ($machine === false) {
+			return false;
+		}
+		$profile = self::acquire_lock($plan['output_dir'] . '/.jy_backup.lock', $plan['output_dir']);
+		if ($profile === false) {
+			self::release_lock($machine);
+			return false;
+		}
+		return array($machine, $profile);
+	}
+
+	public static function release_locks($handles) {
+		if (!is_array($handles)) { return; }
+		self::release_lock($handles[1] ?? null);
+		self::release_lock($handles[0] ?? null);
 	}
 
 	/**
@@ -1376,7 +1409,7 @@ class BackupRunner {
 			foreach (BackupNaming::list_dir($chain_d) as $p) { $candidates[] = $p; }
 		}
 
-		$swept = self::sweep_staged_restores($plan, $cutoff);
+		$swept = self::sweep_staged_restores($plan, $cutoff) + self::sweep_verify_work($plan);
 		foreach (array_unique($candidates) as $path) {
 			if (!is_file($path) || filemtime($path) >= $cutoff) {
 				continue;
@@ -1451,6 +1484,42 @@ class BackupRunner {
 			if (@rmdir($work)) {
 				$swept++;
 			}
+		}
+		return $swept;
+	}
+
+	/**
+	 * How old a verify working directory must be before the sweep takes it. A
+	 * verify removes its own directory on every exit path, including a fatal;
+	 * this is for the one it could not — a kill, a power loss — and a day is
+	 * longer than any verify runs.
+	 */
+	const VERIFY_WORK_MAX_AGE = 86400;
+
+	/**
+	 * Remove verify working directories nobody is using.
+	 *
+	 * A verify (utils/verify_backup.php) stages the whole set a restore of the
+	 * run depends on under `verify-<pid>/` in the profile's directory, and
+	 * level 3 replays the tree beneath it. It removes all of that itself when it
+	 * finishes, however it finishes — but a process that is killed outright runs
+	 * no shutdown handler, and a leftover set is gigabytes on a machine that may
+	 * already be tight. So the sweep takes any such directory older than a day,
+	 * on every run, regardless of the local retention window: these are not
+	 * backups and the window does not apply to them.
+	 */
+	private static function sweep_verify_work(array $plan) {
+		$dir = rtrim((string)($plan['output_dir'] ?? ''), '/');
+		if ($dir === '') { return 0; }
+		$cutoff = time() - self::VERIFY_WORK_MAX_AGE;
+		$swept = 0;
+		foreach (glob($dir . '/' . BackupVerifier::WORK_PREFIX . '*', GLOB_ONLYDIR) ?: array() as $work) {
+			$age = @filemtime($work);
+			if ($age === false || $age >= $cutoff) {
+				continue;
+			}
+			BackupVerifier::remove_tree($work);
+			if (!is_dir($work)) { $swept++; }
 		}
 		return $swept;
 	}

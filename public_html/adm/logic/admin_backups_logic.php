@@ -6,6 +6,13 @@
  * opens them, how many are kept, and what has actually happened. No fleet, no
  * agent — server_manager is a layer on top of this, not a prerequisite for it.
  *
+ * @version 1.8 - milestones['verify_attempt']: a verify that proved nothing either way (skipped or
+ *                refused) and is about a backup no older than the last proof, so the Status box can
+ *                say what became of a verify a person started
+ * @version 1.7 - verified restorable: milestones['verified'] (the newest run proven restorable) and
+ *                ['verify_failed'] (a failure newer than that); 'ceremony' (when the recovery key was
+ *                last proven by a person); the verify_backup action starts a level 2 or 3 verify of
+ *                the site's own newest backup in the background
  * @version 1.6 - milestones: the newest backup, the newest full backup and the oldest backup still
  *                held, for the Status box
  * @version 1.5 - save_target completes a Backblaze credential through BackupTarget::complete_credentials
@@ -26,6 +33,8 @@ require_once(PathHelper::getIncludePath('includes/BackupRunner.php'));
 require_once(PathHelper::getIncludePath('includes/TargetTester.php'));
 require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
 require_once(PathHelper::getIncludePath('data/backup_history_class.php'));
+require_once(PathHelper::getIncludePath('includes/BackupVerifyLauncher.php'));
+require_once(PathHelper::getIncludePath('data/recovery_verifications_class.php'));
 
 function admin_backups_logic($input = array()) {
 	$session = SessionControl::get_instance();
@@ -85,6 +94,8 @@ function admin_backups_logic($input = array()) {
 		'targets'       => $targets,
 		'history'       => $history,
 		'milestones'    => _admin_backups_milestones(),
+		'ceremony'      => _admin_backups_ceremony_time(),
+		'verify_every'  => _admin_backups_verify_every_days(),
 		'recovery'      => BackupRecoveryKey::setup_state(),
 		'plan'          => $plan,
 		'plan_problem'  => $plan_problem,
@@ -313,6 +324,28 @@ function _admin_backups_handle($action, array $input, $session) {
 				return $url;
 			}
 
+			case 'verify_backup': {
+				// Prove the newest backup restorable without restoring it. Level
+				// 2 opens and reads every archive it depends on; level 3 also
+				// replays it into scratch and a throwaway database. Nothing on
+				// the site is touched either way. Runs in its own process like a
+				// backup does; the result lands on the run's row under Recent
+				// backups and on the Status box.
+				$level = (int)($input['level'] ?? 0);
+				if (!BackupVerifier::is_runnable_level($level)) {
+					throw new Exception('A verify is either "open and read" or "rehearse a restore".');
+				}
+				$run = BackupVerifyLauncher::newest_run();
+				if ($run === null) {
+					throw new Exception('This site has no backup of its own to verify yet.');
+				}
+				BackupVerifyLauncher::start($run, $level);
+				$say(($level === BackupVerifier::LEVEL_REHEARSE ? 'Rehearsing a restore of' : 'Opening and reading')
+					. ' the backup of ' . BackupVerifier::when_words((string)$run->get('bkh_start_time'))
+					. ' in the background. The result appears here when it is done.', true);
+				return $url;
+			}
+
 			case 'delete_history': {
 				$row = new BackupHistory((int)($input['bkh_id'] ?? 0), TRUE);
 				$row->set('bkh_delete_time', gmdate('Y-m-d H:i:s'));
@@ -350,11 +383,66 @@ function _admin_backups_milestones() {
 	if ($alone && (!$full || (string)$alone->get('bkh_start_time') > (string)$full->get('bkh_start_time'))) {
 		$full = $alone;
 	}
+	// Verified restorable: the newest run proven so, and a failure newer than
+	// that proof (a failed verify of a later backup is worth more than an old
+	// pass, and is shown beside it rather than hiding it). Either profile
+	// counts — a management node's copy this machine proved is a proof.
+	$verified = $one(array('bkh_verify_outcome' => 'pass'), 'DESC');
+	$verify_failed = null;
+	$failed = new MultiBackupHistory(
+		array_merge($base, array('bkh_verify_outcome' => 'fail')), array('bkh_verify_time' => 'DESC'), 1, 0);
+	foreach ($failed as $r) {
+		if ($verified === null || (string)$r->get('bkh_verify_time') > (string)$verified->get('bkh_verify_time')) {
+			$verify_failed = $r;
+		}
+	}
+	// A verify that proved nothing either way — skipped for disk or a busy
+	// machine, or refused before it read anything — leaves its reason as the
+	// run's message with no outcome. Shown when it is about a backup newer
+	// than the last proof, so a person who pressed the button sees what
+	// became of it.
+	$verify_attempt = null;
+	$attempts = new MultiBackupHistory(
+		array_merge($base, array('verify_attempted' => true)), array('bkh_start_time' => 'DESC'), 1, 0);
+	foreach ($attempts as $r) {
+		if (!BackupVerifier::is_attempt_message((string)$r->get('bkh_verify_message'))) { continue; }
+		if ($verified === null || (string)$r->get('bkh_start_time') >= (string)$verified->get('bkh_start_time')) {
+			$verify_attempt = $r;
+		}
+	}
 	return array(
-		'newest' => $one(array(), 'DESC'),
-		'full'   => $full,
-		'oldest' => $one(array(), 'ASC'),
+		'newest'         => $one(array(), 'DESC'),
+		'full'           => $full,
+		'oldest'         => $one(array(), 'ASC'),
+		'verified'       => $verified,
+		'verify_failed'  => $verify_failed,
+		'verify_attempt' => $verify_attempt,
 	);
+}
+
+/**
+ * Days between scheduled verifications of the newest backup: the setting, or
+ * its declared default (30) where the row has not been seeded yet.
+ */
+function _admin_backups_verify_every_days() {
+	$v = Globalvars::get_instance()->get_setting('backup_verify_every_days', true, true);
+	return ($v === null || $v === '') ? 30 : (int)$v;
+}
+
+/**
+ * When a person last proved the recovery private key opens a challenge — the
+ * ceremony on the Recovery Readiness page. Shown beside the last verify,
+ * because the two together are the proof: the ceremony shows the key opens an
+ * envelope, the verify shows the envelope's contents are sound. Null when
+ * never. Whoever ran it; the key is the site's, not a user's.
+ */
+function _admin_backups_ceremony_time() {
+	try {
+		$latest = RecoveryVerification::latest_passed(array('backup_recovery_key'));
+		return isset($latest['backup_recovery_key']) ? (string)$latest['backup_recovery_key'] : null;
+	} catch (\Throwable $e) {
+		return null;
+	}
 }
 
 /**

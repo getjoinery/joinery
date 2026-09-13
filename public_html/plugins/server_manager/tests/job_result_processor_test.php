@@ -519,4 +519,106 @@ check(!JobResultProcessor::wants_recovery_key_report(array(
 check(!JobResultProcessor::wants_recovery_key_report(array('backup_recovery_state' => 'unconfigured')),
 	'a measured "unconfigured" is an answer, not a gap');
 
+section('verify_backup: the node\'s VERIFY_* lines become the plane\'s copy, in plain words');
+
+$vpass = "fetching files-0000.tar.gz.enc\nVERIFY_RESULT=pass\nVERIFY_LEVEL=2\nVERIFY_RUN=chain-20260912_044520/3\n"
+	. "VERIFY_RUN_TIME=2026-09-13 04:45:20\nVERIFY_ARTIFACTS=3\nVERIFY_BYTES=751829197\nVERIFY_FILES=1842\nVERIFY_DURATION=141\n";
+$v = JobResultProcessor::parse_verify_backup_result($vpass, 'completed');
+check($v['result'] === 'pass' && $v['level'] === 2 && $v['artifacts'] === 3 && $v['bytes'] === 751829197 && $v['files'] === 1842,
+	'a pass reads back with its counts', var_export($v, true));
+check($v['message'] === 'Opened and read the backup of 2026-09-13 04:45 UTC: 3 archives, 717 MB, 1,842 files.',
+	'and its message is the plain-words sentence', $v['message']);
+
+// The primitive transport wraps the text in the API envelope, newlines escaped.
+$wrapped = "=== [Step 1/1] verify_backup ===\n" . json_encode(array('api_version' => 1, 'data' => array('output' => $vpass)));
+$v = JobResultProcessor::parse_verify_backup_result($wrapped, 'completed');
+check($v['result'] === 'pass' && $v['files'] === 1842, 'the envelope is unwrapped first', var_export($v, true));
+
+$vfail = "VERIFY_RESULT=fail\nVERIFY_LEVEL=2\nVERIFY_RUN=chain-20260912_044520/3\nVERIFY_RUN_TIME=2026-09-13 04:45:20\n"
+	. "VERIFY_ARTIFACTS=1\nVERIFY_BYTES=1000\nVERIFY_FILES=40\nVERIFY_DURATION=9\n"
+	. "VERIFY_REASON=files-0001.tar.gz.enc does not match its recorded hash. It is damaged or was replaced; do not restore from it.\n";
+$v = JobResultProcessor::parse_verify_backup_result($vfail, 'failed');
+check($v['result'] === 'fail' && strpos($v['reason'], 'files-0001') === 0, 'a fail reads back with the node\'s reason');
+check(strpos($v['message'], 'failed: files-0001.tar.gz.enc does not match') !== false, 'and the message carries it', $v['message']);
+
+$vskip = "VERIFY_RESULT=skipped\nVERIFY_LEVEL=3\nVERIFY_RUN=chain-20260912_044520/3\nVERIFY_RUN_TIME=2026-09-13 04:45:20\n"
+	. "VERIFY_ARTIFACTS=0\nVERIFY_BYTES=0\nVERIFY_FILES=0\nVERIFY_DURATION=0\nVERIFY_REASON=disk\n"
+	. "VERIFY_NEEDS_BYTES=2600000000\nVERIFY_FREE_BYTES=900000000\n";
+$v = JobResultProcessor::parse_verify_backup_result($vskip, 'completed');
+check($v['result'] === 'skipped' && $v['needs_bytes'] === 2600000000 && $v['free_bytes'] === 900000000, 'a disk skip reads back with both numbers');
+check($v['message'] === 'Could not verify the backup of 2026-09-13 04:45 UTC: needs 2.4 GB free, has 858.3 MB.',
+	'and says them for a person', $v['message']);
+
+$v = JobResultProcessor::parse_verify_backup_result("=== [Step 1/1] ===\nsome agent noise\n", 'failed', 'Refused by the node: tree manifest signature does not verify');
+check($v['result'] === 'fail' && strpos($v['reason'], 'Refused by the node') === 0,
+	'a job that died before printing a result is a failed verify with the job\'s own error', var_export($v, true));
+$v = JobResultProcessor::parse_verify_backup_result('', 'completed');
+check($v['result'] === 'fail', 'and a completed job with no result line is never read as a pass');
+
+// The fold onto the node: pass and fail stamp the four columns; a skip stamps
+// only the message and leaves the last real result standing.
+$jrp_vnode = new ManagedNode(NULL);
+$jrp_vnode->set('mgn_name', 'HarnessTest verify node');
+$jrp_vnode->set('mgn_slug', 'harnesstest-verify-' . bin2hex(random_bytes(3)));
+$jrp_vnode->set('mgn_host', '192.0.2.44');
+$jrp_vnode->save();
+harness_register_row('mgn_managed_nodes', 'mgn_id', $jrp_vnode->key);
+
+$mk_vjob = function ($output, $status) use ($jrp_vnode) {
+	$job = new ManagementJob(NULL);
+	$job->set('mjb_mgn_node_id', $jrp_vnode->key);
+	$job->set('mjb_job_type', 'verify_backup');
+	$job->set('mjb_status', $status);
+	$job->set('mjb_commands', array());
+	$job->set('mjb_output', $output);
+	$job->set('mjb_completed_time', '2026-09-13 05:00:00');
+	$job->save();
+	harness_register_row('mjb_management_jobs', 'mjb_id', $job->key);
+	return $job;
+};
+JobResultProcessor::process($mk_vjob($vpass, 'completed'));
+$jrp_vnode->load();
+check((string)$jrp_vnode->get('mgn_backup_verify_outcome') === 'pass' && (int)$jrp_vnode->get('mgn_backup_verify_level') === 2
+	&& strpos((string)$jrp_vnode->get('mgn_backup_verify_time'), '2026-09-13 05:00:00') === 0,
+	'a pass stamps outcome, level and the job\'s completion time on the node');
+check(strpos((string)$jrp_vnode->get('mgn_backup_verify_message'), 'Opened and read') === 0, 'and the sentence');
+
+JobResultProcessor::process($mk_vjob($vskip, 'completed'));
+$jrp_vnode->load();
+check((string)$jrp_vnode->get('mgn_backup_verify_outcome') === 'pass'
+	&& strpos((string)$jrp_vnode->get('mgn_backup_verify_time'), '2026-09-13 05:00:00') === 0,
+	'a skip leaves the last real result and its time standing');
+check(strpos((string)$jrp_vnode->get('mgn_backup_verify_message'), 'Could not verify') === 0, 'and records why it could not verify');
+
+$vfail_job = $mk_vjob($vfail, 'failed');
+JobResultProcessor::process($vfail_job);
+$jrp_vnode->load();
+check((string)$jrp_vnode->get('mgn_backup_verify_outcome') === 'fail', 'a fail stamps fail');
+$vfail_job->load();
+$vres = json_decode((string)$vfail_job->get('mjb_result'), true);
+check(is_array($vres) && $vres['verify_status'] === 'fail' && strpos($vres['message'], 'failed:') !== false,
+	'and the job records the result and the sentence', (string)$vfail_job->get('mjb_result'));
+
+section('A verify the node ran itself is adopted from its status report, never rolled back');
+
+$adopt_node = new ManagedNode(NULL);
+$adopt_node->set('mgn_backup_verify_time', '2026-09-10 10:00:00');
+$adopt_node->set('mgn_backup_verify_outcome', 'pass');
+$adopt_node->set('mgn_backup_verify_level', 2);
+check(!JobResultProcessor::adopt_reported_verify($adopt_node, array(
+	'last_verify_time' => '2026-09-08 10:00:00', 'last_verify_outcome' => 'pass', 'last_verify_level' => 2)),
+	'an older reported verify does not replace a newer stamp');
+check(!JobResultProcessor::adopt_reported_verify($adopt_node, array('last_run' => '2026-09-12 04:00:00')),
+	'a report with no verify in it changes nothing');
+check(JobResultProcessor::adopt_reported_verify($adopt_node, array(
+	'last_verify_time' => '2026-09-12 10:00:00', 'last_verify_outcome' => 'fail', 'last_verify_level' => 3,
+	'last_verify_message' => 'Verification of the backup of 2026-09-12 04:00 UTC failed: x')),
+	'a newer one is adopted');
+check((string)$adopt_node->get('mgn_backup_verify_outcome') === 'fail' && (int)$adopt_node->get('mgn_backup_verify_level') === 3
+	&& (string)$adopt_node->get('mgn_backup_verify_time') === '2026-09-12 10:00:00',
+	'with its time, level, outcome and words');
+check(!JobResultProcessor::adopt_reported_verify($adopt_node, array(
+	'last_verify_time' => '2026-09-13 10:00:00', 'last_verify_outcome' => 'skipped')),
+	'a skip is never adopted — nothing was proven either way');
+
 harness_finish();

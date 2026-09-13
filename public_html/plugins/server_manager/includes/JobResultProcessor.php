@@ -5,6 +5,11 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.27 - the status fold adopts a verify the node reports in its own backup summary
+ *                 (adopt_reported_verify) when it is newer than the stamp this plane holds
+ * @version 1.26 - process_verify_backup reads a verify_backup job's VERIFY_* lines and stamps the
+ *                 node's mgn_backup_verify_* columns (a skip records its reason and leaves the time
+ *                 alone); parse_verify_backup_result is the pure half, for the fold test
  * @version 1.25 - a primitive status check on a node whose recovery-key state was never measured
  *                 queues the recovery_key_report job, not only one whose state was carried forward
  * @version 1.24 - parse_check_status_ssh_output reads the Swap: line of free -m it always
@@ -477,6 +482,12 @@ class JobResultProcessor {
 					$node->set('mgn_last_backup_outcome',
 						(($mgr['last_outcome'] ?? '') === 'success') ? 'success' : 'failed');
 				}
+				// A verify the node ran itself (its own scheduled task, or its
+				// own Backups page) is as much a proof as one dispatched from
+				// here, and the node's history row is the authority either way.
+				// Taken only when newer than what this plane already holds, so a
+				// report cannot roll a fresher job result back.
+				self::adopt_reported_verify($node, $mgr);
 			}
 			$node->save();
 
@@ -550,6 +561,32 @@ class JobResultProcessor {
 		// the inherited keys read as a job that had measured them.
 		$job->set('mjb_result', json_encode($result));
 		$job->save();
+	}
+
+	/**
+	 * Stamp a verify the node reported in its status summary onto the node's
+	 * mgn_backup_verify_* columns, when it is newer than the stamp held.
+	 * Pure over the node object, so the fold test can pin it.
+	 *
+	 * @return bool whether anything was stamped
+	 */
+	public static function adopt_reported_verify($node, array $summary): bool {
+		$time = trim((string)($summary['last_verify_time'] ?? ''));
+		$outcome = (string)($summary['last_verify_outcome'] ?? '');
+		if ($time === '' || !in_array($outcome, ['pass', 'fail'], true)) {
+			return false;
+		}
+		$reported = strtotime($time . ' UTC');
+		$held_raw = trim((string)$node->get('mgn_backup_verify_time'));
+		$held = ($held_raw !== '') ? strtotime($held_raw . ' UTC') : false;
+		if ($reported === false || ($held !== false && $reported <= $held)) {
+			return false;
+		}
+		$node->set('mgn_backup_verify_time', gmdate('Y-m-d H:i:s', $reported));
+		$node->set('mgn_backup_verify_level', (int)($summary['last_verify_level'] ?? 0) ?: null);
+		$node->set('mgn_backup_verify_outcome', $outcome);
+		$node->set('mgn_backup_verify_message', (string)($summary['last_verify_message'] ?? ''));
+		return true;
 	}
 
 	/**
@@ -844,6 +881,93 @@ class JobResultProcessor {
 
 		$job->set('mjb_result', json_encode($result));
 		$job->save();
+	}
+
+	/**
+	 * Post-process verify_backup: the node has opened and read one of its
+	 * backups, or rehearsed a restore of it, and printed VERIFY_* lines saying
+	 * how it went. Those lines are the node's own words about its own history
+	 * row, which is the authority; this stamps the plane's copy on the node
+	 * (mgn_backup_verify_*) and stores the result in plain words on the job.
+	 *
+	 * Three outcomes, three different stamps. A pass and a fail both stamp the
+	 * time, the level, the outcome and the message — a failed verify is
+	 * surfaced exactly like a failed backup, and never triggers anything on its
+	 * own. A skip (not enough disk, a throwaway database that could not be
+	 * created, a machine busy with a backup) proves nothing either way, so it
+	 * leaves the time and outcome alone and records only the reason, where the
+	 * card can show "could not verify" beside the last real result.
+	 */
+	private static function process_verify_backup($job) {
+		$verdict = self::parse_verify_backup_result(
+			$job->get('mjb_output') ?: '',
+			(string)$job->get('mjb_status'),
+			trim((string)$job->get('mjb_error_message'))
+		);
+		$result = [
+			'verify_status' => $verdict['result'],
+			'level'         => (int)($verdict['level'] ?? 0),
+			'message'       => $verdict['message'],
+		];
+		foreach (['run', 'run_time', 'artifacts', 'bytes', 'files', 'tables', 'rows', 'duration', 'reason',
+		          'needs_bytes', 'free_bytes'] as $k) {
+			if (isset($verdict[$k])) { $result[$k] = $verdict[$k]; }
+		}
+
+		$node_id = $job->get('mjb_mgn_node_id');
+		if ($node_id) {
+			try {
+				$node = new ManagedNode($node_id, TRUE);
+				if ($verdict['result'] === 'skipped') {
+					$node->set('mgn_backup_verify_message', $verdict['message']);
+				} else {
+					$node->set('mgn_backup_verify_time',
+						self::backup_run_stamp_time([], (string)$job->get('mjb_completed_time')));
+					$node->set('mgn_backup_verify_level', (int)($verdict['level'] ?? 0) ?: null);
+					$node->set('mgn_backup_verify_outcome', $verdict['result']);
+					$node->set('mgn_backup_verify_message', $verdict['message']);
+				}
+				$node->save();
+			} catch (Exception $e) {
+				error_log('JobResultProcessor: could not stamp the verify outcome for node '
+					. $node_id . ': ' . $e->getMessage());
+			}
+		}
+
+		$job->set('mjb_result', json_encode($result));
+		$job->save();
+	}
+
+	/**
+	 * Read a verify_backup job's verdict out of its output. Pure — no DB, no
+	 * job mutation — so the fold test can pin every shape.
+	 *
+	 * The contract is BackupVerifier's, printed by the node and parsed by the
+	 * same class here, so the two sides cannot disagree about a key. The
+	 * primitive transport wraps the text in the same JSON envelope backup_run's
+	 * does, so it is unwrapped first. A job that failed before printing a
+	 * result (the node refused the script, the agent timed out) is a failed
+	 * verify with the job's own error as its reason — never an unknown.
+	 *
+	 * @return array the parsed contract plus 'message' in plain words
+	 */
+	public static function parse_verify_backup_result(string $output, string $job_status, string $job_error = ''): array {
+		require_once(PathHelper::getIncludePath('includes/BackupVerifier.php'));
+
+		$envelope = self::extract_api_envelope_data($output);
+		if ($envelope !== null && isset($envelope['output']) && is_string($envelope['output'])) {
+			$output = $envelope['output'];
+		}
+
+		$parsed = BackupVerifier::parse_contract($output);
+		if (!preg_match('/^VERIFY_RESULT=/m', $output)) {
+			$parsed['result'] = 'fail';
+			$parsed['reason'] = ($job_status === 'failed' && $job_error !== '')
+				? $job_error
+				: 'the node reported no result';
+		}
+		$parsed['message'] = BackupVerifier::describe($parsed);
+		return $parsed;
 	}
 
 	/**

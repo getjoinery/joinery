@@ -1,4 +1,16 @@
 <?php
+/**
+ * admin_backups — the Backups page.
+ *
+ * @version 1.8 - a verify that proved nothing either way (skipped, or refused before it read
+ *                anything) shows as "Last attempt" in the Status box and "not verified" / "since
+ *                then" on the run's row, so a verify a person started never vanishes without a word
+ * @version 1.7 - verified restorable: the Status box's fourth row (the last backup proven
+ *                restorable, with the recovery-key ceremony beside it), the "Verify the newest
+ *                backup" and "Rehearse a restore" buttons, and each run's Availability says whether
+ *                it was verified restorable or failed verification
+ * @version 1.6 - the Status box reads the three milestones; Recent backups is one row per run
+ */
 // PathHelper, Globalvars, SessionControl, DbConnector, ThemeHelper,
 // PluginHelper are always pre-loaded — never require them.
 
@@ -6,6 +18,7 @@ require_once(PathHelper::getIncludePath('adm/logic/admin_backups_logic.php'));
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/BackupRunner.php'));
+require_once(PathHelper::getIncludePath('includes/BackupVerifier.php'));
 
 $page_vars = process_logic(admin_backups_logic(array_merge($_GET, $_POST)));
 
@@ -14,6 +27,8 @@ $settings     = $page_vars['settings'];
 $targets      = $page_vars['targets'];
 $history      = $page_vars['history'];
 $milestones   = $page_vars['milestones'];
+$ceremony     = $page_vars['ceremony'];
+$verify_every = $page_vars['verify_every'];
 $recovery     = $page_vars['recovery'];
 $plan         = $page_vars['plan'];
 $plan_problem = $page_vars['plan_problem'];
@@ -125,6 +140,50 @@ echo '<tr><th>Last backup</th><td>' . $describe($milestones['newest']) . '</td><
 echo '<tr><th>Last full backup</th><td>' . $describe($milestones['full']) . '</td></tr>';
 echo '<tr><th>Oldest backup still held</th><td>' . $describe($milestones['oldest']) . $oldest_note . '</td></tr>';
 
+// The fourth fact: has any of this been PROVEN restorable, and when. A pass is
+// dated and named by level; a failure newer than the last pass is shown in red
+// beside it with the reason, because a backup that failed to open is the one
+// to know about. The recovery-key ceremony sits beside it on purpose: the
+// verify proves the archives are sound with the key this machine holds, the
+// ceremony proves the private key a person holds opens an envelope — together
+// they are the proof, and neither alone is.
+$verified = $milestones['verified'];
+$verify_failed = $milestones['verify_failed'];
+echo '<tr><th>Last verified restorable</th><td>';
+if ($verified) {
+	echo htmlspecialchars($when($verified->get('bkh_verify_time')))
+	   . ' <span class="text-muted small">&middot; ' . htmlspecialchars(BackupVerifier::level_name((int)$verified->get('bkh_verify_level')) ?: 'verified')
+	   . ' &middot; the backup of ' . htmlspecialchars($when($verified->get('bkh_start_time')))
+	   . ((string)$verified->get('bkh_verify_message') !== ''
+	       ? ' &middot; ' . htmlspecialchars((string)$verified->get('bkh_verify_message')) : '')
+	   . '</span>';
+} else {
+	echo '<span class="text-muted">never</span>';
+	if ($verify_every > 0 && $milestones['newest']) {
+		echo ' <span class="text-muted small">&middot; the newest backup is opened and read every '
+		   . (int)$verify_every . ' days</span>';
+	} elseif ($verify_every <= 0) {
+		echo ' <span class="text-muted small">&middot; scheduled verification is switched off</span>';
+	}
+}
+if ($verify_failed) {
+	echo '<div class="text-danger small">Verification failed ' . htmlspecialchars($when($verify_failed->get('bkh_verify_time')))
+	   . ': ' . htmlspecialchars((string)$verify_failed->get('bkh_verify_message') ?: 'no reason recorded') . '</div>';
+}
+// A verify that proved nothing either way (skipped, or refused before it
+// read anything) is neither of the above, and is still what became of the
+// button a person pressed.
+if (!empty($milestones['verify_attempt'])) {
+	echo '<div class="text-muted small">Last attempt: '
+	   . htmlspecialchars((string)$milestones['verify_attempt']->get('bkh_verify_message')) . '</div>';
+}
+echo '<div class="text-muted small">Your recovery key was last proven '
+   . ($ceremony ? htmlspecialchars($when($ceremony)) : 'never')
+   . ' &mdash; <a href="/admin/admin_recovery_readiness">prove it</a>. The two together are the proof: the '
+   . 'verification shows the archives open and read with the key this machine holds; the ceremony shows '
+   . 'your own private key opens them.</div>';
+echo '</td></tr>';
+
 // When did a backup last run, and who ran it. A plane-backed node's local task
 // never runs — its backups are dispatched by the management node, which writes no
 // local task row — so falling back to the newest management-node run tells the
@@ -184,6 +243,34 @@ if ($plan) {
 	$fr->hiddeninput('action', '', array('value' => 'run_backup'));
 	$fr->submitbutton('btn_run_backup', 'Run a backup now', array('class' => 'btn btn-sm btn-primary mt-2'));
 	$fr->end_form();
+
+	// Prove the newest backup restorable, without restoring it. Two buttons
+	// for two levels: opening and reading (what the schedule does), and a
+	// rehearsal into scratch and a throwaway database (a person's choice; no
+	// schedule runs one). Only offered once there is a backup of the site's
+	// own to open.
+	$newest_own = BackupVerifyLauncher::newest_run();
+	if ($newest_own) {
+		$fv = $page->getFormWriter('verify_form');
+		$fv->begin_form();
+		$fv->hiddeninput('action', '', array('value' => 'verify_backup'));
+		$fv->hiddeninput('level', '', array('value' => BackupVerifier::LEVEL_READ));
+		$fv->submitbutton('btn_verify', 'Verify the newest backup', array('class' => 'btn btn-sm btn-outline-primary mt-2'));
+		$fv->end_form();
+		$fw3 = $page->getFormWriter('rehearse_form');
+		$fw3->begin_form();
+		$fw3->hiddeninput('action', '', array('value' => 'verify_backup'));
+		$fw3->hiddeninput('level', '', array('value' => BackupVerifier::LEVEL_REHEARSE));
+		$fw3->submitbutton('btn_rehearse', 'Rehearse a restore', array('class' => 'btn btn-sm btn-outline-secondary mt-2'));
+		$fw3->end_form();
+		echo '<p class="text-muted small mt-2 mb-0"><strong>Verify</strong> downloads every archive the newest backup '
+		   . 'depends on, opens each with this site\'s own key and reads it to the end, then removes them. '
+		   . '<strong>Rehearse</strong> does that and then replays the files into a scratch directory and loads '
+		   . 'the database into a throwaway one on this machine\'s PostgreSQL, counts what came back, and deletes '
+		   . 'both &mdash; it needs free disk of roughly twice the site plus the database, and a PostgreSQL role '
+		   . 'that can create a database; both are checked before anything is downloaded. Nothing on the live '
+		   . 'site is touched either way. Each verification downloads the whole set once.</p>';
+	}
 }
 $page->end_box();
 
@@ -446,6 +533,27 @@ if (!$hrows) {
 		// The row states what this machine actually witnessed, which is the upload,
 		// and says who owns the copy from there on.
 		$pruned = (bool)$h->get('bkh_pruned_time');
+		// Verified restorable, or failed verification, from the stamp the
+		// verify left on this run — shown with the availability, since "still
+		// there" and "proven to open" are the two halves of one answer.
+		// A skip or a refusal stamps the message only, so the last real
+		// result stands and the attempt's reason rides beside it.
+		$verify_note = '';
+		$verify_message = (string)$h->get('bkh_verify_message');
+		$attempt = BackupVerifier::is_attempt_message($verify_message);
+		if ((string)$h->get('bkh_verify_time') !== '') {
+			$verify_note = ((string)$h->get('bkh_verify_outcome') === 'pass')
+				? '<div class="text-success small">verified restorable &middot; ' . htmlspecialchars($when($h->get('bkh_verify_time')))
+				  . ' <span class="text-muted">(' . htmlspecialchars(BackupVerifier::level_name((int)$h->get('bkh_verify_level'))) . ')</span></div>'
+				: '<div class="text-danger small">verification failed &middot; ' . htmlspecialchars($when($h->get('bkh_verify_time')))
+				  . (($verify_message !== '' && !$attempt) ? ' &middot; ' . htmlspecialchars($verify_message) : '')
+				  . '</div>';
+			if ($attempt) {
+				$verify_note .= '<div class="text-muted small">since then: ' . htmlspecialchars($verify_message) . '</div>';
+			}
+		} elseif ($attempt) {
+			$verify_note = '<div class="text-muted small">not verified &middot; ' . htmlspecialchars($verify_message) . '</div>';
+		}
 		echo '<td>';
 		if ($pruned) {
 			echo '<span class="text-muted">Cleaned up &middot; ' . htmlspecialchars($when($h->get('bkh_pruned_time'))) . '</span>';
@@ -463,6 +571,7 @@ if (!$hrows) {
 		} else {
 			echo '<span class="text-success">Present</span> <span class="text-muted small">&middot; local only</span>';
 		}
+		echo $verify_note;
 		echo '</td>';
 		echo '<td>';
 		// A management node owns its own records; this site hides only its own — and

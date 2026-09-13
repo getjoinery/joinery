@@ -8,10 +8,17 @@
  * and the explicit switch (activate) remains only for the odd state where
  * everything is ready but someone has turned the task off.
  *
+ * Backup verification (BackupVerify) is switched on with it: a site that
+ * backs itself up proves its backups restorable, on the same decision.
+ *
+ * @version 1.1 - activates BackupVerify alongside BackupRun, and turns the pair on when either is off
  * @version 1.0
  */
 
 class BackupNightly {
+
+	/** The two tasks one decision switches on. */
+	const TASKS = array('BackupRun', 'BackupVerify');
 
 	/**
 	 * Turn the nightly task on if everything it needs exists and it is not
@@ -38,8 +45,12 @@ class BackupNightly {
 		if ($target_id <= 0 || !BackupRecoveryKey::is_ready()) {
 			return false;
 		}
-		$active = new MultiScheduledTask(array('task_class' => 'BackupRun', 'active' => true, 'deleted' => false));
-		if ($active->count_all() > 0) {
+		$all_on = true;
+		foreach (self::TASKS as $class) {
+			$active = new MultiScheduledTask(array('task_class' => $class, 'active' => true, 'deleted' => false));
+			if ($active->count_all() === 0) { $all_on = false; }
+		}
+		if ($all_on) {
 			return false;
 		}
 		self::activate();
@@ -52,21 +63,26 @@ class BackupNightly {
 	 * default so the first run does not stall on a blank.
 	 */
 	public static function activate(): void {
-		$existing = new MultiScheduledTask(array('task_class' => 'BackupRun', 'deleted' => false));
-		$task = null;
-		foreach ($existing as $row) {
-			$task = $row;
-			break;
-		}
-		if ($task !== null) {
-			$task->set('sct_is_active', true);
-			$task->save();
-		} else {
-			$discovered = ScheduledTaskRegistry::discover();
-			$json = $discovered['BackupRun']['json'] ?? array();
+		$discovered = null;
+		foreach (self::TASKS as $class) {
+			$existing = new MultiScheduledTask(array('task_class' => $class, 'deleted' => false));
+			$task = null;
+			foreach ($existing as $row) {
+				$task = $row;
+				break;
+			}
+			if ($task !== null) {
+				if (!$task->get('sct_is_active')) {
+					$task->set('sct_is_active', true);
+					$task->save();
+				}
+				continue;
+			}
+			if ($discovered === null) { $discovered = ScheduledTaskRegistry::discover(); }
+			$json = $discovered[$class]['json'] ?? array();
 			$task = new ScheduledTask(NULL);
-			$task->set('sct_name', $json['name'] ?? 'Backup');
-			$task->set('sct_task_class', 'BackupRun');
+			$task->set('sct_name', $json['name'] ?? $class);
+			$task->set('sct_task_class', $class);
 			$task->set('sct_is_active', true);
 			$task->set('sct_frequency', $json['default_frequency'] ?? 'daily');
 			if (isset($json['default_time'])) {

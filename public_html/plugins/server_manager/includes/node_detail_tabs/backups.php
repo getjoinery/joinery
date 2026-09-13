@@ -9,6 +9,10 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.10 - verified restorable: the last verify is stated with the three facts above the run
+ *                 list, a Verify button per run offers "open and read" or "rehearse a restore" (with
+ *                 the room the node needs), the schedule sentence says how often the newest backup is
+ *                 verified, and the policy editor has the days-between-verifications field
  * @version 1.9 - the schedule summary and the fleet-default dropdown share one sentence that says
  *                what is kept: N full backups with their incrementals, and how many days that is
  * @version 1.8 - the shelf is listed as one row per backup run (when, full or incremental, who took
@@ -159,14 +163,20 @@
 		// which at a weekly full is about a month.
 		$describe_policy = function (array $p) {
 			$keep = (int)$p['keep'];
+			// How often the newest backup is proven restorable, in the same
+			// sentence as the schedule: a schedule nobody verifies is a hope.
+			$every = (int)($p['verify_every_days'] ?? 0);
+			$verify = ($every > 0)
+				? ', verified every ' . $every . ' day' . ($every === 1 ? '' : 's') . ' by opening and reading the newest backup'
+				: ', never verified';
 			if ($p['mode'] === 'chain') {
 				$days = (int)$p['full_interval_days'];
 				return $p['frequency'] . ' backups: a full backup every ' . $days . ' day' . ($days === 1 ? '' : 's')
 				   . ' and incrementals in between, keeping the newest ' . $keep
 				   . ' full backup' . ($keep === 1 ? '' : 's') . ' with their incrementals'
-				   . ' (about ' . (int)round($keep * max(1, $days)) . ' days of history)';
+				   . ' (about ' . (int)round($keep * max(1, $days)) . ' days of history)' . $verify;
 			}
-			return $p['frequency'] . ' full backups, keeping the newest ' . $keep;
+			return $p['frequency'] . ' full backups, keeping the newest ' . $keep . $verify;
 		};
 		echo '<p class="mb-1">';
 		if (!empty($policy['enabled'])) {
@@ -224,7 +234,7 @@
 		$fw_pol->hiddeninput(SmAdminCsrf::FIELD, '', ['value' => SmAdminCsrf::token()]);
 
 		$custom_fields = ['policy_schedule', 'policy_window_start', 'policy_window_minutes',
-			'policy_mode', 'policy_keep', 'policy_full_interval_days'];
+			'policy_mode', 'policy_keep', 'policy_full_interval_days', 'policy_verify_every_days'];
 		$fw_pol->dropinput('backup_policy_source', 'Schedule for this node', [
 			'options' => [
 				'default' => $default_label,
@@ -271,6 +281,13 @@
 		$fw_pol->numberinput('policy_full_interval_days', 'Days between full backups', [
 			'value' => $policy['full_interval_days'],
 			'min'   => 0,
+		]);
+		$fw_pol->numberinput('policy_verify_every_days', 'Days between verifications (0 = never)', [
+			'value'    => $policy['verify_every_days'],
+			'min'      => 0,
+			'helptext' => 'The newest backup is opened and read on the node to prove it restorable: every archive '
+			            . 'it depends on is downloaded, decrypted with the node\'s own key and read to the end, then '
+			            . 'removed. Nothing on the site is touched. Each verification downloads the whole set once.',
 		]);
 
 		$fw_pol->submitbutton('btn_save_backup_policy', 'Save schedule', ['class' => 'btn btn-sm btn-secondary']);
@@ -429,10 +446,29 @@
 			};
 			$newest_full = null;
 			foreach ($shelf_runs as $entry) { if ($entry['run']['level'] === 0) { $newest_full = $entry; break; } }
+			// The last verify, beside the three facts about the shelf. This is
+			// the plane's copy of what the node proved (mgn_backup_verify_*),
+			// refreshed from every verify job and every status report.
+			require_once(PathHelper::getIncludePath('includes/BackupVerifier.php'));
+			$verify_time    = trim((string)$node->get('mgn_backup_verify_time'));
+			$verify_outcome = (string)$node->get('mgn_backup_verify_outcome');
+			$verify_message = trim((string)$node->get('mgn_backup_verify_message'));
+			$verify_level   = BackupVerifier::level_name((int)$node->get('mgn_backup_verify_level'));
+			if ($verify_time === '') {
+				$verify_line = '<span class="text-muted">never' . ($verify_message !== '' ? ' &mdash; ' . htmlspecialchars($verify_message) : '') . '</span>';
+			} elseif ($verify_outcome === 'pass') {
+				$verify_line = htmlspecialchars(substr($verify_time, 0, 16)) . ' UTC'
+				   . ' <span class="text-muted small">&middot; ' . htmlspecialchars($verify_level ?: 'verified')
+				   . ($verify_message !== '' ? ' &middot; ' . htmlspecialchars($verify_message) : '') . '</span>';
+			} else {
+				$verify_line = '<span class="text-danger">failed ' . htmlspecialchars(substr($verify_time, 0, 16)) . ' UTC'
+				   . ($verify_message !== '' ? ' &mdash; ' . htmlspecialchars($verify_message) : '') . '</span>';
+			}
 			echo '<table class="table table-sm mb-3"><tbody>';
 			echo '<tr><th>Last backup</th><td>' . $run_line($shelf_runs[0] ?? null) . '</td></tr>';
 			echo '<tr><th>Last full backup</th><td>' . $run_line($newest_full) . '</td></tr>';
 			echo '<tr><th>Oldest backup held</th><td>' . $run_line($shelf_runs ? end($shelf_runs) : null) . '</td></tr>';
+			echo '<tr><th>Last verified restorable</th><td>' . $verify_line . '</td></tr>';
 			echo '</tbody></table>';
 
 			echo '<table class="table table-striped table-sm">';
@@ -457,11 +493,33 @@
 				// replays them over live data and has to be approved on the node.
 				$sa = htmlspecialchars(json_encode($c['chain_id'])) . ', '
 				    . htmlspecialchars(json_encode($c['profile'])) . ', this';
+				// Verify: prove this run restorable on the node without restoring
+				// it. The room a rehearsal needs is worked out here from the runs'
+				// recorded sizes, the same arithmetic the node applies before it
+				// downloads anything.
+				$pseudo = ['chain_id' => $c['chain_id'], 'runs' => []];
+				foreach ($c['runs'] as $x) {
+					$arts = [];
+					foreach (($x['artifacts'] ?? []) as $kind => $b) { $arts[$kind] = ['name' => $kind, 'bytes' => (int)$b]; }
+					$pseudo['runs'][] = ['seq' => $x['seq'], 'level' => $x['level'], 'artifacts' => $arts];
+				}
+				try { $needs = BackupVerifier::disk_needed($pseudo, (int)$r['seq'], BackupVerifier::LEVEL_REHEARSE); }
+				catch (Throwable $e) { $needs = 0; }
+				$va = htmlspecialchars(json_encode($c['chain_id'])) . ', '
+				    . htmlspecialchars(json_encode($c['profile'])) . ', ' . (int)$r['seq'] . ', '
+				    . htmlspecialchars(json_encode($run_when($r))) . ', '
+				    . htmlspecialchars(json_encode(BackupChainListHelper::format_size($needs))) . ', this';
 				echo '<button type="button" class="btn btn-outline-primary btn-sm me-1" onclick="stageChain(' . $sa . ')">Prepare</button>';
+				echo '<button type="button" class="btn btn-outline-secondary btn-sm me-1" onclick="openVerifyModal(' . $va . ')">Verify</button>';
 				echo '<button type="button" class="btn btn-outline-warning btn-sm" onclick="openChainRestoreModal(' . $ca . ')">Restore</button>';
 				echo '</td></tr>';
 			}
 			echo '</tbody></table>';
+			echo '<p class="text-muted small mb-2"><strong>Verify</strong> proves a backup restorable without restoring '
+			   . 'it: the node downloads what a restore of that run would need, opens every archive with its own key '
+			   . 'and reads it to the end &mdash; or, for a rehearsal, replays it into a scratch directory and a '
+			   . 'throwaway database and counts what came back. Nothing on the site is touched either way. The '
+			   . 'result is shown above and on the node\'s card.</p>';
 			echo '<p class="text-muted small mb-0">Restoring a backup rebuilds the site as it was at that run: the '
 			   . 'last full backup before it, then every incremental up to it, in order. Each file is checked '
 			   . 'against its recorded size and hash before anything is written. <strong>Prepare first</strong> '
@@ -479,6 +537,36 @@
 	// either way — so the value is confirmed at the moment somebody knows it.
 	$prefill_domain = parse_url((string)$node->get('mgn_site_url'), PHP_URL_HOST) ?: '';
 
+	// ── Verify dialog (used by per-row Verify buttons above) ──
+	//
+	// Two choices, both non-destructive and both jobs the node runs on itself.
+	// Buttons rather than a form: nothing is posted to this page, the API
+	// creates the job and the poller reports what the node said.
+?>
+	<dialog id="verifyModal">
+		<div class="svm-modal-head">
+			<h5 class="svm-m0">Verify the backup of <span id="vm_title"></span></h5>
+			<button type="button" aria-label="Close" onclick="closeVerifyModal();" class="svm-modal-close">&times;</button>
+		</div>
+		<p class="text-muted small">Nothing on the site is touched. The node downloads what a restore of this
+			backup would need, then removes it when it is done.</p>
+		<div class="mb-2">
+			<button type="button" class="btn btn-outline-primary btn-sm" onclick="submitVerifyModal(2);">Open and read</button>
+			<div class="text-muted small mt-1">Every archive is decrypted with the node's own key and read to the end.
+				A minute or three; downloads the whole set once.</div>
+		</div>
+		<div class="mb-2">
+			<button type="button" class="btn btn-outline-primary btn-sm" onclick="submitVerifyModal(3);">Rehearse a restore
+				(needs about <span id="vm_needs"></span> free on the node)</button>
+			<div class="text-muted small mt-1">Opens and reads, then replays the files into a scratch directory and loads
+				the database into a throwaway one on the node, counts what came back, and deletes both.</div>
+		</div>
+		<div class="dialog-actions">
+			<button type="button" class="dialog-btn-cancel" onclick="closeVerifyModal();">Cancel</button>
+		</div>
+	</dialog>
+
+	<?php
 	// ── Shared Restore modal (used by per-row Restore buttons above) ──
 ?>
 	<dialog id="restoreModal">
@@ -849,6 +937,50 @@ function stageChain(chainId, profile, btn) {
 
 function stageChainFailed(btn, html) {
 	if (btn) { btn.disabled = false; btn.textContent = 'Prepare'; }
+	document.getElementById('backupScanStatus').innerHTML = '<span class="text-danger">' + html + '</span>';
+}
+
+// Prove a backup restorable on the node without restoring it. Two levels, both
+// non-destructive: the dialog asks which, then the job runs on the node and
+// the poller reports what it said.
+var verifyPending = null;
+function openVerifyModal(chainId, profile, seq, when, needs, btn) {
+	verifyPending = { chainId: chainId, profile: profile, seq: seq, btn: btn };
+	document.getElementById('vm_title').textContent = when;
+	document.getElementById('vm_needs').textContent = needs;
+	document.getElementById('verifyModal').showModal();
+}
+function closeVerifyModal() {
+	document.getElementById('verifyModal').close();
+}
+function submitVerifyModal(level) {
+	var v = verifyPending;
+	closeVerifyModal();
+	if (!v) { return; }
+	var status = document.getElementById('backupScanStatus');
+	var btn = v.btn;
+	if (btn) { btn.disabled = true; btn.textContent = 'Verifying...'; }
+	status.style.display = 'block';
+	status.innerHTML = '<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span> '
+		+ (level === 3 ? 'Rehearsing a restore of ' : 'Opening and reading ') + 'the backup on the node...</span>';
+
+	smApiPost('backup_actions', { action: 'verify_backup', node_id: backupNodeId,
+			chain_id: v.chainId, profile: v.profile, seq: v.seq, level: level })
+		.then(function(data) {
+			if (!data.success) {
+				verifyBackupFailed(btn, smEsc(data.message));
+				return;
+			}
+			pollTransferJob(data.job_id, btn, 'Verify',
+				(level === 3 ? 'Rehearsed on the node.' : 'Opened and read on the node.')
+				+ ' Reload this page to see the result above and on the node\'s card.');
+		})
+		.catch(function() {
+			verifyBackupFailed(btn, 'Request failed');
+		});
+}
+function verifyBackupFailed(btn, html) {
+	if (btn) { btn.disabled = false; btn.textContent = 'Verify'; }
 	document.getElementById('backupScanStatus').innerHTML = '<span class="text-danger">' + html + '</span>';
 }
 

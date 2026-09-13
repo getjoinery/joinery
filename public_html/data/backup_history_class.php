@@ -14,6 +14,12 @@
  * backups have been failing for a month looks identical to a healthy one if only
  * successes are written down.
  *
+ * @version 1.6 - the 'verify_attempted' collection filter selects runs whose newest verify proved
+ *                nothing either way (a skip or a refusal stamps the message only)
+ * @version 1.5 - bkh_verify_time / _level / _outcome / _message: when this run was last proven
+ *                restorable, at what level (2 opened and read, 3 rehearsed), and how it went.
+ *                Stamped by the node on the run it verified; the 'verified' collection filter
+ *                selects rows that have or have not been proven
  * @version 1.4 - bkh_pruned_time distinguishes a backup retention has cleaned up from one an admin
  *                hid, and the 'include_pruned' collection filter shows present and cleaned-up runs
  *                together while still excluding hidden ones
@@ -107,6 +113,18 @@ class BackupHistory extends SystemBase {
 		// happen today and a restore needs to know what happened then — which
 		// private key opens THIS backup.
 		'bkh_recovery_fpr'  => array('type'=>'varchar(64)'),
+
+		// When this run was last proven restorable, and how. The node stamps
+		// these on the row of the run it verified, whichever profile took the
+		// run; the site's Backups page reads them directly and the management
+		// node learns them from the job result and the status report. Level is
+		// 2 (opened and read) or 3 (rehearsed); outcome is pass or fail, and a
+		// verify that was skipped stamps nothing.
+		'bkh_verify_time'    => array('type'=>'timestamp(6)'),
+		'bkh_verify_level'   => array('type'=>'int4'),
+		'bkh_verify_outcome' => array('type'=>'varchar(20)',
+		                              'allowed_values'=>array('pass', 'fail')),
+		'bkh_verify_message' => array('type'=>'text'),
 
 		'bkh_create_time'   => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'bkh_update_time'   => array('type'=>'timestamp(6)'),
@@ -270,6 +288,20 @@ class MultiBackupHistory extends SystemMultiBase {
 		// "am I backed up?" means.
 		if (isset($this->options['offsite'])) {
 			$filters['bkh_upload_time'] = $this->options['offsite'] ? "IS NOT NULL" : "IS NULL";
+		}
+
+		// Runs that have (or have not) been proven restorable, at any level and
+		// with any outcome. The outcome itself is a column filter.
+		if (isset($this->options['verified'])) {
+			$filters['bkh_verify_time'] = $this->options['verified'] ? "IS NOT NULL" : "IS NULL";
+		}
+
+		// Runs whose newest verify proved nothing either way — skipped, or
+		// refused before it read anything. Such a verify stamps the message
+		// only, in BackupVerifier::note_history's words, and the last real
+		// outcome stands beside it.
+		if (!empty($this->options['verify_attempted'])) {
+			$filters['bkh_verify_message'] = "LIKE 'Could not %'";
 		}
 
 		// A display view that keeps cleaned-up runs visible. Retention soft-deletes

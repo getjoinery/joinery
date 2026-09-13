@@ -34,8 +34,13 @@ function bn_active_task_count() {
 	return $tasks->count_all();
 }
 
-// Start from nothing: no target, no key, no BackupRun task at all.
-$db->prepare('DELETE FROM sct_scheduled_tasks WHERE sct_task_class = ?')->execute(array('BackupRun'));
+function bn_active_verify_count() {
+	$tasks = new MultiScheduledTask(array('task_class' => 'BackupVerify', 'active' => true, 'deleted' => false));
+	return $tasks->count_all();
+}
+
+// Start from nothing: no target, no key, no BackupRun or BackupVerify task at all.
+$db->prepare('DELETE FROM sct_scheduled_tasks WHERE sct_task_class IN (?, ?)')->execute(array('BackupRun', 'BackupVerify'));
 bn_put_setting('backup_target_id', '0');
 bn_put_setting('backup_recovery_public_key', '');
 bn_put_setting('backup_recovery_public_key_proven_fpr', '');
@@ -63,6 +68,7 @@ check(BackupRecoveryKey::is_ready() === true, 'fixture key reads as proven');
 
 check(BackupNightly::maybe_activate() === true, 'target + proven key: activates');
 check(bn_active_task_count() === 1, 'exactly one active BackupRun task exists');
+check(bn_active_verify_count() === 1, 'and its verification task is switched on with it — one decision, two tasks');
 
 check(BackupNightly::maybe_activate() === false, 'already active: second call is a no-op');
 check(bn_active_task_count() === 1, 'and does not add another task');
@@ -80,8 +86,14 @@ $count_q = $db->prepare('SELECT COUNT(*) FROM sct_scheduled_tasks WHERE sct_task
 $count_q->execute(array('BackupRun'));
 check((int)$count_q->fetchColumn() === 1, 'one BackupRun row total');
 
+// A site that upgraded with BackupRun already on and no BackupVerify row yet
+// gets the verification task on the next setup-completing call.
+$db->prepare('DELETE FROM sct_scheduled_tasks WHERE sct_task_class = ?')->execute(array('BackupVerify'));
+check(BackupNightly::maybe_activate() === true, 'backup on but verification missing: switches verification on');
+check(bn_active_verify_count() === 1 && bn_active_task_count() === 1, 'both on, one row each');
+
 // ── Cleanup ─────────────────────────────────────────────────────────────
-$db->prepare('DELETE FROM sct_scheduled_tasks WHERE sct_task_class = ?')->execute(array('BackupRun'));
+$db->prepare('DELETE FROM sct_scheduled_tasks WHERE sct_task_class IN (?, ?)')->execute(array('BackupRun', 'BackupVerify'));
 bn_put_setting('backup_target_id', '0');
 bn_put_setting('backup_recovery_public_key', '');
 bn_put_setting('backup_recovery_public_key_proven_fpr', '');

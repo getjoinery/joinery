@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.22.12",
+  "version": "1.22.13",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -272,6 +272,14 @@
       "label": "Days before a chain starts a fresh full",
       "type": "number",
       "helptext": "How long one chain runs before the next backup starts over with a full. Shorter means more storage and shorter restore chains."
+    },
+    {
+      "name": "server_manager_fleet_backup_verify_every_days",
+      "default": "30",
+      "group": "backups",
+      "label": "Days between backup verifications (0 = never)",
+      "type": "number",
+      "helptext": "How often each node's newest backup is verified restorable by opening and reading it on the node: every archive it depends on is downloaded from the shelf, decrypted with the node's own key and read to the end, then removed. Nothing on the site is touched. Each verification downloads the whole set once, so on metered storage it is that much egress per node per interval."
     },
     {
       "name": "server_manager_fleet_backup_max_concurrent",

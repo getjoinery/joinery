@@ -1448,4 +1448,97 @@ check(strpos($retire_cmd, 'RETIRE_FAILED=') !== false && strpos($retire_cmd, '--
 exec('bash -n ' . escapeshellarg('/dev/stdin') . ' <<\'JCB_RETIRE\'' . "\n" . $retire_cmd . "\nJCB_RETIRE\n", $retire_syntax_out, $retire_syntax_rc);
 check($retire_syntax_rc === 0, 'the generated script parses under bash -n', implode("\n", $retire_syntax_out));
 
+section('verify_backup: the same links as a Prepare, plus a level, and nothing destructive');
+
+// A node whose agent ships verify_backup, naming a shelf of its own. The shelf
+// listing is stood in for, so this signs no real link and needs no bucket.
+$verify_bkt = new BackupTarget(NULL);
+$verify_bkt->set('bkt_name', 'HarnessTest Verify Target ' . bin2hex(random_bytes(3)));
+$verify_bkt->set('bkt_provider', 'b2');
+$verify_bkt->set('bkt_bucket', 'harness-verify-bucket');
+$verify_bkt->set('bkt_enabled', true);
+$verify_bkt->set('bkt_credentials', json_encode(array('key_id' => 'k', 'application_key' => 'a')));
+$verify_bkt->save();
+harness_register_row('bkt_backup_targets', 'bkt_id', $verify_bkt->key);
+$verify_node = jcb_node(array(
+	'mgn_web_root'             => '/var/www/html/verifysite/public_html',
+	'mgn_slug'                 => 'verifysite',
+	'mgn_bkt_backup_target_id' => $verify_bkt->key,
+	'mgn_agent_public_key'     => base64_encode(str_repeat("\x03", 32)),
+	'mgn_agent_version'        => JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION['verify_backup']));
+$verify_target = JobCommandBuilder::get_target($verify_node);
+if (!$verify_target) {
+	harness_skip('verify_backup builder', 'no enabled backup target on this management node to resolve a shelf against');
+} else {
+	$vprefix = rtrim((string)($verify_target->get('bkt_path_prefix') ?: 'joinery-backups'), '/')
+		. '/verifysite/manager/chain-20260901_040000/';
+	$vlisting = array(
+		array('key' => $vprefix . 'manifest.json',          'size' => 900),
+		array('key' => $vprefix . 'files-0000.tar.gz.enc',  'size' => 1000),
+		array('key' => $vprefix . 'files-0001.tar.gz.enc',  'size' => 200),
+		array('key' => $vprefix . 'db-0001.sql.gz.enc',     'size' => 110),
+		array('key' => $vprefix . 'sub/dir/escape.enc',     'size' => 5),   // not a bare name: never signed
+	);
+	JobCommandBuilder::set_shelf_listing_for_tests($vlisting);
+	harness_defer(function () { JobCommandBuilder::set_shelf_listing_for_tests(null); });
+
+	foreach (array(1, 4, 0, '') as $bad_level) {
+		$threw = '';
+		try {
+			JobCommandBuilder::build_verify_backup($verify_node, array(
+				'chain_id' => 'chain-20260901_040000', 'profile' => 'manager', 'level' => $bad_level));
+		} catch (Exception $e) { $threw = $e->getMessage(); }
+		check(strpos($threw, 'level') !== false, 'level ' . var_export($bad_level, true) . ' is refused, naming the two that exist', $threw);
+	}
+	$threw = '';
+	try {
+		JobCommandBuilder::build_verify_backup($verify_node, array('chain_id' => '', 'profile' => 'manager', 'level' => 2));
+	} catch (Exception $e) { $threw = $e->getMessage(); }
+	check(strpos($threw, 'chain id') !== false, 'a missing chain id is refused', $threw);
+
+	$staged = JobCommandBuilder::build_stage_chain($verify_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager'));
+	$verify = JobCommandBuilder::build_verify_backup($verify_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager', 'level' => 2));
+	check($verify['primitive'] === 'verify_backup', 'it is the verify_backup primitive');
+	check(($verify['params']['level'] ?? null) === 2, 'and carries its level');
+	check(!isset($verify['params']['seq']), 'no run number travels unless asked for — the node verifies the newest');
+	// The same objects, signed for each primitive's own claim budget: the link
+	// path is identical, the expiry is the operation's.
+	$strip = function ($url) { return strtok((string)$url, '?'); };
+	check($strip($verify['params']['manifest_url']) === $strip($staged['params']['manifest_url'])
+		&& array_map($strip, $verify['params']['artifact_urls']) === array_map($strip, $staged['params']['artifact_urls'])
+		&& $verify['params']['chain_id'] === $staged['params']['chain_id']
+		&& $verify['params']['profile'] === $staged['params']['profile'],
+		'it signs exactly the link set a Prepare signs — one signing body, two primitives');
+	check(strpos($verify['params']['manifest_url'], 'X-Amz-Expires=' . ManagementJob::PRIMITIVE_CLAIM_BUDGETS['verify_backup']) !== false
+		&& strpos($staged['params']['manifest_url'], 'X-Amz-Expires=' . ManagementJob::PRIMITIVE_CLAIM_BUDGETS['stage_chain']) !== false,
+		'each link expires with the claim budget of the job that carries it');
+	check(array_keys($verify['params']['artifact_urls']) === array('files-0000.tar.gz.enc', 'files-0001.tar.gz.enc', 'db-0001.sql.gz.enc'),
+		'every bare-named object under the set is signed and nothing keyed by a path is',
+		implode(',', array_keys($verify['params']['artifact_urls'])));
+	$vjson = (string)json_encode($verify);
+	check(strpos($vjson, 'recovery') === false && strpos($vjson, 'credential') === false
+		&& strpos($vjson, 'access_key') === false,
+		'no key and no credential travel', $vjson);
+
+	$verify3 = JobCommandBuilder::build_verify_backup($verify_node, array(
+		'chain_id' => 'chain-20260901_040000', 'profile' => 'manager', 'level' => 3, 'seq' => 1));
+	check(($verify3['params']['level'] ?? null) === 3 && ($verify3['params']['seq'] ?? null) === 1,
+		'a rehearsal of a chosen run carries level 3 and that run');
+
+	// An agent too old to know the primitive is refused with the floor named.
+	$old_node = jcb_node(array(
+		'mgn_web_root'             => '/var/www/html/oldsite/public_html',
+		'mgn_slug'                 => 'verifysite-old',
+		'mgn_bkt_backup_target_id' => $verify_bkt->key,
+		'mgn_agent_public_key'     => base64_encode(str_repeat("\x04", 32)),
+		'mgn_agent_version'        => '1.13.0'));
+	$threw = '';
+	try {
+		JobCommandBuilder::build_verify_backup($old_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager', 'level' => 2));
+	} catch (Exception $e) { $threw = $e->getMessage(); }
+	check(strpos($threw, JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION['verify_backup']) !== false,
+		'an agent that predates verify_backup is refused, naming the version it needs', $threw);
+	JobCommandBuilder::set_shelf_listing_for_tests(null);
+}
+
 harness_finish();

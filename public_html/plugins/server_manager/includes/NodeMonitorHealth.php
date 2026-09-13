@@ -13,6 +13,12 @@
  * It also surfaces backup recovery problems (backup_recovery_problems), in the
  * same shape, so an unrecoverable-backup node is as visible as broken monitoring.
  *
+ * @version 1.16 - a skip after a pass is recognised by BackupVerifier::is_attempt_message, the one rule
+ *                 the site page uses too
+ * @version 1.15 - fleet_backup_health says whether the node's backups are verified restorable: a
+ *                 shelf-check problem, a failed verify and a stale verify are problems in the node's
+ *                 own words; never verified is information until 45 days after the first backup;
+ *                 a healthy node's card carries the last verify beside the last backup
  * @version 1.14 - the trust-root check counts a management node's whole-site copy of this machine when
  *                  it is sealed to this site's own proven recovery key: the same key holder can open it
  * @version 1.13 - fleet backup outcome 'warning': the node kept a full backup a tenth the size of
@@ -717,8 +723,119 @@ class NodeMonitorHealth {
 				. 'than this node\'s schedule allows for.', true);
 		}
 
+		// Backed up. Whether it is VERIFIED restorable is the next question,
+		// and it has four answers — see verify_state().
+		$verify = self::verify_state($node, $policy);
+		if ($verify['is_problem']) {
+			return self::result('backups', $verify['label'], $verify['detail'], true);
+		}
 		return self::result('backups', 'Backed up',
-			'Last backup ' . self::humanize($age) . ' ago.', false);
+			'Last backup ' . self::humanize($age) . ' ago. ' . $verify['detail'], false);
+	}
+
+	/**
+	 * Is this node's backup verified restorable, and what to say about it.
+	 *
+	 * Four answers, in the order they are checked:
+	 *
+	 *   shelf problem   the fleet pass's shelf check found a backup on the
+	 *                   shelf that is not whole (an artifact missing or short,
+	 *                   a manifest with no envelope). A problem, in the pass's
+	 *                   words — this is the one a level 2 would fail on.
+	 *   verify failed   the node opened its newest backup and could not read it
+	 *                   to the end, or a rehearsal did not restore. A problem,
+	 *                   in the node's own words, surfaced exactly like a failed
+	 *                   backup and never acted on automatically.
+	 *   stale           the last pass is older than VERIFY_STALE_DAYS. A problem:
+	 *                   the schedule should have verified again by now.
+	 *   never           information for NEVER_VERIFIED_GRACE_DAYS after the
+	 *                   first backup from here, a problem after that — a node
+	 *                   the schedule has had six weeks to verify and has not.
+	 *
+	 * A verify that was SKIPPED (not enough disk, a busy machine) stamps only
+	 * the message, so the last real result still stands and the skip's reason
+	 * rides beside it.
+	 *
+	 * $first_backup is when the node was first backed up from here, as a
+	 * timestamp; left null it is read from the job history (first_backup_time).
+	 *
+	 * @return array{is_problem:bool,label:string,detail:string}
+	 */
+	public static function verify_state($node, array $policy, $first_backup = null): array {
+		$shelf = trim((string)$node->get('mgn_backup_shelf_problem'));
+		if ($shelf !== '') {
+			return array('is_problem' => true, 'label' => 'A backup on the shelf is incomplete',
+				'detail' => 'The last listing of this node\'s shelf found ' . $shelf
+					. '. A restore that reached that backup would stop there.');
+		}
+
+		$time_raw = trim((string)$node->get('mgn_backup_verify_time'));
+		$time     = ($time_raw !== '') ? strtotime($time_raw . ' UTC') : false;
+		$outcome  = (string)$node->get('mgn_backup_verify_outcome');
+		$level    = (int)$node->get('mgn_backup_verify_level');
+		$message  = trim((string)$node->get('mgn_backup_verify_message'));
+		$level_words = BackupVerifier::level_name($level) ?: 'verified';
+
+		if ($time === false) {
+			$first = ($first_backup === null) ? self::first_backup_time($node) : $first_backup;
+			$grace = FleetBackupPolicy::NEVER_VERIFIED_GRACE_DAYS * 86400;
+			$every = (int)($policy['verify_every_days'] ?? 0);
+			if ($every <= 0) {
+				return array('is_problem' => false, 'label' => 'Not verified',
+					'detail' => 'Not verified restorable: verification is switched off for this node.'
+						. ($message !== '' ? ' ' . $message : ''));
+			}
+			if ($first !== false && (time() - $first) > $grace) {
+				return array('is_problem' => true, 'label' => 'Backups never verified restorable',
+					'detail' => 'This node has been backed up from here for more than '
+						. FleetBackupPolicy::NEVER_VERIFIED_GRACE_DAYS . ' days and no backup has ever been '
+						. 'opened and read to prove it restorable.' . ($message !== '' ? ' Last attempt: ' . $message : ''));
+			}
+			return array('is_problem' => false, 'label' => 'Not yet verified',
+				'detail' => 'Not yet verified restorable; the newest backup will be opened and read on schedule.'
+					. ($message !== '' ? ' ' . $message : ''));
+		}
+
+		$since = time() - $time;
+		if ($outcome !== 'pass') {
+			return array('is_problem' => true, 'label' => 'Backup verification failed',
+				'detail' => 'The newest backup was ' . $level_words . ' ' . self::humanize($since)
+					. ' ago and did not prove restorable. The node said: '
+					. ($message !== '' ? $message : 'no reason given')
+					. ' Nothing is retried automatically; verify again from the Backups tab once the cause is fixed.');
+		}
+		if ($since > FleetBackupPolicy::VERIFY_STALE_DAYS * 86400) {
+			return array('is_problem' => true, 'label' => 'Backup verification is stale',
+				'detail' => 'The last backup verified restorable (' . $level_words . ') was '
+					. self::humanize($since) . ' ago, longer than ' . FleetBackupPolicy::VERIFY_STALE_DAYS
+					. ' days; the schedule should have verified again by now.');
+		}
+		return array('is_problem' => false, 'label' => 'Verified restorable',
+			'detail' => 'Verified restorable ' . self::humanize($since) . ' ago (' . $level_words . ').'
+				. (BackupVerifier::is_attempt_message($message) ? ' Since then: ' . $message : ''));
+	}
+
+	/**
+	 * When this node was first backed up from here, as a timestamp, or false.
+	 * The oldest successful run in the job history when there is one; a
+	 * stand-in node with no key falls back to the last backup stamp, which is
+	 * at least as recent as the first.
+	 */
+	private static function first_backup_time($node) {
+		$oldest = false;
+		if (isset($node->key) && $node->key) {
+			foreach (self::backup_runs_from_here((int)$node->key, 400) as $row) {
+				if (($row['outcome'] ?? '') === 'success' && !empty($row['time'])) {
+					$ts = strtotime($row['time'] . ' UTC');
+					if ($ts !== false) { $oldest = $ts; }   // rows are newest first
+				}
+			}
+		}
+		if ($oldest === false) {
+			$last = trim((string)$node->get('mgn_last_backup_time'));
+			$oldest = ($last !== '') ? strtotime($last . ' UTC') : false;
+		}
+		return $oldest;
 	}
 
 	/** The sentence the card shows for a failing fleet backup, from the run summary. */
