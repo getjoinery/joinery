@@ -1405,8 +1405,10 @@ check(strpos($runner_for_converger, '--when-changed') !== false && strpos($runne
 	'the runner has the converge-when-changed mode and records its last run');
 check(strpos($install_src, '_plugin_installers_start.sh" "$SITENAME"') !== false,
 	'install.sh runs the runner at the end of a site install (the root moment the converger is born at)');
-check(strpos($upgrade_src, 'joinery-host-converger') !== false && strpos($upgrade_src, 'within five minutes') !== false,
-	'a browser upgrade without root tells the admin the converger will finish the root half');
+check(strpos($upgrade_src, 'joinery-host-converger') !== false && strpos($upgrade_src, 'within a minute') !== false,
+	'a browser upgrade without root tells the admin the converger will finish the root half, within a minute (its tick)');
+check(strpos($upgrade_src, 'waited out the lock') !== false && strpos($upgrade_src, 'the same tick converges it') !== false,
+	'and that a runner transcript which waited out the runner lock is converged by that tick too');
 $runner_src = $runner_for_converger;
 
 $core_installer = $site_root . '/maintenance_scripts/install_tools/install_agent.sh';
@@ -1424,7 +1426,8 @@ $core_at    = strpos($runner_src, 'CORE_INSTALLERS=');
 $plugins_at = strpos($runner_src, 'ACTIVE_PLUGINS=');
 check($core_at !== false && $plugins_at !== false && $core_at < $plugins_at,
     'core installers run before any plugin lookup can exit early');
-check(preg_match('/bash "\$\{CORE_PATH\}" "\$\{SITENAME\}"/', $runner_src) === 1,
+// One body runs a core installer, for the loop and for --only alike.
+check(preg_match('/bash "\$\{path\}" "\$\{SITENAME\}" "\$\{SITE_ROOT\}"/', $runner_src) === 1,
     'the core installer is told which site it is installing for');
 
 // And it must not also be a plugin installer, or a management node runs it twice.
@@ -1618,13 +1621,19 @@ check(strpos($runner_s10, 'refusing to run anything as root') !== false,
 
 $assert_at  = strpos($runner_s10, 'assert_tree_ownership()');
 $refuse_at  = strpos($runner_s10, 'installer_is_trusted()');
-$core_at_s10 = strpos($runner_s10, 'CORE_INSTALLERS=');
-check($assert_at !== false && $refuse_at !== false && $core_at_s10 !== false
-    && $assert_at < $refuse_at && $refuse_at < $core_at_s10,
+// Where installers RUN: the core loop, and the --only branch. The
+// CORE_INSTALLERS constant itself is declared at the top, beside the --only
+// check that reads it, so it is not the anchor.
+$core_at_s10 = strpos($runner_s10, 'for CORE_INSTALLER in ${CORE_INSTALLERS}; do');
+$only_at_s10 = strpos($runner_s10, 'if [[ -n "${ONLY_INSTALLER}" ]]; then');
+check($assert_at !== false && $refuse_at !== false && $core_at_s10 !== false && $only_at_s10 !== false
+    && $assert_at < $refuse_at && $refuse_at < $core_at_s10 && $refuse_at < $only_at_s10,
     'the runner asserts ownership, then defines the refusal, then runs installers',
     'running an installer before either check is running a script we cannot attribute');
 
-$stamp_at = strpos($runner_s10, 'if [[ "${WHEN_CHANGED}" == "1" ]]; then');
+// The stamp check's own section, not the first WHEN_CHANGED test in the file
+// (the --only refusal at the top tests it too).
+$stamp_at = strpos($runner_s10, '# --- Converge only when something changed (--when-changed)');
 check($assert_at !== false && $stamp_at !== false && $assert_at < $stamp_at,
     'the assertion runs before the converge-when-changed early exit',
     'a container whose start command still chowns to www-data reports nothing changed, '
@@ -1814,11 +1823,14 @@ section('Root ignores the converger\'s test hooks (specs/package_signing.md revi
 // environment says: an environment variable is not something root takes
 // orders from. The gate cannot run as root, so the refusal is pinned as text
 // and executed with `id` shadowed.
+// The runner has more than one block that runs only as root (the lock is
+// taken under one), so the hook block is the one that mentions the hook.
 $runner_r1 = (string)file_get_contents($plugin_start);
 $hook_block = '';
-if (preg_match('/^if \[\[ "\$\(id -u\)" == "0" \]\]; then\n(?:.*\n)*?^fi$/m', $runner_r1, $m)
-    && strpos($m[0], 'hook ignored') !== false) {
-    $hook_block = $m[0];
+if (preg_match_all('/^if \[\[ "\$\(id -u\)" == "0" \]\]; then\n(?:.*\n)*?^fi$/m', $runner_r1, $mm)) {
+    foreach ($mm[0] as $block) {
+        if (strpos($block, 'hook ignored') !== false) { $hook_block = $block; break; }
+    }
 }
 check($hook_block !== '', 'the runner has a block that runs only as root and mentions an ignored hook');
 foreach (array('JOINERY_VERIFY_PACKAGE', 'JOINERY_VERIFY_KEYS', 'JOINERY_ACTIVE_PLUGINS') as $hook) {
