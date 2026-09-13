@@ -594,6 +594,13 @@ pub fn run_pass(
         if busy.contains(&entry.id) {
             continue;
         }
+        // An arrival naming left unjudged because the name it wants is held
+        // by a busy entry waits the same pass its verdict waits: planned now,
+        // its move would land on the holder's directory before the holder's
+        // own op has said where that directory goes.
+        if out.naming.pending.contains(&entry.id) {
+            continue;
+        }
         // Nothing on the server, and now nothing on the disk either: there is
         // no third place for it to be, so it is forgotten.
         //

@@ -64,6 +64,13 @@ pub struct NamingOutcome {
     /// that nothing acts on, for ever, while the user sees a file that is never
     /// scanned, sent, renamed or removed again.
     pub give_up_local_copy: Vec<(EntityId, UnsyncableReason)>,
+    /// Arrivals whose destination is not decidable this pass: the name they
+    /// want is held by an entry with an open op of this device's own, so
+    /// where that holder stands next is the queue's business. No verdict was
+    /// given and the round must plan no move for them either -- planned, the
+    /// arrival's move lands on the holder's directory this same pass and the
+    /// room-making steps it aside. Judged, and moved, a pass later.
+    pub pending: std::collections::HashSet<EntityId>,
 }
 
 impl NamingOutcome {
@@ -581,7 +588,7 @@ pub fn apply_naming(
         }
     }
 
-    judge_destinations(env, personality, &settled, &leaving_this_pass, &mut out)?;
+    judge_destinations(env, personality, &settled, &leaving_this_pass, &busy, &mut out)?;
 
     Ok(out)
 }
@@ -611,6 +618,7 @@ fn judge_destinations(
     personality: &Personality,
     settled: &HashMap<Option<i64>, Vec<(EntityId, String)>>,
     leaving_this_pass: &std::collections::HashSet<EntityId>,
+    busy: &std::collections::HashSet<EntityId>,
     out: &mut NamingOutcome,
 ) -> Result<(), ExecError> {
     // At most one park per entity per batch.
@@ -625,12 +633,30 @@ fn judge_destinations(
     // but a device that is never quiet again.
     let already: std::collections::HashSet<EntityId> =
         out.give_up_local_copy.iter().map(|(id, _)| *id).collect();
-    let trading = trading_names(env, personality, settled, leaving_this_pass)?;
+    let (trading, pending) = trading_names(env, personality, settled, leaving_this_pass, busy)?;
     for entry in crate::pass::all_entries(env)? {
         if entry.status == LocalStatus::OutOfScope || entry.remote_deleted {
             continue;
         }
         if !entry.holds_a_local_file() || already.contains(&entry.id) {
+            continue;
+        }
+        // Mid-operation, as the main loop reads it: a verdict against the
+        // slot an open op of this device is about to change waits a pass.
+        // The same for an arrival whose chain runs into such an entry -- the
+        // name it wants is held by something whose next state is decided by
+        // the queue this pass runs, not by this judgement. Judged for real
+        // once the op has completed or been overtaken. Without this, a swap
+        // this device was half-way through (its cycle-breaker's park
+        // answered, then a kill) read every ring as a holder that was not
+        // leaving, and three directories were given up as duplicates of
+        // each other on the strength of one interrupted op -- finding C3 of
+        // the reset's WP1d.
+        if busy.contains(&entry.id) {
+            continue;
+        }
+        if pending.contains(&entry.id) {
+            out.pending.insert(entry.id);
             continue;
         }
         // Placement inequality, not parent inequality. A server rename inside
@@ -708,7 +734,8 @@ fn trading_names(
     personality: &Personality,
     settled: &HashMap<Option<i64>, Vec<(EntityId, String)>>,
     leaving_this_pass: &std::collections::HashSet<EntityId>,
-) -> Result<HashMap<EntityId, EntityId>, ExecError> {
+    busy: &std::collections::HashSet<EntityId>,
+) -> Result<(HashMap<EntityId, EntityId>, std::collections::HashSet<EntityId>), ExecError> {
     // Who is standing on each name, and what each mover is reaching for.
     let mut holder_of: HashMap<(Option<i64>, String), EntityId> = HashMap::new();
     for (parent, names) in settled {
@@ -742,7 +769,7 @@ fn trading_names(
     // review by public-html-0e; pinned by
     // `a_swap_does_not_let_an_unrelated_case_twin_past_the_clash`.
     //
-    // Three endings to the walk. CLOSED, back at the start: every name in
+    // Four endings to the walk. CLOSED, back at the start: every name in
     // the chain is vacated by the round and each arrival is paired with the
     // holder it displaces -- the original rule. OPEN, at a name NO settled
     // entry holds: the chain is vacated by the round too, by the holders'
@@ -752,7 +779,11 @@ fn trading_names(
     // up its own directory to the OS trash and was re-created from the
     // server, the lagging-record family in naming). STOPPED, at a holder
     // that is not moving, or at a repeat that is not the start (a cycle the
-    // arrival is not part of): no exemption, judged as before. Built on
+    // arrival is not part of): no exemption, judged as before. PENDING, at a
+    // holder with an open op of this device's own (`busy`): where that
+    // holder stands next is decided by the queue this pass runs, so the
+    // arrival is neither paired nor judged -- it waits a pass, as a busy
+    // arrival itself does in the main loop. Built on
     // `leaving_this_pass` and nothing wider: a parked or half-parked holder
     // has a remote placement unlike the one it holds and is NOT leaving this
     // pass, and exempting it hands the arrival a name that never comes free
@@ -768,6 +799,7 @@ fn trading_names(
     // other, so the twin's walk stops at a holder that is not its own start
     // and it is judged as before -- both halves hold.
     let mut trading: HashMap<EntityId, EntityId> = HashMap::new();
+    let mut pending: std::collections::HashSet<EntityId> = std::collections::HashSet::new();
     let mut slot_taken: HashMap<(Option<i64>, String), EntityId> = HashMap::new();
     let mut starts: Vec<EntityId> = wants.keys().copied().collect();
     starts.sort_by_key(|id| (id.is_provisional(), id.server_id));
@@ -791,6 +823,11 @@ fn trading_names(
                 paired = true;
                 break;
             }
+            if busy.contains(next) {
+                // Pending: the holder is mid-operation on this device.
+                pending.insert(start);
+                break;
+            }
             at = *next;
         }
         if !paired {
@@ -803,7 +840,7 @@ fn trading_names(
         slot_taken.insert(target, start);
         trading.insert(start, holder);
     }
-    Ok(trading)
+    Ok((trading, pending))
 }
 
 /// Is this an encrypted entry this device has no key for?

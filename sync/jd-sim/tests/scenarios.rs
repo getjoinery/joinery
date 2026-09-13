@@ -3216,6 +3216,119 @@ fn a_refused_plain_move_never_carries_the_vaults_directory_to_its_conflict_name(
     }
 }
 
+/// A swap this device is half-way through is not given up because a peer
+/// rotated the same folders (finding C3 of the reset's WP1d, kill2 75112).
+///
+/// mac swaps ring-1 and ring-2; the planner breaks the cycle by parking one
+/// ring on the server under a scratch name and dies the moment that park is
+/// answered. pc rotates all three rings and wins. mac's next pass finds its
+/// own park still queued: naming ran before the queue, read the busy ring as
+/// a holder that was not leaving, judged every chain STOPPED at it and parked
+/// all three rings as duplicates of each other -- three directories to the OS
+/// trash, the never-uploaded `late.txt` rescued to the root, the rings re-
+/// created from the server on the pass after. A verdict against a slot an
+/// open op of this very device is about to change waits a pass, for the
+/// arrival's whole chain and not only for the busy entry, and so does the
+/// arrival's move (planned, it would land on the holder's directory the same
+/// pass); the op runs in that pass and the chain is judged for real on the
+/// next.
+///
+/// Asserted as the invariant, not the mechanism: at settle every ring folder
+/// is the directory it was before mac's swap, on both disks, and holds its
+/// own file. What the pass did on the way (parks, rescues, kept-asides) is
+/// printed for the reader and not asserted.
+#[test]
+fn a_swap_interrupted_after_its_park_is_not_given_up_when_a_peer_rotates() {
+    // The death has to land on the call that answers the park. Its position
+    // in the pass is not a fact this test should know, so it is found: the
+    // first arming after which the server shows a ring under a scratch name
+    // and mac still holds the park in its queue.
+    let build = |die_after: u64| -> Option<(World, Vec<(i64, &'static str, &'static str)>)> {
+        let world = World::new(9_975, &["mac", "pc"]);
+        let r1 = world.server.seed_folder(None, "ring-1");
+        let r2 = world.server.seed_folder(None, "ring-2");
+        let r3 = world.server.seed_folder(None, "ring-3");
+        world.server.seed_file(Some(r1), "one.txt", b"one");
+        world.server.seed_file(Some(r2), "two.txt", b"two");
+        world.server.seed_file(Some(r3), "three.txt", b"three");
+        assert!(world.settle().is_some());
+        let mac = world.device("mac");
+        mac.fs.user_write("ring-3/late.txt", b"written on mac, not yet up");
+        mac.fs.user_rename("ring-1", ".swap.tmp");
+        mac.fs.user_rename("ring-2", "ring-1");
+        mac.fs.user_rename(".swap.tmp", "ring-2");
+        mac.net.arm_death(die_after);
+        world.pass(mac);
+        let parked = world.server.folders().iter().any(|f| jd_vfs::is_internal(&f.name));
+        let queued = mac.store.queued_ops().unwrap().iter().any(|o| o.kind == "park_remote" && o.attempts >= 1);
+        (parked && queued).then_some((world, vec![(r1, "ring-1", "one.txt"), (r2, "ring-2", "two.txt"), (r3, "ring-3", "three.txt")]))
+    };
+    let (world, rings) = (0..40u64)
+        .find_map(build)
+        .expect("no arming put the death on the call that answered the park");
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    // Which directory each ring was on each disk before anybody traded, by
+    // the name it was seeded under (mac's swap has not been applied to its
+    // records, and pc has not traded yet).
+    let dir_of = |d: &jd_sim::engine::Device, path: &str| {
+        jd_vfs::Vfs::directory_id(&d.fs, std::path::Path::new(&format!("/sync/{path}"))).unwrap()
+    };
+    let before: Vec<(i64, u64, u64)> = rings
+        .iter()
+        .map(|(id, name, _)| {
+            let on_mac = match *name {
+                "ring-1" => dir_of(mac, "ring-2").unwrap(),
+                "ring-2" => dir_of(mac, "ring-1").unwrap(),
+                other => dir_of(mac, other).unwrap(),
+            };
+            (*id, on_mac, dir_of(pc, name).unwrap())
+        })
+        .collect();
+    pc.fs.user_rename("ring-1", ".swap.tmp");
+    pc.fs.user_rename("ring-2", "ring-1");
+    pc.fs.user_rename("ring-3", "ring-2");
+    pc.fs.user_rename(".swap.tmp", "ring-3");
+    let mut quiet = false;
+    for _ in 0..8 {
+        if world.pass(pc).round.plan.ops.is_empty() {
+            quiet = true;
+            break;
+        }
+    }
+    assert!(quiet, "pc's rotation did not reach the server");
+    world.pass(mac);
+    assert!(world.settle().is_some(), "the swap and the rotation never settled");
+
+    for d in &world.devices {
+        let issues = d.store.open_issues().unwrap();
+        let mut kinds: std::collections::BTreeMap<&str, usize> = Default::default();
+        for i in &issues {
+            *kinds.entry(i.kind.as_str()).or_default() += 1;
+        }
+        eprintln!("{}: issues {kinds:?}", d.name);
+    }
+    let folders = world.server.folders();
+    eprintln!("server folders {folders:?}");
+    let live: Vec<_> = folders.iter().filter(|f| !f.trashed).collect();
+    assert_eq!(live.len(), 3, "a ring was minted or lost: {folders:?}");
+    let files = world.server.files();
+    for ((id, _, file), (_, on_mac, on_pc)) in rings.iter().zip(&before) {
+        let f = folders.iter().find(|f| f.id == *id).unwrap();
+        assert!(!f.trashed, "ring {id} was trashed: {folders:?}");
+        let under = files.iter().find(|x| x.name == *file && !x.trashed).map(|x| x.folder);
+        assert_eq!(under, Some(Some(*id)), "{file} left its ring: {:?}", world.server.tree());
+        // The record's directory on each disk is the one it had.
+        let on_mac_now = mac.store.get_entry(jd_core::EntityId::folder(*id)).unwrap().unwrap().synced_fingerprint.map(|fp| fp.file_id);
+        let on_pc_now = pc.store.get_entry(jd_core::EntityId::folder(*id)).unwrap().unwrap().synced_fingerprint.map(|fp| fp.file_id);
+        assert_eq!(on_mac_now, Some(*on_mac), "ring {id} is not its own directory on mac: {:?}", disk_tree(mac).keys().collect::<Vec<_>>());
+        assert_eq!(on_pc_now, Some(*on_pc), "ring {id} is not its own directory on pc: {:?}", disk_tree(pc).keys().collect::<Vec<_>>());
+    }
+    let late = files.iter().find(|x| x.name == "late.txt" && !x.trashed).map(|x| x.folder);
+    assert_eq!(late, Some(Some(rings[2].0)), "late.txt was rescued out of its ring: {:?}", world.server.tree());
+    assert_converged(&world);
+}
+
 /// An empty plain folder whose path another folder takes, by identity, is
 /// neither kept at a path it does not own nor read as deleted while its
 /// directory stands (E1 of the reset's WP2 review).

@@ -4,8 +4,9 @@
 identity) landed in two units -- `4466080e` and `5a347458` (reading 7, the
 post-commit re-run: identical to reading 6 per oracle and byte-identical
 traces); WP1d (the custody oracle) DONE 2026-09-13, harness only, findings
-C1-C3 recorded below; WP3 next. Every change reviewed by public-html-c6,
-approach before patch.**
+C1-C3 recorded below (WP1d committed as `1581721c`); WP3 in progress: change
+1 (naming waits on a chain that runs into an open op) closes C3. Every change
+reviewed by public-html-c6, approach before patch.**
 
 Testing is paused. No further guards land on the sync engine until the work
 packages below are done, in order. This spec is the reason, the order, and the
@@ -1322,6 +1323,70 @@ fire from a confused one.
 Each removal is its own commit with the arm re-run after it. A belt whose
 removal moves a number goes back in with the seed named.
 
+**WP3 change 1 (2026-09-13): naming waits on a chain that runs into an open
+op -- C3's root, in naming, not in the rescue net.** Traced on kill2 75112
+with swaps off (transient probes, removed). mac plans a local swap of two
+rings; the planner breaks the cycle by parking one ring on the server under a
+scratch name (`park_remote`) and the kill lands the moment that park is
+answered, leaving the op queued at attempts=1. pc rotates all three rings and
+wins. On mac's next pass naming runs before the queue: `busy` = {the parked
+ring}; a busy entry is not in `leaving_this_pass`, so every chain in the
+rotation STOPPED at it, and `judge_destinations` -- which, unlike the main
+loop's mid-operation arm, had no busy test -- parked all three rings as
+`DuplicateName` of each other, the busy one included. Three
+`unmaterialize_and_park` ops gave three directories to the OS trash; the
+never-uploaded `ring-3.txt` was rescued to the root (C3's issue naming a
+folder the server never trashed); the next pass re-created the rings from
+the server (reminted); their files landed in the wrong rings (misplaced).
+`trading_names`' own comment names this failure in prose ("the machinery
+that was planned and then thrown away when naming parked the entities
+first"); the busy case is the same throw-away one kill later.
+
+Change, `naming.rs` and one skip in `pass.rs`: (1) `judge_destinations`
+skips a busy entry, as the main loop does; (2) `trading_names` has a fourth
+ending, PENDING -- a walk that reaches a busy holder pairs nothing and the
+arrival is not judged this pass; (3) the pending arrivals come out of naming
+in `NamingOutcome::pending` and the round skips them exactly as it skips
+busy entries (c6's condition: judged-but-planned, the arrival's move landed
+on the busy holder's directory the same pass and the room-making stepped it
+aside -- the planner's occupant map is built from movers only, and a busy
+holder is not a mover). No status written, no op dropped, no belief added: a
+decision is deferred to the pass that can make it. The interrupted op runs
+in `run_queued` that same pass -- completes or is overtaken -- and the chain
+is CLOSED, OPEN or STOPPED for real on the next.
+
+Rejected: counting a busy holder as leaving (its op may be stuck or a peer's
+put-back; the peer-put-back kill sweep is why busy is excluded); dropping the
+interrupted park when a chain forms (throws the cycle-breaker's work away
+again and strands the scratch name); running the queue before naming
+(reorders the pass for one case; the freeing batch's own reason argues
+against it); anything at the rescue net or `unmaterialize_and_park` -- they
+acted correctly on a wrong decision.
+
+Pin: `a_swap_interrupted_after_its_park_is_not_given_up_when_a_peer_rotates`
+-- the death is FOUND, not known (the first arming after which the server
+shows a ring under a scratch name and mac still queues the park); asserts the
+invariant at settle: three live rings, each the directory it was before
+mac's swap on BOTH disks (`synced_fingerprint`), each holding its own file
+by id, `late.txt` in its ring; parks, rescues and kept-asides printed, not
+asserted. RED on 1581721c (a fourth ring minted: the pending arrival's move
+landed on the busy holder's directory); RED with the naming half alone
+(same shape, c6's C1); GREEN with the round's skip.
+
+Reading 9 (`zz_sweep.pending` d5321fd31f37, R4 pair with reading 8 on the
+custody harness): sealed, chain, converged -- no seed moves either way.
+Custody column: kill2 fired 6 -> 5 (75121 green), plat3 5 -> 5 (75415 green,
+75421 red -- swap-off green, AH); kill2 rescued 7 -> 5, plat3 reminted
+21 -> 15. 75112 with swaps off: the `rescued_from_trash` naming 504 is gone;
+its remaining misplaced file is C2. Trace pair `tr_custody` vs `tr_pending`:
+149 identical, 11 differ, every first divergence one of the change's two
+signatures -- a ring's `ApplyRemoteMove`/`AdoptPlacement` absent from a plan
+(pending: 75107 75112 75113 75412 75421) or an exec count shifted by one
+where the freeing batch's park no longer ran and the interrupted op was
+overtaken instead (75104 75105 75121 75123 75400 75415). **C3 CLOSED.** The
+rescue net's own bar stands unchanged: the fire on 504 was a legitimate
+rescue from a park that should never have been ordered.
+
 ## Process rules, effective now
 
 The measurement discipline stays -- measure before build, bisect on the same
@@ -1401,10 +1466,9 @@ belt in, before the belt lands.** B1 is what happens without this.
 - WP1d's draw-sequence cost: measured zero (traces byte-identical 160 of
   160); no re-baseline was needed.
 - C2 (a download landing rebuilds a folder the user has just deleted, and
-  the scan makes a new server folder of it) and C3 (the rescue net firing on
-  a plain ring folder the server never trashed) are WP3's: C3 is exactly the
-  rescue net's bar, C2 goes beside the kill-arm resurrection shapes. C1 is
-  AH (owner decision A1).
+  the scan makes a new server folder of it) is WP3's next, beside the
+  kill-arm resurrection shapes. C3 CLOSED by WP3 change 1 (its root was a
+  naming park, not the rescue net). C1 is AH (owner decision A1).
 - plat3 75418, reading 2, first run: no verdict line, near-zero runtime,
   cause unknown (`scratchpad/wp1a/reading2/manifest.txt`; the host's kernel
   log shows no OOM or kill at 16:15). The runner now keeps the whole output
