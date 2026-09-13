@@ -1130,7 +1130,16 @@ pub fn run_pass(
             parents.local.insert(input.entry.id.server_id, p.parent);
         }
     }
-    out.round = run_round(inputs, synced_total, ctx, policy, &parents);
+    // Folders whose trash on the server is already in the journal from an
+    // earlier pass: busy, so out of this round, and just as decided.
+    let trash_already_queued: std::collections::HashSet<i64> = env
+        .store
+        .queued_ops()?
+        .into_iter()
+        .filter(|op| op.kind == "trash_remote" && op.entity.entity_type == EntityType::Folder)
+        .map(|op| op.entity.server_id)
+        .collect();
+    out.round = run_round(inputs, synced_total, ctx, policy, &parents, &trash_already_queued);
     for (id, issue) in &out.round.issues {
         env.store.raise_issue(
             Some(*id),
