@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+#VERSION 2.76 - fail2ban is configured by host_housekeeping.sh, the installer the host
+#               timer also runs. The inline recipe copied jail.conf to jail.local and
+#               appended a second [sshd]; fail2ban 1.0.2 refuses a repeated section, so
+#               every 24.04 host ran with the service failed from install day
+#               (specs/post_release_fleet_defects.md B2).
 #VERSION 2.75 - Writes config/release_verify_keys on a bare-metal install whose
 #               tree ships no agent bundle to read the key from: fetched once
 #               from <upgrade server>/utils/upgrade?serve-verify-key=1, over
@@ -2200,23 +2205,18 @@ do_docker_install() {
 host_housekeeping() {
     print_header "Host Housekeeping"
 
-    # --- fail2ban: SSH jail ---
-    # A drop-in under jail.d, so it composes with whatever jail.local the
-    # server setup wrote and re-running never appends a second [sshd].
-    print_step "Configuring fail2ban SSH jail..."
-    apt-get install -y fail2ban > /dev/null 2>&1
-    mkdir -p /etc/fail2ban/jail.d
-    tee /etc/fail2ban/jail.d/joinery-sshd.local > /dev/null << 'EOF'
-# Joinery host housekeeping
-[sshd]
-enabled = true
-bantime = 1h
-findtime = 10m
-maxretry = 3
-EOF
-    systemctl enable fail2ban > /dev/null 2>&1
-    systemctl restart fail2ban
-    print_success "fail2ban: SSH jail active (ban for 1h after 3 failures in 10m)"
+    # --- fail2ban and Apache client logging: host_housekeeping.sh ---
+    # The one implementation, shared with the host timer (CORE_INSTALLERS in
+    # _plugin_installers_start.sh) and the agent's fail2ban recipe. It writes
+    # the jails as drop-ins under jail.d, removes the jail.local an older
+    # install left (a copy of jail.conf plus a second [sshd], which fail2ban
+    # 1.0.2 refuses to start on), and PROVES the service is active.
+    print_step "Configuring fail2ban and Apache client logging..."
+    if bash "$SCRIPT_DIR/host_housekeeping.sh"; then
+        print_success "fail2ban: active (SSH: ban for 1h after 3 failures in 10m; Apache jails behind mod_remoteip)"
+    else
+        print_warning "fail2ban is not running - see the lines above; the host timer retries on every converge"
+    fi
 
     # --- journald size limit ---
     print_step "Capping systemd journal size..."
@@ -3166,36 +3166,8 @@ EOF
         # node over SSH, so nothing connects to 5432 from outside the box.
         ufw --force enable
 
-        # Configure fail2ban
-        print_step "Configuring fail2ban..."
-        service_start fail2ban
-
-        cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
-
-        tee -a /etc/fail2ban/jail.local > /dev/null << 'EOF'
-
-# Enable SSH protection
-[sshd]
-enabled = true
-
-# Enable basic Apache protection
-[apache-auth]
-enabled = true
-
-[apache-badbots]
-enabled = true
-
-[apache-noscript]
-enabled = true
-
-[apache-overflows]
-enabled = true
-EOF
-
-        service_restart fail2ban
-
-        print_success "fail2ban configured"
-
+        # fail2ban is configured by host_housekeeping (host_housekeeping.sh):
+        # one implementation, also run by the host timer on every converge.
         host_housekeeping
 
         # Install automatic security updates

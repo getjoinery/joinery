@@ -5,11 +5,55 @@
  * This class handles all caching operations for the static page cache system.
  * It works in conjunction with RouteHelper to cache and serve static HTML versions
  * of public pages, dramatically improving performance for anonymous users.
+ *
+ * @version 1.1 - three defects (specs/post_release_fleet_defects.md B4.5): the
+ *                index written by root (an agent-run upgrade's cache clear) is
+ *                given back to the cache's owner, a CLI clearAll() deletes files
+ *                and never rewrites the index, and an unreadable index turns the
+ *                cache off for the request with one log line; a request with an
+ *                array query parameter is never served from or written to the
+ *                cache (its key collapsed, so ?a[]=1 and ?a[]=2 shared a file);
+ *                the config lives under a key no URL can produce (CONFIG_KEY),
+ *                so a request for /_config can no longer overwrite it and turn
+ *                the cache off site-wide.
  */
 class StaticPageCache {
     private static $index = null;
     private static $index_path = null;
     private static $cache_dir = null;
+
+    /**
+     * Where the cache's own settings live in the index. generateCacheKey()
+     * emits only [A-Za-z0-9_-], so a key with a '.' in it can never be a page
+     * entry, and no request can reach or overwrite the config.
+     */
+    const CONFIG_KEY = '.config';
+
+    /** The key older indexes kept the config under - and the key /_config produces. */
+    const LEGACY_CONFIG_KEY = '_config';
+
+    /** Logged once per process when the index cannot be read. */
+    private static $unreadable_logged = false;
+
+    /**
+     * Point the cache at a directory of a test's choosing (null: back to the
+     * site's). Tests only: every static is reset, so nothing a test wrote is
+     * read back by the next one.
+     */
+    public static function setCacheDirForTests(?string $dir): void {
+        self::$index = null;
+        self::$unreadable_logged = false;
+        if ($dir === null) {
+            self::$cache_dir = null;
+            self::$index_path = null;
+            return;
+        }
+        self::$cache_dir = rtrim($dir, '/') . '/';
+        self::$index_path = self::$cache_dir . 'index.json';
+        if (!is_dir(self::$cache_dir)) {
+            @mkdir(self::$cache_dir, 0775, true);
+        }
+    }
 
     /**
      * Initialize cache paths (called once)
@@ -33,9 +77,6 @@ class StaticPageCache {
                     }
                 }
 
-                // Set proper ownership (www-data:user1) to match system pattern
-                @chgrp(self::$cache_dir, 'user1');
-
                 // Ensure proper permissions (775 = rwxrwxr-x)
                 @chmod(self::$cache_dir, 0775);
 
@@ -47,7 +88,6 @@ class StaticPageCache {
             if (!is_writable(self::$cache_dir)) {
                 // Try to fix permissions - use 775 for directories (group needs write)
                 @chmod(self::$cache_dir, 0775);
-                @chgrp(self::$cache_dir, 'user1');
 
                 // If still not writable, log and continue without caching
                 if (!is_writable(self::$cache_dir)) {
@@ -67,18 +107,107 @@ class StaticPageCache {
 
         // If cache directory couldn't be initialized, return disabled config
         if (self::$cache_dir === null) {
-            return ['_config' => ['enabled' => false]];
+            return [self::CONFIG_KEY => ['enabled' => false]];
         }
 
         if (self::$index === null) {
             if (file_exists(self::$index_path)) {
+                // An index the pool cannot open (written by root and never
+                // re-owned) turns the cache off for this request, said once in
+                // the log rather than as a warning on every page.
+                if (!is_readable(self::$index_path)) {
+                    if (!self::$unreadable_logged) {
+                        self::$unreadable_logged = true;
+                        error_log('StaticPageCache: ' . self::$index_path . ' is not readable by this process; '
+                            . 'the static page cache is off until it is (fix_permissions.sh re-owns cache/)');
+                    }
+                    return [self::CONFIG_KEY => ['enabled' => false]];
+                }
                 $content = file_get_contents(self::$index_path);
-                self::$index = json_decode($content, true) ?? ['_config' => ['enabled' => true]];
+                $decoded = json_decode((string)$content, true);
+                self::$index = is_array($decoded) ? $decoded : [self::CONFIG_KEY => ['enabled' => true]];
             } else {
-                self::$index = ['_config' => ['enabled' => true]];
+                self::$index = [self::CONFIG_KEY => ['enabled' => true]];
             }
+            self::$index = self::migrateLegacyConfig(self::$index);
         }
         return self::$index;
+    }
+
+    /**
+     * Move an older index's config from `_config` to CONFIG_KEY. `_config` is
+     * also the key a request for /_config produces, so an entry there that
+     * carries a page status is a page entry and is left where it is; only a
+     * config-shaped one (no status, an `enabled` flag) moves, and only when
+     * nothing lives under CONFIG_KEY yet.
+     */
+    private static function migrateLegacyConfig(array $index): array {
+        if (isset($index[self::LEGACY_CONFIG_KEY]) && is_array($index[self::LEGACY_CONFIG_KEY])
+                && !isset($index[self::LEGACY_CONFIG_KEY]['status'])) {
+            if (!isset($index[self::CONFIG_KEY])) {
+                $index[self::CONFIG_KEY] = ['enabled' => (bool)($index[self::LEGACY_CONFIG_KEY]['enabled'] ?? true)];
+            }
+            unset($index[self::LEGACY_CONFIG_KEY]);
+        }
+        if (!isset($index[self::CONFIG_KEY]) || !is_array($index[self::CONFIG_KEY])) {
+            $index[self::CONFIG_KEY] = ['enabled' => true];
+        }
+        return $index;
+    }
+
+    /**
+     * True when the index exists and this process cannot read it. Nothing is
+     * written while that holds: a save would replace the index the pool owns
+     * with one built from the "off for this request" placeholder, and turn
+     * the cache off for good.
+     */
+    private static function indexUnavailable(): bool {
+        return self::$index_path !== null && file_exists(self::$index_path) && !is_readable(self::$index_path);
+    }
+
+    /** Whether the cache is switched on, read from the index's config entry. */
+    private static function configEnabled(array $index): bool {
+        return (bool)($index[self::CONFIG_KEY]['enabled'] ?? false);
+    }
+
+    /**
+     * A request with an array query parameter (?a[]=1) is never served from or
+     * written to the cache: the key cannot carry the value, so two such requests
+     * would share one file. A page asked for that way is a filter or a search,
+     * and a miss is the safe answer.
+     */
+    private static function hasArrayParam($params): bool {
+        if (!is_array($params)) {
+            return false;
+        }
+        foreach ($params as $value) {
+            if (is_array($value)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Files this class writes belong to the cache's owner. Under a root process
+     * (an agent-run upgrade's cache clear, a CLI run) a file would otherwise be
+     * root's, and the pool could not open it: the cache would be silently off
+     * on that node until the next permissions pass.
+     */
+    private static function ownLikeCacheDir(string $path, int $mode): void {
+        @chmod($path, $mode);
+        $gid = @filegroup(self::$cache_dir);
+        if ($gid !== false && $gid !== 0) {
+            // Any process may give the file to a group it belongs to (a
+            // developer's CLI run is in the web group); root may give it to any.
+            @chgrp($path, $gid);
+        }
+        if (function_exists('posix_getuid') && posix_getuid() === 0) {
+            $uid = @fileowner(self::$cache_dir);
+            if ($uid !== false && $uid !== 0) {
+                @chown($path, $uid);
+            }
+        }
     }
 
     /**
@@ -88,7 +217,7 @@ class StaticPageCache {
         self::init();
 
         // If cache directory couldn't be initialized, skip saving
-        if (self::$cache_dir === null) {
+        if (self::$cache_dir === null || self::indexUnavailable()) {
             return;
         }
 
@@ -107,6 +236,7 @@ class StaticPageCache {
                 @unlink($temp); // Clean up temp file
                 throw new Exception("Failed to update cache index file: " . self::$index_path);
             }
+            self::ownLikeCacheDir(self::$index_path, 0664);
         }
     }
 
@@ -135,8 +265,8 @@ class StaticPageCache {
             $param_parts = [];
             foreach ($params as $key => $value) {
                 // Sanitize parameter names and values
-                $safe_key = preg_replace('/[^a-zA-Z0-9]/', '', $key);
-                $safe_value = preg_replace('/[^a-zA-Z0-9]/', '', $value);
+                $safe_key = preg_replace('/[^a-zA-Z0-9]/', '', (string)$key);
+                $safe_value = preg_replace('/[^a-zA-Z0-9]/', '', is_scalar($value) ? (string)$value : '');
                 $param_parts[] = $safe_key . '-' . $safe_value;
             }
             $safe_name .= '__' . implode('_', $param_parts);
@@ -212,7 +342,11 @@ class StaticPageCache {
         $index = self::loadIndex();
 
         // Check if caching is enabled
-        if (!$index['_config']['enabled']) {
+        if (!self::configEnabled($index)) {
+            return 'nostatic';
+        }
+
+        if (self::hasArrayParam($params)) {
             return 'nostatic';
         }
 
@@ -233,11 +367,12 @@ class StaticPageCache {
         // Check index status
         if (isset($index[$hash]) && is_array($index[$hash])) {
             $entry = $index[$hash];
+            $status = $entry['status'] ?? '';
 
-            if ($entry['status'] === 'nostatic') {
+            if ($status === 'nostatic') {
                 return 'nostatic';
             }
-            if ($entry['status'] === 'cached') {
+            if ($status === 'cached') {
                 // Determine file extension from index or guess from URL
                 $extension = isset($entry['extension']) ? $entry['extension'] : '.html';
                 $cache_file = self::$cache_dir . $hash . $extension;
@@ -263,7 +398,10 @@ class StaticPageCache {
         self::init();
 
         // If cache directory couldn't be initialized, skip caching
-        if (self::$cache_dir === null) {
+        if (self::$cache_dir === null || self::indexUnavailable()) {
+            return false;
+        }
+        if (self::hasArrayParam($params)) {
             return false;
         }
 
@@ -326,6 +464,7 @@ class StaticPageCache {
             error_log("StaticPageCache: Failed to rename cache file: " . $temp . " to " . $file);
             return false;
         }
+        self::ownLikeCacheDir($file, 0664);
 
         // Update index
         try {
@@ -794,6 +933,10 @@ class StaticPageCache {
             return false;
         }
 
+        if (self::hasArrayParam($params) || self::indexUnavailable()) {
+            return false;
+        }
+
         $hash = self::generateCacheKey($url, $params);
         $index = self::loadIndex();
 
@@ -858,7 +1001,7 @@ class StaticPageCache {
         $index = self::loadIndex();
         $hash = self::generateCacheKey($url, $params);
         $entry = $index[$hash] ?? null;
-        if ($entry && $entry['status'] === 'cached') return $entry;
+        if ($entry && ($entry['status'] ?? '') === 'cached') return $entry;
         return null;
     }
 
@@ -888,10 +1031,19 @@ class StaticPageCache {
             }
         }
 
+        // From the command line (an upgrade, a plugin sync, a CLI run - often
+        // root) the index is not rewritten: every entry whose file is gone
+        // drops out on the next request that asks for it (checkCache), and the
+        // index stays the pool's file. A web request clears the entries too.
+        if (php_sapi_name() === 'cli') {
+            self::$index = null;
+            return $count;
+        }
+
         // Clear index entries except config
         $index = self::loadIndex();
-        $config = $index['_config'] ?? ['enabled' => true];
-        self::$index = ['_config' => $config];
+        $config = $index[self::CONFIG_KEY] ?? ['enabled' => true];
+        self::$index = [self::CONFIG_KEY => $config];
         self::saveIndex();
 
         return $count;
@@ -909,7 +1061,7 @@ class StaticPageCache {
         }
 
         $index = self::loadIndex();
-        $index['_config']['enabled'] = (bool)$enabled;
+        $index[self::CONFIG_KEY]['enabled'] = (bool)$enabled;
         self::$index = $index;  // Update the static property
         self::saveIndex();
         return true;
@@ -945,13 +1097,14 @@ class StaticPageCache {
         $cached_count = 0;
 
         foreach ($index as $key => $value) {
-            if ($key === '_config') continue;
-            if ($value === 'nostatic') $nostatic_count++;
-            if ($value === 'cached') $cached_count++;
+            if ($key === self::CONFIG_KEY) continue;
+            $status = is_array($value) ? ($value['status'] ?? '') : $value;
+            if ($status === 'nostatic') $nostatic_count++;
+            if ($status === 'cached') $cached_count++;
         }
 
         return [
-            'enabled' => $index['_config']['enabled'] ?? false,
+            'enabled' => self::configEnabled($index),
             'file_count' => count($files),
             'total_size' => $total_size,
             'total_size_mb' => round($total_size / 1048576, 2),
@@ -982,13 +1135,13 @@ class StaticPageCache {
 
         if (isset($index[$hash]) && is_array($index[$hash])) {
             $entry = $index[$hash];
-            if ($entry['status'] === 'cached') {
+            if (($entry['status'] ?? '') === 'cached') {
                 $result['status'] = 'already_cached';
                 $result['cache_file'] = self::$cache_dir . $hash . '.html';
                 $result['reasons'][] = '✅ URL is already cached';
                 $result['is_cacheable'] = true;
                 return $result;
-            } elseif ($entry['status'] === 'nostatic') {
+            } elseif (($entry['status'] ?? '') === 'nostatic') {
                 $result['status'] = 'marked_nostatic';
                 $result['reasons'][] = '❌ URL is marked as non-cacheable (nostatic)';
                 return $result;

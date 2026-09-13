@@ -1,5 +1,14 @@
 <?php
 
+/**
+ * Pager — offset/sort/filter links over the current request.
+ *
+ * @version 1.1 - the request URI is never parse_url()'d: a scheme-relative or
+ *                absolute-form request line (GET //x:abc, GET http:///x, the
+ *                shapes scanners send) makes parse_url() return false. The base
+ *                is what stands before the first '?', the query what follows
+ *                (specs/post_release_fleet_defects.md B4.3).
+ */
 class Pager{
 
 	private $numperpage = NULL;
@@ -22,7 +31,7 @@ class Pager{
 
 	function __construct($options=array(), $prefix=''){
 		
-		$url = $_SERVER['REQUEST_URI'];
+		$url = $_SERVER['REQUEST_URI'] ?? '';
 		if(isset($options['getvars']) && $options['getvars']){
 			$url = $options['getvars'];
 		}
@@ -38,10 +47,24 @@ class Pager{
 		$this->numrecords = $options['numrecords'] ?? 0;
 		$this->prefix = $prefix;
 
-		$url_pieces = parse_url($url);
-		parse_str($url_pieces['query'] ?? '', $url_vars);
+		// Split on the first '?': the left part is the base every link keeps,
+		// the right part the variables. parse_url() is not used here - it
+		// refuses the request lines scanners send and returned false.
+		$url = (string)$url;
+		$qpos = strpos($url, '?');
+		$query = $qpos === false ? '' : substr($url, $qpos + 1);
+		$base = $qpos === false ? $url : substr($url, 0, $qpos);
+		$hash = strpos($query, '#');
+		if ($hash !== false) {
+			$query = substr($query, 0, $hash);
+		}
+		parse_str($query, $url_vars);
 		$this->url_vars = $url_vars;
-		$this->base_url = $url_pieces['path'];
+		// A base that is not a plain absolute path (a scheme-relative //host or
+		// an absolute-form http://... request line) would turn every pager link
+		// into a link off the site; those links degrade to relative ?offset=
+		// links instead.
+		$this->base_url = (preg_match('~^/(?!/)~', $base) === 1) ? $base : '';
 
 		if(isset($options['offset']) && $options['offset']){
 			$this->offset = $options['offset'];

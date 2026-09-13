@@ -21,6 +21,13 @@ class ProductException extends SystemBaseException {}
 
 class BasicProductRequirementException extends SystemBaseException {}
 
+/**
+ * Product - a store product.
+ *
+ * @version 1.1 - assemble_validation_rules(): the client-side rule assembly is
+ *                pure and per-constraint, so a Question requirement keeps its
+ *                own rule whatever precedes it (specs/post_release_fleet_defects.md B4.8)
+ */
 class Product extends SystemBase {
 	public static $prefix = 'pro';
 	public static $tablename = 'pro_products';
@@ -572,6 +579,59 @@ public function get_requirement_info($output='text') {
 		return array($form_data, $form_display_data);
 	}
 
+	/**
+	 * Fold every requirement's validation info into client-side rules,
+	 * messages and error containers. Pure, so the shapes are testable.
+	 *
+	 * Each requirement's info is field => constraint => one of:
+	 *   ['value' => x, 'message' => m]   (Question::output_js_validation)
+	 *   [x, m]                            positional; the container is <field>_container
+	 *   [x, m, container]                 positional with its own container
+	 *   x                                 a bare value
+	 * Every constraint stands alone: nothing set by one entry reaches the next
+	 * (specs/post_release_fleet_defects.md B4.8 - a Question requirement's rule
+	 * used to be overwritten by whatever the previous positional entry left).
+	 *
+	 * @param array $validation_info one entry per requirement
+	 * @return array [rules, messages, error_message_objects]
+	 */
+	public static function assemble_validation_rules(array $validation_info) {
+		$rules = array();
+		$messages = array();
+		$error_message_objects = array();
+
+		foreach ($validation_info as $info) {
+			foreach ($info as $field_name => $field_constraints) {
+				foreach ($field_constraints as $constraint => $value_message) {
+					if (!is_array($value_message)) {
+						// Simple value (e.g., from Question validation)
+						$rules[$field_name][$constraint] = $value_message;
+						continue;
+					}
+					if (array_key_exists('value', $value_message)) {
+						// Associative ['value' => x] shape (Question::output_js_validation)
+						$rules[$field_name][$constraint] = $value_message['value'];
+						if (isset($value_message['message'])) {
+							$messages[$field_name][$constraint] = $value_message['message'];
+						}
+						continue;
+					}
+					if (count($value_message) == 2) {
+						list($value, $message) = $value_message;
+						$field_container = $field_name . '_container';
+					} else {
+						list($value, $message, $field_container) = $value_message;
+					}
+					$rules[$field_name][$constraint] = $value;
+					$messages[$field_name][$constraint] = $message;
+					$error_message_objects[$field_name] = $field_container;
+				}
+			}
+		}
+
+		return array($rules, $messages, $error_message_objects);
+	}
+
 	function output_javascript($formwriter, $extra_data=array(), $form_id='product_form') {
 
 		$validation_info = array();
@@ -586,36 +646,7 @@ public function get_requirement_info($output='text') {
 		}
 
 		if ($validation_info) {
-			$rules = array();
-			$messages = array();
-			$error_message_objects = array();
-
-			foreach($validation_info as $info) {
-				foreach($info as $field_name => $field_constraints) {
-					foreach($field_constraints as $constraint => $value_message) {
-						if (is_array($value_message)) {
-							if (array_key_exists('value', $value_message)) {
-								// Associative ['value' => x] shape (Question::output_js_validation)
-								$rules[$field_name][$constraint] = $value_message['value'];
-								if (isset($value_message['message'])) {
-									$messages[$field_name][$constraint] = $value_message['message'];
-								}
-							} else if (count($value_message) == 2) {
-								list($value, $message) = $value_message;
-								$field_container = $field_name . '_container';
-							} else {
-								list($value, $message, $field_container) = $value_message;
-							}
-							$rules[$field_name][$constraint] = $value;
-							$messages[$field_name][$constraint] = $message;
-							$error_message_objects[$field_name] = $field_container;
-						} else {
-							// Simple value (e.g., from Question validation)
-							$rules[$field_name][$constraint] = $value_message;
-						}
-					}
-				}
-			}
+			list($rules, $messages, $error_message_objects) = self::assemble_validation_rules($validation_info);
 
 			//ADD IN EXTRA DATA
 			if(count($extra_data)){

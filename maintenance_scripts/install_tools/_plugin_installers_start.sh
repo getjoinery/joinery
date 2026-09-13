@@ -3,6 +3,11 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.14 - host_housekeeping.sh joins CORE_INSTALLERS: fail2ban configured
+#                 and proven running, Apache logging the real client behind a
+#                 known proxy, on every converge (B2); remove_plugin joins the
+#                 kind list, the file half of a plugin uninstall (B1)
+#                 (specs/post_release_fleet_defects.md).
 # Version: 2.13 - Root ignores the test hooks (JOINERY_VERIFY_PACKAGE,
 #                 JOINERY_VERIFY_KEYS, JOINERY_ACTIVE_PLUGINS) and logs that it
 #                 did; only an unprivileged run - the gate - honours them
@@ -618,7 +623,7 @@ fi
 # Core's own installers run before any plugin's, and unconditionally: nothing
 # about them is a plugin's business. Each is idempotent and decides for itself
 # whether it applies here, the same contract plugin installers work under.
-CORE_INSTALLERS="install_agent.sh install_parser_jail.sh install_host_converger.sh render_vhost.sh"
+CORE_INSTALLERS="install_agent.sh install_parser_jail.sh install_host_converger.sh render_vhost.sh host_housekeeping.sh"
 
 for CORE_INSTALLER in ${CORE_INSTALLERS}; do
     CORE_PATH="${TOOLS_DIR}/${CORE_INSTALLER}"
@@ -964,12 +969,14 @@ run_root_requests() {
         ' "${req}" 2>/dev/null || true)"
 
         case "${kind}" in
-            # The same eight as RootRequest::KINDS, and no more. install_package
+            # The same nine as RootRequest::KINDS, and no more. install_package
             # installs a staged upload only after root has verified it against
             # the release key, or on the owner's acknowledgement checked
             # against the second-factor marker (RootRequest::PACKAGE_KIND).
+            # remove_plugin deletes plugins/<name> only after root has read the
+            # row as uninstalled and the manifest as not is_system (PluginRemoval).
             upgrade|install_plugin|install_theme|install_package|reconcile_composer|\
-            write_agent_files|save_doc|set_receives_upgrades) : ;;
+            write_agent_files|save_doc|set_receives_upgrades|remove_plugin) : ;;
             *)
                 echo "root request: ${id} names no known kind - refused" >&2
                 printf '2\n' > "${queue}/failed/${id}.exit" 2>/dev/null || true

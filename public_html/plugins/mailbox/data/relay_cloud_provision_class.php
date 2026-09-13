@@ -37,6 +37,8 @@
  * the provider access token and the per-run root SSH private key, both
  * SecretBox-sealed and erased at terminal state.
  *
+ * @version 1.4 - the run's bundle copy lives under cache/relay_runs, never in the site root
+ *                (specs/post_release_fleet_defects.md B3)
  * @version 1.3 - the 'upgrade' kind, with the relay it targets
  */
 
@@ -162,9 +164,15 @@ class RelayCloudProvision extends SystemBase {
 	 * Where this run's own copy of the support bundle lives. A publish keeps
 	 * only one bundle on a deployment, so the run copies the bytes it was
 	 * created against and serves THAT copy, whatever lands in agent_dist later.
+	 *
+	 * Under cache/: the one site-root directory the pool writes on a read-only
+	 * tree, and one the site backup skips. The copy is derived state (the
+	 * bundle itself ships in the tree), and a run directory that landed in the
+	 * site root root-owned made every site backup refuse the archive
+	 * (specs/post_release_fleet_defects.md B3).
 	 */
 	public function bundlePath(): string {
-		return PathHelper::getSiteRoot() . '/relay_runs/' . intval($this->key) . '/support_bundle.tar.gz';
+		return PathHelper::getSiteRoot() . '/cache/relay_runs/' . intval($this->key) . '/support_bundle.tar.gz';
 	}
 
 	/**

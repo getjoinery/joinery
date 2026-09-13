@@ -476,7 +476,7 @@ check(is_file($history_dir . '/default_virtualhost-2.05.conf'), 'vhost_history c
 // address — on a shared host, another site's certificate and content. So www
 // has its own :443 host under the same guard, on the same certificate,
 // answering only with a 308 to the apex.
-foreach (array('default_virtualhost.conf' => '2.07', 'default_proxy_vhost.conf' => '1.03') as $tpl => $ver) {
+foreach (array('default_virtualhost.conf' => '2.07', 'default_proxy_vhost.conf' => '1.04') as $tpl => $ver) {
     $t = (string)file_get_contents($tools_dir . '/' . $tpl);
     check(strpos($t, '#Version ' . $ver) === 0, "$tpl is $ver");
     preg_match_all('/<VirtualHost [^>]*:443>(.*?)<\/VirtualHost>/s', $t, $hosts);
@@ -2940,6 +2940,12 @@ $tools_dir = dirname(PathHelper::getRootDir()) . '/maintenance_scripts/install_t
 $history_dir = $tools_dir . '/vhost_history';
 $history = glob($history_dir . '/default_virtualhost-*.conf') ?: array();
 check(count($history) >= 7, 'vhost_history carries every shipped template (1.06 through 2.03)', count($history) . ' files');
+// The proxy template's shipped versions too: a Docker host's vhosts were
+// rendered from one of them, and the host timer's first render there has to
+// adopt the file before it can apply 1.04's appended forwarding header.
+$proxy_history = glob($history_dir . '/default_proxy_vhost-*.conf') ?: array();
+check(count($proxy_history) >= 5, 'vhost_history carries every shipped proxy template (1.00 through 1.03)', count($proxy_history) . ' files');
+$history = array_merge($history, $proxy_history);
 
 $render_fn = '';
 $match_fn = '';
@@ -3108,6 +3114,78 @@ array_map('unlink', glob($vh3 . '/renewal/*'));
 @rmdir($vh3 . '/renewal');
 array_map('unlink', glob($vh3 . '/*'));
 @rmdir($vh3);
+
+section('fail2ban is configured by one installer, and a ban never lands on a proxy (specs/post_release_fleet_defects.md B2)');
+
+// The inline recipe copied jail.conf to jail.local and appended a second
+// [sshd]; fail2ban 1.0.2 refuses a repeated section, so the service was failed
+// from install day on both 24.04 hosts and nothing re-ran a fix. One installer,
+// three callers (install.sh, the host timer, the agent's recipe), and a proof.
+$hk_path = $site_root . '/maintenance_scripts/install_tools/host_housekeeping.sh';
+$hk_src  = is_file($hk_path) ? (string)file_get_contents($hk_path) : '';
+check($hk_src !== '', 'host_housekeeping.sh ships beside install.sh');
+$runner_hk = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/_plugin_installers_start.sh');
+check(preg_match('/CORE_INSTALLERS="[^"]*host_housekeeping\.sh/', $runner_hk) === 1,
+	'the runner lists it as a core installer, so the host timer runs it on every converge');
+check(strpos($install_src, 'host_housekeeping.sh"') !== false,
+	'install.sh calls the file');
+check(strpos($install_src, 'cp /etc/fail2ban/jail.conf') === false,
+	'install.sh no longer copies jail.conf to jail.local');
+check(preg_match('/tee -a [^\n]*jail\.local/', $install_src) !== 1,
+	'and never appends to jail.local');
+check(preg_match('/tee -a [^\n]*fail2ban/', $hk_src) !== 1 && strpos($hk_src, 'jail.d/joinery-sshd.local') !== false,
+	'the installer writes its jails as drop-ins under jail.d, whole, never appended');
+check(strpos($hk_src, 'systemctl is-active --quiet fail2ban') !== false
+	&& strpos($hk_src, 'fail2ban-client status sshd') !== false
+	&& strpos($hk_src, 'FAILED=1') !== false,
+	'it proves the service is active and the sshd jail answers, or exits non-zero');
+check(strpos($hk_src, 'sshd -T') !== false && preg_match('/sed[^\n]*sshd_config|PasswordAuthentication (yes|no)/', $hk_src) !== 1,
+	'sshd posture is reported from sshd -T and never changed');
+
+// The Cloudflare range list: one file, two readers, pinned equal.
+$ranges_file = PathHelper::getIncludePath(SessionControl::CLOUDFLARE_RANGES_FILE);
+check(is_file($ranges_file), 'includes/cloudflare_ip_ranges.txt exists');
+$php_ranges = SessionControl::cloudflare_edge_ranges();
+check(count($php_ranges) >= 22, 'PHP reads the fifteen IPv4 and seven IPv6 ranges Cloudflare publishes', count($php_ranges));
+// The installer's reader, run as the installer runs it.
+$installer_read = shell_exec('grep -vE ' . escapeshellarg('^[[:space:]]*(#|$)') . ' ' . escapeshellarg($ranges_file) . ' | tr -d ' . escapeshellarg('[:blank:]'));
+$sh_ranges = array_values(array_filter(explode("\n", (string)$installer_read), 'strlen'));
+check($php_ranges === $sh_ranges, 'the PHP reader and the installer\'s reader see the same list', count($php_ranges) . ' vs ' . count($sh_ranges));
+check(preg_match('/grep -vE \'\^\[\[:space:\]\]\*\(#\|\$\)\' "\$\{RANGES_FILE\}" \| tr -d \'\[:blank:\]\'/', $hk_src) === 1,
+	'the installer reads the file with exactly that pipeline');
+check(strpos($hk_src, 'public_html/includes/cloudflare_ip_ranges.txt') !== false, 'and from the same path');
+$session_src = (string)file_get_contents(PathHelper::getIncludePath('includes/SessionControl.php'));
+check(strpos($session_src, "'173.245.48.0/20'") === false && strpos($session_src, "'2606:4700::/32'") === false,
+	'SessionControl carries no literal range of its own');
+check(SessionControl::ip_is_cloudflare_edge('104.16.1.1') && SessionControl::ip_is_cloudflare_edge('2606:4700::1')
+	&& !SessionControl::ip_is_cloudflare_edge('8.8.8.8') && !SessionControl::ip_is_cloudflare_edge('not an ip'),
+	'the edge test still answers from the file');
+foreach ($php_ranges as $r) {
+	if (preg_match('~^([0-9a-fA-F:.]+)/(\d+)$~', $r, $m) !== 1 || @inet_pton($m[1]) === false) {
+		check(false, 'every line is a CIDR', $r);
+	}
+}
+check(strpos($hk_src, 'RemoteIPTrustedProxy ${range}') !== false
+	&& strpos($hk_src, 'RemoteIPHeader X-Forwarded-For') !== false,
+	'the installer trusts X-Forwarded-For from those ranges and nothing else on a bare-metal host');
+check(strpos($hk_src, 'RemoteIPInternalProxy 172.17.0.0/16') !== false
+	&& strpos($hk_src, 'if [[ "${IN_CONTAINER}" == 1 ]]; then') !== false,
+	'and the bridge only inside a container');
+check(strpos($hk_src, 'LogFormat "%a %l %u %t') !== false, 'the combined log format records the resolved client');
+
+// The proxy vhost appends to the chain rather than replacing it: `set`
+// discarded the edge hop and left the container nothing to walk.
+$proxy_tpl = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/default_proxy_vhost.conf');
+check(substr_count($proxy_tpl, 'RequestHeader append X-Forwarded-For %{REMOTE_ADDR}s') === 2,
+	'both proxy hosts append X-Forwarded-For');
+check(strpos($proxy_tpl, 'RequestHeader set X-Forwarded-For') === false, 'and neither sets it');
+check(is_file($history_dir . '/default_proxy_vhost-1.03.conf'),
+	'vhost_history carries proxy 1.03 so a Docker host\'s vhosts adopt before 1.04 is applied');
+
+// The gate exists and is declared, so the runner runs it.
+$hk_gate = PathHelper::getIncludePath('tests/integration/host_housekeeping_gate.sh');
+check(is_file($hk_gate) && strpos((string)file_get_contents($hk_gate), '@joinery-test') !== false,
+	'the override-mode gate ships and is declared');
 
 section('The converger entry point is refreshed when it goes stale');
 

@@ -7,6 +7,7 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
+ * @version 2.25.1 - antispam_question_check() reads a missing answer as '' (a bot's direct post) rather than warning (specs/post_release_fleet_defects.md B4.4)
  * @version 2.25.0
  * @changelog 2.25.0 - A help_modal step may be an array (text/url/url_label) so a guide can link each step to the exact vendor page it happens on; same https-only guard as the bottom link
  * @changelog 2.24.0 - validateCSRF() accepts the token the session held when this instance was constructed: construction mints a fresh token for the response's render, which had replaced the one the submitted page carried, so a POST handler that constructs the form it is validating always failed. Added getCSRFToken() for single-button action forms that share one form's token
@@ -5184,7 +5185,7 @@ JS;
         $correct_answer = $settings->get_setting('anti_spam_answer');
 
         if($correct_answer){
-            if(strtolower($postvars['antispam_question']) == strtolower($correct_answer)){
+            if(strtolower((string)($postvars['antispam_question'] ?? '')) == strtolower((string)$correct_answer)){
                 return true;
             }
             else{

@@ -381,6 +381,22 @@ chk "and precedes the run" \
     "$( [ "$(grep -n 'plugin_package_verified "\${PLUGIN}"' "$RUNNER" | cut -d: -f1)" -lt "$(grep -n 'running \${INSTALLER_REL}' "$RUNNER" | cut -d: -f1)" ] && echo yes )" "yes"
 chk "the kind list carries install_package and install_theme" "$(grep -c 'upgrade|install_plugin|install_theme|install_package|reconcile_composer' "$RUNNER")" "1"
 
+echo "== remove_plugin: the file half of an uninstall, refused unless the row and the manifest agree =="
+# specs/post_release_fleet_defects.md B1. The runner admits the kind; the
+# dispatcher deletes only after PluginRemoval::refusal() passes (a plugin name,
+# a real directory directly under plugins/, a manifest that is not is_system, a
+# row that is uninstalled and not active). The checks themselves run in
+# tests/unit/root_request_test.php against a scratch tree; here the wiring.
+DISPATCHER="$(dirname "$RUNNER")/../../public_html/utils/root_request.php"
+chk "the runner admits remove_plugin" "$(grep -c 'write_agent_files|save_doc|set_receives_upgrades|remove_plugin) : ;;' "$RUNNER")" "1"
+chk "the dispatcher handles it" "$(grep -c "^	case 'remove_plugin':" "$DISPATCHER")" "1"
+chk "and asks the checks before it removes" \
+    "$( [ "$(grep -n 'PluginRemoval::refusal(\$name, \$plugins_dir, \$row)' "$DISPATCHER" | cut -d: -f1)" -lt "$(grep -n 'PluginRemoval::remove(\$name, \$plugins_dir)' "$DISPATCHER" | cut -d: -f1)" ] && echo yes )" "yes"
+chk "a refusal exits non-zero with the reason" "$(grep -A2 'remove_plugin refused' "$DISPATCHER" | grep -c 'exit(1)')" "1"
+chk "the row is read from the database, not the request" "$(grep -c 'Plugin::get_by_plugin_name(\$name)' "$DISPATCHER")" "1"
+chk "the checks refuse an is_system manifest" "$(grep -c "manifest\['is_system'\]" "$(dirname "$RUNNER")/../../public_html/includes/PluginRemoval.php")" "1"
+chk "and a row that is not uninstalled" "$(grep -c 'is_uninstalled()' "$(dirname "$RUNNER")/../../public_html/includes/PluginRemoval.php")" "1"
+
 echo
 echo "host_converger gate: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]

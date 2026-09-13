@@ -1,4 +1,5 @@
 <?php
+// @version 1.1 - a Remove button only for a group with a membership row, read once by the logic (specs/post_release_fleet_defects.md B4.2)
 // NO need to require PathHelper - admin pages are accessed through serve.php
 // PathHelper, Globalvars, SessionControl, DbConnector, ThemeHelper, PluginHelper are ALWAYS available
 
@@ -29,6 +30,7 @@ $user_subscribed_list = $page_vars['user_subscribed_list'];
 $user_tier = $page_vars['user_tier'];
 $tier_changes = $page_vars['tier_changes'];
 $groups = $page_vars['groups'];
+$group_member_ids = $page_vars['group_member_ids'] ?? array();
 $num_groups = $page_vars['num_groups'];
 $num_received_emails = $page_vars['num_received_emails'];
 $num_sent_emails = $page_vars['num_sent_emails'];
@@ -188,14 +190,16 @@ array(
 							require_once(PathHelper::getIncludePath('data/groups_class.php'));
 							require_once(PathHelper::getIncludePath('data/group_members_class.php'));
 							foreach($groups as $group): ?>
-								<?php $groupmember = $group->is_member_in_group($user->key); ?>
+								<?php $groupmember_id = $group_member_ids[(int)$group->key] ?? 0; ?>
 								<tr>
 									<td><?php echo htmlspecialchars($group->get('grp_name')); ?></td>
 									<td class="text-end">
+										<?php if ($groupmember_id > 0): ?>
 										<?php echo AdminPage::action_button('Remove', '/admin/admin_user', [
-											'hidden'  => ['action' => 'remove_from_group', 'grm_group_member_id' => $groupmember->key, 'usr_user_id' => $user->key],
+											'hidden'  => ['action' => 'remove_from_group', 'grm_group_member_id' => $groupmember_id, 'usr_user_id' => $user->key],
 											'confirm' => 'Remove user from this group?',
 										]); ?>
+										<?php endif; ?>
 									</td>
 								</tr>
 							<?php endforeach; ?>

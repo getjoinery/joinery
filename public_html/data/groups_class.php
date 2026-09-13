@@ -14,7 +14,14 @@ require_once(PathHelper::getIncludePath('data/group_members_class.php'));
 
 class GroupException extends SystemBaseException {}
 
-class Group extends SystemBase {	public static $prefix = 'grp';
+/**
+ * Group - a named set of members (users, events, ...) under a category.
+ *
+ * @version 1.1 - get_member_ids_for_member(): every membership row behind one
+ *                member, read once (specs/post_release_fleet_defects.md B4.2)
+ */
+class Group extends SystemBase {
+	public static $prefix = 'grp';
 	public static $tablename = 'grp_groups';
 	public static $pkey_column = 'grp_group_id';
 
@@ -327,6 +334,26 @@ class Group extends SystemBase {	public static $prefix = 'grp';
 	}	
 	
 	//RETURN A GROUP MEMBER OBJECT IF A MEMBER IS IN A GROUP
+	/**
+	 * The membership row behind each group one member belongs to, read in one
+	 * query: group id => group member id. What a page listing a member's groups
+	 * uses, so the list and the Remove button behind each row come from the
+	 * same read and cannot disagree.
+	 *
+	 * @param int $foreign_key_id
+	 * @return array<int,int>
+	 */
+	public static function get_member_ids_for_member($foreign_key_id) {
+		$out = array();
+		if (!$foreign_key_id) {
+			return $out;
+		}
+		foreach (new MultiGroupMember(array('foreign_key_id' => (int)$foreign_key_id)) as $member) {
+			$out[(int)$member->get('grm_grp_group_id')] = (int)$member->key;
+		}
+		return $out;
+	}
+
 	function is_member_in_group($id) { 
 		if(!$id){
 			throw new GroupException('To check a group member an id is required.');

@@ -4,6 +4,12 @@
 // so they don't get automatic PathHelper loading.
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
+/**
+ * admin_user_logic — the user detail page.
+ *
+ * @version 1.1 - group membership rows are read once and handed to the view with
+ *                each group (specs/post_release_fleet_defects.md B4.2)
+ */
 function admin_user_logic(array $input): LogicResult {
 	// Required includes (PathHelper is now available from the require above)
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -280,9 +286,13 @@ function admin_user_logic(array $input): LogicResult {
 		'cht_usr_user_id' => $user->key
 	], ['cht_change_time' => 'DESC'], $list_limit);
 
-	// Get groups count
+	// The user's groups, and the membership row behind each one, read ONCE.
+	// The view used to re-query membership per group and could disagree with
+	// the list it had just been given (a row removed in between), emitting a
+	// Remove button with no member id (specs/post_release_fleet_defects.md B4.2).
 	$groups = Group::get_groups_for_member($user->key, 'user', false, 'objects');
 	$num_groups = count($groups);
+	$group_member_ids = Group::get_member_ids_for_member($user->key);
 
 	// Count received emails
 	$received_emails_count = new MultiEmailRecipient(
@@ -323,6 +333,7 @@ function admin_user_logic(array $input): LogicResult {
 	$page_vars['user_tier'] = $user_tier;
 	$page_vars['tier_changes'] = $tier_changes;
 	$page_vars['groups'] = $groups;
+	$page_vars['group_member_ids'] = $group_member_ids;
 	$page_vars['num_groups'] = $num_groups;
 	$page_vars['num_received_emails'] = $num_received_emails;
 	$page_vars['num_sent_emails'] = $num_sent_emails;

@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 # manage_domain.sh - Manage domain assignments for Joinery sites
+# VERSION: 1.1 - the proxy vhost appends to X-Forwarded-For rather than
+#                replacing it, so the chain Cloudflare started reaches the
+#                container and mod_remoteip there can resolve the real client
+#                (specs/post_release_fleet_defects.md B2)
 # VERSION: 1.0
 #
 # Usage:
@@ -333,7 +337,7 @@ set_domain_docker() {
     ProxyPassReverse / http://127.0.0.1:${port}/
 
     RequestHeader set X-Real-IP %{REMOTE_ADDR}s
-    RequestHeader set X-Forwarded-For %{REMOTE_ADDR}s
+    RequestHeader append X-Forwarded-For %{REMOTE_ADDR}s
     RequestHeader set X-Forwarded-Proto "http"
 
     ErrorLog /var/www/html/${sitename}/logs/proxy_error.log

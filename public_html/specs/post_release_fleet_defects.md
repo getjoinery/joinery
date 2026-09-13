@@ -1,7 +1,11 @@
 # Post-release fleet defects: what the 0.8.390 check found
 
-**Status: READY FOR EXECUTORS, 2026-09-13. All decisions taken; see the
-Executor brief near the end.** Written 2026-09-13 from a read-only check of
+**Status: IMPLEMENTED 2026-09-13. WP1, WP2, WP5, WP6 built, reviewed and
+proven on dev; they ship in the next release, and docker-prod's fail2ban is
+fixed once by hand with `host_housekeeping.sh` run from a checkout. WP3 is
+`agent_tier1_recipes.md`, sequenced after. Per-package status lines under
+each B-item.** Written
+2026-09-13 from a read-only check of
 all ten Joinery nodes, the relay and both DNS resolvers after 0.8.390 rolled out.
 The release itself is healthy everywhere. Everything below predates it and
 was only visible because someone finally looked at every node at once.
@@ -13,6 +17,24 @@ needs so that a problem like it is fixed by the node itself; the answer is
 `agent_recipes_and_vocabulary.md`, the unified design (owner, 2026-09-13).
 
 ## B1: uninstalling a plugin on a read-only tree leaves it half gone
+
+**Status (WP1): BUILT 2026-09-13.** `uninstalled` state on the row
+(`plg_uninstalled_time`, request id under `plg_metadata._remove_request_id`),
+`remove_plugin` kind (RootRequest, the runner, `utils/root_request.php`,
+checks in `includes/PluginRemoval.php`), `is_system` refusal, sync/stale/
+dependents/version-list/marketplace/activation all leave the row out, the
+page's three readings and the confirm text. Proven live on dev: uninstall from
+the page, row `uninstalled`, request queued, the host timer removed the
+directory on its tick (transcript: `removed plugins/zz_uninstall_proof (4 files
+and directories)`), the row then read "Uninstalled 2026-09-13 - Data and files
+removed - Not published by the upgrade source". Tests: `plugin_uninstall`
+(test-db), `root_request`, `host_converger` gate. Review 2026-09-13: migration
+105 (`cleanup_uninstalled_plugins.php`, which deleted every `uninstalled` row
+and was hash-tracked, so any edit would have re-run it) is removed from the
+list and deleted - every node has its hash row and a fresh install has no rows
+for it; "still published" comes from `MarketplaceClient::published_names()`, a
+copy kept for a day in `cache/`, not a catalog fetch on every page load; the
+`plg_status` reader inventory: the readers left test for `active` only.
 
 ### What happened
 
@@ -113,6 +135,27 @@ the page; the row goes `uninstalled`, root removes the directory, and the
 upgrade never brings it back.
 
 ## B2: fail2ban has been dead on both hosts since they were built
+
+**Status (WP2): BUILT 2026-09-13.** `host_housekeeping.sh` in
+`CORE_INSTALLERS`, `install.sh` 2.76 calls it and carries no inline recipe,
+`default_proxy_vhost.conf` 1.04 appends X-Forwarded-For (shipped proxy
+templates 1.00-1.03 added to `vhost_history/` so a Docker host's vhosts
+adopt), `includes/cloudflare_ip_ranges.txt` is the one range list
+(`SessionControl::cloudflare_edge_ranges()` and the installer read it, pinned
+equal). Run in override mode on dev (gate transcript in the report); the dev
+host timer also ran the real thing as root on its 15:52 tick, fail2ban and
+Apache active afterwards. Not run on any node. Found while building: Ubuntu's
+`jail.d/defaults-debian.conf` sets `backend = systemd` for every jail, so an
+Apache jail on the default backend watches the journal and never the log
+files - the drop-in sets `backend = auto` per Apache jail. Review 2026-09-13
+(script 1.1): docker-prod's `jail.local` tail is a hardening block in other
+words, not install.sh's text, so "ours" is recognised by shape (jail.conf
+followed only by section headers, `enabled` and a ban policy, naming only
+jails the drop-ins carry); the Apache jails are written only when the remoteip
+configuration is enabled and accepted, otherwise removed with the reason (a
+jail on a log naming the peer would ban the edge); the jails watch a Docker
+host's `proxy_access.log` / `proxy_error.log`; `manage_domain.sh` 1.1 appends
+X-Forwarded-For like the shipped proxy template.
 
 ### What happened
 
@@ -247,6 +290,16 @@ between them. B2 supplies its first installer and its first recipe.
 
 ## B3: the node's own backup has failed every morning on two nodes
 
+**Status (WP5): BUILT 2026-09-13.** `BackupTarget` 2.7 completes a Backblaze
+credential on read and writes it back once (a permitted server-initiated
+write); `SiteBackupNotice` is a core `AdminNotices` renderer from the first
+failed site-profile run, cleared by the next success; the relay run's bundle
+copy lives under `cache/relay_runs/` (the only `relay_runs` writer was
+`RelayCloudProvision::bundlePath()`, not a script). Proven live on dev: the
+notice showed for the 06:00 failure, a "Run a backup now" succeeded (428 MB,
+uploaded) and the header went quiet. Tests: `b2_target_heal_on_read`,
+`site_backup_notice` (both test-db).
+
 ### Background: two backup profiles
 
 Each node has two independent backup profiles
@@ -324,6 +377,16 @@ because it runs on our nodes too. The plane's policy editor gains no
 "site profile off" position.
 
 ## B4: the warnings every node carries
+
+**Status (WP6): BUILT 2026-09-13.** All nine fixed at the root named below;
+tests `static_page_cache` (extended), `pager`, `product_validation_rules`,
+`admin_user_groups`. Dev's error log carried no new warning across a browse of
+the touched paths (no-UA request, `?a[]=1`, `/_config`, a scheme-relative
+request line, `/events`). `page_marketing` and the scrolldaddy login are not
+reachable under dev's theme; their fixes are read-through only. Found while
+building 4.5: `createCache()` on an unreadable index wrote the "off for this
+request" placeholder back over the pool's index and turned the cache off for
+good - nothing is written while the index cannot be read.
 
 Every item below was seen on at least one production node in the two days
 around the release; none is new. Four are only noise, five change behaviour.

@@ -243,6 +243,7 @@ section('Only the server may write during a page view');
 // otherwise have done. A user clicking something is none of those.
 $permitted = array(
 	'data/api_keys_class.php'                                 => 'API key last-used tracking, on read requests',
+	'data/backup_target_class.php'                            => 'a Backblaze credential completed with the region and endpoint Backblaze itself reports, written back once on the read that found them missing',
 	'data/general_errors_class.php'                           => 'error rows, recorded on whatever request failed',
 	'includes/RequestLogger.php'                              => 'request log rows, including for reads',
 	'includes/setup_steps/mail_send.php'                      => 'receiving-domain row reconciled from the stored From address on a wizard view — the Direct records cannot be listed without it',

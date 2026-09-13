@@ -15,6 +15,10 @@
  * seals; get_credentials() unseals. A legacy plaintext credential object reads
  * back unchanged, so existing rows migrate the next time they are saved.
  *
+ * @version 2.7 - a Backblaze credential is completed on READ as well as on save: a target saved
+ *                before the save-time completion existed kept an empty region for good and every
+ *                run signed with nothing (specs/post_release_fleet_defects.md B3). The completed
+ *                credential is written back once, a server-initiated reconciliation.
  * @version 2.6 - complete_credentials(): a Backblaze credential's region and endpoint filled from
  *                Backblaze's own authorize answer, shared by the Backups page, the setup wizard and
  *                utils/install_backup_target.php
@@ -109,7 +113,7 @@ class BackupTarget extends SystemBase {
 	 * restored to a machine without it) stays invisible.
 	 */
 	function get_credentials() {
-		return $this->unseal_column('bkt_credentials');
+		return $this->heal_b2_location('bkt_credentials', $this->unseal_column('bkt_credentials'));
 	}
 
 	/**
@@ -117,7 +121,48 @@ class BackupTarget extends SystemBase {
 	 * none is configured (nodes then receive the main credential).
 	 */
 	function get_node_credentials() {
-		return $this->unseal_column('bkt_node_credentials');
+		return $this->heal_b2_location('bkt_node_credentials', $this->unseal_column('bkt_node_credentials'));
+	}
+
+	/**
+	 * A Backblaze credential with no region or endpoint cannot sign a request.
+	 * The forms hide both and complete_credentials() fills them at save time,
+	 * so a target saved before that existed carries an empty region for good
+	 * and every run that reads it fails at the signer. Completed here, on read,
+	 * from Backblaze's own answer, and written back once so the next read finds
+	 * it. The write is a reconciliation the server makes on its own (the row
+	 * brought into line with a fact just fetched), never something a user
+	 * asked for, which is what server_initiated_write() is for. A failure to
+	 * ask Backblaze leaves the credential as it was; the caller's signer then
+	 * says what is missing, as before.
+	 *
+	 * @param string $column bkt_credentials | bkt_node_credentials
+	 * @param array  $creds  what the column unsealed to
+	 * @return array the credential, completed where it could be
+	 */
+	private function heal_b2_location($column, array $creds) {
+		if ($this->get('bkt_provider') !== 'b2' || $this->key === null
+				|| (string)($creds['access_key'] ?? '') === '' || (string)($creds['secret_key'] ?? '') === ''
+				|| (trim((string)($creds['region'] ?? '')) !== '' && trim((string)($creds['endpoint'] ?? '')) !== '')) {
+			return $creds;
+		}
+		$completed = self::complete_credentials('b2', $creds);
+		$healed = $completed['creds'];
+		if ($healed['region'] === '' || $healed['endpoint'] === '') {
+			return $creds;
+		}
+		// Keep any extra keys the stored credential carried.
+		$healed = array_merge($creds, $healed);
+		$this->set($column, $healed);
+		try {
+			SystemBase::server_initiated_write(function () {
+				$this->save();
+			});
+		} catch (\Throwable $e) {
+			error_log('BackupTarget: could not write back the completed Backblaze credential for "'
+				. $this->get('bkt_name') . '": ' . $e->getMessage());
+		}
+		return $healed;
 	}
 
 	/**
@@ -215,6 +260,15 @@ class BackupTarget extends SystemBase {
 	 * @return array{creds: array, note: string} note is non-empty when
 	 *   Backblaze could not be asked; the connection test then says so.
 	 */
+	/**
+	 * How Backblaze is asked for the account's S3 address: a callable taking
+	 * (access_key, secret_key) and returning the authorize answer's s3_endpoint.
+	 * NULL means the real B2Client; a test sets a stand-in so completion runs
+	 * without the network.
+	 * @var callable|null
+	 */
+	public static $b2_locator = null;
+
 	public static function complete_credentials(string $provider, array $creds): array {
 		$creds = array(
 			'access_key' => (string)($creds['access_key'] ?? ''),
@@ -226,8 +280,13 @@ class BackupTarget extends SystemBase {
 		if ($provider === 'b2' && ($creds['region'] === '' || $creds['endpoint'] === '')
 				&& $creds['access_key'] !== '' && $creds['secret_key'] !== '') {
 			try {
-				$auth = (new B2Client($creds['access_key'], $creds['secret_key']))->authorize();
-				$loc = self::b2_s3_location((string)($auth['s3_endpoint'] ?? ''));
+				if (self::$b2_locator !== null) {
+					$s3_endpoint = (string)call_user_func(self::$b2_locator, $creds['access_key'], $creds['secret_key']);
+				} else {
+					$auth = (new B2Client($creds['access_key'], $creds['secret_key']))->authorize();
+					$s3_endpoint = (string)($auth['s3_endpoint'] ?? '');
+				}
+				$loc = self::b2_s3_location($s3_endpoint);
 				if ($loc['endpoint'] !== '') {
 					$creds['region'] = $creds['region'] !== '' ? $creds['region'] : $loc['region'];
 					$creds['endpoint'] = $creds['endpoint'] !== '' ? $creds['endpoint'] : $loc['endpoint'];

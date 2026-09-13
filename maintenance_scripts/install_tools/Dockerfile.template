@@ -1,4 +1,7 @@
 # Joinery Docker Template
+# VERSION 5.1 - The remoteip baseline is a baseline: host_housekeeping.sh
+#               completes it at every start with the edge ranges the host proxy
+#               now forwards (specs/post_release_fleet_defects.md B2).
 # VERSION 5.0 - The start command leaves the code tree to root (specs/read_only_tree.md).
 #               It used to chown public_html, maintenance_scripts and vendor to
 #               www-data on every start, which handed the PHP pool write access
@@ -215,9 +218,13 @@ RUN cp /var/www/html/${SITENAME}/maintenance_scripts/install_tools/default_virtu
     a2dissite 000-default.conf 2>/dev/null || true && \
     a2ensite ${SITENAME}.conf
 
-# Trust the docker bridge gateway for X-Forwarded-For; everything beyond it
-# (Cloudflare, etc.) is handled by the host proxy, not here. Write the .conf
-# BEFORE a2enmod so the symlink for it is created alongside .load.
+# The image's baseline for mod_remoteip: trust the docker bridge gateway for
+# X-Forwarded-For. At every container start host_housekeeping.sh (a core
+# installer the start command runs before Apache) enables
+# conf-available/joinery-remoteip.conf, which adds Cloudflare's published edge
+# ranges as trusted proxies so the chain the host proxy APPENDS to is walked
+# right to left to the real client. Write the .conf BEFORE a2enmod so the
+# symlink for it is created alongside .load.
 RUN printf '%s\n' \
       'RemoteIPHeader X-Forwarded-For' \
       'RemoteIPInternalProxy 172.17.0.0/16' \
