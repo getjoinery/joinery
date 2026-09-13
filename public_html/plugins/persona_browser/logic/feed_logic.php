@@ -7,6 +7,10 @@
  * Reads stored feed posts (fast — no live browser fetch on page load). New
  * posts arrive via the hourly FetchFeedTask; the "Fetch now" button kicks an
  * out-of-band fetch so the page stays responsive.
+ *
+ * The page is one feed: the network's current Stories are cards in the same
+ * list as posts, every card placed by when it was first captured. Each item
+ * carries a 'kind' ('post' or 'story') so the view knows which card to draw.
  */
 function persona_browser_feed_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -68,6 +72,7 @@ function persona_browser_feed_logic(array $input): LogicResult {
             continue;
         }
         $items[] = [
+            'kind'      => 'post',
             'id'        => (int)$row->key,
             'persona'   => (string)$row->get('pfi_persona'),
             'author'    => $author,
@@ -76,35 +81,44 @@ function persona_browser_feed_logic(array $input): LogicResult {
             'link'      => (string)$row->get('pfi_link'),
             'media'     => $row->media_files(),
             'seen'      => $row->get_local('pfi_first_seen_time', 'M j, Y g:i A'),
+            'seen_utc'  => (string)$row->get('pfi_first_seen_time'),
             'is_ad'     => $is_allowed ? null : $row->get('pfi_is_ad'),   // NULL = not judged, or allowed sender
             'ad_reason' => $is_allowed ? '' : (string)$row->get('pfi_ad_reason'),
         ];
     }
 
     // Current stories — the table mirrors the latest capture's tray, blocked
-    // senders excluded, in the tray's own order.
-    $stories = [];
+    // senders excluded. A story is a card like any other, placed in the feed
+    // by when it was first captured.
     $story_rows = new MultiPersonaStory(
-        ['owner_user_id' => PersonaFeedItem::OWNER_INSTANCE, 'persona' => 'facebook', 'deleted' => false],
-        ['pss_position' => 'ASC']
+        ['owner_user_id' => PersonaFeedItem::OWNER_INSTANCE, 'persona' => 'facebook', 'deleted' => false]
     );
     foreach ($story_rows as $s) {
         $s_author = (string)$s->get('pss_author');
-        if ($blocked && isset($blocked[mb_strtolower(trim($s_author))])) {
+        if (isset($blocked[mb_strtolower(trim($s_author))])) {
             continue;
         }
-        $stories[] = [
-            'author'  => $s_author,
-            'link'    => (string)$s->get('pss_link'),
-            'preview' => (string)$s->get('pss_preview_media'),
-            'avatar'  => (string)$s->get('pss_avatar_media'),
+        $items[] = [
+            'kind'      => 'story',
+            'id'        => (int)$s->key,
+            'persona'   => (string)$s->get('pss_persona'),
+            'author'    => $s_author,
+            'link'      => (string)$s->get('pss_link'),
+            'preview'   => (string)$s->get('pss_preview_media'),
+            'avatar'    => (string)$s->get('pss_avatar_media'),
+            'seen'      => $s->get_local('pss_first_seen_time', 'M j, Y g:i A'),
+            'seen_utc'  => (string)$s->get('pss_first_seen_time'),
         ];
     }
+
+    // Newest first, whatever kind of card.
+    usort($items, function (array $a, array $b): int {
+        return strcmp($b['seen_utc'], $a['seen_utc']);
+    });
 
     return LogicResult::render([
         'session'    => $session,
         'items'      => $items,
-        'stories'    => $stories,
         'configured' => $client->is_configured(),
         'fetching'   => !empty($input['fetching']),
     ]);
