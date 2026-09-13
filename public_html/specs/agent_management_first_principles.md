@@ -1,7 +1,9 @@
 # Agent Management — the programme, from first principles
 
 **Status: DIRECTION — for owner review. Consolidated 2026-08-30 and now the
-SINGLE SOURCE for this family's work map and acceptance criteria.** This is the
+SINGLE SOURCE for this family's work map and acceptance criteria. Revised
+2026-09-13: `agent_recipes_and_vocabulary.md` is the unified design for what
+the agent may do and who may ask it; A10 is reversed there and in this file.** This is the
 destination the agent and security work is driving toward **without major
 rewrites** — every mechanism named below is already built, already specified, or
 is a flag. It settles the five questions, records the owner decisions that
@@ -47,9 +49,17 @@ That is the whole design. Everything below is that paragraph made precise.
 ### 1. What is the agent for?
 
 **One role: a node's own manager.** It gathers status and executes named
-primitives dispatched by its management node over the signed channel. It
-never self-initiates (A10 — the diagnose-and-decide intelligence lives on the
-management node), and it is never a generic executor.
+primitives (words) dispatched by its management node over the signed channel,
+and, **since 2026-09-13, it runs compiled recipes on its own clock** — check,
+repair by a word, verify, escalate — with no plane involved
+(`agent_recipes_and_vocabulary.md`). That reverses A10 of
+`implemented/agent_on_node_architecture.md` ("the agent never initiates work
+of its own"); the implemented spec is left as written and this table wins.
+What A10 protected survives: the agent takes no work from a database row, a
+file, or the wire; a recipe is its own source, has no parameters, and can
+only run words that are compiled in. Tier 2 judgment (diagnosis by an AI
+driver) still lives on the management node, so sovereignty is still
+"self-host the plane". The agent is never a generic executor.
 
 The other two roles it holds today are scaffolding and they die:
 
@@ -178,6 +188,7 @@ status**; the spec named is where its design lives.
 | 6 | SSH is one bootstrap, run once | `implemented/ssh_single_bootstrap.md` | **DONE 2026-09-02**, live-verified on every shape: one install job = local preflight + one ssh session; certificates and fleet seeding over the agent; `enable_agent` and `discover_nodes` deleted |
 | 7 | Retire the local queue | `agent_local_queue_retirement.md` | **DONE 2026-09-07 (agent 1.21.0, `JobCommandBuilder` 1.56, `ManagementJob` 1.17), undeployed.** G2 closed with item 6 WP3. G1 decided 2026-09-05 (owner) and built: `publish_upgrade` is a primitive of the plane's own agent, the plane pairs to itself (dev, node 24776), the release signing key is `600 root:root`, and getjoinery is published from dev as a node action (`publish_as_node_action.md`). WP3 and WP4 landed together — the queue, the `local`/`ssh`/`scp`/`api` step types and the `LocalJobs` flag are all gone, and `createJob()` now refuses a step list for anything but the bootstrap pair, so a builder that grows one breaks loudly instead of filing a job nothing claims. **The `api` transport went with it** (its only executor was the queue; no node held API credentials). **Open: the live gate.** The fleet runs 1.19.0; this ships on the next publish, and the management node is the machine that must be watched through it, because it is the one whose own job source changed |
 | 8 | Per-node hardening | `environment_build_surface_reduction.md` | The image and install surface work only. **It removes no SSH key from any current site** — the existing keys are the human troubleshooting door and stay (owner, 2026-09-05). The move of getjoinery to its own box is no longer part of this item; it was motivated by SSH removal |
+| 9 | The vocabulary and its two composers: compiled recipes on the node (tier 1), the driver on the plane (tier 2), the case between them | `agent_recipes_and_vocabulary.md` | **DESIGN SET 2026-09-13, unbuilt.** The `host_housekeeping.sh` installer ships with `post_release_fleet_defects.md` B2; the tier 1 build (recipes package, check loop, case, first recipes) is `agent_tier1_recipes.md`, **sequenced last by the owner** after every other defect package, report-only first on our own fleet |
 
 **Why item 7 is last, which is the reversal this family keeps re-deriving.** The
 local queue is the largest hole in the platform — a web-tier database write is
@@ -207,8 +218,12 @@ Recorded so nobody re-derives these as gaps:
 - **No web/plane process or database-user separation** — the major rewrite.
   The vocabulary bound plus the destructive gate is the chosen containment.
 - **No container split, no Apache swap** — declined in the surface spec.
-- **No node autonomy** — the agent implements, the management node decides
-  (A10). Self-hosting the plane is the sovereignty answer.
+- **No node autonomy beyond compiled recipes** (revised 2026-09-13). The
+  agent runs fixed, compiled check-and-repair recipes on its own and opens a
+  case when one gives up; everything that *diagnoses* runs on the management
+  node. No local job source, no instructions read from disk. Self-hosting
+  the plane is still the sovereignty answer. See
+  `agent_recipes_and_vocabulary.md`.
 - **No skeleton key, no escrow, no break-glass on customer nodes** — a
   plane that can open customer machines is the target we refuse to become.
 - **No agent on the disposable trio.** Settled; stop re-opening.
@@ -338,6 +353,8 @@ acceptance list of its own.
 | `agent_local_queue_retirement.md` | The thirteen-operation audit, with the two gates and seven deletions |
 | `environment_build_surface_reduction.md` | Image and installer surface; independent of all of the above |
 | `r5_cutover_inventory.md` | **Superseded snapshot.** Kept for its measurements, not its open questions |
+| `agent_recipes_and_vocabulary.md` | **The unified design** (owner, 2026-09-13): what a word is, the rules every word obeys, the three actors on a node (installers, host timer, agent), the two composers (compiled recipes, the plane's driver), and the case between them. Other specs comply with it |
+| `agent_tier1_recipes.md` | The build of tier 1: recipe contract, check loop, hold, ledger, the case and its delivery, first words and recipes, where the bugs will live, burn-in. Sequenced last |
 
 ## Appendix A — the measured ground
 

@@ -10,6 +10,20 @@
 
 ---
 
+> **GOVERNED BY `agent_recipes_and_vocabulary.md` (owner, 2026-09-13); the recipe build is `agent_tier1_recipes.md`.** Three
+> adjustments, none of which change the product: (1) **rungs 1 and 2 with a
+> local check and a deterministic repair are tier 1 recipes compiled into the
+> node's agent**, run on the node's own clock with no plane; the driver (§14.C)
+> is tier 2 and receives the **case** a recipe opens when it gives up, plus
+> the down-transitions the plane's monitoring sees that a node cannot see
+> about itself. (2) The rung library (§14.A) and the evidence collectors
+> (§14.E) are the agent's operate and observe **words**; §5's rules for the
+> AI stand unchanged and are now the rules for every caller. (3) §15 step 1
+> reads: recipes for rungs 1–2 on our own fleet first, then the driver
+> consuming cases. A10 of the prerequisite spec is reversed by the owner in
+> the governing spec; nothing here relied on it except the sentence in §1
+> that the node "does nothing on its own initiative".
+
 ## 1. The product in one paragraph
 
 When someone's Joinery breaks, a guardian they have enrolled with notices within minutes and fixes everything that can be fixed without touching data: restarts, disk, certificates, a forced reboot. If the fix needs a restore, the guardian stages everything — evidence gathered, a fresh snapshot where possible, the verified backup identified — and fetches the owner: **one login, one unlock, one click runs it.** It works through a fixed list of repairs, not by improvising, and every step it takes is written down where the owner can read it. The promise is not "your site will never go down." The promise is **"your site comes back, working, you lose no more than X of data — and nothing destructive ever happens without you."**

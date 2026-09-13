@@ -31,6 +31,11 @@ that fell back to SSH does not.
 > document and the programme disagree about what is done, the programme is
 > right.
 
+> **2026-09-13:** tier 2 diagnosis and repair never route through this or
+> any SSH path. The plane's driver works a node only through the agent's
+> words (`agent_recipes_and_vocabulary.md`); what this document describes
+> stays the install-only bootstrap runner that item 3 of the programme kept.
+
 ## What it is, in plain terms
 
 Today the management node runs a root process that reads job rows out of the

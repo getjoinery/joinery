@@ -10,6 +10,16 @@
 
 ---
 
+> **Complies with `agent_recipes_and_vocabulary.md` (2026-09-13).** The
+> expected-actor allowlist of §2.1 gains two entries that did not exist when
+> this was written: the **host timer** (the systemd timer that runs the
+> tree's installers and the root-request queue) and the agent's **compiled
+> recipes**. Both are explained root because they are ledgered before they
+> act: a recipe run and a timer run each leave a transcript the classifier
+> can match, the same way a primitive's exec is matched to a job. A root
+> event with no ledger entry stays unexplained, recipes or not. A case the
+> classifier opens is the same case object a recipe opens.
+
 ## 1. The trap this design exists to avoid
 
 An alarm that runs on the node can be switched off by the thing it is watching. Root kills the reporter; the plane sees silence; **silence looks exactly like health.** Every naive version of this feature fails here, and fails in the worst possible direction — it reads as coverage while providing none, which is worse than having built nothing, because a fleet dashboard showing twelve calm nodes stops anyone from looking harder.

@@ -10,6 +10,16 @@ carrying the panel (0.8.357) and the bundle, upgrade the victim fleet, then
 acceptance 1–2 (pairing alarms nothing; a live scratch decommission with the
 SSH key proven unused). Acceptance 3–6 are pinned by tests and green.**
 
+> **Added acceptance (2026-09-13, `agent_recipes_and_vocabulary.md`):**
+> machine posture on the Docker host means **both** actors are on the host,
+> not only the agent: the host timer with a host-scoped installer set
+> (`host_housekeeping.sh` at least, certbot's host half when that lands) so
+> the host can repair its own services, and the agent's host-scoped words
+> and recipes so it can watch them. Measured 2026-09-13: the host runs no
+> Joinery unit at all, its fail2ban has been dead since 2026-04-23 with no
+> way to know, and nothing the plane can dispatch reaches it. Acceptance 7:
+> the `fail2ban` recipe repairs fail2ban on the real host with no shell.
+
 ## What this is for
 
 Removing one site from the shared Docker host currently requires SSH: the

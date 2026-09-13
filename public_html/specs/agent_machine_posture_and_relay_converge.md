@@ -42,6 +42,13 @@ every primitive and every rung the sentinel spec later adds.
 
 ---
 
+> **Governed by `agent_recipes_and_vocabulary.md` (2026-09-13).** Still
+> deferred. Two things from here are adopted there as standing rules and are
+> not to be re-derived: §7.1's *collect what exists, refuse what needs what
+> is missing, never guess a path*, and §7.3's *a name, never a path* shape
+> for any parameter a host-scoped word takes. "Machine posture" now means the
+> agent plus the host timer, both host-scoped, on a machine with no site.
+
 ## 1. What the owner asked for, and the one thing that does not fit
 
 Three decisions define this package:
