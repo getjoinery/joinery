@@ -13,6 +13,8 @@
  * It also surfaces backup recovery problems (backup_recovery_problems), in the
  * same shape, so an unrecoverable-backup node is as visible as broken monitoring.
  *
+ * @version 1.14 - the trust-root check counts a management node's whole-site copy of this machine when
+ *                  it is sealed to this site's own proven recovery key: the same key holder can open it
  * @version 1.13 - fleet backup outcome 'warning': the node kept a full backup a tenth the size of
  *                 its last one; the card says so with the node's own words instead of a green tick
  * @version 1.12 - note_reported_script_trust(): a node volunteers its own answer on every poll,
@@ -296,27 +298,64 @@ class NodeMonitorHealth {
 				'id'     => 0,
 				'link'   => '/admin/admin_backups',
 				'health' => self::result('recovery', 'Fleet trust root not yet backed up',
-					'The agent signing key lives only in config/ on this machine, and its offsite copy '
-					. 'is this site\'s own whole-site backup — which has never completed. Until one is '
-					. 'confirmed offsite, losing this machine loses the fleet trust root.', true),
+					'The agent signing key lives only in config/ on this machine. Its offsite copy is a '
+					. 'whole-site backup of this machine that this site\'s recovery key can open — one this '
+					. 'site made itself, or one a management node made sealed to the same key — and none '
+					. 'has completed. Until one is confirmed offsite, losing this machine loses the fleet '
+					. 'trust root.', true),
 			];
 		}
 		return $problems;
 	}
 
-	/** Has this site ever confirmed a whole-site backup in the bucket? */
+	/**
+	 * Can the holder of this site's proven recovery key open a backup row of the
+	 * given profile, sealed to the given recovery fingerprint? The site's own
+	 * runs always can; a management node's copy only when it was sealed to the
+	 * very key this site has proven, and never when nothing is proven here.
+	 */
+	public static function copy_opens_here(string $profile, string $row_fpr, string $proven_fpr): bool {
+		if ($profile === BackupProfile::SITE) { return true; }
+		if ($proven_fpr === '' || $row_fpr === '') { return false; }
+		return hash_equals($proven_fpr, $row_fpr);
+	}
+
+	/**
+	 * Is there a whole-site backup of this machine in a bucket that the holder
+	 * of THIS site's recovery key can open?
+	 *
+	 * This site's own runs always qualify. A copy a management node took of
+	 * this machine qualifies only when it was sealed to the same recovery key
+	 * this site has proven possession of: the management node's runs execute as
+	 * root, so they carry config/agent_signing_key, and a matching fingerprint
+	 * means the person holding this site's key can open them. A copy sealed to
+	 * some other party's key lives on that party's shelf under that party's
+	 * custody and is not evidence that the trust root here is recoverable.
+	 */
 	private static function has_offsite_project_backup(): bool {
 		try {
 			require_once(PathHelper::getIncludePath('data/backup_history_class.php'));
-			// This site's OWN backups. A copy some other management node took of
-			// this machine is sealed to that party's key and lives on its shelf,
-			// so it is not evidence that the trust root here is recoverable.
-			$rows = new MultiBackupHistory(
+			require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
+			$own = new MultiBackupHistory(
 				array('type' => 'project', 'outcome' => 'success', 'offsite' => true, 'deleted' => false,
 				      'profile' => BackupProfile::SITE),
 				array('bkh_start_time' => 'DESC'), 1, 0);
-			$rows->load();
-			foreach ($rows as $r) { return true; }
+			$own->load();
+			foreach ($own as $r) { return true; }
+
+			$proven_fpr = (string)Globalvars::get_instance()->get_setting(BackupRecoveryKey::PROOF_SETTING);
+			if ($proven_fpr !== '') {
+				$taken = new MultiBackupHistory(
+					array('type' => 'project', 'outcome' => 'success', 'offsite' => true, 'deleted' => false,
+					      'profile' => BackupProfile::MANAGER),
+					array('bkh_start_time' => 'DESC'), 50, 0);
+				$taken->load();
+				foreach ($taken as $r) {
+					if (self::copy_opens_here((string)$r->get('bkh_profile'), (string)$r->get('bkh_recovery_fpr'), $proven_fpr)) {
+						return true;
+					}
+				}
+			}
 		} catch (\Throwable $e) {
 			// An unreadable history must not paint a false problem row.
 			error_log('NodeMonitorHealth: backup history check failed: ' . $e->getMessage());

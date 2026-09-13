@@ -13,6 +13,7 @@ $session      = $page_vars['session'];
 $settings     = $page_vars['settings'];
 $targets      = $page_vars['targets'];
 $history      = $page_vars['history'];
+$milestones   = $page_vars['milestones'];
 $recovery     = $page_vars['recovery'];
 $plan         = $page_vars['plan'];
 $plan_problem = $page_vars['plan_problem'];
@@ -95,31 +96,34 @@ if ($is_managed) {
 	   . 'keeping the newest ' . (int)$plan['keep_cloud'] . '.</div>';
 }
 
-// The newest offsite backup this site can actually open. The history now holds
-// every profile newest-first, so the first run that reached the bucket is the
-// answer — whether this site took it or a management node did, both seal to this
-// site's recovery key. Reading only the site's own runs made a plane-backed
-// node (which runs no local backup of its own) report "never" while nightly
-// offsite backups existed.
-$last_ok = null; $last_ok_by = 'site';
-foreach ($history as $h) {
-	// Still offsite: uploaded, and not since cleaned up by retention. A pruned
-	// run keeps its upload_time, so is_offsite() alone would report a backup as
-	// stored offsite after it had been deleted.
-	if ($h->is_offsite() && !$h->get('bkh_pruned_time')) {
-		$last_ok = $h;
-		$last_ok_by = ($h->get('bkh_profile') === BackupProfile::MANAGER) ? 'manager' : 'site';
-		break;
+// The three facts this box exists to answer, each read from the runs still
+// held offsite: when the last backup was, when the last FULL backup was, and
+// how far back the oldest one held reaches. Whoever took the run, it opens with
+// this site's recovery key, so the row says who rather than sorting by whom.
+$describe = function ($h) use ($when) {
+	if (!$h) { return '<span class="text-muted">none yet</span>'; }
+	if ((string)$h->get('bkh_type') === 'database') {
+		$kind = 'database only';
+	} else {
+		$kind = ((string)$h->get('bkh_chain_id') !== '' && (int)$h->get('bkh_chain_seq') > 0) ? 'incremental' : 'full';
 	}
+	$by = ($h->get('bkh_profile') === BackupProfile::MANAGER) ? 'the management node' : 'this site';
+	return htmlspecialchars($when($h->get('bkh_start_time')))
+	   . ' <span class="text-muted small">&middot; ' . $kind
+	   . ' &middot; ' . htmlspecialchars(BackupRunner::human($h->get('bkh_bytes')))
+	   . ' &middot; by ' . $by . '</span>';
+};
+$oldest_note = '';
+if ($milestones['oldest'] && $milestones['oldest']->get('bkh_profile') === BackupProfile::MANAGER) {
+	// This machine witnessed the upload; the management node cleans its own
+	// shelf up on its own schedule and does not report that back here.
+	$oldest_note = ' <span class="text-muted small">(as recorded here &mdash; the management node cleans up '
+	             . 'old backups on its own schedule)</span>';
 }
 echo '<table class="table mb-0"><tbody>';
-echo '<tr><th>Last backup stored offsite</th><td>'
-   . ($last_ok ? htmlspecialchars($when($last_ok->get('bkh_upload_time')))
-                 . ' (' . htmlspecialchars(BackupRunner::human($last_ok->get('bkh_bytes'))) . ')'
-                 . ($last_ok_by === 'manager'
-                     ? ' <span class="text-muted small">&mdash; taken by a management node, recoverable with your key</span>'
-                     : '')
-               : 'never') . '</td></tr>';
+echo '<tr><th>Last backup</th><td>' . $describe($milestones['newest']) . '</td></tr>';
+echo '<tr><th>Last full backup</th><td>' . $describe($milestones['full']) . '</td></tr>';
+echo '<tr><th>Oldest backup still held</th><td>' . $describe($milestones['oldest']) . $oldest_note . '</td></tr>';
 
 // When did a backup last run, and who ran it. A plane-backed node's local task
 // never runs — its backups are dispatched by the management node, which writes no
@@ -372,44 +376,63 @@ $page->end_box();
 endif; // targets + schedule shown only when this site runs its own backups
 
 // ── Recent backups ──────────────────────────────────────────────────────────
-// One list for every profile. A site's own runs and a management node's copies of
-// it both seal to this site's recovery key, so they belong together rather than
-// in two boxes — each row says where it was initiated. Only this site's own runs
-// carry a Hide action; a management node's records are read-only here.
+// One row per run, newest first, whoever ran it: a site's own runs and a
+// management node's copies of it both seal to this site's recovery key, so they
+// belong in one list — each row says what kind of backup it was and who ran it.
+// Only this site's own runs carry a Hide action; a management node's records
+// are read-only here.
 $page->begin_box(array('title' => 'Recent backups'));
 
 $hrows = array();
 foreach ($history as $h) { $hrows[] = $h; }
 
+$backup_kind = function ($h) {
+	if ((string)$h->get('bkh_type') === 'database') { return 'Database only'; }
+	if ((string)$h->get('bkh_chain_id') === '') { return 'Full'; }
+	return ((int)$h->get('bkh_chain_seq') === 0) ? 'Full' : 'Incremental';
+};
+
 if (!$hrows) {
 	echo '<p class="text-muted mb-0">No backups have run yet.</p>';
 } else {
-	echo '<p class="text-muted small">Runs this site made itself and runs a management node made on its '
-	   . 'behalf, newest first &mdash; both open with this site\'s recovery key.</p>';
+	if ($is_managed) {
+		echo '<p class="text-muted small">'
+		   . ($manager_url !== '' ? '<code>' . htmlspecialchars($manager_url) . '</code>' : 'A management node')
+		   . ' runs this site\'s backups and stores them offsite; they open with this site\'s recovery key. '
+		   . 'An incremental backup holds what changed since the run before it and restores together with '
+		   . 'the last full backup before it. A restore is started from the management node and approved '
+		   . 'on this page.</p>';
+	} else {
+		echo '<p class="text-muted small">Newest first. Runs this site made itself and runs a management node '
+		   . 'made on its behalf both open with this site\'s recovery key. An incremental backup holds what '
+		   . 'changed since the run before it and restores together with the last full backup before it.</p>';
+	}
 	echo '<table class="table"><thead><tr>'
-	   . '<th>When</th><th>What</th><th>Result</th><th>Size</th><th>Initiated by</th><th>Availability</th><th></th>'
+	   . '<th>When</th><th>Backup</th><th>Run by</th><th>Result</th><th>Size</th><th>Availability</th><th></th>'
 	   . '</tr></thead><tbody>';
 	foreach ($hrows as $h) {
 		$outcome    = (string)$h->get('bkh_outcome');
 		$is_manager = ($h->get('bkh_profile') === BackupProfile::MANAGER);
+		$message    = (string)$h->get('bkh_message');
 		echo '<tr>';
 		echo '<td>' . htmlspecialchars($when($h->get('bkh_start_time'))) . '</td>';
-		echo '<td>' . htmlspecialchars($h->get('bkh_type')) . '</td>';
-		echo '<td>' . ($outcome === 'failed'
-			? '<strong>failed</strong>'
-			: htmlspecialchars($outcome));
-		if ($h->get('bkh_message')) {
-			echo '<div class="small text-muted">' . htmlspecialchars($h->get('bkh_message')) . '</div>';
-		}
-		echo '</td>';
-		echo '<td>' . htmlspecialchars(BackupRunner::human($h->get('bkh_bytes'))) . '</td>';
-		// Where the run was initiated: a management node dispatched it, or this
-		// machine started it itself.
+		echo '<td>' . htmlspecialchars($backup_kind($h)) . '</td>';
 		echo '<td>' . ($is_manager
 			? 'Management node' . ($manager_url !== ''
 				? ' <span class="text-muted small">(' . htmlspecialchars($manager_url) . ')</span>'
 				: '')
 			: 'This site') . '</td>';
+		echo '<td>' . ($outcome === 'failed'
+			? '<strong>failed</strong>'
+			: htmlspecialchars($outcome));
+		// A successful run's message restates the row ("Incremental run 3 of
+		// chain-..."); only a warning inside it is worth the reader's eye. A
+		// failure's message is the reason, and always shown.
+		if ($message !== '' && ($outcome !== 'success' || stripos($message, 'WARNING') !== false)) {
+			echo '<div class="small text-muted">' . htmlspecialchars($message) . '</div>';
+		}
+		echo '</td>';
+		echo '<td>' . htmlspecialchars(BackupRunner::human($h->get('bkh_bytes'))) . '</td>';
 		// Whether the backup is still there, stated on every row so present and
 		// cleaned-up read differently at a glance. Retention that cleaned a backup
 		// up stamped bkh_pruned_time; its upload_time survives the prune, so pruned
@@ -419,7 +442,7 @@ if (!$hrows) {
 		// uploaded with a credential that can neither list nor delete, to a shelf
 		// the management node prunes on its own schedule, and that prune is never
 		// reported back here — bkh_pruned_time on these rows is stamped by nobody,
-		// so they would read Present forever, including chains deleted weeks ago.
+		// so they would read Present forever, including backups deleted weeks ago.
 		// The row states what this machine actually witnessed, which is the upload,
 		// and says who owns the copy from there on.
 		$pruned = (bool)$h->get('bkh_pruned_time');

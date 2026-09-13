@@ -503,4 +503,20 @@ $dhost6->load();
 check(empty($dhost6->get('mgn_delete_time')),
 	'a victimless verified job never finalizes a siteless (host) subject');
 
+section('A never-measured recovery-key state asks for a report, like a carried one');
+
+// The plane's own node, paired after the API/SSH path retired, had never had
+// the state measured: nothing carried, nothing asked, and every fleet backup
+// pass skipped it as "awaiting its recovery key" (2026-09-13).
+check(JobResultProcessor::wants_recovery_key_report(array('load_1m' => '0.1')),
+	'a blob that has never held the state wants it measured');
+check(JobResultProcessor::wants_recovery_key_report(array(
+		'backup_recovery_state' => 'proven', 'status_carried_keys' => array('backup_recovery_state'))),
+	'a state carried forward from an earlier check wants it measured again');
+check(!JobResultProcessor::wants_recovery_key_report(array(
+		'backup_recovery_state' => 'proven', 'status_carried_keys' => array('load_1m'))),
+	'a state this check measured is not asked for again');
+check(!JobResultProcessor::wants_recovery_key_report(array('backup_recovery_state' => 'unconfigured')),
+	'a measured "unconfigured" is an answer, not a gap');
+
 harness_finish();

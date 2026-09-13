@@ -327,4 +327,19 @@ check($h['is_problem'] && $h['label'] === 'Last backup failed', 'a failed stamp 
 check(strpos($h['detail'], 'failed (') !== false && strpos($h['detail'], 'ago)') !== false,
 	'and the detail says how long ago', $h['detail']);
 
+section('A management node\'s copy is recoverable here only when this site\'s key opens it');
+
+$fpr_a = str_repeat('a', 64);
+$fpr_b = str_repeat('b', 64);
+check(NodeMonitorHealth::copy_opens_here(BackupProfile::SITE, '', ''),
+	'the site\'s own run always counts');
+check(NodeMonitorHealth::copy_opens_here(BackupProfile::MANAGER, $fpr_a, $fpr_a),
+	'a management node\'s copy sealed to the key proven here counts');
+check(!NodeMonitorHealth::copy_opens_here(BackupProfile::MANAGER, $fpr_b, $fpr_a),
+	'one sealed to another party\'s key does not');
+check(!NodeMonitorHealth::copy_opens_here(BackupProfile::MANAGER, $fpr_a, ''),
+	'nothing counts while no key is proven here');
+check(!NodeMonitorHealth::copy_opens_here(BackupProfile::MANAGER, '', $fpr_a),
+	'a copy that recorded no recipient does not');
+
 harness_finish();
