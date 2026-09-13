@@ -955,7 +955,7 @@ The **Backups** tab on each node includes a file browser that lists backup files
 - **Upload to cloud** — offered on rows that exist only on the node, when the node has an enabled cloud target. Creates an `upload_backup` job that pushes that one file from the node to the target. The transfer runs on the node, where the file already is; routing it through the management node would drag the archive down and push it straight back up. The local copy is kept regardless of the node's delete-after-upload setting — an operator asking for an offsite copy of a file they are looking at did not ask for that file to disappear, and deleting stays an explicit action. The button waits for the job's real verdict, so a failed transfer reports as failed with a link to the job output rather than reading as done
 - **Delete** — single Delete button per row that removes the file from every location it exists in (local, cloud, or both); the confirmation dialog names the file and locations explicitly
 - **Restore Full Project** — for `.tar.gz` archives, see the `restore_project` row in the Job Types table
-- **Restore points (incremental chains)** — a second table listing each chain on the node's shelf with its runs, size and newest restore point, read from the chain's own `manifest.json` by `BackupChainListHelper`. Restoring picks a run: the full, then every incremental up to it, in order. Chain artifacts are deliberately absent from the flat file table above — listed there, `files-0003.tar.gz.enc` invites a restore of one incremental with no full under it, which restores nothing at all
+- **Backups** — one row per backup run on the node's shelf, newest first (when, full or incremental, who took it, size), with the last backup, the last full backup and the oldest backup held stated above the list; read from each chain's `manifest.json` by `BackupChainListHelper`. Restoring a run replays the last full before it and every incremental up to it, in order. Chain artifacts are deliberately absent from the flat file table above — listed there, `files-0003.tar.gz.enc` invites a restore of one incremental with no full under it, which restores nothing at all
 
 ### What a restore asks, and what it decides
 
@@ -1289,9 +1289,13 @@ private key are sufficient. No site's recovery depends on any other site being
 alive.
 
 The **agent signing key** (the fleet trust root) needs no separate recovery record:
-it lives at `config/agent_signing_key`, inside the project tree that the site's own
-root-run manager backup carries (the key is root-only, so a backup taken as any
-other user leaves it out and says so).
+it lives at `config/agent_signing_key`, inside the project tree that a root-run
+whole-site backup carries (the key is root-only, so a backup taken as any other
+user leaves it out and says so). The dashboard's trust-root check is satisfied by
+any offsite whole-site backup of this machine that this site's proven recovery key
+opens: one the site made itself, or one a management node made of it sealed to that
+same key. A copy sealed to another party's key is that party's to recover from and
+does not count.
 
 ## How It Works: Smart Plugin, Dumb Agent
 

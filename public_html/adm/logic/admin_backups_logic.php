@@ -6,6 +6,8 @@
  * opens them, how many are kept, and what has actually happened. No fleet, no
  * agent — server_manager is a layer on top of this, not a prerequisite for it.
  *
+ * @version 1.6 - milestones: the newest backup, the newest full backup and the oldest backup still
+ *                held, for the Status box
  * @version 1.5 - save_target completes a Backblaze credential through BackupTarget::complete_credentials
  * @version 1.4 - save_target fills a Backblaze target's region and endpoint from Backblaze's own authorize answer
  *                (both forms hide the fields for B2, and S3 signing needs them)
@@ -82,6 +84,7 @@ function admin_backups_logic($input = array()) {
 		'settings'      => Globalvars::get_instance(),
 		'targets'       => $targets,
 		'history'       => $history,
+		'milestones'    => _admin_backups_milestones(),
 		'recovery'      => BackupRecoveryKey::setup_state(),
 		'plan'          => $plan,
 		'plan_problem'  => $plan_problem,
@@ -324,6 +327,34 @@ function _admin_backups_handle($action, array $input, $session) {
 	}
 
 	return null;
+}
+
+/**
+ * The three facts an operator asks of a backup history — the newest backup,
+ * the newest FULL backup, and the oldest backup still held — each as the run's
+ * history row, or null. Read from runs that are still present offsite: a run
+ * retention cleaned up is soft-deleted, and a hidden one is too, so the
+ * collection's defaults leave both out.
+ */
+function _admin_backups_milestones() {
+	$base = array('outcome' => 'success', 'offsite' => true, 'deleted' => false);
+	$one = function (array $extra, $direction) use ($base) {
+		$rows = new MultiBackupHistory(array_merge($base, $extra), array('bkh_start_time' => $direction), 1, 0);
+		foreach ($rows as $r) { return $r; }
+		return null;
+	};
+	// A full backup is the first run of a chain or a standalone archive; the
+	// newer of the two is the answer.
+	$full = $one(array('bkh_chain_seq' => 0), 'DESC');
+	$alone = $one(array('chained' => false), 'DESC');
+	if ($alone && (!$full || (string)$alone->get('bkh_start_time') > (string)$full->get('bkh_start_time'))) {
+		$full = $alone;
+	}
+	return array(
+		'newest' => $one(array(), 'DESC'),
+		'full'   => $full,
+		'oldest' => $one(array(), 'ASC'),
+	);
 }
 
 /**

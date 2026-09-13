@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.22.10",
+  "version": "1.22.12",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -195,7 +195,7 @@
     },
     {
       "name": "server_manager_upgrade_retention_count",
-      "default": "10",
+      "default": "3",
       "helptext": "How many recent core upgrade archives to keep on disk. Older archives are removed after each publish; their release-history records are always kept. Archives marked Keep, and any version a managed node is running, are never removed. Set to 0 to keep every archive.",
       "group": "publishing",
       "label": "Upgrade archives to keep",

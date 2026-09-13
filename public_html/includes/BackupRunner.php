@@ -33,6 +33,8 @@
  * profile sweeps its own working directory by age, because the machine holding
  * the files is the only one that can.
  *
+ * @version 1.12 - current_chain() reads only chain runs, so a standalone whole-site run in the same
+ *                 profile no longer makes the next run forget the open chain and take a fresh full
  * @version 1.11 - a full backup a tenth the size of the previous full is recorded with a WARNING
  *                 in its message and returned as one (the task message, the BACKUP_WARNING line a
  *                 management node reads). The run is real, so it is kept; what must not happen is
@@ -542,9 +544,15 @@ class BackupRunner {
 	 * to a chain another site had written under the same slug.
 	 */
 	private static function current_chain(array $plan) {
+		// Only chain runs can name the chain to extend. A standalone whole-site
+		// run in the same profile (a pre-restore dump, a run under a policy set
+		// to full mode) writes a success row with no chain id; reading the
+		// newest row regardless made the next run believe there was no chain
+		// and take a fresh full (getjoinery, 2026-09-05: a 464 MB full where a
+		// 70 MB incremental would have done).
 		$rows = new MultiBackupHistory(
 			array('outcome' => 'success', 'deleted' => false, 'slug' => $plan['slug'], 'type' => 'project',
-			      'profile' => $plan['profile']),
+			      'profile' => $plan['profile'], 'chained' => true),
 			array('bkh_start_time' => 'DESC'), 1, 0);
 		$rows->load();
 

@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.25 - a primitive status check on a node whose recovery-key state was never measured
+ *                 queues the recovery_key_report job, not only one whose state was carried forward
  * @version 1.24 - parse_check_status_ssh_output reads the Swap: line of free -m it always
  *                 received (swap_total_mb, swap_used_mb), so a node's swap pressure is a
  *                 recorded fact and not a guess (specs/vault_exposure_quick_fixes.md Q5)
@@ -501,8 +503,13 @@ class JobResultProcessor {
 			// one measurement per node in a six-hour window is as fresh as the
 			// answer can usefully be, and the check below also refuses to pile on
 			// a report that is already queued or running.
-			$carried = $folded[self::STATUS_CARRIED_KEY] ?? [];
-			if (in_array('backup_recovery_state', $carried, true)
+			//
+			// A node that has NEVER had it measured wants the job just as much:
+			// nothing is carried because there is nothing to carry from, and the
+			// backup gate reads that as "awaiting its recovery key" forever. The
+			// plane's own node, paired after the API/SSH path retired, was
+			// skipped by every fleet backup pass this way (2026-09-13).
+			if (self::wants_recovery_key_report($folded)
 					&& JobCommandBuilder::has_primitive($node, 'recovery_key_report')
 					&& !ManagementJob::activeOrRecentForNode($node->key, 'recovery_key_report', 6 * 3600)) {
 				try {
@@ -573,6 +580,18 @@ class JobResultProcessor {
 			'backup_recovery_state' => $proven ? 'proven' : 'unproven',
 			'backup_recovery_fpr'   => $fpr,
 		];
+	}
+
+	/**
+	 * Does a folded status blob leave the node's recovery-key state unmeasured?
+	 * True when the state was carried forward from an earlier check rather than
+	 * measured by this one, and equally when it has never been measured at all
+	 * — both are a node the backup gate cannot yet answer for.
+	 */
+	public static function wants_recovery_key_report(array $folded): bool {
+		$carried = $folded[self::STATUS_CARRIED_KEY] ?? [];
+		return in_array('backup_recovery_state', is_array($carried) ? $carried : [], true)
+			|| !array_key_exists('backup_recovery_state', $folded);
 	}
 
 	/**

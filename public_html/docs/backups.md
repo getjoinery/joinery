@@ -289,10 +289,12 @@ the plan and needs no key. `--domain` names the domain the restored site is to
 answer to; without it the site keeps the domain this machine's config already
 names.
 
-From the dashboard: the node's **Backups** tab lists chains as restore points
-and its Restore button runs the `restore_chain` job. That job recovers the chain
-key on the node from the node's own `backup_site_key`, so no recovery private key
-travels in a job record. A chain taken by a machine that no longer exists is
+From the dashboard: the node's **Backups** tab lists every run on the node's
+shelf, newest first, with the last backup, the last full backup and the oldest
+backup held stated above the list; each row's Restore button runs the
+`restore_chain` job for that run. That job recovers the chain key on the node
+from the node's own `backup_site_key`, so no recovery private key travels in a
+job record. A chain taken by a machine that no longer exists is
 restored from a shell with the recovery key, as above.
 
 ## Key model: one envelope per backup

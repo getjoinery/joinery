@@ -9,6 +9,12 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.9 - the schedule summary and the fleet-default dropdown share one sentence that says
+ *                what is kept: N full backups with their incrementals, and how many days that is
+ * @version 1.8 - the shelf is listed as one row per backup run (when, full or incremental, who took
+ *                it, size) with the last backup, last full backup and oldest backup held stated above it;
+ *                restore is offered per run. Chains and restore points are how it is stored, not what
+ *                an operator is looking for
  * @version 1.7 - a failing fleet backup links the failed job next to its reason
  * @version 1.6 - the backup-target line and recoverable box resolve the shelf via get_target(), the
  *                same fallback the job builder uses, so a node that names no target but backs up to the
@@ -146,12 +152,26 @@
 		// The schedule and the last run, together. Either alone is misleading:
 		// a schedule that has never fired reads as coverage, and a last run with
 		// no schedule reads as ongoing.
+		// One sentence for a policy, used for this node's summary and for the
+		// fleet default in the dropdown below, so the two never describe the
+		// same settings in two ways. "keeping 4" on its own read as four days of
+		// backups; what is kept is four FULL backups, each with its incrementals,
+		// which at a weekly full is about a month.
+		$describe_policy = function (array $p) {
+			$keep = (int)$p['keep'];
+			if ($p['mode'] === 'chain') {
+				$days = (int)$p['full_interval_days'];
+				return $p['frequency'] . ' backups: a full backup every ' . $days . ' day' . ($days === 1 ? '' : 's')
+				   . ' and incrementals in between, keeping the newest ' . $keep
+				   . ' full backup' . ($keep === 1 ? '' : 's') . ' with their incrementals'
+				   . ' (about ' . (int)round($keep * max(1, $days)) . ' days of history)';
+			}
+			return $p['frequency'] . ' full backups, keeping the newest ' . $keep;
+		};
 		echo '<p class="mb-1">';
 		if (!empty($policy['enabled'])) {
-			echo '<strong>Scheduled:</strong> ' . htmlspecialchars($policy['frequency'])
-			   . ' at ' . htmlspecialchars(FleetBackupPolicy::slot_time($policy, (string)$node->get('mgn_slug')))
-			   . ', keeping ' . (int)$policy['keep'] . ' restore point' . ($policy['keep'] === 1 ? '' : 's')
-			   . ($policy['mode'] === 'chain' ? ', as incremental chains' : ', a full backup every time');
+			echo '<strong>Scheduled:</strong> ' . htmlspecialchars($describe_policy($policy))
+			   . ', starting at ' . htmlspecialchars(FleetBackupPolicy::slot_time($policy, (string)$node->get('mgn_slug')));
 		} else {
 			echo '<strong>Not scheduled.</strong> This management node takes no backups of this node '
 			   . 'except when someone runs one.';
@@ -195,9 +215,7 @@
 		// somebody's choice rather than a gap.
 		$fleet = FleetBackupPolicy::fleet_defaults();
 		$default_label = 'Fleet default — '
-			. (!empty($fleet['enabled'])
-				? $fleet['frequency'] . ' backups, keeping ' . (int)$fleet['keep']
-				: 'no scheduled backups');
+			. (!empty($fleet['enabled']) ? $describe_policy($fleet) : 'no scheduled backups');
 
 		echo '<hr>';
 		$fw_pol = $page->getFormWriter('backup_policy_form');
@@ -242,15 +260,15 @@
 			'helptext' => 'The node gets its own start minute inside the window, so a fleet does not upload all at once.',
 		]);
 		$fw_pol->dropinput('policy_mode', 'How backups are taken', [
-			'options' => ['chain' => 'Incremental chains', 'full' => 'A full backup every time'],
+			'options' => ['chain' => 'A full backup, then incrementals', 'full' => 'A full backup every time'],
 			'value'   => $policy['mode'],
 		]);
-		$fw_pol->numberinput('policy_keep', 'Restore points kept', [
+		$fw_pol->numberinput('policy_keep', 'Full backups kept', [
 			'value'    => $policy['keep'],
 			'min'      => 1,
-			'helptext' => 'Chains are kept or deleted whole, never partly.',
+			'helptext' => 'A full backup and the incrementals after it are kept or deleted together, never partly.',
 		]);
-		$fw_pol->numberinput('policy_full_interval_days', 'Days before a chain starts a fresh full', [
+		$fw_pol->numberinput('policy_full_interval_days', 'Days between full backups', [
 			'value' => $policy['full_interval_days'],
 			'min'   => 0,
 		]);
@@ -370,46 +388,73 @@
 
 	$page->end_box();
 
-	// ── Restore points held as incremental chains ──
+	// ── Backups on the shelf ──
 	//
-	// This is what the schedule actually produces. Each chain is ONE restore
-	// point per run: the full, then every incremental up to the run chosen,
-	// applied in order. It cannot be represented in the flat list above, which
-	// is why the list above leaves chain artifacts out.
+	// One row per run, newest first, whichever chain it sits in. A chain (one
+	// full plus the incrementals after it) is how the shelf is organised and how
+	// a restore replays; what an operator asks is when the last backup was, when
+	// the last full was, and how far back the oldest reaches — so those are
+	// stated first, and every run is offered for restore on its own row. Chain
+	// artifacts are deliberately absent from the flat file list above, which
+	// would otherwise offer an incremental with no full under it.
 	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupChainListHelper.php'));
 	$chain_list = BackupChainListHelper::for_node($node);
 
 	if ($chain_list['error'] || !empty($chain_list['chains'])) {
-		$pageoptions = ['title' => 'Restore points (incremental chains)'];
+		$pageoptions = ['title' => 'Backups'];
 		$page->begin_box($pageoptions);
 
 		if ($chain_list['error']) {
-			echo '<div class="alert alert-warning mb-0">Could not read the chain listing: '
+			echo '<div class="alert alert-warning mb-0">Could not read the backup listing: '
 			   . htmlspecialchars($chain_list['error']) . '</div>';
 		} else {
-			echo '<table class="table table-striped table-sm">';
-			echo '<thead><tr><th>Chain</th><th>Taken by</th><th>Restore points</th><th>Newest</th><th>Size</th><th>Actions</th></tr></thead><tbody>';
 			$profile_labels = ['manager' => 'This management node', 'site' => 'The site itself'];
+			$shelf_runs = [];
 			foreach ($chain_list['chains'] as $c) {
-				$runs = $c['runs'];
-				$last = end($runs);
+				foreach ($c['runs'] as $r) {
+					$shelf_runs[] = ['chain' => $c, 'run' => $r];
+				}
+			}
+			usort($shelf_runs, function ($x, $y) {
+				return strcmp((string)$y['run']['time'], (string)$x['run']['time']);
+			});
+			$run_when = function ($r) { return $r['time'] !== '' ? substr((string)$r['time'], 0, 16) . ' UTC' : 'unknown time'; };
+			$run_line = function ($entry) use ($run_when, $profile_labels) {
+				if (!$entry) { return '<span class="text-muted">none</span>'; }
+				return htmlspecialchars($run_when($entry['run']))
+				   . ' <span class="text-muted small">&middot; ' . ($entry['run']['level'] === 0 ? 'full' : 'incremental')
+				   . ' &middot; ' . htmlspecialchars(BackupChainListHelper::format_size($entry['run']['bytes']))
+				   . ' &middot; by ' . htmlspecialchars(strtolower($profile_labels[$entry['chain']['profile']] ?? $entry['chain']['profile']))
+				   . '</span>';
+			};
+			$newest_full = null;
+			foreach ($shelf_runs as $entry) { if ($entry['run']['level'] === 0) { $newest_full = $entry; break; } }
+			echo '<table class="table table-sm mb-3"><tbody>';
+			echo '<tr><th>Last backup</th><td>' . $run_line($shelf_runs[0] ?? null) . '</td></tr>';
+			echo '<tr><th>Last full backup</th><td>' . $run_line($newest_full) . '</td></tr>';
+			echo '<tr><th>Oldest backup held</th><td>' . $run_line($shelf_runs ? end($shelf_runs) : null) . '</td></tr>';
+			echo '</tbody></table>';
+
+			echo '<table class="table table-striped table-sm">';
+			echo '<thead><tr><th>When</th><th>Backup</th><th>Taken by</th><th>Size</th><th>Actions</th></tr></thead><tbody>';
+			foreach ($shelf_runs as $entry) {
+				$c = $entry['chain']; $r = $entry['run'];
 				echo '<tr>';
-				echo '<td><small><code>' . htmlspecialchars($c['chain_id']) . '</code></small></td>';
+				echo '<td>' . htmlspecialchars($run_when($r)) . '</td>';
+				echo '<td>' . ($r['level'] === 0 ? 'Full' : 'Incremental') . '</td>';
 				echo '<td><small>' . htmlspecialchars($profile_labels[$c['profile']] ?? $c['profile']) . '</small></td>';
-				echo '<td>' . count($runs) . '</td>';
-				echo '<td><small>' . htmlspecialchars($last ? substr((string)$last['time'], 0, 16) . ' UTC' : '-') . '</small></td>';
-				echo '<td>' . htmlspecialchars(BackupChainListHelper::format_size($c['bytes'])) . '</td>';
+				echo '<td>' . htmlspecialchars(BackupChainListHelper::format_size($r['bytes'])) . '</td>';
 				echo '<td>';
 				$ca = htmlspecialchars(json_encode($c['chain_id'])) . ', '
 				    . htmlspecialchars(json_encode($c['profile'])) . ', '
-				    . htmlspecialchars(json_encode(array_map(function ($r) {
-						return ['seq' => $r['seq'], 'level' => $r['level'], 'time' => substr((string)$r['time'], 0, 16)];
-					}, $runs)));
+				    . htmlspecialchars(json_encode(array_map(function ($x) {
+						return ['seq' => $x['seq'], 'level' => $x['level'], 'time' => substr((string)$x['time'], 0, 16)];
+					}, $c['runs']))) . ', ' . (int)$r['seq'];
 				// Prepare, then restore. Two buttons rather than one, because
-				// they are genuinely two decisions: staging downloads the chain
-				// and recovers its data key from this machine's own key, and
-				// destroys nothing; the restore replays it over live data and
-				// has to be approved on the node itself.
+				// they are genuinely two decisions: preparing downloads this
+				// backup and the runs it depends on and recovers their data key
+				// from this machine's own key, and destroys nothing; the restore
+				// replays them over live data and has to be approved on the node.
 				$sa = htmlspecialchars(json_encode($c['chain_id'])) . ', '
 				    . htmlspecialchars(json_encode($c['profile'])) . ', this';
 				echo '<button type="button" class="btn btn-outline-primary btn-sm me-1" onclick="stageChain(' . $sa . ')">Prepare</button>';
@@ -417,11 +462,12 @@
 				echo '</td></tr>';
 			}
 			echo '</tbody></table>';
-			echo '<p class="text-muted small mb-0">A chain restores as at one of its runs: the full, then every '
-			   . 'incremental up to that run, in order. Each artifact is checked against its recorded size and '
-			   . 'hash before anything is written. <strong>Prepare first</strong> — that downloads the chain onto '
-			   . 'the node and recovers its data key there; the restore itself then has to be approved on the '
-			   . 'node\'s own Backups page with its backup recovery key.</p>';
+			echo '<p class="text-muted small mb-0">Restoring a backup rebuilds the site as it was at that run: the '
+			   . 'last full backup before it, then every incremental up to it, in order. Each file is checked '
+			   . 'against its recorded size and hash before anything is written. <strong>Prepare first</strong> '
+			   . '&mdash; that downloads what the restore needs onto the node and recovers its data key there; '
+			   . 'the restore itself then has to be approved on the node\'s own Backups page with its backup '
+			   . 'recovery key.</p>';
 		}
 
 		$page->end_box();
@@ -513,7 +559,7 @@
 		// The run picker is filled in by openChainRestoreModal from the manifest —
 		// restoring "as at" a run is the whole point of keeping a chain, so it is a
 		// choice on the form rather than an assumption of "the newest".
-		$fw_chain->dropinput('chain_seq', 'Restore as at', ['options' => [], 'id' => 'cm_seq']);
+		$fw_chain->dropinput('chain_seq', 'Backup to restore', ['options' => [], 'id' => 'cm_seq']);
 		$fw_chain->textinput('restore_domain', 'Domain the restored site will answer to', [
 			'value'    => $prefill_domain,
 			'id'       => 'cm_domain',
@@ -640,24 +686,27 @@ function closeRestoreModal() {
 	document.getElementById('restoreModal').close();
 }
 
-// Chain restore. The runs come from the chain's own manifest, so the picker can
-// only ever offer restore points that exist.
-function openChainRestoreModal(chainId, profile, runs) {
+// Restore of a run held in a chain. The runs come from the chain's own
+// manifest, so the picker can only ever offer backups that exist; the row's
+// own run is preselected.
+function openChainRestoreModal(chainId, profile, runs, chosenSeq) {
 	document.getElementById('cm_chain_id').value = chainId;
 	document.getElementById('cm_profile').value = profile;
-	document.getElementById('cm_title').textContent = chainId;
 
 	var sel = document.getElementById('cm_seq');
 	sel.innerHTML = '';
+	var chosenTime = '';
 	for (var i = runs.length - 1; i >= 0; i--) {
 		var r = runs[i];
 		var opt = document.createElement('option');
 		opt.value = r.seq;
-		opt.textContent = 'Run ' + r.seq + ' — ' + (r.time || 'unknown time') + ' UTC'
-			+ (r.level === 0 ? ' (full)' : '')
+		opt.textContent = (r.time || 'unknown time') + ' UTC'
+			+ (r.level === 0 ? ' — full' : ' — incremental')
 			+ (i === runs.length - 1 ? ' — newest' : '');
+		if (chosenSeq !== undefined && r.seq === chosenSeq) { opt.selected = true; chosenTime = r.time || ''; }
 		sel.appendChild(opt);
 	}
+	document.getElementById('cm_title').textContent = chosenTime ? 'Backup of ' + chosenTime + ' UTC' : chainId;
 
 	document.getElementById('chainRestoreModal').showModal();
 }
@@ -674,7 +723,9 @@ function submitChainRestoreModal() {
 		alert('Enter the domain the restored site is to answer to.');
 		return;
 	}
-	JoineryModal.confirm('Restore ' + chainId + ' as at run ' + seq + ', serving ' + domain
+	var chosen = document.getElementById('cm_seq');
+	var label  = chosen.options[chosen.selectedIndex] ? chosen.options[chosen.selectedIndex].textContent : ('run ' + seq);
+	JoineryModal.confirm('Restore the backup of ' + label + ', serving ' + domain
 		+ '? Files deleted since the full backup are deleted here too, and nothing is saved first.',
 		function() {
 			document.getElementById('chainRestoreForm').submit();

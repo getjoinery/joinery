@@ -312,4 +312,50 @@ check(BackupRunner::full_size_warning($size_plan, 45000000, 0) === '',
 check(BackupRunner::full_size_warning($size_plan, 45000000, (int)$shrunk->key) !== '',
 	'the row being recorded is excluded from its own comparison');
 
+// ── Chain selection ─────────────────────────────────────────────────────────
+section('A standalone run in the same profile does not end the open chain');
+
+// getjoinery, 2026-09-05: a pre-restore whole-site dump on 08-30 wrote a
+// success row with no chain id, the next run read that row as "no chain" and
+// took a 464 MB full where a 70 MB incremental would have done.
+require_once(PathHelper::getIncludePath('includes/BackupChain.php'));
+$cc_slug  = 'chaintest-' . substr(bin2hex(random_bytes(3)), 0, 6);
+$cc_dir   = sys_get_temp_dir() . '/jy-chaintest-' . getmypid() . '-' . bin2hex(random_bytes(2));
+$cc_chain = 'chain-20260830_044517';
+@mkdir($cc_dir . '/' . $cc_chain, 0700, true);
+$cc_manifest_path = $cc_dir . '/' . $cc_chain . '/' . BackupChain::MANIFEST_NAME;
+BackupChain::write(BackupChain::start($cc_chain, $cc_slug, array('recipients' => array())), $cc_manifest_path);
+$cc_plan = array('slug' => $cc_slug, 'profile' => BackupProfile::MANAGER, 'output_dir' => $cc_dir);
+
+$cc_row = function (string $when, $chain_id, int $seq) use ($cc_slug) {
+	$row = new BackupHistory(NULL);
+	$row->set('bkh_type', 'project');
+	$row->set('bkh_slug', $cc_slug);
+	$row->set('bkh_profile', BackupProfile::MANAGER);
+	$row->set('bkh_outcome', 'success');
+	$row->set('bkh_start_time', $when);
+	$row->set('bkh_finish_time', $when);
+	if ($chain_id !== null) {
+		$row->set('bkh_chain_id', $chain_id);
+		$row->set('bkh_chain_seq', $seq);
+	}
+	$row->save();
+	harness_register_row('bkh_backup_history', 'bkh_id', $row->key);
+	return $row;
+};
+$cc_row('2026-08-30 04:45:00', $cc_chain, 0);
+$cc_row('2026-08-30 23:20:00', null, 0);          // the standalone whole-site run, newer
+
+$cc_call = new ReflectionMethod('BackupRunner', 'current_chain');
+$cc_call->setAccessible(true);
+list($cc_id, $cc_found) = $cc_call->invoke(null, $cc_plan);
+check($cc_id === $cc_chain,
+	'the newest CHAIN run names the chain to extend, not the newest run of any kind', var_export($cc_id, true));
+check(is_array($cc_found) && ($cc_found['chain_id'] ?? '') === $cc_chain,
+	'and that chain\'s manifest is the one read');
+
+@unlink($cc_manifest_path);
+@rmdir($cc_dir . '/' . $cc_chain);
+@rmdir($cc_dir);
+
 harness_finish();
