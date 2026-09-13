@@ -225,4 +225,4 @@ owner's order, until those have shipped.
 
 ## Open questions
 
-Carried in `agent_tier1_recipes.md`.
+Settled by the owner 2026-09-13; recorded in `agent_tier1_recipes.md`.

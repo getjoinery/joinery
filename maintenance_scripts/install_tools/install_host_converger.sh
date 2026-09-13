@@ -3,6 +3,13 @@
 # install_host_converger.sh - give this machine one root process that keeps
 # its host converged to the tree deployed on it (specs/host_converger.md).
 #
+# Version: 1.3 - The oneshot service carries TimeoutStartSec=1h. The runner's
+#                lock cannot go stale (a kernel flock dies with its holders),
+#                but a hung installer holds it for as long as it lives; on
+#                timeout systemd's default KillMode=control-group kills the
+#                installer and its children together and the lock releases.
+#                The unit is rewritten whenever its text differs, so the fleet
+#                converges on the next release (specs/agent_tier1_recipes.md).
 # Version: 1.2 - Refreshes the out-of-tree copy whenever it DIFFERS from the
 #                tree's runner, not only when there is none. A copy placed once
 #                and never replaced is a copy from whichever release happened to
@@ -152,6 +159,14 @@ write_if_changed() {
 }
 
 if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
+    # TimeoutStartSec bounds a hung run. The runner holds a kernel flock for as
+    # long as any part of it is alive, so a lock can never go stale - but an
+    # installer that hangs holds it for as long as it hangs, and every later
+    # tick, and every agent --only, says busy and does nothing. After an hour
+    # systemd kills the service; KillMode is left at its default,
+    # control-group, which is what we rely on: the installer and everything it
+    # spawned die together, and with them the lock. Setting it explicitly
+    # would only invite someone to change it.
     SERVICE_TEXT="[Unit]
 Description=Joinery host converger for ${SITENAME}: run the host installers when the deployed release changes
 Documentation=file://${SITE_ROOT}/public_html/specs/host_converger.md
@@ -161,7 +176,10 @@ Type=oneshot
 ExecStart=${COMMAND}
 StandardOutput=append:${LOG_FILE}
 StandardError=append:${LOG_FILE}
-Nice=10"
+Nice=10
+# An hour: a hung installer holds the runner lock while it lives; the timeout
+# kills the whole control group (the default KillMode) and the lock releases.
+TimeoutStartSec=1h"
     TIMER_TEXT="[Unit]
 Description=Joinery host converger timer for ${SITENAME}
 

@@ -34,6 +34,10 @@
 	 * lives under uploads/ and could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.2 - the browser-upgrade note says a minute, which is the host
+	 *                timer's tick, and that a runner transcript showing it
+	 *                waited out the runner lock is converged by that tick too
+	 *                (agent tier 1 slice 1, review R2).
 	 * @version 1.1 - verifies every archive before it deploys it; serves
 	 *                ?serve-verify-key=1 so a fresh install can fetch the
 	 *                release key from its upgrade source. The early
@@ -1952,12 +1956,15 @@
 			echo nl2br(htmlspecialchars(implode("\n", $runner_output))) . "<br>\n";
 			if (!$is_root) {
 				// A browser upgrade cannot do the root half. On a box with the
-				// host converger (specs/host_converger.md) root does it within
-				// five minutes from its own timer; on one without, say so.
+				// host converger (specs/implemented/host_converger.md) root does
+				// it within a minute from its own timer; on one without, say
+				// so. The same tick covers a runner transcript that says it
+				// waited out the runner lock and left the work to the holder:
+				// the timer converges on the change the upgrade made.
 				$has_converger = file_exists('/etc/systemd/system/joinery-host-converger.timer')
 					|| file_exists('/etc/cron.d/joinery-host-converger');
 				upgrade_echo($has_converger
-					? "ℹ The host installers above ran without root; the host converger applies the root half (PHP extensions, host installers) within five minutes.<br>"
+					? "ℹ The host installers above ran without root; the host converger applies the root half (PHP extensions, host installers) within a minute. If the transcript above says the runner waited out the lock and left the work to another run, the same tick converges it.<br>"
 					: "⚠ The host installers above ran without root and this machine has no host converger. On the host, once: sudo bash " . htmlspecialchars($full_site_dir) . "/maintenance_scripts/install_tools/install_host_converger.sh<br>");
 			}
 		}

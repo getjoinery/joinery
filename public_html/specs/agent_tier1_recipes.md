@@ -51,6 +51,39 @@ The recipe contract:
   on that aspect; the recipe records that it is held and does nothing. Data
   that narrows the agent is allowed; data that widens it is not.
 - **escalate**: when retries are exhausted, the recipe opens a **case**.
+  While a recipe's case is open it keeps checking but never repairs; the
+  host timer's daily run is the floor and a human is the next actor. The
+  case closes itself when the check passes.
+
+**Rules of the loop (owner-reviewed 2026-09-13):**
+
+- **A recipe takes the job lock.** The mutex a plane job holds while it runs,
+  and the self-updater refuses to swap the binary without, is the one a
+  recipe attempt holds too. A tick that cannot take it skips, writes "a job
+  is running" to the ledger, and tries next tick; that is not an attempt.
+- **A recipe attempt sets the job marker** (`/etc/joinery-agent/job-running`)
+  for its duration, so an installer that would restart the agent
+  (`install_agent.sh` under `agent_supervision`) defers the restart to the
+  self-updater exactly as it does for a job.
+- **The ledger is written before the repair runs and completed after.** An
+  attempt is appended (recipe, word, time) when it starts and its outcome
+  filled in when it ends. An entry with no outcome is a failed attempt on
+  the next tick, so a repair that kills the agent still counts against the
+  budget and cannot loop through restarts.
+- **Two ledgers.** The ledger the agent reads back (attempt counts, backoff,
+  the open case) lives root-only under `/etc/joinery-agent/ledger/`. The
+  copy the site renders for the unpaired notice is written outward to the
+  site's cache directory and never read back, because the web user can write
+  there and a forged "no attempts yet" would widen the agent from a file on
+  disk. Same shape as the job marker.
+- **The hold directory is root-owned and writable by root alone,** or the
+  marker is ignored and the ledger says so. A marker only narrows, but it is
+  a stated refusal, not an accident.
+- **Consecutive** means two failed ticks with no pass between them, and an
+  agent restart resets the count, so a failure recorded before a reboot is
+  not the first tick of a new one.
+- **Unknown never repairs.** A check that cannot answer (journal unreadable,
+  systemd not responding, the runner busy) is "unknown", not "failed".
 
 A recipe never has a parameter. There is nothing to configure about "keep
 fail2ban running", and a parameter would be a way for something outside the
@@ -103,7 +136,50 @@ to a human before any driver exists.
 - `host_converge`: run `host_housekeeping.sh` from the tree through the
   timer's runner and return the transcript plus a fresh `host_report`. No
   parameters. Refuses when the tree is untrusted or the installer is not in
-  `CORE_INSTALLERS`.
+  `CORE_INSTALLERS`. **Built as (owner-chosen 2026-09-13, option 1 of
+  three):** the runner gains a single-installer mode
+  (`--only=<installer>`) that takes the runner lock, runs that one core
+  installer, refuses any name outside `CORE_INSTALLERS`, touches neither
+  the converge stamp nor the timer's last-run file, and skips everything
+  else. `host_converge` is the runner path plus that one **compiled
+  constant** argument, verified against the manifest exactly as
+  `run_plugin_installers` is; its header review says why a compiled
+  constant is not a wire-supplied argument. The runner's exit code is
+  fail-safe zero, so the recipe verifies by checking the unit, never the
+  exit code. Rejected: running the installer directly from the agent (a
+  second root path outside the runner, no shared lock) and queueing a root
+  request (the agent handing itself a job through a file, which A10's
+  reversal keeps forbidden).
+
+  **The runner lock (platform side of WP2).** Today the runner's flock is
+  taken only at the root-request phase, after every core installer has run,
+  so a recipe's run and the timer's daily run can overlap on the same
+  installer. Four rules:
+  1. The lock moves to the top of the runner and covers every mode,
+     including cron, before anything changes the host. A run that finds it
+     held **waits for it, bounded** (`flock -w`, minutes: long enough for a
+     full converge or an upgrade's installer run, far shorter than the
+     service timeout), and only then says who holds it and exits 0. An
+     immediate skip was the first cut (review R1, 2026-09-13): the timer's
+     tick holds the lock for about a second every minute, so an upgrade's
+     installer run or a plane-dispatched `run_plugin_installers` that
+     landed on a tick did nothing and exited 0 looking done, and a full
+     converge lasting minutes made that certain for anything started
+     beside it.
+  2. The lock file records its holder: pid and start time, written after the
+     lock is taken, so a busy tick can say who holds it and since when.
+  3. The lock cannot go stale (a kernel flock dies with its holders) but it
+     can be held by something alive and hung. The timer's oneshot service
+     gains a start timeout (an hour); systemd's default kill mode then kills
+     the whole control group, installer and children together, and the lock
+     releases. The agent, when a script times out, kills the process group
+     and not only the bash it started, so a hung child cannot inherit the
+     descriptor and keep the lock; this is a dispatch fix every script word
+     inherits, `run_plugin_installers` included.
+  4. Busy has its own budget: the runner found busy on consecutive ticks for
+     longer than the service timeout is a case ("the runner has been held by
+     pid X since T"). The agent never kills the holder; a root installer
+     mid-run is a human's call.
 - `run_installer {name}`: the generalisation, `name` from the core list or
   a plugin's declared `host_installer`. `run_plugin_installers` (built)
   stays as "all of them".
@@ -190,15 +266,38 @@ before build and the burn-in after it look for exactly these:
 The first agent release carrying recipes runs on our own fleet with the
 recipes in **report-only** mode for one release cycle: checks run, cases
 open, nothing is repaired. The ledger from that cycle is reviewed before the
-repair step is armed. Customer nodes get recipes one release after our fleet
-does.
+repair step is armed. Report-only is a compiled constant, so arming is a
+release, never a setting.
+
+*Customer nodes one release after our fleet* is **deferred (owner,
+2026-09-13)**: the agent self-updates from the plane on one channel, so
+every paired node moves together the moment a release is published. The
+report-only release therefore reaches every node, which is safe by
+construction because nothing repairs. Whether a second channel is worth
+building is decided after the burn-in ledger is read.
+
+**Accepted risk (owner, 2026-09-13):** `host_report` tells the plane the
+node's sshd posture, jails and failed units, which is reconnaissance to a
+hostile plane. The accepted-limits table already grants the plane sight, and
+the Host card needs it. What `host_report` never carries is the SSH
+auth-failure detail: counts only, no usernames, no source addresses.
+
+**A case is untrusted input to the plane.** It is the one thing a node pushes
+at the plane on its own initiative, and a compromised node writes what it
+likes into every field. Intake caps every field, the card escapes every
+field, nothing in a case ever reaches a shell, a template or a link, and the
+superadmin mail is plain text with no link that acts. On an unpaired box the
+web user can forge the rendered copy (a lie to the admin and one mail,
+nothing root acts on); the notice says "as reported by the agent's ledger".
+The unpaired mail is capped at one per recipe per day; the notice stays live
+throughout.
 
 ## Work packages
 
 | WP | Scope | Ships as |
 |----|-------|----------|
-| WP2 | Agent: `recipes` package and registry, check loop, hold marker, ledger, recipe list at poll; `host_report`, `host_converge`; recipe `fail2ban` | agent release |
-| WP3 | Agent: the case; plane: case intake on the poll, Host card on the node page, failed-unit and open-case notices; unpaired path (admin notice + superadmin mail) | agent + platform release |
+| WP2 | Agent: `recipes` package and registry, check loop, job lock and marker, hold marker, the two ledgers, recipe list at poll, process-group kill on script timeout; `host_report`, `host_converge`; recipe `fail2ban`, report-only. Platform: the runner's `--only` mode, the lock moved to the top with its holder recorded, the oneshot service timeout | agent + platform release |
+| WP3 | Agent: the case; plane: the incident record data class (Sentinel §14.B, built here as the case store), case intake on the poll, Host card on the node page, failed-unit and open-case notices; unpaired path (admin notice + superadmin mail) | agent + platform release |
 | WP4 | Words `unit_journal`, `file_head`, `restart_unit`, `run_installer`, `fail2ban_reset_config`; recipe `agent_supervision` | agent release |
 | WP5 | Sentinel rungs 1 and 2 as recipes, each its own review; the driver consumes cases | agent + platform release, sequenced by `sentinel_managed_recovery.md` §15 |
 
@@ -208,14 +307,94 @@ WP2 so the first recipe has something to run. WP2 ships report-only first. Every
 hostile-caller review written into the Go file's header comment, the way
 `restart_agent` does.
 
-## Open questions
+## Build order (owner-set 2026-09-13)
 
-- Q1: the check-loop cadence. Recommendation: every 2 minutes, with each
-  recipe carrying its own minimum interval so a cheap check can be frequent
-  and an expensive one rare.
-- Q2: does `host_report` also ride inside `check_status`? Recommendation:
-  no; it must answer when `check_status` cannot, because the site being
-  down is when it matters.
-- Q3: the case format. Recommendation: reuse the incident record data class
-  Sentinel §14.B defines, so a case and an incident are one thing seen from
-  two sides.
+Slices that each ship and prove something alone, the recipe loop last. The
+risk is one thing, a root process acting unasked, so everything it stands
+on runs in the field before it exists. One executor, one slice at a time,
+reviewed per slice, never as a whole at the end. Every word's hostile-caller
+review is in the file header before the code.
+
+1. **Platform: harden the runner.** Lock to the top of every mode, holder
+   recorded, `--only=<installer>` mode, oneshot service timeout. Fixes a
+   live defect (cron hosts can overlap themselves today). Gate: two runners
+   started together, the second waits and runs after the first; a holder
+   that outlives the wait is named. Platform release. **Built 2026-09-13,
+   runner 2.16, reviewed; awaiting commit.**
+2. **Agent: process-group kill on script timeout.** Every script word
+   inherits it. Ships with slice 3.
+3. **Agent: `host_report` as a plain observe word.** No loop. The plane
+   dispatches it as a job; the Host card renders the result. Proves the
+   word, its bounds and the card with nothing acting, and reads the fleet's
+   real host state before any recipe does.
+4. **Agent: `host_converge` as a plane-dispatched operate word.** No recipe.
+   Run from the node page against dev, then jeremytunnell; read the
+   transcript. Proves the `--only` path, the manifest check, the lock and
+   the compiled constant under the job model, where every run is already
+   ledgered.
+5. **Agent: the recipe loop, report-only.** The loop is a state machine
+   (budget, backoff, consecutive, hold, unknown, open case, busy) built as
+   a package with a fake clock and fake check and repair, table-driven
+   tests for every shape in "Where the bugs will live" before a real check
+   is wired in. Then `fail2ban` composes slices 3 and 4. On dev the
+   executor sets the `fail2ban` hold marker while editing, because the
+   working tree is what a recipe on dev runs as root. Release; burn-in
+   starts.
+6. **WP3: the case and the incident record**, in the same release as 5 or
+   the next, so the burn-in's cases have somewhere to land.
+7. **Arming**, its own release, after the burn-in ledger from dev,
+   jeremytunnell and docker-prod is read and written up.
+
+Slices 3 to 5 are all Go in one repository and tempting to ship together.
+They are not shipped together: 3 and 4 are the proofs 5 stands on, and only
+if they ran in the field first.
+
+## Settled questions (owner, 2026-09-13)
+
+- **Q1, the check-loop cadence: every 10 minutes, and a recipe repairs only
+  after its check fails on two consecutive ticks.** Nothing on the tier 1
+  list needs minutes: a crashed unit is restarted by systemd in seconds, a
+  recipe only matters once systemd has given up or the configuration is
+  wrong, and those are hour-scale faults. A faster loop buys transients (an
+  apt upgrade restarting php-fpm, a reboot, an operator reloading fail2ban)
+  and a transient read as a fault is a repair fighting an operator. Worst
+  case detection is 20 minutes. The retry budget stays three attempts in an
+  hour, spaced by backoff (the recipe's second and third attempts wait 10
+  and 30 minutes), never three in a row. Each recipe still carries its own
+  compiled minimum interval, so an expensive check can be rarer than the
+  tick; none may be more frequent.
+- **Q2, `host_report` is its own word, not part of `check_status`.** They
+  differ in subject, not speed: `check_status` is the site (web-root disk,
+  load, Postgres, version, database list, certificate) with keys pinned to
+  the management API's stats endpoint; `host_report` is the machine (units,
+  jails, sshd posture, journal auth failures, reboot-required,
+  unattended-upgrades). `host_report` deliberately repeats disk, memory and
+  swap so a recipe reads one word per check; that overlap is by design and
+  is not to be deduplicated. On a paired node the plane asks `host_report`
+  as its own scheduled job on the `check_status` cadence, so the Host card
+  is fresh without a case.
+- **Q3, the case IS Sentinel's incident record (§14.B), built here.** WP3
+  creates the incident record data class as the case store, node-scoped;
+  the owner column for tenancy arrives with the Sentinel plugin's tenancy
+  work as a data-class column, not a migration. A case from a recipe and an
+  incident the uptime monitor opens land in one list, one node-page card and
+  one notice path, and the tier 2 driver reads them with no translation.
+  The shape:
+  - **What the agent sends:** source (recipe name, or the unexplained-root
+    classifier), a node-minted case id, the attempt ledger (time, word,
+    bounded result), a fresh `host_report`, the vocabulary and recipe list.
+    Every field is capped, because it rides the channel and the channel
+    caps its bodies.
+  - **How it rides:** the poll claim gains an optional list of open cases.
+    The plane stores a new one, appends to a known id, and holds at most
+    one open case per recipe per node.
+  - **Who closes it:** the node. A case closes when the recipe's check
+    passes again, and the next poll reports the close. A human on the plane
+    writes the note and marks it read, but cannot tell the node the fault
+    is gone; the node's check is the truth, which keeps the plane at "see
+    and ask".
+  - **Unpaired:** the agent writes a rendered copy of the record outward to
+    the site's cache directory, readable by the web user the way the host
+    timer's last-run file is, and never reads it back (see "Two ledgers"
+    under the recipe contract); the admin notice and the one superadmin
+    mail render from it.

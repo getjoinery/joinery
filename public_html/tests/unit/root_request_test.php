@@ -19,6 +19,7 @@
  *
  * Run: php tests/unit/root_request_test.php
  *
+ * @version 1.3 - the runner's lock pin reads the bounded wait (flock -w), the shape the lock has since the runner's 2.16
  * @version 1.2 - remove_plugin is a kind; root's checks before it deletes a plugin directory (specs/post_release_fleet_defects.md B1)
  * @version 1.1 - install_package is a kind, because root verifies before it moves (specs/package_signing.md WP3)
  * @version 1.0
@@ -350,8 +351,8 @@ check(is_file($q . '/running/' . $fresh . '.json'),
 // takes minutes: two ticks inside one upgrade used to have the second declare
 // the first's live request abandoned.
 $runner_text = (string)file_get_contents($runner_path);
-check(strpos($runner_text, 'flock -n') !== false,
-	'the queue is held under a kernel lock while it is worked');
+check(strpos($runner_text, 'flock -w "${LOCK_WAIT_SECONDS}" 9') !== false,
+	'the queue is held under a kernel lock while it is worked, and a second runner waits for it');
 
 // Clean up the scratch site.
 shell_exec('rm -rf ' . escapeshellarg($site));

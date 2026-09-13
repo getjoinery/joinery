@@ -150,13 +150,14 @@ chk "it never assumes --production" \
     "$(echo "$out" | grep -c 'applied --production')" "0"
 
 echo "== the runner's own stderr survives =="
-# `exec 9>f 2>/dev/null` applies that redirect to the WHOLE shell, permanently,
+# `exec 9>>f 2>/dev/null` applies that redirect to the WHOLE shell, permanently,
 # and every later message on stderr disappears — including every refusal this
-# gate and the request suite rely on.
-chk "the queue lock does not redirect the shell's stderr" \
-    "$(grep -c 'exec 9>"\${queue}/.runner.lock" 2>/dev/null' "$RUNNER")" "0"
+# gate and the request suite rely on. The lock itself (taken once, at the top,
+# for every mode) is pinned in host_runner_lock_gate.sh.
+chk "the runner lock does not redirect the shell's stderr" \
+    "$(grep -c 'exec 9>>"\${LOCK_FILE}" 2>/dev/null' "$RUNNER")" "0"
 chk "and uses a descriptor below 10, which PHP subprocesses do not inherit" \
-    "$(grep -c 'exec 9>"\${queue}/.runner.lock"' "$RUNNER")" "1"
+    "$(grep -c 'exec 9>>"\${LOCK_FILE}"' "$RUNNER")" "1"
 
 echo "== the unit text the installer writes =="
 chk "a oneshot service" "$(grep -c '^Type=oneshot' "$INSTALLER")" "1"

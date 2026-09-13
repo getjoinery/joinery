@@ -3,6 +3,25 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.16 - A run that finds the lock held waits for it, bounded (flock -w,
+#                 ten minutes), and only when the wait runs out says who holds
+#                 it and exits 0. The timer's tick holds the lock for about a
+#                 second every minute, so the immediate skip of 2.15 made an
+#                 upgrade's installer run, or an agent's run_plugin_installers,
+#                 that landed on a tick do nothing and exit 0 looking done
+#                 (review R1, 2026-09-13). The wait is compiled;
+#                 JOINERY_LOCK_WAIT_SECONDS shortens it for the gate and root
+#                 ignores it as it ignores the other hooks.
+# Version: 2.15 - One runner at a time, on every mode: the flock is taken at the
+#                 top, before the ownership assertion, the entry-point refresh
+#                 and the permissions sweep - before anything changes the host.
+#                 A run that finds it held says who holds it (pid and start
+#                 time, recorded in the lock file by the holder) and exits 0.
+#                 The flock that sat inside run_root_requests is gone: the
+#                 descriptor it took is already held by then. --only=NAME runs
+#                 one core installer under the same lock and nothing else; a
+#                 name outside CORE_INSTALLERS is refused with exit 2
+#                 (specs/agent_tier1_recipes.md, the runner lock).
 # Version: 2.14 - host_housekeeping.sh joins CORE_INSTALLERS: fail2ban configured
 #                 and proven running, Apache logging the real client behind a
 #                 known proxy, on every converge (B2); remove_plugin joins the
@@ -139,7 +158,7 @@
 # unreachable, or an installer failure all exit 0, so a broken installer can
 # never block the container from starting.
 #
-# Usage:  _plugin_installers_start.sh [--when-changed] [--site-root=DIR] [SITENAME] [SITE_ROOT]
+# Usage:  _plugin_installers_start.sh [--when-changed | --only=INSTALLER] [--site-root=DIR] [SITENAME] [SITE_ROOT]
 #         All optional. SITENAME names a site OTHER than the one this copy
 #         of the script was delivered in; with no argument the script works on
 #         its own site. Nothing is required in the environment - the database
@@ -147,22 +166,65 @@
 #         --when-changed is the host converger's mode: run nothing unless the
 #         stamp says something changed (or is a day old). --site-root=DIR is
 #         the explicit site, for a gate that runs this against a temp tree.
+#         --only=INSTALLER runs that one core installer (a name from
+#         CORE_INSTALLERS) under the runner lock and after the ownership
+#         assertion, and nothing else: no stamp, no last-run record, no PHP
+#         extensions, no plugin installers, no root requests. A name outside
+#         the list is a caller error, refused with exit 2 before the lock is
+#         taken; an installer that fails still exits 0, as in a full run.
+#
+# One runner at a time. Whatever the mode, the run holds a kernel flock from
+# before its first change to the host until it exits. A run that finds the
+# lock held waits for it - ten minutes at most, long enough for the run ahead
+# of it to finish - and then does its own work; only when the wait runs out
+# does it print who holds the lock and exit 0 having changed nothing. Two
+# cron ticks inside one upgrade, the timer and an agent's --only, an
+# operator's sudo beside either: they run one after the other, and a holder
+# that outlives the wait is named.
 
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Core's own installers, run before any plugin's and unconditionally: nothing
+# about them is a plugin's business. Each is idempotent and decides for itself
+# whether it applies here, the same contract plugin installers work under.
+# This list is also the whole of what --only may name.
+CORE_INSTALLERS="install_agent.sh install_parser_jail.sh install_host_converger.sh render_vhost.sh host_housekeeping.sh"
+
 WHEN_CHANGED=0
+ONLY_GIVEN=0
+ONLY_INSTALLER=""
 EXPLICIT_ROOT=""
 POSITIONAL=()
 for arg in "$@"; do
     case "${arg}" in
         --when-changed) WHEN_CHANGED=1 ;;
+        --only=*)       ONLY_GIVEN=1; ONLY_INSTALLER="${arg#--only=}" ;;
         --site-root=*)  EXPLICIT_ROOT="${arg#--site-root=}" ;;
         *)              POSITIONAL+=("${arg}") ;;
     esac
 done
 set -- "${POSITIONAL[@]+"${POSITIONAL[@]}"}"
+
+# A caller error is not an installer failure. The fail-safe exit 0 below exists
+# so a broken installer cannot block a container from starting; --only never
+# runs at container start, and a name that is not a core installer is refused
+# here, before the lock, before anything is touched, with a code the caller
+# can tell apart from "ran and failed".
+if [[ "${ONLY_GIVEN}" == "1" ]]; then
+    case " ${CORE_INSTALLERS} " in
+        *" ${ONLY_INSTALLER} "*) : ;;
+        *)
+            echo "host installers: --only=${ONLY_INSTALLER} is not a core installer (one of: ${CORE_INSTALLERS}) - refused" >&2
+            exit 2
+            ;;
+    esac
+    if [[ "${WHEN_CHANGED}" == "1" ]]; then
+        echo "host installers: --only and --when-changed are different modes - refused" >&2
+        exit 2
+    fi
+fi
 
 # Where this file LIVES is the site it belongs to: it ships inside the tree, at
 # {site root}/maintenance_scripts/install_tools/. Deriving the root instead of
@@ -234,6 +296,84 @@ if [[ ! -f "${CONFIG_FILE}" ]]; then
     echo "plugin installers: site not initialised yet - skipping"
     exit 0
 fi
+
+# --- One runner at a time --------------------------------------------------
+# Kernel-held, on every mode. Under systemd the service is a oneshot and the
+# timer will not overlap it, but the cron form has no such promise, an agent's
+# --only can land while the timer is mid-run, and an upgrade takes minutes.
+# Two ticks inside one upgrade meant the second declared the first's live
+# request abandoned while it was still running. Taken here, before the
+# ownership assertion, the entry-point refresh and the permissions sweep,
+# because those are the first things that change the host.
+#
+# A run that finds the lock held WAITS for it, bounded. Ten minutes: a full
+# converge (the core installers, the PHP extensions, every plugin's installer,
+# the queue) or an upgrade's installer run finishes in single-digit minutes on
+# a slow node, so a run that lands beside one waits it out and then does its
+# own work. The timer's tick holds the lock for about a second every minute,
+# so an immediate skip would make a run that landed on a tick - an upgrade's
+# installer run, an agent's run_plugin_installers - do nothing and exit 0
+# looking done. Far short of the service's hour (install_host_converger.sh):
+# a hung holder is killed by that timeout, and a waiter that gives up first
+# names it and goes away. JOINERY_LOCK_WAIT_SECONDS shortens the wait for a
+# test and is honoured only when this is NOT root: a root run - the timer,
+# the container start, an operator's sudo - uses the compiled value whatever
+# the environment says, and says once that it ignored the hook.
+#
+# The lock file is root's, in a directory only root can create in, when this
+# is root: a lock the web user could take is a lock the web user could hold
+# forever, and the run it would block is the one that takes the tree back
+# from the web user. An unprivileged run - the gate, an operator without sudo
+# - changes nothing and locks in the site's cache, so a fixture tree needs no
+# hook. Per site, by name, since installers converge one site.
+#
+# A fixed descriptor, and NO redirection on the exec itself: `exec 9>>f
+# 2>/dev/null` applies that 2>/dev/null to the whole shell, permanently, and
+# every later message on stderr disappears. 9 rather than a {var} allocation
+# because descriptors at 10 and above are inherited by PHP subprocesses here
+# and have killed a child before. Children inherit 9 on purpose: the lock is
+# held while ANY part of this run is alive, so a hung installer keeps it
+# until the service timeout kills the control group, and it can never go
+# stale - a kernel flock dies with its holders. Append mode, because opening
+# for write would truncate the holder's record before a busy run could read
+# it.
+if [[ "$(id -u)" == "0" ]]; then
+    LOCK_DIR="/run/joinery"
+    mkdir -p "${LOCK_DIR}" 2>/dev/null && chmod 755 "${LOCK_DIR}" 2>/dev/null
+    LOCK_FILE="${LOCK_DIR}/host-installers.${SITENAME}.lock"
+else
+    LOCK_FILE="${SITE_ROOT}/cache/host_installers.lock"
+    mkdir -p "${SITE_ROOT}/cache" 2>/dev/null || true
+fi
+if ! exec 9>>"${LOCK_FILE}"; then
+    echo "host installers: cannot open ${LOCK_FILE} - refusing to run unlocked" >&2
+    exit 0
+fi
+LOCK_WAIT_SECONDS=600
+if [[ -n "${JOINERY_LOCK_WAIT_SECONDS:-}" ]]; then
+    if [[ "$(id -u)" == "0" ]]; then
+        echo "host installers: JOINERY_LOCK_WAIT_SECONDS is set but this is root - hook ignored" >&2
+    elif [[ "${JOINERY_LOCK_WAIT_SECONDS}" =~ ^[0-9]+$ ]]; then
+        LOCK_WAIT_SECONDS="${JOINERY_LOCK_WAIT_SECONDS}"
+    fi
+fi
+if ! flock -w "${LOCK_WAIT_SECONDS}" 9; then
+    # Who, and since when: the two lines the holder wrote after it took the
+    # lock, read after the wait so they name whoever holds it NOW. Empty (the
+    # holder is between truncating and writing) or not two numbers (something
+    # else wrote here) reads as unknown, never as a guess.
+    holder="holder unknown"
+    { read -r _pid; read -r _since; } < "${LOCK_FILE}" 2>/dev/null || true
+    if [[ "${_pid:-}" =~ ^[0-9]+$ && "${_since:-}" =~ ^[0-9]+$ ]]; then
+        holder="pid ${_pid} since $(date -u -d "@${_since}" '+%Y-%m-%d %H:%M:%S UTC' 2>/dev/null || echo "${_since}")"
+    fi
+    echo "host installers: another run holds the lock (${holder}) - waited ${LOCK_WAIT_SECONDS}s, leaving it to that one"
+    exit 0
+fi
+# The record, written in place. Never through a temp file and mv: the flock
+# is on this inode, and a rename would leave every later run locking a file
+# nobody holds. flock is independent of content, so truncating is safe.
+printf '%s\n%s\n' "$$" "$(date -u +%s)" > "${LOCK_FILE}" 2>/dev/null || true
 
 # --- The executable set belongs to root (specs/read_only_tree.md) ------------
 # This runs before the stamp check on purpose. A container started from an image
@@ -319,6 +459,68 @@ assert_tree_ownership() {
 }
 
 assert_tree_ownership
+
+# --- An installer this box did not author is not run -------------------------
+# Every script below is executed AS ROOT. The tree owner is whoever owns
+# public_html — root on a node, the developer account on the developer box — and
+# an installer owned by anyone else, or writable by anyone but its owner, is a
+# script we cannot say where it came from. Refusing is loud: the reason goes to
+# stderr and the outcome to cache/host_converger.last, so a box whose ownership
+# has drifted reports it instead of running whatever it finds.
+# The recorded owner is the authority where there is one. Reading it off
+# public_html instead would let whoever owns the tree vouch for the scripts in
+# it. A box with no record keeps the old reading, so an installer still runs on
+# a site that has not been through the new fix_permissions.sh yet.
+if [[ -f "${SITE_ROOT}/config/tree_owner" ]]; then
+    TREE_OWNER="${TREE_OWNER_TARGET}"
+else
+    TREE_OWNER="$(stat -c '%U' "${PUBLIC_HTML}" 2>/dev/null || echo root)"
+fi
+
+# The tree owner is whoever owns public_html - root on a node, the developer
+# account on the developer box. Binding that global here keeps all the call
+# sites below reading as the question they are actually asking.
+installer_is_trusted() {
+    joinery_file_is_trusted "$1" "${TREE_OWNER}"
+}
+
+# --- One core installer, as the full run runs it -----------------------------
+# The one body both the core loop and --only run, so the two cannot drift: the
+# same refusal, the same two arguments (the name for an older installer that
+# only reads argument one, the resolved root for one that can use it - an
+# off-convention site is only correct if the second survives the call), the
+# same transcript lines, and the same contract that a failing installer is
+# reported and never turns into a non-zero exit.
+run_core_installer() {
+    local name="$1" path="${TOOLS_DIR}/$1"
+    if [[ ! -f "${path}" ]]; then
+        echo "core installers: ${name} missing - skipping" >&2
+        return 0
+    fi
+    if ! installer_is_trusted "${path}"; then
+        CONVERGE_OUTCOME="installer-refused"
+        return 0
+    fi
+    echo "core installers: running ${name}"
+    if bash "${path}" "${SITENAME}" "${SITE_ROOT}"; then
+        echo "core installers: ${name}: ok"
+    else
+        echo "core installers: WARNING - ${name} failed" >&2
+        CONVERGE_OUTCOME="installer-failed"
+    fi
+}
+
+# --- --only: that installer, and nothing else --------------------------------
+# The lock is held and the tree is the owner's; that is all a single installer
+# needs. No stamp and no last-run record, because neither describes a run
+# that converged the host; no entry-point refresh, no permissions sweep, no
+# secrets, no key file, no plugin installers, no root requests. The caller
+# (an agent word with a compiled constant for the name) reads the transcript
+# and verifies the aspect it asked for, never this exit code.
+if [[ -n "${ONLY_INSTALLER}" ]]; then
+    run_core_installer "${ONLY_INSTALLER}"
+    exit 0
+fi
 
 # --- Keep the root timer's entry point current -------------------------------
 # The converger's timer runs a root-owned copy of this script from
@@ -458,34 +660,11 @@ write_release_verify_keys() {
 }
 write_release_verify_keys
 
-# --- An installer this box did not author is not run -------------------------
-# Every script below is executed AS ROOT. The tree owner is whoever owns
-# public_html — root on a node, the developer account on the developer box — and
-# an installer owned by anyone else, or writable by anyone but its owner, is a
-# script we cannot say where it came from. Refusing is loud: the reason goes to
-# stderr and the outcome to cache/host_converger.last, so a box whose ownership
-# has drifted reports it instead of running whatever it finds.
-# The recorded owner is the authority where there is one. Reading it off
-# public_html instead would let whoever owns the tree vouch for the scripts in
-# it. A box with no record keeps the old reading, so an installer still runs on
-# a site that has not been through the new fix_permissions.sh yet.
-if [[ -f "${SITE_ROOT}/config/tree_owner" ]]; then
-    TREE_OWNER="${TREE_OWNER_TARGET}"
-else
-    TREE_OWNER="$(stat -c '%U' "${PUBLIC_HTML}" 2>/dev/null || echo root)"
-fi
-
-# The tree owner is whoever owns public_html - root on a node, the developer
-# account on the developer box. Binding that global here keeps all the call
-# sites below reading as the question they are actually asking.
-installer_is_trusted() {
-    joinery_file_is_trusted "$1" "${TREE_OWNER}"
-}
-
-# Only here, below installer_is_trusted() and below TREE_OWNER. Bash resolves a
-# function at CALL time, so calling this above the definition was `command not
-# found` — rc 127, which the guard read as "untrusted", and the copy never
-# refreshed. A stale copy then stayed stale for good.
+# Only here, below installer_is_trusted() and below TREE_OWNER (both defined
+# directly after the ownership assertion). Bash resolves a function at CALL
+# time, so calling this above the definition was `command not found` — rc 127,
+# which the guard read as "untrusted", and the copy never refreshed. A stale
+# copy then stayed stale for good.
 refresh_converger_entry
 apply_tree_permissions
 
@@ -620,31 +799,10 @@ if [[ "${WHEN_CHANGED}" == "1" ]]; then
 fi
 
 # --- Core host installers ----------------------------------------------------
-# Core's own installers run before any plugin's, and unconditionally: nothing
-# about them is a plugin's business. Each is idempotent and decides for itself
-# whether it applies here, the same contract plugin installers work under.
-CORE_INSTALLERS="install_agent.sh install_parser_jail.sh install_host_converger.sh render_vhost.sh host_housekeeping.sh"
-
+# CORE_INSTALLERS is declared at the top, beside the --only check that reads
+# it. Every one of them, through the body --only shares.
 for CORE_INSTALLER in ${CORE_INSTALLERS}; do
-    CORE_PATH="${TOOLS_DIR}/${CORE_INSTALLER}"
-    if [[ ! -f "${CORE_PATH}" ]]; then
-        echo "core installers: ${CORE_INSTALLER} missing - skipping" >&2
-        continue
-    fi
-    if ! installer_is_trusted "${CORE_PATH}"; then
-        CONVERGE_OUTCOME="installer-refused"
-        continue
-    fi
-    echo "core installers: running ${CORE_INSTALLER}"
-    # Both: the name for an older core installer that only reads argument one,
-    # the resolved root for one that can use it. An off-convention site is only
-    # correct if this second value survives the call.
-    if bash "${CORE_PATH}" "${SITENAME}" "${SITE_ROOT}"; then
-        echo "core installers: ${CORE_INSTALLER}: ok"
-    else
-        echo "core installers: WARNING - ${CORE_INSTALLER} failed" >&2
-        CONVERGE_OUTCOME="installer-failed"
-    fi
+    run_core_installer "${CORE_INSTALLER}"
 done
 
 # The database is the only persistent signal of which plugins are active:
@@ -905,21 +1063,9 @@ run_root_requests() {
 
     mkdir -p "${queue}/running" "${queue}/done" "${queue}/failed" "${logs}" 2>/dev/null || true
 
-    # One runner at a time, kernel-held. Under systemd the service is a oneshot
-    # and the timer will not overlap it, but the cron form has no such promise —
-    # and an upgrade takes minutes. Two ticks inside one upgrade meant the second
-    # declared the first's live request abandoned while it was still running.
-    #
-    # A fixed descriptor, and NO redirection on the exec itself: `exec 9>f
-    # 2>/dev/null` applies that 2>/dev/null to the whole shell, permanently, and
-    # every later message on stderr disappears. 9 rather than a {var} allocation
-    # because descriptors at 10 and above are inherited by PHP subprocesses here
-    # and have killed a child before.
-    exec 9>"${queue}/.runner.lock" || return 0
-    if ! flock -n 9; then
-        echo "root request: another run holds the queue - leaving it to that one"
-        return 0
-    fi
+    # No lock of its own: the runner lock on descriptor 9, taken at the top
+    # before anything changed the host, is still held here and covers the
+    # queue. Two ticks inside one upgrade is what it exists to prevent.
 
     # A request left in running/ by a killed run. Retrying it blindly could
     # repeat a half-finished install, so it is reported and set aside instead.
