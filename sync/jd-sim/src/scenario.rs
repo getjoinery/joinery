@@ -1031,7 +1031,9 @@ pub fn assert_the_vault_opens(world: &World) {
     );
 }
 
-fn open_as_the_owner(
+/// A vault file as its owner reads it: the real name, and the hash of the
+/// plaintext when the content opens.
+pub fn open_as_the_owner(
     world: &World,
     f: &crate::server::VaultFile,
 ) -> Option<(String, Option<String>)> {
@@ -1820,6 +1822,97 @@ fn claimed_slot(
     }
     parts.reverse();
     Some(parts)
+}
+
+/// What this device's store believes stands at a path, for an oracle that
+/// LEARNS a folder's server id from a directory it has a handle on.
+#[derive(Debug, PartialEq, Eq)]
+pub enum FolderAt {
+    Root,
+    One(i64),
+    /// Two or more settled records resolve to the slot and the directory's
+    /// identity does not pick one -- the lagging-record shape a pass sorts out
+    /// by identity and a reading by path cannot. Not an answer: a caller
+    /// that learns from it learns one of two beliefs for good.
+    Several(Vec<i64>),
+    Nothing,
+}
+
+/// The folder record whose local placement resolves to `path` -- folded the
+/// way the volume folds -- non-provisional and not deleted. Where the path
+/// alone gives several, the one whose recorded directory identity is the
+/// directory's wins; where none does, `Several`.
+///
+/// Reads exactly what the engine believes at that moment and nothing more,
+/// which is why the custody oracle asks it once per directory and never again.
+pub fn folder_record_at(device: &Device, path: &str) -> FolderAt {
+    if path.is_empty() {
+        return FolderAt::Root;
+    }
+    let personality = jd_vfs::Vfs::personality(&device.fs);
+    let entries = device.store.every_entry().unwrap();
+    let folders: std::collections::HashMap<i64, jd_core::model::Entry> = entries
+        .iter()
+        .filter(|e| e.id.entity_type == jd_core::EntityType::Folder)
+        .map(|e| (e.id.server_id, e.clone()))
+        .collect();
+    let wanted: Vec<String> = path
+        .split('/')
+        .map(|seg| jd_vfs::comparison_key(seg, &personality))
+        .collect();
+    let mut here: Vec<&jd_core::model::Entry> = folders
+        .values()
+        .filter(|e| !e.id.is_provisional() && !e.remote_deleted)
+        .filter(|e| e.synced_placement.is_some() || e.stand_in.is_some())
+        .filter(|e| claimed_slot(&folders, e, &personality).as_ref() == Some(&wanted))
+        .collect();
+    here.sort_by_key(|e| e.id.server_id);
+    match here.len() {
+        0 => FolderAt::Nothing,
+        1 => FolderAt::One(here[0].id.server_id),
+        _ => {
+            let id = device.fs.file_id_of(path).filter(|id| *id != 0);
+            let by_identity: Vec<&&jd_core::model::Entry> = here
+                .iter()
+                .filter(|e| id.is_some() && e.synced_fingerprint.map(|f| f.file_id) == id)
+                .collect();
+            if by_identity.len() == 1 {
+                FolderAt::One(by_identity[0].id.server_id)
+            } else {
+                FolderAt::Several(here.iter().map(|e| e.id.server_id).collect())
+            }
+        }
+    }
+}
+
+/// Where this device's store places a server folder, as a path on its disk;
+/// `None` when the record is missing, provisional or deleted.
+pub fn local_path_of_folder(device: &Device, id: i64) -> Option<String> {
+    let entries = device.store.every_entry().unwrap();
+    let folders: std::collections::HashMap<i64, jd_core::model::Entry> = entries
+        .iter()
+        .filter(|e| e.id.entity_type == jd_core::EntityType::Folder)
+        .map(|e| (e.id.server_id, e.clone()))
+        .collect();
+    let e = folders.get(&id)?;
+    if e.remote_deleted || !(e.synced_placement.is_some() || e.stand_in.is_some()) {
+        return None;
+    }
+    // The slot is folded; the disk path is not. Walk the stored names.
+    let mut parts = vec![e.effective_local_name().to_string()];
+    let mut parent = e.local_placement().parent;
+    let mut guard = 0;
+    while let Some(pid) = parent {
+        guard += 1;
+        if guard > 512 {
+            return None;
+        }
+        let f = folders.get(&pid)?;
+        parts.push(f.effective_local_name().to_string());
+        parent = f.local_placement().parent;
+    }
+    parts.reverse();
+    Some(parts.join("/"))
 }
 
 /// No two folder records claim one directory.
