@@ -1,8 +1,10 @@
 # Drive sync: the reset
 
-**Status: in progress. WP1f, WP1a, WP1b DONE 2026-09-12 (harness only, engine
-still `df2f5c88`); WP2 next. Every change reviewed by public-html-c6, approach
-before patch.**
+**Status: in progress. WP1f, WP1a, WP1b DONE 2026-09-12; WP2 (directory
+identity) landed in two units -- `4466080e` and the second unit of
+2026-09-13 (reading 6: clean arms 70 of 70 green, the twelve converged reds
+closed); WP1d and WP3 next. Every change reviewed by public-html-c6,
+approach before patch.**
 
 Testing is paused. No further guards land on the sync engine until the work
 packages below are done, in order. This spec is the reason, the order, and the
@@ -395,7 +397,15 @@ table goes in the table, not in the code.
     7    recycled: the record's directory     none (the stranger holds     plain: no proposal, nothing happens; the       row-7 pins, both
          is gone and a stranger carries its   nothing of the record's)     record goes with its directory, the stranger   halves, on MemFs's
          id                                                                is minted new. encrypted: the claim lands on   reuse_file_ids
-                                                                           the stranger, over-seals, publishes nothing
+                                                                           the stranger, over-seals, publishes nothing.
+                                                                           Also through the tracker skip (2026-09-13):
+                                                                           a never-materialized tracker whose name the
+                                                                           stranger wears stays unmaterialized while
+                                                                           the stale owner lives -- the one-pass window
+                                                                           (a folder deleted here, inode reused before
+                                                                           its delete is confirmed) clears when the
+                                                                           owner is remote_deleted; the residual is
+                                                                           row 7's, named here for the next reader
 
 **Layer, three parts, each landed and gated on its own:**
 
@@ -501,7 +511,12 @@ directory around a file does not change the file's parent id -- a directory
 move keeps its id and everything inside keeps its parent -- so the design's
 sentence is satisfied by the rule as written; the hazards are the cases with
 NO evidence (P1, P2) and the move the engine makes for the server (P3), and
-those are pinned.
+those are pinned. The same no-evidence residual holds for the rename-race
+policy's disk follow (2026-09-13): it moves the entity's own directory or
+file by identity, and where the id is unknown on either side (a Windows
+id of 0 under P2, or a record that never learned its directory) it moves
+what stands at the planned path -- so the 74023 leak is closed by identity
+and open exactly where identity is absent, like row 6's and P2's.
 
 **Part (a) landed 2026-09-12 (uncommitted):** `Vfs::directory_id`,
 `DirEntry.fingerprint` for directories, `Fingerprint::of_directory`, MemFs
@@ -527,6 +542,21 @@ folder that stood still keeps its own, a restore (`renumber_every_id`)
 re-records with no move read into it; the namesake park leaves each record
 on its own directory; ids wiped then the AG drag leaves the vault NOT
 carrying the new folder's id. C2 gate: recorded below when it lands.
+
+**A second recording site, the move landing (2026-09-13, with E1-2):**
+`move_local` records the id it read at the SOURCE before the rename (the
+directory it verified as this folder's and then moved itself) as the
+folder's identity when it lands, and asks the destination only where it did
+not do the rename. Consistent with the rule above -- the record's agreed
+placement WAS the source, the engine checked the directory there and moved
+it -- and required by it: `fingerprint(dest)` is `None` for a directory, so
+the landing was throwing a known identity away on every folder move, and
+the scan re-records only at the agreed path on the NEXT pass. Two folder
+ops in one pass (a move, then room-making at the same name) met the moved
+directory in between with no id on its record, the follow found no owner,
+two records named one path, and the one read as gone was trashed with the
+other's file inside (`a_second_folder_conflict_at_one_name_gets_its_own_name`,
+which is now that landing's pin and the follow's).
 
 **Part (c), first two readers landed 2026-09-12 (uncommitted):**
 `corroborated(path)` answers by identity when both sides know it; an
@@ -688,6 +718,283 @@ already reads.
 is never re-created at its remote name while that directory stands,
 whatever verdict naming reaches about the name.
 
+**Committed as `4466080e` (2026-09-12).** The post-commit re-run on that SHA
+matches reading 4 per seed and per oracle on all 160 seeds of the five arms
+-- WP1f on real arms, and the named-SHA baseline reading 5 is paired with.
+
+**Readings 5 and 6 (2026-09-13), the R4 chain from `4466080e`.** Frozen
+binaries, one change per pair: `zz_sweep.e12policy` (the ring by identity,
+the path map's root form, the follow at the aside sites, E1-2 and its two
+findings, the rename-race policy), `zz_sweep.uplink` (+ the upload link),
+`zz_sweep.tracker` (+ the tracker rule, the create-site refusal removed),
+`zz_sweep.follow` (+ the policy's disk follow by identity). Trace pairs:
+e12policy -> uplink 159/160 identical (plat3 75412, the rescue's absence);
+uplink -> tracker 158/160 (kill2 75121: the server's move applied to 503's
+own directory instead of a fresh re-creation; plat3 75415: no mint, the
+file into 502 -- both the tracker rule's designed effect); tracker ->
+follow 148/160 (the twelve differing seeds all carry the leak's signature
+on the before side -- a conflict-named folder or file minted new and the
+misrenamed entity trashed: clean2 74023/74031/74035, clean3 74804/74818/
+74820, hostile2 74402/74410, kill2 75109/75129, plat3 75409/75426).
+
+Reading 5 on `zz_sweep.tracker`: clean2 39/40, clean3 29/30, hostile2 /
+kill2 / plat3 0/30; against reading 4, sealed G->R clean2-74023
+clean3-74820 hostile2-74424 kill2-75123 plat3-75402 plat3-75409, chain G->R
+kill2-75123 plat3-75409; swap-off on the same binary: 74424/75123/75402/
+75409 green (AH), **74023 and 74820 RED -- the finding recorded under the
+policy entry (the disk follow), fixed and pinned.**
+
+**Reading 6 on `zz_sweep.follow` (supersedes reading 5):**
+
+    arm       seeds green sealed-only chain-only both other no-verdict
+    clean2       40    40           0          0    0     0          0
+    hostile2     30     0           0          1   28     1          0
+    clean3       30    30           0          0    0     0          0
+    kill2        30     0           1          1   28     0          0
+    plat3        30     0           0          1   28     1          0
+
+Against reading 4 (`4466080e`): sealed G->R hostile2-74424 kill2-75123
+plat3-75402 plat3-75409, every one swap-off GREEN on `zz_sweep.follow`
+(AH by the discriminator); sealed R->G clean3-74800 hostile2-74412
+plat3-75406; chain G->R kill2-75123 plat3-75409 (the same two, AH), R->G
+hostile2-74412; **converged R->G: clean3-74800, hostile2 74414 74424 74426,
+kill2 75100 75101 75105 75110 75124, plat3 75412 75415 75428 -- the twelve
+converged-reds of reading 3 all settle now; converged G->R: none.** Against
+reading 5: only clean2-74023 and clean3-74820 sealed R->G, nothing else
+moved. clean2 and clean3 are 70 of 70 green for the first time; the
+hostile arms are AH waiting (every red there swap-off green where checked),
+not WP2's.
+
+**The three per-arm traces (2026-09-13), and what they taught:**
+
+- hostile2 74424 (withdrawn 14): every pass, every file in the three rings
+  was NotADrag -- the three ring directories stood ROTATED (each record's
+  own id at another ring's path, all three contested) and the ring walk
+  could not close the ring by contents, because the two plain rings' files
+  had been re-parented across passes by cause 2 and only the vault's were
+  whole: one arrival, no ring, nothing moved, every file inside withdrawn
+  for ever. **Landed: the ring walk reads arrivals by identity first** --
+  the directory standing at a contested path that carries another tracked
+  folder's own id is that folder arrived, whatever its files say; contents
+  decide where either side does not know. Within a ring every member is
+  live, tracked and standing, so this is not a plain folder claiming a
+  stranger. With it 74424 converges; what it then shows is four sealed
+  bodies standing under ordinary names -- the hold had been masking cause
+  2. Swap-off run: green. **Classified: AH residue** (and the same for
+  kill2 75100, swap-off green).
+- plat3 75412 (withdrawn 18): with the ring by identity it converges and
+  leaks the AH way with the swap on (AH residue for that half). With the
+  swap OFF it still does not converge: on the `disk` device the plain ring
+  503 says `ring-1`, nothing stands there, and its directory stands at
+  `ring-1 (conflicted copy … from disk)` -- a directory that acquired a
+  SECOND record by the mint while 503's record lagged (the no-mint hold is
+  encrypted-only), so nothing follows it and nothing lifts it. **Landed on
+  the way: `the_owner_follows_its_directory`** at both directory-aside
+  sites (make_room and the rename-into-place aside): the record that knows
+  the directory just moved aside as its own takes the aside name in its
+  agreed placement, so the next scan corroborates it there and reconcile
+  pushes the honest conflict rename; the design's make_room rule, landed
+  directly, for plain and encrypted alike (not a claim: the engine moved
+  the directory itself). It does not reach 75412's shape, whose aside was
+  not the engine's room-making but the mint's second record.
+  Traced to the pass of the mint (2026-09-13): 503 present at `ring-1`,
+  its directory 1003 standing there, corroborated by identity, no issue --
+  and the scan MINTED a new record on 1003 anyway. Not the no-mint rule at
+  all: the PATH MAP (`folder_ids`, keyed by path like `tracked` was) held
+  only one of two records that resolved to `ring-1` -- 502's stale record,
+  which said `ring-1` while its directory stood at `ring-2` -- and when
+  502 was matched away to its directory the map dropped the key so the
+  directory could be "adopted for what it is", which was 503's own. The
+  same two-records-one-path bug in the second map. **Landed: a present
+  record standing at its path stays in the path map** (not one matched
+  elsewhere this pass, whose placement can read unchanged when only its
+  parent was renamed -- the lost-answer rename pin caught that first cut).
+  With it 75412 with the swap off is GREEN; with the swap on it leaks the
+  AH way. **Classified: reader gap, fixed; AH residue for the swap-on
+  half.** Built in the root form c6 set: the path map takes `tracked`'s
+  holder for every tracked path after the eviction, and every removal is
+  own-key-only, so the map is right by construction with no repair loop.
+  Pin owed: the two-records-one-path shape in the path map has not yet been
+  built minimally (75412 is a sweep seed); evidence today is the seed, red
+  without the fix and green with it. c6's refusal half of the plain rule --
+  no mint of a directory whose id a LIVE record knows as its own, plain or
+  encrypted -- is not yet built either; on this seed it was not the
+  mechanism.
+
+- **plat3 75415 with the swap off, traced (2026-09-13):** on the mac the
+  vault's own directory, standing at `ring-3` after the user's rotation
+  while its record still said `ring-1`, had been ADOPTED by
+  `create_local_folder` as a plain folder another device created under
+  that name on the server -- adoption by path, invisible to the create
+  site's record-based check because the vault's record resolved elsewhere.
+  The design's adoption rule, landed: the create site refuses (Overtaken,
+  re-decided) to adopt a directory whose id another live folder record
+  knows as its own; refusal only, never an aside. With it the claim had to
+  yield to a tracker that has no agreement and no stand-in (a server folder
+  nothing of which stands here: its create is refused at the directory by
+  identity, and the vault takes what is its own), and the `remote_wants`
+  deferral likewise. Then the seed LIVELOCKS at a shape with no rule: the
+  claim places the vault at its directory's name every pass, the server
+  refuses the rename (a plain sibling holds that name there and is not
+  moving), and the next scan derives the same claim. `MoveRaceServerWon`
+  covers a local move against a remote move of the same entity; nothing
+  covers a local folder move that loses to a server-held sibling name that
+  is not moving. Before the refusal this was a converged-red hold on a lie
+  (the vault's directory wearing a plain record); now it is a livelock that
+  says what it needs. **Classified: reader gap, half fixed; the rename-race
+  policy one step wider is the open line** (does the server win the name
+  and the local directory take a conflict name by naming's convention,
+  with the record following it?).
+
+- **E1's second shape (naming's destination judgement), built and
+  REVERTED 2026-09-13.** Cut as c6 conditioned it -- a holder may be
+  stepped aside for an arrival when it is leaving by the server's word AND
+  stands on its own directory by identity, at the create site and in
+  `judge_destinations` -- it broke the two pins named to stay green: the
+  unrelated case twin got past the clash (the holder was leaving in a trade
+  and on its own directory, so the exemption applied, but its name was
+  retaken by the trade and the twin could never hold it) and a finisher ran
+  ahead of its park. The two facts are not sufficient: the exemption is
+  sound only when the vacated slot is not retaken by the same round, which
+  is the closed-trade condition `trading_names` already encodes and
+  refuses to widen. The two pins are ignored with that reason; the follow at
+  the aside sites stays landed and still has no pin of its own (every
+  construction reaches naming first, or the holder's retried move lands
+  before the arrival meets it). Open with c6: `trading_names` generalized
+  from a closed ring to a chain that ends at a free name.
+
+- **E1-2 landed 2026-09-13 (uncommitted): the open ending of
+  `trading_names`.** A chain is walked from each arrival through the
+  holder of the name it wants; it ends CLOSED (back at the start), OPEN (at
+  a name no settled entry holds -- vacated by the round, by the holders'
+  own moves and nothing else) or STOPPED (at a holder not moving, or in a
+  cycle the arrival is not part of). Closed and open pair the arrival with
+  the ONE holder it displaces; stopped is judged as before. One arrival per
+  vacated slot, the first by lowest entity id; the rest judged as before.
+  Built on `leaving_this_pass` and nothing wider; identity plays no part;
+  no create-site aside (a create waits behind the holder's move). Pins:
+  `a_folder_arriving_at_a_name_its_holder_is_leaving_for_a_free_one_is_not_parked`
+  (RED without: R parked as a duplicate of P and re-created from the
+  server) and `a_folder_created_at_a_leaving_holders_name_waits_behind_the_holder`
+  (a regression pin for the no-aside decision: green both ways, the
+  create's record check already declines). Two findings on the way, both
+  fixed and accepted by c6: (1) `leaving_this_pass` admitted a record whose
+  SERVER name is a `.jd-swap-` park -- under the closed rule harmless, under
+  the open ending a chain that ended at the park read as ending free and an
+  arrival took the parker's slot while the parker was coming back for it
+  (the peer-put-back kill sweep, die_after=3: the swap's second half lost to
+  a conflict copy); a record wearing a server-side park is not leaving for
+  that name -- the pass's put-back owns it -- so it is out of the set. (2)
+  the move landing threw the folder's identity away (the second recording
+  site above).
+
+- **The rename-race policy at the move site, landed 2026-09-13
+  (uncommitted).** `move_remote` takes the answer the create and the upload
+  already give: on `name_taken`, a name held by something THIS device is
+  renaming away is waited for (Retry); otherwise the next conflict name by
+  naming's convention is asked for under a key of its own, and when the
+  server takes it the disk follows (the move was derived from this disk, so
+  it wears the planned name; server first, then disk, then the record) and
+  the user is told (`kept_aside`: "X was already taken on the server, so
+  this is now Y"), never a hold. Encrypted folders included; an encrypted
+  FILE's name is sealed into the request and takes the ordinary orders with
+  no conflict name. Only in answer to a refusal, never ahead of one (a
+  retry whose answer was lost must ask for the same name). Pin:
+  `a_vault_renamed_onto_a_name_a_peer_took_on_the_server_lands_beside_it`
+  (75415's shape, one device: RED without = never settles; with = the vault
+  under the conflict name with its id, directory and sealed file, the plain
+  folder materialized, nothing trashed, nothing held). The executor test
+  `a_name_held_by_something_we_already_know_about_is_not_waited_on` now
+  asserts the land-beside instead of the Overtaken. **plat3 75415 with the
+  swap off CONVERGES green on both oracles** (issues: kept_aside 27,
+  reconcile 7, withdrawn 15, and one stale `parked` on the disk device for a
+  folder that came back after its clash cleared -- an issue left open after
+  it resolved, the known cost noted on the peer-put-back pin, not a hold).
+  The three other swap-off seeds (75412, 74424, 75100) stay green.
+
+  **Reading 5 found the policy's disk follow leaking (2026-09-13):** clean2
+  74023 and clean3 74820 went sealed G->R with the swap OFF (not AH), and
+  bisected to the policy (green with its loop disabled on the same tree).
+  Probe on 74023: folder 504 (plain, own directory 1004), planned
+  `/sync/ring-2`, the directory standing there id 1002 -- the VAULT's,
+  carried there by the server's move of the vault earlier in the same pass,
+  with the room-making stepping 504's directory aside. The follow renamed
+  what stood at the planned path to 504's conflict name, the plain record
+  sat on the vault's directory, and the sealed file inside went up in the
+  clear under it. Cause: the follow asked the path, not the directory.
+  Layer: the follow itself -- it moves this entity's OWN directory or file
+  by identity (`directory_id`/`fingerprint` at the planned path against
+  the record's own id); a different id is left where it stands and the
+  record takes the server's name (the next scan finds the entity's own
+  directory wherever it is); unknown on either side = today's rule, by
+  path. Pin: `a_refused_plain_move_never_carries_the_vaults_directory_to_
+  its_conflict_name` (74023's shape, the mirror of the 74033 pin: the
+  laptop swaps vault and ring-2, the desktop rotates 1 -> 3 -> 2 -> 1; RED
+  without the identity check: the vault trashed / the sealed body under
+  the plain folder's conflict name; green with, converged, kept_aside +
+  MoveRaceServerWon only). 74023 and 74820 green again on the follow
+  binary; reading 6 on it supersedes reading 5.
+
+- **The create site's identity refusal has no instrument (2026-09-13):**
+  with the policy in, 75415 swap-off converges identically with the refusal
+  disabled, and no pin goes RED without it (the create's record-based check
+  declines the same directory in every construction reached). It is the
+  identity spec's adoption rule stated in the layer that owns the question,
+  and it fired on 75415 before the policy existed. c6 asked for the PLAIN
+  shape before any decision (a plain folder has no claim, so it is the
+  shape that could reach the refusal on its own): one device, plain `P`
+  with a file, the user renames `P`'s directory to a name a peer's folder
+  holds on the server. Result, c6's third reading: **the scan resolved it
+  first, and wrongly** -- the peer's never-materialized tracker (no
+  agreement, no stand-in) was read PRESENT at `Q` because a directory stood
+  there; `Q` was then accounted for, `P` (whose own directory it was, by
+  id) could not be found at it (a plain folder corroborates and never
+  claims, and a tracked path is no candidate), `P` was read as deleted and
+  trashed on the server, its file moved into the peer's folder, and the
+  create adopted `P`'s directory. Identity loss, both ways round the
+  refusal. **Landed, the reader rule:** a folder record with no agreement
+  and no stand-in has never stood anywhere, so a directory at its name is
+  no evidence it is present; where that directory is KNOWN to be another
+  live record's own it is not in `tracked`, not present, and out of the
+  path map (own key only) -- its create meets the directory and waits
+  behind the owner's move. Where nobody knows the directory, today's
+  reading stands (the user's own folder of that name IS the server's
+  folder arriving). Pin: `a_plain_folder_renamed_onto_a_name_a_peer_took_
+  on_the_server_lands_beside_it` (RED without: `P` trashed, its file in
+  `Q`; with: `P` under `Q (conflicted copy ...)` with its id, directory
+  and file, `Q` materialized, nothing trashed, nothing held). The refusal
+  is STILL green-both-ways on this pin: by the time the create runs, the
+  scan has recorded `P`'s move to `Q` and the create's record check
+  declines the directory by path. **Removed 2026-09-13 (c6's call, (a)):**
+  the executor trusts records; the scan is what makes records
+  identity-correct (eviction by identity, the ring by identity, the claim,
+  the tracker skip, the path map from `tracked`). A second identity check in
+  the executor was a belt over the scan, and it fired only in a world where
+  the scan was still wrong. The by-path loop is not the fallback of
+  anything; it is the executor's own question, asked of records the scan
+  has already put where their directories stand. The plain shape was
+  tried before the removal (above). Folded into the tracker binary for
+  the R4 pair (a removal with no reachable shape cannot move a seed).
+  NOT landed, so nobody re-derives it: an except-self clause on
+  `held_by_a_rename_this_device_owes` (the asking entity as the holder of
+  its own name, a case-only rename against a server that folds case). The
+  server compares names byte-for-byte (`DriveHelper::folder_name_taken`
+  and `file_name_taken`, plain SQL equality) and excludes the entity
+  itself (`<> :exclude`), verified 2026-09-13: the shape does not exist on
+  the server the engine talks to, and a change that can move nothing and
+  protects against nothing is a guard for a hypothetical. If a server ever
+  folds case, that is the day it gets a shape and a pin.
+
+- **The follow's pin (2026-09-13):** `a_second_folder_conflict_at_one_name_
+  gets_its_own_name` now asserts the server and the disk end at the
+  server's own names. Without the follow the server LEARNED the
+  room-making's aside name (`Docs (conflicted copy ...)`) as the folder's
+  own -- the record kept naming the path its directory had left, the scan
+  met the directory at the aside as the user moving it, and pushed the
+  conflict name. RED without the follow, green with. The reachability
+  question is closed: it fires, and what it prevents is a rename nobody
+  made published to every device.
+
 **Open after reading 3 (c6, 2026-09-12), before WP2 is called done:**
 
 - The twelve converged reds are WP2's open finding. `withdrawn` dominates,
@@ -701,7 +1008,12 @@ whatever verdict naming reaches about the name.
   victim (the folder's directory itself adopted by path pairing) -- named as
   AH residue with the seed. Each of the twelve gets a one-line
   classification, and **the WP2 bar gains: no seed converged green to red
-  without a classified hold.**
+  without a classified hold.** **CLOSED by reading 6 (2026-09-13):** all
+  twelve are converged R->G on `zz_sweep.follow` -- the rename-race policy
+  ended the refused-rename livelocks and holds the twelve shared (75412
+  and 75415 traced to it directly; the others follow with it) -- and no
+  seed is converged G->R against reading 4. The item leaves the WP2
+  not-done list.
 - plat3 75415: converged-red with issues on the readers-3 binary; on the
   readers-5 binary it NEVER SETTLED. Bisected in two runs: readers-4
   (child-folder corroboration, no E1 branch) settles; readers-5 (the E1
@@ -761,6 +1073,51 @@ A file this device WROTE never gets its inode-to-entity link; only a download
 writes one, because the scan caches the hash first with no entity and the
 upload takes the cached branch. Six lines, measured harmless, and it is what
 the rescue's blindness rests on.
+
+**Landed 2026-09-13 (uncommitted):** the upload's settled arm and `adopt`
+both write the link beside their `agree` (`cache_hash(fp, sha, Some(id))`,
+the plaintext hash for a sealed upload as for a plain one: the link is
+about the file on this disk). The moved-on arm writes nothing, as it
+records no fingerprint. `plaintext_source_of` does NOT read the link (it
+reads the entry's own fingerprint), so the keyless-vault family
+(`a_file_dragged_into_a_vault_with_no_key_here_waits_instead_of_trashing_it`,
+`a_file_brought_back_out_of_a_vault_under_a_new_name_is_not_held_hostage`,
+both on locally WRITTEN files) was never blind and stays green. Pin:
+`a_file_this_device_wrote_is_linked_to_its_entity_once_it_is_up` -- RED
+on `entity_for_file_id(inode) == id` before the link; then a folder trash
+with an unuploaded sibling: the uploaded file goes with the folder, the
+unuploaded one is rescued. Trace gate (c6's form): every ring-arm seed on
+`zz_sweep.e12policy` (before) and `zz_sweep.uplink` (after, the link the
+only change); the first differing line on every differing seed must be a
+rescue that no longer fires, and the count of such seeds is the rescue
+net's spurious-fire count on the pre-link engine. **Result (2026-09-13):
+159 of 160 byte-identical; the one differing seed is plat3 75412, and its
+first divergent line (mac, line 29) is the `UploadAsNew` of `ring-2.txt`
+at the sync root that the rescue had left there -- the pass before, the
+mac parked folder 503 (`ring-2`, a case clash with `ring-1` on its folding
+disk) and `unmaterialize_and_park` rescued `ring-2.txt` out to `/sync`
+because the records did not vouch for it and the link answered "never
+seen"; with the link the file goes to the trash with its folder (the
+server has it) and no `rescued_from_trash` issue is raised. Nothing else
+diverges first. Spurious fires on the ring arms, pre-link engine: 1 seed
+(plat3 75412), 0 on clean2/hostile2/clean3/kill2. The link's instrument is
+the pin; the rescue net's earlier number (the clean ring arm, AJ work:
+disclosures by entity 13 -> 11 under the net) has this beside it. 75412's
+verdict: sealed before, sealed + chain after (a per-oracle G->R on the
+chain oracle, so it carries its swap-off verdict on the SAME binary):
+`NOSWAP=1` on zz_sweep.uplink = green, both oracles silent -- AH on both,
+by the discriminator. Its history after line 29 differs, as any plan
+change makes it.**
+
+**B12 (2026-09-13): a park's event complaint outlived the park.** The
+`parked` issue ("moved to the trash ... comes back here if the clash is
+resolved") was raised as an event that stands until the user waves it away,
+and stayed open after the clash cleared and the file came back (plat3 75415
+swap-off, folder 504 on the disk device). On a sweep trace a stall beside
+an open issue reads as a hold, so a stale issue makes a livelock look like
+a hold. Fixed in the issue lifecycle: when naming releases the entry
+(`recovered`), its `parked` issues are dismissed. Pin:
+`a_parks_complaint_ends_when_the_file_comes_back` (RED without).
 
 **The identity spec's "What lands before it"** (the hold for an encrypted
 folder paired by contents alone) is SUPERSEDED by decisions 1 and 2 -- the

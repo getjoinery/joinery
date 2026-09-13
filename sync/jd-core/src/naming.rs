@@ -549,18 +549,23 @@ pub fn apply_naming(
                 // cycle-breaking park that was planned for exactly this is
                 // dropped on entries naming has already parked. Defect AE.
                 //
-                // Something must actually be here to vacate. The other two
+                // Something must actually be here to vacate. The other
                 // conditions bound what enters the walk rather than deciding
                 // anything: an entry with an operation in flight, or wearing a
-                // scratch name, is mid-something and its record does not
-                // describe the disk, so it has no business in a chain. Measured
-                // in review -- no pin depends on either, and the closed-chain
-                // test carries the weight on its own. They stay for the same
-                // reason the loop above skips a busy parked entry.
+                // scratch name on either side, is mid-something and its record
+                // does not describe the disk, so it has no business in a chain.
+                // The server-side scratch name is load-bearing since the open
+                // ending of `trading_names`: a park a peer left standing is
+                // not leaving for that name -- the pass's put-back owns it and
+                // where it goes is not known here -- and a chain that ended at
+                // the park read as ending free, letting an arrival take the
+                // parker's slot while the parker was still coming back for it
+                // (the peer-put-back kill sweep, die_after=3).
                 if updated.holds_a_local_file()
                     && updated.remote != *updated.local_placement()
                     && !busy.contains(&updated.id)
                     && !parked_locally(&updated)
+                    && !jd_vfs::is_internal(&updated.remote.name)
                 {
                     leaving_this_pass.insert(updated.id);
                 }
@@ -736,24 +741,67 @@ fn trading_names(
     // on one blocker and the occupant map holds current slots only. Found in
     // review by public-html-0e; pinned by
     // `a_swap_does_not_let_an_unrelated_case_twin_past_the_clash`.
+    //
+    // Three endings to the walk. CLOSED, back at the start: every name in
+    // the chain is vacated by the round and each arrival is paired with the
+    // holder it displaces -- the original rule. OPEN, at a name NO settled
+    // entry holds: the chain is vacated by the round too, by the holders'
+    // own moves and nothing else, and the arrival is paired with the one
+    // holder it displaces just the same (`R` arriving at `P` while `P`
+    // leaves for a free `Q`: parked as a duplicate of `P` instead, `R` gave
+    // up its own directory to the OS trash and was re-created from the
+    // server, the lagging-record family in naming). STOPPED, at a holder
+    // that is not moving, or at a repeat that is not the start (a cycle the
+    // arrival is not part of): no exemption, judged as before. Built on
+    // `leaving_this_pass` and nothing wider: a parked or half-parked holder
+    // has a remote placement unlike the one it holds and is NOT leaving this
+    // pass, and exempting it hands the arrival a name that never comes free
+    // (a finisher then runs ahead of its park). Identity plays no part: the
+    // planner sequences the arrival behind the holder's move, so it never
+    // meets the holder's directory and nothing is stepped aside.
+    //
+    // At most ONE arrival per vacated slot, whichever the walk pairs first
+    // by lowest entity id: two arrivals whose names fold to one vacated key
+    // are the server naming two entities for one local slot, a real clash
+    // whatever the holder does, and the second is judged as before. In the
+    // case-twin pin the retake makes `A` and `B`'s chain close through each
+    // other, so the twin's walk stops at a holder that is not its own start
+    // and it is judged as before -- both halves hold.
     let mut trading: HashMap<EntityId, EntityId> = HashMap::new();
-    for start in wants.keys() {
-        let mut at = *start;
-        let displaces = wants.get(start).and_then(|target| holder_of.get(target)).copied();
+    let mut slot_taken: HashMap<(Option<i64>, String), EntityId> = HashMap::new();
+    let mut starts: Vec<EntityId> = wants.keys().copied().collect();
+    starts.sort_by_key(|id| (id.is_provisional(), id.server_id));
+    for start in starts {
+        let mut at = start;
+        let Some(target) = wants.get(&start).cloned() else { continue };
+        let displaces = holder_of.get(&target).copied();
         // Bounded by the number of movers: a chain longer than that has
         // repeated somebody, and a repeat that is not the start is a chain
         // running into a cycle it is not part of.
+        let mut paired = false;
         for _ in 0..=wants.len() {
-            let Some(target) = wants.get(&at) else { break };
-            let Some(next) = holder_of.get(target) else { break };
-            if *next == *start {
-                if let Some(holder) = displaces {
-                    trading.insert(*start, holder);
-                }
+            let Some(next_target) = wants.get(&at) else { break };
+            let Some(next) = holder_of.get(next_target) else {
+                // Open: the chain ends at a name nobody holds.
+                paired = true;
+                break;
+            };
+            if *next == start {
+                // Closed.
+                paired = true;
                 break;
             }
             at = *next;
         }
+        if !paired {
+            continue;
+        }
+        let Some(holder) = displaces else { continue };
+        if slot_taken.contains_key(&target) {
+            continue;
+        }
+        slot_taken.insert(target, start);
+        trading.insert(start, holder);
     }
     Ok(trading)
 }

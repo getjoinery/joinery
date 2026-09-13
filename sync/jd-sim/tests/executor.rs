@@ -846,15 +846,14 @@ fn an_outcome_is_one_of_three_things_and_never_a_silent_success() {
 
 #[test]
 fn a_name_held_by_something_we_already_know_about_is_not_waited_on() {
-    // `name_taken` earns a wait because of what the client does *not* know: the
-    // server is holding a sibling nobody has told this device about, hearing
-    // about it is what moves our copy aside, and until then there is nothing to
-    // do but wait.
-    //
-    // Here the occupant is already in the store, live and settled. Nothing is on
-    // its way, so the wait is forever — and forever costs a device that never
-    // reports itself settled over an operation the next scan throws away. The
-    // rig had these at four hundred attempts apiece.
+    // `name_taken` earns a wait only for a name something THIS device is
+    // renaming away. Here the occupant is already in the store, live and
+    // settled, and nothing is on its way: waiting is forever, and forever
+    // costs a device that never reports itself settled. The rig had these at
+    // four hundred attempts apiece. And dropping the op for the next pass to
+    // choose again chose the same thing from the same disk, for ever. So the
+    // move takes the answer the create and the upload give: it lands beside
+    // the occupant under a conflict name, and says so.
     let (_clock, server, device) = world();
     let mover = EntityId::file(server.seed_file(None, "draft.txt", b"the one being renamed"));
     let occupant = EntityId::file(server.seed_file(None, "final.txt", b"already here"));
@@ -877,20 +876,23 @@ fn a_name_held_by_something_we_already_know_about_is_not_waited_on() {
     );
 
     assert_eq!(report.retrying, 0, "it has to stop, not wait forever");
-    assert_eq!(report.overtaken, 1, "somebody else got there first");
+    assert_eq!(report.done, 1, "it lands beside the occupant: {report:?}");
     assert!(
         device.store.queued_ops().unwrap().is_empty(),
-        "the op is stale, so it goes; the next pass plans from what is there now"
+        "nothing is left waiting on a name that never comes free"
     );
+    let tree = server.tree();
+    assert!(tree.contains_key("final.txt"), "the occupant was touched: {tree:?}");
+    let landed = tree.keys().find(|p| p.starts_with("final (conflicted copy")).cloned();
+    assert!(landed.is_some(), "the mover did not land beside the occupant: {tree:?}");
+    let moved = device.store.get_entry(mover).unwrap().unwrap();
+    assert_eq!(Some(&moved.remote.name), landed.as_ref(), "the record does not say where the server has it");
+    let issues = device.store.open_issues().unwrap();
     assert!(
-        device
-            .store
-            .open_issues()
-            .unwrap()
-            .iter()
-            .all(|i| i.kind != "withdrawn"),
-        "there is nothing here for a person to decide"
+        issues.iter().any(|i| i.kind == "kept_aside" && i.detail.contains("final.txt was already taken on the server")),
+        "the user was not told: {issues:?}"
     );
+    assert!(issues.iter().all(|i| i.kind != "withdrawn"), "there is nothing here for a person to decide");
 }
 
 #[test]

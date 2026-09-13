@@ -3038,6 +3038,184 @@ fn a_vault_whose_directory_stands_where_the_server_wants_a_plain_folder_keeps_it
     }
 }
 
+/// The user renames the vault's directory to a name a peer's plain folder
+/// already holds on the server (clean2 75415's shape, the reset's WP2).
+///
+/// One device. The vault `ring-1` holds a sealed file; a peer creates a
+/// plain `ring-3` on the server that this device has not heard of; the user
+/// renames the vault's directory to `ring-3` here. The server refuses the
+/// vault's rename, and the plain `ring-3` arrives wanting the path the
+/// vault's directory stands on. The move takes the answer the create and
+/// the upload already give: the vault lands beside the occupant under a
+/// conflict name on the server, the disk follows (server first, then disk),
+/// and the user is told. The create of the plain `ring-3` declines the
+/// vault's directory (it is folder `ring-1`'s own, by identity) and waits
+/// behind the move, then lands. One outcome: the vault under the conflict
+/// name with its id, its directory and its sealed file still sealed; the
+/// plain `ring-3` materialized; nothing trashed; nothing held; converged.
+/// Before the policy the refused rename was re-derived from the same disk
+/// every pass, for ever, with nothing raised.
+#[test]
+fn a_vault_renamed_onto_a_name_a_peer_took_on_the_server_lands_beside_it() {
+    let vault = SimVault::new(9_969);
+    let mut world = World::new(9_969, &["laptop"]);
+    world.give_vault("laptop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+    let v = world.server.seed_encrypted_folder(None, "ring-1");
+    let sealed = b"sealed, whatever the folder is called";
+    world.server.seed_vault_file(Some(v), "sealed.txt", sealed, &vault.public_key_b64);
+    assert!(world.settle().is_some());
+    let laptop = world.device("laptop");
+    let dir_of = |path: &str| jd_vfs::Vfs::directory_id(&laptop.fs, std::path::Path::new(&format!("/sync/{path}"))).unwrap();
+    let vault_dir = dir_of("ring-1").unwrap();
+
+    // The peer's plain folder, made on the server by a real action; then the
+    // user's rename here, before this device has heard of it.
+    let act = |name: &str, body: serde_json::Value| world.server.action(name, &body).unwrap();
+    let plain = act("drive_folder_create", serde_json::json!({ "name": "ring-3" }))["folder"]["id"].as_i64().unwrap();
+    world.server.seed_file(Some(plain), "p.txt", b"plain p");
+    committed.note("ring-3/p.txt", b"plain p");
+    laptop.fs.user_rename("ring-1", "ring-3");
+
+    assert!(world.settle().is_some(), "never settled");
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+    let folders = world.server.folders();
+    let the_vault = folders.iter().find(|f| f.id == v).unwrap();
+    assert!(the_vault.encrypted && !the_vault.trashed, "the vault lost its protection or was trashed: {folders:?}");
+    assert!(the_vault.name.starts_with("ring-3 (conflicted copy"), "the vault did not land beside the occupant: {folders:?}");
+    assert_eq!(world.server.folder_id_at("ring-3"), Some(plain), "the plain folder lost its name: {folders:?}");
+    assert_eq!(dir_of(&the_vault.name), Some(vault_dir), "the vault's directory did not follow its name: {:?}", disk_tree(laptop).keys().collect::<Vec<_>>());
+    assert!(disk_tree(laptop).contains_key("ring-3/p.txt"), "the plain folder did not materialize: {:?}", disk_tree(laptop).keys().collect::<Vec<_>>());
+    assert!(
+        world.server.blob(&jd_sim::sha256_hex(sealed)).is_none(),
+        "the sealed body reached the server in the clear: {:?}",
+        world.server.tree()
+    );
+    let view = jd_sim::scenario::owner_view_of_the_server(&world);
+    let sealed_at = format!("{}/sealed.txt", the_vault.name);
+    assert_eq!(view.get(&sealed_at).cloned().flatten(), Some(jd_sim::sha256_hex(sealed)), "the sealed file is not under the vault: {view:?}");
+    assert_eq!(disk_tree(laptop).get(&sealed_at).cloned().flatten(), Some(jd_sim::sha256_hex(sealed)), "{:?}", disk_tree(laptop));
+    assert!(laptop.fs.trashed().is_empty(), "something went to the trash: {:?}", laptop.fs.trashed());
+    let issues = laptop.store.open_issues().unwrap();
+    assert!(issues.iter().any(|i| i.kind == "kept_aside" && i.detail.contains("ring-3 was already taken on the server")), "the user was not told: {issues:?}");
+    assert!(issues.iter().all(|i| i.kind == "kept_aside" || i.kind == "reconcile"), "something was held: {issues:?}");
+}
+
+/// The plain version of 75415's shape: the user renames a PLAIN folder's
+/// directory to a name a peer's folder already holds on the server. No
+/// claim is in play (a plain folder never claims), so this is the shape
+/// that could reach the create site's identity refusal on its own. One
+/// outcome: the renamed folder lands beside the occupant under a conflict
+/// name with its id, its directory and its file; the peer's folder
+/// materializes; nothing trashed; nothing held.
+#[test]
+fn a_plain_folder_renamed_onto_a_name_a_peer_took_on_the_server_lands_beside_it() {
+    let world = World::new(9_971, &["laptop"]);
+    let laptop = world.device("laptop");
+    let mut committed = Committed::default();
+    let p = world.server.seed_folder(None, "P");
+    world.server.seed_file(Some(p), "p.txt", b"inside P");
+    committed.note("P/p.txt", b"inside P");
+    assert!(world.settle().is_some());
+    let dir_of = |path: &str| jd_vfs::Vfs::directory_id(&laptop.fs, std::path::Path::new(&format!("/sync/{path}"))).unwrap();
+    let p_dir = dir_of("P").unwrap();
+
+    let act = |name: &str, body: serde_json::Value| world.server.action(name, &body).unwrap();
+    let q = act("drive_folder_create", serde_json::json!({ "name": "Q" }))["folder"]["id"].as_i64().unwrap();
+    world.server.seed_file(Some(q), "q.txt", b"inside Q");
+    committed.note("Q/q.txt", b"inside Q");
+    laptop.fs.user_rename("P", "Q");
+
+    assert!(world.settle().is_some(), "never settled");
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+    let folders = world.server.folders();
+    let renamed = folders.iter().find(|f| f.id == p).unwrap();
+    assert!(!renamed.trashed && renamed.name.starts_with("Q (conflicted copy"), "P did not land beside Q: {folders:?}");
+    assert_eq!(world.server.folder_id_at("Q"), Some(q), "the peer's folder lost its name: {folders:?}");
+    assert_eq!(folders.iter().filter(|f| !f.trashed).count(), 2, "a folder was minted or lost: {folders:?}");
+    assert_eq!(dir_of(&renamed.name), Some(p_dir), "P's directory did not follow its name: {:?}", disk_tree(laptop).keys().collect::<Vec<_>>());
+    let disk = disk_tree(laptop);
+    assert!(disk.contains_key("Q/q.txt"), "the peer's folder did not materialize: {:?}", disk.keys().collect::<Vec<_>>());
+    assert!(disk.contains_key(&format!("{}/p.txt", renamed.name)), "P's file did not stay with P: {:?}", disk.keys().collect::<Vec<_>>());
+    assert!(laptop.fs.trashed().is_empty(), "something went to the trash: {:?}", laptop.fs.trashed());
+    let issues = laptop.store.open_issues().unwrap();
+    assert!(issues.iter().all(|i| i.kind == "kept_aside" || i.kind == "reconcile"), "something was held: {issues:?}");
+}
+
+/// The mirror of 74033: the laptop SWAPS the vault with a plain ring and
+/// the desktop ROTATES all three (clean2 74023's shape, the reset's WP2).
+///
+/// Server after the laptop: the vault at `ring-2`, plain `ring-2` at
+/// `ring-1`. The desktop, before hearing of it, rotated 1 -> 3 -> 2 -> 1:
+/// its vault directory stands at `ring-3`, plain `ring-3`'s at `ring-2`,
+/// plain `ring-2`'s at `ring-1`. In one desktop pass the server's move
+/// carries the vault's directory to `ring-2` (stepping the plain folder's
+/// directory aside), and the desktop's own move of that plain folder to
+/// `ring-2` is refused -- the vault holds the name on the server -- so it
+/// lands beside under a conflict name. The disk follow of that landing
+/// must move the plain folder's OWN directory and never the one now
+/// standing at the planned path, which is the vault's: it did, the plain
+/// record sat on the vault's directory, and the sealed file went up in
+/// the clear under the plain folder's conflict name. One outcome: the
+/// vault keeps its id, its protection and its directory; the sealed body
+/// is nowhere in the clear; all three rings live; converged; nothing held.
+#[test]
+fn a_refused_plain_move_never_carries_the_vaults_directory_to_its_conflict_name() {
+    let vault = SimVault::new(9_973);
+    let mut world = World::new(9_973, &["laptop", "desktop"]);
+    world.give_vault("laptop", &vault);
+    world.give_vault("desktop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let v = world.server.seed_encrypted_folder(None, "ring-1");
+    let p = world.server.seed_folder(None, "ring-2");
+    let q = world.server.seed_folder(None, "ring-3");
+    let sealed = b"sealed, and staying that way through the mirror";
+    world.server.seed_vault_file(Some(v), "sealed.txt", sealed, &vault.public_key_b64);
+    world.server.seed_file(Some(p), "p.txt", b"plain p");
+    world.server.seed_file(Some(q), "q.txt", b"plain q");
+    assert!(world.settle().is_some());
+    let desktop = world.device("desktop");
+    let dir_of = |path: &str| jd_vfs::Vfs::directory_id(&desktop.fs, std::path::Path::new(&format!("/sync/{path}"))).unwrap();
+    let vault_dir = dir_of("ring-1").unwrap();
+
+    // The laptop swaps the vault with the plain ring-2; the desktop rotates
+    // all three (1 -> 3 -> 2 -> 1). The laptop's swap reaches the server
+    // first.
+    let laptop = world.device("laptop");
+    laptop.fs.user_rename("ring-1", ".swap.tmp");
+    laptop.fs.user_rename("ring-2", "ring-1");
+    laptop.fs.user_rename(".swap.tmp", "ring-2");
+    desktop.fs.user_rename("ring-1", ".swap.tmp");
+    desktop.fs.user_rename("ring-2", "ring-1");
+    desktop.fs.user_rename("ring-3", "ring-2");
+    desktop.fs.user_rename(".swap.tmp", "ring-3");
+    world.pass(laptop);
+    assert!(world.settle().is_some(), "the swap and the rotation never settled");
+
+    let folders = world.server.folders();
+    let the_vault = folders.iter().find(|f| f.id == v).unwrap();
+    assert!(the_vault.encrypted && !the_vault.trashed, "the vault lost its protection or was trashed: {folders:?}");
+    assert!(!folders.iter().any(|f| f.id != v && f.encrypted && !f.trashed), "a second folder became a vault: {folders:?}");
+    assert_eq!(folders.iter().filter(|f| !f.trashed).count(), 3, "a ring was minted or lost: {folders:?}");
+    assert!(
+        world.server.blob(&jd_sim::sha256_hex(sealed)).is_none(),
+        "the sealed body reached the server in the clear: {:?}",
+        world.server.tree()
+    );
+    let view = jd_sim::scenario::owner_view_of_the_server(&world);
+    let sealed_under = view.keys().find(|path| path.ends_with("/sealed.txt")).unwrap().rsplit_once('/').unwrap().0.to_string();
+    assert_eq!(world.server.folder_id_at(&sealed_under), Some(v), "the sealed file is under a folder that is not the vault: {sealed_under} {folders:?}");
+    assert_eq!(dir_of(&the_vault.name), Some(vault_dir), "the vault's directory is not under the vault's name on the desktop: {:?}", disk_tree(desktop).keys().collect::<Vec<_>>());
+    assert_converged(&world);
+    for d in &world.devices {
+        let issues = d.store.open_issues().unwrap();
+        assert!(issues.iter().all(|i| i.kind == "kept_aside" || i.kind == "reconcile"), "{}: {issues:?}", d.name);
+    }
+}
+
 /// An empty plain folder whose path another folder takes, by identity, is
 /// neither kept at a path it does not own nor read as deleted while its
 /// directory stands (E1 of the reset's WP2 review).
@@ -3149,6 +3327,222 @@ fn an_empty_plain_folder_evicted_from_its_path_is_held_not_trashed_or_reminted()
     } else {
         assert!(world.settle().is_some());
     }
+    assert_converged(&world);
+}
+
+/// Three plain folders rotated with their files re-parented across them:
+/// the ring closes by identity, not by contents (the reset's WP2, the ring
+/// walk's identity route; hostile2 74424's shape as a pin).
+///
+/// The user rotates the three directories (A's to B's name, B's to C's,
+/// C's to A's) and then moves files between them, so what each directory
+/// HOLDS no longer says where it came from: read by contents, A is
+/// corroborated at A by a file that merely moved in, and the ring cannot
+/// close. Read by identity, every member is live, tracked and standing at
+/// another member's path -- three folders agreeing on where each other
+/// went -- and each record ends on its own directory under its new name,
+/// the files as ordinary moves between them. RED without the identity
+/// route: the identities end crossed.
+#[test]
+fn three_rotated_folders_with_their_files_reparented_keep_their_identities() {
+    let world = World::new(9_966, &["laptop"]);
+    let laptop = world.device("laptop");
+    let mut committed = Committed::default();
+    for (d, f) in [("A", "a.txt"), ("B", "b.txt"), ("C", "c.txt")] {
+        laptop.fs.user_mkdir(d);
+        laptop.fs.user_write(&format!("{d}/{f}"), f.as_bytes());
+        committed.note(&format!("{d}/{f}"), f.as_bytes());
+    }
+    assert!(world.settle().is_some());
+    let ids: Vec<i64> = ["A", "B", "C"].iter().map(|d| world.server.folder_id_at(d).unwrap()).collect();
+    let dirs: Vec<u64> = ["A", "B", "C"]
+        .iter()
+        .map(|d| jd_vfs::Vfs::directory_id(&laptop.fs, std::path::Path::new(&format!("/sync/{d}"))).unwrap().unwrap())
+        .collect();
+
+    // Rotate the directories: A's goes to B, B's to C, C's to A.
+    laptop.fs.user_rename("A", ".rot.tmp");
+    laptop.fs.user_rename("C", "A");
+    laptop.fs.user_rename("B", "C");
+    laptop.fs.user_rename(".rot.tmp", "B");
+    // Then re-parent files so contents contradict identity: a.txt (in A's
+    // directory, now at B) goes into the directory at A; c.txt (in C's
+    // directory, now at A) goes into the directory at B.
+    laptop.fs.user_rename("B/a.txt", "A/a.txt");
+    laptop.fs.user_rename("A/c.txt", "B/c.txt");
+    committed.note("A/a.txt", b"a.txt");
+    committed.note("B/c.txt", b"c.txt");
+    committed.note("C/b.txt", b"b.txt");
+    assert!(world.settle().is_some(), "never settled");
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+
+    // Each record on its own directory, under its new name.
+    for (i, (was, now)) in [("A", "B"), ("B", "C"), ("C", "A")].iter().enumerate() {
+        assert_eq!(world.server.folder_id_at(now), Some(ids[i]), "the folder that was {was} is not the one now called {now}: {:?}", world.server.folders());
+        let on_disk = jd_vfs::Vfs::directory_id(&laptop.fs, std::path::Path::new(&format!("/sync/{now}"))).unwrap();
+        assert_eq!(on_disk, Some(dirs[i]), "the directory at {now} is not {was}'s");
+    }
+    let tree = world.server.tree();
+    assert!(tree.contains_key("A/a.txt") && tree.contains_key("B/c.txt") && tree.contains_key("C/b.txt"), "{tree:?}");
+}
+
+/// E1's second shape: `P` renamed to `Q` and `R` renamed onto `P` on the
+/// server, `P`'s own rename refused once by the disk. `R` arrives at a name
+/// whose holder is leaving for a free name: the chain `R -> P -> Q` ends at
+/// a name nobody holds, vacated by the round, so `R` is paired with `P`
+/// and not parked (`trading_names`, the open ending); the planner
+/// sequences `R` behind `P`'s move and the two land in order. One outcome:
+/// `P` at `Q`, `R` at `P`, both directories the ones they were, nothing
+/// parked, nothing trashed, no room-making. RED before the open ending:
+/// naming parked `R` as a duplicate of `P`, trashed `R`'s directory to the
+/// OS trash, then re-created it and re-downloaded its file.
+#[test]
+fn a_folder_arriving_at_a_name_its_holder_is_leaving_for_a_free_one_is_not_parked() {
+    let world = World::new(9_967, &["laptop"]);
+    let laptop = world.device("laptop");
+    let mut committed = Committed::default();
+    // P holds nothing: with a file inside, the contents rule alone carries
+    // its record to the aside, and the follow would have no pin.
+    let p = world.server.seed_folder(None, "P");
+    let r = world.server.seed_folder(None, "R");
+    world.server.seed_file(Some(r), "r.txt", b"inside R");
+    committed.note("P/r.txt", b"inside R");
+    assert!(world.settle().is_some());
+    let dir_of = |path: &str| jd_vfs::Vfs::directory_id(&laptop.fs, std::path::Path::new(&format!("/sync/{path}"))).unwrap();
+    let (p_dir, r_dir) = (dir_of("P").unwrap(), dir_of("R").unwrap());
+
+    let act = |name: &str, body: serde_json::Value| world.server.action(name, &body).unwrap();
+    act("drive_rename", serde_json::json!({ "entity_type": "folder", "entity_id": p, "name": "Q" }));
+    act("drive_rename", serde_json::json!({ "entity_type": "folder", "entity_id": r, "name": "P" }));
+    world.clock.advance_secs(20 * 60);
+    world.pass(laptop);
+    // Refused once, so the arrival meets the holder still there. (A
+    // scheduled rename failure matches the FROM path, so more than one would
+    // refuse the room-making's own aside of P as well.)
+    laptop.fs.fail_next(FsOp::Rename, Some("P"), FailureKind::Io, 1);
+    assert!(world.settle().is_some(), "never settled");
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+    assert_eq!(dir_of("Q"), Some(p_dir), "P's directory did not end at Q: {:?}", disk_tree(laptop).keys().collect::<Vec<_>>());
+    assert_eq!(dir_of("P"), Some(r_dir), "R's directory did not end at P: {:?}", disk_tree(laptop).keys().collect::<Vec<_>>());
+    assert_eq!(world.server.folder_id_at("Q"), Some(p));
+    assert_eq!(world.server.folder_id_at("P"), Some(r));
+    let issues = laptop.store.open_issues().unwrap();
+    assert!(issues.iter().all(|i| i.kind == "reconcile"), "something was parked, held or stepped aside: {issues:?}");
+    assert!(laptop.fs.trashed().is_empty(), "a directory went to the trash: {:?}", laptop.fs.trashed());
+}
+
+/// The same, with the arrival CREATED rather than moved: the server renames
+/// `P` to `Q` and creates a new folder at `P` in the same batch, `P`'s own
+/// rename refused once. `create_local_folder` finds `P`'s directory in the
+/// way and declines; nothing is stepped aside -- the create waits behind
+/// the holder's move and lands once `P` has gone to `Q`. One outcome: `P`
+/// at `Q` with its directory, the new folder at `P` with its file, nothing
+/// stepped aside, nothing parked, nothing trashed.
+///
+/// A regression pin for the no-aside decision (E1-2: a create has nothing
+/// to sequence behind, so it waits; the planner sequences an arrival), not
+/// a fix's pin: green with the create site's identity refusal disabled and
+/// with the open ending of `trading_names` disabled, because the create's
+/// record check already declines a directory another folder's record
+/// resolves to.
+#[test]
+fn a_folder_created_at_a_leaving_holders_name_waits_behind_the_holder() {
+    let world = World::new(9_968, &["laptop"]);
+    let laptop = world.device("laptop");
+    let mut committed = Committed::default();
+    // P holds nothing, for the same reason as the sibling pin above.
+    let p = world.server.seed_folder(None, "P");
+    assert!(world.settle().is_some());
+    let dir_of = |path: &str| jd_vfs::Vfs::directory_id(&laptop.fs, std::path::Path::new(&format!("/sync/{path}"))).unwrap();
+    let p_dir = dir_of("P").unwrap();
+
+    let act = |name: &str, body: serde_json::Value| world.server.action(name, &body).unwrap();
+    act("drive_rename", serde_json::json!({ "entity_type": "folder", "entity_id": p, "name": "Q" }));
+    let n = act("drive_folder_create", serde_json::json!({ "name": "P" }))["folder"]["id"].as_i64().unwrap();
+    world.server.seed_file(Some(n), "n.txt", b"inside the new P");
+    committed.note("P/n.txt", b"inside the new P");
+    world.clock.advance_secs(20 * 60);
+    world.pass(laptop);
+    laptop.fs.fail_next(FsOp::Rename, Some("P"), FailureKind::Io, 1);
+    assert!(world.settle().is_some(), "never settled");
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+    assert_eq!(dir_of("Q"), Some(p_dir), "P's directory did not end at Q: {:?}", disk_tree(laptop).keys().collect::<Vec<_>>());
+    assert_eq!(world.server.folder_id_at("Q"), Some(p));
+    assert_eq!(world.server.folder_id_at("P"), Some(n));
+    let issues = laptop.store.open_issues().unwrap();
+    assert!(issues.iter().all(|i| i.kind == "reconcile"), "something was parked, held or stepped aside: {issues:?}");
+    assert!(laptop.fs.trashed().is_empty(), "a directory went to the trash: {:?}", laptop.fs.trashed());
+}
+
+/// A file this device WROTE is linked to its entity once it is up, as a
+/// downloaded one is. The scan caches the hash first with no entity to
+/// name, and the upload's completion took the cached branch and wrote no
+/// link, so `entity_for_file_id` answered "never seen it" for every locally
+/// written file -- the one route the trash rescue has when the records
+/// cannot vouch for a child. With the link: the uploaded file goes to the
+/// trash with its folder (the server has it), the never-uploaded one is
+/// rescued out beside it, and the uploaded one is not re-uploaded as new
+/// content at the root. RED before the link on the first assertion.
+#[test]
+fn a_file_this_device_wrote_is_linked_to_its_entity_once_it_is_up() {
+    let world = World::new(9_970, &["laptop", "desktop"]);
+    let mut committed = Committed::default();
+    let laptop = world.device("laptop");
+    laptop.fs.user_mkdir("Projects");
+    laptop.fs.user_write("Projects/keep.txt", b"this one reached the server");
+    committed.note("Projects/keep.txt", b"this one reached the server");
+    assert!(world.settle().is_some());
+
+    let inode = laptop.fs.file_id_of("Projects/keep.txt").unwrap();
+    let id = laptop
+        .store
+        .every_entry()
+        .unwrap()
+        .into_iter()
+        .find(|e| e.remote.name == "keep.txt")
+        .map(|e| e.id)
+        .unwrap();
+    assert_eq!(
+        laptop.store.entity_for_file_id(inode).unwrap(),
+        Some(id),
+        "the file this device wrote and uploaded is not linked to its entity"
+    );
+
+    // Offline, the user writes a sibling nothing has uploaded; the other
+    // device deletes the folder.
+    laptop.net.set_faults(NetFaults { drop_before: u64::MAX, ..NetFaults::none() });
+    laptop.fs.user_write("Projects/fresh.txt", b"never uploaded anywhere");
+    committed.note("Projects/fresh.txt", b"never uploaded anywhere");
+    world.pass(laptop);
+    let desktop = world.device("desktop");
+    desktop.fs.user_remove("Projects/keep.txt");
+    desktop.fs.user_remove("Projects");
+    world.pass(desktop);
+    laptop.net.set_faults(NetFaults::none());
+    assert!(world.settle().is_some(), "it should settle");
+
+    let tree = disk_tree(laptop);
+    let fresh = jd_sim::sha256_hex(b"never uploaded anywhere");
+    assert!(
+        tree.values().any(|h| h.as_deref() == Some(fresh.as_str())),
+        "the never-uploaded file was not rescued: {:?}",
+        tree.keys().collect::<Vec<_>>()
+    );
+    let kept = jd_sim::sha256_hex(b"this one reached the server");
+    assert!(
+        !tree.values().any(|h| h.as_deref() == Some(kept.as_str())),
+        "the uploaded file was rescued out beside the folder instead of going with it: {:?}",
+        tree.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        laptop.fs.trashed().iter().any(|(path, body)| path == "Projects/keep.txt" && body.as_deref() == Some(&b"this one reached the server"[..])),
+        "the uploaded file did not go to the trash with its folder: {:?}",
+        laptop.fs.trashed()
+    );
+    assert_nothing_lost(&world, &committed);
     assert_converged(&world);
 }
 
@@ -4818,6 +5212,20 @@ fn a_second_folder_conflict_at_one_name_gets_its_own_name() {
             tree.keys().collect::<Vec<_>>()
         );
     }
+    // And the names the room-making minted stay on this disk, for as long
+    // as they are needed and no longer. A folder record whose directory was
+    // stepped aside FOLLOWS it (`the_owner_follows_its_directory`): the next
+    // scan finds the directory where the record says, with no local move to
+    // report, and the server's placement is applied to it from the aside.
+    // Without the follow the record kept naming the path its directory had
+    // left, the scan then met the directory at the aside as the user moving
+    // it there, and the conflict name -- a name nobody chose -- was pushed
+    // to the server as the folder's own and published to every device.
+    // Nothing here asked the server for anything, so its names are the
+    // truth, and the disk ends wearing them.
+    let expected: Vec<&str> = vec!["Docs", "Docs/f1.txt", "Three", "Three/f3.txt", "Two", "Two/f2.txt"];
+    assert_eq!(world.server.tree().keys().map(String::as_str).collect::<Vec<_>>(), expected, "the server learned a name the room-making minted");
+    assert_eq!(tree.keys().map(String::as_str).collect::<Vec<_>>(), expected, "the disk did not end at the server's names");
 }
 
 #[test]
@@ -11012,6 +11420,38 @@ fn a_case_twin_that_was_never_holdable_converges() {
     eprintln!("DISK {:?}", disk_tree(mac).keys().collect::<Vec<_>>());
     eprintln!("SERVER {:?}", world.server.tree().keys().collect::<Vec<_>>());
     assert_converged(&world);
+}
+
+/// A park's event complaint ends when the park is undone (B12 of the reset).
+///
+/// The mac holds `x.txt` and `y.txt`; the server renames `y.txt` onto
+/// `X.txt`, which this disk cannot hold beside `x.txt`, so the mac gives up
+/// its copy of `y.txt` to the trash and says so ("parked", an event). The
+/// server then renames it again to `z.txt`, the clash clears, the file
+/// comes back. Its issue said it would; once it has, the complaint is
+/// over. Left open it named a file that was back and fine, and on a sweep
+/// trace a stall beside an open issue reads as a hold.
+#[test]
+fn a_parks_complaint_ends_when_the_file_comes_back() {
+    let world = World::of(9_972, &[("mac", jd_sim::Platform::MacOs)]);
+    let mac = world.device("mac");
+    let x = world.server.seed_file(None, "x.txt", b"x");
+    let y = world.server.seed_file(None, "y.txt", b"y");
+    let _ = x;
+    assert!(world.settle().is_some(), "never settled");
+    let act = |name: &str, body: serde_json::Value| world.server.action(name, &body).unwrap();
+    act("drive_rename", serde_json::json!({ "entity_type": "file", "entity_id": y, "name": "X.txt" }));
+    assert!(world.settle().is_some(), "the clash never settled");
+    let issues = mac.store.open_issues().unwrap();
+    assert!(issues.iter().any(|i| i.kind == "parked"), "the park was not reported: {issues:?}");
+    assert!(mac.fs.trashed().iter().any(|(p, _)| p == "y.txt"), "the copy was not given up: {:?}", mac.fs.trashed());
+
+    act("drive_rename", serde_json::json!({ "entity_type": "file", "entity_id": y, "name": "z.txt" }));
+    assert!(world.settle().is_some(), "the release never settled");
+    assert_converged(&world);
+    assert_eq!(disk_tree(mac).get("z.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b"y")), "{:?}", disk_tree(mac));
+    let issues = mac.store.open_issues().unwrap();
+    assert!(issues.is_empty(), "the park's complaint outlived the park: {issues:?}");
 }
 
 /// A folder renamed on the server into a case twin of one this disk already

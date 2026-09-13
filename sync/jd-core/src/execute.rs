@@ -1119,6 +1119,7 @@ fn follow_the_server_name(
         } else {
             let aside = free_conflict_path(env, &to, &wanted.name, &[])?;
             env.vfs.rename(&to, &aside)?;
+            the_owner_follows_its_directory(env, &aside)?;
             env.store.raise_issue(
                 Some(id),
                 "kept_aside",
@@ -1148,6 +1149,64 @@ fn names_the_server_has(env: &ExecEnv, parent: Option<i64>) -> Result<Vec<String
         .filter(|e| !e.remote_deleted && !e.id.is_provisional() && e.remote.parent == parent)
         .map(|e| e.remote.name)
         .collect())
+}
+
+/// A directory was just moved aside under a conflict name: whose was it? A
+/// folder record that knows that directory as its own FOLLOWS it -- its
+/// agreed placement takes the aside name, so the next scan finds the
+/// directory where the record says, corroborated by identity, and detects no
+/// local move; the record's `remote` still names the server's placement, so
+/// reconcile reads a REMOTE move and applies the server's placement to the
+/// directory from the aside. Left behind, the record went on believing it
+/// stood at a path that now holds the incoming folder's directory -- a
+/// stranger by identity -- and a PLAIN folder, which may not claim its
+/// directory back, sat contested there for ever with its files withdrawn.
+/// This is not a claim: the engine moved the directory itself and knows
+/// exactly whose it was. The design's make_room rule
+/// (`specs/drive_directory_identity.md`): the owner's record follows it.
+///
+/// Not for a HELD owner (open `directory_disagrees`): the user was told
+/// nothing moves until they put one back, and the engine's own room-making
+/// must not lift that; left believing the old path, the hold stands on its
+/// own directory as the rule says. Not when two live records carry the id:
+/// which one is the owner is then a question this cannot answer.
+fn the_owner_follows_its_directory(env: &ExecEnv, aside: &std::path::Path) -> Result<(), ExecError> {
+    let Some(aside_id) = env.vfs.directory_id(aside)?.filter(|id| *id != 0) else {
+        return Ok(());
+    };
+    let aside_name = aside
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let held: std::collections::HashSet<EntityId> = env
+        .store
+        .open_issues()?
+        .into_iter()
+        .filter(|i| i.kind == crate::pass::DIRECTORY_DISAGREES)
+        .filter_map(|i| i.entity)
+        .collect();
+    let mut owners: Vec<Entry> = env
+        .store
+        .every_entry()?
+        .into_iter()
+        .filter(|o| {
+            o.id.entity_type == EntityType::Folder
+                && !o.remote_deleted
+                && o.synced_fingerprint.map(|fp| fp.file_id) == Some(aside_id)
+        })
+        .collect();
+    if owners.len() != 1 {
+        return Ok(());
+    }
+    let mut owner = owners.remove(0);
+    if held.contains(&owner.id) {
+        return Ok(());
+    }
+    if let Some(agreed) = owner.synced_placement.as_mut() {
+        agreed.name = aside_name;
+        env.store.put_entry(&owner)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn make_room(
@@ -1197,6 +1256,7 @@ pub(crate) fn make_room(
     // path, which may be nothing the server has ever heard of.
     let aside = free_conflict_path(env, path, &name, &[])?;
     env.vfs.rename(path, &aside)?;
+    the_owner_follows_its_directory(env, &aside)?;
     env.store.raise_issue(
         None,
         "kept_aside",
@@ -2148,11 +2208,25 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
         entry.synced_remote_content = entry.remote_content.clone();
     }
     let content = ContentId {
-        sha256: sha,
+        sha256: sha.clone(),
         size: fingerprint.size,
     };
     match settled {
-        Some(fp) => agree(&mut entry, Some(content), Some(fp)),
+        Some(fp) => {
+            agree(&mut entry, Some(content), Some(fp));
+            // The inode-to-entity link, written as the download writes it.
+            // The scan cached this file's hash first, with no entity to name,
+            // and the cached branch above never wrote one -- so a file this
+            // device WROTE was never linked to its entity, and
+            // `entity_for_file_id` answered "never seen it" for every such
+            // file: the rescue then carried a locally written file the server
+            // already held out of a folder being trashed, and `plaintext_
+            // source_of` read one moved into a keyless vault as unseen. The
+            // completion is the one place that knows both the inode and the
+            // entity. The plaintext hash, for a sealed upload as for a plain
+            // one: the link is about the file on this disk.
+            env.store.cache_hash(fp, &sha, Some(entry.id), (env.now_ms)().saturating_mul(1_000_000))?;
+        }
         None => {
             // The file moved on while its bytes were going up. What the server
             // took is still a real version of it, and this device is what sent
@@ -2876,6 +2950,16 @@ fn create_local_folder(
     // coming for it; a tracked FOLDER in the way is waited for, because
     // something is. Estate seed 22081285, reviewer probe p1b.
     if env.vfs.read_dir(&path).is_ok() {
+        // The records, asked by path. The scan is what makes records
+        // identity-correct -- eviction by identity, the ring by identity,
+        // the encrypted claim, the tracker skip, the path map built from
+        // `tracked` -- so by the time this runs a record resolves to the
+        // path its directory stands at. A second identity check here (a
+        // directory another live folder record knows as its own is never
+        // adopted) was tried in the reset's WP2 and fired only while the
+        // scan was still wrong about a never-materialized tracker; with the
+        // scan right it had no reachable shape (both 75415 shapes, the E1
+        // pins, the sweep seed with the swap off), and it came out.
         for other in env.store.every_entry()? {
             if other.id == op.entity
                 || other.id.entity_type != EntityType::Folder
@@ -3129,7 +3213,8 @@ fn move_remote(
     // is refused identically every time after, so the op retries for as long as
     // the computer is on. Any transport hiccup during a vault rename was enough
     // to trigger it.
-    let rename_body = if entry.is_encrypted && op.entity.entity_type == EntityType::File {
+    let sealed_name = entry.is_encrypted && op.entity.entity_type == EntityType::File;
+    let sealed_body = if sealed_name {
         let stored: Option<String> = serde_json::from_str::<Value>(&op.params)
             .ok()
             .and_then(|p| p.get("sealed_name").and_then(Value::as_str).map(str::to_owned));
@@ -3146,24 +3231,32 @@ fn move_remote(
                 Err(why) => return Ok(why),
             },
         };
-        json!({
+        Some(json!({
             "entity_type": t,
             "entity_id": op.entity.server_id,
             "encrypted_metadata": blob,
-        })
+        }))
     } else {
-        json!({
-            "entity_type": t,
-            "entity_id": op.entity.server_id,
-            "name": to.name,
-        })
+        None
     };
-    let rename = || -> Result<(), ExecError> {
-        env.api.action_idempotent(
-            "drive_rename",
-            rename_body.clone(),
-            &format!("{}-rename", op.idempotency_key),
-        )?;
+    // `attempt` 0 asks for the planned name under the op's own key; each
+    // later attempt asks for a conflict name under a key of its own, for the
+    // reason the folder create gives: a key is a promise that the request
+    // behind it does not change.
+    let rename = |wanted: &str, attempt: u32| -> Result<(), ExecError> {
+        let body = match &sealed_body {
+            Some(body) => body.clone(),
+            None => json!({
+                "entity_type": t,
+                "entity_id": op.entity.server_id,
+                "name": wanted,
+            }),
+        };
+        let key = match attempt {
+            0 => format!("{}-rename", op.idempotency_key),
+            n => format!("{}-rename-n{n}", op.idempotency_key),
+        };
+        env.api.action_idempotent("drive_rename", body, &key)?;
         Ok(())
     };
     // The way through when both intermediate states are occupied: step aside
@@ -3201,57 +3294,149 @@ fn move_remote(
 
     let reparenting = entry.remote.parent != to.parent;
     let renaming = entry.remote.name != to.name;
-    match (reparenting, renaming) {
-        // Both. Two calls means one intermediate state, and there is no order
-        // that cannot land in an occupied one: move first and the OLD name
-        // arrives among the destination's siblings; rename first and the NEW
-        // name arrives among the old neighbours. Neither can be assumed free —
-        // a contested name is usually the whole reason for the rename.
-        //
-        // So it takes the order that puts the chosen name in the place it was
-        // chosen for. A conflict copy's name is picked from what the
-        // destination already holds, which says nothing about the folder it is
-        // leaving, so renaming first is the half that was actually checked. If
-        // the old neighbours refuse it, the other order gets its turn.
-        //
-        // Moving first unconditionally is what this used to do, and the server
-        // that let it — the mock, not the real one — hid it completely. Against
-        // a server that refuses, every combined move-and-rename out of a folder
-        // whose name the destination also used stalled: fifteen seeds of a
-        // fifteen-hundred-seed sweep, all of them this.
-        //
-        // Both can be occupied at once, and then neither order works while the
-        // destination the file is actually going to sits free. Stepping aside
-        // into a scratch name first costs one extra call and always works, so it
-        // is the last resort rather than the rule.
-        //
-        // Gated on `may_be_about_the_name` rather than `name_taken`, so a
-        // server that refuses in prose alone still reaches all three orders.
-        // Read strictly, a refusal with no marker skips every branch here and
-        // falls out to the caller, which drops the operation and leaves the
-        // record exactly as it was -- and the next pass derives the identical
-        // move from the same disk, for ever. Sweep seed 90664 is that, and the
-        // soak rig ran into the same thing against a real core whose
-        // folder-rename branches sent no marker. Each order below is verified
-        // by the server taking or refusing its own call, so trying them on a
-        // refusal that was about something else costs three calls and ends in
-        // the same place.
-        (true, true) => match rename() {
-            Ok(()) => reparent()?,
-            Err(ExecError::Proto(p)) if p.may_be_about_the_name() => match reparent() {
-                Ok(()) => rename()?,
-                Err(ExecError::Proto(p)) if p.may_be_about_the_name() => {
-                    park()?;
-                    reparent()?;
-                    rename()?;
-                }
+    // Both. Two calls means one intermediate state, and there is no order
+    // that cannot land in an occupied one: move first and the OLD name
+    // arrives among the destination's siblings; rename first and the NEW
+    // name arrives among the old neighbours. Neither can be assumed free —
+    // a contested name is usually the whole reason for the rename.
+    //
+    // So it takes the order that puts the chosen name in the place it was
+    // chosen for. A conflict copy's name is picked from what the
+    // destination already holds, which says nothing about the folder it is
+    // leaving, so renaming first is the half that was actually checked. If
+    // the old neighbours refuse it, the other order gets its turn.
+    //
+    // Moving first unconditionally is what this used to do, and the server
+    // that let it — the mock, not the real one — hid it completely. Against
+    // a server that refuses, every combined move-and-rename out of a folder
+    // whose name the destination also used stalled: fifteen seeds of a
+    // fifteen-hundred-seed sweep, all of them this.
+    //
+    // Both can be occupied at once, and then neither order works while the
+    // destination the file is actually going to sits free. Stepping aside
+    // into a scratch name first costs one extra call and always works, so it
+    // is the last resort rather than the rule.
+    //
+    // Gated on `may_be_about_the_name` rather than `name_taken`, so a
+    // server that refuses in prose alone still reaches all three orders.
+    // Read strictly, a refusal with no marker skips every branch here and
+    // falls out to the caller, which drops the operation and leaves the
+    // record exactly as it was -- and the next pass derives the identical
+    // move from the same disk, for ever. Sweep seed 90664 is that, and the
+    // soak rig ran into the same thing against a real core whose
+    // folder-rename branches sent no marker. Each order below is verified
+    // by the server taking or refusing its own call, so trying them on a
+    // refusal that was about something else costs three calls and ends in
+    // the same place.
+    let orders = |wanted: &str, attempt: u32| -> Result<(), ExecError> {
+        match (reparenting, renaming || attempt > 0) {
+            (true, true) => match rename(wanted, attempt) {
+                Ok(()) => reparent()?,
+                Err(ExecError::Proto(p)) if p.may_be_about_the_name() => match reparent() {
+                    Ok(()) => rename(wanted, attempt)?,
+                    Err(ExecError::Proto(p)) if p.may_be_about_the_name() => {
+                        park()?;
+                        reparent()?;
+                        rename(wanted, attempt)?;
+                    }
+                    Err(e) => return Err(e),
+                },
                 Err(e) => return Err(e),
             },
+            (true, false) => reparent()?,
+            (false, true) => rename(wanted, attempt)?,
+            (false, false) => {}
+        }
+        Ok(())
+    };
+    // The name the plan chose may be spoken for on the server by something
+    // this device cannot see -- a sibling made on another device that has not
+    // reached this store, most often a folder created at the same name the
+    // user gave a directory here. Every order above ends at the same refusal,
+    // and a refused name is a plan gone out of date, so the op was dropped
+    // for the next pass to choose again: the pass then read the same disk
+    // against the same record and derived the same move, for ever, with
+    // nothing queued and nothing raised (clean2 75415: the user renamed the
+    // vault's directory to a name a peer's plain folder held on the server).
+    //
+    // The engine already answers this at the create and the upload: land
+    // beside the occupant under a conflict name, then bring the disk along.
+    // The move takes the same answer. A name taken by something THIS device
+    // is renaming away is the one temporary case, and that one waits.
+    //
+    // Only in answer to a refusal, never ahead of one, for the reason the
+    // create gives: a retry of a move whose answer was lost has to ask for
+    // the SAME name to be replayed as the same request. An encrypted FILE's
+    // name is sealed into the request itself, so it takes the ordinary
+    // orders and no conflict name.
+    let mut attempt = 0u32;
+    let mut wanted = to.name.clone();
+    loop {
+        match orders(&wanted, attempt) {
+            Ok(()) => break,
+            Err(ExecError::Proto(p)) if p.name_taken() && !sealed_name && attempt < 1000 => {
+                if held_by_a_rename_this_device_owes(env, &wanted, to.parent)? {
+                    return Ok(OpOutcome::Retry(
+                        "the name is spoken for by something this device is renaming".into(),
+                    ));
+                }
+                attempt += 1;
+                wanted = (env.conflict_name)(&to.name, attempt);
+            }
             Err(e) => return Err(e),
-        },
-        (true, false) => reparent()?,
-        (false, true) => rename()?,
-        (false, false) => {}
+        }
+    }
+    let asked_for = to.name.clone();
+    let to = Placement { parent: to.parent, name: wanted };
+    // The server took a conflict name, so the disk follows it: the move was
+    // derived from this disk, which already wears the planned name. Left
+    // there, the record would say one thing and the disk another, and the
+    // next scan would read the gap as the user renaming it back and push the
+    // refused name again. Server first, then disk, then the record.
+    //
+    // Only this entity's OWN directory or file follows, by identity. What
+    // stands at the planned path now is not necessarily what the move was
+    // derived from: an op earlier in the same pass can have put something
+    // else there -- the server's move of the vault into this name, with the
+    // room-making stepping this folder's directory aside (clean2 74023: the
+    // desktop rotated the three rings while the server carried the laptop's
+    // swap; the plain ring's refused move then renamed the VAULT's directory
+    // to the plain folder's conflict name, and the sealed file inside went
+    // up in the clear under it). A directory carrying another id is not
+    // this folder's, however it is named, and is left where it is: the
+    // record takes the server's name and the next scan finds this folder's
+    // own directory wherever it stands, by identity. Where either side does
+    // not know the id, today's rule: the thing at the planned path is what
+    // the move was about.
+    if attempt > 0 {
+        if let (Placed::At(from), Placed::At(dest)) = (
+            path_for(env, &Placement { parent: to.parent, name: asked_for.clone() })?,
+            path_for(env, &to)?,
+        ) {
+            let own = entry.synced_fingerprint.map(|fp| fp.file_id).filter(|id| *id != 0);
+            let here = match entry.id.entity_type {
+                EntityType::Folder => env.vfs.directory_id(&from)?,
+                EntityType::File => env.vfs.fingerprint(&from)?.map(|fp| fp.file_id),
+            }
+            .filter(|id| *id != 0);
+            let its_own = match (own, here) {
+                (Some(own), Some(here)) => own == here,
+                _ => !nothing_at(env, &from)?,
+            };
+            if from != dest && its_own {
+                make_room(env, &dest, None)?;
+                env.vfs.rename(&from, &dest)?;
+            }
+        }
+        env.store.raise_issue(
+            Some(entry.id),
+            "kept_aside",
+            &format!(
+                "{asked_for} was already taken on the server, so this is now {}",
+                to.name
+            ),
+            (env.now_ms)() as i64,
+        )?;
     }
 
     // Where it ACTUALLY is, when this op has been tried before — the calls above
@@ -3334,7 +3519,7 @@ fn move_remote(
         // name it no longer has -- and edited bytes are then found by neither
         // path nor content, which reads as a deletion plus a stranger. A
         // reparent alone changes no name and keeps its mapping.
-        if renaming {
+        if renaming || attempt > 0 {
             entry.local_name = None;
         }
     }
@@ -3589,9 +3774,13 @@ fn move_local(
     // placement, overtaken every pass). A directory carrying a DIFFERENT id
     // is not this folder's, however the records read. Where either side
     // does not know, the records decide as they did.
+    // The id read at `from` is the directory this op moves, and it is what
+    // the landing records as the folder's identity below.
+    let mut directory_moved: Option<u64> = None;
     if entry.id.entity_type == EntityType::Folder && from != dest {
         let mine = entry.synced_fingerprint.map(|fp| fp.file_id).filter(|id| *id != 0);
         let there = env.vfs.directory_id(&from)?.filter(|id| *id != 0);
+        directory_moved = there;
         match (mine, there) {
             (Some(mine), Some(there)) if mine == there => {}
             (Some(_), Some(_)) => {
@@ -3721,18 +3910,36 @@ fn move_local(
     // nobody managed to read -- accidentally safe, because with no content
     // agreement every later guard falls through to its refusal arm, but safe by
     // luck rather than by decision.
+    //
+    // A folder's fingerprint is its directory's identity, and the directory
+    // this operation just moved is the one it read at `from` before the
+    // rename (`directory_moved`): recorded here, at the moment of the move,
+    // because the scan records an identity only at the record's agreed path
+    // and a second operation in the same pass can meet this directory before
+    // any scan does. Where this op did not do the rename -- the move had
+    // already landed, or there was nothing to move -- the directory at `dest`
+    // is asked instead. Asking `fingerprint` here answered `None` for a
+    // directory and threw a known identity away with every move: a folder
+    // moved onto another's name and then stepped aside by the next op's
+    // room-making had no id for the follow to find, its record kept naming
+    // the path it had left, two records named one path, and the one read as
+    // gone was trashed with the other's file inside.
     let agreed = entry.synced_content.as_ref().map(|c| c.sha256.clone());
-    let verified = match (entry.id.entity_type, &agreed) {
-        (EntityType::Folder, _) => true,
-        (EntityType::File, Some(agreed)) => {
-            env.vfs.hash(&dest).ok().as_deref() == Some(agreed.as_str())
+    entry.synced_fingerprint = match (entry.id.entity_type, &agreed) {
+        (EntityType::Folder, _) => match directory_moved.filter(|_| from != dest && !landed) {
+            Some(id) => Some(jd_vfs::Fingerprint::of_directory(id)),
+            None => env
+                .vfs
+                .directory_id(&dest)?
+                .filter(|id| *id != 0)
+                .map(jd_vfs::Fingerprint::of_directory),
+        },
+        (EntityType::File, Some(agreed))
+            if env.vfs.hash(&dest).ok().as_deref() == Some(agreed.as_str()) =>
+        {
+            env.vfs.fingerprint(&dest)?
         }
-        (EntityType::File, None) => false,
-    };
-    entry.synced_fingerprint = if verified {
-        env.vfs.fingerprint(&dest)?
-    } else {
-        None
+        (EntityType::File, _) => None,
     };
 
     // An agreement was just recorded, so say what that means for the entry's
@@ -4978,6 +5185,9 @@ fn adopt(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
 
     let content = entry.remote_content.clone();
     agree(&mut entry, content, Some(fingerprint));
+    // The link, for the same reason the upload's settled arm writes it: the
+    // cached branch above named no entity.
+    env.store.cache_hash(fingerprint, &local_sha, Some(entry.id), (env.now_ms)().saturating_mul(1_000_000))?;
     env.store.put_entry(&entry)?;
     Ok(OpOutcome::Done)
 }
