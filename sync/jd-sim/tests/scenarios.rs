@@ -3329,6 +3329,67 @@ fn a_swap_interrupted_after_its_park_is_not_given_up_when_a_peer_rotates() {
     assert_converged(&world);
 }
 
+/// A download never rebuilds a folder the user has just deleted (finding C2
+/// of the reset's WP1d, kill2 75112 and 75115).
+///
+/// mac makes `Folder` and syncs it to pc; then mac adds `Folder/f.txt` and
+/// sends it up. Before pc's next pass, pc's user deletes `Folder`. That pass
+/// reads the feed (f.txt: new, pending download) and the disk (the folder:
+/// gone) and planned both in one round: `TrashRemote Folder` and `Download
+/// f.txt`. Transfers run before deletes, and a landing creates its parent
+/// directories -- on a real disk too (`fs::create_dir_all`) -- so the folder
+/// the user deleted was standing again, holding the download, before the
+/// trash ran; the next scan met a directory nobody knew and minted a new
+/// server folder for it. Content arriving under a folder this round removes
+/// on the user's word is not brought in: the trash runs, the server trashes
+/// the subtree, and the feed forgets the file.
+/// Twice: once plain, once with pc's trash call refused by the network on
+/// its first try, so the folder is busy on the next pass -- out of the
+/// round, its trash still queued -- while the download is planned again.
+#[test]
+fn a_download_never_rebuilds_a_folder_the_user_has_just_deleted() {
+    for trash_refused_once in [false, true] {
+        let world = World::new(9_976, &["mac", "pc"]);
+        let mac = world.device("mac");
+        let pc = world.device("pc");
+        mac.fs.user_mkdir("Folder");
+        assert!(world.settle().is_some());
+        let folder = world.server.folder_id_at("Folder").unwrap();
+        assert!(pc.fs.exists("Folder"), "pc has the folder before the file exists");
+        mac.fs.user_write("Folder/f.txt", b"arrives after pc's delete");
+        world.pass(mac);
+        assert!(world.server.tree().contains_key("Folder/f.txt"), "f.txt is on the server");
+        pc.fs.user_remove("Folder");
+        if trash_refused_once {
+            pc.net.set_faults(NetFaults {
+                refuse_before: Some("drive_trash".into()),
+                ..NetFaults::none()
+            });
+        }
+        world.pass(pc);
+        if trash_refused_once {
+            assert!(
+                pc.store.queued_ops().unwrap().iter().any(|o| o.kind == "trash_remote"),
+                "the refused trash is not queued: the arming did not take"
+            );
+            world.pass(pc);
+        }
+        assert!(world.settle().is_some(), "never settled (trash refused once: {trash_refused_once})");
+
+        for d in &world.devices {
+            let issues = d.store.open_issues().unwrap();
+            eprintln!("{} (trash refused once: {trash_refused_once}): issues {:?}", d.name, issues.iter().map(|i| i.kind.as_str()).collect::<Vec<_>>());
+        }
+        let folders = world.server.folders();
+        let live: Vec<_> = folders.iter().filter(|f| !f.trashed).collect();
+        assert!(live.is_empty(), "a folder stands on the server after the user deleted it (trash refused once: {trash_refused_once}): {folders:?}");
+        assert!(folders.iter().any(|f| f.id == folder && f.trashed), "the folder was not trashed: {folders:?}");
+        assert!(!pc.fs.exists("Folder"), "the deleted folder is back on pc: {:?}", disk_tree(pc).keys().collect::<Vec<_>>());
+        assert!(!mac.fs.exists("Folder"), "the deleted folder is back on mac: {:?}", disk_tree(mac).keys().collect::<Vec<_>>());
+        assert_converged(&world);
+    }
+}
+
 /// An empty plain folder whose path another folder takes, by identity, is
 /// neither kept at a path it does not own nor read as deleted while its
 /// directory stands (E1 of the reset's WP2 review).

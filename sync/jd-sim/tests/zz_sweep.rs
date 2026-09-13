@@ -3892,7 +3892,14 @@ fn frozen_contested_name_loop_seeds() {
         ("pc", Platform::Windows),
         ("disk", Platform::Decomposing),
     ];
-    for (seed, poisoned_by_ah) in [(111_740u64, false), (111_201, true), (111_120, true)] {
+    // 111740 joined the poisoned list on 2026-09-13 with WP3 change 2: the
+    // round no longer downloads under a folder the user has just deleted
+    // (first divergence: two downloads under two trashed folders withheld on
+    // disk's pass 7), the chaos name-swapper then fires at different moments,
+    // and one of its swaps meets scan rule 1 (file 913 holds both sides of a
+    // chaos pair). Swap-off green on the engine before and after the change:
+    // AH residue, not a fault of the change.
+    for (seed, poisoned_by_ah) in [(111_740u64, true), (111_201, true), (111_120, true)] {
         let run = || {
             workload_core(seed, 70, &refs, true, Vault::None, false, Names::Ordinary);
         };

@@ -5,8 +5,10 @@ identity) landed in two units -- `4466080e` and `5a347458` (reading 7, the
 post-commit re-run: identical to reading 6 per oracle and byte-identical
 traces); WP1d (the custody oracle) DONE 2026-09-13, harness only, findings
 C1-C3 recorded below (WP1d committed as `1581721c`); WP3 in progress: change
-1 (naming waits on a chain that runs into an open op) closes C3. Every change
-reviewed by public-html-c6, approach before patch.**
+1 (`aba4bd60`, naming waits on a chain that runs into an open op) closes C3,
+change 2 (the round brings nothing in under a folder the user has just
+deleted) closes C2. Every change reviewed by public-html-c6, approach before
+patch.**
 
 Testing is paused. No further guards land on the sync engine until the work
 packages below are done, in order. This spec is the reason, the order, and the
@@ -1385,7 +1387,73 @@ signatures -- a ring's `ApplyRemoteMove`/`AdoptPlacement` absent from a plan
 where the freeing batch's park no longer ran and the interrupted op was
 overtaken instead (75104 75105 75121 75123 75400 75415). **C3 CLOSED.** The
 rescue net's own bar stands unchanged: the fire on 504 was a legitimate
-rescue from a park that should never have been ordered.
+rescue from a park that should never have been ordered. Committed as
+`aba4bd60`.
+
+**WP3 change 2 (2026-09-13): the round brings nothing in under a folder the
+user has just deleted -- C2's root.** Traced on kill2 75112 with swaps off
+(journal + net log, no engine probe). pc's user removes `Contested Folder`
+(506) at step 27; pc's next pass reads the feed (mac's `contested.txt`, 906:
+new, never on pc) and the disk (the folder: gone) and plans both in one
+round: `TrashRemote 506` and `Download 906`. Transfers run before deletes, and
+a landing creates its parent directories -- on the real disk too (`OsVfs`
+`try_commit`: `fs::create_dir_all(parent)`; `MemFs` `ensure_parents`) -- so
+the directory the user deleted stood again, holding the download, before
+the trash ran; the next scan met a directory nobody knew and minted a new
+folder for it (510). The harness's landing-save hook wrote the body that
+ended in 510, but the shape needs no hook: the pin below reproduces it in a
+clean world, as an empty-folder resurrection. 75115 is the same (507 -> 511).
+
+Change, `round.rs` (`run_round`) with one read in `pass.rs`: `going` = the
+folders this round's resolution trashes on the server (local delta Deleted)
+PLUS the folders whose `trash_remote` is already open in the journal from an
+earlier pass (c6's condition C2-1: refused once by the network or killed
+mid-call, such a folder is busy and out of the round, and its trash is just
+as decided; `pass.rs` reads `queued_ops` for it). For every other input,
+`Download`, `CreateLocalFolder`, and `ApplyRemoteMove` whose target parent
+is under a going folder (walked up `parents.remote`) are not planned this
+round. Withheld, not dropped: no status, no op, no belief. The trash runs,
+the server trashes the subtree, the feed marks the children deleted and they
+are forgotten as today. Read before the mass-delete withholding on purpose:
+while that pause holds a folder's trash for a person to answer, the arrivals
+under it wait with it. The local-delete twin of the server's
+`parent_trashed` refusal, decided where cross-entry knowledge already lives
+(the mass-delete count). Q2 (c6, `scan.rs`): every known child of a missing
+directory is reported Deleted on its own and resolves to `TrashRemote`, so
+only a never-materialized child produces an arrival, and an upload creates
+no directories -- no further coverage is needed.
+
+Rejected: ordering Delete before Transfer (the stages are global and deletes
+run last for the mass-delete reason); a VFS that does not create parents (the
+real disk does, and a download whose parent was renamed mid-pass relies on
+it); anything at the scan (the directory really is new by the time the scan
+sees it); a rule keyed on the harness's landing save (the shape stands
+without it).
+
+Pin: `a_download_never_rebuilds_a_folder_the_user_has_just_deleted`, two
+armings -- plain, and with pc's `drive_trash` refused once by the network so
+the folder is busy on the next pass while the download is planned again.
+Invariant: no live folder of that name on the server (one trashed), none on
+either disk, converged; issues printed. RED on `aba4bd60` (502 minted, both
+armings); GREEN with `going` from the round alone for the first arming and
+RED for the second (C2-1 load-bearing); GREEN with both.
+
+Reading 10 (`zz_sweep.going` f041a2be620e, R4 pair with reading 9): sealed,
+chain, converged -- no seed moves either way. Custody: kill2 fired 5 -> 3
+(75112 and 75115 green), misplaced 6 -> 4, rescued 5 -> 6; no custody G->R.
+75112 and 75115 with swaps off: every oracle green. Trace pair `tr_pending`
+vs `tr_going`: 150 identical, 10 differ; the first divergence on nine is a
+`Download`/`CreateLocalFolder` absent from a plan that carries its ancestor's
+`TrashRemote` (clean2 74008 74010 74039, clean3 74827, hostile2 74414, kill2
+75112 75115 75118 75122), and on kill2 75110 a `Download` absent two passes
+after a pass that failed mid-way with the parent's trash already journalled
+(C2-1's case). Frozen 111740 (chaos, no kills) moved from green-on-everything
+to red on the chain oracle: its first divergence is two downloads withheld
+under two trashed folders on disk's pass 7; the chaos name-swapper then fires
+at other moments and one swap meets scan rule 1; swap-off green on the
+engine before AND after the change -- AH residue, so the seed joins the
+`poisoned_by_ah` list with the reason in the comment (c6's F1, answered by
+the trace, not by widening the pin). **C2 CLOSED.**
 
 ## Process rules, effective now
 
@@ -1465,10 +1533,9 @@ belt in, before the belt lands.** B1 is what happens without this.
   after WP2 is read correctly.
 - WP1d's draw-sequence cost: measured zero (traces byte-identical 160 of
   160); no re-baseline was needed.
-- C2 (a download landing rebuilds a folder the user has just deleted, and
-  the scan makes a new server folder of it) is WP3's next, beside the
-  kill-arm resurrection shapes. C3 CLOSED by WP3 change 1 (its root was a
-  naming park, not the rescue net). C1 is AH (owner decision A1).
+- C2 CLOSED by WP3 change 2 (the round brings nothing in under a folder the
+  user has just deleted). C3 CLOSED by WP3 change 1 (its root was a naming
+  park, not the rescue net). C1 is AH (owner decision A1).
 - plat3 75418, reading 2, first run: no verdict line, near-zero runtime,
   cause unknown (`scratchpad/wp1a/reading2/manifest.txt`; the host's kernel
   log shows no OOM or kill at 16:15). The runner now keeps the whole output
