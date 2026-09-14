@@ -26,7 +26,8 @@ class ActionQueueException extends Exception {}
  * the conversation through the resolution event row, where the next turn can
  * reason over it.
  *
- * @version 1.3
+ * @version 1.4
+ * @changelog 1.4 - factsFor() passes the owner's user id to the tool's renderer
  * @changelog 1.3 - propose(): a recipe-sourced proposal that replaces a pending
  *   one with the same provenance; approve executes a recipe-sourced action
  *   under ApprovedActionContext (specs/security_inventory.md S17); the card
@@ -175,8 +176,10 @@ class ActionQueue {
             // still has to say what it would have done.
             return ['Run ' . (string)$row->get('aqa_tool') . ' (this tool is no longer installed)'];
         }
+        // The owner rides along for a tool whose facts depend on who is
+        // looking (a time in their zone, a source they may or may not read).
         $lines = [];
-        foreach ($tool->renderProposedAction($arguments) as $line) {
+        foreach ($tool->renderProposedAction($arguments, (int)$row->get('aqa_owner_user_id')) as $line) {
             $line = trim((string)$line);
             if ($line === '') continue;
             $lines[] = mb_strlen($line) > self::FACT_LINE_MAX
