@@ -53,6 +53,10 @@
  * interactive fetch (the reader's Refresh, the admin's Fetch now) stays inside
  * the time a browser, and the proxy in front of it, will wait.
  *
+ * @version 1.20
+ * @changelog 1.20 - fetchHeaderTexts(): header blocks for a whole batch of
+ *   locators in one folder, one STATUS + one FETCH; fetchHeaderText() is the
+ *   one-locator case of it.
  * @version 1.19
  * @changelog 1.19 - fetchHeaderText(): header-only fetch by locator, for the
  *   address-list backfill of rows stored before iem_to / iem_cc existed.
@@ -1909,35 +1913,82 @@ class ImapIngestor {
 	 * @return array{ok:bool,headers?:string,message?:string}
 	 */
 	public function fetchHeaderText(int $uid, ?int $uidvalidity, string $folder, ?string $messageId): array {
+		$res = $this->fetchHeaderTexts($folder, array(array(
+			'uid' => $uid, 'uidvalidity' => $uidvalidity, 'message_id' => $messageId)));
+		return $res[0];
+	}
+
+	/**
+	 * Header blocks for many messages in ONE folder, in two round trips: a
+	 * single STATUS settles UIDVALIDITY for every locator, and a single FETCH
+	 * brings back the headers of every UID that is still valid. Only a locator
+	 * whose UIDVALIDITY no longer matches costs its own Message-ID search. This
+	 * is what makes a backlog catch-up affordable: per message, the two round
+	 * trips become a share of two.
+	 *
+	 * @param array<int|string, array{uid:int, uidvalidity:?int, message_id:?string}> $locators
+	 * @return array<int|string, array{ok:bool, headers?:string, message?:string}>
+	 *   one answer per locator, under the same key
+	 */
+	public function fetchHeaderTexts(string $folder, array $locators): array {
+		$gone = array('ok' => false, 'message' => 'This message is no longer available in the source mailbox.');
+		$out = array();
 		try {
 			$client = $this->client();
 			$folder = $folder ?: ($this->account->get('iia_imap_folder') ?: 'INBOX');
 
-			$resolvedUid = $this->resolveUid($client, $folder, $uid, $uidvalidity, $messageId);
-			if ($resolvedUid === null) {
-				return array('ok' => false, 'message' => 'This message is no longer available in the source mailbox.');
+			$status = $client->status($folder, Horde_Imap_Client::STATUS_UIDVALIDITY);
+			$serverUidValidity = intval($status['uidvalidity'] ?? 0);
+
+			// Which UID each locator resolves to on the server right now.
+			$uid_for = array();
+			foreach ($locators as $k => $loc) {
+				$uid = intval($loc['uid'] ?? 0);
+				$validity = $loc['uidvalidity'] ?? null;
+				if ($validity !== null && intval($validity) === $serverUidValidity && $uid > 0) {
+					$uid_for[$k] = $uid;
+					continue;
+				}
+				$resolved = $this->searchByMessageId($client, $folder, (string)($loc['message_id'] ?? ''));
+				if ($resolved === null) {
+					$out[$k] = $gone;
+				} else {
+					$uid_for[$k] = $resolved;
+				}
+			}
+			if (empty($uid_for)) {
+				return $out;
 			}
 
-			$ids = new Horde_Imap_Client_Ids(array($resolvedUid));
 			$fq = new Horde_Imap_Client_Fetch_Query();
 			$fq->headerText(array('peek' => true)); // headers only, don't set \Seen
-			$res = $client->fetch($folder, $fq, array('ids' => $ids));
-			$fdata = $res[$resolvedUid] ?? null;
-			if ($fdata === null) {
-				return array('ok' => false, 'message' => 'This message is no longer available in the source mailbox.');
+			$res = $client->fetch($folder, $fq, array(
+				'ids' => new Horde_Imap_Client_Ids(array_values(array_unique($uid_for)))));
+			foreach ($uid_for as $k => $uid) {
+				$fdata = $res[$uid] ?? null;
+				$headers = $fdata !== null ? (string)$fdata->getHeaderText() : '';
+				if ($fdata === null) {
+					$out[$k] = $gone;
+				} elseif ($headers === '') {
+					$out[$k] = array('ok' => false, 'message' => 'The source message returned no headers.');
+				} else {
+					$out[$k] = array('ok' => true, 'headers' => $headers);
+				}
 			}
-
-			$headers = (string)$fdata->getHeaderText();
-			if ($headers === '') {
-				return array('ok' => false, 'message' => 'The source message returned no headers.');
-			}
-			return array('ok' => true, 'headers' => $headers);
+			return $out;
 		} catch (ImapIngestorException $e) {
-			return array('ok' => false, 'message' => $e->getMessage());
+			$fail = array('ok' => false, 'message' => $e->getMessage());
 		} catch (Throwable $e) {
-			error_log('ImapIngestor::fetchHeaderText error: ' . $e->getMessage());
-			return array('ok' => false, 'message' => 'Could not retrieve the message headers from the source mailbox.');
+			error_log('ImapIngestor::fetchHeaderTexts error: ' . $e->getMessage());
+			$fail = array('ok' => false, 'message' => 'Could not retrieve the message headers from the source mailbox.');
 		}
+		// A connection-level failure answers for every locator not yet answered.
+		foreach ($locators as $k => $unused) {
+			if (!isset($out[$k])) {
+				$out[$k] = $fail;
+			}
+		}
+		return $out;
 	}
 
 	// ── On-demand single-part fetch (the download endpoint) ────────────────
@@ -2019,16 +2070,22 @@ class ImapIngestor {
 		}
 
 		// UIDVALIDITY changed (or unknown) — fall back to a Message-ID search.
-		if ($messageId !== null && $messageId !== '') {
-			$query = new Horde_Imap_Client_Search_Query();
-			$query->headerText('message-id', $messageId);
-			$res = $client->search($folder, $query, array(
-				'results' => array(Horde_Imap_Client::SEARCH_RESULTS_MATCH),
-			));
-			$ids = $res['match']->ids;
-			if (count($ids)) {
-				return intval($ids[count($ids) - 1]);
-			}
+		return $this->searchByMessageId($client, $folder, (string)$messageId);
+	}
+
+	/** The current UID of the message carrying this Message-ID, or null when the folder has none. */
+	private function searchByMessageId($client, string $folder, string $messageId): ?int {
+		if ($messageId === '') {
+			return null;
+		}
+		$query = new Horde_Imap_Client_Search_Query();
+		$query->headerText('message-id', $messageId);
+		$res = $client->search($folder, $query, array(
+			'results' => array(Horde_Imap_Client::SEARCH_RESULTS_MATCH),
+		));
+		$ids = $res['match']->ids;
+		if (count($ids)) {
+			return intval($ids[count($ids) - 1]);
 		}
 		return null;
 	}

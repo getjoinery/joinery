@@ -1524,10 +1524,12 @@ parsed in memory, never written back); a row with neither answers `''`.
 
 Rows with no retained header block get their lists back through the
 `mailbox_address_lists` deferred-work consumer (`AddressListBackfill`), which
-runs in the owner's unlock window: a `remote` row's header block is fetched from
-the IMAP source (`ImapIngestor::fetchHeaderText()`, one connection per account
-per drain), a stored-raw row's from the raw (in-window when sealed). Newest
-first, 25 per drain. The lists are written as ingest writes them — plaintext on
+runs in the owner's unlock window: `remote` rows' header blocks are fetched from
+the IMAP source in batches (`ImapIngestor::fetchHeaderTexts()` — one connection
+per account per drain, one STATUS + one FETCH per folder per 50 rows), a
+stored-raw row's from the raw (in-window when sealed). Newest first, up to 200
+rows per turn, the turn's deadline being the real bound (checked before every
+fetch and every stored-raw row). The lists are written as ingest writes them — plaintext on
 an unsealed row, sealed under the row's own DEK on a sealed one — and a source
 carrying neither header records `''` in both columns. A row qualifies for the
 owner it records, or, when unsealed, for any holder of a grant on its mailbox.
