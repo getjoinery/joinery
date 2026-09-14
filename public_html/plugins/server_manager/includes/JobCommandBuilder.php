@@ -8,6 +8,10 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.62 - host_converge: run host_housekeeping.sh (fail2ban and the host's daily housekeeping)
+ *                 through the host runner's single-installer mode, the first operate word of
+ *                 specs/agent_tier1_recipes.md. Primitive only, no parameters; the installer name is a
+ *                 constant compiled into the agent, never a value this plane sends
  * @version 1.61 - host_report: the machine as one bounded object (units, jails, sshd posture, an SSH
  *                 auth-failure count, disk, memory, reboot-required, unattended-upgrades), the first
  *                 observe word of specs/agent_tier1_recipes.md. Primitive only, no parameters, refused
@@ -307,6 +311,10 @@ class JobCommandBuilder {
 		// script it verifies against the manifest first; the plane sends the
 		// name and nothing else.
 		'host_report' => '1.25.0',
+		// Run host_housekeeping.sh through the host runner, the first operate
+		// word of the same spec, new in 1.26.0. The plane sends the name and
+		// nothing else; which installer runs is compiled into the agent.
+		'host_converge' => '1.26.0',
 	];
 
 	/**
@@ -1464,6 +1472,45 @@ class JobCommandBuilder {
 
 	public static function build_host_report_primitive($node) {
 		return ['primitive' => 'host_report', 'params' => []];
+	}
+
+	/**
+	 * Run fail2ban housekeeping on the machine now: host_housekeeping.sh (the
+	 * jails and their drop-ins, the trusted-proxy list, the rest of the host's
+	 * daily housekeeping) through the same root runner the host timer uses, in
+	 * its single-installer mode, under the runner lock. Idempotent: it is what
+	 * the timer already runs daily, and running it now leaves the host in the
+	 * state the release defines. The transcript is the record; the runner's
+	 * exit code is fail-safe zero, so JobResultProcessor::process_host_converge
+	 * reads the transcript for "host_housekeeping.sh: ok" and marks the job
+	 * from that, then queues one host_report so the Host card shows the
+	 * machine after the run.
+	 *
+	 * Nothing crosses the wire but the request. WHICH installer runs is a
+	 * constant compiled into the agent (--only=host_housekeeping.sh), not a
+	 * parameter, and the runner refuses any name outside its own core list
+	 * anyway. So there is no field through which this plane, or a compromised
+	 * one, could choose an installer, a path or a tree.
+	 *
+	 * PRIMITIVE ONLY. There is no build_host_converge_ssh and no API route, and
+	 * there never will be: the SSH way to converge a host is a command, which
+	 * is the shape this vocabulary exists to end. A node whose reported
+	 * vocabulary lacks the word is refused here with the fix in the message.
+	 * The repair step recipe fail2ban calls (agent_tier1_recipes.md, slice 5),
+	 * proven here on its own under the job model first.
+	 */
+	public static function build_host_converge($node) {
+		if (!self::has_primitive($node, 'host_converge')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot run host housekeeping: its agent "
+				. "does not offer the host_converge primitive. Apply an update to the node; "
+				. "the agent that ships with it does.");
+		}
+		return self::build_host_converge_primitive($node);
+	}
+
+	public static function build_host_converge_primitive($node) {
+		return ['primitive' => 'host_converge', 'params' => []];
 	}
 
 	/**

@@ -2,6 +2,8 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.20 - host_converge is a filterable job type with a claim budget sized to the agent's fifteen
+ *                minutes (the runner's ten-minute lock wait plus the installer)
  * @version 1.19 - host_report is a filterable job type (the default claim budget covers its minute)
  * @version 1.18 - verify_backup has a claim budget sized to the agent's declared three hours
  * @version 1.17 - createJob() refuses a step list for anything but a bootstrap job. The agent's local
@@ -197,6 +199,10 @@ class ManagementJob extends SystemBase {
 		'backup_run'            => 15720, // 4h20m + slack
 		'upload_backup'         => 5220,  // 85m + slack
 		'run_plugin_installers' => 1020,  // 15m + slack
+		// 15m + slack, the same runner in its single-installer mode: up to
+		// ten minutes waiting for the runner lock behind the timer or an
+		// upgrade, then host_housekeeping.sh, which may apt-install fail2ban.
+		'host_converge'         => 1020,
 		// 60m + slack. An upgrade downloads a release, deploys it, runs
 		// migrations, runs the deploy-tier suite against the deployed tree and
 		// then every host installer. Requeuing one that is still running would
@@ -607,7 +613,7 @@ class ManagementJob extends SystemBase {
 		// backup_project) are not offered: historical rows keep their type strings
 		// and still render, but a filter is for kinds of job that can still happen.
 		$types = [
-			'check_status', 'host_report',
+			'check_status', 'host_report', 'host_converge',
 			'restore_database', 'list_backups',
 			'restore_project', 'restore_chain', 'apply_update', 'decommission_node',
 			'backup_run',

@@ -320,14 +320,17 @@ review is in the file header before the code.
    live defect (cron hosts can overlap themselves today). Gate: two runners
    started together, the second waits and runs after the first; a holder
    that outlives the wait is named. Platform release. **Built 2026-09-13,
-   runner 2.16, reviewed; awaiting commit.**
+   runner 2.16, reviewed; committed 571a70d7, live in 0.8.391.**
 2. **Agent: process-group kill on script timeout.** Every script word
    inherits it. Ships with slice 3. **Built 2026-09-14, reviewed.**
 3. **Agent: `host_report` as a plain observe word.** No loop. The plane
    dispatches it as a job; the Host card renders the result. Proves the
    word, its bounds and the card with nothing acting, and reads the fleet's
    real host state before any recipe does. **Built 2026-09-14, agent
-   1.25.0, reviewed; live proof after the publish.** Shape as built: the
+   1.25.0, reviewed; live in 0.8.391 on joinerydemo, getjoinery and
+   jeremytunnell 2026-09-14, Host card rendering; the two fleet-check
+   defects (a false 0 for SSH failures in a container, gate lock debris)
+   fixed in 656ea325.** Shape as built: the
    agent's gate allows only `script.go` to start a process, and the report
    needs systemctl, fail2ban-client, `sshd -T` and journalctl, so
    `host_report` is a script word like `run_plugin_installers`: the whole
@@ -342,7 +345,17 @@ review is in the file header before the code.
    Run from the node page against dev, then jeremytunnell; read the
    transcript. Proves the `--only` path, the manifest check, the lock and
    the compiled constant under the job model, where every run is already
-   ledgered.
+   ledgered. **Built 2026-09-14, agent 1.26.0, reviewed; awaiting the
+   release and the owner's proof on dev, then jeremytunnell.** Shape as
+   built: the same runner as `run_plugin_installers`, with one argv element
+   that is a package constant in the agent (`--only=host_housekeeping.sh`;
+   no parameter, no `{param}` slot, no `ArgsFrom`, and the test pins all
+   three); 15-minute timeout for the runner's 10-minute lock wait plus the
+   installer. Platform: Run Host Housekeeping in the node page's Actions
+   dropdown, `process_host_converge` reads the transcript
+   (`host_housekeeping.sh: ok` is green, a container's "fail2ban is the
+   host's" is green, everything else the runner can say instead is red
+   with its reason) and queues one `host_report` after a completed run.
 5. **Agent: the recipe loop, report-only.** The loop is a state machine
    (budget, backoff, consecutive, hold, unknown, open case, busy) built as
    a package with a fake clock and fake check and repair, table-driven

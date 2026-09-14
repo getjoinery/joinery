@@ -5,6 +5,10 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.29 - process_host_converge reads a host_converge job's transcript the way
+ *                 process_run_plugin_installers reads the full run: host_housekeeping.sh: ok is green,
+ *                 a WARNING, a refusal, a lock it never got or silence is red with the reason; a
+ *                 completed run queues one host_report so the Host card shows the machine after it
  * @version 1.28 - process_host_report stores a host_report job's object in mgn_last_host_report with
  *                 mgn_last_host_report_time, after sanitise_host_report caps it on intake: every key
  *                 present, every list and string bounded, anything unreadable the string unknown.
@@ -2255,6 +2259,113 @@ HTML;
 
 		$job->set('mjb_result', json_encode($result));
 		$job->save();
+	}
+
+	/**
+	 * A host_converge job: host_housekeeping.sh, run through the host runner's
+	 * single-installer mode. Read the way process_run_plugin_installers reads
+	 * the full run, and for the same reason: the runner exits 0 on every path,
+	 * including the ones where nothing ran, so the transcript is the only
+	 * verdict there is.
+	 *
+	 * Green is one line: "core installers: host_housekeeping.sh: ok". On a
+	 * container node the installer prints that fail2ban is the host's and
+	 * does nothing, and that is a complete, green answer — the machine in
+	 * front of the container runs its own housekeeping.
+	 *
+	 * Red is everything else the runner can say instead, each with its reason
+	 * kept: the installer failed (WARNING), was missing (skipping), was refused
+	 * as untrusted (installer refused: ... owned by ... mode ...), the runner
+	 * could not take or open its lock (another run holds the lock / refusing
+	 * to run unlocked), the runner refused the mode itself (--only ... refused,
+	 * exit 2, which the channel has already failed), or it said nothing at all.
+	 *
+	 * A run that completed queues one host_report for the node, so the Host
+	 * card shows the machine after the run rather than before it. One: a
+	 * report already pending or running for the node is left to answer.
+	 */
+	private static function process_host_converge($job) {
+		$output = (string)($job->get('mjb_output') ?: '');
+
+		// Script primitives return their text inside the agent's JSON envelope,
+		// where the lines are separated by escaped \n that no /m anchor matches.
+		$data = self::extract_api_envelope_data($output);
+		if (is_array($data) && isset($data['output'])) {
+			$output = (string)$data['output'];
+		}
+
+		$failures = [];
+		$ran      = (bool)preg_match('/^core installers: host_housekeeping\.sh: ok$/m', $output);
+
+		if (preg_match_all('/^core installers: WARNING - (.+)$/m', $output, $m)) {
+			foreach ($m[1] as $line) {
+				$failures[] = trim($line);
+			}
+		}
+		if (preg_match_all('/^core installers: (.+ - skipping)$/m', $output, $m)) {
+			foreach ($m[1] as $line) {
+				$failures[] = trim($line);
+			}
+		}
+		if (preg_match_all('/^installer refused: (.+)$/m', $output, $m)) {
+			foreach ($m[1] as $line) {
+				$failures[] = 'installer refused: ' . trim($line);
+			}
+		}
+		if (preg_match_all('/^host installers: (another run holds the lock .+|cannot open .+ - refusing to run unlocked|--only=.+ - refused|--only and --when-changed .+ - refused)$/m', $output, $m)) {
+			foreach ($m[1] as $line) {
+				$failures[] = trim($line);
+			}
+		}
+		if (preg_match_all('/^plugin installers: (_tree_trust\.sh missing .+)$/m', $output, $m)) {
+			foreach ($m[1] as $line) {
+				$failures[] = trim($line);
+			}
+		}
+
+		// The runner narrates every path it takes, including the ones where it
+		// does nothing, so silence means the output never reached us — and a
+		// green job whose output we do not have is the thing this handler
+		// exists to stop.
+		if (trim($output) === '') {
+			$failures[] = 'the runner produced no output, so nothing about this run can be confirmed';
+		} elseif (!$ran && !$failures) {
+			$failures[] = 'the transcript never says host_housekeeping.sh: ok, and gives no reason';
+		}
+
+		$result = [
+			'ran'      => $ran,
+			'failures' => $failures,
+		];
+
+		if ($failures && $job->get('mjb_status') === 'completed') {
+			$job->set('mjb_status', 'failed');
+			$job->set('mjb_error_message',
+				'host housekeeping did not complete: ' . implode('; ', array_slice($failures, 0, 3)));
+		}
+
+		$job->set('mjb_result', json_encode($result));
+		$job->save();
+
+		// The machine after the run. Queued rather than read inline because
+		// reading it means running a script on the node, which is a job, not a
+		// page render; and once, because a report already on its way will
+		// describe the same machine.
+		$node_id = $job->get('mjb_mgn_node_id');
+		if ($job->get('mjb_status') === 'completed' && $node_id) {
+			try {
+				$node = new ManagedNode($node_id, TRUE);
+				if (JobCommandBuilder::has_primitive($node, 'host_report')
+						&& !ManagementJob::activeOrRecentForNode($node->key, 'host_report', 0)) {
+					$built = JobCommandBuilder::build_host_report($node);
+					ManagementJob::createFromBuild($node->key, 'host_report', $built, null,
+						$job->get('mjb_created_by'));
+				}
+			} catch (Exception $e) {
+				// Not being able to ask for the report is not a reason to fail
+				// the housekeeping run that just completed.
+			}
+		}
 	}
 
 	/**

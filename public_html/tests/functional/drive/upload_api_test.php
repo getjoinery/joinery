@@ -111,15 +111,24 @@ check($fdup->key && (int)$fdup->get('fil_fbb_file_blob_id') === (int)$f1model->g
 // ---------------------------------------------------------------------------
 section('quota rejection at the boundary');
 
-// Push recorded usage to exactly the quota, then a 1-byte upload must be refused.
-$usage = DriveUsage::for_user($user->key);
-$usage->set('dru_bytes_used', $quota);
-$usage->save();
-$initFull = api_request('POST', '/api/v1/action/drive_upload_init', $H, array(
-	'name' => 'over.bin', 'size_bytes' => 1, 'mime_type' => 'application/octet-stream',
-));
-check($initFull['status'] >= 400 || !empty($initFull['json']['errortype']), 'upload at quota boundary is rejected', 'status ' . $initFull['status'] . ' ' . ($initFull['json']['error'] ?? ''));
-DriveUsage::recompute($user->key); // restore accurate usage
+// The gate sums what the member owns live (DriveUsage::current_bytes), so the
+// boundary is reached by asking for one byte more than the room left, never by
+// writing a counter nothing reads. The per-file cap is checked first in the
+// logic; a tier whose cap is below the room left cannot reach the quota gate
+// with one upload, and says so rather than passing on the wrong refusal.
+$room     = $quota - DriveUsage::current_bytes($user->key);
+$max_file = (int)SubscriptionTier::getUserFeature($user->key, 'drive_max_file_bytes', 0);
+if ($max_file > 0 && $room + 1 > $max_file) {
+	harness_skip('upload at quota boundary is rejected',
+		'the per-file cap (' . $max_file . ') is below the room left in the quota (' . $room . '), so one upload cannot reach the quota gate');
+} else {
+	$initFull = api_request('POST', '/api/v1/action/drive_upload_init', $H, array(
+		'name' => 'over.bin', 'size_bytes' => $room + 1, 'mime_type' => 'application/octet-stream',
+	));
+	check(($initFull['status'] >= 400 || !empty($initFull['json']['errortype']))
+		&& stripos((string)($initFull['json']['error'] ?? ''), 'quota') !== false,
+		'upload at quota boundary is rejected, by the quota gate', 'status ' . $initFull['status'] . ' ' . ($initFull['json']['error'] ?? ''));
+}
 
 // ---------------------------------------------------------------------------
 section('idempotent complete');

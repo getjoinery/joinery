@@ -19,6 +19,9 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.27 - host_converge action: run fail2ban housekeeping on the machine now, through the
+ *                host runner (operate primitive); the job's transcript is the record and a
+ *                host_report follows it so the Host card shows the machine after the run.
  * @version 1.26 - host_report action: the node describes its machine (observe primitive), and the
  *                Host card on the overview renders it.
  * @version 1.25 - install_report action: the node reads its own first-boot install log
@@ -96,6 +99,7 @@ class NodeDetailActions {
 		'check_status'             => 'overview',
 		'install_report'           => 'overview',
 		'host_report'              => 'overview',
+		'host_converge'            => 'overview',
 		'restore_database'         => 'database',
 		'restore_project'          => 'backups',
 		'restore_chain'            => 'backups',
@@ -178,6 +182,12 @@ class NodeDetailActions {
 			case 'host_report': {
 				$built = JobCommandBuilder::build_host_report($node);
 				$job = ManagementJob::createFromBuild($node->key, 'host_report', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'host_converge': {
+				$built = JobCommandBuilder::build_host_converge($node);
+				$job = ManagementJob::createFromBuild($node->key, 'host_converge', $built, null, $uid);
 				return self::jobUrl($job);
 			}
 

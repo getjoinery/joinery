@@ -1590,4 +1590,55 @@ section('host_report: primitive only, no parameters, refused without the word');
 		'host_report is a filterable job type');
 }
 
+// ---------------------------------------------------------------------------
+section('host_converge: primitive only, no parameters, refused without the word');
+
+{
+	$hc_node = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x05", 32)),
+		'mgn_agent_version'    => '1.26.0',
+		'mgn_agent_primitives' => 'check_status,host_report,host_converge',
+	));
+	$built = JobCommandBuilder::build_host_converge($hc_node);
+	check($built === array('primitive' => 'host_converge', 'params' => array()),
+		'a node whose vocabulary has host_converge gets the bare primitive envelope: the name and nothing else — which installer runs is compiled into the agent',
+		var_export($built, true));
+	check(JobCommandBuilder::transports_for('host_converge') === array('primitive'),
+		'host_converge has exactly one transport, the primitive: no SSH route, no API route',
+		var_export(JobCommandBuilder::transports_for('host_converge'), true));
+	check(!method_exists('JobCommandBuilder', 'build_host_converge_ssh') && !method_exists('JobCommandBuilder', 'build_host_converge_api'),
+		'and no ssh or api builder exists to fall back to');
+
+	$without = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x06", 32)),
+		'mgn_agent_version'    => '1.26.0',
+		'mgn_agent_primitives' => 'check_status,host_report',
+	));
+	check(!JobCommandBuilder::has_primitive($without, 'host_converge'),
+		'a node whose reported vocabulary lacks host_converge does not have it, whatever its version says');
+	$threw = '';
+	try { JobCommandBuilder::build_host_converge($without); } catch (Exception $e) { $threw = $e->getMessage(); }
+	check(strpos($threw, 'host_converge') !== false,
+		'building host_converge for that node is refused, naming the word', $threw);
+
+	$silent_old = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x07", 32)),
+		'mgn_agent_version'    => '1.10.0',
+	));
+	check(!JobCommandBuilder::has_primitive($silent_old, 'host_converge'),
+		'an agent too old to report a vocabulary is held to the 1.26.0 floor and refused');
+	check(JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION['host_converge'] === '1.26.0',
+		'the floor is the release that first ships the word');
+
+	$no_agent = jcb_node();
+	$threw = '';
+	try { JobCommandBuilder::build_host_converge($no_agent); } catch (Exception $e) { $threw = $e->getMessage(); }
+	check($threw !== '', 'a node with no agent at all is refused: there is no SSH route for it');
+
+	check(in_array('host_converge', ManagementJob::filterTypes(), true),
+		'host_converge is a filterable job type');
+	check(ManagementJob::PRIMITIVE_CLAIM_BUDGETS['host_converge'] === ManagementJob::PRIMITIVE_CLAIM_BUDGETS['run_plugin_installers'],
+		'its claim budget is the same runner\'s: fifteen minutes plus slack');
+}
+
 harness_finish();
