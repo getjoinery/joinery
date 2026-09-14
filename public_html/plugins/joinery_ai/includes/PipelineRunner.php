@@ -24,6 +24,10 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProv
  *   tool_errors   -> 3 consecutive invalid/unparseable verdicts
  *   provider_error -> the provider stopped answering mid-drain; the items
  *     already judged and the tokens already spent travel with the result
+ *
+ * @version 1.1
+ * @changelog 1.1 - the system prompt states the current date/time in the
+ *   owner's timezone, so a judge asked about "past" events has a today
  */
 class PipelineRunner {
 
@@ -163,9 +167,17 @@ class PipelineRunner {
         $instructions = trim((string)$recipe->get('rcp_prompt'));
         if ($instructions === '') $instructions = $job->defaultPrompt();
 
+        // The judge must know what day it is: an item carries its own dates
+        // (an email's Date header, the times it names), and "past" or "soon"
+        // means nothing without today's to measure against. Stated once per
+        // run — the prefix stays stable across the run's exchanges.
+        $today_local = LibraryFunctions::convert_time(
+            gmdate('Y-m-d H:i:s'), 'UTC', $ctx->owner_timezone, 'l, F j, Y g:i A T');
+
         $text = "You are a Joinery AI pipeline judge. You are shown exactly one item "
               . "and must return a single verdict for it — nothing else about any other "
               . "item, and no chat.\n\n"
+              . "Current date/time (owner timezone): $today_local\n\n"
               . "## Instructions\n\n" . $instructions . "\n\n"
               . "## Output format\n\n" . DescriptorValidator::renderOutputInstruction($job->verdictDescriptor());
 

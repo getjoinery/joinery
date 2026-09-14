@@ -26,7 +26,9 @@ class ActionQueueException extends Exception {}
  * the conversation through the resolution event row, where the next turn can
  * reason over it.
  *
- * @version 1.4
+ * @version 1.5
+ * @changelog 1.5 - propose()/enqueue() take an optional expiry that wins when
+ *   it comes before the default
  * @changelog 1.4 - factsFor() passes the owner's user id to the tool's renderer
  * @changelog 1.3 - propose(): a recipe-sourced proposal that replaces a pending
  *   one with the same provenance; approve executes a recipe-sourced action
@@ -56,7 +58,8 @@ class ActionQueue {
      */
     public static function enqueue(int $owner_id, string $tool_name, array $input,
             ?int $conversation_id = null, string $area = '',
-            string $source_type = AiQueuedAction::SOURCE_CHAT, ?int $recipe_id = null): AiQueuedAction {
+            string $source_type = AiQueuedAction::SOURCE_CHAT, ?int $recipe_id = null,
+            ?string $expires_utc = null): AiQueuedAction {
         if ($owner_id <= 0) {
             throw new ActionQueueException('A queued action needs an owner.');
         }
@@ -94,8 +97,7 @@ class ActionQueue {
         $row->set('aqa_tool', $tool_name);
         $row->set('aqa_status', AiQueuedAction::STATUS_PENDING);
         $row->set('aqa_created_time', gmdate('Y-m-d H:i:s'));
-        $row->set('aqa_expires_time', gmdate('Y-m-d H:i:s',
-            time() + AiQueuedAction::DEFAULT_EXPIRY_DAYS * 86400));
+        $row->set('aqa_expires_time', self::expiryFor($expires_utc));
         // Cold: the arguments store in the clear, directly. Hot: the row is
         // INSERTed with the sealed column empty, then sealColumns() writes the
         // ciphertext (the AD binds to the row id, so the id must exist first).
@@ -125,10 +127,13 @@ class ActionQueue {
      * it; the owner sees two cards for one message in that rare case, never
      * a silently dropped one.
      *
-     * @param string $dedup_field the argument that carries the provenance
+     * @param string  $dedup_field the argument that carries the provenance
+     * @param ?string $expires_utc when the proposal stops being answerable
+     *   (Y-m-d H:i:s UTC), if sooner than the default expiry — a calendar
+     *   entry's card is worthless once the event has ended
      */
     public static function propose(int $owner_id, int $recipe_id, string $area, string $tool_name,
-            array $input, string $dedup_field): AiQueuedAction {
+            array $input, string $dedup_field, ?string $expires_utc = null): AiQueuedAction {
         $key = (string)($input[$dedup_field] ?? '');
         if ($key !== '') {
             $pending = new MultiAiQueuedAction([
@@ -148,15 +153,23 @@ class ActionQueue {
                 }
                 $row->set('aqa_arguments', json_encode($input, JSON_UNESCAPED_SLASHES));
                 $row->set('aqa_created_time', gmdate('Y-m-d H:i:s'));
-                $row->set('aqa_expires_time', gmdate('Y-m-d H:i:s',
-                    time() + AiQueuedAction::DEFAULT_EXPIRY_DAYS * 86400));
+                $row->set('aqa_expires_time', self::expiryFor($expires_utc));
                 $row->save();
                 $row->load();
                 return $row;
             }
         }
         return self::enqueue($owner_id, $tool_name, $input, null, $area,
-            AiQueuedAction::SOURCE_RECIPE, $recipe_id);
+            AiQueuedAction::SOURCE_RECIPE, $recipe_id, $expires_utc);
+    }
+
+    /** The default expiry, or the caller's if it comes first. */
+    private static function expiryFor(?string $expires_utc): string {
+        $default = gmdate('Y-m-d H:i:s', time() + AiQueuedAction::DEFAULT_EXPIRY_DAYS * 86400);
+        if ($expires_utc === null || !preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $expires_utc)) {
+            return $default;
+        }
+        return min($default, $expires_utc);
     }
 
     /**

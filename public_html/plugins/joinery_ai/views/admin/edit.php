@@ -707,9 +707,13 @@ if (empty($job_registry)) {
         $prefixed = ['input' => []];
         foreach ($inputs as $field => $spec) {
             if (!is_array($spec)) continue;
+            // A field the stored config never set shows the default the job
+            // will apply (DescriptorValidator::coerce), not a blank that
+            // means the same thing without saying so.
             $spec['value'] = $spec['value']
                 ?? (($job_id === $selected_job_id && array_key_exists($field, $stored_source_config))
-                    ? $stored_source_config[$field] : null);
+                    ? $stored_source_config[$field] : null)
+                ?? ($spec['default'] ?? null);
             $prefixed['input']["srccfg_{$job_id}_{$field}"] = $spec;
         }
         $formwriter->fromDescriptor($prefixed);

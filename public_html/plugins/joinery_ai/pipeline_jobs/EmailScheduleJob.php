@@ -25,7 +25,9 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
  * panel contract all live in EmailPipelineJobBase, shared with the other two
  * email jobs.
  *
- * @version 1.5
+ * @version 1.6
+ * @changelog 1.6 - an event that has already ended is never proposed, and a
+ *   proposal expires when its event does
  * @changelog 1.5 - recordVerdict() queues a proposal instead of writing the
  *   entry (specs/security_inventory.md S17)
  */
@@ -124,11 +126,23 @@ class EmailScheduleJob extends EmailPipelineJobBase {
             $end_local = LibraryFunctions::time_shift($start_local, '1 hour', 'Y-m-d H:i:s');
         }
 
+        // An event that has already ended is not for the calendar, whatever
+        // the model concluded — the prompt asks it to say false for past
+        // events, but this is the check that does not depend on the model
+        // having read the date correctly. The log row still records the
+        // email as judged. An all-day entry ends when its day does.
+        $ends_utc = self::endsUtc($start_local, $end_local, $tz, $all_day);
+        if ($ends_utc <= gmdate('Y-m-d H:i:s')) {
+            return;
+        }
+
         // Provenance = the message id: a log-row reset and re-run updates the
         // pending proposal (ActionQueue::propose) and, once approved, the
         // importer updates the same entry instead of duplicating it. The card
         // is rendered from these literal arguments; nothing the model wrote
-        // reaches it as prose.
+        // reaches it as prose. The proposal expires when the event ends: a
+        // card nobody answered in time cannot add a past entry when it is
+        // finally opened.
         ActionQueue::propose($owner_id, (int)$recipe->key, $this->area(), 'create_calendar_entry', [
             'title'       => (string)($verdict['title'] ?? ''),
             'start_local' => $start_local,
@@ -136,7 +150,18 @@ class EmailScheduleJob extends EmailPipelineJobBase {
             'timezone'    => $tz,
             'all_day'     => $all_day,
             'source_ref'  => $item_key,
-        ], 'source_ref');
+        ], 'source_ref', $ends_utc);
+    }
+
+    /**
+     * When the event is over, as a UTC timestamp: the stated end, or the end
+     * of the start's day for an all-day entry, read in the event's zone.
+     */
+    public static function endsUtc(string $start_local, ?string $end_local, string $tz, bool $all_day): string {
+        $end = $all_day || $end_local === null || $end_local === ''
+            ? LibraryFunctions::time_shift(substr($start_local, 0, 10) . ' 00:00:00', '1 day', 'Y-m-d H:i:s')
+            : $end_local;
+        return LibraryFunctions::convert_time($end, $tz, 'UTC', 'Y-m-d H:i:s');
     }
 
     public function defaultPrompt(): string {

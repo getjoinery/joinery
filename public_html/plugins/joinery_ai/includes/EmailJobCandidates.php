@@ -25,8 +25,16 @@
  *     of AI work in the same drain, so waiting costs nothing;
  *   - UNREAD. A summary helps you decide whether to open something and a danger
  *     score is no use after you have read it, so read mail needs neither;
- *   - NEWEST first across the union, so today's mail is handled before a
- *     backlog rather than behind one.
+ *   - RECENT: received within the recipe's `lookback_days` (default
+ *     DEFAULT_LOOKBACK_DAYS). Every candidate costs a model call, and a
+ *     mailbox with years of unread mail would otherwise be walked end to end
+ *     the moment a recipe was bound to it — for verdicts nobody wants on mail
+ *     that old. The floor is rolling, so mail that arrives while a recipe is
+ *     paused for longer than the window is never judged either, which is the
+ *     same judgement an owner would make. 0 lifts the floor for a recipe
+ *     that genuinely means to read everything;
+ *   - NEWEST first across the union, so today's mail is handled before the
+ *     rest of the window rather than behind it.
  *
  * Sealed mail is readable only when the owner's vault window is actually open
  * in this request. That condition is evaluated live rather than assumed from
@@ -35,7 +43,8 @@
  * the standard addresses on the same list are unaffected — instead of anything
  * reading ciphertext as if it were text.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - lookback_days floor on iem_received_time (default 7 days)
  */
 
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/aip_recipe_item_log_class.php'));
@@ -45,6 +54,22 @@ require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 
 class EmailJobCandidates {
+
+	/** How far back a recipe reads when its config does not say. */
+	const DEFAULT_LOOKBACK_DAYS = 7;
+
+	/**
+	 * The recipe's mail-age floor in days, from its `lookback_days` config;
+	 * the default when the key is absent (every recipe saved before the field
+	 * existed) or not a whole number. 0 means no floor.
+	 */
+	public static function lookbackDays(array $config): int {
+		$raw = $config['lookback_days'] ?? null;
+		if ($raw === null || $raw === '' || !is_numeric($raw)) {
+			return self::DEFAULT_LOOKBACK_DAYS;
+		}
+		return max(0, (int)$raw);
+	}
 
 	/**
 	 * The vault scope a job needs for this binding, or null when it needs none.
@@ -121,12 +146,14 @@ class EmailJobCandidates {
 	 *                         so triage/scan/schedule recipes on one mailbox never
 	 *                         suppress each other
 	 * @param int   $owner_id  whose window is consulted for sealed rows
+	 * @param int   $lookback_days mail-age floor (lookbackDays()); 0 = none
 	 */
-	public static function nextId(array $alias_ids, int $recipe_id, int $owner_id): ?int {
+	public static function nextId(array $alias_ids, int $recipe_id, int $owner_id,
+			int $lookback_days = self::DEFAULT_LOOKBACK_DAYS): ?int {
 		if (empty($alias_ids)) return null;
 		$db = DbConnector::get_instance()->get_db_link();
-		$q = $db->prepare(self::sql($alias_ids, $owner_id, 'SELECT iem_inbound_email_message_id', 'LIMIT 1'));
-		$q->execute(self::params($alias_ids, $recipe_id));
+		$q = $db->prepare(self::sql($alias_ids, $owner_id, $lookback_days, 'SELECT iem_inbound_email_message_id', 'LIMIT 1'));
+		$q->execute(self::params($alias_ids, $recipe_id, $lookback_days));
 		$id = (int)$q->fetchColumn();
 		return $id > 0 ? $id : null;
 	}
@@ -136,11 +163,12 @@ class EmailJobCandidates {
 	 * without loading a message — this runs on every vault heartbeat, so it
 	 * stays a single indexed existence check.
 	 */
-	public static function hasCandidate(array $alias_ids, int $recipe_id, int $owner_id): bool {
+	public static function hasCandidate(array $alias_ids, int $recipe_id, int $owner_id,
+			int $lookback_days = self::DEFAULT_LOOKBACK_DAYS): bool {
 		if (empty($alias_ids)) return false;
 		$db = DbConnector::get_instance()->get_db_link();
-		$q = $db->prepare(self::sql($alias_ids, $owner_id, 'SELECT 1', 'LIMIT 1'));
-		$q->execute(self::params($alias_ids, $recipe_id));
+		$q = $db->prepare(self::sql($alias_ids, $owner_id, $lookback_days, 'SELECT 1', 'LIMIT 1'));
+		$q->execute(self::params($alias_ids, $recipe_id, $lookback_days));
 		return (bool)$q->fetchColumn();
 	}
 
@@ -149,19 +177,24 @@ class EmailJobCandidates {
 	 * a COUNT rather than an EXISTS, so it is for surfaces that report a backlog,
 	 * never for the heartbeat.
 	 */
-	public static function countCandidates(array $alias_ids, int $recipe_id, int $owner_id): int {
+	public static function countCandidates(array $alias_ids, int $recipe_id, int $owner_id,
+			int $lookback_days = self::DEFAULT_LOOKBACK_DAYS): int {
 		if (empty($alias_ids)) return 0;
 		$db = DbConnector::get_instance()->get_db_link();
-		$q = $db->prepare(self::sql($alias_ids, $owner_id, 'SELECT count(*)', ''));
-		$q->execute(self::params($alias_ids, $recipe_id));
+		$q = $db->prepare(self::sql($alias_ids, $owner_id, $lookback_days, 'SELECT count(*)', ''));
+		$q->execute(self::params($alias_ids, $recipe_id, $lookback_days));
 		return (int)$q->fetchColumn();
 	}
 
-	/** Named placeholders for the alias set + the log-exclusion recipe id. */
-	private static function params(array $alias_ids, int $recipe_id): array {
+	/** Named placeholders for the alias set, the log-exclusion recipe id, and the age floor. */
+	private static function params(array $alias_ids, int $recipe_id, int $lookback_days): array {
 		$params = ['aip_recipe_id' => $recipe_id];
 		foreach (array_values($alias_ids) as $i => $alias_id) {
 			$params["alias_$i"] = (int)$alias_id;
+		}
+		if ($lookback_days > 0) {
+			// iem_received_time is UTC, like every stored time.
+			$params['received_since'] = gmdate('Y-m-d H:i:s', time() - $lookback_days * 86400);
 		}
 		return $params;
 	}
@@ -173,7 +206,8 @@ class EmailJobCandidates {
 	 * stays as defense in depth so a sealed row on a nominally standard alias
 	 * (a domain mid-flip) can never be judged without the window.
 	 */
-	private static function sql(array $alias_ids, int $owner_id, string $select, string $limit): string {
+	private static function sql(array $alias_ids, int $owner_id, int $lookback_days,
+			string $select, string $limit): string {
 		$sealed_readable = $owner_id > 0
 			&& VaultUnlock::isOpen($owner_id, UserEncryptionVault::SCOPE_USER);
 
@@ -190,6 +224,7 @@ class EmailJobCandidates {
 			  AND iem_direction IS DISTINCT FROM 'draft'
 			  AND iem_pending_parse IS NOT TRUE
 			  AND iem_is_read = false
+			  " . ($lookback_days > 0 ? 'AND iem_received_time >= :received_since' : '') . "
 			  " . ($sealed_readable ? '' : 'AND iem_content_sealed IS NOT TRUE') . "
 			  AND " . MultiAipRecipeItemLog::notExistsClause('iem_inbound_email_message_id::text') . "
 			" . ($limit === '' ? '' : 'ORDER BY iem_received_time DESC, iem_inbound_email_message_id DESC')
