@@ -26,7 +26,8 @@
  *
  * Run: php tests/run.php db --filter=schedule_job_proposal
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - pins the card's when line (owner's zone) and source line (subject, sender, mailbox)
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -165,8 +166,27 @@ if (count($pending) === 1) {
 		'the card headline is rendered from the literal title', json_encode($card['facts']));
 	check(($card['recipe_name'] ?? '') === (string)$recipe->get('rcp_name'),
 		'and the card names the proposing recipe');
-	check(strpos(json_encode($card['facts']), '2026-10-02 15:00:00 to 2026-10-02 16:00:00') !== false,
-		'the end defaulted to an hour after the start, and both show on the card', json_encode($card['facts']));
+	// The when line is the owner's own clock: the verdict is 3–4 PM New York,
+	// and the card says it in the owner's profile zone, with the New York
+	// clock alongside only when that zone keeps a different time.
+	$owner_tz = (string)(new User($owner_uid, TRUE))->get('usr_timezone') ?: 'UTC';
+	if (!in_array($owner_tz, DateTimeZone::listIdentifiers(), true)) $owner_tz = 'UTC';
+	$day_fmt = LibraryFunctions::convert_time('2026-10-02 15:00:00', 'America/New_York', $owner_tz, 'Y')
+		=== LibraryFunctions::convert_time(gmdate('Y-m-d H:i:s'), 'UTC', $owner_tz, 'Y') ? 'D, M j' : 'D, M j, Y';
+	$expect_when = LibraryFunctions::convert_time('2026-10-02 15:00:00', 'America/New_York', $owner_tz, $day_fmt . ' · g:i A')
+		. '–' . LibraryFunctions::convert_time('2026-10-02 16:00:00', 'America/New_York', $owner_tz, 'g:i A T');
+	$expect_when = preg_replace('/^(.*\d) (AM|PM)–(\d[^ ]* \2 )/', '$1–$3', $expect_when);
+	$when = (string)($card['facts'][1] ?? '');
+	check(strpos($when, $expect_when) === 0,
+		'the end defaulted to an hour after the start, and the card says both in the owner\'s zone',
+		$when . ' vs ' . $expect_when);
+	$differs = LibraryFunctions::convert_time('2026-10-02 15:00:00', 'America/New_York', $owner_tz, 'P')
+		!== LibraryFunctions::convert_time('2026-10-02 15:00:00', 'America/New_York', 'America/New_York', 'P');
+	check((strpos($when, '(3:00–4:00 PM EDT)') !== false) === $differs,
+		'the email\'s own clock appears exactly when the owner keeps a different one', $when);
+	$source = (string)($card['facts'][2] ?? '');
+	check($source === 'From the email “Board meeting Friday” sent by stranger@example.com to ' . $address,
+		'the card names the source email by subject, sender and mailbox, not by row id', $source);
 }
 
 // =====================================================================

@@ -11,7 +11,7 @@
  * enqueue, and its call is refused rather than run — an unrenderable action is
  * impossible, not just unlikely.
  *
- * @version 1.0
+ * @version 1.1
  */
 interface QueueableToolInterface {
 
@@ -19,6 +19,12 @@ interface QueueableToolInterface {
      * The card's facts lines, from the LITERAL arguments: first line the
      * headline (what would happen, to what), following lines the argument
      * details. Plain text; the queue truncates over-long values itself.
+     *
+     * The queue also passes the owner's user id as a second argument. A tool
+     * whose facts depend on who is reading them (a time shown in their zone,
+     * a source record they may or may not be allowed to see) declares it as
+     * an optional second parameter, `?int $owner_id = null`; every other tool
+     * leaves it out.
      */
     public function renderProposedAction(array $input): array;
 

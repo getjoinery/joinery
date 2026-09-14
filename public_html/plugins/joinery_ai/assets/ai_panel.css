@@ -1,7 +1,7 @@
 /**
  * Area AI panel (ai_panel.js) — the same panel docked in a host's sidebar or
  * carried by the slide-over, so both are styled from one place. jy-ui
- * vocabulary, vanilla CSS, no framework. @version 2.3.0
+ * vocabulary, vanilla CSS, no framework. @version 2.4.0
  */
 
 .jy-ui.aip-overlay {
@@ -140,6 +140,20 @@
 .aip-action-card {
 	border-color: #e8d49a;
 	background: #fffaec;
+}
+
+/* A proposal's facts: what it would do, in body colour — these are the
+   lines the owner is deciding on, not status chatter. */
+.aip-panel .aip-card-fact {
+	margin: 0 0 0.2rem;
+	font-size: 0.85rem;
+	line-height: 1.35;
+	color: var(--jy-color-text, #1f2933);
+}
+
+.aip-panel .aip-card-origin {
+	margin-top: 0.35rem;
+	font-size: 0.75rem;
 }
 
 .aip-action-note {
