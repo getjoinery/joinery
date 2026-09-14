@@ -4767,6 +4767,10 @@ fn forget_folder_the_server_confirms(env: &ExecEnv, root: EntityId) -> Result<()
             .and_then(|e| e.synced_fingerprint)
             .is_some_and(|f| f.file_id != 0 && still_here.contains(&f.file_id)))
     };
+    // The names of what was kept, for the user and for the reset's reading
+    // of this belt (R8: a belt reports the shape it fired on). Raised once
+    // below, on the folder.
+    let mut kept: Vec<String> = Vec::new();
     let mut kept_a_child = false;
     // Absorbed before anything is deleted, and deliberately including the ones
     // about to go: if this process dies between here and the deletes below,
@@ -4776,6 +4780,9 @@ fn forget_folder_the_server_confirms(env: &ExecEnv, root: EntityId) -> Result<()
     for (id, state) in &answers {
         if state.deleted && keep(id)? {
             kept_a_child = true;
+            if let Some(e) = env.store.get_entry(*id)? {
+                kept.push(e.effective_local_name().to_string());
+            }
             continue;
         }
         crate::pass::absorb_remote(env, *id, state)?;
@@ -4807,11 +4814,40 @@ fn forget_folder_the_server_confirms(env: &ExecEnv, root: EntityId) -> Result<()
     // scan sees the file as untracked and mints it anyway. Forgetting the
     // folder under a child just refused to be disowned undoes the refusal.
     if kept_a_child {
+        // Said once per folder: the user is owed the sentence, and the
+        // sweep reads the belt's fires from it.
+        let already = env
+            .store
+            .open_issues()?
+            .iter()
+            .any(|i| i.kind == SEALED_RECORD_KEPT && i.entity == Some(root));
+        if !already {
+            kept.sort();
+            kept.dedup();
+            env.store.raise_issue(
+                Some(root),
+                SEALED_RECORD_KEPT,
+                &format!(
+                    "{} sealed file(s) here are still on this computer although the server \
+                     has deleted their folder; their records were kept so nothing is sent \
+                     again in the clear, and the files go to this computer's trash with the \
+                     folder: {}",
+                    kept.len(),
+                    summarise(&kept),
+                ),
+                (env.now_ms)() as i64,
+            )?;
+        }
         return Ok(());
     }
     env.store.forget_entry(root)?;
     Ok(())
 }
+
+/// A sealed file's record kept although the server deleted its folder --
+/// fix 4 of 87ca2389 (the keep-record belt) has fired. The reset's WP3
+/// reads this belt's bar from these issues.
+pub(crate) const SEALED_RECORD_KEPT: &str = "sealed_record_kept";
 
 fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     let Some(entry) = require_entry(env, op.entity)? else {

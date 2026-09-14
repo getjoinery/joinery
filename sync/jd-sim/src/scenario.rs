@@ -1885,6 +1885,40 @@ pub fn folder_record_at(device: &Device, path: &str) -> FolderAt {
     }
 }
 
+/// The server folder this device's store NAMES at `path` by its remote
+/// placement, whatever its local state -- a folder the feed has announced
+/// and nothing has materialized here yet answers too. Not for learning a
+/// handle (a named-only record has never stood anywhere); for attributing a
+/// user's removal of a directory that would have been adopted as that folder.
+pub fn folder_named_at(device: &Device, path: &str) -> Option<i64> {
+    let personality = jd_vfs::Vfs::personality(&device.fs);
+    let entries = device.store.every_entry().unwrap();
+    let wanted: Vec<String> = path
+        .split('/')
+        .map(|seg| jd_vfs::comparison_key(seg, &personality))
+        .collect();
+    let folders: Vec<&jd_core::model::Entry> = entries
+        .iter()
+        .filter(|e| e.id.entity_type == jd_core::EntityType::Folder && !e.id.is_provisional())
+        .collect();
+    let mut ids: Vec<i64> = folders
+        .iter()
+        .filter(|e| {
+            server_path_of(&entries, e)
+                .map(|p| p.split('/').map(|seg| jd_vfs::comparison_key(seg, &personality)).collect::<Vec<_>>())
+                .as_ref()
+                == Some(&wanted)
+        })
+        .map(|e| e.id.server_id)
+        .collect();
+    ids.sort();
+    ids.dedup();
+    match ids.as_slice() {
+        [one] => Some(*one),
+        _ => None,
+    }
+}
+
 /// Where this device's store places a server folder, as a path on its disk;
 /// `None` when the record is missing, provisional or deleted.
 pub fn local_path_of_folder(device: &Device, id: i64) -> Option<String> {

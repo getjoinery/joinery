@@ -527,6 +527,16 @@ struct Custody {
     placed: Vec<Vec<(usize, u64)>>,
     /// Every body the workload wrote, by hash, with the file it was written to.
     intents: Vec<(String, usize)>,
+    /// Server folders the USER deleted (a directory removed by the workload's
+    /// hand, resolved to its folder at the moment of removal: the handle if
+    /// learned, else the record the store places at the path). Read by the
+    /// rescue net's bar: a rescue from a folder in this set is the net's
+    /// legitimate shape, whichever device rescued.
+    user_removed_folders: std::collections::BTreeSet<i64>,
+    /// Directories the user removed that resolved to no folder at the
+    /// time -- never learned, never recorded -- so a rescue from one cannot
+    /// be attributed either way.
+    removal_unattributed: usize,
 }
 
 impl Custody {
@@ -565,6 +575,43 @@ impl Custody {
         self.file_of_path.insert(to.to_string(), key);
         if let Some(h) = self.handle_of(di, device, Self::parent_of(to)) {
             self.placed[key].push(h);
+        }
+    }
+
+    /// The user is about to remove the directory at `path` (and everything
+    /// under it) on this device. Every directory of the subtree is resolved
+    /// to its server folder now, while it stands.
+    fn removing(&mut self, di: usize, device: &jd_sim::engine::Device, path: &str) {
+        let mut dirs: Vec<String> = device
+            .fs
+            .all_paths()
+            .into_iter()
+            .filter(|p| p.starts_with(&format!("{path}/")) && device.fs.peek(p).is_none())
+            .collect();
+        dirs.push(path.to_string());
+        for d in dirs {
+            let learned = device
+                .fs
+                .birth_of(&d)
+                .and_then(|b| self.handles.get(&(di, b)).copied().flatten())
+                .flatten();
+            // The handle; else the record the store places here; else the
+            // folder the store merely NAMES here -- a directory the user
+            // made under a name the server was already bringing is adopted
+            // as that folder by the next scan, and removed first it is that
+            // folder's directory the user deleted.
+            let id = learned
+                .or_else(|| match jd_sim::scenario::folder_record_at(device, &d) {
+                    jd_sim::scenario::FolderAt::One(id) => Some(id),
+                    _ => None,
+                })
+                .or_else(|| jd_sim::scenario::folder_named_at(device, &d));
+            match id {
+                Some(id) => {
+                    self.user_removed_folders.insert(id);
+                }
+                None => self.removal_unattributed += 1,
+            }
         }
     }
 
@@ -658,6 +705,88 @@ impl Custody {
             }
         }
     }
+}
+
+/// The rescue net's bar (the reset's WP3): it fires only when the USER
+/// deleted the folder. Every rescue issue on every device, against the
+/// folders the workload removed anywhere in the world -- the cross-device
+/// shape (deleted on one device, a never-uploaded file rescued on another on
+/// the feed's word) is the net's legitimate shape too. Counted and printed on
+/// the custody line, never asserted: a nonzero is a finding to trace, as C3
+/// was, not a verdict.
+fn rescues_from_folders_the_user_never_deleted(world: &World, custody: &Custody) -> Vec<String> {
+    let folders: std::collections::BTreeMap<i64, jd_sim::server::FolderFact> =
+        world.server.folders().into_iter().map(|f| (f.id, f)).collect();
+    let mut out = Vec::new();
+    for d in &world.devices {
+        for issue in d.store.open_issues().unwrap() {
+            if !matches!(issue.kind.as_str(), "rescued_from_trash" | "sealed_not_rescued") {
+                continue;
+            }
+            let Some(entity) = issue.entity else { continue };
+            if !custody.user_removed_folders.contains(&entity.server_id) {
+                out.push(format!(
+                    "{} {} on folder {} ({})",
+                    d.name,
+                    issue.kind,
+                    entity.server_id,
+                    folders.get(&entity.server_id).map(|f| f.name.as_str()).unwrap_or("?")
+                ));
+            }
+        }
+    }
+    out
+}
+
+/// The rescue net's bar can tell a rescue the user caused from one they did
+/// not, across devices: the user deletes the folder on pc while mac holds a
+/// never-uploaded file in it, and mac's rescue on the feed's word counts
+/// zero; the same rescue after another hand trashed the folder on the server
+/// counts one and names it.
+#[test]
+fn the_rescue_nets_bar_knows_whose_delete_it_was() {
+    let rescue_after = |the_user_deletes_it: bool| -> (usize, Vec<String>) {
+        let world = World::of(9_952, &[("mac", Platform::Linux), ("pc", Platform::Linux)]);
+        let mac = world.device("mac");
+        let pc = world.device("pc");
+        pc.fs.user_mkdir("Folder");
+        pc.fs.user_write("Folder/theirs.txt", b"pc's file, synced");
+        assert!(world.settle().is_some());
+        let mut custody = Custody::default();
+        for (di, d) in world.devices.iter().enumerate() {
+            custody.adopt_standing(di, d);
+            custody.learn(di, d, false);
+        }
+        mac.fs.user_write("Folder/mine.txt", b"never uploaded before the folder goes");
+        custody.wrote(0, mac, "Folder/mine.txt", b"never uploaded before the folder goes");
+        if the_user_deletes_it {
+            custody.removing(1, pc, "Folder");
+            pc.fs.user_remove("Folder");
+            world.pass(pc);
+        } else {
+            let id = world.server.folder_id_at("Folder").unwrap();
+            world
+                .server
+                .action("drive_trash", &serde_json::json!({ "entity_type": "folder", "entity_id": id }))
+                .unwrap();
+        }
+        assert!(world.settle().is_some());
+        let rescues = mac
+            .store
+            .open_issues()
+            .unwrap()
+            .iter()
+            .filter(|i| i.kind == "rescued_from_trash")
+            .count();
+        (rescues, rescues_from_folders_the_user_never_deleted(&world, &custody))
+    };
+    let (rescues, outside) = rescue_after(true);
+    assert_eq!(rescues, 1, "mac did not rescue its never-uploaded file");
+    assert!(outside.is_empty(), "the user's own delete on pc was counted against the net: {outside:?}");
+    let (rescues, outside) = rescue_after(false);
+    assert_eq!(rescues, 1, "mac did not rescue its never-uploaded file");
+    assert_eq!(outside.len(), 1, "a rescue from a folder nobody deleted here was not counted: {outside:?}");
+    assert!(outside[0].contains("Folder"), "the line does not name the folder: {outside:?}");
 }
 
 /// Every live file whose body the user wrote stands in a folder the user put
@@ -808,11 +937,13 @@ fn assert_every_file_is_in_a_folder_the_user_put_it_in(world: &World, custody: &
         }
         misplaced.push(line);
     }
+    let net_fires_outside_a_user_delete = rescues_from_folders_the_user_never_deleted(world, custody);
     let learned = custody.handles.values().filter(|v| v.is_some()).count();
     eprintln!(
         "CUSTODY-ORACLE seed={seed} files_checked={checked} multi_candidate={multi} bodies_unknown={unknown} \
          sealed_unopened={sealed_unopened} unresolved={skipped_unresolved} folders={} learned={learned} late={} \
-         deferred={} undecided={} rescued={} reminted={} misplaced={} rescued_lines={rescued:?} reminted_lines={reminted:?}",
+         deferred={} undecided={} rescued={} reminted={} misplaced={} user_removed_folders={} removal_unattributed={} \
+         net_fires_outside_a_user_delete={} rescued_lines={rescued:?} reminted_lines={reminted:?} net_lines={net_fires_outside_a_user_delete:?}",
         custody.handles.len(),
         custody.late.len(),
         custody.deferred,
@@ -820,6 +951,9 @@ fn assert_every_file_is_in_a_folder_the_user_put_it_in(world: &World, custody: &
         rescued.len(),
         reminted.len(),
         misplaced.len(),
+        custody.user_removed_folders.len(),
+        custody.removal_unattributed,
+        net_fires_outside_a_user_delete.len(),
     );
     assert!(
         misplaced.is_empty(),
@@ -1902,6 +2036,7 @@ fn drive(
                     dirs.iter().filter(|d| is_movable(d, root)).cloned().collect();
                 if let Some(d) = rng.pick(&removable).cloned() {
                     if device.fs.exists(&d) {
+                        custody.removing(di, device, &d);
                         device.fs.user_remove(&d);
                     }
                 }
@@ -1984,6 +2119,7 @@ fn drive(
                     dirs.push(shared.clone());
                 }
                 if rng.below(4) == 0 {
+                    custody.removing(di, device, &shared);
                     device.fs.user_remove(&shared);
                 } else {
                     let path = join(&shared, &format!("in-{step}-{}.txt", device.name));

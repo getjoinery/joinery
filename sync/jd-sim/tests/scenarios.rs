@@ -1767,7 +1767,7 @@ fn a_lost_completion_answer_does_not_duplicate_an_encrypted_file() {
 /// what makes the difference between them a finding rather than an assumption.
 #[test]
 fn a_lost_completion_answer_does_not_duplicate_a_plaintext_file() {
-    let mut world = World::new(9_303, &["laptop"]);
+    let world = World::new(9_303, &["laptop"]);
     world.server.seed_folder(None, "Work");
     assert!(world.settle().is_some(), "the folder should arrive");
 
@@ -3327,6 +3327,59 @@ fn a_swap_interrupted_after_its_park_is_not_given_up_when_a_peer_rotates() {
     let late = files.iter().find(|x| x.name == "late.txt" && !x.trashed).map(|x| x.folder);
     assert_eq!(late, Some(Some(rings[2].0)), "late.txt was rescued out of its ring: {:?}", world.server.tree());
     assert_converged(&world);
+}
+
+/// A sealed file still on this computer says so when the server forgets its
+/// folder (the keep-record belt, fix 4 of 87ca2389, reporting its own fire
+/// as the reset's WP3 requires before its bar can be read).
+///
+/// The belt's one reachable shape: the sealed file's record is still under
+/// the folder while its inode stands elsewhere in the tree at the moment the
+/// server confirms the folder gone. Moves run before deletes, so an applied
+/// move takes the record out of the folder first and there is nothing to
+/// keep; the move has to be in flight. One keyed device, a vault subfolder
+/// holding a sealed file, synced. The user drags the file up to the vault
+/// root; the device's pass sends the move and the network refuses it once,
+/// so the move stays queued. Another hand trashes the subfolder on the
+/// server. The next pass: the file is busy (its move is open) and out of
+/// the round; the folder's local trash runs, finds an empty directory, and
+/// the confirmed forget stats the file as gone with the cascade -- but its
+/// inode is on this disk, at the root, so its record is kept, the folder's
+/// with it, and the belt says so once, naming the file.
+#[test]
+fn a_sealed_file_still_here_says_so_when_the_server_forgets_its_folder() {
+    let vault = SimVault::new(9_977);
+    let mut world = World::new(9_977, &["laptop"]);
+    world.give_vault("laptop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    let sub = world.server.seed_encrypted_folder(Some(private), "Sub");
+    let body = b"sealed, and still here when the folder is forgotten";
+    world.server.seed_vault_file(Some(sub), "memo.txt", body, &vault.public_key_b64);
+    assert!(world.settle().is_some(), "it should arrive first");
+    let laptop = world.device("laptop");
+    assert!(laptop.fs.exists("Private/Sub/memo.txt"));
+
+    laptop.fs.user_rename("Private/Sub/memo.txt", "Private/memo.txt");
+    laptop.net.set_faults(NetFaults {
+        refuse_before: Some("drive_move".into()),
+        ..NetFaults::none()
+    });
+    world.pass(laptop);
+    assert!(
+        laptop.store.queued_ops().unwrap().iter().any(|o| o.kind == "move_remote"),
+        "the refused move is not queued: the arming did not take"
+    );
+    world
+        .server
+        .action("drive_trash", &serde_json::json!({ "entity_type": "folder", "entity_id": sub }))
+        .unwrap();
+    world.pass(laptop);
+    let issues = laptop.store.open_issues().unwrap();
+    let kept: Vec<_> = issues.iter().filter(|i| i.kind == "sealed_record_kept").collect();
+    assert_eq!(kept.len(), 1, "the keep-record belt fired without saying so, or said so twice: {issues:?}");
+    assert!(kept[0].detail.contains("memo.txt"), "the report does not name the file: {}", kept[0].detail);
+    assert_eq!(kept[0].entity, Some(jd_core::EntityId::folder(sub)), "the report is not on the folder: {:?}", kept[0].entity);
 }
 
 /// A download never rebuilds a folder the user has just deleted (finding C2
