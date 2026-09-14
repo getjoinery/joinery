@@ -20,6 +20,9 @@
  * is for). Anything a kind needs to say travels in its parts, never in new
  * envelope fields; that is what keeps the envelope kind-independent.
  *
+ * @version 1.2
+ * @changelog 1.2 - the header part carries To and Cc, so the receiver stores
+ *   who else the message went to (iem_to / iem_cc)
  * @version 1.1
  * @changelog 1.1 - a protected mailbox with no key to seal to defers the
  *   delivery (held, parts intact) instead of storing it in plaintext
@@ -168,6 +171,10 @@ class MailDirectHandler implements DirectKindHandler {
 				case 'message-id':  $out['message_id'] = substr($value, 0, 255); break;
 				case 'references':  $out['references'] = $value; break;
 				case 'in-reply-to': $out['in_reply_to'] = $value; break;
+				// Who else the sender addressed — shown by the reader and what
+				// Reply All draws from. Stored in canonical form (iem_to / iem_cc).
+				case 'to': $out['to'] = MailAddressList::fromHeader($value); break;
+				case 'cc': $out['cc'] = MailAddressList::fromHeader($value); break;
 				// The sender's Date is DELIBERATELY not trusted for received_time. It
 				// is free text inside the sealed body; honouring it lets a sender pin
 				// a message to the top of the inbox with a future date or bury it with
@@ -200,6 +207,19 @@ class MailDirectHandler implements DirectKindHandler {
 		$headers = 'Subject: ' . (string)$message->getSubject() . "\r\n"
 			. 'From: ' . self::fromHeader($message) . "\r\n"
 			. 'Date: ' . gmdate('D, d M Y H:i:s') . " +0000\r\n";
+
+		// The To and Cc lists travel with the message, as they do over SMTP, so
+		// the receiver can show who else it went to and reply to all of them.
+		// Bcc never does. Header folding is unnecessary: the part is not wire
+		// SMTP, and parseHeaderPart reads one line per header.
+		$to = MailAddressList::format((array)$message->getRecipients());
+		if ($to !== '') {
+			$headers .= 'To: ' . $to . "\r\n";
+		}
+		$cc = MailAddressList::format((array)$message->getCc());
+		if ($cc !== '') {
+			$headers .= 'Cc: ' . $cc . "\r\n";
+		}
 
 		// A Reply-To the sender set must survive the crossing, or a reply goes to
 		// the From address instead — the SMTP path carries it, so Direct must too.

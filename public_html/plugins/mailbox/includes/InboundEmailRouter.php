@@ -612,6 +612,9 @@ class InboundEmailRouter {
 		// (specs/mailbox_show_original_coverage.md). Content like the body:
 		// plaintext rows store it at insert, sealing rows seal it below.
 		$raw_headers = $this->rawHeaderBlock($raw_email);
+		// Who else the message went to (iem_to / iem_cc): content like the body,
+		// plaintext at insert on a plaintext row, sealed below on a sealing one.
+		$lists = $this->addressListsFromHeaders($parsed['headers'] ?? array());
 
 		$row = [
 			'iem_ied_inbound_email_domain_id' => $domain->key,
@@ -637,7 +640,7 @@ class InboundEmailRouter {
 			// where it belongs rather than all of them landing at the import's clock.
 			'iem_received_time' => (string)($options['received_time'] ?? '') !== ''
 				? $options['received_time'] : gmdate('Y-m-d H:i:s'),
-		];
+		] + $this->addressListColumns($lists, $sealing);
 
 		// Source state an importer carries across, and the run tag that makes the
 		// import reversible. All absent for live delivery, which wants the defaults.
@@ -712,7 +715,7 @@ class InboundEmailRouter {
 			if ($sealing) {
 				$dek = $this->sealMessageContent(intval($msg->key), $vault, $sender, $subject,
 					$bodies['plain'], $bodies['html'], $seal_recipient ? $recipient_value : null,
-					$raw_headers);
+					$raw_headers, $lists);
 			}
 
 			// Row inserted (we now have the serial id): split attachments into
@@ -864,7 +867,8 @@ class InboundEmailRouter {
 		// The header block rides along — this is the row's one plaintext moment,
 		// exactly like receive-time ingest (specs/mailbox_show_original_coverage.md).
 		$dek = $this->sealMessageContent(intval($msg->key), $vault, $sender, $subject,
-			$bodies['plain'], $bodies['html'], null, $this->rawHeaderBlock($raw));
+			$bodies['plain'], $bodies['html'], null, $this->rawHeaderBlock($raw),
+			$this->addressListsFromHeaders($parsed['headers'] ?? array()));
 		$this->persistRawAndManifest(intval($msg->key), $raw, $alias, $dek);
 
 		// Content-spam classification now runs on the parsed plaintext, exactly as
@@ -1060,6 +1064,11 @@ class InboundEmailRouter {
 			$size_bytes += strlen((string)($attachment['bytes'] ?? ''));
 		}
 
+		// The sender's header part carries To / Cc (MailDirectHandler::buildParts),
+		// already in canonical form by way of parseHeaderPart.
+		$lists = $this->addressListsFromHeaders(array(
+			'to' => (string)($meta['to'] ?? ''), 'cc' => (string)($meta['cc'] ?? '')));
+
 		$row = array(
 			'iem_ied_inbound_email_domain_id' => $domain->key,
 			'iem_iea_inbound_email_alias_id'  => $alias ? $alias->key : null,
@@ -1086,7 +1095,7 @@ class InboundEmailRouter {
 			'iem_direct_verified' => $verified_direct,
 			'iem_received_time' => (string)($meta['received_time'] ?? '') !== ''
 				? $meta['received_time'] : gmdate('Y-m-d H:i:s'),
-		);
+		) + $this->addressListColumns($lists, $sealing);
 
 		// One transaction, exactly as the SMTP store uses: a committed row always
 		// carries its attachments, so a dedup hit genuinely means "fully stored".
@@ -1125,7 +1134,8 @@ class InboundEmailRouter {
 		try {
 			$dek = null;
 			if ($sealing) {
-				$dek = $this->sealMessageContent(intval($msg->key), $vault, $sender, $subject, $body_plain, $body_html);
+				$dek = $this->sealMessageContent(intval($msg->key), $vault, $sender, $subject, $body_plain, $body_html,
+					null, null, $lists);
 			}
 			$this->storeDirectAttachments(intval($msg->key), $attachments, $owner_id, $dek);
 			if ($owns_tx) {
@@ -1411,15 +1421,38 @@ class InboundEmailRouter {
 	 * Returns the per-message DEK (raw bytes) so the caller can also seal this
 	 * message's attachments under the SAME key.
 	 */
-	private function sealMessageContent(int $message_id, $vault, string $sender, string $subject, string $body_plain, string $body_html, ?string $recipient = null, ?string $raw_headers = null): string {
+	private function sealMessageContent(int $message_id, $vault, string $sender, string $subject, string $body_plain, string $body_html, ?string $recipient = null, ?string $raw_headers = null, array $lists = array()): string {
 		// On an INBOUND row iem_recipient is the receiving alias address — routing
 		// metadata, not content — so it stays cleartext exactly as storeMessage wrote
 		// it at insert. $recipient is non-null only for a COMPOSED row (imported Sent
 		// mail), where the address list is genuinely content and the read path expects
-		// ciphertext.
+		// ciphertext. $lists carries the To / Cc header lists (iem_to / iem_cc), which
+		// are content on every direction.
 		return InboundEmailMessage::sealAndPersistContent($message_id, $vault, $sender,
 			(string)$recipient, $subject, $body_plain, $body_html, $recipient !== null,
-			'', null, null, $raw_headers);
+			'', null, null, $raw_headers,
+			(string)($lists['to'] ?? ''), (string)($lists['cc'] ?? ''));
+	}
+
+	/**
+	 * The To and Cc lists from a parsed header set, in MailAddressList's canonical
+	 * form — what iem_to / iem_cc hold. '' when the header is absent.
+	 *
+	 * @return array{to:string,cc:string}
+	 */
+	public function addressListsFromHeaders(array $headers): array {
+		return array(
+			'to' => MailAddressList::fromHeader($headers['to'] ?? ''),
+			'cc' => MailAddressList::fromHeader($headers['cc'] ?? ''),
+		);
+	}
+
+	/** iem_to / iem_cc column values for a row insert: NULL for an empty list. */
+	private function addressListColumns(array $lists, bool $sealing): array {
+		return array(
+			'iem_to' => ($sealing || $lists['to'] === '') ? null : $lists['to'],
+			'iem_cc' => ($sealing || $lists['cc'] === '') ? null : $lists['cc'],
+		);
 	}
 
 	/**
@@ -1815,6 +1848,7 @@ class InboundEmailRouter {
 		$subject = substr((string)($msg['subject'] ?? ''), 0, 1000);
 		$plain   = (string)($msg['body_plain'] ?? '');
 		$html    = (string)($msg['body_html'] ?? '');
+		$lists   = $this->addressListsFromHeaders(is_array($msg['headers'] ?? null) ? $msg['headers'] : array());
 
 		$row = array(
 			'iem_ied_inbound_email_domain_id' => $domain->key,
@@ -1841,7 +1875,7 @@ class InboundEmailRouter {
 			'iem_imap_uidvalidity' => isset($msg['imap_uidvalidity']) ? intval($msg['imap_uidvalidity']) : null,
 			'iem_imap_folder'      => $msg['imap_folder'] ?? null,
 			'iem_received_time' => $msg['received_time'] ?? gmdate('Y-m-d H:i:s'),
-		);
+		) + $this->addressListColumns($lists, $sealing);
 
 		try {
 			$saved = InboundEmailMessage::CreateEntry($row);
@@ -1881,7 +1915,7 @@ class InboundEmailRouter {
 		// be reported as stored.
 		if ($sealing) {
 			$this->sealMessageContent(intval($saved->key), $seal['vault'],
-				$sender, $subject, $plain, $html);
+				$sender, $subject, $plain, $html, null, null, $lists);
 		}
 		return array('message' => $saved, 'dedup' => false);
 	}

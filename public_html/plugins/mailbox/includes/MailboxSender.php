@@ -51,6 +51,8 @@
  * cid-rewritten into the stored/sent HTML). The stored iem_body_plain is derived from
  * the final sanitized HTML.
  *
+ * @version 1.17 - the Sent row records its To and Cc lists separately
+ *                 (iem_to / iem_cc) beside the merged iem_recipient
  * @version 1.16 - sendCapabilityFor(): the one answer to "can this mailbox send
  *                  right now", shared by send() itself, the reader's compose
  *                  preflight and the Setup tab's Sending row. An IMAP-source
@@ -300,7 +302,7 @@ class MailboxSender {
 		}
 
 		$stored = $this->storeOutboundRow($source, $alias, $mode, $from_address,
-			array_merge($to, $cc), $bcc, $subject, $email, $message_id, $draft, $morph_dek);
+			$to, $cc, $bcc, $subject, $email, $message_id, $draft, $morph_dek);
 		if (!empty($uploads['regular'])) {
 			$this->persistOutboundUploads($stored['id'], $uploads['regular'], $stored['dek']);
 		}
@@ -1146,7 +1148,7 @@ class MailboxSender {
 	 *         seal any re-uploaded attachments under the same key.
 	 */
 	private function storeOutboundRow(?InboundEmailMessage $source, InboundEmailAlias $alias,
-			string $mode, string $from_address, array $recipients, array $bcc, string $subject,
+			string $mode, string $from_address, array $to, array $cc, array $bcc, string $subject,
 			EmailMessage $email, string $message_id, ?InboundEmailMessage $morph = null,
 			?string $morph_dek = null): array {
 
@@ -1156,7 +1158,11 @@ class MailboxSender {
 
 		// Never truncated: the full list is real content (iem_recipient is text;
 		// a sealed row stores its AEAD blob, which outgrows any plaintext cap).
-		$recipient_str = implode(', ', $recipients);
+		$recipient_str = implode(', ', array_merge($to, $cc));
+		// The same two lists kept apart (iem_to / iem_cc), the shape every row
+		// carries whichever way it arrived, so the reader shows To and Cc as sent.
+		$to_str = MailAddressList::format($to);
+		$cc_str = MailAddressList::format($cc);
 		// Bcc rides its OWN sealed column, never merged into iem_recipient (§ Phase 1)
 		// so reply-all on this Sent copy can never re-leak a bcc'd address.
 		$bcc_str = implode(', ', $bcc);
@@ -1174,6 +1180,8 @@ class MailboxSender {
 			'iem_sender'       => $sealing ? '' : substr($from_address, 0, 500),
 			'iem_recipient'    => $sealing ? '' : $recipient_str,
 			'iem_bcc'          => ($sealing || $bcc_str === '') ? null : $bcc_str,
+			'iem_to'           => ($sealing || $to_str === '') ? null : $to_str,
+			'iem_cc'           => ($sealing || $cc_str === '') ? null : $cc_str,
 			'iem_subject'      => $sealing ? '' : $subject_trunc,
 			'iem_body_plain'   => $sealing ? '' : $body_plain,
 			'iem_body_html'    => $sealing ? '' : $body_html,
@@ -1231,7 +1239,7 @@ class MailboxSender {
 				if ($sealing) {
 					$dek = InboundEmailMessage::sealAndPersistContent($message_id_row, $vault,
 						substr($from_address, 0, 500), $recipient_str, $subject_trunc, $body_plain, $body_html,
-						true, $bcc_str, null, $reuse_dek);
+						true, $bcc_str, null, $reuse_dek, null, $to_str, $cc_str);
 					$db->commit();
 				}
 			} catch (\Throwable $e) {
@@ -1259,7 +1267,7 @@ class MailboxSender {
 			if ($sealing) {
 				$dek = InboundEmailMessage::sealAndPersistContent(intval($row->key), $vault,
 					substr($from_address, 0, 500), $recipient_str, $subject_trunc, $body_plain, $body_html,
-					true, $bcc_str, null, $reuse_dek);
+					true, $bcc_str, null, $reuse_dek, null, $to_str, $cc_str);
 				$db->commit();
 			}
 		} catch (\Throwable $e) {
