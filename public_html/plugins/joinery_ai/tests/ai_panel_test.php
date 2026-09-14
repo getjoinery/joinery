@@ -17,7 +17,7 @@
  *    binding is cron-runnable for its standard remainder.
  *  - AiPanelService: state shape (own cards + template cards), owner scoping,
  *    toggle round-trips including last-mailbox removal, the taint confirm
- *    handshake, and the dashboard-only kill switch.
+ *    handshake, and Turn on putting a Manually-only recipe on arrival.
  *  - Template instantiation: first toggle-ON creates the caller's own enabled
  *    instance (rcp_template_key, never rcp_declared_key) and the seeded row is
  *    never touched; the second toggle edits that same instance.
@@ -25,7 +25,8 @@
  *
  * Run: php tests/run.php db --only=plugins/joinery_ai/tests/ai_panel_test.php
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - Turn on enables a Manually-only recipe on arrival (no refusal)
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 require_once(__DIR__ . '/../../../tests/lib/logic.php');
@@ -259,7 +260,7 @@ check($admin_own && is_string($admin_own['dashboard_url'])
 	'a permission-10 viewer gets the dashboard link');
 
 // -----------------------------------------------------------------------------
-section('Owner scoping and the dashboard-only kill switch');
+section('Owner scoping, and Turn on puts a Manually-only recipe on arrival');
 
 $foreign = aip_recipe($other_id, array());
 $refused = '';
@@ -270,16 +271,41 @@ try {
 }
 check($refused !== '', 'toggling someone else\'s recipe is refused', $refused);
 
+// Bound to the open mailbox but set to Manually only: the card reads Off with
+// the reason on it, and Turn on is the whole enablement — bound AND on arrival.
 $paused = aip_recipe($member_id, array($addr1), false);
-$refused = '';
-try {
-	AiPanelService::toggle($member_id, 1, 'mailbox', $context, intval($paused->key), '', false, false);
-} catch (AiPanelServiceException $e) {
-	$refused = $e->getMessage();
-}
-check(stripos($refused, 'manually only') !== false,
-	'a toggle against a Manually-only recipe is refused server-side, named by what was chosen',
-	$refused);
+$cards = AiPanelService::state($member_id, 1, 'mailbox', $context);
+$paused_card = null;
+foreach ($cards as $c) if ($c['recipe_id'] === intval($paused->key)) $paused_card = $c;
+check($paused_card && $paused_card['covered'] === true && $paused_card['on'] === false
+		&& $paused_card['paused'] === true && $paused_card['blocked_reason'] === null,
+	'a bound Manually-only recipe reads Off (covered, not on, paused) and is not blocked',
+	json_encode($paused_card));
+
+$card = AiPanelService::toggle($member_id, 1, 'mailbox', $context, intval($paused->key), '', true, false);
+$after = new Recipe(intval($paused->key), TRUE);
+check($card['on'] === true && $card['paused'] === false
+		&& (bool)$after->get('rcp_enabled') === true
+		&& (string)$after->get('rcp_schedule_frequency') === RecipeSchedule::FREQ_ARRIVAL,
+	'Turn on enables it on the arrival schedule',
+	json_encode(array('card' => $card, 'enabled' => $after->get('rcp_enabled'),
+		'freq' => $after->get('rcp_schedule_frequency'))));
+
+$card = AiPanelService::toggle($member_id, 1, 'mailbox', $context, intval($paused->key), '', false, false);
+$after = new Recipe(intval($paused->key), TRUE);
+check($card['on'] === false && $card['covered'] === false
+		&& (bool)$after->get('rcp_enabled') === true,
+	'Turn off unbinds the mailbox and leaves the schedule alone', json_encode($card));
+
+// A Manually-only recipe on a clock keeps its clock when a mailbox is bound
+// from the panel — only the manual/automatic bit flips; the person chose the
+// clock on the dashboard. (The fixture is hourly.)
+$clocked = aip_recipe($member_id, array(), true);
+$card = AiPanelService::toggle($member_id, 1, 'mailbox', $context, intval($clocked->key), '', true, false);
+$after = new Recipe(intval($clocked->key), TRUE);
+check($card['on'] === true && (string)$after->get('rcp_schedule_frequency') === 'hourly',
+	'binding a mailbox on a recipe already running on a clock keeps the clock',
+	(string)$after->get('rcp_schedule_frequency'));
 
 // -----------------------------------------------------------------------------
 section('Toggle round-trips, including last-mailbox removal');

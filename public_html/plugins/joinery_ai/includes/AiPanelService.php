@@ -18,19 +18,20 @@ class AiPanelConfirmRequired extends Exception {}
  *
  * Owner scoping IS the authorization — every path here reads and writes only
  * recipes belonging to $user_id, so the two API actions are member-callable
- * with no permission gate. The manual/automatic bit (rcp_enabled) is
- * dashboard-only: a toggle against a recipe set to run manually only is
- * refused here, server-side, so the panel's grayed control is a rendering of
- * server truth.
+ * with no permission gate.
  *
- * @version 1.3
+ * Turning a card ON here is the whole enablement choice: it binds the open
+ * mailbox AND puts the recipe on the arrival schedule (rcp_enabled true,
+ * frequency `arrival`), the same posture instantiateForUser() gives a fresh
+ * instance — so a seeded recipe, which arrives on Manually only, runs as mail
+ * arrives after one toggle, with no dashboard visit. Turning OFF only unbinds:
+ * the recipe may still cover other mailboxes.
+ *
+ * @version 1.4
+ * @changelog 1.4 - toggle-ON enables a Manually-only recipe on arrival instead
+ *   of refusing; a card is On only when bound AND running automatically
  */
 class AiPanelService {
-
-    /** Why a toggle is refused, and what the card says, when a recipe has no
-     *  automatic trigger. One constant so the refusal and the rendering of it
-     *  cannot drift. */
-    const MANUAL_ONLY_TEXT = 'Set to run manually only — give it a schedule on the recipes dashboard.';
 
     /**
      * Every registered pipeline job that belongs to $area, keyed by job id.
@@ -124,16 +125,14 @@ class AiPanelService {
         }
         $job = $area_jobs[$job_id];
 
-        if ($recipe !== null && !$recipe->get('rcp_enabled')) {
-            // The manual/automatic bit is dashboard-only; the panel never
-            // writes it — and the seeded superadmin rows ship on Manually only
-            // on purpose, so giving one a schedule stays a dashboard act. Named
-            // by what someone CHOSE, not by the column: "paused" describes a
-            // state nothing in this UI can produce or clear.
-            throw new AiPanelServiceException(self::MANUAL_ONLY_TEXT);
-        }
-
         if ($enabled) {
+            // Turning ON means "handle my mail as it comes", so the job must
+            // have an arrival concept — every mail job does; the check keeps a
+            // future area job from being switched onto a schedule it cannot run.
+            if (!self::offersArrival($job)) {
+                throw new AiPanelServiceException(
+                    'This recipe\'s work does not arrive on its own — give it a schedule on the recipes dashboard.');
+            }
             // The taint handshake precedes everything — including template
             // instantiation, so declining the dialog leaves nothing behind.
             $accepted = $recipe !== null && (bool)$recipe->get('rcp_allow_tainted_writes');
@@ -163,6 +162,18 @@ class AiPanelService {
     /** @param AreaScopedJobInterface&PipelineJobInterface $job */
     private static function jobUntrusted($job): bool {
         return ($job instanceof PipelineJobInterface) && $job->untrustedDigest();
+    }
+
+    /** Does this job offer the arrival schedule — the one a panel toggle-ON puts
+     *  a recipe on? Same question admin_edit_logic asks before it accepts
+     *  `arrival` from the Runs control. */
+    private static function offersArrival($job): bool {
+        if (!($job instanceof PipelineJobInterface)) return false;
+        try {
+            return trim((string)$job->arrivalLabel()) !== '';
+        } catch (Throwable $e) {
+            return false;
+        }
     }
 
     /** The user's own live recipe, or a refusal — never someone else's. */
@@ -195,6 +206,14 @@ class AiPanelService {
      * the columns this toggle owns — so a dashboard save racing a panel toggle
      * can never clobber an address the other surface just wrote.
      *
+     * Turning ON also puts a Manually-only recipe on the arrival schedule
+     * (rcp_enabled true, frequency `arrival`) — the toggle IS the choice to
+     * run, and a bound recipe that never runs would look on while nothing
+     * happened. A recipe already running on a clock keeps its clock: the
+     * person chose that on the dashboard, and mail bound here is picked up on
+     * that schedule. Turning OFF leaves the schedule alone — other mailboxes
+     * may still be bound.
+     *
      * Turning OFF skips validateConfig() deliberately: removal only shrinks
      * the list, and re-validating the REMAINING addresses would let one stale
      * entry (a grant revoked elsewhere) trap the person out of unbinding this
@@ -221,6 +240,10 @@ class AiPanelService {
             $params = [json_encode($config), gmdate('Y-m-d H:i:s')];
             if ($accept_tainted_writes && !$recipe->get('rcp_allow_tainted_writes')) {
                 $sets .= ', rcp_allow_tainted_writes = TRUE';
+            }
+            if ($on && !$recipe->get('rcp_enabled')) {
+                $sets .= ', rcp_enabled = TRUE, rcp_schedule_frequency = ?';
+                $params[] = RecipeSchedule::FREQ_ARRIVAL;
             }
             $params[] = (int)$recipe->key;
             $u = $db->prepare("UPDATE rcp_recipes SET $sets WHERE rcp_recipe_id = ?");
@@ -257,15 +280,16 @@ class AiPanelService {
             int $user_id, int $permission): array {
         $config = Recipe::decodeSourceConfig($recipe);
         $covered = $job->coversContext($config, $context, $recipe);
+        // Manually only (rcp_enabled false): bound or not, nothing runs on its
+        // own. The card is On only when the mailbox is bound AND the recipe
+        // runs automatically; a bound-but-manual recipe shows Off, and Turn on
+        // is what puts it on arrival.
         $paused = !$recipe->get('rcp_enabled');
         $bound_total = $job->contextCount($config);
 
         $blocked_reason = null;
         $blocked_text = null;
-        if ($paused) {
-            $blocked_reason = 'paused';
-            $blocked_text = self::MANUAL_ONLY_TEXT;
-        } elseif (!$covered) {
+        if (!$covered) {
             // Would turning this ON here be refused? Dry-run the same bind +
             // validate the toggle would run, so the disabled control carries
             // the server's own wording (sealed domain without the AI opt-in,
@@ -284,6 +308,7 @@ class AiPanelService {
             'name'           => (string)$recipe->get('rcp_name'),
             'job_label'      => ($job instanceof PipelineJobInterface) ? $job->label() : '',
             'covered'        => $covered,
+            'on'             => $covered && !$paused,
             'paused'         => $paused,
             'blocked_reason' => $blocked_reason,
             'blocked_text'   => $blocked_text,
@@ -317,6 +342,7 @@ class AiPanelService {
             'name'           => (string)$declaration['name'],
             'job_label'      => ($job instanceof PipelineJobInterface) ? $job->label() : '',
             'covered'        => false,
+            'on'             => false,
             'paused'         => false,
             'blocked_reason' => $blocked_reason,
             'blocked_text'   => $blocked_text,
