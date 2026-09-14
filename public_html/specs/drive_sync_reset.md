@@ -6,8 +6,9 @@ post-commit re-run: identical to reading 6 per oracle and byte-identical
 traces); WP1d (the custody oracle) DONE 2026-09-13, harness only, findings
 C1-C3 recorded below (WP1d committed as `1581721c`); WP3 in progress: change
 1 (`aba4bd60`, naming waits on a chain that runs into an open op) closes C3,
-change 2 (the round brings nothing in under a folder the user has just
-deleted) closes C2. Every change reviewed by public-html-c6, approach before
+change 2 (`20c431b5`, the round brings nothing in under a folder the user has
+just deleted) closes C2; the belts' instrument (reading 11) finds fix 4's bar
+met and finding C4. Every change reviewed by public-html-67 (public-html-c6 until 2026-09-14), approach before
 patch.**
 
 Testing is paused. No further guards land on the sync engine until the work
@@ -1316,9 +1317,13 @@ fire from a confused one.
                            folder but the root, vault subfolders included, so
                            a user deleting a vault subfolder holding a
                            not-yet-uploaded sealed file fires it CORRECTLY.
-                           Bar: fires only on that shape.
+                           Bar: fires only on that shape. Instrument: the
+                           custody line's net_fires_outside_a_user_delete
+                           (reading 11: 3, two of them C4, one AH).
     mint guard (fix 2)     already out; bar is the B1 pin.
     keep-record (fix 4)    bar: zero fires across every arm after WP2.
+                           MET, reading 11 (sealed_record_kept 0 of 160);
+                           removal after C4, with its own pair.
     fix 3's refusals       bar decided by WP2's no-id fallback, above.
     subtree refusal        not a belt; stays.
 
@@ -1453,7 +1458,76 @@ under two trashed folders on disk's pass 7; the chaos name-swapper then fires
 at other moments and one swap meets scan rule 1; swap-off green on the
 engine before AND after the change -- AH residue, so the seed joins the
 `poisoned_by_ah` list with the reason in the comment (c6's F1, answered by
-the trace, not by widening the pin). **C2 CLOSED.**
+the trace, not by widening the pin). **C2 CLOSED.** Committed as `20c431b5`.
+
+**WP3, the belts' instrument (2026-09-13): two belts report before any
+removal (R8).** Reports only; nothing decides on them.
+
+- Fix 4, keep-record (`forget_folder_the_server_confirms`, the `keep`
+  closure): a sealed FILE record whose inode still stands on this disk is
+  not forgotten when the server confirms its folder gone, and the folder's
+  record is kept under it. It fired silently; now it raises
+  `sealed_record_kept` on the folder, once, naming the kept files ("N sealed
+  file(s) here are still on this computer although the server has deleted
+  their folder; their records were kept so nothing is sent again in the
+  clear, and the files go to this computer's trash with the folder").
+  Its one reachable shape, found by the pin: the file's record still under
+  the folder while its inode stands elsewhere in the tree when the forget is
+  confirmed -- moves run before deletes, so an APPLIED move takes the record
+  out of the folder first and there is nothing to keep; the move has to be
+  in flight. Pin `a_sealed_file_still_here_says_so_when_the_server_forgets_
+  its_folder`: the user drags the sealed file to the vault root, the
+  device's pass sends the move and the network refuses it once, another hand
+  trashes the subfolder on the server, the device passes: the file is busy
+  and out of the round, the folder's local trash finds an empty directory,
+  the forget stats the file as gone with the cascade, its inode is at the
+  root -> keep -> the issue stands once, on the folder, naming the file. RED
+  without the report, GREEN with. R9 gap, stated: no pin exists for fix 4's
+  own invariant (nothing plain reaches the server; the file goes to the OS
+  trash with the folder) -- 87ca2389 landed it with `scratch_clean_one` and
+  the estate spec's F5/F6 measurements only.
+- Fix 1, the rescue net: reports already (`rescued_from_trash`,
+  `sealed_not_rescued`); what could not be read was whether the USER deleted
+  the folder the issue names. The harness now knows: `Custody::removing`
+  runs before every workload removal (arms 15 and 18) and resolves each
+  directory of the subtree to its server folder while it stands -- the
+  learned handle, else the record the store places at the path, else the
+  folder the store merely NAMES there (`scenario::folder_named_at`: a
+  directory the user made under a name the server was bringing is adopted
+  as that folder by the next scan, so removed first it is that folder's
+  directory the user deleted); unresolved counted `removal_unattributed`.
+  The set is world-wide: the cross-device shape (deleted on pc, a
+  never-uploaded file rescued on mac on the feed's word) is the net's
+  legitimate shape too. `rescues_from_folders_the_user_never_deleted` = every
+  rescue issue on every device whose folder is not in the set; on the custody
+  line as `net_fires_outside_a_user_delete=` with the lines, plus
+  `user_removed_folders=`. Unit test `the_rescue_nets_bar_knows_whose_delete_
+  it_was`: pc deletes, mac rescues -> 0; the server trashes by hand, mac
+  rescues -> 1 naming the folder.
+
+Reading 11 (`zz_sweep.reports` a84efdf82f83 = `20c431b5` + the report; vs
+reading 10): traces identical 160 of 160 (a report draws nothing), every
+oracle and every custody cell unmoved. `sealed_record_kept`: 0 on every seed
+of every arm -- fix 4's bar is met. `net_fires_outside_a_user_delete`:
+clean2 0, hostile2 1 (74414), clean3 1 (74821), kill2 1 (75101), plat3 0.
+Traced: 75101 swap-off 0 (AH residue); 74821 (clean, no faults) and 74414
+(swap-off still 1) are one shape, **finding C4**: b makes `Private/Sub 4`,
+writes into it, its pass creates 506 from that directory; b's user renames
+the directory (`Sub 28 renamed`); a's stale write mints a namesake on the
+server (507); b's next pass plans `TrashRemote 506`, `CreateLocalFolder 507`
+onto b's directory, and `ApplyLocalMove 906` (506's file) into 507; a and c
+trash their copies and a's never-uploaded sealed file goes to the trash with
+a `sealed_not_rescued`. The user renamed a folder and lost it everywhere
+except as a merge into a stranger's namesake. Site: the provisional folder
+record the scan mints for a new directory carries no directory identity
+(`blank`), the create's landing records none (`agree` passes none), and
+`record_directory_identities` reads agreed paths only on a LATER scan --
+renamed before that scan, the agreed path holds nothing and the record never
+learns its directory; the tracked loop's `owned` map then cannot protect the
+directory from the namesake's arrival, the record reads as missing, and its
+own files corroborate "moved into 507". Custody counted it `reminted` (one
+birth, two ids): the residual line hid it; the belt report shows the human
+cost. C4's fix is the next unit.
 
 ## Process rules, effective now
 
@@ -1535,7 +1609,10 @@ belt in, before the belt lands.** B1 is what happens without this.
   160); no re-baseline was needed.
 - C2 CLOSED by WP3 change 2 (the round brings nothing in under a folder the
   user has just deleted). C3 CLOSED by WP3 change 1 (its root was a naming
-  park, not the rescue net). C1 is AH (owner decision A1).
+  park, not the rescue net). C1 is AH (owner decision A1). C4 (a folder
+  renamed before the first scan after its creation loses its identity and is
+  trashed for a namesake) found by the belt instrument, reading 11; fix next.
+- R9 gap: fix 4's own invariant has no pin (see the belts' instrument).
 - plat3 75418, reading 2, first run: no verdict line, near-zero runtime,
   cause unknown (`scratchpad/wp1a/reading2/manifest.txt`; the host's kernel
   log shows no OOM or kill at 16:15). The runner now keeps the whole output
