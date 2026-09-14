@@ -6,6 +6,8 @@
 # sshd's password and root-login posture, disk, memory, swap, whether a reboot
 # is pending, and when unattended-upgrades last ran.
 #
+# Version: 1.1 - ssh_auth_failures_24h is unknown, not 0, where systemd does
+#                not answer: a container has no system journal to count from.
 # Version: 1.0 - the host_report observe word of specs/agent_tier1_recipes.md.
 #                The agent runs this file, verified against the release
 #                manifest, with no argv and no stdin; the plane stores what it
@@ -163,6 +165,11 @@ emit_fail2ban_jails() {
 # ---------------------------------------------------------------------------
 emit_ssh_auth_failures() {
     local lines count
+    # Where systemd does not answer there is no system journal to count from:
+    # in a container journalctl exits clean with nothing, and that read as
+    # zero failures. Zero means the journal holds none, never that there is no
+    # journal. The same signal the unit states already fail on.
+    run systemctl show -p Version --value >/dev/null || { printf '"unknown"'; return; }
     lines="$(run journalctl --system -u ssh -u sshd --since "24 hours ago" --no-pager -o cat)" \
         || { printf '"unknown"'; return; }
     count="$(printf '%s\n' "$lines" | grep -c -E 'Failed password|Invalid user|authentication failure|Failed publickey')"

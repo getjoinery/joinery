@@ -177,6 +177,19 @@ chk "a group-writable installer is refused" \
 chk "and the ones that are fine still run" \
     "$(echo "$out" | grep -c 'install_agent.sh: ok')" "1"
 rm -rf "$TMP"
+# The runner takes its lock at the top of every mode (2.16); as root that file
+# is /run/joinery/host-installers.<tree name>.lock and outlives the tree. It is
+# this test's to remove, along with any earlier one of its own that nothing
+# holds. Only this test makes a tree with a mktemp name.
+if [ "$(id -u)" = "0" ] && [ -d /run/joinery ]; then
+    rm -f "/run/joinery/host-installers.$(basename "$TMP").lock"
+    for f in /run/joinery/host-installers.tmp.??????????.lock; do
+        [ -e "$f" ] || continue
+        flock -n "$f" true 2>/dev/null && rm -f "$f"
+    done
+fi
+chk "the run leaves no lock file of its own behind" \
+    "$(ls /run/joinery/host-installers.tmp.*.lock 2>/dev/null | wc -l)" "0"
 
 echo "== a submitted request is carried out =="
 
