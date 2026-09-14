@@ -363,7 +363,38 @@ review is in the file header before the code.
    is wired in. Then `fail2ban` composes slices 3 and 4. On dev the
    executor sets the `fail2ban` hold marker while editing, because the
    working tree is what a recipe on dev runs as root. Release; burn-in
-   starts.
+   starts. **Built 2026-09-14, agent 1.27.0, awaiting review, the
+   release, `update_database` on dev for `mgn_agent_recipes`, and the
+   burn-in read.** Shape as built: package `recipes` beside `primitives`
+   (`Recipe{Name, MinInterval, CheckWord, RepairWord, Check, Repair}`, no
+   field a parameter could live in, pinned in `registry_test.go` with its
+   two words and the mode); `Loop.Tick` is the state machine over an
+   injected clock, lock and marker, 10-minute tick, two consecutive
+   failing ticks (an unknown breaks the run, the in-memory count starts at
+   zero per process), three attempts per rolling hour spaced 10 and 30
+   minutes from the previous attempt's end, a fourth is an escalation held
+   open until a pass with further failures appended by id; a lost
+   `TryLock` is a `busy` line, not an attempt; an attempt writes the job
+   marker through `markRecipeRunning` (pid first, then `recipe <name>`);
+   read-back ledger `/etc/joinery-agent/ledger/<recipe>.jsonl` (0700 dir,
+   0600 file, capped at 256 KiB, attempt line before the repair and
+   outcome after, an outcome-less attempt becomes `interrupted` on the
+   next start), outward copy `{site}/cache/recipes/<recipe>.jsonl` never
+   read; the hold and ledger directories must be owned by the agent's uid
+   with no group/other write bit or a marker is ignored (ledgered) and the
+   loop checks without repairing (logged); `recipes.ReportOnly = true`
+   with the attempt ledgered as `report-only` and counted toward the
+   budget and the escalation (assumption, owner may reverse). Recipe
+   `fail2ban`: check `host_report` in-process through
+   `primitives.Execute` under the node's policy and manifest (pass =
+   active with at least one jail; fail = inactive, failed, absent, or
+   active with no jails; unknown = the string unknown, unlisted jails, or
+   a word that refused), repair `host_converge` verified by the
+   transcript's last line `core installers: host_housekeeping.sh: ok`
+   and the check again. The loop starts from `main.go` in both postures
+   sharing `jobLock`; the claim carries `recipes` (`fail2ban:report-only`),
+   validated and normalised beside `primitives` and stored in
+   `mgn_agent_recipes`; the Host card opens with the list and mode.
 6. **WP3: the case and the incident record**, in the same release as 5 or
    the next, so the burn-in's cases have somewhere to land.
 7. **Arming**, its own release, after the burn-in ledger from dev,

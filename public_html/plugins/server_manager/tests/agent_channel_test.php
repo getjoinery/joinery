@@ -346,6 +346,34 @@ check(AgentChannelEndpoint::validation_error(
 	'A well-formed body is accepted');
 
 // ---------------------------------------------------------------------------
+section('A claim is a closed set of fields, and the recipe list is one of them');
+
+// The endpoint's own spec, not a copy: a copy can agree with itself while
+// disagreeing with the code. An undeclared field is refused, and the agent's
+// answer to that is to drop every extra it sends (its vocabulary included), so
+// what a node may say on a poll is exactly this list.
+$claim_spec = AgentChannelEndpoint::claim_request_spec();
+$claim = ['node_id' => 7, 'agent_version' => '1.27.0', 'primitives' => 'check_status,host_converge,host_report',
+	'recipes' => 'fail2ban:report-only', 'bundle_version' => '', 'script_trust' => 'ok'];
+check(AgentChannelEndpoint::validation_error($claim, $claim_spec) === null,
+	'A claim carrying the recipe list with a mode is accepted',
+	(string)AgentChannelEndpoint::validation_error($claim, $claim_spec));
+check(AgentChannelEndpoint::validation_error(['node_id' => 7, 'agent_version' => '1.26.1'], $claim_spec) === null,
+	'A claim from an agent that runs no recipes and says nothing is still accepted');
+$bad = $claim; $bad['recipes'] = 'fail2ban:report-only;rm -rf /';
+check(AgentChannelEndpoint::validation_error($bad, $claim_spec) !== null,
+	'A recipe list carrying a character outside name:mode form is refused whole');
+$bad = $claim; $bad['recipes'] = str_repeat('a', AgentChannelEndpoint::MAX_VOCABULARY_BYTES + 1);
+check(stripos((string)AgentChannelEndpoint::validation_error($bad, $claim_spec), 'limit') !== false,
+	'The recipe list is capped like the vocabulary');
+$bad = $claim; $bad['cases'] = [['recipe' => 'fail2ban']];
+check(stripos((string)AgentChannelEndpoint::validation_error($bad, $claim_spec), 'undeclared') !== false,
+	'A field this release does not declare (the case rides slice 6) is refused as undeclared');
+$bad = $claim; $bad['hold'] = 'fail2ban';
+check(stripos((string)AgentChannelEndpoint::validation_error($bad, $claim_spec), 'undeclared') !== false,
+	'Nothing in a claim names, holds, starts or arms a recipe: such a field is undeclared');
+
+// ---------------------------------------------------------------------------
 section('A refusal is countable, not just readable');
 
 // mjb_status stays the vocabulary every dashboard filter understands, so a

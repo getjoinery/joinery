@@ -80,7 +80,7 @@ echo "== the shipped reader extracts and parses =="
     echo 'say() { echo "agent installer: $*"; }'
     echo 'JOB_MARKER_FILE="$1"'
     awk '/^agent_job_in_progress\(\) \{/{f=1} f{print} f&&/^\}$/{exit}' "$INSTALLER"
-    echo 'if agent_job_in_progress; then echo "BUSY job=${AGENT_JOB_ID}"; else echo "FREE"; fi'
+    echo 'if agent_job_in_progress; then echo "BUSY job=${AGENT_JOB_LABEL}"; else echo "FREE"; fi'
 } > "$T/reader.sh"
 chk "reader function found in install_agent.sh" \
     "$(grep -c 'agent_job_in_progress()' "$T/reader.sh")" "1"
@@ -126,6 +126,27 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+echo "== a recipe attempt writes the same marker with its name =="
+# A recipe (agent recipes/loop.go, from 1.27.0) runs an installer that may
+# restart the agent exactly as a job does, so it writes the same file: the pid
+# first — the only field that gates anything — and "recipe <name>" where a job
+# writes its id. The reader takes line two as a label, never as a number:
+# read as digits, "recipe fail2ban" was "job #2" in both deferral messages.
+printf '%s\n%s\n%s\n' "$FAKE_PID" "recipe fail2ban" "2026-09-14T12:00:00Z" > "$MARKER"
+chk "a recipe marker reads BUSY with the recipe's name" "$("$T/reader.sh" "$MARKER")" "BUSY job=recipe fail2ban"
+chk "a recipe marker is left alone" "$([ -f "$MARKER" ] && echo kept || echo removed)" "kept"
+
+# The label reaches two log lines. It is reduced to letters, digits, space,
+# underscore and hyphen before it does, so nothing on line two can carry a
+# newline, a quote or a shell character into the transcript.
+printf '%s\n%s\n%s\n' "$FAKE_PID" 'recipe fail2ban; $(reboot) "x"' "2026-09-14T12:00:00Z" > "$MARKER"
+chk "a hostile second line is reduced to a plain label" "$("$T/reader.sh" "$MARKER")" "BUSY job=recipe fail2ban reboot x"
+
+# And the job form is unchanged: the id is still what a job writes.
+printf '%s\n%s\n%s\n' "$FAKE_PID" "7777" "2026-08-28T12:00:00Z" > "$MARKER"
+chk "a job marker still reads its id" "$("$T/reader.sh" "$MARKER")" "BUSY job=7777"
+
+# ---------------------------------------------------------------------------
 echo "== a stale marker cannot wedge the node =="
 kill "$FAKE_PID" 2>/dev/null
 wait "$FAKE_PID" 2>/dev/null
@@ -159,6 +180,15 @@ chk "converge_binary is guarded by the deferral" \
 chk "the deferral branch skips converge_binary" \
     "$(awk '/^if \[ "\$DEFER_TO_AGENT" = "1" \]; then/{f=1} f&&/converge_binary/{print "leaked"; exit} f&&/^else$/{print "skipped"; exit}' "$INSTALLER")" \
     "skipped"
+
+echo "== both deferral messages say what the agent is busy with =="
+# Two messages name the marker's label; neither may read it as a number.
+chk "the binary-swap deferral names the label" \
+    "$(grep -c 'not touching the agent binary' "$INSTALLER")" "1"
+chk "the restart deferral names the label" \
+    "$(grep -c 'keeps running (\${AGENT_JOB_LABEL' "$INSTALLER")" "1"
+chk "nothing reads the label as a job number any more" \
+    "$(grep -c 'AGENT_JOB_ID' "$INSTALLER")" "0"
 
 echo "== the deferral exits before start_agent, and says so =="
 DEFER_LINE="$(grep -n 'restart deferred to agent' "$INSTALLER" | head -1 | cut -d: -f1)"

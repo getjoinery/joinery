@@ -2,6 +2,9 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.17 - mgn_agent_recipes: the recipes the node's agent runs on its own clock, each with its
+ *                 mode (name:report-only or name:armed), as the agent reported them at its last poll;
+ *                 empty for an agent before 1.27.0, which runs none. The plane is told, never tells
  * @version 1.16 - mgn_last_host_report / mgn_last_host_report_time: the machine as the host_report
  *                 observe word last described it (units, jails, sshd posture, an SSH auth-failure
  *                 count, disk, memory, reboot-required, unattended-upgrades), its own column and not
@@ -253,6 +256,13 @@ class ManagedNode extends SystemBase {
 		// which is what keeps JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION a
 		// live fallback rather than dead code.
 		'mgn_agent_primitives'    => array('type'=>'text'),
+
+		// The recipes the agent runs on its own clock, each with its mode:
+		// "fail2ban:report-only", comma-separated and sorted, normalised on
+		// intake exactly as the vocabulary is. The plane cannot set, start,
+		// stop or arm a recipe — the agent reports, the Host card shows a
+		// person. Empty for an agent before 1.27.0, which runs none.
+		'mgn_agent_recipes'       => array('type'=>'text'),
 
 		// Which signed support bundle the machine holds — the tree its script
 		// primitives resolve against when it has no site of its own. Empty on

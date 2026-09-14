@@ -36,6 +36,9 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.14 - a claim carries the node's recipe list with each recipe's mode (report-only or armed),
+ *                 validated and normalised like the vocabulary and stored in mgn_agent_recipes, so the
+ *                 node page shows which recipes a node runs on its own clock and whether they act
  * @version 1.13 - adoptJoin adopts a provision's HOST join (claim <slug>-host, provider check passed) as a machine-posture node at the
  *                instance's IPv4, so the placement links; a provision's site join is still sent to the node page
  * @version 1.12 - adoptJoin(): a join for a machine with no node record is approved by making the
@@ -678,10 +681,18 @@ class AgentChannelEndpoint {
 	// Claim
 	// ==================================================================
 
-	private static function handle_claim($body) {
-		$node = self::authenticate_node('/api/v1/agent/claim', self::body_hash());
-
-		$in = self::validate($body, [
+	/**
+	 * Every field a claim accepts, and nothing else.
+	 *
+	 * Public and in one place for the reason artifact_request_spec() is: the
+	 * test that pins what a node may say on a poll has to check the SAME spec
+	 * the endpoint enforces. An undeclared field is refused, and the agent's
+	 * answer to that refusal is to drop every extra it sends — so a field
+	 * added here lands in the same release as the agent that sends it, and
+	 * the publish upgrades this plane before any agent self-updates.
+	 */
+	public static function claim_request_spec(): array {
+		return [
 			'node_id'        => ['type' => 'int', 'required' => true],
 			'agent_version'  => ['type' => 'string', 'max' => 20],
 			// The node's own account of what it can do. A comma-separated list
@@ -691,12 +702,26 @@ class AgentChannelEndpoint {
 			// against, so nothing here needs a second encoding to be read back.
 			'primitives'     => ['type' => 'string', 'max' => self::MAX_VOCABULARY_BYTES,
 			                     'pattern' => '/^[a-z0-9_,]*$/'],
+			// The recipes the node runs on its own clock, each with its mode:
+			// name:report-only or name:armed, comma-separated. Same cap, same
+			// discipline as the vocabulary; normalised_recipes() keeps only
+			// entries whose name could be a recipe and whose mode is one of
+			// the two. The plane cannot set, start, stop or arm one — it is
+			// told, and it shows a person.
+			'recipes'        => ['type' => 'string', 'max' => self::MAX_VOCABULARY_BYTES,
+			                     'pattern' => '/^[a-z0-9_,:-]*$/'],
 			'bundle_version' => ['type' => 'string', 'max' => 32, 'pattern' => '/^[a-z0-9]*$/'],
 			// The node's own answer to whether it can verify the scripts it
 			// would run as root. A closed set, matched not interpolated.
 			'script_trust'   => ['type' => 'string', 'max' => 24,
 				'pattern' => '/^(ok|untrusted_manifest|untrusted_file)?$/'],
-		]);
+		];
+	}
+
+	private static function handle_claim($body) {
+		$node = self::authenticate_node('/api/v1/agent/claim', self::body_hash());
+
+		$in = self::validate($body, self::claim_request_spec());
 		if ((int)$in['node_id'] !== (int)$node->key) {
 			api_error('The signed identity and the stated node do not match.', 'AuthenticationError', 401);
 		}
@@ -732,6 +757,15 @@ class AgentChannelEndpoint {
 			$vocabulary = self::normalised_vocabulary($in['primitives']);
 			if ($vocabulary !== (string)$node->get('mgn_agent_primitives')) {
 				$node->set('mgn_agent_primitives', $vocabulary);
+			}
+		}
+		// The recipe list, stored the same way and for the same reason. Absent
+		// stays absent: an agent before 1.27.0 runs no recipes and says
+		// nothing, and the column's emptiness is that fact.
+		if (array_key_exists('recipes', $in)) {
+			$recipes = self::normalised_recipes($in['recipes']);
+			if ($recipes !== (string)$node->get('mgn_agent_recipes')) {
+				$node->set('mgn_agent_recipes', $recipes);
 			}
 		}
 		if (array_key_exists('bundle_version', $in)
@@ -1126,6 +1160,62 @@ class AgentChannelEndpoint {
 		}
 		ksort($names);
 		return implode(',', array_keys($names));
+	}
+
+	/** The two modes a recipe may report. Anything else is dropped. */
+	const RECIPE_MODES = ['report-only', 'armed'];
+
+	/**
+	 * Reduce a reported recipe list to entries this plane will store.
+	 *
+	 * Each entry is name:mode. The name is re-validated against the shape the
+	 * agent's own registry enforces, the mode against the closed set above,
+	 * duplicates collapse to one (the last mode reported wins, which on a
+	 * single claim is the only one), and the list is sorted — the same
+	 * canonical form normalised_vocabulary() gives, so a re-ordered report
+	 * never reads as a change and nothing that could not be a recipe gets in.
+	 */
+	public static function normalised_recipes($reported) {
+		$entries = [];
+		foreach (explode(',', (string)$reported) as $entry) {
+			$entry = trim($entry);
+			if ($entry === '' || strpos($entry, ':') === false) {
+				continue;
+			}
+			[$name, $mode] = explode(':', $entry, 2);
+			if (!preg_match('/^[a-z][a-z0-9_]{2,39}$/', $name) || !in_array($mode, self::RECIPE_MODES, true)) {
+				continue;
+			}
+			$entries[$name] = $mode;
+			if (count($entries) >= self::MAX_VOCABULARY_NAMES) {
+				break;
+			}
+		}
+		ksort($entries);
+		$out = [];
+		foreach ($entries as $name => $mode) {
+			$out[] = $name . ':' . $mode;
+		}
+		return implode(',', $out);
+	}
+
+	/**
+	 * A stored recipe list as name => mode, for the node page.
+	 */
+	public static function recipes_of($node) {
+		$out = [];
+		$stored = (string)$node->get('mgn_agent_recipes');
+		if ($stored === '') {
+			return $out;
+		}
+		foreach (explode(',', self::normalised_recipes($stored)) as $entry) {
+			if ($entry === '') {
+				continue;
+			}
+			[$name, $mode] = explode(':', $entry, 2);
+			$out[$name] = $mode;
+		}
+		return $out;
 	}
 
 	// ==================================================================
