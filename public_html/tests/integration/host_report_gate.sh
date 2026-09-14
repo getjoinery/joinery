@@ -97,6 +97,7 @@ case "$*" in
         echo 'evil"name;$(reboot)<b>.service loaded failed failed X'
         ;;
     *"list-unit-files php*-fpm.service"*) echo "php8.3-fpm.service enabled enabled" ;;
+    *"-p Version"*) echo 255 ;;
     *"-p LoadState"*)
         case "$*" in *postgresql*) echo not-found ;; *) echo loaded ;; esac ;;
     *"-p ActiveState"*)
@@ -171,6 +172,28 @@ chk "hung fail2ban-client: exit 0" "$rc" "0"
 chk "hung fail2ban-client: jails are unknown" "$(jv "$T/hang.json" fail2ban_jails)" "unknown"
 chk "hung fail2ban-client: the rest of the report is intact" "$(jv "$T/hang.json" ssh_auth_failures_24h)" "4"
 chk "the report returned well inside the word's minute (${elapsed}s)" "$( [ "$elapsed" -lt 30 ]; echo $? )" "0"
+
+echo "=== No systemd answering: a count from no journal is unknown, not 0 ==="
+# A container: systemctl cannot connect, journalctl exits clean with nothing.
+# Reading that as zero failures would be a false clean on every container.
+cat > "$T/bin/systemctl" <<'STUB'
+#!/bin/bash
+echo "System has not been booted with systemd as init system (PID 1). Can't operate." >&2
+exit 1
+STUB
+cat > "$T/bin/journalctl" <<'STUB'
+#!/bin/bash
+exit 0
+STUB
+cat > "$T/bin/fail2ban-client" <<'STUB'
+#!/bin/bash
+exit 1
+STUB
+PATH="$T/bin:$PATH" bash "$SCRIPT" > "$T/nosd.json" 2>/dev/null; rc=$?
+chk "no systemd: exit 0" "$rc" "0"
+chk "no systemd: ssh auth failures are unknown, not 0" "$(jv "$T/nosd.json" ssh_auth_failures_24h)" "unknown"
+chk "no systemd: the expected units are unknown too" "$(jv "$T/nosd.json" expected_units.apache2)" "unknown"
+chk "no systemd: disk is still measured" "$(jv "$T/nosd.json" disk.total_bytes type)" "integer"
 
 echo "=== Static pins ==="
 chk "every command runs under the per-command timeout" "$(grep -c '^run() { timeout "\$CMD_TIMEOUT"' "$SCRIPT")" "1"
