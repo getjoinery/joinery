@@ -3382,6 +3382,78 @@ fn a_sealed_file_still_here_says_so_when_the_server_forgets_its_folder() {
     assert_eq!(kept[0].entity, Some(jd_core::EntityId::folder(sub)), "the report is not on the folder: {:?}", kept[0].entity);
 }
 
+/// A vault folder's identity never claims a directory inside the folder's
+/// own path (finding C5 of the reset's WP3, frozen 1073449).
+///
+/// A disk that hands a deleted directory's id straight back. One keyed
+/// device holds a vault subfolder `Sub` whose record knows its directory.
+/// The user removes `Sub`, makes a new `Sub` at the same path and an `Inner`
+/// inside it, and `Inner` is given the removed directory's id. The vault
+/// claim -- an encrypted folder's identity may claim its directory wherever
+/// it stands -- found that id under the record's own path and read the
+/// folder as MOVED into a folder inside itself; refused that, the no-mint
+/// hold on a live vault folder's directory kept `Inner` from ever syncing.
+/// Nothing can stand inside itself: an id found under the record's own path
+/// is a recycled one and the record knows no directory by it -- its identity
+/// is read again from the directory at its agreed path, the namesake, which
+/// is what the standing-directory rule already makes the folder. `Inner` is
+/// then a new folder of its own, sealed, holding its file.
+#[test]
+fn a_vault_folders_identity_never_claims_a_directory_inside_its_own_path() {
+    let vault = SimVault::new(9_979);
+    let mut world = World::new(9_979, &["laptop"]);
+    world.give_vault("laptop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    let sub = world.server.seed_encrypted_folder(Some(private), "Sub");
+    world.server.seed_vault_file(Some(sub), "memo.txt", b"in the sub that goes", &vault.public_key_b64);
+    assert!(world.settle().is_some(), "it should arrive first");
+    let laptop = world.device("laptop");
+    laptop.fs.reuse_file_ids(true);
+    let old_dir = jd_vfs::Vfs::directory_id(&laptop.fs, std::path::Path::new("/sync/Private/Sub")).unwrap().unwrap();
+    let knows = laptop.store.get_entry(jd_core::EntityId::folder(sub)).unwrap().unwrap().synced_fingerprint.map(|fp| fp.file_id);
+    assert_eq!(knows, Some(old_dir), "the record does not know its directory before the shape starts");
+
+    laptop.fs.user_remove("Private/Sub");
+    laptop.fs.user_mkdir("Private/Sub");
+    laptop.fs.user_mkdir("Private/Sub/Inner");
+    laptop.fs.user_write("Private/Sub/Inner/new.txt", b"in the new folder inside the namesake");
+    let inner_dir = jd_vfs::Vfs::directory_id(&laptop.fs, std::path::Path::new("/sync/Private/Sub/Inner")).unwrap().unwrap();
+    let namesake_dir = jd_vfs::Vfs::directory_id(&laptop.fs, std::path::Path::new("/sync/Private/Sub")).unwrap().unwrap();
+    assert_eq!(inner_dir, old_dir, "the disk did not hand the removed directory's id to Inner ({old_dir}): namesake {namesake_dir}, inner {inner_dir}");
+    let out = world.pass(laptop);
+    eprintln!("first pass planned {:?}", out.round.plan.ops.iter().map(|o| format!("{}:{:?}", o.entity.server_id, o.action)).collect::<Vec<_>>());
+    assert!(world.settle().is_some(), "never settled");
+
+    let folders = world.server.folders();
+    let live_subs: Vec<_> = folders.iter().filter(|f| !f.trashed && f.parent == Some(private)).collect();
+    assert_eq!(live_subs.len(), 1, "one live folder under the vault: {folders:?}");
+    let live_sub = live_subs[0].id;
+    let inner = folders
+        .iter()
+        .find(|f| !f.trashed && f.parent == Some(live_sub) && f.name == "Inner")
+        .unwrap_or_else(|| panic!("Inner never became a folder of its own: {folders:?}"));
+    assert!(inner.encrypted, "Inner went up plain");
+    let files = world.server.files();
+    let new = files
+        .iter()
+        .find(|f| !f.trashed && f.folder == Some(inner.id))
+        .unwrap_or_else(|| panic!("new.txt is not under Inner: {:?}", world.server.tree()));
+    assert!(new.encrypted, "a file inside the vault went up in the clear");
+    assert!(
+        !files.iter().any(|f| !f.trashed && f.folder == Some(sub) && f.id != new.id),
+        "the removed folder's file was not trashed: {:?}",
+        world.server.tree()
+    );
+    let knows_now = laptop.store.get_entry(jd_core::EntityId::folder(live_sub)).unwrap().unwrap().synced_fingerprint.map(|fp| fp.file_id);
+    assert_eq!(knows_now, Some(namesake_dir), "the live Sub's record does not know the directory standing at its path (the recycled id was kept)");
+    eprintln!("removed folder {sub} live={} ; live sub {live_sub}", folders.iter().any(|f| f.id == sub && !f.trashed));
+    for d in &world.devices {
+        eprintln!("{}: issues {:?}", d.name, d.store.open_issues().unwrap().iter().map(|i| i.kind.as_str()).collect::<Vec<_>>());
+    }
+    assert_converged(&world);
+}
+
 /// A download never rebuilds a folder the user has just deleted (finding C2
 /// of the reset's WP1d, kill2 75112 and 75115).
 ///

@@ -7,9 +7,11 @@ traces); WP1d (the custody oracle) DONE 2026-09-13, harness only, findings
 C1-C3 recorded below (WP1d committed as `1581721c`); WP3 in progress: change
 1 (`aba4bd60`, naming waits on a chain that runs into an open op) closes C3,
 change 2 (`20c431b5`, the round brings nothing in under a folder the user has
-just deleted) closes C2; the belts' instrument (reading 11) finds fix 4's bar
-met and finding C4. Every change reviewed by public-html-67 (public-html-c6 until 2026-09-14), approach before
-patch.**
+just deleted) closes C2; the belts' instrument (`d5f939ab`, reading 11)
+finds fix 4's bar met and finding C4; change 3 (C5, a recycled directory id
+under a folder's own path is void) next in the chain C5, C4, C6, fix 4's
+removal, C7, each measured and graded. Every change reviewed by
+public-html-67 (public-html-c6 until 2026-09-14), approach before patch.**
 
 Testing is paused. No further guards land on the sync engine until the work
 packages below are done, in order. This spec is the reason, the order, and the
@@ -1527,7 +1529,65 @@ learns its directory; the tracked loop's `owned` map then cannot protect the
 directory from the namesake's arrival, the record reads as missing, and its
 own files corroborate "moved into 507". Custody counted it `reminted` (one
 birth, two ids): the residual line hid it; the belt report shows the human
-cost. C4's fix is the next unit.
+cost. C4's fix is the unit after C5.
+
+**WP3 change 3 (2026-09-14): an id standing under the record's own path is a
+recycled id, and the record knows no directory by it -- C5's root.** Found
+when C4's fix (below) turned frozen 1073449 custody-red; traced on that seed
+in a scratch worktree with probes at the four move sites: disk's 502
+(`Contested Folder`, encrypted under the shared vault) was created from its
+own directory 1002; the user removed the directory (arm 18) and, on a disk
+that hands ids straight back (`reuse_file_ids`), a later `mkdir` of
+`Contested Folder/Sub 6/Sub 9` got 1002; a new `Contested Folder` (1003)
+stood at 502's agreed path. The vault-claim site ("an ENCRYPTED folder's
+identity may claim") found 1002 under 502's own path and planned
+`ApplyLocalMove 502 -> Contested Folder/Sub 6/Sub 9`: a folder into its own
+subtree, which the server refuses, and the local reading then had 502 owning
+`Sub 9`'s directory with the misplacement behind it. The contents site
+refuses exactly that shape (the 74826 comment) and the claim site did not;
+and refusing it at the claim alone is not enough: the no-mint hold ("a
+directory whose identity belongs to a folder still alive here is never
+minted") then kept `Sub 9` from ever syncing at all, silently.
+
+Change, `pass.rs`, at the source rather than at either site: one closure,
+`recycled_under_own_path`, read by BOTH readers of a record's identity in
+`detect_folder_moves` -- the `owned` map built before the walk (the named-only
+tracker rule reads it: c6's C6-1, else a server folder arriving at the
+recycled directory's path would decline it by identity and wait for an
+owner's move never planned) and `own_id` in the tracked loop (which feeds
+`record_identity`, the vault claim, the no-mint hold and corroboration). A
+record whose recorded id stands under its own believed path knows no
+directory this pass; and `record_directory_identities` counts such an id
+stale and re-records the directory standing at the agreed path -- the
+namesake, which the standing-directory rule already makes the folder.
+Nothing can stand inside itself; an id found there was the disk's to give
+away.
+
+The cost, stated: the user renames `Sub` to `Other`, makes a new `Sub`, and
+moves `Other` inside it. The directory's id now stands under the record's
+believed path and is void; the contents proposal is refused at the same
+subtree test (74826); the record becomes the namesake by the standing-
+directory rule and the moved folder is re-minted new, losing its server
+identity. That is today's outcome for a plain folder already; C5 makes it
+the vault folder's outcome too, instead of a claim into itself refused for
+ever. And the cost falls on every disk, recycling or not: a folder
+genuinely moved into its own namesake is re-minted on APFS and NTFS too,
+because the rule reads the shape, not the disk. No pin covers that shape; it
+is named here as the cost.
+
+Pin `a_vault_folders_identity_never_claims_a_directory_inside_its_own_path`:
+one keyed device on a recycling disk; a vault subfolder whose record knows
+its directory; the user removes it, makes a namesake at its path and `Inner`
+inside, and `Inner` wears the removed directory's id. Invariant: one live
+folder under the vault; `Inner` a folder of its own under it, sealed, holding
+its file; the removed folder's file trashed; the live folder's record knows
+the directory standing at its path, not the recycled one; converged. RED on
+HEAD without C4 (the claim renamed the folder onto `Inner`), GREEN with the
+change alone. Reading 12 (`zz_sweep.c5` e1ad191e1279 vs reading 11): traces
+identical 160 of 160, every cell unmoved -- the shape is not reachable on the
+ring arms until C4 makes records know their directories at the mint, which
+is why C5 lands first and C4 second with 1073449 green outright rather than
+wrapped.
 
 ## Process rules, effective now
 
