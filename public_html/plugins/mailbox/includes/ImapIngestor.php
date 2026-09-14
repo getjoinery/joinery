@@ -53,6 +53,9 @@
  * interactive fetch (the reader's Refresh, the admin's Fetch now) stays inside
  * the time a browser, and the proxy in front of it, will wait.
  *
+ * @version 1.19
+ * @changelog 1.19 - fetchHeaderText(): header-only fetch by locator, for the
+ *   address-list backfill of rows stored before iem_to / iem_cc existed.
  * @version 1.18
  * @changelog 1.18 - timing ledger and deadline (specs/mailbox_refresh_budget.md):
  *   client() laps connect, ingestFolder laps seek/fetch/store per folder, the
@@ -1893,6 +1896,47 @@ class ImapIngestor {
 		} catch (Throwable $e) {
 			error_log('ImapIngestor::fetchFullRaw error: ' . $e->getMessage());
 			return array('ok' => false, 'message' => 'Could not retrieve the message from the source mailbox.');
+		}
+	}
+
+	/**
+	 * Fetch only a message's wire header block by its locator — what the
+	 * address-list backfill (AddressListBackfill) needs from a 'remote' row:
+	 * who the message went to, without paying for its body. Same locator
+	 * resolution and same return shape as fetchFullRaw(), and like it leaves
+	 * the connection open for the caller's batch (close() when done).
+	 *
+	 * @return array{ok:bool,headers?:string,message?:string}
+	 */
+	public function fetchHeaderText(int $uid, ?int $uidvalidity, string $folder, ?string $messageId): array {
+		try {
+			$client = $this->client();
+			$folder = $folder ?: ($this->account->get('iia_imap_folder') ?: 'INBOX');
+
+			$resolvedUid = $this->resolveUid($client, $folder, $uid, $uidvalidity, $messageId);
+			if ($resolvedUid === null) {
+				return array('ok' => false, 'message' => 'This message is no longer available in the source mailbox.');
+			}
+
+			$ids = new Horde_Imap_Client_Ids(array($resolvedUid));
+			$fq = new Horde_Imap_Client_Fetch_Query();
+			$fq->headerText(array('peek' => true)); // headers only, don't set \Seen
+			$res = $client->fetch($folder, $fq, array('ids' => $ids));
+			$fdata = $res[$resolvedUid] ?? null;
+			if ($fdata === null) {
+				return array('ok' => false, 'message' => 'This message is no longer available in the source mailbox.');
+			}
+
+			$headers = (string)$fdata->getHeaderText();
+			if ($headers === '') {
+				return array('ok' => false, 'message' => 'The source message returned no headers.');
+			}
+			return array('ok' => true, 'headers' => $headers);
+		} catch (ImapIngestorException $e) {
+			return array('ok' => false, 'message' => $e->getMessage());
+		} catch (Throwable $e) {
+			error_log('ImapIngestor::fetchHeaderText error: ' . $e->getMessage());
+			return array('ok' => false, 'message' => 'Could not retrieve the message headers from the source mailbox.');
 		}
 	}
 
