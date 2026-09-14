@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.26 - host_report action: the node describes its machine (observe primitive), and the
+ *                Host card on the overview renders it.
  * @version 1.25 - install_report action: the node reads its own first-boot install log
  *                (observe primitive), and the job page shows the verdicts and the tail.
  * @version 1.24 - publish_upgrade: build and sign a release on the node, as the node's own agent. A
@@ -93,6 +95,7 @@ class NodeDetailActions {
 	private static $error_tab = [
 		'check_status'             => 'overview',
 		'install_report'           => 'overview',
+		'host_report'              => 'overview',
 		'restore_database'         => 'database',
 		'restore_project'          => 'backups',
 		'restore_chain'            => 'backups',
@@ -169,6 +172,12 @@ class NodeDetailActions {
 			case 'install_report': {
 				$built = JobCommandBuilder::build_install_report($node);
 				$job = ManagementJob::createFromBuild($node->key, 'install_report', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'host_report': {
+				$built = JobCommandBuilder::build_host_report($node);
+				$job = ManagementJob::createFromBuild($node->key, 'host_report', $built, null, $uid);
 				return self::jobUrl($job);
 			}
 

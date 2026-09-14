@@ -9,6 +9,11 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.11 - the Host card: the machine as the host_report observe word last described it
+ *                 (expected units and their state, failed units, jails with ban counts, SSH auth
+ *                 failures as a count, sshd posture, reboot-required, unattended-upgrades, when it
+ *                 was read), every value escaped, unknown shown as unknown; a Host Report button
+ *                 beside Install Report for a node whose agent ships the word
  * @version 1.10 - the Memory card shows swap used beside memory used, a swapless box saying so
  * @version 1.9 - Install Report button beside Check Status, for a node whose agent ships
  *                install_report.
@@ -40,6 +45,10 @@
 </form>
 <form id="nodeActionInstallReport" method="post" action="<?php echo $base_url; ?>" hidden>
 	<input type="hidden" name="action" value="install_report">
+	<?php echo SmAdminCsrf::field(); ?>
+</form>
+<form id="nodeActionHostReport" method="post" action="<?php echo $base_url; ?>" hidden>
+	<input type="hidden" name="action" value="host_report">
 	<?php echo SmAdminCsrf::field(); ?>
 </form>
 <form id="run_plugin_installers_form" method="post" action="<?php echo $base_url; ?>" hidden>
@@ -270,6 +279,11 @@
 	// shows nothing rather than a button that would refuse.
 	if (JobCommandBuilder::has_primitive($node, 'install_report')) {
 		echo ' <button type="submit" form="nodeActionInstallReport" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075" title="How the first-boot install went: DNS, certificate, and the tail of the install log">Install Report</button>';
+	}
+	// The machine, read now: units, jails, sshd posture, reboot-required. The
+	// Host card below renders the answer.
+	if (JobCommandBuilder::has_primitive($node, 'host_report')) {
+		echo ' <button type="submit" form="nodeActionHostReport" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075" title="Read the machine now: failed units, fail2ban jails, SSH auth failures, sshd posture, reboot-required">Host Report</button>';
 	}
 	echo '</div>';
 
@@ -565,6 +579,123 @@
 			echo '<div class="text-muted small mt-3"><strong>All databases:</strong> ' . htmlspecialchars(implode(', ', $status_data['db_list'])) . '</div>';
 		}
 
+		$page->end_box();
+	}
+
+	// ── Host card ──
+	// The machine as the host_report observe word last described it. Shown for
+	// every node that has an agent (the only thing that can answer) and for any
+	// node holding a report. Everything in it came from the node: the intake
+	// capped it (JobResultProcessor::sanitise_host_report) and this renders
+	// every value through htmlspecialchars, so nothing a node says reaches the
+	// page as markup, a link or a command.
+	$host_report = $node->get('mgn_last_host_report');
+	if (is_string($host_report)) { $host_report = json_decode($host_report, true); }
+	$host_report_time = trim((string)$node->get('mgn_last_host_report_time'));
+	if (is_array($host_report) || JobCommandBuilder::has_agent_channel($node)) {
+		$page->begin_box(['title' => 'Host']);
+		if (!is_array($host_report)) {
+			echo '<p class="text-muted mb-0">This node has not sent a host report yet.';
+			if (JobCommandBuilder::has_primitive($node, 'host_report')) {
+				echo ' One is queued on the status cadence; Host Report above reads the machine now.';
+			} else {
+				echo ' Its agent does not offer the host_report word; the agent that ships with the next update does.';
+			}
+			echo '</p>';
+		} else {
+			$hr = JobResultProcessor::sanitise_host_report($host_report);
+			$hr_str = function ($v) { return htmlspecialchars(is_scalar($v) ? (string)$v : 'unknown', ENT_QUOTES, 'UTF-8'); };
+			$hr_state_class = function ($state) {
+				switch ($state) {
+					case 'active':  return 'text-success';
+					case 'failed':  return 'text-danger';
+					default:        return 'text-muted';
+				}
+			};
+			$hr_when = function ($unix) use ($session) {
+				if (!is_int($unix)) { return 'unknown'; }
+				return LibraryFunctions::convert_time(gmdate('Y-m-d H:i:s', $unix), 'UTC', $session->get_timezone(), 'M j, g:i A');
+			};
+
+			echo '<div class="row g-3">';
+
+			// Expected units
+			echo '<div class="col-md-6 col-xl-4"><div class="border rounded p-3 h-100">';
+			echo '<div class="text-uppercase small text-muted">Services</div>';
+			echo '<ul class="list-unstyled mb-0">';
+			foreach ($hr['expected_units'] as $unit => $state) {
+				echo '<li><span class="' . $hr_state_class($state) . '">' . $hr_str($unit) . ': ' . $hr_str($state) . '</span></li>';
+			}
+			echo '</ul></div></div>';
+
+			// Failed units
+			echo '<div class="col-md-6 col-xl-4"><div class="border rounded p-3 h-100">';
+			echo '<div class="text-uppercase small text-muted">Failed units</div>';
+			if ($hr['failed_units'] === 'unknown') {
+				echo '<div class="text-muted">unknown</div>';
+			} elseif (count($hr['failed_units']) === 0) {
+				echo '<div class="text-success">none</div>';
+			} else {
+				echo '<ul class="list-unstyled mb-0 text-danger">';
+				foreach ($hr['failed_units'] as $unit) { echo '<li>' . $hr_str($unit) . '</li>'; }
+				echo '</ul>';
+				if (count($hr['failed_units']) >= JobResultProcessor::HOST_REPORT_MAX_LIST) {
+					echo '<small class="text-muted">first ' . (int)JobResultProcessor::HOST_REPORT_MAX_LIST . ' only</small>';
+				}
+			}
+			echo '</div></div>';
+
+			// fail2ban jails
+			echo '<div class="col-md-6 col-xl-4"><div class="border rounded p-3 h-100">';
+			echo '<div class="text-uppercase small text-muted">fail2ban jails</div>';
+			if ($hr['fail2ban_jails'] === 'unknown') {
+				echo '<div class="text-muted">unknown</div>';
+			} elseif (count($hr['fail2ban_jails']) === 0) {
+				echo '<div class="text-warning">no jails</div>';
+			} else {
+				echo '<ul class="list-unstyled mb-0">';
+				foreach ($hr['fail2ban_jails'] as $jail) {
+					echo '<li>' . $hr_str($jail['name']) . ': ' . $hr_str($jail['banned']) . ' banned</li>';
+				}
+				echo '</ul>';
+			}
+			echo '</div></div>';
+
+			// SSH
+			echo '<div class="col-md-6 col-xl-4"><div class="border rounded p-3 h-100">';
+			echo '<div class="text-uppercase small text-muted">SSH</div>';
+			echo '<div>Auth failures, last 24h: <strong>' . $hr_str($hr['ssh_auth_failures_24h']) . '</strong></div>';
+			$pw = $hr['sshd']['password_authentication'];
+			$rl = $hr['sshd']['permit_root_login'];
+			echo '<div class="' . ($pw === 'yes' ? 'text-warning' : '') . '">Password authentication: ' . $hr_str($pw) . '</div>';
+			echo '<div class="' . ($rl === 'yes' ? 'text-warning' : '') . '">Root login: ' . $hr_str($rl) . '</div>';
+			echo '</div></div>';
+
+			// Machine
+			echo '<div class="col-md-6 col-xl-4"><div class="border rounded p-3 h-100">';
+			echo '<div class="text-uppercase small text-muted">Machine</div>';
+			if ($hr['reboot_required'] === true) {
+				echo '<div class="text-warning">Reboot required</div>';
+			} elseif ($hr['reboot_required'] === false) {
+				echo '<div>No reboot pending</div>';
+			} else {
+				echo '<div class="text-muted">Reboot required: unknown</div>';
+			}
+			echo '<div>Unattended upgrades last ran: ' . $hr_str($hr_when($hr['unattended_upgrades_last_run'])) . '</div>';
+			foreach (['disk' => 'Disk', 'memory' => 'Memory', 'swap' => 'Swap'] as $key => $label) {
+				$used = $hr[$key]['used_bytes']; $total = $hr[$key]['total_bytes'];
+				$line = (is_int($used) && is_int($total) && $total > 0)
+					? JobResultProcessor::format_size($used) . ' of ' . JobResultProcessor::format_size($total)
+					: 'unknown';
+				echo '<div>' . $hr_str($label) . ': ' . $hr_str($line) . '</div>';
+			}
+			echo '</div></div>';
+
+			echo '</div>';
+			echo '<small class="text-muted d-block mt-2">Read '
+				. ($host_report_time !== '' ? htmlspecialchars(LibraryFunctions::convert_time($host_report_time, 'UTC', $session->get_timezone(), 'M j, g:i A'), ENT_QUOTES, 'UTF-8') : 'unknown')
+				. ', generated on the node at ' . $hr_str($hr_when($hr['generated_at'])) . '.</small>';
+		}
 		$page->end_box();
 	}
 

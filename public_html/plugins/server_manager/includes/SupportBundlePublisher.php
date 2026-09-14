@@ -40,6 +40,8 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.4 - carries host_report.sh: the host_report observe word names it, and a siteless
+ *                machine (the Docker host) answers the Host card out of its bundle like any node
  * @version 1.3 - carries the relay build: provision_relay.sh and the prebuilt sealer binaries
  *                (specs/relay_without_a_shell.md); the publish builds the sealer first
  * @version 1.2 - a site that may not sign tree manifests (TreeManifestPublisher::authority) does not
@@ -101,6 +103,10 @@ class SupportBundlePublisher {
 		'maintenance_scripts/install_tools/install.sh',
 		// decommission_site (self-verifying; sources nothing).
 		'maintenance_scripts/sysadmin_tools/remove_account.sh',
+		// host_report (sources nothing, reads nothing from its caller): the
+		// machine as one bounded object, which a Docker host has as much as
+		// a site does.
+		'maintenance_scripts/sysadmin_tools/host_report.sh',
 		// The relay build, and the sealer it installs - one binary per
 		// `uname -m` name, which is how provision_relay.sh finds its own.
 		'public_html/plugins/mailbox/provisioning/provision_relay.sh',

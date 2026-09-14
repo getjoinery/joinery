@@ -338,6 +338,104 @@ check($node->get('mgn_joinery_version') === '2.14.3',
 	var_export($node->get('mgn_joinery_version'), true));
 
 // ---------------------------------------------------------------------------
+section('host_report: the object lands in its own two columns, capped on intake');
+
+// What the agent posts for a script primitive: its envelope, with the script's
+// stdout as text. The stdout here is what host_report.sh prints as root.
+$hr_object = array(
+	'failed_units' => array('nginx.service'),
+	'expected_units' => array('fail2ban' => 'active', 'apache2' => 'active', 'php-fpm' => 'active', 'cron' => 'active', 'postgresql' => 'absent'),
+	'fail2ban_jails' => array(array('name' => 'sshd', 'banned' => 3), array('name' => 'apache-auth', 'banned' => 0)),
+	'ssh_auth_failures_24h' => 41,
+	'sshd' => array('password_authentication' => 'no', 'permit_root_login' => 'prohibit-password'),
+	'disk' => array('path' => '/var/www/html/site/public_html', 'used_bytes' => 1000, 'total_bytes' => 4000),
+	'memory' => array('used_bytes' => 2000, 'total_bytes' => 8000),
+	'swap' => array('used_bytes' => 0, 'total_bytes' => 1024),
+	'reboot_required' => true,
+	'unattended_upgrades_last_run' => 1789281613,
+	'generated_at' => 1789341744,
+);
+$hr_envelope = "=== [Step 1/1] host_report ===\n" . json_encode(array('api_version' => '1.0', 'data' => array(
+	'output' => json_encode($hr_object) . "\n", 'output_bytes' => 400))) . "\n[Step 1/1 OK]";
+
+$hr_node = jrp_node();
+check(empty($hr_node->get('mgn_last_host_report')) && empty($hr_node->get('mgn_last_host_report_time')),
+	'a fresh node holds no host report');
+$hr_job = jrp_job($hr_node, 'host_report', $hr_envelope);
+JobResultProcessor::process($hr_job);
+$hr_node->load();
+$stored = $hr_node->get('mgn_last_host_report');
+if (is_string($stored)) { $stored = json_decode($stored, true); }
+check(is_array($stored) && $stored['failed_units'] === array('nginx.service'),
+	'the failed units are stored on the node', var_export($stored, true));
+check(is_array($stored) && $stored['expected_units']['postgresql'] === 'absent' && $stored['expected_units']['fail2ban'] === 'active',
+	'the expected units keep their states');
+check(is_array($stored) && $stored['fail2ban_jails'][0] === array('name' => 'sshd', 'banned' => 3),
+	'jails keep their ban counts');
+check(is_array($stored) && $stored['ssh_auth_failures_24h'] === 41 && $stored['reboot_required'] === true
+	&& $stored['sshd']['permit_root_login'] === 'prohibit-password',
+	'the count, the reboot flag and the sshd posture survive');
+check(!empty($hr_node->get('mgn_last_host_report_time')),
+	'and the read time is stamped');
+$hr_status = $hr_node->get('mgn_last_status_data');
+if (is_string($hr_status)) { $hr_status = json_decode($hr_status, true); }
+check(empty($hr_status) || !isset($hr_status['failed_units']),
+	'nothing of it reaches mgn_last_status_data: the two shapes stay apart (Q2)');
+$hr_result = json_decode((string)$hr_job->get('mjb_result'), true);
+check(is_array($hr_result) && ($hr_result['measured'] ?? null) === true && ($hr_result['ssh_auth_failures_24h'] ?? null) === 41,
+	'the job result carries the report too');
+
+// Intake caps: a hostile node cannot put anything but the known keys and
+// bounded values on the plane.
+$hostile = array(
+	'failed_units' => array_merge(array('<script>alert(1)</script>.service', "a\nb; rm -rf /"), array_fill(0, 40, 'x.service')),
+	'expected_units' => array('fail2ban' => 'exploded', 'apache2' => array('nested'), 'php-fpm' => 'active', 'extra' => 'active'),
+	'fail2ban_jails' => array_merge(array(array('name' => str_repeat('j', 500), 'banned' => -5), array('name' => '', 'banned' => 1), 'notanobject'), array_fill(0, 40, array('name' => 'z', 'banned' => 1))),
+	'ssh_auth_failures_24h' => 'eve from 203.0.113.9',
+	'sshd' => array('password_authentication' => 'YES<b>', 'permit_root_login' => 12),
+	'disk' => array('path' => '../../etc/passwd?<x>', 'used_bytes' => '12', 'total_bytes' => 'lots'),
+	'memory' => 'none',
+	'reboot_required' => 'true',
+	'unattended_upgrades_last_run' => -1,
+	'generated_at' => 1.5,
+	'surprise' => 'key',
+);
+$capped = JobResultProcessor::sanitise_host_report($hostile);
+check(!isset($capped['surprise']) && count($capped) === 11, 'unknown keys are dropped and every known key is present', var_export(array_keys($capped), true));
+check(count($capped['failed_units']) === JobResultProcessor::HOST_REPORT_MAX_LIST, 'failed units are capped at the list bound');
+check($capped['failed_units'][0] === 'scriptalert1script.service' && $capped['failed_units'][1] === 'abrm-rf',
+	'unit names are reduced to safe characters', var_export(array_slice($capped['failed_units'], 0, 2), true));
+check($capped['expected_units']['fail2ban'] === 'unknown' && $capped['expected_units']['apache2'] === 'unknown'
+	&& $capped['expected_units']['php-fpm'] === 'active' && $capped['expected_units']['cron'] === 'unknown' && !isset($capped['expected_units']['extra']),
+	'an unrecognised state is unknown, a missing unit is unknown, an extra unit is dropped');
+check(count($capped['fail2ban_jails']) <= JobResultProcessor::HOST_REPORT_MAX_LIST
+	&& strlen($capped['fail2ban_jails'][0]['name']) === JobResultProcessor::HOST_REPORT_MAX_NAME
+	&& $capped['fail2ban_jails'][0]['banned'] === 'unknown',
+	'jail names are capped, a negative count is unknown, a nameless or non-object jail is dropped');
+check($capped['ssh_auth_failures_24h'] === 'unknown', 'a count that is not a number is unknown: no text from the node is kept in it');
+check($capped['sshd'] === array('password_authentication' => 'yesb', 'permit_root_login' => 'unknown'),
+	'sshd values are lowercased letters and dashes only', var_export($capped['sshd'], true));
+check($capped['disk']['path'] === '../../etc/passwdx' && $capped['disk']['used_bytes'] === 12 && $capped['disk']['total_bytes'] === 'unknown',
+	'the disk path is reduced to path characters and byte figures must be numbers');
+check($capped['memory'] === array('used_bytes' => 'unknown', 'total_bytes' => 'unknown') && $capped['swap'] === array('used_bytes' => 'unknown', 'total_bytes' => 'unknown'),
+	'a gauge that is not an object, or is missing, is unknown in both figures');
+check($capped['reboot_required'] === 'unknown' && $capped['unattended_upgrades_last_run'] === 'unknown' && $capped['generated_at'] === 'unknown',
+	'a string "true", a negative time and a fractional time are all unknown');
+check(json_encode($capped) !== false, 'the capped object encodes');
+
+// An answer that is not the object: the columns are left alone.
+$before = $hr_node->get('mgn_last_host_report_time');
+$hr_bad = jrp_job($hr_node, 'host_report', "=== [Step 1/1] host_report ===\n" . json_encode(array('api_version' => '1.0', 'data' => array('output' => "bash: host_report.sh: No such file\n"))));
+JobResultProcessor::process($hr_bad);
+$hr_node->load();
+check((string)$hr_node->get('mgn_last_host_report_time') === (string)$before,
+	'a job whose output is not the object changes no stored report');
+check(json_decode((string)$hr_bad->get('mjb_result'), true) === array('measured' => false),
+	'and records that it measured nothing');
+check(in_array('host_report', JobResultProcessor::processable_types(), true),
+	'host_report is a type this processor knows');
+
+// ---------------------------------------------------------------------------
 section('Terminal jobs always record a result (the sweep can never re-process forever)');
 
 // The dashboard sweep selects mjb_result IS NULL; a handler path that returns
