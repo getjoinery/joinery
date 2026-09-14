@@ -130,23 +130,27 @@ depends on where a row's headers still exist:
 It exists because a sealed row's lists must be sealed under the row's own DEK,
 which unwraps only in the owner's unlock window (docs/scheduled_tasks.md: cron
 can never read sealed content). So it runs while the owner has the reader
-open with the vault unlocked, newest first, 25 rows per drain tick.
+open with the vault unlocked, newest first, up to 200 rows per turn (the
+turn's deadline is the real bound).
 
 - **Candidates:** inbound, not deleted, not pending parse, `iem_to` and
   `iem_cc` both `NULL`, no retained header block, and a source to ask — a
   `remote` locator on an enabled IMAP account, or a stored raw. A sealed row
   qualifies for the owner it records; an unsealed row for any holder of a
   grant on its mailbox.
-- **Source:** `remote` rows — `ImapIngestor::fetchHeaderText()` (new, 1.19),
-  header-only, one open connection per account per drain; stored-raw rows —
-  `getRawMessage()` in-window, `rawHeaderBlock()`.
+- **Source:** `remote` rows — `ImapIngestor::fetchHeaderTexts()` (1.20),
+  header-only, batched: one open connection per account per drain, one STATUS
+  + one FETCH per (account, folder) per 50 rows, so a row costs a share of two
+  round trips rather than two of its own; stored-raw rows — `getRawMessage()`
+  in-window, `rawHeaderBlock()`.
 - **Write:** plaintext on an unsealed row (`updateColumns`); on a sealed row
   `sealColumns()` with the row's DEK (`unwrapDekInWindow`), wrapping untouched.
   A source with neither header records `''` in both columns.
 - **Retry:** each attempt stamps `iem_lists_attempt_time` (new column,
   `timestamp(6)`); a stamped row is retried after a day. If the window closes
-  mid-drain the row is unstamped and the drain stops. One row is one
-  `SealedEgressGuard::isolate()` unit.
+  mid-drain the row — and, in a remote batch, every row not yet written — is
+  unstamped and the drain stops. One row is one `SealedEgressGuard::isolate()`
+  unit; the batched header fetch decrypts nothing, so it sits outside them.
 
 Test: `plugins/mailbox/tests/address_list_backfill_test.php` (23 checks:
 plaintext raw, captured-empty, remote fetch through a stub ingestor, gone
@@ -154,7 +158,7 @@ source stamped, sealed row locked/unlocked, key wrapping untouched).
 
 **For the owner's mailboxes:** every `jeremy.tunnell@gmail.com` message that
 was pulled over IMAP and is still on Gmail is fixed by opening the reader with
-the vault unlocked and leaving it — 25 per heartbeat. `jeremy@jeremytunnell.com`
+the vault unlocked and leaving it — a few hundred per drain slice. `jeremy@jeremytunnell.com`
 mail since 2026-08-25 is already right; earlier mail is § 5.
 
 ## 5. Phase 2 — the easiest way to fix old imported mail (not built)
@@ -170,9 +174,10 @@ that has an enabled IMAP account, the backfill can call
 `fetchHeaderText(0, null, $folder, $message_id)` and the source answers by
 Message-ID. For Gmail, `[Gmail]/All Mail` holds everything the account has,
 imported history included — a Takeout of the same account is the same
-messages. Cost: one IMAP SEARCH plus a header fetch per row, inside the same
-25-per-tick drain; no upload, no new UI, nothing the owner has to do beyond
-having the reader open.
+messages. Cost: one IMAP SEARCH per row (the batched `fetchHeaderTexts()`
+falls back to it per locator when the UID is unusable) plus a share of the
+batch's header FETCH, inside the same drain; no upload, no new UI, nothing
+the owner has to do beyond having the reader open.
 
 Build: widen `candidateWhere()` with a third source arm — the row's alias has
 an enabled IMAP account and the row has a `iem_message_id_header` — and in

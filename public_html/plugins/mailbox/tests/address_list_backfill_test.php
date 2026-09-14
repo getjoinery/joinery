@@ -24,7 +24,8 @@
  *
  * Run: php tests/run.php db --filter=address_list_backfill
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - the stub answers the batched fetchHeaderTexts(); pins one call per chunk
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -61,14 +62,20 @@ $CC_CANON = '"Ford, Tom" <tford@akamai.example>, "Beltran, Luis" <lubeltra@akama
 /** ImapIngestor that answers header fetches from a canned map instead of a server. */
 class StubHeaderIngestor extends ImapIngestor {
 	public static $headers_by_uid = array();
-	public static $fetches = 0;
+	public static $fetches = 0;   // batch calls, not rows: the drain must ask once per chunk
+	public static $locators = 0;  // rows asked for across those calls
 	public static $closed = 0;
-	public function fetchHeaderText(int $uid, ?int $uidvalidity, string $folder, ?string $messageId): array {
+	public function fetchHeaderTexts(string $folder, array $locators): array {
 		self::$fetches++;
-		if (!isset(self::$headers_by_uid[$uid])) {
-			return array('ok' => false, 'message' => 'gone');
+		self::$locators += count($locators);
+		$out = array();
+		foreach ($locators as $k => $loc) {
+			$uid = intval($loc['uid']);
+			$out[$k] = isset(self::$headers_by_uid[$uid])
+				? array('ok' => true, 'headers' => self::$headers_by_uid[$uid])
+				: array('ok' => false, 'message' => 'gone');
 		}
-		return array('ok' => true, 'headers' => self::$headers_by_uid[$uid]);
+		return $out;
 	}
 	public function close(): void { self::$closed++; }
 }
@@ -251,13 +258,15 @@ $m_remote = $mk_remote('albf-remote-' . $suffix, 101, $plain_domain, $plain_alia
 $m_gone = $mk_remote('albf-gone-' . $suffix, 102, $plain_domain, $plain_alias, $plain_addr);
 StubHeaderIngestor::$headers_by_uid = array(101 => $router->rawHeaderBlock($raw_email('albf-remote-' . $suffix, $plain_addr)));
 StubHeaderIngestor::$fetches = 0;
+StubHeaderIngestor::$locators = 0;
 StubHeaderIngestor::$closed = 0;
 
 check($candidate_ids() === array($m_remote, $m_gone), 'both remote rows are candidates', json_encode($candidate_ids()));
 $done = AddressListBackfill::drainForUser($uid, vault_fixture_dummy_key());
 check($done === 1, 'exactly the resolvable remote row was filled (got ' . $done . ')');
-check(StubHeaderIngestor::$fetches === 2 && StubHeaderIngestor::$closed === 1,
-	'one ingestor served both fetches and was closed once', StubHeaderIngestor::$fetches . '/' . StubHeaderIngestor::$closed);
+check(StubHeaderIngestor::$fetches === 1 && StubHeaderIngestor::$locators === 2 && StubHeaderIngestor::$closed === 1,
+	'one ingestor answered both rows in ONE batched fetch and was closed once',
+	StubHeaderIngestor::$fetches . ' fetches / ' . StubHeaderIngestor::$locators . ' rows / ' . StubHeaderIngestor::$closed . ' closed');
 $r = $row($m_remote);
 check($r['iem_to'] === $plain_addr && $r['iem_cc'] === $CC_CANON, 'the remote row holds both lists');
 $r = $row($m_gone);

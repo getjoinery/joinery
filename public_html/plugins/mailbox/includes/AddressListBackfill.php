@@ -15,10 +15,12 @@
  *
  *  - a retained header block (iem_raw_headers): MailboxService derives the
  *    lists on every view, so those rows are not candidates here.
- *  - 'remote' rows (an IMAP locator, no platform raw): the header block is
- *    fetched from the source over IMAP (ImapIngestor::fetchHeaderText), one
- *    connection per account for the whole drain. No vault involved in the
- *    fetch.
+ *  - 'remote' rows (an IMAP locator, no platform raw): the header blocks are
+ *    fetched from the source over IMAP in batches — one connection per
+ *    account for the whole drain, and one STATUS + one FETCH per folder per
+ *    FETCH_CHUNK rows (ImapIngestor::fetchHeaderTexts), so a backlog costs a
+ *    round trip per fifty messages rather than two per message. No vault
+ *    involved in the fetch.
  *  - stored-raw rows: the header block comes from the raw
  *    (InboundEmailMessage::getRawMessage), which on a sealed message opens
  *    only inside the owner's window. That is why this runs as a
@@ -35,7 +37,10 @@
  * retried at most daily, so a message whose source copy is gone costs one
  * attempt per day rather than an IMAP round trip per heartbeat drain.
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - 'remote' rows fetch their headers in batches (one STATUS +
+ *   one FETCH per folder per FETCH_CHUNK rows); DEFAULT_MAX 25 -> 200, the
+ *   turn deadline being the real bound
  */
 
 require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
@@ -43,9 +48,14 @@ require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declare
 
 class AddressListBackfill {
 
-	/** Small on purpose: a 'remote' row costs an IMAP round trip, and a drain
-	 *  slice runs inside a user's page-adjacent request. */
-	const DEFAULT_MAX = 25;
+	/** Rows per turn. A turn is bounded by its deadline, checked before every
+	 *  header fetch and every stored-raw row, so this is a ceiling on one
+	 *  candidate query, not on the time a turn may take. */
+	const DEFAULT_MAX = 200;
+
+	/** 'remote' rows per IMAP FETCH: one round trip brings back this many
+	 *  header blocks (a few KB each), so the whole batch stays a modest reply. */
+	const FETCH_CHUNK = 50;
 
 	/** SQL interval before a stamped row is retried. */
 	const RETRY_INTERVAL = '1 day';
@@ -99,7 +109,13 @@ class AddressListBackfill {
 		}
 		$db = DbConnector::get_instance()->get_db_link();
 		$stmt = $db->prepare(
-			"SELECT m.iem_inbound_email_message_id AS msg_id
+			"SELECT m.iem_inbound_email_message_id AS msg_id,
+			        m.iem_raw_storage_driver AS driver,
+			        m.iem_iia_inbound_imap_account_id AS acc_id,
+			        m.iem_imap_folder AS folder,
+			        m.iem_imap_uid AS uid,
+			        m.iem_imap_uidvalidity AS uidvalidity,
+			        m.iem_message_id_header AS message_id
 			   FROM iem_inbound_email_messages m
 			  WHERE " . self::candidateWhere() . "
 			  ORDER BY m.iem_received_time DESC, m.iem_inbound_email_message_id DESC
@@ -107,23 +123,42 @@ class AddressListBackfill {
 		$stmt->execute(array($user_id, $user_id));
 		$rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+		// 'remote' rows group by (account, folder) so each group's headers come
+		// back in a few round trips; stored-raw rows are one at a time. Newest
+		// first within each — the whole batch is the newest $max regardless.
+		$remote = array();
+		$stored = array();
+		foreach ($rows as $row) {
+			if ((string)$row['driver'] === 'remote' && intval($row['acc_id']) > 0) {
+				$remote[intval($row['acc_id']) . '|' . (string)$row['folder']][] = $row;
+			} else {
+				$stored[] = $row;
+			}
+		}
+
 		$ingestors = array(); // one open IMAP connection per account for the batch
 		$done = 0;
 		try {
-			foreach ($rows as $row) {
+			foreach ($remote as $group) {
+				foreach (array_chunk($group, self::FETCH_CHUNK) as $chunk) {
+					if ($deadline !== null && microtime(true) >= $deadline) {
+						return $done;
+					}
+					$done += self::fillRemoteChunk($chunk, $ingestors, $db);
+				}
+			}
+			foreach ($stored as $row) {
 				if ($deadline !== null && microtime(true) >= $deadline) {
 					break;
 				}
 				$msg_id = intval($row['msg_id']);
-				$stamp = $db->prepare('UPDATE iem_inbound_email_messages
-					SET iem_lists_attempt_time = now() WHERE iem_inbound_email_message_id = ?');
-				$stamp->execute(array($msg_id));
+				self::stamp($db, array($msg_id));
 				try {
 					// One message is one unit for the hot-turn rule: opening a
 					// sealed raw opens this owner's scope, and nothing one row
 					// decrypts is in play when the next one starts.
-					$ok = SealedEgressGuard::isolate(function () use ($msg_id, &$ingestors) {
-						return self::fillOne($msg_id, $ingestors);
+					$ok = SealedEgressGuard::isolate(function () use ($msg_id) {
+						return self::fillStored($msg_id);
 					});
 					if ($ok) {
 						$done++;
@@ -131,14 +166,14 @@ class AddressListBackfill {
 				} catch (VaultLockedException $e) {
 					// The window closed mid-drain — stop, never an error. The row
 					// was not asked anything, so it owes no retry wait: unstamp it.
-					$db->prepare('UPDATE iem_inbound_email_messages
-						SET iem_lists_attempt_time = NULL WHERE iem_inbound_email_message_id = ?')
-						->execute(array($msg_id));
+					self::unstamp($db, array($msg_id));
 					break;
 				} catch (\Throwable $e) {
 					error_log('AddressListBackfill: could not fill message ' . $msg_id . ': ' . $e->getMessage());
 				}
 			}
+		} catch (VaultLockedException $e) {
+			// fillRemoteChunk() has already unstamped what it did not write.
 		} finally {
 			foreach ($ingestors as $ingestor) {
 				try { $ingestor->close(); } catch (\Throwable $e) { /* best effort */ }
@@ -148,54 +183,114 @@ class AddressListBackfill {
 	}
 
 	/**
-	 * Resolve one message's header block through whichever source it has, and
-	 * write its lists. Returns false when the source cannot answer (the row
-	 * stays stamped for the daily retry).
+	 * One (account, folder) chunk of 'remote' rows: stamp them all, fetch their
+	 * header blocks in one call, write the lists row by row. A row whose source
+	 * cannot answer stays stamped for the daily retry. A window that closes
+	 * mid-chunk unstamps every row not yet written — none of those was asked
+	 * anything the vault answered — and rethrows so the drain stops.
 	 *
 	 * @param array<int,ImapIngestor> $ingestors per-account cache, filled here
 	 */
-	private static function fillOne(int $msg_id, array &$ingestors): bool {
+	private static function fillRemoteChunk(array $chunk, array &$ingestors, PDO $db): int {
+		$ids = array_map(function ($row) { return intval($row['msg_id']); }, $chunk);
+		self::stamp($db, $ids);
+
+		$acc_id = intval($chunk[0]['acc_id']);
+		if (!isset($ingestors[$acc_id])) {
+			$account = new InboundImapAccount($acc_id, TRUE);
+			if (!$account->key || !$account->get('iia_is_enabled')) {
+				return 0; // stamped: an account switched off is asked again tomorrow, not every drain
+			}
+			$ingestors[$acc_id] = self::makeIngestor($account);
+		}
+
+		$locators = array();
+		foreach ($chunk as $i => $row) {
+			$locators[$i] = array(
+				'uid'         => intval($row['uid']),
+				'uidvalidity' => $row['uidvalidity'] !== null ? intval($row['uidvalidity']) : null,
+				'message_id'  => (string)$row['message_id'],
+			);
+		}
+		$blocks = $ingestors[$acc_id]->fetchHeaderTexts((string)$chunk[0]['folder'], $locators);
+
+		$done = 0;
+		foreach ($chunk as $i => $row) {
+			$msg_id = intval($row['msg_id']);
+			$res = $blocks[$i] ?? null;
+			if (empty($res['ok'])) {
+				continue;
+			}
+			$block = (string)$res['headers'];
+			try {
+				// Same one-row unit as the stored path: the write may unwrap the
+				// row's DEK, and nothing that opens survives into the next row.
+				$ok = SealedEgressGuard::isolate(function () use ($msg_id, $block) {
+					$msg = new InboundEmailMessage($msg_id, TRUE);
+					if (!$msg->key) {
+						return false;
+					}
+					$lists = MailAddressList::fromHeaderBlock($block);
+					return self::writeLists($msg, $lists['to'], $lists['cc']);
+				});
+				if ($ok) {
+					$done++;
+				}
+			} catch (VaultLockedException $e) {
+				$rest = array();
+				foreach ($chunk as $j => $r) {
+					if ($j >= $i) {
+						$rest[] = intval($r['msg_id']);
+					}
+				}
+				self::unstamp($db, $rest);
+				throw $e;
+			} catch (\Throwable $e) {
+				error_log('AddressListBackfill: could not fill message ' . $msg_id . ': ' . $e->getMessage());
+			}
+		}
+		return $done;
+	}
+
+	/** Mark these rows attempted now — the daily-retry clock starts here. */
+	private static function stamp(PDO $db, array $ids): void {
+		if (empty($ids)) {
+			return;
+		}
+		$db->prepare('UPDATE iem_inbound_email_messages SET iem_lists_attempt_time = now()
+			WHERE iem_inbound_email_message_id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')')
+			->execute(array_values($ids));
+	}
+
+	/** Take the stamp back: these rows were not asked anything, so they owe no wait. */
+	private static function unstamp(PDO $db, array $ids): void {
+		if (empty($ids)) {
+			return;
+		}
+		$db->prepare('UPDATE iem_inbound_email_messages SET iem_lists_attempt_time = NULL
+			WHERE iem_inbound_email_message_id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')')
+			->execute(array_values($ids));
+	}
+
+	/**
+	 * A stored-raw row: open the raw (in-window when sealed), read its header
+	 * block, write the lists. Returns false when the row has no raw to read
+	 * (it stays stamped for the daily retry).
+	 */
+	private static function fillStored(int $msg_id): bool {
 		$msg = new InboundEmailMessage($msg_id, TRUE);
 		if (!$msg->key) {
 			return false;
 		}
-
-		$block = self::headerBlockFor($msg, $ingestors);
-		if ($block === null) {
-			return false;
-		}
-		$lists = MailAddressList::fromHeaderBlock($block);
-		return self::writeLists($msg, $lists['to'], $lists['cc']);
-	}
-
-	/** The wire header block from the source, or null when it cannot be had. */
-	private static function headerBlockFor(InboundEmailMessage $msg, array &$ingestors): ?string {
-		$driver = (string)$msg->get('iem_raw_storage_driver') ?: 'inline';
-		if ($driver === 'remote') {
-			$acc_id = intval($msg->get('iem_iia_inbound_imap_account_id'));
-			if ($acc_id <= 0) {
-				return null;
-			}
-			if (!isset($ingestors[$acc_id])) {
-				$account = new InboundImapAccount($acc_id, TRUE);
-				if (!$account->key || !$account->get('iia_is_enabled')) {
-					return null;
-				}
-				$ingestors[$acc_id] = self::makeIngestor($account);
-			}
-			$res = $ingestors[$acc_id]->fetchHeaderText(intval($msg->get('iem_imap_uid')),
-				$msg->get('iem_imap_uidvalidity') !== null ? intval($msg->get('iem_imap_uidvalidity')) : null,
-				(string)$msg->get('iem_imap_folder'), (string)$msg->get('iem_message_id_header'));
-			return !empty($res['ok']) ? (string)$res['headers'] : null;
-		}
-
-		// Opens the sealed raw in-window; throws VaultLockedException when the
-		// window is closed, which the drain treats as "stop".
+		// Throws VaultLockedException when the window is closed, which the
+		// drain treats as "stop".
 		$raw = $msg->getRawMessage();
 		if ($raw === null || $raw === '') {
-			return null;
+			return false;
 		}
-		return (new InboundEmailRouter())->rawHeaderBlock($raw);
+		$block = (new InboundEmailRouter())->rawHeaderBlock($raw);
+		$lists = MailAddressList::fromHeaderBlock($block);
+		return self::writeLists($msg, $lists['to'], $lists['cc']);
 	}
 
 	/**
