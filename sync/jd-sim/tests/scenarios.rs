@@ -3382,6 +3382,54 @@ fn a_sealed_file_still_here_says_so_when_the_server_forgets_its_folder() {
     assert_eq!(kept[0].entity, Some(jd_core::EntityId::folder(sub)), "the report is not on the folder: {:?}", kept[0].entity);
 }
 
+/// A folder renamed before the first scan after its creation keeps its
+/// identity (finding C4 of the reset's WP3, clean3 74821 and hostile2 74414).
+///
+/// b makes `Sub`, writes into it and syncs: the folder is created on the
+/// server from b's directory. b's user then renames `Sub` to `Other`. Before
+/// b passes again, a's own new folder called `Other` reaches the server. The
+/// record b holds for its folder knew nothing about its directory -- the
+/// provisional minted for a new directory carried no identity and the
+/// create's landing recorded none, so the identity was to be learned by a
+/// later scan at the agreed path, which the rename had emptied -- and b's
+/// pass read the folder as deleted, adopted its directory as a's namesake,
+/// moved its file into the stranger and trashed it on the server for every
+/// device. A record minted from a directory knows that directory from the
+/// start; renamed, it is found by identity and lands beside the namesake.
+#[test]
+fn a_folder_renamed_before_its_first_scan_after_creation_keeps_its_identity() {
+    let world = World::new(9_978, &["a", "b"]);
+    let a = world.device("a");
+    let b = world.device("b");
+    b.fs.user_mkdir("Sub");
+    b.fs.user_write("Sub/mine.txt", b"b's file, in b's folder");
+    world.pass(b);
+    let mine = world.server.folder_id_at("Sub").expect("b's folder reached the server");
+    let dir = jd_vfs::Vfs::directory_id(&b.fs, std::path::Path::new("/sync/Sub")).unwrap().unwrap();
+    b.fs.user_rename("Sub", "Other");
+    a.fs.user_write("Other/theirs.txt", b"a's file, in a's own Other");
+    world.pass(a);
+    let theirs = world.server.folder_id_at("Other").expect("a's folder reached the server");
+    assert_ne!(mine, theirs);
+    world.pass(b);
+    assert!(world.settle().is_some(), "never settled");
+
+    let folders = world.server.folders();
+    let live = |id: i64| folders.iter().find(|f| f.id == id).is_some_and(|f| !f.trashed);
+    assert!(live(mine), "b's folder was trashed on the server after a rename: {folders:?}");
+    assert!(live(theirs), "a's folder was trashed: {folders:?}");
+    let files = world.server.files();
+    let under = |name: &str| files.iter().find(|f| f.name == name && !f.trashed).map(|f| f.folder);
+    assert_eq!(under("mine.txt"), Some(Some(mine)), "b's file left b's folder: {:?}", world.server.tree());
+    assert_eq!(under("theirs.txt"), Some(Some(theirs)), "a's file left a's folder: {:?}", world.server.tree());
+    let on_b = b.store.get_entry(jd_core::EntityId::folder(mine)).unwrap().unwrap().synced_fingerprint.map(|fp| fp.file_id);
+    assert_eq!(on_b, Some(dir), "b's folder is not the directory b made: {:?}", disk_tree(b).keys().collect::<Vec<_>>());
+    for d in &world.devices {
+        eprintln!("{}: issues {:?}", d.name, d.store.open_issues().unwrap().iter().map(|i| i.kind.as_str()).collect::<Vec<_>>());
+    }
+    assert_converged(&world);
+}
+
 /// A vault folder's identity never claims a directory inside the folder's
 /// own path (finding C5 of the reset's WP3, frozen 1073449).
 ///

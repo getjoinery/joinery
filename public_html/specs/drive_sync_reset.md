@@ -8,9 +8,10 @@ C1-C3 recorded below (WP1d committed as `1581721c`); WP3 in progress: change
 1 (`aba4bd60`, naming waits on a chain that runs into an open op) closes C3,
 change 2 (`20c431b5`, the round brings nothing in under a folder the user has
 just deleted) closes C2; the belts' instrument (`d5f939ab`, reading 11)
-finds fix 4's bar met and finding C4; change 3 (C5, a recycled directory id
-under a folder's own path is void) next in the chain C5, C4, C6, fix 4's
-removal, C7, each measured and graded. Every change reviewed by
+finds fix 4's bar met and finding C4; change 3 (`a5638dc9`, a recycled
+directory id under a folder's own path is void) lands C5; change 4 (a folder
+record knows its directory from the mint) closes C4, next in the chain C4,
+C6, fix 4's removal, C7, each measured and graded. Every change reviewed by
 public-html-67 (public-html-c6 until 2026-09-14), approach before patch.**
 
 Testing is paused. No further guards land on the sync engine until the work
@@ -1588,6 +1589,75 @@ identical 160 of 160, every cell unmoved -- the shape is not reachable on the
 ring arms until C4 makes records know their directories at the mint, which
 is why C5 lands first and C4 second with 1073449 green outright rather than
 wrapped.
+
+**WP3 change 4 (2026-09-14): a folder record knows its directory from the
+moment it is minted from one -- C4's root.** One line at the provisional mint
+in the scan (`pass.rs`, the new-directory loop): `entry.synced_fingerprint =
+dir_identity[dir]` as `Fingerprint::of_directory`. The create's landing keeps
+it (`agree` passes no fingerprint) and `record_directory_identities` finds it
+not stale. Rejected: recording at the create landing (reads the record's path
+at landing time; renamed in between, that path holds nothing or a rebuilt
+stranger); widening the tracker rule or the contents match (they read a
+record that does not know its directory, which is the cause). Two readers a
+provisional folder with a fingerprint reaches that it did not before, traced:
+Q4 `unmaterialize_and_park`'s child loop -- unreachable, `inside` skips
+provisionals at the top of its loop before the reset; Q5 `child_folders`
+(corroboration by a known child folder's id): a provisional child's directory
+now counts beside its parent's own id -- reading 13 shows it once, kill2
+75129, where pc's own directory, holding a provisional with its id, is
+created as its own folder (`CreateRemoteFolder`) instead of adopted by name
+for the server's namesake arriving in the same pass; two folders of one name
+land beside each other under the rename-race policy; custody unchanged.
+
+Pin `a_folder_renamed_before_its_first_scan_after_creation_keeps_its_
+identity`: b makes `Sub`, writes into it, syncs (the folder is created from
+b's directory); b renames `Sub` to `Other`; a's own `Other` reaches the server
+first; b passes; settle. Invariant: both folders live, each holding its own
+file by id, b's record for its folder carries the directory b made; converged
+(names race-dependent: one lands beside the other). Issue kinds printed. RED
+on HEAD (b's folder trashed, its file moved into a's), GREEN with the change.
+
+Reading 13 (`zz_sweep.c4c5` c43148503b7d = the instrument + C5 + C4; vs
+reading 11): sealed, chain, converged -- no seed moves either way. Traces
+144 identical, 16 differ; first divergences, every form: fourteen are C4's
+signature -- a folder's `TrashRemote`, or the re-creation of its renamed
+directory as a new folder, replaced by `ApplyLocalMove` of the known record
+to where its directory stands (clean2 74000 74008 74013 74030, clean3 74800
+74821 74827, kill2 75102 75107 75116 75125, plat3 75400 75415 75422); plat3
+75429 is identity correcting a contents guess (507 matched to `Sub 37` by
+contents before, to its own directory `Sub 23` after); kill2 75129 is Q5's
+form above. Custody: clean3's net fire (74821, C4's seed) gone; clean2
+reminted 2 -> 1, kill2 reminted 18 -> 12; kill2 75125 custody G->R (its three
+ring conflict copies counted `reminted` before and `misplaced` after -- the
+same files, the ring family; with C6 landed the swap-off discriminator says
+AH). **OPEN, finding C7 (67, from C4's reading):** on the same seed two
+`sealed_not_rescued` fires outside a user delete appear with C4 (0 on reading
+11, 2 on reading 13, and with swaps off on the fix-4-removed binary still 1:
+mac, folder 505 `Sub 5 (19) (19b)`, beside a `parked` issue on that folder --
+"cannot hold the name it now has on the server (DuplicateName with Sub 5)").
+A naming park gave a vault subfolder holding two never-uploaded sealed files
+to this computer's trash, on a sequence C4 reaches; not AH, and not a user
+delete: the rescue net's bar instrument doing what it was built for (the C3
+family). Untraced -- C4's cost or a pre-existing naming shape the changed
+sequence reaches; the trace is the next WP3 unit, before fix 1's bar is read
+again (67's artifacts: journal and full log under its scratchpad r75125).
+hostile2 74414's net fire
+stays: traced on C4's binary, desktop's `Contested Folder` (506, created from
+its own directory, which C4 now records) is moved by the user into a rebuilt
+`Contested Folder (10)`; its only files never reached the server, so no
+contents proposal exists and a plain folder's id may not claim on its own --
+506 reads as deleted, the directory is minted new and the two files are
+rescued to the root. That is the empty-plain residual as stated (owner item
+A2), not C4. Frozen 1073449 green outright (C5 landed first; no wrapper).
+**C4 CLOSED.**
+
+**Finding C6 (kill2 75125 with swaps off, every binary since the instrument):
+never settles.** mac holds two `move_remote` ops, 504 -> ring-2 and 503 ->
+ring-3, each refused 1700+ times with "the name is spoken for by something
+this device is renaming": a two-folder trade whose cycle-breaker never parked
+one side (a kill in the middle of the trade), and the rename-race policy's
+wait-for-a-name-this-device-is-renaming holds each behind the other for
+ever. Not C4's (the instrument binary shows it); untraced; WP3's next.
 
 ## Process rules, effective now
 
