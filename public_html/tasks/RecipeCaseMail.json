@@ -1,0 +1,7 @@
+{
+    "name": "Recipe case mail",
+    "description": "When a recipe compiled into this host's agent has given up and opened a case, mails the superadmins one plain-text message per recipe per day, from the agent's rendered case under cache/recipes/. Quiet while no case is open.",
+    "activate_on_install": true,
+    "default_frequency": "hourly",
+    "config_fields": {}
+}

@@ -36,6 +36,11 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.15 - a claim carries the node's cases: for each source, the most recent escalation a recipe
+ *                 opened, open or closed, with its body until one claim carrying it succeeds. Intake
+ *                 (intake_cases) caps and re-validates every field, stores a new id, appends to a known
+ *                 one, records the close the node reports, holds at most one open case per source per
+ *                 node and refuses the rest. The plane never closes a case itself and never answers
  * @version 1.14 - a claim carries the node's recipe list with each recipe's mode (report-only or armed),
  *                 validated and normalised like the vocabulary and stored in mgn_agent_recipes, so the
  *                 node page shows which recipes a node runs on its own clock and whether they act
@@ -115,6 +120,25 @@ class AgentChannelEndpoint {
 	 */
 	const MAX_VOCABULARY_BYTES = 4096;
 	const MAX_VOCABULARY_NAMES = 200;
+
+	/**
+	 * The cases a node may report on a claim (specs/agent_tier1_recipes.md,
+	 * "The case"; "A case is untrusted input to the plane"). The whole field
+	 * is bounded as JSON, then per entry: how many a claim may carry, how
+	 * many a node may hold open, and how long any text it contains may be.
+	 * The agent caps the same fields from its own side before they leave;
+	 * these are the plane's own numbers and do not trust that.
+	 */
+	const MAX_CASES_BYTES          = 65536;
+	const MAX_CASES_PER_CLAIM      = 4;
+	const MAX_OPEN_CASES_PER_NODE  = 8;
+	const MAX_CASE_TEXT            = 512;
+	const MAX_CASE_ATTEMPTS        = 10;
+	const MAX_CASE_ATTEMPT_DETAIL  = 1024;
+	/** Sources a case may name that are not a recipe the node reports. */
+	const CASE_SOURCES = ['classifier:unexplained_root'];
+	/** The outcomes an attempt in a case body may carry. Anything else reads as unknown. */
+	const CASE_ATTEMPT_OUTCOMES = ['repaired', 'failed', 'report-only', 'interrupted'];
 
 	/**
 	 * What the artifact endpoint may be asked for. A flat, closed set — a node
@@ -327,6 +351,11 @@ class AgentChannelEndpoint {
 					// so it passes as the empty object it almost certainly is.
 					if (!is_array($value) || ($value !== [] && array_is_list($value))) {
 						return "Field '{$field}' must be a JSON object.";
+					}
+					// A cap on an object is a cap on its JSON: the whole body is
+					// already bounded, and this bounds one field of it.
+					if (isset($rules['max']) && strlen((string)json_encode($value)) > (int)$rules['max']) {
+						return "Field '{$field}' is larger than the {$rules['max']}-byte limit.";
 					}
 					break;
 			}
@@ -710,6 +739,13 @@ class AgentChannelEndpoint {
 			// told, and it shows a person.
 			'recipes'        => ['type' => 'string', 'max' => self::MAX_VOCABULARY_BYTES,
 			                     'pattern' => '/^[a-z0-9_,:-]*$/'],
+			// The node's cases, keyed by source: for each, the most recent
+			// escalation a recipe opened, open or closed, with its body until
+			// a claim carrying it succeeds. A JSON object bounded as a whole
+			// here and field by field in intake_cases(). The one thing a node
+			// pushes at the plane on its own initiative, so every field of it
+			// is attacker-controllable and none is believed as it arrives.
+			'cases'          => ['type' => 'object', 'max' => self::MAX_CASES_BYTES],
 			'bundle_version' => ['type' => 'string', 'max' => 32, 'pattern' => '/^[a-z0-9]*$/'],
 			// The node's own answer to whether it can verify the scripts it
 			// would run as root. A closed set, matched not interpolated.
@@ -785,6 +821,19 @@ class AgentChannelEndpoint {
 		}
 
 		$node->save();
+
+		// The node's cases, after the node row is saved so the recipe list a
+		// case's source is checked against is the one this claim reported.
+		// Everything a case says is re-validated and capped here; a refusal
+		// is logged and costs the node nothing else, because a claim must
+		// still hand out the job.
+		if (array_key_exists('cases', $in) && is_array($in['cases'])) {
+			try {
+				self::intake_cases($node, $in['cases']);
+			} catch (\Throwable $e) {
+				error_log('[AgentChannel] case intake failed for node #' . (int)$node->key . ': ' . $e->getMessage());
+			}
+		}
 
 		// A claim that never came back would otherwise hold this node's
 		// concurrency lock forever. Swept on every poll — scoped to this node,
@@ -1216,6 +1265,271 @@ class AgentChannelEndpoint {
 			$out[$name] = $mode;
 		}
 		return $out;
+	}
+
+	// ==================================================================
+	// Cases
+	// ==================================================================
+
+	/**
+	 * Take in the cases one claim carries and return what became of each,
+	 * keyed by the source the node used: 'stored', 'appended', 'closed',
+	 * 'unchanged', or 'refused: <why>'. Refusals are logged with the node.
+	 *
+	 * The rules (specs/agent_tier1_recipes.md, settled Q3):
+	 *   - a new id is stored, open or closed as the node says it is;
+	 *   - a known id is appended to: the note count, the newest note, and a
+	 *     body when one rides (the node sends its body again after a restart,
+	 *     and the plane takes the newer);
+	 *   - a close the node reports is recorded; the plane never closes a case
+	 *     on its own judgement and a closed case never reopens;
+	 *   - at most one open case per source per node. A node mints ids in
+	 *     order, and a new escalation cannot open on the node until the old
+	 *     one closed, so a HIGHER id arriving open while an older one is open
+	 *     here means the older one's close went unheard: it is closed with a
+	 *     note saying so. A LOWER id is a replay or a forgery and is refused.
+	 *   - at most MAX_OPEN_CASES_PER_NODE open per node and
+	 *     MAX_CASES_PER_CLAIM per claim, whatever the node says.
+	 */
+	public static function intake_cases($node, array $cases): array {
+		$outcomes = [];
+		$node_id = (int)$node->key;
+		$recipes = self::recipes_of($node);
+		$now = gmdate('Y-m-d H:i:s');
+		$seen = 0;
+		foreach ($cases as $source => $entry) {
+			$label = self::safe_label($source);
+			if (++$seen > self::MAX_CASES_PER_CLAIM) {
+				$outcomes[$label] = 'refused: more than ' . self::MAX_CASES_PER_CLAIM . ' cases in one claim';
+				self::log_case_refusal($node_id, $label, $outcomes[$label]);
+				continue;
+			}
+			$clean = self::normalised_case((string)$source, $entry, $recipes);
+			if (is_string($clean)) {
+				$outcomes[$label] = 'refused: ' . $clean;
+				self::log_case_refusal($node_id, $label, $clean);
+				continue;
+			}
+			$outcomes[$clean['source']] = self::record_case($node_id, $clean, $now);
+			if (strpos($outcomes[$clean['source']], 'refused') === 0) {
+				self::log_case_refusal($node_id, $clean['source'], $outcomes[$clean['source']]);
+			}
+		}
+		return $outcomes;
+	}
+
+	private static function log_case_refusal(int $node_id, string $source, string $why): void {
+		error_log('[AgentChannel] case from node #' . $node_id . ' (' . $source . ') ' . $why);
+	}
+
+	/** Store, append to or close one normalised case. Returns the outcome word. */
+	private static function record_case(int $node_id, array $c, string $now): string {
+		$existing = IncidentRecord::find($node_id, $c['source'], $c['id']);
+		if ($existing !== null) {
+			if (!$existing->is_open() && $c['status'] === IncidentRecord::STATUS_OPEN) {
+				return 'refused: case #' . $c['id'] . ' is closed here and a closed case does not reopen';
+			}
+			$outcome = 'unchanged';
+			$existing->set('inc_last_seen_time', $now);
+			if ($c['notes'] > (int)$existing->get('inc_note_count')) {
+				$existing->set('inc_note_count', $c['notes']);
+				$existing->set('inc_last_note', $c['last_note']);
+				$existing->set('inc_last_note_time', $c['last_note_time']);
+				$outcome = 'appended';
+			}
+			if ($c['body'] !== null) {
+				$existing->set('inc_body', $c['body']);
+				$outcome = 'appended';
+			}
+			if ($existing->is_open() && $c['status'] === IncidentRecord::STATUS_CLOSED) {
+				$existing->set('inc_status', IncidentRecord::STATUS_CLOSED);
+				$existing->set('inc_closed_time', $c['closed'] ?? $now);
+				$existing->set('inc_close_reason', $c['close_reason']);
+				$outcome = 'closed';
+			}
+			$existing->save();
+			return $outcome;
+		}
+
+		$open = IncidentRecord::open_for($node_id, $c['source']);
+		if ($open !== null) {
+			if ($c['id'] <= (int)$open->get('inc_node_case_id')) {
+				return 'refused: case #' . $c['id'] . ' is not newer than the open case #' . (int)$open->get('inc_node_case_id');
+			}
+			// The node moved on to a newer case, which it can only do after
+			// closing this one; the close was not heard. Record that, in the
+			// plane's own words, so the row is never mistaken for a fault the
+			// node still reports.
+			$open->set('inc_status', IncidentRecord::STATUS_CLOSED);
+			$open->set('inc_closed_time', $now);
+			$open->set('inc_close_reason', 'closed on the node before its case #' . $c['id']
+				. ' opened; the node\'s own close was not heard by this management node');
+			$open->save();
+		}
+		if ($c['status'] === IncidentRecord::STATUS_OPEN
+			&& IncidentRecord::open_count($node_id) >= self::MAX_OPEN_CASES_PER_NODE) {
+			return 'refused: this node already has ' . self::MAX_OPEN_CASES_PER_NODE . ' open cases';
+		}
+
+		$row = new IncidentRecord();
+		$row->set('inc_mgn_node_id', $node_id);
+		$row->set('inc_source', $c['source']);
+		$row->set('inc_recipe', $c['recipe']);
+		$row->set('inc_node_case_id', $c['id']);
+		$row->set('inc_status', $c['status']);
+		$row->set('inc_opened_time', $c['opened']);
+		$row->set('inc_reason', $c['reason']);
+		$row->set('inc_note_count', $c['notes']);
+		$row->set('inc_last_note', $c['last_note']);
+		$row->set('inc_last_note_time', $c['last_note_time']);
+		$row->set('inc_closed_time', $c['closed']);
+		$row->set('inc_close_reason', $c['close_reason']);
+		$row->set('inc_body', $c['body']);
+		$row->set('inc_first_seen_time', $now);
+		$row->set('inc_last_seen_time', $now);
+		$row->save();
+		return 'stored';
+	}
+
+	/**
+	 * Reduce one reported case to what this plane will store, or say why it
+	 * will not. Pure, so a test can hand it anything a hostile node might.
+	 *
+	 * @param string $source   the key the node filed it under
+	 * @param mixed  $entry    the case as decoded from the claim
+	 * @param array  $recipes  the node's recipe list, name => mode
+	 * @return array|string    the clean case, or the refusal reason
+	 */
+	public static function normalised_case(string $source, $entry, array $recipes) {
+		if (!is_array($entry) || array_is_list($entry)) {
+			return 'a case must be a JSON object';
+		}
+		if (!preg_match('/^[a-z][a-z0-9_]{0,15}:[a-z][a-z0-9_]{2,39}$/', $source)) {
+			return 'the source is not in kind:name form';
+		}
+		if (($entry['source'] ?? null) !== $source) {
+			return 'the case names a source other than the one it is filed under';
+		}
+		$recipe = '';
+		if (strpos($source, 'recipe:') === 0) {
+			$recipe = substr($source, strlen('recipe:'));
+			if (!isset($recipes[$recipe])) {
+				return 'the node does not report a recipe named ' . self::safe_label($recipe);
+			}
+			if (($entry['recipe'] ?? '') !== $recipe) {
+				return 'the recipe field does not match the source';
+			}
+		} elseif (!in_array($source, self::CASE_SOURCES, true)) {
+			return 'the source is not one this plane knows';
+		}
+		$id = $entry['id'] ?? null;
+		if (!is_int($id) || $id < 1 || $id > 2147483647) {
+			return 'the id must be a positive whole number';
+		}
+		$status = $entry['status'] ?? null;
+		if ($status !== IncidentRecord::STATUS_OPEN && $status !== IncidentRecord::STATUS_CLOSED) {
+			return 'the status must be open or closed';
+		}
+		$notes = $entry['notes'] ?? 0;
+		if (!is_int($notes) || $notes < 0) {
+			return 'the note count must be a whole number';
+		}
+		$clean = [
+			'source'         => $source,
+			'recipe'         => $recipe,
+			'id'             => $id,
+			'status'         => $status,
+			'opened'         => self::case_time($entry['opened'] ?? null),
+			'reason'         => self::case_text($entry['reason'] ?? '', self::MAX_CASE_TEXT),
+			'notes'          => min($notes, 2147483647),
+			'last_note'      => self::case_text($entry['last_note'] ?? '', self::MAX_CASE_TEXT),
+			'last_note_time' => self::case_time($entry['last_note_time'] ?? null),
+			'closed'         => $status === IncidentRecord::STATUS_CLOSED ? self::case_time($entry['closed'] ?? null) : null,
+			'close_reason'   => $status === IncidentRecord::STATUS_CLOSED ? self::case_text($entry['close_reason'] ?? '', self::MAX_CASE_TEXT) : '',
+			'body'           => null,
+		];
+		if (isset($entry['body'])) {
+			if (!is_array($entry['body']) || array_is_list($entry['body'])) {
+				return 'the body must be a JSON object';
+			}
+			$clean['body'] = self::normalised_case_body($entry['body']);
+		}
+		return $clean;
+	}
+
+	/** The body of a case, rebuilt from a closed set of keys, every value bounded. */
+	private static function normalised_case_body(array $body): array {
+		$mode = $body['mode'] ?? '';
+		$attempts = [];
+		if (isset($body['attempts']) && is_array($body['attempts'])) {
+			foreach (array_slice(array_values($body['attempts']), 0, self::MAX_CASE_ATTEMPTS) as $a) {
+				if (!is_array($a)) {
+					continue;
+				}
+				$word = $a['word'] ?? '';
+				if (!is_string($word) || !preg_match('/^[a-z][a-z0-9_]{2,39}$/', $word)) {
+					continue;
+				}
+				$id = $a['id'] ?? 0;
+				$outcome = $a['outcome'] ?? '';
+				$amode = $a['mode'] ?? '';
+				$attempts[] = [
+					'id'      => (is_int($id) && $id >= 0) ? $id : 0,
+					'started' => self::case_time($a['started'] ?? null),
+					'word'    => $word,
+					'mode'    => in_array($amode, self::RECIPE_MODES, true) ? $amode : '',
+					'outcome' => in_array($outcome, self::CASE_ATTEMPT_OUTCOMES, true) ? $outcome : 'unknown',
+					'ended'   => self::case_time($a['ended'] ?? null),
+					'detail'  => self::case_text($a['detail'] ?? '', self::MAX_CASE_ATTEMPT_DETAIL),
+				];
+			}
+		}
+		$hr = $body['host_report'] ?? null;
+		if (is_array($hr) && !array_is_list($hr)) {
+			$host_report = JobResultProcessor::sanitise_host_report($hr);
+		} elseif (is_string($hr)) {
+			$host_report = self::case_text($hr, self::MAX_CASE_TEXT);
+		} else {
+			$host_report = 'unknown';
+		}
+		return [
+			'mode'        => in_array($mode, self::RECIPE_MODES, true) ? $mode : 'unknown',
+			'attempts'    => $attempts,
+			'host_report' => $host_report,
+			'vocabulary'  => self::normalised_vocabulary($body['vocabulary'] ?? ''),
+			'recipes'     => self::normalised_recipes($body['recipes'] ?? ''),
+		];
+	}
+
+	/**
+	 * Free text off the wire: a string, valid UTF-8, no control characters,
+	 * at most $max characters. Stored as text and escaped wherever shown; this
+	 * is the cap, not the escape.
+	 */
+	public static function case_text($value, int $max): string {
+		if (!is_string($value)) {
+			return '';
+		}
+		if (!mb_check_encoding($value, 'UTF-8')) {
+			$value = mb_convert_encoding($value, 'UTF-8', 'UTF-8');
+		}
+		$value = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $value);
+		$value = trim((string)$value);
+		if (mb_strlen($value, 'UTF-8') > $max) {
+			$value = mb_substr($value, 0, $max, 'UTF-8') . '…';
+		}
+		return $value;
+	}
+
+	/** An RFC 3339 UTC time off the wire as a stored timestamp, or null. */
+	public static function case_time($value): ?string {
+		if (!is_string($value) || !preg_match('/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?Z$/', $value, $m)) {
+			return null;
+		}
+		if (!checkdate((int)$m[2], (int)$m[3], (int)$m[1]) || (int)$m[4] > 23 || (int)$m[5] > 59 || (int)$m[6] > 60) {
+			return null;
+		}
+		return sprintf('%04d-%02d-%02d %02d:%02d:%02d', $m[1], $m[2], $m[3], $m[4], $m[5], $m[6]);
 	}
 
 	// ==================================================================

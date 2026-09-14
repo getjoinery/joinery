@@ -19,6 +19,7 @@
  * is all a plugin needs. A renderer that throws is logged and skipped — an
  * admin page never fails to render because a notice could not decide.
  *
+ * @version 1.6 - recipe_case joins the core notices (specs/agent_tier1_recipes.md, the case on an unpaired node)
  * @version 1.5 - site_backup joins the core notices (specs/post_release_fleet_defects.md B3)
  * @version 1.4 - certificates joins the core notices (specs/implemented/tls_and_origin_trust.md WP11)
  * @version 1.3 - host_converger joins the core notices (specs/implemented/host_converger.md)
@@ -58,6 +59,10 @@ class AdminNotices {
 			// engine's last line. Silent while runs succeed, and silent on a
 			// site that has never configured one.
 			'site_backup'    => array('SiteBackupNotice', 'render'),
+			// A box whose own agent's recipe gave up says so, from the case
+			// the agent rendered outward, "as reported by the agent's ledger".
+			// Silent while no case is open.
+			'recipe_case'    => array('RecipeCaseNotice', 'render'),
 		);
 	}
 

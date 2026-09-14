@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.14 - the Cases card, under the Host card: the cases this node's agent opened, open first, then
+ *                 closed, each with a human's note and a mark-read control (IncidentCaseCard); shown for every
+ *                 node with an agent, so a node with no case says so
  * @version 1.13 - the Host card opens with the node's recipe list and each recipe's mode (report-only
  *                 or armed), as the agent reported it at its last poll, so a person can see from the
  *                 node page that a node is checking on its own clock and whether it acts
@@ -732,6 +735,18 @@
 				. ($host_report_time !== '' ? htmlspecialchars(LibraryFunctions::convert_time($host_report_time, 'UTC', $session->get_timezone(), 'M j, g:i A'), ENT_QUOTES, 'UTF-8') : 'unknown')
 				. ', generated on the node at ' . $hr_str($hr_when($hr['generated_at'])) . '.</small>';
 		}
+		$page->end_box();
+	}
+
+	// ── Cases card ──
+	// The cases this node's agent opened (a recipe that gave up), open first,
+	// then closed, each with the note a human wrote and a mark-read control.
+	// The node closes a case when its check passes; a human here only says
+	// what they saw. Everything in a case came from the node and is escaped
+	// by the card (IncidentCaseCard); nothing in it is a link.
+	if (JobCommandBuilder::has_agent_channel($node) || count(IncidentCaseCard::cases_for((int)$node->key)) > 0) {
+		$page->begin_box(['title' => 'Cases']);
+		echo IncidentCaseCard::render_for_node($node, $base_url);
 		$page->end_box();
 	}
 
