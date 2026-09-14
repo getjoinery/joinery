@@ -11,6 +11,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/aip_recipe_item
 /**
  * Shared spine of the three email pipeline jobs (triage, security scan,
  * schedule): the `mailbox_aliases` list binding, its validation, the
+ * `lookback_days` mail-age floor, the
  * per-subset scheduling posture, candidate selection across the union, and
  * the mail-reader AI panel's bind/unbind contract. Each concrete job supplies
  * only what genuinely differs — its identity, verdict contract, prompt, and
@@ -19,7 +20,9 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/aip_recipe_item
  * Lives in includes/, NOT pipeline_jobs/ — PipelineJobRegistry instantiates
  * every class it discovers there, and an abstract class cannot be.
  *
- * @version 1.2
+ * @version 1.3
+ * @changelog 1.3 - lookback_days config field: the shared mail-age floor
+ *   (EmailJobCandidates), default 7 days
  * @changelog 1.2 - processingConsent() folds EVERY bound address, not only the
  *   sealed ones (specs/security_inventory.md S19)
  */
@@ -45,6 +48,17 @@ abstract class EmailPipelineJobBase implements PipelineJobInterface, AreaScopedJ
         return ['input' => [
             'mailbox_aliases' => MailboxAliasConfig::descriptorListField(
                 $this->mailboxFieldLabel(), $this->mailboxFieldHelp()),
+            'lookback_days' => [
+                'type'    => 'int',
+                'label'   => 'Only read mail from the last (days)',
+                'help'    => 'Every message read costs a model call, so mail older than this is left '
+                           . 'alone rather than judged for its own sake. Applies to unread mail already '
+                           . 'in the mailbox when the recipe is switched on, and to mail that arrives '
+                           . 'while it is paused. 0 reads everything unread, however old.',
+                'default' => EmailJobCandidates::DEFAULT_LOOKBACK_DAYS,
+                'min'     => 0,
+                'max'     => 3650,
+            ],
         ]];
     }
 
@@ -134,7 +148,7 @@ abstract class EmailPipelineJobBase implements PipelineJobInterface, AreaScopedJ
         $owner_id = (int)$recipe->get('rcp_owner_user_id');
         return EmailJobCandidates::hasCandidate(
             EmailJobCandidates::readableAliasIds($config, $owner_id, $posture),
-            (int)$recipe->key, $owner_id);
+            (int)$recipe->key, $owner_id, EmailJobCandidates::lookbackDays($config));
     }
 
     /** How far behind this recipe is, for the mailbox catch-up prompt. */
@@ -142,7 +156,7 @@ abstract class EmailPipelineJobBase implements PipelineJobInterface, AreaScopedJ
         $owner_id = (int)$recipe->get('rcp_owner_user_id');
         return EmailJobCandidates::countCandidates(
             EmailJobCandidates::readableAliasIds($config, $owner_id, $posture),
-            (int)$recipe->key, $owner_id);
+            (int)$recipe->key, $owner_id, EmailJobCandidates::lookbackDays($config));
     }
 
     /**
@@ -178,7 +192,7 @@ abstract class EmailPipelineJobBase implements PipelineJobInterface, AreaScopedJ
         // reports the gap on the run tally.
         $id = EmailJobCandidates::nextId(
             EmailJobCandidates::readableAliasIds($config, $owner_id),
-            (int)$recipe->key, $owner_id);
+            (int)$recipe->key, $owner_id, EmailJobCandidates::lookbackDays($config));
         if ($id === null) return null;
 
         $msg = new InboundEmailMessage($id, TRUE);

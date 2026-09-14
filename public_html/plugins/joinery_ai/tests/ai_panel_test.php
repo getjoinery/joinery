@@ -10,7 +10,7 @@
  * (specs/implemented/ai_recipes_multi_mailbox_and_ai_panel.md). Covers:
  *
  *  - Union candidate selection across a recipe's mailbox_aliases list, newest
- *    first, and the live re-resolution that drops a revoked grant with a
+ *    first, the lookback_days mail-age floor, and the live re-resolution that drops a revoked grant with a
  *    coverage note instead of a silent gap.
  *  - validateConfig: per-address grant check, empty list legal.
  *  - The scheduling split: a sealed-only binding still refuses cron, a mixed
@@ -25,7 +25,8 @@
  *
  * Run: php tests/run.php db --only=plugins/joinery_ai/tests/ai_panel_test.php
  *
- * @version 1.2
+ * @version 1.3
+ * @changelog 1.3 - lookback_days floor on candidate selection
  * @changelog 1.2 - Turn on enables a Manually-only recipe on arrival (no refusal)
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -157,6 +158,29 @@ check($job->countWork($config, $recipe, PipelineJobInterface::POSTURE_SEALED) ==
 	'the sealed subset of an all-standard binding is empty');
 check($job->countWork($config, $recipe, PipelineJobInterface::POSTURE_STANDARD) === 2,
 	'and the standard subset carries everything');
+
+// -----------------------------------------------------------------------------
+section('The mail-age floor: old unread mail is never a candidate by default');
+
+// Ten days back is outside the default window; every candidate costs a model
+// call, so a recipe bound to a mailbox with an old unread backlog must not
+// walk it. The floor is the recipe's own to widen or lift.
+$stale = aip_message(intval($standard->key), intval($a1->key), 'Stale on one',
+	(string)(-10 * 24 * 60));
+check(EmailJobCandidates::lookbackDays($config) === EmailJobCandidates::DEFAULT_LOOKBACK_DAYS,
+	'a config without lookback_days gets the default floor');
+check($job->countWork($config, $recipe) === 2,
+	'a message older than the default window is not counted', $job->countWork($config, $recipe));
+$wide = $config + array('lookback_days' => '30');
+check(EmailJobCandidates::lookbackDays($wide) === 30, 'a posted numeric string is the floor in days');
+check($job->countWork($wide, $recipe) === 3, 'a 30-day floor reaches it');
+$none = $config + array('lookback_days' => 0);
+check(EmailJobCandidates::lookbackDays($none) === 0, '0 lifts the floor');
+check($job->countWork($none, $recipe) === 3, 'and reads everything unread');
+check(EmailJobCandidates::lookbackDays($config + array('lookback_days' => '')) === EmailJobCandidates::DEFAULT_LOOKBACK_DAYS,
+	'a cleared field is the default, not 0');
+// $stale stays: outside the default window it is invisible to every later
+// count, which is the point.
 
 // -----------------------------------------------------------------------------
 section('A revoked grant drops its address live, with a coverage note');

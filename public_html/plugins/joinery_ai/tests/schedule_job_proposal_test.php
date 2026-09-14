@@ -21,12 +21,15 @@
  *    instead of adding a second;
  *  - approving executes under the recipe's scope with no conversation, and the
  *    entry lands tentative on the owner's calendar with email provenance;
+ *  - an event that has already ended is never proposed, and a proposal
+ *    expires when its event does;
  *  - declining writes nothing;
  *  - a proposal whose recipe is gone fails closed on approval.
  *
  * Run: php tests/run.php db --filter=schedule_job_proposal
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - ended events refused, expiry at event end, fixture date relative
  * @changelog 1.1 - pins the card's when line (owner's zone) and source line (subject, sender, mailbox)
  */
 
@@ -136,10 +139,15 @@ $entries_for = function (string $item_key) use ($owner_uid) {
 };
 
 $job = PipelineJobRegistry::get('email_schedule');
+// The event sits three weeks out, 3 PM New York — a fixed date would slide
+// into the past and be refused (see 'an event that has already ended').
+$event_day = gmdate('Y-m-d', time() + 21 * 86400);
+$event_start = $event_day . ' 15:00:00';
+$event_abbr = LibraryFunctions::convert_time($event_start, 'America/New_York', 'America/New_York', 'T');
 $verdict = [
 	'event_found' => true,
 	'title'       => 'Stranger says: board meeting',
-	'start_local' => '2026-10-02 15:00:00',
+	'start_local' => $event_start,
 	'timezone'    => 'America/New_York',
 	'all_day'     => false,
 ];
@@ -171,23 +179,70 @@ if (count($pending) === 1) {
 	// clock alongside only when that zone keeps a different time.
 	$owner_tz = (string)(new User($owner_uid, TRUE))->get('usr_timezone') ?: 'UTC';
 	if (!in_array($owner_tz, DateTimeZone::listIdentifiers(), true)) $owner_tz = 'UTC';
-	$day_fmt = LibraryFunctions::convert_time('2026-10-02 15:00:00', 'America/New_York', $owner_tz, 'Y')
+	$day_fmt = LibraryFunctions::convert_time($event_start, 'America/New_York', $owner_tz, 'Y')
 		=== LibraryFunctions::convert_time(gmdate('Y-m-d H:i:s'), 'UTC', $owner_tz, 'Y') ? 'D, M j' : 'D, M j, Y';
-	$expect_when = LibraryFunctions::convert_time('2026-10-02 15:00:00', 'America/New_York', $owner_tz, $day_fmt . ' · g:i A')
-		. '–' . LibraryFunctions::convert_time('2026-10-02 16:00:00', 'America/New_York', $owner_tz, 'g:i A T');
+	$expect_when = LibraryFunctions::convert_time($event_start, 'America/New_York', $owner_tz, $day_fmt . ' · g:i A')
+		. '–' . LibraryFunctions::convert_time($event_day . ' 16:00:00', 'America/New_York', $owner_tz, 'g:i A T');
 	$expect_when = preg_replace('/^(.*\d) (AM|PM)–(\d[^ ]* \2 )/', '$1–$3', $expect_when);
 	$when = (string)($card['facts'][1] ?? '');
 	check(strpos($when, $expect_when) === 0,
 		'the end defaulted to an hour after the start, and the card says both in the owner\'s zone',
 		$when . ' vs ' . $expect_when);
-	$differs = LibraryFunctions::convert_time('2026-10-02 15:00:00', 'America/New_York', $owner_tz, 'P')
-		!== LibraryFunctions::convert_time('2026-10-02 15:00:00', 'America/New_York', 'America/New_York', 'P');
-	check((strpos($when, '(3:00–4:00 PM EDT)') !== false) === $differs,
+	$differs = LibraryFunctions::convert_time($event_start, 'America/New_York', $owner_tz, 'P')
+		!== LibraryFunctions::convert_time($event_start, 'America/New_York', 'America/New_York', 'P');
+	check((strpos($when, "(3:00–4:00 PM $event_abbr)") !== false) === $differs,
 		'the email\'s own clock appears exactly when the owner keeps a different one', $when);
 	$source = (string)($card['facts'][2] ?? '');
 	check($source === 'From the email “Board meeting Friday” sent by stranger@example.com to ' . $address,
 		'the card names the source email by subject, sender and mailbox, not by row id', $source);
+	// Three weeks out is past the default expiry, so the default stands.
+	$expires = substr((string)$row->get('aqa_expires_time'), 0, 19);
+	check($expires <= gmdate('Y-m-d H:i:s', time() + AiQueuedAction::DEFAULT_EXPIRY_DAYS * 86400 + 60)
+		&& $expires > gmdate('Y-m-d H:i:s', time() + (AiQueuedAction::DEFAULT_EXPIRY_DAYS - 1) * 86400),
+		'a proposal for an event beyond the default expiry keeps the default', $expires);
 }
+
+// =====================================================================
+section('an event that has already ended is never proposed');
+// =====================================================================
+
+// Whatever the model concluded, the job checks the clock itself. The log
+// row (written by the runner, not here) is what marks the email judged.
+$past = $mk('Last week\'s meeting');
+$past_verdict = $verdict;
+$past_verdict['start_local'] = gmdate('Y-m-d', time() - 7 * 86400) . ' 15:00:00';
+$job->recordVerdict((string)$past, $past_verdict, $recipe, 'test-model');
+$before = count($pending_for_recipe());
+check($before === 1, 'a meeting last week queues nothing', $before);
+
+$yesterday = $verdict;
+$yesterday['all_day'] = true;
+$yesterday['start_local'] = gmdate('Y-m-d', time() - 2 * 86400) . ' 00:00:00';
+$job->recordVerdict((string)$mk('Deadline that passed'), $yesterday, $recipe, 'test-model');
+check(count($pending_for_recipe()) === 1, 'an all-day deadline two days ago queues nothing');
+
+// Still under way: started an hour ago, ends in two — that IS for the calendar.
+$live = $verdict;
+$live['timezone'] = 'UTC';
+$live['start_local'] = gmdate('Y-m-d H:i:s', time() - 3600);
+$live['end_local'] = gmdate('Y-m-d H:i:s', time() + 7200);
+$live_msg = $mk('Happening now');
+$job->recordVerdict((string)$live_msg, $live, $recipe, 'test-model');
+$pending = $pending_for_recipe();
+check(count($pending) === 2, 'an event still under way is proposed', count($pending));
+foreach ($pending as $r) {
+	$args = json_decode((string)$r->get('aqa_arguments'), true);
+	if (($args['source_ref'] ?? '') !== (string)$live_msg) continue;
+	$expires = substr((string)$r->get('aqa_expires_time'), 0, 19);
+	check($expires === $live['end_local'],
+		'and its proposal expires when the event ends, not a week out', $expires . ' vs ' . $live['end_local']);
+	ActionQueue::resolve((int)$r->key, $owner_uid, 'decline');
+}
+
+check(EmailScheduleJob::endsUtc('2030-03-01 00:00:00', null, 'America/New_York', true) === '2030-03-02 05:00:00',
+	'an all-day entry ends when its day does, in its own zone');
+check(EmailScheduleJob::endsUtc('2030-03-01 15:00:00', '2030-03-01 16:00:00', 'Europe/London', false) === '2030-03-01 16:00:00',
+	'a timed entry ends at its stated end, converted to UTC');
 
 // =====================================================================
 section('a re-judged message replaces its pending proposal');
@@ -195,14 +250,14 @@ section('a re-judged message replaces its pending proposal');
 
 $changed = $verdict;
 $changed['title'] = 'Stranger says: board meeting (moved)';
-$changed['start_local'] = '2026-10-03 15:00:00';
+$changed['start_local'] = gmdate('Y-m-d', time() + 22 * 86400) . ' 15:00:00';
 $job->recordVerdict((string)$first, $changed, $recipe, 'test-model');
 $pending = $pending_for_recipe();
 check(count($pending) === 1, 'still exactly one pending proposal', count($pending));
 if (count($pending) === 1) {
 	$args = json_decode((string)$pending[0]->get('aqa_arguments'), true);
 	check(($args['title'] ?? '') === 'Stranger says: board meeting (moved)'
-		&& ($args['start_local'] ?? '') === '2026-10-03 15:00:00',
+		&& ($args['start_local'] ?? '') === $changed['start_local'],
 		'carrying the newer verdict', json_encode($args));
 }
 
