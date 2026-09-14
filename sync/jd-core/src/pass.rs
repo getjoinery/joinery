@@ -1915,7 +1915,15 @@ fn record_directory_identities(
         }
         let stale = match entry.synced_fingerprint {
             None => true,
-            Some(fp) => !on_disk.contains(&fp.file_id),
+            // Gone from the disk, or standing under this folder's own path
+            // -- a recycled id on a directory made inside the folder (C5);
+            // either way not this folder's directory any more.
+            Some(fp) => {
+                !on_disk.contains(&fp.file_id)
+                    || dir_identity
+                        .iter()
+                        .any(|(at, id)| *id == fp.file_id && at.starts_with(&format!("{path}/")))
+            }
         };
         if stale {
             entry.synced_fingerprint = Some(jd_vfs::Fingerprint::of_directory(id));
@@ -2393,13 +2401,37 @@ fn detect_folder_moves(
     // below, and gathered here so it costs a field rather than a second pass.
     let mut believed_parent: HashMap<u64, Option<i64>> = HashMap::new();
     let entries = all_entries(env)?;
+    // An id standing UNDER the record's own path is not the record's
+    // directory, whatever the record says: nothing can be moved inside
+    // itself, so the disk has handed a deleted directory's id to a new one
+    // made under the folder's name (the reset's WP3 finding C5, frozen
+    // 1073449: the vault claim read its folder into a subfolder of itself,
+    // and the no-mint hold then kept that subfolder from ever syncing). Such
+    // a record knows no directory this pass -- for every reader below, the
+    // `owned` map included (a server folder arriving at that directory's
+    // path would otherwise wait for an owner's move that is never planned)
+    // -- and its identity is re-read from its agreed path by
+    // `record_directory_identities`.
+    let recycled_under_own_path = |e: &Entry, id: u64| -> Result<bool, ExecError> {
+        Ok(relative_path(env, e)?.is_some_and(|p| {
+            where_id_stands.get(&id).is_some_and(|at| at.starts_with(&format!("{p}/")))
+        }))
+    };
     // Which live folder record knows each directory id as its own, before
     // the walk below asks about any path.
-    let owned: HashMap<u64, EntityId> = entries
-        .iter()
-        .filter(|e| e.id.entity_type == EntityType::Folder && !e.id.is_provisional() && !e.remote_deleted)
-        .filter_map(|e| e.synced_fingerprint.map(|fp| fp.file_id).filter(|id| *id != 0).map(|id| (id, e.id)))
-        .collect();
+    let mut owned: HashMap<u64, EntityId> = HashMap::new();
+    for e in &entries {
+        if e.id.entity_type != EntityType::Folder || e.id.is_provisional() || e.remote_deleted {
+            continue;
+        }
+        let Some(id) = e.synced_fingerprint.map(|fp| fp.file_id).filter(|id| *id != 0) else {
+            continue;
+        };
+        if recycled_under_own_path(e, id)? {
+            continue;
+        }
+        owned.insert(id, e.id);
+    }
     for entry in entries {
         if entry.id.entity_type == EntityType::File {
             if let Some(fingerprint) = entry.synced_fingerprint {
@@ -2410,7 +2442,11 @@ fn detect_folder_moves(
         if entry.id.entity_type != EntityType::Folder || entry.id.is_provisional() {
             continue;
         }
-        let own_id = entry.synced_fingerprint.map(|fp| fp.file_id).filter(|id| *id != 0);
+        let own_id = match entry.synced_fingerprint.map(|fp| fp.file_id).filter(|id| *id != 0) {
+            // Recycled under its own path: see `recycled_under_own_path`.
+            Some(id) if recycled_under_own_path(&entry, id)? => None,
+            other => other,
+        };
         if let Some(path) = relative_path(env, &entry)? {
             // A folder the server has told us about and nothing has created
             // here yet -- no agreement, no stand-in -- has never stood
