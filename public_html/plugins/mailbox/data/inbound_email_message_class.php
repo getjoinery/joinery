@@ -103,6 +103,10 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.30
+ * @changelog 1.30 - iem_to / iem_cc: the To and Cc lists as the message carried
+ *   them (MailAddressList canonical form), sealed on every direction, so a
+ *   received message shows who else it went to and Reply All includes them.
  * @version 1.29
  * @changelog 1.29 - authRuleSaysSpam(): the one definition of the authentication
  *   spam rule, asked at ingest and again by the reader to explain a filing.
@@ -199,7 +203,11 @@ class InboundEmailMessage extends SystemBase {
 	// inbound row — the direction guard in decryptSealedField*() seals them only when
 	// iem_direction is 'outbound' or 'draft'. iem_draft_state (compose scratch JSON)
 	// is likewise sealed and only ever set on a draft row.
-	public static $sealed_fields = array('iem_sender', 'iem_subject', 'iem_body_plain', 'iem_body_html', 'iem_recipient', 'iem_bcc', 'iem_draft_state', 'iem_ai_summary', 'iem_ai_scan', 'iem_raw_headers');
+	// iem_to / iem_cc (the To and Cc lists as the message carried them) are content
+	// on EVERY direction — who else a received message went to is as much the
+	// owner's business as who they wrote to — so they seal like iem_sender, with no
+	// direction guard.
+	public static $sealed_fields = array('iem_sender', 'iem_subject', 'iem_body_plain', 'iem_body_html', 'iem_recipient', 'iem_bcc', 'iem_draft_state', 'iem_ai_summary', 'iem_ai_scan', 'iem_raw_headers', 'iem_to', 'iem_cc');
 
 	// Sealing runs through this class's own sealAndPersistContent() /
 	// sealExistingRow() paths,
@@ -219,7 +227,7 @@ class InboundEmailMessage extends SystemBase {
 	 * same "the safe thing is the thing you have to remember" shape this file's
 	 * updateContentColumns() note describes.
 	 */
-	public static $optional_sealed_fields = array('iem_bcc', 'iem_draft_state', 'iem_ai_summary', 'iem_ai_scan', 'iem_raw_headers');
+	public static $optional_sealed_fields = array('iem_bcc', 'iem_draft_state', 'iem_ai_summary', 'iem_ai_scan', 'iem_raw_headers', 'iem_to', 'iem_cc');
 
 	// AI surface (docs/example_class.php § AI): recipes may read mail through the
 	// query_model tool. On a protected domain a locked row is EXCLUDED from
@@ -267,6 +275,14 @@ class InboundEmailMessage extends SystemBase {
 		// sealed column, never merged into iem_recipient — so reply-all on your own Sent
 		// copy can structurally never re-leak a bcc'd address. NULL on inbound rows.
 		'iem_bcc'                 => array('type'=>'text', 'is_nullable'=>true),
+		// The To and Cc lists as the message carried them, in MailAddressList's
+		// canonical form ("Name" <addr>, ...), on every direction: an inbound row's
+		// iem_recipient is only the one routing address the envelope delivered to,
+		// so without these the reader cannot show who else a received message went
+		// to, and Reply All cannot include them. NULL on a row stored before these
+		// columns existed (the read path then falls back to iem_raw_headers).
+		'iem_to'                  => array('type'=>'text', 'is_nullable'=>true),
+		'iem_cc'                  => array('type'=>'text', 'is_nullable'=>true),
 		// Draft scratch state (specs/mailbox_compose_maturity.md § Phase 2): a sealed JSON
 		// string {mode, source_id, to, cc} holding what the existing columns can't (To vs Cc
 		// split, reply/forward source + mode) so reopening a draft restores the exact fields.
@@ -949,7 +965,8 @@ class InboundEmailMessage extends SystemBase {
 	public static function sealAndPersistContent(int $message_id, UserEncryptionVault $vault, string $sender,
 			string $recipient, string $subject, string $body_plain, string $body_html,
 			bool $seal_recipient = false, string $bcc = '', ?string $draft_state = null,
-			?string $reuse_dek = null, ?string $raw_headers = null): string {
+			?string $reuse_dek = null, ?string $raw_headers = null,
+			?string $to = null, ?string $cc = null): string {
 		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 
 		// The always-sealed content columns. iem_recipient/iem_bcc are added only
@@ -976,6 +993,15 @@ class InboundEmailMessage extends SystemBase {
 		// so their callers pass nothing and the optional column stays empty.
 		if ($raw_headers !== null && $raw_headers !== '') {
 			$columns['iem_raw_headers'] = $raw_headers;
+		}
+		// The To / Cc lists, every direction (see $sealed_fields). An empty list
+		// stays NULL: the read path treats NULL as "nothing to show", never as
+		// ciphertext, exactly as it does for iem_bcc.
+		if ($to !== null && $to !== '') {
+			$columns['iem_to'] = $to;
+		}
+		if ($cc !== null && $cc !== '') {
+			$columns['iem_cc'] = $cc;
 		}
 
 		// SystemBase::sealColumns() mints or reuses the DEK, seals each value under

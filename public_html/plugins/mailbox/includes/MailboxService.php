@@ -49,6 +49,9 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.39 - getThread() returns each message's to / cc lists (iem_to /
+ *                 iem_cc, or derived from the retained header block on a row
+ *                 stored before those columns existed)
  * @version 1.38 - the thread list reads its HTML-only previews in one
  *                 subprocess (MailboxHtmlSanitizer::toReadableTextMany), not
  *                 one per row, now that received HTML opens in the parser jail
@@ -1487,7 +1490,7 @@ class MailboxService {
 		$in = implode(',', array_map('intval', $ids));
 		$db = $this->db();
 		$sql = "SELECT iem_inbound_email_message_id, iem_iea_inbound_email_alias_id,
-					iem_sender, iem_recipient, iem_bcc, iem_subject, iem_received_time,
+					iem_sender, iem_recipient, iem_bcc, iem_to, iem_cc, iem_subject, iem_received_time,
 					iem_is_read, iem_is_starred, iem_read_time, iem_dkim_result,
 					iem_spf_result, iem_dmarc_result, iem_auth_source, iem_spam_score,
 					iem_mir_mail_import_run_id, iem_iia_inbound_imap_account_id,
@@ -1497,7 +1500,8 @@ class MailboxService {
 					iem_ai_summary, iem_transport, iem_direct_verified,
 					iem_raw_storage_driver, iem_raw_storage_key,
 					(COALESCE(length(iem_raw_message), 0) > 0) AS iem_has_inline_raw,
-					(COALESCE(length(iem_raw_headers), 0) > 0) AS iem_has_raw_headers
+					(COALESCE(length(iem_raw_headers), 0) > 0) AS iem_has_raw_headers,
+					CASE WHEN iem_to IS NULL AND iem_cc IS NULL THEN iem_raw_headers END AS iem_raw_headers_for_lists
 				FROM iem_inbound_email_messages
 				WHERE iem_inbound_email_message_id IN ($in)
 				ORDER BY iem_received_time ASC, iem_inbound_email_message_id ASC";
@@ -1511,6 +1515,7 @@ class MailboxService {
 		foreach ($rows as $r) {
 			$mid = intval($r['iem_inbound_email_message_id']);
 			$decrypted = $this->decryptThreadRow($r);
+			$lists = $this->addressListsFor($r, $decrypted);
 			$out[] = array(
 				'id'                => intval($r['iem_inbound_email_message_id']),
 				'alias_id'          => $r['iem_iea_inbound_email_alias_id'] !== null
@@ -1521,6 +1526,11 @@ class MailboxService {
 				// separate "Bcc:" line when present. Its own sealed column, so it never
 				// leaks into iem_recipient / a reply-all.
 				'bcc'               => $decrypted['iem_bcc'],
+				// The To and Cc lists as the message carried them, every direction
+				// (iem_to / iem_cc): what the reader shows and Reply All draws
+				// from. '' when the message carried none.
+				'to'                => $lists['to'],
+				'cc'                => $lists['cc'],
 				'subject'           => $decrypted['iem_subject'],
 				'received_time'     => $r['iem_received_time'],
 				'is_read'           => (bool)$this->pgBool($r['iem_is_read']),
@@ -1637,8 +1647,44 @@ class MailboxService {
 	 *
 	 * @return array<string,string> the same column names, decrypted (or unchanged)
 	 */
+	/**
+	 * A message's To / Cc lists for the reader. iem_to / iem_cc when the row has
+	 * them; a row stored before those columns existed answers from its retained
+	 * wire header block instead (parsed in memory, never written back — a page
+	 * view writes nothing), and a row with neither says ''. A locked sealed
+	 * column renders the same placeholder as every other locked content field.
+	 *
+	 * @return array{to:string,cc:string}
+	 */
+	private function addressListsFor(array $row, array $decrypted): array {
+		$lists = array('to' => (string)($decrypted['iem_to'] ?? ''), 'cc' => (string)($decrypted['iem_cc'] ?? ''));
+		if ($lists['to'] !== '' || $lists['cc'] !== '') {
+			return $lists;
+		}
+		$block = $row['iem_raw_headers_for_lists'] ?? null;
+		if (!is_string($block) || $block === '') {
+			return $lists;
+		}
+		try {
+			$block = InboundEmailMessage::decryptSealedFieldStatic('iem_raw_headers', $block, $row);
+		} catch (VaultLockedException $e) {
+			$this->content_locked = true;
+			return array('to' => self::SEALED_PLACEHOLDER, 'cc' => self::SEALED_PLACEHOLDER);
+		} catch (Throwable $e) {
+			return $lists;
+		}
+		return MailAddressList::fromHeaderBlock((string)$block);
+	}
+
 	private function decryptThreadRow(array $row): array {
 		$fields = array('iem_sender', 'iem_recipient', 'iem_bcc', 'iem_subject', 'iem_body_plain', 'iem_body_html', 'iem_ai_summary', 'iem_ai_scan');
+		// iem_to / iem_cc are read by getThread only; a caller that did not select
+		// them (allowSender) gets no key for them rather than a warning.
+		foreach (array('iem_to', 'iem_cc') as $col) {
+			if (array_key_exists($col, $row)) {
+				$fields[] = $col;
+			}
+		}
 		// A Fortress pending-parse row is sealed to the owner and not yet parsed —
 		// its content columns are empty. Recipient stays cleartext metadata; the
 		// content fields render the same placeholder as a locked sealed row.

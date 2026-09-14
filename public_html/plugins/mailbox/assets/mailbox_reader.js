@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.62
+ * No framework. @version 2.63
  *
  * The conversation list updates in place after mutations
  * (specs/implemented/mailbox_reader_list_persistence.md): actions that take rows out of
@@ -1982,7 +1982,11 @@
 			left.appendChild(el('div', 'mbx-message-meta mbx-direct-line',
 				'\u2726 Delivered directly from ' + senderName(m.sender) + ' — verified, no third party'));
 		}
-		left.appendChild(el('div', 'mbx-message-meta', 'to ' + (m.recipient || '')));
+		// To / Cc as the message carried them (iem_to / iem_cc). A row stored
+		// before those existed and without a retained header block falls back
+		// to the one routing address it has.
+		left.appendChild(addressLine('to', m.to || m.recipient || ''));
+		if (m.cc) left.appendChild(addressLine('Cc:', m.cc));
 		// Bcc line: only your own Sent copy carries it (its own sealed column).
 		if (outbound && m.bcc) left.appendChild(el('div', 'mbx-message-meta', 'Bcc: ' + m.bcc));
 		if (!outbound) {
@@ -3315,10 +3319,47 @@
 		return (m ? m[1] : s).trim();
 	}
 
+	// Split a stored address list into its entries. A comma or semicolon
+	// separates entries only OUTSIDE double quotes and angle brackets: the
+	// server stores display names quoted ("Ford, Tom" <tford@example.com>), so
+	// the comma inside a name is text, not a separator.
+	function splitEntries(s) {
+		if (!s) return [];
+		var out = [], buf = '', inQuote = false, inAngle = false;
+		for (var i = 0; i < s.length; i++) {
+			var c = s[i];
+			if (inQuote) {
+				if (c === '\\' && i + 1 < s.length) { buf += c + s[++i]; continue; }
+				if (c === '"') inQuote = false;
+				buf += c;
+				continue;
+			}
+			if (c === '"') { inQuote = true; buf += c; continue; }
+			if (c === '<') inAngle = true;
+			if (c === '>') inAngle = false;
+			if ((c === ',' || c === ';') && !inAngle) { out.push(buf); buf = ''; continue; }
+			buf += c;
+		}
+		out.push(buf);
+		return out.map(function (e) { return e.trim(); }).filter(Boolean);
+	}
+
 	// Split a stored recipient string into individual addresses.
 	function splitAddrs(s) {
-		if (!s) return [];
-		return s.split(/[,;]+/).map(extractEmail).filter(Boolean);
+		return splitEntries(s).map(extractEmail).filter(Boolean);
+	}
+
+	// One "to" / "Cc" meta line: each entry in its own span so a name that
+	// contains a comma still reads as one person.
+	function addressLine(label, list) {
+		var line = el('div', 'mbx-message-meta mbx-address-line', label + ' ');
+		splitEntries(list).forEach(function (entry, i) {
+			if (i > 0) line.appendChild(document.createTextNode(', '));
+			var span = el('span', 'mbx-address', senderFull(entry));
+			span.title = extractEmail(entry);
+			line.appendChild(span);
+		});
+		return line;
 	}
 
 	// The current mailbox's own address (to drop from Reply-All), by alias id.
@@ -3387,9 +3428,18 @@
 		} else {
 			to = sender;
 			if (mode === 'reply_all') {
-				cc = splitAddrs(source.recipient).filter(function (a) {
+				// Everyone the message went to (To + Cc), minus this mailbox and
+				// the sender, who is already in To. A row with neither list
+				// stored has only its routing address to offer.
+				var seen = {};
+				var everyone = (source.to || source.cc)
+					? splitAddrs(source.to).concat(splitAddrs(source.cc))
+					: splitAddrs(source.recipient);
+				cc = everyone.filter(function (a) {
 					var la = a.toLowerCase();
-					return la !== own && la !== sender.toLowerCase();
+					if (la === own || la === sender.toLowerCase() || seen[la]) return false;
+					seen[la] = true;
+					return true;
 				}).join(', ');
 			}
 		}

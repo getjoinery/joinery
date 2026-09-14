@@ -1508,6 +1508,20 @@ recipient list is real content (who you emailed; stored untruncated — the colu
 mail (no vault) is unaffected: `iem_content_sealed` stays false and every column holds
 plaintext, exactly as before this package.
 
+**Who else it went to.** Every row also carries the message's **To and Cc lists**
+in `iem_to` / `iem_cc`, sealed on every direction (a received message's other
+recipients are as much the owner's content as the people they wrote to). Each
+ingest path fills them from what it has — the parsed headers on the SMTP push and
+relay paths, `$msg['headers']` on the IMAP-extracted path, the header part on
+Joinery Direct, the typed lists on a composed row — through one parser,
+`MailAddressList`, so the stored shape is the same whichever way the message
+arrived: `"Ford, Tom" <tford@example.com>, "Beltran, Luis" <lubeltra@example.com>`
+(names always quoted, addresses always in angle brackets, entries joined by
+`, `; a reader that respects double quotes can split on commas without splitting
+a name). An empty list is NULL. A row stored before the columns existed answers
+from its retained `iem_raw_headers` at read time (`MailboxService::addressListsFor`,
+parsed in memory, never written back); a row with neither answers `''`.
+
 **Reading.** `InboundEmailMessage::$sealed_fields` + `decryptSealedField()` /
 `decryptSealedFieldStatic()` are the Sealed Vault's generic model read hook: any
 `$msg->get('iem_body_plain')` on a loaded model decrypts automatically when the owner's
@@ -3017,7 +3031,11 @@ see "New message" below for what differs.
 
 - **Compose UI.** A single `FormWriter` form is rendered once in the reader
   (hidden) and the reader's JS shows it, populates To/Cc/Subject and the quoted
-  context, and submits it by `fetch` so the page never reloads. The form is
+  context, and submits it by `fetch` so the page never reloads. **Reply All**
+  puts the sender in To and everyone from the message's `to` + `cc` lists in Cc,
+  minus the mailbox's own address and the sender; a row with neither list
+  stored offers only its routing address. The open message shows a `to` line
+  and, when the message carried one, a `Cc:` line, each entry in its own span. The form is
   rendered with `csrf => false` (FormWriter's single-use, 2-hour token would
   break a second compose in a long-lived reader); the endpoint validates the
   reader's persistent `mailbox_reader_csrf` token instead, as the other reader
