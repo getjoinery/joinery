@@ -374,6 +374,19 @@ pub fn run_pass(
         };
         let id = EntityId::folder(env.store.next_provisional_id()?);
         let mut entry = blank(id, &placement);
+        // The record knows its directory from the moment it is minted from
+        // one. Left to `record_directory_identities` -- which reads agreed
+        // paths only, on a later scan -- a folder the user renamed between
+        // its create and that scan never learned its directory: the agreed
+        // path held nothing, the record read as missing, and a namesake
+        // arriving from the server adopted the directory with the folder's
+        // own files inside it (the reset's WP3 finding C4, clean3 74821).
+        // The create's landing keeps this (`agree` passes no fingerprint).
+        entry.synced_fingerprint = dir_identity
+            .get(dir)
+            .copied()
+            .filter(|id| *id != 0)
+            .map(jd_vfs::Fingerprint::of_directory);
         entry.is_encrypted = parent_is_encrypted(env, placement.parent)?;
         // A folder made inside a vault this device cannot open waits for a
         // key, exactly as a file made there does (below). Pushed instead, it
