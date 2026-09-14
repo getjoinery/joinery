@@ -396,7 +396,42 @@ review is in the file header before the code.
    validated and normalised beside `primitives` and stored in
    `mgn_agent_recipes`; the Host card opens with the list and mode.
 6. **WP3: the case and the incident record**, in the same release as 5 or
-   the next, so the burn-in's cases have somewhere to land.
+   the next, so the burn-in's cases have somewhere to land. **Built
+   2026-09-14, agent 1.28.0, awaiting review, the release, and the
+   burn-in read.** Shape as built: the case is the ledger's escalation
+   given a body and a delivery — no second id, no second open/closed
+   state (`recipes/case.go`). The body is composed once when the
+   escalation opens (mode, the attempts that spent the budget with time,
+   word, outcome and bounded detail, a fresh `host_report` through the
+   recipe's own `Env.Run`, the vocabulary, the recipe list), every field
+   capped before it leaves (32 KiB per case, 64 KiB for the field). The
+   claim's `cases` is a JSON object keyed by source (`recipe:fail2ban`;
+   the classifier's source is left open) carrying, per source, the most
+   recent case open or closed as a summary on every claim and the body
+   until a claim carrying it succeeds; a closed summary rides until the
+   next case replaces it, so no delivery record lives on disk and a close
+   is never lost. The node closes; nothing in the claim response is read.
+   One open case per recipe is the loop's property (a note by id, never a
+   second escalation) and is pinned on both sides. The rendered copy
+   `{site}/cache/recipes/<recipe>.case.json` is written whole and never
+   read, with its delivery (`local` or `management node`). Plane:
+   `IncidentRecord` (`inc_incident_records`, node-scoped, unique on node
+   + source + node-minted id; tenancy column not here), intake in
+   `AgentChannelEndpoint::intake_cases` (field caps, closed key sets,
+   RFC 3339 times only, host report through `sanitise_host_report`; new
+   id stored, known id appended, close recorded, closed never reopens,
+   source must be a reported recipe or a known source, one open per
+   source — a higher id closes the older with a "close not heard" note,
+   a lower id is refused — at most 8 open per node and 4 per claim), the
+   Cases card on the overview tab (open first, then closed; human note
+   and mark-read as POST actions; every field escaped, nothing a link),
+   two plugin-bootstrap notices (`FleetAttentionNotice`: a failed unit in
+   the latest host report, an open unread case), and on the site itself
+   the core `RecipeCaseNotice` ("as reported by the agent's ledger") and
+   the hourly `RecipeCaseMail` task (one plain-text mail per recipe per
+   day, no link, log in the `recipe_case_mail_log` setting, and only for
+   a case delivered locally — a paired node's case is on the plane's card
+   and is never mailed from the node).
 7. **Arming**, its own release, after the burn-in ledger from dev,
    jeremytunnell and docker-prod is read and written up.
 

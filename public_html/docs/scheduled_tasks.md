@@ -667,6 +667,7 @@ rehearsal (level 3) is the Backups page's own button, a person's choice.
 | `plugins/mailbox/tasks/MailboxRelayReconcile.php` | Example ordered-phase task |
 | `plugins/server_manager/tasks/FleetBackupRun.php` | Fleet backup dispatch (manager profile), the shelf check and `verify_backup` dispatch |
 | `tasks/BackupVerify.php` | A site opening and reading its own newest backup on its interval |
+| `tasks/RecipeCaseMail.php` | One plain-text superadmin mail per recipe per day while the agent's rendered case under `cache/recipes/` is open and delivered locally — never for a case a management node has (hourly, activated on install) |
 | `migrations/migration_scheduled_tasks_init.php` | Setup migration |
 
 ### Ordered-phase tasks

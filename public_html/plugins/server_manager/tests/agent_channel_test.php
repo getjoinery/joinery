@@ -29,6 +29,8 @@
  *
  * Run: php plugins/server_manager/tests/agent_channel_test.php
  *
+ * @version 1.6 - the claim's closed field set gains cases (an object keyed by source); a list, and a
+ *                field that would close a case from the plane's side, are refused
  * @version 1.5 - a join with no node record is approved by making the record from the request
  *                (AgentChannelEndpoint::adoptJoin), and a join from this machine's own address is the plane
  *                joining itself: named for the site, carrying the site URL, host and web root
@@ -366,9 +368,16 @@ check(AgentChannelEndpoint::validation_error($bad, $claim_spec) !== null,
 $bad = $claim; $bad['recipes'] = str_repeat('a', AgentChannelEndpoint::MAX_VOCABULARY_BYTES + 1);
 check(stripos((string)AgentChannelEndpoint::validation_error($bad, $claim_spec), 'limit') !== false,
 	'The recipe list is capped like the vocabulary');
+$with_case = $claim; $with_case['cases'] = ['recipe:fail2ban' => ['id' => 1, 'source' => 'recipe:fail2ban', 'recipe' => 'fail2ban', 'status' => 'open']];
+check(AgentChannelEndpoint::validation_error($with_case, $claim_spec) === null,
+	'A claim carrying the cases object is accepted (its entries are judged by intake_cases; see agent_case_intake_test)',
+	(string)AgentChannelEndpoint::validation_error($with_case, $claim_spec));
 $bad = $claim; $bad['cases'] = [['recipe' => 'fail2ban']];
+check(AgentChannelEndpoint::validation_error($bad, $claim_spec) !== null,
+	'The cases field is an object keyed by source; a list is refused');
+$bad = $claim; $bad['close_case'] = 4;
 check(stripos((string)AgentChannelEndpoint::validation_error($bad, $claim_spec), 'undeclared') !== false,
-	'A field this release does not declare (the case rides slice 6) is refused as undeclared');
+	'Nothing in a claim closes a case from the plane\'s side: such a field is undeclared');
 $bad = $claim; $bad['hold'] = 'fail2ban';
 check(stripos((string)AgentChannelEndpoint::validation_error($bad, $claim_spec), 'undeclared') !== false,
 	'Nothing in a claim names, holds, starts or arms a recipe: such a field is undeclared');

@@ -67,6 +67,12 @@
       "helptext": "The public half of the recovery keypair whose private half you keep in your password manager. Every backup this site makes seals a copy of its encryption key to this value, so that one private key opens every backup forever. Set it through the Backup recovery panel, which generates the keypair, takes the public half, and then has you open a challenge to prove the private half works. That proof is the whole point: a mistyped key would seal happily while producing archives nobody can ever open. Encrypted backups refuse to run until it is proven."
     },
     {
+      "name": "recipe_case_mail_log",
+      "default": "",
+      "managed": true,
+      "helptext": "JSON, recipe name to the unix time the superadmins were last mailed about that recipe's open case. Written by tasks/RecipeCaseMail.php, which sends at most one plain-text mail per recipe per day while the agent's rendered case (cache/recipes/<recipe>.case.json) says the case is open."
+    },
+    {
       "name": "backup_recovery_public_key_proven_fpr",
       "default": "",
       "managed": true,

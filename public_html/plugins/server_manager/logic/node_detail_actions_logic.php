@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.28 - case_note and case_read: a human writes a note on one of the node's cases and marks it
+ *                 read; neither closes it, because the node's own check is the truth about the fault
  * @version 1.27 - host_converge action: run fail2ban housekeeping on the machine now, through the
  *                host runner (operate primitive); the job's transcript is the record and a
  *                host_report follows it so the Host card shows the machine after the run.
@@ -118,6 +120,8 @@ class NodeDetailActions {
 		'reject_join'              => 'api_keys',
 		'unpair_agent'             => 'api_keys',
 		'clear_api_credential'     => 'api_keys',
+		'case_note'                => 'overview',
+		'case_read'                => 'overview',
 		'save_node'                => 'overview',
 		'delete_node'              => 'overview',
 		'decommission_node'        => 'overview',
@@ -138,7 +142,7 @@ class NodeDetailActions {
 			return null; // unknown action — let the shell render the page normally
 		}
 
-		// CSRF once, before any handler runs (covers all 18 actions).
+		// CSRF once, before any handler runs (covers every action in $error_tab).
 		if (!SmAdminCsrf::valid()) {
 			self::fail($session, $page_regex, 'Invalid request token. Please try again.');
 			return $base_url;
@@ -530,6 +534,32 @@ class NodeDetailActions {
 				return $base_url . '&tab=overview';
 			}
 
+			case 'case_note':
+			case 'case_read': {
+				// A human's mark on one of this node's cases. The case must be
+				// this node's: the id is posted, the node is the page's, and a
+				// case of another node is refused rather than written to.
+				$case = self::load_case($node, (int)($_POST['inc_id'] ?? 0));
+				if ($case === null) {
+					self::fail($session, $page_regex, 'That case is not one of this node\'s.');
+					return $base_url . '&tab=overview';
+				}
+				if ($action === 'case_note') {
+					// Bounded like everything else on the row; stored as text
+					// and escaped on render.
+					$case->set('inc_human_note', AgentChannelEndpoint::case_text((string)($_POST['case_note'] ?? ''), 4000));
+					$message = 'Note saved on case #' . (int)$case->get('inc_node_case_id') . '.';
+				} else {
+					$case->set('inc_read_time', gmdate('Y-m-d H:i:s'));
+					$case->set('inc_read_by', $uid);
+					$message = 'Case #' . (int)$case->get('inc_node_case_id') . ' marked read. It stays open until the node\'s check passes.';
+				}
+				$case->save();
+				$session->save_message(new DisplayMessage($message, 'Saved', $page_regex,
+					DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+				return $base_url . '&tab=overview';
+			}
+
 			case 'save_api_credential': {
 				$pub = trim($_POST['mgn_api_public_key'] ?? '');
 				$sec = trim($_POST['mgn_api_secret_key'] ?? '');
@@ -838,6 +868,22 @@ class NodeDetailActions {
 			$message, 'Error', $page_regex,
 			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 		));
+	}
+
+	/** One of this node's cases by row id, or null when it is not this node's. */
+	private static function load_case($node, int $inc_id): ?IncidentRecord {
+		if ($inc_id <= 0) {
+			return null;
+		}
+		try {
+			$case = new IncidentRecord($inc_id, TRUE);
+		} catch (Throwable $e) {
+			return null;
+		}
+		if (!$case->key || (int)$case->get('inc_mgn_node_id') !== (int)$node->key || $case->get('inc_delete_time')) {
+			return null;
+		}
+		return $case;
 	}
 
 	private static function jobUrl($job): string {
