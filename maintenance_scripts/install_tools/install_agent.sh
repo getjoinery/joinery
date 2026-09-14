@@ -3,6 +3,10 @@
 # install_agent.sh - install or converge the joinery-agent on this machine from
 # the shipped agent_dist artifact, or stop it where it is switched off.
 #
+# Version: 2.10 - The job marker's second line is read as a label, not a number: a plane job
+#           writes its id there and a recipe attempt (agent 1.27.0, recipes/loop.go) writes
+#           "recipe <name>", and both deferral messages name whichever it is. Digits-only
+#           reading turned "recipe fail2ban" into "job #2".
 # Version: 2.9 - The keepalive's descriptor-closing launcher runs under bash, not sh.
 #           dash parses `exec 10>&-` as "run the program named 10 with stdout closed",
 #           so ANY inherited descriptor numbered 10 or above made the launcher exit 127
@@ -416,12 +420,17 @@ ensure_supervision() {
 # killed mid-job leaves one pointing at a process that is gone; that reads as
 # stale, is removed, and this script converges normally. There is no timeout to
 # tune and nothing an operator has to remember to clean up.
-AGENT_JOB_ID=""
+# AGENT_JOB_LABEL is what the marker's second line says the agent is doing: a
+# job id ("18336") for a plane job, "recipe fail2ban" for a recipe attempt.
+# Read as a label, reduced to letters, digits, space, underscore and hyphen —
+# it goes into two log lines and nowhere else. The pid on line one is the only
+# field that gates anything.
+AGENT_JOB_LABEL=""
 agent_job_in_progress() {
     [ -f "$JOB_MARKER_FILE" ] || return 1
 
     JOB_PID="$(sed -n '1p' "$JOB_MARKER_FILE" 2>/dev/null | tr -dc '0-9')"
-    AGENT_JOB_ID="$(sed -n '2p' "$JOB_MARKER_FILE" 2>/dev/null | tr -dc '0-9')"
+    AGENT_JOB_LABEL="$(sed -n '2p' "$JOB_MARKER_FILE" 2>/dev/null | tr -dc 'A-Za-z0-9 _-' | cut -c1-64)"
 
     # No readable pid, a pid that no longer exists, or a pid that has been
     # recycled by some other program: in every case the marker is debris.
@@ -433,7 +442,7 @@ agent_job_in_progress() {
 
     say "clearing a stale job marker (no joinery-agent running as pid ${JOB_PID:-?})"
     rm -f "$JOB_MARKER_FILE"
-    AGENT_JOB_ID=""
+    AGENT_JOB_LABEL=""
     return 1
 }
 
@@ -632,7 +641,7 @@ if agent_job_in_progress; then
 fi
 
 if [ "$DEFER_TO_AGENT" = "1" ]; then
-    say "agent job #${AGENT_JOB_ID:-?} is running - not touching the agent binary; the agent's own signed self-update will take it"
+    say "the agent is busy (${AGENT_JOB_LABEL:-marker unreadable}) - not touching the agent binary; the agent's own signed self-update will take it"
 else
     converge_binary || true
 fi
@@ -667,7 +676,7 @@ ensure_supervision
 # operator reading an upgrade transcript needs to see that the new agent is
 # staged and pending, not that there was nothing to do.
 if [ "$DEFER_TO_AGENT" = "1" ]; then
-    say "new agent artifact staged in ${DIST_DIR}, restart deferred to agent - v$(installed_version) keeps running job #${AGENT_JOB_ID:-?} and will self-update within a minute of finishing it"
+    say "new agent artifact staged in ${DIST_DIR}, restart deferred to agent - v$(installed_version) keeps running (${AGENT_JOB_LABEL:-marker unreadable}) and will self-update within a minute of finishing it"
     exit 0
 fi
 

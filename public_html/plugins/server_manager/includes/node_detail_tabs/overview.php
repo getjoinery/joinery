@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.13 - the Host card opens with the node's recipe list and each recipe's mode (report-only
+ *                 or armed), as the agent reported it at its last poll, so a person can see from the
+ *                 node page that a node is checking on its own clock and whether it acts
  * @version 1.12 - Run Host Housekeeping in the Actions dropdown, beside Run Plugin Installers, for a
  *                 node whose agent ships host_converge: fail2ban housekeeping now, as root, through
  *                 the host runner
@@ -609,6 +612,24 @@
 	$host_report_time = trim((string)$node->get('mgn_last_host_report_time'));
 	if (is_array($host_report) || JobCommandBuilder::has_agent_channel($node)) {
 		$page->begin_box(['title' => 'Host']);
+
+		// The recipes the agent runs on its own clock, and their mode, as it
+		// reported them at its last poll. One line: a person reading the node
+		// page can see that a node is report-only. Every name and mode was
+		// re-validated on intake (AgentChannelEndpoint::normalised_recipes)
+		// and is escaped again here.
+		$recipes = AgentChannelEndpoint::recipes_of($node);
+		if (count($recipes) === 0) {
+			echo '<div class="mb-2 text-muted">Recipes: none reported. An agent from 1.27.0 checks fail2ban every ten minutes and reports here.</div>';
+		} else {
+			$parts = [];
+			foreach ($recipes as $name => $mode) {
+				$parts[] = htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . ' (' . htmlspecialchars($mode, ENT_QUOTES, 'UTF-8') . ')';
+			}
+			echo '<div class="mb-2">Recipes: ' . implode(', ', $parts)
+				. ' <small class="text-muted">— checked every ten minutes on the node; report-only records what it would repair and changes nothing.</small></div>';
+		}
+
 		if (!is_array($host_report)) {
 			echo '<p class="text-muted mb-0">This node has not sent a host report yet.';
 			if (JobCommandBuilder::has_primitive($node, 'host_report')) {

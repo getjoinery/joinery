@@ -144,6 +144,66 @@ check(AgentChannelEndpoint::normalised_vocabulary('') === '',
 	'an empty report must stay empty, or the version fallback never runs again');
 
 // ======================================================================
+section('A reported recipe list is normalised before it is believed');
+// ======================================================================
+
+// name:mode entries, the mode from a closed set, the same discipline as the
+// vocabulary: what a node says decides what the node page shows, and a node is
+// the likeliest breach.
+check(AgentChannelEndpoint::normalised_recipes('fail2ban:report-only') === 'fail2ban:report-only',
+	'a well-formed entry is stored as sent');
+check(AgentChannelEndpoint::normalised_recipes('agent_supervision:armed,fail2ban:report-only')
+		=== AgentChannelEndpoint::normalised_recipes('fail2ban:report-only,agent_supervision:armed'),
+	'a re-ordered report is the same list',
+	'ordering must not read as a change, or every poll writes the column again');
+check(AgentChannelEndpoint::normalised_recipes('fail2ban,fail2ban:,fail2ban:on,fail2ban:ARMED,../x:armed,a:armed,fail2ban:report-only')
+		=== 'fail2ban:report-only',
+	'an entry without a mode, with a mode outside the closed set, or with a name that could not be a recipe is dropped',
+	'got: ' . AgentChannelEndpoint::normalised_recipes('fail2ban,fail2ban:,fail2ban:on,fail2ban:ARMED,../x:armed,a:armed,fail2ban:report-only'));
+check(AgentChannelEndpoint::normalised_recipes('fail2ban:armed,fail2ban:report-only') === 'fail2ban:report-only',
+	'a recipe named twice collapses to one entry');
+$flood = [];
+for ($i = 0; $i < AgentChannelEndpoint::MAX_VOCABULARY_NAMES + 50; $i++) {
+	$flood[] = 'recipe_' . $i . ':armed';
+}
+$capped = AgentChannelEndpoint::normalised_recipes(implode(',', $flood));
+check(count(explode(',', $capped)) <= AgentChannelEndpoint::MAX_VOCABULARY_NAMES,
+	'a node cannot stuff the column with an unbounded recipe list',
+	'stored ' . count(explode(',', $capped)) . ' entries');
+check(AgentChannelEndpoint::normalised_recipes('') === '',
+	'no report normalises to no report');
+
+// What the node page reads back: name => mode, from the stored column.
+$with_recipes = artifact_test_node('1.27.0', 'check_status,host_converge,host_report');
+$with_recipes->set('mgn_agent_recipes', 'fail2ban:report-only');
+check(AgentChannelEndpoint::recipes_of($with_recipes) === ['fail2ban' => 'report-only'],
+	'the Host card reads the stored list as name => mode',
+	json_encode(AgentChannelEndpoint::recipes_of($with_recipes)));
+check(AgentChannelEndpoint::recipes_of(artifact_test_node('1.26.1', 'check_status')) === [],
+	'a node whose agent predates recipes reads as none, never as report-only or armed');
+
+// And the column is really there on this plane. The claim handler saves the
+// node row on every poll, so a column the data class declares and the database
+// lacks is HTTP 500 to every node in the fleet until update_database runs —
+// which is the failure this check exists to name (twice on 2026-09-13).
+$saved = artifact_test_node('1.27.0', 'check_status,host_converge,host_report');
+$saved->set('mgn_slug', 'harnesstest-recipes-' . bin2hex(random_bytes(3)));
+$saved->set('mgn_host', '192.0.2.31');
+$saved->set('mgn_ssh_user', 'root');
+$saved->set('mgn_agent_recipes', 'fail2ban:report-only');
+$saved_why = '';
+try {
+	$saved->save();
+	$saved->load();
+	harness_register_row('mgn_managed_nodes', 'mgn_id', $saved->key);
+	$saved_why = (string)$saved->get('mgn_agent_recipes') === 'fail2ban:report-only' ? '' : 'read back ' . json_encode($saved->get('mgn_agent_recipes'));
+} catch (Throwable $e) {
+	$saved_why = get_class($e) . ': ' . $e->getMessage();
+}
+check($saved_why === '', 'mgn_agent_recipes exists on this plane and round-trips a saved node',
+	$saved_why . ' — if the column is missing, run update_database: until it runs, every fleet poll fails with HTTP 500 on it');
+
+// ======================================================================
 section('The artifact request is a closed set, and names no path');
 // ======================================================================
 
