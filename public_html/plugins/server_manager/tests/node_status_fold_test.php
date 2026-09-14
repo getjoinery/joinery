@@ -348,6 +348,91 @@ nsf_call('process_run_plugin_installers', [$job]);
 check($job->get('mjb_error_message') === 'the agent could not reach the node',
 	'an already-failed job keeps the error that failed it');
 
+// ---------------------------------------------------------------------------
+section('host_converge: the single-installer transcript is read the same way');
+
+check(in_array('host_converge', JobResultProcessor::processable_types(), true),
+	'host_converge has a handler, so the dashboard sweep reconciles it');
+
+// What the runner prints in --only mode when the installer ran and succeeded.
+$hc_ok = "core installers: running host_housekeeping.sh\n"
+	. "host housekeeping: fail2ban jails written\n"
+	. "core installers: host_housekeeping.sh: ok\n";
+$job = new NsfFakeJob(['mjb_output' => $hc_ok, 'mjb_status' => 'completed']);
+nsf_call('process_host_converge', [$job]);
+$result = json_decode($job->get('mjb_result'), true);
+check($job->get('mjb_status') === 'completed' && ($result['ran'] ?? null) === true && ($result['failures'] ?? null) === [],
+	'host_housekeeping.sh: ok is green and the result says it ran', var_export($result, true));
+
+// A container: the installer says fail2ban is the host's and does nothing,
+// and the runner still reports it ok. That is a complete answer.
+$hc_container = "core installers: running host_housekeeping.sh\n"
+	. "host housekeeping: no systemd here - fail2ban is the host's, not this container's\n"
+	. "core installers: host_housekeeping.sh: ok\n";
+$job = new NsfFakeJob(['mjb_output' => $hc_container, 'mjb_status' => 'completed']);
+nsf_call('process_host_converge', [$job]);
+check($job->get('mjb_status') === 'completed',
+	'a container node that leaves fail2ban to its host is green: nothing to do is a complete answer');
+
+$hc_failed = "core installers: running host_housekeeping.sh\n"
+	. "core installers: WARNING - host_housekeeping.sh failed\n";
+$job = new NsfFakeJob(['mjb_output' => $hc_failed, 'mjb_status' => 'completed']);
+nsf_call('process_host_converge', [$job]);
+$result = json_decode($job->get('mjb_result'), true);
+check($job->get('mjb_status') === 'failed' && ($result['ran'] ?? null) === false,
+	'an installer that failed turns the job red, whatever the runner exited with');
+check(strpos((string)$job->get('mjb_error_message'), 'host_housekeeping.sh failed') !== false,
+	'the error message carries the runner\'s reason', var_export($job->get('mjb_error_message'), true));
+
+$hc_missing = "core installers: host_housekeeping.sh missing - skipping\n";
+$job = new NsfFakeJob(['mjb_output' => $hc_missing, 'mjb_status' => 'completed']);
+nsf_call('process_host_converge', [$job]);
+check($job->get('mjb_status') === 'failed',
+	'an installer the tree does not carry is red, not a quiet green');
+
+$hc_refused = "installer refused: /var/www/html/site/maintenance_scripts/install_tools/host_housekeeping.sh owned by www-data mode 664\n";
+$job = new NsfFakeJob(['mjb_output' => $hc_refused, 'mjb_status' => 'completed']);
+nsf_call('process_host_converge', [$job]);
+check($job->get('mjb_status') === 'failed'
+	&& strpos((string)$job->get('mjb_error_message'), 'owned by www-data') !== false,
+	'an installer the runner refused as untrusted is red, and the message says why');
+
+$hc_lock = "host installers: another run holds the lock (pid 4242 since 2026-09-14 10:00:00 UTC) - waited 600s, leaving it to that one\n";
+$job = new NsfFakeJob(['mjb_output' => $hc_lock, 'mjb_status' => 'completed']);
+nsf_call('process_host_converge', [$job]);
+check($job->get('mjb_status') === 'failed'
+	&& strpos((string)$job->get('mjb_error_message'), 'pid 4242') !== false,
+	'a run that never got the lock is red and names the holder: the housekeeping did not run');
+
+$hc_mode = "host installers: --only=host_housekeeping.sh is not a core installer (one of: install_agent.sh) - refused\n";
+$job = new NsfFakeJob(['mjb_output' => $hc_mode, 'mjb_status' => 'completed']);
+nsf_call('process_host_converge', [$job]);
+check($job->get('mjb_status') === 'failed',
+	'a runner that refused the mode (an older runner without --only) is red');
+
+$job = new NsfFakeJob(['mjb_output' => "core installers: running host_housekeeping.sh\n", 'mjb_status' => 'completed']);
+nsf_call('process_host_converge', [$job]);
+check($job->get('mjb_status') === 'failed',
+	'a transcript that starts the installer and never reports ok is red: green needs the ok line');
+
+$job = new NsfFakeJob(['mjb_output' => '', 'mjb_status' => 'completed']);
+nsf_call('process_host_converge', [$job]);
+check($job->get('mjb_status') === 'failed',
+	'a run that produced no output at all cannot be reported as a success');
+
+$hc_enveloped = "=== [Step 1/1] Agent primitive: host_converge ===\n"
+	. json_encode(['api_version' => 1, 'data' => ['output' => $hc_ok]]);
+$job = new NsfFakeJob(['mjb_output' => $hc_enveloped, 'mjb_status' => 'completed']);
+nsf_call('process_host_converge', [$job]);
+check($job->get('mjb_status') === 'completed',
+	'the same reading works through the agent envelope, not only on raw text');
+
+$job = new NsfFakeJob(['mjb_output' => $hc_failed, 'mjb_status' => 'failed',
+	'mjb_error_message' => 'the agent could not reach the node']);
+nsf_call('process_host_converge', [$job]);
+check($job->get('mjb_error_message') === 'the agent could not reach the node',
+	'an already-failed job keeps the error that failed it');
+
 section('A manager backup is stamped by its verdict, through the agent envelope');
 
 // The exact shape every node's nightly backup_run now takes: since the fleet

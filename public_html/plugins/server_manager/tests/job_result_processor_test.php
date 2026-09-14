@@ -436,6 +436,64 @@ check(in_array('host_report', JobResultProcessor::processable_types(), true),
 	'host_report is a type this processor knows');
 
 // ---------------------------------------------------------------------------
+section('host_converge: a completed run asks for the machine after it, once');
+
+// A node whose agent offers both words; the run's transcript says the
+// installer ran. process() is the real path here (the sweep and the job page
+// both come through it), so the queued report is a real row.
+$hc_node = jrp_node(array(
+	'mgn_agent_public_key' => base64_encode(str_repeat("\x09", 32)),
+	'mgn_agent_version'    => '1.26.0',
+	'mgn_agent_primitives' => 'check_status,host_report,host_converge',
+));
+function jrp_pending_host_reports($node_id) {
+	$db = DbConnector::get_instance()->get_db_link();
+	$q = $db->prepare("SELECT mjb_id FROM mjb_management_jobs WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'host_report' AND mjb_status = 'pending' AND mjb_delete_time IS NULL ORDER BY mjb_id");
+	$q->execute(array((int)$node_id));
+	return $q->fetchAll(PDO::FETCH_COLUMN);
+}
+check(jrp_pending_host_reports($hc_node->key) === array(), 'nothing is queued for the node before the run');
+
+$hc_ok = "=== [Step 1/1] host_converge ===\n" . json_encode(array('api_version' => '1.0', 'data' => array(
+	'output' => "core installers: running host_housekeeping.sh\ncore installers: host_housekeeping.sh: ok\n", 'output_bytes' => 90))) . "\n[Step 1/1 OK]";
+$hc_job = jrp_job($hc_node, 'host_converge', $hc_ok);
+JobResultProcessor::process($hc_job);
+$hc_job->load();
+check($hc_job->get('mjb_status') === 'completed', 'the run is green');
+$queued = jrp_pending_host_reports($hc_node->key);
+foreach ($queued as $id) { harness_register_row('mjb_management_jobs', 'mjb_id', $id); }
+check(count($queued) === 1, 'one host_report is queued for the node so the Host card shows the machine after the run', var_export($queued, true));
+if ($queued) {
+	$follow = new ManagementJob($queued[0], TRUE);
+	$cmd = $follow->get('mjb_commands');
+	if (is_string($cmd)) { $cmd = json_decode($cmd, true); }
+	check(is_array($cmd) && ($cmd['primitive'] ?? null) === 'host_report',
+		'and it is the host_report primitive, dispatched through createFromBuild', var_export($cmd, true));
+}
+
+// A second run while that report is still pending does not pile another on.
+$hc_job2 = jrp_job($hc_node, 'host_converge', $hc_ok);
+JobResultProcessor::process($hc_job2);
+check(count(jrp_pending_host_reports($hc_node->key)) === 1,
+	'a report already pending is left to answer: a second completed run queues no second report');
+
+// A run that did not complete asks for nothing: the machine is as it was.
+$hc_node2 = jrp_node(array(
+	'mgn_agent_public_key' => base64_encode(str_repeat("\x0a", 32)),
+	'mgn_agent_version'    => '1.26.0',
+	'mgn_agent_primitives' => 'check_status,host_report,host_converge',
+));
+$hc_bad = jrp_job($hc_node2, 'host_converge', "=== [Step 1/1] host_converge ===\n" . json_encode(array('api_version' => '1.0', 'data' => array(
+	'output' => "core installers: WARNING - host_housekeeping.sh failed\n"))));
+JobResultProcessor::process($hc_bad);
+$hc_bad->load();
+check($hc_bad->get('mjb_status') === 'failed', 'a failed installer turns the job red through process() too');
+check(jrp_pending_host_reports($hc_node2->key) === array(),
+	'and a red run queues no report');
+check(in_array('host_converge', JobResultProcessor::processable_types(), true),
+	'host_converge is a type this processor knows');
+
+// ---------------------------------------------------------------------------
 section('Terminal jobs always record a result (the sweep can never re-process forever)');
 
 // The dashboard sweep selects mjb_result IS NULL; a handler path that returns

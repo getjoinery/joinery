@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.12 - Run Host Housekeeping in the Actions dropdown, beside Run Plugin Installers, for a
+ *                 node whose agent ships host_converge: fail2ban housekeeping now, as root, through
+ *                 the host runner
  * @version 1.11 - the Host card: the machine as the host_report observe word last described it
  *                 (expected units and their state, failed units, jails with ban counts, SSH auth
  *                 failures as a count, sshd posture, reboot-required, unattended-upgrades, when it
@@ -53,6 +56,10 @@
 </form>
 <form id="run_plugin_installers_form" method="post" action="<?php echo $base_url; ?>" hidden>
 	<input type="hidden" name="action" value="run_plugin_installers">
+	<?php echo SmAdminCsrf::field(); ?>
+</form>
+<form id="host_converge_form" method="post" action="<?php echo $base_url; ?>" hidden>
+	<input type="hidden" name="action" value="host_converge">
 	<?php echo SmAdminCsrf::field(); ?>
 </form>
 <?php
@@ -186,6 +193,14 @@
 			<li><a class="dropdown-item" href="<?php echo $base_url; ?>&tab=overview&edit=1#connectionSettings">Edit Connection Settings</a></li>
 			<?php if (JobCommandBuilder::has_primitive($node, 'run_plugin_installers')): ?>
 				<li><a class="dropdown-item" href="#" onclick="JoineryModal.confirm('Run every active plugin\'s host installer on this node (root, idempotent)? Needed after activating a plugin that configures system services, e.g. the mail stack.', function(){ document.getElementById('run_plugin_installers_form').submit(); }); return false;">Run Plugin Installers</a></li>
+			<?php endif; ?>
+			<?php
+			// fail2ban housekeeping now, through the host runner: the host_converge
+			// operate word. Idempotent, and what the host timer already runs daily;
+			// the job's transcript says what it did, and a host_report follows so
+			// the Host card shows the machine after the run.
+			if (JobCommandBuilder::has_primitive($node, 'host_converge')): ?>
+				<li><a class="dropdown-item" href="#" onclick="JoineryModal.confirm('Run fail2ban housekeeping on this machine now, as root, through the host runner? Idempotent: it is what the host timer runs daily, and the transcript shows what it did.', function(){ document.getElementById('host_converge_form').submit(); }); return false;">Run Host Housekeeping</a></li>
 			<?php endif; ?>
 			<?php if ($session->get_permission() >= 10 && !$node->get('mgn_agent_public_key')):
 				$overview_pending_joins = class_exists('AgentJoinRequest') ? count(AgentJoinRequest::pending()) : 0; ?>
