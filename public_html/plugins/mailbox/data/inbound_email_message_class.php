@@ -283,6 +283,10 @@ class InboundEmailMessage extends SystemBase {
 		// columns existed (the read path then falls back to iem_raw_headers).
 		'iem_to'                  => array('type'=>'text', 'is_nullable'=>true),
 		'iem_cc'                  => array('type'=>'text', 'is_nullable'=>true),
+		// When the address-list backfill (AddressListBackfill) last tried to
+		// recover a row's To / Cc from its source; a row whose source is gone
+		// costs one attempt a day, not one per drain.
+		'iem_lists_attempt_time'  => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 		// Draft scratch state (specs/mailbox_compose_maturity.md § Phase 2): a sealed JSON
 		// string {mode, source_id, to, cc} holding what the existing columns can't (To vs Cc
 		// split, reply/forward source + mode) so reopening a draft restores the exact fields.
