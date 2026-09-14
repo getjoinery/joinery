@@ -8,6 +8,10 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.61 - host_report: the machine as one bounded object (units, jails, sshd posture, an SSH
+ *                 auth-failure count, disk, memory, reboot-required, unattended-upgrades), the first
+ *                 observe word of specs/agent_tier1_recipes.md. Primitive only, no parameters, refused
+ *                 on a node whose reported vocabulary lacks it
  * @version 1.60 - verify_backup joins the primitive transport: build_verify_backup signs the same link
  *                 set as stage_chain (the signing body is sign_chain_links, shared by both) and adds a
  *                 level of 2 or 3; the node stages the set and proves it recoverable without a restore
@@ -298,6 +302,11 @@ class JobCommandBuilder {
 		// the set and reads it to the end, or rehearses a restore into scratch.
 		// The script it runs ships in the same release as the agent.
 		'verify_backup' => '1.24.0',
+		// The machine as one bounded object: the host_report observe word of
+		// specs/agent_tier1_recipes.md, new in 1.25.0. The node runs a shipped
+		// script it verifies against the manifest first; the plane sends the
+		// name and nothing else.
+		'host_report' => '1.25.0',
 	];
 
 	/**
@@ -1420,6 +1429,41 @@ class JobCommandBuilder {
 
 	public static function build_install_report_primitive($node) {
 		return ['primitive' => 'install_report', 'params' => []];
+	}
+
+	/**
+	 * The machine a node runs on, as one bounded object: failed units, the
+	 * expected units and their state, fail2ban's jails and ban counts, how many
+	 * SSH logins failed in the last day (a COUNT, never who or from where),
+	 * sshd's password and root-login posture, disk, memory, swap, whether a
+	 * reboot is pending, and when unattended-upgrades last ran.
+	 *
+	 * The node runs maintenance_scripts/sysadmin_tools/host_report.sh from its
+	 * own tree, verified against the release manifest, with no argv and no
+	 * stdin. Nothing crosses the wire but the request: no unit, no jail, no
+	 * path, no line count. What comes back is untrusted input from the node —
+	 * JobResultProcessor::process_host_report caps every field on intake, and
+	 * the Host card escapes every field on render.
+	 *
+	 * PRIMITIVE ONLY. There is no build_host_report_ssh and no API route, and
+	 * there never will be: the SSH way to read a machine is a list of commands,
+	 * which is the shape this vocabulary exists to end. A node whose reported
+	 * vocabulary lacks the word is refused here with the fix in the message.
+	 * Its own word rather than a part of check_status (agent_tier1_recipes.md,
+	 * settled question Q2): check_status is the site, this is the machine.
+	 */
+	public static function build_host_report($node) {
+		if (!self::has_primitive($node, 'host_report')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot report its host: its agent "
+				. "does not offer the host_report primitive. Apply an update to the node; "
+				. "the agent that ships with it does.");
+		}
+		return self::build_host_report_primitive($node);
+	}
+
+	public static function build_host_report_primitive($node) {
+		return ['primitive' => 'host_report', 'params' => []];
 	}
 
 	/**

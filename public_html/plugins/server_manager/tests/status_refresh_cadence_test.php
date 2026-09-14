@@ -37,9 +37,9 @@ function srt_node($tag, $suffix, array $fields) {
 	harness_register_row('mgn_managed_nodes', 'mgn_id', $node->key);
 	return $node;
 }
-function srt_jobs($node) {
+function srt_jobs($node, $type = 'check_status') {
 	$n = 0;
-	foreach (new MultiManagementJob(array('node_id' => (int)$node->key, 'job_type' => 'check_status')) as $j) {
+	foreach (new MultiManagementJob(array('node_id' => (int)$node->key, 'job_type' => $type)) as $j) {
 		harness_register_row('mjb_management_jobs', 'mjb_id', $j->key);
 		$n++;
 	}
@@ -68,5 +68,21 @@ section('The window dedupes: a second pass queues nothing while the job is open'
 $queued = $task->refresh_status_facts($nodes, gmdate('Y-m-d H:i:s'));
 check($queued === 0, 'nothing queued on the second pass', "queued=$queued");
 check(srt_jobs($stale) === 1, 'the stale node still has exactly one job');
+check(srt_jobs($stale, 'host_report') === 0, 'a node whose vocabulary lacks host_report is never asked for one');
+
+section('host_report rides the same cadence, on its own stamp');
+$both_stale = srt_node($tag, 'bothstale', array('mgn_agent_public_key' => 'harnesstest-key', 'mgn_agent_primitives' => 'check_status,host_report',
+	'mgn_last_status_check' => $stale_at, 'mgn_last_host_report_time' => $stale_at));
+$host_fresh = srt_node($tag, 'hostfresh', array('mgn_agent_public_key' => 'harnesstest-key', 'mgn_agent_primitives' => 'check_status,host_report',
+	'mgn_last_status_check' => $stale_at, 'mgn_last_host_report_time' => gmdate('Y-m-d H:i:s')));
+$host_never = srt_node($tag, 'hostnever', array('mgn_agent_public_key' => 'harnesstest-key', 'mgn_agent_primitives' => 'check_status,host_report',
+	'mgn_last_status_check' => gmdate('Y-m-d H:i:s')));
+$queued = $task->refresh_status_facts(array($both_stale, $host_fresh, $host_never), gmdate('Y-m-d H:i:s'));
+check($queued === 4, 'four jobs: both for the node stale on both stamps, one status for the host-fresh node, one host for the status-fresh node', "queued=$queued");
+check(srt_jobs($both_stale) === 1 && srt_jobs($both_stale, 'host_report') === 1, 'the node stale on both gets one of each');
+check(srt_jobs($host_fresh) === 1 && srt_jobs($host_fresh, 'host_report') === 0, 'a fresh host report is not asked for again');
+check(srt_jobs($host_never) === 0 && srt_jobs($host_never, 'host_report') === 1, 'a node that never reported its host gets one, and its fresh status none');
+$queued = $task->refresh_status_facts(array($both_stale, $host_fresh, $host_never), gmdate('Y-m-d H:i:s'));
+check($queued === 0, 'the window dedupes host reports too', "queued=$queued");
 
 harness_finish();

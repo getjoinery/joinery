@@ -322,11 +322,22 @@ review is in the file header before the code.
    that outlives the wait is named. Platform release. **Built 2026-09-13,
    runner 2.16, reviewed; awaiting commit.**
 2. **Agent: process-group kill on script timeout.** Every script word
-   inherits it. Ships with slice 3.
+   inherits it. Ships with slice 3. **Built 2026-09-14, reviewed.**
 3. **Agent: `host_report` as a plain observe word.** No loop. The plane
    dispatches it as a job; the Host card renders the result. Proves the
    word, its bounds and the card with nothing acting, and reads the fleet's
-   real host state before any recipe does.
+   real host state before any recipe does. **Built 2026-09-14, agent
+   1.25.0, reviewed; live proof after the publish.** Shape as built: the
+   agent's gate allows only `script.go` to start a process, and the report
+   needs systemctl, fail2ban-client, `sshd -T` and journalctl, so
+   `host_report` is a script word like `run_plugin_installers`: the whole
+   of what runs is `maintenance_scripts/sysadmin_tools/host_report.sh`,
+   shipped in the tree and in the Docker host's support bundle, verified
+   against the manifest, no argv, no stdin. The script prints one JSON
+   object with a compiled set of keys; the plane rebuilds it on intake
+   (`sanitise_host_report`) and stores it in `mgn_last_host_report`, its
+   own column, never the status fold. This is the shape every later observe
+   word that needs a process takes.
 4. **Agent: `host_converge` as a plane-dispatched operate word.** No recipe.
    Run from the node page against dev, then jeremytunnell; read the
    transcript. Proves the `--only` path, the manifest check, the lock and

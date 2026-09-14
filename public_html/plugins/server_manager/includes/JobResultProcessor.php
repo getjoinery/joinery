@@ -5,6 +5,10 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.28 - process_host_report stores a host_report job's object in mgn_last_host_report with
+ *                 mgn_last_host_report_time, after sanitise_host_report caps it on intake: every key
+ *                 present, every list and string bounded, anything unreadable the string unknown.
+ *                 Its own column, not the status fold: check_status is the site, this is the machine
  * @version 1.27 - the status fold adopts a verify the node reports in its own backup summary
  *                 (adopt_reported_verify) when it is newer than the stamp this plane holds
  * @version 1.26 - process_verify_backup reads a verify_backup job's VERIFY_* lines and stamps the
@@ -1879,6 +1883,157 @@ HTML;
 	}
 
 	/**
+	 * A host_report job: the machine as its host_report.sh described it.
+	 *
+	 * The script prints one JSON object; the agent carries it back as the
+	 * script primitive's text inside its envelope. It is untrusted input from
+	 * the node, so nothing it says is stored as it arrived: sanitise_host_report
+	 * rebuilds the object from the keys the plane knows, capping every list and
+	 * every string, and anything missing or malformed becomes the string
+	 * unknown for that key. The result lands in its own column, never in the
+	 * status fold (agent_tier1_recipes.md Q2).
+	 *
+	 * An answer that is not an object at all — an older script, a refusal, a
+	 * node that printed something else — records that it was asked and changes
+	 * no stored fact: a silent node is not a node with an empty host.
+	 */
+	private static function process_host_report($job) {
+		$output = $job->get('mjb_output') ?: '';
+		$data = self::extract_api_envelope_data($output);
+		$text = (is_array($data) && isset($data['output'])) ? (string)$data['output'] : '';
+		$decoded = ($text !== '') ? json_decode(trim($text), true) : null;
+
+		if (!is_array($decoded) || !isset($decoded['generated_at'])) {
+			$job->set('mjb_result', json_encode(['measured' => false]));
+			$job->save();
+			return;
+		}
+
+		$report = self::sanitise_host_report($decoded);
+		$read_at = gmdate('Y-m-d H:i:s');
+
+		$node_id = $job->get('mjb_mgn_node_id');
+		if ($node_id) {
+			try {
+				$node = new ManagedNode($node_id, TRUE);
+				$node->set('mgn_last_host_report', json_encode($report));
+				$node->set('mgn_last_host_report_time', $read_at);
+				$node->save();
+			} catch (Exception $e) {
+				// The node record is gone or unreadable; the job result below
+				// still records what the node said.
+			}
+		}
+
+		$job->set('mjb_result', json_encode(array_merge(['measured' => true, 'read_at' => $read_at], $report)));
+		$job->save();
+	}
+
+	/** The unit states host_report.sh may report; anything else is unknown. */
+	const HOST_REPORT_UNIT_STATES = ['active', 'inactive', 'failed', 'absent', 'unknown'];
+	/** The units host_report.sh always names, in the order the card shows them. */
+	const HOST_REPORT_EXPECTED_UNITS = ['fail2ban', 'apache2', 'php-fpm', 'cron', 'postgresql'];
+	/** Caps mirroring the script's own (MAX_LIST, MAX_NAME): the plane's copy of the bound. */
+	const HOST_REPORT_MAX_LIST = 20;
+	const HOST_REPORT_MAX_NAME = 64;
+
+	/**
+	 * Rebuild a host report from what the node sent, keeping only what the
+	 * plane knows and bounding all of it. Pure; the fold test drives it.
+	 *
+	 * The shape it returns is the shape the Host card renders and the only
+	 * shape mgn_last_host_report ever holds: every key present, lists capped at
+	 * HOST_REPORT_MAX_LIST, names reduced to [A-Za-z0-9._@:-] and capped at
+	 * HOST_REPORT_MAX_NAME, numbers non-negative integers, and the string
+	 * unknown wherever the node said nothing usable. A hostile node can lie
+	 * about its host; it cannot put anything but these keys and these kinds of
+	 * value on the plane.
+	 */
+	public static function sanitise_host_report($in) {
+		$in = is_array($in) ? $in : [];
+
+		$units = 'unknown';
+		if (isset($in['failed_units']) && is_array($in['failed_units'])) {
+			$units = [];
+			foreach (array_slice(array_values($in['failed_units']), 0, self::HOST_REPORT_MAX_LIST) as $u) {
+				$name = self::host_report_name($u);
+				if ($name !== '') { $units[] = $name; }
+			}
+		}
+
+		$expected = [];
+		foreach (self::HOST_REPORT_EXPECTED_UNITS as $unit) {
+			$state = (isset($in['expected_units']) && is_array($in['expected_units']) && isset($in['expected_units'][$unit]))
+				? $in['expected_units'][$unit] : 'unknown';
+			$expected[$unit] = (is_string($state) && in_array($state, self::HOST_REPORT_UNIT_STATES, true)) ? $state : 'unknown';
+		}
+
+		$jails = 'unknown';
+		if (isset($in['fail2ban_jails']) && is_array($in['fail2ban_jails'])) {
+			$jails = [];
+			foreach (array_slice(array_values($in['fail2ban_jails']), 0, self::HOST_REPORT_MAX_LIST) as $j) {
+				if (!is_array($j)) { continue; }
+				$name = self::host_report_name($j['name'] ?? '');
+				if ($name === '') { continue; }
+				$jails[] = ['name' => $name, 'banned' => self::host_report_count($j['banned'] ?? null)];
+			}
+		}
+
+		$sshd = ['password_authentication' => 'unknown', 'permit_root_login' => 'unknown'];
+		if (isset($in['sshd']) && is_array($in['sshd'])) {
+			foreach (array_keys($sshd) as $k) {
+				$v = isset($in['sshd'][$k]) && is_string($in['sshd'][$k]) ? preg_replace('/[^a-z-]/', '', strtolower($in['sshd'][$k])) : '';
+				$sshd[$k] = ($v !== '') ? substr($v, 0, 32) : 'unknown';
+			}
+		}
+
+		$disk = self::host_report_gauge($in['disk'] ?? null);
+		$path = (isset($in['disk']['path']) && is_string($in['disk']['path']))
+			? substr(preg_replace('#[^A-Za-z0-9._/-]#', '', $in['disk']['path']), 0, 200) : '';
+		$disk = ['path' => ($path !== '' ? $path : 'unknown')] + $disk;
+
+		$reboot = $in['reboot_required'] ?? null;
+		$reboot = is_bool($reboot) ? $reboot : 'unknown';
+
+		return [
+			'failed_units'                 => $units,
+			'expected_units'               => $expected,
+			'fail2ban_jails'               => $jails,
+			'ssh_auth_failures_24h'        => self::host_report_count($in['ssh_auth_failures_24h'] ?? null),
+			'sshd'                         => $sshd,
+			'disk'                         => $disk,
+			'memory'                       => self::host_report_gauge($in['memory'] ?? null),
+			'swap'                         => self::host_report_gauge($in['swap'] ?? null),
+			'reboot_required'              => $reboot,
+			'unattended_upgrades_last_run' => self::host_report_count($in['unattended_upgrades_last_run'] ?? null),
+			'generated_at'                 => self::host_report_count($in['generated_at'] ?? null),
+		];
+	}
+
+	/** A unit or jail name as the script bounds it: safe characters, capped. */
+	private static function host_report_name($v) {
+		if (!is_string($v)) { return ''; }
+		return substr(preg_replace('/[^A-Za-z0-9._@:-]/', '', $v), 0, self::HOST_REPORT_MAX_NAME);
+	}
+
+	/** A non-negative integer, or unknown. A JSON number arrives as int or float; a digit string counts too. */
+	private static function host_report_count($v) {
+		if (is_int($v) && $v >= 0) { return $v; }
+		if (is_float($v) && $v >= 0 && $v == floor($v) && $v < PHP_INT_MAX) { return (int)$v; }
+		if (is_string($v) && preg_match('/^[0-9]{1,18}$/', $v)) { return (int)$v; }
+		return 'unknown';
+	}
+
+	/** {used_bytes, total_bytes}, each a count or unknown. */
+	private static function host_report_gauge($v) {
+		$v = is_array($v) ? $v : [];
+		return [
+			'used_bytes'  => self::host_report_count($v['used_bytes'] ?? null),
+			'total_bytes' => self::host_report_count($v['total_bytes'] ?? null),
+		];
+	}
+
+	/**
 	 * Process upload_backup result.
 	 *
 	 * The primitive invokes a shipped script, so what comes back is text rather
@@ -2123,9 +2278,10 @@ HTML;
 	}
 
 	/**
-	 * Format bytes into human-readable size.
+	 * Format bytes into human-readable size. Public so the Host card shows a
+	 * report's byte figures the way the backup listing shows a file's.
 	 */
-	private static function format_size($bytes) {
+	public static function format_size($bytes) {
 		if ($bytes >= 1073741824) return round($bytes / 1073741824, 1) . 'G';
 		if ($bytes >= 1048576) return round($bytes / 1048576, 1) . 'M';
 		if ($bytes >= 1024) return round($bytes / 1024, 1) . 'K';

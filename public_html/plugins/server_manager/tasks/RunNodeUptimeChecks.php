@@ -20,6 +20,10 @@
  * expiry is near, and when www reaches the origin uncovered. See
  * check_cert_expiry().
  *
+ * @version 2.4 - queues a host_report beside the check_status, on the same cadence, for every
+ *                enabled node whose agent offers the word and whose last report is older than
+ *                STATUS_REFRESH_SECONDS: the Host card stays fresh without anyone asking
+ *                (specs/agent_tier1_recipes.md Q2)
  * @version 2.3 - a third alert reason, uncovered: the origin answers TLS with a certificate for
  *                other names (a shared fallback vhost, the install-time placeholder). Strict
  *                would take the site down, so it is said, on the same cadence; nothing is stored
@@ -166,7 +170,7 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 			$message .= sprintf(' %d stale agent claim(s) returned to the queue.', $requeued);
 		}
 		if ($refreshed > 0) {
-			$message .= sprintf(' %d status refresh(es) queued.', $refreshed);
+			$message .= sprintf(' %d status/host refresh(es) queued.', $refreshed);
 		}
 		if (!empty($errors)) {
 			$message .= ' Notes: ' . implode(' | ', array_slice($errors, 0, 5));
@@ -187,6 +191,12 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	 * different things. A queued or running job, or one completed inside the
 	 * window, is cover, so one stale node yields one job per window.
 	 *
+	 * The host report rides the same cadence: check_status is the site and
+	 * host_report is the machine (agent_tier1_recipes.md Q2), each with its own
+	 * stamp, so a node whose agent offers host_report gets one queued when
+	 * mgn_last_host_report_time is older than the same window. Two words, two
+	 * jobs, one loop; the count returned is jobs of both kinds.
+	 *
 	 * @param iterable $nodes   live ManagedNode rows
 	 * @param string   $now_utc 'Y-m-d H:i:s'
 	 * @return int jobs queued
@@ -196,23 +206,29 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 		$queued = 0;
 		$floor = strtotime($now_utc . ' UTC') - self::STATUS_REFRESH_SECONDS;
+		$words = [
+			'check_status' => 'mgn_last_status_check',
+			'host_report'  => 'mgn_last_host_report_time',
+		];
 		foreach ($nodes as $node) {
 			if (!$node->get('mgn_enabled') || $node->get('mgn_delete_time')) {
 				continue;
 			}
-			if (!JobCommandBuilder::has_primitive($node, 'check_status')) {
-				continue;
+			foreach ($words as $word => $stamp_column) {
+				if (!JobCommandBuilder::has_primitive($node, $word)) {
+					continue;
+				}
+				$last = trim((string)$node->get($stamp_column));
+				if ($last !== '' && strtotime($last . ' UTC') >= $floor) {
+					continue;
+				}
+				if (ManagementJob::activeOrRecentForNode($node->key, $word, self::STATUS_REFRESH_SECONDS)) {
+					continue;
+				}
+				$builder = 'build_' . $word . '_primitive';
+				ManagementJob::createFromBuild($node->key, $word, JobCommandBuilder::$builder($node), null, null);
+				$queued++;
 			}
-			$last = trim((string)$node->get('mgn_last_status_check'));
-			if ($last !== '' && strtotime($last . ' UTC') >= $floor) {
-				continue;
-			}
-			if (ManagementJob::activeOrRecentForNode($node->key, 'check_status', self::STATUS_REFRESH_SECONDS)) {
-				continue;
-			}
-			ManagementJob::createFromBuild($node->key, 'check_status',
-				JobCommandBuilder::build_check_status_primitive($node), null, null);
-			$queued++;
 		}
 		return $queued;
 	}

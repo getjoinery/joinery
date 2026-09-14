@@ -2,6 +2,10 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.16 - mgn_last_host_report / mgn_last_host_report_time: the machine as the host_report
+ *                 observe word last described it (units, jails, sshd posture, an SSH auth-failure
+ *                 count, disk, memory, reboot-required, unattended-upgrades), its own column and not
+ *                 folded into mgn_last_status_data: the two shapes stay apart (agent_tier1_recipes Q2)
  * @version 1.15 - mgn_backup_verify_time / _level / _outcome / _message: when this node last proved
  *                 one of its backups restorable, stamped from the verify_backup job result and the
  *                 status report; mgn_backup_shelf_problem: what the fleet pass's shelf check found
@@ -44,7 +48,7 @@ class ManagedNode extends SystemBase {
 	public static $tablename = 'mgn_managed_nodes';
 	public static $pkey_column = 'mgn_id';
 
-	public static $json_vars = array('mgn_last_status_data', 'mgn_backup_policy');
+	public static $json_vars = array('mgn_last_status_data', 'mgn_backup_policy', 'mgn_last_host_report');
 
 	protected static $foreign_key_actions = [
 		'mgn_mgh_host_id' => ['action' => 'null'],
@@ -67,6 +71,13 @@ class ManagedNode extends SystemBase {
 		'mgn_joinery_version'     => array('type'=>'varchar(20)'),
 		'mgn_last_status_check'   => array('type'=>'timestamp(6)'),
 		'mgn_last_status_data'    => array('type'=>'jsonb'),
+		// The machine, as the host_report observe word last described it, and
+		// when. Untrusted input from the node: JobResultProcessor caps every
+		// field on intake and the Host card escapes every field on render.
+		// Deliberately NOT part of mgn_last_status_data — check_status is the
+		// site, host_report is the machine, and the shapes stay apart.
+		'mgn_last_host_report'      => array('type'=>'jsonb'),
+		'mgn_last_host_report_time' => array('type'=>'timestamp(6)'),
 		'mgn_api_public_key'      => array('type'=>'varchar(255)'),
 		'mgn_api_secret_key'      => array('type'=>'varchar(255)'),
 		'mgn_tls_insecure'        => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),

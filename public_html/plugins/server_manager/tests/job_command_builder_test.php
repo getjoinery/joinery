@@ -1541,4 +1541,53 @@ if (!$verify_target) {
 	JobCommandBuilder::set_shelf_listing_for_tests(null);
 }
 
+// ---------------------------------------------------------------------------
+section('host_report: primitive only, no parameters, refused without the word');
+
+{
+	$hr_node = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x02", 32)),
+		'mgn_agent_version'    => '1.25.0',
+		'mgn_agent_primitives' => 'check_status,host_report',
+	));
+	$built = JobCommandBuilder::build_host_report($hr_node);
+	check($built === array('primitive' => 'host_report', 'params' => array()),
+		'a node whose vocabulary has host_report gets the bare primitive envelope: the name and nothing else',
+		var_export($built, true));
+	check(JobCommandBuilder::transports_for('host_report') === array('primitive'),
+		'host_report has exactly one transport, the primitive: no SSH route, no API route',
+		var_export(JobCommandBuilder::transports_for('host_report'), true));
+	check(!method_exists('JobCommandBuilder', 'build_host_report_ssh') && !method_exists('JobCommandBuilder', 'build_host_report_api'),
+		'and no ssh or api builder exists to fall back to');
+
+	$without = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x03", 32)),
+		'mgn_agent_version'    => '1.25.0',
+		'mgn_agent_primitives' => 'check_status,install_report',
+	));
+	check(!JobCommandBuilder::has_primitive($without, 'host_report'),
+		'a node whose reported vocabulary lacks host_report does not have it, whatever its version says');
+	$threw = '';
+	try { JobCommandBuilder::build_host_report($without); } catch (Exception $e) { $threw = $e->getMessage(); }
+	check(strpos($threw, 'host_report') !== false,
+		'building host_report for that node is refused, naming the word', $threw);
+
+	$silent_old = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x04", 32)),
+		'mgn_agent_version'    => '1.10.0',
+	));
+	check(!JobCommandBuilder::has_primitive($silent_old, 'host_report'),
+		'an agent too old to report a vocabulary is held to the 1.25.0 floor and refused');
+	check(JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION['host_report'] === '1.25.0',
+		'the floor is the release that first ships the word');
+
+	$no_agent = jcb_node();
+	$threw = '';
+	try { JobCommandBuilder::build_host_report($no_agent); } catch (Exception $e) { $threw = $e->getMessage(); }
+	check($threw !== '', 'a node with no agent at all is refused: there is no SSH route for it');
+
+	check(in_array('host_report', ManagementJob::filterTypes(), true),
+		'host_report is a filterable job type');
+}
+
 harness_finish();

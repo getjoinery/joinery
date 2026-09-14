@@ -2,6 +2,7 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.19 - host_report is a filterable job type (the default claim budget covers its minute)
  * @version 1.18 - verify_backup has a claim budget sized to the agent's declared three hours
  * @version 1.17 - createJob() refuses a step list for anything but a bootstrap job. The agent's local
  *                 queue is gone, so InstallJobExecutor is the only step executor left and a step
@@ -606,7 +607,7 @@ class ManagementJob extends SystemBase {
 		// backup_project) are not offered: historical rows keep their type strings
 		// and still render, but a filter is for kinds of job that can still happen.
 		$types = [
-			'check_status',
+			'check_status', 'host_report',
 			'restore_database', 'list_backups',
 			'restore_project', 'restore_chain', 'apply_update', 'decommission_node',
 			'backup_run',
