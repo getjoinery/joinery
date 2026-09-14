@@ -218,7 +218,7 @@ seeder both read. A declaration states a limit only to deliberately pin one.
 
 **Leave `prompt` empty.** An empty prompt means the job class's `defaultPrompt()` applies, which is the normal case and the one that keeps improving: an upgrade can better that wording for every install, including ones seeded years earlier. Seeding is create-only, so a prompt written into `recipes.json` is a one-time snapshot that a later, better prompt never reaches.
 
-**The declared schedule is a prefill.** A seeded recipe arrives on Manually only (`rcp_enabled` false); the declared `schedule_frequency` / `schedule_day_of_week` / `schedule_time` are what the Runs control offers when the operator gives it one. A declaration may name `arrival` like any other frequency. The panel's own copy of a declaration is the exception — `instantiateForUser()` creates it enabled on `arrival`, because turning a mail card on means "handle my mail as it comes".
+**The declared schedule is a prefill.** A seeded recipe arrives on Manually only (`rcp_enabled` false); the declared `schedule_frequency` / `schedule_day_of_week` / `schedule_time` are what the Runs control offers when the operator gives it one. A declaration may name `arrival` like any other frequency. The mail page's AI panel is the other way on: turning a card on there creates the member's own copy enabled on `arrival` (`instantiateForUser()`), or, for the seeded row itself, flips it to `arrival` in place — turning a mail card on means "handle my mail as it comes".
 
 **`requires_plugin`** holds a declaration back until the named plugin is active, so a template for a job that isn't installed doesn't arrive as clutter. It lands at the sync following that plugin's activation.
 
@@ -527,11 +527,15 @@ the authorization, there is no permission gate):
   never clobber an address the other surface just wrote). Turning ON a
   tainted-capable recipe before its owner has accepted tainted writes answers
   `{confirm_required, confirm_text}` — the `TaintGate::explain()` wording — and
-  the panel renders a `<dialog>` and retries with `accept_tainted_writes`. A
-  toggle against a Manually-only recipe is refused: the manual/automatic bit
-  (`rcp_enabled`) is dashboard-only, and the panel's grayed "Set to run
-  manually only — give it a schedule on the recipes dashboard" control is a
-  rendering of that server truth.
+  the panel renders a `<dialog>` and retries with `accept_tainted_writes`.
+  Turning ON is the whole enablement: a recipe set to Manually only is put on
+  the arrival schedule (`rcp_enabled` true, frequency `arrival`) in the same
+  write as the binding, so a seeded recipe runs as mail arrives after one
+  toggle; a recipe already on a clock keeps its clock. A card reads **On**
+  only when the open mailbox is bound AND the recipe runs automatically — a
+  bound-but-manual recipe reads Off, with "Set to run manually only" on it,
+  and Turn on is what starts it. Turning OFF only unbinds; the schedule is
+  left alone because other mailboxes may still be bound.
 - **`joinery_ai/ai_status`** (read) — both halves of the panel header in one
   call: the caller's recipe runs in flight (`AiPanelService::jobs()`, each line
   saying whether it is running, queued for a worker, or waiting for the owner's

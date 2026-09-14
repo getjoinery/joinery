@@ -45,7 +45,7 @@
  * the person as the blue circle — one is progress, the other is a request, and
  * they must not read as the same kind of number.
  *
- * Vanilla JS, jy-ui styling, no framework. @version 2.6.0
+ * Vanilla JS, jy-ui styling, no framework. @version 2.7.0
  */
 (function () {
 	'use strict';
@@ -439,8 +439,11 @@
 
 			var head = el('div', 'aip-recipe-head');
 			head.appendChild(el('span', 'aip-recipe-name', card.name));
-			head.appendChild(el('span', 'aip-recipe-status' + (card.covered ? ' is-on' : ''),
-				card.covered ? 'On' : 'Off'));
+			// On = bound to this mailbox AND running automatically. A recipe
+			// bound here but set to Manually only shows Off; Turn on puts it on
+			// the arrival schedule.
+			head.appendChild(el('span', 'aip-recipe-status' + (card.on ? ' is-on' : ''),
+				card.on ? 'On' : 'Off'));
 			row.appendChild(head);
 
 			if (card.job_label) {
@@ -449,6 +452,7 @@
 
 			var meta = el('p', 'aip-recipe-meta');
 			var bits = [];
+			if (card.covered && card.paused) bits.push('Set to run manually only');
 			if (card.last_run) bits.push(card.last_run);
 			if (card.other_count > 0) {
 				bits.push('also on ' + card.other_count + ' other mailbox'
@@ -464,26 +468,18 @@
 			// ever blocked, so the link stays available where it still does
 			// something and the reason takes its place where it does not.
 			if (blocked && !card.covered) {
-				var blockedLine = el('p', 'aip-recipe-blocked', card.blocked_text || '');
-				if (card.paused && card.dashboard_url) {
-					blockedLine.textContent = '';
-					var blockedLink = el('a', null,
-						card.blocked_text || 'Set to run manually only — give it a schedule on the recipes dashboard.');
-					blockedLink.href = card.dashboard_url;
-					blockedLine.appendChild(blockedLink);
-				}
-				row.appendChild(blockedLine);
+				row.appendChild(el('p', 'aip-recipe-blocked', card.blocked_text || ''));
 				return row;
 			}
 
 			var actions = el('p', 'aip-recipe-actions');
-			var edit = el('button', 'aip-link', card.covered ? 'Turn off' : 'Turn on');
+			var edit = el('button', 'aip-link', card.on ? 'Turn off' : 'Turn on');
 			edit.type = 'button';
 			edit.addEventListener('click', function () {
 				// Capture the context at click time: if the rail moves while the
 				// confirm dialog is open, the change still applies to the mailbox
 				// it was clicked on.
-				var payload = contextBody({ enabled: !card.covered });
+				var payload = contextBody({ enabled: !card.on });
 				if (card.recipe_id) payload.recipe_id = card.recipe_id;
 				else payload.template_key = card.template_key;
 				sendToggle(payload, edit);
