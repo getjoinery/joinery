@@ -2,6 +2,8 @@
 /**
  * ManagedHost - A server that hosts one or more auto-provisioned Joinery sites.
  *
+ * @version 1.3 - placement_for_addresses(): the live placement record keyed by any of a set of
+ *                addresses, so a join over one family finds the record keyed by the other
  * @version 1.2 - link_host_node(): agent-join approval names a machine-posture node as its
  *                host's own agent (mgh_mgn_host_node_id), so host-scope routing has a target
  * @version 1.1 - ensure_for_node(): the placement record is minted (or linked) the moment a
@@ -101,6 +103,30 @@ class ManagedHost extends SystemBase {
 	 * port, addressing its host) calls this first. Matching is by the host
 	 * address string once, here, at write time — never again at read time.
 	 */
+	/**
+	 * The live placement record whose host is any one of these addresses, or
+	 * null. A dual-stack machine is one record: whichever address the join
+	 * travelled over, the record keyed by its other address is the same box.
+	 */
+	public static function placement_for_addresses(array $addresses) {
+		$wanted = [];
+		foreach ($addresses as $a) {
+			$a = trim((string)$a);
+			if ($a !== '') {
+				$wanted[$a] = true;
+			}
+		}
+		if (count($wanted) === 0) {
+			return null;
+		}
+		foreach (new MultiManagedHost(['deleted' => false], ['mgh_id' => 'ASC']) as $host) {
+			if (isset($wanted[trim((string)$host->get('mgh_host'))])) {
+				return $host;
+			}
+		}
+		return null;
+	}
+
 	public static function ensure_for_node($node) {
 		$addr = trim((string)$node->get('mgn_host'));
 		if ($addr === '') {

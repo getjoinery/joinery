@@ -10,6 +10,14 @@ carrying the panel (0.8.357) and the bundle, upgrade the victim fleet, then
 acceptance 1–2 (pairing alarms nothing; a live scratch decommission with the
 SSH key proven unused). Acceptance 3–6 are pinned by tests and green.**
 
+> **Install rule (owner, 2026-09-15):** the host agent is installed by
+> `install.sh docker` and at no other normal moment — `install_agent.sh
+> --siteless` has exactly one caller, pinned. A host built before that step
+> (docker-prod, April 2026) is caught up by running `install.sh docker
+> --management-node=URL --node-name=NAME` once from a current release tree
+> copied onto it; the same code path a new host takes, not a second
+> procedure. The live acceptance run uses that path.
+>
 > **Added acceptance (2026-09-13, `agent_recipes_and_vocabulary.md`):**
 > machine posture on the Docker host means **both** actors are on the host,
 > not only the agent: the host timer with a host-scoped installer set

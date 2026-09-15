@@ -564,6 +564,72 @@ $made_nodes[] = $container->key;
 check(ManagedHost::link_host_node($container) === null,
 	'A node with a web root is a site, not a host — it links nothing');
 
+section('A dual-stack host joining over one family lands on the placement keyed by the other');
+
+// docker-prod, 2026-09-15: the join came from the host's IPv6 address, the
+// placement record (and every container node) is keyed by its IPv4, and the
+// approval minted a second placement for the same machine and linked the host
+// node to that. The machine now says every address it has, and approval
+// matches the record by any of them.
+$ds_v4 = '198.51.100.' . random_int(10, 250);
+$ds_v6 = '2001:db8:' . dechex(random_int(1, 65535)) . '::' . dechex(random_int(1, 65535));
+$ds_rec = new ManagedHost(NULL);
+$ds_rec->set('mgh_slug', 'agtest-ds-' . substr(bin2hex(random_bytes(3)), 0, 6));
+$ds_rec->set('mgh_name', 'agtest dual-stack host');
+$ds_rec->set('mgh_host', $ds_v4);
+$ds_rec->set('mgh_provisioning_enabled', false);
+$ds_rec->prepare();
+$ds_rec->save();
+$made_hosts[] = $ds_rec->key;
+
+check(AgentChannelEndpoint::reported_addresses(['addresses' => [$ds_v6, $ds_v4, 'not-an-address', 42, $ds_v4, '']]) === $ds_v6 . ',' . $ds_v4,
+	'intake keeps valid, distinct addresses in the order given and drops the rest',
+	AgentChannelEndpoint::reported_addresses(['addresses' => [$ds_v6, $ds_v4, 'not-an-address', 42, $ds_v4, '']]));
+check(AgentChannelEndpoint::reported_addresses(['addresses' => 'x']) === '' && AgentChannelEndpoint::reported_addresses([]) === '',
+	'a missing or malformed list is no addresses');
+$flood_addrs = [];
+for ($i = 1; $i <= AgentJoinRequest::MAX_ADDRESSES + 10; $i++) { $flood_addrs[] = '203.0.113.' . $i; }
+check(count(explode(',', AgentChannelEndpoint::reported_addresses(['addresses' => $flood_addrs]))) === AgentJoinRequest::MAX_ADDRESSES,
+	'and the list is capped');
+
+$ds_pair = sodium_crypto_sign_keypair();
+$ds_pub  = sodium_crypto_sign_publickey($ds_pair);
+$ds_jr = new AgentJoinRequest();
+$ds_jr->set('ajr_claimed_name', 'agtest-dualstack');
+$ds_jr->set('ajr_public_key', base64_encode($ds_pub));
+$ds_jr->set('ajr_fingerprint', AgentJoinRequest::fingerprint($ds_pub));
+$ds_jr->set('ajr_source_ip', $ds_v6);
+$ds_jr->set('ajr_addresses', $ds_v4 . ',' . $ds_v6);
+$ds_jr->set('ajr_status', AgentJoinRequest::STATUS_PENDING);
+$ds_jr->save();
+$made_join_requests[] = $ds_jr->key;
+check($ds_jr->addresses() === [$ds_v6, $ds_v4], 'the request answers source first, then what the machine reported, once each', implode(' ', $ds_jr->addresses()));
+
+$hosts_before_ds = array_map('intval', $db->query('SELECT mgh_id FROM mgh_managed_hosts WHERE mgh_delete_time IS NULL')->fetchAll(PDO::FETCH_COLUMN));
+$ds_adopted = AgentChannelEndpoint::adoptJoin($ds_jr);
+$ds_node = $ds_adopted['node'];
+$made_nodes[] = $ds_node->key;
+$hosts_after_ds = array_map('intval', $db->query('SELECT mgh_id FROM mgh_managed_hosts WHERE mgh_delete_time IS NULL')->fetchAll(PDO::FETCH_COLUMN));
+foreach (array_diff($hosts_after_ds, $hosts_before_ds) as $stray) { $made_hosts[] = $stray; }
+check($ds_node->get('mgn_host') === $ds_v4, 'the node is keyed by the placement record\'s address, not the address the join came from', $ds_node->get('mgn_host'));
+check((int)$ds_node->get('mgn_mgh_host_id') === (int)$ds_rec->key, 'and placed on that record');
+check(count($hosts_after_ds) === count($hosts_before_ds), 'no second placement record was minted for the same machine');
+$ds_rec->load();
+check((int)$ds_rec->get('mgh_mgn_host_node_id') === (int)$ds_node->key, 'which is now linked to the host node');
+
+// No placement anywhere: the node is keyed by its first public IPv4, the
+// convention placement records use, and the record is minted under that.
+$ds2_v4 = '198.51.100.' . random_int(10, 250);
+$ds2_v6 = '2001:db8:' . dechex(random_int(1, 65535)) . '::' . dechex(random_int(1, 65535));
+$ds2_jr = new AgentJoinRequest();
+$ds2_jr->set('ajr_source_ip', $ds2_v6);
+$ds2_jr->set('ajr_addresses', '10.0.0.5,' . $ds2_v4 . ',' . $ds2_v6);
+check(AgentChannelEndpoint::node_address_for_join($ds2_jr, $ds2_v6) === $ds2_v4, 'with no placement, the first PUBLIC IPv4 wins over a private one and over the IPv6 source', AgentChannelEndpoint::node_address_for_join($ds2_jr, $ds2_v6));
+$ds3_jr = new AgentJoinRequest();
+$ds3_jr->set('ajr_source_ip', $ds2_v6);
+$ds3_jr->set('ajr_addresses', '10.0.0.5,' . $ds2_v6);
+check(AgentChannelEndpoint::node_address_for_join($ds3_jr, $ds2_v6) === $ds2_v6, 'and with no public IPv4 at all, the source address');
+
 section('A join with no node record is approved by making the record from the request');
 
 $adopt_pair = sodium_crypto_sign_keypair();
