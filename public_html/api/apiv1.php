@@ -2,7 +2,14 @@
 /**
  * API v1 Endpoint
  *
- * @version 2.17
+ * @version 2.18
+ * @changelog 2.18 - Rate limits: a signed-in browser session is metered per USER
+ *   (api_session_rate_limit_*), after authentication, instead of sharing the
+ *   per-address bucket with keyless and key traffic — a person's own reader,
+ *   the vault beacon and its background drains no longer spend the budget that
+ *   guards against strangers, and several people behind one address are not
+ *   one caller. Every 429 now says what was counted, the limit, and how long
+ *   until the next request is accepted (Retry-After + data.retry_after_seconds).
  * @changelog 2.17 - Agent channel (/api/v1/agent/*): the server manager's node
  *   agent claims primitive jobs and posts results over an outbound HTTPS poll,
  *   authenticated by an Ed25519 keypair the node generated and kept. Its own
@@ -79,6 +86,38 @@ function api_error($message, $error_type = 'TransactionError', $status_code = 40
 		'data' => $data ? $data : new stdClass()
 	)) . PHP_EOL;
 	exit;
+}
+
+/**
+ * Refuse a request that is over a rate limit, and say so usefully: who was
+ * counted, how many in what window, the limit, and when the next request will
+ * be accepted. Sets Retry-After and carries the same numbers in data so a
+ * client can wait the right amount instead of guessing.
+ *
+ * @param array  $state  RequestLogger::rate_limit_state() result
+ * @param string $who    'This address', 'Your account', 'This agent', ...
+ * @param int    $limit  requests allowed per window
+ * @param int    $window window length in seconds
+ * @param string $what   what was counted, e.g. 'API requests', 'failed sign-in attempts'
+ */
+function api_rate_limited(array $state, $who, $limit, $window, $what = 'API requests') {
+	$span = function ($seconds) {
+		$seconds = max(1, intval($seconds));
+		if ($seconds < 90) { return $seconds . ' second' . ($seconds === 1 ? '' : 's'); }
+		if ($seconds < 5400) { $m = (int)ceil($seconds / 60); return $m . ' minute' . ($m === 1 ? '' : 's'); }
+		$h = round($seconds / 3600, 1); return ($h == (int)$h ? (int)$h : $h) . ' hour' . ($h == 1 ? '' : 's');
+	};
+	$retry = intval($state['retry_after'] ?? 60);
+	header('Retry-After: ' . $retry);
+	api_error($who . ' has made ' . number_format(intval($state['count'] ?? $limit)) . ' ' . $what
+		. ' in the last ' . $span($window) . '; the limit is ' . number_format($limit)
+		. '. Nothing is wrong — try again in ' . $span($retry) . '.',
+		'RateLimitError', 429, array(
+			'limit' => intval($limit),
+			'window_seconds' => intval($window),
+			'count' => intval($state['count'] ?? 0),
+			'retry_after_seconds' => $retry,
+		));
 }
 
 /**
@@ -301,8 +340,9 @@ if ((string)$settings->get_setting('api_require_https', false, true) !== '0') {
 if (strtolower(explode('/', trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/'))[2] ?? '') === 'agent') {
 	$agent_limit  = (int)($settings->get_setting('api_agent_rate_limit_requests') ?: 6000);
 	$agent_window = (int)($settings->get_setting('api_agent_rate_limit_window') ?: 3600);
-	if (!RequestLogger::check_rate_limit('api_agent', $agent_limit, $agent_window)) {
-		api_error('Agent channel rate limit exceeded.', 'RateLimitError', 429);
+	$agent_state = RequestLogger::rate_limit_state('api_agent', $agent_limit, $agent_window);
+	if (!$agent_state['allowed']) {
+		api_rate_limited($agent_state, 'This address', $agent_limit, $agent_window, 'agent channel requests');
 	}
 	if (!class_exists('AgentChannelEndpoint')) {
 		// The server_manager plugin is absent or inactive, so this route does
@@ -328,20 +368,6 @@ if (strtolower(explode('/', trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH
 	// dispatchPreAuth() always exits.
 }
 
-// Rate limiting: general API requests (configurable, default 1000/hour per IP)
-$api_rate_limit = (int)($settings->get_setting('api_rate_limit_requests') ?: 1000);
-$api_rate_window = (int)($settings->get_setting('api_rate_limit_window') ?: 3600);
-if (!RequestLogger::check_rate_limit('api', $api_rate_limit, $api_rate_window)) {
-	api_error('Rate limit exceeded. Please try again later.', 'RateLimitError', 429);
-}
-
-// Rate limiting: failed auth attempts (configurable, default 10 failures per 15 min per IP)
-$api_auth_rate_limit = (int)($settings->get_setting('api_auth_rate_limit_requests') ?: 10);
-$api_auth_rate_window = (int)($settings->get_setting('api_auth_rate_limit_window') ?: 900);
-if (!RequestLogger::check_rate_limit('api_auth', $api_auth_rate_limit, $api_auth_rate_window, false)) {
-	api_error('Too many failed authentication attempts. Please try again later.', 'RateLimitError', 429);
-}
-
 // HTTP header names are case-insensitive (RFC 7230). Clients such as Go's
 // net/http canonicalize `public_key` → `Public_key` on HTTP/1.1, where case is
 // preserved on the wire. Additionally, CGI/FastCGI transports collapse `-`
@@ -352,6 +378,36 @@ if (!RequestLogger::check_rate_limit('api_auth', $api_auth_rate_limit, $api_auth
 $headers = array();
 foreach (getallheaders() as $header_name => $header_value) {
 	$headers[str_replace('-', '_', strtolower($header_name))] = $header_value;
+}
+
+// Rate limiting: general API requests (configurable, default 1000/hour per IP).
+//
+// A request shaped like the browser-session credential — no key headers, a
+// session cookie, an X-Joinery-Csrf header — is NOT metered here. It is
+// metered per user once it has authenticated (below), because the address
+// bucket exists to bound strangers and machines, and a person reading their
+// own mail is neither: the reader, the vault beacon and its background drains
+// all come from one browser, and several people behind one address are
+// several callers. A browser-shaped request that fails to authenticate is
+// bounded by the failed-auth limiter like any other bad credential.
+$api_rate_limit = (int)($settings->get_setting('api_rate_limit_requests') ?: 1000);
+$api_rate_window = (int)($settings->get_setting('api_rate_limit_window') ?: 3600);
+$browser_shaped = empty($headers['public_key']) && empty($headers['secret_key'])
+	&& !empty($_COOKIE[session_name()]) && isset($headers['x_joinery_csrf']);
+if (!$browser_shaped) {
+	$api_state = RequestLogger::rate_limit_state('api', $api_rate_limit, $api_rate_window);
+	if (!$api_state['allowed']) {
+		api_rate_limited($api_state, 'This address', $api_rate_limit, $api_rate_window);
+	}
+}
+
+// Rate limiting: failed auth attempts (configurable, default 10 failures per 15 min per IP)
+$api_auth_rate_limit = (int)($settings->get_setting('api_auth_rate_limit_requests') ?: 10);
+$api_auth_rate_window = (int)($settings->get_setting('api_auth_rate_limit_window') ?: 900);
+$api_auth_state = RequestLogger::rate_limit_state('api_auth', $api_auth_rate_limit, $api_auth_rate_window, false);
+if (!$api_auth_state['allowed']) {
+	api_rate_limited($api_auth_state, 'This address', $api_auth_rate_limit, $api_auth_rate_window,
+		'failed sign-in attempts');
 }
 
 // Client version handshake: apps send client_app + client_version on every
@@ -429,6 +485,27 @@ $api_entry = $principal['api_entry'];
 $api_user  = $principal['api_user'];
 $auth_data = $principal['auth_data'];
 
+// Rate limiting for the browser-session credential, now that it has a name:
+// a signed-in user is metered on their own requests (api_session_rate_limit_*,
+// default 5000/hour), whoever else shares their address; the anonymous
+// browser principal, which has no name, is metered by address like any other
+// keyless caller. Key traffic was metered before authentication.
+if ($api_entry === null) {
+	if ($api_user !== null) {
+		$session_limit  = (int)($settings->get_setting('api_session_rate_limit_requests') ?: 5000);
+		$session_window = (int)($settings->get_setting('api_session_rate_limit_window') ?: 3600);
+		$session_state = RequestLogger::rate_limit_state('api', $session_limit, $session_window, null, intval($api_user->key));
+		if (!$session_state['allowed']) {
+			api_rate_limited($session_state, 'Your account', $session_limit, $session_window);
+		}
+	} elseif ($browser_shaped) {
+		$api_state = RequestLogger::rate_limit_state('api', $api_rate_limit, $api_rate_window);
+		if (!$api_state['allowed']) {
+			api_rate_limited($api_state, 'This address', $api_rate_limit, $api_rate_window);
+		}
+	}
+}
+
 // The anonymous browser-session principal (valid CSRF proof, no logged-in
 // user — api_user === null) may only reach action dispatch, where
 // ApiAuth::authorize() enforces the per-action allow_guest contract. Every
@@ -479,8 +556,9 @@ if (strtolower($url_segments[2] ?? '') === 'app') {
 if (strtolower($url_segments[2] ?? '') === 'drive_upload') {
 	$up_limit  = (int)($settings->get_setting('api_upload_rate_limit_requests') ?: 10000);
 	$up_window = (int)($settings->get_setting('api_upload_rate_limit_window') ?: 3600);
-	if (!RequestLogger::check_rate_limit('api_upload', $up_limit, $up_window)) {
-		api_error('Upload rate limit exceeded. Please slow down.', 'RateLimitError', 429);
+	$up_state = RequestLogger::rate_limit_state('api_upload', $up_limit, $up_window);
+	if (!$up_state['allowed']) {
+		api_rate_limited($up_state, 'This address', $up_limit, $up_window, 'upload requests');
 	}
 	require_once(PathHelper::getIncludePath('includes/DriveUploadTransport.php'));
 	DriveUploadTransport::dispatch($url_segments, $auth_data, $request_method, $api_entry);

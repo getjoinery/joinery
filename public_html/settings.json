@@ -855,6 +855,28 @@
       "helptext": "3600 is one hour."
     },
     {
+      "name": "api_session_rate_limit_requests",
+      "default": "5000",
+      "group": "api_rate_limits",
+      "label": "Max API requests per window from a signed-in browser session",
+      "type": "number",
+      "validation": {
+        "min": 1
+      },
+      "helptext": "Counted per user, not per IP: a person's own pages, the mail reader, the vault beacon and its background catch-up work all count here, and several people behind one address are several callers. Keyless and key-based traffic is counted by the per-IP limit above."
+    },
+    {
+      "name": "api_session_rate_limit_window",
+      "default": "3600",
+      "group": "api_rate_limits",
+      "label": "Browser-session window (seconds)",
+      "type": "number",
+      "validation": {
+        "min": 1
+      },
+      "helptext": "3600 is one hour."
+    },
+    {
       "name": "max_entity_photos",
       "default": "{\"user\": 6, \"mailing_list\": 10}",
       "group": "files",

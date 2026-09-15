@@ -107,7 +107,7 @@ section('The check has a writer');
 
 $api  = file_get_contents(PathHelper::getIncludePath('api/apiv1.php'));
 $chan = file_get_contents(PathHelper::getIncludePath('plugins/server_manager/includes/AgentChannelEndpoint.php'));
-check(strpos($api, "RequestLogger::check_rate_limit('api_agent'") !== false, 'apiv1.php still checks the api_agent bucket');
+check(strpos($api, "RequestLogger::rate_limit_state('api_agent'") !== false, 'apiv1.php still checks the api_agent bucket');
 check(strpos($chan, "RequestLogger::log('api_agent'") !== false, 'AgentChannelEndpoint writes api_agent rows');
 
 // Cleanup: only the rows this test's requests produced.

@@ -5,7 +5,10 @@
  * General-purpose: works for API calls, login attempts, registration,
  * password resets, or any site feature that needs logging or throttling.
  *
- * @version 1.3
+ * @version 1.4
+ * @changelog 1.4 - rate_limit_state(): the count, whether it is within the limit, and how
+ *   long until it is not — so a 429 can say when to try again; a limit can be keyed to a
+ *   user (rql_usr_user_id) instead of the address
  * @changelog 1.3 - log(): withhold the note on a sealed-hot request, and never let a failed log write escape into the request it describes
  * @changelog 1.2 - API key type context: set_api_key_type() stamps every subsequent log row so audit queries can separate machine from session API traffic
  * @changelog 1.1 - log(): mark the RequestLog save as an intentional GET mutation (audit/rate-limit rows persist on any request method)
@@ -87,26 +90,60 @@ class RequestLogger {
 	 * @return bool     True if within limit, false if exceeded
 	 */
 	public static function check_rate_limit($feature, $max_requests, $window_seconds, $success_filter = null) {
-		$dbconnector = DbConnector::get_instance();
-		$db = $dbconnector->get_db_link();
+		return self::rate_limit_state($feature, $max_requests, $window_seconds, $success_filter)['allowed'];
+	}
 
-		$ip = isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '0.0.0.0';
+	/**
+	 * Where a caller stands against a limit: how many matching requests the
+	 * window holds, whether one more is allowed, and — when it is not — how
+	 * many seconds until the oldest of the rows that put it over the limit
+	 * leaves the window, i.e. when the next request will be accepted. That
+	 * number is what a 429 owes the caller: "try again in 4 minutes" is a
+	 * wait; "rate limit exceeded" is a worry.
+	 *
+	 * Keyed to the address by default; pass $user_id to key the count to a
+	 * signed-in user instead (rows carry rql_usr_user_id), which is the right
+	 * scope for a browser session — several people behind one address are
+	 * not one caller.
+	 *
+	 * @return array{allowed:bool,count:int,retry_after:int}
+	 */
+	public static function rate_limit_state($feature, $max_requests, $window_seconds, $success_filter = null, $user_id = null) {
+		$db = DbConnector::get_instance()->get_db_link();
+		$window_seconds = max(1, intval($window_seconds));
+		$max_requests = max(1, intval($max_requests));
 
-		$sql = "SELECT COUNT(*) as cnt FROM rql_request_logs
-				WHERE rql_feature = ? AND rql_ip_address = ?
-				AND rql_create_time > NOW() - INTERVAL '" . intval($window_seconds) . " seconds'";
-		$params = [$feature, $ip];
-
+		if ($user_id !== null) {
+			$key_sql = 'rql_usr_user_id = ?';
+			$key = intval($user_id);
+		} else {
+			$key_sql = 'rql_ip_address = ?';
+			$key = isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '0.0.0.0';
+		}
+		$where = "rql_feature = ? AND " . $key_sql
+			. " AND rql_create_time > NOW() - INTERVAL '" . $window_seconds . " seconds'";
+		$params = [$feature, $key];
 		if ($success_filter !== null) {
-			$sql .= " AND rql_was_success = ?";
+			$where .= " AND rql_was_success = ?";
 			$params[] = $success_filter ? 'true' : 'false';
 		}
 
-		$stmt = $db->prepare($sql);
+		$stmt = $db->prepare("SELECT COUNT(*) FROM rql_request_logs WHERE " . $where);
 		$stmt->execute($params);
-		$row = $stmt->fetch(PDO::FETCH_ASSOC);
+		$count = intval($stmt->fetchColumn());
+		if ($count < $max_requests) {
+			return array('allowed' => true, 'count' => $count, 'retry_after' => 0);
+		}
 
-		return ($row['cnt'] < $max_requests);
+		// The request is allowed again once the count drops below the limit:
+		// when the (count - max + 1)-th oldest row in the window ages out.
+		$stmt = $db->prepare("SELECT GREATEST(1, CEIL(EXTRACT(EPOCH FROM (rql_create_time + INTERVAL '"
+			. $window_seconds . " seconds' - NOW()))))::int
+			FROM rql_request_logs WHERE " . $where . "
+			ORDER BY rql_create_time ASC OFFSET ? LIMIT 1");
+		$stmt->execute(array_merge($params, array($count - $max_requests)));
+		$retry_after = intval($stmt->fetchColumn());
+		return array('allowed' => false, 'count' => $count, 'retry_after' => max(1, $retry_after));
 	}
 
 	/**

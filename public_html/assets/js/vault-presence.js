@@ -32,12 +32,26 @@
  * page's content fetches — get the workers and the database first; the backlog
  * is background work and loses nothing by starting a few seconds late.
  *
- * @version 1.4
+ * Chained drains are paced: DRAIN_GAP_MS between one slice ending and the
+ * next starting. Every request here counts against the API's per-address
+ * budget (default 1000 an hour), the same budget the reader's own requests
+ * draw on. Back-to-back ten-second slices plus the beat plus the reader can
+ * spend it inside an hour when a consumer has a long backlog, and the reader
+ * then answers 429 to everything — the person is locked out of their own mail
+ * by background work. A drain the server refuses (429, or any failure) backs
+ * off for BACKOFF_MS instead of being retried on the next beat.
+ *
+ * @version 1.5
+ * @changelog 1.5 - chained drains paced (DRAIN_GAP_MS); a refused drain backs
+ *   off (BACKOFF_MS). A long backlog drained the per-address API budget and
+ *   429'd the reader (jeremytunnell, 2026-09-15).
  */
 (function () {
 	'use strict';
 
 	var QUIET_MS = 10000;
+	var DRAIN_GAP_MS = 15000;   // between chained slices: ~144 drains an hour at most
+	var BACKOFF_MS = 60000;     // after a drain the server refused or that failed
 
 	var timer = null;
 	var draining = false;
@@ -72,9 +86,18 @@
 		joineryApi.post('vault_deferred_work', {}).then(function (res) {
 			draining = false;
 			// More waiting and the window still open - keep going rather than
-			// idling until the next beat.
-			if (res && res.more && !res.locked && timer) { drain(); }
-		}).catch(function () { draining = false; });
+			// idling until the next beat, but paced: the next slice starts
+			// DRAIN_GAP_MS after this one ended.
+			if (res && res.more && !res.locked && timer) {
+				quietUntil = Date.now() + DRAIN_GAP_MS;
+				drain();
+			}
+		}).catch(function () {
+			draining = false;
+			// Refused or failed: wait it out. A 429 in particular means the
+			// address's budget is spent; asking again sooner only spends more.
+			quietUntil = Date.now() + BACKOFF_MS;
+		});
 	}
 
 	function start() {

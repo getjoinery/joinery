@@ -703,14 +703,24 @@ revoke are actions, not CRUD writes — see [Passkeys](passkeys.md).
 
 ## Rate Limiting
 
-The API enforces two rate limits per IP address:
+Who is counted depends on the credential:
 
-| Limit | Threshold | Window |
-|-------|-----------|--------|
-| General requests | 1,000 | Per hour |
-| Failed auth attempts | 10 | Per 15 minutes |
+| Limit | Counted per | Threshold | Window | Setting |
+|-------|-------------|-----------|--------|---------|
+| General requests (key-based and keyless) | IP address | 1,000 | Per hour | `api_rate_limit_requests` / `_window` |
+| Requests from a signed-in browser session | User | 5,000 | Per hour | `api_session_rate_limit_requests` / `_window` |
+| Failed auth attempts | IP address | 10 | Per 15 minutes | `api_auth_rate_limit_requests` / `_window` |
+| Agent channel, device link, Drive upload | IP address | own buckets | Per hour | `api_agent_*`, `api_device_link_*`, `api_upload_*` |
 
-When exceeded, the API returns HTTP 429 with a `RateLimitError`. Wait for the time window to pass before retrying.
+A request shaped like the browser-session credential (no key headers, a session cookie, an `X-Joinery-Csrf` header) is metered **after** it authenticates, against its user — a person's own pages, the mail reader, the vault presence beacon and its background work are one caller, and several people behind one address are several. The anonymous browser principal, having no user, is metered by address. Key-based and keyless traffic is metered by address before authentication.
+
+When a limit is exceeded the API returns HTTP 429 `RateLimitError` with a `Retry-After` header and a message that says what was counted, the limit, and how long until the next request will be accepted — the wait is until the oldest of the requests that put the caller over the limit leaves the window, not the whole window. The same numbers are in `data`:
+
+```json
+{"errortype": "RateLimitError",
+ "error": "Your account has made 5,000 API requests in the last hour; the limit is 5,000. Nothing is wrong — try again in 4 minutes.",
+ "data": {"limit": 5000, "window_seconds": 3600, "count": 5000, "retry_after_seconds": 212}}
+```
 
 ## HTTPS Requirement
 

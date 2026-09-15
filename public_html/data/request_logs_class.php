@@ -57,6 +57,16 @@ class RequestLog extends SystemBase {
 	);
 
 	public static $timestamp_fields = array('rql_create_time');
+
+	/**
+	 * Every API request asks "how many rows for this feature and this address
+	 * (or this user) in the last window?" before it does anything else. These
+	 * are the two indexes that answer it without reading the table.
+	 */
+	public static $index_specifications = array(
+		array('columns' => array('rql_feature', 'rql_ip_address', 'rql_create_time')),
+		array('columns' => array('rql_feature', 'rql_usr_user_id', 'rql_create_time')),
+	);
 }
 
 class MultiRequestLog extends SystemMultiBase {

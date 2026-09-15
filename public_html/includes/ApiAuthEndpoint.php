@@ -22,7 +22,8 @@
  * class owns only the transport concerns — method checks, request parsing,
  * request logging, and response shaping (user_summary).
  *
- * @version 1.3.0
+ * @version 1.3.1
+ * @changelog 1.3.1 - device-link 429s say the count, the limit and when to retry (api_rate_limited)
  * @changelog 1.3.0 - auth/web_session: mints an AppBridgeToken for session keys
  *   so the app webview can derive a web session from the API credential.
  * @changelog 1.2.0 - Browser-session principals (api_entry === null) get a
@@ -175,8 +176,9 @@ class ApiAuthEndpoint {
 		$settings = Globalvars::get_instance();
 		$limit  = (int)($settings->get_setting('api_device_link_rate_limit_requests') ?: 600);
 		$window = (int)($settings->get_setting('api_device_link_rate_limit_window') ?: 3600);
-		if (!RequestLogger::check_rate_limit('api_device_link', $limit, $window)) {
-			api_error('Too many device link requests. Please try again later.', 'RateLimitError', 429);
+		$state = RequestLogger::rate_limit_state('api_device_link', $limit, $window);
+		if (!$state['allowed']) {
+			api_rate_limited($state, 'This address', $limit, $window, 'device-link requests');
 		}
 
 		require_once(PathHelper::getIncludePath('data/device_links_class.php'));
@@ -253,8 +255,9 @@ class ApiAuthEndpoint {
 		$settings = Globalvars::get_instance();
 		$limit  = (int)($settings->get_setting('api_device_link_rate_limit_requests') ?: 600);
 		$window = (int)($settings->get_setting('api_device_link_rate_limit_window') ?: 3600);
-		if (!RequestLogger::check_rate_limit('api_device_link', $limit, $window)) {
-			api_error('Too many device link requests. Please try again later.', 'RateLimitError', 429);
+		$state = RequestLogger::rate_limit_state('api_device_link', $limit, $window);
+		if (!$state['allowed']) {
+			api_rate_limited($state, 'This address', $limit, $window, 'device-link requests');
 		}
 
 		require_once(PathHelper::getIncludePath('data/device_links_class.php'));
