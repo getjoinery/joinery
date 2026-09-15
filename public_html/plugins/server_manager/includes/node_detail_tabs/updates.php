@@ -9,11 +9,26 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.2 - a node that hosts no site gets one sentence in place of the version box and both
+ *                apply buttons: there is no release to apply, and its agent updates itself
  * @version 1.1 - Publish release on this node: for a node whose agent carries the publish_upgrade
  *                primitive, the version it runs and release notes, dispatched as the node's own
  *                agent's job (specs/publish_as_node_action.md)
  * @version 1.0
  */
+
+	// A machine with no site: nothing here applies to it. Its agent keeps
+	// itself current from this management node, and the scripts it runs
+	// arrive in the support bundle on the same clock.
+	if (!$node->hosts_site()) {
+		$page->begin_box(['title' => 'Updates']);
+		echo '<p class="mb-0">This node hosts no Joinery site, so there is no release to apply here. '
+			. 'Its agent (' . htmlspecialchars((string)($node->get('mgn_agent_version') ?: 'version unknown'))
+			. ') updates itself from this management node, and the scripts it runs arrive in the '
+			. 'support bundle the same way.</p>';
+		$page->end_box();
+		return;
+	}
 
 	// Get local version
 	$settings = Globalvars::get_instance();
