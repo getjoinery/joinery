@@ -675,6 +675,43 @@ check(!JobResultProcessor::wants_recovery_key_report(array(
 check(!JobResultProcessor::wants_recovery_key_report(array('backup_recovery_state' => 'unconfigured')),
 	'a measured "unconfigured" is an answer, not a gap');
 
+section('A node that hosts no site is never asked for its recovery key');
+
+// The Docker host, enrolled in machine posture: an agent, no web root, and an
+// agent vocabulary that includes recovery_key_report because the binary ships
+// it. Its bundle does not carry the reporting script, so asking produced a
+// manifest refusal the trust classifier read as a tampered file (2026-09-15).
+function jrp_pending_jobs($node_id, $type) {
+	$db = DbConnector::get_instance()->get_db_link();
+	$q = $db->prepare("SELECT mjb_id FROM mjb_management_jobs WHERE mjb_mgn_node_id = ? AND mjb_job_type = ? AND mjb_status = 'pending' AND mjb_delete_time IS NULL ORDER BY mjb_id");
+	$q->execute(array((int)$node_id, $type));
+	$ids = $q->fetchAll(PDO::FETCH_COLUMN);
+	foreach ($ids as $id) { harness_register_row('mjb_management_jobs', 'mjb_id', $id); }
+	return $ids;
+}
+$machine_status = "=== [Step 1/1] check_status ===\n" . json_encode(array('api_version' => '1.0', 'data' => array(
+	'load_1m' => 0.4, 'memory_total_mb' => 3916, 'memory_used_mb' => 1685, 'uptime' => 'up 3 days'))) . "\n[Step 1/1 OK]";
+$host_node = jrp_node(array(
+	'mgn_agent_public_key' => base64_encode(str_repeat("\x0b", 32)),
+	'mgn_agent_version'    => '1.29.0',
+	'mgn_agent_primitives' => 'check_status,host_report,host_converge,recovery_key_report',
+	'mgn_web_root'         => '',
+));
+JobResultProcessor::process(jrp_job($host_node, 'check_status', $machine_status));
+check(jrp_pending_jobs($host_node->key, 'recovery_key_report') === array(),
+	'a status check on a node with no web root queues no recovery_key_report');
+
+// The same agent with a site: the state is unmeasured, and the report is asked for.
+$site_node = jrp_node(array(
+	'mgn_agent_public_key' => base64_encode(str_repeat("\x0c", 32)),
+	'mgn_agent_version'    => '1.29.0',
+	'mgn_agent_primitives' => 'check_status,host_report,host_converge,recovery_key_report',
+	'mgn_web_root'         => '/var/www/html/fixture/public_html',
+));
+JobResultProcessor::process(jrp_job($site_node, 'check_status', $machine_status));
+check(count(jrp_pending_jobs($site_node->key, 'recovery_key_report')) === 1,
+	'the same status check on a node with a site queues one recovery_key_report');
+
 section('verify_backup: the node\'s VERIFY_* lines become the plane\'s copy, in plain words');
 
 $vpass = "fetching files-0000.tar.gz.enc\nVERIFY_RESULT=pass\nVERIFY_LEVEL=2\nVERIFY_RUN=chain-20260912_044520/3\n"

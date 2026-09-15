@@ -79,6 +79,12 @@ check($state['state'] === 'n/a', 'a node with no web root is not applicable', $s
 
 $state = RecoveryKeyFleet::node_state(rkf_node(['mgn_skip_joinery_checks' => true]));
 check($state['state'] === 'n/a', 'a node with Joinery checks switched off is not applicable', $state['state']);
+// One test, shared with the status processor that decides whether to ask a
+// node for its key at all: what this page calls not applicable is exactly
+// what is never asked.
+check(!rkf_node(['mgn_web_root' => ''])->hosts_site(), 'a node with no web root hosts no site');
+check(!rkf_node(['mgn_skip_joinery_checks' => true])->hosts_site(), 'a node with checks off hosts no site');
+check(rkf_node()->hosts_site(), 'a node with a web root and checks on hosts a site');
 
 // ── Nothing known yet ───────────────────────────────────────────────────────
 section('A node nothing has looked at is unknown, not missing');

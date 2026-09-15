@@ -5,6 +5,9 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.30 - a status check on a node that hosts no site (ManagedNode::hosts_site) queues no
+ *                 recovery_key_report: the host has no key to report, the bundle does not carry the
+ *                 reporting script, and the refusal read as a tampered file (docker-prod, 2026-09-15)
  * @version 1.29 - process_host_converge reads a host_converge job's transcript the way
  *                 process_run_plugin_installers reads the full run: host_housekeeping.sh: ok is green,
  *                 a WARNING, a refusal, a lock it never got or silence is red with the reason; a
@@ -528,7 +531,17 @@ class JobResultProcessor {
 			// backup gate reads that as "awaiting its recovery key" forever. The
 			// plane's own node, paired after the API/SSH path retired, was
 			// skipped by every fleet backup pass this way (2026-09-13).
-			if (self::wants_recovery_key_report($folded)
+			//
+			// Never asked of a node that hosts no site. The Docker host is a
+			// machine in the fleet, not a site on one: it has no recovery key,
+			// its agent runs scripts from the support bundle, and the bundle
+			// does not carry set_recovery_key.php. Asking got a manifest
+			// refusal that the trust classifier read as a file that fails its
+			// release, and the host showed as tampered with (2026-09-15). The
+			// recovery-key page already reports such a node as not applicable;
+			// this is the same test.
+			if ($node->hosts_site()
+					&& self::wants_recovery_key_report($folded)
 					&& JobCommandBuilder::has_primitive($node, 'recovery_key_report')
 					&& !ManagementJob::activeOrRecentForNode($node->key, 'recovery_key_report', 6 * 3600)) {
 				try {
