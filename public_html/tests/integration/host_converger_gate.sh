@@ -211,8 +211,8 @@ chk "and nothing in it is an unresolved function" \
     "$(echo "$out" | grep -ci 'command not found')" "0"
 chk "a stale copy is brought up to date" \
     "$(cmp -s "$RUNNER" "$STALE" && echo current || echo stale)" "current"
-chk "the unit runs the copy, not the tree" \
-    "$(grep -c 'COMMAND="/bin/bash \${RUN_TARGET}' "$INSTALLER")" "1"
+chk "the unit runs the copy, not the tree (a site's command and a machine's)" \
+    "$(grep -c 'COMMAND="/bin/bash \${RUN_TARGET}' "$INSTALLER")" "2"
 
 # A queued root request should not wait for the next tick: someone pressed
 # Upgrade and is watching a transcript.
@@ -397,6 +397,23 @@ chk "a refusal exits non-zero with the reason" "$(grep -A2 'remove_plugin refuse
 chk "the row is read from the database, not the request" "$(grep -c 'Plugin::get_by_plugin_name(\$name)' "$DISPATCHER")" "1"
 chk "the checks refuse an is_system manifest" "$(grep -c "manifest\['is_system'\]" "$(dirname "$RUNNER")/../../public_html/includes/PluginRemoval.php")" "1"
 chk "and a row that is not uninstalled" "$(grep -c 'is_uninstalled()' "$(dirname "$RUNNER")/../../public_html/includes/PluginRemoval.php")" "1"
+
+echo "== --machine: the timer for a host with no site =="
+chk "the installer takes --machine ROOT" "$(grep -c '^if \[\[ "\${1:-}" == "--machine" \]\]; then$' "$INSTALLER")" "1"
+chk "and names the machine host" "$(sed -n '/^if \[\[ "\${1:-}" == "--machine" \]\]; then$/,/^else$/p' "$INSTALLER" | grep -c '^    SITENAME="host"$')" "1"
+chk "the machine unit runs the entry point with --when-changed --machine and the bundle root" "$(grep -c '^\[\[ "\${MACHINE}" == "0" \]\] || COMMAND="/bin/bash \${RUN_TARGET} --when-changed --machine --site-root=\${SITE_ROOT}"$' "$INSTALLER")" "1"
+chk "the machine log is under /var/log/joinery" "$(grep -c '^    LOG_FILE="/var/log/joinery/host_converger.log"$' "$INSTALLER")" "1"
+chk "no path unit on a machine (nothing queues a root request)" "$(grep -B1 'write_if_changed "\${PATH_FILE}"' "$INSTALLER" | grep -c '^    if \[\[ "\${MACHINE}" == "0" \]\]; then$')" "1"
+chk "nor is one enabled" "$(grep -c '^    if \[\[ "\${MACHINE}" == "0" \]\] && ! systemctl is-active --quiet "\${UNIT_NAME}.path"' "$INSTALLER")" "1"
+chk "a site's unit is left alone" "$(grep -c "a site's converger owns \${UNIT_NAME}.service - leaving it" "$INSTALLER")" "1"
+chk "decided by whether the unit already says --machine" "$(grep -c "grep -q -- '--machine' \"\${SERVICE_FILE}\"" "$INSTALLER")" "1"
+chk "the machine branch neither checks a site config nor makes a root_requests queue" "$(sed -n '/^if \[\[ "\${MACHINE}" == "1" \]\]; then$/,/^else$/p' "$INSTALLER" | grep -c 'Globalvars_site.php\|root_requests')" "0"
+chk "the site branch still does both" "$(grep -c '^    \[\[ -f "\${SITE_ROOT}/config/Globalvars_site.php" \]\] || { say "site not initialised yet - skipping"; exit 0; }$\|^    mkdir -p "\${SITE_ROOT}/logs" "\${SITE_ROOT}/cache" "\${SITE_ROOT}/cache/root_requests"$' "$INSTALLER")" "2"
+chk "the bundle carries no specs, so the machine unit has no Documentation line" "$(grep -c '^        DOC_LINE=""' "$INSTALLER")" "1"
+out="$(bash "$INSTALLER" --machine "$T" 2>&1)"; rc=$?
+chk "not root: --machine ROOT skips with exit 0" "$rc:$(printf '%s\n' "$out" | grep -c 'not root - skipping')" "0:1"
+out="$(bash "$INSTALLER" --machine 2>&1)"; rc=$?
+chk "--machine without a root skips, exit 0, and says what it needed" "$rc:$(printf '%s\n' "$out" | grep -c -- '--machine needs the bundle root')" "0:1"
 
 echo
 echo "host_converger gate: $passed passed, $failed failed"

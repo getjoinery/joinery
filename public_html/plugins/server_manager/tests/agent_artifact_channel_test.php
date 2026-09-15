@@ -162,6 +162,11 @@ check(AgentChannelEndpoint::normalised_recipes('fail2ban,fail2ban:,fail2ban:on,f
 	'got: ' . AgentChannelEndpoint::normalised_recipes('fail2ban,fail2ban:,fail2ban:on,fail2ban:ARMED,../x:armed,a:armed,fail2ban:report-only'));
 check(AgentChannelEndpoint::normalised_recipes('fail2ban:armed,fail2ban:report-only') === 'fail2ban:report-only',
 	'a recipe named twice collapses to one entry');
+check(AgentChannelEndpoint::normalised_recipes('fail2ban:not-applicable') === 'fail2ban:not-applicable',
+	'not-applicable is a mode: a container agent reporting a host-scoped recipe it cannot see the subject of',
+	'got: ' . AgentChannelEndpoint::normalised_recipes('fail2ban:not-applicable'));
+check(AgentChannelEndpoint::normalised_recipes('fail2ban:n/a,fail2ban:notapplicable,fail2ban:NOT-APPLICABLE') === '',
+	'and only that spelling');
 $flood = [];
 for ($i = 0; $i < AgentChannelEndpoint::MAX_VOCABULARY_NAMES + 50; $i++) {
 	$flood[] = 'recipe_' . $i . ':armed';

@@ -292,6 +292,48 @@ nothing root acts on); the notice says "as reported by the agent's ledger".
 The unpaired mail is capped at one per recipe per day; the notice stays live
 throughout.
 
+### Burn-in read, 2026-09-15 (ledgers read over SSH)
+
+Eighteen hours of report-only on the fleet, agent 1.28.0 everywhere.
+
+| Node | Read-back ledger | Verdict | Fail2ban |
+|------|------------------|---------|----------|
+| dev (self-node 24776) | 2 lines | pass, pass | active, 5 jails |
+| jeremytunnell (176) | 2 lines | pass, pass | active, 5 jails, sshd banning |
+| docker-prod containers (8) | 109 lines each | unknown every tick | no systemd in a container |
+| docker-prod host | no ledger | no agent | **failed since 2026-04-23 01:52 UTC** |
+
+A pass is ledgered only when the verdict changes, so the two lines on dev
+and jeremytunnell are the two agent starts (1.27.0 at ~19:35 UTC, 1.28.0 at
+~21:23 UTC); every tick between and since passed silently. Both read-back
+directories are `0700 root` with a `0600` file; the outward copy under
+`cache/recipes/` matches byte for byte. No hold directory exists anywhere
+(none was ever touched). No escalation, no case, `inc_incident_records` is
+empty on the plane.
+
+What the read says about arming:
+
+1. **The loop is sound where it can see.** Ten-minute ticks land on the
+   minute, a restart re-reads the ledger and starts a fresh in-memory
+   count, and nothing repaired because nothing failed. Arming changes
+   nothing on dev or jeremytunnell today.
+2. **Unknown is ledgered on every tick.** A container writes ~140 bytes
+   every 10 minutes, ~15 KiB a day, and reaches the 256 KiB trim in about
+   seventeen days with nothing in it worth keeping. Ledger unknown on the
+   change of verdict only, as pass is (polish item, before arming).
+3. **The one box where fail2ban is dead has no agent.** The docker-prod
+   host runs no `joinery-agent` unit and holds no `/etc/joinery-agent`;
+   its fail2ban unit has been failed (exit 255) for almost five months,
+   which is the defect this recipe was written for. The eight container
+   agents cannot see the host's units and answer unknown. The Docker host
+   agent (`specs/docker_host_agent.md`, built 2026-09-01) has never had
+   its live acceptance; until it is installed and paired, arming the
+   recipe repairs nothing on docker-prod.
+4. **The case path has never carried a case.** A deliberate failure on one
+   node (stop fail2ban, wait for two failing ticks and three report-only
+   attempts, about an hour) is the only way to see a case reach the plane
+   before arming makes a real one.
+
 ## Work packages
 
 | WP | Scope | Ships as |
@@ -363,9 +405,8 @@ review is in the file header before the code.
    is wired in. Then `fail2ban` composes slices 3 and 4. On dev the
    executor sets the `fail2ban` hold marker while editing, because the
    working tree is what a recipe on dev runs as root. Release; burn-in
-   starts. **Built 2026-09-14, agent 1.27.0, awaiting review, the
-   release, `update_database` on dev for `mgn_agent_recipes`, and the
-   burn-in read.** Shape as built: package `recipes` beside `primitives`
+   starts. **Built 2026-09-14, agent 1.27.0; reviewed, released 2026-09-14,
+   live on every paired node 2026-09-15; burn-in read below.** Shape as built: package `recipes` beside `primitives`
    (`Recipe{Name, MinInterval, CheckWord, RepairWord, Check, Repair}`, no
    field a parameter could live in, pinned in `registry_test.go` with its
    two words and the mode); `Loop.Tick` is the state machine over an
@@ -397,8 +438,8 @@ review is in the file header before the code.
    `mgn_agent_recipes`; the Host card opens with the list and mode.
 6. **WP3: the case and the incident record**, in the same release as 5 or
    the next, so the burn-in's cases have somewhere to land. **Built
-   2026-09-14, agent 1.28.0, awaiting review, the release, and the
-   burn-in read.** Shape as built: the case is the ledger's escalation
+   2026-09-14, agent 1.28.0; reviewed, released 2026-09-14 21:18, live
+   on every paired node 2026-09-15; no case has opened yet.** Shape as built: the case is the ledger's escalation
    given a body and a delivery — no second id, no second open/closed
    state (`recipes/case.go`). The body is composed once when the
    escalation opens (mode, the attempts that spent the budget with time,
@@ -432,6 +473,72 @@ review is in the file header before the code.
    day, no link, log in the `recipe_case_mail_log` setting, and only for
    a case delivered locally — a paired node's case is on the plane's card
    and is never mailed from the node).
+6b. **Machine posture: both actors on a siteless host** (added 2026-09-15
+   from the burn-in read; acceptance 7 of `docker_host_agent.md` names the
+   end state, nothing had built it). **Built 2026-09-15, agent 1.29.0
+   unbuilt; the runner, housekeeping and timer-installer edits and their
+   three gates are staged in the executor's scratch mirror until the owner
+   stops the dev host timer and path unit, then land in the tree; awaiting
+   review, the release, and the docker-prod enrollment.** A siteless machine runs scripts from
+   the verified bundle at `/opt/joinery-agent/tree`, whose layout is a
+   site root's; today the bundle carries `host_report.sh` and not the
+   runner, so a paired Docker host could check fail2ban and never repair
+   it, and no host timer exists there at all.
+
+   Platform:
+   - The bundle's deliberate list grows by `_plugin_installers_start.sh`,
+     `_tree_trust.sh`, `host_housekeeping.sh`,
+     `install_host_converger.sh` and
+     `public_html/includes/cloudflare_ip_ranges.txt` (the remoteip half
+     of housekeeping reads it; without it Apache logging is left alone
+     with a warning, which is not a failure).
+   - The runner gains a `--machine` mode: SITE_ROOT is the bundle root,
+     SITENAME is `host`, the set is `HOST_INSTALLERS` =
+     `host_housekeeping.sh install_host_converger.sh`, nothing else runs
+     (no ownership assertion, no permissions pass, no secrets, no release
+     keys, no plugin installers, no apt resolver — a bundle has none of
+     those). Lock `/run/joinery/host-installers.host.lock`; the
+     `--when-changed` hash is the bundle stamp
+     (`/opt/joinery-agent/tree.version`); stamp and last files live under
+     `/var/lib/joinery/host/`. `--only=<host installer>` works in this
+     mode; `--only=<site installer>` is refused. The runner never derives
+     machine mode from its path: the caller says so, and the word says so.
+   - `install_host_converger.sh` in machine mode writes
+     `joinery-host-converger-host.{service,timer}` running the machine
+     runner `--when-changed --machine`, no path unit (no root_requests
+     directory exists), log under `/var/log/joinery/`. Same hour timeout.
+   - Plane: `host_converge` on a node with no web root dispatches the
+     machine word; Run Plugin Installers is hidden for such a node (Run
+     Host Housekeeping stays, it now works); `normalised_recipes` accepts
+     `not-applicable` beside `report-only`/`armed`.
+
+   Agent:
+   - `host_converge` carries two compiled constants, pinned:
+     `--only=host_housekeeping.sh` on a site, `--machine` on a siteless
+     node; the posture picks, never a parameter.
+   - On a bundle install or refresh the agent runs the machine converge
+     once under the job lock, ledgered in the journal, which is the
+     machine-posture twin of the site's path trigger: a new signed tree
+     arrived, converge to it. That is how the host timer first gets
+     installed on a host nobody has pressed a button for.
+   - `Recipe` gains `Scope` (`ScopeHost`); the loop skips a host-scoped
+     recipe where `/.dockerenv` exists or `/run/systemd/system` does not,
+     one journal line and one ledger line `not-applicable` at start, and
+     the claim reports `fail2ban:not-applicable`. Containers stop
+     writing unknown every ten minutes.
+
+   Gates: host_runner_lock, host_converger and host_housekeeping gates
+   grow machine-mode checks against a fixture bundle root;
+   `installer_contract_test` pins the bundle list and the two word
+   constants; Go tests pin the scope skip and the posture constant.
+
+   Then enroll the docker-prod host (`docker_host_agent.md` WP1, by hand:
+   siteless install, join, approve, link). Its fail2ban has been failed
+   since 2026-04-23, so the first ticks fail, the report-only attempts
+   spend the budget, and the first real case opens — that is the case
+   proof, on the machine the recipe was written for. Arming (7) is what
+   repairs it.
+
 7. **Arming**, its own release, after the burn-in ledger from dev,
    jeremytunnell and docker-prod is read and written up.
 

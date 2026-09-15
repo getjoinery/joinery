@@ -3,6 +3,13 @@
 # install_host_converger.sh - give this machine one root process that keeps
 # its host converged to the tree deployed on it (specs/host_converger.md).
 #
+# Version: 1.4 - `--machine ROOT`: the timer for a host with no site (runner
+#                2.17 --machine). ROOT is the agent's support bundle. The
+#                unit runs the entry point with --when-changed --machine
+#                --site-root=ROOT, logs under /var/log/joinery, and has no
+#                path trigger (no web user queues root requests on a machine).
+#                A unit already written for a site is left alone: a machine
+#                that later grows a site is that site's to converge.
 # Version: 1.3 - The oneshot service carries TimeoutStartSec=1h. The runner's
 #                lock cannot go stale (a kernel flock dies with its holders),
 #                but a hung installer holds it for as long as it lives; on
@@ -54,6 +61,7 @@
 # exit 0 when not applicable.
 #
 # Usage:  install_host_converger.sh [SITENAME] [SITE_ROOT]
+#         install_host_converger.sh --machine ROOT   (a host with no site)
 
 set -u
 
@@ -70,25 +78,47 @@ INTERVAL_MIN=1
 
 say() { echo "host converger: $*"; }
 
-SITE_ROOT="${2:-}"
-if [[ -z "${SITE_ROOT}" ]]; then
-    SITENAME="${1:-}"
-    if [[ -n "${SITENAME}" && -d "/var/www/html/${SITENAME}" ]]; then
-        SITE_ROOT="/var/www/html/${SITENAME}"
-    else
-        SITE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+MACHINE=0
+if [[ "${1:-}" == "--machine" ]]; then
+    MACHINE=1
+    SITE_ROOT="${2:-}"
+    [[ -n "${SITE_ROOT}" && -d "${SITE_ROOT}" ]] || { say "--machine needs the bundle root as its argument - skipping" >&2; exit 0; }
+    SITENAME="host"
+else
+    SITE_ROOT="${2:-}"
+    if [[ -z "${SITE_ROOT}" ]]; then
+        SITENAME="${1:-}"
+        if [[ -n "${SITENAME}" && -d "/var/www/html/${SITENAME}" ]]; then
+            SITE_ROOT="/var/www/html/${SITENAME}"
+        else
+            SITE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+        fi
     fi
+    SITENAME="$(basename "${SITE_ROOT}")"
 fi
-SITENAME="$(basename "${SITE_ROOT}")"
 
 [[ "$(id -u)" == "0" ]] || { say "not root - skipping (run: sudo bash ${SCRIPT_DIR}/install_host_converger.sh)"; exit 0; }
 [[ -f "${RUNNER}" ]] || { say "runner missing at ${RUNNER} - skipping" >&2; exit 0; }
-[[ -f "${SITE_ROOT}/config/Globalvars_site.php" ]] || { say "site not initialised yet - skipping"; exit 0; }
 
-LOG_FILE="${SITE_ROOT}/logs/host_converger.log"
-mkdir -p "${SITE_ROOT}/logs" "${SITE_ROOT}/cache" "${SITE_ROOT}/cache/root_requests"
-chown www-data:www-data "${SITE_ROOT}/cache/root_requests" 2>/dev/null || true
-chmod 770 "${SITE_ROOT}/cache/root_requests" 2>/dev/null || true
+if [[ "${MACHINE}" == "1" ]]; then
+    # One unit per machine. A site that lives here already converges the host
+    # through its own unit (its runner carries host_housekeeping.sh); the
+    # machine mode must not take that unit over, or the site stops converging.
+    if [[ -f "${SERVICE_FILE}" ]] && ! grep -q -- '--machine' "${SERVICE_FILE}" 2>/dev/null; then
+        say "a site's converger owns ${UNIT_NAME}.service - leaving it"
+        exit 0
+    fi
+    LOG_FILE="/var/log/joinery/host_converger.log"
+    mkdir -p /var/log/joinery
+    chmod 755 /var/log/joinery 2>/dev/null || true
+else
+    [[ -f "${SITE_ROOT}/config/Globalvars_site.php" ]] || { say "site not initialised yet - skipping"; exit 0; }
+
+    LOG_FILE="${SITE_ROOT}/logs/host_converger.log"
+    mkdir -p "${SITE_ROOT}/logs" "${SITE_ROOT}/cache" "${SITE_ROOT}/cache/root_requests"
+    chown www-data:www-data "${SITE_ROOT}/cache/root_requests" 2>/dev/null || true
+    chmod 770 "${SITE_ROOT}/cache/root_requests" 2>/dev/null || true
+fi
 
 # The root timer's entry point is a copy outside the tree, not the file in it.
 # Whoever owns the tree can rewrite anything in it, and on a developer box that
@@ -146,6 +176,7 @@ RUN_TARGET="${ENTRY}"
 [[ -x "${ENTRY}" ]] || RUN_TARGET="${RUNNER}"
 
 COMMAND="/bin/bash ${RUN_TARGET} --when-changed ${SITENAME} ${SITE_ROOT}"
+[[ "${MACHINE}" == "0" ]] || COMMAND="/bin/bash ${RUN_TARGET} --when-changed --machine --site-root=${SITE_ROOT}"
 
 # Write a file only when its content changed, so an unchanged unit never
 # moves a mtime or triggers a reload.
@@ -167,10 +198,16 @@ if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
     # control-group, which is what we rely on: the installer and everything it
     # spawned die together, and with them the lock. Setting it explicitly
     # would only invite someone to change it.
+    DESCRIBED="for ${SITENAME}"
+    DOC_LINE="Documentation=file://${SITE_ROOT}/public_html/specs/host_converger.md
+"
+    if [[ "${MACHINE}" == "1" ]]; then
+        DESCRIBED="for this host (no site)"
+        DOC_LINE=""            # the bundle carries no specs
+    fi
     SERVICE_TEXT="[Unit]
-Description=Joinery host converger for ${SITENAME}: run the host installers when the deployed release changes
-Documentation=file://${SITE_ROOT}/public_html/specs/host_converger.md
-
+Description=Joinery host converger ${DESCRIBED}: run the host installers when the deployed release changes
+${DOC_LINE}
 [Service]
 Type=oneshot
 ExecStart=${COMMAND}
@@ -181,7 +218,7 @@ Nice=10
 # kills the whole control group (the default KillMode) and the lock releases.
 TimeoutStartSec=1h"
     TIMER_TEXT="[Unit]
-Description=Joinery host converger timer for ${SITENAME}
+Description=Joinery host converger timer ${DESCRIBED}
 
 [Timer]
 OnBootSec=2min
@@ -206,7 +243,9 @@ WantedBy=paths.target"
     changed=0
     write_if_changed "${SERVICE_FILE}" "${SERVICE_TEXT}" 644 && changed=1
     write_if_changed "${TIMER_FILE}" "${TIMER_TEXT}" 644 && changed=1
-    write_if_changed "${PATH_FILE}" "${PATH_TEXT}" 644 && changed=1
+    if [[ "${MACHINE}" == "0" ]]; then
+        write_if_changed "${PATH_FILE}" "${PATH_TEXT}" 644 && changed=1
+    fi
     # A stale cron entry from a box that moved to systemd would run twice.
     [[ -f "${CRON_FILE}" ]] && rm -f "${CRON_FILE}"
     if [[ "${changed}" == "1" ]]; then
@@ -220,7 +259,7 @@ WantedBy=paths.target"
     else
         say "timer already active (every ${INTERVAL_MIN} min, systemd)"
     fi
-    if ! systemctl is-active --quiet "${UNIT_NAME}.path" 2>/dev/null; then
+    if [[ "${MACHINE}" == "0" ]] && ! systemctl is-active --quiet "${UNIT_NAME}.path" 2>/dev/null; then
         systemctl enable --now "${UNIT_NAME}.path" >/dev/null 2>&1 \
             && say "queue watch enabled (a root request runs within seconds)" \
             || say "WARNING - could not enable ${UNIT_NAME}.path; requests wait for the timer" >&2

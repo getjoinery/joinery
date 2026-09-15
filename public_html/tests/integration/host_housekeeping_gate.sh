@@ -205,6 +205,23 @@ else
     echo "== fail2ban-client not installed here: the parse check is skipped =="
 fi
 
+echo "== --machine ROOT: the same work, from the agent's bundle =="
+BROOT="$T/bundle"
+mkdir -p "$BROOT/public_html/includes" "$BROOT/maintenance_scripts/install_tools"
+cp "$RANGES" "$BROOT/public_html/includes/"
+R="$T/machine"
+mkdir -p "$R/etc/fail2ban/jail.d" "$R/etc/apache2/conf-available" "$R/etc/apache2/conf-enabled"
+printf '[DEFAULT]\nbantime = 10m\n\n[sshd]\nport = ssh\n' > "$R/etc/fail2ban/jail.conf"
+{ cat "$R/etc/fail2ban/jail.conf"; legacy_block; } > "$R/etc/fail2ban/jail.local"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$R" bash "$SCRIPT" --machine "$BROOT" 2>&1)"; rc=$?
+chk "exit 0" "$rc" "0"
+chk "writes the sshd drop-in" "$( [ -f "$R/etc/fail2ban/jail.d/joinery-sshd.local" ] && echo yes )" "yes"
+chk "removes the copy-and-append jail.local" "$( [ -f "$R/etc/fail2ban/jail.local" ] && echo still || echo gone )" "gone"
+chk "reads the Cloudflare ranges from the bundle (no 'no Cloudflare range list' warning)" "$(printf '%s\n' "$out" | grep -c 'no Cloudflare range list')" "0"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$R" bash "$SCRIPT" --machine "$T/absent-root" 2>&1)"; rc=$?
+chk "--machine with no such root skips, exit 0" "$rc:$(printf '%s\n' "$out" | grep -c -- '--machine needs the bundle root')" "0:1"
+chk "the flag is the first argument and the root the second" "$(grep -c '^if \[\[ "\${1:-}" == "--machine" \]\]; then$' "$SCRIPT")" "1"
+
 echo
 echo "host_housekeeping gate: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]

@@ -3,6 +3,21 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.17 - --machine: the runner on a host with no site. The root is the
+#                 agent's verified support bundle (/opt/joinery-agent/tree, or
+#                 --site-root=), whose layout is a site root's; SITENAME is
+#                 "host"; the set is HOST_INSTALLERS (host_housekeeping.sh and
+#                 install_host_converger.sh, each called with --machine ROOT)
+#                 and nothing a site has and a bundle does not runs: no
+#                 ownership assertion, no permissions pass, no secrets, no
+#                 release keys, no plugin installers, no certificate summary,
+#                 no root-request queue. The --when-changed hash is the bundle
+#                 stamp beside the tree; stamp and last live under
+#                 /var/lib/joinery/host (root) or ROOT/cache (a fixture).
+#                 --only= in this mode names a host installer only. The mode
+#                 is never derived from where the copy lives: the caller says
+#                 --machine, and the agent's host_converge word says it on a
+#                 siteless machine (specs/agent_tier1_recipes.md item 6b).
 # Version: 2.16 - A run that finds the lock held waits for it, bounded (flock -w,
 #                 ten minutes), and only when the wait runs out says who holds
 #                 it and exits 0. The timer's tick holds the lock for about a
@@ -192,20 +207,40 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # This list is also the whole of what --only may name.
 CORE_INSTALLERS="install_agent.sh install_parser_jail.sh install_host_converger.sh render_vhost.sh host_housekeeping.sh"
 
+# The host's own installers: what a machine with no site converges to. A
+# subset of CORE_INSTALLERS by construction (each is also a site's), and the
+# whole of what --only may name under --machine. The agent's bundle carries
+# exactly these two plus what they read.
+HOST_INSTALLERS="host_housekeeping.sh install_host_converger.sh"
+
+# Where a siteless machine's tree is: the support bundle the agent verified
+# and unpacked (bundle.go bundleRootDefault). --site-root= overrides it for a
+# fixture; nothing else does.
+MACHINE_ROOT_DEFAULT="/opt/joinery-agent/tree"
+
 WHEN_CHANGED=0
 ONLY_GIVEN=0
 ONLY_INSTALLER=""
 EXPLICIT_ROOT=""
+MACHINE=0
 POSITIONAL=()
 for arg in "$@"; do
     case "${arg}" in
         --when-changed) WHEN_CHANGED=1 ;;
         --only=*)       ONLY_GIVEN=1; ONLY_INSTALLER="${arg#--only=}" ;;
         --site-root=*)  EXPLICIT_ROOT="${arg#--site-root=}" ;;
+        --machine)      MACHINE=1 ;;
         *)              POSITIONAL+=("${arg}") ;;
     esac
 done
 set -- "${POSITIONAL[@]+"${POSITIONAL[@]}"}"
+
+# A machine has no site to name: a positional argument under --machine is a
+# caller that has confused the two modes, refused before anything is touched.
+if [[ "${MACHINE}" == "1" && "${#POSITIONAL[@]}" -gt 0 ]]; then
+    echo "host installers: --machine takes no site name (got '${POSITIONAL[0]}') - refused" >&2
+    exit 2
+fi
 
 # A caller error is not an installer failure. The fail-safe exit 0 below exists
 # so a broken installer cannot block a container from starting; --only never
@@ -213,10 +248,16 @@ set -- "${POSITIONAL[@]+"${POSITIONAL[@]}"}"
 # here, before the lock, before anything is touched, with a code the caller
 # can tell apart from "ran and failed".
 if [[ "${ONLY_GIVEN}" == "1" ]]; then
-    case " ${CORE_INSTALLERS} " in
+    ONLY_SET="${CORE_INSTALLERS}"
+    ONLY_SET_NAME="a core installer"
+    if [[ "${MACHINE}" == "1" ]]; then
+        ONLY_SET="${HOST_INSTALLERS}"
+        ONLY_SET_NAME="a host installer"
+    fi
+    case " ${ONLY_SET} " in
         *" ${ONLY_INSTALLER} "*) : ;;
         *)
-            echo "host installers: --only=${ONLY_INSTALLER} is not a core installer (one of: ${CORE_INSTALLERS}) - refused" >&2
+            echo "host installers: --only=${ONLY_INSTALLER} is not ${ONLY_SET_NAME} (one of: ${ONLY_SET}) - refused" >&2
             exit 2
             ;;
     esac
@@ -247,7 +288,14 @@ DERIVED_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # does not cover - no argument at all (how the run_plugin_installers primitive
 # invokes it), and a node installed somewhere other than /var/www/html.
 SITENAME="${1:-}"
-if [[ -n "${EXPLICIT_ROOT}" ]]; then
+if [[ "${MACHINE}" == "1" ]]; then
+    # No site anywhere: the root is the bundle, and the name is the fact.
+    SITE_ROOT="${EXPLICIT_ROOT:-${MACHINE_ROOT_DEFAULT}}"
+    if [[ ! -d "${SITE_ROOT}/maintenance_scripts/install_tools" ]]; then
+        echo "host installers: no bundle at ${SITE_ROOT} (no maintenance_scripts/install_tools) - skipping" >&2
+        exit 0
+    fi
+elif [[ -n "${EXPLICIT_ROOT}" ]]; then
     SITE_ROOT="${EXPLICIT_ROOT}"
 elif [[ -n "${2:-}" && -d "${2}" ]]; then
     # The resolved root, from a caller that already knows it (the converger's
@@ -271,6 +319,7 @@ else
     SITE_ROOT="/var/www/html/${SITENAME}"
 fi
 SITENAME="$(basename "${SITE_ROOT}")"
+[[ "${MACHINE}" == "1" ]] && SITENAME="host"
 
 PUBLIC_HTML="${SITE_ROOT}/public_html"
 CONFIG_FILE="${SITE_ROOT}/config/Globalvars_site.php"
@@ -288,11 +337,11 @@ CONFIG_FILE="${SITE_ROOT}/config/Globalvars_site.php"
 TOOLS_DIR="${SITE_ROOT}/maintenance_scripts/install_tools"
 [[ -d "${TOOLS_DIR}" ]] || TOOLS_DIR="${SCRIPT_DIR}"
 
-if [[ ! -d "${PUBLIC_HTML}/plugins" ]]; then
+if [[ "${MACHINE}" == "0" ]] && [[ ! -d "${PUBLIC_HTML}/plugins" ]]; then
     echo "plugin installers: no plugins directory - skipping"
     exit 0
 fi
-if [[ ! -f "${CONFIG_FILE}" ]]; then
+if [[ "${MACHINE}" == "0" ]] && [[ ! -f "${CONFIG_FILE}" ]]; then
     echo "plugin installers: site not initialised yet - skipping"
     exit 0
 fi
@@ -413,6 +462,9 @@ TREE_OWNER_GROUP="$(id -gn "${TREE_OWNER_TARGET}" 2>/dev/null || echo "${TREE_OW
 
 assert_tree_ownership() {
     local ph_owner
+    # A bundle is root's by construction (the agent unpacked it); there is no
+    # web user to have taken it and no tree owner to give it back to.
+    [[ "${MACHINE}" == "0" ]] || return 0
     ph_owner="$(stat -c '%U' "${PUBLIC_HTML}" 2>/dev/null || true)"
     [[ "${ph_owner}" == "www-data" ]] || return 0
 
@@ -502,7 +554,10 @@ run_core_installer() {
         return 0
     fi
     echo "core installers: running ${name}"
-    if bash "${path}" "${SITENAME}" "${SITE_ROOT}"; then
+    local -a installer_args=("${SITENAME}" "${SITE_ROOT}")
+    # A host installer is told the mode, not a site name: --machine ROOT.
+    [[ "${MACHINE}" == "0" ]] || installer_args=(--machine "${SITE_ROOT}")
+    if bash "${path}" "${installer_args[@]}"; then
         echo "core installers: ${name}: ok"
     else
         echo "core installers: WARNING - ${name} failed" >&2
@@ -576,6 +631,7 @@ refresh_converger_entry() {
 # first time this was tried.
 apply_tree_permissions() {
     [[ "${WHEN_CHANGED}" == "1" ]] || return 0
+    [[ "${MACHINE}" == "0" ]] || return 0            # a bundle has no tree to permission
     [[ "$(id -u)" == "0" ]] || return 0
 
     local script="${TOOLS_DIR}/fix_permissions.sh"
@@ -608,7 +664,9 @@ apply_tree_permissions() {
 # happen inside a web request happen here, as root
 # (specs/read_only_tree.md). Each is idempotent and refuses to overwrite - a key
 # that already exists is the one this site's data was encrypted with.
-if [[ -f "${TOOLS_DIR}/_config_secrets.sh" ]]; then
+if [[ "${MACHINE}" == "1" ]]; then
+    : # a machine with no site has no site secrets to mint
+elif [[ -f "${TOOLS_DIR}/_config_secrets.sh" ]]; then
     # shellcheck source=_config_secrets.sh
     . "${TOOLS_DIR}/_config_secrets.sh"
     if [[ "$(id -u)" == "0" ]]; then
@@ -630,6 +688,7 @@ fi
 # it (PackageSignature refuses a key file anyone else could have written).
 write_release_verify_keys() {
     [[ "$(id -u)" == "0" ]] || return 0
+    [[ "${MACHINE}" == "0" ]] || return 0            # no config/ on a machine; the agent holds the key
     local manifest="${PUBLIC_HTML}/agent_dist/manifest.json"
     local keys_file="${SITE_ROOT}/config/release_verify_keys"
     [[ -f "${manifest}" ]] || return 0
@@ -675,13 +734,26 @@ apply_tree_permissions
 # nothing to do and the tick costs a few file reads. The stamp and the record
 # of the last run live in cache/, root-owned, readable by the site so the
 # admin notice and the health check can say when the converger last ran.
-STAMP_FILE="${SITE_ROOT}/cache/host_converger.stamp"
-LAST_FILE="${SITE_ROOT}/cache/host_converger.last"
+# Where the converge stamp lives. A site keeps it in its cache. A machine has
+# no cache that survives a bundle refresh (the tree is replaced whole), so
+# root keeps it under /var/lib/joinery/host; a fixture keeps it in ROOT/cache.
+STATE_DIR="${SITE_ROOT}/cache"
+if [[ "${MACHINE}" == "1" && "$(id -u)" == "0" ]]; then
+    STATE_DIR="/var/lib/joinery/host"
+fi
+STAMP_FILE="${STATE_DIR}/host_converger.stamp"
+LAST_FILE="${STATE_DIR}/host_converger.last"
 CONVERGE_MAX_AGE=86400
 
 converge_hash() {
     {
-        cat "${PUBLIC_HTML}/VERSION" 2>/dev/null
+        # What "the release changed" means here: a site's VERSION, or the
+        # bundle's stamp beside the tree (bundle.go bundleStampPath).
+        if [[ "${MACHINE}" == "1" ]]; then
+            cat "${SITE_ROOT}.version" 2>/dev/null
+        else
+            cat "${PUBLIC_HTML}/VERSION" 2>/dev/null
+        fi
         # Every script this runner executes or sources, and the vhost
         # templates render_vhost.sh applies: a change to any of them is a
         # reason to converge, not something to wait a day for.
@@ -692,7 +764,7 @@ converge_hash() {
 }
 
 record_last() {
-    mkdir -p "${SITE_ROOT}/cache" 2>/dev/null || true
+    mkdir -p "${STATE_DIR}" 2>/dev/null || true
     printf '%s %s\n' "$(date -u +%s)" "$1" > "${LAST_FILE}.tmp" 2>/dev/null && chmod 644 "${LAST_FILE}.tmp" 2>/dev/null && mv -f "${LAST_FILE}.tmp" "${LAST_FILE}" 2>/dev/null || true
 }
 
@@ -771,9 +843,12 @@ if [[ "${WHEN_CHANGED}" == "1" ]]; then
     # or the daily tick — including under the .path unit, which fires this very
     # script the moment a request lands.
     REQUESTS_WAITING=0
-    for _req in "${SITE_ROOT}"/cache/root_requests/*.json; do
-        [[ -f "${_req}" ]] && { REQUESTS_WAITING=1; break; }
-    done
+    if [[ "${MACHINE}" == "0" ]]; then
+        for _req in "${SITE_ROOT}"/cache/root_requests/*.json; do
+            [[ -f "${_req}" ]] && { REQUESTS_WAITING=1; break; }
+        done
+    fi
+    mkdir -p "${STATE_DIR}" 2>/dev/null || true
 
     if [[ "${REQUESTS_WAITING}" == "0" ]] \
        && [[ "${last_hash}" == "${CONVERGE_NOW_HASH}" ]] \
@@ -801,7 +876,9 @@ fi
 # --- Core host installers ----------------------------------------------------
 # CORE_INSTALLERS is declared at the top, beside the --only check that reads
 # it. Every one of them, through the body --only shares.
-for CORE_INSTALLER in ${CORE_INSTALLERS}; do
+INSTALLER_SET="${CORE_INSTALLERS}"
+[[ "${MACHINE}" == "0" ]] || INSTALLER_SET="${HOST_INSTALLERS}"
+for CORE_INSTALLER in ${INSTALLER_SET}; do
     run_core_installer "${CORE_INSTALLER}"
 done
 
@@ -876,6 +953,10 @@ plugin_package_verified() {
 # the script: the queued root requests below are a separate job, and a site with
 # no active plugins is still a site that can have asked for an upgrade.
 run_plugin_installers() {
+if [[ "${MACHINE}" == "1" ]]; then
+    echo "plugin installers: none on a machine with no site"
+    return 0
+fi
 if ! command -v php >/dev/null 2>&1; then
     echo "plugin installers: php-cli not available - skipping" >&2
     CONVERGE_OUTCOME="no-php"
@@ -983,6 +1064,7 @@ resolve_v4() {
 }
 write_certificate_summary() {
     [[ "$(id -u)" == "0" ]] || return 0
+    [[ "${MACHINE}" == "0" ]] || return 0            # host_report describes a machine
     local le="${JOINERY_LETSENCRYPT_DIR:-/etc/letsencrypt}"
     local sites="${JOINERY_APACHE_SITES_DIR:-/etc/apache2/sites-available}"
     local out="${SITE_ROOT}/cache/certificates.json"
@@ -1056,6 +1138,7 @@ write_certificate_summary
 REQUEST_ABANDONED_CODE=75
 
 run_root_requests() {
+    [[ "${MACHINE}" == "0" ]] || return 0            # no web user queues anything on a machine
     local queue="${SITE_ROOT}/cache/root_requests"
     local logs="${SITE_ROOT}/logs/root_requests"
     [[ -d "${queue}" ]] || return 0

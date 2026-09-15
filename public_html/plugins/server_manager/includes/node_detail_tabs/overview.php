@@ -9,6 +9,10 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.15 - Run Plugin Installers is shown only for a node with a site (a machine with no site has
+ *                 no plugins to have installers); Run Host Housekeeping stays for every node with the word,
+ *                 since on a machine it now runs the runner's --machine mode; the recipe line explains a
+ *                 not-applicable mode (a container agent whose recipe's subject is the host)
  * @version 1.14 - the Cases card, under the Host card: the cases this node's agent opened, open first, then
  *                 closed, each with a human's note and a mark-read control (IncidentCaseCard); shown for every
  *                 node with an agent, so a node with no case says so
@@ -197,7 +201,11 @@
 		<button type="button" class="btn btn-sm btn-primary dropdown-toggle" onclick="var m=this.nextElementSibling;m.style.display=m.style.display==='block'?'none':'block'">Actions</button>
 		<ul class="dropdown-menu dropdown-menu-end svm-dropdown-menu">
 			<li><a class="dropdown-item" href="<?php echo $base_url; ?>&tab=overview&edit=1#connectionSettings">Edit Connection Settings</a></li>
-			<?php if (JobCommandBuilder::has_primitive($node, 'run_plugin_installers')): ?>
+			<?php
+			// A machine with no site (a Docker host, a relay) has no plugins,
+			// so nothing for this to run; the action would fail closed at the
+			// runner. Its host-scope twin, Run Host Housekeeping, stays.
+			if (JobCommandBuilder::has_primitive($node, 'run_plugin_installers') && trim((string)$node->get('mgn_web_root')) !== ''): ?>
 				<li><a class="dropdown-item" href="#" onclick="JoineryModal.confirm('Run every active plugin\'s host installer on this node (root, idempotent)? Needed after activating a plugin that configures system services, e.g. the mail stack.', function(){ document.getElementById('run_plugin_installers_form').submit(); }); return false;">Run Plugin Installers</a></li>
 			<?php endif; ?>
 			<?php
@@ -629,8 +637,12 @@
 			foreach ($recipes as $name => $mode) {
 				$parts[] = htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . ' (' . htmlspecialchars($mode, ENT_QUOTES, 'UTF-8') . ')';
 			}
+			$caption = 'checked every ten minutes on the node; report-only records what it would repair and changes nothing.';
+			if (in_array('not-applicable', $recipes, true)) {
+				$caption .= ' Not-applicable: this agent runs inside a container and the recipe\'s subject is the host, which the host\'s own agent watches.';
+			}
 			echo '<div class="mb-2">Recipes: ' . implode(', ', $parts)
-				. ' <small class="text-muted">— checked every ten minutes on the node; report-only records what it would repair and changes nothing.</small></div>';
+				. ' <small class="text-muted">— ' . $caption . '</small></div>';
 		}
 
 		if (!is_array($host_report)) {

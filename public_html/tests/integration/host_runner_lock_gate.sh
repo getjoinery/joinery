@@ -238,10 +238,11 @@ wait "$ONLY_PID"
 
 echo "== the core loop and --only run one body =="
 chk "one function runs a core installer" "$(grep -c '^run_core_installer() {' "$RUNNER")" "1"
-chk "the loop calls it" "$(sed -n '/^for CORE_INSTALLER in \${CORE_INSTALLERS}; do/,/^done$/p' "$RUNNER" | grep -c 'run_core_installer "\${CORE_INSTALLER}"')" "1"
+chk "the loop calls it" "$(sed -n '/^for CORE_INSTALLER in \${INSTALLER_SET}; do/,/^done$/p' "$RUNNER" | grep -c 'run_core_installer "\${CORE_INSTALLER}"')" "1"
+chk "over the core set on a site, the host set on a machine" "$(grep -c '^INSTALLER_SET="\${CORE_INSTALLERS}"$\|^\[\[ "\${MACHINE}" == "0" \]\] || INSTALLER_SET="\${HOST_INSTALLERS}"$' "$RUNNER")" "2"
 chk "and so does --only" "$(sed -n '/^if \[\[ -n "\${ONLY_INSTALLER}" \]\]; then/,/^fi$/p' "$RUNNER" | grep -c 'run_core_installer "\${ONLY_INSTALLER}"')" "1"
 chk "the trust check lives in that one body" "$(sed -n '/^run_core_installer() {/,/^}$/p' "$RUNNER" | grep -c 'installer_is_trusted "\${path}"')" "1"
-chk "and nowhere else runs a core installer" "$(grep -c 'bash "\${path}" "\${SITENAME}" "\${SITE_ROOT}"\|bash "\${CORE_PATH}"' "$RUNNER")" "1"
+chk "and nowhere else runs a core installer" "$(grep -c 'bash "\${path}" "\${installer_args\[@\]}"\|bash "\${CORE_PATH}"' "$RUNNER")" "1"
 
 echo "== a full run still carries out root requests, under the one lock =="
 # run_root_requests is root-only; the root gates are stripped the way
@@ -274,6 +275,67 @@ chk "and the text says the default is what is relied on" "$(grep -c 'control-gro
 # text takes this one at its next converge.
 chk "the unit is rewritten when its text differs" "$(grep -c 'write_if_changed "\${SERVICE_FILE}" "\${SERVICE_TEXT}" 644' "$INSTALLER")" "1"
 chk "followed by a daemon-reload" "$(sed -n '/write_if_changed "\${SERVICE_FILE}"/,/systemctl daemon-reload/p' "$INSTALLER" | grep -c 'systemctl daemon-reload')" "1"
+
+echo "== --machine: the runner on a host with no site, rooted at the bundle =="
+B="$T/bundle"
+mkdir -p "$B/maintenance_scripts/install_tools" "$B/public_html/includes"
+cp "$TOOLS"/*.sh "$B/maintenance_scripts/install_tools/" 2>/dev/null || true
+BT="$B/maintenance_scripts/install_tools"
+cat > "$BT/host_housekeeping.sh" <<'STUB'
+echo "stub-housekeeping args=[$*]"
+STUB
+cat > "$BT/install_host_converger.sh" <<'STUB'
+echo "stub-converger args=[$*]"
+STUB
+for site_only in install_agent.sh install_parser_jail.sh render_vhost.sh fix_permissions.sh; do
+    printf 'echo "MUST-NOT-RUN %s"\n' "$site_only" > "$BT/$site_only"
+done
+chmod 755 "$BT"/*.sh
+echo "bundle-stamp-1" > "$B.version"
+BR="$BT/_plugin_installers_start.sh"
+chk "HOST_INSTALLERS is the two host installers" "$(sed -n 's/^HOST_INSTALLERS="\([^"]*\)".*/\1/p' "$RUNNER")" "host_housekeeping.sh install_host_converger.sh"
+chk "each of which is also a core installer" "$(for h in $(sed -n 's/^HOST_INSTALLERS="\([^"]*\)".*/\1/p' "$RUNNER"); do case " $(sed -n 's/^CORE_INSTALLERS="\([^"]*\)".*/\1/p' "$RUNNER") " in *" $h "*) ;; *) echo "$h not core";; esac; done)" ""
+chk "the machine root is the agent's bundle" "$(grep -c '^MACHINE_ROOT_DEFAULT="/opt/joinery-agent/tree"$' "$RUNNER")" "1"
+chk "the mode is an argument, never derived" "$(grep -c '^        --machine)      MACHINE=1 ;;$' "$RUNNER")" "1"
+chk "a machine has the name host, so root's lock is host-installers.host.lock" "$(grep -c '^\[\[ "\${MACHINE}" == "1" \]\] && SITENAME="host"$' "$RUNNER")" "1"
+out="$(bash "$BR" --machine --site-root="$B" 2>&1)"; rc=$?
+chk "a full machine run exits 0" "$rc" "0"
+chk "runs housekeeping, told the mode and the root" "$(printf '%s\n' "$out" | grep -c "^stub-housekeeping args=\[--machine $B\]$")" "1"
+chk "and the timer installer, the same way" "$(printf '%s\n' "$out" | grep -c "^stub-converger args=\[--machine $B\]$")" "1"
+chk "with the transcript lines the plane matches" "$(printf '%s\n' "$out" | grep -c '^core installers: host_housekeeping.sh: ok$')" "1"
+chk "and no site installer" "$(printf '%s\n' "$out" | grep -c 'MUST-NOT-RUN')" "0"
+chk "no plugin installers" "$(printf '%s\n' "$out" | grep -c '^plugin installers: none on a machine with no site$')" "1"
+chk "no ownership, permissions, secrets, keys or certificate lines" "$(printf '%s\n' "$out" | grep -c 'ownership:\|permissions:\|config secrets:\|release key:\|certificates:')" "0"
+chk "nothing written into the bundle but its cache (an unprivileged run's lock and stamp)" "$(cd "$B" && find . -newer "$B.version" -type f | grep -v '^./cache/' | wc -l)" "0"
+out="$(bash "$BR" --machine --only=host_housekeeping.sh --site-root="$B" 2>&1)"; rc=$?
+chk "--only=<host installer> runs that one" "$rc:$(printf '%s\n' "$out" | grep -c 'stub-housekeeping')" "0:1"
+chk "and not the other" "$(printf '%s\n' "$out" | grep -c 'stub-converger')" "0"
+out="$(bash "$BR" --machine --only=install_agent.sh --site-root="$B" 2>&1)"; rc=$?
+chk "--only=<site installer> is refused before the lock, exit 2" "$rc" "2"
+chk "naming the host set" "$(printf '%s\n' "$out" | grep -c 'is not a host installer (one of: host_housekeeping.sh install_host_converger.sh) - refused')" "1"
+out="$(bash "$BR" --machine somesite --site-root="$B" 2>&1)"; rc=$?
+chk "a site name under --machine is refused, exit 2" "$rc" "2"
+chk "and says so" "$(printf '%s\n' "$out" | grep -c -- '--machine takes no site name')" "1"
+rm -f "$B/cache/host_converger.stamp" "$B/cache/host_converger.last"
+out="$(bash "$BR" --machine --when-changed --site-root="$B" 2>&1)"
+chk "--when-changed converges the first time" "$(printf '%s\n' "$out" | grep -c '^host converger: .* converging host (release or installers changed)$')" "1"
+chk "the stamp and last record live in the root's cache when not root" "$( [ -f "$B/cache/host_converger.stamp" ] && [ -f "$B/cache/host_converger.last" ] && echo yes )" "yes"
+chk "recorded as converged" "$(cut -d' ' -f2 "$B/cache/host_converger.last")" "converged"
+out="$(bash "$BR" --machine --when-changed --site-root="$B" 2>&1)"
+chk "the second tick is silent" "$(printf '%s' "$out" | wc -c)" "0"
+echo "bundle-stamp-2" > "$B.version"
+out="$(bash "$BR" --machine --when-changed --site-root="$B" 2>&1)"
+chk "a new bundle stamp beside the tree converges again" "$(printf '%s\n' "$out" | grep -c 'converging host (release or installers changed)')" "1"
+chk "root keeps the machine's stamp under /var/lib/joinery/host" "$(grep -c '^    STATE_DIR="/var/lib/joinery/host"$' "$RUNNER")" "1"
+chk "the machine hash reads the bundle stamp, not a VERSION" "$(sed -n '/^converge_hash() {/,/^}$/p' "$RUNNER" | grep -c 'cat "\${SITE_ROOT}.version"')" "1"
+out="$(bash "$BR" --machine --site-root="$B/absent" 2>&1)"; rc=$?
+chk "no bundle at the root: skips, exit 0" "$rc:$(printf '%s\n' "$out" | grep -c 'no bundle at')" "0:1"
+chk "the queue phase is skipped on a machine" "$(sed -n '/^run_root_requests() {/,/^}$/p' "$RUNNER" | grep -c '\[\[ "\${MACHINE}" == "0" \]\] || return 0')" "1"
+chk "and the certificate summary" "$(sed -n '/^write_certificate_summary() {/,/^}$/p' "$RUNNER" | grep -c '\[\[ "\${MACHINE}" == "0" \]\] || return 0')" "1"
+chk "and the permissions pass" "$(sed -n '/^apply_tree_permissions() {/,/^}$/p' "$RUNNER" | grep -c '\[\[ "\${MACHINE}" == "0" \]\] || return 0')" "1"
+chk "and the ownership assertion" "$(sed -n '/^assert_tree_ownership() {/,/^}$/p' "$RUNNER" | grep -c '\[\[ "\${MACHINE}" == "0" \]\] || return 0')" "1"
+chk "and the release key" "$(sed -n '/^write_release_verify_keys() {/,/^}$/p' "$RUNNER" | grep -c '\[\[ "\${MACHINE}" == "0" \]\] || return 0')" "1"
+chk "a site run still finds a plugins directory before it does anything" "$(grep -c '^if \[\[ "\${MACHINE}" == "0" \]\] && \[\[ ! -d "\${PUBLIC_HTML}/plugins" \]\]; then$' "$RUNNER")" "1"
 
 echo
 echo "host_runner_lock gate: $passed passed, $failed failed"

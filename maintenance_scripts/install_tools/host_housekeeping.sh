@@ -4,6 +4,12 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.2 - `--machine ROOT`: the call the runner makes on a host with no
+#                site (runner 2.17 --machine). ROOT is the agent's support
+#                bundle, laid out as a site root, so the Cloudflare range list
+#                is where it always is; nothing else about the run differs,
+#                since fail2ban and Apache are the host's whichever tree
+#                described them.
 # Version: 1.1 - jail.local is ours when its head is jail.conf and the rest only
 #                enables jails and sets a ban policy - whichever hand appended
 #                it (docker-prod's tail is not install.sh's text); the Apache
@@ -58,6 +64,8 @@
 # is not, or Apache refused the configuration (which is then put back).
 #
 # Usage:  host_housekeeping.sh [SITENAME] [SITE_ROOT]
+#         host_housekeeping.sh --machine ROOT      (a host with no site; ROOT
+#                                                   is the support bundle)
 #
 # Test hooks, honoured only when this is NOT root (a root run uses the real
 # machine whatever the environment says, and says once that it ignored them):
@@ -74,13 +82,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 say()  { echo "housekeeping: $*"; }
 warn() { echo "housekeeping: WARNING - $*" >&2; }
 
-SITE_ROOT="${2:-}"
-if [[ -z "${SITE_ROOT}" ]]; then
-    SITENAME="${1:-}"
-    if [[ -n "${SITENAME}" && -d "/var/www/html/${SITENAME}" ]]; then
-        SITE_ROOT="/var/www/html/${SITENAME}"
-    else
-        SITE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+MACHINE=0
+if [[ "${1:-}" == "--machine" ]]; then
+    MACHINE=1
+    SITE_ROOT="${2:-}"
+    [[ -n "${SITE_ROOT}" && -d "${SITE_ROOT}" ]] || { warn "--machine needs the bundle root as its argument - skipping"; exit 0; }
+else
+    SITE_ROOT="${2:-}"
+    if [[ -z "${SITE_ROOT}" ]]; then
+        SITENAME="${1:-}"
+        if [[ -n "${SITENAME}" && -d "/var/www/html/${SITENAME}" ]]; then
+            SITE_ROOT="/var/www/html/${SITENAME}"
+        else
+            SITE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+        fi
     fi
 fi
 RANGES_FILE="${SITE_ROOT}/public_html/includes/cloudflare_ip_ranges.txt"

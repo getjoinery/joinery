@@ -265,7 +265,7 @@ The third case is the only one that finishes with root password login still enab
 
 #### fail2ban and the real client address
 
-`maintenance_scripts/install_tools/host_housekeeping.sh` is the one implementation of "fail2ban is configured". It is a core host installer, so it runs at install, on every converge of the host timer (`_plugin_installers_start.sh`, `CORE_INSTALLERS`), through the runner alone with `sudo bash /var/www/html/SITE/maintenance_scripts/install_tools/_plugin_installers_start.sh --only=host_housekeeping.sh` (the same lock and ownership check the timer's run gets, nothing else run), and by hand:
+`maintenance_scripts/install_tools/host_housekeeping.sh` is the one implementation of "fail2ban is configured". It is a core host installer, so it runs at install, on every converge of the host timer (`_plugin_installers_start.sh`, `CORE_INSTALLERS`), through the runner alone with `sudo bash /var/www/html/SITE/maintenance_scripts/install_tools/_plugin_installers_start.sh --only=host_housekeeping.sh` (the same lock and ownership check the timer's run gets, nothing else run), on a machine with no site through the agent's support bundle (`_plugin_installers_start.sh --machine`, see [deploy_and_upgrade.md](deploy_and_upgrade.md)), and by hand:
 
 ```bash
 sudo bash /var/www/html/SITE/maintenance_scripts/install_tools/host_housekeeping.sh
