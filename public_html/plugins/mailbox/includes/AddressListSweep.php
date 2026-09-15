@@ -39,7 +39,8 @@
  * otherwise. Done = every folder walked to its UIDNEXT. Rows still without
  * lists after that are not in the account, and the card says so.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - allFinished() for the card's badge
  * @changelog 1.1 - a failed turn sits the account out for FAILURE_BACKOFF_SECONDS
  *   and the card says why; a fast-failing turn was otherwise re-offered on every
  *   chained drain
@@ -384,6 +385,21 @@ class AddressListSweep {
 	}
 
 	// ---------------------------------------------------------- the card
+
+	/** Has every account that has a sweep finished it? (No sweep at all = nothing pending.) */
+	public static function allFinished(): bool {
+		$db = DbConnector::get_instance()->get_db_link();
+		$states = $db->query("SELECT iia_lists_sweep_state FROM iia_inbound_imap_accounts
+			WHERE iia_delete_time IS NULL AND iia_is_enabled IS TRUE AND iia_lists_sweep_state IS NOT NULL")
+			->fetchAll(PDO::FETCH_COLUMN);
+		foreach ($states as $json) {
+			$st = json_decode((string)$json, true);
+			if (!is_array($st) || empty($st['done'])) {
+				return false;
+			}
+		}
+		return true;
+	}
 
 	/**
 	 * One line per account for the progress card: where each sweep stands.

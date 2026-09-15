@@ -26,6 +26,14 @@
  *    only inside the owner's window. That is why this runs as a
  *    VaultDeferredWork consumer rather than a scheduled task
  *    (docs/scheduled_tasks.md: cron can never read sealed content).
+ *  - archive rows (§ 5b): a row linked from an import entry
+ *    (mie_iem_inbound_email_message_id) whose run still holds its archive
+ *    file reads its header block at the entry's locator through the run's
+ *    reader (MailArchiveImporter::readerAndPath). This is how a row that no
+ *    connected account holds gets its lists: the owner uploads the archive
+ *    it came from again and imports it into the same mailbox — every message
+ *    dedups and links its entry to the existing row — and the drain reads
+ *    from it. One reader per run per drain.
  *
  * The lists are written the way ingest writes them: plaintext on an unsealed
  * row, sealed under the row's OWN DEK on a sealed one (the DEK unwraps only
@@ -37,7 +45,12 @@
  * retried at most daily, so a message whose source copy is gone costs one
  * attempt per day rather than an IMAP round trip per heartbeat drain.
  *
- * @version 1.3
+ * @version 1.5
+ * @changelog 1.5 - the archive arm (§ 5b): a row linked from an import entry whose run
+ *   still holds its archive reads its header block at the entry's locator — the
+ *   rows no connected account has, once the owner uploads the archive again
+ * @changelog 1.4 - Finished = nothing waiting and every sweep done (a daily-retried row does
+ *   not hold it open); the no-copy line says what those rows are once the sweep is over
  * @changelog 1.3 - writeLists() and stampRows() are public for AddressListSweep
  *   (§ 5a, the other temporary half); the card carries the sweep's lines
  * @changelog 1.2 - progress() + renderProgressCard(): the card on Inbound Email →
@@ -86,7 +99,21 @@ class AddressListBackfill {
 		         OR m.iem_lists_attempt_time < now() - interval '" . self::RETRY_INTERVAL . "')
 		    AND ((m.iem_raw_storage_driver = 'remote' AND m.iem_iia_inbound_imap_account_id IS NOT NULL)
 		         OR COALESCE(length(m.iem_raw_message), 0) > 0
-		         OR m.iem_raw_storage_key IS NOT NULL)";
+		         OR m.iem_raw_storage_key IS NOT NULL
+		         OR " . self::archiveSourceSql() . ")";
+	}
+
+	/**
+	 * The archive source arm (§ 5b): the row is linked from an entry of an
+	 * import run that still holds its archive file. Correlated on m.
+	 */
+	private static function archiveSourceSql(): string {
+		return "EXISTS (SELECT 1 FROM mie_mail_import_entries e
+		                  JOIN mir_mail_import_runs r ON r.mir_mail_import_run_id = e.mie_mir_mail_import_run_id
+		                 WHERE e.mie_iem_inbound_email_message_id = m.iem_inbound_email_message_id
+		                   AND e.mie_state IN ('stored', 'dedup')
+		                   AND r.mir_fil_file_id IS NOT NULL
+		                   AND r.mir_delete_time IS NULL)";
 	}
 
 	/**
@@ -114,7 +141,8 @@ class AddressListBackfill {
 			          WHEN m.iem_to IS NOT NULL OR m.iem_cc IS NOT NULL THEN 'filled'
 			          WHEN NOT ((m.iem_raw_storage_driver = 'remote' AND m.iem_iia_inbound_imap_account_id IS NOT NULL)
 			                    OR COALESCE(length(m.iem_raw_message), 0) > 0
-			                    OR m.iem_raw_storage_key IS NOT NULL) THEN 'unrecoverable'
+			                    OR m.iem_raw_storage_key IS NOT NULL
+			                    OR " . self::archiveSourceSql() . ") THEN 'unrecoverable'
 			          WHEN m.iem_lists_attempt_time IS NOT NULL THEN 'retrying'
 			          ELSE 'waiting'
 			        END AS state,
@@ -152,7 +180,11 @@ class AddressListBackfill {
 		if ($waiting === 0 && $p['retrying'] === 0 && $p['unrecoverable'] === 0 && $p['filled'] === 0) {
 			return;
 		}
-		$finished = ($waiting === 0 && $p['retrying'] === 0);
+		// Finished = nothing left that could still be answered: no row waiting
+		// on a source, and every account's sweep walked to the end. Rows whose
+		// source is gone are retried daily by design and do not hold this open.
+		$swept = AddressListSweep::allFinished();
+		$finished = ($waiting === 0 && $swept);
 		echo '<div class="card mb-3' . ($finished ? ' border-success' : '') . '"><div class="card-body">';
 		echo '<h5 class="card-title mb-2">Recovering To/Cc on older messages '
 			. ($finished ? '<span class="badge bg-success">Finished</span>'
@@ -176,12 +208,20 @@ class AddressListBackfill {
 			echo '<li><strong>' . number_format($waiting) . '</strong> still to do: ' . implode('; ', $by_owner) . '.</li>';
 		}
 		if ($p['retrying'] > 0) {
-			echo '<li><strong>' . number_format($p['retrying']) . '</strong> asked and not answered by the source copy; asked again daily.</li>';
+			echo '<li><strong>' . number_format($p['retrying']) . '</strong> asked and not answered by the source copy '
+				. '(the message is gone from where it was pulled); asked again daily.</li>';
 		}
 		if ($p['unrecoverable'] > 0) {
-			echo '<li><strong>' . number_format($p['unrecoverable']) . '</strong> have no copy on this server. '
-				. 'They are looked for in the connected mail account instead (below); any still without To/Cc when '
-				. 'that finishes are not in the account either.</li>';
+			echo '<li><strong>' . number_format($p['unrecoverable']) . '</strong> have no copy on this server'
+				. ($swept
+					? ' and are not in the connected mail account either. Their To/Cc can only come from the '
+					  . 'archive they were imported from: upload it again and import it into the same mailbox '
+					  . '(nothing is created or deleted; every message matches its existing row), keep the '
+					  . 'archive, and open the reader with your vault unlocked — they move to <em>still to do</em> '
+					  . 'and fill from it.'
+					: '. They are being looked for in the connected mail account (below); any still without '
+					  . 'To/Cc when that finishes are not in the account either.')
+				. '</li>';
 		}
 		foreach (AddressListSweep::describe() as $line) {
 			echo '<li>Reading headers back from ' . htmlspecialchars($line) . '</li>';
@@ -220,7 +260,15 @@ class AddressListBackfill {
 			        m.iem_imap_folder AS folder,
 			        m.iem_imap_uid AS uid,
 			        m.iem_imap_uidvalidity AS uidvalidity,
-			        m.iem_message_id_header AS message_id
+			        m.iem_message_id_header AS message_id,
+			        (COALESCE(length(m.iem_raw_message), 0) > 0 OR m.iem_raw_storage_key IS NOT NULL) AS has_raw,
+			        (SELECT e.mie_mir_mail_import_run_id || '|' || e.mie_locator
+			           FROM mie_mail_import_entries e
+			           JOIN mir_mail_import_runs r ON r.mir_mail_import_run_id = e.mie_mir_mail_import_run_id
+			          WHERE e.mie_iem_inbound_email_message_id = m.iem_inbound_email_message_id
+			            AND e.mie_state IN ('stored', 'dedup')
+			            AND r.mir_fil_file_id IS NOT NULL AND r.mir_delete_time IS NULL
+			          ORDER BY e.mie_mail_import_entry_id DESC LIMIT 1) AS archive_ref
 			   FROM iem_inbound_email_messages m
 			  WHERE " . self::candidateWhere() . "
 			  ORDER BY m.iem_received_time DESC, m.iem_inbound_email_message_id DESC
@@ -233,17 +281,29 @@ class AddressListBackfill {
 		// first within each — the whole batch is the newest $max regardless.
 		$remote = array();
 		$stored = array();
+		$archive = array(); // run id => rows, read through that run's archive
 		foreach ($rows as $row) {
+			$has_raw = in_array($row['has_raw'], array(true, 't', '1', 1), true);
 			if ((string)$row['driver'] === 'remote' && intval($row['acc_id']) > 0) {
 				$remote[intval($row['acc_id']) . '|' . (string)$row['folder']][] = $row;
-			} else {
+			} elseif ($has_raw || empty($row['archive_ref'])) {
 				$stored[] = $row;
+			} else {
+				list($run_id, $locator) = explode('|', (string)$row['archive_ref'], 2);
+				$row['locator'] = $locator;
+				$archive[intval($run_id)][] = $row;
 			}
 		}
 
 		$ingestors = array(); // one open IMAP connection per account for the batch
 		$done = 0;
 		try {
+			foreach ($archive as $run_id => $group) {
+				if ($deadline !== null && microtime(true) >= $deadline) {
+					return $done;
+				}
+				$done += self::fillArchiveGroup(intval($run_id), $group, $db, $deadline);
+			}
 			foreach ($remote as $group) {
 				foreach (array_chunk($group, self::FETCH_CHUNK) as $chunk) {
 					if ($deadline !== null && microtime(true) >= $deadline) {
@@ -352,6 +412,70 @@ class AddressListBackfill {
 				throw $e;
 			} catch (\Throwable $e) {
 				error_log('AddressListBackfill: could not fill message ' . $msg_id . ': ' . $e->getMessage());
+			}
+		}
+		return $done;
+	}
+
+	/**
+	 * Rows read through one import run's archive (§ 5b): open the run's
+	 * reader once, then per row stamp, read the message at its locator, take
+	 * its header block, write the lists. A locator the archive no longer
+	 * answers stays stamped for the daily retry; an archive that will not
+	 * open stamps the whole group the same way. A window that closes
+	 * mid-group unstamps the rows not yet written and rethrows.
+	 */
+	private static function fillArchiveGroup(int $run_id, array $group, PDO $db, ?float $deadline): int {
+		$ids = array_map(function ($row) { return intval($row['msg_id']); }, $group);
+		self::stamp($db, $ids);
+		try {
+			$run = new MailImportRun($run_id, TRUE);
+			if (!$run->key) {
+				throw new RuntimeException('import run ' . $run_id . ' is gone');
+			}
+			list($reader, $path) = (new MailArchiveImporter($run))->readerAndPath();
+		} catch (\Throwable $e) {
+			error_log('AddressListBackfill: archive of import run ' . $run_id . ' could not be opened: ' . $e->getMessage());
+			return 0;
+		}
+		$done = 0;
+		foreach ($group as $i => $row) {
+			if ($deadline !== null && microtime(true) >= $deadline) {
+				$rest = array();
+				foreach ($group as $j => $r) {
+					if ($j >= $i) { $rest[] = intval($r['msg_id']); }
+				}
+				self::unstamp($db, $rest); // not asked anything: no wait owed
+				break;
+			}
+			$msg_id = intval($row['msg_id']);
+			try {
+				$raw = $reader->read($path, (string)$row['locator']);
+				if (trim($raw) === '') {
+					continue; // stays stamped: the archive holds nothing at this position
+				}
+				$block = MailArchiveReader::headerBlock($raw);
+				$ok = SealedEgressGuard::isolate(function () use ($msg_id, $block) {
+					$msg = new InboundEmailMessage($msg_id, TRUE);
+					if (!$msg->key) {
+						return false;
+					}
+					$lists = MailAddressList::fromHeaderBlock($block);
+					return self::writeLists($msg, $lists['to'], $lists['cc']);
+				});
+				if ($ok) {
+					$done++;
+				}
+			} catch (VaultLockedException $e) {
+				$rest = array();
+				foreach ($group as $j => $r) {
+					if ($j >= $i) { $rest[] = intval($r['msg_id']); }
+				}
+				self::unstamp($db, $rest);
+				throw $e;
+			} catch (\Throwable $e) {
+				error_log('AddressListBackfill: could not fill message ' . $msg_id . ' from the archive of run '
+					. $run_id . ': ' . $e->getMessage());
 			}
 		}
 		return $done;
