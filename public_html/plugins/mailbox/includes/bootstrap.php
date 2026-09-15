@@ -22,7 +22,8 @@
  * (specs/in_window_deferred_work.md), so a Fortress backlog drains anywhere the
  * owner is on the site with an open window, not only on a mailbox view.
  *
- * @version 1.14
+ * @version 1.15
+ * @changelog 1.15 - registers the TEMPORARY mailbox_address_lists_sweep consumer (§ 5a)
  * @changelog 1.14 - registers the mailbox_address_lists deferred-work consumer
  *   (AddressListBackfill): recovers To / Cc for rows stored before iem_to /
  *   iem_cc, ahead of the inline-image backfill.
@@ -376,6 +377,20 @@ VaultDeferredWork::register(
 	},
 	function (int $user_id, VaultKey $key, float $deadline): int {
 		return AddressListBackfill::drainForUser($user_id, $key, AddressListBackfill::DEFAULT_MAX, $deadline);
+	}
+);
+
+// TEMPORARY (specs/mailbox_to_cc_lists.md § 5a) — remove this block with
+// AddressListSweep.php. Rows with no copy of their headers on this server get
+// their To/Cc read back from the connected IMAP account in bulk, in-window.
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/AddressListSweep.php'));
+VaultDeferredWork::register(
+	'mailbox_address_lists_sweep',
+	function (int $user_id): bool {
+		return AddressListSweep::hasWork($user_id);
+	},
+	function (int $user_id, VaultKey $key, float $deadline): int {
+		return AddressListSweep::drainForUser($user_id, $key, $deadline);
 	}
 );
 
