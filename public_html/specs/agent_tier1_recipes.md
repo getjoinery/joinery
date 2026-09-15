@@ -194,7 +194,7 @@ to a human before any driver exists.
 **Recipes, in build order:**
 
 1. `fail2ban`: check the unit is active; repair `host_converge`; verify
-   active and a jail count; three attempts in an hour; escalate.
+   active and a jail count; three attempts per failing run; escalate.
 2. `agent_supervision`: check the supervisor facts `restart_agent` already
    proves; repair `run_installer install_agent.sh`; this is the recipe that
    makes requirement 2 hold on a minutes clock instead of the timer's daily
@@ -213,7 +213,7 @@ service. 09:03 verify: active, sshd jail present. Ledger written; the site's
 admin notice reads "fail2ban repaired 09:03". Nobody was called.
 
 **Same box, the operator hand-edited the jail file.** The installer refuses
-to overwrite a file it did not write, three times in an hour. The recipe
+to overwrite a file it did not write, three times in the run. The recipe
 opens a case. Unpaired: the admin page shows the case with the three
 transcripts and the superadmins get one mail. A human reads the transcript,
 sees their own edit, fixes it or sets the hold.
@@ -416,9 +416,18 @@ review is in the file header before the code.
    two words and the mode); `Loop.Tick` is the state machine over an
    injected clock, lock and marker, 10-minute tick, two consecutive
    failing ticks (an unknown breaks the run, the in-memory count starts at
-   zero per process), three attempts per rolling hour spaced 10 and 30
-   minutes from the previous attempt's end, a fourth is an escalation held
-   open until a pass with further failures appended by id; a lost
+   zero per process), three attempts per failing run — the attempts since
+   the check last passed, a repair last verified or the escalation closed
+   — spaced 10 and 30 minutes from the previous attempt's end and each due
+   on the first tick at or after its wait (a tick landing up to half an
+   interval early still counts), a fourth is an escalation held open until
+   a pass with further failures appended by id (**B4, 2026-09-15:** the
+   rule as first built counted attempts in a rolling hour, and on a real
+   clock the first attempt of a run had aged out of the hour before the
+   third landed, while the timer's jitter cost each wait an extra tick;
+   the docker-prod host made six report-only attempts in three hours and
+   never a case. The fake-clock tests ticked exactly and passed. Fixed in
+   agent 1.32.0, pinned with a jittered clock and a spread run); a lost
    `TryLock` is a `busy` line, not an attempt; an attempt writes the job
    marker through `markRecipeRunning` (pid first, then `recipe <name>`);
    read-back ledger `/etc/joinery-agent/ledger/<recipe>.jsonl` (0700 dir,
