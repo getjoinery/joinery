@@ -31,6 +31,8 @@
  *
  * Run: php plugins/server_manager/tests/agent_case_intake_test.php
  *
+ * @version 1.1 - an unchanged case is not written on every poll; a newer note with a lower count is taken;
+ *                reports_failed_units loads only the nodes with a failed unit
  * @version 1.0
  */
 
@@ -132,6 +134,25 @@ check(count($rows) === 1 && (int)$rows[0]->get('inc_note_count') === 3
 $outcomes = AgentChannelEndpoint::intake_cases($node, ['recipe:fail2ban' => a_case(['notes' => 3, 'body' => null])]);
 check(($outcomes['recipe:fail2ban'] ?? '') === 'unchanged', 'The same summary again changes nothing', json_encode($outcomes));
 
+// The same summary rides every poll (seconds apart), so a summary that
+// changed nothing must not write the row every time: an open case is
+// re-stamped as still seen at most once per CASE_SEEN_INTERVAL.
+$row = case_rows_for($node_id)[0];
+$recent = gmdate('Y-m-d H:i:s', time() - 60);
+$row->set('inc_last_seen_time', $recent);
+$row->save();
+AgentChannelEndpoint::intake_cases($node, ['recipe:fail2ban' => a_case(['notes' => 3, 'body' => null])]);
+$row = case_rows_for($node_id)[0];
+check(strtotime((string)$row->get('inc_last_seen_time') . ' UTC') === strtotime($recent . ' UTC'),
+	'An unchanged open case seen a minute ago is not written again', (string)$row->get('inc_last_seen_time'));
+$long_ago = gmdate('Y-m-d H:i:s', time() - 2 * AgentChannelEndpoint::CASE_SEEN_INTERVAL);
+$row->set('inc_last_seen_time', $long_ago);
+$row->save();
+AgentChannelEndpoint::intake_cases($node, ['recipe:fail2ban' => a_case(['notes' => 3, 'body' => null])]);
+$row = case_rows_for($node_id)[0];
+check(strtotime((string)$row->get('inc_last_seen_time') . ' UTC') > strtotime($long_ago . ' UTC'),
+	'An unchanged open case not seen for longer than the interval is re-stamped as still seen once', (string)$row->get('inc_last_seen_time'));
+
 $outcomes = AgentChannelEndpoint::intake_cases($node, ['recipe:fail2ban' => a_case(['status' => 'closed', 'notes' => 3,
 	'closed' => '2026-09-14T13:00:00Z', 'close_reason' => 'the check passes: fail2ban is active with 1 jail(s): sshd', 'body' => null])]);
 check(($outcomes['recipe:fail2ban'] ?? '') === 'closed', 'The close the node reports is recorded', json_encode($outcomes));
@@ -140,6 +161,18 @@ check(count($rows) === 1 && !$rows[0]->is_open() && (string)$rows[0]->get('inc_c
 	&& strpos((string)$rows[0]->get('inc_close_reason'), 'passes') !== false,
 	'The closed case carries the node\'s close time and reason');
 check(IncidentRecord::open_for($node_id, 'recipe:fail2ban') === null, 'No open case remains for the source');
+
+// A closed summary rides until the next escalation replaces it, on every
+// poll of every node that ever had a case: it is never written.
+$row = case_rows_for($node_id)[0];
+$row->set('inc_last_seen_time', $long_ago);
+$row->save();
+$outcomes = AgentChannelEndpoint::intake_cases($node, ['recipe:fail2ban' => a_case(['status' => 'closed', 'notes' => 3,
+	'closed' => '2026-09-14T13:00:00Z', 'close_reason' => 'the check passes: fail2ban is active with 1 jail(s): sshd', 'body' => null])]);
+$row = case_rows_for($node_id)[0];
+check(($outcomes['recipe:fail2ban'] ?? '') === 'unchanged'
+	&& strtotime((string)$row->get('inc_last_seen_time') . ' UTC') === strtotime($long_ago . ' UTC'),
+	'A closed summary riding again is unchanged and writes nothing, however long ago it was seen', json_encode($outcomes) . ' ' . $row->get('inc_last_seen_time'));
 
 $outcomes = AgentChannelEndpoint::intake_cases($node, ['recipe:fail2ban' => a_case(['status' => 'open', 'body' => null])]);
 check(strpos((string)($outcomes['recipe:fail2ban'] ?? ''), 'refused') === 0
@@ -162,6 +195,22 @@ $open = array_values(array_filter($rows, function ($r) { return $r->is_open(); }
 check(count($rows) === 2 && count($open) === 1 && (int)$open[0]->get('inc_note_count') === 20,
 	'Twenty polls carrying the same open case are one row with twenty notes, not twenty cases',
 	count($rows) . ' rows, ' . count($open) . ' open');
+
+// The node's ledger was trimmed and its agent restarted: its count starts
+// again from a lower number, but the note it carries is newer than the one
+// stored, so the note is taken and the count never goes down.
+$outcomes = AgentChannelEndpoint::intake_cases($node, ['recipe:fail2ban' => a_case(['id' => 7, 'opened' => '2026-09-14T15:00:00Z',
+	'notes' => 2, 'last_note' => 'still down after a restart', 'last_note_time' => '2026-09-14T16:00:00Z', 'body' => null])]);
+$open = IncidentRecord::open_for($node_id, 'recipe:fail2ban');
+check(($outcomes['recipe:fail2ban'] ?? '') === 'appended' && (int)$open->get('inc_note_count') === 20
+	&& (string)$open->get('inc_last_note') === 'still down after a restart'
+	&& strtotime((string)$open->get('inc_last_note_time') . ' UTC') === strtotime('2026-09-14T16:00:00Z'),
+	'A newer note with a lower count is taken; the count stays at its high-water mark', json_encode($outcomes) . ' ' . json_encode($open->get('inc_note_count')));
+$outcomes = AgentChannelEndpoint::intake_cases($node, ['recipe:fail2ban' => a_case(['id' => 7, 'opened' => '2026-09-14T15:00:00Z',
+	'notes' => 2, 'last_note' => 'an old note replayed', 'last_note_time' => '2026-09-14T15:10:00Z', 'body' => null])]);
+$open = IncidentRecord::open_for($node_id, 'recipe:fail2ban');
+check(($outcomes['recipe:fail2ban'] ?? '') === 'unchanged' && (string)$open->get('inc_last_note') === 'still down after a restart',
+	'A lower count with an older note is a replay: unchanged', json_encode($outcomes));
 
 $outcomes = AgentChannelEndpoint::intake_cases($node, ['recipe:fail2ban' => a_case(['id' => 5, 'opened' => '2026-09-14T14:00:00Z'])]);
 check(strpos((string)($outcomes['recipe:fail2ban'] ?? ''), 'refused') === 0
@@ -339,6 +388,27 @@ if ($shown !== null) {
 		'The failed-unit notice links to the node page by id');
 	check(FleetAttentionNotice::failed_units_for([]) === '' && FleetAttentionNotice::open_cases_for([], []) === '',
 		'Both fleet notices are silent with nothing to say');
+
+	// The failed-unit notice asks the database which nodes to load, so a
+	// healthy fleet costs no decoding on an admin page.
+	$reporting = function () use ($node_id): bool {
+		foreach (new MultiManagedNode(['reports_failed_units' => true, 'deleted' => false]) as $n) {
+			if ((int)$n->key === $node_id) { return true; }
+		}
+		return false;
+	};
+	$node->set('mgn_last_host_report', json_encode(JobResultProcessor::sanitise_host_report(['failed_units' => ['fail2ban.service']])));
+	$node->save();
+	check($reporting(), 'A node whose report names a failed unit is loaded for the failed-unit notice');
+	$node->set('mgn_last_host_report', json_encode(JobResultProcessor::sanitise_host_report(['failed_units' => []])));
+	$node->save();
+	check(!$reporting(), 'A node whose report names no failed unit is not loaded');
+	$node->set('mgn_last_host_report', json_encode(JobResultProcessor::sanitise_host_report([])));
+	$node->save();
+	check(!$reporting(), 'A node whose report could not list units (unknown) is not loaded');
+	$node->set('mgn_last_host_report', null);
+	$node->save();
+	check(!$reporting(), 'A node with no report is not loaded');
 
 	$mail = RecipeCaseNotice::mail_body([
 		'id' => 9, 'source' => 'recipe:fail2ban', 'recipe' => 'fail2ban', 'status' => 'open',

@@ -23,12 +23,27 @@
  * "as reported by the agent's ledger" and carry no link that acts. The agent
  * never reads the file back.
  *
+ * The record carries the time the agent rendered it, and the agent renders
+ * it again on every failing tick while the case is open. So a record whose
+ * rendered time is older than a day is one the agent has stopped writing —
+ * the agent is down, or the file outlived it — and not a fault it still
+ * reports. The notice says when the agent last reported and, past a day,
+ * that the record may be out of date; the mail stops until the agent
+ * renders it again.
+ *
+ * @version 1.1 - the rendered time is read: the notice shows when the agent last reported the case
+ *                and says so when that is more than a day ago; the mail is sent only for a case
+ *                the agent rendered within the day, so a stopped agent's frozen record mails once
+ *                at most, not daily forever
  * @version 1.0
  */
 class RecipeCaseNotice {
 
 	/** The one wording, so a forged record is still labelled as a report. */
 	const AS_REPORTED = "as reported by the agent's ledger";
+
+	/** A record the agent has not rendered for this long is no longer a live report. */
+	const STALE_AFTER = 86400;
 
 	/** The delivery a rendered case names when a management node is polling for it. */
 	const DELIVERY_PLANE = 'management node';
@@ -80,11 +95,35 @@ class RecipeCaseNotice {
 		return mb_strlen($value, 'UTF-8') > $max ? mb_substr($value, 0, $max, 'UTF-8') . '…' : $value;
 	}
 
+	/**
+	 * When the agent rendered the record, as a Unix time, or null when the
+	 * record does not say (or says it in a shape the agent never writes).
+	 */
+	public static function rendered_at(array $rec): ?int {
+		$value = $rec['rendered'] ?? null;
+		if (!is_string($value) || !preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/', $value)) {
+			return null;
+		}
+		$t = strtotime($value);
+		return $t === false ? null : $t;
+	}
+
+	/**
+	 * Whether the record is one the agent stopped rendering: older than
+	 * STALE_AFTER, or carrying no rendered time at all. A rendered time in
+	 * the future (a clock apart from ours) is fresh.
+	 */
+	public static function is_stale(array $rec, int $now): bool {
+		$rendered = self::rendered_at($rec);
+		return $rendered === null || ($now - $rendered) > self::STALE_AFTER;
+	}
+
 	/** The notice for one decoded record. Public and pure so the wording can be tested. */
-	public static function forRecord(array $rec): string {
+	public static function forRecord(array $rec, ?int $now = null): string {
 		if (($rec['status'] ?? '') !== 'open') {
 			return '';
 		}
+		$now = $now ?? time();
 		$e = function ($v) { return htmlspecialchars(self::text($v), ENT_QUOTES, 'UTF-8'); };
 		$recipe = self::text($rec['recipe'] ?? '');
 		$id = (int)($rec['id'] ?? 0);
@@ -103,8 +142,20 @@ class RecipeCaseNotice {
 		$body .= $paired
 			? ' The management node this host is paired to has the case too.'
 			: ' This host is not paired to a management node, so a person is the next actor. The case closes itself when the check passes.';
+		// The body is bounded as one string (a forged reason is capped with
+		// it), so the report time is its own sentence, never cut off by it.
+		$rendered = self::rendered_at($rec);
+		if ($rendered === null) {
+			$reported = 'The record does not say when the agent last reported it.';
+		} else {
+			$reported = 'Last reported by the agent at ' . gmdate('Y-m-d H:i', $rendered) . ' UTC.';
+			if (self::is_stale($rec, $now)) {
+				$reported .= ' The agent reports an open case on every check, and it has not reported this one for more than a day,'
+					. ' so the record may be out of date: check that the agent is running.';
+			}
+		}
 		return self::css()
-			. '<div class="jy-case-notice" role="alert"><strong>' . $e($lead) . '</strong> ' . $e($body) . '</div>';
+			. '<div class="jy-case-notice" role="alert"><strong>' . $e($lead) . '</strong> ' . $e($body) . ' ' . $e($reported) . '</div>';
 	}
 
 	/**
@@ -145,6 +196,8 @@ class RecipeCaseNotice {
 					. (trim((string)($a['detail'] ?? '')) !== '' ? ' - ' . $plain($a['detail'] ?? '', 200) : '');
 			}
 		}
+		$rendered = self::rendered_at($rec);
+		$lines[] = 'Last reported by the agent: ' . ($rendered === null ? 'not recorded' : gmdate('Y-m-d H:i', $rendered) . ' UTC');
 		$lines[] = '';
 		$lines[] = 'This host is not paired to a management node, so a person is the next actor.';
 		$lines[] = 'The case closes itself when the recipe\'s check passes. The full record is ' . 'cache/recipes/' . $recipe . '.case.json under the site root,';

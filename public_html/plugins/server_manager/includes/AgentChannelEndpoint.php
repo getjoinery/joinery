@@ -36,6 +36,10 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.18 - a case that changed nothing is not saved on every poll: an open case is re-stamped as
+ *                 seen at most every CASE_SEEN_INTERVAL and a closed summary is never written; a note is
+ *                 taken when its time is newer even if the node's count restarted lower (the count never
+ *                 goes down)
  * @version 1.17 - a join carries the machine's addresses (ajr_addresses, validated as addresses, at most
  *                 AgentJoinRequest::MAX_ADDRESSES); approval matches the placement record by any of them
  *                 and keys the node by the placement's host, so a dual-stack host joining over IPv6 links
@@ -141,6 +145,8 @@ class AgentChannelEndpoint {
 	const MAX_OPEN_CASES_PER_NODE  = 8;
 	const MAX_CASE_TEXT            = 512;
 	const MAX_CASE_ATTEMPTS        = 10;
+	/** An open case that changed nothing is re-stamped as still seen no more often than this (seconds). */
+	const CASE_SEEN_INTERVAL       = 600;
 	const MAX_CASE_ATTEMPT_DETAIL  = 1024;
 	/** Sources a case may name that are not a recipe the node reports. */
 	const CASE_SOURCES = ['classifier:unexplained_root'];
@@ -1379,7 +1385,17 @@ class AgentChannelEndpoint {
 		error_log('[AgentChannel] case from node #' . $node_id . ' (' . $source . ') ' . $why);
 	}
 
-	/** Store, append to or close one normalised case. Returns the outcome word. */
+	/**
+	 * Store, append to or close one normalised case. Returns the outcome word.
+	 *
+	 * A case rides every claim, so most calls change nothing: an open case is
+	 * re-stamped as still seen at most once per CASE_SEEN_INTERVAL and a
+	 * closed summary, which rides until the next escalation replaces it, is
+	 * never written at all. A note is taken when the node's count is higher
+	 * OR its note time is newer: after a ledger trim and a restart the node's
+	 * count starts again from a lower number, and the newest note is still
+	 * the newest. The stored count never goes down.
+	 */
 	private static function record_case(int $node_id, array $c, string $now): string {
 		$existing = IncidentRecord::find($node_id, $c['source'], $c['id']);
 		if ($existing !== null) {
@@ -1387,9 +1403,10 @@ class AgentChannelEndpoint {
 				return 'refused: case #' . $c['id'] . ' is closed here and a closed case does not reopen';
 			}
 			$outcome = 'unchanged';
-			$existing->set('inc_last_seen_time', $now);
-			if ($c['notes'] > (int)$existing->get('inc_note_count')) {
-				$existing->set('inc_note_count', $c['notes']);
+			$stored_count = (int)$existing->get('inc_note_count');
+			if ($c['notes'] > $stored_count
+				|| self::is_newer($c['last_note_time'], $existing->get('inc_last_note_time'))) {
+				$existing->set('inc_note_count', max($c['notes'], $stored_count));
 				$existing->set('inc_last_note', $c['last_note']);
 				$existing->set('inc_last_note_time', $c['last_note_time']);
 				$outcome = 'appended';
@@ -1404,6 +1421,16 @@ class AgentChannelEndpoint {
 				$existing->set('inc_close_reason', $c['close_reason']);
 				$outcome = 'closed';
 			}
+			if ($outcome === 'unchanged') {
+				if (!$existing->is_open()) {
+					return $outcome;
+				}
+				$seen = trim((string)$existing->get('inc_last_seen_time'));
+				if ($seen !== '' && strtotime($seen . ' UTC') > strtotime($now . ' UTC') - self::CASE_SEEN_INTERVAL) {
+					return $outcome;
+				}
+			}
+			$existing->set('inc_last_seen_time', $now);
 			$existing->save();
 			return $outcome;
 		}
@@ -1579,6 +1606,18 @@ class AgentChannelEndpoint {
 	}
 
 	/** An RFC 3339 UTC time off the wire as a stored timestamp, or null. */
+	/** Whether a reported note time (case_time form, or null) is later than a stored one. */
+	private static function is_newer(?string $reported, $stored): bool {
+		if ($reported === null) {
+			return false;
+		}
+		$stored = trim((string)$stored);
+		if ($stored === '') {
+			return true;
+		}
+		return strtotime($reported . ' UTC') > strtotime($stored . ' UTC');
+	}
+
 	public static function case_time($value): ?string {
 		if (!is_string($value) || !preg_match('/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?Z$/', $value, $m)) {
 			return null;

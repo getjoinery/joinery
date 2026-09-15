@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.19 - MultiManagedNode option reports_failed_units: the nodes whose latest host report
+ *                 names a failed unit, answered by the database from the stored JSON
  * @version 1.18 - hosts_site(): whether this node has a Joinery site to ask about. A host node in
  *                 machine posture (the Docker host, a bare box) has none, and every question that
  *                 only a site can answer — its recovery key first — is not put to it
@@ -383,6 +385,17 @@ class MultiManagedNode extends SystemMultiBase {
 
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$filters = [];
+
+		// Nodes whose latest host report names at least one failed unit. The
+		// report is stored in the shape sanitise_host_report gives it, where
+		// failed_units is a list or the string unknown; a node with no report
+		// has a null there and is out.
+		if (!empty($this->options['reports_failed_units'])) {
+			// Both halves are evaluated whatever the first says, so the second
+			// must be safe on a string: a jsonb compare, not an array length.
+			$filters["jsonb_typeof(mgn_last_host_report->'failed_units')"] =
+				"= 'array' AND mgn_last_host_report->'failed_units' <> '[]'::jsonb";
+		}
 
 		if (isset($this->options['slug'])) {
 			$filters['mgn_slug'] = [$this->options['slug'], PDO::PARAM_STR];

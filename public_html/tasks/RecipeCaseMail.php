@@ -13,10 +13,18 @@ require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
  * to a management node (its card and notice show it there), sends nothing and
  * clears its recipe from the log, so the next local case mails at once.
  *
+ * The agent renders an open case again on every failing tick, so a record
+ * it has not rendered for a day (RecipeCaseNotice::is_stale) is a record the
+ * agent stopped writing, not a fault it still reports: no mail for it until
+ * the agent renders it again, and the log entry stays, so a daily mail does
+ * not restart from zero the moment the agent comes back. The notice keeps
+ * showing the record, saying when the agent last reported it.
+ *
  * The body is plain text with no link, because the file it renders can be
  * forged by the web user: a forged case is a lie to the admin and one mail,
  * nothing anyone acts on by clicking.
  *
+ * @version 1.1 - a case the agent has not rendered within a day is not mailed
  * @version 1.0
  */
 class RecipeCaseMail implements ScheduledTaskInterface {
@@ -43,6 +51,7 @@ class RecipeCaseMail implements ScheduledTaskInterface {
 	public static function mail(array $records, array $log, int $now, array $recipients, string $site, callable $send): array {
 		$sent = 0;
 		$open = 0;
+		$stale = 0;
 		foreach ($records as $recipe => $rec) {
 			// A paired node's case rides the poll to the management node, whose
 			// card and notice show it; the mail is the unpaired path only.
@@ -51,6 +60,10 @@ class RecipeCaseMail implements ScheduledTaskInterface {
 				continue;
 			}
 			$open++;
+			if (RecipeCaseNotice::is_stale($rec, $now)) {
+				$stale++;
+				continue;
+			}
 			if (isset($log[$recipe]) && ($now - (int)$log[$recipe]) < self::ONCE_PER) {
 				continue;
 			}
@@ -75,9 +88,10 @@ class RecipeCaseMail implements ScheduledTaskInterface {
 				$sent++;
 			}
 		}
-		return array('log' => $log, 'sent' => $sent, 'message' => $open === 0
+		return array('log' => $log, 'sent' => $sent, 'stale' => $stale, 'message' => $open === 0
 			? 'No open local case'
-			: $open . ' open local case(s), ' . $sent . ' mail(s) sent');
+			: $open . ' open local case(s), ' . $sent . ' mail(s) sent'
+				. ($stale > 0 ? ', ' . $stale . ' not rendered by the agent within a day and not mailed' : ''));
 	}
 
 	/** Every live superadmin's address. */
