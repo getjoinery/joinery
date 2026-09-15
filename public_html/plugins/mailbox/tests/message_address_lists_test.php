@@ -25,7 +25,7 @@
  *
  * Run: php tests/run.php db --filter=message_address_lists
  *
- * @version 1.0
+ * @version 1.1 - the typed compose field: MailboxSender::parseAddressList keeps names
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -160,6 +160,39 @@ $raw_row = function (int $id) use ($db) {
 	return $db->query('SELECT * FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = ' . $id)
 		->fetch(PDO::FETCH_ASSOC);
 };
+
+// ---- The typed compose field ----------------------------------------------
+section('MailboxSender::parseAddressList keeps names and refuses junk');
+
+$parse = new ReflectionMethod('MailboxSender', 'parseAddressList');
+$parse->setAccessible(true);
+$sender = (new ReflectionClass('MailboxSender'))->newInstanceWithoutConstructor();
+$typed = function ($raw) use ($parse, $sender) { return $parse->invoke($sender, $raw); };
+
+check($typed('"Ford, Tom" <tford@x.example>, bob@x.example; "Ann Lee" <ann@x.example> carol@x.example')
+		=== array(
+			array('email' => 'tford@x.example', 'name' => 'Ford, Tom'),
+			array('email' => 'ann@x.example',   'name' => 'Ann Lee'),
+			array('email' => 'bob@x.example',   'name' => ''),
+			array('email' => 'carol@x.example', 'name' => ''),
+		),
+	'quoted names keep their commas; bare addresses split on comma, semicolon or space');
+check($typed("a@x.example b@x.example\tc@x.example") === array(
+			array('email' => 'a@x.example', 'name' => ''),
+			array('email' => 'b@x.example', 'name' => ''),
+			array('email' => 'c@x.example', 'name' => ''),
+		),
+	'whitespace alone separates bare addresses');
+check($typed('bob@x.example, Bob Smith <bob@x.example>') === array(array('email' => 'bob@x.example', 'name' => 'Bob Smith')),
+	'a repeated address is one recipient and keeps the name it was given');
+check(MailAddressList::format($typed('"Ford, Tom" <tford@x.example>, bob@x.example'))
+		=== '"Ford, Tom" <tford@x.example>, bob@x.example',
+	'what the sender parses is what the Sent row stores');
+$refused = 0;
+foreach (array('notanemail', 'a@x.example, junk', 'Bob <not-an-email>') as $bad) {
+	try { $typed($bad); } catch (MailboxSenderException $e) { $refused++; }
+}
+check($refused === 3, 'a token that is not an address is refused, never dropped');
 
 // ---- Plaintext push ingest -------------------------------------------------
 section('Plaintext push ingest stores both lists and the reader gets them');
