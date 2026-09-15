@@ -3200,6 +3200,42 @@ $hk_gate = PathHelper::getIncludePath('tests/integration/host_housekeeping_gate.
 check(is_file($hk_gate) && strpos((string)file_get_contents($hk_gate), '@joinery-test') !== false,
 	'the override-mode gate ships and is declared');
 
+section('A host agent is born at the Docker install and nowhere else (specs/docker_host_agent.md)');
+
+// The owner's rule, 2026-09-15: if the standard Docker install places the host
+// agent, a hand catch-up on a box built before that is acceptable ONLY because
+// there is no other normal moment it could arrive. This keeps that true: one
+// caller of --siteless in the whole executable tree, inside install.sh's
+// Docker-install step.
+$siteless_callers = [];
+foreach (array_merge(glob($tools_dir . '/*.sh'), glob(dirname($tools_dir) . '/sysadmin_tools/*.sh')) as $sh) {
+    foreach (file($sh) as $ln => $line) {
+        $bare = trim($line);
+        if ($bare === '' || $bare[0] === '#') continue;
+        if (strpos($line, 'install_agent.sh') !== false && strpos($line, '--siteless') !== false) {
+            $siteless_callers[] = basename($sh) . ':' . ($ln + 1);
+        }
+    }
+}
+check(count($siteless_callers) === 1 && strpos($siteless_callers[0], 'install.sh:') === 0,
+    'install_agent.sh --siteless has exactly one caller, in install.sh', implode(', ', $siteless_callers));
+$docker_fn = substr($install_src, strpos($install_src, 'install_docker_host_agent() {'));
+$docker_fn = substr($docker_fn, 0, strpos($docker_fn, "\n}\n"));
+check(strpos($docker_fn, '"$SCRIPT_DIR/install_agent.sh" --siteless --dist-dir="$dist_dir" --enable') !== false,
+    'and that caller is the Docker install step, placing the agent from the tree it runs from');
+check(substr_count($install_src, 'install_docker_host_agent "$MGMT_NODE_URL" "$NODE_NAME"') === 2,
+    'which both branches of install.sh docker run (fresh Docker, Docker already present)');
+check(strpos($docker_fn, 'joinery-agent join "${join_args[@]}"') !== false,
+    'and joins the management node in the same run when one is named');
+$php_callers = [];
+foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator(PathHelper::getRootDir() . '/plugins/server_manager/includes')) as $f) {
+    if (substr((string)$f, -4) === '.php' && strpos((string)file_get_contents((string)$f), '--siteless') !== false) {
+        $php_callers[] = basename((string)$f);
+    }
+}
+check(count($php_callers) === 0,
+    'no plane-side job builder hands a node an install_agent.sh --siteless step', implode(', ', $php_callers));
+
 section('A machine with no site converges through the bundle (specs/agent_tier1_recipes.md item 6b)');
 
 // The Docker host had no agent and a fail2ban dead for five months; the eight

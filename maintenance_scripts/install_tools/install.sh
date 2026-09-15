@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#VERSION 2.77 - A host with no agent artifact is told to re-run install.sh docker from a current
+#              tree, not to run install_agent.sh --siteless by hand: the Docker install is the one
+#              moment a host agent is placed (specs/docker_host_agent.md install rule, pinned).
 #VERSION 2.76 - fail2ban is configured by host_housekeeping.sh, the installer the host
 #               timer also runs. The inline recipe copied jail.conf to jail.local and
 #               appended a second [sshd]; fail2ban 1.0.2 refuses a repeated section, so
@@ -2023,7 +2026,7 @@ install_docker_host_agent() {
     print_step "Installing the Joinery host agent (siteless)..."
     if [ ! -f "$dist_dir/manifest.json" ]; then
         print_warning "No agent artifact at $dist_dir — skipping host agent install."
-        print_warning "Install it later with: install_agent.sh --siteless --dist-dir=DIR --enable"
+        print_warning "Re-run install.sh docker from a current release tree to place it; nothing else installs a host agent."
         return 0
     fi
 

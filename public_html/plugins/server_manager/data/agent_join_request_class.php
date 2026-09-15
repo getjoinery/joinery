@@ -13,6 +13,9 @@
  * key fingerprint and tells the operator to compare it against what the node's
  * own panel shows.
  *
+ * @version 1.3 - ajr_addresses: every address the machine says it answers on, so approval can match
+ *                the placement record whichever family the request travelled over (a dual-stack host
+ *                joins over IPv6 while its placement is keyed by IPv4)
  * @version 1.2 - recently_rejected() and reopen(): a rejection is reversible for a day; the agent keeps asking with the same key
  * @version 1.1 - ajr_mgn_node_id deletion action declared: a deleted node clears the pointer and
  *                keeps the introduction record; undeclared it registered as prevent
@@ -54,6 +57,7 @@ class AgentJoinRequest extends SystemBase {
 		'ajr_public_key'    => array('type'=>'varchar(64)', 'is_nullable'=>false, 'unique'=>true),
 		'ajr_fingerprint'   => array('type'=>'varchar(16)', 'is_nullable'=>false),
 		'ajr_source_ip'     => array('type'=>'varchar(64)'),
+		'ajr_addresses'     => array('type'=>'varchar(1024)'),
 		'ajr_agent_version' => array('type'=>'varchar(20)'),
 		'ajr_status'        => array('type'=>'varchar(16)', 'is_nullable'=>false, 'default'=>'pending', 'allowed_values'=>array('pending', 'approved', 'rejected')),
 		'ajr_mgn_node_id'   => array('type'=>'int8'),
@@ -69,6 +73,33 @@ class AgentJoinRequest extends SystemBase {
 	 * join tests, so a drift on either side fails a suite before it strands a
 	 * fleet at mismatched fingerprints.
 	 */
+	/** Up to MAX_ADDRESSES addresses a machine may report at join. */
+	const MAX_ADDRESSES = 16;
+
+	/**
+	 * The addresses a join can be matched by: what the machine reported, plus
+	 * the address the request came from, the source first. Each is a valid
+	 * address (intake refused anything else), de-duplicated, at most
+	 * MAX_ADDRESSES + 1.
+	 */
+	public function addresses(): array {
+		$out = [];
+		$source = trim((string)$this->get('ajr_source_ip'));
+		if ($source !== '' && filter_var($source, FILTER_VALIDATE_IP) !== false) {
+			$out[] = $source;
+		}
+		foreach (explode(',', (string)$this->get('ajr_addresses')) as $a) {
+			$a = trim($a);
+			if ($a !== '' && filter_var($a, FILTER_VALIDATE_IP) !== false && !in_array($a, $out, true)) {
+				$out[] = $a;
+			}
+			if (count($out) > self::MAX_ADDRESSES) {
+				break;
+			}
+		}
+		return $out;
+	}
+
 	public static function fingerprint(string $raw_public_key): string {
 		return substr(hash('sha256', $raw_public_key), 0, 16);
 	}

@@ -36,6 +36,10 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.17 - a join carries the machine's addresses (ajr_addresses, validated as addresses, at most
+ *                 AgentJoinRequest::MAX_ADDRESSES); approval matches the placement record by any of them
+ *                 and keys the node by the placement's host, so a dual-stack host joining over IPv6 links
+ *                 the record its containers already point at instead of minting a second one
  * @version 1.16 - a recipe's mode may be not-applicable: a host-scoped recipe reported by an agent
  *                 inside a container, whose subject (the host's units) it cannot see; the Host
  *                 card says so instead of the recipe answering unknown every ten minutes
@@ -437,6 +441,7 @@ class AgentChannelEndpoint {
 		// Cloudflare REMOTE_ADDR is an edge, and the client header is trusted
 		// only when the TCP peer is a verified edge (the for-auth mode).
 		$request->set('ajr_source_ip', substr((string)SessionControl::get_client_ip(true), 0, 64));
+		$request->set('ajr_addresses', self::reported_addresses($body));
 		$request->set('ajr_agent_version', (string)($in['agent_version'] ?? ''));
 		$request->set('ajr_status', AgentJoinRequest::STATUS_PENDING);
 		$request->save();
@@ -557,7 +562,7 @@ class AgentChannelEndpoint {
 		// carries (the instance's IPv4), whichever family the join arrived on —
 		// that is what lets link_host_node() find the placement.
 		$host_addr = $host_of_provision ? trim((string)$host_of_provision->get('cvp_instance_ip')) : '';
-		$node->set('mgn_host', $self && $own_host !== '' ? $own_host : ($host_addr !== '' ? $host_addr : $ip));
+		$node->set('mgn_host', $self && $own_host !== '' ? $own_host : ($host_addr !== '' ? $host_addr : self::node_address_for_join($request, $ip)));
 		$node->set('mgn_site_url', $self ? $own_url : null);
 		$node->set('mgn_enabled', true);
 		$node->set('mgn_skip_joinery_checks', false);
@@ -573,6 +578,55 @@ class AgentChannelEndpoint {
 
 		$host = self::approveJoin($request, $node);
 		return ['node' => $node, 'self' => $self, 'host' => $host];
+	}
+
+	/**
+	 * The addresses a join claims, as a comma-joined string for the row: a
+	 * list of strings, each a valid IP, at most MAX_ADDRESSES, anything else
+	 * dropped. A claim, not a proof — approval matches these only against
+	 * placement records the plane already holds.
+	 */
+	public static function reported_addresses($body): string {
+		$list = is_array($body) ? ($body['addresses'] ?? null) : null;
+		if (!is_array($list) || !array_is_list($list)) {
+			return '';
+		}
+		$out = [];
+		foreach ($list as $a) {
+			if (!is_string($a)) {
+				continue;
+			}
+			$a = trim($a);
+			if ($a === '' || strlen($a) > 45 || filter_var($a, FILTER_VALIDATE_IP) === false || in_array($a, $out, true)) {
+				continue;
+			}
+			$out[] = $a;
+			if (count($out) >= AgentJoinRequest::MAX_ADDRESSES) {
+				break;
+			}
+		}
+		return implode(',', $out);
+	}
+
+	/**
+	 * The address a node made from a join is keyed by. A placement record the
+	 * plane already holds for any address the machine has wins, so the node
+	 * lands on the record its containers point at; otherwise the first public
+	 * IPv4 the machine reported (the convention placement records are keyed
+	 * by); otherwise the address the join came from.
+	 */
+	public static function node_address_for_join($request, string $source): string {
+		$addresses = $request->addresses();
+		$placement = ManagedHost::placement_for_addresses($addresses);
+		if ($placement) {
+			return trim((string)$placement->get('mgh_host'));
+		}
+		foreach ($addresses as $a) {
+			if (filter_var($a, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== false) {
+				return $a;
+			}
+		}
+		return $source;
 	}
 
 	/** True when the address a join came from is one of this machine's own. */
