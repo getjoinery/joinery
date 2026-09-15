@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.63
+ * No framework. @version 2.64
  *
  * The conversation list updates in place after mutations
  * (specs/implemented/mailbox_reader_list_persistence.md): actions that take rows out of
@@ -3085,13 +3085,30 @@
 		}).catch(function () { state.contacts = []; });
 	}
 
-	function matchContacts(token) {
+	// Contacts matching the typed token, minus anyone already named in To, Cc
+	// or Bcc — a person is offered once, not again in every field.
+	function matchContacts(token, taken) {
 		token = (token || '').trim().toLowerCase();
 		if (!token) return [];
+		taken = taken || {};
 		return state.contacts.filter(function (c) {
+			if (taken[c.address.toLowerCase()]) return false;
 			return c.address.indexOf(token) !== -1
 				|| (c.name && c.name.toLowerCase().indexOf(token) !== -1);
 		}).slice(0, 8);
+	}
+
+	// Every address already in the three recipient fields, keyed lowercase. The
+	// field being typed in contributes only what sits before the current token.
+	function takenRecipients(input) {
+		var taken = {};
+		['mbx_to', 'mbx_cc', 'mbx_bcc'].forEach(function (id) {
+			var f = document.getElementById(id);
+			if (!f) return;
+			var v = (f === input) ? f.value.slice(0, tokenBoundary(f.value)) : f.value;
+			splitAddrs(v).forEach(function (a) { taken[a.toLowerCase()] = true; });
+		});
+		return taken;
 	}
 
 	// The compose fields accept commas, semicolons, and whitespace between
@@ -3103,17 +3120,27 @@
 	function currentToken(value) {
 		return value.slice(tokenBoundary(value));
 	}
-	function commitToken(input, address) {
+	// A chosen contact goes in as '"Name" <address>' so the recipient's name
+	// travels in the header, not just their address. The name is always quoted:
+	// an imported one may read 'Last, First', and the comma inside the quotes
+	// must not read as a separator (the server's parser honours the quotes).
+	function commitToken(input, contact) {
 		var v = input.value;
 		var prefix = v.slice(0, tokenBoundary(v));
 		if (prefix && !/\s$/.test(prefix)) prefix += ' ';
-		input.value = prefix + address + ', ';
+		var name = (contact.name || '').replace(/["<>]/g, '').trim();
+		var entry = name ? '"' + name + '" <' + contact.address + '>' : contact.address;
+		input.value = prefix + entry + ', ';
 		input.focus();
 	}
 
 	// A vanilla recipient-autocomplete on a To/Cc/Bcc input, filtering the fetched
-	// list client-side (no server prefix-search over ciphertext). Enter/Tab commits
-	// the highlighted contact; typing by hand is always available.
+	// list client-side (no server prefix-search over ciphertext). The top match is
+	// highlighted as soon as the list shows, so Enter/Tab takes it without an
+	// arrow key first; typing by hand is always available. Enter in an address
+	// field never submits the form: with no suggestion showing it does nothing,
+	// because a form-submit here is a Send, and Enter after typing an address is
+	// a habit, not a decision to send.
 	function attachAutocomplete(input) {
 		if (!input || input._acAttached) return;
 		input._acAttached = true;
@@ -3127,30 +3154,33 @@
 
 		function hide() { dd.hidden = true; active = -1; }
 		function render() {
-			items = matchContacts(currentToken(input.value));
+			items = matchContacts(currentToken(input.value), takenRecipients(input));
 			dd.innerHTML = '';
-			if (!items.length) { dd.hidden = true; return; }
+			if (!items.length) { dd.hidden = true; active = -1; return; }
+			if (active < 0 || active >= items.length) active = 0;
 			items.forEach(function (c, idx) {
 				var row = el('div', 'mbx-ac-item' + (idx === active ? ' active' : ''));
 				row.appendChild(el('span', 'mbx-ac-name', c.name || c.address));
 				if (c.name) row.appendChild(el('span', 'mbx-ac-addr', c.address));
 				row.addEventListener('mousedown', function (e) {
 					e.preventDefault();
-					commitToken(input, c.address); hide(); markDraftDirty();
+					commitToken(input, c); hide(); markDraftDirty();
 				});
 				dd.appendChild(row);
 			});
 			dd.hidden = false;
 		}
 
-		input.addEventListener('input', function () { active = -1; render(); });
+		input.addEventListener('input', function () { active = 0; render(); });
 		input.addEventListener('keydown', function (e) {
-			if (dd.hidden) return;
+			if (dd.hidden) { if (e.key === 'Enter') e.preventDefault(); return; }
 			if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(active + 1, items.length - 1); render(); }
-			else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(active - 1, -1); render(); }
-			else if (e.key === 'Enter') { e.preventDefault(); if (active >= 0 && items[active]) { commitToken(input, items[active].address); markDraftDirty(); } hide(); }
-			else if (e.key === 'Tab') { if (active >= 0 && items[active]) { e.preventDefault(); commitToken(input, items[active].address); markDraftDirty(); } hide(); }
-			else if (e.key === 'Escape') { e.preventDefault(); hide(); }
+			else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(active - 1, 0); render(); }
+			else if (e.key === 'Enter') { e.preventDefault(); if (active >= 0 && items[active]) { commitToken(input, items[active]); markDraftDirty(); } hide(); }
+			else if (e.key === 'Tab') { if (active >= 0 && items[active]) { e.preventDefault(); commitToken(input, items[active]); markDraftDirty(); } hide(); }
+			// Esc dismisses the suggestions and nothing more — the reader's own Esc
+			// handler unwinds a layer per press, and this press was spent here.
+			else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); hide(); }
 		});
 		input.addEventListener('blur', function () { setTimeout(hide, 150); });
 	}
@@ -4132,6 +4162,14 @@
 		});
 		// Recipient autocomplete on To/Cc/Bcc (§ Phase 4).
 		['mbx_to', 'mbx_cc', 'mbx_bcc'].forEach(function (id) { attachAutocomplete(document.getElementById(id)); });
+		// Enter in Subject goes on to the message, never to Send.
+		var subjectInput = document.getElementById('mbx_subject');
+		if (subjectInput) subjectInput.addEventListener('keydown', function (e) {
+			if (e.key !== 'Enter') return;
+			e.preventDefault();
+			var rich = document.getElementById('mbx_body_rich');
+			if (rich) rich.focus();
+		});
 
 		// Last-ditch save when the page is being torn down mid-compose.
 		window.addEventListener('beforeunload', function () {

@@ -51,6 +51,9 @@
  * cid-rewritten into the stored/sent HTML). The stored iem_body_plain is derived from
  * the final sanitized HTML.
  *
+ * @version 1.18 - typed recipients keep their display names: parseAddressList()
+ *                 returns email + name (quoted names honoured) and the name
+ *                 reaches the To/Cc/Bcc headers and the Sent row's iem_to / iem_cc
  * @version 1.17 - the Sent row records its To and Cc lists separately
  *                 (iem_to / iem_cc) beside the merged iem_recipient
  * @version 1.16 - sendCapabilityFor(): the one answer to "can this mailbox send
@@ -206,9 +209,9 @@ class MailboxSender {
 
 		$email = new EmailMessage();
 		$email->from($from_address, $alias->get('iea_description') ?: null);
-		foreach ($to as $addr) { $email->to($addr); }
-		foreach ($cc as $addr) { $email->cc($addr); }
-		foreach ($bcc as $addr) { $email->bcc($addr); }
+		foreach ($to as $r) { $email->to($r['email'], $r['name'] !== '' ? $r['name'] : null); }
+		foreach ($cc as $r) { $email->cc($r['email'], $r['name'] !== '' ? $r['name'] : null); }
+		foreach ($bcc as $r) { $email->bcc($r['email'], $r['name'] !== '' ? $r['name'] : null); }
 		$email->subject($subject);
 		$email->messageId($message_id);
 
@@ -1158,14 +1161,14 @@ class MailboxSender {
 
 		// Never truncated: the full list is real content (iem_recipient is text;
 		// a sealed row stores its AEAD blob, which outgrows any plaintext cap).
-		$recipient_str = implode(', ', array_merge($to, $cc));
+		$recipient_str = implode(', ', array_column(array_merge($to, $cc), 'email'));
 		// The same two lists kept apart (iem_to / iem_cc), the shape every row
 		// carries whichever way it arrived, so the reader shows To and Cc as sent.
 		$to_str = MailAddressList::format($to);
 		$cc_str = MailAddressList::format($cc);
 		// Bcc rides its OWN sealed column, never merged into iem_recipient (§ Phase 1)
 		// so reply-all on this Sent copy can never re-leak a bcc'd address.
-		$bcc_str = implode(', ', $bcc);
+		$bcc_str = implode(', ', array_column($bcc, 'email'));
 		$body_plain = (string)$email->getTextBody();
 		$body_html = (string)$email->getHtmlBody();
 		$subject_trunc = substr($subject, 0, 4000);
@@ -1334,11 +1337,17 @@ class MailboxSender {
 	// ── address parsing ──────────────────────────────────────────────────────
 
 	/**
-	 * Parse a To/Cc field into validated email addresses. Accepts 'Name <email>'
-	 * groups and bare addresses, separated by any mix of commas, semicolons,
-	 * spaces, and tabs — whatever a person types. Throws on any invalid token.
+	 * Parse a typed To/Cc/Bcc field into validated recipients, display names
+	 * kept: '"Ford, Tom" <tford@example.com>' is one entry whose name travels in
+	 * the header. Accepts 'Name <email>' groups and bare addresses, separated by
+	 * any mix of commas, semicolons, spaces and tabs — whatever a person types
+	 * — and honours double quotes around a name, so the comma in an imported
+	 * 'Last, First' never reads as a separator. Throws on any token that is not
+	 * an address: a typed recipient is never dropped silently (which is why
+	 * this is not MailAddressList::parse(), a header reader that skips what it
+	 * cannot read).
 	 *
-	 * @return string[] email addresses
+	 * @return array<int, array{email:string,name:string}>
 	 */
 	private function parseAddressList($raw): array {
 		$raw = trim((string)$raw);
@@ -1346,7 +1355,7 @@ class MailboxSender {
 			return array();
 		}
 		$out = array();
-		$add = function ($email) use (&$out) {
+		$add = function (string $email, string $name) use (&$out) {
 			$email = trim($email);
 			if ($email === '') {
 				return;
@@ -1354,17 +1363,28 @@ class MailboxSender {
 			if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
 				throw new MailboxSenderException('Not a valid email address: ' . $email);
 			}
-			$out[strtolower($email)] = $email;
+			$key = strtolower($email);
+			if (!isset($out[$key])) {
+				$out[$key] = array('email' => $email, 'name' => $name);
+			} elseif ($name !== '' && $out[$key]['name'] === '') {
+				$out[$key]['name'] = $name;
+			}
 		};
 		// 'Name <email>' groups come out first: a display name may contain the
-		// very whitespace treated as a separator between bare addresses below.
-		$rest = preg_replace_callback('/[^,;<>]*<([^<>]*)>/', function ($m) use ($add) {
-			$add($m[1]);
+		// very whitespace treated as a separator between bare addresses below,
+		// and a quoted one the very comma.
+		$rest = preg_replace_callback('/((?:"(?:[^"\\\\]|\\\\.)*"|[^,;<>"])*)<([^<>]*)>/', function ($m) use ($add) {
+			$name = trim($m[1]);
+			if (strlen($name) >= 2 && $name[0] === '"' && substr($name, -1) === '"') {
+				$name = stripcslashes(substr($name, 1, -1));
+			}
+			$name = trim(str_replace(array('"', '<', '>', "\r", "\n", "\t"), ' ', $name));
+			$add($m[2], preg_replace('/\s+/', ' ', $name));
 			return ' ';
 		}, $raw);
 		// Whatever remains is bare addresses.
 		foreach (preg_split('/[\s,;]+/', (string)$rest, -1, PREG_SPLIT_NO_EMPTY) as $token) {
-			$add($token);
+			$add($token, '');
 		}
 		return array_values($out);
 	}
