@@ -23,6 +23,8 @@
  * The answer comes from what the last status check recorded, not from reaching
  * out to every node when someone opens a page.
  *
+ * @version 2.1 - "hosts no Joinery site" is ManagedNode::hosts_site_from(), the same test the status
+ *                processor applies before asking a node for its key
  * @version 2.0 - a node's own proven key is what every backup seals to, so this reports coverage
  *                rather than key distribution: no comparison against the management node's key, and
  *                "no proven key" is an un-backed-up node rather than a note
@@ -45,7 +47,7 @@ class RecoveryKeyFleet {
 	 * @return array{state:string, fingerprint:string, summary:string}
 	 */
 	public static function node_state($node): array {
-		if (!$node->get('mgn_web_root') || $node->get('mgn_skip_joinery_checks')) {
+		if (!ManagedNode::hosts_site_from($node)) {
 			return self::result('n/a', '', 'Hosts no Joinery site, so there is nothing to back up.');
 		}
 

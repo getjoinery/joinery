@@ -2,6 +2,9 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.18 - hosts_site(): whether this node has a Joinery site to ask about. A host node in
+ *                 machine posture (the Docker host, a bare box) has none, and every question that
+ *                 only a site can answer — its recovery key first — is not put to it
  * @version 1.17 - mgn_agent_recipes: the recipes the node's agent runs on its own clock, each with its
  *                 mode (name:report-only or name:armed), as the agent reported them at its last poll;
  *                 empty for an agent before 1.27.0, which runs none. The plane is told, never tells
@@ -288,6 +291,27 @@ class ManagedNode extends SystemBase {
 	 * release — is dispatched to that row's agent, so the plane never needs
 	 * a job queue of its own.
 	 */
+	/**
+	 * Does this node have a Joinery site to ask about?
+	 *
+	 * A node in machine posture — the Docker host, a bare box the fleet
+	 * enrolled for its own housekeeping — has no web root, no settings table
+	 * and no recovery key. It answers the machine questions (host_report,
+	 * host_converge, load and memory) and none of the site ones. Anything that
+	 * would dispatch a site question, or report its absence as a gap, asks
+	 * here first; a node whose Joinery checks are switched off is treated the
+	 * same way, because the operator has said the site is not to be asked.
+	 */
+	public function hosts_site(): bool {
+		return self::hosts_site_from($this);
+	}
+
+	/** The rule hosts_site() applies, over anything that answers get() for the two columns. */
+	public static function hosts_site_from($node): bool {
+		return trim((string)$node->get('mgn_web_root')) !== ''
+			&& !$node->get('mgn_skip_joinery_checks');
+	}
+
 	public static function self_node() {
 		$own_url = rtrim((string)LibraryFunctions::get_absolute_url(), '/');
 		if ($own_url === '') {

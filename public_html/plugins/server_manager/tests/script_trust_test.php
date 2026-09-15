@@ -108,6 +108,14 @@ check(NodeMonitorHealth::classify_script_trust('') === null,
 check(NodeMonitorHealth::classify_script_trust(
 	'Refused by the node: primitive "managed_domain_prepare" is not carried by this agent') === null,
 	'a node declining a primitive it does not carry is not a trust event');
+// A machine with no site runs scripts from the support bundle, which carries
+// the host installers and nothing that reads a site. A site primitive sent
+// there is refused as a posture, in the agent's own words, and those words
+// must never colour the host as a tampered file (docker-prod, 2026-09-15).
+check(NodeMonitorHealth::classify_script_trust(
+	'Refused by the node: primitive "recovery_key_report" cannot run here: this machine has no site, '
+	. 'and its support bundle does not carry maintenance_scripts/sysadmin_tools/set_recovery_key.php') === null,
+	'a siteless machine refusing a script its bundle does not carry is not a trust event');
 check(NodeMonitorHealth::classify_script_trust(
 	'Refused by the node: policy forbids destructive operations on this machine') === null,
 	'a policy refusal is not a trust event');
