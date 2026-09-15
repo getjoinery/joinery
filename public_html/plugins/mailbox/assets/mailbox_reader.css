@@ -1,7 +1,7 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.37
+ * Vanilla CSS, no framework. @version 2.38
  */
 
 /* Every size the reader renders text at, in one ladder. Nothing in this file
@@ -791,6 +791,29 @@
 /* An explicit display: above defeats the [hidden] attribute's display:none, so
    restore it for the hidden (default / discarded) state. */
 .mbx-compose[hidden] { display: none; }
+/* Opened from the list (New message) the panel has no conversation to sit
+ * under and lands in the main pane itself, a flex sibling of the list. Left
+ * as a card there it squeezes the list to nothing — whose header then paints
+ * over the compose title — and is clipped at the pane's foot, Send and all.
+ * So in the pane it IS the pane: it scrolls inside itself and the list steps
+ * aside until it closes (which also takes the phone's New-message pill with
+ * it). Inside an open conversation none of this applies; that pane scrolls. */
+.mbx-main > .mbx-compose:not([hidden]) {
+	flex: 1 1 0;
+	min-height: 0;
+	overflow-y: auto;
+	margin: 0;
+	border: none;
+	border-radius: 0;
+	box-shadow: none;
+}
+.mbx-main:has(> .mbx-compose:not([hidden])) .mbx-list-view { display: none; }
+.mbx-main > .mbx-compose:not([hidden]) .mbx-compose-head {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	background: #fff;
+}
 .mbx-compose-head {
 	display: flex; align-items: center; gap: 4px;
 	padding: 12px 16px; border-bottom: 1px solid #eef1f4;
