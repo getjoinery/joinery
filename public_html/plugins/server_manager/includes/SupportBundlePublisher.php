@@ -40,6 +40,11 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.5 - carries the host runner and the host installers (specs/agent_tier1_recipes.md item 6b):
+ *                _plugin_installers_start.sh, _tree_trust.sh, host_housekeeping.sh,
+ *                install_host_converger.sh and the Cloudflare range list housekeeping reads, so a
+ *                machine with no site converges its own fail2ban and installs its own host timer
+ *                through host_converge (the runner's --machine mode), and is not only reported on
  * @version 1.4 - carries host_report.sh: the host_report observe word names it, and a siteless
  *                machine (the Docker host) answers the Host card out of its bundle like any node
  * @version 1.3 - carries the relay build: provision_relay.sh and the prebuilt sealer binaries
@@ -107,6 +112,19 @@ class SupportBundlePublisher {
 		// machine as one bounded object, which a Docker host has as much as
 		// a site does.
 		'maintenance_scripts/sysadmin_tools/host_report.sh',
+		// host_converge on a machine with no site: the runner in --machine
+		// mode, rooted at this bundle, runs the two host installers. The
+		// runner sources _tree_trust.sh (refusing to run anything as root
+		// without it); host_housekeeping.sh reads the Cloudflare range list
+		// at its site-root-relative path for the remoteip half; the timer
+		// installer copies the runner to /usr/local/sbin and writes the
+		// machine's unit. Nothing else from install_tools: a site installer
+		// in this bundle would be a site installer on a machine with no site.
+		'maintenance_scripts/install_tools/_plugin_installers_start.sh',
+		'maintenance_scripts/install_tools/_tree_trust.sh',
+		'maintenance_scripts/install_tools/host_housekeeping.sh',
+		'maintenance_scripts/install_tools/install_host_converger.sh',
+		'public_html/includes/cloudflare_ip_ranges.txt',
 		// The relay build, and the sealer it installs - one binary per
 		// `uname -m` name, which is how provision_relay.sh finds its own.
 		'public_html/plugins/mailbox/provisioning/provision_relay.sh',

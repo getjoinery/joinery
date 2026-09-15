@@ -36,6 +36,9 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.16 - a recipe's mode may be not-applicable: a host-scoped recipe reported by an agent
+ *                 inside a container, whose subject (the host's units) it cannot see; the Host
+ *                 card says so instead of the recipe answering unknown every ten minutes
  * @version 1.15 - a claim carries the node's cases: for each source, the most recent escalation a recipe
  *                 opened, open or closed, with its body until one claim carrying it succeeds. Intake
  *                 (intake_cases) caps and re-validates every field, stores a new id, appends to a known
@@ -1212,7 +1215,7 @@ class AgentChannelEndpoint {
 	}
 
 	/** The two modes a recipe may report. Anything else is dropped. */
-	const RECIPE_MODES = ['report-only', 'armed'];
+	const RECIPE_MODES = ['report-only', 'armed', 'not-applicable'];
 
 	/**
 	 * Reduce a reported recipe list to entries this plane will store.

@@ -1427,8 +1427,9 @@ $plugins_at = strpos($runner_src, 'ACTIVE_PLUGINS=');
 check($core_at !== false && $plugins_at !== false && $core_at < $plugins_at,
     'core installers run before any plugin lookup can exit early');
 // One body runs a core installer, for the loop and for --only alike.
-check(preg_match('/bash "\$\{path\}" "\$\{SITENAME\}" "\$\{SITE_ROOT\}"/', $runner_src) === 1,
-    'the core installer is told which site it is installing for');
+check(preg_match('/installer_args=\("\$\{SITENAME\}" "\$\{SITE_ROOT\}"\)/', $runner_src) === 1
+    && preg_match('/bash "\$\{path\}" "\$\{installer_args\[@\]\}"/', $runner_src) === 1,
+    'the core installer is told which site it is installing for (and, on a machine with no site, the mode and the bundle root)');
 
 // And it must not also be a plugin installer, or a management node runs it twice.
 $sm_manifest = json_decode(file_get_contents(
@@ -1624,7 +1625,7 @@ $refuse_at  = strpos($runner_s10, 'installer_is_trusted()');
 // Where installers RUN: the core loop, and the --only branch. The
 // CORE_INSTALLERS constant itself is declared at the top, beside the --only
 // check that reads it, so it is not the anchor.
-$core_at_s10 = strpos($runner_s10, 'for CORE_INSTALLER in ${CORE_INSTALLERS}; do');
+$core_at_s10 = strpos($runner_s10, 'for CORE_INSTALLER in ${INSTALLER_SET}; do');
 $only_at_s10 = strpos($runner_s10, 'if [[ -n "${ONLY_INSTALLER}" ]]; then');
 check($assert_at !== false && $refuse_at !== false && $core_at_s10 !== false && $only_at_s10 !== false
     && $assert_at < $refuse_at && $refuse_at < $core_at_s10 && $refuse_at < $only_at_s10,
@@ -3198,6 +3199,56 @@ check(is_file($history_dir . '/default_proxy_vhost-1.03.conf'),
 $hk_gate = PathHelper::getIncludePath('tests/integration/host_housekeeping_gate.sh');
 check(is_file($hk_gate) && strpos((string)file_get_contents($hk_gate), '@joinery-test') !== false,
 	'the override-mode gate ships and is declared');
+
+section('A machine with no site converges through the bundle (specs/agent_tier1_recipes.md item 6b)');
+
+// The Docker host had no agent and a fail2ban dead for five months; the eight
+// container agents answered unknown. The recipe was designed to run on the
+// host, and the host runs scripts from the support bundle, which carried the
+// check (host_report.sh) and not the repair. These pins keep the two halves
+// together: what the bundle carries, and what the runner does with it.
+$bundle_src = (string)file_get_contents(PathHelper::getRootDir() . '/plugins/server_manager/includes/SupportBundlePublisher.php');
+foreach ([
+    'maintenance_scripts/install_tools/_plugin_installers_start.sh',
+    'maintenance_scripts/install_tools/_tree_trust.sh',
+    'maintenance_scripts/install_tools/host_housekeeping.sh',
+    'maintenance_scripts/install_tools/install_host_converger.sh',
+    'public_html/includes/cloudflare_ip_ranges.txt',
+] as $bundled) {
+    check(strpos($bundle_src, "'" . $bundled . "',") !== false,
+        "the support bundle carries $bundled");
+}
+foreach (['install_agent.sh', 'install_parser_jail.sh', 'render_vhost.sh', 'fix_permissions.sh', '_config_secrets.sh'] as $site_only) {
+    check(strpos($bundle_src, "'maintenance_scripts/install_tools/$site_only'") === false,
+        "and not the site installer $site_only (a site installer in the bundle would run on a machine with no site)");
+}
+$runner_machine = (string)file_get_contents(dirname(PathHelper::getRootDir())
+    . '/maintenance_scripts/install_tools/_plugin_installers_start.sh');
+check(preg_match('/^HOST_INSTALLERS="host_housekeeping\.sh install_host_converger\.sh"$/m', $runner_machine) === 1,
+    'the runner names the host installer set: housekeeping and the host timer, nothing else');
+check(strpos($runner_machine, 'MACHINE_ROOT_DEFAULT="/opt/joinery-agent/tree"') !== false,
+    'rooted by default at the agent\'s verified bundle (bundle.go bundleRootDefault)');
+check(strpos($runner_machine, '--machine)      MACHINE=1 ;;') !== false,
+    'the mode is an argument the caller gives, never derived from where the copy lives');
+check(strpos($runner_machine, '--machine takes no site name') !== false,
+    'a site name under --machine is refused');
+check(strpos($runner_machine, 'is not ${ONLY_SET_NAME} (one of: ${ONLY_SET}) - refused') !== false,
+    '--only under --machine names a host installer only');
+check(strpos($runner_machine, 'installer_args=(--machine "${SITE_ROOT}")') !== false,
+    'a host installer is told the mode and the root, not a site name');
+check(strpos($runner_machine, 'STATE_DIR="/var/lib/joinery/host"') !== false,
+    'root keeps the machine\'s converge stamp outside the bundle, which a refresh replaces whole');
+foreach (['host_housekeeping.sh', 'install_host_converger.sh'] as $host_installer) {
+    $src = (string)file_get_contents(dirname(PathHelper::getRootDir()) . '/maintenance_scripts/install_tools/' . $host_installer);
+    check(strpos($src, 'if [[ "${1:-}" == "--machine" ]]; then') !== false,
+        "$host_installer takes --machine ROOT");
+}
+$converger_machine = (string)file_get_contents(dirname(PathHelper::getRootDir())
+    . '/maintenance_scripts/install_tools/install_host_converger.sh');
+check(strpos($converger_machine, 'COMMAND="/bin/bash ${RUN_TARGET} --when-changed --machine --site-root=${SITE_ROOT}"') !== false,
+    'the machine\'s unit runs the entry point in machine mode against the bundle');
+check(strpos($converger_machine, "a site's converger owns \${UNIT_NAME}.service - leaving it") !== false,
+    'and never takes over a site\'s unit on a machine that has both');
 
 section('The converger entry point is refreshed when it goes stale');
 
