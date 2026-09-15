@@ -197,6 +197,9 @@ class InboundImapAccount extends SystemBase {
 		// How far back the feed reaches, and the window size when it is 'days'.
 		'iia_import_scope'              => array('type'=>'varchar(10)', 'default'=>'future', 'is_nullable'=>false, 'allowed_values'=>array(self::SCOPE_FUTURE, self::SCOPE_DAYS, self::SCOPE_FULL)),
 		'iia_import_days'               => array('type'=>'int4', 'default'=>'30'),
+		// TEMPORARY (specs/mailbox_to_cc_lists.md § 5a): where the To/Cc header
+		// sweep stands on this account (JSON). Remove with AddressListSweep.
+		'iia_lists_sweep_state'         => array('type'=>'text'),
 		'iia_create_time'               => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'iia_update_time'               => array('type'=>'timestamp(6)'),
 		'iia_delete_time'               => array('type'=>'timestamp(6)'),

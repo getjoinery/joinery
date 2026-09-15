@@ -37,7 +37,12 @@
  * retried at most daily, so a message whose source copy is gone costs one
  * attempt per day rather than an IMAP round trip per heartbeat drain.
  *
- * @version 1.1
+ * @version 1.3
+ * @changelog 1.3 - writeLists() and stampRows() are public for AddressListSweep
+ *   (§ 5a, the other temporary half); the card carries the sweep's lines
+ * @changelog 1.2 - progress() + renderProgressCard(): the card on Inbound Email →
+ *   Accounts, so an operator can see the catch-up move and know when it is
+ *   finished. Everything about the card lives here; the page makes one call.
  * @changelog 1.1 - 'remote' rows fetch their headers in batches (one STATUS +
  *   one FETCH per folder per FETCH_CHUNK rows); DEFAULT_MAX 25 -> 200, the
  *   turn deadline being the real bound
@@ -82,6 +87,106 @@ class AddressListBackfill {
 		    AND ((m.iem_raw_storage_driver = 'remote' AND m.iem_iia_inbound_imap_account_id IS NOT NULL)
 		         OR COALESCE(length(m.iem_raw_message), 0) > 0
 		         OR m.iem_raw_storage_key IS NOT NULL)";
+	}
+
+	/**
+	 * Where the catch-up stands, for the mailbox admin landing page. One
+	 * aggregate over every inbound row still without a retained header block
+	 * (rows WITH one answer at read time and were never the backfill's
+	 * concern). No decrypt, no user predicate — the operator's view is the
+	 * whole node:
+	 *
+	 *  - filled:        rows the backfill wrote (stamped, lists present)
+	 *  - waiting:       rows with a source to ask, not yet tried — by the
+	 *                   owner whose open vault window they wait on ('' key =
+	 *                   unsealed rows, filled by any grant holder)
+	 *  - retrying:      tried, the source did not answer; asked again daily
+	 *  - unrecoverable: no source at all (lean push rows, archive imports)
+	 *
+	 * "Finished" is waiting == 0 and retrying == 0.
+	 *
+	 * @return array{filled:int,waiting:array<string,int>,retrying:int,unrecoverable:int}
+	 */
+	public static function progress(): array {
+		$db = DbConnector::get_instance()->get_db_link();
+		$rows = $db->query(
+			"SELECT CASE
+			          WHEN m.iem_to IS NOT NULL OR m.iem_cc IS NOT NULL THEN 'filled'
+			          WHEN NOT ((m.iem_raw_storage_driver = 'remote' AND m.iem_iia_inbound_imap_account_id IS NOT NULL)
+			                    OR COALESCE(length(m.iem_raw_message), 0) > 0
+			                    OR m.iem_raw_storage_key IS NOT NULL) THEN 'unrecoverable'
+			          WHEN m.iem_lists_attempt_time IS NOT NULL THEN 'retrying'
+			          ELSE 'waiting'
+			        END AS state,
+			        COALESCE(m.iem_sealed_owner_user_id::text, '') AS owner,
+			        count(*) AS n
+			   FROM iem_inbound_email_messages m
+			  WHERE m.iem_direction = 'inbound'
+			    AND m.iem_delete_time IS NULL
+			    AND m.iem_pending_parse IS NOT TRUE
+			    AND COALESCE(length(m.iem_raw_headers), 0) = 0
+			    AND (m.iem_lists_attempt_time IS NOT NULL OR (m.iem_to IS NULL AND m.iem_cc IS NULL))
+			  GROUP BY 1, 2")->fetchAll(PDO::FETCH_ASSOC);
+		$out = array('filled' => 0, 'waiting' => array(), 'retrying' => 0, 'unrecoverable' => 0);
+		foreach ($rows as $r) {
+			$n = intval($r['n']);
+			if ($r['state'] === 'waiting') {
+				$out['waiting'][(string)$r['owner']] = ($out['waiting'][(string)$r['owner']] ?? 0) + $n;
+			} else {
+				$out[$r['state']] += $n;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * The operator's view of progress(), as a card on Inbound Email → Accounts.
+	 * The catch-up runs in the owner's browser session and leaves no trace an
+	 * operator can see; this is that trace. Renders nothing when no old row is
+	 * still without its lists, and goes with this class at retirement (the
+	 * page's single call is the only thing outside this file).
+	 */
+	public static function renderProgressCard(): void {
+		$p = self::progress();
+		$waiting = array_sum($p['waiting']);
+		if ($waiting === 0 && $p['retrying'] === 0 && $p['unrecoverable'] === 0 && $p['filled'] === 0) {
+			return;
+		}
+		$finished = ($waiting === 0 && $p['retrying'] === 0);
+		echo '<div class="card mb-3' . ($finished ? ' border-success' : '') . '"><div class="card-body">';
+		echo '<h5 class="card-title mb-2">Recovering To/Cc on older messages '
+			. ($finished ? '<span class="badge bg-success">Finished</span>'
+			             : '<span class="badge bg-info text-dark">In progress</span>')
+			. '</h5>';
+		echo '<p class="mb-1">Messages stored before the To and Cc lists were kept get them back from their '
+			. 'source copy while the owner is signed in with their vault open. Nothing runs in the background.</p>';
+		echo '<ul class="mb-0">';
+		echo '<li><strong>' . number_format($p['filled']) . '</strong> recovered so far.</li>';
+		if ($waiting > 0) {
+			$by_owner = array();
+			foreach ($p['waiting'] as $owner_id => $n) {
+				if ($owner_id === '') {
+					$by_owner[] = number_format($n) . ' on shared mailboxes (any member who opens the reader)';
+					continue;
+				}
+				$owner = new User(intval($owner_id), TRUE);
+				$who = $owner->key ? $owner->get('usr_email') : 'user ' . intval($owner_id);
+				$by_owner[] = number_format($n) . ' waiting on ' . htmlspecialchars((string)$who);
+			}
+			echo '<li><strong>' . number_format($waiting) . '</strong> still to do: ' . implode('; ', $by_owner) . '.</li>';
+		}
+		if ($p['retrying'] > 0) {
+			echo '<li><strong>' . number_format($p['retrying']) . '</strong> asked and not answered by the source copy; asked again daily.</li>';
+		}
+		if ($p['unrecoverable'] > 0) {
+			echo '<li><strong>' . number_format($p['unrecoverable']) . '</strong> have no copy on this server. '
+				. 'They are looked for in the connected mail account instead (below); any still without To/Cc when '
+				. 'that finishes are not in the account either.</li>';
+		}
+		foreach (AddressListSweep::describe() as $line) {
+			echo '<li>Reading headers back from ' . htmlspecialchars($line) . '</li>';
+		}
+		echo '</ul></div></div>';
 	}
 
 	/** Any message this user can read still without its lists and with a source to ask? Cheap, no decrypt. */
@@ -252,6 +357,11 @@ class AddressListBackfill {
 		return $done;
 	}
 
+	/** stamp() for the sweep, which has no handle of its own. */
+	public static function stampRows(array $ids): void {
+		self::stamp(DbConnector::get_instance()->get_db_link(), $ids);
+	}
+
 	/** Mark these rows attempted now — the daily-retry clock starts here. */
 	private static function stamp(PDO $db, array $ids): void {
 		if (empty($ids)) {
@@ -299,7 +409,7 @@ class AddressListBackfill {
 	 * list is stored as '' — "captured, nothing there" — so the row leaves the
 	 * candidate set and the read path stops deriving.
 	 */
-	private static function writeLists(InboundEmailMessage $msg, string $to, string $cc): bool {
+	public static function writeLists(InboundEmailMessage $msg, string $to, string $cc): bool {
 		$msg_id = intval($msg->key);
 		if (!$msg->get('iem_content_sealed')) {
 			InboundEmailMessage::updateColumns($msg_id, array('iem_to' => $to, 'iem_cc' => $cc));

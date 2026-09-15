@@ -24,7 +24,8 @@
  *
  * Run: php tests/run.php db --filter=address_list_backfill
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - progress() moves rows from waiting to filled
  * @changelog 1.1 - the stub answers the batched fetchHeaderTexts(); pins one call per chunk
  */
 
@@ -213,8 +214,14 @@ check(AddressListBackfill::hasWork($uid), 'hasWork sees rows without lists that 
 check($candidate_ids() === array($m_raw, $m_none),
 	'a row with lists and a row with a retained header block are not candidates', json_encode($candidate_ids()));
 
+$p_before = AddressListBackfill::progress();
 $done = AddressListBackfill::drainForUser($uid, vault_fixture_dummy_key());
 check($done === 2, 'both stored-raw rows were filled (got ' . $done . ')');
+$p_after = AddressListBackfill::progress();
+check(($p_before['waiting'][''] ?? 0) - ($p_after['waiting'][''] ?? 0) === 2
+	&& $p_after['filled'] - $p_before['filled'] === 2,
+	'progress(): the two rows moved from waiting (unsealed, key \'\') to filled',
+	json_encode(array($p_before, $p_after)));
 $r = $row($m_raw);
 check($r['iem_to'] === $plain_addr && $r['iem_cc'] === $CC_CANON,
 	'the row with headers holds both lists in plaintext, canonical form', json_encode(array($r['iem_to'], $r['iem_cc'])));

@@ -9,7 +9,7 @@ spec.
 | Phase | What | State |
 |---|---|---|
 | **1** | The permanent fix (§ 2) + the backfill for rows that still have a source on hand — IMAP-pulled and stored-raw rows (§ 4) | built, tested, ships now |
-| **2** | The full backfill: rows with no source on hand — imports and pre-2026-08-25 lean records — recovered by Message-ID search of a connected IMAP account (§ 5a), archive re-import as the fallback (§ 5b) | investigating; needs the § 0 numbers from jeremytunnell first |
+| **2** | The full backfill: rows with no copy of their headers on the node — archive imports whose archive is gone, pre-2026-08-25 push rows. Fixed **in place** by reading the headers back from the connected IMAP account in bulk (§ 5, `AddressListSweep`); never a delete and re-import (owner, 2026-09-15). The archive arm (§ 5b) is the fallback for what the account does not hold | **built 2026-09-15**, uncommitted; needs a release, then the owner's reader open with the vault unlocked on jeremytunnell |
 
 ## 0. Before Phase 2 — measure the two mailboxes
 
@@ -37,9 +37,38 @@ WHERE m.iem_direction = 'inbound' AND m.iem_delete_time IS NULL
 GROUP BY 1, 2 ORDER BY 1, 2;
 ```
 
-Buckets 1–4 are Phase 1. Buckets 5–6 are Phase 2, and the question Phase 2
-has to answer is: **are those messages still in the Gmail account?** If yes,
-§ 5a fixes them; if only in an archive, § 5b; if neither, they are gone.
+Buckets 1–4 are Phase 1. Buckets 5–6 are Phase 2. Bucket 5 is fixed from
+the archive (§ 5); whether that archive is still on the node decides whether
+the owner has to upload it again first:
+
+```sql
+SELECT r.mir_mail_import_run_id AS run, r.mir_state, r.mir_format, r.mir_create_time::date AS uploaded,
+  r.mir_fil_file_id IS NOT NULL AS archive_kept, r.mir_stored, r.mir_dedup,
+  (SELECT count(*) FROM iem_inbound_email_messages m
+     WHERE m.iem_mir_mail_import_run_id = r.mir_mail_import_run_id
+       AND m.iem_to IS NULL AND m.iem_cc IS NULL
+       AND COALESCE(length(m.iem_raw_headers),0) = 0) AS rows_without_lists
+FROM mir_mail_import_runs r ORDER BY 1;
+```
+
+Bucket 6 (pre-2026-08-25 push, never imported) is only reachable if the
+message is also in the Gmail account (§ 5a); otherwise it is gone.
+
+**Findings 2026-09-15** (from the node's import page and `mail_import_status`,
+superadmin; the bucket query itself still needs a shell):
+
+| Run | Archive | Into | Imported | Ran | Archive kept? |
+|---|---|---|---|---|---|
+| 2 | `All mail Including Spam and Trash-002.mbox` (Gmail Takeout) | `jeremy.tunnell@gmail.com` | **96,754** (98,296 scanned, 65 already here, 1,095 excluded) | 2026-08-22 → 08-23 (22 h) | **no** — discarded |
+| 1 | `jeremy@jeremytunnell.com.zip` | `jeremy@jeremytunnell.com` | **1,932** (2,222 scanned) | 2026-07-31 | **no** — discarded |
+
+Both runs predate header retention (2026-08-25), so every one of those
+98,686 rows is bucket 5: lean, no archive on the node. The Gmail IMAP feed
+is live and healthy, polling INBOX, `[Gmail]/All Mail`, Sent Mail and Trash —
+the account the Takeout came from is still connected, and All Mail still
+holds what the Takeout held. That is what makes § 5 (read the headers back
+from Gmail in bulk) the cheap path for run 2, and § 5b (re-upload) the
+expensive one.
 
 **Why it exists:** on 2026-09-14 an email to info@getjoinery.com CC'd two
 people and the reader showed nobody; Reply All would have left them off. The
@@ -152,93 +181,156 @@ turn's deadline is the real bound).
   unstamped and the drain stops. One row is one `SealedEgressGuard::isolate()`
   unit; the batched header fetch decrypts nothing, so it sits outside them.
 
-Test: `plugins/mailbox/tests/address_list_backfill_test.php` (23 checks:
+**Progress:** the drain runs inside the owner's browser session and leaves
+no trace an operator can see, so `AddressListBackfill::progress()` counts
+every inbound row still without a retained header block — *filled* by the
+backfill (stamped, lists present), *waiting* (a source to ask, not yet tried;
+by the owner whose open window it waits on, or "shared" for unsealed rows),
+*retrying* (tried, the source did not answer; asked again daily),
+*unrecoverable* (no source at all) — and
+`AddressListBackfill::renderProgressCard()` shows them as a card at the top
+of Inbound Email → Accounts, **In progress** or **Finished** (nothing waiting,
+nothing retrying). The card renders only while some old row lacks its lists.
+Everything about it lives in the class; the admin page makes one call.
+
+Test: `plugins/mailbox/tests/address_list_backfill_test.php` (24 checks:
 plaintext raw, captured-empty, remote fetch through a stub ingestor, gone
-source stamped, sealed row locked/unlocked, key wrapping untouched).
+source stamped, sealed row locked/unlocked, key wrapping untouched,
+progress() moving rows from waiting to filled).
 
 **For the owner's mailboxes:** every `jeremy.tunnell@gmail.com` message that
 was pulled over IMAP and is still on Gmail is fixed by opening the reader with
 the vault unlocked and leaving it — a few hundred per drain slice. `jeremy@jeremytunnell.com`
 mail since 2026-08-25 is already right; earlier mail is § 5.
 
-## 5. Phase 2 — the easiest way to fix old imported mail (not built)
+## 5. Phase 2 — reading the lists back from the connected account (built)
 
 Old imported rows (Takeout/mbox/eml) and pre-2026-08-25 push rows are lean
-records: no headers, no raw, no locator. There are two places the headers can
-still be, and one is much cheaper than the other.
+records: no headers, no raw, no locator. The owner's rule (2026-09-15): **fix
+the existing rows in place; never delete and re-import.** Deleting would lose
+labels, read state, stars, threads and every attachment adoption, and the
+re-import would still have to seal everything again.
 
-**5a. The message is still in a connected IMAP mailbox — extend the backfill
-(easiest, recommended).** `ImapIngestor::resolveUid()` already falls back to a
-**Message-ID search** when it has no usable UID. So for a row on a mailbox
-that has an enabled IMAP account, the backfill can call
-`fetchHeaderText(0, null, $folder, $message_id)` and the source answers by
-Message-ID. For Gmail, `[Gmail]/All Mail` holds everything the account has,
-imported history included — a Takeout of the same account is the same
-messages. Cost: one IMAP SEARCH per row (the batched `fetchHeaderTexts()`
-falls back to it per locator when the UID is unusable) plus a share of the
-batch's header FETCH, inside the same drain; no upload, no new UI, nothing
-the owner has to do beyond having the reader open.
+**Why there is no standalone script.** On a sealed mailbox the lists are
+written under the row's own DEK, and that key unwraps only inside the owner's
+unlock window — cron and a CLI never hold it (docs/scheduled_tasks.md). So the
+"script" runs where the Phase 1 drain runs: in the owner's browser session,
+as a second `VaultDeferredWork` consumer. It is one file that depends on
+nothing that is not already public, and is deleted whole (§ 6).
 
-Build: widen `candidateWhere()` with a third source arm — the row's alias has
-an enabled IMAP account and the row has a `iem_message_id_header` — and in
-`headerBlockFor()` treat a row with no locator like a `remote` row with uid 0,
-folder = the account's all-mail folder when the provider has one, else its
-configured folder. Everything else (sealing, stamping, `''`) is unchanged. A
-row Gmail no longer has stays stamped, retried daily, exactly as today. About
-thirty lines plus two test checks (a locator-less row found by Message-ID; one
-not found is stamped).
+### 5a. The sweep — `AddressListSweep` (built)
 
-This is what fixes `jeremy.tunnell@gmail.com` history that arrived by import
-rather than pull. It also fixes `jeremy@jeremytunnell.com` history **if** that
-mail is also in the Gmail account (forwarded, or a Takeout of it imported) —
-the search is by Message-ID, so it does not matter which mailbox the row is
-filed under, only that an account the owner holds can find the message.
+`plugins/mailbox/includes/AddressListSweep.php` (1.0), consumer
+`mailbox_address_lists_sweep`, registered in `bootstrap.php` (1.15) after the
+Phase 1 consumer. On jeremytunnell the account the Takeout came from is
+still connected and its All Mail still holds everything the Takeout held, so
+rather than asking for each row one at a time (one IMAP SEARCH per row,
+~98,000 of them), the sweep **walks each folder once** and matches what
+comes back:
 
-**5b. The message is only in an archive file — re-import with adopt-on-dedup.**
-Re-uploading the same Takeout/mbox today does nothing for existing rows: the
-importer matches each message by Message-ID and records a dedup. That branch
-already adopts attachment bytes onto the matched row
-(`MailArchiveImporter.php` ~497, `AttachmentByteCustody::adopt`); filling
-missing To/Cc there is the same shape — read the archive copy's headers, write
-the lists the way § 4 writes them (sealed under the row DEK, which the import
-runs in-window when the mailbox seals). Cost: the owner re-uploads and
-re-scans the whole archive, which is slow for a large Takeout, and the archive
-has to still exist. Only worth building if 5a cannot reach the mail.
+- **Which accounts:** every enabled, non-broken IMAP account on a mailbox
+  the user holds a grant on, whose sweep is not finished.
+- **Which folders:** the `\All` folder plus Trash and Junk where the account
+  has an `\All` folder (Gmail — All Mail excludes those two); every tracked
+  folder otherwise. From the account's discovered `iif_` rows — no LIST.
+- **The walk:** UID windows from 1 to UIDNEXT, one header-only FETCH
+  (`BODY.PEEK[HEADER]`) per window — 500 UIDs to start, doubling over a window
+  that came back empty up to 4,000, back to 500 after a hit. A window is
+  advanced over only once it has been fetched, so a sparse Gmail folder
+  (UIDNEXT ≈ 270,000, live mail in the top few thousand UIDs) costs a few
+  dozen round trips, not a per-UID probe. Each fetched block's `Message-ID`
+  is matched, in one query per window, against **this user's rows** still
+  without lists and without a header block (sealed to them, or unsealed on a
+  mailbox they hold a grant on) — by mailbox-agnostic Message-ID, so a
+  jeremy@ row whose message was ever forwarded into Gmail is fixed too.
+- **The write:** `AddressListBackfill::writeLists()` (public as of 1.3) —
+  plaintext on an unsealed row, sealed under the row's own DEK on a sealed
+  one — then `stampRows()`, so `progress()` counts the row as *filled*. One
+  row is one `SealedEgressGuard::isolate()` unit. A locked window
+  (`VaultLockedException`) stops the turn: the rows already written in that
+  window stay written and counted, the window is **not** advanced, and the
+  next turn fetches it again; unsealed rows fill with no window at all.
+- **The cursor:** `iia_lists_sweep_state` (text, JSON) on the account row —
+  per folder `{uidvalidity, next, done}`, plus `done`, `seen` (messages
+  fetched), `filled`. A UIDVALIDITY change restarts that folder from 1.
+  `done` = every folder walked to its UIDNEXT; the account then leaves
+  `hasWork()` for good. Rows still without lists after that are not in the
+  account.
+- **The card (§ 4 Progress):** one line per account — *"Reading headers back
+  from jeremy.tunnell@gmail.com: 98,300 messages read, 96,912 rows recovered
+  ([Gmail]/All Mail at UID 184,000; [Gmail]/Trash done)"* — and the
+  *unrecoverable* line says those rows are being looked for in the account.
 
-**Not recoverable:** a pre-2026-08-25 push row whose message is in no
-reachable mailbox and no archive. Its Cc is gone; the reader shows the routing
-address, as it always did.
+Test: `plugins/mailbox/tests/address_list_sweep_test.php` (21 checks, a
+stub sweep answering from canned folders): sparse walk with doubling and
+gap-free coverage below UIDNEXT, nothing asked past it; unsealed fill without
+a window; sealed row stops the turn unadvanced and not stamped, then seals
+under its own DEK in-window with the wrapping untouched; Trash walked; INBOX
+and Sent not walked beside `\All`; done state, `hasWork()` false, a further
+drain asks nothing; the card line.
 
-**Phase 2 decision, still open:** run § 0, then answer for each of buckets 5
-and 6: is the message in the Gmail account (→ 5a), only in a Takeout/mbox on
-disk (→ 5b), or nowhere (→ nothing to build)? 5a is the expected answer for
-the Gmail feed's own imported history and is the default plan; 5b is built
-only if 5a cannot reach the mail. Phase 2 ships as its own release and reuses
-the Phase 1 drain, stamping and sealing unchanged.
+**On jeremytunnell:** after the release, open the reader with the vault
+unlocked and leave the tab. The two consumers share the drain slice; the
+sweep finishes All Mail (UIDNEXT ≈ 270,000) in a few dozen fetches of a few
+hundred KB each — well under an hour of open-window time — and run 2's
+96,754 rows fill as their Message-IDs come past. Then read the card.
+
+### 5b. The archive on the node — fallback, not built
+
+For rows the account does not hold, an import run's index still says where
+each message sat in its archive (`mie_locator`) and which row it became
+(`mie_iem_inbound_email_message_id`), and the archive is a Drive file
+(`mir_fil_file_id`) until discarded. Both of jeremytunnell's runs discarded
+theirs (§ 0), so this path needs the owner to upload the archive again and
+import it **into the same mailbox**: the importer creates and deletes
+nothing — every message dedups by Message-ID
+(`MailArchiveImporter::existingMessageId`) and the entry is linked to the
+existing row. A third source arm in `AddressListBackfill::candidateWhere()`
+(row linked from an entry whose run still holds its file) would then read
+the header block at the locator through the run's reader
+(`MailArchiveReaderRegistry`, `MailArchiveReader::headerBlock()`), ~40
+lines. Dedup is per mailbox, so a Takeout of one account never goes into
+another mailbox (it would *store* everything that mailbox lacks). Build only
+if the card, after § 5a finishes, still shows rows worth the upload.
+
+**Not recoverable:** a row whose message is in no connected account and no
+archive. Its Cc is gone; the reader shows the routing address, as it always
+did.
 
 ## 6. Retirement — what "done" means and what to remove (after Phase 2)
 
 The backfill is temporary. It is done when, on jeremytunnell.com,
-`AddressListBackfill::hasWork()` is false for the owner's user id — no row of
-`jeremy@jeremytunnell.com` or the Gmail feed lacks its lists while still
-having a source to ask. (Rows stamped because the source is gone will keep
+`AddressListBackfill::hasWork()` and `AddressListSweep::hasWork()` are both
+false for the owner's user id — no row of `jeremy@jeremytunnell.com` or the
+Gmail feed lacks its lists while still having a source to ask, and the Gmail
+account's sweep has walked every folder. (Rows stamped because the source is gone will keep
 being retried daily until removal; that is expected, not "not done".)
 
-Check from the node's admin (no shell needed): a superadmin query count of
-candidates, or simply that the reader shows Cc on the oldest pulled messages.
+Check from the node's admin (no shell needed): the "Recovering To/Cc on
+older messages" card at the top of Inbound Email → Accounts
+(`AddressListBackfill::renderProgressCard()`, § 4 Progress) reads **Finished**
+when nothing is waiting or retrying; it also says how many rows have no source
+copy and never will fill. Or simply that the reader shows Cc on the oldest
+pulled messages.
 
 Then remove, in one commit:
 
 - `plugins/mailbox/includes/AddressListBackfill.php`
-- its `VaultDeferredWork::register('mailbox_address_lists', …)` block in
-  `plugins/mailbox/includes/bootstrap.php`
+- `plugins/mailbox/includes/AddressListSweep.php`
+- the one `AddressListBackfill::renderProgressCard()` line (and its comment) in
+  `plugins/mailbox/admin/admin_mailbox_accounts.php`
+- both `VaultDeferredWork::register(…)` blocks — `mailbox_address_lists` and
+  `mailbox_address_lists_sweep` — in `plugins/mailbox/includes/bootstrap.php`
+- `iia_lists_sweep_state` from the IMAP account class's
+  `$field_specifications` (the column may stay in the database)
 - `ImapIngestor::fetchHeaderText()` (nothing else calls it)
 - `iem_lists_attempt_time` from `$field_specifications` (the column may stay
   in the database; `update_database` does not drop columns)
 - the § 4 paragraph in `plugins/mailbox/docs/overview.md` ("Rows with no
   retained header block get their lists back…")
-- `plugins/mailbox/tests/address_list_backfill_test.php`
-- the 5a extension, if built, goes with it
+- `plugins/mailbox/tests/address_list_backfill_test.php` and
+  `plugins/mailbox/tests/address_list_sweep_test.php`
+- the § 5b archive arm, if built (it is inside `AddressListBackfill`)
 
 Everything in § 2 stays. Then move this spec to `specs/implemented/`.
 
@@ -247,14 +339,19 @@ Everything in § 2 stays. Then move this spec to `specs/implemented/`.
 Three columns on `iem_inbound_email_messages`, all via `$field_specifications`
 + `update_database` (ran on dev 2026-09-14): `iem_to`, `iem_cc` (§ 2, already
 on jeremytunnell with the first push) and `iem_lists_attempt_time` (§ 4, Phase
-1 release). Nodes get them from the release's plugin sync (`upgrade.php`). The
+1 release); and one on `iia_inbound_imap_accounts`, `iia_lists_sweep_state`
+(§ 5a, ran on dev 2026-09-15). Nodes get them from the release's plugin sync (`upgrade.php`). The
 info@getjoinery.com Akamai message shows its Cc the moment getjoinery has the
 release — its header block was retained.
 
 **Phase 1 release contents:** `AddressListBackfill.php`, the bootstrap
 registration (1.14), `ImapIngestor::fetchHeaderText()` (1.19), the
 `iem_lists_attempt_time` column (message class), the docs paragraph,
-`address_list_backfill_test.php`, this spec.
+`address_list_backfill_test.php`, this spec. **Phase 2 release contents:** the progress card (`progress()` /
+`renderProgressCard()`, the one line in `admin_mailbox_accounts.php`),
+`AddressListSweep.php`, the bootstrap registration (1.15), the
+`iia_lists_sweep_state` column, `writeLists()`/`stampRows()` public on
+`AddressListBackfill` (1.3), `address_list_sweep_test.php`.
 
 **After the Phase 1 release, on jeremytunnell:** open the reader, unlock the
 vault, leave the tab. Buckets 3–4 fill newest first, 25 per heartbeat
