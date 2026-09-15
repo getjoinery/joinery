@@ -29,7 +29,8 @@
  *
  * See specs/mail_archive_import.md.
  *
- * @version 1.8
+ * @version 1.9
+ * @changelog 1.9 - readerAndPath() retired with the To/Cc backfill
  * @changelog 1.8 - readerAndPath(): the run's archive opened for a reader outside the
  *   import (TEMPORARY caller: AddressListBackfill, specs/mailbox_to_cc_lists.md § 5b;
  *   remove with it)
@@ -127,19 +128,6 @@ class MailArchiveImporter {
 	 * they write, which means a directory existing is now evidence that something
 	 * was actually put in it.
 	 */
-	/**
-	 * TEMPORARY (specs/mailbox_to_cc_lists.md § 5b) — remove with AddressListBackfill.
-	 * The run's archive opened for reading by its locators: [reader, prepared path].
-	 * Same open() the import uses, so a member extracted into the run's working
-	 * area is reused and Discard archive clears it.
-	 *
-	 * @return array{0:MailArchiveReader,1:string}
-	 */
-	public function readerAndPath(): array {
-		$this->open();
-		return array($this->reader, $this->path);
-	}
-
 	public function workDir(): string {
 		$dir = (string)$this->run->get('mir_work_dir');
 		if ($dir === '') {

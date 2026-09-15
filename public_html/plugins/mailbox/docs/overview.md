@@ -1522,34 +1522,6 @@ a name). An empty list is NULL. A row stored before the columns existed answers
 from its retained `iem_raw_headers` at read time (`MailboxService::addressListsFor`,
 parsed in memory, never written back); a row with neither answers `''`.
 
-Rows with no retained header block get their lists back through the
-`mailbox_address_lists` deferred-work consumer (`AddressListBackfill`), which
-runs in the owner's unlock window: `remote` rows' header blocks are fetched from
-the IMAP source in batches (`ImapIngestor::fetchHeaderTexts()` — one connection
-per account per drain, one STATUS + one FETCH per folder per 50 rows), a
-stored-raw row's from the raw (in-window when sealed). Newest first, up to 200
-rows per turn, the turn's deadline being the real bound (checked before every
-fetch and every stored-raw row). The lists are written as ingest writes them — plaintext on
-an unsealed row, sealed under the row's own DEK on a sealed one — and a source
-carrying neither header records `''` in both columns. A row qualifies for the
-owner it records, or, when unsealed, for any holder of a grant on its mailbox.
-Each attempt is stamped (`iem_lists_attempt_time`) and retried at most daily, so
-a message gone from its source costs one attempt a day. A row linked from an
-import entry whose run still holds its archive reads its header block at the
-entry's locator through the run's reader (`MailArchiveImporter::readerAndPath()`)
-— re-importing an archive into the same mailbox links every entry to the row it
-matches, which is what makes this arm reachable. A row with no header block, no
-raw and no kept archive — an old lean record — has no source on this server and
-reads as `''`; the `mailbox_address_lists_sweep` consumer (`AddressListSweep`) looks
-for it in the connected IMAP account instead, walking each account's `\All`
-folder (plus Trash and Junk; every tracked folder where there is no `\All`) once
-by UID window with one header-only FETCH per window, matching the returned
-`Message-ID`s against the user's rows still without lists and writing them the
-same way. The per-folder cursor lives in `iia_lists_sweep_state`; a finished
-account never re-walks. Where the catch-up stands — recovered, waiting by owner,
-retrying, no source, and each account's sweep — reads as a card at the top of
-Inbound Email → Accounts, gone once no old row lacks its lists.
-
 **Reading.** `InboundEmailMessage::$sealed_fields` + `decryptSealedField()` /
 `decryptSealedFieldStatic()` are the Sealed Vault's generic model read hook: any
 `$msg->get('iem_body_plain')` on a loaded model decrypts automatically when the owner's
