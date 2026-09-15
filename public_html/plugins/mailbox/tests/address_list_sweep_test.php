@@ -22,7 +22,8 @@
  *
  * Run: php tests/run.php db --filter=address_list_sweep
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - a failed turn backs the account off; the marker clears on a landed window
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -63,7 +64,12 @@ class StubSweep extends AddressListSweep {
 	public static $folders = array();
 	/** every window asked for, in order: [folder, from, to] */
 	public static $windows = array();
+	/** when set, status() throws with it — a server that will not answer */
+	public static $refuse = null;
 	protected function status(string $folder): array {
+		if (self::$refuse !== null) {
+			throw new RuntimeException(self::$refuse);
+		}
 		$f = self::$folders[$folder] ?? array('uidvalidity' => 1, 'uidnext' => 1);
 		return array($f['uidvalidity'], $f['uidnext']);
 	}
@@ -233,10 +239,28 @@ StubSweep::$folders = array(
 	)),
 );
 
+// ---- A failing server ------------------------------------------------------
+section('A turn that fails sits the account out; the card says why');
+
+check(StubSweep::hasWork($uid), 'hasWork sees rows without lists and an account to ask');
+StubSweep::$refuse = 'imap.test refused the connection';
+$filled = StubSweep::drainForUser($uid, vault_fixture_dummy_key());
+check($filled === 0 && !StubSweep::hasWork($uid),
+	'after a failed turn the account is not offered again (no tight loop on a chained drain)');
+$st = $state();
+check(!empty($st['failed_at']) && strpos((string)$st['error'], 'refused') !== false, 'the failure is recorded on the account', json_encode($st));
+$lines = AddressListSweep::describe();
+$mine = array_values(array_filter($lines, function ($l) { return strpos($l, 'AddrSweep') === 0; }));
+check(count($mine) === 1 && strpos($mine[0], 'last turn failed') !== false, 'the card line names the failure', json_encode($mine));
+StubSweep::$refuse = null;
+// Expire the backoff by hand: the sweep reads the marker from the row.
+$st['failed_at'] = gmdate('Y-m-d H:i:s', time() - AddressListSweep::FAILURE_BACKOFF_SECONDS - 5);
+InboundImapAccount::updateColumns($acc_id, array('iia_lists_sweep_state' => json_encode($st)));
+check(StubSweep::hasWork($uid), 'once the backoff has passed the account is offered again');
+
 // ---- Without a window ------------------------------------------------------
 section('Unsealed rows fill with no window; a sealed one stops the turn, unadvanced');
 
-check(StubSweep::hasWork($uid), 'hasWork sees rows without lists and an account to ask');
 $filled = StubSweep::drainForUser($uid, vault_fixture_dummy_key());
 check($filled === 1, 'the plain row in All Mail was filled (got ' . $filled . ')');
 $r = $row($m_plain);
@@ -251,6 +275,7 @@ $st = $state();
 $all = $st['folders']['[Gmail]/All Mail'] ?? array();
 check(empty($st['done']) && empty($all['done']) && intval($all['next'] ?? 0) <= 2900,
 	'the cursor stopped before the window that held the sealed row', json_encode($st));
+check(empty($st['failed_at']), 'a window that landed cleared the failure marker');
 $first_pass = StubSweep::$windows;
 check(count($first_pass) >= 2 && $first_pass[0] === array('[Gmail]/All Mail', 1, 500),
 	'the walk began at UID 1 with the base span', json_encode($first_pass));

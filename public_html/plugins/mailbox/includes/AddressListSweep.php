@@ -39,7 +39,10 @@
  * otherwise. Done = every folder walked to its UIDNEXT. Rows still without
  * lists after that are not in the account, and the card says so.
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - a failed turn sits the account out for FAILURE_BACKOFF_SECONDS
+ *   and the card says why; a fast-failing turn was otherwise re-offered on every
+ *   chained drain
  */
 
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
@@ -51,6 +54,9 @@ class AddressListSweep {
 
 	/** Never fetch more than this many messages' headers in one round trip. */
 	const MAX_SPAN = 4000;
+
+	/** Seconds an account sits out after a turn that failed (connection, server, SQL). */
+	const FAILURE_BACKOFF_SECONDS = 600;
 
 	/** Test seam: fn(InboundImapAccount): ImapIngestor. */
 	public static $ingestor_factory = null;
@@ -109,7 +115,11 @@ class AddressListSweep {
 				$filled += $sweep->turn_filled;
 				break;
 			} catch (\Throwable $e) {
+				// Sit this account out: a turn that fails fast would otherwise
+				// be offered again on the very next drain, and the client chains
+				// drains while work is reported — a tight loop of failures.
 				error_log('AddressListSweep: account ' . intval($account->key) . ': ' . $e->getMessage());
+				$sweep->recordFailure($e->getMessage());
 			} finally {
 				$sweep->close();
 			}
@@ -141,6 +151,10 @@ class AddressListSweep {
 			$state = json_decode((string)$account->get('iia_lists_sweep_state'), true);
 			if (is_array($state) && !empty($state['done'])) {
 				continue;
+			}
+			if (is_array($state) && !empty($state['failed_at'])
+					&& strtotime((string)$state['failed_at'] . ' UTC') > time() - self::FAILURE_BACKOFF_SECONDS) {
+				continue; // backing off after a failed turn
 			}
 			$out[] = $account;
 		}
@@ -196,6 +210,7 @@ class AddressListSweep {
 					$span = min(self::MAX_SPAN, $span * 2); // proven empty: stride further next time
 				}
 				$this->state['seen'] += count($headers); // counted once the window is done with
+				unset($this->state['failed_at'], $this->state['error']); // a window landed: healthy again
 				$cursor['next'] = $to + 1;
 				$this->state['folders'][$folder] = $cursor;
 				$this->save();
@@ -313,6 +328,13 @@ class AddressListSweep {
 		return $tracked;
 	}
 
+	/** Remember a failed turn so accountsFor() leaves this account alone for a while. */
+	public function recordFailure(string $message): void {
+		$this->state['failed_at'] = gmdate('Y-m-d H:i:s');
+		$this->state['error'] = substr($message, 0, 300);
+		$this->save();
+	}
+
 	private function save(): void {
 		$this->state['updated'] = gmdate('Y-m-d H:i:s');
 		InboundImapAccount::updateColumns(intval($this->account->key),
@@ -388,7 +410,10 @@ class AddressListSweep {
 			$out[] = $who . ': ' . (!empty($st['done']) ? 'finished — ' : '')
 				. number_format(intval($st['seen'] ?? 0)) . ' messages read, '
 				. number_format(intval($st['filled'] ?? 0)) . ' rows recovered'
-				. ($folders ? ' (' . implode('; ', $folders) . ')' : '');
+				. ($folders ? ' (' . implode('; ', $folders) . ')' : '')
+				. (!empty($st['failed_at']) ? ' — last turn failed at ' . $st['failed_at'] . ' UTC: '
+					. (string)($st['error'] ?? '') . '; retried after '
+					. intval(self::FAILURE_BACKOFF_SECONDS / 60) . ' minutes' : '');
 		}
 		return $out;
 	}

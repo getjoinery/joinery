@@ -1131,7 +1131,12 @@ already open): `work_pending` schedules the drain for the end of the period
 rather than firing it, so the page's own requests — the mail-list refresh an
 unlock triggers, a fresh page's content fetches — get the workers and the
 database first. The backlog is background work and loses nothing by starting
-a few seconds late.
+a few seconds late. Chained drains are paced — 15 seconds between one slice
+ending and the next starting — because every drain counts against the API's
+per-address request budget alongside the reader's own requests; the pacing
+keeps a long backlog from spending that budget and locking the person out of
+their own mail. A drain the server refuses (a 429, or any failure) backs off
+for a minute before the next attempt.
 
 The work never runs inside the beat. A batch can involve a language model whose
 timeout is measured in minutes; a beat blocked that long would stack up behind
