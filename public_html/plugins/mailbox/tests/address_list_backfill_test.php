@@ -24,7 +24,8 @@
  *
  * Run: php tests/run.php db --filter=address_list_backfill
  *
- * @version 1.2
+ * @version 1.3
+ * @changelog 1.3 - the archive arm: linked rows fill from a kept archive; a discarded one is no source
  * @changelog 1.2 - progress() moves rows from waiting to filled
  * @changelog 1.1 - the stub answers the batched fetchHeaderTexts(); pins one call per chunk
  */
@@ -281,6 +282,84 @@ check($r['iem_to'] === null && $r['iem_cc'] === null && $r['iem_lists_attempt_ti
 	'the gone row stays unfilled and is stamped');
 check(!AddressListBackfill::hasWork($uid), '…and the stamp holds it out of the predicate — no per-heartbeat retry');
 
+// ---- Archive rows (§ 5b) ---------------------------------------------------
+section('A lean row linked from an import entry fills from the run\'s archive; a discarded archive is no source');
+
+// Two lean rows: no raw, no headers, no locator — the import-before-columns shape.
+$lean_row = function (string $token) use ($plain_domain, $plain_alias, $plain_addr) {
+	$m = new InboundEmailMessage(NULL);
+	$m->set('iem_ied_inbound_email_domain_id', (int)$plain_domain->key);
+	$m->set('iem_iea_inbound_email_alias_id', (int)$plain_alias->key);
+	$m->set('iem_recipient', $plain_addr);
+	$m->set('iem_sender', 'zhartleb@akamai.example');
+	$m->set('iem_subject', 'Backfill ' . $token);
+	$m->set('iem_body_plain', 'Body of ' . $token . '.');
+	$m->set('iem_message_id_header', '<' . $token . '@example.com>');
+	$m->set('iem_thread_key', '<' . $token . '@example.com>');
+	$m->save();
+	harness_register_model('InboundEmailMessage', (int)$m->key);
+	return (int)$m->key;
+};
+$m_arc1 = $lean_row('albf-arc1-' . $suffix);
+$m_arc2 = $lean_row('albf-arc2-' . $suffix);
+check(!AddressListBackfill::hasWork($uid), 'lean rows with no archive behind them are not candidates');
+
+// The archive: an mbox of exactly those two messages, kept by a finished run.
+$mbox = "From zhartleb@akamai.example Mon Sep 15 12:00:00 2026\r\n" . $raw_email('albf-arc1-' . $suffix, $plain_addr)
+	. "\r\nFrom zhartleb@akamai.example Mon Sep 15 12:01:00 2026\r\n" . $raw_email('albf-arc2-' . $suffix, $plain_addr) . "\r\n";
+$file = File::createFromBytes($mbox, 'albf-' . $suffix . '.mbox', 'application/octet-stream', $uid,
+	array('fil_private' => true, 'fil_source' => File::SOURCE_MAIL_IMPORT_ARCHIVE));
+harness_defer(function () use ($file) { try { $file->permanent_delete(); } catch (\Throwable $e) {} });
+$run = new MailImportRun(NULL);
+$run->set('mir_iea_inbound_email_alias_id', (int)$plain_alias->key);
+$run->set('mir_usr_user_id', $uid);
+$run->set('mir_fil_file_id', (int)$file->key);
+$run->set('mir_source_name', 'albf-' . $suffix . '.mbox');
+$run->set('mir_state', MailImportRun::STATE_QUEUED);
+$run->set('mir_own_addresses', $plain_addr);
+$run->prepare();
+$run->save();
+$run->load();
+harness_register_row('mir_mail_import_runs', 'mir_mail_import_run_id', (int)$run->key);
+$importer = new MailArchiveImporter($run);
+$scan = $importer->scanBatch(microtime(true) + 20, 100);
+$entries = $db->prepare('SELECT mie_mail_import_entry_id, mie_locator FROM mie_mail_import_entries WHERE mie_mir_mail_import_run_id = ? ORDER BY mie_ordinal');
+$entries->execute(array((int)$run->key));
+$entries = $entries->fetchAll(PDO::FETCH_ASSOC);
+check(!empty($scan['done']) && count($entries) === 2, 'the scan indexed both messages', json_encode(array($scan, count($entries))));
+foreach ($entries as $e) {
+	harness_register_row('mie_mail_import_entries', 'mie_mail_import_entry_id', (int)$e['mie_mail_import_entry_id']);
+}
+// What a re-import into the same mailbox does: every message dedups and the
+// entry is linked to the existing row.
+MailImportEntry::recordOutcome((int)$entries[0]['mie_mail_import_entry_id'], MailImportEntry::STATE_DEDUP, 'test', $m_arc1);
+MailImportEntry::recordOutcome((int)$entries[1]['mie_mail_import_entry_id'], MailImportEntry::STATE_DEDUP, 'test', $m_arc2);
+$run->moveTo(MailImportRun::STATE_DONE);
+$importer->cleanup(); // the finished import cleared its working area; the drain rebuilds what it needs
+
+check($candidate_ids() === array($m_arc1, $m_arc2), 'linked from a run that kept its archive, both are candidates', json_encode($candidate_ids()));
+$p = AddressListBackfill::progress();
+check(($p['waiting'][''] ?? 0) >= 2, 'the card counts them as waiting, not unrecoverable', json_encode($p));
+$done = AddressListBackfill::drainForUser($uid, vault_fixture_dummy_key());
+check($done === 2, 'both filled from the archive (got ' . $done . ')');
+$r = $row($m_arc1);
+check($r['iem_to'] === $plain_addr && $r['iem_cc'] === $CC_CANON && $r['iem_lists_attempt_time'] !== null,
+	'the first holds both lists, canonical, and is stamped', json_encode(array($r['iem_to'], $r['iem_cc'])));
+$r = $row($m_arc2);
+check($r['iem_cc'] === $CC_CANON, 'so does the second');
+check(!AddressListBackfill::hasWork($uid), 'nothing left from the archive');
+
+// A third lean row linked to the run, after the archive is discarded: no source.
+$m_arc3 = $lean_row('albf-arc3-' . $suffix);
+MailImportEntry::recordOutcome((int)$entries[0]['mie_mail_import_entry_id'], MailImportEntry::STATE_DEDUP, 'test', $m_arc3);
+check($candidate_ids() === array($m_arc3), 'linked while the archive is kept: a candidate');
+$run->writeColumns(array('mir_fil_file_id' => null));
+check($candidate_ids() === array(), 'the archive discarded: no source, not a candidate', json_encode($candidate_ids()));
+$p = AddressListBackfill::progress();
+check($p['unrecoverable'] >= 1, 'and the card counts it as having no copy', json_encode($p));
+
+// The archive section runs BEFORE any sealed content is opened: the scan writes
+// its state (a long JSON) to the run row, which a hot process is refused.
 // ---- Sealed rows -----------------------------------------------------------
 section('A sealed row: locked stops and unstamps; in-window seals under the row DEK');
 

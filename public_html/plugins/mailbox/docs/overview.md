@@ -1534,9 +1534,13 @@ an unsealed row, sealed under the row's own DEK on a sealed one — and a source
 carrying neither header records `''` in both columns. A row qualifies for the
 owner it records, or, when unsealed, for any holder of a grant on its mailbox.
 Each attempt is stamped (`iem_lists_attempt_time`) and retried at most daily, so
-a message gone from its source costs one attempt a day. A row with no header
-block and no raw — an old lean record — has no source on this server and reads
-as `''`; the `mailbox_address_lists_sweep` consumer (`AddressListSweep`) looks
+a message gone from its source costs one attempt a day. A row linked from an
+import entry whose run still holds its archive reads its header block at the
+entry's locator through the run's reader (`MailArchiveImporter::readerAndPath()`)
+— re-importing an archive into the same mailbox links every entry to the row it
+matches, which is what makes this arm reachable. A row with no header block, no
+raw and no kept archive — an old lean record — has no source on this server and
+reads as `''`; the `mailbox_address_lists_sweep` consumer (`AddressListSweep`) looks
 for it in the connected IMAP account instead, walking each account's `\All`
 folder (plus Trash and Junk; every tracked folder where there is no `\All`) once
 by UID window with one header-only FETCH per window, matching the returned

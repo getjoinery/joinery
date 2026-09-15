@@ -54,6 +54,14 @@ FROM mir_mail_import_runs r ORDER BY 1;
 Bucket 6 (pre-2026-08-25 push, never imported) is only reachable if the
 message is also in the Gmail account (§ 5a); otherwise it is gone.
 
+**Outcome 2026-09-15 (evening):** the sweep finished on jeremytunnell —
+98,747 messages read, 71,304 rows recovered; the card reads 71,925 recovered,
+1 retrying (source gone), **1,884 with no copy anywhere reachable**. Those
+1,884 are, by count and date, run 1 — the `jeremy@jeremytunnell.com.zip`
+messages that were never forwarded into Gmail. § 5b is now sized at exactly
+that: re-upload that zip into `jeremy@jeremytunnell.com`, all dedup, then the
+archive arm. Owner's call whether 1,884 rows are worth it.
+
 **Findings 2026-09-15** (from the node's import page and `mail_import_status`,
 superadmin; the bucket query itself still needs a shell):
 
@@ -189,8 +197,12 @@ by the owner whose open window it waits on, or "shared" for unsealed rows),
 *retrying* (tried, the source did not answer; asked again daily),
 *unrecoverable* (no source at all) — and
 `AddressListBackfill::renderProgressCard()` shows them as a card at the top
-of Inbound Email → Accounts, **In progress** or **Finished** (nothing waiting,
-nothing retrying). The card renders only while some old row lacks its lists.
+of Inbound Email → Accounts, **In progress** or **Finished** — nothing
+waiting on a source and every account's sweep (§ 5a) walked to the end. A
+row whose source is gone is retried daily by design and does not hold the
+badge open. Once the sweep is over, the *no copy* line says those rows are
+not in the account either and only the archive they came from can fill them.
+The card renders only while some old row lacks its lists.
 Everything about it lives in the class; the admin page makes one call.
 
 Test: `plugins/mailbox/tests/address_list_backfill_test.php` (24 checks:
@@ -275,27 +287,52 @@ sweep finishes All Mail (UIDNEXT ≈ 270,000) in a few dozen fetches of a few
 hundred KB each — well under an hour of open-window time — and run 2's
 96,754 rows fill as their Message-IDs come past. Then read the card.
 
-### 5b. The archive on the node — fallback, not built
+### 5b. The archive on the node — the archive arm (built)
 
-For rows the account does not hold, an import run's index still says where
-each message sat in its archive (`mie_locator`) and which row it became
-(`mie_iem_inbound_email_message_id`), and the archive is a Drive file
-(`mir_fil_file_id`) until discarded. Both of jeremytunnell's runs discarded
-theirs (§ 0), so this path needs the owner to upload the archive again and
-import it **into the same mailbox**: the importer creates and deletes
-nothing — every message dedups by Message-ID
-(`MailArchiveImporter::existingMessageId`) and the entry is linked to the
-existing row. A third source arm in `AddressListBackfill::candidateWhere()`
-(row linked from an entry whose run still holds its file) would then read
-the header block at the locator through the run's reader
-(`MailArchiveReaderRegistry`, `MailArchiveReader::headerBlock()`), ~40
-lines. Dedup is per mailbox, so a Takeout of one account never goes into
-another mailbox (it would *store* everything that mailbox lacks). Build only
-if the card, after § 5a finishes, still shows rows worth the upload.
+For rows the account does not hold — on jeremytunnell the 1,884 from the
+`jeremy@jeremytunnell.com.zip` import — the source is the archive they came
+from. An import run keeps an index of its archive: one `mie_` entry per
+message with its position (`mie_locator`) and, once stored or deduped, the
+row it became or matched (`mie_iem_inbound_email_message_id`); the archive is
+a Drive file (`mir_fil_file_id`) until discarded.
+
+`AddressListBackfill` (1.5) has a fourth source arm, `archiveSourceSql()`:
+a row linked from an entry (state `stored` or `dedup`) of a run that still
+holds its file is a candidate, and `progress()` counts it as *waiting*
+rather than *no copy*. The drain groups such rows by run, opens the run's
+reader once (`MailArchiveImporter::readerAndPath()`, 1.8 — the same `open()`
+the import uses, so an extracted member lands in the run's working area and
+Discard archive clears it), reads each message at its locator,
+`MailArchiveReader::headerBlock()`, and writes the lists the way every other
+arm does. A locator the archive no longer answers stays stamped for the
+daily retry; an archive that will not open stamps its whole group. A row
+with a stored raw uses the raw, never the archive.
+
+Both of jeremytunnell's runs discarded their archives, so the arm needs the
+owner to **upload the zip again and import it into the same mailbox**. The
+importer creates and deletes nothing: every message matches its existing row
+by Message-ID (`MailArchiveImporter::existingMessageId`), is recorded as a
+dedup, and the entry is linked to that row — exactly the index the arm reads.
+Dedup is per mailbox, so an archive goes into the mailbox its rows live in
+and no other (it would *store* everything that mailbox lacks). The archive
+stays until the card reads Finished; Discard archive then reclaims it.
+
+Test: the archive section of `address_list_backfill_test.php` (35 checks
+total) — a real mbox scanned by the importer, entries linked as a re-import
+links them, both rows filled through the reader; a run whose file is gone is
+no source and its row reads as *no copy*.
 
 **Not recoverable:** a row whose message is in no connected account and no
 archive. Its Cc is gone; the reader shows the routing address, as it always
 did.
+
+**Finishing on jeremytunnell:** release with the archive arm → on Inbound
+Email → Accounts, under jeremy@jeremytunnell.com, *Import archive*: upload
+`jeremy@jeremytunnell.com.zip` (same *addresses that were yours*), Read the
+archive, then import — every message reads *already here* → open the reader
+with the vault unlocked and leave the tab; the card's *no copy* line moves to
+*still to do* and drains to *recovered* → **Finished** → *Discard archive*
+on the import page → § 6.
 
 ## 6. Retirement — what "done" means and what to remove (after Phase 2)
 
@@ -330,7 +367,7 @@ Then remove, in one commit:
   retained header block get their lists back…")
 - `plugins/mailbox/tests/address_list_backfill_test.php` and
   `plugins/mailbox/tests/address_list_sweep_test.php`
-- the § 5b archive arm, if built (it is inside `AddressListBackfill`)
+- `MailArchiveImporter::readerAndPath()` (1.8; nothing else calls it)
 
 Everything in § 2 stays. Then move this spec to `specs/implemented/`.
 
