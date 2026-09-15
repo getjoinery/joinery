@@ -13,6 +13,7 @@
  * every Edit jump to the existing per-object editors with context pre-filled.
  * DNS/host diagnostics live on the Setup tab.
  *
+ * @version 1.10 - the To/Cc catch-up card is retired with the backfill
  * @version 1.9 - the To/Cc catch-up card (specs/mailbox_to_cc_lists.md § 6): one
  *   call, TEMPORARY, removed with the backfill
  * @version 1.8 - + IMAP feed routes into the connect wizard (rule 1)
@@ -48,9 +49,6 @@ echo AdminPage::tab_menu(mailbox_admin_tabs(), 'Accounts');
 
 // Flash messages render in the AdminPage header (admin pages must not
 // fetch or render session messages themselves).
-
-// TEMPORARY (specs/mailbox_to_cc_lists.md § 6): remove this line with the class.
-AddressListBackfill::renderProgressCard();
 
 // How mail reaches this server is a deployment fact, not a question every page
 // has to have answered first: an undecided deployment receives directly and

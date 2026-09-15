@@ -1,10 +1,12 @@
 # Mailbox To / Cc lists — who else a message went to
 
-**Status:** two phases (owner, 2026-09-14). **Phase 1 is built and goes out
-now**; **Phase 2 is under investigation** and is not built. **This spec stays
-in `specs/` — never `specs/implemented/` — until the temporary backfill is
-retired.** Retirement is the last work package (§ 6); when it lands, move the
-spec.
+**Status: IMPLEMENTED and the temporary backfill RETIRED, 2026-09-15.** The
+permanent fix (§ 2) stays. Everything in § 6 was removed in the retirement
+commit; the two columns it left behind (`iem_lists_attempt_time`,
+`iia_lists_sweep_state`) may stay in the database — `update_database` does
+not drop columns. Outcome on jeremytunnell: **73,573 rows recovered**
+(6,651 Phase 1, 71,304 by the Gmail sweep, the rest by the archive arm),
+236 with no copy anywhere reachable, 1 whose IMAP source was deleted.
 
 | Phase | What | State |
 |---|---|---|
