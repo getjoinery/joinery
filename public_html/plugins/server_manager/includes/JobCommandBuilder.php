@@ -8,6 +8,9 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.63 - build_apply_update refuses a node that hosts no site (ManagedNode::hosts_site): a
+ *                 machine in machine posture has no release to apply and its agent updates itself
+ *                 from this plane; the Docker host was being sent one (2026-09-15)
  * @version 1.62 - host_converge: run host_housekeeping.sh (fail2ban and the host's daily housekeeping)
  *                 through the host runner's single-installer mode, the first operate word of
  *                 specs/agent_tier1_recipes.md. Primitive only, no parameters; the installer name is a
@@ -1297,6 +1300,15 @@ class JobCommandBuilder {
 	 * lives.
 	 */
 	public static function build_apply_update($node, $params = []) {
+		// A machine with no site has no release to apply. Its agent keeps
+		// itself current from this plane's artifact endpoint, and its scripts
+		// arrive in the support bundle on the same clock; upgrade.php is not
+		// in that bundle and there is no tree for it to upgrade.
+		if (!$node->hosts_site()) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' hosts no Joinery site, so there is no release to apply. "
+				. 'Its agent updates itself from this management node.');
+		}
 		if (!self::has_primitive($node, 'apply_update')) {
 			throw new Exception(
 				"Node '{$node->get('mgn_slug')}' cannot apply an update: that needs a paired agent "

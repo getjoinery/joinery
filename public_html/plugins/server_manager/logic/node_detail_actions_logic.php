@@ -19,6 +19,9 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.29 - apply_update_all_on_host counts only nodes that host a site: the host's own node
+ *                 shares the placement record and is neither an ungrouped site nor a sibling to
+ *                 upgrade (docker-prod, 2026-09-15)
  * @version 1.28 - case_note and case_read: a human writes a note on one of the node's cases and marks it
  *                 read; neither closes it, because the node's own check is the truth about the fault
  * @version 1.27 - host_converge action: run fail2ban housekeeping on the machine now, through the
@@ -346,14 +349,24 @@ class NodeDetailActions {
 				// address that the placement grouping would miss is a refusal, not
 				// a silent skip — "all sites on this host" must never quietly mean
 				// "some".
+				//
+				// "Sites" throughout. The host's own node — the machine's agent,
+				// in machine posture — carries the same address and may share
+				// the placement record, and it is neither an ungrouped site
+				// nor a sibling with a release to apply (ManagedNode::hosts_site).
 				$host_id = (int)$node->get('mgn_mgh_host_id');
-				$db_ungrouped = DbConnector::get_instance()->get_db_link();
-				$uq = $db_ungrouped->prepare(
-					"SELECT string_agg(mgn_slug, ', ') FROM mgn_managed_nodes
-					 WHERE mgn_host = ? AND mgn_delete_time IS NULL AND mgn_enabled = true
-					   AND mgn_mgh_host_id IS DISTINCT FROM ? AND mgn_id <> ?");
-				$uq->execute([(string)$node->get('mgn_host'), $host_id ?: null, (int)$node->key]);
-				$ungrouped = (string)$uq->fetchColumn();
+				$ungrouped = [];
+				$at_address = new MultiManagedNode(
+					['host' => (string)$node->get('mgn_host'), 'enabled' => true, 'deleted' => false],
+					['mgn_slug' => 'ASC']
+				);
+				foreach ($at_address as $other) {
+					if ((int)$other->key === (int)$node->key || !$other->hosts_site()) continue;
+					if ((int)$other->get('mgn_mgh_host_id') !== $host_id) {
+						$ungrouped[] = $other->get('mgn_slug');
+					}
+				}
+				$ungrouped = implode(', ', $ungrouped);
 				if ($ungrouped !== '') {
 					self::fail($session, $page_regex,
 						"Some sites at this address are not grouped under this host record ({$ungrouped}). "
@@ -376,6 +389,8 @@ class NodeDetailActions {
 				}
 				$queued = 0;
 				foreach ($siblings as $sibling) {
+					// Not a site: nothing to upgrade, nothing to report.
+					if (!$sibling->hosts_site()) continue;
 					try {
 						// Same entry point as the single-node case above; an
 						// unpaired sibling throws and is logged rather than

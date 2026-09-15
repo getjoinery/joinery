@@ -1542,6 +1542,34 @@ if (!$verify_target) {
 }
 
 // ---------------------------------------------------------------------------
+section('apply_update: a node that hosts no site has no release to apply');
+
+// The Docker host, paired in machine posture: an agent that carries
+// apply_update because the binary ships it, and no site for it to upgrade.
+// upgrade.php is not in the support bundle, so dispatching it produced a
+// refusal on the host (2026-09-15). The builder refuses first, and says why.
+$machine = jcb_node(array(
+	'mgn_agent_public_key' => base64_encode(str_repeat("\x0d", 32)),
+	'mgn_agent_version'    => '1.30.0',
+	'mgn_agent_primitives' => 'check_status,host_report,host_converge,apply_update',
+	'mgn_web_root'         => '',
+));
+try {
+	JobCommandBuilder::build_apply_update($machine);
+	check(false, 'a node with no site is refused an update');
+} catch (Exception $e) {
+	check(strpos($e->getMessage(), 'hosts no Joinery site') !== false,
+		'a node with no site is refused an update, and the reason names the posture', $e->getMessage());
+}
+$site = jcb_node(array(
+	'mgn_agent_public_key' => base64_encode(str_repeat("\x0e", 32)),
+	'mgn_agent_version'    => '1.30.0',
+	'mgn_agent_primitives' => 'check_status,host_report,host_converge,apply_update',
+	'mgn_web_root'         => '/var/www/html/fixture/public_html',
+));
+$built = JobCommandBuilder::build_apply_update($site);
+check(($built['primitive'] ?? null) === 'apply_update', 'the same agent with a site is built the update');
+
 section('host_report: primitive only, no parameters, refused without the word');
 
 {
