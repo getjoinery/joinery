@@ -16,6 +16,8 @@
  * "as reported by the agent's ledger", every field escaped or made plain, no
  * link that acts — and that a closed or unreadable file is silence.
  *
+ * @version 1.1 - the rendered time: the notice says when the agent last reported, stale past a day;
+ *                the mail stops for a record the agent has not rendered within a day
  * @version 1.0
  */
 
@@ -76,12 +78,32 @@ $closed = $open; $closed['status'] = 'closed';
 check(RecipeCaseNotice::forRecord($closed) === '', 'A closed case is silence');
 check(RecipeCaseNotice::forRecord(array('status' => 'open')) !== '', 'A bare open record still renders, with unknowns');
 
+section('The notice says when the agent last reported the case, and when that was too long ago');
+$rendered_at = strtotime('2026-09-14T12:50:00Z');
+check(RecipeCaseNotice::rendered_at($open) === $rendered_at, 'The rendered time is read as the agent writes it');
+check(RecipeCaseNotice::rendered_at(array('rendered' => '14 Sep 2026')) === null
+	&& RecipeCaseNotice::rendered_at(array()) === null, 'A rendered time in any other shape, or none, is unknown');
+$fresh = RecipeCaseNotice::forRecord($open, $rendered_at + 3600);
+check(strpos($fresh, 'Last reported by the agent at 2026-09-14 12:50 UTC') !== false, 'The notice says when the agent last reported it');
+check(strpos($fresh, 'may be out of date') === false, 'An hour-old report is not called stale');
+$stale = RecipeCaseNotice::forRecord($open, $rendered_at + 2 * 86400);
+check(strpos($stale, 'may be out of date') !== false && strpos($stale, 'check that the agent is running') !== false,
+	'A report the agent has not rewritten for more than a day says so, and points at the agent');
+check(strpos(RecipeCaseNotice::forRecord($open, $rendered_at - 3600), 'may be out of date') === false,
+	'A rendered time ahead of our clock is fresh, not stale');
+$unstamped = $open; unset($unstamped['rendered']);
+check(strpos(RecipeCaseNotice::forRecord($unstamped, $rendered_at), 'does not say when the agent last reported') !== false,
+	'A record with no rendered time says so');
+check(RecipeCaseNotice::is_stale($open, $rendered_at + 86401) && !RecipeCaseNotice::is_stale($open, $rendered_at + 86400)
+	&& RecipeCaseNotice::is_stale($unstamped, $rendered_at), 'Stale is more than a day since rendered, or no rendered time');
+
 section('The mail is plain text with no link');
 $mail = RecipeCaseNotice::mail_body($hostile, 'Example <b>site</b>');
 check(strip_tags($mail) === $mail, 'No markup survives into the mail (the sender would switch to HTML on the first tag)');
 check(strpos($mail, 'http://') === false && strpos($mail, '://') === false, 'No link at all');
 check(strpos($mail, "as reported by the agent's ledger") !== false, 'The mail says it is a report');
 check(strpos($mail, 'host_converge: report-only') !== false, 'The mail lists what the agent tried');
+check(strpos($mail, 'Last reported by the agent: 2026-09-14 12:50 UTC') !== false, 'The mail says when the agent last reported the case');
 check(strpos($mail, 'once a day per recipe') !== false, 'The mail says how often it comes');
 
 section('The mail is the unpaired path only, once a day per recipe');
@@ -103,6 +125,20 @@ check(count($sends) === 1, 'A day later it is mailed once more while still open'
 $sends = array();
 $r = RecipeCaseMail::mail(array('fail2ban' => $closed), $r['log'], 1000000 + 90000, array('a@example.test'), 'Example', $send);
 check(count($sends) === 0 && !isset($r['log']['fail2ban']), 'A closed case sends nothing and clears its log entry, so the next case mails at once');
+section('A case the agent stopped rendering is not mailed until the agent renders it again');
+$sends = array();
+$log = array('fail2ban' => $rendered_at - 3 * 86400);
+$r = RecipeCaseMail::mail(array('fail2ban' => $open), $log, $rendered_at + 2 * 86400, array('a@example.test'), 'Example', $send);
+check(count($sends) === 0 && ($r['stale'] ?? 0) === 1 && ($r['log']['fail2ban'] ?? 0) === $rendered_at - 3 * 86400
+	&& strpos($r['message'], 'not rendered by the agent within a day') !== false,
+	'Two days after the agent last rendered the case, no mail is sent, the log entry stays, and the message says why', json_encode($r));
+$rerendered = $open; $rerendered['rendered'] = gmdate('Y-m-d\TH:i:s\Z', $rendered_at + 2 * 86400 - 60);
+$r = RecipeCaseMail::mail(array('fail2ban' => $rerendered), $r['log'], $rendered_at + 2 * 86400, array('a@example.test'), 'Example', $send);
+check(count($sends) === 1 && ($r['stale'] ?? 0) === 0, 'Once the agent renders it again, the daily mail resumes', json_encode($r));
+$sends = array();
+$r = RecipeCaseMail::mail(array('fail2ban' => $unstamped), array(), $rendered_at, array('a@example.test'), 'Example', $send);
+check(count($sends) === 0 && ($r['stale'] ?? 0) === 1, 'A record with no rendered time is never mailed');
+
 $hostile_site = $open;
 $r = RecipeCaseMail::mail(array('fail2ban' => $hostile_site), array(), 1, array('a@example.test'), "Evil <b>site</b>\r\nBcc: x", $send);
 check(count($sends) === 1 && strpos($sends[0], "\n") === false && strpos($sends[0], "\r") === false, 'A line break in the site name cannot reach the subject', json_encode($sends));

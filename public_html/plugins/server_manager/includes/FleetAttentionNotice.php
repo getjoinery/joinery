@@ -15,6 +15,8 @@
  * reasons are node-supplied text, capped on intake and escaped here; the one
  * link in each notice is the plane's own node page by id.
  *
+ * @version 1.1 - render_failed_units loads only the nodes whose report names a failed unit
+ *                (MultiManagedNode reports_failed_units), not every node's report on every page
  * @version 1.0
  */
 class FleetAttentionNotice {
@@ -27,7 +29,10 @@ class FleetAttentionNotice {
 			return '';
 		}
 		$failing = [];
-		foreach (new MultiManagedNode(['deleted' => false], ['mgn_name' => 'ASC']) as $node) {
+		// Only nodes whose stored report names a failed unit are loaded: the
+		// database answers that from the JSON, so a healthy fleet costs one
+		// empty query per admin page and no decoding.
+		foreach (new MultiManagedNode(['deleted' => false, 'reports_failed_units' => true], ['mgn_name' => 'ASC']) as $node) {
 			$report = $node->get('mgn_last_host_report');
 			if (is_string($report)) { $report = json_decode($report, true); }
 			if (!is_array($report)) { continue; }

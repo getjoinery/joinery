@@ -1,6 +1,8 @@
 # Agent tier 1: compiled recipes, the check loop, and the case
 
-**Status: DESIGN SET 2026-09-13, unbuilt, sequenced LAST.** Owner's order:
+**Status: slices 1 to 6b BUILT and LIVE fleet-wide 2026-09-15 (0.8.400 /
+agent 1.30.0), report-only; the slice 6 polish, the case proof and the
+burn-in write-up come before arming (7).** Design set 2026-09-13. Owner's order:
 every other package in `post_release_fleet_defects.md` ships first, then this
 one is built on its own, because it is the one piece of that work that is
 major: the first time the agent acts without being asked. It builds the tier 1
@@ -321,6 +323,8 @@ What the read says about arming:
    every 10 minutes, ~15 KiB a day, and reaches the 256 KiB trim in about
    seventeen days with nothing in it worth keeping. Ledger unknown on the
    change of verdict only, as pass is (polish item, before arming).
+   **Done 2026-09-15, agent 1.31.0** (and a container no longer runs the
+   check at all since 6b: `fail2ban:not-applicable`).
 3. **The one box where fail2ban is dead has no agent.** The docker-prod
    host runs no `joinery-agent` unit and holds no `/etc/joinery-agent`;
    its fail2ban unit has been failed (exit 255) for almost five months,
@@ -472,14 +476,39 @@ review is in the file header before the code.
    the hourly `RecipeCaseMail` task (one plain-text mail per recipe per
    day, no link, log in the `recipe_case_mail_log` setting, and only for
    a case delivered locally — a paired node's case is on the plane's card
-   and is never mailed from the node).
+   and is never mailed from the node). **Polish from the 2026-09-14
+   review, built 2026-09-15 (agent 1.31.0):** the rendered copy carries
+   the time the agent wrote it and the agent writes it again on every
+   failing tick, so the site's notice says when the agent last reported
+   the case and, past a day, that the record may be out of date, and the
+   mail stops for a record the agent has not rendered within the day (a
+   stopped agent's frozen file was a daily mail forever); a case that
+   rides a claim unchanged writes nothing (an open case is re-stamped as
+   seen at most every ten minutes, a closed summary never), where before
+   every poll of every node that ever had a case was an UPDATE; a note is
+   taken when its time is newer even if the node's count restarted lower
+   after a ledger trim, and the stored count never goes down; the
+   failed-unit notice asks the database which nodes' reports name a
+   failed unit instead of decoding every node's report on every admin
+   page; and an unknown verdict is ledgered on the change of verdict only,
+   as a pass is (burn-in read, item 2).
 6b. **Machine posture: both actors on a siteless host** (added 2026-09-15
    from the burn-in read; acceptance 7 of `docker_host_agent.md` names the
-   end state, nothing had built it). **Built 2026-09-15, agent 1.29.0
-   unbuilt; the runner, housekeeping and timer-installer edits and their
-   three gates are staged in the executor's scratch mirror until the owner
-   stops the dev host timer and path unit, then land in the tree; awaiting
-   review, the release, and the docker-prod enrollment.** A siteless machine runs scripts from
+   end state, nothing had built it). **Built 2026-09-15, agent 1.29.0,
+   released as 0.8.398 and proven live the same day: the docker-prod host
+   was enrolled by `install.sh docker`, housekeeping repaired its fail2ban
+   at install, the bundle arrived a minute later and its converge installed
+   the host timer. Three defects found on the live host and fixed the same
+   day, agent 1.30.0 on every node by evening: B1 the join came over IPv6
+   and approval minted a second placement instead of linking the host the
+   containers point at (the join now carries the machine's addresses); B2
+   the status sweep asked the host for its recovery key, the bundle has no
+   such script, and the refusal was read as a tampered file (a node that
+   hosts no site is never asked a site question, and the agent names the
+   posture instead of a bad file); B3 an upgrade rollout sent
+   `apply_update` to the host (a node that hosts no site has no release to
+   apply; its agent updates itself from the management node's artifact
+   endpoint).** A siteless machine runs scripts from
    the verified bundle at `/opt/joinery-agent/tree`, whose layout is a
    site root's; today the bundle carries `host_report.sh` and not the
    runner, so a paired Docker host could check fail2ban and never repair
