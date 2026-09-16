@@ -37,6 +37,8 @@
  * mailbox is open. See plugins/mailbox/docs/overview.md § The list toolbar and
  * multi-select.
  *
+ * @version 1.22.0 - messageTimelineUrl: the ⋮ menu's Show logs panel
+ *                  (specs/mailbox_message_timeline.md)
  * @version 1.21.0 - phone layout (specs/mailbox_reader_phone_layout.md): the
  *                  rail carries a drawer close button, a scrim sits beside it,
  *                  and a scope bar heads the list view
@@ -93,6 +95,7 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 		'draftDeleteUrl'    => '/api/v1/action/mailbox/draft_delete',
 		'draftAttachmentDeleteUrl' => '/api/v1/action/mailbox/draft_attachment_delete',
 		'messageSourceUrl'  => '/api/v1/action/mailbox/message_source',
+		'messageTimelineUrl' => '/api/v1/action/mailbox/message_timeline',
 		'attachmentTextUrl' => '/api/v1/action/mailbox/attachment_text',
 		// .eml download + print sheet. One grant-scoped endpoint for both mounts:
 		// a superadmin reaches every mailbox through it exactly as they do in the

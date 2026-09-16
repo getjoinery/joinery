@@ -28,6 +28,7 @@
  * this header — see InboundEmailRouter::readAuthResults() and
  * specs/inbound_mailgun_verification.md.
  *
+ * @version 1.1 - extractHeaders() is public: the message timeline walks the Received: chain with it
  * @version 1.0
  */
 
@@ -200,7 +201,7 @@ class AuthenticationResults {
 	 *
 	 * @return string[] one entry per occurrence of the header
 	 */
-	private static function extractHeaders(string $raw_message, string $header_name): array {
+	public static function extractHeaders(string $raw_message, string $header_name): array {
 		$normalized = str_replace("\r\n", "\n", $raw_message);
 		$split_pos = strpos($normalized, "\n\n");
 		$header_block = ($split_pos !== false) ? substr($normalized, 0, $split_pos) : $normalized;

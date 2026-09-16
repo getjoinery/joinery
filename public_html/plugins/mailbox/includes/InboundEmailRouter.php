@@ -119,6 +119,11 @@
  *   no forward path relays a message that already carries either marker or
  *   has crossed FORWARD_MAX_HOPS relays; the message is kept or dropped as
  *   its delivery mode says, never bounced (a bounce could loop too)
+ * @version 1.37
+ * @changelog 1.37 - a routing-log line names the message row it stored and
+ *   carries the subject (plaintext mailboxes only); a forward records a send
+ *   attempt on the stored message it relayed, so the message timeline can show
+ *   how it was routed and where it went (specs/mailbox_message_timeline.md A1/A2)
  * @version 1.36
  * @changelog 1.36 - every raw MIME parse goes through MimeParse (a message
  *   quoting its own boundary mid-line hangs Horde's parser; observed pinning
@@ -336,10 +341,11 @@ class InboundEmailRouter {
 		// spam_held; a forward_and_store alias still keeps the message (with its spam
 		// verdict) so it stays reviewable in the reader's Spam view.
 		if ($this->classifySpam($auth, $content_spam['signal']) === InboundEmailMessage::SPAM_VERDICT_SPAM) {
-			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_SPAM_HELD, $envelope_recipient, null, null, $domain->key);
+			$held_id = null;
 			if ($stores) {
 				try {
-					$this->storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $auth, $content_spam);
+					$saved = $this->storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $auth, $content_spam);
+					$held_id = $saved['message'] ? intval($saved['message']->key) : null;
 				} catch (MailboxSealTargetMissing $e) {
 					// Declining always means "try again later", on every path —
 					// including this one. Returning 0 here would tell the sender's
@@ -354,6 +360,7 @@ class InboundEmailRouter {
 					$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_ERROR, $envelope_recipient, null, 'Store of spam-held message failed: ' . $e->getMessage(), $domain->key);
 				}
 			}
+			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_SPAM_HELD, $envelope_recipient, null, null, $domain->key, $held_id);
 			return 0;
 		}
 
@@ -369,9 +376,11 @@ class InboundEmailRouter {
 		// backend is genuinely down, forwarding is delayed until it recovers
 		// rather than forwarding and dropping the copy — the correct priority when
 		// the copy is the point.
+		$stored_id = null; // the forward_and_store copy, which the forward's log line and attempt name
 		if ($stores) {
 			try {
-				$this->storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $auth, $content_spam);
+				$saved = $this->storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $auth, $content_spam);
+				$stored_id = $saved['message'] ? intval($saved['message']->key) : null;
 			} catch (\Throwable $e) {
 				error_log('InboundEmailRouter: forward_and_store copy failed, deferring for retry: ' . $e->getMessage());
 				return 75; // sender retries; no forward happened this pass, so no double-forward
@@ -382,17 +391,17 @@ class InboundEmailRouter {
 		// forward_and_store message keeps its copy (already stored above); only
 		// the relay attempt is blocked.
 		if (!$this->checkAliasRateLimit($alias->key)) {
-			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_RATE_LIMITED, $envelope_recipient, null, null, $domain->key);
+			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_RATE_LIMITED, $envelope_recipient, null, null, $domain->key, $stored_id);
 			return 0;
 		}
 		if (!$this->checkDomainRateLimit($domain->key)) {
-			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_RATE_LIMITED, $envelope_recipient, null, null, $domain->key);
+			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_RATE_LIMITED, $envelope_recipient, null, null, $domain->key, $stored_id);
 			return 0;
 		}
 
 		// 7. Basic header checks (forward path requires a usable From header)
 		if (empty($parsed['from'])) {
-			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_REJECTED, $envelope_recipient, null, 'Missing From header', $domain->key);
+			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_REJECTED, $envelope_recipient, null, 'Missing From header', $domain->key, $stored_id);
 			return 0;
 		}
 
@@ -403,7 +412,7 @@ class InboundEmailRouter {
 		// to a forwarder is the same loop by another route.
 		$loop = self::forwardLoopRefusal($parsed);
 		if ($loop !== null) {
-			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_REJECTED, $envelope_recipient, null, 'Forward loop guard: ' . $loop, $domain->key);
+			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_REJECTED, $envelope_recipient, null, 'Forward loop guard: ' . $loop, $domain->key, $stored_id);
 			return 0;
 		}
 		$destinations = $alias->get_destinations_array();
@@ -413,7 +422,7 @@ class InboundEmailRouter {
 		$dest_str = implode(',', $destinations);
 
 		if ($all_success) {
-			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_FORWARDED, $envelope_recipient, $dest_str, null, $domain->key);
+			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_FORWARDED, $envelope_recipient, $dest_str, null, $domain->key, $stored_id);
 			$alias->record_forward();
 		} else {
 			$failed = array();
@@ -422,10 +431,64 @@ class InboundEmailRouter {
 					$failed[] = $dest;
 				}
 			}
-			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_ERROR, $envelope_recipient, $dest_str, 'Failed to deliver to: ' . implode(', ', $failed), $domain->key);
+			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_ERROR, $envelope_recipient, $dest_str, 'Failed to deliver to: ' . implode(', ', $failed), $domain->key, $stored_id);
 		}
+		$this->recordForwardAttempt($alias, $stored_id, $parsed, $envelope_recipient, $results);
 
 		return 0;
+	}
+
+	/**
+	 * The forward's send-attempt row (specs/mailbox_message_timeline.md A2): what
+	 * the relay did with a stored message, so its timeline can say where it went
+	 * and whether the carrier took it. Only for a message that HAS a row — a
+	 * pure-forward alias stores nothing, and an attempt no timeline can show is
+	 * debris. Never throws; a failure to record is logged and swallowed.
+	 *
+	 * @param array $results ['destination' => bool] from relay()
+	 */
+	private function recordForwardAttempt($alias, ?int $message_id, array $parsed, string $from_address, array $results): void {
+		if ($message_id === null || empty($results)) {
+			return;
+		}
+		try {
+			$sent = array_keys(array_filter($results));
+			$failed = array_keys(array_filter($results, function ($ok) { return !$ok; }));
+			$outcome = empty($failed) ? MailboxSendAttempt::OUTCOME_SENT
+				: (empty($sent) ? MailboxSendAttempt::OUTCOME_FAILED : MailboxSendAttempt::OUTCOME_PARTIAL);
+			$recipients = array();
+			foreach (array_keys($results) as $dest) {
+				$recipients[] = array('email' => (string)$dest, 'name' => '', 'kind' => 'forward');
+			}
+			$transport = $this->last_relay_transport;
+			MailboxSendAttempt::record(array(
+				'mst_kind'                     => MailboxSendAttempt::KIND_FORWARD,
+				'mst_iea_inbound_email_alias_id' => ($alias && $alias->key) ? intval($alias->key) : null,
+				'mst_source_iem_inbound_email_message_id' => $message_id,
+				'mst_message_id_header'        => substr(trim((string)($parsed['headers']['message-id'] ?? '')), 0, 255),
+				'mst_from_address'             => substr($from_address, 0, 255),
+				'mst_recipients'               => $recipients,
+				'mst_transport'                => $transport,
+				'mst_transport_label'          => $this->relayTransportLabel($transport),
+				'mst_outcome'                  => $outcome,
+				'mst_error'                    => empty($failed) ? null : 'The relay could not deliver to: ' . implode(', ', $failed),
+				'mst_sent_copy_filed'          => MailboxSendAttempt::SENT_COPY_NOT_APPLICABLE,
+			));
+		} catch (\Throwable $e) {
+			error_log('InboundEmailRouter: could not record the forward attempt: ' . $e->getMessage());
+		}
+	}
+
+	/** The relay transport's human name for the attempt row. */
+	private function relayTransportLabel(?string $key): string {
+		if ($key === null || $key === '') {
+			return 'the forwarding relay';
+		}
+		if ($key === 'smtp') {
+			return 'SMTP relay';
+		}
+		$labels = EmailSender::getAvailableServices();
+		return $labels[$key] ?? $key;
 	}
 
 	/**
@@ -471,7 +534,8 @@ class InboundEmailRouter {
 				$envelope_recipient,
 				$saved['dedup'] ? 'duplicate (Message-ID already stored)' : null,
 				null,
-				$domain->key
+				$domain->key,
+				$saved['message'] ? intval($saved['message']->key) : null
 			);
 			return 0;
 		} catch (MailboxSealTargetMissing $e) {
@@ -1166,7 +1230,7 @@ class InboundEmailRouter {
 		// that cap; this row makes the delivery itself auditable. The sender is kept
 		// out of the log for a sealed message, matching the sealed row.
 		$this->logTransaction(array('from' => $sealing ? '' : $sender), $alias,
-			InboundEmailLog::STATUS_STORED, $envelope_recipient, null, null, $domain->key);
+			InboundEmailLog::STATUS_STORED, $envelope_recipient, null, null, $domain->key, intval($msg->key));
 
 		return array('message' => $msg, 'dedup' => false);
 	}
@@ -2361,7 +2425,11 @@ class InboundEmailRouter {
 		list($raw_mime, $envelope_sender) = $this->buildForwardMessage(
 			$raw, $parsed, $domain, (string)$msg->get('iem_recipient'));
 
-		return $this->relay($raw_mime, $envelope_sender, $destinations);
+		$results = $this->relay($raw_mime, $envelope_sender, $destinations);
+		$alias_id = intval($msg->get('iem_iea_inbound_email_alias_id'));
+		$this->recordForwardAttempt($alias_id > 0 ? new InboundEmailAlias($alias_id, TRUE) : null,
+			intval($msg->key), $parsed, (string)$msg->get('iem_recipient'), $results);
+		return $results;
 	}
 
 	/**
@@ -2620,10 +2688,12 @@ class InboundEmailRouter {
 	private function relay($raw_mime, $envelope_sender, array $destinations) {
 		$provider = $this->resolveRelayProvider();
 		if (!($provider instanceof RawMessageRelay)) {
+			$this->last_relay_transport = 'smtp';
 			return $this->relayViaSmtpFallback($raw_mime, $envelope_sender, $destinations);
 		}
 
 		// Primary: provider raw-MIME relay.
+		$this->last_relay_transport = $provider::getKey();
 		$results = $provider->relayRawMessage($raw_mime, $envelope_sender, $destinations);
 
 		// Fallback: retry only the destinations the provider failed, over SMTP.
@@ -2633,11 +2703,17 @@ class InboundEmailRouter {
 				. ' — retrying over SMTP fallback');
 			foreach ($this->relayViaSmtpFallback($raw_mime, $envelope_sender, $failed) as $dest => $ok) {
 				$results[$dest] = $ok; // SMTP outcome supersedes the provider failure
+				if ($ok) {
+					$this->last_relay_transport = 'smtp'; // the fallback is what carried it
+				}
 			}
 		}
 
 		return $results;
 	}
+
+	/** @var ?string the provider key the most recent relay() handed the message to — for the attempt row */
+	private $last_relay_transport = null;
 
 	/**
 	 * The SMTP forwarding fallback — raw-MIME relay through SmtpProvider configured
@@ -3310,17 +3386,32 @@ class InboundEmailRouter {
 	 * recipient addresses, verdicts, sizes; never subject/body content, sealed
 	 * mailbox or not).
 	 */
-	public function logTransaction($parsed, $alias, $status, $to_address, $destinations = null, $error = null, $domain_id = null) {
+	public function logTransaction($parsed, $alias, $status, $to_address, $destinations = null, $error = null, $domain_id = null, $message_id = null) {
 		InboundEmailLog::CreateEntry(
 			$parsed['from'] ?? '',
 			$to_address,
-			'',
+			$this->logSubjectFor($parsed, $alias),
 			$destinations,
 			$status,
 			$alias ? $alias->key : null,
 			$error,
-			$domain_id
+			$domain_id,
+			$message_id
 		);
+	}
+
+	/**
+	 * The subject a routing-log line may carry: the decoded header on a plaintext
+	 * mailbox, nothing on a sealing one (the log is not sealed, and a subject is
+	 * content). With no alias the line belongs to a rejection or a catch-all,
+	 * whose posture is the domain's; the domain is not in hand here, so those
+	 * lines carry no subject either.
+	 */
+	private function logSubjectFor($parsed, $alias): string {
+		if (!$alias || !$alias->key || $alias->seals_content()) {
+			return '';
+		}
+		return $this->decodeMimeHeader((string)($parsed['subject'] ?? ''));
 	}
 
 	/**

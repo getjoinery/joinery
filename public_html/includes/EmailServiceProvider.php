@@ -9,8 +9,12 @@
  * implementing this interface. No other files need modification.
  *
  * This file also declares the optional RawMessageRelay, ApiSubmissionRelay,
- * DkimRecordSource, and SendingDomainRegistrar capabilities (below).
+ * DkimRecordSource, SendingDomainRegistrar, SingleKeyProvider, SendReceiptSource
+ * and DeliveryEventSource capabilities (below).
  *
+ * @version 1.8 - SendReceiptSource / DeliveryEventSource: what the carrier said when it took a
+ *                message, and what it can say later about whether the message arrived
+ *                (specs/mailbox_message_timeline.md A3, A4)
  * @version 1.7 - SingleKeyProvider: a provider one API key configures declares the shape of
  *                its keys, which is what lets an installer tell which provider issued a key
  * @version 1.6
@@ -224,4 +228,65 @@ interface SingleKeyProvider {
      * keys do.
      */
     public static function apiKeyPattern(): string;
+}
+
+/**
+ * A provider that can repeat what the carrier answered when it accepted the
+ * last message send() handed it — Mailgun's message id, Postfix's "250 2.0.0 Ok:
+ * queued as 4cXYZ", Gmail's "250 2.0.0 OK ... - gsmtp". EmailSender copies the
+ * answer into lastSendReport() so the caller that owns the message (the mailbox
+ * compose path) can keep it as the send's receipt.
+ *
+ * The receipt is evidence of ACCEPTANCE only. Whether the message then reached
+ * anyone is DeliveryEventSource's question.
+ *
+ * @version 1.0
+ */
+interface SendReceiptSource {
+    /**
+     * What the carrier said on the most recent send(); null when nothing was
+     * captured (the send failed before a reply, or the carrier said nothing
+     * parseable).
+     *
+     * @return ?array{id: ?string, response: ?string}  id = the carrier's own
+     *         identifier for the message (queue id, provider message id);
+     *         response = the carrier's reply line, verbatim
+     */
+    public function lastSendReceipt(): ?array;
+}
+
+/**
+ * A provider that can be asked, after the fact, what happened to a message it
+ * carried: accepted, delivered to the recipient's server, bounced, or still
+ * being retried. Keyed on the Message-ID header the message left with — the
+ * platform sets its own on every send, and a forwarded message keeps the
+ * sender's, so the key exists for every message the timeline shows.
+ *
+ * Implemented only where the carrier exposes a pull API for it (Mailgun's
+ * Events API). A provider that cannot answer does not implement this; the
+ * timeline then says delivery status is not available from that carrier,
+ * which is the truth, rather than guessing.
+ *
+ * @version 1.0
+ */
+interface DeliveryEventSource {
+    const DELIVERY_UNKNOWN   = 'unknown';    // the carrier has no events (yet, or any more)
+    const DELIVERY_ACCEPTED  = 'accepted';   // the carrier took it; nothing further yet
+    const DELIVERY_DELIVERED = 'delivered';  // the recipient's server accepted it
+    const DELIVERY_DEFERRED  = 'deferred';   // the recipient's server said try later; the carrier is retrying
+    const DELIVERY_FAILED    = 'failed';     // bounced, or the carrier gave up
+
+    /**
+     * The carrier's delivery events for one message.
+     *
+     * @param string $message_id_header the Message-ID as sent, angle brackets optional
+     * @param string $from_domain       the domain the message was sent as
+     * @return ?array{status: string, events: array<array{time: string, event: string,
+     *         recipient: string, detail: string}>}  status is one of the DELIVERY_*
+     *         constants, the worst-so-far across recipients (failed > deferred >
+     *         delivered > accepted > unknown); time is UTC 'Y-m-d H:i:s'; detail is the
+     *         receiving server's own words where the carrier relays them.
+     *         null when the carrier could not be asked (no credentials, unreachable).
+     */
+    public function deliveryEvents(string $message_id_header, string $from_domain): ?array;
 }

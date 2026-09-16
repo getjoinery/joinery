@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.64
+ * No framework. @version 2.65
  *
  * The conversation list updates in place after mutations
  * (specs/implemented/mailbox_reader_list_persistence.md): actions that take rows out of
@@ -2407,6 +2407,16 @@
 		print.addEventListener('click', function () { closeAllKebabs(); });
 		menu.appendChild(print);
 
+		// Every message has a history — an arrival, a send, or at least a saved
+		// draft — so the timeline is offered on all of them.
+		var logs = el('button', 'mbx-kebab-item', 'Show logs');
+		logs.type = 'button';
+		logs.addEventListener('click', function () {
+			closeAllKebabs();
+			openMessageTimeline(m);
+		});
+		menu.appendChild(logs);
+
 		// Don't let kebab/menu clicks collapse the message (the head toggles it).
 		btn.addEventListener('click', function (e) {
 			e.stopPropagation();
@@ -2800,6 +2810,136 @@
 				});
 		}
 		load();
+	}
+
+	// ── Show logs: the message timeline ──────────────────────────────────
+	//
+	// Everything the platform recorded about one message, oldest first
+	// (specs/mailbox_message_timeline.md). Each line is a stored fact or the
+	// carrier's live answer; the notes under the list are the honest "no answer"
+	// sentences. A delivery line whose carrier can be asked again carries a
+	// Check again button; a sealed message with a closed window shows what it
+	// can and offers the unlock.
+
+	/** 16 Sep 2026, 2:02:11 pm — the exact moment, because a timeline is about order. */
+	function fmtMoment(iso) {
+		if (!iso) return '';
+		var d = new Date(iso.replace(' ', 'T') + 'Z');
+		if (isNaN(d.getTime())) return iso;
+		var day = d.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
+		return day + ', ' + hour12(d) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds()) + ' ' + ampm(d);
+	}
+
+	function openMessageTimeline(m) {
+		var overlay = el('div', 'mbx-modal-overlay');
+		var modal = el('div', 'mbx-modal mbx-timeline-modal');
+		modal.appendChild(el('h3', 'mbx-modal-title', 'Message timeline'));
+		var note = el('p', 'mbx-modal-help', 'Loading…');
+		modal.appendChild(note);
+
+		var list = el('ol', 'mbx-timeline');
+		list.hidden = true;
+		modal.appendChild(list);
+		var notes = el('ul', 'mbx-timeline-notes');
+		notes.hidden = true;
+		modal.appendChild(notes);
+
+		var actions = el('div', 'mbx-modal-actions');
+		var close = el('button', 'mbx-action mbx-primary', 'Close');
+		close.type = 'button';
+		close.addEventListener('click', function () { closeModal(overlay); });
+		actions.appendChild(close);
+		modal.appendChild(actions);
+
+		overlay.appendChild(modal);
+		overlay.addEventListener('click', function (e) { if (e.target === overlay) closeModal(overlay); });
+		document.body.appendChild(overlay);
+
+		function onKey(e) {
+			if (e.key !== 'Escape') return;
+			document.removeEventListener('keydown', onKey);
+			closeModal(overlay);
+		}
+		document.addEventListener('keydown', onKey);
+
+		var unlockOffered = false;
+		function render(data) {
+			data = data || {};
+			var events = Array.isArray(data.events) ? data.events : [];
+			list.innerHTML = '';
+			notes.innerHTML = '';
+
+			if (!events.length) {
+				note.textContent = 'Nothing has been recorded about this message.';
+				list.hidden = true;
+				notes.hidden = true;
+				return;
+			}
+			note.textContent = events.length + (events.length === 1 ? ' event' : ' events')
+				+ ', oldest first. Times are in your timezone.';
+
+			var checkAgain = null;
+			events.forEach(function (ev) {
+				var li = el('li', 'mbx-timeline-item kind-' + (ev.kind || 'event'));
+				var when = el('span', 'mbx-timeline-time', ev.time ? fmtMoment(ev.time) : '');
+				if (!ev.time) when.classList.add('is-timeless');
+				li.appendChild(when);
+				var body = el('div', 'mbx-timeline-body');
+				body.appendChild(el('div', 'mbx-timeline-title', ev.title || ''));
+				if (ev.detail) body.appendChild(el('div', 'mbx-timeline-detail', ev.detail));
+				var meta = ev.meta || {};
+				if (ev.kind === 'delivery' && meta.refreshable) {
+					var sub = el('div', 'mbx-timeline-detail is-muted');
+					sub.textContent = meta.checked_time ? ('checked ' + fmtTime(meta.checked_time)) : '';
+					body.appendChild(sub);
+					checkAgain = checkAgain || meta.carrier || 'the carrier';
+				}
+				li.appendChild(body);
+				list.appendChild(li);
+			});
+			list.hidden = false;
+
+			(data.notes || []).forEach(function (n) { notes.appendChild(el('li', null, n)); });
+			notes.hidden = !notes.children.length;
+
+			// One Check again for the whole panel: it re-asks every carrier that
+			// can be asked, which is what a person pressing it means.
+			var old = actions.querySelector('.mbx-timeline-refresh');
+			if (old) old.remove();
+			if (checkAgain) {
+				var again = el('button', 'mbx-action mbx-timeline-refresh', 'Check ' + checkAgain + ' again');
+				again.type = 'button';
+				again.addEventListener('click', function () {
+					again.disabled = true;
+					again.textContent = 'Checking…';
+					load(true);
+				});
+				actions.insertBefore(again, close);
+			}
+
+			if (data.locked && !unlockOffered) {
+				// Sealed lines are missing; offer the one-tap ceremony once, then
+				// ask again with the window open.
+				unlockOffered = true;
+				note.textContent += ' Some lines are sealed — unlocking…';
+				unlockVault().then(function (ok) {
+					if (!ok) { note.textContent += ' Your vault stayed locked, so those lines are hidden.'; return; }
+					state.threadLocked = false;
+					load(false);
+				});
+			}
+		}
+
+		function load(refresh) {
+			var payload = { message_id: String(m.id) };
+			if (refresh) payload.refresh_delivery = '1';
+			apiV1(CFG.messageTimelineUrl, payload)
+				.then(render)
+				.catch(function (err) {
+					note.textContent = (err && err.message) || 'The timeline could not be read.';
+				});
+		}
+		load(false);
 	}
 
 	// Place the caret at the very start of an element (so the user types ABOVE an

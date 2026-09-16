@@ -7,6 +7,16 @@ require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declare
 
 require_once(PathHelper::getIncludePath('data/debug_email_logs_class.php'));
 
+/**
+ * EmailSender - the one outbound mail pipeline: egress assertions, dry-run and
+ * test-mode guards, Joinery Direct first, then the injected transport or the
+ * configured service with its fallback.
+ *
+ * @version 1.1 - lastSendReport(): which transport took the message, the carrier's
+ *   receipt, which recipients Direct delivered, the error on refusal
+ *   (specs/mailbox_message_timeline.md A3); the debug log writes the columns
+ *   DebugEmailLog declares (B1)
+ */
 class EmailSender {
 
     /**
@@ -40,6 +50,19 @@ class EmailSender {
     private $defaultFromName;
     private $defaultReplyTo;
     private $debugMode;
+
+    /**
+     * What the most recent send() did, for the caller that owns the message.
+     * send() returns a bool because every transactional caller wants exactly
+     * that; the mailbox compose path also wants to know WHICH transport took the
+     * message, what the carrier answered, and which recipients Joinery Direct
+     * delivered before any carrier was involved — so it can keep the send's
+     * record (specs/mailbox_message_timeline.md A2/A3). Reset at the top of
+     * every send(); read with lastSendReport().
+     *
+     * @var array{direct_delivered: string[], transport: ?string, receipt: ?array, error: ?string}
+     */
+    private $last_send_report = array('direct_delivered' => array(), 'transport' => null, 'receipt' => null, 'error' => null);
 
     /** @var array|null Cached provider registry: key => class name */
     private static $providers = null;
@@ -95,6 +118,15 @@ class EmailSender {
             return null;
         }
         return new $class();
+    }
+
+    /**
+     * A configured provider instance by key, or null for an unknown key. For
+     * callers that ask a provider a question outside a send — the message
+     * timeline asking a DeliveryEventSource what became of a message.
+     */
+    public static function providerFor(string $key): ?EmailServiceProvider {
+        return self::getProvider($key);
     }
 
     /**
@@ -316,6 +348,7 @@ class EmailSender {
         // is never queued for retry.
         require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
         SealedEgressGuard::assertSendAllowed((string)$egress_assertion, (string)$message->getSubject());
+        $this->last_send_report = array('direct_delivered' => array(), 'transport' => null, 'receipt' => null, 'error' => null);
 
         // Set defaults if not specified
         if (!$message->getFrom()) {
@@ -407,6 +440,7 @@ class EmailSender {
             try {
                 $direct = call_user_func(self::$direct_attempt, $message);
                 if (!empty($direct['delivered'])) {
+                    $this->last_send_report['direct_delivered'] = array_values($direct['delivered']);
                     $this->logEmailDebug('Delivered over Joinery Direct to '
                         . implode(', ', $direct['delivered']), 'joinery-direct');
                     if (empty($direct['remaining'])) {
@@ -424,8 +458,11 @@ class EmailSender {
         // Injected transport: send through it directly, no provider fallback.
         if ($transport !== null) {
             $service = method_exists($transport, 'getKey') ? $transport::getKey() : get_class($transport);
+            $this->last_send_report['transport'] = $service;
             try {
                 $result = $transport->send($message);
+                $this->recordSendOutcome($transport, $result,
+                    $result ? null : 'The ' . $service . ' transport refused the message.');
                 $this->logEmailDebug(
                     $result ? "Email sent successfully via injected transport $service"
                             : "Email send failed via injected transport $service",
@@ -437,6 +474,7 @@ class EmailSender {
                 // of silently queueing/failing the send.
                 throw $e;
             } catch (\Exception $e) {
+                $this->last_send_report['error'] = $e->getMessage();
                 $this->logEmailDebug("Email send exception via injected transport $service: " . $e->getMessage(), $service);
                 $result = false;
             }
@@ -454,6 +492,7 @@ class EmailSender {
             // Nothing to try. Queued rather than dropped, so the messages a
             // brand-new site generates before anyone reaches the settings page
             // are still there to go out once a provider is named.
+            $this->last_send_report['error'] = 'No email service is configured.';
             $this->logEmailDebug('No email service is configured — nothing was sent. Set one at /admin/admin_settings_email.');
             if ($queue_on_failure) {
                 $this->queueForRetry($message);
@@ -718,11 +757,18 @@ class EmailSender {
             $friendly = "Email service '$service' is selected but not configured: $reason. Skipping — configure it at /admin/admin_settings_email or select a different service.";
             error_log("[EmailSender] $friendly");
             $this->logEmailDebug($friendly, $service);
+            $this->last_send_report['error'] = "Email service '$service' is not configured: $reason";
             return false;
         }
 
+        // The report names the service that is being tried; on a fallback the
+        // second call overwrites the first, so it ends naming the one that took
+        // the message (or the last one that refused it).
+        $this->last_send_report['transport'] = $service;
         try {
             $result = $provider->send($message);
+            $this->recordSendOutcome($provider, $result,
+                $result ? null : "The $service service refused the message.");
             if ($result) {
                 $this->logEmailDebug("Email sent successfully via $service", $service);
             } else {
@@ -730,9 +776,42 @@ class EmailSender {
             }
             return $result;
         } catch (\Exception $e) {
+            $this->last_send_report['error'] = $e->getMessage();
             $this->logEmailDebug("Email send exception via $service: " . $e->getMessage(), $service);
             return false;
         }
+    }
+
+    /**
+     * Fill the send report from a transport that has just answered: the
+     * carrier's receipt when the transport can repeat it, the error otherwise.
+     * A receipt is only asked for on success — a refused send has none.
+     */
+    private function recordSendOutcome($transport, bool $ok, ?string $error): void {
+        if ($ok) {
+            $this->last_send_report['error'] = null;
+            if ($transport instanceof SendReceiptSource) {
+                try {
+                    $this->last_send_report['receipt'] = $transport->lastSendReceipt();
+                } catch (\Throwable $e) {
+                    // A receipt is a nicety; never let reading one turn a sent
+                    // message into a reported failure.
+                    error_log('[EmailSender] could not read the send receipt: ' . $e->getMessage());
+                }
+            }
+        } else {
+            $this->last_send_report['error'] = $error;
+        }
+    }
+
+    /**
+     * What the most recent send() did — see $last_send_report. Valid until the
+     * next send() on this instance.
+     *
+     * @return array{direct_delivered: string[], transport: ?string, receipt: ?array, error: ?string}
+     */
+    public function lastSendReport(): array {
+        return $this->last_send_report;
     }
 
     /**
@@ -859,7 +938,6 @@ class EmailSender {
             require_once(PathHelper::getIncludePath('data/debug_email_logs_class.php'));
 
             $log = new DebugEmailLog(null);
-            $log->set('del_timestamp', date('Y-m-d H:i:s'));
             $log->set('del_message', $message);
             $log->set('del_service', $service ?: 'unknown');
             $log->set('del_status', 'debug');

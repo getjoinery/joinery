@@ -22,8 +22,32 @@ use PHPMailer\PHPMailer\SMTP;
  * SMTP send (global, connected-account, per-mailbox) is "new SmtpMailer($config),
  * applyMessage($m), send()".
  *
+ * @version 2.4 - the SMTP session keeps the server's reply to DATA, so a send can
+ *   report its receipt (specs/mailbox_message_timeline.md A3)
  * @version 2.3 - UTF-8 charset; no X-Mailer fingerprint
  */
+
+/**
+ * PHPMailer's SMTP session, remembering the one reply that matters afterwards.
+ * PHPMailer keeps only the LAST reply, and after a send that is QUIT's "221 Bye";
+ * the server's answer to DATA — "250 2.0.0 Ok: queued as 4cXYZ" — is the
+ * receipt, and PHPMailer reads it exactly once, in recordLastTransactionID().
+ * This hooks that moment and keeps the line.
+ */
+class SmtpReceiptSession extends SMTP {
+    /** @var string|null the server's reply to DATA on the last message, verbatim */
+    private $data_reply = null;
+
+    protected function recordLastTransactionID() {
+        $this->data_reply = trim((string)$this->getLastReply()) ?: null;
+        return parent::recordLastTransactionID();
+    }
+
+    public function getDataReply(): ?string {
+        return $this->data_reply;
+    }
+}
+
 class SmtpMailer extends PHPMailer {
     // Only encoding is truly universal
     const SMTP_ENCODING = 'quoted-printable';
@@ -100,6 +124,37 @@ class SmtpMailer extends PHPMailer {
                 // Unauthenticated relay (e.g. local Postfix on port 25).
                 break;
         }
+    }
+
+    /** The session class is ours so the DATA reply survives the QUIT that follows it. */
+    public function getSMTPInstance() {
+        if (!is_object($this->smtp)) {
+            $this->smtp = new SmtpReceiptSession();
+        }
+        return $this->smtp;
+    }
+
+    /**
+     * What the server said when it accepted the last message, as a receipt:
+     * the queue/transaction id PHPMailer recognised (Postfix, Exim, Exchange,
+     * SES, SendGrid, Mailjet… patterns) and the DATA reply line itself. Null
+     * when no message has been accepted on this mailer.
+     *
+     * @return ?array{id: ?string, response: ?string}
+     */
+    public function lastReceipt(): ?array {
+        if (!is_object($this->smtp) || !($this->smtp instanceof SmtpReceiptSession)) {
+            return null;
+        }
+        $response = $this->smtp->getDataReply();
+        if ($response === null) {
+            return null;
+        }
+        $id = $this->smtp->getLastTransactionID();
+        return array(
+            'id'       => (is_string($id) && $id !== '') ? $id : null,
+            'response' => $response,
+        );
     }
 
     /** Map an SmtpConfig encryption keyword to the PHPMailer SMTPSecure constant. */

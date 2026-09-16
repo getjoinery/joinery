@@ -2939,6 +2939,7 @@ cookie + `X-Joinery-Csrf`). The reader consumes the response envelope's `data`.
 | `mailbox/thread_action` | mark read/unread, star/unstar, delete — accepts `ids[]`, a `thread_key`, or a whole selection as `thread_keys[]` — each expanded server-side |
 | `mailbox/send` | multipart: send a reply / reply-all / forward / new message AS the mailbox; stores the sent copy |
 | `mailbox/message_source` | the original RFC822 source of one message, for **Show original** |
+| `mailbox/message_timeline` | everything recorded about one message as an ordered event list, for **Show logs** (`refresh_delivery=1` re-asks the carrier) |
 
 HTML bodies stay sandboxed — stored mail is fully attacker-controlled. The
 reader's frame carries `sandbox="allow-popups allow-popups-to-escape-sandbox"`
@@ -2955,7 +2956,7 @@ handle back on the reader. The admin detail page
 (`admin_mailbox_message.php`) is a forensic view and grants nothing: its
 `sandbox=""` frame leaves links dead on purpose.
 
-### The message kebab: Show original, Download .eml, Print
+### The message kebab: Show original, Download .eml, Print, Show logs
 
 Every message card carries a kebab (⋮) in its top-right corner, on both mounts:
 
@@ -2964,6 +2965,7 @@ Every message card carries a kebab (⋮) in its top-right corner, on both mounts
 | **Show original** | the message exactly as it arrived, headers and all, in a modal with a Copy button (`mailbox/message_source`) |
 | **Download .eml** | the same bytes as a `message/rfc822` file, named from the subject |
 | **Print** | a print sheet — addressed header block, body, attachment names — opened in a new tab and printed on load |
+| **Show logs** | the message timeline — every recorded event about the message, oldest first (`mailbox/message_timeline`); see [The message timeline](#the-message-timeline) |
 
 Every one of them scopes the read to the caller's own grants exactly as the
 reader does (a NULL-alias catch-all message stays superadmin-only), so the member
@@ -3279,6 +3281,64 @@ each present only when its plugin/feature is active. For a non-admin the server 
 returns `account_visible:false`, and the client omits the whole section — so an absent
 section reads as "not disclosed to you", never as "no account". The panel is lazy,
 session-cached, collapsible, and hidden below a width breakpoint.
+
+### The message timeline
+
+**Show logs** answers "what happened to this message?" with one ordered list,
+built only from facts the platform holds or the carrier states — never a
+guess. Where a question has no answer the panel says so in a note ("Gmail
+handled delivery — no delivery status is available here").
+
+What a line can be, and where it comes from:
+
+| Line | Source |
+|------|--------|
+| Left the sender's server / Passed through / Received by | the `Received:` chain in the message's stored headers (`MailboxMessageTimeline::parseReceived()`); readable only in-window on a sealing mailbox |
+| Arrived at *alias* / Arrived over Joinery Direct / Collected from *provider* | `iem_received_time`, `iem_transport`, the source account and its folder, `iem_create_time` |
+| Authentication | `InboundEmailMessage::authReadout()` over the stored SPF/DKIM/DMARC verdicts and their source |
+| Spam check / You marked this… / Safety scan | `iem_spam_verdict`, `iem_spam_score`, `iem_learned_verdict`, `iem_ai_danger_score` |
+| Routed to … — stored / Forwarded on / Held as spam / Filters applied / … | the `iel_inbound_email_logs` rows whose `iel_iem_inbound_email_message_id` names the message (`InboundEmailRouter::logTransaction()` writes the link) |
+| Sealed / Opened / Labelled / Starred / Archived / Moved to trash | the row's own state columns; the labels are the current `ilm_` members |
+| Sent as … / Forwarded / Send attempt failed / Forward failed | `mst_mailbox_send_attempts` rows that produced the message or answered it (`about_message_id`) |
+| *Carrier* accepted the message | the attempt's receipt — what the carrier said when it took the message (`SendReceiptSource`) |
+| Delivered over Joinery Direct | the attempt's Direct-delivered recipients: delivery *is* the send |
+| Copy filed in Sent | the attempt's `mst_sent_copy_filed` |
+| Delivered to … / Delivery failed / Delivery delayed | the carrier's events by Message-ID (`DeliveryEventSource`), with the receiving server's own words |
+
+**Send attempts.** Every send the reader makes writes one `MailboxSendAttempt`
+row (`compose`), whether the carrier took the message or refused it; every
+forward the router relays for a message that has a stored copy writes one
+(`forward`). The row records the transport and its label, the outcome (`sent`,
+`failed`, `partial`), the carrier's error text, its receipt, the recipients,
+and — asked later — the delivery status. On a Private or Fortress mailbox the
+recipients and the error seal to the owner's vault with the rest of the mail;
+a sealing mailbox with nobody to seal to records the attempt without them.
+Writing the record never fails or delays a send: both writers run after the
+transport has answered and swallow their own errors. An attempt on a message
+that was never stored (a pure-forward alias) is not written — no timeline could
+show it.
+
+**Delivery status per transport.**
+
+| Sent through | The timeline can say |
+|---|---|
+| Mailgun (hosted alias) | accepted → delivered / delayed / failed, from the Events API by Message-ID, with the receiving server's response line |
+| Joinery Direct | delivered — the receiving instance confirmed receipt at send time |
+| A connected account (Gmail, M365, …) | accepted by that provider's SMTP (its `250` line); the provider handled delivery and no status is available here |
+| Self-hosted Postfix / other SMTP | accepted, with the queue id from the `250 … queued as` line; delivery status is not available |
+| Any other provider | accepted; "Delivery status is not available from *provider*" |
+
+The carrier is asked when someone opens the panel, never during the send, and
+the answer is cached on the attempt (`mst_delivery_status`, `mst_delivery_detail`,
+`mst_delivery_checked_time`). A status still in motion (`unknown`, `accepted`,
+`deferred`) is re-asked at most every two minutes; `delivered` and `failed` are
+settled and re-asked only by the panel's **Check again** button. A carrier that
+cannot be reached leaves the cache standing and says so.
+
+Reading the timeline needs exactly the grant reading the message needs; a
+NULL-alias message stays superadmin-only. A closed vault window drops the
+header hops and the sealed attempt fields, returns `locked: true` beside the
+rest, and the panel offers the one-tap unlock.
 
 ## API Surface
 
