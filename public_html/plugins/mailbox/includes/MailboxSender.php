@@ -51,6 +51,10 @@
  * cid-rewritten into the stored/sent HTML). The stored iem_body_plain is derived from
  * the final sanitized HTML.
  *
+ * @version 1.19 - every send writes a MailboxSendAttempt row — sent, failed, or partly
+ *   Direct-delivered — with the transport, the carrier's receipt and the error, so
+ *   a refused send is no longer a toast nobody can find again
+ *   (specs/mailbox_message_timeline.md A2, B2)
  * @version 1.18 - typed recipients keep their display names: parseAddressList()
  *                 returns email + name (quoted names honoured) and the name
  *                 reaches the To/Cc/Bcc headers and the Sent row's iem_to / iem_cc
@@ -267,9 +271,19 @@ class MailboxSender {
 		$email->html($body_html);
 		$email->text(MailboxHtmlSanitizer::toPlainText($body_html));
 
+		// The attempt record (specs/mailbox_message_timeline.md A2): written once
+		// the transport has answered, whatever it answered, so a refused send leaves
+		// the same kind of row a delivered one does. Recording never fails the send.
+		$sender = new EmailSender();
+		$attempt = function (string $outcome, ?string $error, ?int $row_id, ?string $sent_copy = null)
+				use ($sender, $alias, $account, $transport, $source, $draft, $message_id, $from_address, $to, $cc, $bcc) {
+			$this->recordAttempt($sender->lastSendReport(), $outcome, $error, $row_id, $sent_copy,
+				$alias, $account, $transport, $source, $draft, $message_id, $from_address, $to, $cc, $bcc);
+		};
+		$draft_row_id = $draft !== null ? intval($draft->key) : null;
+
 		// One pipeline, synchronous (no retry-queue): success/failure is shown now.
 		try {
-			$sender = new EmailSender();
 			// Building the body opens the quoted source and the sealed DKIM key,
 			// so this process is hot by the time it gets here. The egress is the
 			// whole point and the user authorised it by pressing send in their own
@@ -279,13 +293,18 @@ class MailboxSender {
 			// Signing a protected identity domain unwraps its sealed DKIM key, so it
 			// is a content action under the locked-state contract: a closed window
 			// (never opened, or lapsed mid-compose) prompts the same one-tap unlock
-			// rather than escaping an unsigned/ambient send.
+			// rather than escaping an unsigned/ambient send. Nothing reached a
+			// transport, so there is no attempt to record.
 			throw new MailboxLockedException('Your vault is locked — unlock it to send from this address.');
 		} catch (Throwable $e) {
 			error_log('MailboxSender: send threw for alias ' . $alias_id . ': ' . $e->getMessage());
+			$attempt(MailboxSendAttempt::OUTCOME_FAILED, $e->getMessage(), $draft_row_id);
 			throw new MailboxSenderException('The message could not be sent: ' . $e->getMessage());
 		}
 		if (!$ok) {
+			$report = $sender->lastSendReport();
+			$attempt(MailboxSendAttempt::OUTCOME_FAILED,
+				$report['error'] ?: 'The transport refused the message.', $draft_row_id);
 			throw new MailboxSenderException('The message could not be sent. Check the mailbox connection and try again.');
 		}
 
@@ -297,15 +316,29 @@ class MailboxSender {
 		// filed. The Message-ID this message carries is the one the provider
 		// keeps, so the ingest matches its filed copy to that row and adopts the
 		// locator onto it rather than inserting a second one.
-		if ($account && $account->showCompose() && !$transport->filesSent) {
-			// The provider's SMTP does not file Sent (generic / self-hosted): APPEND
-			// the exact MIME ourselves, carrying the same Message-ID so the ingest
-			// dedups. Best-effort — a failed APPEND never fails the send.
-			$this->appendSentCopy($account, $email);
+		$sent_copy = MailboxSendAttempt::SENT_COPY_NOT_APPLICABLE;
+		if ($account && $account->showCompose()) {
+			if ($transport->filesSent) {
+				$sent_copy = MailboxSendAttempt::SENT_COPY_PROVIDER;
+			} else {
+				// The provider's SMTP does not file Sent (generic / self-hosted): APPEND
+				// the exact MIME ourselves, carrying the same Message-ID so the ingest
+				// dedups. Best-effort — a failed APPEND never fails the send.
+				$sent_copy = $this->appendSentCopy($account, $email)
+					? MailboxSendAttempt::SENT_COPY_APPENDED : MailboxSendAttempt::SENT_COPY_APPEND_FAILED;
+			}
 		}
 
-		$stored = $this->storeOutboundRow($source, $alias, $mode, $from_address,
-			$to, $cc, $bcc, $subject, $email, $message_id, $draft, $morph_dek);
+		try {
+			$stored = $this->storeOutboundRow($source, $alias, $mode, $from_address,
+				$to, $cc, $bcc, $subject, $email, $message_id, $draft, $morph_dek);
+		} catch (Throwable $e) {
+			// The message LEFT; the local copy failed to store. The attempt says so,
+			// on the draft when there was one, so the send is not a mystery later.
+			$attempt(MailboxSendAttempt::OUTCOME_SENT, null, $draft_row_id, $sent_copy);
+			throw $e;
+		}
+		$attempt(MailboxSendAttempt::OUTCOME_SENT, null, intval($stored['id']), $sent_copy);
 		if (!empty($uploads['regular'])) {
 			$this->persistOutboundUploads($stored['id'], $uploads['regular'], $stored['dek']);
 		}
@@ -1090,12 +1123,12 @@ class MailboxSender {
 	 * logged but never fails the user's send (the local row still shows it, and the
 	 * copy will simply be absent from the source Sent folder).
 	 */
-	private function appendSentCopy(InboundImapAccount $account, EmailMessage $email): void {
+	private function appendSentCopy(InboundImapAccount $account, EmailMessage $email): bool {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ImapIngestor.php'));
 		try {
 			$raw = $this->buildRawMime($email);
 			if ($raw === '') {
-				return;
+				return false;
 			}
 			$ingestor = new ImapIngestor($account);
 			try {
@@ -1103,8 +1136,67 @@ class MailboxSender {
 			} finally {
 				$ingestor->close();
 			}
+			return true;
 		} catch (Throwable $e) {
 			error_log('MailboxSender: APPEND-to-Sent failed: ' . $e->getMessage());
+			return false;
+		}
+	}
+
+	/**
+	 * Write the compose's attempt row (specs/mailbox_message_timeline.md A2) from
+	 * what EmailSender reported. The transport named is the one that carried the
+	 * message: Joinery Direct when it delivered every recipient, the connected
+	 * account's SMTP when sending as one, else the platform provider the report
+	 * names. Never throws.
+	 */
+	private function recordAttempt(array $report, string $outcome, ?string $error, ?int $row_id, ?string $sent_copy,
+			InboundEmailAlias $alias, $account, OutboundTransport $transport, ?InboundEmailMessage $source,
+			?InboundEmailMessage $draft, string $message_id, string $from_address, array $to, array $cc, array $bcc): void {
+		try {
+			$recipients = array();
+			foreach (array('to' => $to, 'cc' => $cc, 'bcc' => $bcc) as $kind => $list) {
+				foreach ($list as $r) {
+					$recipients[] = array('email' => $r['email'], 'name' => $r['name'], 'kind' => $kind);
+				}
+			}
+			$direct = $report['direct_delivered'] ?? array();
+			$all_direct = !empty($direct) && count($direct) >= count($recipients);
+
+			if ($all_direct) {
+				$key = 'joinery_direct';
+				$label = 'Joinery Direct';
+			} elseif ($account !== null && $transport->transport !== null) {
+				$key = 'connected_account';
+				$label = $account->providerLabel() . ' (your connected account)';
+			} else {
+				$key = $report['transport'] ?? null;
+				$labels = EmailSender::getAvailableServices();
+				$label = ($key !== null && isset($labels[$key])) ? $labels[$key] : ($key ?: 'no transport');
+			}
+			if ($outcome === MailboxSendAttempt::OUTCOME_SENT && !empty($direct) && !$all_direct) {
+				$outcome = MailboxSendAttempt::OUTCOME_PARTIAL; // Direct took some, the carrier the rest
+			}
+
+			MailboxSendAttempt::record(array(
+				'mst_kind'                     => MailboxSendAttempt::KIND_COMPOSE,
+				'mst_iea_inbound_email_alias_id' => intval($alias->key),
+				'mst_usr_user_id'              => $this->viewer->getUserId(),
+				'mst_iem_inbound_email_message_id' => $row_id,
+				'mst_source_iem_inbound_email_message_id' => $source !== null ? intval($source->key) : null,
+				'mst_message_id_header'        => substr($message_id, 0, 255),
+				'mst_from_address'             => substr($from_address, 0, 255),
+				'mst_recipients'               => $recipients,
+				'mst_transport'                => $key,
+				'mst_transport_label'          => substr((string)$label, 0, 120),
+				'mst_outcome'                  => $outcome,
+				'mst_error'                    => $error,
+				'mst_receipt'                  => $report['receipt'] ?? null,
+				'mst_direct_delivered'         => $direct,
+				'mst_sent_copy_filed'          => $sent_copy,
+			));
+		} catch (\Throwable $e) {
+			error_log('MailboxSender: could not record the send attempt: ' . $e->getMessage());
 		}
 	}
 

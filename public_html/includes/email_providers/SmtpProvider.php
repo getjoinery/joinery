@@ -12,6 +12,8 @@
  * forwarding relay. The EmailMessage→PHPMailer mapping lives once in
  * SmtpMailer::applyMessage().
  *
+ * @version 1.5 - SendReceiptSource: the server's reply to DATA (queue id and line) is the
+ *   send's receipt (specs/mailbox_message_timeline.md A3)
  * @version 1.4
  */
 
@@ -19,7 +21,10 @@ require_once(PathHelper::getIncludePath('includes/SmtpMailer.php'));
 require_once(PathHelper::getIncludePath('includes/SmtpConfig.php'));
 require_once(PathHelper::getIncludePath('includes/MailIdentityGuard.php'));
 
-class SmtpProvider implements EmailServiceProvider, RawMessageRelay {
+class SmtpProvider implements EmailServiceProvider, RawMessageRelay, SendReceiptSource {
+
+    /** @var ?array what the server answered on the last accepted send() — see lastSendReceipt() */
+    private $last_receipt = null;
 
     /**
      * The SMTP transport configuration. Defaults to the global smtp_* settings so
@@ -163,7 +168,11 @@ class SmtpProvider implements EmailServiceProvider, RawMessageRelay {
             $mailer->DKIM_identity       = (string)$message->getFrom();
         }
 
+        $this->last_receipt = null;
         $ok = $mailer->send();
+        if ($ok) {
+            $this->last_receipt = $mailer->lastReceipt();
+        }
 
         if ($sig !== null) {
             // The unwrapped signing key must not outlive the send — php-fpm
@@ -179,6 +188,10 @@ class SmtpProvider implements EmailServiceProvider, RawMessageRelay {
         }
 
         return true;
+    }
+
+    public function lastSendReceipt(): ?array {
+        return $this->last_receipt;
     }
 
     public function sendBatch(EmailMessage $message, array $recipients): array {

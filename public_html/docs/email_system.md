@@ -446,7 +446,7 @@ Existing sites are unaffected — they carry a value in `stg_settings`, and a de
 
 **Debug Mode:**
 ```php
-email_debug_mode = "1"  // Enable debug logging to debug_email_logs table
+email_debug_mode = "1"  // Enable debug logging to del_debug_email_logs
 ```
 
 **Test Mode:**
@@ -535,9 +535,40 @@ never sends to a runner flag such as `--json`.
 // Enable in settings
 email_debug_mode = "1"
 
-// View logs
-SELECT * FROM debug_email_logs ORDER BY del_timestamp DESC;
+// View logs: /admin/admin_debug_email_logs, or
+SELECT del_create_time, del_service, del_status, del_message
+  FROM del_debug_email_logs ORDER BY del_create_time DESC;
 ```
+
+Each row is one step the pipeline took: which service a message went to,
+a dry-run or test-mode suppression, a fallback. The log is diagnostic
+scratch (the admin page has a Clear button) and is not a per-message
+history; the mailbox reader's **Show logs** timeline is that.
+
+**What a send did — `lastSendReport()`:**
+```php
+$sender = new EmailSender();
+$ok = $sender->send($message, false, $transport, EmailSender::EGRESS_USER_COMPOSE);
+$report = $sender->lastSendReport();
+// [
+//   'direct_delivered' => ['bob@other.example'],   // recipients Joinery Direct took first
+//   'transport'        => 'mailgun',                // provider key that carried the rest (null if none ran)
+//   'receipt'          => ['id' => '…', 'response' => 'Queued. Thank you.'],   // what the carrier said, if it can repeat it
+//   'error'            => null,                     // the transport's error text on a refusal
+// ]
+```
+
+Two optional provider interfaces in `EmailServiceProvider.php` feed it:
+
+- `SendReceiptSource::lastSendReceipt()` — the carrier's answer on acceptance.
+  `SmtpProvider` returns the server's reply to `DATA` with the queue id
+  PHPMailer recognised (Postfix, Exim, Exchange, SES, SendGrid, Mailjet…);
+  `MailgunProvider` returns the send response's id.
+- `DeliveryEventSource::deliveryEvents($message_id_header, $from_domain)` — what
+  became of a message after acceptance: `status` (one of the `DELIVERY_*`
+  constants) plus per-recipient events with the receiving server's words.
+  `MailgunProvider` implements it over the Events API. A provider that cannot
+  answer does not implement it, and callers say so rather than guessing.
 
 **Service Validation:**
 ```php

@@ -3,6 +3,9 @@
  * InboundEmailLog - Records all inbound email transactions.
  * Also used for rate limiting by counting recent entries.
  *
+ * @version 1.7 - iel_iem_inbound_email_message_id links a transaction to the message row it
+ *   stored, so the message timeline can show how it was routed
+ *   (specs/mailbox_message_timeline.md A1)
  * @version 1.6
  */
 
@@ -50,12 +53,18 @@ class InboundEmailLog extends SystemBase {
 	protected static $foreign_key_actions = [
 		'iel_iea_inbound_email_alias_id'  => ['action' => 'null'],
 		'iel_ied_inbound_email_domain_id' => ['action' => 'null'],
+		// The log outlives the message: a deleted message's routing record is still
+		// a fact about what arrived.
+		'iel_iem_inbound_email_message_id' => ['action' => 'null'],
 	];
 
 	public static $field_specifications = array(
 		'iel_inbound_email_log_id'         => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'iel_iea_inbound_email_alias_id'   => array('type'=>'int4'),
 		'iel_ied_inbound_email_domain_id'  => array('type'=>'int4'),
+		// The message row this transaction stored, when it stored one. NULL for a
+		// rejection, a discard, a rate-limit, and for rows from before the link existed.
+		'iel_iem_inbound_email_message_id' => array('type'=>'int8', 'index'=>true),
 		'iel_from_address'     => array('type'=>'varchar(500)'),
 		'iel_to_address'       => array('type'=>'varchar(500)'),
 		'iel_subject'          => array('type'=>'varchar(1000)'),
@@ -83,9 +92,13 @@ class InboundEmailLog extends SystemBase {
 	 * @param mixed $domain_id Domain id (int) or null. Populated for every transaction
 	 *                         so the domain_id filter and per-domain rate limits work
 	 *                         without joining through the alias table.
+	 * @param mixed $message_id The iem_ row this transaction stored, or null.
 	 */
-	static function CreateEntry($from, $to, $subject, $destinations, $status, $alias_id = null, $error = null, $domain_id = null) {
+	static function CreateEntry($from, $to, $subject, $destinations, $status, $alias_id = null, $error = null, $domain_id = null, $message_id = null) {
 		$log = new InboundEmailLog(NULL);
+		if ($message_id) {
+			$log->set('iel_iem_inbound_email_message_id', intval($message_id));
+		}
 		$log->set('iel_from_address', substr($from, 0, 500));
 		$log->set('iel_to_address', substr($to, 0, 500));
 		$log->set('iel_subject', substr($subject, 0, 1000));
@@ -121,6 +134,10 @@ class MultiInboundEmailLog extends SystemMultiBase {
 
 		if (isset($this->options['domain_id'])) {
 			$filters['iel_ied_inbound_email_domain_id'] = [$this->options['domain_id'], PDO::PARAM_INT];
+		}
+
+		if (isset($this->options['message_id'])) {
+			$filters['iel_iem_inbound_email_message_id'] = [$this->options['message_id'], PDO::PARAM_INT];
 		}
 
 

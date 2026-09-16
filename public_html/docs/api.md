@@ -121,6 +121,11 @@ rather than a failure state.
   compose has no open window — run the unlock ceremony, then resend.
 - `mailbox/thread_action` (mark/star/delete) operates on cleartext metadata and
   keeps working while locked.
+- `mailbox/message_timeline` (`message_id`, optional `refresh_delivery=1`)
+  returns `{events, notes, locked}`: the lines it can read plus `locked: true`
+  when header hops or sealed attempt fields were omitted — the panel shows what
+  it has and offers the unlock. Each event is `{time, kind, title, detail,
+  meta}` with `time` in UTC `Y-m-d H:i:s` or null for a timeless state line.
 
 The CRUD surface follows the same contract. A single-object GET whose sealed
 content nobody present can open answers **423 `VaultLocked`** — the record

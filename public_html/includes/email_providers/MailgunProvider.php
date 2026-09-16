@@ -17,6 +17,9 @@
  * Implements SendingDomainRegistrar: the same API can create a sending domain,
  * which is what makes the machine sender ceremony's register step a button.
  *
+ * @version 1.9 - SendReceiptSource (the send response's id) and DeliveryEventSource (the
+ *   Events API by Message-ID: accepted, delivered, deferred, failed, with the receiving
+ *   server's own words) — specs/mailbox_message_timeline.md A3/A4
  * @version 1.8 - SingleKeyProvider: declares the shape of its API keys
  * @version 1.7
  * @changelog 1.7 - verifySendingDomain(): asks Mailgun to re-check a sending
@@ -29,7 +32,10 @@ require_once(PathHelper::getIncludePath('includes/InboundEmailProvider.php'));
 
 use Mailgun\Mailgun;
 
-class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubmissionRelay, DkimRecordSource, SendingDomainRegistrar, SingleKeyProvider {
+class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubmissionRelay, DkimRecordSource, SendingDomainRegistrar, SingleKeyProvider, SendReceiptSource, DeliveryEventSource {
+
+    /** @var ?array the send response of the last accepted send() — see lastSendReceipt() */
+    private $last_receipt = null;
 
     /** @var array<string,string> Per-request cache: sending domain => account state ('' = not in account / lookup failed). */
     private static $sending_domain_state = [];
@@ -203,6 +209,7 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
         $recipients = $message->getRecipients();
         $sending_groups = array_chunk($recipients, 500, true);
         $all_sent = true;
+        $this->last_receipt = null;
 
         foreach ($sending_groups as $sending_group) {
             $mailgun_recipients = [];
@@ -217,7 +224,12 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
             $email_to_send['recipient-variables'] = json_encode($recipient_variables);
 
             try {
-                $mg->messages()->send($domain, $email_to_send);
+                $response = $mg->messages()->send($domain, $email_to_send);
+                // A compose is one chunk; on a batch the receipt is the last chunk's.
+                $this->last_receipt = array(
+                    'id'       => method_exists($response, 'getId') ? trim((string)$response->getId(), '<> ') : null,
+                    'response' => method_exists($response, 'getMessage') ? (string)$response->getMessage() : null,
+                );
             } catch (\Exception $e) {
                 error_log("[MailgunProvider] Send failed: " . $e->getMessage());
                 $all_sent = false;
@@ -225,6 +237,114 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
         }
 
         return $all_sent;
+    }
+
+    public function lastSendReceipt(): ?array {
+        return $this->last_receipt;
+    }
+
+    // ── DeliveryEventSource ─────────────────────────────────────────────
+
+    /**
+     * Mailgun's Events API, filtered to one Message-ID. A compose send() submits
+     * through the configured mailgun_domain, a raw relay through the sender's
+     * own active domain (apiDomainForSender), so both are asked, configured
+     * first; the first domain with events answers. A domain the key may not read
+     * (Mailgun scopes keys per domain) is skipped, not fatal — the lookup is
+     * null only when no domain could be asked at all.
+     */
+    public function deliveryEvents(string $message_id_header, string $from_domain): ?array {
+        $settings = Globalvars::get_instance();
+        if ((string)$settings->get_setting('mailgun_api_key') === '') {
+            return null;
+        }
+        $message_id = trim($message_id_header, '<> ');
+        if ($message_id === '') {
+            return null;
+        }
+
+        $configured = (string)$settings->get_setting('mailgun_domain');
+        $relay_domain = self::apiDomainForSender('timeline@' . $from_domain);
+        $domains = array_values(array_unique(array_filter(array($configured, $relay_domain))));
+
+        $mg = self::client();
+        $events = array();
+        $asked = 0;
+        foreach ($domains as $domain) {
+            try {
+                $page = $mg->events()->get($domain, array('message-id' => $message_id, 'limit' => 100));
+            } catch (\Throwable $e) {
+                error_log('[MailgunProvider] events lookup failed for ' . $domain . ': ' . $e->getMessage());
+                continue;
+            }
+            $asked++;
+            foreach ($page->getItems() as $item) {
+                $events[] = self::describeEvent($item);
+            }
+            if ($events) {
+                break;
+            }
+        }
+        if ($asked === 0) {
+            return null;
+        }
+
+        usort($events, function ($a, $b) { return strcmp($a['time'], $b['time']); });
+        return array('status' => self::worstStatus($events), 'events' => $events);
+    }
+
+    /** One Mailgun event as the timeline's neutral shape. */
+    private static function describeEvent($item): array {
+        $event = strtolower((string)$item->getEvent());
+        $delivery = $item->getDeliveryStatus();
+        $detail = '';
+        if (!empty($delivery['message'])) {
+            $detail = (string)$delivery['message'];
+        } elseif (!empty($delivery['description'])) {
+            $detail = (string)$delivery['description'];
+        } elseif ($item->getReason() !== '') {
+            $detail = (string)$item->getReason();
+        }
+        if (!empty($delivery['code']) && $detail !== '' && strpos($detail, (string)$delivery['code']) !== 0) {
+            $detail = $delivery['code'] . ' ' . $detail;
+        }
+        // Mailgun distinguishes a bounce it will retry from one it will not.
+        if ($event === 'failed') {
+            $event = (strtolower((string)$item->getSeverity()) === 'temporary') ? 'deferred' : 'failed';
+        } elseif ($event === 'rejected') {
+            $event = 'failed';
+        }
+        return array(
+            'time'      => gmdate('Y-m-d H:i:s', $item->getTimestamp()),
+            'event'     => $event,
+            'recipient' => (string)$item->getRecipient(),
+            'detail'    => trim($detail),
+        );
+    }
+
+    /**
+     * The status a set of events adds up to. Each recipient's LATEST event is
+     * where that recipient stands (a deferral followed by a delivery is a
+     * delivery); across recipients the worst stands for the message:
+     * failed > deferred > delivered > accepted > unknown. Events must be in
+     * time order.
+     */
+    public static function worstStatus(array $events): string {
+        $rank = array(
+            self::DELIVERY_UNKNOWN => 0, self::DELIVERY_ACCEPTED => 1, self::DELIVERY_DELIVERED => 2,
+            self::DELIVERY_DEFERRED => 3, self::DELIVERY_FAILED => 4,
+        );
+        $latest = array();
+        foreach ($events as $e) {
+            $latest[strtolower((string)$e['recipient'])] = isset($rank[$e['event']]) ? $e['event'] : self::DELIVERY_UNKNOWN;
+        }
+        $status = self::DELIVERY_UNKNOWN;
+        foreach ($latest as $candidate) {
+            if ($rank[$candidate] > $rank[$status]) {
+                $status = $candidate;
+            }
+        }
+        return $status;
     }
 
     /**

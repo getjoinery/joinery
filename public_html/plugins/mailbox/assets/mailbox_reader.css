@@ -1,7 +1,7 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.38
+ * Vanilla CSS, no framework. @version 2.39
  */
 
 /* Every size the reader renders text at, in one ladder. Nothing in this file
@@ -1279,6 +1279,69 @@
 .mbx-sig-card .mbx-sig-note { margin: .4rem 0 0; font-size: var(--mbx-text-sm); }
 .mbx-sig-card .mbx-sig-note.is-ok { color: #067647; }
 .mbx-sig-card .mbx-sig-note.is-error { color: #b42318; }
+
+/* "Show logs": the message timeline — a time column and a body column per
+ * event, the column collapsing to stacked lines at phone width. Kinds colour
+ * the marker only: a failure reads red, a delivery green, everything else the
+ * neutral dot. */
+.mbx-timeline-modal { width: min(760px, 94vw); }
+.mbx-timeline {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	max-height: 60vh;
+	overflow: auto;
+	border-left: 2px solid #e4e7eb;
+}
+.mbx-timeline-item {
+	position: relative;
+	display: grid;
+	grid-template-columns: 11.5rem 1fr;
+	gap: .25rem .9rem;
+	padding: .45rem 0 .45rem 1.1rem;
+}
+.mbx-timeline-item::before {
+	content: '';
+	position: absolute;
+	left: -6px;
+	top: .8rem;
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	background: #9aa3ae;
+	border: 2px solid #fff;
+}
+.mbx-timeline-item.kind-attempt_failed::before { background: #b42318; }
+.mbx-timeline-item.kind-delivery::before,
+.mbx-timeline-item.kind-sent::before,
+.mbx-timeline-item.kind-receipt::before { background: #067647; }
+.mbx-timeline-item.kind-auth::before,
+.mbx-timeline-item.kind-spam::before { background: #4f6bed; }
+.mbx-timeline-time {
+	font-size: var(--mbx-text-sm);
+	color: #6b7280;
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+	padding-top: .1rem;
+}
+.mbx-timeline-time.is-timeless::after { content: '—'; color: #c4c9d0; }
+.mbx-timeline-title { font-weight: 600; color: #1f2933; }
+.mbx-timeline-detail { font-size: var(--mbx-text-sm); color: #4b5563; overflow-wrap: anywhere; }
+.mbx-timeline-detail.is-muted { color: #9aa3ae; }
+.mbx-timeline-notes {
+	margin: .75rem 0 0;
+	padding: .6rem .8rem;
+	list-style: none;
+	background: #f7f8fa;
+	border: 1px solid #e4e7eb;
+	border-radius: 6px;
+	font-size: var(--mbx-text-sm);
+	color: #4b5563;
+}
+.mbx-timeline-notes li + li { margin-top: .3rem; }
+@media (max-width: 640px) {
+	.mbx-timeline-item { grid-template-columns: 1fr; gap: .1rem; }
+}
 
 /* "Show original": raw RFC822, so it is read as code — monospace, wrapped at
  * word boundaries (headers run long), and scrolled inside the modal rather
