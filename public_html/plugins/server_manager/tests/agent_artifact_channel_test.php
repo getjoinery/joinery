@@ -175,6 +175,31 @@ $capped = AgentChannelEndpoint::normalised_recipes(implode(',', $flood));
 check(count(explode(',', $capped)) <= AgentChannelEndpoint::MAX_VOCABULARY_NAMES,
 	'a node cannot stuff the column with an unbounded recipe list',
 	'stored ' . count(explode(',', $capped)) . ' entries');
+// From agent 1.33.0 an entry may carry what the check last said. A mode says
+// whether a recipe acts; only the verdict says whether its subject is right.
+check(AgentChannelEndpoint::normalised_recipes('fail2ban:armed:fail') === 'fail2ban:armed:fail',
+	'A recipe entry keeps the verdict its check last gave',
+	'got: ' . AgentChannelEndpoint::normalised_recipes('fail2ban:armed:fail'));
+check(AgentChannelEndpoint::normalised_recipes('fail2ban:report-only:pass,agent_supervision:armed:unknown') === 'agent_supervision:armed:unknown,fail2ban:report-only:pass',
+	'Verdicts survive normalisation on every mode that checks, sorted by name',
+	'got: ' . AgentChannelEndpoint::normalised_recipes('fail2ban:report-only:pass,agent_supervision:armed:unknown'));
+check(AgentChannelEndpoint::normalised_recipes('fail2ban:armed:broken,fail2ban:armed:FAIL,fail2ban:armed:fail:extra,fail2ban:armed:') === '',
+	'A verdict outside pass/fail/unknown, a fourth segment, or an empty third segment drops the entry whole',
+	'got: ' . AgentChannelEndpoint::normalised_recipes('fail2ban:armed:broken,fail2ban:armed:FAIL,fail2ban:armed:fail:extra,fail2ban:armed:'));
+check(AgentChannelEndpoint::normalised_recipes('fail2ban:not-applicable:fail') === 'fail2ban:not-applicable',
+	'A not-applicable recipe is never checked, so a verdict on it is dropped and the entry kept',
+	'got: ' . AgentChannelEndpoint::normalised_recipes('fail2ban:not-applicable:fail'));
+$verdict_node = artifact_test_node('1.33.0', 'check_status,host_converge,host_report');
+$verdict_node->set('mgn_agent_recipes', 'fail2ban:armed:fail,other_thing:armed');
+check(AgentChannelEndpoint::recipes_of($verdict_node) === ['fail2ban' => 'armed', 'other_thing' => 'armed'],
+	'recipes_of reads name => mode whether or not an entry carries a verdict (the case intake keys on it)',
+	json_encode(AgentChannelEndpoint::recipes_of($verdict_node)));
+check(AgentChannelEndpoint::recipe_verdicts_of($verdict_node) === ['fail2ban' => 'fail'],
+	'recipe_verdicts_of reads name => verdict and leaves out a recipe that has not reported one',
+	json_encode(AgentChannelEndpoint::recipe_verdicts_of($verdict_node)));
+check(AgentChannelEndpoint::recipe_verdicts_of(artifact_test_node('1.32.0', 'check_status')) === [],
+	'A node whose agent predates verdicts reads as none');
+
 check(AgentChannelEndpoint::normalised_recipes('') === '',
 	'no report normalises to no report');
 

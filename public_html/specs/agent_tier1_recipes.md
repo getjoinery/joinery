@@ -1,8 +1,15 @@
 # Agent tier 1: compiled recipes, the check loop, and the case
 
 **Status: slices 1 to 6b BUILT and LIVE fleet-wide 2026-09-15 (0.8.400 /
-agent 1.30.0), report-only; the slice 6 polish, the case proof and the
-burn-in write-up come before arming (7).** Design set 2026-09-13. Owner's order:
+agent 1.30.0), the slice 6 polish and B4 released (0.8.402 / agent 1.32.0),
+the case proof run end to end 2026-09-16; slice 7 (arming, the verdict in
+the claim, B5) RELEASED 2026-09-16 as agent 1.33.0 / 0.8.403, LIVE on all
+eleven agented nodes, and the ARMING PROOF run the same day (12 minutes
+from a hand-stopped fail2ban to its repair, no case). The site-posture proof ran
+on dev the same day. WP4's recipe `agent_supervision` and its two words
+BUILT 2026-09-16 as agent 1.34.0, awaiting release and its live proof; the
+four diagnosis words and WP5 go to the driver's spec (see the work
+packages).** Design set 2026-09-13. Owner's order:
 every other package in `post_release_fleet_defects.md` ships first, then this
 one is built on its own, because it is the one piece of that work that is
 major: the first time the agent acts without being asked. It builds the tier 1
@@ -198,7 +205,29 @@ to a human before any driver exists.
 2. `agent_supervision`: check the supervisor facts `restart_agent` already
    proves; repair `run_installer install_agent.sh`; this is the recipe that
    makes requirement 2 hold on a minutes clock instead of the timer's daily
-   one.
+   one. **Built 2026-09-16, agent 1.34.0.** As built: a recipe composes
+   only parameterless words (the registry refuses one with a parameter, so
+   nothing compiled here can be a value the word should have compiled
+   itself), so the repair is not `run_installer {name}` but its twin of
+   `host_converge`: `agent_converge`, one compiled constant
+   `--only=install_agent.sh`, refused on a machine with no site. The check
+   is `agent_report`, an observe word that reads the same four files
+   `restart_agent` reads and answers whether anything would restart this
+   process; the verdict is pass when something would, fail when nothing
+   would, unknown when the word refused. Under the job marker every attempt
+   sets, `install_agent.sh` writes the supervision and restarts nothing
+   (its 2.7 deferral), so the repair cannot kill the agent running it; the
+   one state it cannot repair — a restarting unit on disk but this process
+   not started by systemd — fails three attempts and opens a case, which is
+   right: that agent is unsupervised until a person restarts it. The recipe
+   is **site-scoped** (`ScopeSite`): the support bundle a siteless machine
+   runs from carries no `install_agent.sh`, so the docker-prod host reports
+   `agent_supervision:not-applicable` and its agent's supervision stays the
+   host timer's daily business, as before. Pinned: the two words in the
+   vocabulary gate, the recipe in `registry_test.go`, the argv constant and
+   the siteless refusal, the verdict reading, the site scope, and an
+   end-to-end run through `primitives.Execute` against a signed runner that
+   installs a keepalive when asked for exactly that installer.
 3. Sentinel's rungs 1 and 2 as recipes where the check is local and the
    repair is deterministic: `php_fpm_down`, `postgres_down`,
    `disk_reclaim`, `certificate_renew`, `upgrade_half_applied`. Each is
@@ -338,14 +367,88 @@ What the read says about arming:
    attempts, about an hour) is the only way to see a case reach the plane
    before arming makes a real one.
 
+### Case proof, 2026-09-15/16 (docker-prod host, agent 1.32.0)
+
+The first case to travel end to end, on the machine the recipe was written
+for, with fail2ban stopped by hand and the recipe report-only.
+
+The first run (agent 1.31.0, stopped 19:08 UTC) never escalated: six
+report-only attempts at 19:22, 19:42, 20:22, 20:52, 21:32 and 22:02 and no
+case, because the budget counted attempts in a rolling hour and the timer's
+jitter cost each wait a tick (B4, above). The plane saw a healthy node the
+whole time: the claim carries a recipe's mode, never its verdict.
+
+The second run (agent 1.32.0, stopped 23:07 UTC):
+
+| Time (UTC) | Host | Plane |
+|------------|------|-------|
+| 23:09:15 | first failing tick | |
+| 23:19:15 | attempt #7, report-only | |
+| 23:29:15 | attempt #8, ten minutes later (jitter fix) | |
+| 23:59:15 | attempt #9, thirty minutes later | |
+| 00:09:15 | escalation #10; case composed with a fresh host report | stored 00:09:26; Cases card open, fleet notice: docker-prod: recipe:fail2ban #10 |
+| 00:10:15 | fail2ban started by hand | |
+| 00:19:15 | check passes; escalation closed | closed 00:19:29, reason: the check passes: fail2ban is active with 5 jail(s) |
+
+The case body carried exactly the run's three attempts (#7 to #9, not the
+six from the earlier run: the run boundary is read back from the pass line)
+and the host report at the moment of opening. The claim carrying the case
+was stored on the first poll; no refusal was logged; one row, never a
+storm. One side effect of the test: logrotate's midnight run failed its
+post-rotate step for the fail2ban log while fail2ban was stopped, which the
+opening host report named as a failed unit; the flag was cleared by hand.
+
+What the proof says about arming: the loop, the case and the intake all do
+what the spec says on a real clock. What it says about slice 7: the plane
+must see a recipe's last verdict, not only its mode, or a recipe failing
+every tick for three hours is indistinguishable from a healthy one.
+
+### Arming proof, 2026-09-16 (docker-prod host, agent 1.33.0)
+
+The first armed repair in the field, on the same host as the case proof,
+with fail2ban stopped by hand at 15:29:18 UTC. Both actors on the host
+were the release's: agent 1.33.0 (armed, B5 fixed) and the host timer's
+bundle.
+
+| UTC | Host | Plane |
+|-----|------|-------|
+| 15:29:18 | fail2ban stopped by hand | claim still `fail2ban:armed:pass` |
+| 15:31:22 | tick: check fails (inactive); first failing tick, no repair | 15:31:40 claim `fail2ban:armed:fail`; the Host card says `check: fail`; the fleet notice names docker-prod, loaded by the database filter alone |
+| 15:41:22 | tick: check fails again; attempt #11, armed, `host_converge` | |
+| 15:41:26 | outcome `repaired` (`host_housekeeping.sh: ok`); fail2ban active, five jails | 15:41:44 claim `fail2ban:armed:pass`; the notice is empty again; no case opened (the last case is still #10, closed) |
+
+Twelve minutes from the fault to the repair, four seconds for the repair
+itself. The machine transcript ended with the runner's plugin-installer
+line, as B5 predicted, and the attempt was still judged repaired because
+the ok line for `host_housekeeping.sh` is looked for rather than required
+last. The housekeeping run also read sshd's posture and the sshd jail's
+ban count into the transcript, as it does on every run. Nothing for a
+person to do, which is the point of the slice.
+
+### Arming proof, site posture, 2026-09-16 (dev, agent 1.33.0)
+
+The same fault on a site node, where `host_converge` runs the runner
+`--only=host_housekeeping.sh` and the transcript ends with the ok line.
+fail2ban stopped by the owner at 15:45 UTC.
+
+| UTC | Node | Plane |
+|-----|------|-------|
+| 15:52:35 | tick: check fails (inactive); first failing tick | 15:52:54 `fail2ban:armed:fail` |
+| 16:02:35 | tick: check fails again; attempt #1, armed, `host_converge` | |
+| 16:02:40 | outcome `repaired` (`host_housekeeping.sh: ok`); fail2ban active, five jails | 16:02:58 `fail2ban:armed:pass`; no case |
+
+The first attempt this node ever made, seventeen minutes after the fault
+(the stop landed just after a tick), five seconds for the repair. Both
+runner paths the recipe can take have now repaired in the field.
+
 ## Work packages
 
 | WP | Scope | Ships as |
 |----|-------|----------|
 | WP2 | Agent: `recipes` package and registry, check loop, job lock and marker, hold marker, the two ledgers, recipe list at poll, process-group kill on script timeout; `host_report`, `host_converge`; recipe `fail2ban`, report-only. Platform: the runner's `--only` mode, the lock moved to the top with its holder recorded, the oneshot service timeout | agent + platform release |
 | WP3 | Agent: the case; plane: the incident record data class (Sentinel §14.B, built here as the case store), case intake on the poll, Host card on the node page, failed-unit and open-case notices; unpaired path (admin notice + superadmin mail) | agent + platform release |
-| WP4 | Words `unit_journal`, `file_head`, `restart_unit`, `run_installer`, `fail2ban_reset_config`; recipe `agent_supervision` | agent release |
-| WP5 | Sentinel rungs 1 and 2 as recipes, each its own review; the driver consumes cases | agent + platform release, sequenced by `sentinel_managed_recovery.md` §15 |
+| WP4 | Recipe `agent_supervision` with its words `agent_report` and `agent_converge` (**built 2026-09-16, agent 1.34.0**). The diagnosis words `unit_journal`, `file_head`, `restart_unit`, `fail2ban_reset_config` and the parameterised `run_installer {name}` are the driver's: no recipe in this spec composes them (a recipe composes parameterless words only), and they ship with the spec that builds their caller | agent release |
+| WP5 | Sentinel rungs 1 and 2 as recipes, each its own review; the driver consumes cases. **Out of this spec** by its own Scope; sequenced by `sentinel_managed_recovery.md` §15 | its own spec |
 
 `host_housekeeping.sh` (B2 of `post_release_fleet_defects.md`) ships before
 WP2 so the first recipe has something to run. WP2 ships report-only first. Every WP ends with the agent's test suite and
@@ -578,7 +681,47 @@ review is in the file header before the code.
    repairs it.
 
 7. **Arming**, its own release, after the burn-in ledger from dev,
-   jeremytunnell and docker-prod is read and written up.
+   jeremytunnell and docker-prod is read and written up. **Built
+   2026-09-16, agent 1.33.0, with the platform half in the release that
+   follows 0.8.402; the plane ships first, since an agent reporting
+   verdicts to a plane that drops them would read as running no recipes
+   and have its cases refused.** Three things, one release each side:
+
+   - `recipes.ReportOnly = false` and the pin in `registry_test.go` with
+     it. The report-only path stays tested end to end against the real
+     recipe and a signed tree (the test sets the loop's field), so a later
+     release can disarm on a path that never stopped being proven.
+   - **B5, found 2026-09-16 while mapping this slice:** the fail2ban
+     repair judged itself by the converge transcript's *last* line being
+     the runner's ok line for `host_housekeeping.sh`. True on a site,
+     where `--only` runs that one installer and exits; false on a machine
+     with no site, where `--machine` runs the whole host set and the
+     transcript ends with `plugin installers: none on a machine with no
+     site` (the docker-prod host's own converger log). Armed, every repair
+     there would have restarted fail2ban and been ledgered failed. The ok
+     line is now looked for anywhere and the runner's failure line for
+     the same installer is disqualifying anywhere; pinned with a
+     machine-shaped transcript.
+   - **The verdict in the claim.** What the case proof said about this
+     slice: the plane must see a recipe's last verdict, not only its
+     mode. The claim's entry becomes `fail2ban:armed:fail` once the check
+     has run (`pass`, `fail`, `unknown`; nothing before the first check;
+     never on a not-applicable recipe, which is never checked). The loop
+     notes every check's verdict and a repair's own verifying pass, so a
+     node repaired a minute ago reads as passing on its next poll. The
+     plane's `normalised_recipes` accepts the third segment from a closed
+     set, `recipe_verdicts_of` reads it, the Host card shows `fail2ban
+     (armed, check: fail)`, and a third fleet notice names the nodes
+     whose stored list ends an entry in `:fail` (`MultiManagedNode`
+     option `reports_failing_recipe`), because between a check failing
+     and a case there are twenty minutes to an hour armed in which
+     nothing else on the plane says so.
+
+   The arming proof, on the docker-prod host once both halves are live:
+   stop fail2ban by hand; two failing ticks; attempt #1 runs the machine
+   converge, fail2ban comes back, the attempt is ledgered `repaired`, the
+   claim says `fail2ban:armed:pass`, no case opens. The ledger from that
+   run is written up below the case proof.
 
 Slices 3 to 5 are all Go in one repository and tempting to ship together.
 They are not shipped together: 3 and 4 are the proofs 5 stands on, and only
