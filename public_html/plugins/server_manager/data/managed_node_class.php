@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.20 - MultiManagedNode option reports_failing_recipe: the nodes whose stored recipe list
+ *                 says a recipe's check last failed (an entry ending :fail), answered by the database
  * @version 1.19 - MultiManagedNode option reports_failed_units: the nodes whose latest host report
  *                 names a failed unit, answered by the database from the stored JSON
  * @version 1.18 - hosts_site(): whether this node has a Joinery site to ask about. A host node in
@@ -266,7 +268,10 @@ class ManagedNode extends SystemBase {
 		// "fail2ban:report-only", comma-separated and sorted, normalised on
 		// intake exactly as the vocabulary is. The plane cannot set, start,
 		// stop or arm a recipe — the agent reports, the Host card shows a
-		// person. Empty for an agent before 1.27.0, which runs none.
+		// person. Empty for an agent before 1.27.0, which runs none. From
+		// agent 1.33.0 an entry carries what the check last said after the
+		// mode (fail2ban:armed:fail), so a failing recipe is visible here
+		// and not only in a case.
 		'mgn_agent_recipes'       => array('type'=>'text'),
 
 		// Which signed support bundle the machine holds — the tree its script
@@ -395,6 +400,13 @@ class MultiManagedNode extends SystemMultiBase {
 			// must be safe on a string: a jsonb compare, not an array length.
 			$filters["jsonb_typeof(mgn_last_host_report->'failed_units')"] =
 				"= 'array' AND mgn_last_host_report->'failed_units' <> '[]'::jsonb";
+		}
+
+		if (!empty($this->options['reports_failing_recipe'])) {
+			// The stored list is canonical (AgentChannelEndpoint::normalised_recipes):
+			// name:mode[:verdict], comma-separated, verdicts from a closed set,
+			// so "an entry ends in :fail" is the whole question.
+			$filters['mgn_agent_recipes'] = "~ ':fail(,|$)'";
 		}
 
 		if (isset($this->options['slug'])) {

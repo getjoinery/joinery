@@ -36,6 +36,9 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.19 - a recipe entry may carry the check's last verdict after the mode (fail2ban:armed:fail),
+ *                 a closed set (RECIPE_VERDICTS) dropped from an entry that cannot have been checked
+ *                 (not-applicable); recipe_verdicts_of() reads it for the Host card and the fleet notice
  * @version 1.18 - a case that changed nothing is not saved on every poll: an open case is re-stamped as
  *                 seen at most every CASE_SEEN_INTERVAL and a closed summary is never written; a note is
  *                 taken when its time is newer even if the node's count restarted lower (the count never
@@ -1274,18 +1277,29 @@ class AgentChannelEndpoint {
 		return implode(',', array_keys($names));
 	}
 
-	/** The two modes a recipe may report. Anything else is dropped. */
+	/** The three modes a recipe may report. Anything else is dropped. */
 	const RECIPE_MODES = ['report-only', 'armed', 'not-applicable'];
+
+	/** The three answers a recipe's check may give, as the agent's own Kind names them. */
+	const RECIPE_VERDICTS = ['pass', 'fail', 'unknown'];
 
 	/**
 	 * Reduce a reported recipe list to entries this plane will store.
 	 *
-	 * Each entry is name:mode. The name is re-validated against the shape the
-	 * agent's own registry enforces, the mode against the closed set above,
-	 * duplicates collapse to one (the last mode reported wins, which on a
+	 * Each entry is name:mode or, once the check has run, name:mode:verdict.
+	 * The name is re-validated against the shape the agent's own registry
+	 * enforces, the mode and the verdict against the closed sets above (an
+	 * entry with a verdict outside the set is dropped whole; a verdict on a
+	 * not-applicable recipe, which is never checked, is dropped from the
+	 * entry), duplicates collapse to one (the last reported wins, which on a
 	 * single claim is the only one), and the list is sorted — the same
 	 * canonical form normalised_vocabulary() gives, so a re-ordered report
 	 * never reads as a change and nothing that could not be a recipe gets in.
+	 *
+	 * The verdict is there because a mode says whether a recipe acts and
+	 * nothing about whether its subject is right: without it a node whose
+	 * check fails every ten minutes reads as healthy here (the case proof of
+	 * 2026-09-16, three hours of fail behind 'fail2ban:report-only').
 	 */
 	public static function normalised_recipes($reported) {
 		$entries = [];
@@ -1294,27 +1308,67 @@ class AgentChannelEndpoint {
 			if ($entry === '' || strpos($entry, ':') === false) {
 				continue;
 			}
-			[$name, $mode] = explode(':', $entry, 2);
+			$parts = explode(':', $entry);
+			if (count($parts) > 3) {
+				continue;
+			}
+			$name = $parts[0];
+			$mode = $parts[1];
+			$verdict = $parts[2] ?? '';
 			if (!preg_match('/^[a-z][a-z0-9_]{2,39}$/', $name) || !in_array($mode, self::RECIPE_MODES, true)) {
 				continue;
 			}
-			$entries[$name] = $mode;
+			// A third segment, when present, is one of the three answers;
+			// an empty one (a trailing colon) is malformed and drops the entry.
+			if (count($parts) === 3 && !in_array($verdict, self::RECIPE_VERDICTS, true)) {
+				continue;
+			}
+			if ($mode === 'not-applicable') {
+				$verdict = '';
+			}
+			$entries[$name] = $verdict === '' ? $mode : $mode . ':' . $verdict;
 			if (count($entries) >= self::MAX_VOCABULARY_NAMES) {
 				break;
 			}
 		}
 		ksort($entries);
 		$out = [];
-		foreach ($entries as $name => $mode) {
-			$out[] = $name . ':' . $mode;
+		foreach ($entries as $name => $rest) {
+			$out[] = $name . ':' . $rest;
 		}
 		return implode(',', $out);
 	}
 
 	/**
-	 * A stored recipe list as name => mode, for the node page.
+	 * A stored recipe list as name => mode, for the node page and the case
+	 * intake's source check.
 	 */
 	public static function recipes_of($node) {
+		$out = [];
+		foreach (self::recipe_entries_of($node) as $name => $entry) {
+			$out[$name] = $entry['mode'];
+		}
+		return $out;
+	}
+
+	/**
+	 * What each recipe's check last said, as name => pass|fail|unknown, from
+	 * the stored list; a recipe that has not reported a verdict (an agent
+	 * before 1.33.0, a not-applicable recipe, a process that has not ticked
+	 * yet) is absent.
+	 */
+	public static function recipe_verdicts_of($node) {
+		$out = [];
+		foreach (self::recipe_entries_of($node) as $name => $entry) {
+			if ($entry['verdict'] !== '') {
+				$out[$name] = $entry['verdict'];
+			}
+		}
+		return $out;
+	}
+
+	/** The stored list as name => ['mode' => ..., 'verdict' => ...] (verdict '' when none). */
+	private static function recipe_entries_of($node) {
 		$out = [];
 		$stored = (string)$node->get('mgn_agent_recipes');
 		if ($stored === '') {
@@ -1324,8 +1378,8 @@ class AgentChannelEndpoint {
 			if ($entry === '') {
 				continue;
 			}
-			[$name, $mode] = explode(':', $entry, 2);
-			$out[$name] = $mode;
+			$parts = explode(':', $entry);
+			$out[$parts[0]] = ['mode' => $parts[1], 'verdict' => $parts[2] ?? ''];
 		}
 		return $out;
 	}

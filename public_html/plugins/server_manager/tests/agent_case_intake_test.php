@@ -386,8 +386,38 @@ if ($shown !== null) {
 		'The failed-unit notice escapes the unit names and the node name');
 	check(preg_match('#href="/admin/server_manager/node_detail\?mgn_id=' . $node_id . '&amp;tab=overview"#', $units) === 1,
 		'The failed-unit notice links to the node page by id');
-	check(FleetAttentionNotice::failed_units_for([]) === '' && FleetAttentionNotice::open_cases_for([], []) === '',
-		'Both fleet notices are silent with nothing to say');
+	$failing_recipes = FleetAttentionNotice::failing_recipes_for([$node_id => ['name' => '<b>' . $node->get('mgn_name') . '</b>', 'recipes' => ['<i>fail2ban</i>' => 'armed'], 'polled' => '2026-09-16 00:00:00']]);
+	check(strpos($failing_recipes, '<b>') === false && strpos($failing_recipes, '<i>') === false && strpos($failing_recipes, '&lt;i&gt;fail2ban&lt;/i&gt; armed') !== false,
+		'The failing-recipe notice escapes the recipe names and the node name');
+	check(preg_match('#href="/admin/server_manager/node_detail\?mgn_id=' . $node_id . '&amp;tab=overview"#', $failing_recipes) === 1,
+		'The failing-recipe notice links to the node page by id');
+	check(FleetAttentionNotice::failed_units_for([]) === '' && FleetAttentionNotice::open_cases_for([], []) === ''
+		&& FleetAttentionNotice::failing_recipes_for([]) === '',
+		'All three fleet notices are silent with nothing to say');
+
+	// The failing-recipe notice asks the database which nodes to load: the
+	// stored list is canonical, so "an entry ends in :fail" is the whole question.
+	$failing_check = function () use ($node_id): bool {
+		foreach (new MultiManagedNode(['reports_failing_recipe' => true, 'deleted' => false]) as $n) {
+			if ((int)$n->key === $node_id) { return true; }
+		}
+		return false;
+	};
+	$recipes_before = $node->get('mgn_agent_recipes');
+	foreach ([
+		['fail2ban:armed:fail', true, 'a recipe whose check last failed'],
+		['agent_supervision:armed:fail,fail2ban:armed:pass', true, 'a failing recipe first in the list'],
+		['fail2ban:armed:pass', false, 'a passing recipe'],
+		['fail2ban:armed:unknown', false, 'a recipe whose check could not answer'],
+		['fail2ban:armed', false, 'a recipe with no verdict yet'],
+		['', false, 'no recipes'],
+	] as [$stored, $expect, $label]) {
+		$node->set('mgn_agent_recipes', $stored);
+		$node->save();
+		check($failing_check() === $expect, ($expect ? 'Loaded' : 'Not loaded') . ' for the failing-recipe notice: ' . $label);
+	}
+	$node->set('mgn_agent_recipes', $recipes_before);
+	$node->save();
 
 	// The failed-unit notice asks the database which nodes to load, so a
 	// healthy fleet costs no decoding on an admin page.

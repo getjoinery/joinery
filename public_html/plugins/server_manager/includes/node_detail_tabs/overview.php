@@ -9,6 +9,11 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.17 - the not-applicable caption covers both reasons a recipe does not tick here: a container agent
+ *                 whose recipe's subject is the host, and a machine with no site whose recipe's repair is an
+ *                 installer the support bundle does not carry (agent_supervision)
+ * @version 1.16 - the recipe line carries what each check last said (fail2ban (armed, check: fail)) as the
+ *                 agent reported it at its last poll, so a failing recipe is visible before its case
  * @version 1.15 - Run Plugin Installers is shown only for a node with a site (a machine with no site has
  *                 no plugins to have installers); Run Host Housekeeping stays for every node with the word,
  *                 since on a machine it now runs the runner's --machine mode; the recipe line explains a
@@ -624,22 +629,31 @@
 	if (is_array($host_report) || JobCommandBuilder::has_agent_channel($node)) {
 		$page->begin_box(['title' => 'Host']);
 
-		// The recipes the agent runs on its own clock, and their mode, as it
-		// reported them at its last poll. One line: a person reading the node
-		// page can see that a node is report-only. Every name and mode was
+		// The recipes the agent runs on its own clock, their mode, and what
+		// each check last said, as it reported them at its last poll. One
+		// line: a person reading the node page can see whether a node acts
+		// and whether its check passes. Every name, mode and verdict was
 		// re-validated on intake (AgentChannelEndpoint::normalised_recipes)
 		// and is escaped again here.
 		$recipes = AgentChannelEndpoint::recipes_of($node);
+		$verdicts = AgentChannelEndpoint::recipe_verdicts_of($node);
 		if (count($recipes) === 0) {
 			echo '<div class="mb-2 text-muted">Recipes: none reported. An agent from 1.27.0 checks fail2ban every ten minutes and reports here.</div>';
 		} else {
 			$parts = [];
 			foreach ($recipes as $name => $mode) {
-				$parts[] = htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . ' (' . htmlspecialchars($mode, ENT_QUOTES, 'UTF-8') . ')';
+				$label = htmlspecialchars($mode, ENT_QUOTES, 'UTF-8');
+				if (isset($verdicts[$name])) {
+					$label .= ', check: ' . htmlspecialchars($verdicts[$name], ENT_QUOTES, 'UTF-8');
+				}
+				$parts[] = htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . ' (' . $label . ')';
 			}
-			$caption = 'checked every ten minutes on the node; report-only records what it would repair and changes nothing.';
+			$caption = 'checked every ten minutes on the node; armed repairs after two failing checks in a row, report-only records what it would repair and changes nothing.';
+			if (in_array('fail', $verdicts, true)) {
+				$caption .= ' A check that fails is repaired on the node\'s own clock; one that keeps failing after three attempts opens a case below.';
+			}
 			if (in_array('not-applicable', $recipes, true)) {
-				$caption .= ' Not-applicable: this agent runs inside a container and the recipe\'s subject is the host, which the host\'s own agent watches.';
+				$caption .= ' Not-applicable: the recipe\'s subject is out of this agent\'s reach — a container agent cannot see the host (the host\'s own agent watches it), and a machine with no site has no site tree to run the agent installer from.';
 			}
 			echo '<div class="mb-2">Recipes: ' . implode(', ', $parts)
 				. ' <small class="text-muted">— ' . $caption . '</small></div>';
