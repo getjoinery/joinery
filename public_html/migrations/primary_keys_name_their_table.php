@@ -31,6 +31,8 @@
  * (its plugin is not active here) or already keyed by the new column is
  * left alone. The migration runner holds the transaction, so a failure
  * leaves the old key in place.
+ * A table whose plugin is inactive here has no spec pass to add the new
+ * column, so the column and its sequence are renamed in place instead.
  */
 function primary_keys_name_their_table() {
     $db = DbConnector::get_instance()->get_db_link();
@@ -91,7 +93,17 @@ function primary_keys_name_their_table() {
             continue;
         }
         if (!$has_column($table, $new)) {
-            throw new Exception("{$table}.{$new} not yet added - run the schema pass first");
+            // The table is here but its plugin is not active, so no spec
+            // pass added the new column and none will until the plugin is
+            // activated. Rename the column and its sequence in place; the
+            // key and the column default follow the rename.
+            $old_sequence = $sequence_of($table, $old);
+            $db->exec("ALTER TABLE {$table} RENAME COLUMN {$old} TO {$new}");
+            if ($old_sequence !== null && $old_sequence === "{$table}_{$old}_seq") {
+                $db->exec("ALTER SEQUENCE {$old_sequence} RENAME TO {$table}_{$new}_seq");
+            }
+            echo "  {$table}: {$old} -> {$new}, renamed in place (plugin not active here)\n";
+            continue;
         }
         $new_sequence = $sequence_of($table, $new);
         if ($new_sequence === null) {

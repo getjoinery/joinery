@@ -12,6 +12,8 @@
  * at a time. A table that is absent (its plugin is not active here) or a
  * column already gone is left alone. The migration runner holds the
  * transaction.
+ * A table whose plugin is inactive here has no spec pass to add the new
+ * column, so the migration renames the column in place instead.
  */
 function timestamp_columns_platform_names() {
     $db = DbConnector::get_instance()->get_db_link();
@@ -59,7 +61,12 @@ function timestamp_columns_platform_names() {
             continue;
         }
         if (!$has_column($table, $new)) {
-            throw new Exception("{$table}.{$new} not yet added - run the schema pass first");
+            // The table is here but its plugin is not active, so no spec
+            // pass added the new column and none will until the plugin is
+            // activated. Nothing else touches the table: rename in place.
+            $db->exec("ALTER TABLE {$table} RENAME COLUMN {$old} TO {$new}");
+            echo "  {$table}: {$old} -> {$new}, renamed in place (plugin not active here)\n";
+            continue;
         }
 
         // The spec pass filled a defaulted new column (create_time default

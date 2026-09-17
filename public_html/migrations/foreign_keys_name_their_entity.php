@@ -13,6 +13,8 @@
  * This copies the old value across and drops the old column, table by
  * table. A table that is absent (its plugin is not active here) or already
  * migrated is left alone. The migration runner holds the transaction.
+ * A table whose plugin is inactive here has no spec pass to add the new
+ * column, so the migration renames the column in place instead.
  */
 function foreign_keys_name_their_entity() {
     $db = DbConnector::get_instance()->get_db_link();
@@ -59,7 +61,12 @@ function foreign_keys_name_their_entity() {
             continue;
         }
         if (!$has_column($table, $new)) {
-            throw new Exception("{$table}.{$new} not yet added - run the schema pass first");
+            // The table is here but its plugin is not active, so no spec
+            // pass added the new column and none will until the plugin is
+            // activated. Nothing else touches the table: rename in place.
+            $db->exec("ALTER TABLE {$table} RENAME COLUMN {$old} TO {$new}");
+            echo "  {$table}: {$old} -> {$new}, renamed in place (plugin not active here)\n";
+            continue;
         }
 
         $q = $db->prepare("UPDATE {$table} SET {$new} = {$old} WHERE {$new} IS NULL AND {$old} IS NOT NULL");
