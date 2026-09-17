@@ -33,7 +33,7 @@ function my_bookings_logic(array $input): LogicResult {
 		if ($reason !== '') { $booking->set('bkn_cancel_reason', $reason); }
 		$booking->set('bkn_update_time', gmdate('Y-m-d H:i:s'));
 		$booking->save();
-		$type = new BookingType($booking->get('bkn_bkt_booking_type_id'), TRUE);
+		$type = new BookingType($booking->get('bkn_bty_booking_type_id'), TRUE);
 		$host = new User($user_id, TRUE);
 		$client = new User($booking->get('bkn_usr_user_id_client'), TRUE);
 		if ($type->key) { booking_notify_cancellation($booking, $type, $host, $client, $settings, 'host'); }

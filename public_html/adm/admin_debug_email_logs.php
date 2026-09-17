@@ -34,7 +34,7 @@ $page->admin_header(array(
 $settings = Globalvars::get_instance();
 $debug_on = (string)$settings->get_setting('email_debug_mode') === '1';
 
-$logs = new MultiDebugEmailLog(array(), array('del_create_time' => 'DESC'), $numperpage, $offset);
+$logs = new MultiDebugEmailLog(array(), array('dbl_create_time' => 'DESC'), $numperpage, $offset);
 $numrecords = $logs->count_all();
 
 $headers = array('Time', 'Service', 'Status', 'Message');
@@ -49,10 +49,10 @@ $page->tableheader($headers, array('altlinks' => $altlinks, 'title' => 'Debug Em
 
 foreach ($logs as $log) {
 	$page->disprow(array(
-		LibraryFunctions::convert_time($log->get('del_create_time'), 'UTC', $session->get_timezone()),
-		htmlspecialchars((string)$log->get('del_service')),
-		htmlspecialchars((string)$log->get('del_status')),
-		htmlspecialchars((string)$log->get('del_message')),
+		LibraryFunctions::convert_time($log->get('dbl_create_time'), 'UTC', $session->get_timezone()),
+		htmlspecialchars((string)$log->get('dbl_service')),
+		htmlspecialchars((string)$log->get('dbl_status')),
+		htmlspecialchars((string)$log->get('dbl_message')),
 	));
 }
 

@@ -1068,7 +1068,7 @@ class MultiModelTester extends ModelTester {
      *
      *   $filters['ord_timestamp'] = "<= " . $dblink->quote($this->options['x']);
      *   $filters['amu_parent_menu_id'] = "IS NOT NULL";
-     *   $filters['bkt_status'] = "= " . ($this->options['active'] ? '1' : '0');
+     *   $filters['bty_status'] = "= " . ($this->options['active'] ? '1' : '0');
      *       A predicate — the option is a bound, a flag, or a mapped value.
      *       'created_before' => a date does not mean every row has that exact
      *       timestamp; it means every row is earlier. Asserting equality here

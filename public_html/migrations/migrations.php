@@ -1491,3 +1491,13 @@
 	$migration['migration_file'] = 'retired_tables_dropped.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// AbTest and DebugEmailLog take prefixes of their own (abx, dbl): rows
+	// copied into the renamed tables, the variant foreign key renamed, old
+	// tables gone (specs/implemented/shared_prefixes_first_three.md).
+	$migration = array();
+	$migration['database_version'] = '192';
+	$migration['test'] = "SELECT CASE WHEN to_regclass('public.abt_tests') IS NULL AND to_regclass('public.del_debug_email_logs') IS NULL THEN 1 ELSE 0 END AS count";
+	$migration['migration_file'] = 'shared_prefixes_first_three.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

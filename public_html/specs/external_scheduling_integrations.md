@@ -13,7 +13,7 @@ This spec adds the external implementations on top of those seams. It is **addit
 
 **Why import-first.** The target market is the "degoogle" crowd — hosts moving *off* Google and Calendly onto self-hosted scheduling. For them, **import (migration) is more valuable than live sync.** Importing an external account's configuration so the host can recreate it natively and *leave* the external service is the point. Ongoing two-way calendar sync (read busy from / write back to Google/Outlook) does the opposite — it re-tethers users to the services they're trying to leave — so it sits at the bottom of this spec, useful only for hosts who deliberately want to keep one foot in Google.
 
-**Depends on (must already be shipped by the native spec):** the `SchedulingServiceProvider` interface + registry, the `bkt_provider` / `bkt_external_type_uri` booking-type fields, and the `CalendarItemSource` registry. This spec provides implementations for those contracts; it does not change them.
+**Depends on (must already be shipped by the native spec):** the `SchedulingServiceProvider` interface + registry, the `bty_provider` / `bty_external_type_uri` booking-type fields, and the `CalendarItemSource` registry. This spec provides implementations for those contracts; it does not change them.
 
 **Pre-launch note:** The platform has no production users. No data-preservation migrations are required.
 
@@ -23,9 +23,9 @@ This spec adds the external implementations on top of those seams. It is **addit
 
 A host connecting an external scheduling/calendar account can do one of two things. The first is the reason this spec exists; the second is a convenience for holdouts.
 
-1. **Migrate (import → native).** Connect the account once, read its event types via `listEventTypes()`, and recreate each as a **native** booking type (`bkt_provider='native'`) bound to a native schedule. The host then runs entirely on Joinery and disconnects the external service. This is the primary, highest-value path for the degoogle market — the external account is a *source*, not a permanent dependency.
+1. **Migrate (import → native).** Connect the account once, read its event types via `listEventTypes()`, and recreate each as a **native** booking type (`bty_provider='native'`) bound to a native schedule. The host then runs entirely on Joinery and disconnects the external service. This is the primary, highest-value path for the degoogle market — the external account is a *source*, not a permanent dependency.
 
-2. **Proxy (stay external).** Keep the external service as the live backend: `bkt_provider='calendly'|'acuity'` types that either embed the provider's widget (Calendly) or drive the native slot picker through the provider's API (Acuity). Bookings still land in the unified local `bkn_bookings` table for one history/admin/analytics view. For hosts who want to keep their existing tool. Secondary.
+2. **Proxy (stay external).** Keep the external service as the live backend: `bty_provider='calendly'|'acuity'` types that either embed the provider's widget (Calendly) or drive the native slot picker through the provider's API (Acuity). Bookings still land in the unified local `bkn_bookings` table for one history/admin/analytics view. For hosts who want to keep their existing tool. Secondary.
 
 Both paths use the same `SchedulingServiceProvider` contract; migration uses only `listEventTypes()`, proxy uses the full surface.
 
@@ -48,7 +48,7 @@ The interface, registry, mode model (`headless` vs `embed`), and `NativeScheduli
 
 Hosts connect at `/profile/bookings/connections`: OAuth providers show a Connect button (consent flow), key-based providers show the provider's `getConnectionFields()` via FormWriter. After connecting, `listEventTypes()` powers an import step.
 
-**Import step (the migration path):** the import UI lists the external event types and lets the host bring each in as either a **native** type (recreate `bkt_provider='native'` — duration, and a native schedule the host then tunes) or a **proxy** type (`bkt_provider` + `bkt_external_type_uri`, kept live on the external service). Native is the default and the recommended choice; the page frames proxy as "keep running this on {provider}." When every type a host cares about has been imported as native, they can disconnect with nothing left behind.
+**Import step (the migration path):** the import UI lists the external event types and lets the host bring each in as either a **native** type (recreate `bty_provider='native'` — duration, and a native schedule the host then tunes) or a **proxy** type (`bty_provider` + `bty_external_type_uri`, kept live on the external service). Native is the default and the recommended choice; the page frames proxy as "keep running this on {provider}." When every type a host cares about has been imported as native, they can disconnect with nothing left behind.
 
 ### Calendly provider
 

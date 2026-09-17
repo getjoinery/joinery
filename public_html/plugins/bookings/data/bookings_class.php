@@ -11,6 +11,9 @@ class BookingException extends SystemBaseException {}
  * `bkn_usr_user_id_client` is the invitee. Invitee self-service (cancel /
  * reschedule) is authorized by the random `bkn_action_token`, not a login.
  * External-provider bookings carry their provider id in `bkn_external_uri`.
+ *
+ * @version 1.1 - the type key is bkn_bty_booking_type_id (BookingType is bty), which
+ *   the convention resolves on its own — no source_class override
  */
 class Booking extends SystemBase {
 
@@ -19,8 +22,7 @@ class Booking extends SystemBase {
 	public static $pkey_column = 'bkn_booking_id';
 
 	protected static $foreign_key_actions = [
-		// bkt collides with core BackupTarget - name the source explicitly
-		'bkn_bkt_booking_type_id' => ['action' => 'prevent', 'source_class' => 'BookingType', 'message' => 'bookings of this type exist'],
+		'bkn_bty_booking_type_id' => ['action' => 'prevent', 'message' => 'bookings of this type exist'],
 		'bkn_usr_user_id_booked' => ['action' => 'set_value', 'value' => User::USER_DELETED],
 		'bkn_usr_user_id_client' => ['action' => 'set_value', 'value' => User::USER_DELETED],
 		'bkn_pro_product_id' => ['action' => 'null'],
@@ -42,7 +44,7 @@ class Booking extends SystemBase {
 	    'bkn_booking_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 	    'bkn_provider' => array('type'=>'varchar(32)', 'default'=>'native'),
 	    'bkn_external_uri' => array('type'=>'varchar(255)'),
-	    'bkn_bkt_booking_type_id' => array('type'=>'int8'),
+	    'bkn_bty_booking_type_id' => array('type'=>'int8'),
 	    'bkn_usr_user_id_booked' => array('type'=>'int8'),   // host
 	    'bkn_usr_user_id_client' => array('type'=>'int8'),   // invitee
 	    'bkn_pro_product_id' => array('type'=>'int4'),
@@ -140,7 +142,7 @@ class MultiBooking extends SystemMultiBase {
         }
 
         if (isset($this->options['booking_type_id'])) {
-            $filters['bkn_bkt_booking_type_id'] = [$this->options['booking_type_id'], PDO::PARAM_INT];
+            $filters['bkn_bty_booking_type_id'] = [$this->options['booking_type_id'], PDO::PARAM_INT];
         }
 
         if (isset($this->options['product_id'])) {

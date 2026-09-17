@@ -31,8 +31,8 @@ class BookingEmailsTask implements ScheduledTaskInterface {
 			if ($booking->get('bkn_is_no_show')) { continue; }
 			if (!$booking->get('bkn_start_time')) { continue; }
 
-			$type = new BookingType($booking->get('bkn_bkt_booking_type_id'), TRUE);
-			if (!$type->key || !$type->get('bkt_send_native_emails')) { continue; }
+			$type = new BookingType($booking->get('bkn_bty_booking_type_id'), TRUE);
+			if (!$type->key || !$type->get('bty_send_native_emails')) { continue; }
 
 			$start = $booking->get('bkn_start_time');
 			$end = $booking->get('bkn_end_time') ?: $start;
@@ -94,10 +94,10 @@ class BookingEmailsTask implements ScheduledTaskInterface {
 		$when = LibraryFunctions::convert_time($booking->get('bkn_start_time'), 'UTC', $tz, 'l, M j, Y g:i A T');
 		$manage = $this->baseUrl() . '/booking/manage?token=' . $booking->get('bkn_action_token');
 		$body = '<p>Reminder: your booking is coming up.</p>'
-			. '<p><strong>' . htmlspecialchars($type->get('bkt_name')) . '</strong><br>' . htmlspecialchars($when) . '</p>'
+			. '<p><strong>' . htmlspecialchars($type->get('bty_name')) . '</strong><br>' . htmlspecialchars($when) . '</p>'
 			. '<p><a href="' . htmlspecialchars($manage) . '">Manage this booking</a></p>';
 		try {
-			(new EmailSender())->send(EmailMessage::create($client->get('usr_email'), 'Reminder: ' . $type->get('bkt_name'), $body));
+			(new EmailSender())->send(EmailMessage::create($client->get('usr_email'), 'Reminder: ' . $type->get('bty_name'), $body));
 			return true;
 		} catch (Exception $e) { error_log('booking reminder failed: ' . $e->getMessage()); return false; }
 	}
@@ -105,12 +105,12 @@ class BookingEmailsTask implements ScheduledTaskInterface {
 	private function sendFollowup($booking, $type) {
 		$client = new User($booking->get('bkn_usr_user_id_client'), TRUE);
 		if (!$client->key || !$client->get('usr_email')) { return false; }
-		$body = '<p>Thanks for meeting!</p><p>We hope your <strong>' . htmlspecialchars($type->get('bkt_name')) . '</strong> went well.</p>';
-		if ($type->get('bkt_slug')) {
-			$body .= '<p><a href="' . htmlspecialchars($this->baseUrl() . '/book/' . $type->get('bkt_slug')) . '">Book again</a></p>';
+		$body = '<p>Thanks for meeting!</p><p>We hope your <strong>' . htmlspecialchars($type->get('bty_name')) . '</strong> went well.</p>';
+		if ($type->get('bty_slug')) {
+			$body .= '<p><a href="' . htmlspecialchars($this->baseUrl() . '/book/' . $type->get('bty_slug')) . '">Book again</a></p>';
 		}
 		try {
-			(new EmailSender())->send(EmailMessage::create($client->get('usr_email'), 'Following up: ' . $type->get('bkt_name'), $body));
+			(new EmailSender())->send(EmailMessage::create($client->get('usr_email'), 'Following up: ' . $type->get('bty_name'), $body));
 			return true;
 		} catch (Exception $e) { error_log('booking followup failed: ' . $e->getMessage()); return false; }
 	}

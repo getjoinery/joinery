@@ -446,7 +446,7 @@ Existing sites are unaffected — they carry a value in `stg_settings`, and a de
 
 **Debug Mode:**
 ```php
-email_debug_mode = "1"  // Enable debug logging to del_debug_email_logs
+email_debug_mode = "1"  // Enable debug logging to dbl_debug_email_logs
 ```
 
 **Test Mode:**
@@ -536,8 +536,8 @@ never sends to a runner flag such as `--json`.
 email_debug_mode = "1"
 
 // View logs: /admin/admin_debug_email_logs, or
-SELECT del_create_time, del_service, del_status, del_message
-  FROM del_debug_email_logs ORDER BY del_create_time DESC;
+SELECT dbl_create_time, dbl_service, dbl_status, dbl_message
+  FROM dbl_debug_email_logs ORDER BY dbl_create_time DESC;
 ```
 
 Each row is one step the pipeline took: which service a message went to,

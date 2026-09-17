@@ -7,6 +7,9 @@
  * Joinery idiom of carrying static helpers alongside the data class.
  *
  * @see /specs/ab_testing_framework.md
+ *
+ * @version 1.1 - prefix abx, table abx_ab_tests, primary key abx_ab_test_id: abt is
+ *   AppBridgeToken's alone (specs/implemented/shared_prefixes_first_three.md)
  */
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -19,9 +22,9 @@ require_once(PathHelper::getIncludePath('data/visitor_events_class.php'));
 class AbTestException extends SystemBaseException {}
 
 class AbTest extends SystemBase {
-	public static $prefix = 'abt';
-	public static $tablename = 'abt_tests';
-	public static $pkey_column = 'abt_test_id';
+	public static $prefix = 'abx';
+	public static $tablename = 'abx_ab_tests';
+	public static $pkey_column = 'abx_ab_test_id';
 
 	const STATUS_DRAFT    = 'draft';
 	const STATUS_ACTIVE   = 'active';
@@ -29,17 +32,17 @@ class AbTest extends SystemBase {
 	const STATUS_CROWNED  = 'crowned';
 
 	public static $field_specifications = array(
-		'abt_test_id'                  => array('type' => 'int8', 'is_nullable' => false, 'serial' => true),
-		'abt_entity_type'              => array('type' => 'varchar(64)', 'is_nullable' => false),
-		'abt_entity_id'                => array('type' => 'int8', 'is_nullable' => false),
-		'abt_status'                   => array('type' => 'varchar(16)', 'default' => 'draft'),
-		'abt_conversion_event_type'    => array('type' => 'int2', 'is_nullable' => true),
-		'abt_epsilon'                  => array('type' => 'decimal(4,3)', 'default' => 0.100),
-		'abt_cold_start_threshold'     => array('type' => 'int4', 'default' => 100),
-		'abt_winner_abv_variant_id'    => array('type' => 'int8', 'is_nullable' => true),
-		'abt_create_time'              => array('type' => 'timestamp(6)', 'default' => 'now()'),
-		'abt_update_time'            => array('type' => 'timestamp(6)', 'is_nullable' => true),
-		'abt_delete_time'              => array('type' => 'timestamp(6)', 'is_nullable' => true),
+		'abx_ab_test_id'                  => array('type' => 'int8', 'is_nullable' => false, 'serial' => true),
+		'abx_entity_type'              => array('type' => 'varchar(64)', 'is_nullable' => false),
+		'abx_entity_id'                => array('type' => 'int8', 'is_nullable' => false),
+		'abx_status'                   => array('type' => 'varchar(16)', 'default' => 'draft'),
+		'abx_conversion_event_type'    => array('type' => 'int2', 'is_nullable' => true),
+		'abx_epsilon'                  => array('type' => 'decimal(4,3)', 'default' => 0.100),
+		'abx_cold_start_threshold'     => array('type' => 'int4', 'default' => 100),
+		'abx_winner_abv_variant_id'    => array('type' => 'int8', 'is_nullable' => true),
+		'abx_create_time'              => array('type' => 'timestamp(6)', 'default' => 'now()'),
+		'abx_update_time'            => array('type' => 'timestamp(6)', 'is_nullable' => true),
+		'abx_delete_time'              => array('type' => 'timestamp(6)', 'is_nullable' => true),
 	);
 
 	/**
@@ -66,7 +69,7 @@ class AbTest extends SystemBase {
 
 		$test = self::get_active_test_for_entity($class, (int)$entity->key);
 		if (!$test) return;
-		if ($test->get('abt_status') !== self::STATUS_ACTIVE) return;
+		if ($test->get('abx_status') !== self::STATUS_ACTIVE) return;
 
 		// Bust the static cache on first render after activation, and ensure
 		// this URL is flagged nostatic so future requests skip the cache and
@@ -138,8 +141,8 @@ class AbTest extends SystemBase {
 	 * Epsilon-greedy selection with cold-start guard.
 	 */
 	protected static function select_variant($test, $variants) {
-		$cold_threshold = (int)$test->get('abt_cold_start_threshold');
-		$epsilon = (float)$test->get('abt_epsilon');
+		$cold_threshold = (int)$test->get('abx_cold_start_threshold');
+		$epsilon = (float)$test->get('abx_epsilon');
 
 		$any_cold = false;
 		foreach ($variants as $v) {
@@ -177,7 +180,7 @@ class AbTest extends SystemBase {
 	 * inherits the platform's canonical bot filter for free.
 	 *
 	 * Trials: one per stashed (test_id, variant_id) for this request.
-	 * Rewards: for every active test whose abt_conversion_event_type matches
+	 * Rewards: for every active test whose abx_conversion_event_type matches
 	 *          $vse_type, increments the cookied variant (if it belongs to
 	 *          that test).
 	 */
@@ -191,7 +194,7 @@ class AbTest extends SystemBase {
 				$sql = 'UPDATE abv_variants
 						   SET abv_trials = abv_trials + 1,
 						       abv_update_time = now()
-						 WHERE abv_variant_id = ? AND abv_abt_test_id = ?';
+						 WHERE abv_variant_id = ? AND abv_abx_ab_test_id = ?';
 				$q = $dblink->prepare($sql);
 				$q->execute([$variant_id, $test_id]);
 			} catch (\Throwable $e) {
@@ -205,11 +208,11 @@ class AbTest extends SystemBase {
 		if ($vse_type <= 0) return;
 
 		try {
-			$sql = 'SELECT abt_test_id
-					  FROM abt_tests
-					 WHERE abt_status = ?
-					   AND abt_delete_time IS NULL
-					   AND abt_conversion_event_type = ?';
+			$sql = 'SELECT abx_ab_test_id
+					  FROM abx_ab_tests
+					 WHERE abx_status = ?
+					   AND abx_delete_time IS NULL
+					   AND abx_conversion_event_type = ?';
 			$q = $dblink->prepare($sql);
 			$q->execute([self::STATUS_ACTIVE, $vse_type]);
 			$test_rows = $q->fetchAll(PDO::FETCH_ASSOC);
@@ -219,7 +222,7 @@ class AbTest extends SystemBase {
 		}
 
 		foreach ($test_rows as $row) {
-			$test_id = (int)$row['abt_test_id'];
+			$test_id = (int)$row['abx_ab_test_id'];
 			$cookie_name = 'ab_' . $test_id;
 			if (empty($_COOKIE[$cookie_name])) continue;
 			$variant_id = (int)$_COOKIE[$cookie_name];
@@ -229,7 +232,7 @@ class AbTest extends SystemBase {
 				$sql = 'UPDATE abv_variants
 						   SET abv_rewards = abv_rewards + 1,
 						       abv_update_time = now()
-						 WHERE abv_variant_id = ? AND abv_abt_test_id = ?';
+						 WHERE abv_variant_id = ? AND abv_abx_ab_test_id = ?';
 				$q = $dblink->prepare($sql);
 				$q->execute([$variant_id, $test_id]);
 			} catch (\Throwable $e) {
@@ -243,16 +246,16 @@ class AbTest extends SystemBase {
 	/**
 	 * Find the non-deleted test attached to a given entity, if any. Returns
 	 * the test regardless of status (draft/active/paused/crowned); callers
-	 * decide how to react based on abt_status.
+	 * decide how to react based on abx_status.
 	 */
 	public static function get_active_test_for_entity($entity_class, $entity_id) {
 		$dblink = DbConnector::get_instance()->get_db_link();
 		try {
-			$sql = 'SELECT abt_test_id FROM abt_tests
-					 WHERE abt_entity_type = ?
-					   AND abt_entity_id = ?
-					   AND abt_delete_time IS NULL
-					 ORDER BY abt_test_id DESC
+			$sql = 'SELECT abx_ab_test_id FROM abx_ab_tests
+					 WHERE abx_entity_type = ?
+					   AND abx_entity_id = ?
+					   AND abx_delete_time IS NULL
+					 ORDER BY abx_ab_test_id DESC
 					 LIMIT 1';
 			$q = $dblink->prepare($sql);
 			$q->execute([$entity_class, (int)$entity_id]);
@@ -262,7 +265,7 @@ class AbTest extends SystemBase {
 			return null;
 		}
 		if (!$row) return null;
-		$test = new AbTest($row['abt_test_id'], true);
+		$test = new AbTest($row['abx_ab_test_id'], true);
 		return $test->key ? $test : null;
 	}
 
@@ -274,15 +277,15 @@ class AbTest extends SystemBase {
 	 * transaction along with the status update and winner assignment.
 	 */
 	public static function copy_winner_onto_parent(AbTest $test) {
-		$winner_id = (int)$test->get('abt_winner_abv_variant_id');
+		$winner_id = (int)$test->get('abx_winner_abv_variant_id');
 		if (!$winner_id) return;
 
 		$variant = new AbTestVariant($winner_id, true);
 		if (!$variant->key) return;
 
-		$class = $test->get('abt_entity_type');
+		$class = $test->get('abx_entity_type');
 		if (!class_exists($class)) return;
-		$entity_id = (int)$test->get('abt_entity_id');
+		$entity_id = (int)$test->get('abx_entity_id');
 		$entity = new $class($entity_id, true);
 		if (!$entity->key) return;
 
@@ -306,12 +309,12 @@ class AbTest extends SystemBase {
 	 * falls back to clearAll() otherwise.
 	 */
 	public static function invalidate_cache_for_test(AbTest $test) {
-		$class = $test->get('abt_entity_type');
+		$class = $test->get('abx_entity_type');
 		if (!class_exists($class)) {
 			StaticPageCache::clearAll();
 			return;
 		}
-		$entity = new $class((int)$test->get('abt_entity_id'), true);
+		$entity = new $class((int)$test->get('abx_entity_id'), true);
 		if (!$entity->key) {
 			StaticPageCache::clearAll();
 			return;
@@ -336,23 +339,23 @@ class MultiAbTest extends SystemMultiBase {
 		$filters = array();
 
 		if (isset($this->options['entity_type'])) {
-			$filters['abt_entity_type'] = array($this->options['entity_type'], PDO::PARAM_STR);
+			$filters['abx_entity_type'] = array($this->options['entity_type'], PDO::PARAM_STR);
 		}
 
 		if (isset($this->options['entity_id'])) {
-			$filters['abt_entity_id'] = array($this->options['entity_id'], PDO::PARAM_INT);
+			$filters['abx_entity_id'] = array($this->options['entity_id'], PDO::PARAM_INT);
 		}
 
 		if (isset($this->options['status'])) {
-			$filters['abt_status'] = array($this->options['status'], PDO::PARAM_STR);
+			$filters['abx_status'] = array($this->options['status'], PDO::PARAM_STR);
 		}
 
 		if (isset($this->options['conversion_event_type'])) {
-			$filters['abt_conversion_event_type'] = array($this->options['conversion_event_type'], PDO::PARAM_INT);
+			$filters['abx_conversion_event_type'] = array($this->options['conversion_event_type'], PDO::PARAM_INT);
 		}
 
 
-		return $this->_get_resultsv2('abt_tests', $filters, $this->order_by, $only_count, $debug);
+		return $this->_get_resultsv2('abx_ab_tests', $filters, $this->order_by, $only_count, $debug);
 	}
 }
 
@@ -398,7 +401,7 @@ class AbTestVersionsPanel {
 		echo '<div class="card mt-3"><div class="card-header bg-body-tertiary d-flex justify-content-between align-items-center">';
 		echo '<h5 class="mb-0">A/B Test</h5>';
 		if ($test) {
-			echo '<span class="badge bg-' . self::status_color($test->get('abt_status')) . '">' . htmlspecialchars($test->get('abt_status')) . '</span>';
+			echo '<span class="badge bg-' . self::status_color($test->get('abx_status')) . '">' . htmlspecialchars($test->get('abx_status')) . '</span>';
 		}
 		echo '</div><div class="card-body">';
 
@@ -460,16 +463,16 @@ class AbTestVersionsPanel {
 		$existing = AbTest::get_active_test_for_entity($entity_class, $entity_id);
 		if ($existing) return; // idempotent — one live test per entity
 		$test = new AbTest(null);
-		$test->set('abt_entity_type', $entity_class);
-		$test->set('abt_entity_id', $entity_id);
-		$test->set('abt_status', AbTest::STATUS_DRAFT);
-		$test->set('abt_epsilon', 0.100);
-		$test->set('abt_cold_start_threshold', 100);
+		$test->set('abx_entity_type', $entity_class);
+		$test->set('abx_entity_id', $entity_id);
+		$test->set('abx_status', AbTest::STATUS_DRAFT);
+		$test->set('abx_epsilon', 0.100);
+		$test->set('abx_cold_start_threshold', 100);
 		$test->save();
 
 		// Seed with a control variant that inherits the parent's current values
 		$variant = new AbTestVariant(null);
-		$variant->set('abv_abt_test_id', $test->key);
+		$variant->set('abv_abx_ab_test_id', $test->key);
 		$variant->set('abv_name', 'control');
 		$variant->set('abv_overrides', []);
 		$variant->save();
@@ -477,8 +480,8 @@ class AbTestVersionsPanel {
 
 	protected static function action_set_status($test, $status) {
 		if (!$test) return;
-		$test->set('abt_status', $status);
-		$test->set('abt_update_time', 'now()');
+		$test->set('abx_status', $status);
+		$test->set('abx_update_time', 'now()');
 		$test->save();
 		AbTest::invalidate_cache_for_test($test);
 	}
@@ -491,9 +494,9 @@ class AbTestVersionsPanel {
 		$dblink = DbConnector::get_instance()->get_db_link();
 		$dblink->beginTransaction();
 		try {
-			$test->set('abt_status', AbTest::STATUS_CROWNED);
-			$test->set('abt_winner_abv_variant_id', $winner_id);
-			$test->set('abt_update_time', 'now()');
+			$test->set('abx_status', AbTest::STATUS_CROWNED);
+			$test->set('abx_winner_abv_variant_id', $winner_id);
+			$test->set('abx_update_time', 'now()');
 			$test->save();
 			AbTest::copy_winner_onto_parent($test);
 			$dblink->commit();
@@ -509,24 +512,24 @@ class AbTestVersionsPanel {
 		$dblink = DbConnector::get_instance()->get_db_link();
 		$sql = 'UPDATE abv_variants
 				   SET abv_trials = 0, abv_rewards = 0, abv_update_time = now()
-				 WHERE abv_abt_test_id = ?';
+				 WHERE abv_abx_ab_test_id = ?';
 		$q = $dblink->prepare($sql);
 		$q->execute([(int)$test->key]);
 	}
 
 	protected static function action_save_settings($test) {
 		if (!$test) return;
-		if (isset($_POST['abt_conversion_event_type'])) {
-			$val = $_POST['abt_conversion_event_type'];
-			$test->set('abt_conversion_event_type', $val === '' ? null : (int)$val);
+		if (isset($_POST['abx_conversion_event_type'])) {
+			$val = $_POST['abx_conversion_event_type'];
+			$test->set('abx_conversion_event_type', $val === '' ? null : (int)$val);
 		}
-		if (isset($_POST['abt_epsilon'])) {
-			$test->set('abt_epsilon', (float)$_POST['abt_epsilon']);
+		if (isset($_POST['abx_epsilon'])) {
+			$test->set('abx_epsilon', (float)$_POST['abx_epsilon']);
 		}
-		if (isset($_POST['abt_cold_start_threshold'])) {
-			$test->set('abt_cold_start_threshold', (int)$_POST['abt_cold_start_threshold']);
+		if (isset($_POST['abx_cold_start_threshold'])) {
+			$test->set('abx_cold_start_threshold', (int)$_POST['abx_cold_start_threshold']);
 		}
-		$test->set('abt_update_time', 'now()');
+		$test->set('abx_update_time', 'now()');
 		$test->save();
 	}
 
@@ -536,7 +539,7 @@ class AbTestVersionsPanel {
 		$variant = $variant_id ? new AbTestVariant($variant_id, true) : new AbTestVariant(null);
 		if ($variant_id && !$variant->key) return;
 
-		$variant->set('abv_abt_test_id', (int)$test->key);
+		$variant->set('abv_abx_ab_test_id', (int)$test->key);
 		$variant->set('abv_name', trim((string)($_POST['abv_name'] ?? '')) ?: 'variant');
 
 		$allowed = isset($entity_class::$ab_testable_fields) ? $entity_class::$ab_testable_fields : [];
@@ -557,7 +560,7 @@ class AbTestVersionsPanel {
 		$variant_id = (int)($_POST['abv_variant_id'] ?? 0);
 		if (!$variant_id) return;
 		$variant = new AbTestVariant($variant_id, true);
-		if ($variant->key && (int)$variant->get('abv_abt_test_id') === (int)$test->key) {
+		if ($variant->key && (int)$variant->get('abv_abx_ab_test_id') === (int)$test->key) {
 			$variant->soft_delete();
 		}
 	}
@@ -640,7 +643,7 @@ class AbTestVersionsPanel {
 	}
 
 	protected static function render_status_actions($entity_class, $entity_id, AbTest $test, $variants) {
-		$status = $test->get('abt_status');
+		$status = $test->get('abx_status');
 		echo '<div class="mb-3">';
 
 		if ($status === AbTest::STATUS_DRAFT || $status === AbTest::STATUS_PAUSED) {
@@ -695,7 +698,7 @@ class AbTestVersionsPanel {
 			}
 		}
 
-		$winner_id = (int)$test->get('abt_winner_abv_variant_id');
+		$winner_id = (int)$test->get('abx_winner_abv_variant_id');
 
 		echo '<table class="table table-sm mb-3"><thead><tr>';
 		echo '<th>Variant</th><th class="text-end">Trials</th><th class="text-end">Rewards</th><th class="text-end">Rate</th>';
@@ -787,7 +790,7 @@ class AbTestVersionsPanel {
 		self::hidden_keys($entity_class, $entity_id);
 		echo '<input type="hidden" name="abtest_action" value="save_settings">';
 
-		$conversion_type = $test->get('abt_conversion_event_type');
+		$conversion_type = $test->get('abx_conversion_event_type');
 		$event_types = [
 			''                                    => '-- Pick a conversion event --',
 			VisitorEvent::TYPE_CART_ADD           => 'Cart add',
@@ -798,7 +801,7 @@ class AbTestVersionsPanel {
 		];
 		echo '<div class="row g-2">';
 		echo '<div class="col-md-4"><label class="form-label small">Conversion event</label>';
-		echo '<select name="abt_conversion_event_type" class="form-select form-select-sm">';
+		echo '<select name="abx_conversion_event_type" class="form-select form-select-sm">';
 		foreach ($event_types as $val => $label) {
 			$sel = ((string)$conversion_type === (string)$val) ? ' selected' : '';
 			echo '<option value="' . htmlspecialchars((string)$val) . '"' . $sel . '>' . htmlspecialchars($label) . '</option>';
@@ -806,10 +809,10 @@ class AbTestVersionsPanel {
 		echo '</select></div>';
 
 		echo '<div class="col-md-4"><label class="form-label small">Epsilon</label>';
-		echo '<input type="number" step="0.001" min="0" max="1" name="abt_epsilon" class="form-control form-control-sm" value="' . htmlspecialchars((string)$test->get('abt_epsilon')) . '"></div>';
+		echo '<input type="number" step="0.001" min="0" max="1" name="abx_epsilon" class="form-control form-control-sm" value="' . htmlspecialchars((string)$test->get('abx_epsilon')) . '"></div>';
 
 		echo '<div class="col-md-4"><label class="form-label small">Cold-start threshold</label>';
-		echo '<input type="number" step="1" min="0" name="abt_cold_start_threshold" class="form-control form-control-sm" value="' . htmlspecialchars((string)$test->get('abt_cold_start_threshold')) . '"></div>';
+		echo '<input type="number" step="1" min="0" name="abx_cold_start_threshold" class="form-control form-control-sm" value="' . htmlspecialchars((string)$test->get('abx_cold_start_threshold')) . '"></div>';
 		echo '</div>';
 
 		echo '<button type="submit" class="btn btn-sm btn-outline-primary mt-2">Save settings</button>';

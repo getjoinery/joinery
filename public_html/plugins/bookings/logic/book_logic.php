@@ -34,7 +34,7 @@ function book_logic(array $input): LogicResult {
 		return LogicResult::render($page_vars);
 	}
 
-	$host = new User($type->get('bkt_usr_user_id'), TRUE);
+	$host = new User($type->get('bty_usr_user_id'), TRUE);
 	$page_vars['type'] = $type;
 	$page_vars['host'] = $host;
 
@@ -62,7 +62,7 @@ function book_logic(array $input): LogicResult {
 			return LogicResult::render($page_vars);
 		}
 
-		$provider = SchedulingProviderRegistry::get($type->get('bkt_provider'));
+		$provider = SchedulingProviderRegistry::get($type->get('bty_provider'));
 
 		// Race-safe creation: serialize per host, then re-check the slot is still
 		// open. The invitee is matched-or-created only AFTER the slot is
@@ -78,7 +78,7 @@ function book_logic(array $input): LogicResult {
 		try {
 			$dblink->beginTransaction();
 			$lock = $dblink->prepare('SELECT pg_advisory_xact_lock(?)');
-			$lock->execute([(int)$type->get('bkt_usr_user_id')]);
+			$lock->execute([(int)$type->get('bty_usr_user_id')]);
 
 			$day = substr($slot_start, 0, 10);
 			$check = $provider->getAvailableSlots($type, $day . ' 00:00:00', $day . ' 23:59:59');
@@ -140,13 +140,13 @@ function book_logic(array $input): LogicResult {
 		}
 
 		// Store intake survey answers against the invitee.
-		booking_save_survey_answers($type->get('bkt_svy_survey_id'), $client->key, $input);
+		booking_save_survey_answers($type->get('bty_svy_survey_id'), $client->key, $input);
 
 		// Side effects outside the transaction.
 		booking_send_confirmation($booking, $type, $host, $client, $settings);
 		Notification::create_notification(
 			$host->key, 'booking', 'New booking',
-			$client->display_name() . ' booked ' . $type->get('bkt_name') . '.',
+			$client->display_name() . ' booked ' . $type->get('bty_name') . '.',
 			'/profile/calendar', $client->key
 		);
 
@@ -183,7 +183,7 @@ function booking_save_survey_answers($survey_id, $user_id, $input) {
 
 /** Confirmation emails to invitee + host, with an ICS invite and manage link. */
 function booking_send_confirmation($booking, $type, $host, $client, $settings) {
-	if (!$type->get('bkt_send_native_emails')) { return; }
+	if (!$type->get('bty_send_native_emails')) { return; }
 
 	$base = rtrim(LibraryFunctions::get_absolute_url(''), '/');
 	$manage_url = $base . '/booking/manage?token=' . $booking->get('bkn_action_token');
@@ -197,20 +197,20 @@ function booking_send_confirmation($booking, $type, $host, $client, $settings) {
 
 	// Invitee
 	$body = '<p>Your booking is confirmed.</p>'
-		. '<p><strong>' . htmlspecialchars($type->get('bkt_name')) . '</strong><br>' . htmlspecialchars($when_client) . '</p>'
-		. ($type->get('bkt_location_details') ? '<p>Location: ' . htmlspecialchars($type->get('bkt_location_details')) . '</p>' : '')
+		. '<p><strong>' . htmlspecialchars($type->get('bty_name')) . '</strong><br>' . htmlspecialchars($when_client) . '</p>'
+		. ($type->get('bty_location_details') ? '<p>Location: ' . htmlspecialchars($type->get('bty_location_details')) . '</p>' : '')
 		. '<p>Need to make a change? <a href="' . htmlspecialchars($manage_url) . '">Cancel or reschedule</a>.</p>';
-	$msg = EmailMessage::create($client->get('usr_email'), 'Booking confirmed: ' . $type->get('bkt_name'), $body);
+	$msg = EmailMessage::create($client->get('usr_email'), 'Booking confirmed: ' . $type->get('bty_name'), $body);
 	$msg->attachData($ics, 'invite.ics', 'text/calendar');
 	try { (new EmailSender())->send($msg); } catch (Exception $e) { error_log('booking confirm (invitee) failed: ' . $e->getMessage()); }
 
 	// Host
 	if ($host->get('usr_email')) {
 		$hbody = '<p>New booking.</p>'
-			. '<p><strong>' . htmlspecialchars($type->get('bkt_name')) . '</strong><br>' . htmlspecialchars($when_host) . '</p>'
+			. '<p><strong>' . htmlspecialchars($type->get('bty_name')) . '</strong><br>' . htmlspecialchars($when_host) . '</p>'
 			. '<p>With: ' . htmlspecialchars($client->display_name()) . ' (' . htmlspecialchars($client->get('usr_email')) . ')</p>'
 			. ($booking->get('bkn_notes') ? '<p>Notes: ' . htmlspecialchars($booking->get('bkn_notes')) . '</p>' : '');
-		$hmsg = EmailMessage::create($host->get('usr_email'), 'New booking: ' . $type->get('bkt_name'), $hbody);
+		$hmsg = EmailMessage::create($host->get('usr_email'), 'New booking: ' . $type->get('bty_name'), $hbody);
 		$hmsg->attachData($ics, 'invite.ics', 'text/calendar');
 		try { (new EmailSender())->send($hmsg); } catch (Exception $e) { error_log('booking confirm (host) failed: ' . $e->getMessage()); }
 	}
@@ -220,7 +220,7 @@ function booking_send_confirmation($booking, $type, $host, $client, $settings) {
 function booking_build_ics($booking, $type, $host) {
 	$fmt = function ($utc) { return gmdate('Ymd\THis\Z', strtotime($utc)); };
 	$uid = 'booking-' . $booking->key . '@joinery';
-	$summary = str_replace(["\r", "\n"], ' ', $type->get('bkt_name'));
+	$summary = str_replace(["\r", "\n"], ' ', $type->get('bty_name'));
 	$lines = array(
 		'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Joinery//Bookings//EN', 'BEGIN:VEVENT',
 		'UID:' . $uid,
@@ -229,8 +229,8 @@ function booking_build_ics($booking, $type, $host) {
 		'DTEND:' . $fmt($booking->get('bkn_end_time')),
 		'SUMMARY:' . $summary,
 	);
-	if ($type->get('bkt_location_details')) {
-		$lines[] = 'LOCATION:' . str_replace(["\r", "\n"], ' ', $type->get('bkt_location_details'));
+	if ($type->get('bty_location_details')) {
+		$lines[] = 'LOCATION:' . str_replace(["\r", "\n"], ' ', $type->get('bty_location_details'));
 	}
 	$lines[] = 'END:VEVENT';
 	$lines[] = 'END:VCALENDAR';

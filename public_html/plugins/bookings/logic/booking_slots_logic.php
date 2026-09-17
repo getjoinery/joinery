@@ -38,7 +38,7 @@ function booking_slots_logic(array $input): LogicResult {
 	list($start, $end) = $range;
 
 	try {
-		$provider = SchedulingProviderRegistry::get($type->get('bkt_provider'));
+		$provider = SchedulingProviderRegistry::get($type->get('bty_provider'));
 		$slots = $provider->getAvailableSlots($type, $start, $end);
 	} catch (Exception $e) {
 		$slots = [];

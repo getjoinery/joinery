@@ -27,6 +27,7 @@
  * prefixed zzfix_, never used by a real model). Run:
  *   php tests/integration/deletion_rule_registration_test.php
  *
+ * @version 1.5 - the ambiguous-prefix cases move to cnv/fil; bty is a single-owner prefix
  * @version 1.4 - pins DeletionRule::pluralForms(), the one pluralization the engine and the
  *   validator share (y -> ies included)
  * @version 1.3 - bkh_bkt_backup_target_id carries the full entity and resolves; the abbreviated
@@ -145,19 +146,27 @@ try {
         && strpos((string)$rows[0]['del_message'], 'zzc_usr_user_id') !== false);
 
     // --- Ambiguous prefix resolves by entity match, never discovery order ---
-    // 'bkt' is claimed by both BackupTarget (bkt_backup_targets) and
-    // BookingType (bkt_booking_types). The column name embeds the entity, so
-    // each resolves to its own table; an abbreviated entity (bkt_target)
-    // matches neither and must stay unrecognized.
-    ok('ambiguous prefix: bkn_bkt_booking_type_id resolves to bkt_booking_types',
-        DeletionRule::getSourceTableFromColumn('bkn_bkt_booking_type_id', 'bkn') === 'bkt_booking_types');
-    ok('ambiguous prefix: mgn_bkt_backup_target_id resolves to bkt_backup_targets',
-        DeletionRule::getSourceTableFromColumn('mgn_bkt_backup_target_id', 'mgn') === 'bkt_backup_targets');
+    // 'cnv' is claimed by both Conversation (cnv_conversations) and
+    // ContentVersion (cnv_content_versions), 'fil' by File (fil_files) and
+    // InboundEmailFilter (fil_inbound_email_filters). The column name embeds
+    // the entity, so each resolves to its own table; an abbreviated entity
+    // under a shared prefix (cnv_conv) matches nothing and must stay
+    // unrecognized. bkt is BackupTarget's alone since BookingType took bty
+    // (specs/implemented/shared_prefixes_first_three.md), so a bkt column resolves by
+    // prefix whatever its entity part says — the single-owner rule.
     ok('ambiguous prefix: msg_cnv_conversation_id resolves to cnv_conversations, not content versions',
         DeletionRule::getSourceTableFromColumn('msg_cnv_conversation_id', 'msg') === 'cnv_conversations');
-    ok('ambiguous prefix with abbreviated entity: a bkh_bkt_target_id stays unrecognized',
-        DeletionRule::getSourceTableFromColumn('bkh_bkt_target_id', 'bkh') === null);
-    ok('ambiguous prefix with the full entity: bkh_bkt_backup_target_id resolves to bkt_backup_targets',
+    ok('ambiguous prefix: pst_fil_file_id resolves to fil_files, not inbound email filters',
+        DeletionRule::getSourceTableFromColumn('pst_fil_file_id', 'pst') === 'fil_files');
+    ok('single-owner prefix: bkn_bty_booking_type_id resolves to bty_booking_types',
+        DeletionRule::getSourceTableFromColumn('bkn_bty_booking_type_id', 'bkn') === 'bty_booking_types');
+    ok('single-owner prefix: mgn_bkt_backup_target_id resolves to bkt_backup_targets',
+        DeletionRule::getSourceTableFromColumn('mgn_bkt_backup_target_id', 'mgn') === 'bkt_backup_targets');
+    ok('abbreviated entity under a shared prefix: a msg_cnv_conv_id stays unrecognized',
+        DeletionRule::getSourceTableFromColumn('msg_cnv_conv_id', 'msg') === null);
+    ok('abbreviated entity under a single-owner prefix: bkh_bkt_target_id resolves by prefix alone',
+        DeletionRule::getSourceTableFromColumn('bkh_bkt_target_id', 'bkh') === 'bkt_backup_targets');
+    ok('the full entity: bkh_bkt_backup_target_id resolves to bkt_backup_targets',
         DeletionRule::getSourceTableFromColumn('bkh_bkt_backup_target_id', 'bkh') === 'bkt_backup_targets');
     // The tie-break accepts every correct plural the validator's pkey check
     // does, from the one definition - a y -> ies table under a shared prefix

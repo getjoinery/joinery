@@ -135,9 +135,9 @@ try {
 
 	section('B1: the debug log declares what the sender writes');
 	$sender_src = file_get_contents(PathHelper::getIncludePath('includes/EmailSender.php'));
-	preg_match_all('/\$log->set\(\'(del_[a-z_]+)\'/', $sender_src, $mm);
+	preg_match_all('/\$log->set\(\'(dbl_[a-z_]+)\'/', $sender_src, $mm);
 	$written = array_unique($mm[1]);
-	ok('the sender writes at least the message and service', in_array('del_message', $written, true) && in_array('del_service', $written, true));
+	ok('the sender writes at least the message and service', in_array('dbl_message', $written, true) && in_array('dbl_service', $written, true));
 	$undeclared = array_diff($written, array_keys(DebugEmailLog::$field_specifications));
 	ok('every column the sender writes is declared on DebugEmailLog', $undeclared === array(), implode(', ', $undeclared));
 

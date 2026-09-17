@@ -46,10 +46,10 @@ class BookingItemSource implements CalendarItemSource {
 					continue;
 				}
 				$title = 'Booking';
-				if ($b->get('bkn_bkt_booking_type_id')) {
-					$type = new BookingType($b->get('bkn_bkt_booking_type_id'), true);
-					if ($type->key && $type->get('bkt_name')) {
-						$title = $type->get('bkt_name');
+				if ($b->get('bkn_bty_booking_type_id')) {
+					$type = new BookingType($b->get('bkn_bty_booking_type_id'), true);
+					if ($type->key && $type->get('bty_name')) {
+						$title = $type->get('bty_name');
 					}
 				}
 				$items[] = new CalendarItem([

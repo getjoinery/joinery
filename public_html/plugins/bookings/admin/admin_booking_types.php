@@ -33,15 +33,15 @@ $page->tableheader($headers, array('title' => 'Booking Types'), $pager);
 
 foreach ($types as $type) {
 	$host = '—';
-	if ($type->get('bkt_usr_user_id')) {
-		$h = new User($type->get('bkt_usr_user_id'), TRUE);
+	if ($type->get('bty_usr_user_id')) {
+		$h = new User($type->get('bty_usr_user_id'), TRUE);
 		if ($h->key) { $host = htmlspecialchars($h->display_name()); }
 	}
 	$status = $type->is_active() ? 'Active' : 'Inactive';
-	$slug = $type->get('bkt_slug') ? '/book/' . htmlspecialchars($type->get('bkt_slug')) : '—';
+	$slug = $type->get('bty_slug') ? '/book/' . htmlspecialchars($type->get('bty_slug')) : '—';
 
 	$rowvalues = array();
-	$rowvalues[] = '<a href="/plugins/bookings/admin/admin_booking_type_edit?bkt_booking_type_id=' . $type->key . '">' . htmlspecialchars($type->get('bkt_name')) . '</a>';
+	$rowvalues[] = '<a href="/plugins/bookings/admin/admin_booking_type_edit?bty_booking_type_id=' . $type->key . '">' . htmlspecialchars($type->get('bty_name')) . '</a>';
 	$rowvalues[] = $host;
 	$rowvalues[] = $slug;
 	$rowvalues[] = $status;

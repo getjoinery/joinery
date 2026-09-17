@@ -28,6 +28,7 @@
  *
  * Run: php tests/unit/class_autoloader_test.php
  *
+ * @version 1.2 - the shared-prefix case is cnv; abt has one owner (specs/implemented/shared_prefixes_first_three.md)
  * @version 1.1 - the prefix index and the fingerprinted miss
  * @version 1.0
  */
@@ -89,8 +90,11 @@ section('The cache carries the model prefix index and a tree fingerprint');
 check(isset($decoded['prefixes']['usr']) && $decoded['prefixes']['usr'] === array('User'),
 	'a model prefix names the class declaring it',
 	json_encode($decoded['prefixes']['usr'] ?? null));
-check(isset($decoded['prefixes']['abt']) && count($decoded['prefixes']['abt']) === 2,
+check(isset($decoded['prefixes']['cnv']) && count($decoded['prefixes']['cnv']) === 2,
 	'a prefix two models share lists both',
+	json_encode($decoded['prefixes']['cnv'] ?? null));
+check(($decoded['prefixes']['abt'] ?? null) === array('AppBridgeToken'),
+	'a prefix retired from sharing lists its one owner (abt is AppBridgeToken since AbTest took abx)',
 	json_encode($decoded['prefixes']['abt'] ?? null));
 check(!isset($decoded['prefixes']['']) && !isset($decoded['map']['']),
 	'nothing is indexed under an empty name');

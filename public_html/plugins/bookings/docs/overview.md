@@ -6,15 +6,15 @@ Gated by the `bookings_active` setting.
 
 ## Booking types
 
-`BookingType` (`data/booking_types_class.php`, `bkt_booking_types`) configures a bookable meeting. Key fields:
+`BookingType` (`data/booking_types_class.php`, `bty_booking_types`) configures a bookable meeting. Key fields:
 
-- `bkt_provider` (default `native`), `bkt_external_type_uri` — scheduling backend (see the seam below).
-- `bkt_usr_user_id` — the host; availability comes from this user's one schedule.
-- `bkt_slug` — globally unique; the public URL is `/book/{slug}`.
-- `bkt_duration_minutes`, `bkt_slot_increment_minutes`, `bkt_buffer_before_minutes`, `bkt_buffer_after_minutes`, `bkt_min_notice_minutes`, `bkt_rolling_days`, `bkt_window_start`/`bkt_window_end`, `bkt_max_per_day`/`bkt_max_per_week` — slot shape and bounds.
-- `bkt_location_mode` / `bkt_location_details`, `bkt_pro_product_id` (paid), `bkt_svy_survey_id` (intake survey).
-- `bkt_cancel_notice_minutes`, `bkt_cancellation_policy_text` — invitee cancel/reschedule rules.
-- `bkt_send_native_emails` (default on), `bkt_reminder_minutes_csv` (default `1440,60`).
+- `bty_provider` (default `native`), `bty_external_type_uri` — scheduling backend (see the seam below).
+- `bty_usr_user_id` — the host; availability comes from this user's one schedule.
+- `bty_slug` — globally unique; the public URL is `/book/{slug}`.
+- `bty_duration_minutes`, `bty_slot_increment_minutes`, `bty_buffer_before_minutes`, `bty_buffer_after_minutes`, `bty_min_notice_minutes`, `bty_rolling_days`, `bty_window_start`/`bty_window_end`, `bty_max_per_day`/`bty_max_per_week` — slot shape and bounds.
+- `bty_location_mode` / `bty_location_details`, `bty_pro_product_id` (paid), `bty_svy_survey_id` (intake survey).
+- `bty_cancel_notice_minutes`, `bty_cancellation_policy_text` — invitee cancel/reschedule rules.
+- `bty_send_native_emails` (default on), `bty_reminder_minutes_csv` (default `1440,60`).
 
 Admin CRUD: `/plugins/bookings/admin/admin_booking_types` (list) and `admin_booking_type_edit` (create/edit). The edit form renders the bulk fields through `FormWriter::fromDescriptor()`; the host picker and the location box (gated on the location mode via `visibility_rules`) are hand-added.
 
@@ -30,7 +30,7 @@ Admin CRUD: `/plugins/bookings/admin/admin_booking_types` (list) and `admin_book
 
 ## Invitee self-service
 
-`/booking/manage?token={bkn_action_token}` — cancel (with reason) or reschedule (a `slot_picker` for the same type; the same booking row moves to the new slot, re-checked race-safely; the old time frees automatically). No login — the token is the credential. Enforces `bkt_cancel_notice_minutes` and shows the policy text.
+`/booking/manage?token={bkn_action_token}` — cancel (with reason) or reschedule (a `slot_picker` for the same type; the same booking row moves to the new slot, re-checked race-safely; the old time frees automatically). No login — the token is the credential. Enforces `bty_cancel_notice_minutes` and shows the policy text.
 
 ## Host & admin operations
 

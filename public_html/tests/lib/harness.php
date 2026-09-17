@@ -746,7 +746,7 @@ function harness_cleanup_stale_fixtures() {
 		array('Survey', 'svy_surveys', 'svy_name', 'svy_create_time', 'HarnessTest %'),
 		array('Group', 'grp_groups', 'grp_name', 'grp_create_time', 'HarnessTest %'),
 		array('Product', 'pro_products', 'pro_name', 'pro_create_time', 'HarnessTest %'),
-		array('BookingType', 'bkt_booking_types', 'bkt_name', 'bkt_create_time', 'HarnessTest %'),
+		array('BookingType', 'bty_booking_types', 'bty_name', 'bty_create_time', 'HarnessTest %'),
 		array('ManagedNode', 'mgn_managed_nodes', 'mgn_name', 'mgn_create_time', 'HarnessTest %'),
 		array('Question', 'qst_questions', 'qst_question', 'qst_create_time', 'HarnessTest %'),
 	);

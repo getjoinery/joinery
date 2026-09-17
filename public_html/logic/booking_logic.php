@@ -32,7 +32,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		//SHOW IT EVEN IF UNPUBLISHED OR DELETED
 	}
 	else {
-		if($booking_type->get('bkt_delete_time') || !$booking_type->get('bkt_status')){
+		if($booking_type->get('bty_delete_time') || !$booking_type->get('bty_status')){
 			require_once(LibraryFunctions::display_404_page());	
 		}
 	}	

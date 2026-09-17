@@ -10,7 +10,7 @@
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-require_once(PathHelper::getIncludePath('data/tests_class.php'));
+require_once(PathHelper::getIncludePath('data/ab_tests_class.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(5);
@@ -20,10 +20,10 @@ $session->set_return();
 $dblink = DbConnector::get_instance()->get_db_link();
 $duplicate_groups = [];
 try {
-	$sql = 'SELECT abt_entity_type, abt_entity_id, COUNT(*) AS c
-			  FROM abt_tests
-			 WHERE abt_status = ? AND abt_delete_time IS NULL
-			 GROUP BY abt_entity_type, abt_entity_id
+	$sql = 'SELECT abx_entity_type, abx_entity_id, COUNT(*) AS c
+			  FROM abx_ab_tests
+			 WHERE abx_status = ? AND abx_delete_time IS NULL
+			 GROUP BY abx_entity_type, abx_entity_id
 			HAVING COUNT(*) > 1';
 	$q = $dblink->prepare($sql);
 	$q->execute([AbTest::STATUS_ACTIVE]);
@@ -35,7 +35,7 @@ try {
 // Load all non-deleted tests
 $tests = new MultiAbTest(
 	['deleted' => false],
-	['abt_test_id' => 'DESC']
+	['abx_ab_test_id' => 'DESC']
 );
 $tests->load();
 
@@ -56,8 +56,8 @@ if (!empty($duplicate_groups)) {
 	echo 'This should never happen; it usually indicates a race during activation. Review each and soft-delete the duplicate(s).';
 	echo '<ul class="mb-0 mt-2">';
 	foreach ($duplicate_groups as $g) {
-		$link = get_entity_deep_link($g['abt_entity_type'], (int)$g['abt_entity_id']);
-		echo '<li>' . htmlspecialchars($g['abt_entity_type']) . ' #' . (int)$g['abt_entity_id'];
+		$link = get_entity_deep_link($g['abx_entity_type'], (int)$g['abx_entity_id']);
+		echo '<li>' . htmlspecialchars($g['abx_entity_type']) . ' #' . (int)$g['abx_entity_id'];
 		if ($link) echo ' — <a href="' . htmlspecialchars($link) . '">open</a>';
 		echo ' (' . (int)$g['c'] . ' active tests)</li>';
 	}
@@ -67,15 +67,15 @@ if (!empty($duplicate_groups)) {
 // Build duplicate set for per-row badging
 $dup_set = [];
 foreach ($duplicate_groups as $g) {
-	$dup_set[$g['abt_entity_type'] . '#' . (int)$g['abt_entity_id']] = true;
+	$dup_set[$g['abx_entity_type'] . '#' . (int)$g['abx_entity_id']] = true;
 }
 
 $headers = array('Entity', 'Status', 'Trials', 'Leader', 'Rate', 'Started');
 $paget->tableheader($headers, array('title' => 'All Tests', 'search_on' => false), null);
 
 foreach ($tests as $test) {
-	$entity_class = $test->get('abt_entity_type');
-	$entity_id = (int)$test->get('abt_entity_id');
+	$entity_class = $test->get('abx_entity_type');
+	$entity_id = (int)$test->get('abx_entity_id');
 	$dup_key = $entity_class . '#' . $entity_id;
 
 	// Entity cell — deep-link to the entity's edit page
@@ -118,10 +118,10 @@ foreach ($tests as $test) {
 	$leader_cell = $leader ? htmlspecialchars($leader->get('abv_name')) : '<span class="text-muted">—</span>';
 	$rate_cell = $leader ? number_format($leader_rate * 100, 2) . '%' : '<span class="text-muted">—</span>';
 
-	$status = $test->get('abt_status');
+	$status = $test->get('abx_status');
 	$status_badge = '<span class="badge bg-' . ab_status_color($status) . '">' . htmlspecialchars($status) . '</span>';
 
-	$started = $test->get('abt_create_time');
+	$started = $test->get('abx_create_time');
 	$started_cell = $started ? LibraryFunctions::convert_time($started, 'UTC', $session->get_timezone(), 'M j, Y') : '';
 
 	$paget->disprow(array(
