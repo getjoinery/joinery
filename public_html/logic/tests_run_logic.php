@@ -16,7 +16,7 @@
  * tier enforcement, env gate, and subprocess isolation the CLI gets), and the
  * runner's aggregate contract is returned verbatim under `run`.
  *
- * @version 1.1.0
+ * @version 1.1.1
  * @changelog 1.1.0 - Spawn via the CLI binary (harness_php_cli) so it works
  *   under php-fpm; capture child output to temp files to avoid pipe deadlock.
  */
@@ -108,5 +108,11 @@ function tests_run_logic_descriptor() {
 		// apk_permission capability axis and gate on the user role floor.
 		'auth' => array('capability' => null, 'min_user_permission' => 10),
 		'description' => 'Run a test tier batch or a single declared test and return its result contract',
+		'input' => [
+			'tier' => ['type' => 'string', 'required' => false, 'label' => 'Tier: safe, db, test-db or live (safe by default)'],
+			'filter' => ['type' => 'string', 'required' => false, 'label' => 'Name filter'],
+			'test' => ['type' => 'string', 'required' => false, 'label' => 'Single test file'],
+			'confirm' => ['type' => 'bool', 'required' => false, 'label' => 'Acknowledge real external effects (live tier / prod-verify)'],
+		],
 	);
 }

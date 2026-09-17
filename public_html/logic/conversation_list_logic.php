@@ -6,7 +6,7 @@
  * (20/page, matching the web inbox). Shares conversations_logic.php's
  * query path (the lateral-join latest-message inbox query).
  *
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 require_once(__DIR__ . '/../includes/PathHelper.php');
@@ -65,6 +65,9 @@ function conversation_list_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Paginated conversation inbox for the signed-in owner',
+		'input' => [
+			'offset' => ['type' => 'int', 'required' => false, 'label' => 'Pagination offset'],
+		],
 	];
 }
 

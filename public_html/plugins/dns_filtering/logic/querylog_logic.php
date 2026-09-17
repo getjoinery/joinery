@@ -114,6 +114,10 @@ function querylog_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Fetch a device\'s DNS query log (device_id, optional lines: 100/250/500)',
+		'input' => [
+			'device_id' => ['type' => 'int', 'required' => true, 'label' => 'Device ID'],
+			'lines' => ['type' => 'int', 'required' => false, 'label' => 'Entries to show (100, 250 or 500; snaps to the nearest)'],
+		],
 	];
 }
 

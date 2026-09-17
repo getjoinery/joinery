@@ -41,5 +41,8 @@ function chat_list_logic(array $input): LogicResult {
 
 function chat_list_logic_descriptor() {
     return ['requires_session' => true,
-            'description' => 'List the signed-in user\'s AI chat conversations (pinned first, newest first); optional title/body search.'];
+            'description' => 'List the signed-in user\'s AI chat conversations (pinned first, newest first); optional title/body search.',
+            'input' => [
+                'search' => ['type' => 'string', 'required' => false, 'label' => 'Title/body search'],
+            ]];
 }

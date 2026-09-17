@@ -79,6 +79,9 @@ function vault_unlock_passkey_logic_descriptor() {
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
 		'description' => 'Complete unlocking the vault with a passkey',
+		'input' => [
+			'credential' => ['type' => 'object', 'required' => true, 'label' => 'WebAuthn credential response'],
+		],
 	];
 }
 ?>

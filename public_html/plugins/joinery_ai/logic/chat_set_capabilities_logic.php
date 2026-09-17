@@ -79,5 +79,12 @@ function chat_set_capabilities_logic(array $input): LogicResult {
 
 function chat_set_capabilities_logic_descriptor() {
     return ['requires_session' => true,
-            'description' => 'Set one AI chat control (model, temperature, thinking level, or a capability toggle) on an existing conversation.'];
+            'description' => 'Set one AI chat control (model, temperature, thinking level, or a capability toggle) on an existing conversation.',
+            'input' => [
+                'conversation_id' => ['type' => 'int', 'required' => true, 'label' => 'Conversation ID'],
+                'field' => ['type' => 'string', 'required' => false, 'label' => 'Control to set (model, temperature, top_p, max_tokens, instructions, thinking_level, attachment_mode, security_level, or a capability)'],
+                'value' => ['type' => 'string', 'required' => false, 'label' => 'New value'],
+                'capability' => ['type' => 'string', 'required' => false, 'label' => 'Capability toggle (legacy form)'],
+                'enabled' => ['type' => 'bool', 'required' => false, 'label' => 'Capability on/off (legacy form)'],
+            ]];
 }

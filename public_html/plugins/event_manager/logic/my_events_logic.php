@@ -6,7 +6,7 @@
  * active / expired / canceled / completed, default all), offset (10/page).
  * Shares events_profile_logic.php's query path and status derivation.
  *
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 
@@ -86,6 +86,10 @@ function my_events_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Status-filtered, paginated event registration list for the signed-in owner',
+		'input' => [
+			'status' => ['type' => 'string', 'required' => false, 'label' => 'Registration status filter (all by default)'],
+			'offset' => ['type' => 'int', 'required' => false, 'label' => 'Pagination offset'],
+		],
 	];
 }
 

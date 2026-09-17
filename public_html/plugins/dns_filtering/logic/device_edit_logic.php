@@ -111,6 +111,13 @@ function device_edit_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Create a DNS-filtering device (omit device_id) or rename/edit one (pass device_id)',
+		'input' => [
+			'device_id' => ['type' => 'int', 'required' => false, 'label' => 'Device ID (omit to create)'],
+			'device_name' => ['type' => 'string', 'required' => false, 'label' => 'Device name'],
+			'sdd_timezone' => ['type' => 'string', 'required' => false, 'label' => 'Timezone'],
+			'sdd_allow_device_edits' => ['type' => 'string', 'required' => false, 'label' => 'Allow edits from the device (1 or 0)'],
+			'sdd_log_queries' => ['type' => 'string', 'required' => false, 'label' => 'Log DNS queries (1 or 0)'],
+		],
 	];
 }
 

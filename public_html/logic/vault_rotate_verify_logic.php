@@ -79,6 +79,11 @@ function vault_rotate_verify_logic_descriptor() {
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
 		'description' => 'Complete vault key rotation: fresh keypair, every consumer re-seals its content, recovery codes replaced, other unlockers must be re-added',
+		'input' => [
+			'acknowledged' => ['type' => 'bool', 'required' => true, 'label' => 'Acknowledge the consequences'],
+			'credential' => ['type' => 'object', 'required' => true, 'label' => 'WebAuthn credential response'],
+			'passphrase' => ['type' => 'password', 'required' => false, 'label' => 'Bypass phrase to re-enroll'],
+		],
 	];
 }
 ?>

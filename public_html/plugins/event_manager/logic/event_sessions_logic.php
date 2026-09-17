@@ -127,6 +127,11 @@ function event_sessions_logic_descriptor() {
     return [
         'requires_session' => true,
         'description' => 'Select event sessions',
+        'input' => [
+            'evt_event_id' => ['type' => 'int', 'required' => false, 'label' => 'Event ID'],
+            'event_id' => ['type' => 'int', 'required' => false, 'label' => 'Event ID (alias)'],
+            'offset' => ['type' => 'int', 'required' => false, 'label' => 'Pagination offset'],
+        ],
     ];
 }
 ?>

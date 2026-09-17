@@ -97,6 +97,14 @@ function vault_client_setup_logic_descriptor() {
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
 		'description' => 'Persist a new client-custody vault (public key + browser-produced opaque wrapping blobs) for a scope',
+		'input' => [
+			'scope' => ['type' => 'string', 'required' => true, 'label' => 'Client-custody scope'],
+			'acknowledged' => ['type' => 'bool', 'required' => true, 'label' => 'Acknowledge the consequences'],
+			'public_key' => ['type' => 'string', 'required' => true, 'label' => 'Vault public key'],
+			'salt' => ['type' => 'string', 'required' => false, 'label' => 'KDF salt'],
+			'wrappings' => ['type' => 'array', 'required' => false, 'items' => ['type' => 'object'], 'label' => 'Browser-produced wrapping blobs'],
+			'kdf_params' => ['type' => 'object', 'required' => false, 'label' => 'KDF parameters'],
+		],
 	];
 }
 ?>

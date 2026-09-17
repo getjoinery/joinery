@@ -13,7 +13,7 @@
  * vault holder with a closed window gets {locked:true} and no contacts (autocomplete
  * silently absent).
  *
- * @version 1.1.0
+ * @version 1.1.1
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -58,6 +58,9 @@ function contacts_logic_descriptor() {
 	return array(
 		'requires_session' => true,
 		'description' => 'One mailbox\'s email contacts (decrypted, ranked) for autocomplete + management',
+		'input' => [
+			'alias_id' => ['type' => 'int', 'required' => true, 'label' => 'Mailbox alias ID'],
+		],
 	);
 }
 ?>

@@ -8,7 +8,7 @@
  * step decides whether a vault holder additionally needs an independent second
  * factor before the reset is authorized.
  *
- * @version 1.0
+ * @version 1.1
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
@@ -46,6 +46,9 @@ function password_reset_passkey_options_logic_descriptor() {
 	return [
 		'requires_session' => false,
 		'description' => 'Begin a passkey password reset (returns WebAuthn request options)',
+		'input' => [
+			'email' => ['type' => 'string', 'required' => false, 'label' => 'Email address'],
+		],
 	];
 }
 ?>

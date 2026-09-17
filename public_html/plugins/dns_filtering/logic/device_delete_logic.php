@@ -46,6 +46,10 @@ function device_delete_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Permanently delete a DNS-filtering device (pass device_id and confirm=1)',
+		'input' => [
+			'device_id' => ['type' => 'int', 'required' => true, 'label' => 'Device ID'],
+			'confirm' => ['type' => 'bool', 'required' => false, 'label' => 'Confirm permanent deletion'],
+		],
 	];
 }
 

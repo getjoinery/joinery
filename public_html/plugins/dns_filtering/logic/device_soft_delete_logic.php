@@ -48,6 +48,9 @@ function device_soft_delete_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Deactivate a DNS-filtering device (pass device_id)',
+		'input' => [
+			'device_id' => ['type' => 'int', 'required' => true, 'label' => 'Device ID'],
+		],
 	];
 }
 

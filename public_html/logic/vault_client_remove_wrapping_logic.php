@@ -59,6 +59,10 @@ function vault_client_remove_wrapping_logic_descriptor() {
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
 		'description' => 'Retire one unlocker wrapping from a client-custody vault (unlocker-floor enforced); requires a recent step-up',
+		'input' => [
+			'scope' => ['type' => 'string', 'required' => true, 'label' => 'Client-custody scope'],
+			'wrapping_id' => ['type' => 'int', 'required' => true, 'label' => 'Wrapping ID'],
+		],
 	];
 }
 ?>

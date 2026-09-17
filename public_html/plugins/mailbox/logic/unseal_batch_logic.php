@@ -16,7 +16,7 @@
  *
  * Returns {unsealed, own_remaining, others_remaining} (+ locked when closed).
  *
- * @version 1.1
+ * @version 1.2
  * @changelog 1.1 - accepts an alias_id scope; the still-sealing refusal asks the
  *   MAILBOX, so a Private mailbox on a lowered domain keeps its mail sealed
  */
@@ -66,6 +66,10 @@ function unseal_batch_logic_descriptor() {
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
 		'description' => 'Unseal one bounded batch of the caller\'s own sealed messages on domains that no longer seal; returns unsealed and remaining counts',
+		'input' => [
+			'alias_id' => ['type' => 'int', 'required' => false, 'label' => 'Mailbox alias ID'],
+			'domain_id' => ['type' => 'int', 'required' => false, 'label' => 'Domain ID (when no alias)'],
+		],
 	);
 }
 ?>

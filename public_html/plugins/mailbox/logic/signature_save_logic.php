@@ -9,7 +9,7 @@
  * caller holds no such grant, which is reported as "no access". Returns {ok, signature}
  * (the stored, sanitized HTML, so the client can re-render it).
  *
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -50,6 +50,10 @@ function signature_save_logic_descriptor() {
 	return array(
 		'requires_session' => true,
 		'description' => 'Save the compose signature for one of the caller\'s mailboxes',
+		'input' => [
+			'alias_id' => ['type' => 'int', 'required' => true, 'label' => 'Mailbox alias ID'],
+			'signature' => ['type' => 'text', 'required' => false, 'label' => 'Signature HTML'],
+		],
 	);
 }
 ?>

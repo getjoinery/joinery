@@ -74,6 +74,10 @@ function vault_passphrase_enroll_logic_descriptor() {
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
 		'description' => 'Add (or replace) the optional vault bypass phrase unlocker; requires a recent step-up and a fresh unlocker (unlocker: {credential} from vault_unlock_options, {passphrase} or {code}) in the same request',
+		'input' => [
+			'passphrase' => ['type' => 'password', 'required' => true, 'label' => 'New bypass phrase'],
+			'unlocker' => ['type' => 'object', 'required' => false, 'label' => 'Fresh unlocker: {credential} from vault_unlock_options, {passphrase} or {code}'],
+		],
 	];
 }
 ?>

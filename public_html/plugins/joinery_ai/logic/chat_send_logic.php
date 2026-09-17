@@ -161,5 +161,9 @@ function chat_send_logic(array $input): LogicResult {
 
 function chat_send_logic_descriptor() {
     return ['requires_session' => true,
-            'description' => 'Send a message to the AI assistant (creates a conversation when conversation_id is omitted); returns a poll handle for the streaming reply.'];
+            'description' => 'Send a message to the AI assistant (creates a conversation when conversation_id is omitted); returns a poll handle for the streaming reply.',
+            'input' => [
+                'message' => ['type' => 'text', 'required' => false, 'max_length' => 8000, 'label' => 'Message (may be empty when uploads accompany it)'],
+                'conversation_id' => ['type' => 'int', 'required' => false, 'label' => 'Conversation ID (omit to create)'],
+            ]];
 }

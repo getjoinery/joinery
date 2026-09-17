@@ -10,7 +10,7 @@
  * exactly as the web view does. Shares conversation_logic.php's query
  * path and participant checks.
  *
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 require_once(__DIR__ . '/../includes/PathHelper.php');
@@ -169,6 +169,12 @@ function conversation_thread_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'One conversation\'s messages, cursor-paginated; marks it read. Given `to` instead of conversation_id, dedups to an existing 1:1 conversation for compose mode.',
+		'input' => [
+			'conversation_id' => ['type' => 'int', 'required' => false, 'label' => 'Conversation ID'],
+			'to' => ['type' => 'int', 'required' => false, 'label' => 'Recipient user ID (compose mode)'],
+			'before' => ['type' => 'string', 'required' => false, 'label' => 'Cursor: messages sent before this time'],
+			'after' => ['type' => 'string', 'required' => false, 'label' => 'Cursor: messages sent after this time'],
+		],
 	];
 }
 

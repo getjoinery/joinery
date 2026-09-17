@@ -49,6 +49,9 @@ function vault_client_prf_options_logic_descriptor() {
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
 		'description' => 'WebAuthn PRF assertion options for a client-custody scope (browser derives the KEK locally; the output is never sent back)',
+		'input' => [
+			'scope' => ['type' => 'string', 'required' => true, 'label' => 'Client-custody scope'],
+		],
 	];
 }
 ?>

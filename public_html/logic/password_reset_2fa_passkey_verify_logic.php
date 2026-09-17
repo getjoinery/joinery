@@ -10,7 +10,7 @@
  * passkey + an independent second factor are both proven, so it hands off to
  * the built completion path.
  *
- * @version 1.1
+ * @version 1.2
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
@@ -81,6 +81,9 @@ function password_reset_2fa_passkey_verify_logic_descriptor() {
 	return [
 		'requires_session' => false,
 		'description' => 'Complete the passkey second factor for a vault-holder password reset',
+		'input' => [
+			'credential' => ['type' => 'object', 'required' => true, 'label' => 'WebAuthn credential response'],
+		],
 	];
 }
 ?>

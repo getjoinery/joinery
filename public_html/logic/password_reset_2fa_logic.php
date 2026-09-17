@@ -13,7 +13,7 @@
  * On success it hands off to the built completion path (/password-reset-2), which
  * sets the new password and fires the credential-event wiring.
  *
- * @version 1.0
+ * @version 1.1
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
@@ -87,6 +87,9 @@ function password_reset_2fa_logic_descriptor() {
 	return [
 		'requires_session' => false,
 		'description' => 'Confirm the second factor for a vault-holder passkey password reset (TOTP path)',
+		'input' => [
+			'totp_code' => ['type' => 'password', 'required' => false, 'label' => 'Authenticator code'],
+		],
 	];
 }
 ?>

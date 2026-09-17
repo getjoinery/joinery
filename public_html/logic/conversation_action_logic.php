@@ -9,7 +9,7 @@
  * authorization matches it exactly — only a participant's own
  * ConversationParticipant row may be mutated.
  *
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 require_once(__DIR__ . '/../includes/PathHelper.php');
@@ -67,6 +67,10 @@ function conversation_action_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Mute, unmute, or delete a conversation for the signed-in owner',
+		'input' => [
+			'conversation_id' => ['type' => 'int', 'required' => true, 'label' => 'Conversation ID'],
+			'action' => ['type' => 'string', 'required' => true, 'enum' => ['mute', 'unmute', 'delete'], 'label' => 'Action'],
+		],
 	];
 }
 

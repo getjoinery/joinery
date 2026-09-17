@@ -34,6 +34,9 @@ function entries_list_logic_descriptor() {
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
 		'description' => 'List the user\'s encrypted password entries (opaque blobs) - live, or trashed',
+		'input' => [
+			'trashed' => ['type' => 'bool', 'required' => false, 'label' => 'List trashed entries instead of live ones'],
+		],
 	];
 }
 ?>

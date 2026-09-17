@@ -1,18 +1,23 @@
 # Descriptor migration — retire `_logic_api()`
 
-**Status:** PARTLY DONE (checked 2026-09-02). Steps 1 and 3 are complete: no
-logic file defines `_logic_api()`, `ApiLogicEndpoint::resolveMeta()` reads
-descriptors only, the docs mention no legacy companion, and
+**Status:** DONE 2026-09-17. Steps 1 and 3 landed earlier: no logic file
+defines `_logic_api()`, `ApiLogicEndpoint::resolveMeta()` reads descriptors
+only, the docs mention no legacy companion, and
 `tests/unit/core_api_mechanical_test.php` fails on any file that reintroduces
-one. **Acceptance item 2 is NOT met:** of 226 descriptors, 106 declare no
-`input` schema, and 83 of those belong to logic that reads request input
-(mailbox send/draft/thread/contacts, checkout and cart, chat, devices and
-blocks, and most passkey and vault ceremonies). The remaining work is those
-83 schemas, authored in batches by area with the functional API suites run
-after each; the passkey and vault batch touches sign-in and unlock paths and
-is not to be rushed. The 23 schema-less descriptors whose logic reads no
-input (status reads, option issuers, catalog lists) are complete as they are.
-Inventory command for the remainder is in step 1b below.
+one. Step 2 is moot with the stubs already gone. Acceptance item 2 closed in
+two batches on 2026-09-17: 26 descriptors outside the sign-in paths, then the
+57 passkey, vault, password-reset and mailbox descriptors. Every descriptor
+whose logic reads request input now declares an `input` schema (208 of 232
+descriptors; the 24 without one read no input — status reads, option issuers,
+catalog lists — and are complete as they are). Fields are optional unless the
+logic refuses the request without them; values the logic compares strictly as
+strings stay typed as strings; enums appear only where the logic already
+rejects anything else. `DescriptorValidator` 1.3 adds the `object` type for
+opaque structured values (a WebAuthn credential response, an unlocker, a
+browser-produced wrapping blob), checked to be an object and passed through
+untouched. Gates run after each batch: `db --changed`, `db --filter=api`,
+`--filter=mailbox`, `--filter=vault`, `--filter=passkey`,
+`--filter=account_security`, `--filter=password`, all passing.
 
 **Prerequisite (done):** the REST API consumes descriptors natively with
 `_logic_api()` as a fallback — see

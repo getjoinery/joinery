@@ -80,6 +80,9 @@ function vault_unlock_recovery_logic_descriptor() {
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
 		'description' => 'Unlock the vault with a one-time recovery code',
+		'input' => [
+			'code' => ['type' => 'password', 'required' => true, 'label' => 'Recovery code'],
+		],
 	];
 }
 ?>

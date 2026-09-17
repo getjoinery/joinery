@@ -69,6 +69,12 @@ function vault_setup_verify_logic_descriptor() {
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
 		'description' => 'Complete Sealed Vault setup: generate the keypair, wrap it under the enrolling passkey/recovery codes/optional passphrase, and open the unlock window',
+		'input' => [
+			'acknowledged' => ['type' => 'bool', 'required' => true, 'label' => 'Acknowledge the consequences'],
+			'credential' => ['type' => 'object', 'required' => true, 'label' => 'WebAuthn credential response'],
+			'passphrase' => ['type' => 'password', 'required' => false, 'label' => 'Optional bypass phrase'],
+			'recovery_code_count' => ['type' => 'int', 'required' => false, 'label' => 'Number of recovery codes (10 by default)'],
+		],
 	];
 }
 ?>

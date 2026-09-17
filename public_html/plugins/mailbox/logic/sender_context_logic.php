@@ -23,7 +23,7 @@
  * registrations / orders / conversation count — each section present only when its
  * plugin/feature is active. No match → {is_member:false}.
  *
- * @version 1.4.0
+ * @version 1.4.1
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -200,6 +200,9 @@ function sender_context_logic_descriptor() {
 	return array(
 		'requires_session' => true,
 		'description' => 'Resolve a thread counterparty to the caller\'s contact entry, plus their member record (admin only)',
+		'input' => [
+			'message_id' => ['type' => 'int', 'required' => true, 'label' => 'Message ID'],
+		],
 	);
 }
 ?>

@@ -10,7 +10,7 @@
  * Both upsert through the same contact-store path (source 'import' / 'manual'). A file
  * import returns {imported, skipped}; a manual add returns {added: bool}.
  *
- * @version 1.1.0
+ * @version 1.1.1
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -78,6 +78,10 @@ function contacts_import_logic_descriptor() {
 	return array(
 		'requires_session' => true,
 		'description' => 'Import contacts from a vCard/CSV file, or add one address by hand',
+		'input' => [
+			'alias_id' => ['type' => 'int', 'required' => true, 'label' => 'Mailbox alias ID'],
+			'address' => ['type' => 'string', 'required' => false, 'label' => 'One address to add by hand (or upload a file)'],
+		],
 	);
 }
 ?>

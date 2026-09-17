@@ -22,7 +22,7 @@
  * reading those needs an open unlock window and a locked one returns
  * {locked:true}, the same contract the body and draft reads use.
  *
- * @version 1.1.0
+ * @version 1.1.1
  */
 
 function message_source_logic(array $input): LogicResult {
@@ -93,6 +93,9 @@ function message_source_logic_descriptor() {
 	return array(
 		'requires_session' => true,
 		'description' => 'Return the original RFC822 source of one mail message',
+		'input' => [
+			'message_id' => ['type' => 'int', 'required' => true, 'label' => 'Message ID'],
+		],
 	);
 }
 ?>

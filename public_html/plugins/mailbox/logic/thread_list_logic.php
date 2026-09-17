@@ -12,7 +12,7 @@
  * carry a purge_time; `sent` switches to the Sent view (conversations carrying
  * an outbound row).
  *
- * @version 1.3.0
+ * @version 1.3.1
  * @changelog 1.3.0 - sent param: the Sent pseudo-folder view
  */
 
@@ -60,6 +60,19 @@ function thread_list_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'List mail threads for a mailbox view (inbox/all/sent/spam/trash, search, labels), paged',
+		'input' => [
+			'alias_id' => ['type' => 'string', 'required' => false, 'label' => 'Mailbox alias ID, unmatched, or unmatched:{domain_id}'],
+			'q' => ['type' => 'string', 'required' => false, 'label' => 'Search text'],
+			'unread_only' => ['type' => 'bool', 'required' => false, 'label' => 'Unread only'],
+			'starred_only' => ['type' => 'bool', 'required' => false, 'label' => 'Starred only'],
+			'inbox' => ['type' => 'bool', 'required' => false, 'label' => 'Inbox view'],
+			'sent' => ['type' => 'bool', 'required' => false, 'label' => 'Sent view'],
+			'drafts' => ['type' => 'bool', 'required' => false, 'label' => 'Drafts view'],
+			'spam' => ['type' => 'bool', 'required' => false, 'label' => 'Spam view'],
+			'trash' => ['type' => 'bool', 'required' => false, 'label' => 'Trash view'],
+			'folder_id' => ['type' => 'int', 'required' => false, 'label' => 'Folder ID'],
+			'page' => ['type' => 'int', 'required' => false, 'min' => 1, 'label' => 'Page number (1 by default)'],
+		],
 	];
 }
 

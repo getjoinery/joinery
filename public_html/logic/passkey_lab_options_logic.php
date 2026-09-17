@@ -52,6 +52,12 @@ function passkey_lab_options_logic_descriptor() {
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
 		'description' => 'Passkey lab (superadmin): begin a diagnostic assertion ceremony with a chosen options shape',
+		'input' => [
+			'variant' => ['type' => 'string', 'required' => false, 'max_length' => 40, 'label' => 'Options variant name'],
+			'uv' => ['type' => 'string', 'required' => false, 'label' => 'userVerification (required by default)'],
+			'prf' => ['type' => 'bool', 'required' => false, 'label' => 'Attach a throwaway PRF extension'],
+			'credential_ids' => ['type' => 'array', 'required' => false, 'items' => ['type' => 'string'], 'label' => 'Restrict to these credential IDs'],
+		],
 	];
 }
 ?>

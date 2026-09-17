@@ -6,7 +6,7 @@
  * matching the web order history page). Returns each order with its line
  * item summaries, sharing orders_profile_logic.php's query path.
  *
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 
@@ -69,6 +69,9 @@ function order_list_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Paginated order history for the signed-in owner, with line item summaries',
+		'input' => [
+			'offset' => ['type' => 'int', 'required' => false, 'label' => 'Pagination offset'],
+		],
 	];
 }
 

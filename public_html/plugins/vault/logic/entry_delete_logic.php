@@ -29,6 +29,9 @@ function entry_delete_logic_descriptor() {
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
 		'description' => 'Trash one encrypted password entry (soft delete)',
+		'input' => [
+			'id' => ['type' => 'int', 'required' => true, 'label' => 'Entry ID'],
+		],
 	];
 }
 ?>

@@ -795,7 +795,7 @@ values (typed, defaults applied) overlay the raw input; fields the schema
 doesn't declare pass through untouched. The logic file's own validation
 remains the backstop. See `includes/DescriptorValidator.php` for the type
 vocabulary (`string`, `int`, `float`, `bool`, `email`, `text`, `password`,
-`date`, `datetime`, `array`) and per-field options (`enum`, `min`/`max`,
+`date`, `datetime`, `array`, `object`) and per-field options (`enum`, `min`/`max`,
 `max_length`, `items`).
 
 **Feature gating.** An action belonging to a feature the operator can switch

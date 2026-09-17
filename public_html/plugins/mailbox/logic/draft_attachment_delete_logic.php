@@ -8,7 +8,7 @@
  * (non-inline) attachment. Scope is enforced in MailboxDrafts — the draft is author-owned
  * and the attachment must belong to it. Returns {deleted:bool}.
  *
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -49,6 +49,10 @@ function draft_attachment_delete_logic_descriptor() {
 	return array(
 		'requires_session' => true,
 		'description' => 'Remove one saved attachment from a draft (file + manifest row)',
+		'input' => [
+			'draft_id' => ['type' => 'int', 'required' => true, 'label' => 'Draft ID'],
+			'attachment_id' => ['type' => 'int', 'required' => true, 'label' => 'Attachment ID'],
+		],
 	);
 }
 ?>

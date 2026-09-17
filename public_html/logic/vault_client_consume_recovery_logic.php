@@ -83,6 +83,10 @@ function vault_client_consume_recovery_logic_descriptor() {
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
 		'description' => 'Mark a one-time recovery-key wrapping as used after a client-custody recovery unlock',
+		'input' => [
+			'scope' => ['type' => 'string', 'required' => true, 'label' => 'Client-custody scope'],
+			'wrapping_id' => ['type' => 'int', 'required' => true, 'label' => 'Recovery wrapping ID'],
+		],
 	];
 }
 ?>

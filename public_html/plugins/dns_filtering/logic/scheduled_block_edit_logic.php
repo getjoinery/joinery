@@ -179,6 +179,16 @@ function scheduled_block_edit_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Read a device block (device_id, optional block_id) or save it (action=edit) / delete it (action=delete)',
+		'input' => [
+			'action' => ['type' => 'string', 'required' => false, 'label' => 'edit or delete; omit to read'],
+			'device_id' => ['type' => 'int', 'required' => false, 'label' => 'Device ID'],
+			'block_id' => ['type' => 'int', 'required' => false, 'label' => 'Block ID (omit to create)'],
+			'sdb_name' => ['type' => 'string', 'required' => false, 'label' => 'Block name'],
+			'start_time' => ['type' => 'string', 'required' => false, 'label' => 'Start time (HH:MM)'],
+			'end_time' => ['type' => 'string', 'required' => false, 'label' => 'End time (HH:MM)'],
+			'days_blocked' => ['type' => 'array', 'required' => false, 'items' => ['type' => 'string'], 'label' => 'Days of the week'],
+			'remove_advanced_keys' => ['type' => 'array', 'required' => false, 'items' => ['type' => 'string'], 'label' => 'Advanced keys to remove'],
+		],
 	];
 }
 

@@ -9,7 +9,7 @@
  * at sign-in, closing the quirk where a passkey-only Fortress user was never asked
  * a second factor.
  *
- * @version 1.1
+ * @version 1.2
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
@@ -62,6 +62,10 @@ function login_2fa_passkey_verify_logic_descriptor() {
 	return [
 		'requires_session' => false,
 		'description' => 'Complete passkey second-factor confirmation and finish password sign-in',
+		'input' => [
+			'credential' => ['type' => 'object', 'required' => true, 'label' => 'WebAuthn credential response'],
+			'trust_device' => ['type' => 'bool', 'required' => false, 'label' => 'Remember this device'],
+		],
 	];
 }
 ?>

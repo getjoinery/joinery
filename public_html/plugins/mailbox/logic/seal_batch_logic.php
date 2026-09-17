@@ -11,7 +11,7 @@
  * nothing while rows remain signals an unsealable backlog (a holder lost
  * their vault after the raise); the caller stops on that shape.
  *
- * @version 1.1
+ * @version 1.2
  * @changelog 1.1 - accepts an alias_id scope, so one protected mailbox converges
  *   its own backlog without touching the rest of its domain
  */
@@ -70,6 +70,10 @@ function seal_batch_logic_descriptor() {
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
 		'description' => 'Seal one bounded batch of a protected domain or mailbox\'s unsealed messages; returns sealed and remaining counts',
+		'input' => [
+			'alias_id' => ['type' => 'int', 'required' => false, 'label' => 'Mailbox alias ID'],
+			'domain_id' => ['type' => 'int', 'required' => false, 'label' => 'Domain ID (when no alias)'],
+		],
 	);
 }
 ?>

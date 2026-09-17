@@ -113,6 +113,11 @@ function passkey_register_verify_logic_descriptor() {
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
 		'description' => 'Complete passkey enrollment and persist the new credential; with unlocker ({credential} from vault_unlock_options, {passphrase} or {code}) also activates it for the vault',
+		'input' => [
+			'credential' => ['type' => 'object', 'required' => true, 'label' => 'WebAuthn credential response'],
+			'label' => ['type' => 'string', 'required' => false, 'label' => 'Passkey label'],
+			'unlocker' => ['type' => 'object', 'required' => false, 'label' => 'Fresh unlocker: {credential} from vault_unlock_options, {passphrase} or {code}'],
+		],
 	];
 }
 ?>

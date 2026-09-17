@@ -33,6 +33,10 @@ function passkey_rename_logic_descriptor() {
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
 		'description' => 'Rename an enrolled passkey',
+		'input' => [
+			'credential_id' => ['type' => 'int', 'required' => true, 'label' => 'Passkey ID'],
+			'label' => ['type' => 'string', 'required' => false, 'label' => 'New label'],
+		],
 	];
 }
 ?>

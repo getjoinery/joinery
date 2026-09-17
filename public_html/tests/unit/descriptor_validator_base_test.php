@@ -176,6 +176,32 @@ check(DescriptorValidator::coerce(array('input' => array()), array('a' => 1)) ==
 	'An empty input schema yields no values');
 
 
+section('object: an opaque JSON object passed through untouched');
+
+// A WebAuthn credential response or a browser-produced wrapping blob is
+// structured data the logic interprets — the boundary only checks it is an
+// object and hands it over unchanged, keys and all.
+$credential = array('id' => 'abc', 'response' => array('clientDataJSON' => 'x', 'signature' => 'y'));
+$out = DescriptorValidator::coerce(array('input' => array('credential' => array('type' => 'object'))),
+	array('credential' => $credential));
+check($out === array('credential' => $credential), 'An object field comes back byte-for-byte', json_encode($out));
+
+$refused = false;
+try {
+	DescriptorValidator::coerce(array('input' => array('credential' => array('type' => 'object'))),
+		array('credential' => 'not-an-object'));
+} catch (InvalidArgumentException $e) {
+	$refused = true;
+}
+check($refused, 'A scalar where an object is declared is refused');
+
+$out = DescriptorValidator::coerce(
+	array('input' => array('wrappings' => array('type' => 'array', 'items' => array('type' => 'object')))),
+	array('wrappings' => array(array('kind' => 'recovery', 'blob' => 'a'), array('kind' => 'passkey', 'blob' => 'b'))));
+check(count($out['wrappings']) === 2 && $out['wrappings'][1]['blob'] === 'b',
+	'A list of objects keeps every element intact', json_encode($out));
+
+
 section('Several fields at once');
 
 $descriptor = array('input' => array(

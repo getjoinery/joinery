@@ -65,6 +65,9 @@ function passkey_login_verify_logic_descriptor() {
 	return [
 		'requires_session' => false,
 		'description' => 'Complete passwordless passkey sign-in and establish the browser session',
+		'input' => [
+			'credential' => ['type' => 'object', 'required' => true, 'label' => 'WebAuthn credential response'],
+		],
 	];
 }
 ?>

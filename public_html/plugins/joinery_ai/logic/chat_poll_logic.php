@@ -77,5 +77,8 @@ function chat_poll_logic(array $input): LogicResult {
 
 function chat_poll_logic_descriptor() {
     return ['requires_session' => true,
-            'description' => 'Poll a running AI chat turn; returns partial text while running, the finished turn when complete, or an error.'];
+            'description' => 'Poll a running AI chat turn; returns partial text while running, the finished turn when complete, or an error.',
+            'input' => [
+                'message_id' => ['type' => 'int', 'required' => true, 'label' => 'Assistant message ID'],
+            ]];
 }
