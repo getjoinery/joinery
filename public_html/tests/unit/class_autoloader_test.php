@@ -20,8 +20,15 @@
  * cache is JSON, nothing include()s it, and a class_map.php left behind by an
  * older release is removed rather than left sitting in the tree's cache.
  *
+ * It also holds what the cache carries beyond the map: the model prefix index
+ * FormWriter reads instead of loading every data class, and the fingerprint
+ * that lets a lookup miss answer from a stat walk when the tree has not
+ * changed — a probe for a class that does not exist here used to tokenize
+ * every file on the platform, on every request that made one.
+ *
  * Run: php tests/unit/class_autoloader_test.php
  *
+ * @version 1.1 - the prefix index and the fingerprinted miss
  * @version 1.0
  */
 
@@ -74,8 +81,44 @@ check(strpos($raw, '<?php') === false,
 	'first 20 bytes: ' . substr($raw, 0, 20));
 $decoded = json_decode($raw, true);
 check(is_array($decoded) && $decoded !== [], 'it parses as a non-empty JSON object');
-check(isset($decoded['Product']) && strpos((string)$decoded['Product'], 'products_class.php') !== false,
+check(isset($decoded['map']['Product']) && strpos((string)$decoded['map']['Product'], 'products_class.php') !== false,
 	'and maps a class to the file that declares it');
+
+section('The cache carries the model prefix index and a tree fingerprint');
+
+check(isset($decoded['prefixes']['usr']) && $decoded['prefixes']['usr'] === array('User'),
+	'a model prefix names the class declaring it',
+	json_encode($decoded['prefixes']['usr'] ?? null));
+check(isset($decoded['prefixes']['abt']) && count($decoded['prefixes']['abt']) === 2,
+	'a prefix two models share lists both',
+	json_encode($decoded['prefixes']['abt'] ?? null));
+check(!isset($decoded['prefixes']['']) && !isset($decoded['map']['']),
+	'nothing is indexed under an empty name');
+check(preg_match('/^\d+:\d+:\d+$/', (string)($decoded['stamp'] ?? '')) === 1,
+	'the map records a fingerprint of the tree it was built from',
+	(string)($decoded['stamp'] ?? ''));
+check(isset($decoded['built']) && abs(time() - intval($decoded['built'])) < 600,
+	'and when it was built');
+
+// The same index, in-process, is what FormWriter asks for.
+$prefixes = ClassAutoloader::modelPrefixes();
+check(($prefixes['iem'] ?? null) === array('InboundEmailMessage') || !PluginHelper::isPluginActive('mailbox'),
+	'modelPrefixes() answers in-process, plugin models included while the plugin is active',
+	json_encode($prefixes['iem'] ?? null));
+
+// A miss against an unchanged tree must not rebuild: it walks the tree once
+// (a few ms) and stops. Measured in a subprocess with a warm file cache, so the
+// probe is the only work — a rebuild tokenizes every file and takes hundreds
+// of milliseconds, a walk takes single digits.
+$probe = escapeshellarg(PHP_BINARY) . ' -r '
+	. escapeshellarg('require_once("' . PathHelper::getIncludePath('includes/PathHelper.php') . '");'
+		. ' class_exists("Product"); $t = microtime(true);'
+		. ' class_exists("NoSuchClassAnywhere_" . getmypid());'
+		. ' echo round((microtime(true) - $t) * 1000);');
+$miss_ms = (int)shell_exec($probe . ' 2>/dev/null');
+check($miss_ms < 100,
+	'a miss against an unchanged tree costs a stat walk, not a rebuild',
+	$miss_ms . ' ms');
 
 section('The cache is not writable by the whole machine');
 
@@ -87,6 +130,11 @@ check(($mode & 0002) === 0,
 	'the cache file is not world-writable', sprintf('%o', $mode));
 check(preg_match('/chmod\s*\([^)]*0666/', $src) !== 1,
 	'and the autoloader chmods nothing to 0666');
+// A developer's run and the web user's cron both write this file; with the
+// writer's own primary group on it, each locks the other out and both rebuild
+// on every run.
+check(filegroup($json_map) === filegroup($cache_dir),
+	'the cache file carries the cache directory\'s group, so every writer can read it');
 
 section('A class_map.php left by an older release is removed');
 

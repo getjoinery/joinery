@@ -2,7 +2,11 @@
 /**
  * API v1 Endpoint
  *
- * @version 2.18
+ * @version 2.19
+ * @changelog 2.19 - Sessioned actions dispatch before the CRUD model list is
+ *   assembled. Assembling it loads every model class on the platform, ~180 ms
+ *   a call that no action ever used; a page mounting with five calls in
+ *   flight paid it five times over on one CPU.
  * @changelog 2.18 - Rate limits: a signed-in browser session is metered per USER
  *   (api_session_rate_limit_*), after authentication, instead of sharing the
  *   per-address bucket with keyless and key traffic — a person's own reader,
@@ -461,13 +465,6 @@ if (strtolower($url_segments[2] ?? '') === 'action') {
 	// Returns only when the action requires a session.
 }
 
-// Discover all model classes, then apply the Layer 1 exposure opt-in. discover_model_classes()
-// must keep returning ALL models (shared with schema/deletion subsystems); the CRUD surface is
-// the filtered subset. An unexposed class is indistinguishable from a nonexistent one (404).
-$classes = LibraryFunctions::discover_model_classes(['include_plugins' => true, 'plugin_status' => 'active']);
-$readable_classes = array_values(array_filter($classes, fn($c) => api_flag($c, 'api_readable')));
-$writable_classes = array_values(array_filter($classes, fn($c) => api_flag($c, 'api_writable')));
-
 // Auth-grade client IP: behind Cloudflare the TCP peer is an edge address, so
 // key IP restrictions must check the verified CF-Connecting-IP instead — but
 // only when the peer really is a Cloudflare edge (a spoofed header from a
@@ -513,6 +510,16 @@ if ($api_entry === null) {
 // reads $api_user unconditionally and has no guest vocabulary.
 if ($api_user === null && strtolower($url_segments[2] ?? '') !== 'action') {
 	api_error('Authentication required', 'AuthenticationError', 401);
+}
+
+// Sessioned action endpoint — sessionless actions executed pre-auth above.
+// Dispatched before the CRUD surface is assembled: an action never touches
+// it, and assembling it means loading every model class on the platform
+// (~180 ms per call, paid by each of the several calls a page fires as it
+// mounts).
+if (strtolower($url_segments[2] ?? '') === 'action' && isset($url_segments[3])) {
+	ApiLogicEndpoint::dispatchActionAuthenticated($url_segments, $api_entry, $api_user);
+	// dispatchActionAuthenticated() always exits.
 }
 
 // URL segments were parsed above the pre-auth dispatches
@@ -564,6 +571,13 @@ if (strtolower($url_segments[2] ?? '') === 'drive_upload') {
 	DriveUploadTransport::dispatch($url_segments, $auth_data, $request_method, $api_entry);
 	// dispatch() always exits, logging the api_upload outcome as it goes.
 }
+
+// Discover all model classes, then apply the Layer 1 exposure opt-in. discover_model_classes()
+// must keep returning ALL models (shared with schema/deletion subsystems); the CRUD surface is
+// the filtered subset. An unexposed class is indistinguishable from a nonexistent one (404).
+$classes = LibraryFunctions::discover_model_classes(['include_plugins' => true, 'plugin_status' => 'active']);
+$readable_classes = array_values(array_filter($classes, fn($c) => api_flag($c, 'api_readable')));
+$writable_classes = array_values(array_filter($classes, fn($c) => api_flag($c, 'api_writable')));
 
 if (in_array($operation, $classes)) {
 	$class_name = $operation;
@@ -869,10 +883,6 @@ if (in_array($operation, $classes)) {
 		'data' => $actions
 	);
 
-} else if (strtolower($url_segments[2] ?? '') === 'action' && isset($url_segments[3])) {
-	// Sessioned action endpoint — sessionless actions executed pre-auth above.
-	ApiLogicEndpoint::dispatchActionAuthenticated($url_segments, $api_entry, $api_user);
-	// dispatchActionAuthenticated() always exits.
 }
 
 if ($response !== NULL) {

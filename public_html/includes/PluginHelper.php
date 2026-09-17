@@ -4,11 +4,20 @@ require_once(__DIR__ . '/ComponentBase.php');
 /**
  * PluginHelper - Manages plugin metadata and provides helper functions
  * Extends ComponentBase for common functionality
+ *
+ * @version 1.1.0 - the active set is read once per request (activeSet()) and
+ *   every isActive() answers from it; a request asked "is this plugin active?"
+ *   some fifteen times (once per plugin dir just to list the active ones) and
+ *   ran a COUNT for each. Plugin::save() forgets the set, so a row saved in
+ *   this process is seen by the next ask.
  */
 class PluginHelper extends ComponentBase {
     protected $componentType = 'plugin';
     
     private static $instances = [];
+
+    /** plugin name => true for every row with plg_active = 1; null until read. */
+    private static $active_set = null;
     
     /**
      * Private constructor for singleton pattern
@@ -50,23 +59,42 @@ class PluginHelper extends ComponentBase {
             return true;
         }
 
-        // Check plg_plugins table for activation status
-        // SAFETY: Handle case where plg_plugins table doesn't exist yet (during initial setup/migrations)
-        try {
-            $dbconnector = DbConnector::get_instance();
-            $dblink = $dbconnector->get_db_link();
+        return isset(self::activeSet()[$this->name]);
+    }
 
-            $sql = "SELECT COUNT(*) as count FROM plg_plugins WHERE plg_name = ? AND plg_active = 1";
-            $q = $dblink->prepare($sql);
-            $q->execute([$this->name]);
-            $result = $q->fetch(PDO::FETCH_ASSOC);
-
-            return ($result['count'] > 0);
-        } catch (PDOException $e) {
-            // Table doesn't exist yet (likely during initial database setup)
-            // Return false to indicate plugin is not active during migration phase
-            return false;
+    /**
+     * The names of every active plugin, read from plg_plugins once per
+     * request. Not a cache across requests: nothing outlives the process.
+     *
+     * @return array name => true
+     */
+    private static function activeSet() {
+        if (self::$active_set !== null) {
+            return self::$active_set;
         }
+        $set = [];
+        // SAFETY: plg_plugins may not exist yet (initial setup, migrations) —
+        // then nothing is active, and the empty answer is not kept, so the
+        // table appearing later in the same process is seen.
+        try {
+            $dblink = DbConnector::get_instance()->get_db_link();
+            $q = $dblink->query("SELECT plg_name FROM plg_plugins WHERE plg_active = 1");
+            foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $name) {
+                $set[$name] = true;
+            }
+        } catch (PDOException $e) {
+            return [];
+        }
+        self::$active_set = $set;
+        return $set;
+    }
+
+    /**
+     * Drop the remembered active set. Plugin::save() calls it, so an
+     * activation or deactivation in this process is seen by the next ask.
+     */
+    public static function forgetActiveSet() {
+        self::$active_set = null;
     }
     
     /**

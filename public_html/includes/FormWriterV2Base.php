@@ -7,6 +7,10 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
+ * @version 2.26.0 - detectModelFromFieldName() finds a field's model through
+ *   ClassAutoloader::modelPrefixes() — the cached prefix index — instead of
+ *   loading every data class on the platform (~400 files, ~400 ms per page
+ *   with a prefixed field, every request); a shared prefix tries each model
  * @version 2.25.1 - antispam_question_check() reads a missing answer as '' (a bot's direct post) rather than warning (specs/post_release_fleet_defects.md B4.4)
  * @version 2.25.0
  * @changelog 2.25.0 - A help_modal step may be an array (text/url/url_label) so a guide can link each step to the exact vendor page it happens on; same https-only guard as the bottom link
@@ -57,7 +61,6 @@ abstract class FormWriterV2Base {
     protected static $custom_validators = [];
 
     // Static property for model prefix map (cached)
-    protected static $model_prefix_map = null;
 
     /**
      * Constructor
@@ -665,10 +668,8 @@ abstract class FormWriterV2Base {
         $prefix = $matches[1];
 
         // Prefer a model explicitly passed to the form (getFormWriter(..., ['model' => $obj])).
-        // getModelPrefixMap() only globs core data/*_class.php, so plugin model fields would
-        // otherwise never resolve to a model and pick up no auto-detected validation. If the
-        // passed model owns this field by prefix, use it directly — this is what a developer
-        // who passes the model reasonably expects.
+        // If the passed model owns this field by prefix, use it directly — this is
+        // what a developer who passes the model reasonably expects.
         if (isset($this->options['model']) && is_object($this->options['model'])) {
             $passed_class = get_class($this->options['model']);
             if (isset($passed_class::$prefix) && $passed_class::$prefix === $prefix
@@ -680,86 +681,40 @@ abstract class FormWriterV2Base {
             }
         }
 
-        // Get prefix map (cached for performance)
-        $prefix_map = $this->getModelPrefixMap();
+        // The models declaring this prefix, from the autoloader's cached index.
+        // A prefix shared by several models lists each; the one that declares
+        // the field owns it.
+        $candidates = $this->getModelPrefixMap()[$prefix] ?? [];
 
         if (!empty($this->options['debug'])) {
-            error_log("[FormWriterV2 DEBUG] detectModelFromFieldName($field_name): Prefix=$prefix | Prefix map: " . json_encode($prefix_map));
+            error_log("[FormWriterV2 DEBUG] detectModelFromFieldName($field_name): Prefix=$prefix | Candidates: " . json_encode($candidates));
         }
 
-        $model_name = $prefix_map[$prefix] ?? null;
-
-        if (!empty($this->options['debug'])) {
-            error_log("[FormWriterV2 DEBUG] detectModelFromFieldName($field_name): Model name=$model_name | Class exists: " . (class_exists($model_name) ? 'YES' : 'NO'));
-        }
-
-        if ($model_name && class_exists($model_name)) {
-            // Verify the field actually exists in this model
-            if (isset($model_name::$field_specifications[$field_name])) {
+        foreach ($candidates as $model_name) {
+            if (class_exists($model_name) && isset($model_name::$field_specifications[$field_name])) {
                 if (!empty($this->options['debug'])) {
                     error_log("[FormWriterV2 DEBUG] detectModelFromFieldName($field_name): ✓ Field found in model $model_name");
                 }
                 return $model_name;
-            } else {
-                if (!empty($this->options['debug'])) {
-                    error_log("[FormWriterV2 DEBUG] detectModelFromFieldName($field_name): ✗ Field NOT found in model $model_name. Available fields: " . json_encode(array_keys($model_name::$field_specifications)));
-                }
             }
+        }
+        if (!empty($this->options['debug'])) {
+            error_log("[FormWriterV2 DEBUG] detectModelFromFieldName($field_name): ✗ No model with prefix $prefix declares this field");
         }
 
         return null;  // No matching model found
     }
 
     /**
-     * Build or retrieve the prefix-to-model mapping
+     * Model prefix => the class names declaring it, for every model in core
+     * and the active plugins. Read from ClassAutoloader's cached map, so no
+     * data class is loaded to answer it — only the one that turns out to own
+     * the field is autoloaded, by name, when the caller checks it.
      *
-     * @return array Prefix to model class name mapping
+     * @return array
      */
     protected function getModelPrefixMap() {
-        if (self::$model_prefix_map === null) {
-            self::$model_prefix_map = [];
-
-            // Auto-discover by scanning the core /data directory plus every plugin's
-            // data/ directory, so prefix-based field validation keeps working for
-            // model fields owned by plugin data classes (e.g. pro_/ord_/evt_/loc_).
-            $data_files = glob(PathHelper::getIncludePath('data/*_class.php'));
-            $plugin_data_files = glob(PathHelper::getIncludePath('plugins/*/data/*_class.php'));
-            if (!empty($plugin_data_files)) {
-                $data_files = array_merge($data_files, $plugin_data_files);
-            }
-
-            foreach ($data_files as $file) {
-                // Extract class name from filename
-                $basename = basename($file, '_class.php');
-
-                // Convert to class name, handling plural filenames -> singular class names
-                // e.g., 'users' -> 'User', 'locations' -> 'Location', 'event_registrants' -> 'EventRegistrant'
-                $class_name = str_replace(' ', '', ucwords(str_replace('_', ' ', $basename)));
-
-                // Try to load the class
-                if (!class_exists($class_name)) {
-                    require_once($file);
-                }
-
-                // If plural class name doesn't exist, try singular version (remove trailing 's')
-                $singular_class = $class_name;
-                if (!class_exists($class_name) && substr($class_name, -1) === 's') {
-                    $singular_class = substr($class_name, 0, -1);
-                    if (!class_exists($singular_class)) {
-                        require_once($file);
-                    }
-                }
-
-                // Add to map if class exists and has prefix (prefer singular version)
-                if (class_exists($singular_class) && isset($singular_class::$prefix)) {
-                    self::$model_prefix_map[$singular_class::$prefix] = $singular_class;
-                } elseif (class_exists($class_name) && isset($class_name::$prefix)) {
-                    self::$model_prefix_map[$class_name::$prefix] = $class_name;
-                }
-            }
-        }
-
-        return self::$model_prefix_map;
+        return ClassAutoloader::modelPrefixes();
     }
 
     /**

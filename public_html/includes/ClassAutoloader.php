@@ -9,10 +9,21 @@
  * without executing any of the mapped files.
  *
  * The map is cached (APCu under the web server, a JSON file under the site
- * root's cache/ directory on CLI, where APCu is not enabled). A lookup miss rebuilds
- * the map once and retries, so a class added since the cache was written
- * resolves without a cache flush.
+ * root's cache/ directory on CLI, where APCu is not enabled) together with a
+ * fingerprint of the tree it was built from. A lookup miss rebuilds the map
+ * once and retries when the tree has changed since — so a class added after
+ * the cache was written resolves without a cache flush — and costs only a
+ * stat walk when it has not, which is what a probe for a class that does not
+ * exist here (an inactive plugin's) comes to.
  *
+ * @version 1.3.0 - a lookup miss no longer rebuilds the map on every request:
+ *   the cached map carries a fingerprint of the scanned tree (file count and
+ *   mtimes, a 6 ms stat walk), and a miss rebuilds only when the tree has
+ *   changed since the map was built — an absent class costs a walk, not a
+ *   482 ms tokenize of every file. The TTL check also revalidates by
+ *   fingerprint instead of rebuilding. The same scan records each model's
+ *   `static $prefix`, served by modelPrefixes(), so FormWriter can find the
+ *   model owning a field without loading every data class on the platform.
  * @version 1.2.0 - the cached map is cache/class_map.json, read with
  *   json_decode. It was cache/class_map.php, a PHP file the web user wrote and
  *   this class `include`d on every request — code the pool both writes and
@@ -26,13 +37,17 @@
 class ClassAutoloader {
 
 	/** Bump when the map's shape changes so stale caches are ignored. */
-	const CACHE_KEY = 'joinery_class_map_v1';
+	const CACHE_KEY = 'joinery_class_map_v2';
 
-	/** Seconds a cached map is trusted before it is rebuilt. */
+	/** Seconds a cached map is trusted before its fingerprint is rechecked. */
 	const CACHE_TTL = 600;
 
 	private static $registered = false;
 	private static $map = null;
+	/** prefix => class names declaring `static $prefix` with that value. */
+	private static $prefixes = null;
+	/** Fingerprint of the tree the current map was built from. */
+	private static $stamp = null;
 	private static $rebuilt = false;
 	private static $resolving_theme_chain = false;
 	private static $core_only = false;
@@ -60,6 +75,8 @@ class ClassAutoloader {
 	public static function restrictToCore() {
 		self::$core_only = true;
 		self::$map = null;
+		self::$prefixes = null;
+		self::$stamp = null;
 	}
 
 	/**
@@ -101,12 +118,18 @@ class ClassAutoloader {
 		}
 
 		// Miss against a cached map: the class may have been added since the
-		// map was written. Rebuild once per process and retry.
+		// map was written — or it may simply not exist (a probe for an
+		// optional plugin's class). Only a tree that has changed since the map
+		// was built can hold a class the map does not know, so an unchanged
+		// tree answers the miss with a stat walk rather than a rebuild. Once
+		// per process either way.
 		if (!self::$rebuilt) {
 			self::$rebuilt = true;
-			$map = self::rebuild();
-			if (isset($map[$class]) && is_file($map[$class])) {
-				require_once($map[$class]);
+			if (self::$stamp === null || self::fingerprint() !== self::$stamp) {
+				$map = self::rebuild();
+				if (isset($map[$class]) && is_file($map[$class])) {
+					require_once($map[$class]);
+				}
 			}
 		}
 	}
@@ -153,17 +176,39 @@ class ClassAutoloader {
 	 * @return array
 	 */
 	public static function map() {
-		if (self::$map !== null) {
-			return self::$map;
+		if (self::$map === null) {
+			self::entry();
 		}
+		return self::$map;
+	}
 
+	/**
+	 * Model prefix => the class names declaring `static $prefix` with that
+	 * value, for every model the map covers (core and active plugins). A
+	 * prefix shared by several models lists each of them; the caller decides
+	 * which owns the field it holds.
+	 *
+	 * @return array
+	 */
+	public static function modelPrefixes() {
+		if (self::$prefixes === null) {
+			self::entry();
+		}
+		return self::$prefixes;
+	}
+
+	/**
+	 * Populate the map, prefixes and stamp from the cache, or by scanning.
+	 */
+	private static function entry() {
 		$cached = self::cache_read();
 		if (is_array($cached)) {
-			self::$map = $cached;
-			return self::$map;
+			self::$map = $cached['map'];
+			self::$prefixes = $cached['prefixes'];
+			self::$stamp = $cached['stamp'];
+			return;
 		}
-
-		return self::rebuild();
+		self::rebuild();
 	}
 
 	/**
@@ -173,33 +218,106 @@ class ClassAutoloader {
 	 */
 	public static function rebuild() {
 		$map = array();
+		$prefixes = array();
 		$complete = true;
+		// A rebuild answers this process's one allowed miss-rebuild: a map
+		// built moments ago is not made stale by a miss.
+		self::$rebuilt = true;
 
-		self::scan_directory(PathHelper::getIncludePath('includes'), $map);
-		self::scan_directory(PathHelper::getIncludePath('data'), $map);
+		foreach (self::scan_roots($complete) as $directory) {
+			self::scan_directory($directory, $map, $prefixes);
+		}
+
+		self::$map = $map;
+		self::$prefixes = $prefixes;
 
 		// A core-only map is never cached: it is deliberately missing its
 		// plugin half, and it belongs to a process that cannot write here.
 		if (self::$core_only) {
-			self::$map = $map;
+			self::$stamp = null;
 			return $map;
 		}
 
-		foreach (self::active_plugins($complete) as $plugin) {
-			$plugin_root = PathHelper::getIncludePath('plugins/' . $plugin);
-			self::scan_directory($plugin_root . '/includes', $map);
-			self::scan_directory($plugin_root . '/data', $map);
-		}
-
-		self::$map = $map;
+		self::$stamp = self::fingerprint();
 
 		// A map missing its plugin half would poison every later lookup, so it
 		// is used for this request only and never written to the cache.
 		if ($complete) {
-			self::cache_write($map);
+			self::cache_write(self::payload());
 		}
 
 		return $map;
+	}
+
+	/**
+	 * The directories the map is built from: core includes/ and data/, then
+	 * each active plugin's, in that order (first declaration wins, so core
+	 * cannot be shadowed). A core-only process stops after core.
+	 *
+	 * @param bool $complete set FALSE when the active plugin set is unknown
+	 * @return string[]
+	 */
+	private static function scan_roots(&$complete) {
+		$roots = array(
+			PathHelper::getIncludePath('includes'),
+			PathHelper::getIncludePath('data'),
+		);
+		if (self::$core_only) {
+			return $roots;
+		}
+		foreach (self::active_plugins($complete) as $plugin) {
+			$plugin_root = PathHelper::getIncludePath('plugins/' . $plugin);
+			$roots[] = $plugin_root . '/includes';
+			$roots[] = $plugin_root . '/data';
+		}
+		return $roots;
+	}
+
+	/**
+	 * A cheap identity for the scanned tree: how many PHP files it holds and
+	 * when they were last written. Any file added, removed or edited changes
+	 * it; nothing else does. One stat per file — about 6 ms for the platform.
+	 *
+	 * @return string
+	 */
+	private static function fingerprint() {
+		$complete = true;
+		$count = 0;
+		$newest = 0;
+		$sum = 0;
+		foreach (self::scan_roots($complete) as $directory) {
+			if (!is_dir($directory)) {
+				continue;
+			}
+			$iterator = new RecursiveIteratorIterator(
+				new RecursiveDirectoryIterator($directory, FilesystemIterator::SKIP_DOTS)
+			);
+			foreach ($iterator as $file) {
+				if (!$file->isFile() || strtolower($file->getExtension()) !== 'php') {
+					continue;
+				}
+				$mtime = $file->getMTime();
+				$count++;
+				$sum += $mtime;
+				if ($mtime > $newest) {
+					$newest = $mtime;
+				}
+			}
+		}
+		return $count . ':' . $newest . ':' . $sum;
+	}
+
+	/**
+	 * What the cache holds: the map, the prefix index, the fingerprint of the
+	 * tree they describe, and when they were built.
+	 */
+	private static function payload() {
+		return array(
+			'map'      => self::$map,
+			'prefixes' => self::$prefixes,
+			'stamp'    => self::$stamp,
+			'built'    => time(),
+		);
 	}
 
 	/**
@@ -241,12 +359,14 @@ class ClassAutoloader {
 
 	/**
 	 * Add every class, interface, trait and enum declared under a directory to
-	 * the map. Files are tokenized, never executed.
+	 * the map, and every `static $prefix` a class declares to the prefix
+	 * index. Files are tokenized, never executed.
 	 *
 	 * @param string $directory
 	 * @param array $map
+	 * @param array $prefixes
 	 */
-	private static function scan_directory($directory, &$map) {
+	private static function scan_directory($directory, &$map, &$prefixes) {
 		if (!is_dir($directory)) {
 			return;
 		}
@@ -260,23 +380,28 @@ class ClassAutoloader {
 				continue;
 			}
 			$path = $file->getPathname();
-			foreach (self::declarations_in($path) as $name) {
+			foreach (self::declarations_in($path) as $name => $prefix) {
 				// First declaration of a name wins: core before plugins, so a
 				// plugin cannot shadow a core class by reusing its name.
-				if (!isset($map[$name])) {
-					$map[$name] = $path;
+				if (isset($map[$name])) {
+					continue;
+				}
+				$map[$name] = $path;
+				if ($prefix !== null) {
+					$prefixes[$prefix][] = $name;
 				}
 			}
 		}
 	}
 
 	/**
-	 * Type names declared in one file. A file declaring a namespace returns
-	 * nothing — namespaced code (bundled libraries) loads through its own
-	 * mechanism.
+	 * Type names declared in one file, each mapped to the string its class
+	 * assigns to `static $prefix` (a model's column prefix), or null when it
+	 * declares none. A file declaring a namespace returns nothing —
+	 * namespaced code (bundled libraries) loads through its own mechanism.
 	 *
 	 * @param string $path
-	 * @return array
+	 * @return array name => prefix|null
 	 */
 	private static function declarations_in($path) {
 		$source = @file_get_contents($path);
@@ -300,6 +425,7 @@ class ClassAutoloader {
 		}
 
 		$names = array();
+		$current = null;
 		$count = count($tokens);
 		$skip  = array(T_WHITESPACE, T_COMMENT, T_DOC_COMMENT);
 
@@ -313,6 +439,21 @@ class ClassAutoloader {
 				return array();
 			}
 
+			// `static $prefix = 'usr';` inside the class declared last: the
+			// model's column prefix, recorded without executing the file.
+			if ($id === T_VARIABLE && $tokens[$i][1] === '$prefix' && $current !== null) {
+				$before = self::meaningful($tokens, $i, -1, $skip);
+				$eq     = self::meaningful($tokens, $i, 1, $skip);
+				$value  = $eq === null ? null : self::meaningful($tokens, $eq, 1, $skip);
+				if ($before !== null && is_array($tokens[$before]) && $tokens[$before][0] === T_STATIC
+						&& $eq !== null && $tokens[$eq] === '='
+						&& $value !== null && is_array($tokens[$value])
+						&& $tokens[$value][0] === T_CONSTANT_ENCAPSED_STRING) {
+					$names[$current] = trim($tokens[$value][1], '\'"');
+				}
+				continue;
+			}
+
 			$is_declaration = ($id === T_CLASS || $id === T_INTERFACE || $id === T_TRAIT);
 			if (!$is_declaration && defined('T_ENUM') && $id === T_ENUM) {
 				$is_declaration = true;
@@ -323,33 +464,37 @@ class ClassAutoloader {
 
 			// `Foo::class` is not a declaration.
 			if ($id === T_CLASS) {
-				$preceded_by_double_colon = false;
-				for ($j = $i - 1; $j >= 0; $j--) {
-					if (is_array($tokens[$j]) && in_array($tokens[$j][0], $skip, true)) {
-						continue;
-					}
-					$preceded_by_double_colon = is_array($tokens[$j]) && $tokens[$j][0] === T_DOUBLE_COLON;
-					break;
-				}
-				if ($preceded_by_double_colon) {
+				$before = self::meaningful($tokens, $i, -1, $skip);
+				if ($before !== null && is_array($tokens[$before]) && $tokens[$before][0] === T_DOUBLE_COLON) {
 					continue;
 				}
 			}
 
 			// The declared name is the next meaningful token; an anonymous
 			// class has none.
-			for ($j = $i + 1; $j < $count; $j++) {
-				if (is_array($tokens[$j]) && in_array($tokens[$j][0], $skip, true)) {
-					continue;
-				}
-				if (is_array($tokens[$j]) && $tokens[$j][0] === T_STRING) {
-					$names[] = $tokens[$j][1];
-				}
-				break;
+			$j = self::meaningful($tokens, $i, 1, $skip);
+			if ($j !== null && is_array($tokens[$j]) && $tokens[$j][0] === T_STRING) {
+				$current = $tokens[$j][1];
+				$names[$current] = null;
 			}
 		}
 
 		return $names;
+	}
+
+	/**
+	 * Index of the nearest token in $direction from $from that is not
+	 * whitespace or a comment, or null at either end of the stream.
+	 */
+	private static function meaningful(array $tokens, $from, $direction, array $skip) {
+		$count = count($tokens);
+		for ($j = $from + $direction; $j >= 0 && $j < $count; $j += $direction) {
+			if (is_array($tokens[$j]) && in_array($tokens[$j][0], $skip, true)) {
+				continue;
+			}
+			return $j;
+		}
+		return null;
 	}
 
 	// ---- cache -------------------------------------------------------------
@@ -382,19 +527,30 @@ class ClassAutoloader {
 		if (self::apcu_available()) {
 			$ok = false;
 			$value = apcu_fetch(self::CACHE_KEY, $ok);
-			return ($ok && is_array($value)) ? $value : null;
+			if (!$ok) {
+				$value = null;
+			}
+		} else {
+			$file = self::cache_file();
+			$raw = is_file($file) ? @file_get_contents($file) : false;
+			$value = ($raw === false || $raw === '') ? null : json_decode($raw, true);
+		}
+		if (!is_array($value) || !isset($value['map'], $value['prefixes'], $value['stamp'], $value['built'])
+				|| !is_array($value['map']) || !is_array($value['prefixes'])) {
+			return null;
 		}
 
-		$file = self::cache_file();
-		if (!is_file($file) || (time() - @filemtime($file)) > self::CACHE_TTL) {
-			return null;
+		// Past the TTL the map is not thrown away but checked against the
+		// tree: an unchanged tree keeps it for another TTL at the cost of a
+		// stat walk, and only a changed tree pays the rebuild.
+		if ((time() - intval($value['built'])) > self::CACHE_TTL) {
+			if (self::fingerprint() !== $value['stamp']) {
+				return null;
+			}
+			$value['built'] = time();
+			self::cache_write($value);
 		}
-		$raw = @file_get_contents($file);
-		if ($raw === false || $raw === '') {
-			return null;
-		}
-		$value = json_decode($raw, true);
-		return is_array($value) ? $value : null;
+		return $value;
 	}
 
 	/**
@@ -410,9 +566,11 @@ class ClassAutoloader {
 		}
 	}
 
-	private static function cache_write($map) {
+	private static function cache_write($payload) {
 		if (self::apcu_available()) {
-			apcu_store(self::CACHE_KEY, $map, self::CACHE_TTL);
+			// No APCu TTL: expiry is the payload's own `built`, checked by
+			// cache_read(), so a stale-by-age map is revalidated, not dropped.
+			apcu_store(self::CACHE_KEY, $payload);
 			return;
 		}
 
@@ -424,7 +582,7 @@ class ClassAutoloader {
 
 		// Written atomically: a half-written map would be read by another
 		// process as malformed JSON and thrown away, costing it a rebuild.
-		$json = json_encode($map);
+		$json = json_encode($payload);
 		if ($json === false) {
 			return;
 		}
@@ -435,6 +593,14 @@ class ClassAutoloader {
 			// else needs to write the cache, and a world-writable cache file is
 			// something any local account can corrupt on every request.
 			@chmod($temp, 0660);
+			// The cache directory's group, not the writer's primary group: a
+			// developer account's file would otherwise be unreadable by the
+			// web user's cron runs, which then rebuild and write their own —
+			// and the two rebuild past each other forever.
+			$group = @filegroup($dir);
+			if ($group !== false && @filegroup($temp) !== $group) {
+				@chgrp($temp, $group);
+			}
 			@rename($temp, $file);
 		}
 	}
@@ -445,6 +611,8 @@ class ClassAutoloader {
 	 */
 	public static function flush() {
 		self::$map = null;
+		self::$prefixes = null;
+		self::$stamp = null;
 		self::$rebuilt = false;
 		if (self::apcu_available()) {
 			apcu_delete(self::CACHE_KEY);
