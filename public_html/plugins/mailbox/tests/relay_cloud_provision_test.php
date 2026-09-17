@@ -97,12 +97,12 @@ class RelayCloudProvisionTest {
 
 	private function makeRun(array $over = array()): RelayCloudProvision {
 		$run = new RelayCloudProvision(NULL);
-		$run->set('rcp_kind', 'provision');
-		$run->set('rcp_status', 'ready');
-		$run->set('rcp_provider', 'linode');
-		$run->set('rcp_mail_hostname', 'mx.rcp-test.example');
-		$run->set('rcp_region', 'us-test');
-		$run->set('rcp_instance_type', 'g6-test-1');
+		$run->set('rcl_kind', 'provision');
+		$run->set('rcl_status', 'ready');
+		$run->set('rcl_provider', 'linode');
+		$run->set('rcl_mail_hostname', 'mx.rcp-test.example');
+		$run->set('rcl_region', 'us-test');
+		$run->set('rcl_instance_type', 'g6-test-1');
 		foreach ($over as $k => $v) { $run->set($k, $v); }
 		$run->sealToken('fake-access-token');
 		$run->save();
@@ -127,15 +127,15 @@ class RelayCloudProvisionTest {
 		$p = new RelayCloudProvisioner();
 
 		check(strpos($p->advance($run), 'user-data') !== false, 'ready -> booting names the user-data');
-		check((string)$run->get('rcp_status') === 'booting', 'ready -> booting');
+		check((string)$run->get('rcl_status') === 'booting', 'ready -> booting');
 		$opts = $this->driver->instances['fake-1'] ?? array();
 		check(!isset($opts['authorized_keys']), 'no SSH key is installed on the relay');
 		check(!isset($opts['root_pass']), 'the provisioner hands the driver no root password to record');
 		check(!empty($opts['user_data']), 'the create carries first-boot user-data');
 		$ud = (string)($opts['user_data'] ?? '');
 		check(strpos($ud, 'RUN_ID="${RUN_ID:-' . $run->key . '}"') !== false, 'the user-data names this run');
-		check(strpos($ud, 'BUNDLE_SHA256="${BUNDLE_SHA256:-' . (string)$run->get('rcp_bundle_sha256') . '}"') !== false
-			&& (string)$run->get('rcp_bundle_sha256') !== '', 'the user-data names the hash of the run\'s bundle copy');
+		check(strpos($ud, 'BUNDLE_SHA256="${BUNDLE_SHA256:-' . (string)$run->get('rcl_bundle_sha256') . '}"') !== false
+			&& (string)$run->get('rcl_bundle_sha256') !== '', 'the user-data names the hash of the run\'s bundle copy');
 		check(is_file($run->bundlePath()), 'the run holds its own copy of the bundle');
 		check(strpos($ud, 'CLIENT_PUBLIC_KEY="${CLIENT_PUBLIC_KEY:-' . RelayClientIdentity::publicKey(RelayClientIdentity::KIND_CLIENT) . '}"') !== false,
 			'the user-data carries this deployment\'s relay client public key');
@@ -143,11 +143,11 @@ class RelayCloudProvisionTest {
 		preg_match('/RUN_TOKEN="\${RUN_TOKEN:-([0-9a-f]+)}"/', $ud, $m);
 		check(!empty($m[1]) && $run->runTokenMatches($m[1]), 'the user-data carries the run\'s live token');
 
-		check($p->advance($run) === 'still booting' && (string)$run->get('rcp_status') === 'booting', 'not running yet stays booting');
-		check(strpos($p->advance($run), 'report in') !== false && (string)$run->get('rcp_status') === 'provisioning',
+		check($p->advance($run) === 'still booting' && (string)$run->get('rcl_status') === 'booting', 'not running yet stays booting');
+		check(strpos($p->advance($run), 'report in') !== false && (string)$run->get('rcl_status') === 'provisioning',
 			'running with an address -> provisioning, which is a wait');
-		check((string)$run->get('rcp_instance_ip') === '198.51.100.99', 'the provider\'s address is recorded for the birth report to match');
-		check(strpos($p->advance($run), 'waiting') !== false && (string)$run->get('rcp_status') === 'provisioning',
+		check((string)$run->get('rcl_instance_ip') === '198.51.100.99', 'the provider\'s address is recorded for the birth report to match');
+		check(strpos($p->advance($run), 'waiting') !== false && (string)$run->get('rcl_status') === 'provisioning',
 			'provisioning waits for the birth report rather than building anything from here');
 		check(count($this->driver->deleted) === 0, 'nothing destroyed while waiting');
 	}
@@ -159,8 +159,8 @@ class RelayCloudProvisionTest {
 		$this->driver->create_error = new CloudComputeException('Linode API POST failed (400): region invalid', 400);
 		$run = $this->makeRun();
 		(new RelayCloudProvisioner())->advance($run);
-		check((string)$run->get('rcp_status') === 'failed', '4xx create error is terminal');
-		check((string)$run->get('rcp_sealed_token') === '' && (string)$run->get('rcp_sealed_run_token') === '', 'provider token and run token erased on failure');
+		check((string)$run->get('rcl_status') === 'failed', '4xx create error is terminal');
+		check((string)$run->get('rcl_sealed_token') === '' && (string)$run->get('rcl_sealed_run_token') === '', 'provider token and run token erased on failure');
 		check(!is_file($run->bundlePath()), 'the bundle copy is erased on failure');
 		check(count($this->driver->deleted) === 0, 'no instance existed, none destroyed');
 	}
@@ -172,9 +172,9 @@ class RelayCloudProvisionTest {
 		$this->driver->create_error = new CloudComputeException('Linode API POST failed (503): try later', 503);
 		$run = $this->makeRun();
 		(new RelayCloudProvisioner())->advance($run);
-		check((string)$run->get('rcp_status') === 'ready', '5xx stays put for the next tick');
-		check((string)$run->get('rcp_sealed_token') !== '', 'provider token kept while the run is live');
-		check(strpos((string)$run->get('rcp_error'), 'Transient') === 0, 'the transient reason is recorded');
+		check((string)$run->get('rcl_status') === 'ready', '5xx stays put for the next tick');
+		check((string)$run->get('rcl_sealed_token') !== '', 'provider token kept while the run is live');
+		check(strpos((string)$run->get('rcl_error'), 'Transient') === 0, 'the transient reason is recorded');
 	}
 
 	private function testBootTimeout() {
@@ -188,9 +188,9 @@ class RelayCloudProvisionTest {
 		// Age the run past the boot window.
 		$this->age($run, RelayCloudProvisioner::BOOT_TIMEOUT_SECONDS + 60);
 		$p->advance($run);
-		check((string)$run->get('rcp_status') === 'failed', 'boot timeout is terminal');
+		check((string)$run->get('rcl_status') === 'failed', 'boot timeout is terminal');
 		check(in_array('fake-1', $this->driver->deleted, true), 'timed-out instance destroyed within the grant');
-		check((string)$run->get('rcp_sealed_token') === '', 'token erased after timeout');
+		check((string)$run->get('rcl_sealed_token') === '', 'token erased after timeout');
 	}
 
 	private function testBirthTimeout() {
@@ -202,12 +202,12 @@ class RelayCloudProvisionTest {
 		$p = new RelayCloudProvisioner();
 		$p->advance($run); // -> booting
 		$p->advance($run); // -> provisioning
-		check((string)$run->get('rcp_status') === 'provisioning', 'waiting');
+		check((string)$run->get('rcl_status') === 'provisioning', 'waiting');
 		$this->age($run, RelayCloudProvisioner::BIRTH_TIMEOUT_SECONDS + 60);
 		check(strpos($p->advance($run), 'birth timeout') !== false, 'the wait ends');
-		check((string)$run->get('rcp_status') === 'failed', 'a silent relay is a failed run');
+		check((string)$run->get('rcl_status') === 'failed', 'a silent relay is a failed run');
 		check(in_array('fake-1', $this->driver->deleted, true), 'its instance is destroyed within the grant');
-		check(!is_file($run->bundlePath()) && (string)$run->get('rcp_sealed_run_token') === '', 'bundle copy and run token erased');
+		check(!is_file($run->bundlePath()) && (string)$run->get('rcl_sealed_run_token') === '', 'bundle copy and run token erased');
 	}
 
 	private function testUpdateDrainsThenReimages() {
@@ -237,19 +237,19 @@ class RelayCloudProvisionTest {
 
 			$this->driver = new RcpFakeDriver();
 			$run = $this->makeRun(array(
-				'rcp_kind' => 'upgrade', 'rcp_mrl_mailbox_relay_id' => intval($relay->key),
-				'rcp_instance_id' => 'fake-existing', 'rcp_instance_ip' => '127.0.0.1',
-				'rcp_mail_hostname' => 'mx.rcp-update.example',
+				'rcl_kind' => 'upgrade', 'rcl_mrl_mailbox_relay_id' => intval($relay->key),
+				'rcl_instance_id' => 'fake-existing', 'rcl_instance_ip' => '127.0.0.1',
+				'rcl_mail_hostname' => 'mx.rcp-update.example',
 			));
 			$p = new RelayCloudProvisioner();
 
 			// An undrained spool refuses: a held entry is mail a wipe would destroy.
 			// (An empty spool drains in one pass, below.)
 			$out = $p->advance($run);
-			check((string)$run->get('rcp_status') === 'rebuilding', 'an empty spool drains over the API and the run moves to rebuilding', $out . ' / ' . (string)$run->get('rcp_error'));
+			check((string)$run->get('rcl_status') === 'rebuilding', 'an empty spool drains over the API and the run moves to rebuilding', $out . ' / ' . (string)$run->get('rcl_error'));
 
 			$out = $p->advance($run);
-			check((string)$run->get('rcp_status') === 'booting', 'rebuilding -> booting', $out);
+			check((string)$run->get('rcl_status') === 'booting', 'rebuilding -> booting', $out);
 			check(count($this->driver->rebuilds) === 1 && $this->driver->rebuilds[0][0] === 'fake-existing',
 				'the SAME instance is re-imaged; nothing is created');
 			$opts = $this->driver->rebuilds[0][1] ?? array();
@@ -261,7 +261,7 @@ class RelayCloudProvisionTest {
 			// The update's birth writes the new pin on the SAME row.
 			$this->driver->boot_sequence = array('running');
 			$p->advance($run); // booting -> provisioning (the fake reports 198.51.100.99, so re-point the run at the probe)
-			$run->set('rcp_instance_ip', '127.0.0.1');
+			$run->set('rcl_instance_ip', '127.0.0.1');
 			$run->save();
 			$probe2 = new RelayPingProbe($binary);
 			$probe2->addTenantWithKey('main', RelayClientIdentity::publicKey(RelayClientIdentity::KIND_CLIENT));
@@ -275,7 +275,7 @@ class RelayCloudProvisionTest {
 			check((string)$fresh->get('mrl_identity_fingerprint') === $probe2->fingerprint(), 'the row carries the new identity pin');
 			check((string)$fresh->get('mrl_public_ip') === '127.0.0.1', 'the address is kept');
 			$done = new RelayCloudProvision(intval($run->key), TRUE);
-			check((string)$done->get('rcp_status') === 'done', 'the update run is done');
+			check((string)$done->get('rcl_status') === 'done', 'the update run is done');
 			if (intval($fresh->get('mrl_mgn_managed_node_id')) > 0) {
 				harness_register_model('ManagedNode', intval($fresh->get('mrl_mgn_managed_node_id')));
 				$node = new ManagedNode(intval($fresh->get('mrl_mgn_managed_node_id')), TRUE);
@@ -297,9 +297,9 @@ class RelayCloudProvisionTest {
 	/** Back-date a run's last transition, as a long wait would; save() would stamp now. */
 	private function age(RelayCloudProvision $run, int $seconds): void {
 		$db = DbConnector::get_instance()->get_db_link();
-		$stmt = $db->prepare('UPDATE rcp_relay_cloud_provisions SET rcp_update_time = ? WHERE rcp_relay_cloud_provision_id = ?');
+		$stmt = $db->prepare('UPDATE rcl_relay_cloud_provisions SET rcl_update_time = ? WHERE rcl_relay_cloud_provision_id = ?');
 		$stmt->execute(array(gmdate('Y-m-d H:i:s', time() - $seconds), intval($run->key)));
-		$run->set('rcp_update_time', gmdate('Y-m-d H:i:s', time() - $seconds));
+		$run->set('rcl_update_time', gmdate('Y-m-d H:i:s', time() - $seconds));
 	}
 
 	private function tokenIn(string $user_data): string {

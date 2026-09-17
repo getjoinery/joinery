@@ -273,7 +273,7 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 
 		$work = array();
 		foreach ($actionable as $run) {
-			if ((string)$run->get('rcp_status') !== 'awaiting_grant') {
+			if ((string)$run->get('rcl_status') !== 'awaiting_grant') {
 				$work[] = $run;
 			}
 		}

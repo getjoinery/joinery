@@ -37,6 +37,8 @@
  * wrapper differs.
  *
  * @see specs/implemented/inbound_email_filters.md
+ * @version 1.4 - prefix ief, table ief_inbound_email_filters: fil is File's alone
+ *                (specs/implemented/shared_prefix_inbound_email_filter.md)
  * @version 1.3 - parseGmailExport(): the XML opens in the parser jail
  *   (GmailFilterExportParser); the mapping stays here
  * @version 1.2
@@ -54,9 +56,9 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_logs
 class InboundEmailFilterException extends SystemBaseException {}
 
 class InboundEmailFilter extends SystemBase {
-	public static $prefix = 'fil';
-	public static $tablename = 'fil_inbound_email_filters';
-	public static $pkey_column = 'fil_inbound_email_filter_id';
+	public static $prefix = 'ief';
+	public static $tablename = 'ief_inbound_email_filters';
+	public static $pkey_column = 'ief_inbound_email_filter_id';
 
 	const SIZE_OP_GT = 'gt';
 	const SIZE_OP_LT = 'lt';
@@ -66,42 +68,42 @@ class InboundEmailFilter extends SystemBase {
 
 	protected static $foreign_key_actions = array(
 		// A filter dies with its mailbox or its domain. The label-apply action
-		// (fil_action_ilb_inbound_email_label_id) guards for a since-deleted label at
+		// (ief_action_ilb_inbound_email_label_id) guards for a since-deleted label at
 		// apply time, so it is intentionally not a cascade FK — deleting a label leaves
 		// stale filter actions that simply no-op rather than cascading the filter away.
-		'fil_iea_inbound_email_alias_id'  => array('action' => 'cascade'),
-		'fil_ied_inbound_email_domain_id' => array('action' => 'cascade'),
+		'ief_iea_inbound_email_alias_id'  => array('action' => 'cascade'),
+		'ief_ied_inbound_email_domain_id' => array('action' => 'cascade'),
 	);
 
 	public static $field_specifications = array(
-		'fil_inbound_email_filter_id'    => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+		'ief_inbound_email_filter_id'    => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		// Scope: a filter belongs to a mailbox (alias). NULL alias = domain-wide,
-		// running for every alias under fil_ied_inbound_email_domain_id.
-		'fil_iea_inbound_email_alias_id'  => array('type'=>'int8'),
-		'fil_ied_inbound_email_domain_id' => array('type'=>'int4', 'is_nullable'=>false),
-		'fil_name'        => array('type'=>'varchar(255)'),
-		'fil_is_enabled'  => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),
-		'fil_order'       => array('type'=>'int4', 'default'=>'0', 'is_nullable'=>false),
+		// running for every alias under ief_ied_inbound_email_domain_id.
+		'ief_iea_inbound_email_alias_id'  => array('type'=>'int8'),
+		'ief_ied_inbound_email_domain_id' => array('type'=>'int4', 'is_nullable'=>false),
+		'ief_name'        => array('type'=>'varchar(255)'),
+		'ief_is_enabled'  => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),
+		'ief_order'       => array('type'=>'int4', 'default'=>'0', 'is_nullable'=>false),
 
 		// criteria
-		'fil_match_from'           => array('type'=>'varchar(500)'),
-		'fil_match_to'             => array('type'=>'varchar(500)'),
-		'fil_match_subject'        => array('type'=>'varchar(1000)'),
-		'fil_match_has_words'      => array('type'=>'text'),
-		'fil_match_excludes'       => array('type'=>'text'),
-		'fil_match_size_op'        => array('type'=>'varchar(2)'),   // 'gt' | 'lt' | NULL
-		'fil_match_size_bytes'     => array('type'=>'int8'),
-		'fil_match_has_attachment' => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		'ief_match_from'           => array('type'=>'varchar(500)'),
+		'ief_match_to'             => array('type'=>'varchar(500)'),
+		'ief_match_subject'        => array('type'=>'varchar(1000)'),
+		'ief_match_has_words'      => array('type'=>'text'),
+		'ief_match_excludes'       => array('type'=>'text'),
+		'ief_match_size_op'        => array('type'=>'varchar(2)'),   // 'gt' | 'lt' | NULL
+		'ief_match_size_bytes'     => array('type'=>'int8'),
+		'ief_match_has_attachment' => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 
 		// actions
-		'fil_action_ilb_inbound_email_label_id' => array('type'=>'int8'),  // the custom label to apply (ilb_)
-		'fil_action_star'        => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
-		'fil_action_mark_read'   => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
-		'fil_action_archive'     => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
-		'fil_action_mark_spam'   => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
-		'fil_action_never_spam'  => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
-		'fil_action_forward_to'  => array('type'=>'varchar(500)'),
-		'fil_action_delete'      => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		'ief_action_ilb_inbound_email_label_id' => array('type'=>'int8'),  // the custom label to apply (ilb_)
+		'ief_action_star'        => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		'ief_action_mark_read'   => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		'ief_action_archive'     => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		'ief_action_mark_spam'   => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		'ief_action_never_spam'  => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		'ief_action_forward_to'  => array('type'=>'varchar(500)'),
+		'ief_action_delete'      => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 
 		// Forwarding off a protected domain is an egress: the message leaves in
 		// clear text over SMTP, out of reach of the vault that was protecting it.
@@ -109,17 +111,17 @@ class InboundEmailFilter extends SystemBase {
 		// (specs/implemented/sealed_content_egress.md § resolved decision 7). The destination
 		// is recorded WITH the acknowledgment so changing where mail goes needs a
 		// fresh one — the old consent was for a different address.
-		'fil_forward_ack_time'        => array('type'=>'timestamp(6)'),
-		'fil_forward_ack_usr_user_id' => array('type'=>'int8'),
-		'fil_forward_ack_destination' => array('type'=>'varchar(500)'),
+		'ief_forward_ack_time'        => array('type'=>'timestamp(6)'),
+		'ief_forward_ack_usr_user_id' => array('type'=>'int8'),
+		'ief_forward_ack_destination' => array('type'=>'varchar(500)'),
 
 		// backfill bookkeeping ("Also apply to existing")
-		'fil_apply_existing_pending' => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
-		'fil_apply_existing_cursor'  => array('type'=>'int8', 'default'=>'0', 'is_nullable'=>false),
+		'ief_apply_existing_pending' => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		'ief_apply_existing_cursor'  => array('type'=>'int8', 'default'=>'0', 'is_nullable'=>false),
 
-		'fil_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'fil_update_time' => array('type'=>'timestamp(6)'),
-		'fil_delete_time' => array('type'=>'timestamp(6)'),
+		'ief_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+		'ief_update_time' => array('type'=>'timestamp(6)'),
+		'ief_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
 	function authenticate_write($data) {
@@ -143,16 +145,16 @@ class InboundEmailFilter extends SystemBase {
 	 * the filter reaches all of them, so the strictest one governs.
 	 */
 	function forwardNeedsAcknowledgment(): bool {
-		if (trim((string)$this->get('fil_action_forward_to')) === '') {
+		if (trim((string)$this->get('ief_action_forward_to')) === '') {
 			return false;
 		}
-		$alias_id = intval($this->get('fil_iea_inbound_email_alias_id'));
+		$alias_id = intval($this->get('ief_iea_inbound_email_alias_id'));
 		if ($alias_id > 0) {
 			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
 			$alias = new InboundEmailAlias($alias_id, TRUE);
 			return $alias->key ? $alias->seals_content() : false;
 		}
-		$domain_id = intval($this->get('fil_ied_inbound_email_domain_id'));
+		$domain_id = intval($this->get('ief_ied_inbound_email_domain_id'));
 		if ($domain_id <= 0) {
 			return false;
 		}
@@ -175,20 +177,20 @@ class InboundEmailFilter extends SystemBase {
 		if (!$this->forwardNeedsAcknowledgment()) {
 			return true;
 		}
-		if (!$this->get('fil_forward_ack_time')) {
+		if (!$this->get('ief_forward_ack_time')) {
 			return false;
 		}
 		return strcasecmp(
-			trim((string)$this->get('fil_forward_ack_destination')),
-			trim((string)$this->get('fil_action_forward_to'))
+			trim((string)$this->get('ief_forward_ack_destination')),
+			trim((string)$this->get('ief_action_forward_to'))
 		) === 0;
 	}
 
 	/** Record the acknowledgment against the destination it was given for. */
 	function recordForwardAcknowledgment(int $user_id): void {
-		$this->set('fil_forward_ack_time', gmdate('Y-m-d H:i:s'));
-		$this->set('fil_forward_ack_usr_user_id', $user_id > 0 ? $user_id : null);
-		$this->set('fil_forward_ack_destination', trim((string)$this->get('fil_action_forward_to')));
+		$this->set('ief_forward_ack_time', gmdate('Y-m-d H:i:s'));
+		$this->set('ief_forward_ack_usr_user_id', $user_id > 0 ? $user_id : null);
+		$this->set('ief_forward_ack_destination', trim((string)$this->get('ief_action_forward_to')));
 	}
 
 	/** The sentence an operator has to agree to before a protected domain forwards. */
@@ -214,16 +216,16 @@ class InboundEmailFilter extends SystemBase {
 		$db = DbConnector::get_instance()->get_db_link();
 		$stmt = $db->prepare(
 			'UPDATE ' . static::$tablename . '
-			    SET fil_forward_ack_time = NULL, fil_forward_ack_usr_user_id = NULL,
-			        fil_forward_ack_destination = NULL
-			  WHERE fil_ied_inbound_email_domain_id = ?
-			    AND fil_forward_ack_time IS NOT NULL');
+			    SET ief_forward_ack_time = NULL, ief_forward_ack_usr_user_id = NULL,
+			        ief_forward_ack_destination = NULL
+			  WHERE ief_ied_inbound_email_domain_id = ?
+			    AND ief_forward_ack_time IS NOT NULL');
 		$stmt->execute(array($domain_id));
 		return $stmt->rowCount();
 	}
 
 	function prepare() {
-		$this->set('fil_update_time', gmdate('Y-m-d H:i:s'));
+		$this->set('ief_update_time', gmdate('Y-m-d H:i:s'));
 
 		// A filter must do something to one of the criteria — reject an all-empty
 		// rule so a stray save can't match (and act on) every message.
@@ -232,36 +234,36 @@ class InboundEmailFilter extends SystemBase {
 		}
 
 		// Normalize the size operator (blank unless a real op + a positive size).
-		$op = (string)$this->get('fil_match_size_op');
-		$bytes = intval($this->get('fil_match_size_bytes'));
+		$op = (string)$this->get('ief_match_size_op');
+		$bytes = intval($this->get('ief_match_size_bytes'));
 		if (!in_array($op, array(self::SIZE_OP_GT, self::SIZE_OP_LT), true) || $bytes <= 0) {
-			$this->set('fil_match_size_op', null);
-			$this->set('fil_match_size_bytes', null);
+			$this->set('ief_match_size_op', null);
+			$this->set('ief_match_size_bytes', null);
 		}
 
 		// A forward target, when present, must be a valid address (operator-only;
 		// no verification handshake, but never an obviously broken relay target).
-		$fwd = trim((string)$this->get('fil_action_forward_to'));
+		$fwd = trim((string)$this->get('ief_action_forward_to'));
 		if ($fwd !== '' && !filter_var($fwd, FILTER_VALIDATE_EMAIL)) {
 			throw new InboundEmailFilterException('Forward-to is not a valid email address: ' . htmlspecialchars($fwd));
 		}
-		$this->set('fil_action_forward_to', $fwd !== '' ? $fwd : null);
+		$this->set('ief_action_forward_to', $fwd !== '' ? $fwd : null);
 	}
 
 	/** True when at least one criterion field is set (the save-time guard). */
 	function hasAnyCriterion(): bool {
-		foreach (array('fil_match_from', 'fil_match_to', 'fil_match_subject',
-				'fil_match_has_words', 'fil_match_excludes') as $f) {
+		foreach (array('ief_match_from', 'ief_match_to', 'ief_match_subject',
+				'ief_match_has_words', 'ief_match_excludes') as $f) {
 			if (trim((string)$this->get($f)) !== '') {
 				return true;
 			}
 		}
-		if ((bool)$this->get('fil_match_has_attachment')) {
+		if ((bool)$this->get('ief_match_has_attachment')) {
 			return true;
 		}
-		$op = (string)$this->get('fil_match_size_op');
+		$op = (string)$this->get('ief_match_size_op');
 		if (in_array($op, array(self::SIZE_OP_GT, self::SIZE_OP_LT), true)
-				&& intval($this->get('fil_match_size_bytes')) > 0) {
+				&& intval($this->get('ief_match_size_bytes')) > 0) {
 			return true;
 		}
 		return false;
@@ -298,25 +300,25 @@ class InboundEmailFilter extends SystemBase {
 		$haystack  = mb_strtolower($sender_raw . ' ' . $subject_raw . ' ' . $body_plain_raw . ' ' . $body_html_raw);
 
 		// From — case-insensitive substring; comma-separated terms are OR'd.
-		$from = trim((string)$this->get('fil_match_from'));
+		$from = trim((string)$this->get('ief_match_from'));
 		if ($from !== '' && !$this->anyTermIn($from, $sender)) {
 			return false;
 		}
 
 		// To — same as From.
-		$to = trim((string)$this->get('fil_match_to'));
+		$to = trim((string)$this->get('ief_match_to'));
 		if ($to !== '' && !$this->anyTermIn($to, $recipient)) {
 			return false;
 		}
 
 		// Subject — plain case-insensitive substring.
-		$subj = trim((string)$this->get('fil_match_subject'));
+		$subj = trim((string)$this->get('ief_match_subject'));
 		if ($subj !== '' && mb_strpos($subject, mb_strtolower($subj)) === false) {
 			return false;
 		}
 
 		// Has the words — every whitespace-separated token must be present.
-		$words = trim((string)$this->get('fil_match_has_words'));
+		$words = trim((string)$this->get('ief_match_has_words'));
 		if ($words !== '') {
 			foreach ($this->tokens($words) as $tok) {
 				if (mb_strpos($haystack, $tok) === false) {
@@ -326,7 +328,7 @@ class InboundEmailFilter extends SystemBase {
 		}
 
 		// Doesn't have — the message must contain NONE of the tokens.
-		$excl = trim((string)$this->get('fil_match_excludes'));
+		$excl = trim((string)$this->get('ief_match_excludes'));
 		if ($excl !== '') {
 			foreach ($this->tokens($excl) as $tok) {
 				if (mb_strpos($haystack, $tok) !== false) {
@@ -336,8 +338,8 @@ class InboundEmailFilter extends SystemBase {
 		}
 
 		// Size — compare against iem_size_bytes.
-		$op = (string)$this->get('fil_match_size_op');
-		$bytes = intval($this->get('fil_match_size_bytes'));
+		$op = (string)$this->get('ief_match_size_op');
+		$bytes = intval($this->get('ief_match_size_bytes'));
 		if (in_array($op, array(self::SIZE_OP_GT, self::SIZE_OP_LT), true) && $bytes > 0) {
 			$size = intval($msg->get('iem_size_bytes'));
 			if ($op === self::SIZE_OP_GT && !($size > $bytes)) { return false; }
@@ -345,7 +347,7 @@ class InboundEmailFilter extends SystemBase {
 		}
 
 		// Has attachment — true iff the message has >= 1 manifest row.
-		if ((bool)$this->get('fil_match_has_attachment') && !$this->messageHasAttachment(intval($msg->key))) {
+		if ((bool)$this->get('ief_match_has_attachment') && !$this->messageHasAttachment(intval($msg->key))) {
 			return false;
 		}
 
@@ -402,8 +404,8 @@ class InboundEmailFilter extends SystemBase {
 	 * sets unioned).
 	 */
 	function buildActionSet(): array {
-		$label = intval($this->get('fil_action_ilb_inbound_email_label_id'));
-		$fwd   = trim((string)$this->get('fil_action_forward_to'));
+		$label = intval($this->get('ief_action_ilb_inbound_email_label_id'));
+		$fwd   = trim((string)$this->get('ief_action_forward_to'));
 
 		// A protected domain forwards only while its acknowledgment stands.
 		// Dropping the action here rather than at the relay keeps the rest of the
@@ -418,14 +420,14 @@ class InboundEmailFilter extends SystemBase {
 		}
 
 		return array(
-			'never_spam' => (bool)$this->get('fil_action_never_spam'),
-			'mark_spam'  => (bool)$this->get('fil_action_mark_spam'),
+			'never_spam' => (bool)$this->get('ief_action_never_spam'),
+			'mark_spam'  => (bool)$this->get('ief_action_mark_spam'),
 			'label_ids'  => $label > 0 ? array($label) : array(),
-			'star'       => (bool)$this->get('fil_action_star'),
-			'mark_read'  => (bool)$this->get('fil_action_mark_read'),
-			'archive'    => (bool)$this->get('fil_action_archive'),
+			'star'       => (bool)$this->get('ief_action_star'),
+			'mark_read'  => (bool)$this->get('ief_action_mark_read'),
+			'archive'    => (bool)$this->get('ief_action_archive'),
 			'forward_to' => $fwd !== '' ? array($fwd) : array(),
-			'delete'     => (bool)$this->get('fil_action_delete'),
+			'delete'     => (bool)$this->get('ief_action_delete'),
 		);
 	}
 
@@ -571,7 +573,7 @@ class InboundEmailFilter extends SystemBase {
 	/**
 	 * Every enabled, non-deleted filter that applies to a message: the alias's own
 	 * filters plus the domain-wide (NULL-alias) filters for its domain, ordered by
-	 * fil_order then id so application is deterministic.
+	 * ief_order then id so application is deterministic.
 	 *
 	 * @return InboundEmailFilter[]
 	 */
@@ -579,7 +581,7 @@ class InboundEmailFilter extends SystemBase {
 		$multi = new MultiInboundEmailFilter(
 			array('scope_alias_id' => $aliasId, 'scope_domain_id' => $domainId,
 				'enabled' => true, 'deleted' => false),
-			array('fil_order' => 'ASC', 'fil_inbound_email_filter_id' => 'ASC')
+			array('ief_order' => 'ASC', 'ief_inbound_email_filter_id' => 'ASC')
 		);
 		$multi->load();
 		$out = array();
@@ -626,7 +628,7 @@ class InboundEmailFilter extends SystemBase {
 	 *
 	 *   [
 	 *     'name'       => 'From: dealnews',          // synthesized — Gmail filters are unnamed
-	 *     'fields'     => [fil_match_from => 'dealnews', fil_action_archive => true, ...],
+	 *     'fields'     => [ief_match_from => 'dealnews', ief_action_archive => true, ...],
 	 *     'label'      => 'deals',                   // Gmail label name, or null (resolved on confirm)
 	 *     'skipped'    => ['categorize: Updates'],   // human-readable unmapped properties
 	 *     'importable' => true,                      // >=1 criterion AND >=1 action (a label counts)
@@ -681,23 +683,23 @@ class InboundEmailFilter extends SystemBase {
 			list($name, $value) = $pair;
 			switch ($name) {
 				// ---- criteria
-				case 'from':    if (trim($value) !== '') { $fields['fil_match_from'] = trim($value); } break;
-				case 'to':      if (trim($value) !== '') { $fields['fil_match_to'] = trim($value); } break;
-				case 'subject': if (trim($value) !== '') { $fields['fil_match_subject'] = trim($value); } break;
-				case 'hasTheWord':         if (trim($value) !== '') { $fields['fil_match_has_words'] = trim($value); } break;
-				case 'doesNotHaveTheWord': if (trim($value) !== '') { $fields['fil_match_excludes'] = trim($value); } break;
-				case 'hasAttachment':      if (self::gmailTrue($value)) { $fields['fil_match_has_attachment'] = true; } break;
+				case 'from':    if (trim($value) !== '') { $fields['ief_match_from'] = trim($value); } break;
+				case 'to':      if (trim($value) !== '') { $fields['ief_match_to'] = trim($value); } break;
+				case 'subject': if (trim($value) !== '') { $fields['ief_match_subject'] = trim($value); } break;
+				case 'hasTheWord':         if (trim($value) !== '') { $fields['ief_match_has_words'] = trim($value); } break;
+				case 'doesNotHaveTheWord': if (trim($value) !== '') { $fields['ief_match_excludes'] = trim($value); } break;
+				case 'hasAttachment':      if (self::gmailTrue($value)) { $fields['ief_match_has_attachment'] = true; } break;
 				case 'size':         $size = $value; break;
 				case 'sizeOperator': $sizeOp = $value; break;
 				case 'sizeUnit':     $sizeUnit = $value; break;
 
 				// ---- actions
-				case 'shouldArchive':    if (self::gmailTrue($value)) { $fields['fil_action_archive'] = true; } break;
-				case 'shouldMarkAsRead': if (self::gmailTrue($value)) { $fields['fil_action_mark_read'] = true; } break;
-				case 'shouldStar':       if (self::gmailTrue($value)) { $fields['fil_action_star'] = true; } break;
-				case 'shouldTrash':      if (self::gmailTrue($value)) { $fields['fil_action_delete'] = true; } break;
-				case 'shouldNeverSpam':  if (self::gmailTrue($value)) { $fields['fil_action_never_spam'] = true; } break;
-				case 'forwardTo':        if (trim($value) !== '') { $fields['fil_action_forward_to'] = trim($value); } break;
+				case 'shouldArchive':    if (self::gmailTrue($value)) { $fields['ief_action_archive'] = true; } break;
+				case 'shouldMarkAsRead': if (self::gmailTrue($value)) { $fields['ief_action_mark_read'] = true; } break;
+				case 'shouldStar':       if (self::gmailTrue($value)) { $fields['ief_action_star'] = true; } break;
+				case 'shouldTrash':      if (self::gmailTrue($value)) { $fields['ief_action_delete'] = true; } break;
+				case 'shouldNeverSpam':  if (self::gmailTrue($value)) { $fields['ief_action_never_spam'] = true; } break;
+				case 'forwardTo':        if (trim($value) !== '') { $fields['ief_action_forward_to'] = trim($value); } break;
 				case 'label':
 					if (trim($value) === '') { break; }
 					// First label wins; Gmail rarely emits more than one per entry.
@@ -723,9 +725,9 @@ class InboundEmailFilter extends SystemBase {
 		// Size is a criterion ONLY when `size` carries a numeric value (the size trap):
 		// a lone sizeOperator/sizeUnit (emitted by default on every entry) is ignored.
 		if ($size !== null && is_numeric($size) && (int)$size > 0) {
-			$fields['fil_match_size_op'] = ($sizeOp === 's_sg') ? self::SIZE_OP_GT : self::SIZE_OP_LT;
+			$fields['ief_match_size_op'] = ($sizeOp === 's_sg') ? self::SIZE_OP_GT : self::SIZE_OP_LT;
 			$mult = self::GMAIL_SIZE_UNIT_BYTES[$sizeUnit] ?? 1;
-			$fields['fil_match_size_bytes'] = (int)$size * $mult;
+			$fields['ief_match_size_bytes'] = (int)$size * $mult;
 		}
 
 		return array(
@@ -744,34 +746,34 @@ class InboundEmailFilter extends SystemBase {
 
 	/** Synthesize a readable name from the first criterion (Gmail filters are unnamed). */
 	private static function synthesizeFilterName(array $fields, ?string $label): string {
-		if (!empty($fields['fil_match_from']))      { return 'From: ' . $fields['fil_match_from']; }
-		if (!empty($fields['fil_match_to']))        { return 'To: ' . $fields['fil_match_to']; }
-		if (!empty($fields['fil_match_subject']))   { return 'Subject: ' . $fields['fil_match_subject']; }
-		if (!empty($fields['fil_match_has_words'])) { return 'Has: ' . $fields['fil_match_has_words']; }
-		if (!empty($fields['fil_match_excludes']))  { return 'Excludes: ' . $fields['fil_match_excludes']; }
-		if (!empty($fields['fil_match_has_attachment'])) { return 'Has attachment'; }
-		if (!empty($fields['fil_match_size_op']))   { return 'By size'; }
+		if (!empty($fields['ief_match_from']))      { return 'From: ' . $fields['ief_match_from']; }
+		if (!empty($fields['ief_match_to']))        { return 'To: ' . $fields['ief_match_to']; }
+		if (!empty($fields['ief_match_subject']))   { return 'Subject: ' . $fields['ief_match_subject']; }
+		if (!empty($fields['ief_match_has_words'])) { return 'Has: ' . $fields['ief_match_has_words']; }
+		if (!empty($fields['ief_match_excludes']))  { return 'Excludes: ' . $fields['ief_match_excludes']; }
+		if (!empty($fields['ief_match_has_attachment'])) { return 'Has attachment'; }
+		if (!empty($fields['ief_match_size_op']))   { return 'By size'; }
 		if ($label !== null)                        { return 'Label: ' . $label; }
 		return '(unnamed)';
 	}
 
 	/** True when a candidate has at least one matching criterion. */
 	private static function candidateHasCriterion(array $fields): bool {
-		foreach (array('fil_match_from', 'fil_match_to', 'fil_match_subject',
-				'fil_match_has_words', 'fil_match_excludes') as $f) {
+		foreach (array('ief_match_from', 'ief_match_to', 'ief_match_subject',
+				'ief_match_has_words', 'ief_match_excludes') as $f) {
 			if (!empty($fields[$f])) { return true; }
 		}
-		return !empty($fields['fil_match_has_attachment']) || !empty($fields['fil_match_size_op']);
+		return !empty($fields['ief_match_has_attachment']) || !empty($fields['ief_match_size_op']);
 	}
 
 	/** True when a candidate has at least one action (a label counts as an action). */
 	private static function candidateHasAction(array $fields, ?string $label): bool {
 		if ($label !== null) { return true; }
-		foreach (array('fil_action_archive', 'fil_action_mark_read', 'fil_action_star',
-				'fil_action_delete', 'fil_action_never_spam') as $f) {
+		foreach (array('ief_action_archive', 'ief_action_mark_read', 'ief_action_star',
+				'ief_action_delete', 'ief_action_never_spam') as $f) {
 			if (!empty($fields[$f])) { return true; }
 		}
-		return !empty($fields['fil_action_forward_to']);
+		return !empty($fields['ief_action_forward_to']);
 	}
 }
 
@@ -782,16 +784,16 @@ class MultiInboundEmailFilter extends SystemMultiBase {
 		$filters = array();
 
 		if (isset($this->options['alias_id'])) {
-			$filters['fil_iea_inbound_email_alias_id'] = array($this->options['alias_id'], PDO::PARAM_INT);
+			$filters['ief_iea_inbound_email_alias_id'] = array($this->options['alias_id'], PDO::PARAM_INT);
 		}
 
 		// Domain-wide rows (NULL alias) only.
 		if (!empty($this->options['domain_wide'])) {
-			$filters['fil_iea_inbound_email_alias_id'] = 'IS NULL';
+			$filters['ief_iea_inbound_email_alias_id'] = 'IS NULL';
 		}
 
 		if (isset($this->options['domain_id'])) {
-			$filters['fil_ied_inbound_email_domain_id'] = array($this->options['domain_id'], PDO::PARAM_INT);
+			$filters['ief_ied_inbound_email_domain_id'] = array($this->options['domain_id'], PDO::PARAM_INT);
 		}
 
 		// In-scope-for-a-message: the alias's own filters OR the domain-wide ones
@@ -799,26 +801,26 @@ class MultiInboundEmailFilter extends SystemMultiBase {
 		if (array_key_exists('scope_domain_id', $this->options)) {
 			$domainId = intval($this->options['scope_domain_id']);
 			$aliasId = $this->options['scope_alias_id'] ?? null;
-			$domainWide = 'fil_iea_inbound_email_alias_id IS NULL AND fil_ied_inbound_email_domain_id = ' . $domainId;
+			$domainWide = 'ief_iea_inbound_email_alias_id IS NULL AND ief_ied_inbound_email_domain_id = ' . $domainId;
 			if ($aliasId !== null) {
-				$filters['(fil_iea_inbound_email_alias_id'] = '= ' . intval($aliasId)
+				$filters['(ief_iea_inbound_email_alias_id'] = '= ' . intval($aliasId)
 					. ' OR (' . $domainWide . '))';
 			} else {
-				$filters['(fil_iea_inbound_email_alias_id'] = 'IS NULL AND fil_ied_inbound_email_domain_id = '
+				$filters['(ief_iea_inbound_email_alias_id'] = 'IS NULL AND ief_ied_inbound_email_domain_id = '
 					. $domainId . ')';
 			}
 		}
 
 		if (isset($this->options['enabled'])) {
-			$filters['fil_is_enabled'] = $this->options['enabled'] ? '= true' : '= false';
+			$filters['ief_is_enabled'] = $this->options['enabled'] ? '= true' : '= false';
 		}
 
 		if (!empty($this->options['pending_backfill'])) {
-			$filters['fil_apply_existing_pending'] = '= true';
+			$filters['ief_apply_existing_pending'] = '= true';
 		}
 
 
-		return $this->_get_resultsv2('fil_inbound_email_filters', $filters, $this->order_by, $only_count, $debug);
+		return $this->_get_resultsv2('ief_inbound_email_filters', $filters, $this->order_by, $only_count, $debug);
 	}
 }
 ?>

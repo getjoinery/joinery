@@ -79,18 +79,18 @@ class FilterImportDeleteDisabledTest {
 		$trash = $this->loadByFrom('trashme-' . $this->suffix);
 		$archive = $this->loadByFrom('archiveme-' . $this->suffix);
 
-		check($trash !== null && (bool)$trash->get('fil_action_delete') === true,
-			'the trash rule imported with fil_action_delete set');
-		check($trash !== null && (bool)$trash->get('fil_is_enabled') === false,
-			'the trash rule imported DISABLED (fil_is_enabled = false)');
-		check($archive !== null && (bool)$archive->get('fil_is_enabled') === true,
+		check($trash !== null && (bool)$trash->get('ief_action_delete') === true,
+			'the trash rule imported with ief_action_delete set');
+		check($trash !== null && (bool)$trash->get('ief_is_enabled') === false,
+			'the trash rule imported DISABLED (ief_is_enabled = false)');
+		check($archive !== null && (bool)$archive->get('ief_is_enabled') === true,
 			'the archive rule imported ENABLED as before');
 	}
 
 	private function loadByFrom($from) {
 		$stmt = $this->db->prepare(
-			"SELECT fil_inbound_email_filter_id FROM fil_inbound_email_filters
-			 WHERE fil_ied_inbound_email_domain_id = ? AND fil_match_from = ? AND fil_delete_time IS NULL LIMIT 1");
+			"SELECT ief_inbound_email_filter_id FROM ief_inbound_email_filters
+			 WHERE ief_ied_inbound_email_domain_id = ? AND ief_match_from = ? AND ief_delete_time IS NULL LIMIT 1");
 		$stmt->execute(array($this->domain_id, $from));
 		$id = $stmt->fetchColumn();
 		return $id ? new InboundEmailFilter(intval($id), TRUE) : null;
@@ -99,7 +99,7 @@ class FilterImportDeleteDisabledTest {
 	private function tearDown() {
 		try {
 			if ($this->domain_id) {
-				$this->db->exec("DELETE FROM fil_inbound_email_filters WHERE fil_ied_inbound_email_domain_id = " . intval($this->domain_id));
+				$this->db->exec("DELETE FROM ief_inbound_email_filters WHERE ief_ied_inbound_email_domain_id = " . intval($this->domain_id));
 				$this->db->exec("DELETE FROM ied_inbound_email_domains WHERE ied_inbound_email_domain_id = " . intval($this->domain_id));
 			}
 		} catch (\Throwable $e) {}

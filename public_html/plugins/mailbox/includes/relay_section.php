@@ -305,7 +305,7 @@ function mailbox_relay_section_render($page, array $v): void {
 		// Nothing on this box has to be prepared first: the deployment's relay
 		// client identity is minted when the run starts.
 		$run = $v['cloud_run'] ?? null;
-		$run_status = $run ? (string)$run->get('rcp_status') : '';
+		$run_status = $run ? (string)$run->get('rcl_status') : '';
 		$status_lines = array(
 			'ready'          => 'Creating the server in your account…',
 			'draining'       => 'Emptying the relay\'s spool before it is re-imaged…',
@@ -367,13 +367,13 @@ function mailbox_relay_section_render($page, array $v): void {
 			} else {
 				echo '<p>⏳ ' . htmlspecialchars($status_lines[$run_status] ?? $run_status)
 					. ' <a href="">Refresh</a></p>';
-				if ((string)$run->get('rcp_error') !== '') {
-					echo '<p class="text-muted small">' . htmlspecialchars((string)$run->get('rcp_error')) . '</p>';
+				if ((string)$run->get('rcl_error') !== '') {
+					echo '<p class="text-muted small">' . htmlspecialchars((string)$run->get('rcl_error')) . '</p>';
 				}
 			}
 		} else {
 			if ($run !== null && $run_status === 'failed') {
-				echo '<p class="text-danger">' . htmlspecialchars((string)$run->get('rcp_error')) . '</p>';
+				echo '<p class="text-danger">' . htmlspecialchars((string)$run->get('rcl_error')) . '</p>';
 				echo mailbox_relay_action_button(0, 'relay_cloud_dismiss', 'Dismiss', 'btn-secondary');
 			}
 

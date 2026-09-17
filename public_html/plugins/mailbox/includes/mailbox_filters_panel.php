@@ -63,34 +63,34 @@ function mailbox_render_filter_form($page, array $vars, string $base, array $pag
 		echo '<p class="filter-scope-context"><strong>Filter for:</strong> '
 			. htmlspecialchars($vars['scope_label'] ?? $v['scope']) . '</p>';
 
-		$formwriter->textinput('fil_name', 'Filter name', array(
-			'value' => $v['fil_name'],
+		$formwriter->textinput('ief_name', 'Filter name', array(
+			'value' => $v['ief_name'],
 			'helptext' => 'Optional label so you remember what this rule is for.',
 		));
 
-		$formwriter->textinput('fil_match_from', 'From', array(
-			'value' => $v['fil_match_from'],
+		$formwriter->textinput('ief_match_from', 'From', array(
+			'value' => $v['ief_match_from'],
 			'helptext' => 'Matches the sender. Separate multiple addresses with commas (any one matches).',
 		));
-		$formwriter->textinput('fil_match_to', 'To', array(
-			'value' => $v['fil_match_to'],
+		$formwriter->textinput('ief_match_to', 'To', array(
+			'value' => $v['ief_match_to'],
 			'helptext' => 'Matches the recipient. Commas are OR.',
 		));
-		$formwriter->textinput('fil_match_subject', 'Subject', array(
-			'value' => $v['fil_match_subject'],
+		$formwriter->textinput('ief_match_subject', 'Subject', array(
+			'value' => $v['ief_match_subject'],
 		));
-		$formwriter->textinput('fil_match_has_words', 'Has the words', array(
-			'value' => $v['fil_match_has_words'],
+		$formwriter->textinput('ief_match_has_words', 'Has the words', array(
+			'value' => $v['ief_match_has_words'],
 			'helptext' => 'Every word must appear somewhere in the sender, subject, or body.',
 		));
-		$formwriter->textinput('fil_match_excludes', "Doesn't have", array(
-			'value' => $v['fil_match_excludes'],
+		$formwriter->textinput('ief_match_excludes', "Doesn't have", array(
+			'value' => $v['ief_match_excludes'],
 			'helptext' => 'The message must contain none of these words.',
 		));
 
-		$formwriter->dropinput('fil_match_size_op', 'Size', array(
+		$formwriter->dropinput('ief_match_size_op', 'Size', array(
 			'options' => array('' => 'Any size', 'gt' => 'Greater than', 'lt' => 'Less than'),
-			'value' => $v['fil_match_size_op'],
+			'value' => $v['ief_match_size_op'],
 			'visibility_rules' => array(
 				'gt' => array('show' => array('size_value', 'size_unit'), 'hide' => array()),
 				'lt' => array('show' => array('size_value', 'size_unit'), 'hide' => array()),
@@ -103,65 +103,65 @@ function mailbox_render_filter_form($page, array $vars, string $base, array $pag
 			'value' => $v['size_unit'],
 		));
 
-		$formwriter->checkboxinput('fil_match_has_attachment', 'Has attachment', array(
-			'checked' => $v['fil_match_has_attachment'],
+		$formwriter->checkboxinput('ief_match_has_attachment', 'Has attachment', array(
+			'checked' => $v['ief_match_has_attachment'],
 		));
 
 		$formwriter->submitbutton('continue_btn', 'Continue');
 	} else {
 		// Step 2 carries every step-1 value as a hidden input so the save sees the
 		// whole filter in one post.
-		$carry = array('id', 'scope', 'fil_name', 'fil_match_from', 'fil_match_to',
-			'fil_match_subject', 'fil_match_has_words', 'fil_match_excludes',
-			'fil_match_size_op', 'size_value', 'size_unit');
+		$carry = array('id', 'scope', 'ief_name', 'ief_match_from', 'ief_match_to',
+			'ief_match_subject', 'ief_match_has_words', 'ief_match_excludes',
+			'ief_match_size_op', 'size_value', 'size_unit');
 		foreach ($carry as $k) {
 			$formwriter->hiddeninput($k, '', array('value' => $v[$k]));
 		}
-		if (!empty($v['fil_match_has_attachment'])) {
-			$formwriter->hiddeninput('fil_match_has_attachment', '', array('value' => '1'));
+		if (!empty($v['ief_match_has_attachment'])) {
+			$formwriter->hiddeninput('ief_match_has_attachment', '', array('value' => '1'));
 		}
 
 		// Apply a label — a custom label (ilb_) in the global namespace, shared with the
 		// reader and IMAP sync. "Create new label…" reveals a name field and mints the
 		// label on save (Gmail's inline "New label…").
-		$formwriter->dropinput('fil_action_ilb_inbound_email_label_id', 'Apply the label', array(
+		$formwriter->dropinput('ief_action_ilb_inbound_email_label_id', 'Apply the label', array(
 			'options' => array('0' => '— none —') + ($vars['label_options'] ?? array()) + array('new' => 'Create new label…'),
-			'value' => (string)$v['fil_action_ilb_inbound_email_label_id'],
+			'value' => (string)$v['ief_action_ilb_inbound_email_label_id'],
 			'visibility_rules' => array(
-				'new'     => array('show' => array('fil_action_label_new'), 'hide' => array()),
-				'default' => array('show' => array(), 'hide' => array('fil_action_label_new')),
+				'new'     => array('show' => array('ief_action_label_new'), 'hide' => array()),
+				'default' => array('show' => array(), 'hide' => array('ief_action_label_new')),
 			),
 		));
-		$formwriter->textinput('fil_action_label_new', 'New label name', array(
-			'value' => $v['fil_action_label_new'],
+		$formwriter->textinput('ief_action_label_new', 'New label name', array(
+			'value' => $v['ief_action_label_new'],
 			'helptext' => 'Creates this label and applies it.',
 		));
 
-		$formwriter->checkboxinput('fil_action_star', 'Star it', array('checked' => $v['fil_action_star']));
-		$formwriter->checkboxinput('fil_action_mark_read', 'Mark as read', array('checked' => $v['fil_action_mark_read']));
-		$formwriter->checkboxinput('fil_action_archive', 'Skip the Inbox (Archive it)', array('checked' => $v['fil_action_archive']));
-		$formwriter->checkboxinput('fil_action_mark_spam', 'Mark it as spam', array('checked' => $v['fil_action_mark_spam']));
-		$formwriter->checkboxinput('fil_action_never_spam', 'Never send it to Spam', array('checked' => $v['fil_action_never_spam']));
-		$formwriter->textinput('fil_action_forward_to', 'Forward it to', array(
-			'value' => $v['fil_action_forward_to'],
+		$formwriter->checkboxinput('ief_action_star', 'Star it', array('checked' => $v['ief_action_star']));
+		$formwriter->checkboxinput('ief_action_mark_read', 'Mark as read', array('checked' => $v['ief_action_mark_read']));
+		$formwriter->checkboxinput('ief_action_archive', 'Skip the Inbox (Archive it)', array('checked' => $v['ief_action_archive']));
+		$formwriter->checkboxinput('ief_action_mark_spam', 'Mark it as spam', array('checked' => $v['ief_action_mark_spam']));
+		$formwriter->checkboxinput('ief_action_never_spam', 'Never send it to Spam', array('checked' => $v['ief_action_never_spam']));
+		$formwriter->textinput('ief_action_forward_to', 'Forward it to', array(
+			'value' => $v['ief_action_forward_to'],
 			'helptext' => 'A single email address. Historical mail is never re-forwarded.',
 		));
 		// On a domain that seals its mail, forwarding sends it back out in clear
 		// text. That is allowed, but only once it has been said so in writing — and
 		// the consent lapses whenever the domain's security level is raised.
 		if (!empty($vars['forward_ack_domain'])) {
-			$formwriter->checkboxinput('fil_forward_ack',
+			$formwriter->checkboxinput('ief_forward_ack',
 				InboundEmailFilter::forwardAcknowledgmentText(
-					$v['fil_action_forward_to'] !== '' ? $v['fil_action_forward_to'] : 'the address above',
+					$v['ief_action_forward_to'] !== '' ? $v['ief_action_forward_to'] : 'the address above',
 					$vars['forward_ack_domain']),
 				array(
-					'checked'  => $v['fil_forward_ack'],
+					'checked'  => $v['ief_forward_ack'],
 					'helptext' => 'Required only while a forwarding address is set — leave the '
 						. 'address blank and this is ignored. Raising this domain security level '
 						. 'clears it, and forwarding stops until you confirm again.',
 				));
 		}
-		$formwriter->checkboxinput('fil_action_delete', 'Delete it', array('checked' => $v['fil_action_delete']));
+		$formwriter->checkboxinput('ief_action_delete', 'Delete it', array('checked' => $v['ief_action_delete']));
 
 		$formwriter->checkboxinput('apply_existing', 'Also apply this filter to matching existing mail', array(
 			'checked' => $v['apply_existing'],

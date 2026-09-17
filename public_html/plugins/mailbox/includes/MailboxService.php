@@ -2259,12 +2259,12 @@ class MailboxService {
 			// An existing rule for the same address on the same mailbox is re-armed
 			// for backfill rather than duplicated — clicking twice must not leave two
 			// rules saying the same thing.
-			// alias_id is the collection's own option; fil_match_from resolves through
+			// alias_id is the collection's own option; ief_match_from resolves through
 			// the declared-column path, which types and binds the value itself — so
 			// both take a plain scalar, never a [value, type] pair.
 			$existing = new MultiInboundEmailFilter(array(
 				'alias_id'       => $alias_id,
-				'fil_match_from' => $address,
+				'ief_match_from' => $address,
 				'deleted'        => FALSE,
 			));
 			$filter = null;
@@ -2274,17 +2274,17 @@ class MailboxService {
 			}
 			if ($filter === null) {
 				$filter = new InboundEmailFilter();
-				$filter->set('fil_iea_inbound_email_alias_id', $alias_id);
-				$filter->set('fil_ied_inbound_email_domain_id',
+				$filter->set('ief_iea_inbound_email_alias_id', $alias_id);
+				$filter->set('ief_ied_inbound_email_domain_id',
 					intval($alias->get('iea_ied_inbound_email_domain_id')));
-				$filter->set('fil_name', 'Always allow ' . $address);
-				$filter->set('fil_match_from', $address);
+				$filter->set('ief_name', 'Always allow ' . $address);
+				$filter->set('ief_match_from', $address);
 			}
-			$filter->set('fil_is_enabled', true);
-			$filter->set('fil_action_never_spam', true);
-			$filter->set('fil_action_mark_spam', false);
-			$filter->set('fil_apply_existing_pending', true);
-			$filter->set('fil_apply_existing_cursor', 0);
+			$filter->set('ief_is_enabled', true);
+			$filter->set('ief_action_never_spam', true);
+			$filter->set('ief_action_mark_spam', false);
+			$filter->set('ief_apply_existing_pending', true);
+			$filter->set('ief_apply_existing_cursor', 0);
 			$filter->prepare();
 			$filter->save();
 			return true;

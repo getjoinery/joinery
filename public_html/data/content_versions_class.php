@@ -10,12 +10,21 @@ require_once(PathHelper::getIncludePath('includes/Validator.php'));
 
 class ContentVersionException extends SystemBaseException {}
 
-class ContentVersion extends SystemBase {	public static $prefix = 'cnv';
-	public static $tablename = 'cnv_content_versions';
-	public static $pkey_column = 'cnv_content_version_id';
+/**
+ * ContentVersion — one saved edit of an entity (post, page, template, event,
+ * location, item, agent file), keyed by cvn_type + cvn_foreign_key_id and
+ * chained through cvn_previous_version_id / cvn_next_version_id.
+ *
+ * @version 1.1 - prefix cvn, table cvn_content_versions: cnv is Conversation's alone
+ *   (specs/implemented/shared_prefix_content_version.md)
+ */
+class ContentVersion extends SystemBase {
+	public static $prefix = 'cvn';
+	public static $tablename = 'cvn_content_versions';
+	public static $pkey_column = 'cvn_content_version_id';
 
 	protected static $foreign_key_actions = array(
-		'cnv_usr_user_id' => array('action' => 'set_value', 'value' => User::USER_DELETED),
+		'cvn_usr_user_id' => array('action' => 'set_value', 'value' => User::USER_DELETED),
 	);
 
 	const TYPE_POST = 1;
@@ -44,22 +53,22 @@ class ContentVersion extends SystemBase {	public static $prefix = 'cnv';
 	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-	    'cnv_content_version_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
-	    'cnv_title' => array('type'=>'varchar(255)'),
-	    'cnv_usr_user_id' => array('type'=>'int4'),
-	    'cnv_description' => array('type'=>'varchar(255)'),
-	    'cnv_type' => array('type'=>'varchar(255)'),
-	    'cnv_foreign_key_id' => array('type'=>'int4', 'required'=>true),
-	    'cnv_next_version_id' => array('type'=>'int4'),
-	    'cnv_previous_version_id' => array('type'=>'int4'),
-	    'cnv_content' => array('type'=>'text'),
-	    'cnv_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
-	    'cnv_delete_time' => array('type'=>'timestamp(6)'),
+	    'cvn_content_version_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'cvn_title' => array('type'=>'varchar(255)'),
+	    'cvn_usr_user_id' => array('type'=>'int4'),
+	    'cvn_description' => array('type'=>'varchar(255)'),
+	    'cvn_type' => array('type'=>'varchar(255)'),
+	    'cvn_foreign_key_id' => array('type'=>'int4', 'required'=>true),
+	    'cvn_next_version_id' => array('type'=>'int4'),
+	    'cvn_previous_version_id' => array('type'=>'int4'),
+	    'cvn_content' => array('type'=>'text'),
+	    'cvn_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	    'cvn_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
 function get_previous_version(){
-		if($this->get('cnv_previous_version_id')){
-			return new ContentVersion($this->get('cnv_previous_version_id'), TRUE);
+		if($this->get('cvn_previous_version_id')){
+			return new ContentVersion($this->get('cvn_previous_version_id'), TRUE);
 		}
 		else{
 			return false;
@@ -67,8 +76,8 @@ function get_previous_version(){
 	}
 
 	function get_next_version(){
-		if($this->get('cnv_next_version_id')){
-			return new ContentVersion($this->get('cnv_next_version_id'), TRUE);
+		if($this->get('cvn_next_version_id')){
+			return new ContentVersion($this->get('cvn_next_version_id'), TRUE);
 		}
 		else{
 			return false;
@@ -86,32 +95,32 @@ function get_previous_version(){
 			$results->load();
 			$last_item = $results->get(0);
 			$new_item = new ContentVersion(NULL);
-			$new_item->set('cnv_title', $title);
-			$new_item->set('cnv_description', $description);
-			$new_item->set('cnv_type', $type);
-			$new_item->set('cnv_content', $content);
-			$new_item->set('cnv_foreign_key_id', $foreign_key_id);
-			$new_item->set('cnv_previous_version_id', $last_item->key);
+			$new_item->set('cvn_title', $title);
+			$new_item->set('cvn_description', $description);
+			$new_item->set('cvn_type', $type);
+			$new_item->set('cvn_content', $content);
+			$new_item->set('cvn_foreign_key_id', $foreign_key_id);
+			$new_item->set('cvn_previous_version_id', $last_item->key);
 			if($session->get_user_id()){
-				$new_item->set('cnv_usr_user_id', $session->get_user_id());
+				$new_item->set('cvn_usr_user_id', $session->get_user_id());
 			}
 			$new_item->prepare();
 			$new_item->save();
 			$new_item->load();
 
-			$last_item->set('cnv_next_version_id', $new_item->key);
+			$last_item->set('cvn_next_version_id', $new_item->key);
 			$last_item->save();
 
 		}
 		else{
 			$new_item = new ContentVersion(NULL);
-			$new_item->set('cnv_title', $title);
-			$new_item->set('cnv_description', $description);
-			$new_item->set('cnv_type', $type);
-			$new_item->set('cnv_content', $content);
-			$new_item->set('cnv_foreign_key_id', $foreign_key_id);
+			$new_item->set('cvn_title', $title);
+			$new_item->set('cvn_description', $description);
+			$new_item->set('cvn_type', $type);
+			$new_item->set('cvn_content', $content);
+			$new_item->set('cvn_foreign_key_id', $foreign_key_id);
 			if($session->get_user_id()){
-				$new_item->set('cnv_usr_user_id', $session->get_user_id());
+				$new_item->set('cvn_usr_user_id', $session->get_user_id());
 			}
 			$new_item->prepare();
 			$new_item->save();
@@ -159,18 +168,18 @@ function get_previous_version(){
 		$previous_version = $this->get_previous_version();
 		
 		if($next_version && $previous_version){
-			$next_version->set('cnv_previous_version_id', $previous_version->key);
+			$next_version->set('cvn_previous_version_id', $previous_version->key);
 			$next_version->save();
 
-			$previous_version->set('cnv_next_version_id', $next_version->key);
+			$previous_version->set('cvn_next_version_id', $next_version->key);
 			$previous_version->save();			
 		}
 		else if($previous_version){
-			$previous_version->set('cnv_next_version_id', NULL);
+			$previous_version->set('cvn_next_version_id', NULL);
 			$previous_version->save();	
 		}
 		else if($next_version){
-			$next_version->set('cnv_previous_version_id', NULL);
+			$next_version->set('cvn_previous_version_id', NULL);
 			$next_version->save();	
 		}
 		
@@ -189,11 +198,11 @@ class MultiContentVersion extends SystemMultiBase {
 	function get_dropdown_array($session, $include_new=FALSE) {
 		$items = array();
 		foreach($this as $content_version) {
-			if($content_version->get('cnv_description')){
-				$items[$content_version->key] = $content_version->get('cnv_description'). ' - ' .  $content_version->get_local('cnv_create_time');
+			if($content_version->get('cvn_description')){
+				$items[$content_version->key] = $content_version->get('cvn_description'). ' - ' .  $content_version->get_local('cvn_create_time');
 			}
 			else{
-				$items[$content_version->key] = $content_version->get_local('cnv_create_time');
+				$items[$content_version->key] = $content_version->get_local('cvn_create_time');
 			}
 		}
 		if ($include_new) {
@@ -207,18 +216,18 @@ class MultiContentVersion extends SystemMultiBase {
         $filters = [];
 
         if (isset($this->options['user_id'])) {
-            $filters['cnv_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
+            $filters['cvn_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
         }
         
         if (isset($this->options['type'])) {
-            $filters['cnv_type'] = [$this->options['type'], PDO::PARAM_INT];
+            $filters['cvn_type'] = [$this->options['type'], PDO::PARAM_INT];
         }
 
         if (isset($this->options['foreign_key_id'])) {
-            $filters['cnv_foreign_key_id'] = [$this->options['foreign_key_id'], PDO::PARAM_INT];
+            $filters['cvn_foreign_key_id'] = [$this->options['foreign_key_id'], PDO::PARAM_INT];
         }
 
-        return $this->_get_resultsv2('cnv_content_versions', $filters, $this->order_by, $only_count, $debug);
+        return $this->_get_resultsv2('cvn_content_versions', $filters, $this->order_by, $only_count, $debug);
     }
 
 }

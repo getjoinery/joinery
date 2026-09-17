@@ -22,7 +22,7 @@
 
 	// Only process form submission if this is a POST request
 	// GET requests (from version loading) should skip form processing
-	if($_POST && !isset($_GET['cnv_content_version_id'])){
+	if($_POST && !isset($_GET['cvn_content_version_id'])){
 
 		$editable_fields = array('pag_title');
 
@@ -179,7 +179,7 @@
 
 			$formwriter->begin_form();
 			$formwriter->hiddeninput('pag_page_id', '', ['value' => $page->key]);
-			$formwriter->dropinput('cnv_content_version_id', 'Load another version', [
+			$formwriter->dropinput('cvn_content_version_id', 'Load another version', [
 				'options' => $optionvals
 			]);
 			$formwriter->submitbutton('btn_load', 'Load');

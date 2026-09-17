@@ -36,10 +36,10 @@
 	$title = $email_template->get('emt_name');
 	$content = $email_template->get('emt_body');
 	//LOAD THE ALTERNATE CONTENT VERSION IF NEEDED
-	if($_GET['cnv_content_version_id']){
-		$content_version = new ContentVersion($_GET['cnv_content_version_id'], TRUE);
-		$content = $content_version->get('cnv_content');
-		$title = $content_version->get('cnv_title');
+	if($_GET['cvn_content_version_id']){
+		$content_version = new ContentVersion($_GET['cvn_content_version_id'], TRUE);
+		$content = $content_version->get('cvn_content');
+		$title = $content_version->get('cvn_title');
 	}
 
 	$page = new AdminPage();
@@ -111,7 +111,7 @@
 		$formwriter = $page->getFormWriter('form_load_version', ['action' => '/admin/admin_email_template_edit', 'method' => 'GET']);
 		$formwriter->begin_form();
 		$formwriter->hiddeninput('emt_email_template_id', '', ['value' => $email_template->key]);
-		$formwriter->dropinput('cnv_content_version_id', 'Load another version', [
+		$formwriter->dropinput('cvn_content_version_id', 'Load another version', [
 			'options' => $optionvals,
 			'empty_option' => '-- Select --'
 		]);

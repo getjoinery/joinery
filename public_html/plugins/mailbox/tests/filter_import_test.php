@@ -64,13 +64,13 @@ class FilterImportTest {
 		// The size trap: NOT ONE candidate gains a size criterion, even though every
 		// entry carries default sizeOperator/sizeUnit.
 		$withSize = 0;
-		foreach ($cands as $c) { if (!empty($c['fields']['fil_match_size_op'])) { $withSize++; } }
+		foreach ($cands as $c) { if (!empty($c['fields']['ief_match_size_op'])) { $withSize++; } }
 		$this->eq(0, $withSize, 'size trap — no candidate gets a bogus size criterion');
 
 		// from + shouldArchive map; the first entry is from=dealnews, label=deals, archive.
-		$deal = $this->candWith($cands, 'fil_match_from', 'dealnews');
+		$deal = $this->candWith($cands, 'ief_match_from', 'dealnews');
 		$this->ok($deal !== null, 'from=dealnews candidate present');
-		$this->eq(true, $deal['fields']['fil_action_archive'] ?? null, 'shouldArchive -> fil_action_archive');
+		$this->eq(true, $deal['fields']['ief_action_archive'] ?? null, 'shouldArchive -> ief_action_archive');
 		$this->eq('deals', $deal['label'], 'label carried by NAME on the candidate');
 		$this->ok(!in_array('deals', $deal['skipped'], true), 'label is NOT in skipped');
 		$this->ok(empty($deal['skipped']), 'no spurious skipped entries (sizeOperator/Unit ignored silently)');
@@ -79,18 +79,18 @@ class FilterImportTest {
 
 		// The label property never resolves to an id at parse time (no DB key leaks in).
 		$leak = false;
-		foreach ($cands as $c) { if (array_key_exists('fil_action_ilb_inbound_email_label_id', $c['fields'])) { $leak = true; } }
+		foreach ($cands as $c) { if (array_key_exists('ief_action_ilb_inbound_email_label_id', $c['fields'])) { $leak = true; } }
 		$this->ok(!$leak, 'parse never sets a label id (resolution deferred to confirm)');
 
 		// The lone subject / shouldMarkAsRead / hasTheWord / doesNotHaveTheWord /
 		// shouldNeverSpam entries are present and mapped.
 		$haveSubject = $haveRead = $haveWords = $haveExcludes = $haveNeverSpam = 0;
 		foreach ($cands as $c) {
-			if (!empty($c['fields']['fil_match_subject']))    { $haveSubject++; }
-			if (!empty($c['fields']['fil_action_mark_read'])) { $haveRead++; }
-			if (!empty($c['fields']['fil_match_has_words']))  { $haveWords++; }
-			if (!empty($c['fields']['fil_match_excludes']))   { $haveExcludes++; }
-			if (!empty($c['fields']['fil_action_never_spam'])){ $haveNeverSpam++; }
+			if (!empty($c['fields']['ief_match_subject']))    { $haveSubject++; }
+			if (!empty($c['fields']['ief_action_mark_read'])) { $haveRead++; }
+			if (!empty($c['fields']['ief_match_has_words']))  { $haveWords++; }
+			if (!empty($c['fields']['ief_match_excludes']))   { $haveExcludes++; }
+			if (!empty($c['fields']['ief_action_never_spam'])){ $haveNeverSpam++; }
 		}
 		$this->eq(1, $haveSubject, 'the single subject entry maps');
 		$this->eq(1, $haveRead, 'the single shouldMarkAsRead entry maps');
@@ -113,8 +113,8 @@ class FilterImportTest {
 					"<apps:property name='sizeUnit' value='$unit'/>" .
 					"<apps:property name='shouldArchive' value='true'/>");
 				$c = InboundEmailFilter::parseGmailExport($xml)[0];
-				$this->eq($expectOp, $c['fields']['fil_match_size_op'] ?? null, "sizeOperator $op -> $expectOp");
-				$this->eq(5 * $mult, $c['fields']['fil_match_size_bytes'] ?? null, "5 $unit -> " . (5 * $mult) . ' bytes');
+				$this->eq($expectOp, $c['fields']['ief_match_size_op'] ?? null, "sizeOperator $op -> $expectOp");
+				$this->eq(5 * $mult, $c['fields']['ief_match_size_bytes'] ?? null, "5 $unit -> " . (5 * $mult) . ' bytes');
 			}
 		}
 
@@ -124,7 +124,7 @@ class FilterImportTest {
 			"<apps:property name='size' value='0'/>" .
 			"<apps:property name='sizeOperator' value='s_sl'/>" .
 			"<apps:property name='shouldArchive' value='true'/>"))[0];
-		$this->ok(empty($c0['fields']['fil_match_size_op']), 'size=0 -> no size criterion');
+		$this->ok(empty($c0['fields']['ief_match_size_op']), 'size=0 -> no size criterion');
 	}
 
 	// --------------------------------------------------------- importable test
@@ -136,7 +136,7 @@ class FilterImportTest {
 		$attach = InboundEmailFilter::parseGmailExport($this->feed(
 			"<apps:property name='hasAttachment' value='true'/>" .
 			"<apps:property name='label' value='Files'/>"))[0];
-		$this->eq(true, $attach['fields']['fil_match_has_attachment'] ?? null, 'hasAttachment maps');
+		$this->eq(true, $attach['fields']['ief_match_has_attachment'] ?? null, 'hasAttachment maps');
 		$this->ok($attach['importable'], 'attachment criterion + label-only action -> importable');
 
 		// from + label, no other action -> importable (label counts as an action).
@@ -223,7 +223,7 @@ class FilterImportTest {
 		$this->eq(intval($first->key), intval($again->key), 're-resolving the same name reuses the row');
 
 		// Signature stability: same fields + same label id -> identical signature.
-		$fields = array('fil_match_from' => 'dealnews', 'fil_action_archive' => true);
+		$fields = array('ief_match_from' => 'dealnews', 'ief_action_archive' => true);
 		$sigA = _filter_signature($fields, intval($first->key));
 		$sigB = _filter_signature($fields, intval($first->key));
 		$this->eq($sigA, $sigB, 'signature is stable for identical input');

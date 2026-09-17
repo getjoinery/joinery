@@ -53,10 +53,10 @@
 	$content = $location->get('loc_description');
 
 	//LOAD THE ALTERNATE CONTENT VERSION IF NEEDED
-	if($_GET['cnv_content_version_id']){
-		$content_version = new ContentVersion($_GET['cnv_content_version_id'], TRUE);
-		$content = $content_version->get('cnv_content');
-		$title = $content_version->get('cnv_title');
+	if($_GET['cvn_content_version_id']){
+		$content_version = new ContentVersion($_GET['cvn_content_version_id'], TRUE);
+		$content = $content_version->get('cvn_content');
+		$title = $content_version->get('cvn_title');
 	}
 
 	$page = new AdminPage();
@@ -156,7 +156,7 @@
 
 		echo $formwriter->begin_form();
 		$formwriter->hiddeninput('loc_location_id', '', ['value' => $location->key]);
-		$formwriter->dropinput('cnv_content_version_id', 'Load another version', [
+		$formwriter->dropinput('cvn_content_version_id', 'Load another version', [
 			'options' => $optionvals
 		]);
 		$formwriter->submitbutton('load', 'Load');

@@ -41,12 +41,12 @@ $return_page_id = !empty($_REQUEST['pag_page_id'])
 // Check if loading a previous version
 $loading_version = false;
 $version_notice = '';
-if (isset($_GET['cnv_content_version_id']) && $_GET['cnv_content_version_id'] && $content->key) {
+if (isset($_GET['cvn_content_version_id']) && $_GET['cvn_content_version_id'] && $content->key) {
 	$loading_version = true;
-	$content_version = new ContentVersion($_GET['cnv_content_version_id'], TRUE);
+	$content_version = new ContentVersion($_GET['cvn_content_version_id'], TRUE);
 
 	// Parse the versioned config JSON
-	$versioned_content = $content_version->get('cnv_content');
+	$versioned_content = $content_version->get('cvn_content');
 	$versioned_config = json_decode($versioned_content, true);
 	if ($versioned_config !== null) {
 		// Valid JSON - restore as component config
@@ -54,7 +54,7 @@ if (isset($_GET['cnv_content_version_id']) && $_GET['cnv_content_version_id'] &&
 	}
 
 	$version_notice = 'Viewing version from ' .
-		$content_version->get_local('cnv_create_time') .
+		$content_version->get_local('cvn_create_time') .
 		'. Save to restore this version.';
 }
 
@@ -525,7 +525,7 @@ if ($content->key) {
 		]);
 		$version_form->begin_form();
 		$version_form->hiddeninput('pac_page_content_id', '', ['value' => $content->key]);
-		$version_form->dropinput('cnv_content_version_id', 'Version', [
+		$version_form->dropinput('cvn_content_version_id', 'Version', [
 			'options' => $version_options
 		]);
 		$version_form->submitbutton('btn_load', 'Load');

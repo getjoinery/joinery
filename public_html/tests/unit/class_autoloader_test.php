@@ -28,6 +28,8 @@
  *
  * Run: php tests/unit/class_autoloader_test.php
  *
+ * @version 1.4 - no prefix lists two models (InboundEmailFilter took ief)
+ * @version 1.3 - the shared-prefix case is fil (ContentVersion took cvn)
  * @version 1.2 - the shared-prefix case is cnv; abt has one owner (specs/implemented/shared_prefixes_first_three.md)
  * @version 1.1 - the prefix index and the fingerprinted miss
  * @version 1.0
@@ -90,9 +92,10 @@ section('The cache carries the model prefix index and a tree fingerprint');
 check(isset($decoded['prefixes']['usr']) && $decoded['prefixes']['usr'] === array('User'),
 	'a model prefix names the class declaring it',
 	json_encode($decoded['prefixes']['usr'] ?? null));
-check(isset($decoded['prefixes']['cnv']) && count($decoded['prefixes']['cnv']) === 2,
-	'a prefix two models share lists both',
-	json_encode($decoded['prefixes']['cnv'] ?? null));
+$shared = array_filter($decoded['prefixes'], function ($classes) { return count($classes) > 1; });
+check(count($shared) === 0,
+	'no prefix lists two models (the index keeps a list so a deliberate pair would show both)',
+	json_encode($shared));
 check(($decoded['prefixes']['abt'] ?? null) === array('AppBridgeToken'),
 	'a prefix retired from sharing lists its one owner (abt is AppBridgeToken since AbTest took abx)',
 	json_encode($decoded['prefixes']['abt'] ?? null));

@@ -546,12 +546,12 @@ class MailboxReaderTest {
 		$rule = $this->allowRule($sender_addr);
 		$this->ok($rule !== null, 'the never_spam filter was actually written');
 		if ($rule !== null) {
-			$this->ok(intval($rule['fil_iea_inbound_email_alias_id']) === intval($this->beth_alias),
+			$this->ok(intval($rule['ief_iea_inbound_email_alias_id']) === intval($this->beth_alias),
 				'the rule is scoped to the mailbox the message arrived in');
-			$this->ok($this->pgTrue($rule['fil_action_never_spam']), 'it is a never_spam rule');
-			$this->ok($this->pgTrue($rule['fil_apply_existing_pending']),
+			$this->ok($this->pgTrue($rule['ief_action_never_spam']), 'it is a never_spam rule');
+			$this->ok($this->pgTrue($rule['ief_apply_existing_pending']),
 				'it is armed for the backfill, so mail already in Spam is swept up');
-			$this->ok($this->pgTrue($rule['fil_is_enabled']), 'it is enabled');
+			$this->ok($this->pgTrue($rule['ief_is_enabled']), 'it is enabled');
 		}
 
 		// Pressing it twice must not leave two rules saying the same thing.
@@ -570,16 +570,16 @@ class MailboxReaderTest {
 
 	/** The never_spam rule for one address, or null. */
 	private function allowRule(string $address) {
-		$stmt = $this->db->prepare("SELECT * FROM fil_inbound_email_filters
-			WHERE fil_match_from = ? AND fil_delete_time IS NULL LIMIT 1");
+		$stmt = $this->db->prepare("SELECT * FROM ief_inbound_email_filters
+			WHERE ief_match_from = ? AND ief_delete_time IS NULL LIMIT 1");
 		$stmt->execute([$address]);
 		$row = $stmt->fetch(PDO::FETCH_ASSOC);
 		return $row ? $row : null;
 	}
 
 	private function allowRuleCount(string $address): int {
-		$stmt = $this->db->prepare("SELECT count(*) FROM fil_inbound_email_filters
-			WHERE fil_match_from = ? AND fil_delete_time IS NULL");
+		$stmt = $this->db->prepare("SELECT count(*) FROM ief_inbound_email_filters
+			WHERE ief_match_from = ? AND ief_delete_time IS NULL");
 		$stmt->execute([$address]);
 		return intval($stmt->fetchColumn());
 	}
@@ -611,7 +611,7 @@ class MailboxReaderTest {
 		// The allow-sender rules this run wrote (they hang off the alias with no
 		// cascade to lean on, and a leftover would match a later run's fixtures).
 		try {
-			$this->db->prepare("DELETE FROM fil_inbound_email_filters WHERE fil_match_from = ?")
+			$this->db->prepare("DELETE FROM ief_inbound_email_filters WHERE ief_match_from = ?")
 				->execute(['sender_' . $this->suffix . '@out.test']);
 		} catch (\Throwable $e) {}
 		// Grants don't cascade on raw alias delete (no DB FK), so clean them first.

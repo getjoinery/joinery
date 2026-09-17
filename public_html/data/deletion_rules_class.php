@@ -267,11 +267,11 @@ class DeletionRule extends SystemBase {
             return null;
         }
 
-        // Two models declare this prefix (e.g. 'cnv' is both Conversation and
-        // ContentVersion). The column name embeds the singular entity
+        // Two models declare this prefix (none do today; the scaffolder only
+        // warns on a taken prefix). The column name embeds the singular entity
         // ({own}_{prefix}_{entity}_id), so match that against the candidate
         // table names instead of taking whichever model was discovered first:
-        // msg_cnv_conversation_id names cnv_conversations. Resolve only on an
+        // a pst_fil_file_id would name fil_files. Resolve only on an
         // exact singular/plural match - a column that matches none of the
         // candidates stays unrecognized rather than guessed, and a declared
         // override for it must name 'source_table'/'source_class'.
@@ -335,9 +335,9 @@ class DeletionRule extends SystemBase {
 
                 if ($reflection->hasProperty('prefix')) {
                     $prefix = $reflection->getStaticPropertyValue('prefix');
-                    // Keep every table claiming the prefix - six prefixes are
-                    // declared by two models each (bkt, cnv, rcp, fil, abt,
-                    // del), and getSourceTableFromColumn() disambiguates.
+                    // Keep every table claiming the prefix. Every prefix has one
+                    // owner today; the scaffolder only warns on a taken one, so
+                    // getSourceTableFromColumn() still disambiguates a pair.
                     if ($prefix && !in_array($table, $prefix_to_tables[$prefix] ?? [], true)) {
                         $prefix_to_tables[$prefix][] = $table;
                     }
