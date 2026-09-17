@@ -5,6 +5,12 @@
  * 
  * This class extracts the core functionality from update_database.php to make it
  * reusable for plugin installations and system repairs.
+ *
+ * @version 1.1 - a primary key that moves to another column is dropped CASCADE: a
+ *   foreign key on another table that depended on it goes with it, named in the
+ *   transcript, and the declared ones come back in the foreign-key step after
+ *   migrations. A dependent key used to fail the swap as a schema error, which
+ *   stopped every migration behind it.
  */
 class DatabaseUpdater {
     
@@ -2152,7 +2158,30 @@ class DatabaseUpdater {
                 if (preg_match('/[;\'"\\\\-]{2}|\/\*|\*\/|\\x00/', $constraint_name)) {
                     throw new PDOException("Invalid constraint name - contains potentially malicious characters");
                 }
-                $drop_sql = "ALTER TABLE {$table_name} DROP CONSTRAINT {$constraint_name}";
+                // A foreign key on another table that references this key
+                // depends on it, and Postgres refuses to drop a key with
+                // dependents. The key is moving to the column the spec names;
+                // every declared foreign key is materialized again against
+                // that column in the step that follows migrations, so the
+                // dependents go with the old key here (CASCADE) and are named,
+                // so a transcript shows what left and what the later step put
+                // back. Without this a model whose key moved was stuck behind
+                // any one table that pointed at it — bkt_backup_targets behind
+                // bkh_backup_history on the first node the 0.8.405 release
+                // reached.
+                $dep_q = $dblink->prepare(
+                    "SELECT c.conname, c.conrelid::regclass AS dependent_table
+                       FROM pg_constraint c
+                      WHERE c.contype = 'f'
+                        AND c.confrelid = ?::regclass
+                        AND c.conindid = (SELECT p.conindid FROM pg_constraint p
+                                           WHERE p.conname = ? AND p.conrelid = ?::regclass)");
+                $dep_q->execute(['public.' . $table_name, $constraint_name, 'public.' . $table_name]);
+                foreach ($dep_q->fetchAll(PDO::FETCH_ASSOC) as $dep) {
+                    echo "  Dropping foreign key {$dep['dependent_table']}.{$dep['conname']} with the old primary key of {$table_name}; "
+                       . "a declared one is materialized again after migrations<br>\n";
+                }
+                $drop_sql = "ALTER TABLE {$table_name} DROP CONSTRAINT {$constraint_name} CASCADE";
                 $q = $dblink->prepare($drop_sql);
                 $q->execute();
             }
