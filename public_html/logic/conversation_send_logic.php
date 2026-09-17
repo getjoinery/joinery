@@ -9,7 +9,7 @@
  * of the legacy /ajax/conversations_ajax.php endpoint; participant
  * authorization matches it exactly (sender or recipient).
  *
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 require_once(__DIR__ . '/../includes/PathHelper.php');
@@ -75,6 +75,11 @@ function conversation_send_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Send a message in a conversation (conversation_id or to for a new/existing 1:1)',
+		'input' => [
+			'body' => ['type' => 'text', 'required' => false, 'label' => 'Message body'],
+			'conversation_id' => ['type' => 'int', 'required' => false, 'label' => 'Conversation ID'],
+			'to' => ['type' => 'int', 'required' => false, 'label' => 'Recipient user ID (new or existing 1:1)'],
+		],
 	];
 }
 

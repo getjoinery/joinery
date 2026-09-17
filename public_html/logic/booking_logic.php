@@ -45,6 +45,9 @@ function booking_logic_descriptor() {
     return [
         'requires_session' => true,
         'description' => 'Book an appointment',
+        'input' => [
+            'booking_type_id' => ['type' => 'int', 'required' => true, 'label' => 'Booking type ID'],
+        ],
     ];
 }
 ?>

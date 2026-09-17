@@ -50,6 +50,9 @@ function passkey_login_options_logic_descriptor() {
 	return [
 		'requires_session' => false,
 		'description' => 'Begin passwordless passkey sign-in (returns WebAuthn request options)',
+		'input' => [
+			'email' => ['type' => 'string', 'required' => false, 'label' => 'Email address (omit for a discoverable credential)'],
+		],
 	];
 }
 ?>

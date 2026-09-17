@@ -24,7 +24,7 @@
  * reading it needs an open unlock window; a locked one returns {locked:true},
  * the same contract the body, source and draft reads use.
  *
- * @version 1.1.0
+ * @version 1.1.1
  * @changelog 1.1.0 - review fixes: the byte ceiling refuses from the recorded size BEFORE any fetch/decrypt, and every path that fetched bytes (or refused for size) writes a throttle row — refusals were the one unthrottled, most expensive request
  */
 
@@ -169,6 +169,9 @@ function attachment_text_logic_descriptor() {
 	return array(
 		'requires_session' => true,
 		'description' => 'Return one mail attachment as plain text, without opening the file',
+		'input' => [
+			'attachment_id' => ['type' => 'int', 'required' => true, 'label' => 'Attachment ID'],
+		],
 	);
 }
 ?>

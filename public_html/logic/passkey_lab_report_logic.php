@@ -42,6 +42,14 @@ function passkey_lab_report_logic_descriptor() {
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
 		'description' => 'Passkey lab (superadmin): record the browser-side outcome of a diagnostic ceremony',
+		'input' => [
+			'variant' => ['type' => 'string', 'required' => false, 'max_length' => 40, 'label' => 'Options variant name'],
+			'outcome' => ['type' => 'string', 'required' => false, 'label' => 'success, or anything else for failure'],
+			'elapsed_ms' => ['type' => 'int', 'required' => false, 'label' => 'Elapsed milliseconds'],
+			'detail' => ['type' => 'string', 'required' => false, 'label' => 'Success note'],
+			'error_name' => ['type' => 'string', 'required' => false, 'label' => 'Browser error name'],
+			'error_message' => ['type' => 'string', 'required' => false, 'label' => 'Browser error message'],
+		],
 	];
 }
 ?>

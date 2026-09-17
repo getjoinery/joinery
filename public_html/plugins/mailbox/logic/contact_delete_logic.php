@@ -6,7 +6,7 @@
  * Scoped to the caller — a contact id owned by another user is a no-op. Returns
  * {deleted: bool}.
  *
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -35,6 +35,9 @@ function contact_delete_logic_descriptor() {
 	return array(
 		'requires_session' => true,
 		'description' => 'Delete one of the caller\'s contacts',
+		'input' => [
+			'contact_id' => ['type' => 'int', 'required' => true, 'label' => 'Contact ID'],
+		],
 	);
 }
 ?>

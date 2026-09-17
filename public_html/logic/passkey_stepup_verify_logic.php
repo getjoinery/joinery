@@ -35,6 +35,9 @@ function passkey_stepup_verify_logic_descriptor() {
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
 		'description' => 'Complete passkey step-up confirmation, marking the session recently re-verified',
+		'input' => [
+			'credential' => ['type' => 'object', 'required' => true, 'label' => 'WebAuthn credential response'],
+		],
 	];
 }
 ?>

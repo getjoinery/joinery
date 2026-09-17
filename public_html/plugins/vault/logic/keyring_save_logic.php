@@ -37,6 +37,9 @@ function keyring_save_logic_descriptor() {
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
 		'description' => 'Store the password store DEK sealed to the vault public key (opaque blob) - create-only, an existing sealed key is never overwritten',
+		'input' => [
+			'wrapped_dek' => ['type' => 'text', 'required' => true, 'label' => 'Store key sealed to the vault public key'],
+		],
 	];
 }
 ?>

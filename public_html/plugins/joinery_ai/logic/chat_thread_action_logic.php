@@ -61,5 +61,10 @@ function chat_thread_action_logic(array $input): LogicResult {
 
 function chat_thread_action_logic_descriptor() {
     return ['requires_session' => true,
-            'description' => 'Pin, rename, or delete an AI chat conversation.'];
+            'description' => 'Pin, rename, or delete an AI chat conversation.',
+            'input' => [
+                'conversation_id' => ['type' => 'int', 'required' => true, 'label' => 'Conversation ID'],
+                'action' => ['type' => 'string', 'required' => true, 'enum' => ['pin', 'rename', 'delete'], 'label' => 'Action'],
+                'value' => ['type' => 'string', 'required' => false, 'label' => 'Pinned flag (pin) or new title (rename)'],
+            ]];
 }

@@ -10,7 +10,7 @@
  * {locked:true} when a sealed draft with attachments needs an unlock window it lacks —
  * the client prompts a one-tap unlock, then resaves.
  *
- * @version 1.1.0
+ * @version 1.1.1
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -75,6 +75,19 @@ function draft_save_logic_descriptor() {
 	return array(
 		'requires_session' => true,
 		'description' => 'Create or update a compose draft (multipart attachments supported)',
+		'input' => [
+			'alias_id' => ['type' => 'int', 'required' => false, 'label' => 'Mailbox alias ID'],
+			'draft_id' => ['type' => 'int', 'required' => false, 'label' => 'Draft ID'],
+			'mode' => ['type' => 'string', 'required' => false, 'label' => 'new, reply, reply_all or forward'],
+			'source_id' => ['type' => 'int', 'required' => false, 'label' => 'Message being replied to or forwarded'],
+			'to' => ['type' => 'string', 'required' => false, 'label' => 'To addresses'],
+			'cc' => ['type' => 'string', 'required' => false, 'label' => 'Cc addresses'],
+			'bcc' => ['type' => 'string', 'required' => false, 'label' => 'Bcc addresses'],
+			'subject' => ['type' => 'string', 'required' => false, 'label' => 'Subject'],
+			'body' => ['type' => 'text', 'required' => false, 'label' => 'Plain-text body'],
+			'body_html' => ['type' => 'text', 'required' => false, 'label' => 'HTML body'],
+			'inline_manifest' => ['type' => 'string', 'required' => false, 'label' => 'Inline image manifest (local-id => filename)'],
+		],
 	);
 }
 ?>

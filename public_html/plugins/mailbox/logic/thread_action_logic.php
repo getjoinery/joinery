@@ -18,7 +18,7 @@
  * (specs/mailbox_trash_folder.md), so they expand a thread_key under the Trash
  * scope; every other action refuses a discarded row by scope.
  *
- * @version 1.3.0
+ * @version 1.3.1
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -135,7 +135,17 @@ function thread_action_logic(array $input): LogicResult {
 function thread_action_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'description' => 'Mutate mail state: read/star/archive/delete/spam, allow a sender, restore/purge from trash, labels, create-folder',
+		'description' => 'Mutate mail state: read/star/archive/delete/spam, allow a sender, restore/purge from trash, labels, create-folder, delete-label',
+		'input' => [
+			'action' => ['type' => 'string', 'required' => true, 'enum' => ['mark_read', 'mark_unread', 'star', 'unstar', 'delete', 'archive', 'unarchive', 'mark_spam', 'mark_not_spam', 'allow_sender', 'restore', 'purge', 'set_membership', 'create_folder', 'delete_label'], 'label' => 'Action'],
+			'alias_id' => ['type' => 'string', 'required' => false, 'label' => 'Mailbox alias ID, unmatched, or unmatched:{domain_id}'],
+			'ids' => ['type' => 'array', 'required' => false, 'items' => ['type' => 'int'], 'label' => 'Message IDs'],
+			'thread_keys' => ['type' => 'array', 'required' => false, 'items' => ['type' => 'string'], 'label' => 'Thread keys (whole selection)'],
+			'thread_key' => ['type' => 'string', 'required' => false, 'label' => 'One thread key'],
+			'folder_id' => ['type' => 'int', 'required' => false, 'label' => 'Folder ID (set_membership, delete_label)'],
+			'present' => ['type' => 'bool', 'required' => false, 'label' => 'Add to the folder (set_membership)'],
+			'name' => ['type' => 'string', 'required' => false, 'label' => 'Folder name (create_folder)'],
+		],
 	];
 }
 

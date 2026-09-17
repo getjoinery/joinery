@@ -3,7 +3,10 @@
  * Coerces and validates input against a logic-file descriptor's `input`
  * schema. Each input entry can declare:
  *   - type: 'string' | 'int' | 'float' | 'bool' | 'email' | 'text' |
- *           'password' | 'date' | 'datetime' | 'array'
+ *           'password' | 'date' | 'datetime' | 'array' | 'object'
+ *     ('object' is an opaque JSON object — a WebAuthn credential response,
+ *     an unlocker, a browser-produced wrapping blob — checked to be an
+ *     object and passed through untouched; also usable as an array's `items`)
  *   - required: bool
  *   - label: string (for error messages)
  *   - default: scalar (substituted when value is absent and not required)
@@ -27,7 +30,10 @@
  * The logic file's own validation still runs as the backstop — this is the
  * fast first-pass at the boundary, not a replacement.
  *
- * @version 1.2
+ * @version 1.3
+ * @changelog 1.3 - type 'object': an opaque JSON object passed through
+ *   unchanged, for descriptor fields whose value is structured data the
+ *   logic (not the boundary) interprets.
  * @changelog 1.2 - type 'array' also accepts a scalar `items` spec (a list of
  *   strings/ints/…), used by list-shaped config fields like the email jobs'
  *   mailbox_aliases.
@@ -218,6 +224,12 @@ class DescriptorValidator {
             case 'datetime':
                 if (!is_string($value) || strtotime($value) === false) {
                     throw new InvalidArgumentException("$label ($field) must be a valid datetime.");
+                }
+                return $value;
+
+            case 'object':
+                if (!is_array($value)) {
+                    throw new InvalidArgumentException("$label ($field) must be an object.");
                 }
                 return $value;
 

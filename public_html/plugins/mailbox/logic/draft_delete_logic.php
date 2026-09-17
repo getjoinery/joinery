@@ -7,7 +7,7 @@
  * never lingers in a trash tier — there is no draft trash). Scope is enforced in
  * MailboxDrafts. Returns {deleted:bool}.
  *
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -44,6 +44,9 @@ function draft_delete_logic_descriptor() {
 	return array(
 		'requires_session' => true,
 		'description' => 'Discard a saved draft (row + attachments + files)',
+		'input' => [
+			'draft_id' => ['type' => 'int', 'required' => true, 'label' => 'Draft ID'],
+		],
 	);
 }
 ?>

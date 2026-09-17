@@ -8,7 +8,7 @@
  * its own occurrence_date context (from the feed item) when editing a single
  * occurrence — the stored fields returned here are the series values.
  *
- * @version 1.1.0
+ * @version 1.1.1
  * @changelog 1.1.0 - location, link, notes in the payload
  */
 
@@ -88,6 +88,9 @@ function calendar_entry_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Load one native calendar entry (owner-only) for editing',
+		'input' => [
+			'entry_id' => ['type' => 'int', 'required' => true, 'label' => 'Calendar entry ID'],
+		],
 	];
 }
 

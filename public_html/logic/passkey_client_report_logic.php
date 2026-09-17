@@ -42,6 +42,14 @@ function passkey_client_report_logic_descriptor() {
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
 		'description' => 'Record a browser-side passkey ceremony failure (error name, surface, timing) for diagnostics',
+		'input' => [
+			'context' => ['type' => 'string', 'required' => false, 'max_length' => 80, 'label' => 'Ceremony surface'],
+			'error_name' => ['type' => 'string', 'required' => false, 'max_length' => 40, 'label' => 'Browser error name'],
+			'error_message' => ['type' => 'string', 'required' => false, 'max_length' => 140, 'label' => 'Browser error message'],
+			'focus' => ['type' => 'bool', 'required' => false, 'label' => 'Document had focus'],
+			'visibility' => ['type' => 'string', 'required' => false, 'max_length' => 10, 'label' => 'Document visibility state'],
+			'elapsed_ms' => ['type' => 'int', 'required' => false, 'label' => 'Elapsed milliseconds'],
+		],
 	];
 }
 ?>

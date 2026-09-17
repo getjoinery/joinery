@@ -101,6 +101,10 @@ function vault_regenerate_codes_logic_descriptor() {
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
 		'description' => 'Invalidate all existing recovery codes and issue a fresh set; requires a recent step-up and a fresh unlocker (unlocker: {credential} from vault_unlock_options, {passphrase} or {code}) in the same request',
+		'input' => [
+			'recovery_code_count' => ['type' => 'int', 'required' => false, 'label' => 'Number of codes to issue (10 by default)'],
+			'unlocker' => ['type' => 'object', 'required' => false, 'label' => 'Fresh unlocker: {credential} from vault_unlock_options, {passphrase} or {code}'],
+		],
 	];
 }
 ?>

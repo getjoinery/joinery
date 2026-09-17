@@ -53,6 +53,10 @@ function passkey_lab_verify_logic_descriptor() {
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
 		'description' => 'Passkey lab (superadmin): verify a diagnostic assertion (no step-up marker is set)',
+		'input' => [
+			'variant' => ['type' => 'string', 'required' => false, 'max_length' => 40, 'label' => 'Options variant name'],
+			'credential' => ['type' => 'object', 'required' => true, 'label' => 'WebAuthn credential response'],
+		],
 	];
 }
 ?>

@@ -23,7 +23,7 @@
  * window omits the header-derived and sealed lines and returns locked:true
  * beside the lines that ARE readable — the panel shows what it can.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 function message_timeline_logic(array $input): LogicResult {
@@ -62,6 +62,10 @@ function message_timeline_logic_descriptor() {
 	return array(
 		'requires_session' => true,
 		'description' => 'The timeline of everything recorded about one mail message',
+		'input' => [
+			'message_id' => ['type' => 'int', 'required' => true, 'label' => 'Message ID'],
+			'refresh_delivery' => ['type' => 'bool', 'required' => false, 'label' => 'Re-query delivery state'],
+		],
 	);
 }
 ?>

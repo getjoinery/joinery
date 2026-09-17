@@ -8,7 +8,7 @@
  *
  * Exposed as POST /api/v1/action/dns_filtering/block_list.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 function block_list_logic(array $input): LogicResult{
@@ -60,6 +60,9 @@ function block_list_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'List a device\'s always-on and scheduled blocks with full contents (device_id)',
+		'input' => [
+			'device_id' => ['type' => 'int', 'required' => true, 'label' => 'Device ID'],
+		],
 	];
 }
 

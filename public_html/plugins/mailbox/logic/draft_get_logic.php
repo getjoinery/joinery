@@ -9,7 +9,7 @@
  * one-tap unlock affordance, same as reading sealed mail). Scope is enforced in
  * MailboxDrafts — a draft outside the viewer's grants returns an empty result.
  *
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -52,6 +52,9 @@ function draft_get_logic_descriptor() {
 	return array(
 		'requires_session' => true,
 		'description' => 'Return the decrypted compose state + attachments for a saved draft',
+		'input' => [
+			'draft_id' => ['type' => 'int', 'required' => true, 'label' => 'Draft ID'],
+		],
 	);
 }
 ?>

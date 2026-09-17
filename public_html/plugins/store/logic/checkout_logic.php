@@ -239,6 +239,14 @@ function checkout_logic_descriptor() {
     return [
         'requires_session' => true,
         'description' => 'Add item to cart',
+        'input' => [
+            'coupon_code' => ['type' => 'string', 'required' => false, 'label' => 'Coupon code to apply'],
+            'clear_coupon_code' => ['type' => 'string', 'required' => false, 'label' => 'Coupon code to remove'],
+            'use_current_user' => ['type' => 'int', 'required' => false, 'label' => '1 to bill the signed-in user'],
+            'newbilling' => ['type' => 'int', 'required' => false, 'label' => '1 to enter new billing details'],
+            'billing_email' => ['type' => 'string', 'required' => false, 'label' => 'Billing email'],
+            'complete_order' => ['type' => 'string', 'required' => false, 'label' => 'Set to complete a zero-total order'],
+        ],
     ];
 }
 ?>

@@ -14,7 +14,7 @@
  * a discarded conversation is invisible to every other read, so the Trash view
  * says so when it asks.
  *
- * @version 1.2.0
+ * @version 1.2.1
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -61,6 +61,11 @@ function thread_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Fetch a mail thread: messages with bodies, signed attachment and inline-image URLs',
+		'input' => [
+			'thread_key' => ['type' => 'string', 'required' => true, 'label' => 'Thread key'],
+			'alias_id' => ['type' => 'string', 'required' => false, 'label' => 'Mailbox alias ID, unmatched, or unmatched:{domain_id}'],
+			'trash' => ['type' => 'bool', 'required' => false, 'label' => 'Read from Trash'],
+		],
 	];
 }
 

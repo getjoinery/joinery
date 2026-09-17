@@ -121,6 +121,11 @@ function event_sessions_course_logic_descriptor() {
     return [
         'requires_session' => true,
         'description' => 'Select course sessions',
+        'input' => [
+            'evt_event_id' => ['type' => 'int', 'required' => false, 'label' => 'Event ID'],
+            'event_id' => ['type' => 'int', 'required' => false, 'label' => 'Event ID (alias)'],
+            'session_number' => ['type' => 'int', 'required' => false, 'label' => 'Session number (defaults to the lowest)'],
+        ],
     ];
 }
 ?>

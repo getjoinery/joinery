@@ -28,6 +28,9 @@ function vault_client_status_logic_descriptor() {
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
 		'description' => 'Client-custody vault keyring status for a scope (public key, KDF params, opaque wrapping blobs) - no secret material',
+		'input' => [
+			'scope' => ['type' => 'string', 'required' => true, 'label' => 'Client-custody scope'],
+		],
 	];
 }
 ?>

@@ -24,7 +24,7 @@
  * local-id => filename), and `draft_id` (morph a saved draft into the Sent row). All
  * optional, so the mobile `mailbox/send` contract stays backward-compatible.
  *
- * @version 1.3.0
+ * @version 1.3.1
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -84,6 +84,19 @@ function send_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Send a reply, reply-all, or forward as the mailbox',
+		'input' => [
+			'alias_id' => ['type' => 'int', 'required' => false, 'label' => 'Mailbox alias ID'],
+			'draft_id' => ['type' => 'int', 'required' => false, 'label' => 'Draft ID'],
+			'mode' => ['type' => 'string', 'required' => false, 'label' => 'new, reply, reply_all or forward'],
+			'source_id' => ['type' => 'int', 'required' => false, 'label' => 'Message being replied to or forwarded'],
+			'to' => ['type' => 'string', 'required' => false, 'label' => 'To addresses'],
+			'cc' => ['type' => 'string', 'required' => false, 'label' => 'Cc addresses'],
+			'bcc' => ['type' => 'string', 'required' => false, 'label' => 'Bcc addresses'],
+			'subject' => ['type' => 'string', 'required' => false, 'label' => 'Subject'],
+			'body' => ['type' => 'text', 'required' => false, 'label' => 'Plain-text body'],
+			'body_html' => ['type' => 'text', 'required' => false, 'label' => 'HTML body'],
+			'inline_manifest' => ['type' => 'string', 'required' => false, 'label' => 'Inline image manifest (local-id => filename)'],
+		],
 	];
 }
 

@@ -59,6 +59,9 @@ function vault_unlock_passphrase_logic_descriptor() {
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
 		'description' => 'Unlock the vault with the enrolled bypass phrase',
+		'input' => [
+			'passphrase' => ['type' => 'password', 'required' => true, 'label' => 'Bypass phrase'],
+		],
 	];
 }
 ?>

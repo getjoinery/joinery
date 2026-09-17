@@ -127,6 +127,12 @@ function survey_logic_descriptor() {
     return [
         'requires_session' => true,
         'description' => 'Submit survey response',
+        'input' => [
+            'survey_id' => ['type' => 'string', 'required' => true, 'label' => 'Encoded survey ID'],
+            'offset' => ['type' => 'int', 'required' => false, 'label' => 'Pagination offset'],
+            'sort' => ['type' => 'string', 'required' => false, 'label' => 'Sort column'],
+            'sdirection' => ['type' => 'string', 'required' => false, 'label' => 'Sort direction'],
+        ],
     ];
 }
 ?>

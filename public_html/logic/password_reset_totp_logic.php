@@ -11,7 +11,7 @@
  * passkey path closes. Rate-limited; the completion path notifies like every
  * reset.
  *
- * @version 1.0
+ * @version 1.1
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
@@ -83,6 +83,10 @@ function password_reset_totp_logic_descriptor() {
 	return [
 		'requires_session' => false,
 		'description' => 'Reset a password using email plus an authenticator code (accounts without a vault only)',
+		'input' => [
+			'email' => ['type' => 'string', 'required' => false, 'label' => 'Email address'],
+			'totp_code' => ['type' => 'password', 'required' => false, 'label' => 'Authenticator code'],
+		],
 	];
 }
 ?>

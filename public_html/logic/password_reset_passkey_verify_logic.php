@@ -22,7 +22,7 @@
  * that session is discarded here and replaced with a scoped, expiring reset
  * ticket in $_SESSION. Authorization always completes on /password-reset-2.
  *
- * @version 1.0
+ * @version 1.1
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
@@ -96,6 +96,9 @@ function password_reset_passkey_verify_logic_descriptor() {
 	return [
 		'requires_session' => false,
 		'description' => 'Complete a passkey password reset; vault holders are told when a second factor is still required',
+		'input' => [
+			'credential' => ['type' => 'object', 'required' => true, 'label' => 'WebAuthn credential response'],
+		],
 	];
 }
 ?>
