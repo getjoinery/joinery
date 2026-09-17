@@ -346,6 +346,13 @@ production. The `referential_integrity` gate itself stays read-only; a red
 there points at the run that just happened, and a failed fixture teardown
 also fails the suite that leaked, right where the leaker is named.
 
+Its sibling `tables_without_model` (tier `safe`) fails the gate when a live
+table is declared by no model and is not on its short list of tables that
+stay outside on purpose (reference data, one recovery artifact), each with
+its reason. A table no model declares lives outside `update_database`, the
+deletion engine and the validator — a new one is a decision: give it a model
+(`docs/example_class.php`), or list it there with why.
+
 It also names surviving rows in the fixture families that label themselves.
 Name any standalone fixture `HarnessTest <something>` in the table's name column
 (`evt_events`, `svy_surveys`, `grp_groups`, `pro_products`, `bkt_booking_types`,

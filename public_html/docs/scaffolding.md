@@ -112,6 +112,8 @@ A JSON file — the same format as every other declarative manifest in the platf
 
 ### Required vs. optional
 
+A `prefix` another table already carries is reported as a warning, not refused: two models may share a prefix (the deletion engine tells their foreign keys apart by the entity in the column name, which is why a foreign key always carries the full entity), and a plugin written elsewhere cannot know what core will claim. A unique prefix still reads better — prefer one if it is free.
+
 Only `entity`, `prefix`, `plural`, and `fields:` are required. Everything else has a sensible default: `into:` → `core`, `surfaces:` → all five page tokens, `delete.strategy` → `soft`, and the whole `api:`/`ai:` blocks default to off — omit them and the entity simply isn't exposed to the REST/AI surfaces. Field-level `api:`/`ai:` lists are optional too; declare them only when tuning a surface that's on.
 
 ### Field naming
@@ -195,7 +197,7 @@ Run `php plugins/joinery_ai/cli/owner_scope_report.php` after generating to conf
 php utils/scaffold.php <manifest.json> [--force] [--dry-run]
 ```
 
-- `--force` — overwrite existing files (default: refuse and report collisions). `--force` replaces a whole file outright (no merge); expect it only for greenfield iteration before business logic is added. It also **relaxes the existence guards**: the "table already exists" and "prefix already used" checks become warnings instead of hard errors, so you can regenerate a class whose table is already created (e.g. after fixing a template bug). All other validation stays hard.
+- `--force` — overwrite existing files (default: refuse and report collisions). `--force` replaces a whole file outright (no merge); expect it only for greenfield iteration before business logic is added. It also **relaxes the table-exists guard**: "table already exists" becomes a warning instead of a hard error, so you can regenerate a class whose table is already created (e.g. after fixing a template bug). All other validation stays hard.
 - `--dry-run` — render and validate, print the plan, write nothing.
 
 Before writing, the CLI prints the resolved file list and derived names (table, URLs) so the `plural`-driven derivations can be confirmed, then puts its own output through three guarantees:
@@ -216,7 +218,7 @@ Any failure aborts the write with nothing written — generated code that fails 
 
 ## Manifest validation
 
-The engine fails fast with actionable errors on: a prefix that isn't exactly 3 lowercase letters or collides with an existing table prefix; a `plural` that isn't a bare snake slug or resolves to an existing table; a `surfaces:` token outside the allowed set or one that resolves (after alias expansion) to an empty set; a field `type` outside the supported set; a field name that includes the prefix or duplicates the PK/soft-delete column; a `filters:` column not defined in `fields:`; `api.public_read` without `api.readable`; an `ai.writable_fields` column caught by the credential regex or also listed in `api.unwritable_fields`; or an `into:` plugin directory that doesn't exist.
+The engine fails fast with actionable errors on: a prefix that isn't exactly 3 lowercase letters; a `plural` that isn't a bare snake slug or resolves to an existing table; a `surfaces:` token outside the allowed set or one that resolves (after alias expansion) to an empty set; a field `type` outside the supported set; a field name that includes the prefix or duplicates the PK/soft-delete column; a `filters:` column not defined in `fields:`; `api.public_read` without `api.readable`; an `ai.writable_fields` column caught by the credential regex or also listed in `api.unwritable_fields`; or an `into:` plugin directory that doesn't exist.
 
 ---
 
