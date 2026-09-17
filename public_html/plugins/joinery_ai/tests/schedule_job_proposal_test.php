@@ -28,7 +28,9 @@
  *
  * Run: php tests/run.php db --filter=schedule_job_proposal
  *
- * @version 1.2
+ * @version 1.3
+ * @changelog 1.3 - location/link/notes on the proposal and card; the link gate
+ *   (verbatim in the digest, http(s) only) — specs/calendar_entry_details.md
  * @changelog 1.2 - ended events refused, expiry at event end, fixture date relative
  * @changelog 1.1 - pins the card's when line (owner's zone) and source line (subject, sender, mailbox)
  */
@@ -92,7 +94,7 @@ $recipe->prepare();
 $recipe->save();
 harness_register_row('rcp_recipes', 'rcp_recipe_id', (int)$recipe->key);
 
-$mk = function ($subject) use ($domain, $alias_id) {
+$mk = function ($subject, $body = 'Meeting Friday 3pm at the office.') use ($domain, $alias_id) {
 	$m = new InboundEmailMessage(NULL);
 	$m->set('iem_ied_inbound_email_domain_id', (int)$domain->key);
 	$m->set('iem_iea_inbound_email_alias_id', $alias_id);
@@ -100,7 +102,7 @@ $mk = function ($subject) use ($domain, $alias_id) {
 	$m->set('iem_sender', 'stranger@example.com');
 	$m->set('iem_recipient', 'zzprop@example.com');
 	$m->set('iem_subject', $subject);
-	$m->set('iem_body_plain', 'Meeting Friday 3pm at the office.');
+	$m->set('iem_body_plain', $body);
 	$m->set('iem_body_html', '');
 	$m->set('iem_message_id_header', 'zzprop-' . bin2hex(random_bytes(8)) . '@example.com');
 	$m->set('iem_received_time', gmdate('Y-m-d H:i:s'));
@@ -297,6 +299,48 @@ if (count($pending) === 1) {
 	check((string)$resolved->get('aqa_status') === AiQueuedAction::STATUS_DECLINED, 'declined');
 	check(count($entries_for((string)$second)) === 0, 'and no entry was written');
 }
+
+// =====================================================================
+section('details ride along; a link must be one the email actually contains');
+// =====================================================================
+
+$join = 'https://meet.example.com/j/8812?pwd=abc';
+$fourth = $mk('Kickoff call', "Kickoff Friday 3pm. Join: $join  Bring your badge, confirmation #Q-17.");
+$detailed = $verdict + ['location' => 'Zoom', 'link' => $join, 'notes' => "Confirmation #Q-17\nBring your badge"];
+$job->recordVerdict((string)$fourth, $detailed, $recipe, 'test-model');
+$pending = $pending_for_recipe();
+check(count($pending) === 1, 'the detailed verdict queues one proposal', count($pending));
+if (count($pending) === 1) {
+	$args = json_decode((string)$pending[0]->get('aqa_arguments'), true);
+	check(($args['location'] ?? '') === 'Zoom' && ($args['notes'] ?? '') === "Confirmation #Q-17\nBring your badge",
+		'location and notes are carried as given', json_encode($args));
+	check(($args['link'] ?? '') === $join, 'a link that is in the email body is kept verbatim', json_encode($args));
+	$facts = ActionQueue::card($pending[0])['facts'];
+	$joined = implode("\n", array_map('strval', $facts));
+	check(strpos($joined, 'Where: Zoom') !== false, 'the card says where', $joined);
+	check(strpos($joined, 'Link: ' . $join) !== false, 'the card shows the whole link', $joined);
+	check(strpos($joined, 'Notes: Confirmation #Q-17') !== false, 'the card shows the notes', $joined);
+	ActionQueue::resolve((int)$pending[0]->key, $owner_uid, 'decline');
+}
+
+$fifth = $mk('Composed link', 'Dinner Friday 3pm. Details at https://real.example.com/reservations/55');
+$composed = $verdict + ['link' => 'https://real.example.com/reservations'];  // a prefix, not the listed URL
+$job->recordVerdict((string)$fifth, $composed, $recipe, 'test-model');
+$pending = $pending_for_recipe();
+check(count($pending) === 1, 'a verdict with an unlisted link still proposes the entry', count($pending));
+if (count($pending) === 1) {
+	$args = json_decode((string)$pending[0]->get('aqa_arguments'), true);
+	check(!array_key_exists('link', $args), 'but the link the model composed is dropped', json_encode($args));
+	ActionQueue::resolve((int)$pending[0]->key, $owner_uid, 'decline');
+}
+
+$digest = "URLS FOUND (2):\n1. https://ok.example.com/a\n2. javascript:alert(1)";
+check(EmailScheduleJob::admittedLink('https://ok.example.com/a', $digest) === 'https://ok.example.com/a', 'admittedLink keeps a listed https URL');
+check(EmailScheduleJob::admittedLink(' https://ok.example.com/a ', $digest) === 'https://ok.example.com/a', 'and trims it first');
+check(EmailScheduleJob::admittedLink('javascript:alert(1)', $digest) === null, 'a listed non-http(s) URL is still refused');
+check(EmailScheduleJob::admittedLink('https://ok.example.com/ab', $digest) === null, 'a URL that merely extends a listed one is refused');
+check(EmailScheduleJob::admittedLink('', $digest) === null && EmailScheduleJob::admittedLink(null, $digest) === null, 'no link is no link');
+check(count($pending_for_recipe()) === 0, 'nothing is left pending after the details section');
 
 // =====================================================================
 section('a proposal whose recipe is gone fails closed');

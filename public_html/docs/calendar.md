@@ -58,6 +58,20 @@ There is exactly one upstream contract — items. "Busy time" is a derived view:
 
 These are two independent axes, not one. `cal_blocks_availability` says whether an item occupies time at all (the iCal transparency axis) — untouched by firmness. `cal_status` (`tentative` | `confirmed` | `cancelled`) says how sure the calendar is that the entry is real: every human-authored path (the calendar form, `.ics` import) writes `confirmed`; an AI-extracted entry (`specs/joinery_ai_calendar_ai_surface.md`, `CalendarEntryImporter`) writes `tentative` until the owner acts on it. An AI-extracted meeting is still busy — the calendar records the truth about occupied time; risk tolerance for an *unconfirmed* commitment lives with each consumer via the `getBusyBlocks()` seam above, not by silently marking it free. `CalendarItem::$status` (default `confirmed`) carries this through the projection: `CalendarEntry`'s own projections (`get_instances_for_range()`, `NativeCalendarItemSource`) populate it from `cal_status`; every other source leaves the default, since a projected event or booking is always real.
 
+## Entry details: location, link, notes
+
+A native entry carries three optional details beyond its title and time, the same three every major calendar puts on its create dialog:
+
+| Column | Holds | Rule |
+|---|---|---|
+| `cal_location` | Where it is, free text | Trimmed, 255 characters. |
+| `cal_link` | The one URL that gets the owner in: join link, tickets, confirmation | Absolute `http`/`https` only, 2048 characters; anything else is refused, never silently kept. |
+| `cal_notes` | Plain-text facts: confirmation number, dial-in, what to bring | Trimmed, 10 000 characters; rendered escaped with line breaks kept, never as HTML. |
+
+Empty and NULL mean the same thing. **Every write goes through `CalendarEntry::set_detail_fields($location, $link, $notes)`**, and `CalendarEntry::normalize_link()` is the link rule on its own for a caller that must validate before saving — the calendar form reports a bad link as a form error, the `.ics` importer drops it with a warning, the AI schedule job drops it.
+
+Where they appear: the full entry form ("More options") edits all three; the quick-entry popover edits the location only, and its save touches only the fields it sends, so a quick edit never clobbers a stored link or notes. `location` and `link` travel on `CalendarItem` (`toArray()` → the feed; the grid chip's tooltip adds the location) at `details` visibility and are stripped at `busy` with the title. Notes stay off the feed and come back on the `calendar_entry` editor payload. Recurring scope edits carry all three onto a replacement row or a split-off parent exactly as the reminder override is carried. The reminder email shows them (see below), and the AI surface reads and proposes them (`plugins/joinery_ai/docs/overview.md` § Calendar access).
+
 ## Native entries and the personal calendar page
 
 `/profile/calendar` renders the `calendar_grid` component against the owner's aggregated item feed (`/api/v1/action/calendar_feed`, `details` visibility). Native entries are created and edited there: click a day to start a new entry, click a native chip to edit it. A "blocking" entry removes its time from booking availability via the busy projection. Times are entered in the owner's timezone and stored as UTC.
@@ -73,8 +87,8 @@ path with the web form: the `_calendar_set_fields` / `_calendar_set_recurrence`
 | Action | Purpose |
 |---|---|
 | `calendar_feed` | Aggregated items over a UTC range (`start`, `end`; defaults −7d…+45d) at `details` visibility: `{items: [CalendarItem::toArray()...], timezone}`. |
-| `calendar_entry` | One native entry shaped for an editor (`entry_id`): wall-clock `date`/`start_time`/`end_time` + `timezone`, flags, `is_recurring_parent`, `recurrence_description`, and the stored `recurrence` fields. |
-| `calendar_entry_save` | Create/update: `date`, `title`, `all_day`, `blocks`, `start_time`/`end_time` (`HH:MM[:SS]`), optional `timezone` (IANA; defaults to the profile zone), optional `recurrence` object (`type`, `interval`, `days_of_week`, `week_of_month`, `ends: never\|date\|count` with `end_date`/`count`). With `entry_id` + `occurrence_date` it is a scope-aware recurring edit (`scope: this\|future\|all`, defaulting to the safe `this`). |
+| `calendar_entry` | One native entry shaped for an editor (`entry_id`): wall-clock `date`/`start_time`/`end_time` + `timezone`, flags, `location`/`link`/`notes`, `is_recurring_parent`, `recurrence_description`, and the stored `recurrence` fields. |
+| `calendar_entry_save` | Create/update: `date`, `title`, `all_day`, `blocks`, `start_time`/`end_time` (`HH:MM[:SS]`), optional `timezone` (IANA; defaults to the profile zone), optional `location`/`link`/`notes` (each applied only when present; `''` clears; a `link` that is not http(s) is an error), optional `recurrence` object (`type`, `interval`, `days_of_week`, `week_of_month`, `ends: never\|date\|count` with `end_date`/`count`). With `entry_id` + `occurrence_date` it is a scope-aware recurring edit (`scope: this\|future\|all`, defaulting to the safe `this`). |
 | `calendar_entry_delete` | Delete: standalone entries soft-delete; recurring parents take `scope` (`all` default; `this`/`future` require `occurrence_date`). |
 
 The wall-clock → UTC conversion happens server-side in the declared
@@ -128,8 +142,11 @@ A user can populate their calendar by uploading an iCalendar (`.ics`) file expor
 | `RRULE` | `cal_recurrence_*` when expressible + `cal_rrule_raw` (always) |
 | `EXDATE` | `cal_entry_exceptions` rows (when the event maps to a recurring parent) |
 | `RECURRENCE-ID` | exception on the parent + a standalone replacement entry (`cal_parent_entry_id` / `cal_parent_entry_date`) |
+| `LOCATION` | `cal_location` |
+| `DESCRIPTION` | `cal_notes` (plain text) |
+| `URL` | `cal_link` (an `URL` that is not http(s) is left out and counted as a warning) |
 
-Imported entries are `cal_type = personal`, `cal_visibility = details`, and `cal_source = ical_import`. `DESCRIPTION`, `LOCATION`, and `CLASS` are dropped — the native entry model is title + time + busy/recurrence and has no column for them.
+Imported entries are `cal_type = personal`, `cal_visibility = details`, and `cal_source = ical_import`. `CLASS` and `ATTENDEE` are dropped — the native entry has no visibility beyond the owner and no attendee model.
 
 **Timezones.** A `DTSTART` carrying a `TZID` is stored with that zone as `cal_timezone` and the value as the local wall-clock; a UTC (`…Z`) value is stored as the UTC instant with the local derived in the uploader's timezone; a date-only value is an all-day entry; a floating value is interpreted in the uploader's timezone. A `TZID` that is not a recognized IANA zone (e.g. an Outlook Windows name) falls back to the uploader's timezone and is reported as a warning.
 
@@ -155,7 +172,7 @@ The calendar emails members two things, both opt-in and both off by default: a *
 
 **The ledger.** Every send is claimed first in `cme_calendar_emails` (`CalendarEmail`) under a unique `cme_dedup_key` — `reminder:{entry_id}:{occurrence_start_utc}` or `{kind}:{user_id}:{period_key}` — which makes at-most-once a database guarantee (`CalendarEmail::claim()` returns `NULL` on a duplicate). A rescheduled entry gets a new occurrence start, hence a new key, hence a fresh reminder for the new time — intended. Rows expire on `calendar_email_log_retention_days` (default 90) via the retention sweep. Run-level audit goes to `EventLog` as `evl_event = calendar_emails_run`, written only when a pass sent something.
 
-**Templates and sending.** `calendar_reminder` and `calendar_summary` are inner (`emt_type = 2`) email templates, editable at `/admin/admin_email_templates`. The reminder body renders title/tentative inside conditionals so a vars array carrying only the time vars produces a generic "You have a calendar entry coming up" email — `CalendarEmailEngine::reminderVars()` is the single chokepoint deciding what an email may say about an entry, which is where a protection-level check belongs. Sending is strictly ambient (`EmailSender::sendTemplate`, the platform sender): cron holds no vault unlock window, so the session-gated compose transport is structurally unavailable to this path.
+**Templates and sending.** `calendar_reminder` and `calendar_summary` are inner (`emt_type = 2`) email templates, editable at `/admin/admin_email_templates`. The reminder body renders title/tentative/location/link/notes inside conditionals so a vars array carrying only the time vars produces a generic "You have a calendar entry coming up" email — `CalendarEmailEngine::reminderVars()` is the single chokepoint deciding what an email may say about an entry, which is where a protection-level check belongs. It escapes `location`, `link`, and `notes` itself (the template renderer substitutes raw; an AI-extracted entry's notes came from a stranger's email), and `notes` keeps its newlines for the template's `|nl2br` modifier. The summary appends ` @ location` to each line that has one. Sending is strictly ambient (`EmailSender::sendTemplate`, the platform sender): cron holds no vault unlock window, so the session-gated compose transport is structurally unavailable to this path.
 
 ## Deletion
 

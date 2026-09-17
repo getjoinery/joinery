@@ -18,6 +18,8 @@
  *   reminder_minutes optional reminder override; only applied when present.
  *                    '' = use my default, 0 = no reminder, else 60|30|15|5
  *                    minutes before start
+ *   location / link / notes  optional details; each applied only when
+ *                    present ('' clears). link must be an http(s) URL.
  *   recurrence       null, or { type: daily|weekly|monthly|yearly,
  *                    interval, days_of_week: [0-6] (weekly) or single 0-6
  *                    (monthly by-weekday), week_of_month: 1-4|-1,
@@ -27,7 +29,8 @@
  * logic/calendar_logic.php do the field/recurrence writes and the
  * scope-aware series splits.
  *
- * @version 1.1.0
+ * @version 1.2.0
+ * @changelog 1.2.0 - location, link, notes (specs/calendar_entry_details.md)
  */
 
 require_once(__DIR__ . '/../includes/PathHelper.php');
@@ -63,6 +66,22 @@ function calendar_entry_save_logic(array $input): LogicResult {
 	$reminder = array_key_exists('reminder_minutes', $input)
 		? _calendar_parse_reminder($input['reminder_minutes'])
 		: false;
+
+	// Details: only the keys the caller sent are applied (the popover sends
+	// location alone; a quick edit must not clobber a stored link or notes).
+	$details = [];
+	foreach (['location', 'link', 'notes'] as $k) {
+		if (array_key_exists($k, $input)) {
+			$details[$k] = (string)$input[$k];
+		}
+	}
+	if (isset($details['link'])) {
+		try {
+			CalendarEntry::normalize_link($details['link']);
+		} catch (CalendarEntryException $e) {
+			return LogicResult::error($e->getMessage());
+		}
+	}
 
 	if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
 		return LogicResult::error('Enter a valid date.');
@@ -158,7 +177,7 @@ function calendar_entry_save_logic(array $input): LogicResult {
 					$parent, ($scope !== '' ? $scope : 'this'), $odate, $title, $all_day, $blocks,
 					$start_local, $end_local, $start_utc, $end_utc, $tz,
 					$rec_type, $rec_interval, $rec_days, $rec_week, $rec_end_date,
-					$subject, $reminder
+					$subject, $reminder, $details
 				);
 				return LogicResult::render(array('saved' => true, 'entry_id' => (int)$parent->key));
 			}
@@ -180,6 +199,7 @@ function calendar_entry_save_logic(array $input): LogicResult {
 		if ($reminder !== false) {
 			$entry->set('cal_reminder_minutes', $reminder);
 		}
+		_calendar_apply_details($entry, $details);
 		$entry->save();
 
 		return LogicResult::render(array('saved' => true, 'entry_id' => (int)$entry->key));
@@ -219,6 +239,9 @@ function calendar_entry_save_logic_descriptor(): array {
 			'timezone'        => ['type' => 'string', 'required' => false, 'label' => 'IANA timezone of the wall-clock values'],
 			'occurrence_date' => ['type' => 'string', 'required' => false, 'label' => 'Occurrence date (recurring edit)'],
 			'reminder_minutes'=> ['type' => 'string', 'required' => false, 'label' => 'Reminder override: empty = use my default, 0 = none, else 60|30|15|5 minutes before'],
+			'location'        => ['type' => 'string', 'required' => false, 'max_length' => 255, 'label' => 'Location (free text)'],
+			'link'            => ['type' => 'string', 'required' => false, 'max_length' => 2048, 'label' => 'Link to join or open (http/https)'],
+			'notes'           => ['type' => 'string', 'required' => false, 'max_length' => 10000, 'label' => 'Notes (plain text)'],
 			'scope'           => ['type' => 'string', 'required' => false, 'enum' => ['this', 'future', 'all'], 'label' => 'Recurring edit scope'],
 			// 'recurrence' is deliberately not declared: it is a single object
 			// ({type, interval, days_of_week, ...}), and the schema's 'array'

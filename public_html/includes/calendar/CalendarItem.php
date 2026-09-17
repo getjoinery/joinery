@@ -29,6 +29,8 @@ class CalendarItem {
     public $type = self::TYPE_PERSONAL;
     public $title = null;               // owner-visible only
     public $url = null;                 // owner-visible only
+    public $location = null;            // owner-visible only (native entries)
+    public $link = null;                // owner-visible only (native entries): the join/open URL
     public $blocks_availability = true;
     // Firmness axis, distinct from blocks_availability (busy/free): 'tentative'
     // (AI/pipeline-extracted, unconfirmed) | 'confirmed' (default; every
@@ -83,6 +85,8 @@ class CalendarItem {
             $copy = clone $this;
             $copy->title = null;
             $copy->url = null;
+            $copy->location = null;
+            $copy->link = null;
             $copy->entry_id = null;
             $copy->occurrence_date = null;
             $copy->visibility = self::VIS_BUSY;
@@ -99,6 +103,8 @@ class CalendarItem {
             'all_day'             => $this->all_day,
             'title'               => $this->title,
             'url'                 => $this->url,
+            'location'            => $this->location,
+            'link'                => $this->link,
             'color'               => $this->getColor(),
             'type'                => $this->type,
             'source_key'          => $this->source_key,

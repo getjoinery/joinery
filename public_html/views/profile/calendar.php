@@ -211,6 +211,25 @@ $formwriter->dropinput('entry_start', 'Start', ['options' => $time_options, 'val
 $formwriter->dropinput('entry_end',   'End',   ['options' => $time_options, 'value' => $e_end]);
 $formwriter->checkboxinput('entry_blocks', 'Block this time (removes it from your booking availability)', ['value' => $is_edit ? (bool)$display_entry->get('cal_blocks_availability') : true]);
 
+// Details (specs/calendar_entry_details.md): where, the one link that gets
+// you in, and plain-text notes. A submitted value is what was saved, so a
+// failed save keeps what was typed.
+$formwriter->textinput('entry_location', 'Location', [
+    'value'       => $_POST['entry_location'] ?? ($is_edit ? (string)$display_entry->get('cal_location') : ''),
+    'placeholder' => 'e.g. Room 4B, Zoom, 12 Main St',
+    'maxlength'   => 255,
+]);
+$formwriter->textinput('entry_link', 'Link', [
+    'value'       => $_POST['entry_link'] ?? ($is_edit ? (string)$display_entry->get('cal_link') : ''),
+    'placeholder' => 'https://… (meeting, tickets, confirmation)',
+    'helptext'    => 'Shown in your reminder email as a link.',
+]);
+$formwriter->textbox('entry_notes', 'Notes', [
+    'value'       => $_POST['entry_notes'] ?? ($is_edit ? (string)$display_entry->get('cal_notes') : ''),
+    'rows'        => 4,
+    'placeholder' => 'Confirmation number, dial-in, what to bring…',
+]);
+
 // Reminder override. '' = inherit the member's default (set on
 // /profile/calendar_settings); the first option's label shows what that
 // default currently is, so the choice is legible without leaving the form.
@@ -409,6 +428,7 @@ $popwriter->checkboxinput('entry_all_day', 'All day', ['value' => true]);
             </div>
         </div>
 <?php
+$popwriter->textinput('entry_location', 'Location', ['placeholder' => 'Add location', 'maxlength' => 255]);
 $popwriter->checkboxinput('entry_blocks', 'Block this time (removes from booking availability)', ['value' => true]);
 ?>
     </div>
@@ -564,6 +584,7 @@ $popwriter->checkboxinput('entry_blocks', 'Block this time (removes from booking
         setField('entry_all_day', opts.allDay!==false);
         setField('entry_start', opts.startTime||''); setField('entry_end', opts.endTime||'');
         setField('entry_blocks', opts.blocksAvail!==false);
+        setField('entry_location', opts.location||'');
         syncAllDay();
         deleteBtn.hidden = !opts.isEdit;
         positionPopup(rect);
@@ -599,7 +620,10 @@ $popwriter->checkboxinput('entry_blocks', 'Block this time (removes from booking
             date:       getField('entry_date'),
             title:      getField('entry_title'),
             start_time: getField('entry_start'),
-            end_time:   getField('entry_end')
+            end_time:   getField('entry_end'),
+            // Location only: link and notes live under "More options", and
+            // the save action touches only the fields it is sent.
+            location:   getField('entry_location')
         };
         if (allDayEl && allDayEl.checked) { body.all_day = true; }
         if (blocksEl && blocksEl.checked) { body.blocks = true; }
@@ -660,7 +684,8 @@ $popwriter->checkboxinput('entry_blocks', 'Block this time (removes from booking
             date:startTz?startTz.date:'', allDay:!!it.all_day,
             startTime:(!it.all_day&&startTz)?startTz.time.slice(0,5):'',
             endTime:  (!it.all_day&&endTz)  ?endTz.time.slice(0,5)  :'',
-            blocksAvail:it.blocks_availability!==false
+            blocksAvail:it.blocks_availability!==false,
+            location:it.location||''
         }, ev.detail.targetRect);
     });
 

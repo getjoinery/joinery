@@ -14,7 +14,8 @@
  * Import is one-directional, manual, owner-scoped: each VEVENT becomes a native
  * cal_entries row owned by the given CalendarSubject. See docs/calendar.md.
  *
- * @version 1.2
+ * @version 1.3
+ * @changelog 1.3 - LOCATION / DESCRIPTION / URL map to the entry's details
  * @changelog 1.3 - the file-scope requires are gone. parse() used none of them,
  *   and they are what put the site config inside the parser jail: any of them
  *   reaches LibraryFunctions, which pulls SystemBase, which pulls the errors
@@ -515,6 +516,21 @@ class IcsImporter {
 		// TRANSP: OPAQUE (or absent) blocks availability; TRANSPARENT does not.
 		$transp = isset($props['TRANSP']) ? strtoupper(trim($props['TRANSP']['value'])) : 'OPAQUE';
 		$entry->set('cal_blocks_availability', $transp !== 'TRANSPARENT');
+
+		// Details: LOCATION, DESCRIPTION (as plain-text notes), URL. A URL that
+		// is not http(s) is dropped and reported rather than refusing the event.
+		$link = isset($props['URL']) ? trim((string)$props['URL']['value']) : '';
+		try {
+			$link = CalendarEntry::normalize_link($link);
+		} catch (CalendarEntryException $e) {
+			$summary['warnings'][] = 'A link on an event was not a web address and was left out.';
+			$link = null;
+		}
+		$entry->set_detail_fields(
+			isset($props['LOCATION'])    ? (string)$props['LOCATION']['value']    : null,
+			$link,
+			isset($props['DESCRIPTION']) ? (string)$props['DESCRIPTION']['value'] : null
+		);
 
 		if (isset($props['UID'])) {
 			$entry->set('cal_uid',             mb_substr($props['UID']['value'], 0, 255));
