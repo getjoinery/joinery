@@ -1,8 +1,8 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.66 — a label can be deleted from the Labels panel:
- * a trash can at the row's right edge, shown on hover, opens a type-the-name
- * confirmation; the label leaves every message and mailbox, the mail stays.
+ * No framework. @version 2.67 — the Contact panel also lists everyone else the
+ * open message names (its To and Cc) who is not yet in this mailbox's contacts,
+ * each with a one-click Add, under the counterparty's card.
  *
  * The conversation list updates in place after mutations
  * (specs/implemented/mailbox_reader_list_persistence.md): actions that take rows out of
@@ -3192,6 +3192,31 @@
 		return name ? ('"' + name + '" <' + data.address + '>') : data.address;
 	}
 
+	// "Not in Contacts" plus the one-click Add that keeps {address, display_name}
+	// in the mailbox's store and re-reads the panel from the server's answer.
+	// One row serves the counterparty card and every "also on this message" card.
+	function addContactRow(person, aliasId, messageId) {
+		var row = el('div', 'mbx-context-addrow');
+		row.appendChild(el('span', 'mbx-context-note', 'Not in Contacts'));
+		var add = el('button', 'mbx-context-add', '+ Add');
+		add.type = 'button';
+		add.title = 'Add ' + person.address + ' to this mailbox\'s contacts';
+		add.addEventListener('click', function () {
+			add.disabled = true;
+			add.textContent = 'Adding…';   // the round trip can take a moment; say so
+			joineryApi.post(CFG.contactsImportUrl,
+					{ address: contactToken(person), alias_id: String(aliasId) })
+				.then(function () {
+					delete contextCache[messageId];
+					loadContacts(aliasId);          // keep compose autocomplete current
+					fetchSenderContext(messageId);  // re-render from the server's truth
+				})
+				.catch(function () { add.disabled = false; add.textContent = 'Could not add'; });
+		});
+		row.appendChild(add);
+		return row;
+	}
+
 	// Put an address in the search box and run it — the panel's "all mail" link.
 	function searchForAddress(address) {
 		var box = $('#mbx-search');
@@ -3251,25 +3276,7 @@
 			// Saving needs a mailbox to save INTO, and contacts are per-mailbox. Mail
 			// that belongs to no mailbox (unmatched) has no store to add to, so the
 			// control is absent rather than offering a save that cannot land.
-			var row = el('div', 'mbx-context-addrow');
-			row.appendChild(el('span', 'mbx-context-note', 'Not in Contacts'));
-			var add = el('button', 'mbx-context-add', '+ Add');
-			add.type = 'button';
-			add.title = 'Add ' + data.address + ' to this mailbox\'s contacts';
-			add.addEventListener('click', function () {
-				add.disabled = true;
-				add.textContent = 'Adding…';   // the round trip can take a moment; say so
-				joineryApi.post(CFG.contactsImportUrl,
-						{ address: contactToken(data), alias_id: String(data.alias_id) })
-					.then(function () {
-						delete contextCache[data.message_id];
-						loadContacts(data.alias_id);          // keep compose autocomplete current
-						fetchSenderContext(data.message_id);  // re-render from the server's truth
-					})
-					.catch(function () { add.disabled = false; add.textContent = 'Could not add'; });
-			});
-			row.appendChild(add);
-			card.appendChild(row);
+			card.appendChild(addContactRow(data, data.alias_id, data.message_id));
 		}
 
 		if (contact && !contact.locked && contact.added_time) {
@@ -3284,6 +3291,25 @@
 		all.addEventListener('click', function (e) { e.preventDefault(); searchForAddress(data.address); });
 		card.appendChild(all);
 		panel.appendChild(card);
+
+		// Everyone else the message names (its To and Cc, minus this mailbox and
+		// the counterparty) who is not yet in this mailbox's contacts, each with
+		// the same one-click Add. Someone already kept needs nothing from this
+		// panel, so they are not listed; a locked store can answer for no one.
+		var others = (data.others || []).filter(function (o) { return !o.contact; });
+		if (others.length && isRealMailbox(data.alias_id)) {
+			panel.appendChild(contextSection('Also on this message'));
+			others.forEach(function (o) {
+				var oc = el('div', 'mbx-context-card mbx-context-card-minor');
+				var oname = o.display_name || '';
+				if (oname && oname !== o.address) oc.appendChild(el('div', 'mbx-context-name', oname));
+				var line = el('div', 'mbx-context-email', o.address + ' ');
+				line.appendChild(el('span', 'mbx-context-field', o.field === 'cc' ? 'Cc' : 'To'));
+				oc.appendChild(line);
+				oc.appendChild(addContactRow(o, data.alias_id, data.message_id));
+				panel.appendChild(oc);
+			});
+		}
 
 		// Site account: admins only. For everyone else the server never looked, so the
 		// section is absent rather than reporting an absence it can't vouch for.

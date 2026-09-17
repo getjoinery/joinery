@@ -3273,6 +3273,14 @@ mail was exchanged, having never watched the traffic. A sealed contact store wit
 window can answer neither way, so the card says **Contacts locked** and offers Unlock rather
 than asserting "not a contact".
 
+Under the card, **Also on this message** lists everyone else the message names — its To
+and Cc lists (`iem_to` / `iem_cc`, or the retained header block on a row stored before
+those columns existed), minus the mailbox's own address and the counterparty — who is
+**not yet in this mailbox's contacts**, each with the same one-click **+ Add** and a
+To/Cc marker. The server returns every such person as `others`, with each one's
+contact-store answer; the client lists only those with no entry, since someone already
+kept needs nothing from the panel, and a locked store lists no one.
+
 Below the card, a **Site account** section is **admin-only** (permission 5+), because member
 records, orders and registrations are operator data: it resolves the address with
 `User::GetByEmail` and shows the joined date and a link to the admin edit page, or "No
@@ -3357,7 +3365,7 @@ The mailbox is exposed to API clients (the native mobile mail screens,
 | `draft_attachment_delete` | Remove one saved attachment from a draft — `draft_id`, `attachment_id` (author-scoped, non-inline) |
 | `signature_save` | Save the caller's compose signature for one of their mailboxes |
 | `contacts` / `contact_delete` / `contacts_import` | List (decrypted, ranked) / delete / import-or-add the caller's contacts for ONE mailbox — `contacts` and `contacts_import` both require `alias_id`, since a contact belongs to a mailbox |
-| `sender_context` | Resolve a thread counterparty (by message id) to the caller's contact-store entry, plus (admins only) their member record, orders and registrations |
+| `sender_context` | Resolve a thread counterparty (by message id) to the caller's contact-store entry, list everyone else on the message with theirs, plus (admins only) the counterparty's member record, orders and registrations |
 
 Each action is a `logic/{action}_logic.php` with a `_logic_descriptor()` opt-in that
 builds a `MailboxViewer` for the key's user and goes through
