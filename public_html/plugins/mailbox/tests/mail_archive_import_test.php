@@ -441,13 +441,13 @@ class MailArchiveImportTest {
 		// whatever filtering its source applied, and firing live rules on years-old
 		// mail would act on messages nobody just received.
 		$filter = new InboundEmailFilter(NULL);
-		$filter->set('fil_ied_inbound_email_domain_id', $this->domain_id);
-		$filter->set('fil_iea_inbound_email_alias_id', intval($this->alias->key));
-		$filter->set('fil_name', 'catch everything ' . $this->suffix);
-		$filter->set('fil_is_enabled', true);
-		$filter->set('fil_match_subject', 'a');   // matches any subject containing "a"
-		$filter->set('fil_action_archive', true);
-		$filter->set('fil_action_mark_spam', true);
+		$filter->set('ief_ied_inbound_email_domain_id', $this->domain_id);
+		$filter->set('ief_iea_inbound_email_alias_id', intval($this->alias->key));
+		$filter->set('ief_name', 'catch everything ' . $this->suffix);
+		$filter->set('ief_is_enabled', true);
+		$filter->set('ief_match_subject', 'a');   // matches any subject containing "a"
+		$filter->set('ief_action_archive', true);
+		$filter->set('ief_action_mark_spam', true);
 		$filter->save();
 		$filter->load();
 
@@ -870,7 +870,7 @@ class MailArchiveImportTest {
 			$this->db->exec("DELETE FROM ilm_inbound_label_members WHERE ilm_iem_inbound_email_message_id IN
 				(SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
 				 WHERE iem_iea_inbound_email_alias_id IN ($ain))");
-			$this->db->exec("DELETE FROM fil_inbound_email_filters WHERE fil_iea_inbound_email_alias_id IN ($ain)");
+			$this->db->exec("DELETE FROM ief_inbound_email_filters WHERE ief_iea_inbound_email_alias_id IN ($ain)");
 		}
 		$this->db->exec("DELETE FROM iem_inbound_email_messages WHERE iem_ied_inbound_email_domain_id = " . $domainId);
 		$this->db->exec("DELETE FROM iea_inbound_email_aliases WHERE iea_ied_inbound_email_domain_id = " . $domainId);

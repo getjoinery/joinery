@@ -40,12 +40,12 @@ class RelayCloudConsumer implements OAuth2Consumer {
 		} catch (\Throwable $e) {
 			return self::RETURN_URL;
 		}
-		if ((string)$run->get('rcp_status') !== 'awaiting_grant') {
+		if ((string)$run->get('rcl_status') !== 'awaiting_grant') {
 			return self::RETURN_URL; // stale callback — never rewind a live run
 		}
 		$run->sealToken($token->getAccessToken());
-		$run->set('rcp_status', 'ready');
-		$run->set('rcp_error', null);
+		$run->set('rcl_status', 'ready');
+		$run->set('rcl_error', null);
 		$run->save();
 		return self::RETURN_URL;
 	}

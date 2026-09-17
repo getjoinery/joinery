@@ -771,8 +771,8 @@ but only as an informed choice.
 
 Saving a filter with a forwarding address on a protected domain requires ticking
 an acknowledgment that names the destination. The acknowledgment is stored with
-the address it was given for (`fil_forward_ack_time`, `fil_forward_ack_destination`,
-`fil_forward_ack_usr_user_id`), so repointing the filter somewhere else needs
+the address it was given for (`ief_forward_ack_time`, `ief_forward_ack_destination`,
+`ief_forward_ack_usr_user_id`), so repointing the filter somewhere else needs
 fresh consent rather than inheriting the old one.
 
 **Raising the domain's security level revokes every acknowledgment on it.**

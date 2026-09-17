@@ -302,12 +302,12 @@ identity pin the plane will trust from then on. So the plane does not learn the
 relay's address from the report, and does not trust the pin until the address
 the provider gave has answered to it:
 
-1. The address is `rcp_instance_ip`, which `handleBooting` already records
+1. The address is `rcl_instance_ip`, which `handleBooting` already records
    from the provider. The report's `public_ip` must equal it, and the report
    must arrive **from** it, or the report is refused and logged.
 2. The signature must verify against the identity key the report carries, and
    the run token must be live and unspent.
-3. The plane then performs a pinned `GET /relay/ping` to `rcp_instance_ip`
+3. The plane then performs a pinned `GET /relay/ping` to `rcl_instance_ip`
    with the reported fingerprint. Only when that succeeds is the pin written to
    `mrl_identity_fingerprint`, the row updated (`mrl_public_ip`,
    `mrl_authserv_id`), the map hash cleared and the fragment pushed. The push

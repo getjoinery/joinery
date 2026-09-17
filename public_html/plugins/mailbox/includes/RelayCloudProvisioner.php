@@ -23,7 +23,7 @@
  *
  * Test seam: $driver_factory.
  *
- * @version 2.2 - a fleet shard is born the same way, skeleton only (rcp_mfs_mailbox_fleet_shard_id): the
+ * @version 2.2 - a fleet shard is born the same way, skeleton only (rcl_mfs_mailbox_fleet_shard_id): the
  *                operator identity's key rides in its user-data and its birth lands on the
  *                MailboxFleetShard row (specs/relay_without_a_shell.md WP4)
  * @version 2.1 - BORN CONFIGURED (specs/relay_without_a_shell.md WP3). ready creates the
@@ -106,7 +106,7 @@ class RelayCloudProvisioner {
 
 	/** Advance one run a single step. Returns a short human status line. */
 	public function advance(RelayCloudProvision $run): string {
-		switch ((string)$run->get('rcp_status')) {
+		switch ((string)$run->get('rcl_status')) {
 			case 'ready':
 				// An upgrade has an instance already; what it needs first is for
 				// the relay to be empty, because the wipe takes the spool with it.
@@ -182,20 +182,20 @@ class RelayCloudProvisioner {
 		$driver = $this->driverFor($run);
 		try {
 			$opts = array(
-				'label'  => self::instanceLabel((string)$run->get('rcp_mail_hostname'), intval($run->key)),
-				'region' => (string)$run->get('rcp_region'),
-				'type'   => (string)$run->get('rcp_instance_type'),
+				'label'  => self::instanceLabel((string)$run->get('rcl_mail_hostname'), intval($run->key)),
+				'region' => (string)$run->get('rcl_region'),
+				'type'   => (string)$run->get('rcl_instance_type'),
 				'image'  => self::INSTANCE_IMAGE,
 			);
-			$instance = $driver->createInstance($opts + $this->firstBootOptions($driver, (string)$run->get('rcp_region'), $first_boot));
+			$instance = $driver->createInstance($opts + $this->firstBootOptions($driver, (string)$run->get('rcl_region'), $first_boot));
 		} catch (CloudComputeException $e) {
 			return $this->handleComputeFailure($run, $e, 'create');
 		}
 
-		$run->set('rcp_instance_id', (string)$instance['id']);
-		$run->set('rcp_instance_ip', (string)$instance['ip']);
-		$run->set('rcp_status', 'booting');
-		$run->set('rcp_error', null);
+		$run->set('rcl_instance_id', (string)$instance['id']);
+		$run->set('rcl_instance_ip', (string)$instance['ip']);
+		$run->set('rcl_status', 'booting');
+		$run->set('rcl_error', null);
 		$run->save();
 		return 'instance created with first-boot user-data, booting';
 	}
@@ -216,7 +216,7 @@ class RelayCloudProvisioner {
 		$sha = $run->copyBundle();
 		$token = $run->issueRunToken(self::RUN_TOKEN_TTL_SECONDS);
 		$run->save();
-		$mail_hostname = strtolower(trim((string)$run->get('rcp_mail_hostname')));
+		$mail_hostname = strtolower(trim((string)$run->get('rcl_mail_hostname')));
 		$fields = array(
 			'plane'             => $plane,
 			'run_id'            => (string)$run->key,
@@ -311,9 +311,9 @@ class RelayCloudProvisioner {
 			return 'refused: relay is shared';
 		}
 
-		if ((string)$run->get('rcp_status') !== 'draining') {
-			$run->set('rcp_status', 'draining');
-			$run->set('rcp_error', null);
+		if ((string)$run->get('rcl_status') !== 'draining') {
+			$run->set('rcl_status', 'draining');
+			$run->set('rcl_error', null);
 			$run->save();
 		}
 
@@ -331,12 +331,12 @@ class RelayCloudProvisioner {
 			$status = (string)($result['status'] ?? 'error');
 
 			if ($status === 'error') {
-				$run->set('rcp_error', mb_substr('Drain failed: ' . (string)($result['message'] ?? ''), 0, 4000));
+				$run->set('rcl_error', mb_substr('Drain failed: ' . (string)($result['message'] ?? ''), 0, 4000));
 				$run->save();
 				return 'drain error — will retry next pass';
 			}
 			if ($status === 'skipped') {
-				$run->set('rcp_error', 'The relay has no tunnel address, so its spool cannot be drained before the wipe.');
+				$run->set('rcl_error', 'The relay has no tunnel address, so its spool cannot be drained before the wipe.');
 				$run->save();
 				return 'drain skipped — no tunnel';
 			}
@@ -370,8 +370,8 @@ class RelayCloudProvisioner {
 			return 'drain did not finish — failed';
 		}
 
-		$run->set('rcp_status', 'rebuilding');
-		$run->set('rcp_error', null);
+		$run->set('rcl_status', 'rebuilding');
+		$run->set('rcl_error', null);
 		$run->save();
 		return 'relay drained in ' . $passes . ' pass(es) — rebuilding';
 	}
@@ -385,7 +385,7 @@ class RelayCloudProvisioner {
 	 * in with a new identity; the birth writes the new pin on the same row.
 	 */
 	private function handleRebuilding(RelayCloudProvision $run): string {
-		$instance_id = (string)$run->get('rcp_instance_id');
+		$instance_id = (string)$run->get('rcl_instance_id');
 		if ($instance_id === '') {
 			$run->fail('This update has no provider instance to re-image.');
 			return 'no instance - failed';
@@ -402,16 +402,16 @@ class RelayCloudProvisioner {
 		try {
 			$instance = $driver->rebuildInstance($instance_id,
 				array('image' => self::INSTANCE_IMAGE)
-				+ $this->firstBootOptions($driver, (string)$run->get('rcp_region'), $first_boot));
+				+ $this->firstBootOptions($driver, (string)$run->get('rcl_region'), $first_boot));
 		} catch (CloudComputeException $e) {
 			return $this->handleComputeFailure($run, $e, 'rebuild');
 		}
 
 		if (!empty($instance['ip'])) {
-			$run->set('rcp_instance_ip', (string)$instance['ip']);
+			$run->set('rcl_instance_ip', (string)$instance['ip']);
 		}
-		$run->set('rcp_status', 'booting');
-		$run->set('rcp_error', null);
+		$run->set('rcl_status', 'booting');
+		$run->set('rcl_error', null);
 		$run->save();
 		return 'instance re-imaging with fresh user-data, booting';
 	}
@@ -420,13 +420,13 @@ class RelayCloudProvisioner {
 	private function handleBooting(RelayCloudProvision $run): string {
 		$driver = $this->driverFor($run);
 		try {
-			$instance = $driver->getInstance((string)$run->get('rcp_instance_id'));
+			$instance = $driver->getInstance((string)$run->get('rcl_instance_id'));
 		} catch (CloudComputeException $e) {
 			return $this->handleComputeFailure($run, $e, 'boot-poll');
 		}
 
 		if ($instance['status'] !== 'running' || $instance['ip'] === '') {
-			$since = $run->get('rcp_update_time') ?: $run->get('rcp_create_time');
+			$since = $run->get('rcl_update_time') ?: $run->get('rcl_create_time');
 			if ($since && (time() - strtotime($since . ' UTC')) > self::BOOT_TIMEOUT_SECONDS) {
 				$this->destroyInstanceQuietly($run);
 				$run->fail('Instance did not reach running with a public IP within '
@@ -436,8 +436,8 @@ class RelayCloudProvisioner {
 			return 'still booting';
 		}
 
-		$run->set('rcp_instance_ip', (string)$instance['ip']);
-		$run->set('rcp_status', 'provisioning');
+		$run->set('rcl_instance_ip', (string)$instance['ip']);
+		$run->set('rcl_status', 'provisioning');
 		$run->save();
 		return 'boot complete - waiting for the relay to build itself and report in';
 	}
@@ -448,7 +448,7 @@ class RelayCloudProvisioner {
 	 * the admin watches. The birth wait stays with the scheduled task.
 	 */
 	public function advanceCheap(RelayCloudProvision $run): string {
-		switch ((string)$run->get('rcp_status')) {
+		switch ((string)$run->get('rcl_status')) {
 			case 'ready':
 				// PROVISION ONLY. handleReady() CREATES an instance, which for an
 				// update would leave the customer paying for a second machine
@@ -474,7 +474,7 @@ class RelayCloudProvisioner {
 	 * the grant, as a boot timeout is. Its console log at the provider says why.
 	 */
 	private function awaitBirth(RelayCloudProvision $run): string {
-		$since = $run->get('rcp_update_time') ?: $run->get('rcp_create_time');
+		$since = $run->get('rcl_update_time') ?: $run->get('rcl_create_time');
 		if ($since && (time() - strtotime($since . ' UTC')) > self::BIRTH_TIMEOUT_SECONDS) {
 			$this->destroyInstanceQuietly($run);
 			$run->eraseBundle();
@@ -509,7 +509,7 @@ class RelayCloudProvisioner {
 	public function completeBirth(RelayCloudProvision $run, array $report): MailboxRelay {
 		$public_ip = trim((string)$report['public_ip']);
 		$fingerprint = trim((string)$report['identity_fingerprint']);
-		$mail_hostname = strtolower(trim((string)$run->get('rcp_mail_hostname')));
+		$mail_hostname = strtolower(trim((string)$run->get('rcl_mail_hostname')));
 
 		// 3a. Does the machine at the provider's address hold the key the report
 		//     carried? Signed as the party the user-data put in the relay's
@@ -566,9 +566,9 @@ class RelayCloudProvisioner {
 		//    A record first, which is usually unpublished at this moment - a
 		//    refusal is expected and the Setup tab's PTR check carries the
 		//    instruction from here.
-		if ((string)$run->get('rcp_instance_id') !== '') {
+		if ((string)$run->get('rcl_instance_id') !== '') {
 			try {
-				$this->driverFor($run)->setReverseDns((string)$run->get('rcp_instance_id'), $public_ip, $mail_hostname);
+				$this->driverFor($run)->setReverseDns((string)$run->get('rcl_instance_id'), $public_ip, $mail_hostname);
 			} catch (\Throwable $e) {
 				error_log('RelayCloudProvisioner: setReverseDns deferred (' . $e->getMessage()
 					. ') - expected until the mail hostname A record resolves.');
@@ -581,9 +581,9 @@ class RelayCloudProvisioner {
 		$this->attachManagedNode($relay);
 
 		$run->spendRunToken();
-		$run->set('rcp_mrl_mailbox_relay_id', intval($relay->key));
-		$run->set('rcp_status', 'done');
-		$run->set('rcp_error', null);
+		$run->set('rcl_mrl_mailbox_relay_id', intval($relay->key));
+		$run->set('rcl_status', 'done');
+		$run->set('rcl_error', null);
 		$run->eraseCredentials();
 		$run->save();
 		return $relay;
@@ -646,24 +646,24 @@ class RelayCloudProvisioner {
 	private function completeShardBirth(RelayCloudProvision $run, string $public_ip, string $fingerprint,
 			string $identity_public_key, string $relay_version): MailboxRelay {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_fleet_shards_class.php'));
-		$shard = new MailboxFleetShard(intval($run->get('rcp_mfs_mailbox_fleet_shard_id')), TRUE);
+		$shard = new MailboxFleetShard(intval($run->get('rcl_mfs_mailbox_fleet_shard_id')), TRUE);
 		if (!$shard->key) {
 			throw new RelayBirthRefused('The shard this run was for no longer exists.');
 		}
 		$shard->set('mfs_public_ip', substr($public_ip, 0, 64));
 		$shard->set('mfs_identity_fingerprint', substr($fingerprint, 0, 64));
-		$shard->set('mfs_cloud_provider', (string)$run->get('rcp_provider'));
-		$shard->set('mfs_cloud_instance_id', (string)$run->get('rcp_instance_id'));
-		$shard->set('mfs_region', (string)$run->get('rcp_region'));
+		$shard->set('mfs_cloud_provider', (string)$run->get('rcl_provider'));
+		$shard->set('mfs_cloud_instance_id', (string)$run->get('rcl_instance_id'));
+		$shard->set('mfs_region', (string)$run->get('rcl_region'));
 		if ($relay_version !== '') {
 			$shard->set('mfs_provisioned_version', substr($relay_version, 0, 20));
 		}
 		$shard->set('mfs_is_active', true);
 		$shard->save();
 
-		if ((string)$run->get('rcp_instance_id') !== '') {
+		if ((string)$run->get('rcl_instance_id') !== '') {
 			try {
-				$this->driverFor($run)->setReverseDns((string)$run->get('rcp_instance_id'), $public_ip, (string)$shard->get('mfs_hostname'));
+				$this->driverFor($run)->setReverseDns((string)$run->get('rcl_instance_id'), $public_ip, (string)$shard->get('mfs_hostname'));
 			} catch (\Throwable $e) {
 				error_log('RelayCloudProvisioner: shard setReverseDns deferred (' . $e->getMessage() . ')');
 			}
@@ -671,8 +671,8 @@ class RelayCloudProvisioner {
 		$this->attachShardNode($shard);
 
 		$run->spendRunToken();
-		$run->set('rcp_status', 'done');
-		$run->set('rcp_error', null);
+		$run->set('rcl_status', 'done');
+		$run->set('rcl_error', null);
 		$run->eraseCredentials();
 		$run->save();
 
@@ -748,8 +748,8 @@ class RelayCloudProvisioner {
 		// An updated relay is a new machine with a new identity: the pin above
 		// replaced the old one.
 		$relay->set('mrl_last_health_failure', null);
-		$relay->set('mrl_cloud_provider', (string)$run->get('rcp_provider'));
-		$relay->set('mrl_cloud_instance_id', (string)$run->get('rcp_instance_id'));
+		$relay->set('mrl_cloud_provider', (string)$run->get('rcl_provider'));
+		$relay->set('mrl_cloud_instance_id', (string)$run->get('rcl_instance_id'));
 		$relay->save();
 		$relay->ensureTransportKeypair();
 		return $relay;
@@ -761,10 +761,10 @@ class RelayCloudProvisioner {
 	 */
 	private function existingRowFor(RelayCloudProvision $run): ?MailboxRelay {
 		$relay = $run->isUpgrade() ? $run->relay() : null;
-		if ($relay === null && (string)$run->get('rcp_instance_id') !== '') {
+		if ($relay === null && (string)$run->get('rcl_instance_id') !== '') {
 			$existing = new MultiMailboxRelay(array('deleted' => false));
 			foreach ($existing as $row) {
-				if ((string)$row->get('mrl_cloud_instance_id') === (string)$run->get('rcp_instance_id')) {
+				if ((string)$row->get('mrl_cloud_instance_id') === (string)$run->get('rcl_instance_id')) {
 					return $row;
 				}
 			}
@@ -785,7 +785,7 @@ class RelayCloudProvisioner {
 			$this->failWithCleanup($run, 'Provider API error during ' . $phase . ': ' . $e->getMessage());
 			return $phase . ' failed';
 		}
-		$run->set('rcp_error', mb_substr('Transient (' . $phase . '): ' . $e->getMessage(), 0, 4000));
+		$run->set('rcl_error', mb_substr('Transient (' . $phase . '): ' . $e->getMessage(), 0, 4000));
 		$run->save();
 		return $phase . ' transient error — will retry';
 	}
@@ -804,7 +804,7 @@ class RelayCloudProvisioner {
 		if ($run->isUpgrade()) {
 			return;
 		}
-		$instance_id = (string)$run->get('rcp_instance_id');
+		$instance_id = (string)$run->get('rcl_instance_id');
 		if ($instance_id === '') {
 			return;
 		}
@@ -821,7 +821,7 @@ class RelayCloudProvisioner {
 		if (self::$driver_factory !== null) {
 			return call_user_func(self::$driver_factory, $run);
 		}
-		$provider = (string)$run->get('rcp_provider');
+		$provider = (string)$run->get('rcl_provider');
 		if ($provider !== 'linode') {
 			throw new RelayCloudProvisionException('Unknown cloud provider "' . $provider . '".');
 		}

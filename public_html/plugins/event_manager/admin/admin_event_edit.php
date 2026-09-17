@@ -314,7 +314,7 @@ if(count($optionvals)){
 	$formwriter = $page->getFormWriter('form_load_version', ['action' => '/plugins/event_manager/admin/admin_event_edit', 'method' => 'GET']);
 	$formwriter->begin_form();
 	$formwriter->hiddeninput('evt_event_id', '', ['value' => $event->key]);
-	$formwriter->dropinput('cnv_content_version_id', 'Load another description', [
+	$formwriter->dropinput('cvn_content_version_id', 'Load another description', [
 		'options' => $optionvals,
 		'empty_option' => '-- Select --'
 	]);

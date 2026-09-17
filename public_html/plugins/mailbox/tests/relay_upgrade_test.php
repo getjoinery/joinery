@@ -322,8 +322,8 @@ class RelayUpgradeTest {
 			$provisioner = new RelayCloudProvisioner();
 
 			$upgrade = new RelayCloudProvision(NULL);
-			$upgrade->set('rcp_kind', 'upgrade');
-			$upgrade->set('rcp_instance_id', 'inst-live-relay');
+			$upgrade->set('rcl_kind', 'upgrade');
+			$upgrade->set('rcl_instance_id', 'inst-live-relay');
 			$method->invoke($provisioner, $upgrade);
 			check(count($deleted) === 0,
 				'an upgrade never deletes its instance — it is the customer\'s working relay',
@@ -332,8 +332,8 @@ class RelayUpgradeTest {
 			// The same call on a PROVISION run must still clean up, or a failed
 			// provision would leave the customer paying for a half-built box.
 			$provision = new RelayCloudProvision(NULL);
-			$provision->set('rcp_kind', 'provision');
-			$provision->set('rcp_instance_id', 'inst-half-built');
+			$provision->set('rcl_kind', 'provision');
+			$provision->set('rcl_instance_id', 'inst-half-built');
 			$method->invoke($provisioner, $provision);
 			$this->eq(array('inst-half-built'), $deleted,
 				'a failed provision still cleans up the instance it created');
@@ -379,7 +379,7 @@ class RelayUpgradeTest {
 		$rebuild_at = strpos($source, "case 'rebuilding':");
 		check($drain_at !== false && $rebuild_at !== false && $drain_at < $rebuild_at,
 			'draining is reached before rebuilding');
-		check(preg_match('/handleDraining.*?rcp_status.,\s*.rebuilding./s', $source) === 1,
+		check(preg_match('/handleDraining.*?rcl_status.,\s*.rebuilding./s', $source) === 1,
 			'only a completed drain advances the run to rebuilding');
 
 		// An upgrade must never take the CREATE path: that would leave the customer
@@ -404,9 +404,9 @@ class RelayUpgradeTest {
 			'an upgrade resolves its relay from the run, not by scanning instance ids');
 
 		// The run row has to be able to name it.
-		check(array_key_exists('rcp_mrl_mailbox_relay_id', RelayCloudProvision::$field_specifications),
+		check(array_key_exists('rcl_mrl_mailbox_relay_id', RelayCloudProvision::$field_specifications),
 			'the run row carries the relay an upgrade targets');
-		$kind = RelayCloudProvision::$field_specifications['rcp_kind'];
+		$kind = RelayCloudProvision::$field_specifications['rcl_kind'];
 		check(in_array('upgrade', (array)($kind['allowed_values'] ?? array()), true),
 			'the run row allows the upgrade kind');
 		check(in_array('provision', (array)($kind['allowed_values'] ?? array()), true),

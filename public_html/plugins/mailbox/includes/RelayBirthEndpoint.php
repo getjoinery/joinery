@@ -101,7 +101,7 @@ class RelayBirthEndpoint {
 		} catch (\Throwable $e) {
 			return null;
 		}
-		if ($run->key === null || !in_array((string)$run->get('rcp_status'), array('booting', 'provisioning'), true)) {
+		if ($run->key === null || !in_array((string)$run->get('rcl_status'), array('booting', 'provisioning'), true)) {
 			return null;
 		}
 		if (!$run->runTokenMatches($token)) {
@@ -122,7 +122,7 @@ class RelayBirthEndpoint {
 			return array('status' => 403, 'error' => 'No live run for this token.');
 		}
 		$sha256 = strtolower(trim($sha256));
-		$recorded = strtolower(trim((string)$run->get('rcp_bundle_sha256')));
+		$recorded = strtolower(trim((string)$run->get('rcl_bundle_sha256')));
 		$path = $run->bundlePath();
 		if ($sha256 === '' || $recorded === '' || !hash_equals($recorded, $sha256) || !is_file($path)
 				|| !hash_equals($recorded, (string)hash_file('sha256', $path))) {
@@ -150,7 +150,7 @@ class RelayBirthEndpoint {
 
 		// 1. The address. The report must NAME the address the provider gave
 		//    and must ARRIVE from it: the token alone is not enough to be believed.
-		$expected_ip = trim((string)$run->get('rcp_instance_ip'));
+		$expected_ip = trim((string)$run->get('rcl_instance_ip'));
 		$claimed_ip = trim((string)($report['public_ip'] ?? ''));
 		if ($expected_ip === '' || $claimed_ip !== $expected_ip || trim($remote) !== $expected_ip) {
 			error_log('RelayBirthEndpoint: run ' . $run->key . ' birth report refused - address mismatch (provider '

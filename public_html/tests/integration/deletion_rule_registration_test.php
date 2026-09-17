@@ -27,6 +27,8 @@
  * prefixed zzfix_, never used by a real model). Run:
  *   php tests/integration/deletion_rule_registration_test.php
  *
+ * @version 1.7 - no prefix has two owners (InboundEmailFilter took ief); the walk is pinned by the invariant
+ * @version 1.6 - cnv is a single-owner prefix (ContentVersion took cvn); the shared case is fil
  * @version 1.5 - the ambiguous-prefix cases move to cnv/fil; bty is a single-owner prefix
  * @version 1.4 - pins DeletionRule::pluralForms(), the one pluralization the engine and the
  *   validator share (y -> ies included)
@@ -145,29 +147,31 @@ try {
         && strpos((string)$rows[0]['del_message'], 'ZZFixtureConventionModel') !== false
         && strpos((string)$rows[0]['del_message'], 'zzc_usr_user_id') !== false);
 
-    // --- Ambiguous prefix resolves by entity match, never discovery order ---
-    // 'cnv' is claimed by both Conversation (cnv_conversations) and
-    // ContentVersion (cnv_content_versions), 'fil' by File (fil_files) and
-    // InboundEmailFilter (fil_inbound_email_filters). The column name embeds
-    // the entity, so each resolves to its own table; an abbreviated entity
-    // under a shared prefix (cnv_conv) matches nothing and must stay
-    // unrecognized. bkt is BackupTarget's alone since BookingType took bty
-    // (specs/implemented/shared_prefixes_first_three.md), so a bkt column resolves by
-    // prefix whatever its entity part says — the single-owner rule.
-    ok('ambiguous prefix: msg_cnv_conversation_id resolves to cnv_conversations, not content versions',
-        DeletionRule::getSourceTableFromColumn('msg_cnv_conversation_id', 'msg') === 'cnv_conversations');
-    ok('ambiguous prefix: pst_fil_file_id resolves to fil_files, not inbound email filters',
+    // --- Every prefix has one owner; a column resolves by its prefix ---
+    // The six pairs that once shared a prefix are gone (specs/implemented/
+    // shared_prefixes_first_three.md, shared_prefix_content_version.md,
+    // shared_prefix_relay_cloud_provision.md, shared_prefix_inbound_email_filter.md),
+    // so the prefix names the table and the entity part is not consulted.
+    // The entity tie-break in getSourceTableFromColumn() stays for the day a
+    // pair is created on purpose (the scaffolder only warns), but nothing
+    // here can exercise it without one: the registry is built from files.
+    $owners = ClassAutoloader::modelPrefixes();
+    $shared = array_filter($owners, function ($classes) { return count($classes) > 1; });
+    ok('no prefix is declared by two models', count($shared) === 0, json_encode($shared));
+    ok('single-owner prefix: pst_fil_file_id resolves to fil_files',
         DeletionRule::getSourceTableFromColumn('pst_fil_file_id', 'pst') === 'fil_files');
+    ok('single-owner prefix: msg_cnv_conversation_id resolves to cnv_conversations',
+        DeletionRule::getSourceTableFromColumn('msg_cnv_conversation_id', 'msg') === 'cnv_conversations');
     ok('single-owner prefix: bkn_bty_booking_type_id resolves to bty_booking_types',
         DeletionRule::getSourceTableFromColumn('bkn_bty_booking_type_id', 'bkn') === 'bty_booking_types');
     ok('single-owner prefix: mgn_bkt_backup_target_id resolves to bkt_backup_targets',
         DeletionRule::getSourceTableFromColumn('mgn_bkt_backup_target_id', 'mgn') === 'bkt_backup_targets');
-    ok('abbreviated entity under a shared prefix: a msg_cnv_conv_id stays unrecognized',
-        DeletionRule::getSourceTableFromColumn('msg_cnv_conv_id', 'msg') === null);
     ok('abbreviated entity under a single-owner prefix: bkh_bkt_target_id resolves by prefix alone',
         DeletionRule::getSourceTableFromColumn('bkh_bkt_target_id', 'bkh') === 'bkt_backup_targets');
     ok('the full entity: bkh_bkt_backup_target_id resolves to bkt_backup_targets',
         DeletionRule::getSourceTableFromColumn('bkh_bkt_backup_target_id', 'bkh') === 'bkt_backup_targets');
+    ok('an unknown prefix stays unrecognized',
+        DeletionRule::getSourceTableFromColumn('pst_zzz_thing_id', 'pst') === null);
     // The tie-break accepts every correct plural the validator's pkey check
     // does, from the one definition - a y -> ies table under a shared prefix
     // must resolve, not silently register nothing.

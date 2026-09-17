@@ -1501,3 +1501,12 @@
 	$migration['migration_file'] = 'shared_prefixes_first_three.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// ContentVersion takes a prefix of its own (cvn): rows copied into the
+	// renamed table, old table gone (specs/implemented/shared_prefix_content_version.md).
+	$migration = array();
+	$migration['database_version'] = '193';
+	$migration['test'] = "SELECT CASE WHEN to_regclass('public.cnv_content_versions') IS NULL THEN 1 ELSE 0 END AS count";
+	$migration['migration_file'] = 'content_version_prefix.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

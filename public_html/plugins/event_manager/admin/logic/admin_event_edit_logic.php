@@ -225,10 +225,10 @@ function admin_event_edit_logic(array $input): LogicResult {
 	$title = $event->get('evt_name');
 	$content = $event->get('evt_description');
 	//LOAD THE ALTERNATE CONTENT VERSION IF NEEDED
-	if($input['cnv_content_version_id']){
-		$content_version = new ContentVersion($input['cnv_content_version_id'], TRUE);
-		$content = $content_version->get('cnv_content');
-		$title = $content_version->get('cnv_title');
+	if($input['cvn_content_version_id']){
+		$content_version = new ContentVersion($input['cvn_content_version_id'], TRUE);
+		$content = $content_version->get('cvn_content');
+		$title = $content_version->get('cvn_title');
 	}
 
 	// Load files for dropdown

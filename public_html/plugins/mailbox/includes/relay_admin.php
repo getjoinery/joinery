@@ -161,15 +161,15 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 		}
 
 		$run = new RelayCloudProvision(NULL);
-		$run->set('rcp_kind', 'upgrade');
-		$run->set('rcp_mrl_mailbox_relay_id', intval($relay->key));
-		$run->set('rcp_provider', (string)$relay->get('mrl_cloud_provider'));
-		$run->set('rcp_instance_id', (string)$relay->get('mrl_cloud_instance_id'));
-		$run->set('rcp_instance_ip', (string)$relay->get('mrl_public_ip'));
+		$run->set('rcl_kind', 'upgrade');
+		$run->set('rcl_mrl_mailbox_relay_id', intval($relay->key));
+		$run->set('rcl_provider', (string)$relay->get('mrl_cloud_provider'));
+		$run->set('rcl_instance_id', (string)$relay->get('mrl_cloud_instance_id'));
+		$run->set('rcl_instance_ip', (string)$relay->get('mrl_public_ip'));
 		// The re-image builds the relay again under the same hostname it already
 		// answers to: it is the milters' AuthservID and the HELO name, so a
 		// different value here would silently change what the relay is.
-		$run->set('rcp_mail_hostname', (string)$relay->get('mrl_mx_hostname')
+		$run->set('rcl_mail_hostname', (string)$relay->get('mrl_mx_hostname')
 			?: (string)$relay->get('mrl_name'));
 		$run->save();
 		admin_mailbox_relay_flash($session,
@@ -204,11 +204,11 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 		}
 
 		$run = new RelayCloudProvision(NULL);
-		$run->set('rcp_kind', 'provision');
-		$run->set('rcp_provider', 'linode');
-		$run->set('rcp_mail_hostname', substr($mail_hostname, 0, 255));
-		$run->set('rcp_region', substr($region, 0, 50));
-		$run->set('rcp_instance_type', substr($type, 0, 50));
+		$run->set('rcl_kind', 'provision');
+		$run->set('rcl_provider', 'linode');
+		$run->set('rcl_mail_hostname', substr($mail_hostname, 0, 255));
+		$run->set('rcl_region', substr($region, 0, 50));
+		$run->set('rcl_instance_type', substr($type, 0, 50));
 		$run->save();
 		return LogicResult::redirect($self_url);
 	}
@@ -220,7 +220,7 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provisions_class.php'));
 		require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Client.php'));
 		$run = RelayCloudProvision::live();
-		if ($run === null || (string)$run->get('rcp_status') !== 'awaiting_grant') {
+		if ($run === null || (string)$run->get('rcl_status') !== 'awaiting_grant') {
 			return LogicResult::redirect($self_url);
 		}
 		try {
@@ -242,7 +242,7 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 		require_once(PathHelper::getIncludePath('includes/cloud_compute/LinodeComputeDriver.php'));
 
 		$run = RelayCloudProvision::live();
-		if ($run === null || (string)$run->get('rcp_status') !== 'awaiting_grant') {
+		if ($run === null || (string)$run->get('rcl_status') !== 'awaiting_grant') {
 			return LogicResult::redirect($self_url);
 		}
 		$token = trim((string)($input['cloud_token'] ?? ''));
@@ -265,8 +265,8 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 			// Network hiccup — proceed; the run's own error handling covers it.
 		}
 		$run->sealToken($token);
-		$run->set('rcp_status', 'ready');
-		$run->set('rcp_error', null);
+		$run->set('rcl_status', 'ready');
+		$run->set('rcl_error', null);
 		$run->save();
 		admin_mailbox_relay_flash($session,
 			'Provisioning started — the server is created in your account and builds itself from its first boot, '
@@ -278,8 +278,8 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 	if ($action === 'relay_cloud_dismiss') {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provisions_class.php'));
 		$run = RelayCloudProvision::latest();
-		if ($run !== null && (string)$run->get('rcp_status') !== 'booting'
-				&& (string)$run->get('rcp_status') !== 'provisioning') {
+		if ($run !== null && (string)$run->get('rcl_status') !== 'booting'
+				&& (string)$run->get('rcl_status') !== 'provisioning') {
 			$run->eraseCredentials();
 			$run->soft_delete();
 		}
@@ -419,7 +419,7 @@ function admin_mailbox_relay_tenant_vars(): array {
 	// with the scheduled task.
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provisions_class.php'));
 	$live_run = RelayCloudProvision::live();
-	if ($live_run !== null && in_array((string)$live_run->get('rcp_status'), array('ready', 'booting'), true)) {
+	if ($live_run !== null && in_array((string)$live_run->get('rcl_status'), array('ready', 'booting'), true)) {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayCloudProvisioner.php'));
 		try {
 			SystemBase::server_initiated_write(function () use ($live_run) {
@@ -675,12 +675,12 @@ function admin_mailbox_relay_provision_shard(array $input, $session): array {
 	$shard->save();
 
 	$run = new RelayCloudProvision(NULL);
-	$run->set('rcp_kind', 'provision');
-	$run->set('rcp_provider', 'linode');
-	$run->set('rcp_mail_hostname', substr($hostname, 0, 255));
-	$run->set('rcp_region', substr($region, 0, 50));
-	$run->set('rcp_instance_type', 'g6-nanode-1');
-	$run->set('rcp_mfs_mailbox_fleet_shard_id', intval($shard->key));
+	$run->set('rcl_kind', 'provision');
+	$run->set('rcl_provider', 'linode');
+	$run->set('rcl_mail_hostname', substr($hostname, 0, 255));
+	$run->set('rcl_region', substr($region, 0, 50));
+	$run->set('rcl_instance_type', 'g6-nanode-1');
+	$run->set('rcl_mfs_mailbox_fleet_shard_id', intval($shard->key));
 	$run->save();
 
 	return array('title' => 'Shard birth started',

@@ -52,14 +52,14 @@ function fc_domain(string $level, string $suffix): InboundEmailDomain {
 /** A domain-wide filter that labels and forwards. */
 function fc_filter(int $domain_id, string $forward_to): InboundEmailFilter {
 	$filter = new InboundEmailFilter(NULL);
-	$filter->set('fil_ied_inbound_email_domain_id', $domain_id);
-	$filter->set('fil_name', 'consent fixture');
-	$filter->set('fil_match_from', 'someone@example.com');
-	$filter->set('fil_action_star', true);
-	$filter->set('fil_action_forward_to', $forward_to !== '' ? $forward_to : null);
+	$filter->set('ief_ied_inbound_email_domain_id', $domain_id);
+	$filter->set('ief_name', 'consent fixture');
+	$filter->set('ief_match_from', 'someone@example.com');
+	$filter->set('ief_action_star', true);
+	$filter->set('ief_action_forward_to', $forward_to !== '' ? $forward_to : null);
 	$filter->prepare();
 	$filter->save();
-	harness_register_row('fil_inbound_email_filters', 'fil_inbound_email_filter_id', (int)$filter->key);
+	harness_register_row('ief_inbound_email_filters', 'ief_inbound_email_filter_id', (int)$filter->key);
 	return $filter;
 }
 
@@ -101,13 +101,13 @@ try {
 	check($reloaded->forwardConsentSatisfied(), 'the acknowledgment stands after a round trip');
 	check($reloaded->buildActionSet()['forward_to'] === array($destination),
 		'and the forward action is back');
-	check((string)$reloaded->get('fil_forward_ack_destination') === $destination,
+	check((string)$reloaded->get('ief_forward_ack_destination') === $destination,
 		'the destination is recorded with the acknowledgment, not merely the fact of one');
 
 	// =====================================================================
 	section('consent is for one destination, not for forwarding in general');
 
-	$reloaded->set('fil_action_forward_to', 'somewhere-else@example.com');
+	$reloaded->set('ief_action_forward_to', 'somewhere-else@example.com');
 	$reloaded->save();
 	$repointed = new InboundEmailFilter((int)$reloaded->key, TRUE);
 	check(!$repointed->forwardConsentSatisfied(),
@@ -118,7 +118,7 @@ try {
 	// =====================================================================
 	section('raising the level revokes every acknowledgment on the domain');
 
-	$repointed->set('fil_action_forward_to', $destination);
+	$repointed->set('ief_action_forward_to', $destination);
 	$repointed->recordForwardAcknowledgment(1);
 	$repointed->save();
 	check((new InboundEmailFilter((int)$repointed->key, TRUE))->forwardConsentSatisfied(),
@@ -129,7 +129,7 @@ try {
 
 	$after_raise = new InboundEmailFilter((int)$repointed->key, TRUE);
 	check(!$after_raise->forwardConsentSatisfied(), 'and the filter stops forwarding');
-	check((string)$after_raise->get('fil_action_forward_to') === $destination,
+	check((string)$after_raise->get('ief_action_forward_to') === $destination,
 		'the address is left in place, so re-acknowledging is one tick rather than a re-entry');
 	$after_actions = $after_raise->buildActionSet();
 	check($after_actions['forward_to'] === array(), 'the forward is dropped');
@@ -138,7 +138,7 @@ try {
 	// =====================================================================
 	section('clearing the address clears the obligation');
 
-	$after_raise->set('fil_action_forward_to', null);
+	$after_raise->set('ief_action_forward_to', null);
 	$after_raise->save();
 	$no_forward = new InboundEmailFilter((int)$after_raise->key, TRUE);
 	check(!$no_forward->forwardNeedsAcknowledgment(), 'a filter that does not forward needs no consent');

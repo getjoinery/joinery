@@ -81,14 +81,14 @@ function mailbox_filters_logic(array $input, array $mount = array()): LogicResul
 	if ($op === 'toggle' && !empty($input['id'])) {
 		$f = new InboundEmailFilter(intval($input['id']), TRUE);
 		if ($filter_in_reach($f)) {
-			$locked_msg = _filter_require_unlock($f->get('fil_iea_inbound_email_alias_id'));
+			$locked_msg = _filter_require_unlock($f->get('ief_iea_inbound_email_alias_id'));
 			if ($locked_msg !== null) {
 				_filter_flash($session, $locked_msg, $scoped_list($return_scope), 'Nothing changed');
 				return LogicResult::redirect($scoped_list($return_scope));
 			}
 			// Flip the bool directly (no prepare(), so criteria validation does not
 			// re-fire on a simple enable/disable).
-			$f->set('fil_is_enabled', $f->get('fil_is_enabled') ? false : true);
+			$f->set('ief_is_enabled', $f->get('ief_is_enabled') ? false : true);
 			$f->save();
 		}
 		return LogicResult::redirect($scoped_list($return_scope));
@@ -96,7 +96,7 @@ function mailbox_filters_logic(array $input, array $mount = array()): LogicResul
 	if ($op === 'delete' && !empty($input['id'])) {
 		$f = new InboundEmailFilter(intval($input['id']), TRUE);
 		if ($filter_in_reach($f)) {
-			$locked_msg = _filter_require_unlock($f->get('fil_iea_inbound_email_alias_id'));
+			$locked_msg = _filter_require_unlock($f->get('ief_iea_inbound_email_alias_id'));
 			if ($locked_msg !== null) {
 				_filter_flash($session, $locked_msg, $scoped_list($return_scope), 'Nothing changed');
 				return LogicResult::redirect($scoped_list($return_scope));
@@ -430,50 +430,50 @@ function _filter_label_options(string $scopeValue = ''): array {
 /** A blank value set for a new filter. */
 function _filter_blank_values(): array {
 	return array(
-		'id' => 0, 'scope' => '', 'fil_name' => '',
-		'fil_match_from' => '', 'fil_match_to' => '', 'fil_match_subject' => '',
-		'fil_match_has_words' => '', 'fil_match_excludes' => '',
-		'fil_match_size_op' => '', 'size_value' => '', 'size_unit' => 'MB',
-		'fil_match_has_attachment' => false,
-		'fil_action_ilb_inbound_email_label_id' => '0', 'fil_action_label_new' => '',
-		'fil_action_star' => false, 'fil_action_mark_read' => false,
-		'fil_action_archive' => false, 'fil_action_mark_spam' => false,
-		'fil_action_never_spam' => false, 'fil_action_delete' => false,
-		'fil_action_forward_to' => '', 'fil_forward_ack' => false, 'apply_existing' => false,
+		'id' => 0, 'scope' => '', 'ief_name' => '',
+		'ief_match_from' => '', 'ief_match_to' => '', 'ief_match_subject' => '',
+		'ief_match_has_words' => '', 'ief_match_excludes' => '',
+		'ief_match_size_op' => '', 'size_value' => '', 'size_unit' => 'MB',
+		'ief_match_has_attachment' => false,
+		'ief_action_ilb_inbound_email_label_id' => '0', 'ief_action_label_new' => '',
+		'ief_action_star' => false, 'ief_action_mark_read' => false,
+		'ief_action_archive' => false, 'ief_action_mark_spam' => false,
+		'ief_action_never_spam' => false, 'ief_action_delete' => false,
+		'ief_action_forward_to' => '', 'ief_forward_ack' => false, 'apply_existing' => false,
 	);
 }
 
 /** Read every filter field out of submitted input into the normalized value set. */
 function _filter_collect_input(array $input): array {
-	$op = isset($input['fil_match_size_op']) && in_array($input['fil_match_size_op'],
+	$op = isset($input['ief_match_size_op']) && in_array($input['ief_match_size_op'],
 		array(InboundEmailFilter::SIZE_OP_GT, InboundEmailFilter::SIZE_OP_LT), true)
-		? $input['fil_match_size_op'] : '';
+		? $input['ief_match_size_op'] : '';
 	$unit = isset($input['size_unit']) && isset(FILTER_UNIT_MULTIPLIERS[$input['size_unit']])
 		? $input['size_unit'] : 'MB';
 	return array(
 		'id'    => intval($input['id'] ?? 0),
 		'scope' => (string)($input['scope'] ?? ''),
-		'fil_name' => trim((string)($input['fil_name'] ?? '')),
-		'fil_match_from'      => trim((string)($input['fil_match_from'] ?? '')),
-		'fil_match_to'        => trim((string)($input['fil_match_to'] ?? '')),
-		'fil_match_subject'   => trim((string)($input['fil_match_subject'] ?? '')),
-		'fil_match_has_words' => trim((string)($input['fil_match_has_words'] ?? '')),
-		'fil_match_excludes'  => trim((string)($input['fil_match_excludes'] ?? '')),
-		'fil_match_size_op'   => $op,
+		'ief_name' => trim((string)($input['ief_name'] ?? '')),
+		'ief_match_from'      => trim((string)($input['ief_match_from'] ?? '')),
+		'ief_match_to'        => trim((string)($input['ief_match_to'] ?? '')),
+		'ief_match_subject'   => trim((string)($input['ief_match_subject'] ?? '')),
+		'ief_match_has_words' => trim((string)($input['ief_match_has_words'] ?? '')),
+		'ief_match_excludes'  => trim((string)($input['ief_match_excludes'] ?? '')),
+		'ief_match_size_op'   => $op,
 		'size_value'          => trim((string)($input['size_value'] ?? '')),
 		'size_unit'           => $unit,
-		'fil_match_has_attachment' => !empty($input['fil_match_has_attachment']),
+		'ief_match_has_attachment' => !empty($input['ief_match_has_attachment']),
 		// Raw selection: a label id, '0' (none), or 'new' (create one inline).
-		'fil_action_ilb_inbound_email_label_id' => (string)($input['fil_action_ilb_inbound_email_label_id'] ?? '0'),
-		'fil_action_label_new'    => trim((string)($input['fil_action_label_new'] ?? '')),
-		'fil_action_star'      => !empty($input['fil_action_star']),
-		'fil_action_mark_read' => !empty($input['fil_action_mark_read']),
-		'fil_action_archive'   => !empty($input['fil_action_archive']),
-		'fil_action_mark_spam' => !empty($input['fil_action_mark_spam']),
-		'fil_action_never_spam'=> !empty($input['fil_action_never_spam']),
-		'fil_action_delete'    => !empty($input['fil_action_delete']),
-		'fil_action_forward_to'=> trim((string)($input['fil_action_forward_to'] ?? '')),
-		'fil_forward_ack'      => !empty($input['fil_forward_ack']),
+		'ief_action_ilb_inbound_email_label_id' => (string)($input['ief_action_ilb_inbound_email_label_id'] ?? '0'),
+		'ief_action_label_new'    => trim((string)($input['ief_action_label_new'] ?? '')),
+		'ief_action_star'      => !empty($input['ief_action_star']),
+		'ief_action_mark_read' => !empty($input['ief_action_mark_read']),
+		'ief_action_archive'   => !empty($input['ief_action_archive']),
+		'ief_action_mark_spam' => !empty($input['ief_action_mark_spam']),
+		'ief_action_never_spam'=> !empty($input['ief_action_never_spam']),
+		'ief_action_delete'    => !empty($input['ief_action_delete']),
+		'ief_action_forward_to'=> trim((string)($input['ief_action_forward_to'] ?? '')),
+		'ief_forward_ack'      => !empty($input['ief_forward_ack']),
 		'apply_existing'       => !empty($input['apply_existing']),
 	);
 }
@@ -501,9 +501,9 @@ function _filter_forward_ack_domain(string $scope): string {
 
 /** A stored filter's scope value ('alias:N' for a mailbox rule, 'domain:N' for a domain-wide one). */
 function _filter_model_scope(InboundEmailFilter $f): string {
-	return ($f->get('fil_iea_inbound_email_alias_id') !== null)
-		? 'alias:' . intval($f->get('fil_iea_inbound_email_alias_id'))
-		: 'domain:' . intval($f->get('fil_ied_inbound_email_domain_id'));
+	return ($f->get('ief_iea_inbound_email_alias_id') !== null)
+		? 'alias:' . intval($f->get('ief_iea_inbound_email_alias_id'))
+		: 'domain:' . intval($f->get('ief_ied_inbound_email_domain_id'));
 }
 
 /** Reconstruct the editable value set from a stored filter (edit prefill). */
@@ -514,23 +514,23 @@ function _filter_values_from_model(InboundEmailFilter $f): array {
 	}
 	$v['id'] = intval($f->key);
 	$v['scope'] = _filter_model_scope($f);
-	foreach (array('fil_name', 'fil_match_from', 'fil_match_to', 'fil_match_subject',
-			'fil_match_has_words', 'fil_match_excludes', 'fil_action_forward_to') as $col) {
+	foreach (array('ief_name', 'ief_match_from', 'ief_match_to', 'ief_match_subject',
+			'ief_match_has_words', 'ief_match_excludes', 'ief_action_forward_to') as $col) {
 		$v[$col] = (string)$f->get($col);
 	}
-	foreach (array('fil_match_has_attachment', 'fil_action_star', 'fil_action_mark_read',
-			'fil_action_archive', 'fil_action_mark_spam', 'fil_action_never_spam',
-			'fil_action_delete') as $col) {
+	foreach (array('ief_match_has_attachment', 'ief_action_star', 'ief_action_mark_read',
+			'ief_action_archive', 'ief_action_mark_spam', 'ief_action_never_spam',
+			'ief_action_delete') as $col) {
 		$v[$col] = (bool)$f->get($col);
 	}
 	// Prefill the acknowledgment as ticked only when the standing one still covers
 	// the address in the box. A revoked or superseded consent shows unticked, so
 	// re-saving is a deliberate re-consent rather than a rubber stamp.
-	$v['fil_forward_ack'] = $f->forwardConsentSatisfied() && $f->forwardNeedsAcknowledgment();
-	$lid = intval($f->get('fil_action_ilb_inbound_email_label_id'));
-	$v['fil_action_ilb_inbound_email_label_id'] = $lid > 0 ? (string)$lid : '0';
-	$v['fil_match_size_op'] = (string)$f->get('fil_match_size_op');
-	$bytes = intval($f->get('fil_match_size_bytes'));
+	$v['ief_forward_ack'] = $f->forwardConsentSatisfied() && $f->forwardNeedsAcknowledgment();
+	$lid = intval($f->get('ief_action_ilb_inbound_email_label_id'));
+	$v['ief_action_ilb_inbound_email_label_id'] = $lid > 0 ? (string)$lid : '0';
+	$v['ief_match_size_op'] = (string)$f->get('ief_match_size_op');
+	$bytes = intval($f->get('ief_match_size_bytes'));
 	if ($bytes > 0) {
 		// Show the largest exact unit so 5 MB reads back as 5 MB, not 5242880 B.
 		if ($bytes % FILTER_UNIT_MULTIPLIERS['MB'] === 0) { $v['size_unit'] = 'MB'; $v['size_value'] = (string)($bytes / FILTER_UNIT_MULTIPLIERS['MB']); }
@@ -542,13 +542,13 @@ function _filter_values_from_model(InboundEmailFilter $f): array {
 
 /** Null if criteria are present, else a human error (the step-1 gate). */
 function _filter_validate_criteria(array $v): ?string {
-	$hasText = ($v['fil_match_from'] !== '' || $v['fil_match_to'] !== '' || $v['fil_match_subject'] !== ''
-		|| $v['fil_match_has_words'] !== '' || $v['fil_match_excludes'] !== '');
-	$hasSize = ($v['fil_match_size_op'] !== '' && (float)$v['size_value'] > 0);
+	$hasText = ($v['ief_match_from'] !== '' || $v['ief_match_to'] !== '' || $v['ief_match_subject'] !== ''
+		|| $v['ief_match_has_words'] !== '' || $v['ief_match_excludes'] !== '');
+	$hasSize = ($v['ief_match_size_op'] !== '' && (float)$v['size_value'] > 0);
 	if ($v['scope'] === '') {
 		return 'Choose which mailbox this filter applies to.';
 	}
-	if (!$hasText && !$hasSize && !$v['fil_match_has_attachment']) {
+	if (!$hasText && !$hasSize && !$v['ief_match_has_attachment']) {
 		return 'Add at least one criterion (From, To, Subject, words, size, or attachment).';
 	}
 	return null;
@@ -578,45 +578,45 @@ function _filter_save(array $v, array $alias_domain): InboundEmailFilter {
 		throw new InboundEmailFilterException($locked_msg);
 	}
 
-	$filter->set('fil_iea_inbound_email_alias_id', $alias_id);
-	$filter->set('fil_ied_inbound_email_domain_id', $domain_id);
-	$filter->set('fil_name', $v['fil_name'] !== '' ? $v['fil_name'] : null);
+	$filter->set('ief_iea_inbound_email_alias_id', $alias_id);
+	$filter->set('ief_ied_inbound_email_domain_id', $domain_id);
+	$filter->set('ief_name', $v['ief_name'] !== '' ? $v['ief_name'] : null);
 
-	$filter->set('fil_match_from', $v['fil_match_from'] !== '' ? $v['fil_match_from'] : null);
-	$filter->set('fil_match_to', $v['fil_match_to'] !== '' ? $v['fil_match_to'] : null);
-	$filter->set('fil_match_subject', $v['fil_match_subject'] !== '' ? $v['fil_match_subject'] : null);
-	$filter->set('fil_match_has_words', $v['fil_match_has_words'] !== '' ? $v['fil_match_has_words'] : null);
-	$filter->set('fil_match_excludes', $v['fil_match_excludes'] !== '' ? $v['fil_match_excludes'] : null);
-	$filter->set('fil_match_has_attachment', $v['fil_match_has_attachment']);
+	$filter->set('ief_match_from', $v['ief_match_from'] !== '' ? $v['ief_match_from'] : null);
+	$filter->set('ief_match_to', $v['ief_match_to'] !== '' ? $v['ief_match_to'] : null);
+	$filter->set('ief_match_subject', $v['ief_match_subject'] !== '' ? $v['ief_match_subject'] : null);
+	$filter->set('ief_match_has_words', $v['ief_match_has_words'] !== '' ? $v['ief_match_has_words'] : null);
+	$filter->set('ief_match_excludes', $v['ief_match_excludes'] !== '' ? $v['ief_match_excludes'] : null);
+	$filter->set('ief_match_has_attachment', $v['ief_match_has_attachment']);
 
 	// Size: normalize value + unit to bytes (blank unless a real op + positive value).
-	if ($v['fil_match_size_op'] !== '' && (float)$v['size_value'] > 0) {
+	if ($v['ief_match_size_op'] !== '' && (float)$v['size_value'] > 0) {
 		$bytes = (int)round((float)$v['size_value'] * FILTER_UNIT_MULTIPLIERS[$v['size_unit']]);
-		$filter->set('fil_match_size_op', $v['fil_match_size_op']);
-		$filter->set('fil_match_size_bytes', $bytes);
+		$filter->set('ief_match_size_op', $v['ief_match_size_op']);
+		$filter->set('ief_match_size_bytes', $bytes);
 	} else {
-		$filter->set('fil_match_size_op', null);
-		$filter->set('fil_match_size_bytes', null);
+		$filter->set('ief_match_size_op', null);
+		$filter->set('ief_match_size_bytes', null);
 	}
 
 	// Actions. A label is an ilb_ row, not a mailbox-scoped folder, so the apply-label
 	// action is valid for every scope, domain-wide buckets included. The selection
 	// is a label id, or 'new' to mint a label inline (Gmail's "New label…").
-	$filter->set('fil_action_ilb_inbound_email_label_id', _filter_resolve_label($v));
-	$filter->set('fil_action_star', $v['fil_action_star']);
-	$filter->set('fil_action_mark_read', $v['fil_action_mark_read']);
-	$filter->set('fil_action_archive', $v['fil_action_archive']);
-	$filter->set('fil_action_mark_spam', $v['fil_action_mark_spam']);
-	$filter->set('fil_action_never_spam', $v['fil_action_never_spam']);
-	$filter->set('fil_action_delete', $v['fil_action_delete']);
-	$filter->set('fil_action_forward_to', $v['fil_action_forward_to'] !== '' ? $v['fil_action_forward_to'] : null);
+	$filter->set('ief_action_ilb_inbound_email_label_id', _filter_resolve_label($v));
+	$filter->set('ief_action_star', $v['ief_action_star']);
+	$filter->set('ief_action_mark_read', $v['ief_action_mark_read']);
+	$filter->set('ief_action_archive', $v['ief_action_archive']);
+	$filter->set('ief_action_mark_spam', $v['ief_action_mark_spam']);
+	$filter->set('ief_action_never_spam', $v['ief_action_never_spam']);
+	$filter->set('ief_action_delete', $v['ief_action_delete']);
+	$filter->set('ief_action_forward_to', $v['ief_action_forward_to'] !== '' ? $v['ief_action_forward_to'] : null);
 
 	// Forwarding off a protected domain is an egress and needs the operator to
 	// say so in writing (specs/implemented/sealed_content_egress.md § resolved decision 7).
 	// The acknowledgment is refreshed on every save that ticks the box, which is
 	// what makes changing the destination re-consent rather than inherit.
 	if ($filter->forwardNeedsAcknowledgment()) {
-		if (empty($v['fil_forward_ack'])) {
+		if (empty($v['ief_forward_ack'])) {
 			throw new InboundEmailFilterException(
 				'This domain protects its mail, so forwarding it off the server needs your '
 				. 'acknowledgment. Tick the confirmation under the forwarding address, or clear '
@@ -625,15 +625,15 @@ function _filter_save(array $v, array $alias_domain): InboundEmailFilter {
 		$filter->recordForwardAcknowledgment(intval(SessionControl::get_instance()->get_user_id()));
 	} else {
 		// No address, or a domain with nothing to protect: hold no stale consent.
-		$filter->set('fil_forward_ack_time', null);
-		$filter->set('fil_forward_ack_usr_user_id', null);
-		$filter->set('fil_forward_ack_destination', null);
+		$filter->set('ief_forward_ack_time', null);
+		$filter->set('ief_forward_ack_usr_user_id', null);
+		$filter->set('ief_forward_ack_destination', null);
 	}
 
 	// "Also apply to existing": flag for the backfill task and reset its cursor.
 	if ($v['apply_existing']) {
-		$filter->set('fil_apply_existing_pending', true);
-		$filter->set('fil_apply_existing_cursor', 0);
+		$filter->set('ief_apply_existing_pending', true);
+		$filter->set('ief_apply_existing_cursor', 0);
 	}
 
 	$filter->prepare();
@@ -648,9 +648,9 @@ function _filter_save(array $v, array $alias_domain): InboundEmailFilter {
  * cleanly.
  */
 function _filter_resolve_label(array $v): ?int {
-	$sel = (string)($v['fil_action_ilb_inbound_email_label_id'] ?? '0');
+	$sel = (string)($v['ief_action_ilb_inbound_email_label_id'] ?? '0');
 	if ($sel === 'new') {
-		$name = trim((string)($v['fil_action_label_new'] ?? ''));
+		$name = trim((string)($v['ief_action_label_new'] ?? ''));
 		if ($name === '') {
 			return null;
 		}
@@ -676,7 +676,7 @@ function _filter_list_rows(string $scope = ''): array {
 	}
 	$multi = new MultiInboundEmailFilter(
 		$options,
-		array('fil_order' => 'ASC', 'fil_inbound_email_filter_id' => 'ASC')
+		array('ief_order' => 'ASC', 'ief_inbound_email_filter_id' => 'ASC')
 	);
 	$multi->load();
 
@@ -684,7 +684,7 @@ function _filter_list_rows(string $scope = ''): array {
 	$alias_cache = array();
 	$domain_cache = array();
 	foreach ($multi as $f) {
-		$aliasId = $f->get('fil_iea_inbound_email_alias_id');
+		$aliasId = $f->get('ief_iea_inbound_email_alias_id');
 		if ($aliasId !== null) {
 			$aid = intval($aliasId);
 			if (!isset($alias_cache[$aid])) {
@@ -693,7 +693,7 @@ function _filter_list_rows(string $scope = ''): array {
 			}
 			$mailbox = $alias_cache[$aid];
 		} else {
-			$did = intval($f->get('fil_ied_inbound_email_domain_id'));
+			$did = intval($f->get('ief_ied_inbound_email_domain_id'));
 			if (!isset($domain_cache[$did])) {
 				$d = new InboundEmailDomain($did, TRUE);
 				$domain_cache[$did] = $d->key ? ('All mailboxes in ' . $d->get('ied_domain')) : ('domain #' . $did);
@@ -703,11 +703,11 @@ function _filter_list_rows(string $scope = ''): array {
 		$rows[] = array(
 			'id'        => intval($f->key),
 			'mailbox'   => $mailbox,
-			'name'      => $f->get('fil_name') ?: '(unnamed)',
-			'enabled'   => (bool)$f->get('fil_is_enabled'),
+			'name'      => $f->get('ief_name') ?: '(unnamed)',
+			'enabled'   => (bool)$f->get('ief_is_enabled'),
 			'criteria'  => _filter_criteria_summary($f),
 			'actions'   => _filter_action_summary($f),
-			'pending'   => (bool)$f->get('fil_apply_existing_pending'),
+			'pending'   => (bool)$f->get('ief_apply_existing_pending'),
 		);
 	}
 	return $rows;
@@ -716,30 +716,30 @@ function _filter_list_rows(string $scope = ''): array {
 /** Compact human summary of a filter's criteria for the list. */
 function _filter_criteria_summary(InboundEmailFilter $f): array {
 	$parts = array();
-	if ($f->get('fil_match_from'))      { $parts[] = 'From: ' . $f->get('fil_match_from'); }
-	if ($f->get('fil_match_to'))        { $parts[] = 'To: ' . $f->get('fil_match_to'); }
-	if ($f->get('fil_match_subject'))   { $parts[] = 'Subject: ' . $f->get('fil_match_subject'); }
-	if ($f->get('fil_match_has_words')) { $parts[] = 'Has: ' . $f->get('fil_match_has_words'); }
-	if ($f->get('fil_match_excludes'))  { $parts[] = 'Excludes: ' . $f->get('fil_match_excludes'); }
-	if ($f->get('fil_match_size_op')) {
-		$parts[] = 'Size ' . ($f->get('fil_match_size_op') === 'gt' ? '>' : '<') . ' '
-			. number_format((int)$f->get('fil_match_size_bytes')) . ' B';
+	if ($f->get('ief_match_from'))      { $parts[] = 'From: ' . $f->get('ief_match_from'); }
+	if ($f->get('ief_match_to'))        { $parts[] = 'To: ' . $f->get('ief_match_to'); }
+	if ($f->get('ief_match_subject'))   { $parts[] = 'Subject: ' . $f->get('ief_match_subject'); }
+	if ($f->get('ief_match_has_words')) { $parts[] = 'Has: ' . $f->get('ief_match_has_words'); }
+	if ($f->get('ief_match_excludes'))  { $parts[] = 'Excludes: ' . $f->get('ief_match_excludes'); }
+	if ($f->get('ief_match_size_op')) {
+		$parts[] = 'Size ' . ($f->get('ief_match_size_op') === 'gt' ? '>' : '<') . ' '
+			. number_format((int)$f->get('ief_match_size_bytes')) . ' B';
 	}
-	if ($f->get('fil_match_has_attachment')) { $parts[] = 'Has attachment'; }
+	if ($f->get('ief_match_has_attachment')) { $parts[] = 'Has attachment'; }
 	return $parts;
 }
 
 /** Compact human chips for a filter's actions in the list. */
 function _filter_action_summary(InboundEmailFilter $f): array {
 	$chips = array();
-	if ($f->get('fil_action_never_spam')) { $chips[] = 'Never spam'; }
-	if ($f->get('fil_action_mark_spam'))  { $chips[] = 'Mark spam'; }
-	if ($f->get('fil_action_ilb_inbound_email_label_id')) { $chips[] = 'Label'; }
-	if ($f->get('fil_action_star'))       { $chips[] = 'Star'; }
-	if ($f->get('fil_action_mark_read'))  { $chips[] = 'Mark read'; }
-	if ($f->get('fil_action_archive'))    { $chips[] = 'Archive'; }
-	if ($f->get('fil_action_forward_to')) { $chips[] = 'Forward'; }
-	if ($f->get('fil_action_delete'))     { $chips[] = 'Delete'; }
+	if ($f->get('ief_action_never_spam')) { $chips[] = 'Never spam'; }
+	if ($f->get('ief_action_mark_spam'))  { $chips[] = 'Mark spam'; }
+	if ($f->get('ief_action_ilb_inbound_email_label_id')) { $chips[] = 'Label'; }
+	if ($f->get('ief_action_star'))       { $chips[] = 'Star'; }
+	if ($f->get('ief_action_mark_read'))  { $chips[] = 'Mark read'; }
+	if ($f->get('ief_action_archive'))    { $chips[] = 'Archive'; }
+	if ($f->get('ief_action_forward_to')) { $chips[] = 'Forward'; }
+	if ($f->get('ief_action_delete'))     { $chips[] = 'Delete'; }
 	return $chips;
 }
 
@@ -832,7 +832,7 @@ function _filter_import_confirm(string $xml, array $checked, string $scope, arra
 			continue;
 		}
 		_filter_create_from_candidate($cand, $labelId, $alias_id, $domain_id);
-		if (!empty($cand['fields']['fil_action_delete'])) { $deleteFlagged++; }
+		if (!empty($cand['fields']['ief_action_delete'])) { $deleteFlagged++; }
 		$existing[$sig] = true; // also collapse exact duplicates within one file
 		$created++;
 	}
@@ -858,30 +858,30 @@ function _filter_import_confirm(string $xml, array $checked, string $scope, arra
 function _filter_create_from_candidate(array $cand, ?int $labelId, ?int $alias_id, int $domain_id): InboundEmailFilter {
 	$fields = $cand['fields'];
 	$filter = new InboundEmailFilter(NULL);
-	$filter->set('fil_iea_inbound_email_alias_id', $alias_id);
-	$filter->set('fil_ied_inbound_email_domain_id', $domain_id);
-	$filter->set('fil_name', substr((string)$cand['name'], 0, 255));
+	$filter->set('ief_iea_inbound_email_alias_id', $alias_id);
+	$filter->set('ief_ied_inbound_email_domain_id', $domain_id);
+	$filter->set('ief_name', substr((string)$cand['name'], 0, 255));
 
-	foreach (array('fil_match_from', 'fil_match_to', 'fil_match_subject',
-			'fil_match_has_words', 'fil_match_excludes', 'fil_action_forward_to') as $c) {
+	foreach (array('ief_match_from', 'ief_match_to', 'ief_match_subject',
+			'ief_match_has_words', 'ief_match_excludes', 'ief_action_forward_to') as $c) {
 		$filter->set($c, (isset($fields[$c]) && $fields[$c] !== '') ? $fields[$c] : null);
 	}
-	foreach (array('fil_match_has_attachment', 'fil_action_archive', 'fil_action_mark_read',
-			'fil_action_star', 'fil_action_delete', 'fil_action_never_spam') as $c) {
+	foreach (array('ief_match_has_attachment', 'ief_action_archive', 'ief_action_mark_read',
+			'ief_action_star', 'ief_action_delete', 'ief_action_never_spam') as $c) {
 		$filter->set($c, !empty($fields[$c]));
 	}
-	if (!empty($fields['fil_match_size_op'])) {
-		$filter->set('fil_match_size_op', $fields['fil_match_size_op']);
-		$filter->set('fil_match_size_bytes', intval($fields['fil_match_size_bytes']));
+	if (!empty($fields['ief_match_size_op'])) {
+		$filter->set('ief_match_size_op', $fields['ief_match_size_op']);
+		$filter->set('ief_match_size_bytes', intval($fields['ief_match_size_bytes']));
 	}
-	$filter->set('fil_action_ilb_inbound_email_label_id', $labelId);
+	$filter->set('ief_action_ilb_inbound_email_label_id', $labelId);
 
 	// Fix 9 (specs/mailbox_data_loss_fixes.md): a filter that carries a
 	// delete/trash action imports DISABLED, pending an explicit enable — a rule
 	// that auto-trashes matching mail on arrival must not silently activate
 	// during a migration. Every other filter imports enabled (schema default).
-	if (!empty($fields['fil_action_delete'])) {
-		$filter->set('fil_is_enabled', false);
+	if (!empty($fields['ief_action_delete'])) {
+		$filter->set('ief_is_enabled', false);
 	}
 
 	$filter->prepare();
@@ -896,17 +896,17 @@ function _filter_create_from_candidate(array $cand, ?int $labelId, ?int $alias_i
  */
 function _filter_signature(array $fields, ?int $labelId): string {
 	$sig = array();
-	foreach (array('fil_match_from', 'fil_match_to', 'fil_match_subject',
-			'fil_match_has_words', 'fil_match_excludes', 'fil_action_forward_to') as $c) {
+	foreach (array('ief_match_from', 'ief_match_to', 'ief_match_subject',
+			'ief_match_has_words', 'ief_match_excludes', 'ief_action_forward_to') as $c) {
 		$v = trim((string)($fields[$c] ?? ''));
 		if ($v !== '') { $sig[$c] = $v; }
 	}
-	foreach (array('fil_match_has_attachment', 'fil_action_archive', 'fil_action_mark_read',
-			'fil_action_star', 'fil_action_delete', 'fil_action_never_spam', 'fil_action_mark_spam') as $c) {
+	foreach (array('ief_match_has_attachment', 'ief_action_archive', 'ief_action_mark_read',
+			'ief_action_star', 'ief_action_delete', 'ief_action_never_spam', 'ief_action_mark_spam') as $c) {
 		if (!empty($fields[$c])) { $sig[$c] = 1; }
 	}
-	if (!empty($fields['fil_match_size_op'])) {
-		$sig['size'] = $fields['fil_match_size_op'] . ':' . intval($fields['fil_match_size_bytes'] ?? 0);
+	if (!empty($fields['ief_match_size_op'])) {
+		$sig['size'] = $fields['ief_match_size_op'] . ':' . intval($fields['ief_match_size_bytes'] ?? 0);
 	}
 	if ($labelId) { $sig['label'] = intval($labelId); }
 	ksort($sig);
@@ -922,31 +922,31 @@ function _filter_existing_signatures(?int $alias_id, int $domain_id): array {
 		$options['domain_wide'] = true;
 		$options['domain_id'] = $domain_id;
 	}
-	$multi = new MultiInboundEmailFilter($options, array('fil_inbound_email_filter_id' => 'ASC'));
+	$multi = new MultiInboundEmailFilter($options, array('ief_inbound_email_filter_id' => 'ASC'));
 	$multi->load();
 
 	$sigs = array();
 	foreach ($multi as $f) {
 		$fields = array(
-			'fil_match_from'           => (string)$f->get('fil_match_from'),
-			'fil_match_to'             => (string)$f->get('fil_match_to'),
-			'fil_match_subject'        => (string)$f->get('fil_match_subject'),
-			'fil_match_has_words'      => (string)$f->get('fil_match_has_words'),
-			'fil_match_excludes'       => (string)$f->get('fil_match_excludes'),
-			'fil_action_forward_to'    => (string)$f->get('fil_action_forward_to'),
-			'fil_match_has_attachment' => (bool)$f->get('fil_match_has_attachment'),
-			'fil_action_archive'       => (bool)$f->get('fil_action_archive'),
-			'fil_action_mark_read'     => (bool)$f->get('fil_action_mark_read'),
-			'fil_action_star'          => (bool)$f->get('fil_action_star'),
-			'fil_action_delete'        => (bool)$f->get('fil_action_delete'),
-			'fil_action_never_spam'    => (bool)$f->get('fil_action_never_spam'),
-			'fil_action_mark_spam'     => (bool)$f->get('fil_action_mark_spam'),
+			'ief_match_from'           => (string)$f->get('ief_match_from'),
+			'ief_match_to'             => (string)$f->get('ief_match_to'),
+			'ief_match_subject'        => (string)$f->get('ief_match_subject'),
+			'ief_match_has_words'      => (string)$f->get('ief_match_has_words'),
+			'ief_match_excludes'       => (string)$f->get('ief_match_excludes'),
+			'ief_action_forward_to'    => (string)$f->get('ief_action_forward_to'),
+			'ief_match_has_attachment' => (bool)$f->get('ief_match_has_attachment'),
+			'ief_action_archive'       => (bool)$f->get('ief_action_archive'),
+			'ief_action_mark_read'     => (bool)$f->get('ief_action_mark_read'),
+			'ief_action_star'          => (bool)$f->get('ief_action_star'),
+			'ief_action_delete'        => (bool)$f->get('ief_action_delete'),
+			'ief_action_never_spam'    => (bool)$f->get('ief_action_never_spam'),
+			'ief_action_mark_spam'     => (bool)$f->get('ief_action_mark_spam'),
 		);
-		if ($f->get('fil_match_size_op')) {
-			$fields['fil_match_size_op'] = (string)$f->get('fil_match_size_op');
-			$fields['fil_match_size_bytes'] = intval($f->get('fil_match_size_bytes'));
+		if ($f->get('ief_match_size_op')) {
+			$fields['ief_match_size_op'] = (string)$f->get('ief_match_size_op');
+			$fields['ief_match_size_bytes'] = intval($f->get('ief_match_size_bytes'));
 		}
-		$lid = intval($f->get('fil_action_ilb_inbound_email_label_id'));
+		$lid = intval($f->get('ief_action_ilb_inbound_email_label_id'));
 		$sigs[_filter_signature($fields, $lid > 0 ? $lid : null)] = true;
 	}
 	return $sigs;
@@ -955,28 +955,28 @@ function _filter_existing_signatures(?int $alias_id, int $domain_id): array {
 /** Compact human criteria chips for a parsed candidate (preview table). */
 function _filter_candidate_criteria_chips(array $fields): array {
 	$chips = array();
-	if (!empty($fields['fil_match_from']))      { $chips[] = 'From: ' . $fields['fil_match_from']; }
-	if (!empty($fields['fil_match_to']))        { $chips[] = 'To: ' . $fields['fil_match_to']; }
-	if (!empty($fields['fil_match_subject']))   { $chips[] = 'Subject: ' . $fields['fil_match_subject']; }
-	if (!empty($fields['fil_match_has_words'])) { $chips[] = 'Has: ' . $fields['fil_match_has_words']; }
-	if (!empty($fields['fil_match_excludes']))  { $chips[] = 'Excludes: ' . $fields['fil_match_excludes']; }
-	if (!empty($fields['fil_match_size_op'])) {
-		$chips[] = 'Size ' . ($fields['fil_match_size_op'] === 'gt' ? '>' : '<') . ' '
-			. number_format(intval($fields['fil_match_size_bytes'] ?? 0)) . ' B';
+	if (!empty($fields['ief_match_from']))      { $chips[] = 'From: ' . $fields['ief_match_from']; }
+	if (!empty($fields['ief_match_to']))        { $chips[] = 'To: ' . $fields['ief_match_to']; }
+	if (!empty($fields['ief_match_subject']))   { $chips[] = 'Subject: ' . $fields['ief_match_subject']; }
+	if (!empty($fields['ief_match_has_words'])) { $chips[] = 'Has: ' . $fields['ief_match_has_words']; }
+	if (!empty($fields['ief_match_excludes']))  { $chips[] = 'Excludes: ' . $fields['ief_match_excludes']; }
+	if (!empty($fields['ief_match_size_op'])) {
+		$chips[] = 'Size ' . ($fields['ief_match_size_op'] === 'gt' ? '>' : '<') . ' '
+			. number_format(intval($fields['ief_match_size_bytes'] ?? 0)) . ' B';
 	}
-	if (!empty($fields['fil_match_has_attachment'])) { $chips[] = 'Has attachment'; }
+	if (!empty($fields['ief_match_has_attachment'])) { $chips[] = 'Has attachment'; }
 	return $chips;
 }
 
 /** Compact human action chips for a parsed candidate, excluding the label. */
 function _filter_candidate_action_chips(array $fields): array {
 	$chips = array();
-	if (!empty($fields['fil_action_never_spam'])) { $chips[] = 'Never spam'; }
-	if (!empty($fields['fil_action_star']))       { $chips[] = 'Star'; }
-	if (!empty($fields['fil_action_mark_read']))  { $chips[] = 'Mark read'; }
-	if (!empty($fields['fil_action_archive']))    { $chips[] = 'Archive'; }
-	if (!empty($fields['fil_action_forward_to'])) { $chips[] = 'Forward: ' . $fields['fil_action_forward_to']; }
-	if (!empty($fields['fil_action_delete']))     { $chips[] = 'Delete'; }
+	if (!empty($fields['ief_action_never_spam'])) { $chips[] = 'Never spam'; }
+	if (!empty($fields['ief_action_star']))       { $chips[] = 'Star'; }
+	if (!empty($fields['ief_action_mark_read']))  { $chips[] = 'Mark read'; }
+	if (!empty($fields['ief_action_archive']))    { $chips[] = 'Archive'; }
+	if (!empty($fields['ief_action_forward_to'])) { $chips[] = 'Forward: ' . $fields['ief_action_forward_to']; }
+	if (!empty($fields['ief_action_delete']))     { $chips[] = 'Delete'; }
 	return $chips;
 }
 ?>

@@ -63,14 +63,14 @@ harness_defer(function () { RelayCloudProvisioner::$driver_factory = null; });
 section('A run in booting, with a token and its bundle copy');
 
 $run = new RelayCloudProvision(NULL);
-$run->set('rcp_kind', 'provision');
-$run->set('rcp_status', 'booting');
-$run->set('rcp_provider', 'linode');
-$run->set('rcp_mail_hostname', 'mx.birth-' . substr(md5(uniqid()), 0, 6) . '.test');
-$run->set('rcp_region', 'us-east');
-$run->set('rcp_instance_type', 'g6-nanode-1');
-$run->set('rcp_instance_id', 'birth-test-' . mt_rand(1000, 9999));
-$run->set('rcp_instance_ip', '127.0.0.1');
+$run->set('rcl_kind', 'provision');
+$run->set('rcl_status', 'booting');
+$run->set('rcl_provider', 'linode');
+$run->set('rcl_mail_hostname', 'mx.birth-' . substr(md5(uniqid()), 0, 6) . '.test');
+$run->set('rcl_region', 'us-east');
+$run->set('rcl_instance_type', 'g6-nanode-1');
+$run->set('rcl_instance_id', 'birth-test-' . mt_rand(1000, 9999));
+$run->set('rcl_instance_ip', '127.0.0.1');
 $token = $run->issueRunToken(1800);
 $run->save();
 harness_register_model('RelayCloudProvision', $run->key);
@@ -138,7 +138,7 @@ check($r['status'] === 403, 'a fingerprint that is not the key\'s fingerprint is
 $r = RelayBirthEndpoint::processBorn('{"report":', $token, '127.0.0.1');
 check($r['status'] === 400, 'garbage is a 400', json_encode($r));
 $check_run = new RelayCloudProvision(intval($run_id), TRUE);
-check((string)$check_run->get('rcp_status') === 'booting' && !(bool)$check_run->get('rcp_run_token_spent'), 'no refusal moved the run or spent the token');
+check((string)$check_run->get('rcl_status') === 'booting' && !(bool)$check_run->get('rcl_run_token_spent'), 'no refusal moved the run or spent the token');
 
 // The pinned ping must answer before the pin is trusted: with the listener
 // stopped nothing does, and the run stays where it is.
@@ -147,7 +147,7 @@ $r = RelayBirthEndpoint::processBorn($body, $token, '127.0.0.1');
 check($r['status'] === 409 && strpos($r['error'], 'pinned ping') !== false, 'a relay that does not answer its pinned ping is not believed', json_encode($r));
 $rows = new MultiMailboxRelay(array('deleted' => false));
 $stray = 0;
-foreach ($rows as $row) { if ((string)$row->get('mrl_cloud_instance_id') === (string)$run->get('rcp_instance_id')) { $stray++; } }
+foreach ($rows as $row) { if ((string)$row->get('mrl_cloud_instance_id') === (string)$run->get('rcl_instance_id')) { $stray++; } }
 check($stray === 0, 'a refused birth leaves no relay row behind', $stray . ' row(s)');
 
 // Now the relay answers.
@@ -179,10 +179,10 @@ if ($relay_id > 0) {
 	}
 }
 $done = new RelayCloudProvision(intval($run_id), TRUE);
-check((string)$done->get('rcp_status') === 'done', 'the run is done');
-check((bool)$done->get('rcp_run_token_spent') && (string)$done->get('rcp_sealed_run_token') === '', 'the token is spent and erased');
+check((string)$done->get('rcl_status') === 'done', 'the run is done');
+check((bool)$done->get('rcl_run_token_spent') && (string)$done->get('rcl_sealed_run_token') === '', 'the token is spent and erased');
 check(!is_file($done->bundlePath()), 'the run\'s bundle copy is erased');
-check(intval($done->get('rcp_mrl_mailbox_relay_id')) === $relay_id, 'the run names its relay');
+check(intval($done->get('rcl_mrl_mailbox_relay_id')) === $relay_id, 'the run names its relay');
 check(count($driver->rdns) === 1 && $driver->rdns[0][1] === '127.0.0.1', 'reverse DNS was requested from the provider');
 $r = RelayBirthEndpoint::processBorn(json_encode($signed2), $token, '127.0.0.1');
 check($r['status'] === 403, 'a second report with the spent token is refused', json_encode($r));

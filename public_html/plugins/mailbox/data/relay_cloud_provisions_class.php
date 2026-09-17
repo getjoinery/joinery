@@ -37,6 +37,8 @@
  * the provider access token and the per-run root SSH private key, both
  * SecretBox-sealed and erased at terminal state.
  *
+ * @version 1.5 - prefix rcl, table rcl_relay_cloud_provisions, locators rcl_relay_cloud_provisions.rcl_sealed_*:
+ *                rcp is Recipe's alone (specs/implemented/shared_prefix_relay_cloud_provision.md)
  * @version 1.4 - the run's bundle copy lives under cache/relay_runs, never in the site root
  *                (specs/post_release_fleet_defects.md B3)
  * @version 1.3 - the 'upgrade' kind, with the relay it targets
@@ -48,67 +50,67 @@ require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
 class RelayCloudProvisionException extends SystemBaseException {}
 
 class RelayCloudProvision extends SystemBase {
-	public static $prefix = 'rcp';
-	public static $tablename = 'rcp_relay_cloud_provisions';
-	public static $pkey_column = 'rcp_relay_cloud_provision_id';
+	public static $prefix = 'rcl';
+	public static $tablename = 'rcl_relay_cloud_provisions';
+	public static $pkey_column = 'rcl_relay_cloud_provision_id';
 
 	protected static $foreign_key_actions = array(
-		'rcp_mrl_mailbox_relay_id' => array('action' => 'null'),
-		'rcp_mfs_mailbox_fleet_shard_id' => array('action' => 'null'),
+		'rcl_mrl_mailbox_relay_id' => array('action' => 'null'),
+		'rcl_mfs_mailbox_fleet_shard_id' => array('action' => 'null'),
 	);
 
 	public static $field_specifications = array(
-		'rcp_relay_cloud_provision_id'              => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
-		'rcp_kind'            => array('type'=>'varchar(10)', 'is_nullable'=>false, 'default'=>'provision', 'allowed_values'=>array('provision', 'upgrade')),
-		'rcp_status'          => array('type'=>'varchar(20)', 'is_nullable'=>false, 'default'=>'awaiting_grant'),
-		'rcp_provider'        => array('type'=>'varchar(32)', 'is_nullable'=>false, 'default'=>'linode'),
-		'rcp_mail_hostname'   => array('type'=>'varchar(255)'),
-		'rcp_region'          => array('type'=>'varchar(50)'),
-		'rcp_instance_type'   => array('type'=>'varchar(50)'),
+		'rcl_relay_cloud_provision_id'              => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+		'rcl_kind'            => array('type'=>'varchar(10)', 'is_nullable'=>false, 'default'=>'provision', 'allowed_values'=>array('provision', 'upgrade')),
+		'rcl_status'          => array('type'=>'varchar(20)', 'is_nullable'=>false, 'default'=>'awaiting_grant'),
+		'rcl_provider'        => array('type'=>'varchar(32)', 'is_nullable'=>false, 'default'=>'linode'),
+		'rcl_mail_hostname'   => array('type'=>'varchar(255)'),
+		'rcl_region'          => array('type'=>'varchar(50)'),
+		'rcl_instance_type'   => array('type'=>'varchar(50)'),
 		// Upgrade runs only: the relay being replaced. A provision run has no
 		// relay yet — it creates one — so this stays null there.
-		'rcp_mrl_mailbox_relay_id' => array('type'=>'int8'),
-		'rcp_instance_id'     => array('type'=>'varchar(50)'),
-		'rcp_instance_ip'     => array('type'=>'varchar(64)'),
-		'rcp_sealed_token'    => array('type'=>'text'),
+		'rcl_mrl_mailbox_relay_id' => array('type'=>'int8'),
+		'rcl_instance_id'     => array('type'=>'varchar(50)'),
+		'rcl_instance_ip'     => array('type'=>'varchar(64)'),
+		'rcl_sealed_token'    => array('type'=>'text'),
 		// A relay born from user-data (specs/relay_without_a_shell.md): the
 		// one-time run token the first-boot script presents to fetch the bundle
 		// and post the birth report, sealed like the provider token and erased
 		// with it; when it stops being valid; whether the birth report spent it;
 		// and the sha256 of the run's own copy of the support bundle.
-		'rcp_sealed_run_token' => array('type'=>'text'),
-		'rcp_run_token_expires'=> array('type'=>'timestamp(6)'),
-		'rcp_run_token_spent'  => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
-		'rcp_bundle_sha256'    => array('type'=>'varchar(64)'),
+		'rcl_sealed_run_token' => array('type'=>'text'),
+		'rcl_run_token_expires'=> array('type'=>'timestamp(6)'),
+		'rcl_run_token_spent'  => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
+		'rcl_bundle_sha256'    => array('type'=>'varchar(64)'),
 		// A fleet SHARD is born the same way, skeleton only: no tenant main, the
 		// operator's public key in its registry, and its birth lands on the
 		// MailboxFleetShard row this names instead of a MailboxRelay row.
-		'rcp_mfs_mailbox_fleet_shard_id'     => array('type'=>'int8'),
-		'rcp_error'           => array('type'=>'text'),
-		'rcp_create_time'     => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'rcp_update_time'     => array('type'=>'timestamp(6)'),
-		'rcp_delete_time'     => array('type'=>'timestamp(6)'),
+		'rcl_mfs_mailbox_fleet_shard_id'     => array('type'=>'int8'),
+		'rcl_error'           => array('type'=>'text'),
+		'rcl_create_time'     => array('type'=>'timestamp(6)', 'default'=>'now()'),
+		'rcl_update_time'     => array('type'=>'timestamp(6)'),
+		'rcl_delete_time'     => array('type'=>'timestamp(6)'),
 	);
 
 	function prepare() {
-		$this->set('rcp_update_time', gmdate('Y-m-d H:i:s'));
+		$this->set('rcl_update_time', gmdate('Y-m-d H:i:s'));
 	}
 
 	// Mandatory stamping lives in save(): prepare() is not guaranteed to run first.
 	function save($debug = false) {
-		$this->set('rcp_update_time', gmdate('Y-m-d H:i:s'));
+		$this->set('rcl_update_time', gmdate('Y-m-d H:i:s'));
 		return parent::save($debug);
 	}
 
 	/** Seal the provider access token onto the row (not saved here). */
 	public function sealToken(string $access_token): void {
 		$box = new SecretBox();
-		$this->set('rcp_sealed_token', $box->seal('rcp_relay_cloud_provisions.rcp_sealed_token', $access_token));
+		$this->set('rcl_sealed_token', $box->seal('rcl_relay_cloud_provisions.rcl_sealed_token', $access_token));
 	}
 
 	/** @return string '' when no token is held (or it is unreadable here). */
 	public function unsealToken(): string {
-		$stored = (string)$this->get('rcp_sealed_token');
+		$stored = (string)$this->get('rcl_sealed_token');
 		if ($stored === '') {
 			return '';
 		}
@@ -123,10 +125,10 @@ class RelayCloudProvision extends SystemBase {
 	public function issueRunToken(int $ttl_seconds): string {
 		$token = bin2hex(random_bytes(32));
 		require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
-		$this->set('rcp_sealed_run_token',
-			(new SecretBox())->seal('rcp_relay_cloud_provisions.rcp_sealed_run_token', $token));
-		$this->set('rcp_run_token_expires', gmdate('Y-m-d H:i:s', time() + max(60, $ttl_seconds)));
-		$this->set('rcp_run_token_spent', false);
+		$this->set('rcl_sealed_run_token',
+			(new SecretBox())->seal('rcl_relay_cloud_provisions.rcl_sealed_run_token', $token));
+		$this->set('rcl_run_token_expires', gmdate('Y-m-d H:i:s', time() + max(60, $ttl_seconds)));
+		$this->set('rcl_run_token_spent', false);
 		return $token;
 	}
 
@@ -136,14 +138,14 @@ class RelayCloudProvision extends SystemBase {
 	 */
 	public function runTokenMatches(string $presented): bool {
 		$presented = trim($presented);
-		if ($presented === '' || !$this->isLive() || (bool)$this->get('rcp_run_token_spent')) {
+		if ($presented === '' || !$this->isLive() || (bool)$this->get('rcl_run_token_spent')) {
 			return false;
 		}
-		$expires = (string)$this->get('rcp_run_token_expires');
+		$expires = (string)$this->get('rcl_run_token_expires');
 		if ($expires === '' || strtotime($expires . ' UTC') < time()) {
 			return false;
 		}
-		$sealed = (string)$this->get('rcp_sealed_run_token');
+		$sealed = (string)$this->get('rcl_sealed_run_token');
 		if ($sealed === '') {
 			return false;
 		}
@@ -157,7 +159,7 @@ class RelayCloudProvision extends SystemBase {
 
 	/** The birth report spends the token: nothing presents it twice. */
 	public function spendRunToken(): void {
-		$this->set('rcp_run_token_spent', true);
+		$this->set('rcl_run_token_spent', true);
 	}
 
 	/**
@@ -195,7 +197,7 @@ class RelayCloudProvision extends SystemBase {
 			throw new RuntimeException('Cannot copy the support bundle onto run ' . $this->key);
 		}
 		$sha = hash_file('sha256', $dest);
-		$this->set('rcp_bundle_sha256', $sha);
+		$this->set('rcl_bundle_sha256', $sha);
 		return $sha;
 	}
 
@@ -207,32 +209,32 @@ class RelayCloudProvision extends SystemBase {
 	}
 
 	public function eraseCredentials(): void {
-		$this->set('rcp_sealed_token', null);
-		$this->set('rcp_sealed_run_token', null);
+		$this->set('rcl_sealed_token', null);
+		$this->set('rcl_sealed_run_token', null);
 		$this->eraseBundle();
 		$this->save();
 	}
 
 	/** Record a terminal failure and erase credentials. Saves. */
 	public function fail(string $message): void {
-		$this->set('rcp_status', 'failed');
-		$this->set('rcp_error', mb_substr($message, 0, 4000));
+		$this->set('rcl_status', 'failed');
+		$this->set('rcl_error', mb_substr($message, 0, 4000));
 		$this->eraseCredentials();
 	}
 
 	/** True while the run is neither done nor failed. */
 	public function isLive(): bool {
-		return !in_array((string)$this->get('rcp_status'), array('done', 'failed'), true);
+		return !in_array((string)$this->get('rcl_status'), array('done', 'failed'), true);
 	}
 
 	/** True when this run replaces an existing relay rather than creating one. */
 	/** Is this run for a fleet shard (skeleton only) rather than this deployment's relay? */
 	public function isShard(): bool {
-		return intval($this->get('rcp_mfs_mailbox_fleet_shard_id')) > 0;
+		return intval($this->get('rcl_mfs_mailbox_fleet_shard_id')) > 0;
 	}
 
 	public function isUpgrade(): bool {
-		return (string)$this->get('rcp_kind') === 'upgrade';
+		return (string)$this->get('rcl_kind') === 'upgrade';
 	}
 
 	/**
@@ -240,7 +242,7 @@ class RelayCloudProvision extends SystemBase {
 	 * which have no relay until they finish making one).
 	 */
 	public function relay(): ?MailboxRelay {
-		$id = intval($this->get('rcp_mrl_mailbox_relay_id'));
+		$id = intval($this->get('rcl_mrl_mailbox_relay_id'));
 		if ($id <= 0) {
 			return null;
 		}
@@ -256,7 +258,7 @@ class RelayCloudProvision extends SystemBase {
 	/** The deployment's single live run, or null (one act at a time). */
 	public static function live(): ?RelayCloudProvision {
 		$multi = new MultiRelayCloudProvision(array('live' => true, 'deleted' => false),
-			array('rcp_relay_cloud_provision_id' => 'DESC'), 1);
+			array('rcl_relay_cloud_provision_id' => 'DESC'), 1);
 		$multi->load();
 		foreach ($multi as $run) {
 			return $run;
@@ -266,7 +268,7 @@ class RelayCloudProvision extends SystemBase {
 
 	/** The most recent run of any state, or null (the section shows its outcome). */
 	public static function latest(): ?RelayCloudProvision {
-		$multi = new MultiRelayCloudProvision(array('deleted' => false), array('rcp_relay_cloud_provision_id' => 'DESC'), 1);
+		$multi = new MultiRelayCloudProvision(array('deleted' => false), array('rcl_relay_cloud_provision_id' => 'DESC'), 1);
 		$multi->load();
 		foreach ($multi as $run) {
 			return $run;
@@ -282,20 +284,20 @@ class MultiRelayCloudProvision extends SystemMultiBase {
 		$filters = [];
 
 		if (isset($this->options['status'])) {
-			$filters['rcp_status'] = [$this->options['status'], PDO::PARAM_STR];
+			$filters['rcl_status'] = [$this->options['status'], PDO::PARAM_STR];
 		}
 
 		if (isset($this->options['live'])) {
-			$filters['rcp_status'] = $this->options['live']
+			$filters['rcl_status'] = $this->options['live']
 				? "NOT IN ('done', 'failed')" : "IN ('done', 'failed')";
 		}
 
 		if (isset($this->options['kind'])) {
-			$filters['rcp_kind'] = [$this->options['kind'], PDO::PARAM_STR];
+			$filters['rcl_kind'] = [$this->options['kind'], PDO::PARAM_STR];
 		}
 
 
-		return $this->_get_resultsv2('rcp_relay_cloud_provisions', $filters, $this->order_by, $only_count, $debug);
+		return $this->_get_resultsv2('rcl_relay_cloud_provisions', $filters, $this->order_by, $only_count, $debug);
 	}
 }
 ?>

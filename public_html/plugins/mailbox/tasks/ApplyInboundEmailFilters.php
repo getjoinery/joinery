@@ -4,7 +4,7 @@
  *
  * Drains the "Also apply to matching existing mail" backlog (Gmail's "Also apply
  * filter to N matching conversations"). When a filter is saved with that box
- * ticked it sets fil_apply_existing_pending; this task pages through that
+ * ticked it sets ief_apply_existing_pending; this task pages through that
  * mailbox's locally-received, non-deleted stored mail in bounded batches and
  * applies the SAME matcher and actions the ingest hook uses — minus forwarding
  * (Gmail does not re-forward historical mail).
@@ -30,7 +30,7 @@ class ApplyInboundEmailFilters implements ScheduledTaskInterface {
 
 		$pending = new MultiInboundEmailFilter(
 			array('pending_backfill' => true, 'deleted' => false),
-			array('fil_inbound_email_filter_id' => 'ASC')
+			array('ief_inbound_email_filter_id' => 'ASC')
 		);
 		$pending->load();
 		if (!count($pending)) {
@@ -46,9 +46,9 @@ class ApplyInboundEmailFilters implements ScheduledTaskInterface {
 			$filter = new InboundEmailFilter($stub->key, TRUE);
 			if (!$filter->key) { continue; }
 
-			$cursor = intval($filter->get('fil_apply_existing_cursor'));
-			$aliasId = $filter->get('fil_iea_inbound_email_alias_id');
-			$domainId = intval($filter->get('fil_ied_inbound_email_domain_id'));
+			$cursor = intval($filter->get('ief_apply_existing_cursor'));
+			$aliasId = $filter->get('ief_iea_inbound_email_alias_id');
+			$domainId = intval($filter->get('ief_ied_inbound_email_domain_id'));
 
 			// Locally-received only: reference-backed (IMAP-sourced) rows have a
 			// non-null account id and are out of scope. Scope to the alias, or to the
@@ -104,12 +104,12 @@ class ApplyInboundEmailFilters implements ScheduledTaskInterface {
 
 			if (count($ids) < $batch) {
 				// Mailbox exhausted: clear the flag and reset the cursor.
-				$filter->set('fil_apply_existing_pending', false);
-				$filter->set('fil_apply_existing_cursor', 0);
+				$filter->set('ief_apply_existing_pending', false);
+				$filter->set('ief_apply_existing_cursor', 0);
 				$filters_done++;
 			} else {
 				// More to do next run: advance the cursor.
-				$filter->set('fil_apply_existing_cursor', $last_id);
+				$filter->set('ief_apply_existing_cursor', $last_id);
 			}
 			$filter->save();
 		}

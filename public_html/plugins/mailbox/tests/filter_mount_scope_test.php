@@ -112,20 +112,20 @@ try {
 	section('a stored filter names its own scope');
 
 	$filter = new InboundEmailFilter(NULL);
-	$filter->set('fil_iea_inbound_email_alias_id', intval($mine->key));
-	$filter->set('fil_ied_inbound_email_domain_id', $domain_id);
-	$filter->set('fil_name', 'fms mailbox rule');
-	$filter->set('fil_match_from', 'someone@elsewhere.example');
-	$filter->set('fil_action_archive', true);
+	$filter->set('ief_iea_inbound_email_alias_id', intval($mine->key));
+	$filter->set('ief_ied_inbound_email_domain_id', $domain_id);
+	$filter->set('ief_name', 'fms mailbox rule');
+	$filter->set('ief_match_from', 'someone@elsewhere.example');
+	$filter->set('ief_action_archive', true);
 	$filter->prepare();
 	$filter->save();
 	harness_register_model('InboundEmailFilter', intval($filter->key));
 
 	$wide = new InboundEmailFilter(NULL);
-	$wide->set('fil_ied_inbound_email_domain_id', $domain_id);
-	$wide->set('fil_name', 'fms domain rule');
-	$wide->set('fil_match_from', 'someone@elsewhere.example');
-	$wide->set('fil_action_archive', true);
+	$wide->set('ief_ied_inbound_email_domain_id', $domain_id);
+	$wide->set('ief_name', 'fms domain rule');
+	$wide->set('ief_match_from', 'someone@elsewhere.example');
+	$wide->set('ief_action_archive', true);
 	$wide->prepare();
 	$wide->save();
 	harness_register_model('InboundEmailFilter', intval($wide->key));

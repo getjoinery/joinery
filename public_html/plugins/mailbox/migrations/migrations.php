@@ -11,6 +11,8 @@
  * the Mailbox Reader's thread-key index is created here (same pattern as the
  * server_manager plugin's index migration).
  *
+ * @version 1.30.0 - ief_001_inbound_email_filter_prefix: fil_inbound_email_filters -> ief_inbound_email_filters
+ * @version 1.29.0 - rcl_001_relay_cloud_provision_prefix: rcp_relay_cloud_provisions -> rcl_relay_cloud_provisions
  * @version 1.28.0
  */
 return [
@@ -912,6 +914,114 @@ return [
 			foreach (array('mailbox_relay_outbound_mode', 'mailbox_relay_wg_public_key') as $name) {
 				$stmt->execute(array($name));
 			}
+		},
+	],
+	[
+		// RelayCloudProvision takes a prefix of its own: rcp was shared with
+		// joinery_ai's Recipe (specs/implemented/shared_prefix_relay_cloud_provision.md).
+		// The plugin's additive pass has created rcl_relay_cloud_provisions
+		// from the spec, empty, before this runs; this copies every row across
+		// with its id (a run in flight keeps its state and its sealed values —
+		// a locator is a declaration, not part of the ciphertext), carries
+		// the sequence, drops the old table, and removes the old-locator rows
+		// from the sealed-secret registry, which the seed re-creates under the
+		// new names. Idempotent: no old table, nothing to do.
+		'id' => 'rcl_001_relay_cloud_provision_prefix',
+		'version' => '1.117.0',
+		'up' => function($dbconnector) {
+			$db = $dbconnector->get_db_link();
+			$exists = function ($table) use ($db) {
+				$q = $db->prepare("SELECT to_regclass(:t)");
+				$q->execute(array(':t' => 'public.' . $table));
+				return $q->fetchColumn() !== null;
+			};
+			if (!$exists('rcp_relay_cloud_provisions')) {
+				return true;
+			}
+			if (!$exists('rcl_relay_cloud_provisions')) {
+				throw new Exception('rcl_relay_cloud_provisions not yet created - run the schema pass first');
+			}
+			$columns = array();
+			foreach (array_keys(RelayCloudProvision::$field_specifications) as $new) {
+				$columns['rcp_' . substr($new, 4)] = $new;
+			}
+			$old_cols = implode(', ', array_keys($columns));
+			$new_cols = implode(', ', array_values($columns));
+			$copied = $db->exec(
+				"INSERT INTO rcl_relay_cloud_provisions ({$new_cols})
+				 SELECT {$old_cols} FROM rcp_relay_cloud_provisions
+				  WHERE rcp_relay_cloud_provision_id NOT IN (SELECT rcl_relay_cloud_provision_id FROM rcl_relay_cloud_provisions)");
+			$q = $db->query(
+				"SELECT pg_get_expr(d.adbin, d.adrelid) FROM pg_attrdef d
+				   JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum
+				  WHERE d.adrelid = 'public.rcl_relay_cloud_provisions'::regclass AND a.attname = 'rcl_relay_cloud_provision_id'");
+			if (!preg_match("/nextval\\('([^']+)'/", (string)$q->fetchColumn(), $m)) {
+				throw new Exception('rcl_relay_cloud_provisions.rcl_relay_cloud_provision_id has no sequence default');
+			}
+			$db->exec(
+				"SELECT setval('{$m[1]}',
+							   GREATEST((SELECT coalesce(max(rcl_relay_cloud_provision_id), 0) FROM rcl_relay_cloud_provisions), 1),
+							   (SELECT count(*) > 0 FROM rcl_relay_cloud_provisions))");
+			$db->exec("DROP TABLE rcp_relay_cloud_provisions");
+			$db->exec("DROP SEQUENCE IF EXISTS rcp_relay_cloud_provisions_rcp_relay_cloud_provision_id_seq");
+			$db->exec("DELETE FROM ssr_sealed_secret_registry WHERE ssr_locator LIKE 'rcp_relay_cloud_provisions.%'");
+			error_log("mailbox rcl_001_relay_cloud_provision_prefix: {$copied} provisions carried to rcl_relay_cloud_provisions, old table dropped");
+			return true;
+		},
+	],
+	[
+		// InboundEmailFilter takes a prefix of its own: fil was shared with
+		// core File (specs/implemented/shared_prefix_inbound_email_filter.md). The
+		// plugin's additive pass has created ief_inbound_email_filters from
+		// the spec, empty, before this runs; this copies every filter across
+		// with its id, carries the sequence and drops the old table.
+		// Idempotent: no old table, nothing to do.
+		'id' => 'ief_001_inbound_email_filter_prefix',
+		'version' => '1.118.0',
+		'up' => function($dbconnector) {
+			$db = $dbconnector->get_db_link();
+			$exists = function ($table) use ($db) {
+				$q = $db->prepare("SELECT to_regclass(:t)");
+				$q->execute(array(':t' => 'public.' . $table));
+				return $q->fetchColumn() !== null;
+			};
+			if (!$exists('fil_inbound_email_filters')) {
+				return true;
+			}
+			if (!$exists('ief_inbound_email_filters')) {
+				throw new Exception('ief_inbound_email_filters not yet created - run the schema pass first');
+			}
+			$columns = array();
+			foreach (array_keys(InboundEmailFilter::$field_specifications) as $new) {
+				$columns['fil_' . substr($new, 4)] = $new;
+			}
+			$old_cols = implode(', ', array_keys($columns));
+			$new_cols = implode(', ', array_values($columns));
+			$copied = $db->exec(
+				"INSERT INTO ief_inbound_email_filters ({$new_cols})
+				 SELECT {$old_cols} FROM fil_inbound_email_filters
+				  WHERE fil_inbound_email_filter_id NOT IN (SELECT ief_inbound_email_filter_id FROM ief_inbound_email_filters)");
+			$q = $db->query(
+				"SELECT pg_get_expr(d.adbin, d.adrelid) FROM pg_attrdef d
+				   JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum
+				  WHERE d.adrelid = 'public.ief_inbound_email_filters'::regclass AND a.attname = 'ief_inbound_email_filter_id'");
+			if (!preg_match("/nextval\\('([^']+)'/", (string)$q->fetchColumn(), $m)) {
+				throw new Exception('ief_inbound_email_filters.ief_inbound_email_filter_id has no sequence default');
+			}
+			// Carry the OLD sequence's value, not max(id): ids above the highest
+			// surviving row were issued and deleted, and a sequence is forward-only
+			// (reissuing one could re-attach an orphan). The old sequence is read by
+			// its name, which is not OWNED BY the column.
+			$issued = (int)$db->query(
+				"SELECT last_value FROM fil_inbound_email_filters_fil_inbound_email_filter_id_seq")->fetchColumn();
+			$db->exec(
+				"SELECT setval('{$m[1]}',
+							   GREATEST({$issued}, (SELECT coalesce(max(ief_inbound_email_filter_id), 0) FROM ief_inbound_email_filters), 1),
+							   (SELECT count(*) > 0 FROM ief_inbound_email_filters))");
+			$db->exec("DROP TABLE fil_inbound_email_filters");
+			$db->exec("DROP SEQUENCE IF EXISTS fil_inbound_email_filters_fil_inbound_email_filter_id_seq");
+			error_log("mailbox ief_001_inbound_email_filter_prefix: {$copied} filters carried to ief_inbound_email_filters, old table dropped");
+			return true;
 		},
 	],
 ];

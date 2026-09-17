@@ -125,7 +125,7 @@ if (!empty($fleet_service_on)) {
 	}
 
 	if (!empty($shard_run) && $shard_run->isLive()) {
-		echo '<p>⏳ A shard is being born (run #' . intval($shard_run->key) . ', ' . htmlspecialchars((string)$shard_run->get('rcp_status'))
+		echo '<p>⏳ A shard is being born (run #' . intval($shard_run->key) . ', ' . htmlspecialchars((string)$shard_run->get('rcl_status'))
 			. '). Approve or watch it in the <a href="/plugins/mailbox/admin/admin_mailbox_setup?advanced=1#relay-section">Relay section</a>.</p>';
 	} else {
 		// A shard is born like any relay: a skeleton-only run in the operator's
