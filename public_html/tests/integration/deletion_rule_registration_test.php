@@ -22,11 +22,17 @@
  *   - the primary key column is never treated as a foreign key
  *   - pruneOrphanedRules() removes rules referencing a table no loaded model
  *     declares, and leaves rules for real tables (e.g. usr_users) alone
+ *   - pruneOrphanedRules() also removes rules whose table a model declares
+ *     but this database does not have (an inactive plugin's), proven by
+ *     renaming a real plugin table away inside a transaction that is rolled
+ *     back - one such rule refused every file delete on a site without the
+ *     store plugin
  *
  * Writes and cleans up its own del_deletion_rules rows (target tables
  * prefixed zzfix_, never used by a real model). Run:
  *   php tests/integration/deletion_rule_registration_test.php
  *
+ * @version 1.8 - a rule about a table this database does not have is pruned too
  * @version 1.7 - no prefix has two owners (InboundEmailFilter took ief); the walk is pinned by the invariant
  * @version 1.6 - cnv is a single-owner prefix (ContentVersion took cvn); the shared case is fil
  * @version 1.5 - the ambiguous-prefix cases move to cnv/fil; bty is a single-owner prefix
@@ -233,6 +239,40 @@ try {
         && count(rules_for_target($db, 'zzfix_convention_target')) === 0);
 
     ok('pruneOrphanedRules: reports what it pruned', count($prune_messages) >= 2);
+
+    // --- a table a model declares but this database lacks ---------------------
+    // The store plugin's prq_product_requirements has rules from fil_files and
+    // qst_questions. On a site where the plugin is not active the table is not
+    // there, and the engine's COUNT against it failed every file delete. The
+    // table is renamed away inside a transaction so the database is exactly
+    // as it was afterwards, whatever happens in between.
+    $absent = DeletionRule::tablesAbsentFromDatabase(['fil_files', 'zzfix_no_such_table']);
+    ok('tablesAbsentFromDatabase: names only the tables that are not there',
+        $absent === ['zzfix_no_such_table' => true]);
+
+    require_once(PathHelper::getIncludePath('plugins/store/data/product_requirements_class.php'));
+    DeletionRule::registerModelRules('ProductRequirement');
+    $prq_before = count(rules_for_target($db, 'prq_product_requirements'));
+    ok('sanity: prq_product_requirements has rules to lose', $prq_before >= 1);
+
+    $db->beginTransaction();
+    try {
+        $db->exec('ALTER TABLE prq_product_requirements RENAME TO zzfix_prq_hidden');
+        $gone_messages = DeletionRule::pruneOrphanedRules();
+        $prq_during = count(rules_for_target($db, 'prq_product_requirements'));
+        $stmt = $db->prepare("SELECT COUNT(*) FROM del_deletion_rules WHERE del_deletion_rule_id = ?");
+        $stmt->execute([$control_id]);
+        $control_during = (int)$stmt->fetchColumn();
+    } finally {
+        $db->rollBack();
+    }
+    ok('pruneOrphanedRules: a rule about a table this database lacks is pruned', $prq_during === 0);
+    // At least the rules targeting the table; rules it is the SOURCE of go too.
+    ok('pruneOrphanedRules: says why', count(array_filter($gone_messages, function ($m) {
+        return strpos($m, 'prq_product_requirements') !== false && strpos($m, 'not in this database') !== false;
+    })) >= $prq_before);
+    ok('pruneOrphanedRules: a rule whose tables are all present survives', $control_during === 1);
+    ok('the rollback put the rules back', count(rules_for_target($db, 'prq_product_requirements')) === $prq_before);
 
 } finally {
     cleanup_fixture_rows($db);
