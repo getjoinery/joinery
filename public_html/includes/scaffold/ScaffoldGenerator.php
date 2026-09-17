@@ -52,11 +52,19 @@ class ScaffoldGenerator {
      * an empty list means the manifest is generatable. Read-only DB checks
      * (prefix/table collisions) are best-effort and skipped if no DB link.
      *
-     * With $force, the two existence guards (table-already-exists and
-     * prefix-already-used) are demoted from hard errors to warnings — `--force`
-     * already means "overwrite the files," and equally means "the table may
-     * already exist" (e.g. regenerating a class after a template fix). All other
-     * validation stays hard. Retrieve demoted advisories via warnings().
+     * A prefix another table already carries is a warning, never an error: two
+     * models may share a prefix (six pairs do — bkt, cnv, del, fil, rcp, abt),
+     * because the only thing that ever resolves a table BY prefix, the deletion
+     * engine's foreign-key match, disambiguates by the entity in the column
+     * name, which the naming scheme guarantees. A plugin written elsewhere
+     * cannot know what core or another plugin will claim, so a collision is a
+     * thing to be told about, not stopped by.
+     *
+     * With $force, the table-already-exists guard is demoted from a hard error
+     * to a warning too — `--force` already means "overwrite the files," and
+     * equally means "the table may already exist" (e.g. regenerating a class
+     * after a template fix). All other validation stays hard. Retrieve
+     * advisories via warnings().
      *
      * @return string[]
      */
@@ -177,14 +185,16 @@ class ScaffoldGenerator {
         }
 
         // --- read-only DB collision checks (best-effort) ---
-        // Under --force these are advisories, not blockers: the developer has
-        // accepted overwriting, and the table may legitimately already exist.
+        // A shared prefix is always an advisory. The table-exists guard is a
+        // blocker unless --force: the developer has accepted overwriting, and
+        // the table may legitimately already exist.
         if (preg_match('/^[a-z]{3}$/', $prefix) && preg_match('/^[a-z][a-z0-9_]*$/', $plural)) {
             $existence = $this->validateAgainstDatabase($prefix, $prefix . '_' . $plural);
+            $this->warnings = array_merge($this->warnings, $existence['warnings']);
             if ($force) {
-                $this->warnings = array_merge($this->warnings, $existence);
+                $this->warnings = array_merge($this->warnings, $existence['errors']);
             } else {
-                $errors = array_merge($errors, $existence);
+                $errors = array_merge($errors, $existence['errors']);
             }
         }
 
@@ -196,20 +206,23 @@ class ScaffoldGenerator {
         return $this->warnings;
     }
 
-    /** Best-effort read-only collision checks against the live schema. */
+    /**
+     * Best-effort read-only collision checks against the live schema:
+     * ['errors' => [...], 'warnings' => [...]].
+     */
     protected function validateAgainstDatabase(string $prefix, string $table): array {
-        $errors = [];
+        $out = ['errors' => [], 'warnings' => []];
         try {
             $dblink = DbConnector::get_instance()->get_db_link();
         } catch (Throwable $e) {
-            return [];   // no DB available (pure preview) — skip
+            return $out;   // no DB available (pure preview) — skip
         }
 
         $q = $dblink->prepare(
             "SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ? LIMIT 1");
         $q->execute([$table]);
         if ($q->fetchColumn()) {
-            $errors[] = "plural: table '$table' already exists.";
+            $out['errors'][] = "plural: table '$table' already exists.";
         }
 
         $q = $dblink->prepare(
@@ -218,10 +231,12 @@ class ScaffoldGenerator {
         $q->execute([$prefix . '\_%']);
         $existing = $q->fetchColumn();
         if ($existing) {
-            $errors[] = "prefix: '$prefix' already used by an existing table ('$existing').";
+            $out['warnings'][] = "prefix: '$prefix' is also carried by '$existing'. Two models may share a prefix "
+                . "(the deletion engine tells their foreign keys apart by the entity in the column name), "
+                . "but a unique one reads better - prefer another if one is free.";
         }
 
-        return $errors;
+        return $out;
     }
 
     // ====================================================================
