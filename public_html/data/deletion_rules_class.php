@@ -8,6 +8,10 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
  * when a parent record is permanently deleted. Rules are auto-registered during
  * database updates by scanning all model classes for foreign key patterns.
  *
+ * @version 1.2 - pruneOrphanedRules() also drops a rule whose table is declared by a model
+ *   on disk but is not in this database (an inactive or uninstalled plugin's): the engine
+ *   counts rows in every rule's table before a delete, and a table that is not there
+ *   fails the whole delete. A plugin's rules come back when it activates.
  * @version 1.1 - pluralForms(): the shared-prefix tie-break accepts every plural the
  *   validator's pkey check does (+s, +es, y -> ies, uncountable), from one definition
  */
@@ -354,11 +358,14 @@ class DeletionRule extends SystemBase {
     }
 
     /**
-     * Delete every registered rule whose source or target table matches no
-     * currently-loaded model (core or plugin, active or not - discovery scans
-     * the filesystem, not activation state). Safe to call at any time: it
-     * only ever removes rules that reference a table nothing declares, which
-     * can only happen from a stale guess or a renamed/removed table.
+     * Delete every registered rule that names a table the engine could not
+     * consult: one no model on disk declares (core or plugin, active or not -
+     * discovery scans the filesystem), or one that is not in this database
+     * (a model of a plugin that is inactive or uninstalled here). Safe to call
+     * at any time. permanent_delete() runs a COUNT against every rule's table
+     * before it deletes anything, so one rule about an absent table refuses
+     * every delete of the source - deleting a file, say - on the whole site.
+     * A plugin's rules are registered again when it activates.
      *
      * @return array Human-readable messages describing what was pruned
      */
@@ -369,8 +376,15 @@ class DeletionRule extends SystemBase {
         $stmt = $db->query("SELECT del_deletion_rule_id, del_source_table, del_target_table, del_target_column FROM del_deletion_rules");
 
         $orphaned = [];
-        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $absent = self::tablesAbsentFromDatabase(array_unique(array_merge(
+            array_column($rows, 'del_source_table'), array_column($rows, 'del_target_table'))));
+        foreach ($rows as $row) {
             if (!isset($known_tables[$row['del_source_table']]) || !isset($known_tables[$row['del_target_table']])) {
+                $row['why'] = 'no model declares the table';
+                $orphaned[] = $row;
+            } elseif (isset($absent[$row['del_source_table']]) || isset($absent[$row['del_target_table']])) {
+                $row['why'] = 'table is not in this database';
                 $orphaned[] = $row;
             }
         }
@@ -388,8 +402,29 @@ class DeletionRule extends SystemBase {
 
         return array_map(function ($row) {
             return "pruned orphaned deletion rule: {$row['del_source_table']} -> "
-                . "{$row['del_target_table']}.{$row['del_target_column']} (table does not exist)";
+                . "{$row['del_target_table']}.{$row['del_target_column']} ({$row['why']})";
         }, $orphaned);
+    }
+
+    /**
+     * Which of these table names have no table in this database, as a set
+     * (name => true). One query, whatever the count.
+     */
+    public static function tablesAbsentFromDatabase(array $tables) {
+        $tables = array_values(array_filter($tables, 'strlen'));
+        if (!$tables) {
+            return [];
+        }
+        $db = DbConnector::get_instance()->get_db_link();
+        $placeholders = implode(',', array_fill(0, count($tables), '?'));
+        $stmt = $db->prepare("SELECT t.name FROM unnest(ARRAY[$placeholders]::text[]) AS t(name)
+            WHERE to_regclass(t.name) IS NULL");
+        $stmt->execute($tables);
+        $absent = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $name) {
+            $absent[$name] = true;
+        }
+        return $absent;
     }
 
     /**

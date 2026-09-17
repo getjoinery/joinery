@@ -4,7 +4,9 @@
  * seeded profile menu store via get_menu_data() — themes style the markup
  * but do not own the list (docs/plugin_developer_guide.md § Plugin Menus).
  *
- * @version 1.2.0
+ * @version 1.2.1 - the footer loads joinery-validate.js, which every FormWriter form's
+ *   inline script expects; without it each form page logged a ReferenceError and
+ *   validated nothing client-side
  */
 require_once(PathHelper::getIncludePath('includes/PublicPageBase.php'));
 require_once(PathHelper::getIncludePath('includes/Pager.php'));
@@ -213,6 +215,7 @@ class PublicPage extends PublicPageBase {
         if (close) close.addEventListener('click', closeSidebar);
         document.addEventListener('keydown', e => { if (e.key === 'Escape' && overlay) closeSidebar(); });
     </script>
+    <script src="/assets/js/joinery-validate.js?v=<?php echo $this->asset_mtime('assets/js/joinery-validate.js'); ?>"></script>
 
 </body>
 </html>

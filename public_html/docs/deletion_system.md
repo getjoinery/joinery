@@ -281,13 +281,20 @@ duplicates.
 ### Orphaned Rule Pruning
 
 `PluginManager::sync()` calls `DeletionRule::pruneOrphanedRules()` after
-registering every active plugin's rules — it deletes any rule whose source or
-target table matches no currently-loaded model (core or plugin, active or
-not; discovery scans the filesystem, not activation state). This is what
-clears out rules left behind by a renamed or removed table, since nothing
-else ever revisits an already-registered rule once its owning column is gone.
-Safe to call at any time — it only ever removes rules referencing a table
-nothing declares.
+registering every active plugin's rules, and `PluginManager::uninstall()`
+calls it after dropping the plugin's tables. It deletes any rule naming a
+table the engine could not consult:
+
+- a table no model on disk declares (core or plugin, active or not; discovery
+  scans the filesystem) — a renamed or removed table, since nothing else ever
+  revisits a registered rule once its owning column is gone;
+- a table a model declares but this database does not have — an inactive or
+  uninstalled plugin's. `permanent_delete()` counts rows in every rule's table
+  before it deletes anything, so one rule about an absent table refuses every
+  delete of its source (every file, say) on the whole site. The plugin's rules
+  are registered again when it activates.
+
+Safe to call at any time.
 
 ## How Deletion Works
 
@@ -433,7 +440,8 @@ $obj->permanent_delete($debug = true);  // Prints SQL without executing
 **DeletionRule** (`/data/deletion_rules_class.php`)
 - `registerModelsFromDiscovery($options)` - Discover and register model rules; returns warning strings for unresolvable declared overrides
 - `registerModelRules($model_class)` - Register one model's rules incrementally; returns the same kind of warnings
-- `pruneOrphanedRules()` - Delete rules whose source or target table matches no currently-loaded model
+- `pruneOrphanedRules()` - Delete rules whose source or target table no model declares or this database lacks
+- `tablesAbsentFromDatabase($tables)` - Which of these names have no table here, as a set
 
 **SystemBase** (`/includes/SystemBase.php`)
 - `permanent_delete_dry_run()` - Preview deletion impact

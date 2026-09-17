@@ -13,6 +13,9 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
  * This consolidated class replaces the previous multi-class structure with
  * a single cohesive manager that extends AbstractExtensionManager
  *
+ * @version 1.6 - uninstall() prunes the deletion rules that named the tables it
+ *                dropped; a rule about a table that is gone refuses every delete
+ *                of its source (a file, a user) until the registry is rebuilt
  * @version 1.5 - uninstall() keeps the row as the record (`uninstalled`,
  *                plg_uninstalled_time) and asks root to remove the files
  *                (RootRequest 'remove_plugin'); refuses an is_system plugin;
@@ -1269,6 +1272,11 @@ class PluginManager extends AbstractExtensionManager {
                 }
             }
         }
+
+        // The rules that named those tables go with them. permanent_delete()
+        // counts rows in every rule's table first, so a rule left behind would
+        // refuse every delete of its source until the next update_database.
+        DeletionRule::pruneOrphanedRules();
 
         // Step 8: The row stays, as the record. Data is gone; the files are
         // root's to remove. sync() leaves an uninstalled row alone, so the
