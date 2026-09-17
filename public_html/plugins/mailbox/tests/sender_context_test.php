@@ -17,11 +17,14 @@
  *  - No-oracle + scope: the input is a message id (never an address), and a message
  *    outside the caller's mailbox scope is refused — admin or not.
  *  - Plugin sections track PluginHelper::isPluginActive.
+ *  - `others`: everyone else on the message (To + Cc) minus the mailbox itself and the
+ *    counterparty, each with their own contact-store answer; a sent message also drops
+ *    its sender (the mailbox again).
  *
  * Sessions are simulated with SessionControl::set_api_user (the same mechanism the API
  * dispatcher uses), so the logic runs exactly as it would behind /api/v1.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -33,6 +36,7 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alia
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grants_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/logic/sender_context_logic.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxContacts.php'));
 
 $db = DbConnector::get_instance()->get_db_link();
 $session = SessionControl::get_instance();
@@ -87,7 +91,7 @@ $mk_grant = function ($uid) use ($alias) {
 $mk_grant($admin_uid);
 $mk_grant($plain_uid);   // a non-admin mailbox grantee — gets the contact half only
 
-$mk_msg = function ($alias_id, $sender, $mid) use ($domain) {
+$mk_msg = function ($alias_id, $sender, $mid, $extra = array()) use ($domain) {
 	$m = new InboundEmailMessage(NULL);
 	$m->set('iem_ied_inbound_email_domain_id', (int)$domain->key);
 	$m->set('iem_iea_inbound_email_alias_id', $alias_id);
@@ -97,6 +101,7 @@ $mk_msg = function ($alias_id, $sender, $mid) use ($domain) {
 	$m->set('iem_subject', 's');
 	$m->set('iem_message_id_header', $mid);
 	$m->set('iem_thread_key', $mid);
+	foreach ($extra as $k => $v) { $m->set($k, $v); }
 	$m->save();
 	harness_register_model('InboundEmailMessage', (int)$m->key);
 	return (int)$m->key;
@@ -153,5 +158,55 @@ $r = $run($plain_uid, $other_msg);
 check($r->error !== null, 'mailbox scope still binds the non-admin (no cross-mailbox oracle)', json_encode($r->data));
 $r = $run($admin_uid, 0);
 check($r->error !== null, 'a missing message id is refused (input is a message id, never an address)');
+
+// ── Everyone else on the message ─────────────────────────────────────────────
+section('Others on the message');
+$own_addr = 'inbox@' . $domain->get('ied_domain');
+$sender_addr = 'alice-' . bin2hex(random_bytes(3)) . '@stranger.example';
+$cc1 = 'cc-one-' . bin2hex(random_bytes(3)) . '@stranger.example';
+$cc2 = 'cc-two-' . bin2hex(random_bytes(3)) . '@stranger.example';
+$to2 = 'to-two-' . bin2hex(random_bytes(3)) . '@stranger.example';
+$cc_msg = $mk_msg($alias, 'Alice <' . $sender_addr . '>', '<ctx-cc@x>', array(
+	'iem_to' => '"Our Box" <' . $own_addr . '>, ' . $to2,
+	'iem_cc' => '"Cc One" <' . $cc1 . '>, ' . $cc2 . ', ' . $sender_addr . ', ' . strtoupper($cc1),
+));
+$r = $run($plain_uid, $cc_msg);
+check($r->error === null, 'a message with To and Cc lists resolves', (string)$r->error);
+check(($r->data['address'] ?? '') === $sender_addr, 'the sender is still the counterparty', json_encode($r->data['address'] ?? null));
+$others = $r->data['others'] ?? null;
+$listed = is_array($others) ? array_column($others, 'address') : array();
+check(is_array($others), 'others is present');
+check($listed === array($to2, $cc1, $cc2), 'others lists To then Cc, minus the mailbox, the sender and repeats', json_encode($listed));
+$by = array(); foreach ((array)$others as $o) { $by[$o['address']] = $o; }
+check(($by[$cc1]['display_name'] ?? '') === 'Cc One', 'a Cc entry keeps its display name', json_encode($by[$cc1] ?? null));
+check(($by[$cc1]['field'] ?? '') === 'cc' && ($by[$to2]['field'] ?? '') === 'to', 'each entry says which list it came from');
+check(array_key_exists('contact', $by[$cc1]) && $by[$cc1]['contact'] === null, 'a stranger on Cc is not in contacts');
+
+// Keep one of them, and the panel's next read says so.
+$contacts = new MailboxContacts();
+$kept = $contacts->manualAdd($plain_uid, 'Cc One <' . $cc1 . '>', $alias);
+check($kept === true, 'the Cc address can be added to this mailbox\'s contacts');
+$r = $run($plain_uid, $cc_msg);
+$by = array(); foreach ((array)($r->data['others'] ?? array()) as $o) { $by[$o['address']] = $o; }
+check(!empty($by[$cc1]['contact']) && empty($by[$cc1]['contact']['locked']), 'once kept, the Cc entry reads back as a contact', json_encode($by[$cc1] ?? null));
+check(isset($by[$cc2]) && $by[$cc2]['contact'] === null, 'the other Cc address is still not a contact');
+$stmt = $db->prepare('DELETE FROM imc_mailbox_contacts WHERE imc_usr_user_id = ? AND imc_iea_inbound_email_alias_id = ?');
+$stmt->execute(array($plain_uid, $alias));
+
+// A sent message: the counterparty is the first recipient, and the sender (the
+// mailbox itself) is never listed among the others.
+$sent_msg = $mk_msg($alias, $own_addr, '<ctx-sent@x>', array(
+	'iem_direction' => 'outbound',
+	'iem_recipient' => $to2 . ', ' . $cc1,
+	'iem_to' => $to2,
+	'iem_cc' => $cc1 . ', ' . $own_addr,
+));
+$r = $run($plain_uid, $sent_msg);
+check(($r->data['address'] ?? '') === $to2, 'on a sent message the first recipient is the counterparty', json_encode($r->data['address'] ?? null));
+check(array_column($r->data['others'] ?? array(), 'address') === array($cc1), 'a sent message lists its Cc, never the mailbox itself', json_encode($r->data['others'] ?? null));
+
+// A message with no lists at all says so with an empty array, not an absence.
+$r = $run($plain_uid, $stranger_msg);
+check(isset($r->data['others']) && $r->data['others'] === array(), 'a message with no To/Cc lists has an empty others', json_encode($r->data['others'] ?? null));
 
 harness_finish();

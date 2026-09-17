@@ -1,7 +1,7 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.40
+ * Vanilla CSS, no framework. @version 2.41
  */
 
 /* Every size the reader renders text at, in one ladder. Nothing in this file
@@ -1586,6 +1586,21 @@
 .mbx-context-name { font-weight: 600; color: #1f2933; }
 .mbx-context-email { color: #52606d; font-size: var(--mbx-text-sm); margin-top: .1rem; }
 .mbx-context-since { color: #6b7280; font-size: var(--mbx-text-xs); margin-top: .25rem; }
+/* The "also on this message" cards: same card, tighter, with a To/Cc marker. */
+.mbx-context-card-minor { padding: .45rem .6rem; margin-bottom: .5rem; }
+.mbx-context-field {
+	display: inline-block;
+	margin-left: .2rem;
+	padding: 0 .3rem;
+	border-radius: 4px;
+	background: #f0f3f6;
+	color: #6b7280;
+	font-size: var(--mbx-text-micro);
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: .03em;
+	vertical-align: middle;
+}
 .mbx-context-link {
 	display: inline-block;
 	margin-top: .5rem;

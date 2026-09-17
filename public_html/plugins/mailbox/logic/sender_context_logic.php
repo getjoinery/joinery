@@ -23,7 +23,13 @@
  * registrations / orders / conversation count — each section present only when its
  * plugin/feature is active. No match → {is_member:false}.
  *
- * @version 1.4.1
+ * `others` lists everyone ELSE the message names — its To and Cc lists, minus the
+ * counterparty and the mailbox's own address — each with the same contact-store answer
+ * (contact null / row / {locked:true}), so the panel can offer to keep a Cc'd person who
+ * is not yet a contact. The lists come from iem_to / iem_cc, or from the retained header
+ * block on a row stored before those columns existed.
+ *
+ * @version 1.5.0
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -32,7 +38,9 @@ function sender_context_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxViewer.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxContacts.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailAddressList.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 	$session = SessionControl::get_instance();
@@ -66,6 +74,19 @@ function sender_context_logic(array $input): LogicResult {
 	try {
 		$is_outbound = ($msg->get('iem_direction') === 'outbound');
 		$raw = $is_outbound ? (string)$msg->get('iem_recipient') : (string)$msg->get('iem_sender');
+		$sender_raw = (string)$msg->get('iem_sender');
+		// Everyone else named on the message: the stored To / Cc lists, or, on a row
+		// from before those columns existed, the lists in its retained header block.
+		$to_list = (string)$msg->get('iem_to');
+		$cc_list = (string)$msg->get('iem_cc');
+		if ($to_list === '' && $cc_list === '') {
+			$block = (string)$msg->get('iem_raw_headers');
+			if ($block !== '') {
+				$lists = MailAddressList::fromHeaderBlock($block);
+				$to_list = $lists['to'];
+				$cc_list = $lists['cc'];
+			}
+		}
 	} catch (Throwable $e) {
 		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 		if ($e instanceof VaultLockedException) {
@@ -102,11 +123,59 @@ function sender_context_logic(array $input): LogicResult {
 		? (new MailboxContacts())->lookup(intval($session->get_user_id()), $address, $alias_id)
 		: null;
 
+	// Everyone else on the message, in header order, To before Cc. Left out: the
+	// counterparty (they are the card above), this mailbox's own address, and on a
+	// sent message its sender — the mailbox again. Each carries the same contact
+	// answer the counterparty does, from the same store.
+	$own = '';
+	if ($alias_id > 0) {
+		$alias = new InboundEmailAlias($alias_id, TRUE);
+		if ($alias->key) {
+			$own = strtolower((string)$alias->get_full_address());
+		}
+	}
+	$seen = array($address => true);
+	if ($own !== '') {
+		$seen[$own] = true;
+	}
+	if ($is_outbound) {
+		$sender_parsed = MailboxContacts::parseAddress($sender_raw);
+		if ($sender_parsed !== null) {
+			$seen[$sender_parsed[0]] = true;
+		}
+	}
+	$others = array();
+	$contacts = new MailboxContacts();
+	foreach (array('to' => $to_list, 'cc' => $cc_list) as $field => $list) {
+		if ($list === '') {
+			continue;
+		}
+		foreach (MailAddressList::parse($list) as $entry) {
+			$addr = strtolower(trim((string)$entry['email']));
+			if (isset($seen[$addr]) || !filter_var($addr, FILTER_VALIDATE_EMAIL)) {
+				continue;
+			}
+			$seen[$addr] = true;
+			if (count($others) >= 25) {
+				break 2;
+			}
+			$others[] = array(
+				'address'      => $addr,
+				'display_name' => (string)$entry['name'],
+				'field'        => $field,
+				'contact'      => ($alias_id > 0)
+					? $contacts->lookup(intval($session->get_user_id()), $addr, $alias_id)
+					: null,
+			);
+		}
+	}
+
 	$base = array(
 		'message_id'      => $message_id,
 		'address'         => $address,
 		'display_name'    => (string)$parsed[1],
 		'contact'         => $contact,
+		'others'          => $others,
 		'alias_id'        => $alias_id,
 		'account_visible' => $can_see_account,
 	);
@@ -199,7 +268,7 @@ function sender_context_logic(array $input): LogicResult {
 function sender_context_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'description' => 'Resolve a thread counterparty to the caller\'s contact entry, plus their member record (admin only)',
+		'description' => 'Resolve a thread counterparty to the caller\'s contact entry, plus everyone else on the message, plus their member record (admin only)',
 		'input' => [
 			'message_id' => ['type' => 'int', 'required' => true, 'label' => 'Message ID'],
 		],
