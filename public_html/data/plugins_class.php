@@ -11,6 +11,7 @@ class PluginNotSentException extends PluginException {};
 /**
  * Plugin — a plugin's database row.
  *
+ * @version 1.3 - save() forgets PluginHelper's per-request active set
  * @version 1.2 - the `uninstalled` status: uninstall keeps the row as the record
  *                (plg_uninstalled_time) while root removes the files
  *                (specs/post_release_fleet_defects.md B1)
@@ -255,6 +256,16 @@ function authenticate_write($data) {
 		return null;
 	}
 	
+	/**
+	 * A saved row may have changed plg_active; the request-wide active set
+	 * PluginHelper answers from is dropped so the next ask reads the row.
+	 */
+	public function save($debug = false) {
+		$result = parent::save($debug);
+		PluginHelper::forgetActiveSet();
+		return $result;
+	}
+
 	/**
 	 * Override prepare to add plugin name validation
 	 */
