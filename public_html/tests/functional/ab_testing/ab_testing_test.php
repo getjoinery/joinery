@@ -35,7 +35,7 @@ ob_start();
 harness_boot();
 
 require_once(PathHelper::getIncludePath('data/pages_class.php'));
-require_once(PathHelper::getIncludePath('data/tests_class.php'));
+require_once(PathHelper::getIncludePath('data/ab_tests_class.php'));
 require_once(PathHelper::getIncludePath('data/visitor_events_class.php'));
 
 // Assertion helpers delegate to the shared harness recorder; section() comes
@@ -94,23 +94,23 @@ $page->save();
 echo "  Page fixture created: id=" . $page->key . "\n";
 
 $test = new AbTest(null);
-$test->set('abt_entity_type', 'Page');
-$test->set('abt_entity_id', (int)$page->key);
-$test->set('abt_status', AbTest::STATUS_ACTIVE);
-$test->set('abt_conversion_event_type', VisitorEvent::TYPE_PURCHASE);
-$test->set('abt_epsilon', 0.100);
-$test->set('abt_cold_start_threshold', 100);
+$test->set('abx_entity_type', 'Page');
+$test->set('abx_entity_id', (int)$page->key);
+$test->set('abx_status', AbTest::STATUS_ACTIVE);
+$test->set('abx_conversion_event_type', VisitorEvent::TYPE_PURCHASE);
+$test->set('abx_epsilon', 0.100);
+$test->set('abx_cold_start_threshold', 100);
 $test->save();
 echo "  Test created: id=" . $test->key . ", status=active, conversion=PURCHASE\n";
 
 $variantA = new AbTestVariant(null);
-$variantA->set('abv_abt_test_id', (int)$test->key);
+$variantA->set('abv_abx_ab_test_id', (int)$test->key);
 $variantA->set('abv_name', 'control');
 $variantA->set('abv_overrides', []);
 $variantA->save();
 
 $variantB = new AbTestVariant(null);
-$variantB->set('abv_abt_test_id', (int)$test->key);
+$variantB->set('abv_abx_ab_test_id', (int)$test->key);
 $variantB->set('abv_name', 'challenger');
 $variantB->set('abv_overrides', ['pag_title' => 'Challenger Title']);
 $variantB->save();
@@ -147,7 +147,7 @@ section("Warm bandit argmax (trials>=threshold, epsilon=0)");
 
 $dblink->exec("UPDATE abv_variants SET abv_trials = 1000, abv_rewards = 100 WHERE abv_variant_id = " . (int)$variantA->key);
 $dblink->exec("UPDATE abv_variants SET abv_trials = 1000, abv_rewards = 500 WHERE abv_variant_id = " . (int)$variantB->key);
-$test->set('abt_epsilon', 0.000);
+$test->set('abx_epsilon', 0.000);
 $test->save();
 
 $counts = [(int)$variantA->key => 0, (int)$variantB->key => 0];
@@ -163,7 +163,7 @@ assert_eq(0, $counts[(int)$variantA->key], 'Variant A (10% rate) never picked wi
 assert_eq(50, $counts[(int)$variantB->key], 'Variant B (50% rate) always picked with epsilon=0');
 
 // Restore epsilon
-$test->set('abt_epsilon', 0.100);
+$test->set('abx_epsilon', 0.100);
 $test->save();
 
 // ---------------------------------------------------------------------------
@@ -216,7 +216,7 @@ assert_eq(1, count($stash), 'Stash has exactly one entry after 3 calls with same
 // ---------------------------------------------------------------------------
 section("Trial accounting via flush");
 
-$dblink->exec("UPDATE abv_variants SET abv_trials = 0, abv_rewards = 0 WHERE abv_abt_test_id = " . (int)$test->key);
+$dblink->exec("UPDATE abv_variants SET abv_trials = 0, abv_rewards = 0 WHERE abv_abx_ab_test_id = " . (int)$test->key);
 reset_cookies();
 reset_stash();
 $_COOKIE['ab_' . $test->key] = (string)$variantA->key;
@@ -236,7 +236,7 @@ assert_eq([], read_stash(), 'Stash cleared after flush');
 // ---------------------------------------------------------------------------
 section("Reward attribution on conversion event");
 
-$dblink->exec("UPDATE abv_variants SET abv_trials = 0, abv_rewards = 0 WHERE abv_abt_test_id = " . (int)$test->key);
+$dblink->exec("UPDATE abv_variants SET abv_trials = 0, abv_rewards = 0 WHERE abv_abx_ab_test_id = " . (int)$test->key);
 reset_cookies();
 reset_stash();
 $_COOKIE['ab_' . $test->key] = (string)$variantA->key;
@@ -256,21 +256,21 @@ assert_eq(0, (int)$vB->get('abv_rewards'), 'Variant B rewards unchanged');
 // ---------------------------------------------------------------------------
 section("No reward for mismatched event type");
 
-$dblink->exec("UPDATE abv_variants SET abv_rewards = 0 WHERE abv_abt_test_id = " . (int)$test->key);
+$dblink->exec("UPDATE abv_variants SET abv_rewards = 0 WHERE abv_abx_ab_test_id = " . (int)$test->key);
 reset_cookies();
 reset_stash();
 $_COOKIE['ab_' . $test->key] = (string)$variantA->key;
 AbTest::flush_request_accounting(VisitorEvent::TYPE_SIGNUP);   // test is configured for PURCHASE
 
 $vA = reload_variant($variantA->key);
-assert_eq(0, (int)$vA->get('abv_rewards'), 'No reward when event type does not match abt_conversion_event_type');
+assert_eq(0, (int)$vA->get('abv_rewards'), 'No reward when event type does not match abx_conversion_event_type');
 
 // ---------------------------------------------------------------------------
 // Test 9: End-to-end bot filter via save_visitor_event
 // ---------------------------------------------------------------------------
 section("Bot filter short-circuits flush via save_visitor_event");
 
-$dblink->exec("UPDATE abv_variants SET abv_trials = 0, abv_rewards = 0 WHERE abv_abt_test_id = " . (int)$test->key);
+$dblink->exec("UPDATE abv_variants SET abv_trials = 0, abv_rewards = 0 WHERE abv_abx_ab_test_id = " . (int)$test->key);
 
 // Real browser UA — trial should be counted
 $_SERVER['HTTP_USER_AGENT'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
@@ -311,8 +311,8 @@ $p->set('pag_title', 'Control Title');
 $p->save();
 
 $test2 = new AbTest($test->key, true);
-$test2->set('abt_status', AbTest::STATUS_ACTIVE);
-$test2->set('abt_winner_abv_variant_id', (int)$variantB->key);
+$test2->set('abx_status', AbTest::STATUS_ACTIVE);
+$test2->set('abx_winner_abv_variant_id', (int)$variantB->key);
 $test2->save();
 
 AbTest::copy_winner_onto_parent($test2);
@@ -380,7 +380,7 @@ assert_eq('Parent Title Restored', $p->get('pag_title'), 'Empty overrides array:
 section("apply_variant is a no-op when test is paused");
 
 $test2 = new AbTest($test->key, true);
-$test2->set('abt_status', AbTest::STATUS_PAUSED);
+$test2->set('abx_status', AbTest::STATUS_PAUSED);
 $test2->save();
 
 reset_cookies();
@@ -395,7 +395,7 @@ assert_eq('Stored Value', $p->get('pag_title'), 'Paused test: no variant applied
 assert_eq([], read_stash(), 'Paused test: nothing stashed');
 
 // Restore active for any follow-on tests
-$test2->set('abt_status', AbTest::STATUS_ACTIVE);
+$test2->set('abx_status', AbTest::STATUS_ACTIVE);
 $test2->save();
 
 // ---------------------------------------------------------------------------
@@ -403,8 +403,8 @@ $test2->save();
 // ---------------------------------------------------------------------------
 section("Reset counters");
 
-$dblink->exec("UPDATE abv_variants SET abv_trials = 77, abv_rewards = 33 WHERE abv_abt_test_id = " . (int)$test->key);
-$dblink->exec("UPDATE abv_variants SET abv_trials = 0, abv_rewards = 0, abv_update_time = now() WHERE abv_abt_test_id = " . (int)$test->key);
+$dblink->exec("UPDATE abv_variants SET abv_trials = 77, abv_rewards = 33 WHERE abv_abx_ab_test_id = " . (int)$test->key);
+$dblink->exec("UPDATE abv_variants SET abv_trials = 0, abv_rewards = 0, abv_update_time = now() WHERE abv_abx_ab_test_id = " . (int)$test->key);
 $vA = reload_variant($variantA->key);
 $vB = reload_variant($variantB->key);
 assert_eq(0, (int)$vA->get('abv_trials'), 'Variant A trials zeroed');
@@ -417,8 +417,8 @@ assert_eq(0, (int)$vB->get('abv_rewards'), 'Variant B rewards zeroed');
 	// CLEANUP
 	// ---------------------------------------------------------------------------
 	section("Cleanup");
-	$dblink->exec("DELETE FROM abv_variants WHERE abv_abt_test_id = " . (int)$test->key);
-	$dblink->exec("DELETE FROM abt_tests WHERE abt_test_id = " . (int)$test->key);
+	$dblink->exec("DELETE FROM abv_variants WHERE abv_abx_ab_test_id = " . (int)$test->key);
+	$dblink->exec("DELETE FROM abx_ab_tests WHERE abx_ab_test_id = " . (int)$test->key);
 	$dblink->exec("DELETE FROM pag_pages WHERE pag_page_id = " . (int)$page->key);
 	echo "  fixtures removed\n";
 }

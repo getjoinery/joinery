@@ -17,28 +17,28 @@ function admin_booking_type_edit_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 
-	$pk = $input['edit_primary_key_value'] ?? ($input['bkt_booking_type_id'] ?? null);
+	$pk = $input['edit_primary_key_value'] ?? ($input['bty_booking_type_id'] ?? null);
 	$type = $pk ? new BookingType($pk, TRUE) : new BookingType(NULL);
 
 	if (LibraryFunctions::isFormSubmission()) {
-		$strings = ['bkt_name','bkt_slug','bkt_description_plain','bkt_provider','bkt_location_mode',
-		            'bkt_location_details','bkt_cancellation_policy_text','bkt_reminder_minutes_csv'];
+		$strings = ['bty_name','bty_slug','bty_description_plain','bty_provider','bty_location_mode',
+		            'bty_location_details','bty_cancellation_policy_text','bty_reminder_minutes_csv'];
 		foreach ($strings as $f) {
 			if (isset($input[$f])) { $type->set($f, trim($input[$f])); }
 		}
-		$ints = ['bkt_usr_user_id','bkt_svy_survey_id','bkt_pro_product_id','bkt_status','bkt_duration_minutes',
-		         'bkt_slot_increment_minutes','bkt_buffer_before_minutes','bkt_buffer_after_minutes',
-		         'bkt_min_notice_minutes','bkt_rolling_days','bkt_max_per_day','bkt_max_per_week','bkt_cancel_notice_minutes'];
+		$ints = ['bty_usr_user_id','bty_svy_survey_id','bty_pro_product_id','bty_status','bty_duration_minutes',
+		         'bty_slot_increment_minutes','bty_buffer_before_minutes','bty_buffer_after_minutes',
+		         'bty_min_notice_minutes','bty_rolling_days','bty_max_per_day','bty_max_per_week','bty_cancel_notice_minutes'];
 		foreach ($ints as $f) {
 			if (isset($input[$f]) && $input[$f] !== '') { $type->set($f, (int)$input[$f]); }
 			elseif (isset($input[$f]) && $input[$f] === '') { $type->set($f, null); }
 		}
-		foreach (['bkt_window_start','bkt_window_end'] as $f) {
+		foreach (['bty_window_start','bty_window_end'] as $f) {
 			$type->set($f, (isset($input[$f]) && $input[$f] !== '') ? $input[$f] : null);
 		}
-		$type->set('bkt_send_native_emails', !empty($input['bkt_send_native_emails']));
-		if (!$type->get('bkt_provider')) { $type->set('bkt_provider', 'native'); }
-		$type->set('bkt_update_time', gmdate('Y-m-d H:i:s'));
+		$type->set('bty_send_native_emails', !empty($input['bty_send_native_emails']));
+		if (!$type->get('bty_provider')) { $type->set('bty_provider', 'native'); }
+		$type->set('bty_update_time', gmdate('Y-m-d H:i:s'));
 
 		try {
 			$type->prepare();
@@ -55,13 +55,13 @@ function admin_booking_type_edit_logic(array $input): LogicResult {
 	// reminders work out of the box (the field defaults only apply on INSERT and
 	// would otherwise show blank/unchecked in the form).
 	if (!$type->key) {
-		$type->set('bkt_send_native_emails', true);
-		$type->set('bkt_reminder_minutes_csv', '1440,60');
-		$type->set('bkt_slot_increment_minutes', 30);
-		$type->set('bkt_min_notice_minutes', 240);
-		$type->set('bkt_rolling_days', 60);
-		$type->set('bkt_status', BookingType::BOOKING_STATUS_ACTIVE);
-		$type->set('bkt_provider', 'native');
+		$type->set('bty_send_native_emails', true);
+		$type->set('bty_reminder_minutes_csv', '1440,60');
+		$type->set('bty_slot_increment_minutes', 30);
+		$type->set('bty_min_notice_minutes', 240);
+		$type->set('bty_rolling_days', 60);
+		$type->set('bty_status', BookingType::BOOKING_STATUS_ACTIVE);
+		$type->set('bty_provider', 'native');
 	}
 
 	return LogicResult::render(booking_type_edit_vars($session, $type));
@@ -74,8 +74,8 @@ function booking_type_edit_vars($session, $type): array {
 	$staff->load();
 	foreach ($staff as $u) { $hosts[$u->key] = $u->display_name(); }
 	// Ensure the current host is selectable even if not staff.
-	if ($type->get('bkt_usr_user_id') && !isset($hosts[$type->get('bkt_usr_user_id')])) {
-		$h = new User($type->get('bkt_usr_user_id'), TRUE);
+	if ($type->get('bty_usr_user_id') && !isset($hosts[$type->get('bty_usr_user_id')])) {
+		$h = new User($type->get('bty_usr_user_id'), TRUE);
 		if ($h->key) { $hosts[$h->key] = $h->display_name(); }
 	}
 
@@ -100,24 +100,24 @@ function admin_booking_type_edit_logic_descriptor(): array {
 		'mutates' => true,
 		'input' => array(
 			'edit_primary_key_value' => array('type' => 'int', 'required' => false, 'label' => 'Booking Type ID (omit to create)'),
-			'bkt_name' => array('type' => 'string', 'required' => true, 'label' => 'Name'),
-			'bkt_slug' => array('type' => 'string', 'required' => true, 'label' => 'URL slug', 'help' => 'Public booking URL: /book/{slug}'),
-			'bkt_description_plain' => array('type' => 'text', 'required' => false, 'label' => 'Description'),
-			'bkt_status' => array('type' => 'select', 'required' => false, 'label' => 'Status', 'options' => array('1' => 'Active', '0' => 'Inactive')),
-			'bkt_duration_minutes' => array('type' => 'int', 'required' => true, 'label' => 'Duration (minutes)'),
-			'bkt_slot_increment_minutes' => array('type' => 'int', 'required' => false, 'label' => 'Slot increment (minutes)'),
-			'bkt_buffer_before_minutes' => array('type' => 'int', 'required' => false, 'label' => 'Buffer before (minutes)'),
-			'bkt_buffer_after_minutes' => array('type' => 'int', 'required' => false, 'label' => 'Buffer after (minutes)'),
-			'bkt_min_notice_minutes' => array('type' => 'int', 'required' => false, 'label' => 'Minimum notice (minutes)'),
-			'bkt_rolling_days' => array('type' => 'int', 'required' => false, 'label' => 'Rolling window (days ahead)'),
-			'bkt_window_start' => array('type' => 'date', 'required' => false, 'label' => 'Fixed window start (optional)'),
-			'bkt_window_end' => array('type' => 'date', 'required' => false, 'label' => 'Fixed window end (optional)'),
-			'bkt_max_per_day' => array('type' => 'int', 'required' => false, 'label' => 'Max bookings per day (optional)'),
-			'bkt_max_per_week' => array('type' => 'int', 'required' => false, 'label' => 'Max bookings per week (optional)'),
-			'bkt_cancel_notice_minutes' => array('type' => 'int', 'required' => false, 'label' => 'Invitee cancel/reschedule notice (minutes)'),
-			'bkt_cancellation_policy_text' => array('type' => 'text', 'required' => false, 'label' => 'Cancellation policy text'),
-			'bkt_reminder_minutes_csv' => array('type' => 'string', 'required' => false, 'label' => 'Reminder offsets (minutes, CSV)', 'help' => 'e.g. 1440,60'),
-			'bkt_send_native_emails' => array('type' => 'bool', 'required' => false, 'label' => 'Send native emails (confirmations, reminders)'),
+			'bty_name' => array('type' => 'string', 'required' => true, 'label' => 'Name'),
+			'bty_slug' => array('type' => 'string', 'required' => true, 'label' => 'URL slug', 'help' => 'Public booking URL: /book/{slug}'),
+			'bty_description_plain' => array('type' => 'text', 'required' => false, 'label' => 'Description'),
+			'bty_status' => array('type' => 'select', 'required' => false, 'label' => 'Status', 'options' => array('1' => 'Active', '0' => 'Inactive')),
+			'bty_duration_minutes' => array('type' => 'int', 'required' => true, 'label' => 'Duration (minutes)'),
+			'bty_slot_increment_minutes' => array('type' => 'int', 'required' => false, 'label' => 'Slot increment (minutes)'),
+			'bty_buffer_before_minutes' => array('type' => 'int', 'required' => false, 'label' => 'Buffer before (minutes)'),
+			'bty_buffer_after_minutes' => array('type' => 'int', 'required' => false, 'label' => 'Buffer after (minutes)'),
+			'bty_min_notice_minutes' => array('type' => 'int', 'required' => false, 'label' => 'Minimum notice (minutes)'),
+			'bty_rolling_days' => array('type' => 'int', 'required' => false, 'label' => 'Rolling window (days ahead)'),
+			'bty_window_start' => array('type' => 'date', 'required' => false, 'label' => 'Fixed window start (optional)'),
+			'bty_window_end' => array('type' => 'date', 'required' => false, 'label' => 'Fixed window end (optional)'),
+			'bty_max_per_day' => array('type' => 'int', 'required' => false, 'label' => 'Max bookings per day (optional)'),
+			'bty_max_per_week' => array('type' => 'int', 'required' => false, 'label' => 'Max bookings per week (optional)'),
+			'bty_cancel_notice_minutes' => array('type' => 'int', 'required' => false, 'label' => 'Invitee cancel/reschedule notice (minutes)'),
+			'bty_cancellation_policy_text' => array('type' => 'text', 'required' => false, 'label' => 'Cancellation policy text'),
+			'bty_reminder_minutes_csv' => array('type' => 'string', 'required' => false, 'label' => 'Reminder offsets (minutes, CSV)', 'help' => 'e.g. 1440,60'),
+			'bty_send_native_emails' => array('type' => 'bool', 'required' => false, 'label' => 'Send native emails (confirmations, reminders)'),
 		),
 	);
 }

@@ -125,7 +125,7 @@ class ComponentRenderer {
 
 		// A/B variant application — no-op unless PageContent has an active test.
 		// Runs before fields are read so variant body overrides flow into rendering.
-		require_once(PathHelper::getIncludePath('data/tests_class.php'));
+		require_once(PathHelper::getIncludePath('data/ab_tests_class.php'));
 		AbTest::apply_variant($component_instance);
 
 		$component_type = $component_instance->get_component_type();

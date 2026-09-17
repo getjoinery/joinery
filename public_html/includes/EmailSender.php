@@ -938,9 +938,9 @@ class EmailSender {
             require_once(PathHelper::getIncludePath('data/debug_email_logs_class.php'));
 
             $log = new DebugEmailLog(null);
-            $log->set('del_message', $message);
-            $log->set('del_service', $service ?: 'unknown');
-            $log->set('del_status', 'debug');
+            $log->set('dbl_message', $message);
+            $log->set('dbl_service', $service ?: 'unknown');
+            $log->set('dbl_status', 'debug');
             $log->save();
         } catch (Exception $e) {
             error_log("Debug email log failed: " . $e->getMessage());

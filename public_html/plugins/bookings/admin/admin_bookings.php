@@ -55,9 +55,9 @@ foreach ($bookings as $booking) {
 	$client = $booking->get('bkn_usr_user_id_client') ? new User($booking->get('bkn_usr_user_id_client'), TRUE) : new User(NULL);
 	$host = $booking->get('bkn_usr_user_id_booked') ? new User($booking->get('bkn_usr_user_id_booked'), TRUE) : new User(NULL);
 	$type_name = '—';
-	if ($booking->get('bkn_bkt_booking_type_id')) {
-		$bt = new BookingType($booking->get('bkn_bkt_booking_type_id'), TRUE);
-		if ($bt->key) { $type_name = htmlspecialchars($bt->get('bkt_name')); }
+	if ($booking->get('bkn_bty_booking_type_id')) {
+		$bt = new BookingType($booking->get('bkn_bty_booking_type_id'), TRUE);
+		if ($bt->key) { $type_name = htmlspecialchars($bt->get('bty_name')); }
 	}
 	$status = $status_labels[(int)$booking->get('bkn_status')] ?? 'Unknown';
 	if ($booking->get('bkn_is_no_show')) { $status .= ' · No-show'; }

@@ -32,7 +32,7 @@ class NativeSchedulingProvider implements SchedulingServiceProvider {
 	 * @return array[] list of ['start'=>UTC, 'end'=>UTC]
 	 */
 	public function getAvailableSlots(BookingType $type, string $start_utc, string $end_utc): array {
-		$host_id = $type->get('bkt_usr_user_id');
+		$host_id = $type->get('bty_usr_user_id');
 		if (!$host_id) { return []; }
 
 		$subject = CalendarSubject::user($host_id);
@@ -42,14 +42,14 @@ class NativeSchedulingProvider implements SchedulingServiceProvider {
 		// Constrain the requested range to the bookable window.
 		$now = gmdate('Y-m-d H:i:s');
 		$bookable_start = $now;
-		if ($type->get('bkt_window_start')) {
-			$ws = $type->get('bkt_window_start') . ' 00:00:00';
+		if ($type->get('bty_window_start')) {
+			$ws = $type->get('bty_window_start') . ' 00:00:00';
 			$bookable_start = max($bookable_start, $ws);
 		}
-		if ($type->get('bkt_window_end')) {
-			$bookable_end = $type->get('bkt_window_end') . ' 23:59:59';
+		if ($type->get('bty_window_end')) {
+			$bookable_end = $type->get('bty_window_end') . ' 23:59:59';
 		} else {
-			$rolling = (int)($type->get('bkt_rolling_days') ?: 60);
+			$rolling = (int)($type->get('bty_rolling_days') ?: 60);
 			$bookable_end = gmdate('Y-m-d H:i:s', strtotime($now . ' +' . $rolling . ' days'));
 		}
 
@@ -60,11 +60,11 @@ class NativeSchedulingProvider implements SchedulingServiceProvider {
 		$busy = CalendarItemSourceRegistry::getBusyBlocks($subject, $eff_start, $eff_end);
 
 		$slots = SlotGenerator::forSchedule($schedule, $eff_start, $eff_end, [
-			'duration_minutes'      => (int)($type->get('bkt_duration_minutes') ?: 30),
-			'increment_minutes'     => (int)($type->get('bkt_slot_increment_minutes') ?: 30),
-			'buffer_before_minutes' => (int)$type->get('bkt_buffer_before_minutes'),
-			'buffer_after_minutes'  => (int)$type->get('bkt_buffer_after_minutes'),
-			'min_notice_minutes'    => (int)($type->get('bkt_min_notice_minutes') ?: 0),
+			'duration_minutes'      => (int)($type->get('bty_duration_minutes') ?: 30),
+			'increment_minutes'     => (int)($type->get('bty_slot_increment_minutes') ?: 30),
+			'buffer_before_minutes' => (int)$type->get('bty_buffer_before_minutes'),
+			'buffer_after_minutes'  => (int)$type->get('bty_buffer_after_minutes'),
+			'min_notice_minutes'    => (int)($type->get('bty_min_notice_minutes') ?: 0),
 		], $busy);
 
 		return $this->applyCaps($type, $schedule->get('sch_timezone'), $slots);
@@ -75,8 +75,8 @@ class NativeSchedulingProvider implements SchedulingServiceProvider {
 	 * counted in the host's timezone, per the spec — not the generator's job.
 	 */
 	private function applyCaps(BookingType $type, string $tz, array $slots): array {
-		$max_day  = $type->get('bkt_max_per_day');
-		$max_week = $type->get('bkt_max_per_week');
+		$max_day  = $type->get('bty_max_per_day');
+		$max_week = $type->get('bty_max_per_week');
 		if (!$max_day && !$max_week) { return $slots; }
 
 		// Count every row that occupies the host's time — confirmed bookings and
@@ -113,15 +113,15 @@ class NativeSchedulingProvider implements SchedulingServiceProvider {
 	 * @param array $invitee ['user_id','notes','timezone','utm'=>[...],'status'?]
 	 */
 	public function createBooking(BookingType $type, array $invitee, string $slot_start_utc): Booking {
-		$duration = (int)($type->get('bkt_duration_minutes') ?: 30);
+		$duration = (int)($type->get('bty_duration_minutes') ?: 30);
 		$end_utc = gmdate('Y-m-d H:i:s', strtotime($slot_start_utc) + $duration * 60);
 
 		$booking = new Booking(NULL);
 		$booking->set('bkn_provider', 'native');
-		$booking->set('bkn_bkt_booking_type_id', $type->key);
-		$booking->set('bkn_usr_user_id_booked', $type->get('bkt_usr_user_id'));
+		$booking->set('bkn_bty_booking_type_id', $type->key);
+		$booking->set('bkn_usr_user_id_booked', $type->get('bty_usr_user_id'));
 		$booking->set('bkn_usr_user_id_client', $invitee['user_id'] ?? null);
-		$booking->set('bkn_pro_product_id', $type->get('bkt_pro_product_id'));
+		$booking->set('bkn_pro_product_id', $type->get('bty_pro_product_id'));
 		$booking->set('bkn_start_time', $slot_start_utc);
 		$booking->set('bkn_end_time', $end_utc);
 		// Store local times using the invitee's timezone as source of truth.
@@ -133,7 +133,7 @@ class NativeSchedulingProvider implements SchedulingServiceProvider {
 		$booking->set('bkn_tzdata_version', '2026a');
 		$booking->set('bkn_status', $invitee['status'] ?? Booking::BOOKING_STATUS_BOOKED);
 		$booking->set('bkn_notes', $invitee['notes'] ?? '');
-		$booking->set('bkn_location', $type->get('bkt_location_details'));
+		$booking->set('bkn_location', $type->get('bty_location_details'));
 		$booking->set('bkn_invitee_timezone', $invitee_tz);
 		$booking->set('bkn_action_token', Booking::make_action_token());
 		if (!empty($invitee['utm'])) {

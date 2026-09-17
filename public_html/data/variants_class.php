@@ -8,6 +8,8 @@
  * "override to empty" (an explicit choice) — never conflate the two.
  *
  * @see /specs/ab_testing_framework.md
+ *
+ * @version 1.1 - the parent key is abv_abx_ab_test_id (AbTest is abx)
  */
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -22,12 +24,12 @@ class AbTestVariant extends SystemBase {
 	public static $pkey_column = 'abv_variant_id';
 
 	protected static $foreign_key_actions = array(
-		'abv_abt_test_id' => array('action' => 'cascade'),
+		'abv_abx_ab_test_id' => array('action' => 'cascade'),
 	);
 
 	public static $field_specifications = array(
 		'abv_variant_id'    => array('type' => 'int8', 'is_nullable' => false, 'serial' => true),
-		'abv_abt_test_id'   => array('type' => 'int8', 'is_nullable' => false),
+		'abv_abx_ab_test_id'   => array('type' => 'int8', 'is_nullable' => false),
 		'abv_name'          => array('type' => 'varchar(64)'),
 		'abv_overrides'     => array('type' => 'json', 'is_nullable' => true),
 		'abv_trials'        => array('type' => 'int8', 'default' => 0, 'zero_on_create' => true),
@@ -57,7 +59,7 @@ class MultiAbTestVariant extends SystemMultiBase {
 		$filters = array();
 
 		if (isset($this->options['test_id'])) {
-			$filters['abv_abt_test_id'] = array($this->options['test_id'], PDO::PARAM_INT);
+			$filters['abv_abx_ab_test_id'] = array($this->options['test_id'], PDO::PARAM_INT);
 		}
 
 

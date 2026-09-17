@@ -355,7 +355,7 @@ deletion engine and the validator — a new one is a decision: give it a model
 
 It also names surviving rows in the fixture families that label themselves.
 Name any standalone fixture `HarnessTest <something>` in the table's name column
-(`evt_events`, `svy_surveys`, `grp_groups`, `pro_products`, `bkt_booking_types`,
+(`evt_events`, `svy_surveys`, `grp_groups`, `pro_products`, `bty_booking_types`,
 `mgn_managed_nodes`, `qst_questions` are covered) and a leak reports the table
 and the offending row instead of waiting to be noticed as a phantom entry in an
 admin screen. Where the value cannot hold a space, the label is a prefix instead:
@@ -600,7 +600,7 @@ provisioned skips them with a named reason instead of failing the gate.
 `'foreign_key'` field spec (target table + column — the same declaration
 `DatabaseUpdater` materializes as a constraint) is authoritative; without one,
 the naming convention applies: an FK column is the child prefix followed by the
-parent model's primary key (`abv_abt_test_id` → `AbTest`). For each resolved
+parent model's primary key (`abv_abx_ab_test_id` → `AbTest`). For each resolved
 reference the tester **creates a fresh parent row** through the target model
 (recursively, so the parent's own references are satisfied too) and removes it
 before the model's test finishes. Fresh parents keep results independent of

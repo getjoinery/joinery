@@ -33,7 +33,7 @@ function booking_manage_logic(array $input): LogicResult {
 		return LogicResult::render($page_vars);
 	}
 
-	$type = new BookingType($booking->get('bkn_bkt_booking_type_id'), TRUE);
+	$type = new BookingType($booking->get('bkn_bty_booking_type_id'), TRUE);
 	$host = new User($booking->get('bkn_usr_user_id_booked'), TRUE);
 	$client = new User($booking->get('bkn_usr_user_id_client'), TRUE);
 	$page_vars['booking'] = $booking;
@@ -45,7 +45,7 @@ function booking_manage_logic(array $input): LogicResult {
 	$page_vars['already_done'] = $already_done;
 
 	// Notice-window check shared by cancel + reschedule.
-	$notice = (int)$type->get('bkt_cancel_notice_minutes');
+	$notice = (int)$type->get('bty_cancel_notice_minutes');
 	$within_notice = $notice > 0 && strtotime($booking->get('bkn_start_time')) < (time() + $notice * 60);
 
 	if (!$already_done && isset($_POST['cancel_booking'])) {
@@ -75,7 +75,7 @@ function booking_manage_logic(array $input): LogicResult {
 			return LogicResult::render($page_vars);
 		}
 
-		$provider = SchedulingProviderRegistry::get($type->get('bkt_provider'));
+		$provider = SchedulingProviderRegistry::get($type->get('bty_provider'));
 		$dblink = DbConnector::get_instance()->get_db_link();
 		$conflict = false;
 		try {
@@ -89,7 +89,7 @@ function booking_manage_logic(array $input): LogicResult {
 			if (!$open) {
 				$conflict = true; $dblink->rollBack();
 			} else {
-				$dur = (int)($type->get('bkt_duration_minutes') ?: 30);
+				$dur = (int)($type->get('bty_duration_minutes') ?: 30);
 				$new_end = gmdate('Y-m-d H:i:s', strtotime($slot_start) + $dur * 60);
 				$booking->set('bkn_start_time', $slot_start);
 				$booking->set('bkn_end_time', $new_end);
@@ -116,7 +116,7 @@ function booking_manage_logic(array $input): LogicResult {
 
 		booking_send_confirmation($booking, $type, $host, $client, $settings);
 		Notification::create_notification($host->key, 'booking', 'Booking rescheduled',
-			$client->display_name() . ' rescheduled ' . $type->get('bkt_name') . '.', '/profile/calendar', $client->key);
+			$client->display_name() . ' rescheduled ' . $type->get('bty_name') . '.', '/profile/calendar', $client->key);
 		return LogicResult::redirect('/booking/manage?token=' . $token . '&rescheduled=1');
 	}
 
@@ -129,19 +129,19 @@ function booking_manage_logic(array $input): LogicResult {
 /** Notify the other party when a booking is canceled, with a rebook link for invitees. */
 function booking_notify_cancellation($booking, $type, $host, $client, $settings, $by) {
 	$base = rtrim(LibraryFunctions::get_absolute_url(''), '/');
-	$rebook = $base . '/book/' . $type->get('bkt_slug');
+	$rebook = $base . '/book/' . $type->get('bty_slug');
 
 	// Tell the host when the invitee cancels; tell the invitee when the host/admin cancels.
 	if ($by === 'invitee' && $host->get('usr_email')) {
 		$when = LibraryFunctions::convert_time($booking->get('bkn_start_time'), 'UTC', $host->get('usr_timezone') ?: 'UTC', 'l, M j, Y g:i A T');
-		$body = '<p>A booking was canceled.</p><p><strong>' . htmlspecialchars($type->get('bkt_name')) . '</strong><br>'
+		$body = '<p>A booking was canceled.</p><p><strong>' . htmlspecialchars($type->get('bty_name')) . '</strong><br>'
 			. htmlspecialchars($when) . '</p><p>By: ' . htmlspecialchars($client->display_name()) . '</p>'
 			. ($booking->get('bkn_cancel_reason') ? '<p>Reason: ' . htmlspecialchars($booking->get('bkn_cancel_reason')) . '</p>' : '');
-		try { (new EmailSender())->send(EmailMessage::create($host->get('usr_email'), 'Booking canceled: ' . $type->get('bkt_name'), $body)); }
+		try { (new EmailSender())->send(EmailMessage::create($host->get('usr_email'), 'Booking canceled: ' . $type->get('bty_name'), $body)); }
 		catch (Exception $e) { error_log('cancel notify host failed: ' . $e->getMessage()); }
 	} elseif ($by !== 'invitee' && $client->get('usr_email')) {
 		$when = LibraryFunctions::convert_time($booking->get('bkn_start_time'), 'UTC', $client->get('usr_timezone') ?: 'UTC', 'l, M j, Y g:i A T');
-		$body = '<p>Your booking was canceled.</p><p><strong>' . htmlspecialchars($type->get('bkt_name')) . '</strong><br>'
+		$body = '<p>Your booking was canceled.</p><p><strong>' . htmlspecialchars($type->get('bty_name')) . '</strong><br>'
 			. htmlspecialchars($when) . '</p><p><a href="' . htmlspecialchars($rebook) . '">Pick a new time</a></p>';
 		try { (new EmailSender())->send(EmailMessage::create($client->get('usr_email'), 'Your booking was canceled', $body)); }
 		catch (Exception $e) { error_log('cancel notify invitee failed: ' . $e->getMessage()); }

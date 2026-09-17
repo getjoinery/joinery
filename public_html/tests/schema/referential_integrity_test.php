@@ -183,7 +183,7 @@ $named_fixtures = array(
 	'svy_surveys'       => 'svy_name',
 	'grp_groups'        => 'grp_name',
 	'pro_products'      => 'pro_name',
-	'bkt_booking_types' => 'bkt_name',
+	'bty_booking_types' => 'bty_name',
 	'mgn_managed_nodes' => 'mgn_name',
 	'qst_questions'     => 'qst_question',
 );

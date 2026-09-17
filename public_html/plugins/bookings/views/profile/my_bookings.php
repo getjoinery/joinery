@@ -30,11 +30,11 @@ echo PublicPage::BeginPage('My Bookings', array());
 <?php else: ?>
 	<?php foreach ($bookings as $b):
 		$client = $b->get('bkn_usr_user_id_client') ? new User($b->get('bkn_usr_user_id_client'), TRUE) : new User(NULL);
-		$bt = $b->get('bkn_bkt_booking_type_id') ? new BookingType($b->get('bkn_bkt_booking_type_id'), TRUE) : new BookingType(NULL);
+		$bt = $b->get('bkn_bty_booking_type_id') ? new BookingType($b->get('bkn_bty_booking_type_id'), TRUE) : new BookingType(NULL);
 		$when = LibraryFunctions::convert_time($b->get('bkn_start_time'), 'UTC', $tz, 'l, M j, Y g:i A T');
 	?>
 		<div class="bkn-card">
-			<strong><?php echo htmlspecialchars($bt->get('bkt_name') ?: 'Booking'); ?></strong> · <?php echo htmlspecialchars($when); ?><br>
+			<strong><?php echo htmlspecialchars($bt->get('bty_name') ?: 'Booking'); ?></strong> · <?php echo htmlspecialchars($when); ?><br>
 			<span class="bkn-with">with <?php echo htmlspecialchars($client->display_name()); ?></span>
 			<form method="post" class="bkn-cancel-form">
 				<input type="hidden" name="bkn_booking_id" value="<?php echo $b->key; ?>">

@@ -14,7 +14,7 @@ extract($page_vars);
 
 $page = new PublicPage();
 $valid = !isset($is_valid_page) || $is_valid_page;
-$title = ($valid && $type) ? $type->get('bkt_name') : 'Booking';
+$title = ($valid && $type) ? $type->get('bty_name') : 'Booking';
 $page->public_header(array('is_valid_page' => $valid, 'title' => $title), NULL);
 echo PublicPage::BeginPage($title, array());
 ?>
@@ -30,15 +30,15 @@ echo PublicPage::BeginPage($title, array());
 	$manage = '/booking/manage?token=' . htmlspecialchars($cb->get('bkn_action_token'));
 	?>
 	<h1>You're booked!</h1>
-	<p><strong><?php echo htmlspecialchars($type->get('bkt_name')); ?></strong><br><?php echo htmlspecialchars($when); ?></p>
-	<?php if ($type->get('bkt_location_details')): ?><p>Location: <?php echo htmlspecialchars($type->get('bkt_location_details')); ?></p><?php endif; ?>
+	<p><strong><?php echo htmlspecialchars($type->get('bty_name')); ?></strong><br><?php echo htmlspecialchars($when); ?></p>
+	<?php if ($type->get('bty_location_details')): ?><p>Location: <?php echo htmlspecialchars($type->get('bty_location_details')); ?></p><?php endif; ?>
 	<p>A confirmation email is on its way. Need a change? <a href="<?php echo $manage; ?>">Cancel or reschedule</a>.</p>
 <?php else: ?>
-	<h1><?php echo htmlspecialchars($type->get('bkt_name')); ?></h1>
+	<h1><?php echo htmlspecialchars($type->get('bty_name')); ?></h1>
 	<p class="jy-book-meta">with <?php echo htmlspecialchars($host->display_name()); ?>
-		· <?php echo (int)$type->get('bkt_duration_minutes'); ?> min</p>
-	<?php if ($type->get('bkt_description_plain')): ?>
-		<p><?php echo nl2br(htmlspecialchars($type->get('bkt_description_plain'))); ?></p>
+		· <?php echo (int)$type->get('bty_duration_minutes'); ?> min</p>
+	<?php if ($type->get('bty_description_plain')): ?>
+		<p><?php echo nl2br(htmlspecialchars($type->get('bty_description_plain'))); ?></p>
 	<?php endif; ?>
 	<?php if (!empty($errors)): ?>
 		<div class="jy-book-errors">
@@ -47,14 +47,14 @@ echo PublicPage::BeginPage($title, array());
 	<?php endif; ?>
 
 	<?php
-	$formwriter = $page->getFormWriter('bookform', ['action' => '/book/' . $type->get('bkt_slug')]);
+	$formwriter = $page->getFormWriter('bookform', ['action' => '/book/' . $type->get('bty_slug')]);
 	$formwriter->begin_form();
 	$formwriter->hiddeninput('book_submit', '', ['value' => '1']);
 	$formwriter->hiddeninput('invitee_timezone', '', ['value' => '']);
 
 	// Slot picker writes the chosen UTC slot into the hidden 'slot_start' field.
 	echo ComponentRenderer::render(null, 'slot_picker', [
-		'slots_url' => '/api/v1/action/bookings/booking_slots?slug=' . rawurlencode($type->get('bkt_slug')),
+		'slots_url' => '/api/v1/action/bookings/booking_slots?slug=' . rawurlencode($type->get('bty_slug')),
 		'field_name' => 'slot_start',
 	]);
 
@@ -64,10 +64,10 @@ echo PublicPage::BeginPage($title, array());
 	$formwriter->textbox('invitee_notes', 'Anything you\'d like to share?', ['value' => $old['notes'] ?? '']);
 
 	// Intake survey questions (rendered inline via Question::output_question).
-	if ($type->get('bkt_svy_survey_id')) {
+	if ($type->get('bty_svy_survey_id')) {
 		require_once(PathHelper::getIncludePath('data/survey_questions_class.php'));
 		require_once(PathHelper::getIncludePath('data/questions_class.php'));
-		$sq = new MultiSurveyQuestion(['survey_id' => $type->get('bkt_svy_survey_id'), 'deleted' => false]);
+		$sq = new MultiSurveyQuestion(['survey_id' => $type->get('bty_svy_survey_id'), 'deleted' => false]);
 		$sq->load();
 		if (count($sq)) {
 			echo '<h3 class="jy-book-sectionhead">A few questions</h3>';

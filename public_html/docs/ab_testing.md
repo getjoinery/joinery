@@ -11,7 +11,7 @@ Spec: [`/specs/ab_testing_framework.md`](../specs/ab_testing_framework.md).
 
 ## Opting an entity in
 
-Add two static properties to the data class. No schema change on the entity's own table — all bandit state lives in `abt_tests` and `abv_variants`.
+Add two static properties to the data class. No schema change on the entity's own table — all bandit state lives in `abx_ab_tests` and `abv_variants`.
 
 ```php
 class Post extends SystemBase {
@@ -44,7 +44,7 @@ On the entity's existing admin edit page:
 
 ```php
 if (!empty(Post::$ab_testable)) {
-    require_once(PathHelper::getIncludePath('data/tests_class.php'));
+    require_once(PathHelper::getIncludePath('data/ab_tests_class.php'));
     AbTestVersionsPanel::render('Post', $post_id);
 }
 ```

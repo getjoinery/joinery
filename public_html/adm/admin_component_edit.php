@@ -549,7 +549,7 @@ $page->end_box();
 
 // A/B Testing panel — only if PageContent is opted in and the component is saved
 if ($content->key && !empty(PageContent::$ab_testable)) {
-	require_once(PathHelper::getIncludePath('data/tests_class.php'));
+	require_once(PathHelper::getIncludePath('data/ab_tests_class.php'));
 	AbTestVersionsPanel::render('PageContent', $content->key);
 }
 

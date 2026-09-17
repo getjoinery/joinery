@@ -25,12 +25,12 @@ $tz = (!empty($booking) && $booking->get('bkn_invitee_timezone')) ? $booking->ge
 <?php else:
 	$when = LibraryFunctions::convert_time($booking->get('bkn_start_time'), 'UTC', $tz, 'l, M j, Y g:i A T');
 ?>
-	<h1><?php echo htmlspecialchars($type->get('bkt_name')); ?></h1>
+	<h1><?php echo htmlspecialchars($type->get('bty_name')); ?></h1>
 	<p class="jy-bookmgr-meta"><?php echo htmlspecialchars($when); ?> · with <?php echo htmlspecialchars($host->display_name()); ?></p>
 
 	<?php if (!empty($canceled) || (int)$booking->get('bkn_status') === Booking::BOOKING_STATUS_CANCELED): ?>
 		<div class="jy-bookmgr-notice">This booking is canceled.
-			<?php if ($type->get('bkt_slug')): ?> <a href="/book/<?php echo htmlspecialchars($type->get('bkt_slug')); ?>">Book a new time</a>.<?php endif; ?>
+			<?php if ($type->get('bty_slug')): ?> <a href="/book/<?php echo htmlspecialchars($type->get('bty_slug')); ?>">Book a new time</a>.<?php endif; ?>
 		</div>
 	<?php elseif (!empty($rescheduled)): ?>
 		<div class="jy-bookmgr-notice-ok">Your booking was rescheduled to <?php echo htmlspecialchars($when); ?>.</div>
@@ -40,8 +40,8 @@ $tz = (!empty($booking) && $booking->get('bkn_invitee_timezone')) ? $booking->ge
 				<?php foreach ($errors as $e) { echo htmlspecialchars($e) . '<br>'; } ?>
 			</div>
 		<?php endif; ?>
-		<?php if ($type->get('bkt_cancellation_policy_text')): ?>
-			<p class="jy-bookmgr-policy"><?php echo nl2br(htmlspecialchars($type->get('bkt_cancellation_policy_text'))); ?></p>
+		<?php if ($type->get('bty_cancellation_policy_text')): ?>
+			<p class="jy-bookmgr-policy"><?php echo nl2br(htmlspecialchars($type->get('bty_cancellation_policy_text'))); ?></p>
 		<?php endif; ?>
 
 		<?php if (!empty($within_notice)): ?>
@@ -54,7 +54,7 @@ $tz = (!empty($booking) && $booking->get('bkn_invitee_timezone')) ? $booking->ge
 			$rf->hiddeninput('reschedule_booking', '', ['value' => '1']);
 			$rf->hiddeninput('token', '', ['value' => $booking->get('bkn_action_token')]);
 			echo ComponentRenderer::render(null, 'slot_picker', [
-				'slots_url' => '/api/v1/action/bookings/booking_slots?slug=' . rawurlencode($type->get('bkt_slug')),
+				'slots_url' => '/api/v1/action/bookings/booking_slots?slug=' . rawurlencode($type->get('bty_slug')),
 				'field_name' => 'slot_start',
 			]);
 			$rf->submitbutton('btn_resched', 'Reschedule to selected time');

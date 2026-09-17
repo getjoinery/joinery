@@ -21,7 +21,7 @@ function admin_booking_logic(array $input): LogicResult {
 	if (!$booking->key) {
 		return LogicResult::redirect('/plugins/bookings/admin/admin_bookings');
 	}
-	$type = $booking->get('bkn_bkt_booking_type_id') ? new BookingType($booking->get('bkn_bkt_booking_type_id'), TRUE) : new BookingType(NULL);
+	$type = $booking->get('bkn_bty_booking_type_id') ? new BookingType($booking->get('bkn_bty_booking_type_id'), TRUE) : new BookingType(NULL);
 	$host = $booking->get('bkn_usr_user_id_booked') ? new User($booking->get('bkn_usr_user_id_booked'), TRUE) : new User(NULL);
 	$client = $booking->get('bkn_usr_user_id_client') ? new User($booking->get('bkn_usr_user_id_client'), TRUE) : new User(NULL);
 

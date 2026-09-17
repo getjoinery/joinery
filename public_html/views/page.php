@@ -6,7 +6,7 @@
 	$page_vars = process_logic(page_logic(array_merge($_GET, $_POST, $params ?? [])));
 	$page = $page_vars['page'];
 
-	require_once(PathHelper::getIncludePath('data/tests_class.php'));
+	require_once(PathHelper::getIncludePath('data/ab_tests_class.php'));
 	AbTest::apply_variant($page);
 
 	if ($template = $page->get('pag_template')) {

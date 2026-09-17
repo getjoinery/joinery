@@ -45,14 +45,15 @@ like `owner`, a self-reference like `parent`, an external id like
 `stripe_customer`) registers nothing — never a wrong guess. Give it an
 explicit `source_table` (see below) if it does need to cascade.
 
-**Ambiguous prefixes.** A prefix can be claimed by two models (`bkt` is both
-BookingType and BackupTarget; `cnv` is both Conversation and ContentVersion).
-The column name embeds the singular entity — `bkn_bkt_booking_type_id` names
-`bkt_booking_types` — so resolution matches that against the candidates'
+**Ambiguous prefixes.** A prefix can be claimed by two models (`cnv` is both
+Conversation and ContentVersion; `fil` is both File and InboundEmailFilter).
+The column name embeds the singular entity — `msg_cnv_conversation_id` names
+`cnv_conversations` — so resolution matches that against the candidates'
 table names and accepts only an exact singular/plural match. A column that
-matches none of the candidates (`bkh_bkt_backup_target_id` — the entity part is
+matches none of the candidates (a `msg_cnv_conv_id` — the entity part is
 abbreviated) stays unrecognized, and its declaration must name
-`source_table`/`source_class` explicitly.
+`source_table`/`source_class` explicitly. A prefix with one owner resolves
+by the prefix alone, whatever the entity part says.
 
 ### Escape Hatch: Columns That Don't Fit the Convention
 

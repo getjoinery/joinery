@@ -267,11 +267,11 @@ class DeletionRule extends SystemBase {
             return null;
         }
 
-        // Two models declare this prefix (e.g. 'bkt' is both BookingType and
-        // BackupTarget). The column name embeds the singular entity
+        // Two models declare this prefix (e.g. 'cnv' is both Conversation and
+        // ContentVersion). The column name embeds the singular entity
         // ({own}_{prefix}_{entity}_id), so match that against the candidate
         // table names instead of taking whichever model was discovered first:
-        // bkn_bkt_booking_type_id names bkt_booking_types. Resolve only on an
+        // msg_cnv_conversation_id names cnv_conversations. Resolve only on an
         // exact singular/plural match - a column that matches none of the
         // candidates stays unrecognized rather than guessed, and a declared
         // override for it must name 'source_table'/'source_class'.

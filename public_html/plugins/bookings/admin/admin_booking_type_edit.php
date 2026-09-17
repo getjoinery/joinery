@@ -42,30 +42,30 @@ $formwriter->begin_form();
 $formwriter->fromDescriptor(admin_booking_type_edit_logic_descriptor());
 
 // Host picker (hand-added — descriptor has no user-picker type).
-$formwriter->dropinput('bkt_usr_user_id', 'Host', array(
+$formwriter->dropinput('bty_usr_user_id', 'Host', array(
 	'options' => $host_options,
-	'value' => $type->get('bkt_usr_user_id'),
+	'value' => $type->get('bty_usr_user_id'),
 	'helptext' => 'Availability comes from this user\'s schedule (/profile/bookings/availability).',
 ));
 
 // Intake survey (hand-added select of surveys).
-$formwriter->dropinput('bkt_svy_survey_id', 'Intake survey', array(
+$formwriter->dropinput('bty_svy_survey_id', 'Intake survey', array(
 	'options' => $survey_options,
-	'value' => $type->get('bkt_svy_survey_id'),
+	'value' => $type->get('bty_svy_survey_id'),
 ));
 
 // Location — the detail box is shown only when a mode is chosen (visibility_rules,
 // not a hand-rolled toggle).
-$formwriter->dropinput('bkt_location_mode', 'Location type', array(
+$formwriter->dropinput('bty_location_mode', 'Location type', array(
 	'options' => array('none' => 'None', 'in_person' => 'In person', 'phone' => 'Phone', 'video' => 'Video', 'custom' => 'Custom'),
-	'value' => $type->get('bkt_location_mode') ?: 'none',
+	'value' => $type->get('bty_location_mode') ?: 'none',
 	'visibility_rules' => array(
-		'none' => array('hide' => array('bkt_location_details')),
-		'default' => array('show' => array('bkt_location_details')),
+		'none' => array('hide' => array('bty_location_details')),
+		'default' => array('show' => array('bty_location_details')),
 	),
 ));
-$formwriter->textbox('bkt_location_details', 'Location details', array(
-	'value' => $type->get('bkt_location_details'),
+$formwriter->textbox('bty_location_details', 'Location details', array(
+	'value' => $type->get('bty_location_details'),
 	'placeholder' => 'Address, dial-in number, meeting link, or instructions',
 ));
 

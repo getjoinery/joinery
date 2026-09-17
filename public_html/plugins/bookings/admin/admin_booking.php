@@ -26,7 +26,7 @@ $page->admin_header(array(
 $page->begin_box(array('title' => 'Booking #' . $booking->key));
 
 echo '<table class="table">';
-echo '<tr><th>Type</th><td>' . htmlspecialchars($type->get('bkt_name') ?: '—') . '</td></tr>';
+echo '<tr><th>Type</th><td>' . htmlspecialchars($type->get('bty_name') ?: '—') . '</td></tr>';
 echo '<tr><th>When</th><td>' . LibraryFunctions::convert_time($booking->get('bkn_start_time'), 'UTC', $tz, 'l, M j, Y g:i A T')
 	. ' – ' . LibraryFunctions::convert_time($booking->get('bkn_end_time'), 'UTC', $tz, 'g:i A T') . '</td></tr>';
 echo '<tr><th>Host</th><td>' . htmlspecialchars($host->display_name()) . '</td></tr>';
@@ -39,10 +39,10 @@ if ($booking->get('bkn_cancel_reason')) { echo '<tr><th>Cancel reason</th><td>' 
 echo '</table>';
 
 // Intake survey answers (against the invitee).
-if ($type->key && $type->get('bkt_svy_survey_id') && $client->key) {
+if ($type->key && $type->get('bty_svy_survey_id') && $client->key) {
 	require_once(PathHelper::getIncludePath('data/survey_answers_class.php'));
 	require_once(PathHelper::getIncludePath('data/questions_class.php'));
-	$answers = new MultiSurveyAnswer(array('survey_id' => $type->get('bkt_svy_survey_id'), 'user_id' => $client->key));
+	$answers = new MultiSurveyAnswer(array('survey_id' => $type->get('bty_svy_survey_id'), 'user_id' => $client->key));
 	$answers->load();
 	if (count($answers)) {
 		echo '<hr><h4>Intake answers</h4><table class="table">';

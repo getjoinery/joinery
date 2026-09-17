@@ -107,21 +107,21 @@ function bk_type($host, array $overrides = array()) {
 	static $n = 0;
 	$n++;
 	$t = new BookingType(NULL);
-	$t->set('bkt_usr_user_id', $host->key);
-	$t->set('bkt_name', 'HarnessTest Booking ' . $n);
-	$t->set('bkt_slug', 'harnesstest-' . $RUN . '-' . $n);
-	$t->set('bkt_status', BookingType::BOOKING_STATUS_ACTIVE);
-	$t->set('bkt_duration_minutes', 60);
-	$t->set('bkt_slot_increment_minutes', 60);
-	$t->set('bkt_min_notice_minutes', 0);
-	$t->set('bkt_rolling_days', 300);
+	$t->set('bty_usr_user_id', $host->key);
+	$t->set('bty_name', 'HarnessTest Booking ' . $n);
+	$t->set('bty_slug', 'harnesstest-' . $RUN . '-' . $n);
+	$t->set('bty_status', BookingType::BOOKING_STATUS_ACTIVE);
+	$t->set('bty_duration_minutes', 60);
+	$t->set('bty_slot_increment_minutes', 60);
+	$t->set('bty_min_notice_minutes', 0);
+	$t->set('bty_rolling_days', 300);
 	// Sending is a side effect of a successful booking, not part of what this
 	// suite asserts; leaving it on would put real mail in the queue on every run.
-	$t->set('bkt_send_native_emails', false);
+	$t->set('bty_send_native_emails', false);
 	foreach ($overrides as $k => $v) { $t->set($k, $v); }
 	$t->save();
 	$t->load();
-	harness_register_row('bkt_booking_types', 'bkt_booking_type_id', $t->key);
+	harness_register_row('bty_booking_types', 'bty_booking_type_id', $t->key);
 	$BK_TYPE_IDS[] = $t->key;
 	return $t;
 }
@@ -134,7 +134,7 @@ function bk_future_day($days_ahead = 10) {
 
 /** Open slot start times for a type on one UTC day. */
 function bk_slots($type, $day) {
-	$provider = SchedulingProviderRegistry::get($type->get('bkt_provider'));
+	$provider = SchedulingProviderRegistry::get($type->get('bty_provider'));
 	$slots = $provider->getAvailableSlots($type, $day . ' 00:00:00', $day . ' 23:59:59');
 	return array_column($slots, 'start');
 }
@@ -159,7 +159,7 @@ function bk_submit($slug, $slot_start, array $extra = array()) {
 /** Live (non-canceled, non-deleted) booking rows for a type. */
 function bk_rows($type) {
 	$db = DbConnector::get_instance()->get_db_link();
-	$q = $db->prepare('SELECT * FROM bkn_bookings WHERE bkn_bkt_booking_type_id = ? AND bkn_delete_time IS NULL ORDER BY bkn_booking_id');
+	$q = $db->prepare('SELECT * FROM bkn_bookings WHERE bkn_bty_booking_type_id = ? AND bkn_delete_time IS NULL ORDER BY bkn_booking_id');
 	$q->execute(array($type->key));
 	return $q->fetchAll(PDO::FETCH_ASSOC);
 }
@@ -196,7 +196,7 @@ list($day, $dow) = bk_future_day(10);
 bk_window($sched, $dow, '09:00:00', '12:00:00');
 $type = bk_type($host);
 
-$res = harness_call_logic('plugins/bookings/logic/book_logic.php', 'book_logic', array('slug' => $type->get('bkt_slug')), 'GET');
+$res = harness_call_logic('plugins/bookings/logic/book_logic.php', 'book_logic', array('slug' => $type->get('bty_slug')), 'GET');
 check(!isset($res->data['is_valid_page']) || $res->data['is_valid_page'] !== false,
 	'An active slug renders the booking page');
 check(isset($res->data['type']) && $res->data['type'] && $res->data['type']->key == $type->key,
@@ -214,34 +214,34 @@ check(isset($res->data['is_valid_page']) && $res->data['is_valid_page'] === fals
 
 // A type an admin has switched off must stop taking bookings, not just stop
 // being linked to — the URL stays valid and guessable after deactivation.
-$off = bk_type($host, array('bkt_status' => BookingType::BOOKING_STATUS_INACTIVE));
-$res = harness_call_logic('plugins/bookings/logic/book_logic.php', 'book_logic', array('slug' => $off->get('bkt_slug')), 'GET');
+$off = bk_type($host, array('bty_status' => BookingType::BOOKING_STATUS_INACTIVE));
+$res = harness_call_logic('plugins/bookings/logic/book_logic.php', 'book_logic', array('slug' => $off->get('bty_slug')), 'GET');
 check(isset($res->data['is_valid_page']) && $res->data['is_valid_page'] === false,
 	'An inactive booking type is not bookable through its URL');
 $res = harness_call_logic('plugins/bookings/logic/booking_slots_logic.php', 'booking_slots_logic',
-	array('slug' => $off->get('bkt_slug'), 'start' => $day . ' 00:00:00', 'end' => $day . ' 23:59:59'), 'GET');
+	array('slug' => $off->get('bty_slug'), 'start' => $day . ' 00:00:00', 'end' => $day . ' 23:59:59'), 'GET');
 check(isset($res->data['slots']) && count($res->data['slots']) === 0,
 	'The public slot endpoint offers nothing for an inactive type');
 
 $res = harness_call_logic('plugins/bookings/logic/booking_slots_logic.php', 'booking_slots_logic',
-	array('slug' => $type->get('bkt_slug'), 'start' => $day . ' 00:00:00', 'end' => $day . ' 23:59:59'), 'GET');
+	array('slug' => $type->get('bty_slug'), 'start' => $day . ' 00:00:00', 'end' => $day . ' 23:59:59'), 'GET');
 check(isset($res->data['slots']) && count($res->data['slots']) === 3,
 	'The public slot endpoint offers the three open hours', json_encode(array_column($res->data['slots'], 'start')));
 
 // The endpoint is called by public, possibly cached, pages: a caller supplying
 // nonsense must get an empty list rather than an error page or a stack trace.
 $res = harness_call_logic('plugins/bookings/logic/booking_slots_logic.php', 'booking_slots_logic',
-	array('slug' => $type->get('bkt_slug'), 'start' => 'not-a-date', 'end' => 'also-not'), 'GET');
+	array('slug' => $type->get('bty_slug'), 'start' => 'not-a-date', 'end' => 'also-not'), 'GET');
 check(isset($res->data['slots']) && count($res->data['slots']) === 0,
 	'A malformed range yields no slots rather than an error');
 
 // Switching the whole subsystem off closes the public door everywhere.
 harness_set_setting_mem('bookings_active', '0');
-$res = harness_call_logic('plugins/bookings/logic/book_logic.php', 'book_logic', array('slug' => $type->get('bkt_slug')), 'GET');
+$res = harness_call_logic('plugins/bookings/logic/book_logic.php', 'book_logic', array('slug' => $type->get('bty_slug')), 'GET');
 check(isset($res->data['is_valid_page']) && $res->data['is_valid_page'] === false,
 	'With bookings switched off, no booking page is valid');
 $res = harness_call_logic('plugins/bookings/logic/booking_slots_logic.php', 'booking_slots_logic',
-	array('slug' => $type->get('bkt_slug'), 'start' => $day . ' 00:00:00', 'end' => $day . ' 23:59:59'), 'GET');
+	array('slug' => $type->get('bty_slug'), 'start' => $day . ' 00:00:00', 'end' => $day . ' 23:59:59'), 'GET');
 check(isset($res->data['slots']) && count($res->data['slots']) === 0,
 	'With bookings switched off, the slot endpoint offers nothing');
 harness_set_setting_mem('bookings_active', '1');
@@ -256,19 +256,19 @@ check($slots[0] === $day . ' 09:00:00', 'The first slot is the start of the wind
 
 $before = count(bk_rows($type));
 
-$res = bk_submit($type->get('bkt_slug'), 'tomorrow at noon');
+$res = bk_submit($type->get('bty_slug'), 'tomorrow at noon');
 check(in_array('Please pick a time.', bk_errors($res)), 'A slot that is not a UTC timestamp is refused');
 check(!$res->redirect, 'A refused submission does not redirect to the confirmation');
 
-$res = bk_submit($type->get('bkt_slug'), $slots[0], array('invitee_name' => '   '));
+$res = bk_submit($type->get('bty_slug'), $slots[0], array('invitee_name' => '   '));
 check(in_array('Please enter your name.', bk_errors($res)), 'A blank name is refused');
 
-$res = bk_submit($type->get('bkt_slug'), $slots[0], array('invitee_email' => 'not-an-email'));
+$res = bk_submit($type->get('bty_slug'), $slots[0], array('invitee_email' => 'not-an-email'));
 check(in_array('Please enter a valid email.', bk_errors($res)), 'An unparseable email is refused');
 
 // Being handed the form back with empty fields is the difference between a
 // typo and starting over, so the accepted values have to survive the round trip.
-$res = bk_submit($type->get('bkt_slug'), $slots[0], array(
+$res = bk_submit($type->get('bty_slug'), $slots[0], array(
 	'invitee_email' => 'not-an-email', 'invitee_name' => 'Jo Smith', 'invitee_notes' => 'about the roof',
 ));
 check(isset($res->data['old']['name']) && $res->data['old']['name'] === 'Jo Smith',
@@ -282,21 +282,21 @@ check(count(bk_slots($type, $day)) === 3, 'None of the refused submissions consu
 // A slot that parses but is not on offer — outside the working hours — must be
 // refused by the server. The picker only ever shows real slots, so anything
 // else arrives from a hand-made post.
-$res = bk_submit($type->get('bkt_slug'), $day . ' 22:00:00');
+$res = bk_submit($type->get('bty_slug'), $day . ' 22:00:00');
 check(bk_errors($res) && strpos(implode(' ', bk_errors($res)), 'just taken') !== false,
 	'A time outside the host working hours is refused', json_encode(bk_errors($res)));
 check(count(bk_rows($type)) === $before, 'A time outside working hours created no booking');
 
 // Same test one step subtler: a well-formed time inside the window but off the
 // increment grid (09:30 when slots start on the hour) is not a slot either.
-$res = bk_submit($type->get('bkt_slug'), $day . ' 09:30:00');
+$res = bk_submit($type->get('bty_slug'), $day . ' 09:30:00');
 check(count(bk_rows($type)) === $before, 'A time off the increment grid created no booking');
 
 
 // ============================================================================
 section('A taken slot stops being offered');
 
-$res = bk_submit($type->get('bkt_slug'), $day . ' 10:00:00', array('invitee_notes' => 'first booking'));
+$res = bk_submit($type->get('bty_slug'), $day . ' 10:00:00', array('invitee_notes' => 'first booking'));
 check(!bk_errors($res), 'A valid submission is accepted', json_encode(bk_errors($res)));
 check($res->redirect && strpos($res->redirect, 'confirmed=') !== false,
 	'A booking redirects to its confirmation', (string)$res->redirect);
@@ -324,7 +324,7 @@ check($client->get('usr_email') !== '', 'The invitee record carries the email th
 // Booking again with the same email must reuse that record rather than pile up
 // a new half-populated user on every appointment.
 $repeat_email = $client->get('usr_email');
-$res2 = bk_submit($type->get('bkt_slug'), $day . ' 11:00:00', array('invitee_email' => $repeat_email));
+$res2 = bk_submit($type->get('bty_slug'), $day . ' 11:00:00', array('invitee_email' => $repeat_email));
 check(!bk_errors($res2), 'A second booking by the same person is accepted', json_encode(bk_errors($res2)));
 $booking2 = bk_from_redirect($res2);
 check($booking2 && (int)$booking2->get('bkn_usr_user_id_client') === (int)$client->key,
@@ -359,11 +359,11 @@ $type_d = bk_type($host_d);
 $slots_d = bk_slots($type_d, $day_d);
 check(count($slots_d) === 2, 'The contested day starts with two open hours', json_encode($slots_d));
 
-$first = bk_submit($type_d->get('bkt_slug'), $day_d . ' 09:00:00');
+$first = bk_submit($type_d->get('bty_slug'), $day_d . ' 09:00:00');
 check(!bk_errors($first), 'The first booker gets the slot', json_encode(bk_errors($first)));
 
 $loser_email = 'bkflow_loser_' . $RUN . '@dev.getjoinery.com';
-$second = bk_submit($type_d->get('bkt_slug'), $day_d . ' 09:00:00', array('invitee_email' => $loser_email));
+$second = bk_submit($type_d->get('bty_slug'), $day_d . ' 09:00:00', array('invitee_email' => $loser_email));
 check(bk_errors($second), 'The second booker for the same hour is refused');
 check(strpos(implode(' ', bk_errors($second)), 'just taken') !== false,
 	'The refusal tells them the time was taken', json_encode(bk_errors($second)));
@@ -385,7 +385,7 @@ if ($loser_row) { harness_register_row('usr_users', 'usr_user_id', $loser_row); 
 
 // The loser must still be able to take a different time — a conflict is not a
 // dead end, and the failed attempt must not have consumed anything.
-$third = bk_submit($type_d->get('bkt_slug'), $day_d . ' 10:00:00');
+$third = bk_submit($type_d->get('bty_slug'), $day_d . ' 10:00:00');
 check(!bk_errors($third), 'The other hour is still bookable after the conflict', json_encode(bk_errors($third)));
 check(count(bk_rows($type_d)) === 2, 'Two bookings now exist, one per hour');
 check(count(bk_slots($type_d, $day_d)) === 0, 'With both hours taken, nothing is offered');
@@ -438,7 +438,7 @@ if ($edt_date && $est_date) {
 
 	// The invitee sees their own zone on the confirmation and the calendar
 	// invite, so their local rendering is stored alongside the UTC instant.
-	$res = bk_submit($type_tz->get('bkt_slug'), $edt_date . ' 13:00:00', array('invitee_timezone' => 'Asia/Tokyo'));
+	$res = bk_submit($type_tz->get('bty_slug'), $edt_date . ' 13:00:00', array('invitee_timezone' => 'Asia/Tokyo'));
 	check(!bk_errors($res), 'A booking across zones is accepted', json_encode(bk_errors($res)));
 	$btz = bk_from_redirect($res);
 	check($btz && $btz->get('bkn_invitee_timezone') === 'Asia/Tokyo', 'The invitee timezone is recorded');
@@ -465,22 +465,22 @@ $host_c = bk_host('Cap', 'UTC');
 $sched_c = bk_schedule($host_c, 'UTC');
 list($day_c, $dow_c) = bk_future_day(12);
 bk_window($sched_c, $dow_c, '09:00:00', '13:00:00');
-$type_c = bk_type($host_c, array('bkt_max_per_day' => 2));
+$type_c = bk_type($host_c, array('bty_max_per_day' => 2));
 
 check(count(bk_slots($type_c, $day_c)) === 4, 'The capped day starts with four open hours');
 
-$r1 = bk_submit($type_c->get('bkt_slug'), $day_c . ' 09:00:00');
+$r1 = bk_submit($type_c->get('bty_slug'), $day_c . ' 09:00:00');
 check(!bk_errors($r1), 'The first booking under the cap is accepted', json_encode(bk_errors($r1)));
 check(count(bk_slots($type_c, $day_c)) === 3, 'One booking leaves three hours (cap not yet reached)');
 
-$r2 = bk_submit($type_c->get('bkt_slug'), $day_c . ' 10:00:00');
+$r2 = bk_submit($type_c->get('bty_slug'), $day_c . ' 10:00:00');
 check(!bk_errors($r2), 'The second booking reaches the cap', json_encode(bk_errors($r2)));
 check(count(bk_slots($type_c, $day_c)) === 0,
 	'At the cap the rest of the day stops being offered, not just the booked hours',
 	json_encode(bk_slots($type_c, $day_c)));
 
 // A cap that only hides slots but still accepts a posted one is not a cap.
-$r3 = bk_submit($type_c->get('bkt_slug'), $day_c . ' 11:00:00');
+$r3 = bk_submit($type_c->get('bty_slug'), $day_c . ' 11:00:00');
 check(bk_errors($r3), 'A posted time past the daily cap is refused', json_encode(bk_errors($r3)));
 check(count(bk_rows($type_c)) === 2, 'The cap holds at two bookings for the day');
 
@@ -496,14 +496,14 @@ $host_h = bk_host('HoldCap', 'UTC');
 $sched_h = bk_schedule($host_h, 'UTC');
 list($day_h, $dow_h) = bk_future_day(19);
 bk_window($sched_h, $dow_h, '09:00:00', '13:00:00');
-$type_h = bk_type($host_h, array('bkt_max_per_day' => 1));
+$type_h = bk_type($host_h, array('bty_max_per_day' => 1));
 
 check(count(bk_slots($type_h, $day_h)) === 4, 'The hold-cap day starts with four open hours');
 
 $holder = make_user('BkHoldCap');
 $hold = new Booking(NULL);
 $hold->set('bkn_provider', 'native');
-$hold->set('bkn_bkt_booking_type_id', $type_h->key);
+$hold->set('bkn_bty_booking_type_id', $type_h->key);
 $hold->set('bkn_usr_user_id_booked', $host_h->key);
 $hold->set('bkn_usr_user_id_client', $holder->key);
 $hold->set('bkn_start_time', $day_h . ' 09:00:00');
@@ -553,8 +553,8 @@ $sq->save();
 $sq->load();
 harness_register_row('srq_survey_questions', 'srq_survey_question_id', $sq->key);
 
-$type_q = bk_type($host_q, array('bkt_svy_survey_id' => $survey->key));
-$res = bk_submit($type_q->get('bkt_slug'), $day_q . ' 09:00:00', array(
+$type_q = bk_type($host_q, array('bty_svy_survey_id' => $survey->key));
+$res = bk_submit($type_q->get('bty_slug'), $day_q . ' 09:00:00', array(
 	'question_' . $question->key => 'A leaking gutter',
 ));
 check(!bk_errors($res), 'A booking with intake answers is accepted', json_encode(bk_errors($res)));
@@ -574,7 +574,7 @@ foreach ($ans_rows as $r) {
 
 // An unanswered intake question must not store an empty row that later reads
 // as "they said nothing" rather than "they were never asked".
-$res = bk_submit($type_q->get('bkt_slug'), $day_q . ' 10:00:00', array('question_' . $question->key => ''));
+$res = bk_submit($type_q->get('bty_slug'), $day_q . ' 10:00:00', array('question_' . $question->key => ''));
 $ans->execute(array($survey->key, $question->key));
 check(count($ans->fetchAll(PDO::FETCH_ASSOC)) === 0, 'A blank intake answer stores nothing');
 
@@ -586,9 +586,9 @@ $host_m = bk_host('Manage', 'UTC');
 $sched_m = bk_schedule($host_m, 'UTC');
 list($day_m, $dow_m) = bk_future_day(14);
 bk_window($sched_m, $dow_m, '09:00:00', '13:00:00');
-$type_m = bk_type($host_m, array('bkt_cancel_notice_minutes' => 0));
+$type_m = bk_type($host_m, array('bty_cancel_notice_minutes' => 0));
 
-$res = bk_submit($type_m->get('bkt_slug'), $day_m . ' 09:00:00');
+$res = bk_submit($type_m->get('bty_slug'), $day_m . ' 09:00:00');
 $bm = bk_from_redirect($res);
 check($bm && $bm->key, 'A booking to manage was created');
 $token = $bm->get('bkn_action_token');
@@ -631,7 +631,7 @@ check(isset($res->data['already_done']) && $res->data['already_done'] === true,
 
 // Reschedule moves the row rather than making a second one, so the old time
 // comes back and the invitee keeps one booking, not two.
-$res = bk_submit($type_m->get('bkt_slug'), $day_m . ' 10:00:00', array('invitee_timezone' => 'America/New_York'));
+$res = bk_submit($type_m->get('bty_slug'), $day_m . ' 10:00:00', array('invitee_timezone' => 'America/New_York'));
 $br = bk_from_redirect($res);
 check($br && $br->key, 'A booking to reschedule was created');
 $rtoken = $br->get('bkn_action_token');
@@ -657,7 +657,7 @@ check(substr((string)$br->get('bkn_start_time_local'), 11, 5) === '08:00',
 	(string)$br->get('bkn_start_time_local'));
 
 // A reschedule onto a taken time is the same race as a first booking.
-$res = bk_submit($type_m->get('bkt_slug'), $day_m . ' 11:00:00');
+$res = bk_submit($type_m->get('bty_slug'), $day_m . ' 11:00:00');
 check(!bk_errors($res), 'A second booking fills another hour', json_encode(bk_errors($res)));
 $res = harness_call_logic('plugins/bookings/logic/booking_manage_logic.php', 'booking_manage_logic',
 	array('token' => $rtoken, 'reschedule_booking' => '1', 'slot_start' => $day_m . ' 11:00:00'), 'POST');
@@ -681,9 +681,9 @@ list($day_n, $dow_n) = bk_future_day(15);
 bk_window($sched_n, $dow_n, '09:00:00', '11:00:00');
 // Wider than the distance to the booking, so every slot on that day is inside
 // the window and the rule is guaranteed to bind.
-$type_n = bk_type($host_n, array('bkt_cancel_notice_minutes' => 60 * 24 * 60));
+$type_n = bk_type($host_n, array('bty_cancel_notice_minutes' => 60 * 24 * 60));
 
-$res = bk_submit($type_n->get('bkt_slug'), $day_n . ' 09:00:00');
+$res = bk_submit($type_n->get('bty_slug'), $day_n . ' 09:00:00');
 $bn = bk_from_redirect($res);
 check($bn && $bn->key, 'A booking inside the notice window was created');
 
@@ -710,7 +710,7 @@ check((int)$bn->get('bkn_status') === Booking::BOOKING_STATUS_CANCELED, 'The hos
 check($bn->get('bkn_canceled_by') === 'host', 'The cancellation is attributed to the host');
 
 // Another host must not be able to cancel a booking that is not on their calendar.
-$res = bk_submit($type_n->get('bkt_slug'), $day_n . ' 10:00:00');
+$res = bk_submit($type_n->get('bty_slug'), $day_n . ' 10:00:00');
 $bn2 = bk_from_redirect($res);
 check($bn2 && $bn2->key, 'A booking on the first host was created for the ownership check');
 bk_signin($host);
@@ -750,20 +750,20 @@ $in7 = gmdate('Y-m-d', strtotime('+7 days'));
 $yesterday = gmdate('Y-m-d', strtotime('-1 day'));
 
 // Rolling horizon: bookable from now out to N days, and no further.
-$type_roll = bk_type($host_w, array('bkt_rolling_days' => 14));
+$type_roll = bk_type($host_w, array('bty_rolling_days' => 14));
 check(count(bk_slots($type_roll, $in7)) === 3, 'A day inside the rolling horizon is open');
 check(count(bk_slots($type_roll, gmdate('Y-m-d', strtotime('+20 days')))) === 0,
 	'A day past the rolling horizon is closed');
 check(count(bk_slots($type_roll, $yesterday)) === 0, 'A day in the past is closed');
-$res = bk_submit($type_roll->get('bkt_slug'), $yesterday . ' 09:00:00');
+$res = bk_submit($type_roll->get('bty_slug'), $yesterday . ' 09:00:00');
 check(bk_errors($res), 'A time in the past is refused, not just hidden', json_encode(bk_errors($res)));
-$res = bk_submit($type_roll->get('bkt_slug'), gmdate('Y-m-d', strtotime('+20 days')) . ' 09:00:00');
+$res = bk_submit($type_roll->get('bty_slug'), gmdate('Y-m-d', strtotime('+20 days')) . ' 09:00:00');
 check(bk_errors($res), 'A time past the horizon is refused, not just hidden', json_encode(bk_errors($res)));
 
 // Fixed window: a type that only runs between two dates, e.g. a conference.
 $w_start = gmdate('Y-m-d', strtotime('+10 days'));
 $w_end   = gmdate('Y-m-d', strtotime('+12 days'));
-$type_fix = bk_type($host_w, array('bkt_window_start' => $w_start, 'bkt_window_end' => $w_end));
+$type_fix = bk_type($host_w, array('bty_window_start' => $w_start, 'bty_window_end' => $w_end));
 check(count(bk_slots($type_fix, $in7)) === 0, 'Before the fixed window opens, nothing is offered');
 check(count(bk_slots($type_fix, gmdate('Y-m-d', strtotime('+11 days')))) === 3,
 	'Inside the fixed window the working hours apply as normal');
@@ -772,12 +772,12 @@ check(count(bk_slots($type_fix, gmdate('Y-m-d', strtotime('+13 days')))) === 0,
 	'After the window closes, nothing is offered');
 
 // Minimum notice: how much warning the host insists on.
-$type_notice = bk_type($host_w, array('bkt_min_notice_minutes' => 60 * 24 * 3));
+$type_notice = bk_type($host_w, array('bty_min_notice_minutes' => 60 * 24 * 3));
 check(count(bk_slots($type_notice, gmdate('Y-m-d', strtotime('+1 day')))) === 0,
 	'A day inside the minimum-notice period is closed');
 check(count(bk_slots($type_notice, gmdate('Y-m-d', strtotime('+5 days')))) === 3,
 	'A day beyond the minimum-notice period is open');
-$res = bk_submit($type_notice->get('bkt_slug'), gmdate('Y-m-d', strtotime('+1 day')) . ' 09:00:00');
+$res = bk_submit($type_notice->get('bty_slug'), gmdate('Y-m-d', strtotime('+1 day')) . ' 09:00:00');
 check(bk_errors($res), 'A too-soon time is refused, not just hidden', json_encode(bk_errors($res)));
 
 
@@ -789,7 +789,7 @@ harness_defer(function () use ($BK_TYPE_IDS, $BK_HOST_IDS, $RUN) {
 	$db = DbConnector::get_instance()->get_db_link();
 	try {
 		foreach ($BK_TYPE_IDS as $tid) {
-			$db->prepare('DELETE FROM bkn_bookings WHERE bkn_bkt_booking_type_id = ?')->execute(array($tid));
+			$db->prepare('DELETE FROM bkn_bookings WHERE bkn_bty_booking_type_id = ?')->execute(array($tid));
 		}
 		foreach ($BK_HOST_IDS as $hid) {
 			$db->prepare('DELETE FROM ntf_notifications WHERE ntf_usr_user_id = ?')->execute(array($hid));
