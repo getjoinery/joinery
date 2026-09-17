@@ -18,9 +18,9 @@ require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 
 require_once(PathHelper::getIncludePath('includes/calendar/CalendarSubject.php'));
-require_once(PathHelper::getIncludePath('data/schedule_class.php'));
-require_once(PathHelper::getIncludePath('data/schedule_window_class.php'));
-require_once(PathHelper::getIncludePath('data/schedule_override_class.php'));
+require_once(PathHelper::getIncludePath('data/schedules_class.php'));
+require_once(PathHelper::getIncludePath('data/schedule_windows_class.php'));
+require_once(PathHelper::getIncludePath('data/schedule_overrides_class.php'));
 
 $dblink = DbConnector::get_instance()->get_db_link();
 $row = $dblink->query("SELECT usr_user_id FROM usr_users WHERE usr_delete_time IS NULL ORDER BY usr_user_id LIMIT 1")->fetch(PDO::FETCH_ASSOC);

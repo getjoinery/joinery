@@ -35,7 +35,7 @@ ob_start();
 harness_boot();
 
 require_once(PathHelper::getIncludePath('data/pages_class.php'));
-require_once(PathHelper::getIncludePath('data/abt_tests_class.php'));
+require_once(PathHelper::getIncludePath('data/tests_class.php'));
 require_once(PathHelper::getIncludePath('data/visitor_events_class.php'));
 
 // Assertion helpers delegate to the shared harness recorder; section() comes
@@ -404,7 +404,7 @@ $test2->save();
 section("Reset counters");
 
 $dblink->exec("UPDATE abv_variants SET abv_trials = 77, abv_rewards = 33 WHERE abv_abt_test_id = " . (int)$test->key);
-$dblink->exec("UPDATE abv_variants SET abv_trials = 0, abv_rewards = 0, abv_modified_time = now() WHERE abv_abt_test_id = " . (int)$test->key);
+$dblink->exec("UPDATE abv_variants SET abv_trials = 0, abv_rewards = 0, abv_update_time = now() WHERE abv_abt_test_id = " . (int)$test->key);
 $vA = reload_variant($variantA->key);
 $vB = reload_variant($variantB->key);
 assert_eq(0, (int)$vA->get('abv_trials'), 'Variant A trials zeroed');

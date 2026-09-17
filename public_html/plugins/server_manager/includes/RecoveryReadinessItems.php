@@ -21,7 +21,7 @@ class RecoveryReadinessItems {
 	/** Provider for RecoveryReadiness::items() — returns a list of item arrays. */
 	public static function items() {
 		require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
-		require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
+		require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 
 		$items = array();
 		$items[] = self::recoveryKeyItem();

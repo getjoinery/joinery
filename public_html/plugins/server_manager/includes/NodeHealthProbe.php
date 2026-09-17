@@ -260,7 +260,7 @@ class NodeHealthProbe {
 	 */
 	public static function run_and_record($node, $created_by = null) {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 
 		$result = self::run($node);
 		$now    = gmdate('Y-m-d H:i:s');
@@ -273,7 +273,7 @@ class NodeHealthProbe {
 		}
 
 		$job = new ManagementJob(NULL);
-		$job->set('mjb_mgn_node_id', $node->key);
+		$job->set('mjb_mgn_managed_node_id', $node->key);
 		$job->set('mjb_job_type', 'check_status');
 		$job->set('mjb_status', $result['ok'] ? 'completed' : 'failed');
 		$job->set('mjb_commands', json_encode(['probe' => 'check_status', 'steps' => []]));

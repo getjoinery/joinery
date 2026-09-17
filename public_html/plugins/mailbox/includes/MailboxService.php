@@ -140,13 +140,13 @@ require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php')
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxViewer.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxIndex.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxHtmlSanitizer.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_folder_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_accounts_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_folders_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_labels_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_label_members_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grants_class.php'));
 
 class MailboxService {
 
@@ -2205,8 +2205,8 @@ class MailboxService {
 		if (!count($ids)) {
 			return array('count' => 0, 'addresses' => array());
 		}
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_filter_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_filters_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxContacts.php'));
 
 		$in = implode(',', $ids);

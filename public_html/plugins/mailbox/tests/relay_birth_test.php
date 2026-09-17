@@ -27,7 +27,7 @@ require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 require_once(__DIR__ . '/lib/relay_ping_probe.php');
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayBirthEndpoint.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_client_identity_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_client_identities_class.php'));
 
 $binary = RelayPingProbe::binary();
 if ($binary === null) {

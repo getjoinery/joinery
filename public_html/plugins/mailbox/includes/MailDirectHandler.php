@@ -31,8 +31,8 @@
 require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectHandler.php'));
 require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectProtocol.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
 
 class MailDirectHandler implements DirectKindHandler {
 

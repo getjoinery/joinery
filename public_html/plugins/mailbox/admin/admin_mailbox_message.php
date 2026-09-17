@@ -18,7 +18,7 @@ require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/admin_tabs.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/logic/admin_mailbox_message_logic.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
 
 $page_vars = process_logic(admin_mailbox_message_logic(array_merge($_GET, $_POST, $params ?? [])));
 extract($page_vars);

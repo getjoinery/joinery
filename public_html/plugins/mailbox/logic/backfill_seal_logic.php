@@ -28,8 +28,8 @@ function backfill_seal_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 	require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grants_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
 
 	$batch_size = 25;

@@ -69,7 +69,7 @@ class AiQueuedAction extends SystemBase {
         'aqa_status'              => array('type'=>'varchar(12)', 'default'=>'pending', 'index'=>true),
         // JSON-encoded execution outcome ({status, summary} or {error}).
         'aqa_result'              => array('type'=>'text'),
-        'aqa_created_time'        => array('type'=>'timestamp(6)', 'default'=>'now()'),
+        'aqa_create_time'        => array('type'=>'timestamp(6)', 'default'=>'now()'),
         'aqa_resolved_time'       => array('type'=>'timestamp(6)'),
         'aqa_expires_time'        => array('type'=>'timestamp(6)'),
         // Layer 0 sealing columns — per row, like the idempotency cache: only a

@@ -6,7 +6,7 @@
 
 	require_once(PathHelper::getIncludePath('plugins/event_manager/data/events_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_registrants_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_waiting_lists_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/event_manager/data/waiting_lists_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);

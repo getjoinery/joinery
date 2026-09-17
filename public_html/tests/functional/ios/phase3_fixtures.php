@@ -28,8 +28,8 @@ require_once('/var/www/html/joinerytest/public_html/tests/functional/api/api_tes
 harness_require_debug_mode();
 
 require_once(PathHelper::getIncludePath('data/users_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grants_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_labels_class.php'));
 
 $cmd = $argv[1] ?? '';

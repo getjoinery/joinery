@@ -38,7 +38,7 @@ function unseal_batch_logic(array $input): LogicResult {
 	if (!empty($input['alias_id'])) {
 		// One lowered mailbox (specs/mailbox_connect_flow.md § D) — its own level
 		// answers, so a Private mailbox on a Standard domain is still refused.
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
 		$alias = new InboundEmailAlias(intval($input['alias_id']), TRUE);
 		if (!$alias->key) {
 			return LogicResult::error('Unknown mailbox.');

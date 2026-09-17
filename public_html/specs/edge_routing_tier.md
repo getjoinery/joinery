@@ -3,7 +3,7 @@
 ## Problem
 
 Today a site's public domain is welded to the box that hosts it. The domain lives as
-`mgn_site_url` on the `ManagedNode` record (`plugins/server_manager/data/managed_node_class.php`),
+`mgn_site_url` on the `ManagedNode` record (`plugins/server_manager/data/managed_nodes_class.php`),
 and public DNS points an A record straight at `mgn_host`. Moving a site to another node
 therefore means editing DNS and waiting out TTL propagation — slow, manual, and not
 instantly reversible.
@@ -67,7 +67,7 @@ shop.foo.com    ───►   │ routing table (cached │  ──►  node-B
 
 A lightweight entity, **separate from `ManagedNode`** (an edge node is just Caddy — it has
 no Joinery install, web root, container, or upgrade lifecycle, so it does not belong in the
-node model). Mirrors the conventions in `managed_node_class.php`
+node model). Mirrors the conventions in `managed_nodes_class.php`
 (SystemBase, `$prefix`, `$tablename`, `$field_specifications`, `prepare()`, Multi class).
 
 ```php
@@ -105,7 +105,7 @@ public static $tablename = 'srt_site_routes';
 public static $pkey_column = 'srt_id';
 
 protected static $foreign_key_actions = [
-    'srt_mgn_node_id' => ['table' => 'mgn_managed_nodes', 'column' => 'mgn_id', 'action' => 'set_null'],
+    'srt_mgn_node_id' => ['table' => 'mgn_managed_nodes', 'column' => 'mgn_managed_node_id', 'action' => 'set_null'],
 ];
 
 $field_specifications = array(
@@ -207,7 +207,7 @@ follow suit from the new edge/routing views.)
 
 `mgn_site_url` currently carries the domain. On rollout:
 
-1. Seed one `SiteRoute` per enabled node from its `mgn_site_url` (domain) → `mgn_id`.
+1. Seed one `SiteRoute` per enabled node from its `mgn_site_url` (domain) → `mgn_managed_node_id`.
 2. `mgn_site_url` remains for display/health-check convenience but is **no longer the
    routing authority**; `SiteRoute` is. Document this in the overview doc so it is not
    mistaken for the binding.

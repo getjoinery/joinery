@@ -2,7 +2,7 @@
 
 	require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
 
-	require_once(PathHelper::getIncludePath('/data/phone_number_class.php'));
+	require_once(PathHelper::getIncludePath('/data/phone_numbers_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(9);
@@ -31,7 +31,7 @@
 	if($act_result) {
 		$phone_act = new PhoneNumber($act_result->act_phn_phone_number_id, TRUE);
 		?>
-		<p>The last text message was sent to <?php echo $phone_act->get_phone_string(); ?> at <strong><?php echo  LibraryFunctions::convert_time($act_result->act_created_time, 'UTC', $session->get_timezone()); ?></strong>.</p>
+		<p>The last text message was sent to <?php echo $phone_act->get_phone_string(); ?> at <strong><?php echo  LibraryFunctions::convert_time($act_result->act_create_time, 'UTC', $session->get_timezone()); ?></strong>.</p>
 		<?php
 	}
 

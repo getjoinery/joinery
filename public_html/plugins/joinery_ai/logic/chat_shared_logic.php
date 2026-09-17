@@ -14,8 +14,8 @@
  */
 function joinery_ai_chat_page_logic(array $input, int $min_permission, string $login_return): LogicResult {
     require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-    require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
-    require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
+    require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversations_class.php'));
+    require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversation_messages_class.php'));
 
     $session = SessionControl::get_instance();
     if (!$session->is_logged_in() || $session->get_permission() < $min_permission) {
@@ -57,7 +57,7 @@ function joinery_ai_chat_page_logic(array $input, int $min_permission, string $l
     if ($selected && !$selected_locked) {
         $rows = new MultiAiConversationMessage(
             ['conversation_id' => (int)$selected->key, 'deleted' => false],
-            ['aim_message_id' => 'ASC']
+            ['aim_conversation_message_id' => 'ASC']
         );
         $rows->load();
         foreach ($rows as $row) $messages[] = $row;

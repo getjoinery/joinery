@@ -42,8 +42,8 @@ class VaultEntry extends SystemBase {
 		'vle_usr_user_id' => array('type'=>'int8', 'is_nullable'=>false, 'index'=>true,
 			'foreign_key'=>array('table'=>'usr_users', 'column'=>'usr_user_id', 'on_delete'=>'CASCADE')),
 		'vle_ciphertext'   => array('type'=>'text', 'is_nullable'=>false),
-		'vle_created_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'vle_updated_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
+		'vle_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+		'vle_update_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 		'vle_delete_time'  => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	);
 }

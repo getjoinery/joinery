@@ -26,7 +26,7 @@
  * @version 1.0
  */
 
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
 
 /** A stored DNS verdict older than this is ignored rather than shown. */
 const MAILBOX_SETUP_VERDICT_STALE_DAYS = 7;

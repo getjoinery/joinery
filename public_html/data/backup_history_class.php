@@ -43,12 +43,12 @@ class BackupHistoryException extends SystemBaseException {}
 class BackupHistory extends SystemBase {
 	public static $prefix = 'bkh';
 	public static $tablename = 'bkh_backup_history';
-	public static $pkey_column = 'bkh_id';
+	public static $pkey_column = 'bkh_backup_history_id';
 
 	public static $json_vars = array('bkh_artifacts');
 
 	public static $field_specifications = array(
-		'bkh_id'            => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+		'bkh_backup_history_id'            => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 
 		// project | database — what was backed up.
 		'bkh_type'          => array('type'=>'varchar(20)', 'is_nullable'=>false, 'required'=>true,
@@ -66,8 +66,8 @@ class BackupHistory extends SystemBase {
 		// Which target it went to, and the slug it was filed under. Kept as
 		// values rather than only a foreign key: a target can be deleted and
 		// reconfigured, and the history still has to say where a backup went.
-		'bkh_bkt_target_id' => array('type'=>'int8',
-		                             'foreign_key'=>array('table'=>'bkt_backup_targets', 'column'=>'bkt_id',
+		'bkh_bkt_backup_target_id' => array('type'=>'int8',
+		                             'foreign_key'=>array('table'=>'bkt_backup_targets', 'column'=>'bkt_backup_target_id',
 		                                                  'on_delete'=>'SET NULL')),
 		'bkh_target_name'   => array('type'=>'varchar(100)'),
 		'bkh_slug'          => array('type'=>'varchar(255)'),
@@ -138,10 +138,9 @@ class BackupHistory extends SystemBase {
 	// target name is denormalised onto the row precisely so the history still
 	// reads correctly once the target is gone. Hence 'null', not 'cascade'.
 	protected static $foreign_key_actions = array(
-		// 'bkt' is claimed by both BackupTarget and BookingType, and the column
-		// name (bkt_target, not bkt_backup_target) defeats the entity match -
-		// name the source explicitly.
-		'bkh_bkt_target_id' => array('action' => 'null', 'source_class' => 'BackupTarget'),
+		// 'bkt' is claimed by both BackupTarget and BookingType; the full
+		// entity in the column name is what picks bkt_backup_targets.
+		'bkh_bkt_backup_target_id' => array('action' => 'null'),
 	);
 
 	function prepare() {
@@ -251,7 +250,7 @@ class MultiBackupHistory extends SystemMultiBase {
 		}
 
 		if (isset($this->options['target_id'])) {
-			$filters['bkh_bkt_target_id'] = [$this->options['target_id'], PDO::PARAM_INT];
+			$filters['bkh_bkt_backup_target_id'] = [$this->options['target_id'], PDO::PARAM_INT];
 		}
 
 		if (isset($this->options['slug'])) {

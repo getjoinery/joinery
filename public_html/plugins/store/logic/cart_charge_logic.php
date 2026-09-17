@@ -17,9 +17,9 @@ function _checkout_error($message) {
  */
 function _resolve_receipt_template(Product $product, $default_name) {
 	require_once(PathHelper::getIncludePath('data/email_templates_class.php'));
-	$override_id = $product->get('pro_emt_receipt_template_id');
+	$override_id = $product->get('pro_emt_email_template_id');
 	if ($override_id) {
-		$tpl = new EmailTemplateStore($override_id, TRUE);
+		$tpl = new EmailTemplate($override_id, TRUE);
 		// SystemBase preserves $key even on failed load. Use emt_name as the
 		// "row exists" signal — it's required, so null means the load missed.
 		$tpl_name = $tpl->get('emt_name');
@@ -34,7 +34,7 @@ function cart_charge_logic(array $input): LogicResult{
 
 	require_once(PathHelper::getIncludePath('plugins/store/includes/ShoppingCart.php'));
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-	require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
+	require_once(PathHelper::getIncludePath('includes/EmailTemplateRenderer.php'));
 	require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 	require_once(PathHelper::getIncludePath('plugins/store/includes/StripeHelper.php'));
 	require_once(PathHelper::getIncludePath('plugins/store/includes/PaypalHelper.php'));
@@ -42,8 +42,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('data/groups_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/store/data/orders_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php'));
-	require_once(PathHelper::getIncludePath('data/address_class.php'));
-	require_once(PathHelper::getIncludePath('data/phone_number_class.php'));
+	require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
+	require_once(PathHelper::getIncludePath('data/phone_numbers_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/store/data/product_details_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/store/data/coupon_codes_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/store/data/coupon_code_uses_class.php'));
@@ -548,7 +548,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$r3_product = $summary['product'];
 			if (isset($seen_product_ids[$r3_product->key])) continue;
 			$has_msg = (bool)$r3_product->get('pro_after_purchase_message');
-			$has_override = (bool)$r3_product->get('pro_emt_receipt_template_id');
+			$has_override = (bool)$r3_product->get('pro_emt_email_template_id');
 			if (!$has_msg && !$has_override) continue;
 			$seen_product_ids[$r3_product->key] = true;
 

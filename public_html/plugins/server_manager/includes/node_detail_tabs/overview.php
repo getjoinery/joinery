@@ -920,11 +920,11 @@
 
 	$target_id = $node->get('mgn_bkt_backup_target_id');
 	if ($target_id) {
-		require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
+		require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 		try {
 			$target = new BackupTarget($target_id, TRUE);
 			$conn_row('Backup target',
-				'<a href="/admin/server_manager/target_info?bkt_id=' . $target->key . '">' . htmlspecialchars($target->get('bkt_name')) . '</a> <span class="text-muted">(' . htmlspecialchars($target->get('bkt_provider')) . ')</span>'
+				'<a href="/admin/server_manager/target_info?bkt_backup_target_id=' . $target->key . '">' . htmlspecialchars($target->get('bkt_name')) . '</a> <span class="text-muted">(' . htmlspecialchars($target->get('bkt_provider')) . ')</span>'
 			);
 		} catch (Exception $e) {}
 	}
@@ -985,7 +985,7 @@
 	}
 
 	// Recent jobs for this node
-	$overview_jobs = new MultiManagementJob(['deleted' => false, 'node_id' => $node->key], ['mjb_id' => 'DESC'], 10);
+	$overview_jobs = new MultiManagementJob(['deleted' => false, 'node_id' => $node->key], ['mjb_management_job_id' => 'DESC'], 10);
 	$overview_jobs->load();
 
 	$pageoptions = ['title' => 'Recent Jobs', 'altlinks' => ['All Jobs' => $base_url . '&tab=jobs']];
@@ -1100,7 +1100,7 @@
 	echo '<h6 class="text-muted mt-4 mb-3">Backup Settings</h6>';
 
 	// Target dropdown (manual since FormWriter doesn't have a model-aware FK dropdown)
-	require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
+	require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 	$all_targets = new MultiBackupTarget(['deleted' => false, 'enabled' => true], ['bkt_name' => 'ASC']);
 	$all_targets->load();
 	$current_target_id = $node->get('mgn_bkt_backup_target_id');

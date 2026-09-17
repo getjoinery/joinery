@@ -13,9 +13,9 @@ function availability_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
     require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
     require_once(PathHelper::getIncludePath('includes/calendar/CalendarSubject.php'));
-    require_once(PathHelper::getIncludePath('data/schedule_class.php'));
-    require_once(PathHelper::getIncludePath('data/schedule_window_class.php'));
-    require_once(PathHelper::getIncludePath('data/schedule_override_class.php'));
+    require_once(PathHelper::getIncludePath('data/schedules_class.php'));
+    require_once(PathHelper::getIncludePath('data/schedule_windows_class.php'));
+    require_once(PathHelper::getIncludePath('data/schedule_overrides_class.php'));
 
     $settings = Globalvars::get_instance();
     if (!$settings->get_setting('bookings_active')) {

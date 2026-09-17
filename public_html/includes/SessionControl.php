@@ -7,7 +7,7 @@ require_once ('PathHelper.php');
 require_once ('DbConnector.php');
 require_once ('LibraryFunctions.php');
 
-require_once(PathHelper::getIncludePath('data/login_class.php'));
+require_once(PathHelper::getIncludePath('data/logins_class.php'));
 
 class DisplayMessage {
 
@@ -672,7 +672,7 @@ class SessionControl{
 		}
 
 		$this->store_session_variables($user_obj);
-		LoginClass::StoreUserLogin($user_obj->key, LoginClass::LOGIN_COOKIE);
+		Login::record($user_obj->key, Login::LOGIN_COOKIE);
 		return TRUE;
 	}
 
@@ -753,7 +753,7 @@ class SessionControl{
 
 	function logout() {
 		if($this->get_user_id()) {
-			LoginClass::StoreUserLogout($this->get_user_id());
+			Login::record_logout($this->get_user_id());
 		}
 
 		// Remove this device's remember-me token from the user's token list
@@ -1256,7 +1256,7 @@ class SessionControl{
 		if (!$settings->get_setting('passkeys_enabled')) {
 			return false;
 		}
-		require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+		require_once(PathHelper::getIncludePath('data/passkey_credentials_class.php'));
 		$creds = new MultiPasskey(array('user_id' => (int)$user->key));
 		$creds->load();
 		return count($creds) >= $passkeys_needed;
@@ -1273,7 +1273,7 @@ class SessionControl{
 		$markers->load();
 		$cutoff = time() - $ttl;
 		foreach ($markers as $m) {
-			$t = strtotime($m->get('pks_created_time') . ' UTC');
+			$t = strtotime($m->get('pks_create_time') . ' UTC');
 			if ($t && $t >= $cutoff) {
 				return true;
 			}
@@ -1688,7 +1688,7 @@ class SessionControl{
 		}
 		if (!isset($_SESSION['max_security_level'])) {
 			$_SESSION['max_security_level'] = 'standard';
-			$domain_class = PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php');
+			$domain_class = PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php');
 			if (is_file($domain_class)) {
 				require_once($domain_class);
 				if (class_exists('InboundEmailDomain')) {

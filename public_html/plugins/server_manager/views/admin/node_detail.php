@@ -1,7 +1,7 @@
 <?php
 /**
  * Server Manager - Node Detail (shell)
- * URL: /admin/server_manager/node_detail?mgn_id=N&tab=overview
+ * URL: /admin/server_manager/node_detail?mgn_managed_node_id=N&tab=overview
  *
  * Thin shell: loads the node, applies the permission gate, dispatches the POST
  * action (NodeDetailActions), renders the header + tab nav, and includes the
@@ -16,8 +16,8 @@
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/Pager.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeMonitorHealth.php'));
@@ -31,17 +31,17 @@ $session->check_permission(10);
 $session->set_return();
 
 // Load node
-$mgn_id = isset($_POST['edit_primary_key_value']) && $_POST['edit_primary_key_value']
+$mgn_managed_node_id = isset($_POST['edit_primary_key_value']) && $_POST['edit_primary_key_value']
 	? intval($_POST['edit_primary_key_value'])
-	: (isset($_GET['mgn_id']) ? intval($_GET['mgn_id']) : 0);
+	: (isset($_GET['mgn_managed_node_id']) ? intval($_GET['mgn_managed_node_id']) : 0);
 
-if (!$mgn_id) {
+if (!$mgn_managed_node_id) {
 	header('Location: /admin/server_manager');
 	exit;
 }
 
 try {
-	$node = new ManagedNode($mgn_id, TRUE);
+	$node = new ManagedNode($mgn_managed_node_id, TRUE);
 } catch (Exception $e) {
 	header('Location: /admin/server_manager');
 	exit;
@@ -62,7 +62,7 @@ if (!in_array($tab, $valid_tabs)) {
 }
 
 $page_regex = '/\/admin\/server_manager/';
-$base_url = '/admin/server_manager/node_detail?mgn_id=' . $node->key;
+$base_url = '/admin/server_manager/node_detail?mgn_managed_node_id=' . $node->key;
 
 // ── POST action dispatch ──
 // Validates CSRF once, runs the handler with uniform error handling, and

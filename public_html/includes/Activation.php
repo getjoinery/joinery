@@ -5,13 +5,13 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 
 require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
 require_once(PathHelper::getIncludePath('includes/SmtpMailer.php'));
-require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
+require_once(PathHelper::getIncludePath('includes/EmailTemplateRenderer.php'));
 require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
 require_once(PathHelper::getIncludePath('includes/Activation.php'));
 
 require_once(PathHelper::getIncludePath('data/users_class.php'));
-require_once(PathHelper::getIncludePath('data/phone_number_class.php'));
+require_once(PathHelper::getIncludePath('data/phone_numbers_class.php'));
 
 class ActivationError extends SystemBaseException {}
 
@@ -83,7 +83,7 @@ class Activation {
 		$dblink = $dbhelper->get_db_link();
 
 		$sql = 'SELECT * FROM act_activation_codes
-			WHERE act_deleted=FALSE AND act_usr_user_id = :user_id AND
+			WHERE act_delete_time IS NULL AND act_usr_user_id = :user_id AND
 			act_purpose = :act_purpose AND
 			act_expires_time > NOW() ' .
 			(($email) ? 'AND act_usr_email = :usr_email' : ''). ' ORDER BY act_expires_time DESC LIMIT 1';
@@ -138,7 +138,7 @@ class Activation {
 
 	static function deleteTempCode($act_code){
 		$statement = DbConnector::GetPreparedStatement(
-			"UPDATE act_activation_codes SET act_deleted = TRUE WHERE act_code = :act_code");
+			"UPDATE act_activation_codes SET act_delete_time = now() WHERE act_code = :act_code AND act_delete_time IS NULL");
 		$statement->bindParam(':act_code', strtolower($act_code), PDO::PARAM_STR);
 		$statement->execute();
 	}
@@ -149,7 +149,7 @@ class Activation {
 	// also reconciles against the current candidate, so this is defense in depth.
 	static function deleteUserCodes($usr_user_id, $purpose){
 		$statement = DbConnector::GetPreparedStatement(
-			"UPDATE act_activation_codes SET act_deleted = TRUE WHERE act_usr_user_id = :uid AND act_purpose = :purpose AND act_deleted = FALSE");
+			"UPDATE act_activation_codes SET act_delete_time = now() WHERE act_usr_user_id = :uid AND act_purpose = :purpose AND act_delete_time IS NULL");
 		$statement->bindValue(':uid', (int)$usr_user_id, PDO::PARAM_INT);
 		$statement->bindValue(':purpose', (int)$purpose, PDO::PARAM_INT);
 		$statement->execute();
@@ -157,12 +157,12 @@ class Activation {
 
 	static function deleteTempCodePhone($act_phn_phone_number_id) {
 		$statement = DbConnector::GetPreparedStatement(
-			'UPDATE act_activation_codes SET act_deleted=TRUE WHERE act_phn_phone_number_id=:act_phn_phone_number_id');
+			'UPDATE act_activation_codes SET act_delete_time = now() WHERE act_phn_phone_number_id = :act_phn_phone_number_id AND act_delete_time IS NULL');
 		$statement->bindParam(':act_phn_phone_number_id', $act_phn_phone_number_id, PDO::PARAM_STR);
 		$statement->execute();
 	}
 
-	// act_deleted = FALSE is part of what makes a code valid, not an extra the
+	// act_delete_time IS NULL is part of what makes a code valid, not an extra the
 	// caller may remember to add. Without it here, a consumed code stayed live
 	// for the rest of its lifetime through every path that resolves a code
 	// without calling checkTempCode first — ActivateUser among them, which
@@ -170,7 +170,7 @@ class Activation {
 	// everywhere it is honoured.
 	static function getIdFromTempCode($act_code, $act_purpose){
 		$statement = DbConnector::GetPreparedStatement(
-			'SELECT act_usr_user_id FROM act_activation_codes WHERE act_deleted = FALSE AND
+			'SELECT act_usr_user_id FROM act_activation_codes WHERE act_delete_time IS NULL AND
 			act_code = :act_code AND act_expires_time > NOW() AND act_purpose = :act_purpose');
 
 		$act_code_lower = strtolower($act_code);
@@ -187,10 +187,10 @@ class Activation {
 		return FALSE;
 	}
 
-	// act_deleted = FALSE for the same reason as getIdFromTempCode above.
+	// act_delete_time IS NULL for the same reason as getIdFromTempCode above.
 	static function getTempCodeInfo($act_code, $act_purpose){
 		$statement = DbConnector::GetPreparedStatement(
-			'SELECT * FROM act_activation_codes WHERE act_deleted = FALSE AND act_code = :act_code AND act_expires_time > NOW() AND act_purpose = :act_purpose');
+			'SELECT * FROM act_activation_codes WHERE act_delete_time IS NULL AND act_code = :act_code AND act_expires_time > NOW() AND act_purpose = :act_purpose');
 		$act_code_lower = strtolower($act_code);
 		$statement->bindParam(':act_code', $act_code_lower, PDO::PARAM_STR);
 		$statement->bindParam(':act_purpose', $act_purpose, PDO::PARAM_INT);
@@ -201,7 +201,7 @@ class Activation {
 
 	static function checkTempCode($code, $purpose){
 		$statement = DbConnector::GetPreparedStatement('
-			SELECT 1 FROM act_activation_codes WHERE act_deleted = FALSE AND act_code = :code AND act_expires_time > NOW() AND act_purpose = :act_purpose');
+			SELECT 1 FROM act_activation_codes WHERE act_delete_time IS NULL AND act_code = :code AND act_expires_time > NOW() AND act_purpose = :act_purpose');
 		$statement->bindParam(':code', strtolower($code), PDO::PARAM_STR);
 		$statement->bindParam(':act_purpose', $purpose, PDO::PARAM_INT);
 		$statement->execute();
@@ -211,7 +211,7 @@ class Activation {
 	static function phone_verify($act_code, $user_id) {
 		$statement = DbConnector::GetPreparedStatement(
 			'SELECT * FROM act_activation_codes
-			 WHERE act_deleted = FALSE AND act_code = :act_code AND act_phn_phone_number_id IS NOT NULL');
+			 WHERE act_delete_time IS NULL AND act_code = :act_code AND act_phn_phone_number_id IS NOT NULL');
 		$statement->bindParam(':act_code', strtolower($act_code), PDO::PARAM_STR);
 		$statement->execute();
 		$statement->setFetchMode(PDO::FETCH_OBJ);

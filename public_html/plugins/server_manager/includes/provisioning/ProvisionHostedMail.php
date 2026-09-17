@@ -79,9 +79,9 @@ class ProvisionHostedMail {
 	private $client = null;
 
 	public function run(array $config): array {
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provisions_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/registered_domains_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/Smtp2GoClient.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
@@ -442,7 +442,7 @@ class ProvisionHostedMail {
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare(
 			"SELECT COUNT(*) FROM mjb_management_jobs
-			 WHERE mjb_mgn_node_id = ? AND mjb_job_type = ? AND mjb_delete_time IS NULL");
+			 WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = ? AND mjb_delete_time IS NULL");
 		$q->execute(array((int)$node->key, self::JOB_TYPE));
 		return (int)$q->fetchColumn();
 	}
@@ -520,7 +520,7 @@ class ProvisionHostedMail {
 
 	/** The provision's node, or null. */
 	private function node_of($provision) {
-		$id = (int)$provision->get('cvp_mgn_node_id');
+		$id = (int)$provision->get('cvp_mgn_managed_node_id');
 		if (!$id) { return null; }
 		$node = new ManagedNode($id, TRUE);
 		return ($node->key && !$node->get('mgn_delete_time')) ? $node : null;

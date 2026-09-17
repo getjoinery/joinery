@@ -1,5 +1,5 @@
 <?php
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversation_messages_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
 
 /**

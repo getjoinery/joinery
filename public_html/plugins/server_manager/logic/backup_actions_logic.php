@@ -39,11 +39,11 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  */
 function backup_actions_envelope_on_node($node, $filename) {
 	if (!class_exists('MultiManagementJob')) {
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 	}
 	$latest = new MultiManagementJob(
 		['node_id' => $node->key, 'job_type' => 'list_backups', 'status' => 'completed', 'deleted' => false],
-		['mjb_id' => 'DESC'], 1);
+		['mjb_management_job_id' => 'DESC'], 1);
 	foreach ($latest as $job) {
 		$result = $job->get('mjb_result');
 		if (is_string($result)) $result = json_decode($result, true);
@@ -59,8 +59,8 @@ function backup_actions_envelope_on_node($node, $filename) {
 
 function backup_actions_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-	require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
 
@@ -110,7 +110,7 @@ function backup_actions_logic(array $input): LogicResult {
 		// reports "completed" (the step is continue_on_error).
 		if ($want_cloud) {
 			require_once(PathHelper::getIncludePath('includes/TargetBackups.php'));
-			require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
+			require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 			$target_id = (int) $node->get('mgn_bkt_backup_target_id');
 			if (!$target_id) {
 				return LogicResult::render(['success' => false, 'message' => 'This node has no cloud backup target configured.']);
@@ -161,7 +161,7 @@ function backup_actions_logic(array $input): LogicResult {
 		// backup, it is a cloud copy nobody can ever open, and it reports as a
 		// success. Decide that before the upload, not after.
 		require_once(PathHelper::getIncludePath('includes/BackupPairing.php'));
-		require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
+		require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 
 		$filename  = basename($local_path);
 		$target_id = (int) $node->get('mgn_bkt_backup_target_id');

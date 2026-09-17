@@ -39,7 +39,7 @@ function vault_client_remove_wrapping_logic(array $input): LogicResult {
 		}
 
 		$exclude = $wrapping->get('uew_unlocker_type') === UserEncryptionWrapping::TYPE_PASSKEY
-			? (int)$wrapping->get('uew_pkc_credential_id') : null;
+			? (int)$wrapping->get('uew_pkc_passkey_credential_id') : null;
 		try {
 			VaultUnlock::assertWrappingDeleteSafe((int)$vault->key, $exclude, (int)$wrapping->key);
 		} catch (RuntimeException $e) {

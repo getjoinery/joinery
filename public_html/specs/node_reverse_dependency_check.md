@@ -67,14 +67,14 @@ over — see Non-goals.
 
 ## What exists today (grounding)
 
-- **`mgn_managed_nodes`** (`plugins/server_manager/data/managed_node_class.php`)
+- **`mgn_managed_nodes`** (`plugins/server_manager/data/managed_nodes_class.php`)
   — 31 rows. Identity-ish fields: `mgn_host` (the SSH target, usually a public
   IP), `mgn_name`, `mgn_slug`, `mgn_site_url`, `mgn_health_check_url`,
-  `mgn_container_name`, `mgn_port`, `mgn_wg_ip`, `mgn_mgh_host_id`.
-- **`mgh_managed_hosts`** (`managed_host_class.php`) — the physical machine a
+  `mgn_container_name`, `mgn_port`, `mgn_wg_ip`, `mgn_mgh_managed_host_id`.
+- **`mgh_managed_hosts`** (`managed_hosts_class.php`) — the physical machine a
   node sits on; `mgh_host` is again a single address. Nine of the nodes share
   host `23.239.11.53`.
-- **SSH execution** — `ManagementJob` (`data/management_job_class.php`) runs
+- **SSH execution** — `ManagementJob` (`data/management_jobs_class.php`) runs
   ordered steps including `{'type':'ssh', 'on_host':true, 'cmd':…}` against a
   node or its host, with per-step timeout and `continue_on_error`.
   `JobCommandBuilder` / `JobResultProcessor` build and consume those steps.

@@ -19,7 +19,7 @@
 
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
 require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
 
 class MailboxDkimSigner {
 
@@ -113,7 +113,7 @@ class MailboxDkimSigner {
 
 	/** True on a relay-fronted deployment (an active MailboxRelay row exists). */
 	private static function relayActive(): bool {
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 		try {
 			return MailboxRelay::active() !== null;
 		} catch (\Throwable $e) {

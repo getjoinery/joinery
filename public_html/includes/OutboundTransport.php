@@ -181,7 +181,7 @@ class OutboundTransport {
      * must not fatal if the plugin class or table is absent.
      */
     private static function forwardingSubdomainOf(string $domain): string {
-        $path = PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php');
+        $path = PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php');
         if (!is_file($path)) {
             return '';
         }
@@ -200,7 +200,7 @@ class OutboundTransport {
      * fatal if it is absent or the table does not exist yet.
      */
     private static function activeRelay() {
-        $path = PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php');
+        $path = PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php');
         if (!is_file($path)) {
             return null;
         }

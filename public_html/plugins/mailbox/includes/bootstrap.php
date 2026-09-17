@@ -56,10 +56,10 @@ require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
 require_once(PathHelper::getIncludePath('includes/MailIdentityGuard.php'));
 require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachment_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachments_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grants_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxDkimSigner.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxIndex.php'));
 
@@ -487,7 +487,7 @@ SetupSteps::register('mail_import', array(
 		if (!$viewer || !$viewer->key) {
 			return SetupSteps::STATUS_NONE;
 		}
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mail_import_run_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mail_import_runs_class.php'));
 		$runs = new MultiMailImportRun(array('user_id' => (int)$viewer->key, 'state' => MailImportRun::STATE_DONE));
 		if ($runs->count_all() > 0) {
 			return SetupSteps::STATUS_GREEN;

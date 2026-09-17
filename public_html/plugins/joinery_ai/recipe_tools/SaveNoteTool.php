@@ -2,7 +2,7 @@
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/QueueableToolInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunContext.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_notes_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/notes_class.php'));
 
 /**
  * Write or update a note in the owner's notes table.

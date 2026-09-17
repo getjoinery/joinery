@@ -61,7 +61,7 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	const STATUS_REFRESH_SECONDS  = 6 * 3600;
 
 	public function run(array $config): array {
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeMonitorHealth.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeHealthProbe.php'));
@@ -161,7 +161,7 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 		// nothing else for the node can move. The claim endpoint sweeps on
 		// every poll, which heals an agent that comes back; this sweep is for
 		// the agent that does not, where no poll is ever going to arrive.
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 		$requeued = ManagementJob::requeueStaleClaims();
 		$refreshed = $this->refresh_status_facts($nodes, $now_utc);
 
@@ -202,7 +202,7 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	 * @return int jobs queued
 	 */
 	public function refresh_status_facts($nodes, string $now_utc): int {
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 		$queued = 0;
 		$floor = strtotime($now_utc . ' UTC') - self::STATUS_REFRESH_SECONDS;
@@ -907,11 +907,11 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	 */
 	private function node_detail_url($node): string {
 		$web = trim((string)Globalvars::get_instance()->get_setting('webDir'), " /");
-		$id  = (int)$node->get('mgn_id');
+		$id  = (int)$node->get('mgn_managed_node_id');
 		if ($web === '' || $id <= 0) {
 			return '';
 		}
-		return 'https://' . $web . '/admin/server_manager/node_detail?mgn_id=' . $id;
+		return 'https://' . $web . '/admin/server_manager/node_detail?mgn_managed_node_id=' . $id;
 	}
 
 	private function format_duration(int $seconds): string {

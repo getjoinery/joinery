@@ -61,9 +61,9 @@
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayClient.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/SRSRewriter.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
 require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
 
 class RelaySpoolConsumer {
@@ -311,7 +311,7 @@ class RelaySpoolConsumer {
 
 		list($local, $domain_name) = explode('@', $recipient, 2);
 
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
 		$domain = InboundEmailDomain::GetByDomain($domain_name);
 		if (!$domain || !$domain->get('ied_is_enabled')) {
 			// The domain was removed/disabled (temporarily or accidentally) since

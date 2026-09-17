@@ -32,7 +32,7 @@ function sender_context_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxViewer.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxContacts.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 	$session = SessionControl::get_instance();

@@ -30,10 +30,10 @@ require_once(__DIR__ . '/../../../tests/lib/harness.php');
 require_once(__DIR__ . '/../../../tests/lib/vault_fixtures.php');
 harness_boot();
 
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversations_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversation_messages_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_queued_actions_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_notes_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/notes_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ActionQueue.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatTurnContext.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunContext.php'));
@@ -204,12 +204,12 @@ section('The resolution lands in the conversation as an EVENT row');
 
 $events = new MultiAiConversationMessage(
 	['conversation_id' => intval($conversation->key), 'role' => AiConversationMessage::ROLE_EVENT,
-	 'deleted' => false], ['aim_message_id' => 'ASC']);
+	 'deleted' => false], ['aim_conversation_message_id' => 'ASC']);
 $events->load();
 check(count($events) === 3, 'each resolution appended one event row', count($events) . ' rows');
 $texts = [];
 foreach ($events as $e) {
-	harness_register_row('aim_conversation_messages', 'aim_message_id', (int)$e->key);
+	harness_register_row('aim_conversation_messages', 'aim_conversation_message_id', (int)$e->key);
 	$texts[] = (string)$e->get('aim_content');
 }
 check(strpos($texts[0] ?? '', 'approved it and it ran') !== false,

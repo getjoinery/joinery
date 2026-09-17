@@ -40,7 +40,7 @@ status the node agent's `pending`-only claim never matches. Scope: fresh docker;
   `authorized_keys` otherwise refuses.
 - **WP5 (host link at approval).** `ManagedHost::link_host_node()` (class 1.2),
   called from `AgentChannelEndpoint::approveJoin`, names a machine-posture node
-  as its host's own agent (`mgh_mgn_host_node_id`) when a placement record for
+  as its host's own agent (`mgh_mgn_managed_node_id`) when a placement record for
   its address exists with no host node yet — conservative (a container node
   with a web root links nothing; an already-linked host is never re-pointed).
 - Tests: `agent_channel_test` (+ host-link section), `customer_cloud_provisioning_test`
@@ -357,7 +357,7 @@ container's sited one**. `install_agent.sh` v2.8's own header names "Docker host
 that the plane manages but that host no deployment" as its purpose, so the
 artifact exists. The host's identity shape is settled and built
 (`docker_host_agent.md`, 2026-09-01): the host is a **plain ManagedNode in
-machine posture**, and the placement record's `mgh_mgn_host_node_id` names it —
+machine posture**, and the placement record's `mgh_mgn_managed_node_id` names it —
 that link is how host-scope work (decommission_site today; certificates and
 container install through the same door) is routed. One consequence remains to
 design for rather than discover: a VPS involves **two join approvals**.
@@ -371,7 +371,7 @@ whoever created it. Existing docker hosts are the manual-enrollment case, per
 the rule.
 
 **Approving a HOST join must also set the link.** A host agent that pairs but
-is never named in `mgh_mgn_host_node_id` is routed to by nothing — the
+is never named in `mgh_mgn_managed_node_id` is routed to by nothing — the
 approval flow (WP5's card, or the host edit page it points at) sets the
 placement record's link when the joining machine is a provision's host, so
 host-scope routing works without a separate manual step to forget.

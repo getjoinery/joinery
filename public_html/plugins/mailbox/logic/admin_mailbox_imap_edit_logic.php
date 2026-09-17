@@ -34,11 +34,11 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
 function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_folder_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_accounts_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_folders_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grants_class.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 	$session = SessionControl::get_instance();
@@ -127,7 +127,7 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 	if ($combined && $alias_id <= 0 && intval($input['edit_primary_key_value'] ?? 0) <= 0
 			&& intval($input['iia_inbound_imap_account_id'] ?? 0) <= 0
 			&& !LibraryFunctions::isFormSubmission()) {
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_accounts_class.php'));
 		$suggested = InboundImapAccount::providerForEmailDomain($domain->get('ied_domain')) ?: 'imap_generic';
 		return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_connect?provider='
 			. rawurlencode($suggested));

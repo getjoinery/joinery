@@ -487,7 +487,7 @@ class AgentChannelEndpoint {
 			'fingerprint' => (string)$request->get('ajr_fingerprint'),
 		];
 		if ($status === AgentJoinRequest::STATUS_APPROVED) {
-			$node_id = (int)$request->get('ajr_mgn_node_id');
+			$node_id = (int)$request->get('ajr_mgn_managed_node_id');
 			$payload['node_id']       = $node_id;
 			$payload['node_slug']     = '';
 			$payload['poll_interval'] = self::SUGGESTED_POLL_INTERVAL;
@@ -685,7 +685,7 @@ class AgentChannelEndpoint {
 		$node->save();
 
 		$request->set('ajr_status', AgentJoinRequest::STATUS_APPROVED);
-		$request->set('ajr_mgn_node_id', (int)$node->key);
+		$request->set('ajr_mgn_managed_node_id', (int)$node->key);
 		$request->save();
 
 		// If the joining machine is a host waiting for its own agent, name it
@@ -1103,7 +1103,7 @@ class AgentChannelEndpoint {
 
 		$running = $db->prepare(
 			"SELECT count(*) FROM mjb_management_jobs
-			 WHERE mjb_mgn_node_id = ? AND mjb_status = 'running' AND mjb_delete_time IS NULL"
+			 WHERE mjb_mgn_managed_node_id = ? AND mjb_status = 'running' AND mjb_delete_time IS NULL"
 		);
 		$running->execute([$node_id]);
 		if ((int)$running->fetchColumn() > 0) {
@@ -1111,12 +1111,12 @@ class AgentChannelEndpoint {
 		}
 
 		$q = $db->prepare(
-			"SELECT mjb_id FROM mjb_management_jobs
-			 WHERE mjb_mgn_node_id = ?
+			"SELECT mjb_management_job_id FROM mjb_management_jobs
+			 WHERE mjb_mgn_managed_node_id = ?
 			   AND mjb_status = 'pending'
 			   AND mjb_delete_time IS NULL
 			   AND jsonb_exists(mjb_commands, 'primitive')
-			 ORDER BY mjb_id ASC LIMIT 1"
+			 ORDER BY mjb_management_job_id ASC LIMIT 1"
 		);
 		$q->execute([$node_id]);
 		$job_id = $q->fetchColumn();
@@ -1132,7 +1132,7 @@ class AgentChannelEndpoint {
 			     mjb_started_time = now(),
 			     mjb_claim_attempts = COALESCE(mjb_claim_attempts, 0) + 1,
 			     mjb_update_time = now()
-			 WHERE mjb_id = ? AND mjb_status = 'pending' AND mjb_mgn_node_id = ?"
+			 WHERE mjb_management_job_id = ? AND mjb_status = 'pending' AND mjb_mgn_managed_node_id = ?"
 		);
 		$claim->execute([$job_id, $node_id]);
 		if ($claim->rowCount() === 0) {
@@ -1510,7 +1510,7 @@ class AgentChannelEndpoint {
 		}
 
 		$row = new IncidentRecord();
-		$row->set('inc_mgn_node_id', $node_id);
+		$row->set('inc_mgn_managed_node_id', $node_id);
 		$row->set('inc_source', $c['source']);
 		$row->set('inc_recipe', $c['recipe']);
 		$row->set('inc_node_case_id', $c['id']);
@@ -2056,7 +2056,7 @@ class AgentChannelEndpoint {
 		} catch (Exception $e) {
 			api_error('No such job.', 'ActionError', 404);
 		}
-		if ((int)$job->get('mjb_mgn_node_id') !== $node_id || $job->get('mjb_delete_time')) {
+		if ((int)$job->get('mjb_mgn_managed_node_id') !== $node_id || $job->get('mjb_delete_time')) {
 			api_error('No such job.', 'ActionError', 404);
 		}
 		if (!$job->isPrimitiveJob()) {

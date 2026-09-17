@@ -33,7 +33,7 @@ require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 
 require_once(PathHelper::getIncludePath('data/users_class.php'));
-require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+require_once(PathHelper::getIncludePath('data/passkey_credentials_class.php'));
 
 /** Load a collection with $sort and report what happened. */
 function sort_attempt($sort) {

@@ -42,5 +42,5 @@ $run->load();
 // it up — in that case the run page will say "Queued, N runs ahead."
 RecipeWorkerSpawner::spawnIfUnderCap($run);
 
-header('Location: /admin/joinery_ai/run?rcr_run_id=' . (int)$run->key);
+header('Location: /admin/joinery_ai/run?rcr_recipe_run_id=' . (int)$run->key);
 exit;

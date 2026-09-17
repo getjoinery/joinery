@@ -104,7 +104,7 @@ class EventSession extends SystemBase {
 	);
 
 public static function GetBySessionNumber($event_id, $session_number){
-		$results = new MultiEventSessions(array('event_id' => $event_id, 'session_number' => $session_number));
+		$results = new MultiEventSession(array('event_id' => $event_id, 'session_number' => $session_number));
 		$results->load();
 
 		if(count($results)){	
@@ -395,7 +395,7 @@ public static function GetBySessionNumber($event_id, $session_number){
 
 }
 
-class MultiEventSessions extends SystemMultiBase {
+class MultiEventSession extends SystemMultiBase {
 	protected static $model_class = 'EventSession';
 
 	function get_sessions_dropdown_array($include_new=FALSE) {

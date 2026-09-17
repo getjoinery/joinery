@@ -27,7 +27,7 @@
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 
-require_once(PathHelper::getIncludePath('data/calendar_entry_class.php'));
+require_once(PathHelper::getIncludePath('data/entries_class.php'));
 
 /**
  * Build an unsaved recurring entry and return the Nth occurrence date.

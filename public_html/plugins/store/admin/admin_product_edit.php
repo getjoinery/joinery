@@ -228,7 +228,7 @@ foreach ($receipt_templates as $rt) {
 	if ($rt->get('emt_delete_time')) continue;
 	$receipt_template_options[$rt->key] = $rt->get('emt_name');
 }
-$formwriter->dropinput('pro_emt_receipt_template_id', 'Receipt template (override)', [
+$formwriter->dropinput('pro_emt_email_template_id', 'Receipt template (override)', [
 	'options' => $receipt_template_options,
 	'helptext' => 'Optional. When set, the per-product receipt email uses this template. Leave empty for the system default.',
 ]);

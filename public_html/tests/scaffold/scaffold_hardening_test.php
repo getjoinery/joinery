@@ -64,7 +64,7 @@ section('Scaffold generator hardening — generated output');
 // ── Generated output (no DB needed) ──────────────────────────────────────────
 $gen   = new ScaffoldGenerator(probe_manifest());
 $files = $gen->files();
-$data  = $files['data/scaffold_hardening_probe_class.php'] ?? '';
+$data  = $files['data/scaffold_hardening_probes_class.php'] ?? '';
 
 ok('data class source was produced', $data !== '');
 
@@ -100,7 +100,7 @@ ok('item 4: owner-check references the declared owner column',
 
 // item 4 — standard owner_field emits NO custom auth
 $std = (new ScaffoldGenerator(probe_manifest(['owner_field' => 'zqx_usr_user_id'])))
-    ->files()['data/scaffold_hardening_probe_class.php'] ?? '';
+    ->files()['data/scaffold_hardening_probes_class.php'] ?? '';
 ok('item 4: standard owner_field emits no authenticate_read()',
     strpos($std, 'function authenticate_read') === false);
 
@@ -108,7 +108,7 @@ ok('item 4: standard owner_field emits no authenticate_read()',
 $none_manifest = probe_manifest();
 unset($none_manifest['owner_field']);
 $none = (new ScaffoldGenerator($none_manifest))
-    ->files()['data/scaffold_hardening_probe_class.php'] ?? '';
+    ->files()['data/scaffold_hardening_probes_class.php'] ?? '';
 ok('item 4: omitted owner_field emits no authenticate_read()',
     strpos($none, 'function authenticate_read') === false);
 

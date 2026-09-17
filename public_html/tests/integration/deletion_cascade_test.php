@@ -40,7 +40,7 @@ require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
-require_once(PathHelper::getIncludePath('data/deletion_rule_class.php'));
+require_once(PathHelper::getIncludePath('data/deletion_rules_class.php'));
 
 $_SERVER['REQUEST_METHOD'] = 'POST'; // mutation context — permanent_delete refuses on GET
 
@@ -242,8 +242,8 @@ try {
 	if (!$has_chain) {
 		harness_skip('multi-level recursion', 'usr->aic_conversations->aim_conversation_messages chain not registered');
 	} else {
-		require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversations_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversation_messages_class.php'));
 
 		$mk_conversation = function ($owner_id, $n_messages) {
 			$c = new AiConversation(NULL);

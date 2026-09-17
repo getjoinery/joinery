@@ -13,8 +13,8 @@
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAdminCsrf.php'));
@@ -77,7 +77,7 @@ if ($job->get('mjb_status') === 'completed' && !$job->get('mjb_result')) {
 
 // Load node name
 $node_name = 'Local';
-$node_id = $job->get('mjb_mgn_node_id');
+$node_id = $job->get('mjb_mgn_managed_node_id');
 if ($node_id) {
 	try {
 		$node = new ManagedNode($node_id, TRUE);
@@ -98,7 +98,7 @@ $page->admin_header([
 	'breadcrumbs' => $node_id
 		? [
 			'Server Manager' => '/admin/server_manager',
-			$node_name => '/admin/server_manager/node_detail?mgn_id=' . $node_id,
+			$node_name => '/admin/server_manager/node_detail?mgn_managed_node_id=' . $node_id,
 			'Job #' . $job->key => '',
 		]
 		: [

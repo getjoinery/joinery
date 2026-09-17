@@ -17,8 +17,8 @@
  * @version 1.0
  */
 
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
-require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
+require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 require_once(PathHelper::getIncludePath('includes/TargetLister.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupChainListHelper.php'));
 
@@ -35,7 +35,7 @@ class BackupListHelper {
 		// Most recent completed list_backups job for this node
 		$latest = new MultiManagementJob(
 			['node_id' => $node->key, 'job_type' => 'list_backups', 'status' => 'completed', 'deleted' => false],
-			['mjb_id' => 'DESC'],
+			['mjb_management_job_id' => 'DESC'],
 			1
 		);
 		$latest->load();

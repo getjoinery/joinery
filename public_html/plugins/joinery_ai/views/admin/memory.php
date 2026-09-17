@@ -11,7 +11,7 @@
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/Pager.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_memories_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/memories_class.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(10);

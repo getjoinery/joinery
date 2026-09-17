@@ -198,7 +198,7 @@ function setup_logic(array $input): LogicResult {
 			if ((int)$settings->get_setting('backup_target_id') === 0) {
 				// One-go: a first target becomes the scheduled target immediately,
 				// instead of leaving a second choice for later.
-				$targets = new MultiBackupTarget(array('deleted' => false, 'enabled' => true), array('bkt_id' => 'DESC'), 1);
+				$targets = new MultiBackupTarget(array('deleted' => false, 'enabled' => true), array('bkt_backup_target_id' => 'DESC'), 1);
 				foreach ($targets as $target) {
 					Setting::put('backup_target_id', (string)(int)$target->key);
 					break;

@@ -5,7 +5,7 @@
 	require_once(PathHelper::getIncludePath('plugins/event_manager/data/events_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_registrants_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_sessions_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_waiting_lists_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/event_manager/data/waiting_lists_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/event_manager/admin/logic/admin_events_logic.php'));
 
 	$page_vars = process_logic(admin_events_logic(array_merge($_GET, $_POST)));

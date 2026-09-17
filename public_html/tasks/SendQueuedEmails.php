@@ -11,7 +11,7 @@
 
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 require_once(PathHelper::getIncludePath('data/emails_class.php'));
-require_once(PathHelper::getIncludePath('data/queued_email_class.php'));
+require_once(PathHelper::getIncludePath('data/queued_emails_class.php'));
 
 class SendQueuedEmails implements ScheduledTaskInterface {
 

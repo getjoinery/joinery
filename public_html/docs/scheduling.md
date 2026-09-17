@@ -4,7 +4,7 @@ The availability engine turns a subject's working hours (minus the time they're 
 
 ## Schedules
 
-A subject has **one** schedule (`Schedule` / `data/schedule_class.php`, table `sch_schedules`) — it *is* the subject's availability and the timezone anchor for their windows.
+A subject has **one** schedule (`Schedule` / `data/schedules_class.php`, table `sch_schedules`) — it *is* the subject's availability and the timezone anchor for their windows.
 
 - `sch_subject_type` / `sch_subject_id` — the owning `CalendarSubject`, **unique together** (one schedule per subject).
 - `sch_timezone` — the IANA timezone the windows are defined in.

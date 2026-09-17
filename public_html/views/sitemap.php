@@ -6,10 +6,10 @@
 
 	$records = SeoPageMetadata::enumerate_public_paths();
 
-	// Left-join SEO rows so noindex paths can be skipped and lastmod can fall back to spm_modify_time
+	// Left-join SEO rows so noindex paths can be skipped and lastmod can fall back to spm_update_time
 	$dblink = DbConnector::get_instance()->get_db_link();
 	$rows_by_path = array();
-	$q = $dblink->query("SELECT spm_path, spm_noindex, spm_modify_time
+	$q = $dblink->query("SELECT spm_path, spm_noindex, spm_update_time
 	                     FROM spm_seo_page_metadata
 	                     WHERE spm_delete_time IS NULL");
 	while ($row = $q->fetch(PDO::FETCH_ASSOC)) {
@@ -28,7 +28,7 @@
 
 		$loc = LibraryFunctions::get_absolute_url($path);
 
-		$lastmod = $rec['modify_time'] ?? ($seo['spm_modify_time'] ?? null);
+		$lastmod = $rec['modify_time'] ?? ($seo['spm_update_time'] ?? null);
 		$lastmod_str = $lastmod ? substr($lastmod, 0, 10) : date('Y-m-d');
 
 		echo "    <url>\n";

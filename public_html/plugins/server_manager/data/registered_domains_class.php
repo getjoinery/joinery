@@ -35,7 +35,7 @@ class RegisteredDomain extends SystemBase {
 
 	public static $prefix = 'rdm';
 	public static $tablename = 'rdm_registered_domains';
-	public static $pkey_column = 'rdm_id';
+	public static $pkey_column = 'rdm_registered_domain_id';
 
 	/** Fulfillment axis. */
 	const STATUS_PENDING    = 'pending';
@@ -60,7 +60,7 @@ class RegisteredDomain extends SystemBase {
 			'message' => 'This user owns a registered domain.'),
 		// The box can go away — a domain outlives the server it pointed at,
 		// and the row's job (custody, expiry, hand-over) does not need one.
-		'rdm_mgn_node_id' => array('action' => 'null'),
+		'rdm_mgn_managed_node_id' => array('action' => 'null'),
 	);
 
 	public static $test_fixture = array(
@@ -68,13 +68,13 @@ class RegisteredDomain extends SystemBase {
 	);
 
 	public static $field_specifications = array(
-		'rdm_id'                     => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+		'rdm_registered_domain_id'                     => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'rdm_registrar'              => array('type'=>'varchar(32)', 'is_nullable'=>false, 'default'=>'namecheap'),
 		'rdm_domain'                 => array('type'=>'varchar(255)', 'required'=>true, 'unique'=>true),
 		'rdm_usr_user_id'            => array('type'=>'int8', 'is_nullable'=>false,
 			'foreign_key'=>array('table'=>'usr_users','column'=>'usr_user_id','on_delete'=>'RESTRICT')),
 		'rdm_external_order_item_id' => array('type'=>'int8', 'unique'=>true),
-		'rdm_mgn_node_id'            => array('type'=>'int8'),
+		'rdm_mgn_managed_node_id'            => array('type'=>'int8'),
 		'rdm_buyer_email'            => array('type'=>'varchar(255)'),
 		'rdm_registrant_sealed'      => array('type'=>'text'),
 		'rdm_price_paid'             => array('type'=>'numeric(10,2)'),
@@ -269,7 +269,7 @@ class MultiRegisteredDomain extends SystemMultiBase {
 		}
 
 		if (isset($this->options['node_id'])) {
-			$filters['rdm_mgn_node_id'] = array($this->options['node_id'], PDO::PARAM_INT);
+			$filters['rdm_mgn_managed_node_id'] = array($this->options['node_id'], PDO::PARAM_INT);
 		}
 
 		return $this->_get_resultsv2('rdm_registered_domains', $filters, $this->order_by, $only_count, $debug);

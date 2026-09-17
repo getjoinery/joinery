@@ -69,8 +69,8 @@ class ProvisionManagedDomains {
 
 	public function run(array $config): array {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/registered_domains_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provisions_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeDnsPlan.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeReverseDns.php'));
 		require_once(PathHelper::getIncludePath('includes/dns/DnsRecordPlan.php'));
@@ -154,7 +154,7 @@ class ProvisionManagedDomains {
 	 * install job.
 	 */
 	private function resolve_node($row) {
-		$node_id = (int)$row->get('rdm_mgn_node_id');
+		$node_id = (int)$row->get('rdm_mgn_managed_node_id');
 		if ($node_id > 0) {
 			$node = new ManagedNode($node_id, TRUE);
 			return $node->key ? $node : null;
@@ -170,15 +170,15 @@ class ProvisionManagedDomains {
 			'external_order_item_id' => $order_item_id, 'deleted' => false));
 		$provisions->load();
 		foreach ($provisions as $provision) {
-			$found_id = (int)$provision->get('cvp_mgn_node_id');
+			$found_id = (int)$provision->get('cvp_mgn_managed_node_id');
 			break;
 		}
 
 		if ($found_id <= 0) {
 			$db = DbConnector::get_instance()->get_db_link();
-			$q = $db->prepare('SELECT mjb_mgn_node_id FROM mjb_management_jobs '
+			$q = $db->prepare('SELECT mjb_mgn_managed_node_id FROM mjb_management_jobs '
 				. 'WHERE mjb_external_order_item_id = ? AND mjb_delete_time IS NULL '
-				. 'ORDER BY mjb_id DESC LIMIT 1');
+				. 'ORDER BY mjb_management_job_id DESC LIMIT 1');
 			$q->execute(array($order_item_id));
 			$found_id = (int)$q->fetchColumn();
 		}
@@ -191,7 +191,7 @@ class ProvisionManagedDomains {
 		if (!$node->key) {
 			return null;
 		}
-		$row->set('rdm_mgn_node_id', $node->key);
+		$row->set('rdm_mgn_managed_node_id', $node->key);
 		$row->save();
 		return $node;
 	}
@@ -354,7 +354,7 @@ class ProvisionManagedDomains {
 				 JOIN odi_order_items p ON p.odi_order_item_id = r.rdm_external_order_item_id
 				 WHERE p.odi_ord_order_id = ?
 				   AND r.rdm_delete_time IS NULL
-				   AND r.rdm_id <> ?
+				   AND r.rdm_registered_domain_id <> ?
 				   AND r.rdm_status IN (?, ?)');
 			$q->execute(array($order_id, $except_rdm_id,
 				RegisteredDomain::STATUS_REGISTERED, RegisteredDomain::STATUS_ACTIVE));
@@ -560,7 +560,7 @@ class ProvisionManagedDomains {
 	 */
 	protected function dispatch_prepare($row, $node, string $domain): int {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 
 		try {
 			$built = JobCommandBuilder::build_managed_domain_prepare($node, array('domain' => $domain));
@@ -588,12 +588,12 @@ class ProvisionManagedDomains {
 	protected function latest_prepare_job(int $node_id, string $domain): ?array {
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare(
-			"SELECT mjb_id, mjb_status, mjb_create_time, mjb_completed_time, mjb_parameters,
+			"SELECT mjb_management_job_id, mjb_status, mjb_create_time, mjb_completed_time, mjb_parameters,
 			        mjb_output, mjb_result
 			 FROM mjb_management_jobs
-			 WHERE mjb_mgn_node_id = ? AND mjb_job_type = ? AND mjb_delete_time IS NULL
+			 WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = ? AND mjb_delete_time IS NULL
 			   AND mjb_parameters->>'domain' = ?
-			 ORDER BY mjb_create_time DESC, mjb_id DESC
+			 ORDER BY mjb_create_time DESC, mjb_management_job_id DESC
 			 LIMIT 1");
 		$q->execute(array($node_id, self::JOB_PREPARE, $domain));
 		$row = $q->fetch(PDO::FETCH_ASSOC);
@@ -611,11 +611,11 @@ class ProvisionManagedDomains {
 	 */
 	protected function prepare_payload(array $job): ?array {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 
 		$result = $job['mjb_result'] ?? null;
 		if (!$result) {
-			$done = new ManagementJob((int)$job['mjb_id'], TRUE);
+			$done = new ManagementJob((int)$job['mjb_management_job_id'], TRUE);
 			if (!$done->key) {
 				return null;
 			}
@@ -636,8 +636,8 @@ class ProvisionManagedDomains {
 	 * jobs for a node naturally re-arms the whole sequence.
 	 */
 	protected function mark_prepare_consumed(array $job): void {
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
-		$record = new ManagementJob((int)$job['mjb_id'], TRUE);
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
+		$record = new ManagementJob((int)$job['mjb_management_job_id'], TRUE);
 		if (!$record->key) {
 			return;
 		}

@@ -7,7 +7,7 @@
  * @version 1.0
  */
 require_once(PathHelper::getIncludePath('plugins/store/includes/requirements/AbstractProductRequirement.php'));
-require_once(PathHelper::getIncludePath('data/phone_number_class.php'));
+require_once(PathHelper::getIncludePath('data/phone_numbers_class.php'));
 
 class PhoneNumberRequirement extends AbstractProductRequirement {
 

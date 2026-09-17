@@ -75,7 +75,7 @@ class PasswordResetAuthorizers {
 	public static function secondFactorRequirement(User $user, string $used_credential_id): array {
 		$has_totp = $user->has_totp_enabled();
 
-		require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+		require_once(PathHelper::getIncludePath('data/passkey_credentials_class.php'));
 		$creds = new MultiPasskey(['user_id' => (int)$user->key]);
 		$creds->load();
 		$other_passkeys = false;

@@ -48,7 +48,7 @@
  *                command (specs/mailbox_relay_surface_simplification.md)
  */
 
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
 
 /**
  * Who could own this domain's signing key, as user_id => display label.
@@ -60,8 +60,8 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_doma
  * @return array<int,string> Never empty: falls back to the acting user.
  */
 function mailbox_protect_candidate_owners(InboundEmailDomain $domain, int $acting_user_id): array {
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grants_class.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 	$out = array();

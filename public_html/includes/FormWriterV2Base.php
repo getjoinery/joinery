@@ -20,7 +20,7 @@
  * @changelog 2.15.0 - Added registerValidationField(): a caller with authoritative rules (SettingsWriter, from the setting declarations) can validate names this form never drew, so validation scope stops depending on what a page happened to render
  * @changelog 2.14.0 - preparePasswordData() discards any bound value and shows a "(stored — leave blank to keep)" placeholder instead: a password input never emits value="", so a stored credential can no longer reach the page source
  * @changelog 2.13.0 - Added the help_modal input option: a field can declare where its credential comes from (title/steps/url/copy) and buildHelpModal() renders a trigger plus an inert template that the kit modal opens
- * @changelog 2.12.0 - getDefaultFormAction() keeps the query string, matching the browser default for a form with no explicit action (a stripped query orphaned POST handlers that read $_GET context like ?mgn_id=)
+ * @changelog 2.12.0 - getDefaultFormAction() keeps the query string, matching the browser default for a form with no explicit action (a stripped query orphaned POST handlers that read $_GET context like ?mgn_managed_node_id=)
  * @changelog 2.10.0 - buildAjaxSelectScript() speaks the /api/v1 action contract for /api/v1/ endpoints (POST {q, ...}, CSRF header, read data.items); query-string suffixes fold into the POST body. Legacy GET ?q= array contract retained for other URLs
  * @changelog 2.9.0 - outputJavascriptValidation() emits `remote` rules (and `custom` rules carrying a url) to the client `remote` validator, which speaks the /api/v1 JSON-envelope contract for API-action URLs
  * @changelog 2.8.0 - Added fromDescriptor() to render a form body from a *_logic_descriptor() input map (scaffolding generator)
@@ -234,7 +234,7 @@ abstract class FormWriterV2Base {
      * Returns the current page URL without the .php extension (for routing
      * compatibility), query string included — a form with no explicit action
      * posts back to the full current URL, matching browser behavior, so page
-     * context carried in the query (e.g. ?mgn_id=) survives the round trip.
+     * context carried in the query (e.g. ?mgn_managed_node_id=) survives the round trip.
      *
      * @return string The form action URL
      */

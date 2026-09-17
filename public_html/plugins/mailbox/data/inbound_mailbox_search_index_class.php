@@ -67,8 +67,8 @@ class InboundMailboxSearchIndex extends SystemBase {
 		// (or a legacy one with no stamp) is not worth decrypting — restore
 		// refuses it before reading a byte and the next unlock rebuilds.
 		'imi_format'           => array('type'=>'int4', 'is_nullable'=>true),
-		'imi_created_time'     => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'imi_updated_time'     => array('type'=>'timestamp(6)', 'is_nullable'=>true),
+		'imi_create_time'     => array('type'=>'timestamp(6)', 'default'=>'now()'),
+		'imi_update_time'     => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	);
 
 	/** The one bookkeeping row for a mailbox owner, creating it if absent. */

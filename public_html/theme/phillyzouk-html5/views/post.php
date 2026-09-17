@@ -138,7 +138,7 @@ $page->public_header($hoptions);
                         <?php foreach($page_vars['comments'] as $comment): ?>
                         <div class="comment">
                             <div class="comment-author"><?php echo htmlspecialchars($comment->get('cmt_author_name')); ?></div>
-                            <div class="comment-date"><?php echo date('M d, Y \a\t g:i a', strtotime($comment->get('cmt_created_time'))); ?></div>
+                            <div class="comment-date"><?php echo date('M d, Y \a\t g:i a', strtotime($comment->get('cmt_create_time'))); ?></div>
                             <div class="comment-text"><?php echo $comment->get_sanitized_comment(); ?></div>
 
                             <?php if($settings->get_setting('comments_unregistered_users') || $session->get_user_id()): ?>
@@ -191,7 +191,7 @@ $page->public_header($hoptions);
                                     <?php if($reply->get('cmt_comment_id_parent') == $comment->key): ?>
                                     <div class="comment">
                                         <div class="comment-author"><?php echo htmlspecialchars($reply->get('cmt_author_name')); ?></div>
-                                        <div class="comment-date"><?php echo date('M d, Y \a\t g:i a', strtotime($reply->get('cmt_created_time'))); ?></div>
+                                        <div class="comment-date"><?php echo date('M d, Y \a\t g:i a', strtotime($reply->get('cmt_create_time'))); ?></div>
                                         <div class="comment-text"><?php echo $reply->get_sanitized_comment(); ?></div>
                                     </div>
                                     <?php endif; ?>

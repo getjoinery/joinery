@@ -23,7 +23,7 @@
  *   Standard domain is no longer read as having consented to the cloud
  */
 
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grants_class.php'));
 
 class MailboxAliasConfig {
 

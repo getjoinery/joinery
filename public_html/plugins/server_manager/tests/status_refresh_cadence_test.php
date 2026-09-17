@@ -18,8 +18,8 @@
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/tasks/RunNodeUptimeChecks.php'));
 
@@ -34,13 +34,13 @@ function srt_node($tag, $suffix, array $fields) {
 	foreach ($fields as $k => $v) { $node->set($k, $v); }
 	$node->save();
 	$node->load();
-	harness_register_row('mgn_managed_nodes', 'mgn_id', $node->key);
+	harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $node->key);
 	return $node;
 }
 function srt_jobs($node, $type = 'check_status') {
 	$n = 0;
 	foreach (new MultiManagementJob(array('node_id' => (int)$node->key, 'job_type' => $type)) as $j) {
-		harness_register_row('mjb_management_jobs', 'mjb_id', $j->key);
+		harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $j->key);
 		$n++;
 	}
 	return $n;

@@ -35,7 +35,7 @@
  */
 
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 
 class MailboxRelayReconcile implements ScheduledTaskInterface {
 
@@ -265,7 +265,7 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 	 * relay drops this deployment's row and leaves the instance to its owner.
 	 */
 	private function advanceCloudProvisions() {
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provision_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provisions_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayCloudProvisioner.php'));
 
 		$actionable = new MultiRelayCloudProvision(array('live' => true, 'deleted' => false));
@@ -312,7 +312,7 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 	 */
 	private function reconcileFleet() {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetService.php'));
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_fleet_slot_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_fleet_slots_class.php'));
 
 		if (!FleetService::enabled()) {
 			return array('status' => 'skipped', 'message' => '');

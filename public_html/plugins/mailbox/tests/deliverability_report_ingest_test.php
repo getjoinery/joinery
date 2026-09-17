@@ -28,11 +28,11 @@ harness_boot();
 require_once(__DIR__ . '/../../../tests/lib/vault_fixtures.php');
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/DeliverabilityReportIngest.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/deliverability_report_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/deliverability_report_source_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_log_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/deliverability_reports_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/deliverability_report_sources_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_logs_class.php'));
 require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
 
 $db = DbConnector::get_instance()->get_db_link();

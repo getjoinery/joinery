@@ -28,9 +28,9 @@ require_once(PathHelper::getIncludePath('data/files_class.php'));
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
 require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_message_attachments_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversations_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversation_messages_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/message_attachments_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatAsync.php'));
 
@@ -67,7 +67,7 @@ File::registerDecryptHook(File::SOURCE_AI_CHAT_UPLOAD, function (string $ciphert
     if (!$link->get('aia_sealed')) {
         return $ciphertext; // stored plaintext
     }
-    $msg = new AiConversationMessage(intval($link->get('aia_aim_message_id')), TRUE);
+    $msg = new AiConversationMessage(intval($link->get('aia_aim_conversation_message_id')), TRUE);
     if (!$msg->key) {
         throw new VaultLockedException();
     }
@@ -116,7 +116,7 @@ VaultUnlock::onReseal(function (int $user_id, VaultKey $old_key, int $old_key_ge
     // Message DEKs — self-contained via aim_sealed_owner_user_id (the
     // conversation owner). Soft-deleted messages re-seal too, same as above.
     $ms = $db->prepare(
-        'SELECT aim_message_id, aim_sealed_key FROM aim_conversation_messages
+        'SELECT aim_conversation_message_id, aim_sealed_key FROM aim_conversation_messages
          WHERE aim_sealed_owner_user_id = ? AND aim_content_sealed = true
          AND aim_key_generation = ?');
     $ms->execute(array($user_id, $old_key_generation));
@@ -128,11 +128,11 @@ VaultUnlock::onReseal(function (int $user_id, VaultKey $old_key, int $old_key_ge
             $resealed = $crypto->sealItemDek($dek, $new_public_key);
             $u = $db->prepare(
                 'UPDATE aim_conversation_messages SET aim_sealed_key = ?, aim_key_generation = ?
-                 WHERE aim_message_id = ?');
-            $u->execute(array($resealed, $new_key_generation, intval($row['aim_message_id'])));
+                 WHERE aim_conversation_message_id = ?');
+            $u->execute(array($resealed, $new_key_generation, intval($row['aim_conversation_message_id'])));
         } catch (Throwable $e) {
             $failed++;
-            error_log('Chat vault reseal: failed for message ' . $row['aim_message_id'] . ': ' . $e->getMessage());
+            error_log('Chat vault reseal: failed for message ' . $row['aim_conversation_message_id'] . ': ' . $e->getMessage());
         }
     }
 
@@ -154,7 +154,7 @@ VaultUnlock::onWipe(function (int $user_id, ?string $scope) {
     }
     $db = DbConnector::get_instance()->get_db_link();
     $q = $db->prepare(
-        "SELECT m.aim_message_id FROM aim_conversation_messages m
+        "SELECT m.aim_conversation_message_id FROM aim_conversation_messages m
          JOIN aic_conversations c ON c.aic_conversation_id = m.aim_aic_conversation_id
          WHERE c.aic_owner_user_id = ? AND m.aim_status = 'running'
          AND c.aic_security_level IN ('private','fortress') AND m.aim_delete_time IS NULL");

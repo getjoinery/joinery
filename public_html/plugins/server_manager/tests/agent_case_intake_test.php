@@ -61,7 +61,7 @@ $node->set('mgn_agent_primitives', 'check_status,host_converge,host_report');
 $node->set('mgn_agent_recipes', 'fail2ban:report-only');
 $node->save();
 $node->load();
-harness_register_row('mgn_managed_nodes', 'mgn_id', $node->key);
+harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $node->key);
 $node_id = (int)$node->key;
 
 // Every case row this node gets is swept with it: cases cascade from the
@@ -70,10 +70,10 @@ $node_id = (int)$node->key;
 function case_rows_for(int $node_id): array {
 	static $registered = [];
 	$out = [];
-	foreach (new MultiIncidentRecord(['node_id' => $node_id], ['inc_id' => 'ASC']) as $row) {
+	foreach (new MultiIncidentRecord(['node_id' => $node_id], ['inc_incident_record_id' => 'ASC']) as $row) {
 		if (!isset($registered[(int)$row->key])) {
 			$registered[(int)$row->key] = true;
-			harness_register_row('inc_incident_records', 'inc_id', $row->key);
+			harness_register_row('inc_incident_records', 'inc_incident_record_id', $row->key);
 		}
 		$out[] = $row;
 	}
@@ -366,7 +366,7 @@ if ($shown !== null) {
 	$body['attempts'][0]['detail'] = '<i>detail</i> http://evil.example/';
 	$shown->set('inc_body', $body);
 	$shown->save();
-	$html = IncidentCaseCard::render_case($shown, '/admin/server_manager/node_detail?mgn_id=' . $node_id, SmAdminCsrf::token());
+	$html = IncidentCaseCard::render_case($shown, '/admin/server_manager/node_detail?mgn_managed_node_id=' . $node_id, SmAdminCsrf::token());
 	check(strpos($html, '<script>') === false && strpos($html, '&lt;script&gt;') !== false, 'The reason is escaped on the card');
 	check(strpos($html, '<img src=x') === false && strpos($html, '&lt;img') !== false, 'The newest note is escaped on the card');
 	check(strpos($html, '<b>note</b>') === false && strpos($html, '&lt;b&gt;note') !== false, 'The human note is escaped on the card');
@@ -378,18 +378,18 @@ if ($shown !== null) {
 	$notice = FleetAttentionNotice::open_cases_for([$shown], [$node_id => '<b>' . $node->get('mgn_name') . '</b>']);
 	check(strpos($notice, '<script>') === false && strpos($notice, '<b>') === false && strpos($notice, '&lt;b&gt;') !== false,
 		'The open-case notice escapes the case and the node name');
-	check(preg_match('#href="/admin/server_manager/node_detail\?mgn_id=' . $node_id . '&amp;tab=overview"#', $notice) === 1,
+	check(preg_match('#href="/admin/server_manager/node_detail\?mgn_managed_node_id=' . $node_id . '&amp;tab=overview"#', $notice) === 1,
 		'The notice links to the node page by id, never to anything the case said');
 
 	$units = FleetAttentionNotice::failed_units_for([$node_id => ['name' => '<b>' . $node->get('mgn_name') . '</b>', 'units' => ['<i>x</i>.service', 'fail2ban.service']]]);
 	check(strpos($units, '<b>') === false && strpos($units, '<i>') === false && strpos($units, '&lt;i&gt;x&lt;/i&gt;.service') !== false,
 		'The failed-unit notice escapes the unit names and the node name');
-	check(preg_match('#href="/admin/server_manager/node_detail\?mgn_id=' . $node_id . '&amp;tab=overview"#', $units) === 1,
+	check(preg_match('#href="/admin/server_manager/node_detail\?mgn_managed_node_id=' . $node_id . '&amp;tab=overview"#', $units) === 1,
 		'The failed-unit notice links to the node page by id');
 	$failing_recipes = FleetAttentionNotice::failing_recipes_for([$node_id => ['name' => '<b>' . $node->get('mgn_name') . '</b>', 'recipes' => ['<i>fail2ban</i>' => 'armed'], 'polled' => '2026-09-16 00:00:00']]);
 	check(strpos($failing_recipes, '<b>') === false && strpos($failing_recipes, '<i>') === false && strpos($failing_recipes, '&lt;i&gt;fail2ban&lt;/i&gt; armed') !== false,
 		'The failing-recipe notice escapes the recipe names and the node name');
-	check(preg_match('#href="/admin/server_manager/node_detail\?mgn_id=' . $node_id . '&amp;tab=overview"#', $failing_recipes) === 1,
+	check(preg_match('#href="/admin/server_manager/node_detail\?mgn_managed_node_id=' . $node_id . '&amp;tab=overview"#', $failing_recipes) === 1,
 		'The failing-recipe notice links to the node page by id');
 	check(FleetAttentionNotice::failed_units_for([]) === '' && FleetAttentionNotice::open_cases_for([], []) === ''
 		&& FleetAttentionNotice::failing_recipes_for([]) === '',

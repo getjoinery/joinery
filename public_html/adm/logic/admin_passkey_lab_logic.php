@@ -3,7 +3,7 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
 
 function admin_passkey_lab_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-	require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+	require_once(PathHelper::getIncludePath('data/passkey_credentials_class.php'));
 	require_once(PathHelper::getIncludePath('data/request_logs_class.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 
@@ -16,7 +16,7 @@ function admin_passkey_lab_logic(array $input): LogicResult {
 	// The lab runs ceremonies against the signed-in superadmin's own
 	// credentials - enroll the authenticators under test on this account.
 	$credentials = [];
-	$creds = new MultiPasskey(['user_id' => $session->get_user_id()], ['pkc_created_time' => 'ASC']);
+	$creds = new MultiPasskey(['user_id' => $session->get_user_id()], ['pkc_create_time' => 'ASC']);
 	$creds->load();
 	foreach ($creds as $passkey) {
 		$transports = json_decode($passkey->get('pkc_transports') ?: '[]', true) ?: [];
@@ -33,7 +33,7 @@ function admin_passkey_lab_logic(array $input): LogicResult {
 			'discoverable' => $passkey->get('pkc_discoverable'),
 			'attachment' => $passkey->get('pkc_attachment'),
 			'uv_never_performed' => $passkey->uv_never_performed(),
-			'created_time' => $passkey->get('pkc_created_time'),
+			'created_time' => $passkey->get('pkc_create_time'),
 			'last_used_time' => $passkey->get('pkc_last_used_time'),
 		];
 	}

@@ -25,8 +25,8 @@
  *   reconstruction for a lean record.
  */
 
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachment_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachments_class.php'));
 
 /**
  * Resolve the original RFC822 source of one message, wherever it lives. Does
@@ -80,7 +80,7 @@ function mailbox_resolve_original(InboundEmailMessage $message, ?ImapIngestor $i
 		}
 		$owns_ingestor = ($ingestor === null);
 		if ($owns_ingestor) {
-			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
+			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_accounts_class.php'));
 			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ImapIngestor.php'));
 			$account = new InboundImapAccount($account_id, TRUE);
 			if (!$account->key) {

@@ -18,8 +18,8 @@
  * @version 1.3.0
  */
 
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachment_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachments_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
 
 /**
  * Fetch the raw bytes for an attachment row. Does NOT authorize.
@@ -72,7 +72,7 @@ function mailbox_retrieve_attachment_bytes(InboundMessageAttachment $att, Inboun
 			return $fail('The source mailbox for this message is no longer available.');
 		}
 
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_accounts_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ImapIngestor.php'));
 
 		$account = new InboundImapAccount($account_id, TRUE);

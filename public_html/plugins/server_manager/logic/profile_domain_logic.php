@@ -31,7 +31,7 @@ function profile_domain_logic(array $input): LogicResult {
 	}
 
 	if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($input['action'] ?? '') === 'request_push') {
-		$row = profile_domain_row_for_user((int)($input['rdm_id'] ?? 0), $user_id);
+		$row = profile_domain_row_for_user((int)($input['rdm_registered_domain_id'] ?? 0), $user_id);
 		if ($row === null) {
 			return LogicResult::error('That domain is not one of yours.');
 		}
@@ -62,7 +62,7 @@ function profile_domain_logic(array $input): LogicResult {
 
 	$domains = new MultiRegisteredDomain(
 		array('user_id' => $user_id, 'deleted' => false),
-		array('rdm_id' => 'DESC'));
+		array('rdm_registered_domain_id' => 'DESC'));
 	$domains->load();
 
 	return LogicResult::render(array(
@@ -72,11 +72,11 @@ function profile_domain_logic(array $input): LogicResult {
 }
 
 /** One of the signed-in user's own domain rows, or null. */
-function profile_domain_row_for_user(int $rdm_id, int $user_id) {
-	if ($rdm_id <= 0) {
+function profile_domain_row_for_user(int $rdm_registered_domain_id, int $user_id) {
+	if ($rdm_registered_domain_id <= 0) {
 		return null;
 	}
-	$row = new RegisteredDomain($rdm_id, TRUE);
+	$row = new RegisteredDomain($rdm_registered_domain_id, TRUE);
 	if (!$row->key || (int)$row->get('rdm_usr_user_id') !== $user_id
 			|| $row->get('rdm_delete_time')) {
 		return null;

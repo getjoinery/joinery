@@ -19,10 +19,10 @@ class PersonaAllowedSenderException extends SystemBaseException {}
 class PersonaAllowedSender extends SystemBase {
     public static $prefix = 'pas';
     public static $tablename = 'pas_persona_allowed_senders';
-    public static $pkey_column = 'pas_allowed_sender_id';
+    public static $pkey_column = 'pas_persona_allowed_sender_id';
 
     public static $field_specifications = array(
-        'pas_allowed_sender_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true, 'is_primary_key'=>true),
+        'pas_persona_allowed_sender_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true, 'is_primary_key'=>true),
         'pas_owner_user_id' => array('type'=>'int4', 'is_nullable'=>false, 'default'=>'0', 'unique_with'=>array('pas_persona', 'pas_author')),
         'pas_persona' => array('type'=>'varchar(32)', 'is_nullable'=>false, 'required'=>true),
         'pas_author' => array('type'=>'varchar(255)', 'is_nullable'=>false, 'required'=>true),

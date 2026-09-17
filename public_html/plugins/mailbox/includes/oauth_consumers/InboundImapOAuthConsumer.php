@@ -47,7 +47,7 @@ require_once(PathHelper::getIncludePath('includes/oauth/OAuth2ConsumerHandlesDen
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ImapIngestor.php'));
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Client.php'));
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2ProviderRegistry.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_accounts_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ImapFeedProvisioner.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ImapConnectStash.php'));
 

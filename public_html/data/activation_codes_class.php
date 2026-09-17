@@ -58,9 +58,9 @@ class ActivationCode extends SystemBase {	public static $prefix = 'act';
 	    'act_expires_time' => array('type'=>'timestamp(6)'),
 	    'act_usr_user_id' => array('type'=>'int4'),
 	    'act_purpose' => array('type'=>'int2', 'default'=>0),
-	    'act_created_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	    'act_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	    'act_phn_phone_number_id' => array('type'=>'int4'),
-	    'act_deleted' => array('type'=>'bool', 'default'=>false),
+	    'act_delete_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	);
 
 }

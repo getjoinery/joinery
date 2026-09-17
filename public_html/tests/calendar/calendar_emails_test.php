@@ -19,9 +19,9 @@ require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 
 require_once(PathHelper::getIncludePath('includes/calendar/CalendarEmailEngine.php'));
-require_once(PathHelper::getIncludePath('data/calendar_entry_class.php'));
-require_once(PathHelper::getIncludePath('data/calendar_preference_class.php'));
-require_once(PathHelper::getIncludePath('data/calendar_email_class.php'));
+require_once(PathHelper::getIncludePath('data/entries_class.php'));
+require_once(PathHelper::getIncludePath('data/calendar_preferences_class.php'));
+require_once(PathHelper::getIncludePath('data/calendar_emails_class.php'));
 
 const NOW_UTC = '2026-08-10 13:00:00'; // Monday; Chicago 08:00 CDT, New York 09:00 EDT
 

@@ -24,7 +24,7 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
 function refresh_node_status_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 
 	$session = SessionControl::get_instance();

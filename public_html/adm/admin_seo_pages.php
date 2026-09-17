@@ -115,7 +115,7 @@ foreach ($rows as $row) {
 
 	$rowvalues[] = $row->get('spm_noindex') ? '<span style="color:#a00;">noindex</span>' : '';
 
-	$mtime = $row->get('spm_modify_time') ?: $row->get('spm_create_time');
+	$mtime = $row->get('spm_update_time') ?: $row->get('spm_create_time');
 	$rowvalues[] = $mtime
 		? htmlspecialchars(LibraryFunctions::convert_time($mtime, 'UTC', $session->get_timezone(), 'M j, Y'))
 		: '';

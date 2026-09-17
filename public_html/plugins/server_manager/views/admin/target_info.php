@@ -1,25 +1,25 @@
 <?php
 /**
  * Server Manager - Backup Target Info
- * URL: /admin/server_manager/target_info?bkt_id=N
+ * URL: /admin/server_manager/target_info?bkt_backup_target_id=N
  *
  * Shows a target's metadata and a listing of its bucket contents grouped by node slug.
  *
  * @version 1.0
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
-require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
+require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 require_once(PathHelper::getIncludePath('includes/TargetLister.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(10);
 
-$bkt_id = intval($_GET['bkt_id'] ?? 0);
-if (!$bkt_id) {
+$bkt_backup_target_id = intval($_GET['bkt_backup_target_id'] ?? 0);
+if (!$bkt_backup_target_id) {
 	header('Location: /admin/server_manager/targets');
 	exit;
 }
-$target = new BackupTarget($bkt_id, TRUE);
+$target = new BackupTarget($bkt_backup_target_id, TRUE);
 if (!$target->key) {
 	header('Location: /admin/server_manager/targets');
 	exit;
@@ -72,7 +72,7 @@ $page->admin_header([
 // ── Metadata ──
 $page->begin_box([
 	'title' => 'Target Details',
-	'altlinks' => ['Edit' => '/admin/server_manager/targets?bkt_id=' . $target->key],
+	'altlinks' => ['Edit' => '/admin/server_manager/targets?bkt_backup_target_id=' . $target->key],
 ]);
 echo '<table class="table table-sm mb-0 svm-mw600">';
 echo '<tbody>';

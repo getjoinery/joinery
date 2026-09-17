@@ -10,8 +10,8 @@ require_once(PathHelper::getIncludePath('includes/SingleRowAccessor.php'));
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 
 require_once(PathHelper::getIncludePath('data/groups_class.php'));
-require_once(PathHelper::getIncludePath('data/address_class.php'));
-require_once(PathHelper::getIncludePath('data/phone_number_class.php'));
+require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
+require_once(PathHelper::getIncludePath('data/phone_numbers_class.php'));
 require_once(PathHelper::getIncludePath('data/activation_codes_class.php'));
 require_once(PathHelper::getIncludePath('data/visitor_events_class.php'));
 require_once(PathHelper::getIncludePath('data/contact_types_class.php'));
@@ -433,7 +433,7 @@ private static function UcName($string) {
 			
 			if($send_emails){
 				$settings = Globalvars::get_instance();
-				require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
+				require_once(PathHelper::getIncludePath('includes/EmailTemplateRenderer.php'));
 				require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 				require_once(PathHelper::getIncludePath('includes/Activation.php'));
 				
@@ -589,7 +589,6 @@ private static function UcName($string) {
 		
 		$user_data['usr_days_since_last_email'] = $user_data['usr_day_since_register'];
 
-		//$user_data['usr_num_upsell_emails_sent'] = count(RecurringMailer::GetSentEmails($this->key, 'put'));
 
 		// Output the top 3 progress items for this user
 		// and select only those progress items that are marked to

@@ -31,8 +31,8 @@
 		NULL);  //OFFSET
 	$contact_types->load();
 
-	$templates = new MultiEmailTemplateStore(
-		array('template_type' => EmailTemplateStore::TEMPLATE_TYPE_INNER),
+	$templates = new MultiEmailTemplate(
+		array('template_type' => EmailTemplate::TEMPLATE_TYPE_INNER),
 		NULL,		//SORT BY => DIRECTION
 		NULL,  //NUM PER PAGE
 		NULL);  //OFFSET

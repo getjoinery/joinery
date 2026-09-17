@@ -357,7 +357,7 @@
                     tr.appendChild(nameTd);
 
                     var createdTd = document.createElement('td');
-                    createdTd.textContent = passkey.pkc_created_time ? new Date(passkey.pkc_created_time + 'Z').toLocaleDateString() : '';
+                    createdTd.textContent = passkey.pkc_create_time ? new Date(passkey.pkc_create_time + 'Z').toLocaleDateString() : '';
                     tr.appendChild(createdTd);
 
                     var lastUsedTd = document.createElement('td');
@@ -435,7 +435,7 @@
                         // database returns them. Oldest first, matching what the
                         // Added column implies.
                         credentials.sort(function (a, b) {
-                            return String(a.pkc_created_time || '').localeCompare(String(b.pkc_created_time || ''));
+                            return String(a.pkc_create_time || '').localeCompare(String(b.pkc_create_time || ''));
                         });
                         credentialCount = credentials.length;
                         var activeIds = vaultActiveIds();

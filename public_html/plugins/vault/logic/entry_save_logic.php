@@ -23,7 +23,7 @@ function entry_save_logic(array $input): LogicResult {
 		if (!$entry->key || (int)$entry->get('vle_usr_user_id') !== $user_id) {
 			return LogicResult::error('That entry does not belong to you.');
 		}
-		$entry->set('vle_updated_time', gmdate('Y-m-d H:i:s'));
+		$entry->set('vle_update_time', gmdate('Y-m-d H:i:s'));
 	} else {
 		$entry = new VaultEntry(NULL);
 		$entry->set('vle_usr_user_id', $user_id);

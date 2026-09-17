@@ -14,7 +14,7 @@
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
-require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
+require_once(PathHelper::getIncludePath('includes/EmailTemplateRenderer.php'));
 require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
 require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 require_once(PathHelper::getIncludePath('data/email_templates_class.php'));

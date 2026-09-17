@@ -25,7 +25,7 @@
  * @version 1.0
  */
 
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayClient.php'));
 require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectProtocol.php'));
 

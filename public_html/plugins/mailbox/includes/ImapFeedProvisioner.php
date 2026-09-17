@@ -26,10 +26,10 @@
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/provisioning.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_accounts_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grants_class.php'));
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Token.php'));
 
 /** Provisioning could not complete; the message is fit to show an operator. */

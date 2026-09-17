@@ -12,7 +12,7 @@ header('Content-type: text/html');
 $session = SessionControl::get_instance();
 $session->check_permission(10);
 
-$template = new EmailTemplateStore($_GET['emt_email_template_id'], TRUE);
+$template = new EmailTemplate($_GET['emt_email_template_id'], TRUE);
 
 echo $template->get('emt_body');
 ?>

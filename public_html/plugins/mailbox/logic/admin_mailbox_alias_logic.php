@@ -4,9 +4,9 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
 function admin_mailbox_alias_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grants_class.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 	$session = SessionControl::get_instance();
@@ -206,7 +206,7 @@ function admin_mailbox_alias_logic(array $input): LogicResult {
  * owner's own session can ever satisfy.
  */
 function _mailbox_alias_require_unlock(int $alias_id): ?string {
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
 	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 	require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 

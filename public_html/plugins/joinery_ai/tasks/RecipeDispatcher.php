@@ -103,7 +103,7 @@ class RecipeDispatcher implements ScheduledTaskInterface {
         $db = DbConnector::get_instance()->get_db_link();
         $cutoff = gmdate('Y-m-d H:i:s', time() - self::STUCK_PENDING_SECONDS);
 
-        $q = $db->prepare("SELECT rcr_run_id, rcr_rcp_recipe_id, rcr_started_time, rcr_trigger
+        $q = $db->prepare("SELECT rcr_recipe_run_id, rcr_rcp_recipe_id, rcr_started_time, rcr_trigger
                            FROM rcr_recipe_runs
                            WHERE rcr_status = ? AND rcr_delete_time IS NULL");
         $q->execute([RecipeRun::STATUS_PENDING]);
@@ -125,7 +125,7 @@ class RecipeDispatcher implements ScheduledTaskInterface {
             SET rcr_status = ?,
                 rcr_status_note = COALESCE(NULLIF(rcr_status_note, ''), ?),
                 rcr_completed_time = NOW() AT TIME ZONE 'UTC'
-            WHERE rcr_run_id = ? AND rcr_status = ? AND rcr_delete_time IS NULL");
+            WHERE rcr_recipe_run_id = ? AND rcr_status = ? AND rcr_delete_time IS NULL");
 
         $cancelled = 0;
         foreach ($rows as $row) {
@@ -143,7 +143,7 @@ class RecipeDispatcher implements ScheduledTaskInterface {
                 continue;   // healthy, still waiting its turn under the cap
             }
             $upd->execute([RecipeRun::STATUS_CANCELLED, $reason,
-                (int)$row['rcr_run_id'], RecipeRun::STATUS_PENDING]);
+                (int)$row['rcr_recipe_run_id'], RecipeRun::STATUS_PENDING]);
             $cancelled += $upd->rowCount();
         }
         return $cancelled;

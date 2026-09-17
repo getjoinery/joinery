@@ -183,7 +183,7 @@ The UI is organized around a **dashboard + node detail** pattern. The dashboard 
 | URL | Purpose |
 |-----|---------|
 | `/admin/server_manager` | **Dashboard** -- agent status, node cards with health dots, publish upgrade, recent jobs |
-| `/admin/server_manager/node_detail?mgn_id=N` | **Node Detail** -- tabbed page for a single node (see tabs below) |
+| `/admin/server_manager/node_detail?mgn_managed_node_id=N` | **Node Detail** -- tabbed page for a single node (see tabs below) |
 | `/admin/server_manager/node_add` | **Add Node** -- the record a node's own join request is approved against |
 | `/admin/server_manager/targets` | **Backup Targets** -- CRUD for cloud storage targets (B2, S3, Linode) |
 | `/admin/server_manager/jobs` | **Jobs** -- global job history with filters by node, status, and type |
@@ -192,7 +192,7 @@ The UI is organized around a **dashboard + node detail** pattern. The dashboard 
 
 ### Node Detail Tabs
 
-The node detail page (`/admin/server_manager/node_detail?mgn_id=N&tab=...`) has six tabs:
+The node detail page (`/admin/server_manager/node_detail?mgn_managed_node_id=N&tab=...`) has six tabs:
 
 | Tab | Purpose |
 |-----|---------|
@@ -402,7 +402,7 @@ joinery-agent leave
 
 ### The Docker host as a node
 
-A shared Docker host is a plain ManagedNode in machine posture — paired, addressed and versioned like any node, with no web root and no container name. `install.sh docker` installs the host's own siteless agent as part of the install and, given `--management-node=URL` (and `--node-name=NAME` for the pending list), lodges its join; the machine that runs our Docker is managed by its own agent, which is the only path to certificate renewal or site removal once SSH is gone. The placement record (`mgh_managed_hosts`) stays what it is: which containers live where. One nullable link joins the two worlds: `mgh_mgn_host_node_id` on the host record names the host's own paired node. Approving the host agent's join sets it (`ManagedHost::link_host_node` fills an existing placement record for the host's address that has no host node yet), and the host's edit page sets it by hand. That is the routing chain for host-scope work — a container victim's `mgn_mgh_host_id` finds the host record, the host record names the host's node, and the job is addressed there. Sibling containers on a host are found by `mgn_mgh_host_id` and nothing else; `ManagedHost::ensure_for_node()` mints or links the placement record the moment a node needs a container port, so the FK is never absent where it matters.
+A shared Docker host is a plain ManagedNode in machine posture — paired, addressed and versioned like any node, with no web root and no container name. `install.sh docker` installs the host's own siteless agent as part of the install and, given `--management-node=URL` (and `--node-name=NAME` for the pending list), lodges its join; the machine that runs our Docker is managed by its own agent, which is the only path to certificate renewal or site removal once SSH is gone. The placement record (`mgh_managed_hosts`) stays what it is: which containers live where. One nullable link joins the two worlds: `mgh_mgn_managed_node_id` on the host record names the host's own paired node. Approving the host agent's join sets it (`ManagedHost::link_host_node` fills an existing placement record for the host's address that has no host node yet), and the host's edit page sets it by hand. That is the routing chain for host-scope work — a container victim's `mgn_mgh_managed_host_id` finds the host record, the host record names the host's node, and the job is addressed there. Sibling containers on a host are found by `mgn_mgh_managed_host_id` and nothing else; `ManagedHost::ensure_for_node()` mints or links the placement record the moment a node needs a container port, so the FK is never absent where it matters.
 
 A host record can be deleted (soft) from its edit page — last, deliberately: the delete refuses while any container site still names it as placement, and while its own agent node record is live.
 
@@ -502,7 +502,7 @@ The **Overview** tab shows an **SSL Setup card** when `mgn_ssl_state` is not `ac
 2. Enables the **Provision SSL** button when DNS is ready (or when the host IP is not configured)
 3. On submit: starts the certificate chain (`ProvisionPendingSsl::begin_chain`), sets `mgn_ssl_state = 'pending'`, redirects to the jobs tab
 
-The chain ends in a `provision_certificate` primitive on the **issuer** — the node's own agent on bare metal, its host's paired agent for a container (routed through the placement record, `mgn_mgh_host_id` → `mgh_mgn_host_node_id`; a container on a host with no paired host agent has no issuance path and the refusal says to pair the host). The job names the site in `for_node_id`, and `JobResultProcessor` reads what the script actually did (`SslProvisionOutcome`) before setting that site's `mgn_ssl_state` to `active`.
+The chain ends in a `provision_certificate` primitive on the **issuer** — the node's own agent on bare metal, its host's paired agent for a container (routed through the placement record, `mgn_mgh_managed_host_id` → `mgh_mgn_managed_node_id`; a container on a host with no paired host agent has no issuance path and the refusal says to pair the host). The job names the site in `for_node_id`, and `JobResultProcessor` reads what the script actually did (`SslProvisionOutcome`) before setting that site's `mgn_ssl_state` to `active`.
 
 **Cloudflare-proxied domains** are gated on a routing probe first: the `ssl_probe_place` primitive writes a one-time token into the site node's webroot, the management node fetches `/sm-ssl-probe.txt` through the domain, and `ssl_probe_clear` removes it either way. The token is only fetchable because core serve.php routes that URL to `views/sm_ssl_probe.php` — a Joinery front controller never serves arbitrary webroot files, so a node whose code predates that route (`PROBE_MIN_CORE_VERSION`) is refused by name rather than blamed on Cloudflare. Only a match — proof that traffic for the domain actually lands on this node — dispatches the certificate; a miss leaves the domain pending until the customer's DNS actually routes here. The universal vhost already forwards `X-Forwarded-Proto https`, so nothing is patched.
 
@@ -692,8 +692,8 @@ the provider for the instance and refuses unless it is `running` at that
 address and the node being approved is the provision's site or a host record
 at its address. A second join from that address after the node's agent is
 admitted is refused and logged as an alarm. A docker provision's
-container gets `mgn_mgh_host_id` (its placement record, minted at booting), and
-the host's own agent, once approved, is named in `mgh_mgn_host_node_id`. The
+container gets `mgn_mgh_managed_host_id` (its placement record, minted at booting), and
+the host's own agent, once approved, is named in `mgh_mgn_managed_node_id`. The
 server is the customer's property: cancelling their subscription stops
 management, never touches the instance.
 
@@ -1591,8 +1591,8 @@ the state machine documented under
 [Customer-Cloud Fulfillment](#customer-cloud-fulfillment); install parameters
 ride on the row (`cvp_docker_mode`, `cvp_install_mode`, `cvp_source_node_id`,
 `cvp_backup_source`, `cvp_port`, `cvp_sitename`); links to the account
-(`cvp_cca_account_id`), instance (`cvp_instance_id`/`_ip`), and resulting
-node (`cvp_mgn_node_id`).
+(`cvp_cca_customer_cloud_account_id`), instance (`cvp_instance_id`/`_ip`), and resulting
+node (`cvp_mgn_managed_node_id`).
 
 ### RegisteredDomain (`rdm_registered_domains`)
 
@@ -1606,7 +1606,7 @@ ownership belongs to neither — the buyer is the registrant from registration.
 - `rdm_usr_user_id` -- the buyer; deletion is refused while a domain is theirs
 - `rdm_external_order_item_id` -- the order item both this and the compute leg
   hang off, and the intake's idempotency key
-- `rdm_mgn_node_id` -- the box, resolved during fulfillment
+- `rdm_mgn_managed_node_id` -- the box, resolved during fulfillment
 - `rdm_registrant_sealed` -- the WHOIS contact block, SecretBox-sealed
 - `rdm_dns_bootstrap_time` / `rdm_dns_mail_time` / `rdm_ptr_time` -- the
   idempotency ledger: null means outstanding, stamped means never redone
@@ -1617,7 +1617,7 @@ ownership belongs to neither — the buyer is the registrant from registration.
 
 Represents a queued, running, or completed operation. Key fields:
 
-- `mjb_mgn_node_id` -- Target node (FK to mgn_managed_nodes, null for local-only jobs)
+- `mjb_mgn_managed_node_id` -- Target node (FK to mgn_managed_nodes, null for local-only jobs)
 - `mjb_job_type` -- Label for display/filtering (e.g., "backup_run")
 - `mjb_status` -- `pending`, `running`, `completed`, `failed`, or `cancelled`
 - `mjb_commands` -- JSON with the step array the agent executes
@@ -1814,10 +1814,10 @@ Used by the backup browser on the Backups tab.
 |------|---------|
 | `plugin.json` | Plugin metadata |
 | `uninstall.php` | Removes settings and menu entries on uninstall |
-| `data/managed_node_class.php` | ManagedNode + MultiManagedNode |
-| `data/management_job_class.php` | ManagementJob + MultiManagementJob |
-| `data/agent_heartbeat_class.php` | AgentHeartbeat + MultiAgentHeartbeat |
-| `data/backup_target_class.php` | BackupTarget + MultiBackupTarget |
+| `data/managed_nodes_class.php` | ManagedNode + MultiManagedNode |
+| `data/management_jobs_class.php` | ManagementJob + MultiManagementJob |
+| `data/agent_heartbeats_class.php` | AgentHeartbeat + MultiAgentHeartbeat |
+| `data/backup_targets_class.php` | BackupTarget + MultiBackupTarget |
 | `data/registered_domains_class.php` | RegisteredDomain + MultiRegisteredDomain |
 | `includes/domain_registrar/DomainRegistrarProvider.php` | The registrar seam + `DomainRegistrarException` (transient vs terminal) |
 | `includes/domain_registrar/DomainRegistrarRegistry.php` | Interface-based registrar discovery, plus the shared domain-name and TLD gates |

@@ -23,7 +23,7 @@
  *
  * Test seam: $driver_factory.
  *
- * @version 2.2 - a fleet shard is born the same way, skeleton only (rcp_mfs_shard_id): the
+ * @version 2.2 - a fleet shard is born the same way, skeleton only (rcp_mfs_mailbox_fleet_shard_id): the
  *                operator identity's key rides in its user-data and its birth lands on the
  *                MailboxFleetShard row (specs/relay_without_a_shell.md WP4)
  * @version 2.1 - BORN CONFIGURED (specs/relay_without_a_shell.md WP3). ready creates the
@@ -63,8 +63,8 @@
  * @version 1.5 - records the relay's authserv-id alongside its MX hostname
  */
 
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provision_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provisions_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayClient.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_compute/LinodeComputeDriver.php'));
@@ -208,7 +208,7 @@ class RelayCloudProvisioner {
 	 */
 	private function prepareFirstBoot(RelayCloudProvision $run): array {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayFirstBoot.php'));
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_client_identity_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_client_identities_class.php'));
 		$plane = rtrim((string)LibraryFunctions::get_absolute_url(), '/');
 		if ($plane === '' || stripos($plane, 'https://') !== 0) {
 			throw new RuntimeException('this deployment has no https URL for the relay to fetch its bundle from and report to');
@@ -645,8 +645,8 @@ class RelayCloudProvisioner {
 	 */
 	private function completeShardBirth(RelayCloudProvision $run, string $public_ip, string $fingerprint,
 			string $identity_public_key, string $relay_version): MailboxRelay {
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_fleet_shard_class.php'));
-		$shard = new MailboxFleetShard(intval($run->get('rcp_mfs_shard_id')), TRUE);
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_fleet_shards_class.php'));
+		$shard = new MailboxFleetShard(intval($run->get('rcp_mfs_mailbox_fleet_shard_id')), TRUE);
 		if (!$shard->key) {
 			throw new RelayBirthRefused('The shard this run was for no longer exists.');
 		}

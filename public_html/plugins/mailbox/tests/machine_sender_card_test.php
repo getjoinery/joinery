@@ -39,7 +39,7 @@ require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 require_once(PathHelper::getIncludePath('includes/MailIdentityGuard.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailSetupCheck.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/mailbox_setup_scope.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
 require_once(PathHelper::getIncludePath('data/event_logs_class.php'));
 
 // ── Fixture domains (test DB only) ──────────────────────────────────────────
@@ -186,9 +186,9 @@ check($count_refusals() === 1, 'the repeat refusal does not write a second row (
 // ── Engine failure honesty ──────────────────────────────────────────────────
 section('CalendarEmailEngine reports delivery failures');
 require_once(PathHelper::getIncludePath('includes/calendar/CalendarEmailEngine.php'));
-require_once(PathHelper::getIncludePath('data/calendar_entry_class.php'));
-require_once(PathHelper::getIncludePath('data/calendar_preference_class.php'));
-require_once(PathHelper::getIncludePath('data/calendar_email_class.php'));
+require_once(PathHelper::getIncludePath('data/entries_class.php'));
+require_once(PathHelper::getIncludePath('data/calendar_preferences_class.php'));
+require_once(PathHelper::getIncludePath('data/calendar_emails_class.php'));
 $u = make_user('mscfail');
 $u->set('usr_timezone', 'America/Chicago');
 $u->save();

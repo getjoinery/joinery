@@ -140,7 +140,7 @@ if (isset($_GET['check']) && $_GET['check'] !== '') {
     // authIsVerified()'s call, resolved here rather than by a list in the page's
     // JavaScript — one that lagged the router and called relay- and SES-verified
     // mail "unverified".
-    require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+    require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
     echo json_encode([
         'found'       => true,
         'id'          => (int)$row['iem_inbound_email_message_id'],

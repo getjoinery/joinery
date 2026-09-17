@@ -32,12 +32,12 @@ require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 require_once(__DIR__ . '/lib/mailbox_test_fixture.php');
 require_once(PathHelper::getIncludePath('data/files_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachment_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachments_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_accounts_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grants_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ImapIngestor.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
 

@@ -28,8 +28,8 @@ if (php_sapi_name() !== 'cli') { echo "This test must be run from the command li
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 
 $db = DbConnector::get_instance()->get_db_link();
 $node_id = null;
@@ -65,7 +65,7 @@ try {
 	check(($cmd['params'] ?? null) == $params, 'same envelope params');
 	check(json_decode($again->get('mjb_parameters'), true) == $record, 'record params survive (caller context like victim_node_id)');
 	check($again->get('mjb_status') === 'pending', 'queued as pending');
-	check((int)$again->get('mjb_mgn_node_id') === $node_id, 'same node');
+	check((int)$again->get('mjb_mgn_managed_node_id') === $node_id, 'same node');
 	check($again->get('mjb_job_type') === 'backup_run', 'same job type');
 	check((int)$again->get('mjb_total_steps') === 1 && (int)$again->get('mjb_current_step') === 0, 'progress reset');
 	check((int)$again->get('mjb_created_by') === $created_by, 'attributed to the re-runner');
@@ -107,7 +107,7 @@ try {
 	// ---------------------------------------------------------------------
 
 	$empty = new ManagementJob(NULL);
-	$empty->set('mjb_mgn_node_id', $node_id);
+	$empty->set('mjb_mgn_managed_node_id', $node_id);
 	$empty->set('mjb_job_type', 'check_status');
 	$empty->set('mjb_status', 'completed');
 	$empty->set('mjb_commands', json_encode(['steps' => []]));
@@ -128,10 +128,10 @@ try {
 
 } finally {
 	foreach ($job_ids as $jid) {
-		if ($jid) $db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_id = ?')->execute([$jid]);
+		if ($jid) $db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_management_job_id = ?')->execute([$jid]);
 	}
 	if ($node_id) {
-		$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_id = ?')->execute([$node_id]);
+		$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_managed_node_id = ?')->execute([$node_id]);
 	}
 }
 

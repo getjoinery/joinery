@@ -375,8 +375,8 @@ class AiAttachment {
         if ((string)$file->get('fil_source') !== File::SOURCE_AI_CHAT_UPLOAD) return $bytes;
 
         require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
-        require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_message_attachments_class.php'));
-        require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/message_attachments_class.php'));
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversation_messages_class.php'));
         require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
 
         $links = new MultiAiMessageAttachment(['file_id' => (int)$file->key, 'deleted' => false], []);
@@ -385,7 +385,7 @@ class AiAttachment {
         $link = $links->get(0);
         if (!$link->get('aia_sealed')) return $bytes;   // Standard-chat upload: stored plaintext
 
-        $msg = new AiConversationMessage((int)$link->get('aia_aim_message_id'), true);
+        $msg = new AiConversationMessage((int)$link->get('aia_aim_conversation_message_id'), true);
         if (!$msg->key) return null;
         try {
             return ChatSeal::openAttachmentBytes($msg, (int)$link->key, $bytes);

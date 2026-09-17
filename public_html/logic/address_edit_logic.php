@@ -3,7 +3,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function address_edit_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-	require_once(PathHelper::getIncludePath('data/address_class.php'));
+	require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(0);
@@ -85,7 +85,7 @@ function address_edit_logic(array $input): LogicResult{
  * the web form (Address::renderFormFields), so client and web stay in lockstep.
  */
 function address_edit_logic_form($formwriter, $user = null, $input = []) {
-	require_once(PathHelper::getIncludePath('data/address_class.php'));
+	require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
 
 	$user_id = $user ? $user->key : null;
 

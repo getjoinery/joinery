@@ -31,11 +31,11 @@ harness_boot();
 harness_test_mode();
 require_once(__DIR__ . '/lib/mailbox_test_fixture.php');
 
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_log_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_send_attempt_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_logs_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_send_attempts_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSender.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxViewer.php'));

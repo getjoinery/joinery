@@ -1605,6 +1605,13 @@ class MethodExistenceTest {
      *   - $permanent_delete_actions declared on the class (nothing reads it)
      *   - Multi class not named Multi{Model}
      *   - $prefix shared with another loaded model class
+     *   - file not named {plural}_class.php (the table name minus its prefix)
+     *   - $pkey_column not {prefix}_{singular}_id — a bare {prefix}_id, or an
+     *     entity that does not pluralize to the table name
+     *   - a timestamp column named {prefix}_created_time / _updated_time /
+     *     _modified_time / _modify_time, or a bare {prefix}_deleted flag,
+     *     where the platform names are _create_time / _update_time /
+     *     _delete_time (only {prefix}_delete_time gets soft-delete handling)
      *
      * Checks run via reflection on the live classes (the file has already been
      * require'd), so they see exactly what SystemBase will see at runtime.
@@ -1753,6 +1760,62 @@ class MethodExistenceTest {
                 }
             }
 
+            // Naming scheme beyond the hard contract. Nothing reads these
+            // names mechanically (the autoloader maps by tokenizing, and
+            // FK resolution keys on the prefix), so a deviation is
+            // advisory — but each existing one was a copy of the last, so
+            // the point is to catch a new one at edit time.
+            if ($prefix && is_string($tablename) && strpos($tablename, $prefix . '_') === 0) {
+                $plural = substr($tablename, 4);
+
+                // File name: {plural}_class.php. A file holding several
+                // models is judged against any of them.
+                $expected_basenames = [];
+                foreach ($file_models as $sibling => $sibling_reflection) {
+                    $sp = $sibling_reflection->getStaticProperties();
+                    if (!empty($sp['tablename']) && !empty($sp['prefix'])
+                        && strpos($sp['tablename'], $sp['prefix'] . '_') === 0) {
+                        $expected_basenames[] = substr($sp['tablename'], 4) . '_class.php';
+                    }
+                }
+                $basename = basename($real_path);
+                if (!in_array($basename, $expected_basenames, true)) {
+                    $advisories[] = "$class: file is named $basename; the convention is {$plural}_class.php "
+                                  . "(the table name minus its prefix)";
+                }
+
+                // Primary key: {prefix}_{singular}_id, where the singular
+                // pluralizes to the table's plural by DeletionRule::pluralForms()
+                // - the one definition the deletion engine also resolves with.
+                if (is_string($pkey) && strpos($pkey, $prefix . '_') === 0 && substr($pkey, -3) === '_id') {
+                    $entity = substr($pkey, 4, -3);
+                    if ($entity === '' || !in_array($plural, DeletionRule::pluralForms($entity), true)) {
+                        $advisories[] = "$class: \$pkey_column '$pkey' does not name its table; the convention is "
+                                      . "{$prefix}_{singular}_id (e.g. usr_user_id on usr_users)";
+                    }
+                }
+
+                // Timestamp names: the platform spells them create/update/delete_time.
+                foreach ($specs as $column => $spec) {
+                    $rest = substr($column, 4);
+                    $fix = null;
+                    if (preg_match('/^(created|updated|modified|deleted)_time$/', $rest, $mm)) {
+                        $fix = ['created' => 'create_time', 'updated' => 'update_time',
+                                'modified' => 'update_time', 'deleted' => 'delete_time'][$mm[1]];
+                    } elseif ($rest === 'modify_time') {
+                        $fix = 'update_time';
+                    } elseif ($rest === 'deleted') {
+                        $fix = 'delete_time';
+                    }
+                    if ($fix !== null) {
+                        $advisories[] = "$class: column '$column' — the platform name is {$prefix}_{$fix}"
+                                      . ($fix === 'delete_time'
+                                          ? " (only {$prefix}_delete_time gets the deleted filter and delete()/undelete())"
+                                          : '');
+                    }
+                }
+            }
+
             // Deletion behaviour is declared by the child model in
             // $foreign_key_actions, so a model declaring $permanent_delete_actions
             // is stating a rule nothing reads (see docs/deletion_system.md).
@@ -1771,7 +1834,7 @@ class MethodExistenceTest {
             }
 
             // $foreign_key_actions overrides that don't auto-register. The
-            // detector (data/deletion_rule_class.php) resolves a column's
+            // detector (data/deletion_rules_class.php) resolves a column's
             // source table by stripping the declaring model's own prefix and
             // looking up the remainder's first segment in a real
             // prefix -> tablename registry built from every loaded model
@@ -1833,7 +1896,7 @@ class MethodExistenceTest {
      * pass can predict whether the auto-detector will register a given FK
      * column: strip the declaring model's own prefix, then check whether the
      * remainder's first segment is a known model prefix and the remainder
-     * contains '_id'. Must stay in sync with data/deletion_rule_class.php.
+     * contains '_id'. Must stay in sync with data/deletion_rules_class.php.
      */
     private function resolvesFkColumnByConvention($column, $own_prefix, $prefix_tables) {
         if (!$own_prefix) {
@@ -1859,10 +1922,11 @@ class MethodExistenceTest {
             return false;
         }
         // Ambiguous prefix: resolve only on an exact singular/plural entity
-        // match, exactly as DeletionRule::getSourceTableFromColumn() does.
+        // match, exactly as DeletionRule::getSourceTableFromColumn() does -
+        // the same pluralForms() so the two can never disagree.
         $entity = substr($remainder, 0, strpos($remainder, '_id'));
         foreach ($candidates as $candidate) {
-            if ($candidate === $entity || $candidate === $entity . 's') {
+            if (in_array($candidate, DeletionRule::pluralForms($entity), true)) {
                 return true;
             }
         }

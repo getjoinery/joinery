@@ -4,7 +4,7 @@ require_once(PathHelper::getIncludePath('includes/calendar/CalendarSubject.php')
 require_once(PathHelper::getIncludePath('includes/calendar/CalendarItemSourceRegistry.php'));
 require_once(PathHelper::getIncludePath('includes/scheduling/SlotGenerator.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-require_once(PathHelper::getIncludePath('data/schedule_class.php'));
+require_once(PathHelper::getIncludePath('data/schedules_class.php'));
 require_once(PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php'));
 require_once(PathHelper::getIncludePath('plugins/bookings/data/booking_types_class.php'));
 

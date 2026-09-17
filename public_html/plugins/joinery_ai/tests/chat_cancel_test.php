@@ -12,8 +12,8 @@ harness_boot();
 require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
 if (!PluginHelper::isPluginActive('joinery_ai')) { harness_skip('joinery_ai plugin inactive'); harness_finish(); }
 
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversations_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversation_messages_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatTurnContext.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRunner.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AgentLoop.php'));
@@ -91,7 +91,7 @@ $make_running_msg = function (int $conv_id, string $content = ''): AiConversatio
     $u->set('aim_content', 'hello there');
     $u->set('aim_status', AiConversationMessage::STATUS_COMPLETE);
     $u->save();
-    harness_register_row('aim_conversation_messages', 'aim_message_id', (int)$u->key);
+    harness_register_row('aim_conversation_messages', 'aim_conversation_message_id', (int)$u->key);
 
     $m = new AiConversationMessage(NULL);
     $m->set('aim_aic_conversation_id', $conv_id);
@@ -100,7 +100,7 @@ $make_running_msg = function (int $conv_id, string $content = ''): AiConversatio
     $m->set('aim_status', AiConversationMessage::STATUS_RUNNING);
     $m->save();
     $m->load();
-    harness_register_row('aim_conversation_messages', 'aim_message_id', (int)$m->key);
+    harness_register_row('aim_conversation_messages', 'aim_conversation_message_id', (int)$m->key);
     return $m;
 };
 

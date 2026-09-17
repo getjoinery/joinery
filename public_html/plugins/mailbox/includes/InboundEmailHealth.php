@@ -40,9 +40,9 @@ require_once(PathHelper::getIncludePath('includes/ProvisioningCheckFailed.php'))
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundProviderRegistry.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
 
 class InboundEmailHealth {
 
@@ -120,7 +120,7 @@ class InboundEmailHealth {
      * @throws ProvisioningCheckFailed when any protected mailbox cannot be sealed to.
      */
     public static function checkSealingMailboxHolders() {
-        require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+        require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
         require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 
         $db = DbConnector::get_instance()->get_db_link();
@@ -168,7 +168,7 @@ class InboundEmailHealth {
 
     /** The active hardened ingest relay, or null on a colocated deployment. */
     private static function activeRelay() {
-        require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+        require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
         try {
             return MailboxRelay::active();
         } catch (\Throwable $e) {
@@ -248,7 +248,7 @@ class InboundEmailHealth {
      * @throws ProvisioningCheckFailed naming each broken feed, its reason and the fix.
      */
     public static function checkImapFeeds() {
-        require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
+        require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_accounts_class.php'));
         $broken = array();
         $feeds = new MultiInboundImapAccount(array('enabled' => true, 'deleted' => false));
         foreach ($feeds as $feed) {
@@ -908,7 +908,7 @@ class InboundEmailHealth {
     private static function originProbeTarget(): string {
         $domains = new MultiInboundEmailDomain(array('enabled' => true, 'deleted' => false), array('ied_domain' => 'ASC'));
         $domains->load();
-        require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+        require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
         foreach ($domains as $domain) {
             if ($domain->security_level() === InboundEmailDomain::LEVEL_FORTRESS) {
                 continue;

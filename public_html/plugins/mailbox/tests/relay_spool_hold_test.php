@@ -31,8 +31,8 @@
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySpoolConsumer.php'));
 
 class RelaySpoolHoldTest {
@@ -158,8 +158,8 @@ class RelaySpoolHoldTest {
 	private function testStoredSealDedupsWithoutMeta() {
 		// The stored-but-half-acked shape: a message row already carries this
 		// spool id, and the sidecar is gone. Must dedup (→ re-ack), not throw.
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
 		$a = new InboundEmailAlias(NULL);
 		$a->set('iea_ied_inbound_email_domain_id', $this->disabled_domain_id);
 		$a->set('iea_alias', 'rsh' . $this->suffix);

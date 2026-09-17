@@ -1422,3 +1422,72 @@
 	$migration['migration_file'] = NULL;
 	$migration['migration_sql'] = "UPDATE stg_settings SET stg_value = CASE stg_name WHEN 'enable_csp' THEN '1' ELSE '0' END, stg_update_time = now() WHERE (stg_name = 'enable_csp' AND stg_value <> '1') OR (stg_name = 'csp_report_only' AND stg_value <> '0')";
 	$migrations[] = $migration;
+
+	// Activation codes take the platform's act_delete_time / act_create_time
+	// in place of a bool act_deleted and act_created_time: values copied
+	// across, old columns dropped.
+	$migration = array();
+	$migration['database_version'] = '185';
+	$migration['test'] = "SELECT CASE WHEN EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'act_activation_codes' AND column_name IN ('act_deleted', 'act_created_time')) THEN 0 ELSE 1 END AS count";
+	$migration['migration_file'] = 'activation_codes_delete_time.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
+	// Foreign-key columns name their target's full entity
+	// (ajr_mgn_node_id -> ajr_mgn_managed_node_id, 17 columns): values
+	// copied across, old columns dropped, table by table.
+	$migration = array();
+	$migration['database_version'] = '186';
+	$migration['test'] = "SELECT CASE WHEN EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND column_name IN ('ajr_mgn_node_id','cvp_mgn_node_id','inc_mgn_node_id','mjb_mgn_node_id','rdm_mgn_node_id','mgh_mgn_host_node_id','mgn_mgh_host_id','cvp_cca_account_id','htr_cvp_provision_id','mfd_mft_slot_id','mft_mfs_shard_id','rcp_mfs_shard_id','aia_aim_message_id','aip_rcr_run_id','pro_emt_receipt_template_id','uew_pkc_credential_id','bkh_bkt_target_id')) THEN 0 ELSE 1 END AS count";
+	$migration['migration_file'] = 'foreign_keys_name_their_entity.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
+	// dnr_dns_records takes its model's name: dnr_managed_dns_records, primary
+	// key dnr_managed_dns_record_id. Rows copied, sequence carried, old table
+	// gone.
+	$migration = array();
+	$migration['database_version'] = '187';
+	$migration['test'] = "SELECT CASE WHEN to_regclass('public.dnr_dns_records') IS NULL THEN 1 ELSE 0 END AS count";
+	$migration['migration_file'] = 'managed_dns_records_table.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
+	// Eighteen timestamp columns take the platform spelling
+	// ({prefix}_create_time / _update_time): values copied across, old
+	// columns dropped.
+	$migration = array();
+	$migration['database_version'] = '188';
+	$migration['test'] = "SELECT CASE WHEN EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND column_name IN ('abt_modified_time','abv_modified_time','aqa_created_time','cmt_created_time','del_created_time','imi_created_time','imi_updated_time','pkc_created_time','pks_created_time','pri_created_time','spm_modify_time','uev_created_time','uev_updated_time','uew_created_time','vle_created_time','vle_updated_time','vlk_created_time','vlk_updated_time')) THEN 0 ELSE 1 END AS count";
+	$migration['migration_file'] = 'timestamp_columns_platform_names.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
+	// Twenty-three primary keys take the platform form {prefix}_{singular}_id
+	// (mgn_id -> mgn_managed_node_id): ids kept, sequence carried, old
+	// column dropped, table by table.
+	$migration = array();
+	$migration['database_version'] = '189';
+	$migration['test'] = "SELECT CASE WHEN EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND column_name IN ('ahb_id','ajr_id','aim_message_id','aia_attachment_id','aip_log_id','bkh_id','bkt_id','cex_calendar_entry_exception_id','cal_calendar_entry_id','cca_id','cvp_id','del_id','htr_id','inc_id','mgh_id','mgn_id','mjb_id','pas_allowed_sender_id','pbs_blocked_sender_id','rcr_run_id','rdm_id','rcp_id','ssr_id')) THEN 0 ELSE 1 END AS count";
+	$migration['migration_file'] = 'primary_keys_name_their_table.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
+	// log_logins is a model: serial log_login_id in place of the (user, time)
+	// pair, log_ip as text in place of the inet column.
+	$migration = array();
+	$migration['database_version'] = '190';
+	$migration['test'] = "SELECT CASE WHEN EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'log_logins' AND column_name = 'log_ip_address') THEN 0 ELSE 1 END AS count";
+	$migration['migration_file'] = 'logins_become_a_model.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
+	// Tables of retired features are dropped (the ControlD-era ScrollDaddy
+	// schema, cart logs, the recurring mailer, the Mailgun-era inbound store,
+	// requirement types, and an empty lck_license_keys).
+	$migration = array();
+	$migration['database_version'] = '191';
+	$migration['test'] = "SELECT CASE WHEN EXISTS(SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename IN ('cdb_ctlddevice_backups','cdd_ctlddevices','cdf_ctldfilters','cdp_ctldprofiles','cdr_ctldrules','cds_ctldservices','cls_cart_logs','ers_recurring_email_logs','iem_inbound_emails','rqt_requirement_types','lck_license_keys')) THEN 0 ELSE 1 END AS count";
+	$migration['migration_file'] = 'retired_tables_dropped.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

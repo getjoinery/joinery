@@ -9,8 +9,8 @@ function calendar_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
     require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
     require_once(PathHelper::getIncludePath('includes/calendar/CalendarSubject.php'));
-    require_once(PathHelper::getIncludePath('data/calendar_entry_class.php'));
-    require_once(PathHelper::getIncludePath('data/calendar_entry_exception_class.php'));
+    require_once(PathHelper::getIncludePath('data/entries_class.php'));
+    require_once(PathHelper::getIncludePath('data/entry_exceptions_class.php'));
 
     $session = SessionControl::get_instance();
     $session->check_permission(0);
@@ -271,7 +271,7 @@ function calendar_logic(array $input): LogicResult {
 
     // The owner's default reminder lead, so the entry form's "Use my default"
     // option can say what it currently means.
-    require_once(PathHelper::getIncludePath('data/calendar_preference_class.php'));
+    require_once(PathHelper::getIncludePath('data/calendar_preferences_class.php'));
     $page_vars['reminder_default_minutes'] = (int)CalendarPreference::get_for($user_id)->get('cpr_reminder_default_minutes');
 
     // Has this subject authored (or imported) anything of its own yet? Drives the
@@ -323,7 +323,7 @@ function _calendar_parse_reminder($raw): ?int {
     if ($raw === null || $raw === '' || !is_numeric($raw)) {
         return null;
     }
-    require_once(PathHelper::getIncludePath('data/calendar_preference_class.php'));
+    require_once(PathHelper::getIncludePath('data/calendar_preferences_class.php'));
     $v = (int)$raw;
     return in_array($v, CalendarPreference::REMINDER_MINUTE_CHOICES, true) ? $v : null;
 }

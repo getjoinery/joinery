@@ -237,7 +237,7 @@ the job history for no custody gain the agent path does not also give).
 
 **G2 — container nodes cannot ISSUE certificates over the channel.**
 *(Opened 2026-09-01: a Docker host is a paired machine-posture node
-reporting `provision_certificate`, and `mgh_mgn_host_node_id` routes to it.
+reporting `provision_certificate`, and `mgh_mgn_managed_node_id` routes to it.
 The disposition is in `ssh_single_bootstrap.md` WP3; the measurements below
 stand.)*
 `ProvisionPendingSsl::uses_primitive_route()` takes the agent SSL chain only

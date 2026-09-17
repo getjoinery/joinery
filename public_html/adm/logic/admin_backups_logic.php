@@ -31,7 +31,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
 require_once(PathHelper::getIncludePath('includes/BackupRunner.php'));
 require_once(PathHelper::getIncludePath('includes/TargetTester.php'));
-require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
+require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 require_once(PathHelper::getIncludePath('data/backup_history_class.php'));
 require_once(PathHelper::getIncludePath('includes/BackupVerifyLauncher.php'));
 require_once(PathHelper::getIncludePath('data/recovery_verifications_class.php'));
@@ -217,7 +217,7 @@ function _admin_backups_handle($action, array $input, $session) {
 			}
 
 			case 'save_target': {
-				$id = (int)($input['bkt_id'] ?? 0);
+				$id = (int)($input['bkt_backup_target_id'] ?? 0);
 				$target = $id ? new BackupTarget($id, TRUE) : new BackupTarget(NULL);
 				$target->set('bkt_name', trim((string)($input['bkt_name'] ?? '')));
 				$target->set('bkt_provider', (string)($input['bkt_provider'] ?? ''));
@@ -249,14 +249,14 @@ function _admin_backups_handle($action, array $input, $session) {
 			}
 
 			case 'test_target': {
-				$target = new BackupTarget((int)($input['bkt_id'] ?? 0), TRUE);
+				$target = new BackupTarget((int)($input['bkt_backup_target_id'] ?? 0), TRUE);
 				$test = TargetTester::test($target);
 				$say(($test['success'] ? 'Connection OK: ' : 'Connection failed: ') . $test['message'], $test['success']);
 				return $url;
 			}
 
 			case 'delete_target': {
-				$target = new BackupTarget((int)($input['bkt_id'] ?? 0), TRUE);
+				$target = new BackupTarget((int)($input['bkt_backup_target_id'] ?? 0), TRUE);
 				// Deleting the target a schedule points at would leave the task
 				// skipping every night with a message nobody reads, so say so now.
 				if ((int)Globalvars::get_instance()->get_setting('backup_target_id') === (int)$target->key) {
@@ -347,7 +347,7 @@ function _admin_backups_handle($action, array $input, $session) {
 			}
 
 			case 'delete_history': {
-				$row = new BackupHistory((int)($input['bkh_id'] ?? 0), TRUE);
+				$row = new BackupHistory((int)($input['bkh_backup_history_id'] ?? 0), TRUE);
 				$row->set('bkh_delete_time', gmdate('Y-m-d H:i:s'));
 				$row->save();
 				$say('Removed from the list. The stored backup itself was not deleted.', true);

@@ -8,7 +8,8 @@
  * Copy this template and adapt it for your table/entity.
  *
  * USAGE:
- * 1. Copy this file to /data/[tablename]_class.php
+ * 1. Copy this file to /data/[plural]_class.php — the table name minus its prefix
+ *    (exm_examples -> examples_class.php)
  * 2. Replace "Example" with your actual class name (PascalCase)
  * 3. Replace "MultiExample" with Multi + your class name
  * 4. Update all static properties for your table
@@ -37,7 +38,7 @@ class Example extends SystemBase
     // REQUIRED: Table configuration
     public static $prefix = 'exm';                   // 3-character prefix for field names (always 3 chars)
     public static $tablename = 'exm_examples';       // Actual database table name
-    public static $pkey_column = 'exm_id';          // Primary key column name
+    public static $pkey_column = 'exm_example_id';  // {prefix}_{singular}_id — the column names its table
 
     // ====================================================================
     // REST API exposure & authorization (opt-in, default-closed)
@@ -191,7 +192,7 @@ class Example extends SystemBase
         // Primary key specification — int8 + 'serial'=>true is the platform
         // convention (update_database manages the canonical {table}_{pkey}_seq
         // sequence from the 'serial' flag; a 'bigserial' type does not set it).
-        'exm_id' => array(
+        'exm_example_id' => array(
             'type' => 'int8',
             'is_nullable' => false,
             'serial' => true,
@@ -276,13 +277,13 @@ class Example extends SystemBase
             'is_nullable' => true
             // Automatically detected as timestamp field for smart_get()
         ),
-        'exm_created' => array(
+        'exm_create_time' => array(   // {prefix}_create_time / _update_time / _delete_time are the platform names
             'type' => 'timestamp',         // Supported: timestamp (without time zone)
             'is_nullable' => false,
             'default' => 'now()'
             // Automatically detected as timestamp field
         ),
-        'exm_updated' => array(
+        'exm_update_time' => array(
             'type' => 'timestamp with time zone', // Supported: timestamp with time zone
             'is_nullable' => false,
             'default' => 'now()'
@@ -297,7 +298,7 @@ class Example extends SystemBase
             'is_nullable' => true,
             'foreign_key' => array(
                 'table' => 'usr_users',
-                'column' => 'usr_id',
+                'column' => 'usr_user_id',
                 'on_delete' => 'SET NULL'
             )
         ),
@@ -306,7 +307,7 @@ class Example extends SystemBase
             'is_nullable' => true,
             'foreign_key' => array(
                 'table' => 'usr_users', 
-                'column' => 'usr_id',
+                'column' => 'usr_user_id',
                 'on_delete' => 'SET NULL'
             )
         )
@@ -570,7 +571,7 @@ class MultiExample extends SystemMultiBase
  * $result = $example->prepare();
  * if ($result['success']) {
  *     $example->save();
- *     echo "Created example with ID: " . $example->get('exm_id');
+ *     echo "Created example with ID: " . $example->get('exm_example_id');
  *     echo "Status (default): " . $example->get('exm_status');      // Will be 1 (default)
  *     echo "Counter (zero): " . $example->get('exm_counter');       // Will be 0 (zero_on_create)
  *     echo "Active (default): " . $example->get('exm_is_active');   // Will be true (default)
@@ -583,7 +584,7 @@ class MultiExample extends SystemMultiBase
  *     echo "Price: " . $example->getFormattedPrice();
  *     
  *     // Timestamp fields auto-detected - smart_get returns DateTime objects
- *     $created = $example->smart_get('exm_created');  // Returns DateTime object
+ *     $created = $example->smart_get('exm_create_time');  // Returns DateTime object
  *     echo "Created: " . $created->format('Y-m-d H:i:s');
  * }
  * 

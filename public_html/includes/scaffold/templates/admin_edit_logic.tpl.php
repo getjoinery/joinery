@@ -4,7 +4,6 @@
 function admin_<?= $entity_snake ?>_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getIncludePath('<?= $base ?>data/<?= $entity_snake ?>_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(<?= $admin_permission ?>);

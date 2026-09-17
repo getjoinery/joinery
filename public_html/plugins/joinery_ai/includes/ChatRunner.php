@@ -1,7 +1,7 @@
 <?php
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_message_attachments_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversations_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversation_messages_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/message_attachments_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AiAttachment.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatTurnContext.php'));
@@ -207,7 +207,7 @@ class ChatRunner {
             ChatTurnContext $ctx): array {
         $rows = new MultiAiConversationMessage(
             ['conversation_id' => (int)$conversation->key, 'deleted' => false],
-            ['aim_message_id' => 'ASC']
+            ['aim_conversation_message_id' => 'ASC']
         );
         $rows->load();
 
@@ -312,7 +312,7 @@ class ChatRunner {
             array $caps, string $nonce, int $owner): array {
         $links = new MultiAiMessageAttachment(
             ['message_id' => (int)$row->key, 'in_context' => true, 'deleted' => false],
-            ['aia_attachment_id' => 'ASC']
+            ['aia_message_attachment_id' => 'ASC']
         );
         $links->load();
         if (!count($links)) return [];
@@ -560,7 +560,7 @@ class ChatRunner {
     private static function conversationHasAttachments(int $conversation_id): bool {
         if ($conversation_id <= 0) return false;
         $sql = 'SELECT 1 FROM aia_message_attachments a '
-             . 'JOIN aim_conversation_messages m ON m.aim_message_id = a.aia_aim_message_id '
+             . 'JOIN aim_conversation_messages m ON m.aim_conversation_message_id = a.aia_aim_conversation_message_id '
              . 'WHERE m.aim_aic_conversation_id = ? '
              . 'AND a.aia_delete_time IS NULL AND a.aia_in_context IS TRUE '
              . 'AND m.aim_delete_time IS NULL LIMIT 1';

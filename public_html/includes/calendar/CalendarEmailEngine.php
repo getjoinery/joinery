@@ -2,9 +2,9 @@
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/calendar/CalendarSubject.php'));
 require_once(PathHelper::getIncludePath('includes/calendar/CalendarItemSourceRegistry.php'));
-require_once(PathHelper::getIncludePath('data/calendar_entry_class.php'));
-require_once(PathHelper::getIncludePath('data/calendar_preference_class.php'));
-require_once(PathHelper::getIncludePath('data/calendar_email_class.php'));
+require_once(PathHelper::getIncludePath('data/entries_class.php'));
+require_once(PathHelper::getIncludePath('data/calendar_preferences_class.php'));
+require_once(PathHelper::getIncludePath('data/calendar_emails_class.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 /**

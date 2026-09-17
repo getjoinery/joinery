@@ -9,7 +9,7 @@
  * ManagementJob::latestForNode() — newest non-deleted job of a type for a node.
  *
  * The property under test: the helper returns the most recent job of the
- * requested type for the given node (highest mjb_id wins), returns null when
+ * requested type for the given node (highest mjb_management_job_id wins), returns null when
  * that node has no job of the type, ignores soft-deleted jobs, and does not
  * cross node boundaries.
  *
@@ -26,8 +26,8 @@ if (php_sapi_name() !== 'cli') { echo "This test must be run from the command li
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 
 $db = DbConnector::get_instance()->get_db_link();
 
@@ -79,7 +79,7 @@ try {
 
 	$latest = ManagementJob::latestForNode($node_id, 'check_status');
 	check($latest !== null, 'a check_status job is found');
-	check((int)$latest->key === (int)$newer->key, 'newest (highest mjb_id) check_status wins');
+	check((int)$latest->key === (int)$newer->key, 'newest (highest mjb_management_job_id) check_status wins');
 	check($latest->get('mjb_job_type') === 'check_status', 'returned model is the right type');
 
 	$latest_backup = ManagementJob::latestForNode($node_id, 'backup_run');
@@ -90,7 +90,7 @@ try {
 	section('ignores soft-deleted jobs');
 	// -----------------------------------------------------------------------
 
-	$db->prepare('UPDATE mjb_management_jobs SET mjb_delete_time = now() WHERE mjb_id = ?')
+	$db->prepare('UPDATE mjb_management_jobs SET mjb_delete_time = now() WHERE mjb_management_job_id = ?')
 	   ->execute([(int)$newer->key]);
 
 	$after_delete = ManagementJob::latestForNode($node_id, 'check_status');
@@ -106,13 +106,13 @@ try {
 
 } finally {
 	foreach ($job_ids as $jid) {
-		$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_id = ?')->execute([$jid]);
+		$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_management_job_id = ?')->execute([$jid]);
 	}
 	if ($node_id) {
-		$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_id = ?')->execute([$node_id]);
+		$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_managed_node_id = ?')->execute([$node_id]);
 	}
 	if ($other_node_id) {
-		$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_id = ?')->execute([$other_node_id]);
+		$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_managed_node_id = ?')->execute([$other_node_id]);
 	}
 }
 

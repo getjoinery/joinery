@@ -1,7 +1,7 @@
 <?php
 require_once(PathHelper::getIncludePath('includes/calendar/CalendarItemSource.php'));
-require_once(PathHelper::getIncludePath('data/calendar_entry_class.php'));
-require_once(PathHelper::getIncludePath('data/calendar_entry_exception_class.php'));
+require_once(PathHelper::getIncludePath('data/entries_class.php'));
+require_once(PathHelper::getIncludePath('data/entry_exceptions_class.php'));
 
 /**
  * Projects native calendar entries — the appointments and blocked-out time a

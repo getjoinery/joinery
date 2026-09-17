@@ -31,8 +31,8 @@ if ($message_id <= 0) {
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversations_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversation_messages_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatTurn.php'));
 
 $msg = new AiConversationMessage($message_id, true);

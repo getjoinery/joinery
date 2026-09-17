@@ -223,7 +223,7 @@ section('Primitive-capable operations are dispatched through createFromBuild');
 // Dynamic job types (createJob($node->key, $job_type, ...)) cannot be resolved
 // statically and are not checked here — the runtime guard in createJob covers
 // them.
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 
 $dispatch_roots = [
 	PathHelper::getIncludePath('plugins/server_manager'),

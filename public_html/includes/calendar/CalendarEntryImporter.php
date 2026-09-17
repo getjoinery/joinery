@@ -1,7 +1,7 @@
 <?php
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/calendar/CalendarSubject.php'));
-require_once(PathHelper::getIncludePath('data/calendar_entry_class.php'));
+require_once(PathHelper::getIncludePath('data/entries_class.php'));
 
 /**
  * Owner-fixed, provenance-deduped writer for AI-originated personal calendar

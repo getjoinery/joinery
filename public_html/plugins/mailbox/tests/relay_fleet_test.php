@@ -28,7 +28,7 @@
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 
 class RelayFleetTest {
 
@@ -140,7 +140,7 @@ class RelayFleetTest {
 		$shard->save();
 
 		$slot_a = new MailboxFleetSlot(NULL);
-		$slot_a->set('mft_mfs_shard_id', intval($shard->key));
+		$slot_a->set('mft_mfs_mailbox_fleet_shard_id', intval($shard->key));
 		$slot_a->set('mft_status', MailboxFleetSlot::STATUS_ACTIVE);
 		$slot_a->set('mft_public_key', base64_encode(str_repeat("\x03", 32)));
 		$slot_a->save();
@@ -165,7 +165,7 @@ class RelayFleetTest {
 		check($shard->hasCapacity(), 'shard under capacity');
 
 		$slot_b = new MailboxFleetSlot(NULL);
-		$slot_b->set('mft_mfs_shard_id', intval($shard->key));
+		$slot_b->set('mft_mfs_mailbox_fleet_shard_id', intval($shard->key));
 		$slot_b->set('mft_status', MailboxFleetSlot::STATUS_ACTIVE);
 		$slot_b->set('mft_public_key', base64_encode(str_repeat("\x04", 32)));
 		$slot_b->save();
@@ -173,7 +173,7 @@ class RelayFleetTest {
 
 		// Claim uniqueness is FLEET-WIDE: slot B cannot claim what slot A holds.
 		$claim = new MailboxFleetDomainClaim(NULL);
-		$claim->set('mfd_mft_slot_id', intval($slot_a->key));
+		$claim->set('mfd_mft_mailbox_fleet_slot_id', intval($slot_a->key));
 		$claim->set('mfd_domain', 'relay-fleet-test.example');
 		$claim->set('mfd_txt_token', 'joinery-fleet-verify-test');
 		$claim->set('mfd_status', MailboxFleetDomainClaim::STATUS_VERIFIED);
@@ -181,7 +181,7 @@ class RelayFleetTest {
 		$this->cleanup[] = array('mfd_mailbox_fleet_domain_claims', 'mfd_mailbox_fleet_domain_claim_id', intval($claim->key));
 
 		$other = MailboxFleetDomainClaim::liveClaimByOtherSlot('relay-fleet-test.example', intval($slot_b->key));
-		check($other !== null && intval($other->get('mfd_mft_slot_id')) === intval($slot_a->key),
+		check($other !== null && intval($other->get('mfd_mft_mailbox_fleet_slot_id')) === intval($slot_a->key),
 			'another slot\'s live claim blocks the domain fleet-wide');
 		check(MailboxFleetDomainClaim::liveClaimByOtherSlot('relay-fleet-test.example', intval($slot_a->key)) === null,
 			'the owning slot is not blocked by its own claim');
@@ -201,7 +201,7 @@ class RelayFleetTest {
 		// are revoked immediately — the domains' next home must be able to
 		// claim them before this slot finishes evicting.
 		$claim2 = new MailboxFleetDomainClaim(NULL);
-		$claim2->set('mfd_mft_slot_id', intval($slot_a->key));
+		$claim2->set('mfd_mft_mailbox_fleet_slot_id', intval($slot_a->key));
 		$claim2->set('mfd_domain', 'relay-fleet-release.example');
 		$claim2->set('mfd_txt_token', 'joinery-fleet-verify-test2');
 		$claim2->set('mfd_status', MailboxFleetDomainClaim::STATUS_VERIFIED);

@@ -1,6 +1,6 @@
 <?php
 require_once(PathHelper::getIncludePath('includes/EmailServiceProvider.php'));
-require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
+require_once(PathHelper::getIncludePath('includes/EmailTemplateRenderer.php'));
 require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
 require_once(PathHelper::getIncludePath('includes/MailIdentityGuard.php'));
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException (the locked-state signal)
@@ -901,7 +901,7 @@ class EmailSender {
             return;
         }
         try {
-            require_once(PathHelper::getIncludePath('data/queued_email_class.php'));
+            require_once(PathHelper::getIncludePath('data/queued_emails_class.php'));
 
             $fromName = $message->getFromName() ?: '';
 
@@ -927,7 +927,7 @@ class EmailSender {
 
     /**
      * Debug logging
-     * Made public to support deprecated EmailTemplate methods
+     * Made public to support deprecated EmailTemplateRenderer methods
      */
     public function logEmailDebug($message, $service = null) {
         if (!$this->debugMode) {

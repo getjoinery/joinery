@@ -16,7 +16,7 @@
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAdminCsrf.php'));
 
 $session = SessionControl::get_instance();
@@ -79,7 +79,7 @@ if ($_POST && isset($_POST['mgn_name'])) {
 		$node->load();
 
 		// Link (or mint) the placement record. Every node names its machine by
-		// mgn_mgh_host_id — sibling grouping (port allocation, upgrade-all,
+		// mgn_mgh_managed_host_id — sibling grouping (port allocation, upgrade-all,
 		// host-scope routing) reads nothing else, so the FK is set the moment
 		// the node exists rather than only when a host row happened to.
 		ManagedHost::ensure_for_node($node);
@@ -91,7 +91,7 @@ if ($_POST && isset($_POST['mgn_name'])) {
 			DisplayMessage::MESSAGE_ANNOUNCEMENT,
 			DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 		));
-		header('Location: /admin/server_manager/node_detail?mgn_id=' . $node->key);
+		header('Location: /admin/server_manager/node_detail?mgn_managed_node_id=' . $node->key);
 		exit;
 	} catch (Exception $e) {
 		$error = $e->getMessage();

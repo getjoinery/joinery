@@ -19,11 +19,11 @@
 class PollHostingOrders {
 
 	public function run(array $config): array {
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_host_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_account_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_hosts_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_accounts_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provisions_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/GetJoineryApiClient.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/ProvisioningSetup.php'));
@@ -153,7 +153,7 @@ class PollHostingOrders {
 				} elseif (($account = CustomerCloudAccount::get_for_user($user_id, 'linode')) !== null
 						&& $account->get('cca_status') === 'active') {
 					// The buyer already granted access — skip the Connect wait.
-					$provision->set('cvp_cca_account_id', $account->key);
+					$provision->set('cvp_cca_customer_cloud_account_id', $account->key);
 					$provision->set('cvp_status', 'ready');
 				} else {
 					$provision->set('cvp_status', 'pending_connect');
@@ -198,7 +198,7 @@ class PollHostingOrders {
 				$node->set('mgn_ssh_user',     $host->get('mgh_ssh_user'));
 				$node->set('mgn_ssh_key_path', $host->get('mgh_ssh_key_path'));
 				$node->set('mgn_ssh_port',     $host->get('mgh_ssh_port'));
-				$node->set('mgn_mgh_host_id',  $host->key);
+				$node->set('mgn_mgh_managed_host_id',  $host->key);
 				$node->set('mgn_install_state', 'installing');
 				$node->set('mgn_ssl_state',    'pending');
 				$node->set('mgn_port',         $port);
@@ -212,7 +212,7 @@ class PollHostingOrders {
 				$node->set('mgn_ssh_key_path', $host->get('mgh_ssh_key_path'));
 				$node->set('mgn_ssh_port',     $host->get('mgh_ssh_port'));
 				$node->set('mgn_site_url',     'https://' . $domain);
-				$node->set('mgn_mgh_host_id',  $host->key);
+				$node->set('mgn_mgh_managed_host_id',  $host->key);
 				$node->set('mgn_install_state', 'installing');
 				$node->set('mgn_ssl_state',    'pending');
 				$node->set('mgn_port',         $port);

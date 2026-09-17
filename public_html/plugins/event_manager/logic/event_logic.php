@@ -6,7 +6,7 @@ function event_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('plugins/event_manager/data/events_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_sessions_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_registrants_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_waiting_lists_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/event_manager/data/waiting_lists_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/event_manager/data/locations_class.php'));
 
 	$session = SessionControl::get_instance();
@@ -190,7 +190,7 @@ function event_logic(array $input): LogicResult {
 	if($event->get('evt_session_display_type')== Event::DISPLAY_SEPARATE){
 		$searches = array();
 		$searches['event_id'] = $event->key;
-		$event_sessions = new MultiEventSessions($searches,
+		$event_sessions = new MultiEventSession($searches,
 			array('evs_start_time'=>'ASC', 'evs_session_number'=>'ASC')); 
 		$event_sessions->load();	
 		$page_vars['event_sessions'] = $event_sessions;
@@ -203,7 +203,7 @@ function event_logic(array $input): LogicResult {
 		$searches = array();
 		$searches['event_id'] = $event->key;
 		$searches['future_or_none'] = true;
-		$future_event_sessions = new MultiEventSessions($searches,
+		$future_event_sessions = new MultiEventSession($searches,
 			array('evs_start_time'=>'ASC', 'evs_session_number'=>'ASC')); 
 		$future_event_sessions->load();	
 		$page_vars['future_event_sessions'] = $future_event_sessions;
@@ -213,7 +213,7 @@ function event_logic(array $input): LogicResult {
 		$searches = array();
 		$searches['event_id'] = $event->key;
 		$searches['past'] = 'now()';
-		$past_event_sessions = new MultiEventSessions($searches,
+		$past_event_sessions = new MultiEventSession($searches,
 			array('evs_start_time'=>'DESC', 'evs_session_number'=>'DESC'));
 		$past_numsessions = $past_event_sessions->count_all();
 		$page_vars['past_numsessions'] = $past_numsessions;

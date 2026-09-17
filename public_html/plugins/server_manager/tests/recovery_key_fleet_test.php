@@ -46,7 +46,7 @@ require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/RecoveryKeyFleet.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
 
 /**
  * An unsaved node fixture. $recovery is what the last status check recorded:

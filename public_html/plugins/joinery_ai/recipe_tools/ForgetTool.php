@@ -2,7 +2,7 @@
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/QueueableToolInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunContext.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_memories_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/memories_class.php'));
 
 /**
  * Soft-delete one of the acting user's OWN memories (specs/joinery_ai_memory.md).

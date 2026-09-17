@@ -35,10 +35,10 @@
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_host_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/agent_heartbeat_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_hosts_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/agent_heartbeats_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAssets.php'));
@@ -54,7 +54,7 @@ $session->set_return();
 if ($_POST && in_array($_POST['action'] ?? '', ['adopt_join', 'reject_join', 'reopen_join'], true)) {
 	$page_regex = '/\/admin\/server_manager/';
 	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager'); exit; }
-	$jr = new AgentJoinRequest((int)($_POST['ajr_id'] ?? 0), TRUE);
+	$jr = new AgentJoinRequest((int)($_POST['ajr_agent_join_request_id'] ?? 0), TRUE);
 	if (!$jr->key || $jr->get('ajr_delete_time')) {
 		$session->save_message(new DisplayMessage('That join request no longer exists.', 'Error', $page_regex,
 			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
@@ -80,7 +80,7 @@ if ($_POST && in_array($_POST['action'] ?? '', ['adopt_join', 'reject_join', 're
 	}
 	try {
 		$adopted = AgentChannelEndpoint::adoptJoin($jr);
-		$node_url = '/admin/server_manager/node_detail?mgn_id=' . (int)$adopted['node']->key;
+		$node_url = '/admin/server_manager/node_detail?mgn_managed_node_id=' . (int)$adopted['node']->key;
 		$session->save_message(new DisplayMessage(
 			'Agent connected. ' . $jr->get('ajr_claimed_name') . ' (key '
 			. AgentJoinRequest::display_fingerprint((string)$jr->get('ajr_fingerprint')) . ') is now the agent of '
@@ -104,7 +104,7 @@ if ($_POST && in_array($_POST['action'] ?? '', ['adopt_join', 'reject_join', 're
 if ($_POST && ($_POST['action'] ?? '') === 'dismiss_provision') {
 	$page_regex = '/\/admin\/server_manager/';
 	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager'); exit; }
-	$prov = new CustomerCloudProvision((int)($_POST['cvp_id'] ?? 0), TRUE);
+	$prov = new CustomerCloudProvision((int)($_POST['cvp_customer_cloud_provision_id'] ?? 0), TRUE);
 	if (!$prov->key || $prov->get('cvp_delete_time')) {
 		$session->save_message(new DisplayMessage('That provision is no longer on the board.', 'Error', $page_regex,
 			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
@@ -135,8 +135,8 @@ $db = DbConnector::get_instance()->get_db_link();
 $processable  = JobResultProcessor::processable_types();
 $placeholders = implode(',', array_fill(0, count($processable), '?'));
 $q = $db->prepare(
-	"SELECT j.mjb_id FROM mjb_management_jobs j " .
-	"JOIN mgn_managed_nodes n ON n.mgn_id = j.mjb_mgn_node_id " .
+	"SELECT j.mjb_management_job_id FROM mjb_management_jobs j " .
+	"JOIN mgn_managed_nodes n ON n.mgn_managed_node_id = j.mjb_mgn_managed_node_id " .
 	"WHERE j.mjb_status IN ('completed','failed') " .
 	"  AND j.mjb_job_type IN ($placeholders) " .
 	"  AND j.mjb_result IS NULL " .
@@ -145,7 +145,7 @@ $q = $db->prepare(
 );
 $q->execute($processable);
 foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
-	$unprocessed_job = new ManagementJob($row['mjb_id'], TRUE);
+	$unprocessed_job = new ManagementJob($row['mjb_management_job_id'], TRUE);
 	JobResultProcessor::process($unprocessed_job);
 }
 
@@ -164,13 +164,13 @@ $nodes->load();
 
 $nodes_by_host = [];
 foreach ($nodes as $node) {
-	$hid = $node->get('mgn_mgh_host_id');
+	$hid = $node->get('mgn_mgh_managed_host_id');
 	$key = $hid !== null ? (int)$hid : 0; // 0 = ungrouped
 	$nodes_by_host[$key][] = $node;
 }
 
 // Load recent jobs
-$recent_jobs = new MultiManagementJob(['deleted' => false], ['mjb_id' => 'DESC'], 20);
+$recent_jobs = new MultiManagementJob(['deleted' => false], ['mjb_management_job_id' => 'DESC'], 20);
 $recent_jobs->load();
 
 // Agent heartbeat
@@ -178,11 +178,11 @@ $agent = AgentHeartbeat::getLatest();
 
 // Cloud provisions still working toward a running site (or stuck), and finished
 // ones whose install password this plane still holds (specs/keyless_provisioning.md)
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provisions_class.php'));
 $inflight_provisions = new MultiCustomerCloudProvision([
 	'open'    => true,
 	'deleted' => false,
-], ['cvp_id' => 'DESC']);
+], ['cvp_customer_cloud_provision_id' => 'DESC']);
 $inflight_provisions->load();
 
 // Nodes whose uptime monitoring cannot currently conclude up or down.
@@ -330,7 +330,7 @@ if ($agent_online) {
 	<ul class="mb-0 mt-2">
 		<?php foreach ($monitor_problems as $p): ?>
 			<li>
-				<a href="/admin/server_manager/node_detail?mgn_id=<?php echo (int)$p['id']; ?>" class="alert-link"><?php echo htmlspecialchars($p['name'] ?: $p['slug']); ?></a>
+				<a href="/admin/server_manager/node_detail?mgn_managed_node_id=<?php echo (int)$p['id']; ?>" class="alert-link"><?php echo htmlspecialchars($p['name'] ?: $p['slug']); ?></a>
 				&mdash; <?php echo htmlspecialchars($p['health']['detail']); ?>
 			</li>
 		<?php endforeach; ?>
@@ -348,7 +348,7 @@ if ($agent_online) {
 		<?php foreach ($recovery_problems as $p): ?>
 			<li>
 				<?php if ((int)$p['id'] > 0): ?>
-					<a href="/admin/server_manager/node_detail?mgn_id=<?php echo (int)$p['id']; ?>&tab=backups" class="alert-link"><?php echo htmlspecialchars($p['name'] ?: $p['slug']); ?></a>
+					<a href="/admin/server_manager/node_detail?mgn_managed_node_id=<?php echo (int)$p['id']; ?>&tab=backups" class="alert-link"><?php echo htmlspecialchars($p['name'] ?: $p['slug']); ?></a>
 				<?php else: // management-node-level problem (recovery setup, agent signing key) ?>
 					<strong><?php echo htmlspecialchars($p['name'] ?: $p['slug']); ?></strong>
 				<?php endif; ?>
@@ -414,25 +414,25 @@ if ($agent_online) {
 						This address is <strong>provision #<?php echo (int)$jr_prov->key; ?></strong> (<?php echo htmlspecialchars($jr_prov->get('cvp_domain')); ?>).
 						Approve it from that provision's node, where the claim is checked with the provider first
 						<?php if ($agentless_nodes): ?>&mdash;
-							<?php $first = true; foreach ($agentless_nodes as $cand): ?><?php echo $first ? '' : ', '; $first = false; ?><a href="/admin/server_manager/node_detail?mgn_id=<?php echo (int)$cand->key; ?>&amp;tab=api_keys" class="alert-link"><?php echo htmlspecialchars($cand->get('mgn_name') ?: $cand->get('mgn_slug')); ?></a><?php endforeach; ?><?php endif; ?>.
+							<?php $first = true; foreach ($agentless_nodes as $cand): ?><?php echo $first ? '' : ', '; $first = false; ?><a href="/admin/server_manager/node_detail?mgn_managed_node_id=<?php echo (int)$cand->key; ?>&amp;tab=api_keys" class="alert-link"><?php echo htmlspecialchars($cand->get('mgn_name') ?: $cand->get('mgn_slug')); ?></a><?php endforeach; ?><?php endif; ?>.
 					<?php else: ?>
 						Approving makes a node record named <strong><?php echo htmlspecialchars($jr->get('ajr_claimed_name')); ?></strong> at <?php echo htmlspecialchars((string)$jr->get('ajr_source_ip')); ?>; the site URL and the rest can be filled in on the node afterwards.
 						<?php if ($agentless_nodes): ?>To bind it to a record that already exists instead, approve from that node's API Keys tab:
-							<?php $first = true; foreach ($agentless_nodes as $cand): ?><?php echo $first ? '' : ', '; $first = false; ?><a href="/admin/server_manager/node_detail?mgn_id=<?php echo (int)$cand->key; ?>&amp;tab=api_keys" class="alert-link"><?php echo htmlspecialchars($cand->get('mgn_name') ?: $cand->get('mgn_slug')); ?></a><?php endforeach; ?>.<?php endif; ?>
+							<?php $first = true; foreach ($agentless_nodes as $cand): ?><?php echo $first ? '' : ', '; $first = false; ?><a href="/admin/server_manager/node_detail?mgn_managed_node_id=<?php echo (int)$cand->key; ?>&amp;tab=api_keys" class="alert-link"><?php echo htmlspecialchars($cand->get('mgn_name') ?: $cand->get('mgn_slug')); ?></a><?php endforeach; ?>.<?php endif; ?>
 					<?php endif; ?>
 				</div>
 				<div class="mt-2">
 					<?php if (!$jr_prov || $jr_host_claim): ?>
 					<form method="post" action="/admin/server_manager" id="adopt_join_<?php echo (int)$jr->key; ?>" style="display:inline;margin-right:6px;">
 						<input type="hidden" name="action" value="adopt_join">
-						<input type="hidden" name="ajr_id" value="<?php echo (int)$jr->key; ?>">
+						<input type="hidden" name="ajr_agent_join_request_id" value="<?php echo (int)$jr->key; ?>">
 						<?php echo SmAdminCsrf::field(); ?>
 						<button type="button" class="btn btn-sm btn-primary" onclick="JoineryModal.confirm(<?php echo htmlspecialchars(json_encode(($jr_self ? 'Connect this management node\'s own agent' : 'Connect ' . $jr->get('ajr_claimed_name')) . '? Confirm the fingerprint ' . $jr_fpr . ' matches what the machine printed first.'), ENT_QUOTES); ?>, function(){ document.getElementById('adopt_join_<?php echo (int)$jr->key; ?>').submit(); })">Approve</button>
 					</form>
 					<?php endif; ?>
 					<form method="post" action="/admin/server_manager" id="reject_join_<?php echo (int)$jr->key; ?>" style="display:inline;">
 						<input type="hidden" name="action" value="reject_join">
-						<input type="hidden" name="ajr_id" value="<?php echo (int)$jr->key; ?>">
+						<input type="hidden" name="ajr_agent_join_request_id" value="<?php echo (int)$jr->key; ?>">
 						<?php echo SmAdminCsrf::field(); ?>
 						<button type="button" class="btn btn-sm btn-outline-danger" onclick="JoineryModal.confirm(<?php echo htmlspecialchars(json_encode('Reject this join request?'), ENT_QUOTES); ?>, function(){ document.getElementById('reject_join_<?php echo (int)$jr->key; ?>').submit(); })">Reject</button>
 					</form>
@@ -452,7 +452,7 @@ if ($agent_online) {
 			(<?php echo htmlspecialchars((string)$rj->get('ajr_source_ip')); ?>, key <?php echo htmlspecialchars(AgentJoinRequest::display_fingerprint((string)$rj->get('ajr_fingerprint'))); ?>)
 			<form method="post" action="/admin/server_manager" style="display:inline;">
 				<input type="hidden" name="action" value="reopen_join">
-				<input type="hidden" name="ajr_id" value="<?php echo (int)$rj->key; ?>">
+				<input type="hidden" name="ajr_agent_join_request_id" value="<?php echo (int)$rj->key; ?>">
 				<?php echo SmAdminCsrf::field(); ?>
 				<button type="submit" class="btn btn-sm btn-outline-secondary py-0 px-2">Reopen</button>
 			</form>
@@ -525,7 +525,7 @@ if ($agent_online) {
 						<?php if (!$dismiss_blockers): ?>
 							<form method="post" action="/admin/server_manager" id="dismiss_prov_<?php echo (int)$prov->key; ?>" style="display:inline;">
 								<input type="hidden" name="action" value="dismiss_provision">
-								<input type="hidden" name="cvp_id" value="<?php echo (int)$prov->key; ?>">
+								<input type="hidden" name="cvp_customer_cloud_provision_id" value="<?php echo (int)$prov->key; ?>">
 								<?php echo SmAdminCsrf::field(); ?>
 								<button type="button" class="btn btn-sm btn-outline-secondary"
 									onclick="JoineryModal.confirm(<?php echo htmlspecialchars(json_encode('Dismiss ' . $prov->get('cvp_domain') . '? It created nothing, so this only clears the record off this board.'), ENT_QUOTES); ?>, function(){ document.getElementById('dismiss_prov_<?php echo (int)$prov->key; ?>').submit(); })">Dismiss</button>
@@ -612,7 +612,7 @@ if ($agent_online) {
 							<?php endif; ?>
 							<div class="p-2 border-top bg-light d-flex gap-2">
 								<a href="/admin/server_manager/install_node_form" class="btn btn-sm btn-outline-primary">Install Site</a>
-								<a href="/admin/server_manager/host_add?mgh_id=<?php echo $host->key; ?>" class="btn btn-sm btn-outline-secondary">Edit Host</a>
+								<a href="/admin/server_manager/host_add?mgh_managed_host_id=<?php echo $host->key; ?>" class="btn btn-sm btn-outline-secondary">Edit Host</a>
 							</div>
 						</div>
 					</div>
@@ -688,7 +688,7 @@ if ($agent_online) {
 					};
 
 					$node_name = '-';
-					$node_id = $job->get('mjb_mgn_node_id');
+					$node_id = $job->get('mjb_mgn_managed_node_id');
 					if ($node_id) {
 						try {
 							$job_node = new ManagedNode($node_id, TRUE);
@@ -727,8 +727,8 @@ function render_node_row($node, $db, $session) {
 	$last_job_failed = false;
 	$last_job_q = $db->prepare(
 		"SELECT mjb_status FROM mjb_management_jobs " .
-		"WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'check_status' AND mjb_delete_time IS NULL " .
-		"ORDER BY mjb_id DESC LIMIT 1"
+		"WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'check_status' AND mjb_delete_time IS NULL " .
+		"ORDER BY mjb_management_job_id DESC LIMIT 1"
 	);
 	$last_job_q->execute([$node->key]);
 	$last_job_row = $last_job_q->fetch(PDO::FETCH_ASSOC);
@@ -757,7 +757,7 @@ function render_node_row($node, $db, $session) {
 	ob_start();
 	?>
 	<div class="list-group-item node-row d-flex justify-content-between align-items-center"
-		data-href="/admin/server_manager/node_detail?mgn_id=<?php echo $node->key; ?>"
+		data-href="/admin/server_manager/node_detail?mgn_managed_node_id=<?php echo $node->key; ?>"
 		data-node-id="<?php echo $node->key; ?>"
 		data-api-refreshable="<?php echo $api_refreshable ? '1' : '0'; ?>"
 		onclick="if(!event.target.closest('form,button,input,a')) window.location=this.dataset.href">

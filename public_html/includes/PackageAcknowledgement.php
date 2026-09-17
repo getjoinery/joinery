@@ -97,7 +97,7 @@ class PackageAcknowledgement {
 		$newest = null;
 		$newest_at = 0;
 		foreach (new MultiPasskeyCeremony(array('session_id' => $session_id, 'kind' => 'stepup')) as $m) {
-			$t = strtotime($m->get('pks_created_time') . ' UTC');
+			$t = strtotime($m->get('pks_create_time') . ' UTC');
 			if ($t && $t >= $cutoff && $t > $newest_at) {
 				$newest = $m;
 				$newest_at = $t;
@@ -157,7 +157,7 @@ class PackageAcknowledgement {
 		if (!hash_equals($session_hash, hash('sha256', (string)$m->get('pks_session_id')))) {
 			return 'the second-factor confirmation named belongs to another session';
 		}
-		$created = strtotime($m->get('pks_created_time') . ' UTC');
+		$created = strtotime($m->get('pks_create_time') . ' UTC');
 		if (!$created || $created > $at + 60 || $created < $at - self::STEP_UP_TTL) {
 			return 'the second-factor confirmation named was not fresh when the warning was answered';
 		}

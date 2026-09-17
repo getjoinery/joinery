@@ -36,8 +36,8 @@ require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 require_once(PathHelper::getIncludePath('plugins/mailbox/tasks/LearnSpamFeedback.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSpamPolicy.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
 
 /** A port nothing listens on, so controllerReachable() is deterministically false. */
 const DEAD_CONTROLLER = 'http://127.0.0.1:11399';

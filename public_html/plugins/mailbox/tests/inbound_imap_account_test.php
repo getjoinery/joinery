@@ -24,9 +24,9 @@ if (session_status() !== PHP_SESSION_ACTIVE && !headers_sent()) { @session_start
 harness_boot();
 require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Token.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_accounts_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/mailbox_setup_memory.php'));
 
 class InboundImapAccountTest {

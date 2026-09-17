@@ -90,7 +90,10 @@
  * dedup return adopts from the raw in hand, storeDirectMessage's from the
  * delivered parts. See AttachmentByteCustody.
  *
- * @version 1.40
+ * @version 1.41
+ * @changelog 1.41 - relay() names the transport for the attempt row only when the
+ *   relay is an EmailServiceProvider; RawMessageRelay promises no getKey(), and a
+ *   bare relay (the forward-loop test's recorder) crashed the forward.
  * @changelog 1.40 - the address book elevates a sender past the CONTENT score on
  *   every ingest path (elevateForContact), never past the auth rule; the auth
  *   rule itself moves to InboundEmailMessage::authRuleSaysSpam() so the reader
@@ -149,14 +152,14 @@
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
 require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_log_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachment_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_logs_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachments_class.php'));
 require_once(PathHelper::getIncludePath('data/files_class.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grants_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RawMessageStore.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/AuthenticationResults.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/SRSRewriter.php'));
@@ -824,7 +827,7 @@ class InboundEmailRouter {
 		// iem_subject/iem_body_* would raise VaultLockedException on read.
 		if (!array_key_exists('run_filters', $options) || $options['run_filters']) {
 			try {
-				require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_filter_class.php'));
+				require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_filters_class.php'));
 				InboundEmailFilter::runForMessage($msg, $parsed, $alias, [
 					'sender' => $sender, 'subject' => $subject,
 					'body_plain' => $bodies['plain'], 'body_html' => $bodies['html'],
@@ -922,7 +925,7 @@ class InboundEmailRouter {
 		$alias = null;
 		$alias_id = $msg->get('iem_iea_inbound_email_alias_id');
 		if ($alias_id) {
-			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
 			try { $alias = new InboundEmailAlias(intval($alias_id), TRUE); } catch (\Throwable $e) { $alias = null; }
 		}
 
@@ -973,7 +976,7 @@ class InboundEmailRouter {
 		// the plaintext in hand, never on the row's now-sealed columns.
 		try {
 			$fresh = new InboundEmailMessage(intval($msg->key), TRUE);
-			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_filter_class.php'));
+			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_filters_class.php'));
 			InboundEmailFilter::runForMessage($fresh, $parsed, $alias, [
 				'sender' => $sender, 'subject' => $subject,
 				'body_plain' => $bodies['plain'], 'body_html' => $bodies['html'],
@@ -1215,7 +1218,7 @@ class InboundEmailRouter {
 		// Filters match on the plaintext in hand, never on the row's now-sealed
 		// columns — ingest runs with no unlock window on the live path.
 		try {
-			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_filter_class.php'));
+			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_filters_class.php'));
 			InboundEmailFilter::runForMessage($msg, array('headers' => array(), 'from' => $sender), $alias, array(
 				'sender' => $sender, 'subject' => $subject,
 				'body_plain' => $body_plain, 'body_html' => $body_html,
@@ -2448,7 +2451,7 @@ class InboundEmailRouter {
 	 */
 	private function synthesizeRawForForward(InboundEmailMessage $msg): ?string {
 		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachment_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachments_class.php'));
 
 		try {
 			$sender    = (string)$msg->get('iem_sender');
@@ -2692,8 +2695,11 @@ class InboundEmailRouter {
 			return $this->relayViaSmtpFallback($raw_mime, $envelope_sender, $destinations);
 		}
 
-		// Primary: provider raw-MIME relay.
-		$this->last_relay_transport = $provider::getKey();
+		// Primary: provider raw-MIME relay. The attempt row names the transport
+		// by the provider's key; a bare RawMessageRelay (the interface promises
+		// no key) is recorded as what it is.
+		$this->last_relay_transport = ($provider instanceof EmailServiceProvider)
+			? $provider::getKey() : 'relay';
 		$results = $provider->relayRawMessage($raw_mime, $envelope_sender, $destinations);
 
 		// Fallback: retry only the destinations the provider failed, over SMTP.

@@ -31,7 +31,7 @@
  */
 
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailSetupCheck.php'));
 
 class CheckDomainSetup implements ScheduledTaskInterface {

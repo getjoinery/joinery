@@ -27,6 +27,10 @@
  * prefixed zzfix_, never used by a real model). Run:
  *   php tests/integration/deletion_rule_registration_test.php
  *
+ * @version 1.4 - pins DeletionRule::pluralForms(), the one pluralization the engine and the
+ *   validator share (y -> ies included)
+ * @version 1.3 - bkh_bkt_backup_target_id carries the full entity and resolves; the abbreviated
+ *   form is kept as the hypothetical that must stay unrecognized
  * @version 1.2
  */
 /** @joinery-test
@@ -39,7 +43,7 @@
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
-require_once(PathHelper::getIncludePath('data/deletion_rule_class.php'));
+require_once(PathHelper::getIncludePath('data/deletion_rules_class.php'));
 
 // --- Fixture "model" classes - plain classes with just the statics
 // registerModelRules() reads via reflection. None of these tablenames are
@@ -151,8 +155,17 @@ try {
         DeletionRule::getSourceTableFromColumn('mgn_bkt_backup_target_id', 'mgn') === 'bkt_backup_targets');
     ok('ambiguous prefix: msg_cnv_conversation_id resolves to cnv_conversations, not content versions',
         DeletionRule::getSourceTableFromColumn('msg_cnv_conversation_id', 'msg') === 'cnv_conversations');
-    ok('ambiguous prefix with abbreviated entity: bkh_bkt_target_id stays unrecognized',
+    ok('ambiguous prefix with abbreviated entity: a bkh_bkt_target_id stays unrecognized',
         DeletionRule::getSourceTableFromColumn('bkh_bkt_target_id', 'bkh') === null);
+    ok('ambiguous prefix with the full entity: bkh_bkt_backup_target_id resolves to bkt_backup_targets',
+        DeletionRule::getSourceTableFromColumn('bkh_bkt_backup_target_id', 'bkh') === 'bkt_backup_targets');
+    // The tie-break accepts every correct plural the validator's pkey check
+    // does, from the one definition - a y -> ies table under a shared prefix
+    // must resolve, not silently register nothing.
+    ok('pluralForms: +s, +es, y -> ies and the uncountable form',
+        DeletionRule::pluralForms('cat_category') === array('cat_category', 'cat_categorys', 'cat_categoryes', 'cat_categories')
+        && in_array('bkh_backup_history', DeletionRule::pluralForms('bkh_backup_history'), true)
+        && in_array('adr_addresses', DeletionRule::pluralForms('adr_address'), true));
     ok('unambiguous prefix: entity match is not required (usr resolves as before)',
         DeletionRule::getSourceTableFromColumn('ord_usr_user_id', 'ord') === 'usr_users');
 
@@ -185,7 +198,7 @@ try {
     require_once(PathHelper::getIncludePath('plugins/store/data/orders_class.php'));
     DeletionRule::registerModelRules('Order');
     $stmt = $db->prepare(
-        "SELECT del_id FROM del_deletion_rules WHERE del_target_table = 'ord_orders' AND del_source_table = 'usr_users'"
+        "SELECT del_deletion_rule_id FROM del_deletion_rules WHERE del_target_table = 'ord_orders' AND del_source_table = 'usr_users'"
     );
     $stmt->execute();
     $control_id = $stmt->fetchColumn();
@@ -197,7 +210,7 @@ try {
 
     $prune_messages = DeletionRule::pruneOrphanedRules();
 
-    $stmt = $db->prepare("SELECT COUNT(*) FROM del_deletion_rules WHERE del_id = ?");
+    $stmt = $db->prepare("SELECT COUNT(*) FROM del_deletion_rules WHERE del_deletion_rule_id = ?");
     $stmt->execute([$control_id]);
     ok('pruneOrphanedRules: a real usr_users -> ord_orders rule survives pruning',
         (int)$stmt->fetchColumn() === 1);

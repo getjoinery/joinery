@@ -28,8 +28,8 @@ function scrub_job_row_inline_credentials() {
 	$secrets = [];
 
 	if ($has_targets) {
-		require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
-		foreach ($db->query("SELECT bkt_id FROM bkt_backup_targets")->fetchAll(PDO::FETCH_COLUMN) as $tid) {
+		require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
+		foreach ($db->query("SELECT bkt_backup_target_id FROM bkt_backup_targets")->fetchAll(PDO::FETCH_COLUMN) as $tid) {
 			try {
 				$target = new BackupTarget(intval($tid), TRUE);
 				$creds  = $target->get_credentials();

@@ -4,8 +4,8 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
 function admin_mailbox_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);

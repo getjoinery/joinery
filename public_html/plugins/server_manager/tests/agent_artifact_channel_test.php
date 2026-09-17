@@ -225,7 +225,7 @@ $saved_why = '';
 try {
 	$saved->save();
 	$saved->load();
-	harness_register_row('mgn_managed_nodes', 'mgn_id', $saved->key);
+	harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $saved->key);
 	$saved_why = (string)$saved->get('mgn_agent_recipes') === 'fail2ban:report-only' ? '' : 'read back ' . json_encode($saved->get('mgn_agent_recipes'));
 } catch (Throwable $e) {
 	$saved_why = get_class($e) . ': ' . $e->getMessage();

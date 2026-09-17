@@ -227,11 +227,11 @@ class EmailPatternTest {
             ]
         ];
         
-        // Pattern 11: Recurring mailer template pattern  
-        // Copied from: data/recurring_mailer_class.php:200 (recurring email template)
+        // Pattern 11: a whole-template send with a nested recipient record —
+        // the shape a periodic member mailing takes
         $this->patterns[] = [
             'name' => 'recurring_mailer_template_pattern',
-            'source' => 'data/recurring_mailer_class.php:200',
+            'source' => 'periodic member mailing (template + nested recipient)',
             'method' => 'fromTemplate',
             'template' => 'blank_template', // Using blank_template as fallback for main_template
             'variables' => [

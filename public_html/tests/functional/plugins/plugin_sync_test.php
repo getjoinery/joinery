@@ -311,7 +311,7 @@ section('Deletion-rule pruning does not depend on activation state');
 // behaviour while the tables and data still existed. Discovery scans the
 // filesystem instead, so an inactive plugin's models still count. Pin that,
 // because the failure mode is silent data damage on an unrelated action.
-require_once(PathHelper::getIncludePath('data/deletion_rule_class.php'));
+require_once(PathHelper::getIncludePath('data/deletion_rules_class.php'));
 $registry = new ReflectionMethod('DeletionRule', 'getModelRegistry');
 $reg = $registry->invoke(null);
 $known = $reg['all_tables'];

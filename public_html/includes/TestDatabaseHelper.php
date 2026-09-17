@@ -9,6 +9,10 @@
  *   TestDatabaseHelper::checkAndWarn();          // Warn if the copy has drifted
  *   TestDatabaseHelper::copy('structure');       // Rebuild (schema + reference data)
  *
+ * Version: 2.02 - a structure copy seeds the two placeholder users (User::USER_SYSTEM,
+ *   User::USER_DELETED) and moves the users sequence past them, as the installer does;
+ *   without them the third fixture user a run minted after a rebuild took id 3 and became
+ *   the deleted-user placeholder platform-wide (no notifications, undeletable)
  * Version: 2.01
  */
 
@@ -251,7 +255,7 @@ class TestDatabaseHelper {
      * other.
      *
      * Deliberately absent: `timezone` (9.7 MB of IANA DST transitions that no
-     * code on the platform reads — `zone`, which address_class.php does read,
+     * code on the platform reads — `zone`, which users_addrs_class.php does read,
      * is 96 KB and is here).
      *
      * @return string[]
@@ -261,7 +265,7 @@ class TestDatabaseHelper {
             'stg_settings',        // get_setting() reads this through the test connection
             'plg_plugins',         // decides which plugins are active, so which classes resolve
             'amu_admin_menus',     // cheap; keeps an admin page under test from looking broken
-            'zone',                // IANA zone names (address_class.php)
+            'zone',                // IANA zone names (users_addrs_class.php)
             'cco_country_codes',   // reference data
             'emt_email_templates', // reference data; the send path reads it
         );
@@ -393,6 +397,19 @@ class TestDatabaseHelper {
             $seq_result = self::advanceSequences($staging_db, $db_user, $password, $reference_tables);
             if ($seq_result !== true) {
                 return $fail("Reference data restored but the sequence sweep failed: " . $seq_result);
+            }
+
+            // Step 3b: The placeholder users. The platform treats ids
+            // User::USER_SYSTEM and User::USER_DELETED as placeholders by
+            // constant, and the installer seeds both rows and moves the
+            // sequence past them. usr_users is content, not reference, so the
+            // copy arrives empty with its sequence at 1 — and the third
+            // fixture user a test run mints is then the deleted-user
+            // placeholder to every reader. Seed the two rows the installer
+            // would, and start real users after them.
+            $seed_result = self::seedPlaceholderUsers($staging_db, $db_user, $password);
+            if ($seed_result !== true) {
+                return $fail("Reference data restored but the placeholder users could not be seeded: " . $seed_result);
             }
         }
 
@@ -537,6 +554,42 @@ class TestDatabaseHelper {
      *
      * @return true|string true, or an error message
      */
+    /**
+     * Seed the system and deleted-user placeholder rows (utils/create_install_sql.php
+     * seeds the same two on a fresh install) and move the users sequence past
+     * them, so the ids the platform reserves by constant are never handed to a
+     * fixture user. Idempotent: rows already present are left alone.
+     *
+     * @return true|string true on success, otherwise the error message
+     */
+    private static function seedPlaceholderUsers($staging_db, $db_user, $password) {
+        try {
+            $pdo = new PDO("pgsql:host=localhost;port=5432;dbname={$staging_db}", $db_user, $password);
+            $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+            $placeholders = array(
+                array(User::USER_SYSTEM,  'System',  'system-user@joinery.local'),
+                array(User::USER_DELETED, 'Deleted', 'deleted-user@joinery.local'),
+            );
+            $insert = $pdo->prepare(
+                "INSERT INTO public.usr_users (usr_user_id, usr_first_name, usr_last_name, usr_email, usr_permission,
+                     usr_is_activated, usr_email_is_verified, usr_password, usr_signup_date, usr_force_password_change, usr_timezone)
+                 VALUES (:id, :first, 'User', :email, 0, false, false, '', CURRENT_DATE, false, 'America/New_York')
+                 ON CONFLICT (usr_user_id) DO NOTHING");
+            foreach ($placeholders as $row) {
+                $insert->execute(array(':id' => $row[0], ':first' => $row[1], ':email' => $row[2]));
+            }
+
+            $reserved = max(User::USER_SYSTEM, User::USER_DELETED);
+            $pdo->query(
+                "SELECT setval('public.usr_users_usr_user_id_seq',
+                               GREATEST((SELECT COALESCE(MAX(usr_user_id), 0) FROM public.usr_users), {$reserved}), true)");
+            return true;
+        } catch (PDOException $e) {
+            return $e->getMessage();
+        }
+    }
+
     private static function advanceSequences($staging_db, $db_user, $password, array $tables) {
         try {
             $pdo = new PDO("pgsql:host=localhost;port=5432;dbname={$staging_db}", $db_user, $password);

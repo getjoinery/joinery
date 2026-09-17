@@ -68,7 +68,7 @@ function su_cleanup_session($sid) {
 function su_age_markers($sid, $age) {
 	$db = DbConnector::get_instance()->get_db_link();
 	$q = $db->prepare("UPDATE pks_passkey_ceremonies
-		SET pks_created_time = NOW() AT TIME ZONE 'UTC' - (? || ' seconds')::interval
+		SET pks_create_time = NOW() AT TIME ZONE 'UTC' - (? || ' seconds')::interval
 		WHERE pks_session_id = ? AND pks_kind = 'stepup'");
 	$q->execute(array((int)$age, $sid));
 }

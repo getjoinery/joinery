@@ -39,10 +39,10 @@ require_once(__DIR__ . '/../../../tests/lib/llm_fixtures.php');
 $fake_resolution = fake_model_resolution();
 
 
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grants_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxAliasConfig.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/EmailJobCandidates.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobRegistry.php'));
@@ -437,7 +437,7 @@ check($dup === 1, 'the panel shows the instance once — its template card is go
 section('What the AI is doing: in-flight runs and the counts on the panel');
 
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/aip_recipe_item_log_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_item_log_class.php'));
 
 /** A run row in a given state, for the jobs list to find. */
 function aip_run(int $recipe_id, string $status): RecipeRun {
@@ -446,7 +446,7 @@ function aip_run(int $recipe_id, string $status): RecipeRun {
 	$run->set('rcr_status', $status);
 	$run->save();
 	$run->load();
-	harness_register_row('rcr_recipe_runs', 'rcr_run_id', intval($run->key));
+	harness_register_row('rcr_recipe_runs', 'rcr_recipe_run_id', intval($run->key));
 	return $run;
 }
 
@@ -500,11 +500,11 @@ $log = new AipRecipeItemLog(NULL);
 $log->set('aip_rcp_recipe_id', intval($busy->key));
 // The real item key — the message id — so the job's own count stops seeing it.
 $log->set('aip_item_key', (string)$busy_first);
-$log->set('aip_rcr_run_id', intval($run_running->key));
+$log->set('aip_rcr_recipe_run_id', intval($run_running->key));
 $log->set('aip_status', AipRecipeItemLog::STATUS_DONE);
 $log->save();
 $log->load();
-harness_register_row('aip_recipe_item_log', 'aip_log_id', intval($log->key));
+harness_register_row('aip_recipe_item_log', 'aip_recipe_item_log_id', intval($log->key));
 
 $jobs = AiPanelService::jobs($member_id);
 $by_state = array();

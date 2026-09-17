@@ -70,9 +70,9 @@ $made_hosts = [];
 // Anything a previous crashed run left behind. A test that cannot clean up
 // after its own failure eventually stops being runnable.
 $db->exec("DELETE FROM mgh_managed_hosts WHERE mgh_slug LIKE 'agtest-host-%'");
-foreach ($db->query("SELECT mgn_id FROM mgn_managed_nodes WHERE mgn_slug LIKE 'agtest-%'")->fetchAll(PDO::FETCH_COLUMN) as $stale_id) {
-	$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_node_id = ?')->execute([$stale_id]);
-	$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_id = ?')->execute([$stale_id]);
+foreach ($db->query("SELECT mgn_managed_node_id FROM mgn_managed_nodes WHERE mgn_slug LIKE 'agtest-%'")->fetchAll(PDO::FETCH_COLUMN) as $stale_id) {
+	$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = ?')->execute([$stale_id]);
+	$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_managed_node_id = ?')->execute([$stale_id]);
 }
 $db->exec("DELETE FROM ajr_agent_join_requests WHERE ajr_claimed_name LIKE 'agtest-%'");
 
@@ -141,7 +141,7 @@ check($node->get('mgn_agent_public_key') === base64_encode($public),
 check(!empty($node->get('mgn_agent_paired_time')),
 	'Approval stamps when — an enrollment nobody expected is seen rather than silent');
 check($jr->get('ajr_status') === AgentJoinRequest::STATUS_APPROVED
-	&& (int)$jr->get('ajr_mgn_node_id') === (int)$node->key,
+	&& (int)$jr->get('ajr_mgn_managed_node_id') === (int)$node->key,
 	'The request records which node adopted it');
 
 $stored = json_encode($node->export_as_array());
@@ -270,9 +270,9 @@ try {
 }
 check($threw, 'Oversized params are refused at BUILD time, naming the limit — not sent to die quietly on a node');
 
-$before = (int)$db->query("SELECT count(*) FROM mjb_management_jobs WHERE mjb_mgn_node_id = " . (int)$node->key)->fetchColumn();
+$before = (int)$db->query("SELECT count(*) FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = " . (int)$node->key)->fetchColumn();
 try { ManagementJob::createPrimitiveJob($node->key, 'check_status', 'check_status', $oversize, null); } catch (Exception $e) {}
-$after = (int)$db->query("SELECT count(*) FROM mjb_management_jobs WHERE mjb_mgn_node_id = " . (int)$node->key)->fetchColumn();
+$after = (int)$db->query("SELECT count(*) FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = " . (int)$node->key)->fetchColumn();
 check($before === $after, 'A refused build leaves no job row behind');
 
 // ---------------------------------------------------------------------------
@@ -425,7 +425,7 @@ check(ManagementJob::refusalCountForNode($node->key, $since) === 0,
 // A plane-side give-up is not a node verdict. The node said nothing, and
 // recording an outcome for it would be inventing one.
 $abandoned = ManagementJob::createPrimitiveJob($outcome_node->key, 'check_status', 'check_status', [], null);
-$db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_time=?, mjb_claim_attempts=? WHERE mjb_id=?")
+$db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_time=?, mjb_claim_attempts=? WHERE mjb_management_job_id=?")
 	->execute([gmdate('Y-m-d H:i:s', time() - (ManagementJob::CLAIM_TIMEOUT_SECONDS + 60)),
 		ManagementJob::MAX_CLAIM_ATTEMPTS, $abandoned->key]);
 ManagementJob::requeueStaleClaims($outcome_node->key);
@@ -442,11 +442,11 @@ section('A claim that never comes back is a delay, not a wedge');
 
 $stale = ManagementJob::createPrimitiveJob($node->key, 'check_status', 'check_status', [], null);
 $old = gmdate('Y-m-d H:i:s', time() - (ManagementJob::CLAIM_TIMEOUT_SECONDS + 60));
-$db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_time=?, mjb_claim_attempts=1 WHERE mjb_id=?")
+$db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_time=?, mjb_claim_attempts=1 WHERE mjb_management_job_id=?")
 	->execute([$old, $stale->key]);
 
 $fresh = ManagementJob::createPrimitiveJob($node->key, 'check_status', 'check_status', [], null);
-$db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_time=now(), mjb_claim_attempts=1 WHERE mjb_id=?")
+$db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_time=now(), mjb_claim_attempts=1 WHERE mjb_management_job_id=?")
 	->execute([$fresh->key]);
 
 // A bootstrap job: the only kind that carries steps, and the real case this
@@ -454,7 +454,7 @@ $db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_t
 // which does not claim over the channel and does not report back through it.
 $steps_stale = ManagementJob::createJob($node->key, 'install_node',
 	[['type' => 'local', 'label' => 'x', 'cmd' => 'true']], null, null);
-$db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_time=? WHERE mjb_id=?")
+$db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_time=? WHERE mjb_management_job_id=?")
 	->execute([$old, $steps_stale->key]);
 
 ManagementJob::requeueStaleClaims();
@@ -474,11 +474,11 @@ check($steps_stale->get('mjb_status') === 'running',
 $other = agent_channel_node('agtest-other-' . substr(bin2hex(random_bytes(4)), 0, 8));
 $made_nodes[] = $other->key;
 $other_stale = ManagementJob::createPrimitiveJob($other->key, 'check_status', 'check_status', [], null);
-$db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_time=?, mjb_claim_attempts=1 WHERE mjb_id=?")
+$db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_time=?, mjb_claim_attempts=1 WHERE mjb_management_job_id=?")
 	->execute([$old, $other_stale->key]);
 
 $stale2 = ManagementJob::createPrimitiveJob($node->key, 'check_status', 'check_status', [], null);
-$db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_time=?, mjb_claim_attempts=1 WHERE mjb_id=?")
+$db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_time=?, mjb_claim_attempts=1 WHERE mjb_management_job_id=?")
 	->execute([$old, $stale2->key]);
 
 ManagementJob::requeueStaleClaims($node->key);
@@ -494,7 +494,7 @@ check($other_stale->get('mjb_status') === 'pending',
 
 // A job that kills three agents is not going to succeed on the fourth.
 $poison = ManagementJob::createPrimitiveJob($node->key, 'check_status', 'check_status', [], null);
-$db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_time=?, mjb_claim_attempts=? WHERE mjb_id=?")
+$db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_time=?, mjb_claim_attempts=? WHERE mjb_management_job_id=?")
 	->execute([$old, ManagementJob::MAX_CLAIM_ATTEMPTS, $poison->key]);
 ManagementJob::requeueStaleClaims();
 $poison->load();
@@ -509,7 +509,7 @@ section('Approving a host agent names it as the host node');
 
 // A host that a container was provisioned onto already has a placement record
 // (ensure_for_node minted it) with no host node yet. Approving the host's own
-// agent join must fill mgh_mgn_host_node_id, or host-scope work
+// agent join must fill mgh_mgn_managed_node_id, or host-scope work
 // (decommission_site, certificates) is routed to the host by nothing.
 $host_addr = '198.51.100.' . random_int(10, 250);
 $host_rec = new ManagedHost(NULL);
@@ -540,7 +540,7 @@ $made_join_requests[] = $hjr->key;
 
 AgentChannelEndpoint::approveJoin($hjr, $host_node);
 $host_rec->load();
-check((int)$host_rec->get('mgh_mgn_host_node_id') === (int)$host_node->key,
+check((int)$host_rec->get('mgh_mgn_managed_node_id') === (int)$host_node->key,
 	'Approving the host agent links the placement record to it');
 
 // A second machine at the same address must not take the host over: first host
@@ -552,7 +552,7 @@ $made_nodes[] = $intruder->key;
 $linked = ManagedHost::link_host_node($intruder);
 check($linked === null, 'A second host join does not re-point an already-linked host');
 $host_rec->load();
-check((int)$host_rec->get('mgh_mgn_host_node_id') === (int)$host_node->key,
+check((int)$host_rec->get('mgh_mgn_managed_node_id') === (int)$host_node->key,
 	'The first host node still owns the placement record');
 
 // A container node (it carries a web root) is a site, never its own host.
@@ -605,17 +605,17 @@ $ds_jr->save();
 $made_join_requests[] = $ds_jr->key;
 check($ds_jr->addresses() === [$ds_v6, $ds_v4], 'the request answers source first, then what the machine reported, once each', implode(' ', $ds_jr->addresses()));
 
-$hosts_before_ds = array_map('intval', $db->query('SELECT mgh_id FROM mgh_managed_hosts WHERE mgh_delete_time IS NULL')->fetchAll(PDO::FETCH_COLUMN));
+$hosts_before_ds = array_map('intval', $db->query('SELECT mgh_managed_host_id FROM mgh_managed_hosts WHERE mgh_delete_time IS NULL')->fetchAll(PDO::FETCH_COLUMN));
 $ds_adopted = AgentChannelEndpoint::adoptJoin($ds_jr);
 $ds_node = $ds_adopted['node'];
 $made_nodes[] = $ds_node->key;
-$hosts_after_ds = array_map('intval', $db->query('SELECT mgh_id FROM mgh_managed_hosts WHERE mgh_delete_time IS NULL')->fetchAll(PDO::FETCH_COLUMN));
+$hosts_after_ds = array_map('intval', $db->query('SELECT mgh_managed_host_id FROM mgh_managed_hosts WHERE mgh_delete_time IS NULL')->fetchAll(PDO::FETCH_COLUMN));
 foreach (array_diff($hosts_after_ds, $hosts_before_ds) as $stray) { $made_hosts[] = $stray; }
 check($ds_node->get('mgn_host') === $ds_v4, 'the node is keyed by the placement record\'s address, not the address the join came from', $ds_node->get('mgn_host'));
-check((int)$ds_node->get('mgn_mgh_host_id') === (int)$ds_rec->key, 'and placed on that record');
+check((int)$ds_node->get('mgn_mgh_managed_host_id') === (int)$ds_rec->key, 'and placed on that record');
 check(count($hosts_after_ds) === count($hosts_before_ds), 'no second placement record was minted for the same machine');
 $ds_rec->load();
-check((int)$ds_rec->get('mgh_mgn_host_node_id') === (int)$ds_node->key, 'which is now linked to the host node');
+check((int)$ds_rec->get('mgh_mgn_managed_node_id') === (int)$ds_node->key, 'which is now linked to the host node');
 
 // No placement anywhere: the node is keyed by its first public IPv4, the
 // convention placement records use, and the record is minted under that.
@@ -649,12 +649,12 @@ check(AgentChannelEndpoint::isThisMachine('127.0.0.1') === true, 'The loopback a
 
 // Only a host row the adoption MINTED is this test's to delete: ensure_for_node
 // links an existing row at the same address when there is one.
-$hosts_before = array_map('intval', $db->query('SELECT mgh_id FROM mgh_managed_hosts')->fetchAll(PDO::FETCH_COLUMN));
+$hosts_before = array_map('intval', $db->query('SELECT mgh_managed_host_id FROM mgh_managed_hosts')->fetchAll(PDO::FETCH_COLUMN));
 $adopted = AgentChannelEndpoint::adoptJoin($adopt_jr);
 $adopt_node = $adopted['node'];
 $made_nodes[] = $adopt_node->key;
-if ($adopt_node->get('mgn_mgh_host_id') && !in_array((int)$adopt_node->get('mgn_mgh_host_id'), $hosts_before, true)) {
-	$made_hosts[] = (int)$adopt_node->get('mgn_mgh_host_id');
+if ($adopt_node->get('mgn_mgh_managed_host_id') && !in_array((int)$adopt_node->get('mgn_mgh_managed_host_id'), $hosts_before, true)) {
+	$made_hosts[] = (int)$adopt_node->get('mgn_mgh_managed_host_id');
 }
 $adopt_jr->load();
 check($adopted['self'] === false, 'A join from elsewhere is not the plane itself');
@@ -665,8 +665,8 @@ check($adopt_node->get('mgn_site_url') === null || $adopt_node->get('mgn_site_ur
 check((bool)$adopt_node->get('mgn_enabled') === true, 'The record is enabled: the agent is what makes it manageable');
 check($adopt_node->get('mgn_agent_public_key') === base64_encode($adopt_pub), 'Approval bound the requesting key to the new record');
 check($adopt_jr->get('ajr_status') === AgentJoinRequest::STATUS_APPROVED
-	&& (int)$adopt_jr->get('ajr_mgn_node_id') === (int)$adopt_node->key, 'The request records the node it made');
-check(!empty($adopt_node->get('mgn_mgh_host_id')), 'The record has a placement (host) row like a hand-made node');
+	&& (int)$adopt_jr->get('ajr_mgn_managed_node_id') === (int)$adopt_node->key, 'The request records the node it made');
+check(!empty($adopt_node->get('mgn_mgh_managed_host_id')), 'The record has a placement (host) row like a hand-made node');
 
 $second = AgentChannelEndpoint::freeSlug('agtest-Fresh Box.local');
 check($second === 'agtest-fresh-box-local-2', 'A second machine with the same name gets the next free slug', $second);
@@ -692,12 +692,12 @@ $made_join_requests[] = $self_jr->key;
 
 $own_url = rtrim((string)LibraryFunctions::get_absolute_url(), '/');
 $own_host = (string)parse_url($own_url, PHP_URL_HOST);
-$hosts_before = array_map('intval', $db->query('SELECT mgh_id FROM mgh_managed_hosts')->fetchAll(PDO::FETCH_COLUMN));
+$hosts_before = array_map('intval', $db->query('SELECT mgh_managed_host_id FROM mgh_managed_hosts')->fetchAll(PDO::FETCH_COLUMN));
 $self_adopted = AgentChannelEndpoint::adoptJoin($self_jr);
 $self_node = $self_adopted['node'];
 $made_nodes[] = $self_node->key;
-if ($self_node->get('mgn_mgh_host_id') && !in_array((int)$self_node->get('mgn_mgh_host_id'), $hosts_before, true)) {
-	$made_hosts[] = (int)$self_node->get('mgn_mgh_host_id');
+if ($self_node->get('mgn_mgh_managed_host_id') && !in_array((int)$self_node->get('mgn_mgh_managed_host_id'), $hosts_before, true)) {
+	$made_hosts[] = (int)$self_node->get('mgn_mgh_managed_host_id');
 }
 check($self_adopted['self'] === true, 'A join from this machine\'s own address is the plane joining itself');
 check($self_node->get('mgn_name') === $own_host, 'It is named for this site, not for what the machine called itself', $self_node->get('mgn_name'));
@@ -766,26 +766,26 @@ $old_reject->set('ajr_source_ip', '203.0.113.98');
 $old_reject->set('ajr_status', AgentJoinRequest::STATUS_REJECTED);
 $old_reject->save();
 $made_join_requests[] = $old_reject->key;
-$db->prepare("UPDATE ajr_agent_join_requests SET ajr_update_time = ?, ajr_create_time = ? WHERE ajr_id = ?")
+$db->prepare("UPDATE ajr_agent_join_requests SET ajr_update_time = ?, ajr_create_time = ? WHERE ajr_agent_join_request_id = ?")
 	->execute([gmdate('Y-m-d H:i:s', time() - 3 * 86400), gmdate('Y-m-d H:i:s', time() - 3 * 86400), $old_reject->key]);
 $listed = array_map(function ($r) { return (int)$r->key; }, AgentJoinRequest::recently_rejected());
 check(!in_array((int)$old_reject->key, $listed, true), 'a rejection older than a day is not offered for reopening');
 
 section('Cleanup');
 
-// Hosts first: mgh_mgn_host_node_id points at a node, so a host row still
-// naming one blocks that node's delete. Jobs likewise (mjb_mgn_node_id is a
+// Hosts first: mgh_mgn_managed_node_id points at a node, so a host row still
+// naming one blocks that node's delete. Jobs likewise (mjb_mgn_managed_node_id is a
 // real foreign key) — a cleanup that half-works leaves the next run to trip
 // over what this one made.
 foreach ($made_hosts as $id) {
-	$db->prepare('DELETE FROM mgh_managed_hosts WHERE mgh_id = ?')->execute([$id]);
+	$db->prepare('DELETE FROM mgh_managed_hosts WHERE mgh_managed_host_id = ?')->execute([$id]);
 }
 foreach ($made_nodes as $id) {
-	$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_node_id = ?')->execute([$id]);
-	$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_id = ?')->execute([$id]);
+	$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = ?')->execute([$id]);
+	$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_managed_node_id = ?')->execute([$id]);
 }
 foreach ($made_join_requests as $id) {
-	$db->prepare('DELETE FROM ajr_agent_join_requests WHERE ajr_id = ?')->execute([$id]);
+	$db->prepare('DELETE FROM ajr_agent_join_requests WHERE ajr_agent_join_request_id = ?')->execute([$id]);
 }
 $left = (int)$db->query('SELECT count(*) FROM mgn_managed_nodes WHERE mgn_slug LIKE \'agtest-%\'')->fetchColumn();
 check($left === 0, 'Every node this test created is gone', $left . ' left');

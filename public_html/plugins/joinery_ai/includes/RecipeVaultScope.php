@@ -392,11 +392,11 @@ class RecipeVaultScope {
 		}
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare(
-			"SELECT rcr_run_id FROM rcr_recipe_runs
+			"SELECT rcr_recipe_run_id FROM rcr_recipe_runs
 			  WHERE rcr_rcp_recipe_id = ?
 			    AND rcr_status = ?
 			    AND rcr_delete_time IS NULL
-			  ORDER BY rcr_started_time ASC, rcr_run_id ASC
+			  ORDER BY rcr_started_time ASC, rcr_recipe_run_id ASC
 			  LIMIT 1");
 		$q->execute(array((int)$recipe->key, RecipeRun::STATUS_PENDING));
 		$id = $q->fetchColumn();

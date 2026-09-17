@@ -114,8 +114,8 @@ class CalendarSubject {
      * from the owner's deletion path (e.g. User::permanent_delete for a user).
      */
     public function purge(): void {
-        require_once(PathHelper::getIncludePath('data/schedule_class.php'));
-        require_once(PathHelper::getIncludePath('data/calendar_entry_class.php'));
+        require_once(PathHelper::getIncludePath('data/schedules_class.php'));
+        require_once(PathHelper::getIncludePath('data/entries_class.php'));
 
         $filter = ['subject_type' => $this->type, 'subject_id' => $this->id];
 

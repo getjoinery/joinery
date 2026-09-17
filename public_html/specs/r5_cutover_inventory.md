@@ -240,8 +240,8 @@ Classified `DIES` / `BIRTH` (survives for provisioning-time use) / `OUT OF SCOPE
 
 | File | What it does with the key path | Class |
 |---|---|---|
-| `data/managed_node_class.php` | declares `mgn_ssh_key_path` | **BIRTH** — the column stays while `install_node` does; empty it per node as each is cut over |
-| `data/managed_host_class.php` | declares `mgh_ssh_key_path` | **BIRTH** — same, plus §7.2's host pairing columns land beside it |
+| `data/managed_nodes_class.php` | declares `mgn_ssh_key_path` | **BIRTH** — the column stays while `install_node` does; empty it per node as each is cut over |
+| `data/managed_hosts_class.php` | declares `mgh_ssh_key_path` | **BIRTH** — same, plus §7.2's host pairing columns land beside it |
 | `includes/JobCommandBuilder.php` | §1 above | mixed |
 | `includes/JobResultProcessor.php:1153` | relay registration fallback: `mrl_ssh_key_path` = the relay pull key if present, **else the node's `mgn_ssh_key_path`** | **DIES.** The fallback writes the plane's fleet key into a relay row as that relay's credential. It is reached only when `RelaySsh::pullKeyPath()` is missing. Delete the fallback, not just the branch — a missing pull key should refuse, not substitute the fleet key. |
 | `includes/JobResultProcessor.php:1473` | carries `ssh_key_path` out of `discover_nodes` job params into a node row | **DIES** with `build_discover_nodes` |

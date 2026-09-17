@@ -6,12 +6,12 @@ require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 require_once(PathHelper::getIncludePath('includes/SingleRowAccessor.php'));
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 require_once(PathHelper::getIncludePath('includes/Validator.php'));
-require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
+require_once(PathHelper::getIncludePath('includes/EmailTemplateRenderer.php'));
 require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('plugins/store/includes/StripeHelper.php'));
 
-require_once(PathHelper::getIncludePath('data/address_class.php'));
+require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
 require_once(PathHelper::getIncludePath('plugins/store/data/order_item_requirements_class.php'));
 require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php'));
 

@@ -9,9 +9,9 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 require_once(PathHelper::getIncludePath('includes/Validator.php'));
 require_once(PathHelper::getIncludePath('data/content_versions_class.php'));
 
-class EmailTemplateStoreException extends SystemBaseException {}
+class EmailTemplateException extends SystemBaseException {}
 
-class EmailTemplateStore extends SystemBase {	public static $prefix = 'emt';
+class EmailTemplate extends SystemBase {	public static $prefix = 'emt';
 	public static $tablename = 'emt_email_templates';
 	public static $pkey_column = 'emt_email_template_id';
 
@@ -46,7 +46,7 @@ class EmailTemplateStore extends SystemBase {	public static $prefix = 'emt';
 	);
 
 private function _check_for_duplicate_email_template() {
-		$count = new MultiEmailTemplateStore(array(
+		$count = new MultiEmailTemplate(array(
 			'email_template_name' => $this->get('emt_name'),
 		));
 		
@@ -62,7 +62,7 @@ private function _check_for_duplicate_email_template() {
 		//CHECK FOR DUPLICATES
 		if(!$this->key){
 			if($this->_check_for_duplicate_email_template()){
-				throw new EmailTemplateStoreException(
+				throw new EmailTemplateException(
 				'This email_template already exists');
 			}
 		}
@@ -87,8 +87,8 @@ private function _check_for_duplicate_email_template() {
 
 }
 
-class MultiEmailTemplateStore extends SystemMultiBase {
-	protected static $model_class = 'EmailTemplateStore';
+class MultiEmailTemplate extends SystemMultiBase {
+	protected static $model_class = 'EmailTemplate';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();

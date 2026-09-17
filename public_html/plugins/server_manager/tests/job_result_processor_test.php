@@ -38,8 +38,8 @@ require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 
 /** Call a private static on JobResultProcessor. */
 function jrp_call($method, array $args) {
@@ -58,20 +58,20 @@ function jrp_node(array $fields = array()) {
 	foreach ($fields as $k => $v) { $node->set($k, $v); }
 	$node->save();
 	$node->load();
-	harness_register_row('mgn_managed_nodes', 'mgn_id', $node->key);
+	harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $node->key);
 	return $node;
 }
 
 function jrp_job($node, $type, $output) {
 	$job = new ManagementJob(NULL);
-	$job->set('mjb_mgn_node_id', $node ? $node->key : null);
+	$job->set('mjb_mgn_managed_node_id', $node ? $node->key : null);
 	$job->set('mjb_job_type', $type);
 	$job->set('mjb_status', 'completed');
 	$job->set('mjb_commands', array());
 	$job->set('mjb_output', $output);
 	$job->save();
 	$job->load();
-	harness_register_row('mjb_management_jobs', 'mjb_id', $job->key);
+	harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $job->key);
 	return $job;
 }
 
@@ -448,7 +448,7 @@ $hc_node = jrp_node(array(
 ));
 function jrp_pending_host_reports($node_id) {
 	$db = DbConnector::get_instance()->get_db_link();
-	$q = $db->prepare("SELECT mjb_id FROM mjb_management_jobs WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'host_report' AND mjb_status = 'pending' AND mjb_delete_time IS NULL ORDER BY mjb_id");
+	$q = $db->prepare("SELECT mjb_management_job_id FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'host_report' AND mjb_status = 'pending' AND mjb_delete_time IS NULL ORDER BY mjb_management_job_id");
 	$q->execute(array((int)$node_id));
 	return $q->fetchAll(PDO::FETCH_COLUMN);
 }
@@ -461,7 +461,7 @@ JobResultProcessor::process($hc_job);
 $hc_job->load();
 check($hc_job->get('mjb_status') === 'completed', 'the run is green');
 $queued = jrp_pending_host_reports($hc_node->key);
-foreach ($queued as $id) { harness_register_row('mjb_management_jobs', 'mjb_id', $id); }
+foreach ($queued as $id) { harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $id); }
 check(count($queued) === 1, 'one host_report is queued for the node so the Host card shows the machine after the run', var_export($queued, true));
 if ($queued) {
 	$follow = new ManagementJob($queued[0], TRUE);
@@ -620,7 +620,7 @@ $dvictim4 = jrp_node(array('mgn_container_name' => 'decomrp4', 'mgn_web_root' =>
 $dj4 = ManagementJob::createFromBuild($dhost4->key, 'decommission_node',
 	array('primitive' => 'decommission_site', 'params' => array('site' => 'decomrp4')),
 	array('victim_node_id' => (int)$dvictim4->key, 'site' => 'decomrp4'), 1);
-harness_register_row('mjb_management_jobs', 'mjb_id', $dj4->key);
+harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $dj4->key);
 $dj4->set('mjb_status', 'completed');
 $dj4->set('mjb_output', json_encode(array('api_version' => 1, 'data' => array(
 	'output' => "REMOVE_ACCOUNT_OK decomrp4\nDECOMMISSION_VERIFIED decomrp4"))));
@@ -639,7 +639,7 @@ $dvictim5 = jrp_node(array('mgn_container_name' => 'decomrp5', 'mgn_web_root' =>
 $dj5 = ManagementJob::createFromBuild($dhost4->key, 'decommission_node',
 	array('primitive' => 'decommission_site', 'params' => array('site' => 'decomrp5')),
 	array('victim_node_id' => (int)$dvictim5->key, 'site' => 'decomrp5'), 1);
-harness_register_row('mjb_management_jobs', 'mjb_id', $dj5->key);
+harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $dj5->key);
 $dj5->set('mjb_status', 'completed');
 $dj5->set('mjb_output', json_encode(array('api_version' => 1, 'data' => array(
 	'output' => "REMOVE_ACCOUNT_OK decomrp5\nDECOMMISSION_FAILED_VERIFY decomrp5\nstill present: volumes"))));
@@ -683,10 +683,10 @@ section('A node that hosts no site is never asked for its recovery key');
 // manifest refusal the trust classifier read as a tampered file (2026-09-15).
 function jrp_pending_jobs($node_id, $type) {
 	$db = DbConnector::get_instance()->get_db_link();
-	$q = $db->prepare("SELECT mjb_id FROM mjb_management_jobs WHERE mjb_mgn_node_id = ? AND mjb_job_type = ? AND mjb_status = 'pending' AND mjb_delete_time IS NULL ORDER BY mjb_id");
+	$q = $db->prepare("SELECT mjb_management_job_id FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = ? AND mjb_status = 'pending' AND mjb_delete_time IS NULL ORDER BY mjb_management_job_id");
 	$q->execute(array((int)$node_id, $type));
 	$ids = $q->fetchAll(PDO::FETCH_COLUMN);
-	foreach ($ids as $id) { harness_register_row('mjb_management_jobs', 'mjb_id', $id); }
+	foreach ($ids as $id) { harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $id); }
 	return $ids;
 }
 $machine_status = "=== [Step 1/1] check_status ===\n" . json_encode(array('api_version' => '1.0', 'data' => array(
@@ -755,18 +755,18 @@ $jrp_vnode->set('mgn_name', 'HarnessTest verify node');
 $jrp_vnode->set('mgn_slug', 'harnesstest-verify-' . bin2hex(random_bytes(3)));
 $jrp_vnode->set('mgn_host', '192.0.2.44');
 $jrp_vnode->save();
-harness_register_row('mgn_managed_nodes', 'mgn_id', $jrp_vnode->key);
+harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $jrp_vnode->key);
 
 $mk_vjob = function ($output, $status) use ($jrp_vnode) {
 	$job = new ManagementJob(NULL);
-	$job->set('mjb_mgn_node_id', $jrp_vnode->key);
+	$job->set('mjb_mgn_managed_node_id', $jrp_vnode->key);
 	$job->set('mjb_job_type', 'verify_backup');
 	$job->set('mjb_status', $status);
 	$job->set('mjb_commands', array());
 	$job->set('mjb_output', $output);
 	$job->set('mjb_completed_time', '2026-09-13 05:00:00');
 	$job->save();
-	harness_register_row('mjb_management_jobs', 'mjb_id', $job->key);
+	harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $job->key);
 	return $job;
 };
 JobResultProcessor::process($mk_vjob($vpass, 'completed'));

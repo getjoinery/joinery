@@ -20,7 +20,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function calendar_settings_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-	require_once(PathHelper::getIncludePath('data/calendar_preference_class.php'));
+	require_once(PathHelper::getIncludePath('data/calendar_preferences_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(0);

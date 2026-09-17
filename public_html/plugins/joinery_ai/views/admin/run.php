@@ -1,7 +1,7 @@
 <?php
 /**
  * Joinery AI - Run Detail
- * URL: /admin/joinery_ai/run?rcr_run_id=N
+ * URL: /admin/joinery_ai/run?rcr_recipe_run_id=N
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -12,7 +12,7 @@ $session = SessionControl::get_instance();
 $session->check_permission(10);
 $session->set_return();
 
-$run_id = (int)LibraryFunctions::fetch_variable_local($_GET, 'rcr_run_id', 0);
+$run_id = (int)LibraryFunctions::fetch_variable_local($_GET, 'rcr_recipe_run_id', 0);
 if ($run_id <= 0) {
     header('Location: /admin/joinery_ai');
     exit;

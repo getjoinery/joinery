@@ -42,10 +42,10 @@ require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 
 require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/hosted_trial_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provisions_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/hosted_trials_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/HostedTrialSignals.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/fulfillment_providers/CustomerCloudFulfillment.php'));
@@ -173,7 +173,7 @@ $reveal = ht_provision('httest-reveal-' . $suffix, 'operator', array(
 		'cvp_customer_cloud_provisions.cvp_admin_pass_sealed', $pw),
 ));
 check($reveal->admin_password_state() === 'sealed', 'before the reveal it is readable');
-check(CustomerCloudProvision::holds_admin_password($reveal->get('cvp_mgn_node_id')) === false,
+check(CustomerCloudProvision::holds_admin_password($reveal->get('cvp_mgn_managed_node_id')) === false,
 	'holds_admin_password is answered per NODE, and this row names none yet');
 
 // What the page does, in the same request that shows it.
@@ -193,7 +193,7 @@ section('The grace clock moves dates and never touches a machine');
 
 $graced = ht_provision('httest-grace-' . $suffix, 'operator');
 $trial = new HostedTrial(NULL);
-$trial->set('htr_cvp_provision_id', (int)$graced->key);
+$trial->set('htr_cvp_customer_cloud_provision_id', (int)$graced->key);
 $trial->set('htr_external_order_item_id', 880000 + random_int(0, 9999));
 $trial->set('htr_state', HostedTrial::STATE_SUBSCRIBED);
 $trial->save();
@@ -343,7 +343,7 @@ foreach (array(
 // ---------------------------------------------------------------------------
 section('A backup target that can mint keys says so, and only where it can');
 
-require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
+require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 $b2 = new BackupTarget(NULL);
 $b2->set('bkt_name', 'HarnessTest hosted ' . $suffix);
 $b2->set('bkt_provider', 'b2');
@@ -484,7 +484,7 @@ section('A trial that simply ends becomes a subscription');
 // date in the past.
 $conv = ht_provision('httest-conv-' . $suffix, 'operator');
 $ct = new HostedTrial(NULL);
-$ct->set('htr_cvp_provision_id', (int)$conv->key);
+$ct->set('htr_cvp_customer_cloud_provision_id', (int)$conv->key);
 $ct->set('htr_state', HostedTrial::STATE_TRIAL);
 $ct->set('htr_trial_ends_time', gmdate('Y-m-d H:i:s', time() + 86400));
 $ct->save();

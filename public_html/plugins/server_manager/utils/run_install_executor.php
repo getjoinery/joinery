@@ -35,8 +35,8 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
 require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/InstallJobExecutor.php'));
 
 // Single instance. A second worker spawned while one is running exits quietly
@@ -81,7 +81,7 @@ try {
 			$say('queue empty; exiting after ' . $ran . ' job(s)');
 			break;
 		}
-		$say('claimed job #' . $job->key . ' for node #' . (int)$job->get('mjb_mgn_node_id'));
+		$say('claimed job #' . $job->key . ' for node #' . (int)$job->get('mjb_mgn_managed_node_id'));
 		(new InstallJobExecutor())->execute($job);
 		$job->load();
 		$say('finished job #' . $job->key . ': ' . $job->get('mjb_status'));

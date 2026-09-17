@@ -25,7 +25,7 @@
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayProtocol.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_client_identity_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_client_identities_class.php'));
 
 class RelayClientException extends Exception {
 	/** @var string one of RelayClient::FAIL_* */

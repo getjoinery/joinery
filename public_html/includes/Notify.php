@@ -206,7 +206,7 @@ class Notify {
 	 */
 	private static function _enqueue_email($user_id, $title, $body, $link = null) {
 		require_once(PathHelper::getIncludePath('data/users_class.php'));
-		require_once(PathHelper::getIncludePath('data/queued_email_class.php'));
+		require_once(PathHelper::getIncludePath('data/queued_emails_class.php'));
 		require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 		$user  = new User($user_id, TRUE);

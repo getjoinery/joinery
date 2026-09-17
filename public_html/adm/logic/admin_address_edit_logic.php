@@ -3,7 +3,7 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
 
 function admin_address_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-	require_once(PathHelper::getIncludePath('data/address_class.php'));
+	require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);

@@ -584,8 +584,8 @@ if ($dom_id && ($level === 'private' || $level === 'fortress')) {
 	// Completed state is not lost by omission: it reads as a card in Receiving
 	// and Sending, and the lifecycle controls live under Advanced.
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
 	$active_relay = mailbox_receive_relay_exists() ? MailboxRelay::active() : null;
 
 	// Each entry is a closure so a step can render a form, and so nothing is

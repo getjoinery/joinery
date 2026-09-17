@@ -22,7 +22,7 @@
  * @version 1.3
  */
 
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 
 class FleetClientException extends Exception {}
 
@@ -51,7 +51,7 @@ class FleetClient {
 		// The one key a shard needs: this deployment's relay client identity,
 		// minted on first use. Its public half goes into the shard's registry;
 		// nothing that could read a spool ever leaves this box.
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_client_identity_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_client_identities_class.php'));
 		$keys = array('public_key' => RelayClientIdentity::publicKey(RelayClientIdentity::KIND_CLIENT));
 
 		$data = $this->call('fleet_enroll', $keys);
@@ -79,7 +79,7 @@ class FleetClient {
 			$domains[] = strtolower(trim($only_domain));
 		} else {
 			try {
-				require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
+				require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
 				$multi = new MultiInboundEmailDomain(array('deleted' => false));
 				$multi->load();
 				foreach ($multi as $d) {

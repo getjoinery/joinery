@@ -5,7 +5,7 @@
 The email system consists of three focused classes that provide clear separation of concerns:
 
 - **EmailMessage**: Fluent API for composing email messages
-- **EmailTemplate**: Template processing (conditionals, variables)
+- **EmailTemplateRenderer**: Template processing (conditionals, variables)
 - **EmailSender**: All sending logic with service selection and fallback
 
 **Inbound email** is handled by the Mailbox plugin — see [Mailbox Plugin](/plugins/mailbox/docs/overview.md) for setup, admin usage, and server configuration. Its guided **Setup** tab verifies MX, SPF, DKIM, and forward-confirmed reverse DNS (PTR) for each inbound domain, using `DnsResolver` (including `DnsResolver::getPtr()` for reverse lookups). Locally-stored mail is read through a Gmail-style **Mailbox Reader** with a **grant-based mailbox model** — each address is its own mailbox, shareable among several users, with read/star state shared per mailbox. The reader has two mounts of one UI: the staff **Mailboxes** admin tab, and a member page at `/profile/mailbox/mailbox` where any signed-in member reads and answers the mailboxes they hold grants for; see [Mailbox Reader](/plugins/mailbox/docs/overview.md#mailbox-reader).
@@ -141,13 +141,13 @@ per UTC day, since the event-log table carries no retention policy. The red
 Setup card, not the log, is the live signal; the log row is the durable
 record.
 
-### EmailTemplate Class
+### EmailTemplateRenderer Class
 
 Focused on template processing:
 
 ```php
 // Direct template processing (rarely needed - use EmailMessage instead)
-$template = new EmailTemplate('activation_content');
+$template = new EmailTemplateRenderer('activation_content');
 $template->fill_template([
     'act_code' => 'ABC123',
     'resend' => false,
@@ -783,9 +783,9 @@ The receipt system (specs/receipts_refactor.md) uses two database-stored templat
 | Template name | Purpose | Recipient |
 |---|---|---|
 | `purchase_receipt_default` | Default order receipt + per-registrant activation. One template, two render modes via `{is_billing}`. | Billing user always; per-registrant for event/bundle gift recipients. |
-| `purchase_receipt_product_default` | Per-product opt-in email. Sent at most once per (product, order). Falls back here when a product has `pro_after_purchase_message` or `pro_emt_receipt_template_id` set. | Billing user. |
+| `purchase_receipt_product_default` | Per-product opt-in email. Sent at most once per (product, order). Falls back here when a product has `pro_after_purchase_message` or `pro_emt_email_template_id` set. | Billing user. |
 
-A product can override `purchase_receipt_product_default` with any other template by setting `pro_emt_receipt_template_id`. If the override points at a missing or soft-deleted template the helper `_resolve_receipt_template()` falls back to the default — never crashes.
+A product can override `purchase_receipt_product_default` with any other template by setting `pro_emt_email_template_id`. If the override points at a missing or soft-deleted template the helper `_resolve_receipt_template()` falls back to the default — never crashes.
 
 **Variables passed to `purchase_receipt_default`:**
 
@@ -821,7 +821,7 @@ The email system provides:
 - **✅ Maintained performance** - same template processing engine
 - **✅ Template compatibility** - all existing templates work unchanged
 
-Use EmailMessage + EmailSender for all email development. Direct EmailTemplate usage is only for specialized template processing needs.
+Use EmailMessage + EmailSender for all email development. Direct EmailTemplateRenderer usage is only for specialized template processing needs.
 
 ## Two Send Modes & SmtpConfig
 

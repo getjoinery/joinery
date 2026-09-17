@@ -113,8 +113,8 @@ if (count($active) === 1) {
 // ── C. Seeding travels as ONE fleet_enroll job on the node's own agent ──────
 section('seedNode dispatches a fleet_enroll primitive');
 
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 
 // An unpaired node has no route, and no key is minted for it: the provision
 // re-asks every tick until the agent pairs, and a key per tick would churn.
@@ -125,7 +125,7 @@ $unpaired->set('mgn_host', '192.0.2.40');
 $unpaired->set('mgn_uptime_enabled', false);
 $unpaired->save();
 $unpaired->load();
-harness_register_row('mgn_managed_nodes', 'mgn_id', $unpaired->key);
+harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $unpaired->key);
 check(FleetProvisionSeeding::nodeReady($unpaired) === false, 'an unpaired node is not ready to seed');
 $before = 0;
 foreach (new MultiApiKey(array('user_id' => $buyer->key)) as $k) { $before++; }
@@ -147,11 +147,11 @@ $paired->set('mgn_agent_version', '1.17.0');
 $paired->set('mgn_agent_primitives', 'check_status,fleet_enroll');
 $paired->save();
 $paired->load();
-harness_register_row('mgn_managed_nodes', 'mgn_id', $paired->key);
+harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $paired->key);
 $res = FleetProvisionSeeding::seedNode($paired, $buyer->key);
 check($res['ok'] === true && !empty($res['job_id']), 'a paired node is seeded by a job', $res['message']);
 $job = new ManagementJob((int)$res['job_id'], TRUE);
-harness_register_row('mjb_management_jobs', 'mjb_id', $job->key);
+harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $job->key);
 $env = json_decode((string)$job->get('mjb_commands'), true);
 check(($env['primitive'] ?? '') === 'fleet_enroll', 'the job is the fleet_enroll primitive');
 check(isset($env['params']['service_url'], $env['params']['public_key'], $env['params']['secret_key'])
@@ -177,7 +177,7 @@ check(FleetProvisionSeeding::outcome($paired)['state'] === 'pending', 'before th
 // revoked the credential the first site enrolled with. The same site again is
 // a rotation and goes through.
 section('One seeded site per buyer');
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provisions_class.php'));
 $holder = new CustomerCloudProvision(NULL);
 $holder->set('cvp_origin', 'admin');
 $holder->set('cvp_usr_user_id', $buyer->key);
@@ -186,11 +186,11 @@ $holder->set('cvp_slug', 'harnesstest-fleet-holder-' . substr(md5(uniqid('', tru
 $holder->set('cvp_status', 'done');
 $holder->set('cvp_install_mode', 'fresh');
 $holder->set('cvp_docker_mode', 'docker');
-$holder->set('cvp_mgn_node_id', $unpaired->key);
+$holder->set('cvp_mgn_managed_node_id', $unpaired->key);
 $holder->set('cvp_fleet_seed_state', 'done');
 $holder->save();
 $holder->load();
-harness_register_row('cvp_customer_cloud_provisions', 'cvp_id', $holder->key);
+harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $holder->key);
 check(FleetProvisionSeeding::seededElsewhere($paired, $buyer->key) === 'harnesstest-fleet-holder.example.com',
 	'the slot holder is found by the buyer, on a node other than the one being seeded');
 check(FleetProvisionSeeding::seededElsewhere($unpaired, $buyer->key) === null,

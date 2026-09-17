@@ -35,11 +35,11 @@ const FILTER_UNIT_MULTIPLIERS = array('B' => 1, 'KB' => 1024, 'MB' => 1048576);
 function mailbox_filters_logic(array $input, array $mount = array()): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_filter_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_folder_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_filters_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_accounts_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_folders_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_labels_class.php'));
 
 	$session = SessionControl::get_instance();
@@ -314,7 +314,7 @@ function _filter_require_unlock($alias_id): ?string {
 	if ($alias_id === null) {
 		return null;
 	}
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
 	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 	require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 

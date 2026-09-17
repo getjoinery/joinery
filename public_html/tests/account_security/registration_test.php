@@ -231,7 +231,7 @@ check($res->error !== null,
 // Population 2: a login email hosted on this platform is circular. The mailbox
 // plugin owns the domain list, so skip cleanly when it is not installed.
 $hosted_domain = null;
-$domain_class = PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php');
+$domain_class = PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php');
 if (file_exists($domain_class)) {
 	require_once($domain_class);
 	try {
@@ -378,8 +378,8 @@ if ($created instanceof User) {
 	// The activation email is dry-run suppressed, but the code behind it must
 	// still be minted — otherwise the account can never verify.
 	$db = DbConnector::get_instance()->get_db_link();
-	$q = $db->prepare("SELECT act_code, act_expires_time, act_deleted FROM act_activation_codes
-		WHERE act_usr_user_id = ? AND act_purpose = ? AND act_deleted = FALSE");
+	$q = $db->prepare("SELECT act_code, act_expires_time, act_delete_time FROM act_activation_codes
+		WHERE act_usr_user_id = ? AND act_purpose = ? AND act_delete_time IS NULL");
 	$q->execute(array($created->key, Activation::EMAIL_VERIFY));
 	$codes = $q->fetchAll(PDO::FETCH_ASSOC);
 	check(count($codes) >= 1, 'an email-verification code is issued at registration',

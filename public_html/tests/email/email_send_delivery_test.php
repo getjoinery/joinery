@@ -33,8 +33,8 @@ harness_boot();
 // the harness's recipient redirect exists to prevent — so it takes the
 // documented escape and turns the redirect off for this process.
 harness_set_setting_mem('email_test_mode', '0');
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
 require_once(PathHelper::getIncludePath('includes/EmailServiceProvider.php'));
 require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));

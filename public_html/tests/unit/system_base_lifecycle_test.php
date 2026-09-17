@@ -34,7 +34,7 @@ require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 
 require_once(PathHelper::getIncludePath('data/questions_class.php'));
-require_once(PathHelper::getIncludePath('data/schedule_class.php'));
+require_once(PathHelper::getIncludePath('data/schedules_class.php'));
 
 if (session_id() === '') { @session_start(); }
 

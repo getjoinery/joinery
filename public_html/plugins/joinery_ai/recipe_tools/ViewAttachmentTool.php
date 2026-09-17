@@ -3,7 +3,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolI
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatTurnContext.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AiAttachment.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_message_attachments_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/message_attachments_class.php'));
 
 /**
  * On-demand attachment escalation (chat only). In a chat set to "Full file when

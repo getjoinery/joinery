@@ -12,8 +12,8 @@ harness_boot();
 require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
 if (!PluginHelper::isPluginActive('joinery_ai')) { harness_skip('joinery_ai plugin inactive'); harness_finish(); }
 
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_memories_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/memories_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversations_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatTurnContext.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatMemory.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatControls.php'));

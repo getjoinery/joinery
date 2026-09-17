@@ -15,9 +15,9 @@
  * @version 1.0
  */
 
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_account_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provisions_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_accounts_class.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_compute/LinodeComputeDriver.php'));
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Client.php'));
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2ProviderRegistry.php'));
@@ -132,7 +132,7 @@ class NodeReverseDns {
 				"No reverse-DNS driver for provider '{$provision->get('cvp_provider')}'.");
 		}
 
-		$account_id = (int)$provision->get('cvp_cca_account_id');
+		$account_id = (int)$provision->get('cvp_cca_customer_cloud_account_id');
 		$account = $account_id ? new CustomerCloudAccount($account_id, TRUE) : null;
 		if (!$account || !$account->key || $account->get('cca_status') !== 'active') {
 			throw NodeReverseDnsException::reconnect(

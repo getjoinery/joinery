@@ -26,7 +26,7 @@
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_filter_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_filters_class.php'));
 
 class FilterImportTest {
 	private $fixture;

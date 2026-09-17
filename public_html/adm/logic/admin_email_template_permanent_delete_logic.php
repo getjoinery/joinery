@@ -25,7 +25,7 @@ function admin_email_template_permanent_delete_logic(array $input): LogicResult 
 		$confirm = LibraryFunctions::fetch_variable('confirm', NULL, 1, 'You must confirm the action.', $input);
 
 		if ($confirm) {
-			$email_template = new EmailTemplateStore($emt_email_template_id, TRUE);
+			$email_template = new EmailTemplate($emt_email_template_id, TRUE);
 			$email_template->assert_can_write($session);
 			$email_template->permanent_delete();
 		}
@@ -38,7 +38,7 @@ function admin_email_template_permanent_delete_logic(array $input): LogicResult 
 	// Handle GET - Display confirmation page
 	$emt_email_template_id = LibraryFunctions::fetch_variable('emt_email_template_id', NULL, 1, 'You must provide a email_template to edit.', $input);
 
-	$email_template = new EmailTemplateStore($emt_email_template_id, TRUE);
+	$email_template = new EmailTemplate($emt_email_template_id, TRUE);
 
 	$session->set_return("/admin/admin_email_templates");
 

@@ -2202,7 +2202,7 @@ class ModelTester {
      */
     private function validate_foreign_key_declarations() {
         if (!class_exists('DeletionRule')) {
-            require_once(PathHelper::getIncludePath('data/deletion_rule_class.php'));
+            require_once(PathHelper::getIncludePath('data/deletion_rules_class.php'));
         }
         $model_class = $this->model_class;
         $reflection = new ReflectionClass($model_class);

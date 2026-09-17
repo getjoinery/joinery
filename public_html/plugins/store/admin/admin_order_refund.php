@@ -3,7 +3,7 @@
 	require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
 	
 	require_once(PathHelper::getIncludePath('/plugins/store/includes/StripeHelper.php'));
-	require_once(PathHelper::getIncludePath('/data/address_class.php'));
+	require_once(PathHelper::getIncludePath('/data/users_addrs_class.php'));
 	require_once(PathHelper::getIncludePath('/data/users_class.php'));
 
 	$session = SessionControl::get_instance();

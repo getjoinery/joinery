@@ -16,7 +16,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_cla
 $session = SessionControl::get_instance();
 $session->check_permission(10);
 
-$run_id = (int)LibraryFunctions::fetch_variable_local($_REQUEST, 'rcr_run_id', 0);
+$run_id = (int)LibraryFunctions::fetch_variable_local($_REQUEST, 'rcr_recipe_run_id', 0);
 $recipe_id = (int)LibraryFunctions::fetch_variable_local($_REQUEST, 'rcp_recipe_id', 0);
 
 if ($run_id <= 0) {
@@ -44,7 +44,7 @@ $q = $db->prepare(
              WHEN rcr_status = ? THEN 'cancelled by admin (before dispatch)'
              ELSE rcr_status_note
          END
-     WHERE rcr_run_id = ?
+     WHERE rcr_recipe_run_id = ?
        AND rcr_status IN (?, ?)
        AND rcr_delete_time IS NULL"
 );
@@ -59,6 +59,6 @@ $q->execute([
 if ($recipe_id > 0) {
     header('Location: /admin/joinery_ai');
 } else {
-    header('Location: /admin/joinery_ai/run?rcr_run_id=' . $run_id);
+    header('Location: /admin/joinery_ai/run?rcr_recipe_run_id=' . $run_id);
 }
 exit;

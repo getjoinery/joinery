@@ -451,7 +451,7 @@ than an accident.
 `mgh_ssh_user`, `mgh_ssh_key_path`, `mgh_ssh_port`, `mgh_max_sites`,
 `mgh_provisioning_enabled`, `mgh_notes` and timestamps — **SSH connection
 details and nothing else**. No public key, no fingerprint, no pairing, no
-version. And `mjb_management_jobs` carries `mjb_mgn_node_id` only, so **no job
+version. And `mjb_management_jobs` carries `mjb_mgn_managed_node_id` only, so **no job
 row can name a host**. On-host steps are dispatched at a *node* and merely skip
 the `docker exec` wrapper (`runner.go:238-245`).
 
@@ -473,7 +473,7 @@ is R3's only consumer, and is shelved with it.
 
 One finding here outlives the design and is worth keeping: siblings on a host
 are found **two different ways that disagree** — by the `mgn_host` string and
-by the `mgn_mgh_host_id` FK, with `next_container_port()` hedging across both.
+by the `mgn_mgh_managed_host_id` FK, with `next_container_port()` hedging across both.
 Whenever the host does become a node, that must be settled first, or the host
 is paired under one identity and addressed under the other.
 

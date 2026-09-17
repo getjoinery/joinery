@@ -24,11 +24,11 @@ class IncidentCaseCard {
 	public static function cases_for(int $node_id): array {
 		$out = [];
 		foreach (new MultiIncidentRecord(['node_id' => $node_id, 'status' => IncidentRecord::STATUS_OPEN, 'deleted' => false],
-			['inc_id' => 'DESC']) as $row) {
+			['inc_incident_record_id' => 'DESC']) as $row) {
 			$out[] = $row;
 		}
 		foreach (new MultiIncidentRecord(['node_id' => $node_id, 'status' => IncidentRecord::STATUS_CLOSED, 'deleted' => false],
-			['inc_id' => 'DESC'], self::CLOSED_SHOWN) as $row) {
+			['inc_incident_record_id' => 'DESC'], self::CLOSED_SHOWN) as $row) {
 			$out[] = $row;
 		}
 		return $out;
@@ -121,7 +121,7 @@ class IncidentCaseCard {
 		ob_start();
 		$fw->begin_form();
 		$fw->hiddeninput('action', '', ['value' => 'case_note']);
-		$fw->hiddeninput('inc_id', '', ['value' => (string)$id]);
+		$fw->hiddeninput('inc_incident_record_id', '', ['value' => (string)$id]);
 		$fw->hiddeninput(SmAdminCsrf::FIELD, '', ['value' => $csrf_token]);
 		$fw->textarea('case_note', 'Your note', ['rows' => 2, 'placeholder' => 'What you saw, what you did, where any backup is']);
 		$fw->submitbutton('btn_case_note_' . $id, 'Save note', ['class' => 'btn btn-sm btn-outline-primary']);
@@ -131,7 +131,7 @@ class IncidentCaseCard {
 		if (!$read) {
 			$html .= '<form method="post" action="' . $e($base_url . '&tab=overview') . '" class="mt-1">'
 				. '<input type="hidden" name="action" value="case_read">'
-				. '<input type="hidden" name="inc_id" value="' . $id . '">'
+				. '<input type="hidden" name="inc_incident_record_id" value="' . $id . '">'
 				. '<input type="hidden" name="' . $e(SmAdminCsrf::FIELD) . '" value="' . $e($csrf_token) . '">'
 				. '<button type="submit" class="btn btn-sm btn-outline-secondary">Mark read</button>'
 				. '</form>';

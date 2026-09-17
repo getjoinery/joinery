@@ -12,7 +12,7 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
 
 function probe_api_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-	require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 
 	$node_id = isset($input['node_id']) ? (int) $input['node_id'] : 0;

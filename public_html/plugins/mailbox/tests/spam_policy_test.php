@@ -45,7 +45,7 @@
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSpamPolicy.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 
 class SpamPolicyTest {
 

@@ -39,7 +39,7 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailSe
 require_once(PathHelper::getIncludePath('plugins/mailbox/tasks/CheckDomainSetup.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/mailbox_setup_hints.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/mailbox_setup_scope.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_accounts_class.php'));
 
 /** One check row in the shape runDomainChecks() returns. */
 function row(string $status, string $severity = InboundEmailSetupCheck::REQUIRED): array {

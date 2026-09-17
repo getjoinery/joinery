@@ -58,7 +58,7 @@ class VaultClientCustody {
 	 * credential.
 	 */
 	public static function resolveOwnedPrfPasskeyId(int $user_id, string $credential_b64url): int {
-		require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+		require_once(PathHelper::getIncludePath('data/passkey_credentials_class.php'));
 		$creds = new MultiPasskey(['user_id' => $user_id]);
 		$creds->load();
 		foreach ($creds as $passkey) {
@@ -120,7 +120,7 @@ class VaultClientCustody {
 		$wrapping->set('uew_uev_user_encryption_vault_id', $vault_id);
 		$wrapping->set('uew_unlocker_type', $type);
 		if ($credential_id !== null) {
-			$wrapping->set('uew_pkc_credential_id', $credential_id);
+			$wrapping->set('uew_pkc_passkey_credential_id', $credential_id);
 		}
 		if ($label !== null && $label !== '') {
 			$wrapping->set('uew_label', $label);
@@ -196,11 +196,11 @@ class VaultClientCustody {
 		if ($w->get('uew_unlocker_type') !== UserEncryptionWrapping::TYPE_PASSKEY) {
 			return null;
 		}
-		$internal_id = (int)$w->get('uew_pkc_credential_id');
+		$internal_id = (int)$w->get('uew_pkc_passkey_credential_id');
 		if (!$internal_id) {
 			return null;
 		}
-		require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+		require_once(PathHelper::getIncludePath('data/passkey_credentials_class.php'));
 		$passkey = new Passkey($internal_id, TRUE);
 		return $passkey->key ? (string)$passkey->get('pkc_credential_id') : null;
 	}

@@ -20,7 +20,7 @@
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 
-require_once(PathHelper::getIncludePath('data/calendar_entry_class.php'));
+require_once(PathHelper::getIncludePath('data/entries_class.php'));
 require_once(PathHelper::getIncludePath('includes/IcsHelper.php'));
 require_once(PathHelper::getIncludePath('includes/calendar/IcsImporter.php'));
 

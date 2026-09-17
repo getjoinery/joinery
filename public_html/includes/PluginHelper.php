@@ -246,7 +246,7 @@ class PluginHelper extends ComponentBase {
      * Public so it can be called during plugin uninstall
      */
     public function removePluginDeletionRules() {
-        require_once(PathHelper::getIncludePath('data/deletion_rule_class.php'));
+        require_once(PathHelper::getIncludePath('data/deletion_rules_class.php'));
 
         try {
             // Get all model files for this plugin
@@ -292,7 +292,7 @@ class PluginHelper extends ComponentBase {
      *   for any declared $foreign_key_actions override that couldn't be registered
      */
     public static function registerAllActiveDeletionRules() {
-        require_once(PathHelper::getIncludePath('data/deletion_rule_class.php'));
+        require_once(PathHelper::getIncludePath('data/deletion_rules_class.php'));
         require_once(PathHelper::getIncludePath('data/plugins_class.php'));
 
         // Get all active plugins

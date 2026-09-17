@@ -38,11 +38,11 @@
  * @version 2.0
  */
 
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_folder_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_accounts_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_folders_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_labels_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_label_members_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ImapClient.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ImapIngestor.php'));
 

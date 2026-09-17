@@ -10,7 +10,7 @@
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/Pager.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_notes_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/notes_class.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(10);

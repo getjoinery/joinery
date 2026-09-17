@@ -1877,7 +1877,7 @@ abstract class SystemBase {
 		// Get all deletion rules for this table from the database
 		$sql = "SELECT * FROM del_deletion_rules
 				WHERE del_source_table = ?
-				ORDER BY del_id";
+				ORDER BY del_deletion_rule_id";
 		$stmt = $db->prepare($sql);
 		$stmt->execute([static::$tablename]);
 
@@ -1971,7 +1971,7 @@ abstract class SystemBase {
 			// This is much more efficient than scanning information_schema
 			$sql = "SELECT * FROM del_deletion_rules
 					WHERE del_source_table = ?
-					ORDER BY del_id";
+					ORDER BY del_deletion_rule_id";
 			$stmt = $db->prepare($sql);
 			$stmt->execute([static::$tablename]);
 

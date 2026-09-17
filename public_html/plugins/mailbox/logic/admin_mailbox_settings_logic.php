@@ -130,7 +130,7 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 	// deployment's receive mode is relay (or a connection/relay already
 	// exists); the outbound box only once a relay is active.
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 	$fleet_url = trim((string)$settings->get_setting('mailbox_fleet_service_url'));
 	$values['mailbox_fleet_service_url']    = $fleet_url;
 	$values['mailbox_fleet_api_public_key'] = trim((string)$settings->get_setting('mailbox_fleet_api_public_key'));

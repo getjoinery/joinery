@@ -35,7 +35,7 @@
  * @version 1.0
  */
 
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
 require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
 require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
 

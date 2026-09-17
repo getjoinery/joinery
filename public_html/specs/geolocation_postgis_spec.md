@@ -56,7 +56,7 @@ SELECT PostGIS_Version();
 
 ### 2.2 Geography Column on Addresses
 
-Geography fields are added to the existing `usa_users_addrs` table (via `$field_specifications` in `data/address_class.php`). Address data (city, state, zip, country) already lives here, so geocoded coordinates belong here too. Proximity queries join through the user's default address (`usa_is_default = TRUE`).
+Geography fields are added to the existing `usa_users_addrs` table (via `$field_specifications` in `data/users_addrs_class.php`). Address data (city, state, zip, country) already lives here, so geocoded coordinates belong here too. Proximity queries join through the user's default address (`usa_is_default = TRUE`).
 
 **Target schema (handled automatically by DatabaseUpdater once extended):**
 ```sql
@@ -82,7 +82,7 @@ Since `SystemBase::set()` treats values as literal data for prepared statements,
 Note: `prepare()` is not guaranteed to be called, so this must live in `save()`.
 
 ```php
-// In Address model (data/address_class.php) -- geography fields are on usa_users_addrs
+// In Address model (data/users_addrs_class.php) -- geography fields are on usa_users_addrs
 // The same pattern applies to Location model (data/locations_class.php)
 public function save($debug = false) {
     // Let parent save handle all normal fields
@@ -154,7 +154,7 @@ else if($data_type == 'USER-DEFINED'){
 
 **Column specification examples:**
 ```php
-// In data/address_class.php $field_specifications:
+// In data/users_addrs_class.php $field_specifications:
 'usa_latitude' => array('type' => 'numeric(10,7)', 'is_nullable' => true),
 'usa_longitude' => array('type' => 'numeric(10,7)', 'is_nullable' => true),
 'usa_geography' => array('type' => 'geography(Point, 4326)', 'is_nullable' => true),
@@ -303,7 +303,7 @@ class GeoHelper {
 }
 ```
 
-**`geocode_address()` integration:** The existing `Address` model (`data/address_class.php`, table `usa_users_addrs`) already stores `usa_address1`, `usa_address2`, `usa_city`, `usa_state`, `usa_zip_code_id`, and `usa_cco_country_code_id`. This convenience method pulls those fields and passes them to `geocode()`, making it easy to geocode any address in the system without manual field mapping.
+**`geocode_address()` integration:** The existing `Address` model (`data/users_addrs_class.php`, table `usa_users_addrs`) already stores `usa_address1`, `usa_address2`, `usa_city`, `usa_state`, `usa_zip_code_id`, and `usa_cco_country_code_id`. This convenience method pulls those fields and passes them to `geocode()`, making it easy to geocode any address in the system without manual field mapping.
 
 ### 3.4 Nominatim API Details
 
@@ -464,9 +464,9 @@ This is an early implementation target since it already exists with no geo colum
 
 ### 6.1 Important: What Stays
 
-**The `usa_zip_code_id` field on addresses is ACTIVE and must NOT be removed.** It's a `varchar(10)` field on `usa_users_addrs` that stores the user's postal/zip code as plain text. It's used in address forms, display formatting, duplicate checking, and search filtering throughout the codebase (`address_class.php`, `address_edit_logic.php`, `admin_address_edit_logic.php`, `admin_orders.php`, etc.).
+**The `usa_zip_code_id` field on addresses is ACTIVE and must NOT be removed.** It's a `varchar(10)` field on `usa_users_addrs` that stores the user's postal/zip code as plain text. It's used in address forms, display formatting, duplicate checking, and search filtering throughout the codebase (`users_addrs_class.php`, `address_edit_logic.php`, `admin_address_edit_logic.php`, `admin_orders.php`, etc.).
 
-What's dead is the old `zips.zip_codes` **lookup table** (a separate schema with city/state/lat/lng keyed by zip code). That table and schema don't exist in the database. Two methods in `address_class.php` still reference it -- those are the dead code. The field itself and all its form/display/search usage stays.
+What's dead is the old `zips.zip_codes` **lookup table** (a separate schema with city/state/lat/lng keyed by zip code). That table and schema don't exist in the database. Two methods in `users_addrs_class.php` still reference it -- those are the dead code. The field itself and all its form/display/search usage stays.
 
 ### 6.2 Files With Dead Geo Code
 
@@ -479,7 +479,7 @@ What's dead is the old `zips.zip_codes` **lookup table** (a separate schema with
 | `GetTimezoneFromZipCode($zip)` | 741-759 | Would error (no table) | **Remove** -- references non-existent `zips.zip_codes` table |
 | `getTimezoneFromPoint($lat, $lng)` | ~~700-713~~ | Removed | **Done** -- removed in time function consolidation |
 
-**`data/address_class.php`:**
+**`data/users_addrs_class.php`:**
 | Code | Lines | Status | Action |
 |------|-------|--------|--------|
 | `$google_address_precision` | 24-35 | Unused | **Remove** -- Google geocoding not used |
@@ -491,7 +491,7 @@ What's dead is the old `zips.zip_codes` **lookup table** (a separate schema with
 | coordinate unsets in `export_as_array()` | 456-458 | Harmless | **Remove** -- unsets fields that don't exist |
 | `CheckForDuplicate` zip lookup | ~494 | Would error | **Remove** -- the `zips.zip_codes` query inside this method. The duplicate checking logic itself stays, just remove the dead zip schema reference |
 
-**Keep in `address_class.php`:** The `usa_zip_code_id` field definition, all form helpers (`get_form_fields`), display methods (`get_address_string`, `get_microformat`), and search filters that use `usa_zip_code_id` as a plain text field. These are all active.
+**Keep in `users_addrs_class.php`:** The `usa_zip_code_id` field definition, all form helpers (`get_form_fields`), display methods (`get_address_string`, `get_microformat`), and search filters that use `usa_zip_code_id` as a plain text field. These are all active.
 
 **`data/location_info_data.php`:**
 - Lines 24-200: Extensive commented-out geocoding pipeline
@@ -539,7 +539,7 @@ These schemas/tables were either never deployed to this database or were cleaned
 3. **Create GeoHelper class** (`includes/GeoHelper.php`) with geocode() and distance methods
 4. **Add geo fields to `loc_locations`** (existing table -- via $field_specifications + GiST index migration). This proves out the PostGIS + DatabaseUpdater integration on a real table.
 5. **Wire geocoding into Location model save** -- when address changes, call GeoHelper::geocode()
-6. **Add geo fields to `usa_users_addrs`** (via $field_specifications in `data/address_class.php` + GiST index migration)
+6. **Add geo fields to `usa_users_addrs`** (via $field_specifications in `data/users_addrs_class.php` + GiST index migration)
 7. **Wire geocoding into Address model save** -- when address fields change, call GeoHelper::geocode_address()
 8. **Clean up legacy code** -- remove dead functions, commented code, missing references
 9. **Add distance queries** to member directory / dating discovery (join through default address)

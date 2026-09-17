@@ -20,7 +20,7 @@
  */
 
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Consumer.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provision_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provisions_class.php'));
 
 class RelayCloudConsumer implements OAuth2Consumer {
 

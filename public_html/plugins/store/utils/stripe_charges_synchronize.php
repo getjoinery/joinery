@@ -12,7 +12,7 @@
 	require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/store/data/stripe_customers_class.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
-	require_once(PathHelper::getIncludePath('data/address_class.php'));
+	require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/store/data/stripe_invoices_class.php'));
 
 	require_once(PathHelper::getIncludePath('data/event_logs_class.php'));

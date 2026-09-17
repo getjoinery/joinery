@@ -36,8 +36,8 @@ function calendar_entry_save_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('includes/calendar/CalendarSubject.php'));
-	require_once(PathHelper::getIncludePath('data/calendar_entry_class.php'));
-	require_once(PathHelper::getIncludePath('data/calendar_entry_exception_class.php'));
+	require_once(PathHelper::getIncludePath('data/entries_class.php'));
+	require_once(PathHelper::getIncludePath('data/entry_exceptions_class.php'));
 	require_once(PathHelper::getIncludePath('logic/calendar_logic.php')); // shared _calendar_* helpers
 
 	$session = SessionControl::get_instance();

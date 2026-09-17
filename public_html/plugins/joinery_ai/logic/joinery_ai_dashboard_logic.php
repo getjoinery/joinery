@@ -33,7 +33,7 @@ function joinery_ai_dashboard_logic(array $input): LogicResult {
             $placeholders = implode(',', array_fill(0, count($ids), '?'));
             // DISTINCT ON to grab the most recent successful run per recipe in one query.
             $sql = "SELECT DISTINCT ON (rcr_rcp_recipe_id)
-                       rcr_run_id, rcr_rcp_recipe_id, rcr_started_time, rcr_output,
+                       rcr_recipe_run_id, rcr_rcp_recipe_id, rcr_started_time, rcr_output,
                        rcr_content_sealed, rcr_sealed_key, rcr_sealed_owner_user_id
                     FROM rcr_recipe_runs
                     WHERE rcr_rcp_recipe_id IN ($placeholders)

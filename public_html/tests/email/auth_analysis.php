@@ -35,7 +35,7 @@ if (!defined('GLOBALVARS_INCLUDED')) {
     // Running standalone - need to include files
     $base_path = dirname(dirname(__DIR__));
     require_once($base_path . '/includes/Globalvars.php');
-    require_once($base_path . '/includes/EmailTemplate.php');
+    require_once($base_path . '/includes/EmailTemplateRenderer.php');
     
     // Try to load Mailgun dependencies if they exist
     $autoload_path = PathHelper::getComposerAutoloadPath();
@@ -87,7 +87,7 @@ if (!$run_test) {
                 <h6 class="alert-heading mb-2">🔬 Advanced Email Authentication Analysis</h6>
                 <p class="mb-2"><strong>This tool provides END-TO-END authentication testing:</strong></p>
                 <ul class="mb-2">
-                    <li>Sends a test email using your EmailTemplate system</li>
+                    <li>Sends a test email using your EmailTemplateRenderer system</li>
                     <li>Connects to Gmail via IMAP to retrieve the sent email</li>
                     <li>Analyzes actual SPF, DKIM, and DMARC headers from receiving mail servers</li>
                     <li>Shows real-world authentication results (not just DNS record existence)</li>

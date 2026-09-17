@@ -119,9 +119,9 @@ class ProvisionPendingSsl {
 	}
 
 	public function run(array $config): array {
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_host_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_hosts_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
 
@@ -252,7 +252,7 @@ class ProvisionPendingSsl {
 		if (trim((string)$node->get('mgn_container_name')) === '') {
 			return null;
 		}
-		$host_id = (int)$node->get('mgn_mgh_host_id');
+		$host_id = (int)$node->get('mgn_mgh_managed_host_id');
 		if (!$host_id) {
 			return null;
 		}
@@ -325,7 +325,7 @@ class ProvisionPendingSsl {
 			if (SslProvisionOutcome::needs_operator($cert_outcome['state'])
 				&& !$this->alert_sent($jobs, 'certificate_alert_sent')) {
 				$this->send_certificate_alert($node, $domain, $cert_outcome);
-				$this->mark_alert_sent((int)$last['mjb_id'], 'certificate_alert_sent');
+				$this->mark_alert_sent((int)$last['mjb_management_job_id'], 'certificate_alert_sent');
 			}
 		}
 
@@ -351,7 +351,7 @@ class ProvisionPendingSsl {
 				if ($misses >= self::ROUTING_FAST_ATTEMPTS && !$this->alert_sent($jobs, 'routing_alert_sent')) {
 					$first = reset($jobs);
 					$this->send_routing_alert($node, $domain, $misses, $first['mjb_create_time']);
-					$this->mark_alert_sent((int)$last['mjb_id'], 'routing_alert_sent');
+					$this->mark_alert_sent((int)$last['mjb_management_job_id'], 'routing_alert_sent');
 				}
 			} else if (self::certificate_give_up_due($jobs, time())) {
 				$node->set('mgn_ssl_state', 'failed');
@@ -458,7 +458,7 @@ class ProvisionPendingSsl {
 		$verified = ($token !== '' && $fetched !== null && hash_equals($token, $fetched));
 
 		$params['routing_verified'] = $verified;
-		$this->store_job_params((int)$place_job['mjb_id'], $params);
+		$this->store_job_params((int)$place_job['mjb_management_job_id'], $params);
 
 		$started = 0;
 		try {
@@ -507,14 +507,14 @@ class ProvisionPendingSsl {
 	 */
 	private function chain_jobs($db, $node_id): array {
 		$q = $db->prepare(
-			"SELECT mjb_id, mjb_job_type, mjb_status, mjb_create_time, mjb_completed_time,
+			"SELECT mjb_management_job_id, mjb_job_type, mjb_status, mjb_create_time, mjb_completed_time,
 			        mjb_parameters, mjb_output
 			 FROM mjb_management_jobs
 			 WHERE mjb_delete_time IS NULL
 			   AND mjb_job_type IN (?, ?, ?)
 			   AND (mjb_parameters->>'for_node_id' = ?
-			        OR (mjb_mgn_node_id = ? AND mjb_parameters->>'for_node_id' IS NULL))
-			 ORDER BY mjb_create_time ASC, mjb_id ASC"
+			        OR (mjb_mgn_managed_node_id = ? AND mjb_parameters->>'for_node_id' IS NULL))
+			 ORDER BY mjb_create_time ASC, mjb_management_job_id ASC"
 		);
 		// for_node_id names the site every chain job is FOR. The second half
 		// is for rows that predate it, and it excludes jobs a node ran for
@@ -535,7 +535,7 @@ class ProvisionPendingSsl {
 			return null;
 		}
 		$last = end($jobs);
-		return new ManagementJob((int)$last['mjb_id'], TRUE);
+		return new ManagementJob((int)$last['mjb_management_job_id'], TRUE);
 	}
 
 	/**

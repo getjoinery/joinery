@@ -142,8 +142,8 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 			return null;
 		}
 
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_account_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provisions_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_accounts_class.php'));
 
 		$existing = new MultiCustomerCloudProvision(array(
 			'external_order_item_id' => (int)$order_item->key, 'deleted' => false));
@@ -174,7 +174,7 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 			// A buyer who already granted access skips the Connect wait entirely.
 			$account = CustomerCloudAccount::get_for_user((int)$user->key, 'linode');
 			if ($account !== null && $account->get('cca_status') === 'active') {
-				$provision->set('cvp_cca_account_id', $account->key);
+				$provision->set('cvp_cca_customer_cloud_account_id', $account->key);
 				$provision->set('cvp_status', 'ready');
 			} else {
 				$provision->set('cvp_status', 'pending_connect');

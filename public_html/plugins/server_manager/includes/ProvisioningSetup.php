@@ -26,7 +26,7 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('data/api_keys_class.php'));
 require_once(PathHelper::getIncludePath('data/questions_class.php'));
 require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_host_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_hosts_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/GetJoineryApiClient.php'));
 
 class ProvisioningSetup {
@@ -502,7 +502,7 @@ class ProvisioningSetup {
 	 *               last_heartbeat:string}
 	 */
 	public static function agentStatus(): array {
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/agent_heartbeat_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/agent_heartbeats_class.php'));
 		$agent = AgentHeartbeat::getLatest();
 		if ($agent === null) {
 			return array('present' => false, 'online' => false,

@@ -20,7 +20,7 @@ require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
 require_once(PathHelper::getIncludePath('includes/calendar/CalendarSubject.php'));
 require_once(PathHelper::getIncludePath('includes/calendar/CalendarItemSourceRegistry.php'));
 require_once(PathHelper::getIncludePath('includes/calendar/item_sources/NativeCalendarItemSource.php'));
-require_once(PathHelper::getIncludePath('data/calendar_entry_class.php'));
+require_once(PathHelper::getIncludePath('data/entries_class.php'));
 
 $dblink = DbConnector::get_instance()->get_db_link();
 $row = $dblink->query("SELECT usr_user_id FROM usr_users WHERE usr_delete_time IS NULL ORDER BY usr_user_id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
@@ -44,7 +44,7 @@ $entry->set('cal_blocks_availability', true);
 $entry->set('cal_visibility', 'details');
 $entry->set('cal_type', 'personal');
 $entry->save();
-harness_register_row('cal_entries', 'cal_calendar_entry_id', (int)$entry->key);
+harness_register_row('cal_entries', 'cal_entry_id', (int)$entry->key);
 ok('entry saved with an id', (bool)$entry->key);
 
 CalendarItemSourceRegistry::resetCache();
@@ -74,7 +74,7 @@ $free->set('cal_end_utc', gmdate('Y-m-d H:i:s', strtotime('+3 days 09:30')));
 $free->set('cal_blocks_availability', false);
 $free->set('cal_title', 'Reminder');
 $free->save();
-harness_register_row('cal_entries', 'cal_calendar_entry_id', (int)$free->key);
+harness_register_row('cal_entries', 'cal_entry_id', (int)$free->key);
 
 // Discriminate blocking vs non-blocking against the source directly — the merged
 // registry busy projection also contains this user's events, which would mask it.

@@ -2,7 +2,7 @@
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/QueueableToolInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunContext.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_memories_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/memories_class.php'));
 
 /**
  * Store one durable memory for the acting user (specs/joinery_ai_memory.md).

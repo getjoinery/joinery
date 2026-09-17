@@ -25,9 +25,9 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
 
 function profile_sites_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-	require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_account_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/server_manager/data/hosted_trial_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provisions_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_accounts_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/server_manager/data/hosted_trials_class.php'));
 
 	$self_url = '/profile/server_manager';
 
@@ -38,14 +38,14 @@ function profile_sites_logic(array $input): LogicResult {
 	}
 
 	$provisions = new MultiCustomerCloudProvision(
-		array('user_id' => $user_id, 'deleted' => false), array('cvp_id' => 'DESC'));
+		array('user_id' => $user_id, 'deleted' => false), array('cvp_customer_cloud_provision_id' => 'DESC'));
 	$provisions->load();
 
 	// The reveal. A POST, and the method is checked rather than assumed.
 	//
 	// A browser performs a GET whenever it is told to, including by another
 	// site, and SameSite=Lax sends the session cookie on a top-level cross-site
-	// GET. A link or a prefetch carrying this buyer's cvp_id would then BURN
+	// GET. A link or a prefetch carrying this buyer's cvp_customer_cloud_provision_id would then BURN
 	// their one-time password: the attacker sees nothing, and the buyer loses
 	// the only copy. A cross-site POST gets no cookie at all.
 	$revealed = '';
@@ -55,7 +55,7 @@ function profile_sites_logic(array $input): LogicResult {
 	if (($input['action'] ?? '') === 'reveal_password' && !$is_post) {
 		$error = 'Showing a password is an action, not a link. Use the button on this page.';
 	} elseif (($input['action'] ?? '') === 'reveal_password') {
-		$wanted = (int)($input['cvp_id'] ?? 0);
+		$wanted = (int)($input['cvp_customer_cloud_provision_id'] ?? 0);
 		$target = null;
 		foreach ($provisions as $provision) {
 			// Matched inside the buyer's OWN list, so an id from somebody

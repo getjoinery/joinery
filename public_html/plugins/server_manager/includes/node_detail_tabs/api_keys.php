@@ -190,7 +190,7 @@
 				$jr_id = (int)$jr->key;
 				echo '<form method="post" action="' . $base_url . '" id="approve_join_' . $jr_id . '" style="display:inline;margin-right:6px;">'
 				   . '<input type="hidden" name="action" value="approve_join">'
-				   . '<input type="hidden" name="ajr_id" value="' . $jr_id . '">'
+				   . '<input type="hidden" name="ajr_agent_join_request_id" value="' . $jr_id . '">'
 				   . SmAdminCsrf::field()
 				   . '<button type="button" class="btn btn-sm btn-primary" onclick="JoineryModal.confirm('
 				   . htmlspecialchars(json_encode('Connect this agent as ' . $node->get('mgn_name')
@@ -199,7 +199,7 @@
 				   . '</form>';
 				echo '<form method="post" action="' . $base_url . '" id="reject_join_' . $jr_id . '" style="display:inline;">'
 				   . '<input type="hidden" name="action" value="reject_join">'
-				   . '<input type="hidden" name="ajr_id" value="' . $jr_id . '">'
+				   . '<input type="hidden" name="ajr_agent_join_request_id" value="' . $jr_id . '">'
 				   . SmAdminCsrf::field()
 				   . '<button type="button" class="btn btn-sm btn-outline-danger" onclick="JoineryModal.confirm('
 				   . htmlspecialchars(json_encode('Reject this join request?'), ENT_QUOTES)

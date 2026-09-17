@@ -214,7 +214,7 @@ These do not reach the pool (that analysis is `vault_key_memory_exposure.md`
 refuse, and three of them run with nobody watching.
 
 **B7 — a stranger's message can cause an outbound forward.** Inbound filters
-carry a `forward_to` action (`inbound_email_filter_class.php:101`), applied on
+carry a `forward_to` action (`inbound_email_filters_class.php:101`), applied on
 arrival to SMTP mail and to Joinery Direct mail alike
 (`InboundEmailRouter.php:1110-1119`). The owner chose the rule and acknowledged
 the destination (`forwardConsentSatisfied()`), so this is intended. What is
@@ -251,7 +251,7 @@ content is wrapped `<<UNTRUSTED_{nonce}>>…<</UNTRUSTED_{nonce}>>`
 (`PipelineRunner.php:100`, `ModelQueryExecutor.php:263`) before it reaches a
 model, and the model can be local, `trusted`, or a cloud API
 (`ai_endpoints.json`). The per-domain consent `local|trusted|cloud`
-(`inbound_email_domain_class.php:70-75`) is folded into
+(`inbound_email_domains_class.php:70-75`) is folded into
 `RecipeVaultScope::consentTrustFloor()`, which returns **null when nothing
 sealed is in play** (`:174-176`). So a Private or Fortress mailbox's consent
 binds; a Standard mailbox's mail goes to whichever endpoint has a key, with the

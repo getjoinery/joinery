@@ -8,7 +8,7 @@
  * @version 1.0
  */
 require_once(PathHelper::getIncludePath('plugins/store/includes/requirements/AbstractProductRequirement.php'));
-require_once(PathHelper::getIncludePath('data/address_class.php'));
+require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
 
 class AddressRequirement extends AbstractProductRequirement {
 

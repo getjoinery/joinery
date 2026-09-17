@@ -11,7 +11,7 @@
 	$session->check_permission(5);
 	$session->set_return();
 
-	$email_template = new EmailTemplateStore($_GET['emt_email_template_id'], TRUE);
+	$email_template = new EmailTemplate($_GET['emt_email_template_id'], TRUE);
 
 	$page = new AdminPage();
 	$page->admin_header(
@@ -30,13 +30,13 @@
 								'Delete Template' => '/admin/admin_email_template_permanent_delete?emt_email_template_id='.$email_template->key);
 	$page->begin_box($options);
 
-	if($email_template->get('emt_type') == EmailTemplateStore::TEMPLATE_TYPE_OUTER){
+	if($email_template->get('emt_type') == EmailTemplate::TEMPLATE_TYPE_OUTER){
 		echo '<strong>Type:</strong> Outer template<br />';
 	}
-	else if($email_template->get('emt_type') == EmailTemplateStore::TEMPLATE_TYPE_INNER){
+	else if($email_template->get('emt_type') == EmailTemplate::TEMPLATE_TYPE_INNER){
 		echo '<strong>Type:</strong> Inner template<br />';
 	}
-	else if($email_template->get('emt_type') == EmailTemplateStore::TEMPLATE_TYPE_FOOTER){
+	else if($email_template->get('emt_type') == EmailTemplate::TEMPLATE_TYPE_FOOTER){
 		echo '<strong>Type:</strong> Footer template<br />';
 	}
 

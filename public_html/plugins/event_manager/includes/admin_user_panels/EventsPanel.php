@@ -59,7 +59,7 @@ class EventsPanel implements AdminUserPanel {
 		$visited_session_rows = array();
 		foreach ($event_registrations as $event_registration) {
 			$sv_event = new Event($event_registration->get('evr_evt_event_id'), TRUE);
-			$event_sessions_visit = new MultiEventSessions(
+			$event_sessions_visit = new MultiEventSession(
 				array('event_id' => $event_registration->get('evr_evt_event_id')),
 				array('evs_session_number' => 'DESC', 'evs_title' => 'DESC'));
 			$event_sessions_visit->load();

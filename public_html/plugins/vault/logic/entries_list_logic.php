@@ -13,7 +13,7 @@ function entries_list_logic(array $input): LogicResult {
 	$user_id = (int)$session->get_user_id();
 
 	$trashed = !empty($input['trashed']);
-	$entries = new MultiVaultEntry(['user_id' => $user_id, 'deleted' => $trashed], ['vle_updated_time' => 'DESC']);
+	$entries = new MultiVaultEntry(['user_id' => $user_id, 'deleted' => $trashed], ['vle_update_time' => 'DESC']);
 	$entries->load();
 
 	$out = [];
@@ -21,8 +21,8 @@ function entries_list_logic(array $input): LogicResult {
 		$out[] = [
 			'id'           => (int)$entry->key,
 			'ciphertext'   => $entry->get('vle_ciphertext'),
-			'created_time' => $entry->get('vle_created_time'),
-			'updated_time' => $entry->get('vle_updated_time'),
+			'created_time' => $entry->get('vle_create_time'),
+			'updated_time' => $entry->get('vle_update_time'),
 		];
 	}
 

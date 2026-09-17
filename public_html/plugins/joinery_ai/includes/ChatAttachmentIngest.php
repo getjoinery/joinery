@@ -1,12 +1,12 @@
 <?php
 require_once(PathHelper::getIncludePath('data/files_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_message_attachments_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversations_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/message_attachments_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AiAttachment.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatControls.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRunner.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversation_messages_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
 
 /**
@@ -219,7 +219,7 @@ class ChatAttachmentIngest {
             $extract = $p['extract'] ?? ['status' => AiAttachment::EXTRACT_SKIPPED, 'text' => ''];
 
             $link = new AiMessageAttachment(NULL);
-            $link->set('aia_aim_message_id', $message_id);
+            $link->set('aia_aim_conversation_message_id', $message_id);
             $link->set('aia_fil_file_id', (int)$file->key);
             $link->set('aia_extracted_text', (string)$extract['text']);
             $link->set('aia_extract_status', $extract['status']);

@@ -14,7 +14,7 @@
 header('Content-Type: application/json');
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversations_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
 
 function chat_thread_fail(string $msg): void {

@@ -18,10 +18,10 @@ function admin_mailbox_message_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachment_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachments_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);

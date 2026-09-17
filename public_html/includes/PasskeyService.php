@@ -139,7 +139,7 @@ class PasskeyService {
 	private $request_ceremony;
 
 	public function __construct() {
-		require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+		require_once(PathHelper::getIncludePath('data/passkey_credentials_class.php'));
 		require_once(PathHelper::getIncludePath('data/passkey_ceremonies_class.php'));
 		require_once(PathHelper::getIncludePath('data/users_class.php'));
 
@@ -436,7 +436,7 @@ class PasskeyService {
 		$markers = new MultiPasskeyCeremony(['session_id' => $this->_sessionId(), 'kind' => 'stepup']);
 		$markers->load();
 		foreach ($markers as $marker) {
-			$verified_at = strtotime($marker->get('pks_created_time') . ' UTC');
+			$verified_at = strtotime($marker->get('pks_create_time') . ' UTC');
 			if ($verified_at && (time() - $verified_at) <= $max_age_seconds) {
 				return true;
 			}
@@ -668,7 +668,7 @@ class PasskeyService {
 	// ========================================================================
 
 	public function listCredentials(User $user): MultiPasskey {
-		$creds = new MultiPasskey(['user_id' => $user->key], ['pkc_created_time' => 'ASC']);
+		$creds = new MultiPasskey(['user_id' => $user->key], ['pkc_create_time' => 'ASC']);
 		$creds->load();
 		return $creds;
 	}

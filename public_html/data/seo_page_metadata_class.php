@@ -27,7 +27,7 @@ class SeoPageMetadata extends SystemBase {
 		'spm_og_type'              => array('type'=>'varchar(50)', 'is_nullable'=>true),
 		'spm_noindex'              => array('type'=>'bool', 'default'=>false),
 		'spm_create_time'          => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'spm_modify_time'          => array('type'=>'timestamp(6)', 'is_nullable'=>true),
+		'spm_update_time'          => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 		'spm_delete_time'          => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	);
 
@@ -78,7 +78,7 @@ class SeoPageMetadata extends SystemBase {
 
 	function save($debug = false) {
 		if ($this->key) {
-			$this->set('spm_modify_time', 'now()');
+			$this->set('spm_update_time', 'now()');
 		}
 		if ($this->get('spm_path') !== null) {
 			$this->set('spm_path', self::canonicalize_path($this->get('spm_path')));
@@ -528,7 +528,7 @@ class SeoPageMetadata extends SystemBase {
 					if ($existing) {
 						if ($existing['spm_path'] !== $rec['path']) {
 							$upd = $dblink->prepare("UPDATE spm_seo_page_metadata
-								SET spm_path = ?, spm_modify_time = now()
+								SET spm_path = ?, spm_update_time = now()
 								WHERE spm_seo_page_metadata_id = ?");
 							$upd->execute(array($rec['path'], $existing['spm_seo_page_metadata_id']));
 							$result['updated_path']++;

@@ -204,7 +204,7 @@ run_suite "Calendar: native grid + entry CRUD" "JoineryMemberUITests/CalendarUIT
 
 # Server-side proof the round-trip hit cal_entries: the entry was created,
 # then soft-deleted by the in-app delete.
-CAL_ROW=$($PSQL "SELECT cal_calendar_entry_id FROM cal_entries
+CAL_ROW=$($PSQL "SELECT cal_entry_id FROM cal_entries
                  WHERE cal_title = '$CAL_TITLE' AND cal_delete_time IS NOT NULL LIMIT 1")
 if [ -n "$CAL_ROW" ]; then
     PASS_COUNT=$((PASS_COUNT+1))

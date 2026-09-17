@@ -258,7 +258,7 @@ check(count($reqs) === 1 && $reqs[0] instanceof QuestionRequirement,
 require_once(PathHelper::getIncludePath('plugins/store/data/orders_class.php'));
 require_once(PathHelper::getIncludePath('plugins/store/data/order_items_class.php'));
 require_once(PathHelper::getIncludePath('plugins/store/data/order_item_requirements_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provisions_class.php'));
 
 $buyer = make_user('CcfBuyer');
 $odi = new OrderItem(NULL);
@@ -281,7 +281,7 @@ harness_register_row('oir_order_item_requirements', 'oir_order_item_requirement_
 $f1 = $provider->fulfill($buyer, $fake_product, $odi, new Order(NULL), 0);
 check((int)($f1['ref_id'] ?? 0) > 0, 'fulfill creates a provision row');
 $cvp = new CustomerCloudProvision((int)$f1['ref_id'], TRUE);
-harness_register_row('cvp_customer_cloud_provisions', 'cvp_id', $cvp->key);
+harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $cvp->key);
 check($cvp->get('cvp_status') === 'pending_connect', 'provision starts at pending_connect (no grant)');
 check($cvp->get('cvp_slug') === 'fulfill-test-example-com', 'slug sanitized from the domain answer');
 check((int)$cvp->get('cvp_usr_user_id') === (int)$buyer->key, 'provision linked to the buyer');
@@ -317,7 +317,7 @@ check(isset($agent_status['present'], $agent_status['online']),
 	'agentStatus returns present/online flags');
 
 // A fresh heartbeat must classify as present+online; a stale one as offline.
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/agent_heartbeat_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/agent_heartbeats_class.php'));
 $hb = new AgentHeartbeat(NULL);
 $hb->set('ahb_agent_name', 'harnesstest-agent-' . substr(md5(uniqid('', true)), 0, 6));
 $hb->set('ahb_agent_version', '9.9.9');
@@ -325,7 +325,7 @@ $hb->set('ahb_status', 'ok');
 $hb->set('ahb_last_heartbeat', gmdate('Y-m-d H:i:s'));
 $hb->save();
 $hb->load();
-harness_register_row('ahb_agent_heartbeats', 'ahb_id', (int)$hb->key);
+harness_register_row('ahb_agent_heartbeats', 'ahb_agent_heartbeat_id', (int)$hb->key);
 
 $fresh = ProvisioningSetup::agentStatus();
 check($fresh['present'] === true && $fresh['online'] === true,

@@ -51,7 +51,7 @@ class ProductRequirementInstance extends SystemBase {	public static $prefix = 'p
 	    'pri_config' => array('type'=>'jsonb'),
 	    'pri_order' => array('type'=>'int4', 'default'=>0),
 	    'pri_delete_time' => array('type'=>'timestamp(6)'),
-	    'pri_created_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	    'pri_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
 
 	public static $json_vars = array('pri_config'); 

@@ -176,7 +176,7 @@ class PluginManager extends AbstractExtensionManager {
         }
 
         // Register deletion rules for this plugin's models
-        require_once(PathHelper::getIncludePath('data/deletion_rule_class.php'));
+        require_once(PathHelper::getIncludePath('data/deletion_rules_class.php'));
         try {
             DeletionRule::registerModelsFromDiscovery([
                 'include_plugins' => true,
@@ -849,7 +849,7 @@ class PluginManager extends AbstractExtensionManager {
         }
 
         // Register deletion rules (non-fatal)
-        require_once(PathHelper::getIncludePath('data/deletion_rule_class.php'));
+        require_once(PathHelper::getIncludePath('data/deletion_rules_class.php'));
         try {
             DeletionRule::registerModelsFromDiscovery([
                 'include_plugins' => true,
@@ -1508,7 +1508,7 @@ class PluginManager extends AbstractExtensionManager {
         // re-registered earlier in this same request (utils/update_database.php
         // Step 3.5) and every active plugin's rules were just re-registered above,
         // so this is the point where the full picture is freshest.
-        require_once(PathHelper::getIncludePath('data/deletion_rule_class.php'));
+        require_once(PathHelper::getIncludePath('data/deletion_rules_class.php'));
         $deletion_rule_messages = array_merge($deletion_rule_messages, DeletionRule::pruneOrphanedRules());
         if (!empty($deletion_rule_messages)) {
             $result['deletion_rule_messages'] = $deletion_rule_messages;

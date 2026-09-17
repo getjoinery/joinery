@@ -32,7 +32,7 @@ require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/SRSRewriter.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayMapSync.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
 
 class RelayFixPackTest {
 

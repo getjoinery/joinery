@@ -81,14 +81,14 @@ Scope boundaries already decided elsewhere, restated so this spec cannot creep:
    markers, nothing-to-remove exits 0).
 6. **One finding from §7.2 outlives its deferral and blocks this work:**
    siblings on a host are found two ways that disagree — the `mgn_host` string
-   and the `mgn_mgh_host_id` FK, with `next_container_port()` hedging across
+   and the `mgn_mgh_managed_host_id` FK, with `next_container_port()` hedging across
    both. The host cannot become a node until one of those is the identity.
 
 ## The design
 
 ### WP0 — settle the sibling lookup
 
-`mgn_mgh_host_id` becomes the only way a container node names its host;
+`mgn_mgh_managed_host_id` becomes the only way a container node names its host;
 `mgn_host` string comparison dies everywhere it is used for grouping
 (`next_container_port()` included). Without this, the host is paired under one
 identity and addressed under the other — §7.2 called this out as the
@@ -100,10 +100,10 @@ Install the agent on the Docker host via the siteless path, run
 `joinery-agent join --management-node=...`, compare the printed fingerprint
 against the pending request, approve on the plane. All of that exists.
 
-New: **`mgh_mgn_host_node_id` on `mgh_managed_hosts`** — a nullable FK from
+New: **`mgh_mgn_managed_node_id` on `mgh_managed_hosts`** — a nullable FK from
 the placement record to the host's own node identity. That is the routing
-link: victim container node → `mgn_mgh_host_id` → host record →
-`mgh_mgn_host_node_id` → the paired node a host-scope primitive is addressed
+link: victim container node → `mgn_mgh_managed_host_id` → host record →
+`mgh_mgn_managed_node_id` → the paired node a host-scope primitive is addressed
 to. One column; the job table is untouched (a job's subject is a node, and the
 host *is* a node).
 
@@ -326,7 +326,7 @@ host's own node record retires through the existing `delete_node` /
 placement record by hand" currently means a raw DB write. WP1 therefore adds
 a host delete action (soft delete, POST button per the actions-are-buttons
 rule) that refuses while `count_sites() > 0` (the method already exists) or
-while `mgh_mgn_host_node_id` names a live node record — a host is deleted
+while `mgh_mgn_managed_node_id` names a live node record — a host is deleted
 last, after its containers and its own node identity.
 
 ## Sequencing and acceptance

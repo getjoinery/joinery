@@ -33,12 +33,12 @@
  *   predicate asks the mailbox rather than its domain
  */
 
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grants_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
 require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
-require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+require_once(PathHelper::getIncludePath('data/passkey_credentials_class.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 /**
@@ -57,7 +57,7 @@ function mailbox_protection_facts(InboundEmailDomain $domain, int $acting_user_i
 		int $alias_scope_id = 0): array {
 	$settings = Globalvars::get_instance();
 
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 	$fronted = false;
 	try {
 		$fronted = (MailboxRelay::active() !== null);
@@ -429,7 +429,7 @@ function mailbox_protection_posture_join(): string {
 
 /** True-when-sealing predicate for a query carrying the posture join above. */
 function mailbox_protection_seals_sql(): string {
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
 	return InboundEmailAlias::effectiveLevelSql('a', 'd') . " IN ('"
 		. InboundEmailDomain::LEVEL_PRIVATE . "','" . InboundEmailDomain::LEVEL_FORTRESS . "')";
 }

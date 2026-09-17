@@ -82,10 +82,10 @@ $page->tableheader($headers, [
 foreach ($runs as $run) {
     $row = [];
     $rid = (int)$run->key;
-    $row[] = '<a href="/admin/joinery_ai/run?rcr_run_id=' . $rid . '">#' . $rid . '</a>';
+    $row[] = '<a href="/admin/joinery_ai/run?rcr_recipe_run_id=' . $rid . '">#' . $rid . '</a>';
 
-    $rcp_id = (int)$run->get('rcr_rcp_recipe_id');
-    $rname = $recipe_names[$rcp_id] ?? '(deleted)';
+    $rcp_relay_cloud_provision_id = (int)$run->get('rcr_rcp_recipe_id');
+    $rname = $recipe_names[$rcp_relay_cloud_provision_id] ?? '(deleted)';
     $row[] = htmlspecialchars($rname);
 
     $status = $run->get('rcr_status');

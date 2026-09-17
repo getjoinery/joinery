@@ -5,14 +5,14 @@ function admin_event_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 	require_once(PathHelper::getIncludePath('plugins/event_manager/data/events_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_registrants_class.php'));
-	require_once(PathHelper::getIncludePath('data/address_class.php'));
+	require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
 	require_once(PathHelper::getIncludePath('data/log_form_errors_class.php'));
 	require_once(PathHelper::getIncludePath('data/emails_class.php'));
 	require_once(PathHelper::getIncludePath('data/email_recipients_class.php'));
 	require_once(PathHelper::getIncludePath('data/event_logs_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/store/data/orders_class.php'));
 	require_once(PathHelper::getIncludePath('data/messages_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_waiting_lists_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/event_manager/data/waiting_lists_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/event_manager/data/locations_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_types_class.php'));
 	require_once(PathHelper::getIncludePath('data/groups_class.php'));
@@ -130,7 +130,7 @@ function admin_event_logic(array $input): LogicResult {
 	$rpager = new Pager(array('numrecords'=>$numregistrants, 'numperpage'=> $rnumperpage), 'r');
 
 	//SESSIONS
-	$event_sessions = new MultiEventSessions(
+	$event_sessions = new MultiEventSession(
 		array('event_id' => $event->key),
 		array('evs_session_number' => 'ASC')
 	);
@@ -225,7 +225,7 @@ function admin_event_logic(array $input): LogicResult {
 	$ssort = LibraryFunctions::fetch_variable('ssort', 'evs_session_number', 0, '');
 	$ssdirection = LibraryFunctions::fetch_variable('ssdirection', 'ASC', 0, '');
 
-	$event_sessions_paged = new MultiEventSessions(
+	$event_sessions_paged = new MultiEventSession(
 		array('event_id' => $event->key),
 		array($ssort => $ssdirection),
 		$snumperpage,

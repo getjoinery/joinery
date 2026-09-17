@@ -70,7 +70,7 @@
 		//PULL LATEST Session
 		$searches = array();
 		$searches['event_id'] = $event->key;
-		$event_sessions = new MultiEventSessions(
+		$event_sessions = new MultiEventSession(
 			$searches,
 			array('evs_start_time'=>'DESC', 'evs_session_number'=>'DESC')
 		);
@@ -138,7 +138,7 @@
 				$event_session->set('evs_session_number', NULL);
 			}
 			else if($_POST['evs_session_number'] >= 0){
-				$event_sessions = new MultiEventSessions(
+				$event_sessions = new MultiEventSession(
 					array('event_id'=>$event->key, 'session_number'=>$_POST['evs_session_number'],'deleted'=>false),
 					NULL,
 					10,

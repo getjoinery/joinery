@@ -352,7 +352,7 @@ the manifest as a literal `options` map instead.
 
 An option list keys on **what gets stored**, which is whatever the code that
 reads the setting looks the value up by. The email template settings key on the
-template *name*, because `EmailTemplate` filters on `emt_name`; keying them on
+template *name*, because `EmailTemplateRenderer` filters on `emt_name`; keying them on
 the row id would produce a dropdown that reads correctly and stores a value no
 consumer can resolve. Where a stored value is not in the list, `CoreSettingOptions`
 keeps it and labels it rather than dropping it, so a wrong value stays visible

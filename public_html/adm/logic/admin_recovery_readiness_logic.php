@@ -73,7 +73,7 @@ function admin_recovery_readiness_logic(array $input): LogicResult {
 		$page_vars['items'] = RecoveryReadiness::items($session);
 		$page_vars['stale_days'] = RecoveryReadiness::STALE_DAYS;
 		require_once(PathHelper::getIncludePath('data/users_class.php'));
-		require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+		require_once(PathHelper::getIncludePath('data/passkey_credentials_class.php'));
 		$account = new User($session->get_user_id(), TRUE);
 		$page_vars['account_email'] = (string)$account->get('usr_email');
 		$passkeys = new MultiPasskey(array('user_id' => $session->get_user_id()));
@@ -88,7 +88,7 @@ function admin_recovery_readiness_logic(array $input): LogicResult {
 	$page_vars['stale_days'] = RecoveryReadiness::STALE_DAYS;
 
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
-	require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+	require_once(PathHelper::getIncludePath('data/passkey_credentials_class.php'));
 	$account = new User($session->get_user_id(), TRUE);
 	$page_vars['account_email'] = (string)$account->get('usr_email');
 

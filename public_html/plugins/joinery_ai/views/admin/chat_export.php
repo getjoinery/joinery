@@ -15,8 +15,8 @@ header('Content-Type: application/json');
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversations_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversation_messages_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatExport.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
 
@@ -55,7 +55,7 @@ if (ChatSeal::isLocked($conversation)) {
 
 $rows = new MultiAiConversationMessage(
     ['conversation_id' => (int)$conversation->key, 'deleted' => false],
-    ['aim_message_id' => 'ASC']
+    ['aim_conversation_message_id' => 'ASC']
 );
 $rows->load();
 $messages = [];

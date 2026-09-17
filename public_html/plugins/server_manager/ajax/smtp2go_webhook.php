@@ -35,8 +35,8 @@
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/ProvisioningSetup.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/hosted_trial_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provisions_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/hosted_trials_class.php'));
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
 	http_response_code(405);
@@ -180,15 +180,15 @@ function smtp2go_webhook_trial_for(array $event) {
 
 	$db = DbConnector::get_instance()->get_db_link();
 	if ($username !== '') {
-		$q = $db->prepare("SELECT cvp_id FROM cvp_customer_cloud_provisions
-			WHERE cvp_smtp2go_user_id = ? AND cvp_delete_time IS NULL ORDER BY cvp_id DESC LIMIT 1");
+		$q = $db->prepare("SELECT cvp_customer_cloud_provision_id FROM cvp_customer_cloud_provisions
+			WHERE cvp_smtp2go_user_id = ? AND cvp_delete_time IS NULL ORDER BY cvp_customer_cloud_provision_id DESC LIMIT 1");
 		$q->execute(array($username));
 		$id = $q->fetchColumn();
 		if ($id) { return HostedTrial::for_provision((int)$id); }
 	}
 	if ($subaccount !== '') {
-		$q = $db->prepare("SELECT cvp_id FROM cvp_customer_cloud_provisions
-			WHERE cvp_smtp2go_subaccount_id = ? AND cvp_delete_time IS NULL ORDER BY cvp_id DESC LIMIT 1");
+		$q = $db->prepare("SELECT cvp_customer_cloud_provision_id FROM cvp_customer_cloud_provisions
+			WHERE cvp_smtp2go_subaccount_id = ? AND cvp_delete_time IS NULL ORDER BY cvp_customer_cloud_provision_id DESC LIMIT 1");
 		$q->execute(array($subaccount));
 		$id = $q->fetchColumn();
 		if ($id) { return HostedTrial::for_provision((int)$id); }

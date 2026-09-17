@@ -96,7 +96,7 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 		<?php if ($site['password_state'] === 'sealed'): ?>
 			<form method="post" action="/profile/server_manager">
 				<input type="hidden" name="action" value="reveal_password">
-				<input type="hidden" name="cvp_id" value="<?php echo (int)$site['id']; ?>">
+				<input type="hidden" name="cvp_customer_cloud_provision_id" value="<?php echo (int)$site['id']; ?>">
 				<button type="submit" class="sms-reveal-btn">Show my admin password</button>
 			</form>
 			<p class="sms-note">Shown once, then we forget it. Your site asks you to choose a new one

@@ -12,7 +12,7 @@
 function admin_joinery_ai_deleted_conversation_purge_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
     require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-    require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
+    require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversations_class.php'));
 
     $session = SessionControl::get_instance();
     $session->check_permission(10);

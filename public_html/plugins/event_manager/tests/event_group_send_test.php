@@ -34,7 +34,7 @@ require_once(PathHelper::getIncludePath('data/emails_class.php'));
 require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 require_once(PathHelper::getIncludePath('plugins/event_manager/data/events_class.php'));
 require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_registrants_class.php'));
-require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_waiting_lists_class.php'));
+require_once(PathHelper::getIncludePath('plugins/event_manager/data/waiting_lists_class.php'));
 // The event and waiting-list providers register from the plugin's serve.php.
 require_once(PathHelper::getIncludePath('plugins/event_manager/serve.php'));
 

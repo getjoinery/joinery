@@ -65,8 +65,8 @@ class UserEncryptionVault extends SystemBase {
 		'uev_salt'           => array('type'=>'text', 'is_nullable'=>false),
 		'uev_kdf_params'     => array('type'=>'text', 'is_nullable'=>true),
 		'uev_key_generation' => array('type'=>'int4', 'is_nullable'=>false, 'default'=>1),
-		'uev_created_time'   => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'uev_updated_time'   => array('type'=>'timestamp(6)', 'is_nullable'=>true),
+		'uev_create_time'   => array('type'=>'timestamp(6)', 'default'=>'now()'),
+		'uev_update_time'   => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	);
 
 	/** The one vault row for a (user, scope), or null if not set up yet. */

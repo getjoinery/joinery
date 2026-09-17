@@ -28,8 +28,8 @@ function admin_domains_logic(array $input): LogicResult {
 	if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 		$action = (string)($input['action'] ?? '');
 		$row = null;
-		if ((int)($input['rdm_id'] ?? 0) > 0) {
-			$row = new RegisteredDomain((int)$input['rdm_id'], TRUE);
+		if ((int)($input['rdm_registered_domain_id'] ?? 0) > 0) {
+			$row = new RegisteredDomain((int)$input['rdm_registered_domain_id'], TRUE);
 			if (!$row->key) { $row = null; }
 		}
 
@@ -66,19 +66,19 @@ function admin_domains_logic(array $input): LogicResult {
 
 	$pending_pushes = new MultiRegisteredDomain(
 		array('graduation_state' => RegisteredDomain::GRAD_REQUESTED, 'deleted' => false),
-		array('rdm_id' => 'ASC'));
+		array('rdm_registered_domain_id' => 'ASC'));
 	$pending_pushes->load();
 
 	$failures = new MultiRegisteredDomain(
 		array('status' => RegisteredDomain::STATUS_FAILED, 'deleted' => false),
-		array('rdm_id' => 'DESC'));
+		array('rdm_registered_domain_id' => 'DESC'));
 	$failures->load();
 
 	// Newest first, capped: the two tables above are the working surfaces, and
 	// this one is a ledger nobody reads past the first screen of. The count is
 	// shown separately so a capped page says so rather than looking complete.
 	$all = new MultiRegisteredDomain(
-		array('deleted' => false), array('rdm_id' => 'DESC'), ADMIN_DOMAINS_LEDGER_LIMIT, 0);
+		array('deleted' => false), array('rdm_registered_domain_id' => 'DESC'), ADMIN_DOMAINS_LEDGER_LIMIT, 0);
 	$total = (int)$all->count_all();
 	$all->load();
 

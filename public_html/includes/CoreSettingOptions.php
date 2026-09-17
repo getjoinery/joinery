@@ -54,7 +54,7 @@ class CoreSettingOptions {
 	public static function backupTargets(): array {
 		$options = array('0' => '— none —');
 		try {
-			require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
+			require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 			$targets = new MultiBackupTarget(array('deleted' => false), array('bkt_name' => 'ASC'));
 			$targets->load();
 			foreach ($targets as $t) {
@@ -89,7 +89,7 @@ class CoreSettingOptions {
 
 	/** Every timezone, in the grouped form the platform displays elsewhere. */
 	public static function timezones(): array {
-		require_once(PathHelper::getIncludePath('data/address_class.php'));
+		require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
 		return Address::get_timezone_drop_array();
 	}
 
@@ -134,21 +134,21 @@ class CoreSettingOptions {
 	}
 
 	public static function outerTemplates(): array {
-		return self::templates(EmailTemplateStore::TEMPLATE_TYPE_OUTER, array(
+		return self::templates(EmailTemplate::TEMPLATE_TYPE_OUTER, array(
 			'default_email_template', 'bulk_outer_template',
 			'group_email_outer_template', 'event_email_outer_template',
 		));
 	}
 
 	public static function innerTemplates(): array {
-		return self::templates(EmailTemplateStore::TEMPLATE_TYPE_INNER, array(
+		return self::templates(EmailTemplate::TEMPLATE_TYPE_INNER, array(
 			'individual_email_inner_template', 'group_email_inner_template',
 			'event_email_inner_template',
 		));
 	}
 
 	public static function footerTemplates(): array {
-		return self::templates(EmailTemplateStore::TEMPLATE_TYPE_FOOTER, array(
+		return self::templates(EmailTemplate::TEMPLATE_TYPE_FOOTER, array(
 			'bulk_footer', 'group_email_footer_template', 'event_email_footer_template',
 		));
 	}
@@ -164,7 +164,7 @@ class CoreSettingOptions {
 	 */
 	public static function connectedAccounts(): array {
 		if (!class_exists('InboundImapAccount')) {
-			$path = PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php');
+			$path = PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_accounts_class.php');
 			if (!is_file($path)) return array();
 			require_once($path);
 		}
@@ -193,7 +193,7 @@ class CoreSettingOptions {
 	 * Templates of one kind, keyed by name.
 	 *
 	 * The name is what gets stored, because the name is what every consumer
-	 * looks a template up by — EmailTemplate filters on emt_name. A stored
+	 * looks a template up by — EmailTemplateRenderer filters on emt_name. A stored
 	 * value that is not a template name is kept in the list and labelled, so a
 	 * wrong value stays visible and survives a save instead of being quietly
 	 * swapped for whichever template happened to sort first.
@@ -204,7 +204,7 @@ class CoreSettingOptions {
 	private static function templates(string $type, array $used_by = array()): array {
 		require_once(PathHelper::getIncludePath('data/email_templates_class.php'));
 
-		$templates = new MultiEmailTemplateStore(array('template_type' => $type), NULL, NULL, NULL);
+		$templates = new MultiEmailTemplate(array('template_type' => $type), NULL, NULL, NULL);
 		$templates->load();
 
 		$options = array();

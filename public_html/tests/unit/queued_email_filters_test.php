@@ -20,7 +20,7 @@
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 
-require_once(PathHelper::getIncludePath('data/queued_email_class.php'));
+require_once(PathHelper::getIncludePath('data/queued_emails_class.php'));
 
 section('multi_status filter generates executable SQL');
 

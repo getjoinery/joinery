@@ -333,7 +333,7 @@ foreach (DnsDriverRegistry::all() as $key => $class) {
 
 // Nothing in the DNS subsystem may write a credential anywhere. The ownership
 // table is the only thing it persists, and its columns are all public facts.
-require_once(PathHelper::getIncludePath('data/dns_records_class.php'));
+require_once(PathHelper::getIncludePath('data/managed_dns_records_class.php'));
 $secretish = array('token', 'secret', 'password', 'credential', 'api_key', 'access');
 $leaky = array();
 foreach (array_keys(ManagedDnsRecord::$field_specifications) as $column) {

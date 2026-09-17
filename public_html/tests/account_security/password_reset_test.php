@@ -15,10 +15,10 @@
  * merely on the one code path that remembered to check.
  *
  * That last property is the reason this suite exists. Validity is expressed in
- * three lookups: checkTempCode filters act_deleted, while getIdFromTempCode and
+ * three lookups: checkTempCode filters act_delete_time, while getIdFromTempCode and
  * getTempCodeInfo resolve a code for callers that grant real access
  * (Activation::ActivateUser, reached straight from login_logic). Any lookup that
- * ignores act_deleted turns a spent code back into a live one for the remainder
+ * ignores act_delete_time turns a spent code back into a live one for the remainder
  * of its lifetime, so the replay checks below exercise the resolvers directly
  * rather than trusting one flow's ordering to save the others.
  *

@@ -141,8 +141,8 @@ class SlotGenerator {
      * the registry dependency for testing).
      */
     public static function forSchedule($schedule, string $range_start_utc, string $range_end_utc, array $opts, array $busy): array {
-        require_once(PathHelper::getIncludePath('data/schedule_window_class.php'));
-        require_once(PathHelper::getIncludePath('data/schedule_override_class.php'));
+        require_once(PathHelper::getIncludePath('data/schedule_windows_class.php'));
+        require_once(PathHelper::getIncludePath('data/schedule_overrides_class.php'));
 
         $windows = [];
         $mw = new MultiScheduleWindow(['schedule_id' => $schedule->key, 'deleted' => false]);

@@ -26,8 +26,8 @@ if (php_sapi_name() !== 'cli') { echo "This test must be run from the command li
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAdminCsrf.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/logic/node_detail_actions_logic.php'));
 
@@ -42,7 +42,7 @@ $ALL_ACTIONS = array_keys($error_tab_prop->getValue());
 
 /** Count non-deleted jobs for a node (any created mutation shows up here). */
 function job_count($db, $node_id) {
-	$q = $db->prepare('SELECT count(*) FROM mjb_management_jobs WHERE mjb_mgn_node_id = ? AND mjb_delete_time IS NULL');
+	$q = $db->prepare('SELECT count(*) FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = ? AND mjb_delete_time IS NULL');
 	$q->execute([(int)$node_id]);
 	return (int)$q->fetchColumn();
 }
@@ -68,7 +68,7 @@ try {
 	$node_id = (int)$n->key;
 
 	$session = SessionControl::get_instance();
-	$base_url = '/admin/server_manager/node_detail?mgn_id=' . $n->key;
+	$base_url = '/admin/server_manager/node_detail?mgn_managed_node_id=' . $n->key;
 	$page_regex = '/\/admin\/server_manager/';
 
 	// Establish a known session token (mints it if absent).
@@ -124,8 +124,8 @@ try {
 } finally {
 	$_POST = [];
 	if ($node_id) {
-		$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_node_id = ?')->execute([$node_id]);
-		$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_id = ?')->execute([$node_id]);
+		$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = ?')->execute([$node_id]);
+		$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_managed_node_id = ?')->execute([$node_id]);
 	}
 }
 
