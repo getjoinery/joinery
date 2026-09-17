@@ -17,9 +17,9 @@
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provisions_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/InstallJobExecutor.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
@@ -31,9 +31,9 @@ $made_jobs = array();
 
 // Clean any debris from a crashed run.
 $db->exec("DELETE FROM cvp_customer_cloud_provisions WHERE cvp_slug LIKE 'ijetest-%'");
-foreach ($db->query("SELECT mgn_id FROM mgn_managed_nodes WHERE mgn_slug LIKE 'ijetest-%'")->fetchAll(PDO::FETCH_COLUMN) as $sid) {
-	$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_node_id = ?')->execute([$sid]);
-	$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_id = ?')->execute([$sid]);
+foreach ($db->query("SELECT mgn_managed_node_id FROM mgn_managed_nodes WHERE mgn_slug LIKE 'ijetest-%'")->fetchAll(PDO::FETCH_COLUMN) as $sid) {
+	$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = ?')->execute([$sid]);
+	$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_managed_node_id = ?')->execute([$sid]);
 }
 
 // Everything this test writes lives inside ONE transaction that is rolled back
@@ -67,7 +67,7 @@ function ije_node($slug, $seal_password = null) {
 		$prov->set('cvp_usr_user_id', 990000 + random_int(0, 9999));
 		$prov->set('cvp_domain', $slug . '.example.com');
 		$prov->set('cvp_slug', $slug);
-		$prov->set('cvp_mgn_node_id', $node->key);
+		$prov->set('cvp_mgn_managed_node_id', $node->key);
 		$prov->set('cvp_status', 'installing');
 		$box = new SecretBox();
 		$prov->set('cvp_root_pass_sealed',
@@ -120,11 +120,11 @@ check($orphan_refused, 'a step list outside the bootstrap set is refused when it
 
 // The node agent claims WHERE mjb_status = 'pending'; the executor claims
 // WHERE mjb_status = 'queued'. Prove both predicates against this exact job.
-$agent_sees = $db->prepare("SELECT COUNT(*) FROM mjb_management_jobs WHERE mjb_id = ? AND mjb_status = 'pending'");
+$agent_sees = $db->prepare("SELECT COUNT(*) FROM mjb_management_jobs WHERE mjb_management_job_id = ? AND mjb_status = 'pending'");
 $agent_sees->execute([$job->key]);
 check((int)$agent_sees->fetchColumn() === 0, 'the node agent claim predicate does not match it');
 
-$exec_claim = $db->prepare("UPDATE mjb_management_jobs SET mjb_status = 'running', mjb_started_time = now() WHERE mjb_id = ? AND mjb_status = 'queued'");
+$exec_claim = $db->prepare("UPDATE mjb_management_jobs SET mjb_status = 'running', mjb_started_time = now() WHERE mjb_management_job_id = ? AND mjb_status = 'queued'");
 $exec_claim->execute([$job->key]);
 check($exec_claim->rowCount() === 1, 'the executor claim predicate matches it exactly once');
 
@@ -283,7 +283,7 @@ check(in_array('retire_install_password', ManagementJob::BOOTSTRAP_JOB_TYPES, tr
 $bad = ManagementJob::createJob($node7->key, 'install_node',
 	array(array('type' => 'local', 'label' => 'x', 'cmd' => 'echo never')), array(), null);
 $made_jobs[] = $bad->key;
-$db->prepare("UPDATE mjb_management_jobs SET mjb_status = 'running', mjb_job_type = 'check_status' WHERE mjb_id = ?")->execute([$bad->key]);
+$db->prepare("UPDATE mjb_management_jobs SET mjb_status = 'running', mjb_job_type = 'check_status' WHERE mjb_management_job_id = ?")->execute([$bad->key]);
 $bad->load();
 (new InstallJobExecutor())->execute($bad);
 $bad->load();
@@ -312,7 +312,7 @@ check(strpos((string)$doubt->get('mjb_output'), 'Confirming the machine refuses 
 	'the output shows the confirmation attempt, so a watcher knows what the job was waiting on');
 $result = json_decode((string)$doubt->get('mjb_result'), true);
 check(is_array($result) && $result['retired'] === false, 'the recorded result says not retired');
-$sealed_q = $db->prepare('SELECT cvp_root_pass_sealed FROM cvp_customer_cloud_provisions WHERE cvp_mgn_node_id = ?');
+$sealed_q = $db->prepare('SELECT cvp_root_pass_sealed FROM cvp_customer_cloud_provisions WHERE cvp_mgn_managed_node_id = ?');
 $sealed_q->execute([$node7->key]);
 $sealed_still = (string)$sealed_q->fetchColumn();
 check($sealed_still !== '' && (new SecretBox())->open($sealed_still)['value'] === $retire_pw,

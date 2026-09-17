@@ -55,9 +55,9 @@ function admin_mailbox_connect_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Client.php'));
 	require_once(PathHelper::getIncludePath('includes/oauth/OAuth2ProviderRegistry.php'));
 	require_once(PathHelper::getIncludePath('includes/oauth/OAuth2ProviderConfig.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_accounts_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ImapFeedProvisioner.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ImapConnectStash.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
@@ -327,7 +327,7 @@ function admin_mailbox_connect_logic(array $input): LogicResult {
 	// discovers folders on its first poll anyway.
 	$folder_names = array();
 	if ($state === 'configure' && $account !== null && $account->key) {
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_folder_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_folders_class.php'));
 		if ($account->isConnectable()) {
 			try {
 				require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ImapIngestor.php'));

@@ -43,8 +43,8 @@ require_once(__DIR__ . '/../../../tests/lib/logic.php');
 harness_boot();
 
 require_once(PathHelper::getIncludePath('data/users_class.php'));
-require_once(PathHelper::getIncludePath('data/schedule_class.php'));
-require_once(PathHelper::getIncludePath('data/schedule_window_class.php'));
+require_once(PathHelper::getIncludePath('data/schedules_class.php'));
+require_once(PathHelper::getIncludePath('data/schedule_windows_class.php'));
 require_once(PathHelper::getIncludePath('data/surveys_class.php'));
 require_once(PathHelper::getIncludePath('data/questions_class.php'));
 require_once(PathHelper::getIncludePath('data/survey_questions_class.php'));

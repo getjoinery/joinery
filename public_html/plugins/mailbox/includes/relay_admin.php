@@ -48,7 +48,7 @@ function admin_mailbox_relay_flash($session, string $msg, string $title = 'Done'
  */
 function admin_mailbox_relay_tenant_actions(array $input, $session, string $self_url): ?LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 
 	$action = $input['action'] ?? null;
 	if ($action === null) {
@@ -113,7 +113,7 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 	// upgrade drains it and replaces the machine's contents in place
 	// (specs/mailbox_relay_upgrade_without_server_manager.md).
 	if ($action === 'relay_upgrade') {
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provision_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provisions_class.php'));
 		$relay_id = intval($input['mrl_mailbox_relay_id'] ?? 0);
 		$relay = null;
 		if ($relay_id > 0) {
@@ -183,7 +183,7 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 	// the section then shows the just-in-time credential step. Nothing to
 	// configure beforehand.
 	if ($action === 'relay_cloud_begin') {
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provision_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provisions_class.php'));
 
 		$mail_hostname = strtolower(trim((string)($input['cloud_mail_hostname'] ?? '')));
 		$region = trim((string)($input['cloud_region'] ?? ''));
@@ -217,7 +217,7 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 	// configured, the step is a single Approve at Linode — the consent lands
 	// on the run via RelayCloudConsumer with the same grant-per-act custody.
 	if ($action === 'relay_cloud_connect') {
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provision_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provisions_class.php'));
 		require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Client.php'));
 		$run = RelayCloudProvision::live();
 		if ($run === null || (string)$run->get('rcp_status') !== 'awaiting_grant') {
@@ -238,7 +238,7 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 	// by the customer for this one act, verified live, sealed onto the run,
 	// and erased at the run's terminal state (grant-per-act custody).
 	if ($action === 'relay_cloud_token') {
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provision_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provisions_class.php'));
 		require_once(PathHelper::getIncludePath('includes/cloud_compute/LinodeComputeDriver.php'));
 
 		$run = RelayCloudProvision::live();
@@ -276,7 +276,7 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 
 	// Dismiss a finished (or abandoned-at-consent) run from the section.
 	if ($action === 'relay_cloud_dismiss') {
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provision_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provisions_class.php'));
 		$run = RelayCloudProvision::latest();
 		if ($run !== null && (string)$run->get('rcp_status') !== 'booting'
 				&& (string)$run->get('rcp_status') !== 'provisioning') {
@@ -366,7 +366,7 @@ function admin_mailbox_relay_upgrade_vars(MailboxRelay $relay): array {
 }
 
 function admin_mailbox_relay_tenant_vars(): array {
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 	$settings = Globalvars::get_instance();
 	$server_manager_active = PluginHelper::isPluginActive('server_manager');
 
@@ -417,7 +417,7 @@ function admin_mailbox_relay_tenant_vars(): array {
 	// cheap transitions (create instance, poll boot) advance right here on
 	// page load so a watching admin sees progress; the long SSH build stays
 	// with the scheduled task.
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provision_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provisions_class.php'));
 	$live_run = RelayCloudProvision::live();
 	if ($live_run !== null && in_array((string)$live_run->get('rcp_status'), array('ready', 'booting'), true)) {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayCloudProvisioner.php'));
@@ -606,7 +606,7 @@ function admin_mailbox_relay_create_fleet_product(): array {
  * and the nodes a shard can be provisioned onto.
  */
 function admin_mailbox_relay_operator_vars(): array {
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provision_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provisions_class.php'));
 	$settings = Globalvars::get_instance();
 	$server_manager_active = PluginHelper::isPluginActive('server_manager');
 
@@ -650,7 +650,7 @@ function admin_mailbox_relay_operator_vars(): array {
  */
 function admin_mailbox_relay_provision_shard(array $input, $session): array {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetService.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provision_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provisions_class.php'));
 
 	$hostname = strtolower(trim((string)($input['shard_hostname'] ?? '')));
 	$region = trim((string)($input['shard_region'] ?? ''));
@@ -680,7 +680,7 @@ function admin_mailbox_relay_provision_shard(array $input, $session): array {
 	$run->set('rcp_mail_hostname', substr($hostname, 0, 255));
 	$run->set('rcp_region', substr($region, 0, 50));
 	$run->set('rcp_instance_type', 'g6-nanode-1');
-	$run->set('rcp_mfs_shard_id', intval($shard->key));
+	$run->set('rcp_mfs_mailbox_fleet_shard_id', intval($shard->key));
 	$run->save();
 
 	return array('title' => 'Shard birth started',
@@ -698,7 +698,7 @@ function admin_mailbox_relay_provision_shard(array $input, $session): array {
  */
 function admin_mailbox_relay_shard_dns_rows($shard): array {
 	require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_fleet_slot_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_fleet_slots_class.php'));
 
 	$ip = trim((string)$shard->get('mfs_public_ip'));
 	$host = strtolower(trim((string)$shard->get('mfs_hostname')));
@@ -826,7 +826,7 @@ function admin_mailbox_relay_health(): array {
  */
 function admin_mailbox_relay_check_rows(string $advanced_url = ''): array {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailSetupCheck.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 
 	$setup_link = array(
 		'text' => 'Relay setup lives under Advanced server setup, at the bottom of this page.',

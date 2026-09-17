@@ -126,7 +126,7 @@
 					<div>
 						<strong><?php echo htmlspecialchars($comment->get('cmt_author_name')); ?></strong>
 						<span style="color: var(--color-meta); font-size: 1.3rem; margin-left: 1rem;">
-							<?php echo LibraryFunctions::convert_time($comment->get('cmt_created_time'), 'UTC', 'America/New_York'); ?>
+							<?php echo LibraryFunctions::convert_time($comment->get('cmt_create_time'), 'UTC', 'America/New_York'); ?>
 						</span>
 						<p style="margin-top: 0.8rem;"><?php echo htmlspecialchars($comment->get('cmt_body')); ?></p>
 					</div>

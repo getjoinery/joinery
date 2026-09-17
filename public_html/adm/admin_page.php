@@ -352,7 +352,7 @@
 	<?php
 	// A/B Testing Panel — only renders if Page has opted into the framework
 	if (!empty(Page::$ab_testable)) {
-		require_once(PathHelper::getIncludePath('data/abt_tests_class.php'));
+		require_once(PathHelper::getIncludePath('data/tests_class.php'));
 		AbTestVersionsPanel::render('Page', $page->key);
 	}
 	?>

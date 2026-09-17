@@ -40,8 +40,8 @@ require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 
 const RESTORE_OPS = ['restore_database', 'restore_project', 'restore_chain'];
 

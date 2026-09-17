@@ -25,9 +25,9 @@
  *   they may not be in this mailbox (specs/mail_import_loss_proof.md).
  */
 
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/mail_import_run_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/mail_import_entry_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/mail_import_runs_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/mail_import_entries_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxViewer.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/import/MailArchiveReaderRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/import/MailArchiveImporter.php'));

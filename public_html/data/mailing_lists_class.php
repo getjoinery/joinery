@@ -166,7 +166,7 @@ function get_subscribed_users($return='object'){
 			if($this->get('mlt_emt_email_template_id')){
 				//SEND WELCOME EMAIL
 				$user = new User($usr_user_id, TRUE);
-				$template = new EmailTemplateStore($this->get('mlt_emt_email_template_id'), TRUE);
+				$template = new EmailTemplate($this->get('mlt_emt_email_template_id'), TRUE);
 				EmailSender::sendTemplate($template->get('emt_machine_name'),
 					$user->get('usr_email'),
 					[

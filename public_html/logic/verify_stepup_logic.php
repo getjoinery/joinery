@@ -36,7 +36,7 @@ function verify_stepup_logic(array $input): LogicResult {
 	}
 
 	$has_totp = $user->has_totp_enabled();
-	require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+	require_once(PathHelper::getIncludePath('data/passkey_credentials_class.php'));
 	$passkeys = new MultiPasskey(array('user_id' => (int)$user->key));
 	$passkeys->load();
 	$has_passkey = (count($passkeys) > 0) && (bool)$settings->get_setting('passkeys_enabled');

@@ -30,7 +30,9 @@ function mailbox_make_user(string $email, int $permission = 5, string $first_nam
 /**
  * Best-effort removal of leftover inbound-mail fixtures for a set of test
  * domains, matched by a `ied_domain LIKE` pattern. Cascades in FK-safe order:
- * attachments -> grants -> messages -> aliases -> domains. Every step is a
+ * attachments -> grants -> send attempts -> messages -> aliases -> domains.
+ * A forward records a send attempt against its alias (MailboxSendAttempt),
+ * so a suite that forwards leaves one per alias. Every step is a
  * no-op when there is nothing to remove, so one call serves suites that create
  * only domains+aliases as well as suites that also store messages/attachments.
  *
@@ -70,6 +72,7 @@ function mailbox_purge_domains(string $domain_like, ?string $user_email_like = n
 			if ($aids) {
 				$ain = implode(',', array_map('intval', $aids));
 				$db->exec("DELETE FROM ieg_inbound_email_mailbox_grants WHERE ieg_iea_inbound_email_alias_id IN ($ain)");
+				$db->exec("DELETE FROM mst_mailbox_send_attempts WHERE mst_iea_inbound_email_alias_id IN ($ain)");
 			}
 
 			$db->exec("DELETE FROM iem_inbound_email_messages WHERE iem_ied_inbound_email_domain_id IN ($in)");

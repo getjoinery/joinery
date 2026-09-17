@@ -8,7 +8,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
-	require_once(PathHelper::getIncludePath('data/login_class.php'));
+	require_once(PathHelper::getIncludePath('data/logins_class.php'));
 
 	//HANDLE ACTIVATION FIRST IF PRESENT
 	if (!empty($input['act_code'])) {
@@ -53,7 +53,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 					$session->store_session_variables($activated_user);
 
 					if ($session->get_initial_user_id() == $session->get_user_id()) {
-						LoginClass::StoreUserLogin($activated_user->key, LoginClass::LOGIN_FORM);
+						Login::record($activated_user->key, Login::LOGIN_FORM);
 					}
 
 					return LogicResult::redirect('/password-set');
@@ -175,7 +175,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 		// Save their session
 		$session->store_session_variables($user);
-		LoginClass::StoreUserLogin($user->key, LoginClass::LOGIN_FORM);
+		Login::record($user->key, Login::LOGIN_FORM);
 
 		// Potentially save a cookie if they set "Remember Me"
 		if (!empty($input['setcookie']) || !empty($input['lbx_setcookie'])) {

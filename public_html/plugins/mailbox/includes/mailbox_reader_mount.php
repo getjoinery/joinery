@@ -345,7 +345,7 @@ function mailbox_reader_emit_unseal_convergence(): void {
 	if (!$user_id) {
 		return;
 	}
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protection_ceremony.php'));
 	try {
 		// "No longer sealed" is the MAILBOX's answer (specs/mailbox_connect_flow.md

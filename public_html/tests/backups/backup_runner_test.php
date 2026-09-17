@@ -283,7 +283,7 @@ $size_row = function (int $files_bytes, int $level, string $when, string $outcom
 		array('kind' => 'db', 'name' => 'db.sql.gz.enc', 'bytes' => 5000, 'level' => $level),
 	));
 	$row->save();
-	harness_register_row('bkh_backup_history', 'bkh_id', $row->key);
+	harness_register_row('bkh_backup_history', 'bkh_backup_history_id', $row->key);
 	return $row;
 };
 
@@ -340,7 +340,7 @@ $cc_row = function (string $when, $chain_id, int $seq) use ($cc_slug) {
 		$row->set('bkh_chain_seq', $seq);
 	}
 	$row->save();
-	harness_register_row('bkh_backup_history', 'bkh_id', $row->key);
+	harness_register_row('bkh_backup_history', 'bkh_backup_history_id', $row->key);
 	return $row;
 };
 $cc_row('2026-08-30 04:45:00', $cc_chain, 0);

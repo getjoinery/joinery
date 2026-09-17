@@ -89,7 +89,7 @@ require_once(PathHelper::getIncludePath('includes/BackupNaming.php'));
 require_once(PathHelper::getIncludePath('includes/BackupProfile.php'));
 require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
 require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
-require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
+require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 require_once(PathHelper::getIncludePath('data/backup_history_class.php'));
 require_once(PathHelper::getIncludePath('includes/BackupVerifier.php'));
 
@@ -203,7 +203,7 @@ class BackupRunner {
 			// An ephemeral target has no id. The name is denormalised onto the row
 			// either way, which is what the history has to be able to say.
 			if ($plan['target']->key) {
-				$history->set('bkh_bkt_target_id', $plan['target']->key);
+				$history->set('bkh_bkt_backup_target_id', $plan['target']->key);
 			}
 			$history->set('bkh_target_name', $plan['target']->get('bkt_name'));
 		}

@@ -1,6 +1,6 @@
 <?php
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/aip_recipe_item_log_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_item_log_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunContext.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobRegistry.php'));
 require_once(PathHelper::getIncludePath('includes/DescriptorValidator.php'));
@@ -324,7 +324,7 @@ class PipelineRunner {
         $log = new AipRecipeItemLog(NULL);
         $log->set('aip_rcp_recipe_id', (int)$recipe->key);
         $log->set('aip_item_key', $item_key);
-        $log->set('aip_rcr_run_id', (int)$ctx->run->key);
+        $log->set('aip_rcr_recipe_run_id', (int)$ctx->run->key);
         $log->set('aip_status', $status);
         $log->prepare();
         $log->save();

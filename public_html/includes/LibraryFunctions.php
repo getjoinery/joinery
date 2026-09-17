@@ -726,7 +726,7 @@ class LibraryFunctions {
 	}
 
 	static function state_to_abbr($fullstate) {
-		require_once(PathHelper::getIncludePath('data/address_class.php'));
+		require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
 		$abbrev = array_search($fullstate, Address::$states);
 		return $abbrev;
 	}

@@ -24,7 +24,7 @@ harness_boot();
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/listener_admin.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailSetupCheck.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailHealth.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 
 section('guardrail refusal matrix');
 

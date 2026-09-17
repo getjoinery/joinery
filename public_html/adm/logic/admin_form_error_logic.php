@@ -10,7 +10,7 @@ function admin_form_error_logic(array $input): LogicResult {
 	$session->check_permission(9);
 	$session->set_return();
 
-	$form_error = new FormError($input['lfe_log_form_error_id'] ?? NULL, TRUE);
+	$form_error = new LogFormError($input['lfe_log_form_error_id'] ?? NULL, TRUE);
 	$user = new User($form_error->get('lfe_usr_user_id'), TRUE);
 
 	$page_vars = array();

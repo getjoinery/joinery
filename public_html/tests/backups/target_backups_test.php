@@ -31,7 +31,7 @@ harness_boot();
 
 require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
 require_once(PathHelper::getIncludePath('includes/TargetBackups.php'));
-require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
+require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 
 /** Call a private static on S3Signer. */
 function s3_call($method, array $args) {

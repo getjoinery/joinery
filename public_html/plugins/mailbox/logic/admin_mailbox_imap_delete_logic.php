@@ -24,9 +24,9 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
 
 function admin_mailbox_imap_delete_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_accounts_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
 
 	$session = SessionControl::get_instance();
 	// Deleting IMAP feeds handles full-mailbox credentials — superadmin only.
@@ -136,7 +136,7 @@ function _imap_del_keep($session, InboundImapAccount $account, array $ref_ids, i
 
 /** Remove: permanent-delete the mirrored rows, then delete the feed (and cascade). */
 function _imap_del_remove($session, InboundImapAccount $account, array $ref_ids, int $cascade_alias_id, string $accounts_url): LogicResult {
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
 
 	$removed = 0;
 	foreach ($ref_ids as $id) {
@@ -159,7 +159,7 @@ function _imap_del_finish_plain($session, InboundImapAccount $account, int $casc
 /** Permanently delete the owning alias when the delete originated as its cascade. */
 function _imap_del_cascade_alias(int $cascade_alias_id): string {
 	if ($cascade_alias_id <= 0) { return ''; }
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
 	$alias = new InboundEmailAlias($cascade_alias_id, TRUE);
 	if ($alias->key) {
 		$alias->permanent_delete();

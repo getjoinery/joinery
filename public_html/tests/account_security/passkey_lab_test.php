@@ -24,7 +24,7 @@ require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 
 require_once(PathHelper::getIncludePath('data/users_class.php'));
-require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+require_once(PathHelper::getIncludePath('data/passkey_credentials_class.php'));
 require_once(PathHelper::getIncludePath('data/passkey_ceremonies_class.php'));
 require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 // PasskeyService declares classes against WebAuthn library interfaces at file

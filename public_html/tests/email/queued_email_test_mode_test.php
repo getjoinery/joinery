@@ -24,6 +24,9 @@
  *
  * Run: php tests/run.php test-db --filter=queued_email_test_mode
  *
+ * @version 1.1 - the Notify section finds its own rows by the title marker, not by a
+ *   high-water mark on shared tables: under parallel lanes the mark swept in (and
+ *   deleted) another suite's notifications and counted its queued mail as ours
  * @version 1.0
  */
 
@@ -141,19 +144,23 @@ try {
 		foreach (array_keys($decl['payload'] ?? array()) as $field) {
 			if ($field !== 'recipients') $payload[$field] = $title_marker;
 		}
-		$before_ntf = (int)$db->query('SELECT coalesce(max(ntf_notification_id),0) FROM ntf_notifications')->fetchColumn();
-		$before_equ = (int)$db->query('SELECT coalesce(max(equ_queued_email_id),0) FROM equ_queued_emails')->fetchColumn();
+		// The rows this dispatch made are the ones carrying the marker in
+		// their title/subject — never "every row newer than a high-water
+		// mark", which under the runner's parallel lanes reads (and below,
+		// deletes) rows another suite is writing at the same moment.
+		$like = '%' . $title_marker . '%';
 
 		SignalBus::dispatch($signal, $payload);
 
-		$ntf = $db->prepare('SELECT ntf_usr_user_id FROM ntf_notifications WHERE ntf_notification_id > ?');
-		$ntf->execute(array($before_ntf));
-		$ntf_users = array_map('intval', $ntf->fetchAll(PDO::FETCH_COLUMN));
-		$equ = $db->prepare('SELECT equ_to, equ_queued_email_id FROM equ_queued_emails WHERE equ_queued_email_id > ?');
-		$equ->execute(array($before_equ));
+		$ntf = $db->prepare('SELECT ntf_usr_user_id, ntf_notification_id FROM ntf_notifications WHERE ntf_title LIKE ?');
+		$ntf->execute(array($like));
+		$ntf_rows  = $ntf->fetchAll(PDO::FETCH_ASSOC);
+		$ntf_users = array_map(function ($r) { return (int)$r['ntf_usr_user_id']; }, $ntf_rows);
+		$equ = $db->prepare('SELECT equ_to, equ_queued_email_id FROM equ_queued_emails WHERE equ_subject LIKE ?');
+		$equ->execute(array($like));
 		$equ_rows = $equ->fetchAll(PDO::FETCH_ASSOC);
 
-		$db->prepare('DELETE FROM ntf_notifications WHERE ntf_notification_id > ?')->execute(array($before_ntf));
+		$db->prepare('DELETE FROM ntf_notifications WHERE ntf_title LIKE ?')->execute(array($like));
 		foreach ($equ_rows as $r) { harness_register_model('QueuedEmail', (int)$r['equ_queued_email_id']); }
 
 		check(in_array((int)$person->key, $ntf_users, true),

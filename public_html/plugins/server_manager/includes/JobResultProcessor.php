@@ -74,8 +74,8 @@
  * @version 1.10 - processable_types() drives the dashboard sweep (P-17: relay/ssl/backup results no longer skipped)
  */
 
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 
 class JobResultProcessor {
 
@@ -364,7 +364,7 @@ class JobResultProcessor {
 		$is_api_path = ($api_data !== null);
 
 		// Load node early — needed for HTTPS probe (mgn_site_url, mgn_tls_insecure)
-		$node_id = $job->get('mjb_mgn_node_id');
+		$node_id = $job->get('mjb_mgn_managed_node_id');
 		$node    = null;
 		if ($node_id) {
 			try { $node = new ManagedNode($node_id, TRUE); } catch (Exception $e) {}
@@ -885,7 +885,7 @@ class JobResultProcessor {
 			$result['message'] = trim((string)$job->get('mjb_error_message'));
 		}
 
-		$node_id = $job->get('mjb_mgn_node_id');
+		$node_id = $job->get('mjb_mgn_managed_node_id');
 		if ($node_id && $status !== 'skipped') {
 			try {
 				$node = new ManagedNode($node_id, TRUE);
@@ -935,7 +935,7 @@ class JobResultProcessor {
 			if (isset($verdict[$k])) { $result[$k] = $verdict[$k]; }
 		}
 
-		$node_id = $job->get('mjb_mgn_node_id');
+		$node_id = $job->get('mjb_mgn_managed_node_id');
 		if ($node_id) {
 			try {
 				$node = new ManagedNode($node_id, TRUE);
@@ -1075,7 +1075,7 @@ class JobResultProcessor {
 	 * success if the node is actually running the version it was sent.
 	 */
 	private static function process_apply_update($job) {
-		$node_id = $job->get('mjb_mgn_node_id');
+		$node_id = $job->get('mjb_mgn_managed_node_id');
 		if (!$node_id) { return self::record_apply_update_result($job, ['probed' => false, 'reason' => 'no node on job']); }
 		try {
 			$node = new ManagedNode($node_id, TRUE);
@@ -1236,7 +1236,7 @@ class JobResultProcessor {
 	 * Runs for both 'completed' and 'failed' terminal states.
 	 */
 	private static function process_install_node($job) {
-		$node_id = $job->get('mjb_mgn_node_id');
+		$node_id = $job->get('mjb_mgn_managed_node_id');
 		if (!$node_id) return;
 
 		try {
@@ -1289,7 +1289,7 @@ class JobResultProcessor {
 	public static function send_provisioning_welcome_email($job, $node) {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/GetJoineryApiClient.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/ProvisioningSetup.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_host_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_hosts_class.php'));
 
 		$settings   = Globalvars::get_instance();
 		$api_url    = $settings->get_setting('server_manager_getjoinery_api_url');
@@ -1314,7 +1314,7 @@ class JobResultProcessor {
 		// live on a ManagedHost machine; customer-cloud nodes have no host row
 		// — the node's own address is the DNS target.
 		$host_ip = '';
-		$host_id = $node->get('mgn_mgh_host_id');
+		$host_id = $node->get('mgn_mgh_managed_host_id');
 		if ($host_id) {
 			try {
 				$host    = new ManagedHost($host_id, true);
@@ -1443,7 +1443,7 @@ HTML;
 		if (is_string($params)) { $params = json_decode($params, true); }
 		$node_id = (is_array($params) && !empty($params['for_node_id']))
 			? (int)$params['for_node_id']
-			: $job->get('mjb_mgn_node_id');
+			: $job->get('mjb_mgn_managed_node_id');
 		if (!$node_id) return;
 
 		try {
@@ -1523,7 +1523,7 @@ HTML;
 			];
 			if (!empty($data['replaced'])) {
 				error_log('JobResultProcessor: SSL routing probe on node '
-					. $job->get('mjb_mgn_node_id') . ' replaced a token that was already there — '
+					. $job->get('mjb_mgn_managed_node_id') . ' replaced a token that was already there — '
 					. 'an earlier probe did not clean up, or two are in flight.');
 			}
 		}
@@ -1870,7 +1870,7 @@ HTML;
 			return;
 		}
 
-		$node_id = $job->get('mjb_mgn_node_id');
+		$node_id = $job->get('mjb_mgn_managed_node_id');
 		if ($node_id) {
 			try {
 				$node = new ManagedNode($node_id, TRUE);
@@ -1929,7 +1929,7 @@ HTML;
 		$report = self::sanitise_host_report($decoded);
 		$read_at = gmdate('Y-m-d H:i:s');
 
-		$node_id = $job->get('mjb_mgn_node_id');
+		$node_id = $job->get('mjb_mgn_managed_node_id');
 		if ($node_id) {
 			try {
 				$node = new ManagedNode($node_id, TRUE);
@@ -2128,7 +2128,7 @@ HTML;
 	 * soft-delete triggers no cascade), so the node's offsite backups stay recoverable.
 	 */
 	private static function process_decommission_node($job) {
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
 
 		$output = (string)($job->get('mjb_output') ?: '');
 		$data = self::extract_api_envelope_data($output);
@@ -2153,7 +2153,7 @@ HTML;
 				// subject is a HOST node and whose params name no victim is a
 				// build defect, and finalizing the host's record for it is the
 				// one wrong answer.
-				$subject = new ManagedNode($job->get('mjb_mgn_node_id'), TRUE);
+				$subject = new ManagedNode($job->get('mjb_mgn_managed_node_id'), TRUE);
 				if ($subject->key && (trim((string)$subject->get('mgn_container_name')) !== ''
 						|| trim((string)$subject->get('mgn_web_root')) !== '')) {
 					$node_id = $subject->key;
@@ -2364,7 +2364,7 @@ HTML;
 		// reading it means running a script on the node, which is a job, not a
 		// page render; and once, because a report already on its way will
 		// describe the same machine.
-		$node_id = $job->get('mjb_mgn_node_id');
+		$node_id = $job->get('mjb_mgn_managed_node_id');
 		if ($job->get('mjb_status') === 'completed' && $node_id) {
 			try {
 				$node = new ManagedNode($node_id, TRUE);

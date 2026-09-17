@@ -79,7 +79,7 @@ $secret_allowed = array(
 	'includes/PoolVaultKey.php',                          // holds the bytes; the pool `open` and `unwrap`
 	'includes/SealedBox.php',                             // openDek() is unframeSeal() + openBinary()
 	'plugins/mailbox/includes/RelaySpoolConsumer.php',    // the SERVER's relay transport key, not a vault key
-	'plugins/mailbox/data/mailbox_relay_class.php',       // mints that transport keypair
+	'plugins/mailbox/data/mailbox_relays_class.php',       // mints that transport keypair
 );
 
 $root = realpath(__DIR__ . '/../..');

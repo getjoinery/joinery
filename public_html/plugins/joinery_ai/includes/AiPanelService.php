@@ -374,7 +374,7 @@ class AiPanelService {
 
         $db = DbConnector::get_instance()->get_db_link();
         $q = $db->prepare(
-            "SELECT r.rcr_run_id, r.rcr_status, r.rcr_started_time, p.rcp_recipe_id, p.rcp_name
+            "SELECT r.rcr_recipe_run_id, r.rcr_status, r.rcr_started_time, p.rcp_recipe_id, p.rcp_name
                FROM rcr_recipe_runs r
                JOIN rcp_recipes p ON p.rcp_recipe_id = r.rcr_rcp_recipe_id
               WHERE r.rcr_delete_time IS NULL
@@ -403,7 +403,7 @@ class AiPanelService {
                 'name'     => (string)$row['rcp_name'],
                 'state'    => $state,
                 'label'    => $label,
-                'progress' => self::progressLine($recipe, (int)$row['rcr_run_id'], $running),
+                'progress' => self::progressLine($recipe, (int)$row['rcr_recipe_run_id'], $running),
             ];
         }
 
@@ -452,7 +452,7 @@ class AiPanelService {
     /** How many items this run has finished with, whatever the outcome. */
     private static function runItemsDone(int $run_id): int {
         $db = DbConnector::get_instance()->get_db_link();
-        $q = $db->prepare('SELECT count(*) FROM aip_recipe_item_log WHERE aip_rcr_run_id = ?');
+        $q = $db->prepare('SELECT count(*) FROM aip_recipe_item_log WHERE aip_rcr_recipe_run_id = ?');
         $q->execute([$run_id]);
         return (int)$q->fetchColumn();
     }

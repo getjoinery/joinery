@@ -5,7 +5,7 @@ function verify_totp_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
-	require_once(PathHelper::getIncludePath('data/login_class.php'));
+	require_once(PathHelper::getIncludePath('data/logins_class.php'));
 
 	$session = SessionControl::get_instance();
 	$page_vars = array();
@@ -33,7 +33,7 @@ function verify_totp_logic(array $input): LogicResult{
 		return LogicResult::redirect('/login');
 	}
 	$page_vars['has_totp'] = $pending_user->has_totp_enabled();
-	require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+	require_once(PathHelper::getIncludePath('data/passkey_credentials_class.php'));
 	$pending_passkeys = new MultiPasskey(array('user_id' => (int)$pending_user->key));
 	$pending_passkeys->load();
 	$page_vars['has_passkey'] = (count($pending_passkeys) > 0)

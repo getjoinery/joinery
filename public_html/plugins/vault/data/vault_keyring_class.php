@@ -41,8 +41,8 @@ class VaultKeyring extends SystemBase {
 		'vlk_usr_user_id' => array('type'=>'int8', 'is_nullable'=>false, 'unique'=>true, 'index'=>true,
 			'foreign_key'=>array('table'=>'usr_users', 'column'=>'usr_user_id', 'on_delete'=>'CASCADE')),
 		'vlk_wrapped_dek'   => array('type'=>'text', 'is_nullable'=>false),
-		'vlk_created_time'  => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'vlk_updated_time'  => array('type'=>'timestamp(6)', 'is_nullable'=>true),
+		'vlk_create_time'  => array('type'=>'timestamp(6)', 'default'=>'now()'),
+		'vlk_update_time'  => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	);
 
 	/** The keyring row for a user, or null if the store DEK isn't sealed yet. */

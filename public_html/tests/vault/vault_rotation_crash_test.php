@@ -72,7 +72,7 @@ $open_all_items = function (VaultKey $secret) use ($consumer, $crypto): int {
 $secret_for_generation = function (int $gen) use ($box, $vault_id, $credential_id, $kek): ?VaultKey {
 	foreach (vault_live_wrappings($vault_id) as $w) {
 		if ($w->get('uew_unlocker_type') !== UserEncryptionWrapping::TYPE_PASSKEY) { continue; }
-		if ((int)$w->get('uew_pkc_credential_id') !== $credential_id) { continue; }
+		if ((int)$w->get('uew_pkc_passkey_credential_id') !== $credential_id) { continue; }
 		if ((int)$w->get('uew_key_generation') !== $gen) { continue; }
 		return VaultUnlock::openKey(0, $w->unlocker($kek))['key'];
 	}

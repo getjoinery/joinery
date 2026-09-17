@@ -114,7 +114,7 @@ section('which name the relay row resolves to');
 // hostname is a per-tenant record the shard never stamps under, so a recorded
 // authserv-id has to win — and mrl_name is a human label there, never a host.
 try {
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 
 	$self_hosted = new MailboxRelay(NULL);
 	$self_hosted->set('mrl_name', RELAY_HOST);

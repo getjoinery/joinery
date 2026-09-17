@@ -114,7 +114,7 @@ HTML;
 	               SELECT ?, 2, ?, ?, now(), now()
 	               WHERE NOT EXISTS (SELECT 1 FROM emt_email_templates WHERE emt_name = ?)";
 
-	// Static subjects — the EmailTemplate engine substitutes variables in the
+	// Static subjects — the EmailTemplateRenderer engine substitutes variables in the
 	// body but not in emt_subject, so any *placeholders* in the subject would
 	// render literally. Keep these plain.
 	$inserts = array(

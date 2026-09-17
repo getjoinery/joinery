@@ -12,7 +12,7 @@ function profile_joinery_ai_memory_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
     require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
     require_once(PathHelper::getIncludePath('includes/Pager.php'));
-    require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_memories_class.php'));
+    require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/memories_class.php'));
 
     $session = SessionControl::get_instance();
     if (!$session->is_logged_in()) {

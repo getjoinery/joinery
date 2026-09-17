@@ -4,7 +4,7 @@
 	require_once(PathHelper::getIncludePath('data/emails_class.php'));
 	require_once(PathHelper::getIncludePath('data/email_recipients_class.php'));
 	require_once(PathHelper::getIncludePath('data/messages_class.php'));
-	require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
+	require_once(PathHelper::getIncludePath('includes/EmailTemplateRenderer.php'));
 	require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
 	require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 	

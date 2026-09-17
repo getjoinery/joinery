@@ -29,7 +29,7 @@ harness_boot();
 require_once(__DIR__ . '/lib/relay_ping_probe.php');
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayCloudProvisioner.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayBirthEndpoint.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_client_identity_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_client_identities_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayFirstBoot.php'));
 
 /** A provider that records every call and answers what the test scripted. */
@@ -297,7 +297,7 @@ class RelayCloudProvisionTest {
 	/** Back-date a run's last transition, as a long wait would; save() would stamp now. */
 	private function age(RelayCloudProvision $run, int $seconds): void {
 		$db = DbConnector::get_instance()->get_db_link();
-		$stmt = $db->prepare('UPDATE rcp_relay_cloud_provisions SET rcp_update_time = ? WHERE rcp_id = ?');
+		$stmt = $db->prepare('UPDATE rcp_relay_cloud_provisions SET rcp_update_time = ? WHERE rcp_relay_cloud_provision_id = ?');
 		$stmt->execute(array(gmdate('Y-m-d H:i:s', time() - $seconds), intval($run->key)));
 		$run->set('rcp_update_time', gmdate('Y-m-d H:i:s', time() - $seconds));
 	}

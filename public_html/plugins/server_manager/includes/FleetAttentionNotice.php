@@ -62,7 +62,7 @@ class FleetAttentionNotice {
 		$e = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
 		$parts = [];
 		foreach (array_slice($failing, 0, self::NAMED, true) as $node_id => $f) {
-			$parts[] = '<a href="/admin/server_manager/node_detail?mgn_id=' . (int)$node_id . '&amp;tab=overview">' . $e($f['name']) . '</a>'
+			$parts[] = '<a href="/admin/server_manager/node_detail?mgn_managed_node_id=' . (int)$node_id . '&amp;tab=overview">' . $e($f['name']) . '</a>'
 				. ' (' . $e(implode(', ', array_map('strval', $f['units']))) . ')';
 		}
 		$more = count($failing) - count($parts);
@@ -113,7 +113,7 @@ class FleetAttentionNotice {
 			foreach ($f['recipes'] as $recipe => $mode) {
 				$recipes[] = $e($recipe) . ($mode !== '' ? ' ' . $e($mode) : '');
 			}
-			$parts[] = '<a href="/admin/server_manager/node_detail?mgn_id=' . (int)$node_id . '&amp;tab=overview">' . $e($f['name']) . '</a>'
+			$parts[] = '<a href="/admin/server_manager/node_detail?mgn_managed_node_id=' . (int)$node_id . '&amp;tab=overview">' . $e($f['name']) . '</a>'
 				. ' (' . implode(', ', $recipes) . ')';
 		}
 		$more = count($failing) - count($parts);
@@ -135,9 +135,9 @@ class FleetAttentionNotice {
 		$rows = [];
 		$names = [];
 		foreach (new MultiIncidentRecord(['status' => IncidentRecord::STATUS_OPEN, 'unread' => true, 'deleted' => false],
-			['inc_id' => 'DESC'], 50) as $row) {
+			['inc_incident_record_id' => 'DESC'], 50) as $row) {
 			$rows[] = $row;
-			$node_id = (int)$row->get('inc_mgn_node_id');
+			$node_id = (int)$row->get('inc_mgn_managed_node_id');
 			if (!isset($names[$node_id])) {
 				try {
 					$node = new ManagedNode($node_id, TRUE);
@@ -162,9 +162,9 @@ class FleetAttentionNotice {
 		$e = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
 		$parts = [];
 		foreach (array_slice($rows, 0, self::NAMED) as $row) {
-			$node_id = (int)$row->get('inc_mgn_node_id');
+			$node_id = (int)$row->get('inc_mgn_managed_node_id');
 			$name = $node_names[$node_id] ?? ('node #' . $node_id);
-			$parts[] = '<a href="/admin/server_manager/node_detail?mgn_id=' . $node_id . '&amp;tab=overview">' . $e($name) . '</a>: '
+			$parts[] = '<a href="/admin/server_manager/node_detail?mgn_managed_node_id=' . $node_id . '&amp;tab=overview">' . $e($name) . '</a>: '
 				. $e($row->get('inc_source')) . ' #' . (int)$row->get('inc_node_case_id') . ' — ' . $e($row->get('inc_reason'));
 		}
 		$more = count($rows) - count($parts);

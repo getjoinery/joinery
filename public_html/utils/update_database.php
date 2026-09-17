@@ -263,7 +263,7 @@
 
 		// Step 3.5: Register deletion rules for core models only (plugins handled separately)
 		echo "-----DELETION RULES (CORE)-----<br>\n";
-		require_once(PathHelper::getIncludePath('data/deletion_rule_class.php'));
+		require_once(PathHelper::getIncludePath('data/deletion_rules_class.php'));
 
 		try {
 			// Register rules for core models only, without affecting plugin rules

@@ -25,7 +25,7 @@
  */
 
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_accounts_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ImapIngestor.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ImapSyncer.php'));
 

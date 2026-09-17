@@ -73,7 +73,7 @@ class VaultCeremonies {
 		// phrase-only vault for an account that could have used a passkey.
 		$passkeyless = ($passkey_credential_id <= 0);
 		if ($passkeyless) {
-			require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+			require_once(PathHelper::getIncludePath('data/passkey_credentials_class.php'));
 			if (!Passkey::userNeedsPassphraseFallback((int)$user->key)) {
 				throw new VaultCeremonyException(
 					'Your passkey can hold this key, so it must — a bypass phrase alone is only for devices that cannot.');
@@ -202,7 +202,7 @@ class VaultCeremonies {
 		$authorizing_wrapping = null;
 		foreach ($live_wrappings as $wrapping) {
 			if ($wrapping->get('uew_unlocker_type') !== UserEncryptionWrapping::TYPE_PASSKEY
-					|| (int)$wrapping->get('uew_pkc_credential_id') !== $passkey_credential_id) {
+					|| (int)$wrapping->get('uew_pkc_passkey_credential_id') !== $passkey_credential_id) {
 				continue;
 			}
 			if ($authorizing_wrapping === null
@@ -235,8 +235,8 @@ class VaultCeremonies {
 		foreach ($live_wrappings as $wrapping) {
 			if ($wrapping->get('uew_unlocker_type') === UserEncryptionWrapping::TYPE_PASSKEY
 					&& (int)$wrapping->get('uew_key_generation') === $old_generation
-					&& (int)$wrapping->get('uew_pkc_credential_id') !== $passkey_credential_id) {
-				$dropped_passkeys[] = ['credential_id' => (int)$wrapping->get('uew_pkc_credential_id'), 'label' => $wrapping->get('uew_label')];
+					&& (int)$wrapping->get('uew_pkc_passkey_credential_id') !== $passkey_credential_id) {
+				$dropped_passkeys[] = ['credential_id' => (int)$wrapping->get('uew_pkc_passkey_credential_id'), 'label' => $wrapping->get('uew_label')];
 			}
 		}
 
@@ -284,7 +284,7 @@ class VaultCeremonies {
 			$vault->set('uev_public_key', $new_key->publicKey());
 			$vault->set('uev_salt', $salt);
 			$vault->set('uev_key_generation', $new_generation);
-			$vault->set('uev_updated_time', gmdate('Y-m-d H:i:s'));
+			$vault->set('uev_update_time', gmdate('Y-m-d H:i:s'));
 			$vault->save();
 
 			$db->commit();
@@ -333,15 +333,15 @@ class VaultCeremonies {
 		foreach ($live_wrappings as $wrapping) {
 			if ($wrapping->get('uew_unlocker_type') === UserEncryptionWrapping::TYPE_PASSKEY
 					&& (int)$wrapping->get('uew_key_generation') === $current_generation) {
-				$has_current[(int)$wrapping->get('uew_pkc_credential_id')] = true;
+				$has_current[(int)$wrapping->get('uew_pkc_passkey_credential_id')] = true;
 			}
 		}
 		$dropped_passkeys = [];
 		foreach ($live_wrappings as $wrapping) {
 			if ($wrapping->get('uew_unlocker_type') === UserEncryptionWrapping::TYPE_PASSKEY
 					&& (int)$wrapping->get('uew_key_generation') === $old_generation
-					&& empty($has_current[(int)$wrapping->get('uew_pkc_credential_id')])) {
-				$dropped_passkeys[] = ['credential_id' => (int)$wrapping->get('uew_pkc_credential_id'), 'label' => $wrapping->get('uew_label')];
+					&& empty($has_current[(int)$wrapping->get('uew_pkc_passkey_credential_id')])) {
+				$dropped_passkeys[] = ['credential_id' => (int)$wrapping->get('uew_pkc_passkey_credential_id'), 'label' => $wrapping->get('uew_label')];
 			}
 		}
 
@@ -357,7 +357,7 @@ class VaultCeremonies {
 		$current_wrapping = null;
 		foreach ($live_wrappings as $wrapping) {
 			if ($wrapping->get('uew_unlocker_type') === UserEncryptionWrapping::TYPE_PASSKEY
-					&& (int)$wrapping->get('uew_pkc_credential_id') === $passkey_credential_id
+					&& (int)$wrapping->get('uew_pkc_passkey_credential_id') === $passkey_credential_id
 					&& (int)$wrapping->get('uew_key_generation') === $current_generation) {
 				$current_wrapping = $wrapping;
 				break;

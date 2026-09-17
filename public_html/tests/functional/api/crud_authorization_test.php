@@ -51,7 +51,7 @@ require_once(__DIR__ . '/api_test_harness.php');
 api_test_boot($argv);
 
 // Model fixtures driven over CRUD.
-require_once(PathHelper::getIncludePath('data/address_class.php'));  // Bucket B, owner usa_usr_user_id
+require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));  // Bucket B, owner usa_usr_user_id
 require_once(PathHelper::getIncludePath('data/posts_class.php'));    // Bucket A, $api_public_read
 require_once(PathHelper::getIncludePath('data/settings_class.php')); // Bucket C, unexposed
 

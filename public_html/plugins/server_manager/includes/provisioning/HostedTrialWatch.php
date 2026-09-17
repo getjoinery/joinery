@@ -57,10 +57,10 @@ class HostedTrialWatch {
 	private $errors = array();
 
 	public function run(array $config): array {
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/hosted_trial_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provisions_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/hosted_trials_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/provisioning/ProvisionHostedMail.php'));
 		// Named explicitly: classes under a plugin's includes/provisioning/ are
@@ -143,7 +143,7 @@ class HostedTrialWatch {
 	 */
 	private function open_row($provision, int $trial_days): void {
 		$trial = new HostedTrial(NULL);
-		$trial->set('htr_cvp_provision_id', (int)$provision->key);
+		$trial->set('htr_cvp_customer_cloud_provision_id', (int)$provision->key);
 		$trial->set('htr_external_order_item_id', $provision->get('cvp_external_order_item_id'));
 		if ($trial_days > 0) {
 			$trial->set('htr_state', HostedTrial::STATE_TRIAL);
@@ -641,7 +641,7 @@ class HostedTrialWatch {
 
 	/** The provision's node, or null. */
 	private function node_of($provision) {
-		$id = (int)$provision->get('cvp_mgn_node_id');
+		$id = (int)$provision->get('cvp_mgn_managed_node_id');
 		if (!$id) { return null; }
 		$node = new ManagedNode($id, TRUE);
 		return ($node->key && !$node->get('mgn_delete_time')) ? $node : null;

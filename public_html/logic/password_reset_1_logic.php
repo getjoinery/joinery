@@ -4,7 +4,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 function password_reset_1_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-	require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
+	require_once(PathHelper::getIncludePath('includes/EmailTemplateRenderer.php'));
 
 	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 

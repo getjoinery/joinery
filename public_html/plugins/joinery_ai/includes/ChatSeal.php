@@ -2,8 +2,8 @@
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));   // VaultUnlock + VaultLockedException
 require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
 require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversations_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversation_messages_class.php'));
 
 /**
  * The Sealed Vault consumer crypto for AI chat (docs/sealed_vault.md,
@@ -51,7 +51,7 @@ class ChatSeal {
 
     // ---------------------------------------------------------- AD conventions
 
-    /** Message column AD: chat:{aim_message_id}:{column}. */
+    /** Message column AD: chat:{aim_conversation_message_id}:{column}. */
     public static function messageAd(int $message_id, string $column): string {
         return 'chat:' . $message_id . ':' . $column;
     }
@@ -61,12 +61,12 @@ class ChatSeal {
         return 'chat:conv:' . $conversation_id . ':' . $token;
     }
 
-    /** Attachment bytes AD: chat:{aim_message_id}:att:{aia_attachment_id}. */
+    /** Attachment bytes AD: chat:{aim_conversation_message_id}:att:{aia_message_attachment_id}. */
     public static function attachmentBytesAd(int $message_id, int $attachment_id): string {
         return 'chat:' . $message_id . ':att:' . $attachment_id;
     }
 
-    /** Attachment extracted-text AD: chat:{aim_message_id}:att_text:{aia_attachment_id}. */
+    /** Attachment extracted-text AD: chat:{aim_conversation_message_id}:att_text:{aia_message_attachment_id}. */
     public static function attachmentTextAd(int $message_id, int $attachment_id): string {
         return 'chat:' . $message_id . ':att_text:' . $attachment_id;
     }
@@ -300,7 +300,7 @@ class ChatSeal {
 
     /** Open a sealed attachment's extracted text — behind AiMessageAttachment::decryptSealedField(). */
     public static function openAttachmentText(AiMessageAttachment $att, string $ciphertext): string {
-        $msg = new AiConversationMessage((int)$att->get('aia_aim_message_id'), true);
+        $msg = new AiConversationMessage((int)$att->get('aia_aim_conversation_message_id'), true);
         if (!$msg->key) throw new VaultLockedException();
         $owner = (int)$msg->get('aim_sealed_owner_user_id');
         $sealed_key = (string)$msg->get('aim_sealed_key');
@@ -379,7 +379,7 @@ class ChatSeal {
     }
 
     public static function sealExistingAttachments(AiConversationMessage $msg): void {
-        require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_message_attachments_class.php'));
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/message_attachments_class.php'));
         require_once(PathHelper::getIncludePath('data/files_class.php'));
         $links = new MultiAiMessageAttachment(['message_id' => (int)$msg->key, 'deleted' => false], []);
         $links->load();
@@ -406,7 +406,7 @@ class ChatSeal {
     }
 
     public static function unsealExistingAttachments(AiConversationMessage $msg): void {
-        require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_message_attachments_class.php'));
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/message_attachments_class.php'));
         require_once(PathHelper::getIncludePath('data/files_class.php'));
         $links = new MultiAiMessageAttachment(['message_id' => (int)$msg->key, 'deleted' => false], []);
         $links->load();

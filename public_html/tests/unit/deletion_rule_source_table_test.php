@@ -21,7 +21,7 @@
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
-require_once(PathHelper::getIncludePath('data/deletion_rule_class.php'));
+require_once(PathHelper::getIncludePath('data/deletion_rules_class.php'));
 
 function resolve($column, $own_prefix) {
     $method = new ReflectionMethod('DeletionRule', 'getSourceTableFromColumn');
@@ -29,8 +29,8 @@ function resolve($column, $own_prefix) {
 }
 
 // --- Real Class B mis-guesses from the bug spec now resolve correctly -----
-ok('aip_rcr_run_id (own prefix aip) resolves to the real rcr_recipe_runs table',
-    resolve('aip_rcr_run_id', 'aip') === 'rcr_recipe_runs');
+ok('aip_rcr_recipe_run_id (own prefix aip) resolves to the real rcr_recipe_runs table',
+    resolve('aip_rcr_recipe_run_id', 'aip') === 'rcr_recipe_runs');
 
 ok('evt_svy_survey_id (own prefix evt) resolves to svy_surveys, not the old "svy_surveies" guess',
     resolve('evt_svy_survey_id', 'evt') === 'svy_surveys');

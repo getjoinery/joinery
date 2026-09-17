@@ -43,7 +43,7 @@ interface DnsOwnershipStore {
 }
 
 /**
- * The real store, backed by dnr_dns_records.
+ * The real store, backed by dnr_managed_dns_records.
  *
  * Reads fail soft. On a deployment whose code has landed but whose
  * update_database run has not, the table does not exist yet — and "the platform
@@ -55,7 +55,7 @@ interface DnsOwnershipStore {
 class DbDnsOwnershipStore implements DnsOwnershipStore {
 
 	public function __construct() {
-		require_once(PathHelper::getIncludePath('data/dns_records_class.php'));
+		require_once(PathHelper::getIncludePath('data/managed_dns_records_class.php'));
 	}
 
 	public function isOwned(string $domain, string $type, string $name): bool {

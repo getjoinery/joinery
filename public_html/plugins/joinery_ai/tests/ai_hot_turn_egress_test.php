@@ -44,8 +44,8 @@ require_once(__DIR__ . '/../../../tests/lib/harness.php');
 require_once(__DIR__ . '/../../../tests/lib/vault_fixtures.php');
 harness_boot();
 
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversations_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversation_messages_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_queued_actions_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ActionQueue.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AgentLoop.php'));
@@ -84,7 +84,7 @@ function eg_register(int $action_id): void {
 function eg_latest_event(PDO $db, int $conv_id): string {
 	$q = $db->prepare("SELECT aim_content FROM aim_conversation_messages
 		WHERE aim_aic_conversation_id = ? AND aim_role = ?
-		ORDER BY aim_message_id DESC LIMIT 1");
+		ORDER BY aim_conversation_message_id DESC LIMIT 1");
 	$q->execute([$conv_id, AiConversationMessage::ROLE_EVENT]);
 	return (string)$q->fetchColumn();
 }
@@ -202,13 +202,13 @@ $conversation->set('aic_security_level', ChatSeal::LEVEL_STANDARD);
 // decrypts (never goes hot), yet still reads ordinary plaintext fields.
 $decrypt = new ReflectionMethod('ModelQueryExecutor', 'decryptSealedFields');
 $decrypt->setAccessible(true);
-$sealed_row = ['aim_message_id' => 1, 'aim_content' => 'v1.aead.' . str_repeat('x', 40),
+$sealed_row = ['aim_conversation_message_id' => 1, 'aim_content' => 'v1.aead.' . str_repeat('x', 40),
 	'aim_content_sealed' => true, 'aim_sealed_owner_user_id' => $owner_id, 'aim_sealed_key' => 'k'];
-$plain_row  = ['aim_message_id' => 2, 'aim_content' => 'ordinary plaintext', 'aim_content_sealed' => false];
+$plain_row  = ['aim_conversation_message_id' => 2, 'aim_content' => 'ordinary plaintext', 'aim_content_sealed' => false];
 $kept = $decrypt->invoke(null, [$sealed_row, $plain_row], 'AiConversationMessage', false);
-check(count($kept) === 1 && (int)($kept[0]['aim_message_id'] ?? 0) === 2
+check(count($kept) === 1 && (int)($kept[0]['aim_conversation_message_id'] ?? 0) === 2
 		&& ModelQueryExecutor::lastLockedExcluded() === 1,
-	'the sealed row is excluded, the plaintext row still read', json_encode(array_column($kept, 'aim_message_id')));
+	'the sealed row is excluded, the plaintext row still read', json_encode(array_column($kept, 'aim_conversation_message_id')));
 
 // Recipes are the protected unit themselves, so they may open sealed content.
 $exec_src = file_get_contents(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelQueryExecutor.php'));

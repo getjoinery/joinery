@@ -16,7 +16,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 function calendar_entry_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getIncludePath('data/calendar_entry_class.php'));
+	require_once(PathHelper::getIncludePath('data/entries_class.php'));
 
 	$session = SessionControl::get_instance();
 	if (!$session->get_user_id()) {

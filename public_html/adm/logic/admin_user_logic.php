@@ -7,6 +7,7 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
 /**
  * admin_user_logic — the user detail page.
  *
+ * @version 1.2 - the sign-in history reads through MultiLogin; the table is a model
  * @version 1.1 - group membership rows are read once and handed to the view with
  *                each group (specs/post_release_fleet_defects.md B4.2)
  */
@@ -19,8 +20,8 @@ function admin_user_logic(array $input): LogicResult {
 
 	// Data class includes
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
-	require_once(PathHelper::getIncludePath('data/phone_number_class.php'));
-	require_once(PathHelper::getIncludePath('data/address_class.php'));
+	require_once(PathHelper::getIncludePath('data/phone_numbers_class.php'));
+	require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
 	require_once(PathHelper::getIncludePath('data/log_form_errors_class.php'));
 	require_once(PathHelper::getIncludePath('data/emails_class.php'));
 	require_once(PathHelper::getIncludePath('data/email_recipients_class.php'));
@@ -185,36 +186,10 @@ function admin_user_logic(array $input): LogicResult {
 	$numaddressrecords = $addresses->count_all();
 	$addresses->load();
 
-	// Get database connection for custom queries
-	$dbhelper = DbConnector::get_instance();
-	$dblink = $dbhelper->get_db_link();
-
-	// Get total count of logins
-	$sql_count = 'SELECT COUNT(*) as count FROM log_logins WHERE log_usr_user_id = ?';
-	try{
-		$q_count = $dblink->prepare($sql_count);
-		$q_count->execute([$user->key]);
-		$num_logins = $q_count->fetch(PDO::FETCH_OBJ)->count;
-	}
-	catch(PDOException $e){
-		$dbhelper->handle_query_error($e);
-	}
-
-	// Get logins with limit
-	$sql = 'SELECT * FROM log_logins WHERE log_usr_user_id = ? ORDER BY log_login_time DESC';
-	if (!$show_all) {
-		$sql .= ' LIMIT 10';
-	}
-
-	try{
-		$q = $dblink->prepare($sql);
-		$count = $q->execute([$user->key]);
-		$q->setFetchMode(PDO::FETCH_OBJ);
-	}
-	catch(PDOException $e){
-		$dbhelper->handle_query_error($e);
-	}
-	$logins = $q->fetchAll();
+	// Sign-in history, newest first: the last ten, or all of it on request.
+	$all_logins = new MultiLogin(['user_id' => $user->key]);
+	$num_logins = $all_logins->count_all();
+	$logins = new MultiLogin(['user_id' => $user->key], ['log_login_time' => 'DESC'], $show_all ? NULL : 10);
 
 	$webDir = $settings->get_setting('webDir');
 
@@ -367,7 +342,7 @@ function admin_user_security_facts($user, $session) {
 		$facts['passkeys'][] = array(
 			'id'               => (int)$passkey->key,
 			'label'            => (string)$passkey->get('pkc_label'),
-			'created'          => $passkey->get_local('pkc_created_time', 'M j, Y'),
+			'created'          => $passkey->get_local('pkc_create_time', 'M j, Y'),
 			'last_used'        => $passkey->get_local('pkc_last_used_time', 'M j, Y'),
 			'vault_capability' => $passkey->vault_capability(),
 		);
@@ -375,7 +350,7 @@ function admin_user_security_facts($user, $session) {
 
 	// The mailbox plugin owns the Fortress level and may be inactive - same
 	// availability guard SessionControl::must_enroll_2fa_for_fortress() uses.
-	$domain_class = PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php');
+	$domain_class = PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php');
 	if (is_file($domain_class)) {
 		require_once($domain_class);
 		if (class_exists('InboundEmailDomain')) {

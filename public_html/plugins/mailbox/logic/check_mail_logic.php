@@ -75,7 +75,7 @@ function _check_mail_relay(): array {
 		return array('pulled' => false, 'reason' => 'direct');
 	}
 
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 	$relay = MailboxRelay::active();
 	if ($relay === null) {
 		return array('pulled' => false, 'reason' => 'no_relay');
@@ -116,7 +116,7 @@ function _check_mail_relay(): array {
  * time is left due for the poller and counted as deferred.
  */
 function _check_mail_imap(MailboxViewer $viewer, ?float $deadline = null): array {
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_accounts_class.php'));
 
 	$accounts = new MultiInboundImapAccount(
 		array('enabled' => true, 'deleted' => false),

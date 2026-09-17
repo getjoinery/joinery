@@ -68,8 +68,8 @@
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundProviderRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protection_ceremony.php'));
 
@@ -166,7 +166,7 @@ class InboundEmailSetupCheck {
 		$this->topology = array('mode' => 'colocated', 'relay' => null,
 			'mx_hostname' => '', 'public_ip' => '', 'enabled' => false);
 		try {
-			require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+			require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 			$multi = new MultiMailboxRelay(array('deleted' => false));
 			$multi->load();
 			foreach ($multi as $relay) {
@@ -1324,7 +1324,7 @@ class InboundEmailSetupCheck {
 	 */
 	public static function relayScannerResult(array $health, string $name, string $age_note = '', ?bool $covered = null) {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSpamPolicy.php'));
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 		$row = function ($status, $summary, $detail = '', $fix = null) {
 			return array(
 				'id' => 'host.relay_scanner', 'scope' => '', 'layer' => 'host',
@@ -1842,9 +1842,9 @@ class InboundEmailSetupCheck {
 				$stmt->execute(array(intval($model->key)));
 
 				require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
-				require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
-				require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
-				require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
+				require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
+				require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
+				require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grants_class.php'));
 				foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $group) {
 					$pending += intval($group['pending']);
 					$n = intval($group['unsealed']);

@@ -54,7 +54,7 @@ function mailbox_hosted_relay_offered(): bool {
 
 /** True when a live relay row (hosted slot or self-hosted) exists. */
 function mailbox_receive_relay_exists(): bool {
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 	$relays = new MultiMailboxRelay(array('deleted' => false));
 	$relays->load();
 	return count($relays) > 0;
@@ -62,7 +62,7 @@ function mailbox_receive_relay_exists(): bool {
 
 /** The deployment's resolved receive mode. */
 function mailbox_receive_mode(): string {
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
 
 	// Only a domain this deployment actually receives for counts as a decided
 	// topology. An IMAP-source anchor (gmail.com behind a connected account)
@@ -151,7 +151,7 @@ function mailbox_receive_gate_render(): string {
 
 	$relay = null;
 	if ($mode === 'relay') {
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 		$relay = mailbox_receive_relay_exists() ? MailboxRelay::active() : null;
 	}
 
@@ -178,7 +178,7 @@ function mailbox_receive_gate_render(): string {
 function mailbox_receive_mode_comparison(): string {
 	$active_relay = false;
 	if (mailbox_receive_relay_exists()) {
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 		$active_relay = (MailboxRelay::active() !== null);
 	}
 	$relay_ready = mailbox_receive_relay_exists();

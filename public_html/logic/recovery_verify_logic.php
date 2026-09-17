@@ -29,7 +29,7 @@ function recovery_verify_logic(array $input): LogicResult {
 		return LogicResult::render($page_vars);
 	}
 
-	// checkTempCode enforces act_deleted = FALSE (and expiry); getTempCodeInfo does
+	// checkTempCode enforces act_delete_time IS NULL (and expiry); getTempCodeInfo does
 	// not. Gating on it here makes deleteTempCode effective — a link cannot be
 	// replayed after use, and its full 2-day TTL no longer keeps it live.
 	if (!Activation::checkTempCode($act_code, Activation::RECOVERY_VERIFY)) {

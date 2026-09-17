@@ -42,8 +42,8 @@ require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 
 /** A node fixture. Defaults give it SSH but no API credentials. */
 function jcb_node(array $fields = array()) {
@@ -66,7 +66,7 @@ function jcb_node(array $fields = array()) {
 	}
 	$node->save();
 	$node->load();
-	harness_register_row('mgn_managed_nodes', 'mgn_id', $node->key);
+	harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $node->key);
 	return $node;
 }
 
@@ -390,7 +390,7 @@ $cert_host_node = jcb_node(array('mgn_host' => '192.0.2.77',
 	'mgn_agent_version'    => '1.16.3',
 	'mgn_agent_primitives' => 'check_status,provision_certificate,decommission_site'));
 $cert_host = ManagedHost::ensure_for_node($cert_host_node);
-harness_register_row('mgh_managed_hosts', 'mgh_id', $cert_host->key);
+harness_register_row('mgh_managed_hosts', 'mgh_managed_host_id', $cert_host->key);
 $cert_container = jcb_node(array('mgn_host' => '192.0.2.77', 'mgn_container_name' => 'certsite',
 	'mgn_web_root' => '/var/www/html/certsite/public_html', 'mgn_site_url' => 'https://cert.example.com'));
 ManagedHost::ensure_for_node($cert_container);
@@ -399,7 +399,7 @@ try { JobCommandBuilder::certificate_issuer_for($cert_container); }
 catch (Exception $e) { $cert_threw = $e->getMessage(); }
 check(strpos($cert_threw, 'host') !== false && strpos($cert_threw, 'Pair') !== false,
 	'a container on a host with no paired host agent has no issuer, and the refusal says to pair the host', $cert_threw);
-$cert_host->set('mgh_mgn_host_node_id', $cert_host_node->key);
+$cert_host->set('mgh_mgn_managed_node_id', $cert_host_node->key);
 $cert_host->save();
 $issuer = JobCommandBuilder::certificate_issuer_for($cert_container);
 check((int)$issuer->key === (int)$cert_host_node->key, 'once the host agent is linked, the host node is the issuer');
@@ -750,14 +750,14 @@ try {
 check(strpos($pub_refused, '1.17.2') !== false,
       'an agent that does not report the primitive is refused, naming its version', $pub_refused);
 
-require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
+require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 $bkt = new BackupTarget(NULL);
 $bkt->set('bkt_name', 'HarnessTest Target ' . bin2hex(random_bytes(3)));
 $bkt->set('bkt_provider', 'b2');
 $bkt->set('bkt_bucket', 'harness-test-bucket');
 $bkt->set('bkt_credentials', json_encode(array('key_id' => 'k', 'application_key' => 'a')));
 $bkt->save();
-harness_register_row('bkt_backup_targets', 'bkt_id', $bkt->key);
+harness_register_row('bkt_backup_targets', 'bkt_backup_target_id', $bkt->key);
 
 // The installer directory is per-job, so two installs on one machine never
 // extract over each other.
@@ -914,7 +914,7 @@ $off->set('bkt_bucket', 'harness-disabled-bucket');
 $off->set('bkt_credentials', json_encode(array('key_id' => 'k', 'application_key' => 'a')));
 $off->set('bkt_enabled', false);
 $off->save();
-harness_register_row('bkt_backup_targets', 'bkt_id', $off->key);
+harness_register_row('bkt_backup_targets', 'bkt_backup_target_id', $off->key);
 check(JobCommandBuilder::get_target(jcb_node(array(
 	'mgn_web_root' => '/var/www/html/offtarget/public_html',
 	'mgn_bkt_backup_target_id' => $off->key))) === null,
@@ -1053,7 +1053,7 @@ $bkt_split->set('bkt_node_credentials', json_encode(array(
 	'access_key' => 'NODE', 'secret_key' => 'node_write_only',
 	'region' => 'us-west-004', 'endpoint' => 'https://s3.us-west-004.example.invalid')));
 $bkt_split->save();
-harness_register_row('bkt_backup_targets', 'bkt_id', $bkt_split->key);
+harness_register_row('bkt_backup_targets', 'bkt_backup_target_id', $bkt_split->key);
 
 $split_node = jcb_node(array(
 	'mgn_web_root' => '/var/www/html/splitnode/public_html',
@@ -1124,7 +1124,7 @@ check(strpos($split_dl_json, 'X-Amz-Signature') !== false
 
 section('Decommission: one destructive primitive to the host agent, or a refusal naming the fix');
 
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_host_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_hosts_class.php'));
 
 /** A placement record linked to its own paired host-agent node. */
 function jcb_host_with_agent(array $host_agent_fields = array()) {
@@ -1138,11 +1138,11 @@ function jcb_host_with_agent(array $host_agent_fields = array()) {
 	$host->set('mgh_slug', 'harnesstest-host-' . $suffix);
 	$host->set('mgh_name', 'HarnessTest Host ' . $suffix);
 	$host->set('mgh_host', '192.0.2.10');
-	$host->set('mgh_mgn_host_node_id', $host_node->key);
+	$host->set('mgh_mgn_managed_node_id', $host_node->key);
 	$host->prepare();
 	$host->save();
 	$host->load();
-	harness_register_row('mgh_managed_hosts', 'mgh_id', $host->key);
+	harness_register_row('mgh_managed_hosts', 'mgh_managed_host_id', $host->key);
 	return array($host, $host_node);
 }
 
@@ -1151,7 +1151,7 @@ function jcb_decom_victim($host, array $fields = array()) {
 	return jcb_node(array_merge(array(
 		'mgn_container_name'  => 'decomsite',
 		'mgn_web_root'        => '/var/www/html/decomsite/public_html',
-		'mgn_mgh_host_id'     => $host->key,
+		'mgn_mgh_managed_host_id'     => $host->key,
 		'mgn_joinery_version' => JobCommandBuilder::DECOMMISSION_PANEL_MIN_CORE_VERSION,
 	), $fields));
 }
@@ -1223,7 +1223,7 @@ $host_unpaired->set('mgh_host', '192.0.2.11');
 $host_unpaired->prepare();
 $host_unpaired->save();
 $host_unpaired->load();
-harness_register_row('mgh_managed_hosts', 'mgh_id', $host_unpaired->key);
+harness_register_row('mgh_managed_hosts', 'mgh_managed_host_id', $host_unpaired->key);
 $decom_no_agent = jcb_decom_victim($host_unpaired, array('mgn_container_name' => 'decomsite3'));
 $np_msg = '';
 try { JobCommandBuilder::build_decommission_node($decom_no_agent); } catch (Exception $e) { $np_msg = $e->getMessage(); }
@@ -1263,7 +1263,7 @@ check(strpos($core_msg, 'consent') !== false
 $decom_busy = jcb_decom_victim($decom_host, array('mgn_container_name' => 'decomsite7'));
 $busy_job = ManagementJob::createPrimitiveJob($decom_busy->key, 'check_status',
 	'check_status', array(), 1);
-harness_register_row('mjb_management_jobs', 'mjb_id', $busy_job->key);
+harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $busy_job->key);
 $busy_msg = '';
 try { JobCommandBuilder::build_decommission_node($decom_busy); } catch (Exception $e) { $busy_msg = $e->getMessage(); }
 check(strpos($busy_msg, 'pending or running job') !== false,
@@ -1278,7 +1278,7 @@ $decom_v1 = jcb_decom_victim($host_b, array('mgn_container_name' => 'decomsite8'
 $denv2 = JobCommandBuilder::build_decommission_node($decom_v1);
 $djob = ManagementJob::createFromBuild($host_b_node->key, 'decommission_node', $denv2,
 	array('victim_node_id' => (int)$decom_v1->key, 'site' => 'decomsite8'), 1);
-harness_register_row('mjb_management_jobs', 'mjb_id', $djob->key);
+harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $djob->key);
 $recorded = json_decode((string)$djob->get('mjb_parameters'), true);
 check((int)($recorded['victim_node_id'] ?? 0) === (int)$decom_v1->key
 	&& ($recorded['site'] ?? '') === 'decomsite8',
@@ -1310,13 +1310,13 @@ $host_old_row->set('mgh_host', '192.0.2.99');
 $host_old_row->prepare();
 $host_old_row->save();
 $host_old_row->load();
-harness_register_row('mgh_managed_hosts', 'mgh_id', $host_old_row->key);
-$ported = jcb_node(array('mgn_host' => '192.0.2.99', 'mgn_mgh_host_id' => $host_old_row->key,
+harness_register_row('mgh_managed_hosts', 'mgh_managed_host_id', $host_old_row->key);
+$ported = jcb_node(array('mgn_host' => '192.0.2.99', 'mgn_mgh_managed_host_id' => $host_old_row->key,
 	'mgn_container_name' => 'portpoolsite', 'mgn_port' => 9055));
 $host_old_row->soft_delete();
 $reminted = jcb_node(array('mgn_host' => '192.0.2.99', 'mgn_container_name' => 'portpoolsite2'));
 $new_host = ManagedHost::ensure_for_node($reminted);
-harness_register_row('mgh_managed_hosts', 'mgh_id', $new_host->key);
+harness_register_row('mgh_managed_hosts', 'mgh_managed_host_id', $new_host->key);
 check((int)$new_host->key !== (int)$host_old_row->key,
 	'a deleted host row is re-minted, not resurrected');
 check(JobCommandBuilder::next_container_port($new_host->key, (int)$reminted->key) === 9056,
@@ -1331,7 +1331,7 @@ $dup_row->set('mgh_host', '192.0.2.99');
 $dup_row->prepare();
 $dup_row->save();
 $dup_row->load();
-harness_register_row('mgh_managed_hosts', 'mgh_id', $dup_row->key);
+harness_register_row('mgh_managed_hosts', 'mgh_managed_host_id', $dup_row->key);
 $converge = jcb_node(array('mgn_host' => '192.0.2.99'));
 $picked = ManagedHost::ensure_for_node($converge);
 check((int)$picked->key === (int)min((int)$new_host->key, (int)$dup_row->key),
@@ -1340,7 +1340,7 @@ check((int)$picked->key === (int)min((int)$new_host->key, (int)$dup_row->key),
 // A long hostname mints a row instead of overflowing mgh_slug (varchar 50).
 $long_node = jcb_node(array('mgn_host' => str_repeat('very-long-hostname.', 5) . 'example.com'));
 $long_host = ManagedHost::ensure_for_node($long_node);
-harness_register_row('mgh_managed_hosts', 'mgh_id', $long_host->key);
+harness_register_row('mgh_managed_hosts', 'mgh_managed_host_id', $long_host->key);
 check(strlen($long_host->get('mgh_slug')) <= 50,
 	'a minted slug fits the column whatever the address length', $long_host->get('mgh_slug'));
 
@@ -1419,7 +1419,7 @@ check($refused,
 // And the bootstrap pair still gets through, in the status its executor claims.
 $boot = ManagementJob::createJob($api_node->key, 'install_node',
 	array(array('type' => 'local', 'label' => 'Pre-flight', 'cmd' => 'true')), null, null);
-harness_register_row('mjb_management_jobs', 'mjb_id', $boot->key);
+harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $boot->key);
 check($boot && $boot->get('mjb_status') === 'queued',
 	'a bootstrap job is still created, and starts queued for the install executor');
 
@@ -1459,7 +1459,7 @@ $verify_bkt->set('bkt_bucket', 'harness-verify-bucket');
 $verify_bkt->set('bkt_enabled', true);
 $verify_bkt->set('bkt_credentials', json_encode(array('key_id' => 'k', 'application_key' => 'a')));
 $verify_bkt->save();
-harness_register_row('bkt_backup_targets', 'bkt_id', $verify_bkt->key);
+harness_register_row('bkt_backup_targets', 'bkt_backup_target_id', $verify_bkt->key);
 $verify_node = jcb_node(array(
 	'mgn_web_root'             => '/var/www/html/verifysite/public_html',
 	'mgn_slug'                 => 'verifysite',

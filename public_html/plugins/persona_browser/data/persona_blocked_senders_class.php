@@ -24,10 +24,10 @@ class PersonaBlockedSenderException extends SystemBaseException {}
 class PersonaBlockedSender extends SystemBase {
     public static $prefix = 'pbs';
     public static $tablename = 'pbs_persona_blocked_senders';
-    public static $pkey_column = 'pbs_blocked_sender_id';
+    public static $pkey_column = 'pbs_persona_blocked_sender_id';
 
     public static $field_specifications = array(
-        'pbs_blocked_sender_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true, 'is_primary_key'=>true),
+        'pbs_persona_blocked_sender_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true, 'is_primary_key'=>true),
         'pbs_owner_user_id' => array('type'=>'int4', 'is_nullable'=>false, 'default'=>'0', 'unique_with'=>array('pbs_persona', 'pbs_author')),
         'pbs_persona' => array('type'=>'varchar(32)', 'is_nullable'=>false, 'required'=>true),
         'pbs_author' => array('type'=>'varchar(255)', 'is_nullable'=>false, 'required'=>true),

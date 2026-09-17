@@ -9,7 +9,7 @@
  *                exempts it); the bypass-phrase route steps up BEFORE the phrase is typed
  * @version 1.4
  */
-require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+require_once(PathHelper::getIncludePath('data/passkey_credentials_class.php'));
 
 // The key is unlocked by a passkey that can derive a PRF secret. A U2F-only
 // authenticator answers 'incapable' and can never hold a wrapping, so an

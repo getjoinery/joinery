@@ -4,7 +4,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
-require_once(PathHelper::getIncludePath('data/address_class.php'));
+require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 class LocationInfo {

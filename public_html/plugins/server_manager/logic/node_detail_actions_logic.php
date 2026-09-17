@@ -90,8 +90,8 @@
  * @version 1.1
  */
 
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
 require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
@@ -343,7 +343,7 @@ class NodeDetailActions {
 			}
 
 			case 'apply_update_all_on_host': {
-				// Siblings share a placement record (mgn_mgh_host_id), never a host
+				// Siblings share a placement record (mgn_mgh_managed_host_id), never a host
 				// string. A node with no placement record has no known siblings, so
 				// the action covers just it. Either way, a LIVE node at the same
 				// address that the placement grouping would miss is a refusal, not
@@ -354,7 +354,7 @@ class NodeDetailActions {
 				// in machine posture — carries the same address and may share
 				// the placement record, and it is neither an ungrouped site
 				// nor a sibling with a release to apply (ManagedNode::hosts_site).
-				$host_id = (int)$node->get('mgn_mgh_host_id');
+				$host_id = (int)$node->get('mgn_mgh_managed_host_id');
 				$ungrouped = [];
 				$at_address = new MultiManagedNode(
 					['host' => (string)$node->get('mgn_host'), 'enabled' => true, 'deleted' => false],
@@ -362,7 +362,7 @@ class NodeDetailActions {
 				);
 				foreach ($at_address as $other) {
 					if ((int)$other->key === (int)$node->key || !$other->hosts_site()) continue;
-					if ((int)$other->get('mgn_mgh_host_id') !== $host_id) {
+					if ((int)$other->get('mgn_mgh_managed_host_id') !== $host_id) {
 						$ungrouped[] = $other->get('mgn_slug');
 					}
 				}
@@ -554,7 +554,7 @@ class NodeDetailActions {
 				// A human's mark on one of this node's cases. The case must be
 				// this node's: the id is posted, the node is the page's, and a
 				// case of another node is refused rather than written to.
-				$case = self::load_case($node, (int)($_POST['inc_id'] ?? 0));
+				$case = self::load_case($node, (int)($_POST['inc_incident_record_id'] ?? 0));
 				if ($case === null) {
 					self::fail($session, $page_regex, 'That case is not one of this node\'s.');
 					return $base_url . '&tab=overview';
@@ -619,7 +619,7 @@ class NodeDetailActions {
 					self::fail($session, $page_regex, 'Approving an agent join request is superadmin-only.');
 					return $base_url . '&tab=api_keys';
 				}
-				$request = self::load_join_request((int)($_POST['ajr_id'] ?? 0), $session, $page_regex);
+				$request = self::load_join_request((int)($_POST['ajr_agent_join_request_id'] ?? 0), $session, $page_regex);
 				if (!$request) {
 					return $base_url . '&tab=api_keys';
 				}
@@ -674,7 +674,7 @@ class NodeDetailActions {
 					self::fail($session, $page_regex, 'Rejecting an agent join request is superadmin-only.');
 					return $base_url . '&tab=api_keys';
 				}
-				$request = self::load_join_request((int)($_POST['ajr_id'] ?? 0), $session, $page_regex);
+				$request = self::load_join_request((int)($_POST['ajr_agent_join_request_id'] ?? 0), $session, $page_regex);
 				if (!$request) {
 					return $base_url . '&tab=api_keys';
 				}
@@ -886,16 +886,16 @@ class NodeDetailActions {
 	}
 
 	/** One of this node's cases by row id, or null when it is not this node's. */
-	private static function load_case($node, int $inc_id): ?IncidentRecord {
-		if ($inc_id <= 0) {
+	private static function load_case($node, int $inc_incident_record_id): ?IncidentRecord {
+		if ($inc_incident_record_id <= 0) {
 			return null;
 		}
 		try {
-			$case = new IncidentRecord($inc_id, TRUE);
+			$case = new IncidentRecord($inc_incident_record_id, TRUE);
 		} catch (Throwable $e) {
 			return null;
 		}
-		if (!$case->key || (int)$case->get('inc_mgn_node_id') !== (int)$node->key || $case->get('inc_delete_time')) {
+		if (!$case->key || (int)$case->get('inc_mgn_managed_node_id') !== (int)$node->key || $case->get('inc_delete_time')) {
 			return null;
 		}
 		return $case;
@@ -906,13 +906,13 @@ class NodeDetailActions {
 	}
 
 	/** Load a live, still-pending join request, or fail with a message and return null. */
-	private static function load_join_request(int $ajr_id, $session, $page_regex) {
-		if ($ajr_id <= 0) {
+	private static function load_join_request(int $ajr_agent_join_request_id, $session, $page_regex) {
+		if ($ajr_agent_join_request_id <= 0) {
 			self::fail($session, $page_regex, 'No join request was named.');
 			return null;
 		}
 		try {
-			$request = new AgentJoinRequest($ajr_id, TRUE);
+			$request = new AgentJoinRequest($ajr_agent_join_request_id, TRUE);
 		} catch (Exception $e) {
 			self::fail($session, $page_regex, 'That join request no longer exists.');
 			return null;

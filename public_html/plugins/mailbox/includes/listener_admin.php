@@ -43,7 +43,7 @@ function mailbox_listener_helper_path(): string {
  * active — the guardrail verdict for the Decommission button.
  */
 function mailbox_listener_state(): array {
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 	$setting = mailbox_listener_setting();
 	$state = array(
 		'setting'          => $setting,
@@ -68,7 +68,7 @@ function mailbox_listener_state(): array {
  *               spool_error:string,outbound_local:bool,outbound_label:string}
  */
 function mailbox_listener_guardrail_facts(): array {
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailSetupCheck.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailHealth.php'));
 	require_once(PathHelper::getIncludePath('includes/EmailServiceProvider.php'));

@@ -30,8 +30,8 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSend.ph
 
 function chat_send_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-    require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
-    require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
+    require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversations_class.php'));
+    require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversation_messages_class.php'));
 
     $session = SessionControl::get_instance();
     $uid = (int)$session->get_user_id();

@@ -7,7 +7,7 @@
  *
  * @version 1.0
  */
-require_once(PathHelper::getIncludePath('data/calendar_preference_class.php'));
+require_once(PathHelper::getIncludePath('data/calendar_preferences_class.php'));
 require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 
 $setup_cal_pref = CalendarPreference::get_for((int)$viewer->key);

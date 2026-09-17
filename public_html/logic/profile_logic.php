@@ -15,7 +15,7 @@ function profile_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
-	require_once(PathHelper::getIncludePath('data/address_class.php'));
+	require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
 	require_once(PathHelper::getIncludePath('data/files_class.php'));
 	require_once(PathHelper::getIncludePath('data/notifications_class.php'));
 	require_once(PathHelper::getIncludePath('includes/ProfileDashboardRegistry.php'));

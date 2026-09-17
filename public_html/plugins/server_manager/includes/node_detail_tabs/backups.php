@@ -46,7 +46,7 @@
 	// is in fact uploading to the management node's sole enabled shelf. Reading the
 	// raw mgn_bkt_backup_target_id here was how a working, cloud-backed node
 	// showed as local-only whenever it named no target of its own.
-	require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
+	require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 	$cloud_target  = JobCommandBuilder::get_target($node);
 	$names_own     = (bool) $node->get('mgn_bkt_backup_target_id');
 	$target_name   = 'Local only';

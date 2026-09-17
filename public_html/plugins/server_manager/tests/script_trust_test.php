@@ -42,8 +42,8 @@ require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeMonitorHealth.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 
 function st_node(array $fields = array()) {
 	$node = new ManagedNode(NULL);
@@ -55,13 +55,13 @@ function st_node(array $fields = array()) {
 	foreach ($fields as $k => $v) { $node->set($k, $v); }
 	$node->save();
 	$node->load();
-	harness_register_row('mgn_managed_nodes', 'mgn_id', $node->key);
+	harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $node->key);
 	return $node;
 }
 
 function st_job($node, $type, $outcome, $message) {
 	$job = new ManagementJob(NULL);
-	$job->set('mjb_mgn_node_id', $node->key);
+	$job->set('mjb_mgn_managed_node_id', $node->key);
 	$job->set('mjb_job_type', $type);
 	$job->set('mjb_status', $outcome === 'completed' ? 'completed' : 'failed');
 	$job->set('mjb_agent_outcome', $outcome);
@@ -69,7 +69,7 @@ function st_job($node, $type, $outcome, $message) {
 	$job->set('mjb_error_message', $message);
 	$job->save();
 	$job->load();
-	harness_register_row('mjb_management_jobs', 'mjb_id', $job->key);
+	harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $job->key);
 	return $job;
 }
 

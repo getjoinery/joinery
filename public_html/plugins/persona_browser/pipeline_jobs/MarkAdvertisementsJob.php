@@ -1,6 +1,6 @@
 <?php
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobInterface.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/aip_recipe_item_log_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_item_log_class.php'));
 require_once(PathHelper::getIncludePath('plugins/persona_browser/data/persona_feed_items_class.php'));
 require_once(PathHelper::getIncludePath('plugins/persona_browser/data/persona_blocked_senders_class.php'));
 require_once(PathHelper::getIncludePath('plugins/persona_browser/data/persona_allowed_senders_class.php'));

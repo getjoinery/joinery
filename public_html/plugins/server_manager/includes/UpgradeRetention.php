@@ -18,7 +18,7 @@
  */
 
 require_once(PathHelper::getIncludePath('data/upgrades_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 class UpgradeRetention {
@@ -55,7 +55,7 @@ class UpgradeRetention {
 		$in_use = [];
 
 		try {
-			$nodes = new MultiManagedNode(['deleted' => false], ['mgn_id' => 'ASC'], 1000, 0);
+			$nodes = new MultiManagedNode(['deleted' => false], ['mgn_managed_node_id' => 'ASC'], 1000, 0);
 			$nodes->load();
 			foreach ($nodes as $node) {
 				$v = trim((string)$node->get('mgn_joinery_version'));

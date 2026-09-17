@@ -47,10 +47,10 @@ require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 require_once(PathHelper::getIncludePath('includes/VaultDeferredWork.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protection_ceremony.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxAliasConfig.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grants_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_contacts_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeVaultScope.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeSchedule.php'));
@@ -261,7 +261,7 @@ try {
 	$run->set('rcr_started_time', gmdate('Y-m-d H:i:s'));
 	$run->save();
 	$run->load();
-	harness_register_row('rcr_recipe_runs', 'rcr_run_id', intval($run->key));
+	harness_register_row('rcr_recipe_runs', 'rcr_recipe_run_id', intval($run->key));
 
 	check(RecipeWorkerSpawner::spawnIfUnderCap($run) === false,
 		'the spawner refuses to start a worker for it');
@@ -563,7 +563,7 @@ try {
 		$run->set('rcr_trigger', RecipeRun::TRIGGER_WINDOW);
 		$run->save();
 		$run->load();
-		harness_register_row('rcr_recipe_runs', 'rcr_run_id', intval($run->key));
+		harness_register_row('rcr_recipe_runs', 'rcr_recipe_run_id', intval($run->key));
 		return $run;
 	}
 
@@ -600,7 +600,7 @@ try {
 	$sealed_run->set('rcr_started_time', gmdate('Y-m-d H:i:s'));
 	$sealed_run->saveContent();
 	$wrap_check = $db->prepare(
-		'SELECT rcr_sealed_key, rcr_sealed_owner_user_id FROM rcr_recipe_runs WHERE rcr_run_id = ?');
+		'SELECT rcr_sealed_key, rcr_sealed_owner_user_id FROM rcr_recipe_runs WHERE rcr_recipe_run_id = ?');
 	$wrap_check->execute(array($sealed_run->key));
 	$wrap_row = $wrap_check->fetch(PDO::FETCH_ASSOC);
 	check(!empty($wrap_row['rcr_sealed_key'])
@@ -610,7 +610,7 @@ try {
 	// The estate assertion: EVERY column of the row, not a list someone has to
 	// remember to update. A content column added later is covered by this
 	// without anyone touching the test.
-	$run_row = $db->prepare('SELECT * FROM rcr_recipe_runs WHERE rcr_run_id = ?');
+	$run_row = $db->prepare('SELECT * FROM rcr_recipe_runs WHERE rcr_recipe_run_id = ?');
 	$run_row->execute(array($sealed_run->key));
 	$stored = $run_row->fetch(PDO::FETCH_ASSOC);
 	$leaked = array();
@@ -999,7 +999,7 @@ try {
 	$met->set('rcr_completed_time', gmdate('Y-m-d H:i:s'));
 	$met->save();
 	$met->load();
-	harness_register_row('rcr_recipe_runs', 'rcr_run_id', intval($met->key));
+	harness_register_row('rcr_recipe_runs', 'rcr_recipe_run_id', intval($met->key));
 	check(!in_array((int)$clock->key, array_map(fn($r) => (int)$r->key,
 			RecipeVaultScope::pendingForOwner($owner_id)), true),
 		'a run at or after the fire point suppresses it until the next period');
@@ -1015,7 +1015,7 @@ try {
 	$manual->set('rcr_started_time', gmdate('Y-m-d H:i:s'));
 	$manual->save();
 	$manual->load();
-	harness_register_row('rcr_recipe_runs', 'rcr_run_id', intval($manual->key));
+	harness_register_row('rcr_recipe_runs', 'rcr_recipe_run_id', intval($manual->key));
 
 	check(RecipeWorkerSpawner::spawnIfUnderCap($manual) === false,
 		'no worker will take the Run Now row');
@@ -1075,7 +1075,7 @@ try {
 	$mo_run->set('rcr_started_time', gmdate('Y-m-d H:i:s'));
 	$mo_run->save();
 	$mo_run->load();
-	harness_register_row('rcr_recipe_runs', 'rcr_run_id', intval($mo_run->key));
+	harness_register_row('rcr_recipe_runs', 'rcr_recipe_run_id', intval($mo_run->key));
 
 	check(RecipeWorkerSpawner::spawnIfUnderCap($mo_run) === false,
 		'no worker will take its Run Now row');
@@ -1118,7 +1118,7 @@ try {
 	$worker_run->set('rcr_completed_time', gmdate('Y-m-d H:i:s'));
 	$worker_run->save();
 	$worker_run->load();
-	harness_register_row('rcr_recipe_runs', 'rcr_run_id', intval($worker_run->key));
+	harness_register_row('rcr_recipe_runs', 'rcr_recipe_run_id', intval($worker_run->key));
 
 	check(RecipeSchedule::isDue($mixed, PipelineJobInterface::POSTURE_STANDARD,
 			gmdate('Y-m-d H:i:s')) === false,
@@ -1136,7 +1136,7 @@ try {
 	$window_run->set('rcr_completed_time', gmdate('Y-m-d H:i:s'));
 	$window_run->save();
 	$window_run->load();
-	harness_register_row('rcr_recipe_runs', 'rcr_run_id', intval($window_run->key));
+	harness_register_row('rcr_recipe_runs', 'rcr_recipe_run_id', intval($window_run->key));
 
 	check(!in_array((int)$mixed->key, array_map(fn($r) => (int)$r->key,
 			RecipeVaultScope::pendingForOwner($owner_id)), true),

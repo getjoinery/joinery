@@ -32,8 +32,8 @@
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 require_once(PathHelper::getComposerAutoloadPath());
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_account_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_accounts_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provisions_class.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_compute/LinodeComputeDriver.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/oauth_consumers/CustomerCloudConsumer.php'));
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Token.php'));
@@ -204,10 +204,10 @@ class CustomerCloudProvisioningTest {
 		$probe->probeBooting($prov);
 		$prov->load();
 
-		$node_id = (int)$prov->get('cvp_mgn_node_id');
+		$node_id = (int)$prov->get('cvp_mgn_managed_node_id');
 		$node = new ManagedNode($node_id, TRUE);
-		check($node_id > 0 && (int)$node->get('mgn_mgh_host_id') > 0,
-			'the container node is given a placement record (mgn_mgh_host_id)');
+		check($node_id > 0 && (int)$node->get('mgn_mgh_managed_host_id') > 0,
+			'the container node is given a placement record (mgn_mgh_managed_host_id)');
 		$host_count = 0;
 		foreach (new MultiManagedHost(['host' => $ip, 'deleted' => false]) as $h) { $host_count++; }
 		check($host_count === 1, 'a ManagedHost exists for the instance address');
@@ -237,10 +237,10 @@ class CustomerCloudProvisioningTest {
 
 		// Cleanup: node first (its FK points at the host), then host, job, provision.
 		$db = $this->db;
-		$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_node_id = ?')->execute([$node_id]);
-		$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_id = ?')->execute([$node_id]);
+		$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = ?')->execute([$node_id]);
+		$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_managed_node_id = ?')->execute([$node_id]);
 		$db->prepare('DELETE FROM mgh_managed_hosts WHERE mgh_host = ?')->execute([$ip]);
-		$db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_id = ?')->execute([$prov->key]);
+		$db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_customer_cloud_provision_id = ?')->execute([$prov->key]);
 
 		// Every shape is keyless now (specs/ssh_single_bootstrap.md): bare and
 		// bare-metal create their instance like fresh docker does.
@@ -261,7 +261,7 @@ class CustomerCloudProvisioningTest {
 			$label = $shape[0] . '/' . $shape[1];
 			check($ok->get('cvp_status') === 'booting' && is_array($fake->lastCreateOpts),
 				"{$label}: an instance is created and the provision boots", (string)$probe->lastFailReason);
-			$db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_id = ?')->execute([$ok->key]);
+			$db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_customer_cloud_provision_id = ?')->execute([$ok->key]);
 		}
 
 		// A clone arms its SOURCE before the instance exists: the key is sealed
@@ -331,12 +331,12 @@ class CustomerCloudProvisioningTest {
 		check($second->get('cvp_status') === 'ready' && $fake->lastCreateOpts === null
 			&& strpos((string)$second->get('cvp_error'), 'armed for provision #' . $clone->key) !== false,
 			'a second clone from the same source waits at ready, naming the provision holding the key');
-		$db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_id = ?')->execute([$second->key]);
+		$db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_customer_cloud_provision_id = ?')->execute([$second->key]);
 
 		// A transient provider failure leaves the row at ready; the next tick
 		// does not re-arm (one key, one job) — the arm job count stays at one.
 		$arm_count = function () use ($db, $src_unpaired) {
-			$q = $db->prepare("SELECT COUNT(*) FROM mjb_management_jobs WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'clone_export_arm'");
+			$q = $db->prepare("SELECT COUNT(*) FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'clone_export_arm'");
 			$q->execute([$src_unpaired->key]);
 			return (int)$q->fetchColumn();
 		};
@@ -354,13 +354,13 @@ class CustomerCloudProvisioningTest {
 		$fake->getInstanceResult = ['id' => '77002', 'ip' => $clone_ip, 'status' => 'running'];
 		check($probe->probeBooting($clone) === 0 && $clone->get('cvp_status') === 'booting',
 			'the clone waits while the source has not answered its arm job');
-		$db->prepare("UPDATE mjb_management_jobs SET mjb_status = 'completed', mjb_completed_time = now(), mjb_output = ? WHERE mjb_id = ?")
+		$db->prepare("UPDATE mjb_management_jobs SET mjb_status = 'completed', mjb_completed_time = now(), mjb_output = ? WHERE mjb_management_job_id = ?")
 			->execute([json_encode(['api_version' => '1.0', 'data' => ['output' => "CLONE_EXPORT_ARM=armed\n"]]), $arm_job->key]);
 		$probe->probeBooting($clone);
 		$clone->load();
 		check($clone->get('cvp_status') === 'installing', 'once the source reports armed, the clone dispatches its install',
 			(string)$probe->lastFailReason . ' ' . (string)$clone->get('cvp_error'));
-		$clone_node_id = (int)$clone->get('cvp_mgn_node_id');
+		$clone_node_id = (int)$clone->get('cvp_mgn_managed_node_id');
 		$clone_job = ManagementJob::latestForNode($clone_node_id, 'install_node');
 		$clone_boot = '';
 		foreach ((json_decode((string)$clone_job->get('mjb_commands'), true)['steps'] ?? []) as $st) {
@@ -372,10 +372,10 @@ class CustomerCloudProvisioningTest {
 			'and the domain on the site command is the clone\'s own');
 
 		// Cleanup.
-		$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_node_id IN (?, ?)')->execute([$clone_node_id, $src_unpaired->key]);
-		$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_id IN (?, ?)')->execute([$clone_node_id, $src_unpaired->key]);
+		$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id IN (?, ?)')->execute([$clone_node_id, $src_unpaired->key]);
+		$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_managed_node_id IN (?, ?)')->execute([$clone_node_id, $src_unpaired->key]);
 		$db->prepare('DELETE FROM mgh_managed_hosts WHERE mgh_host IN (?, ?)')->execute([$clone_ip, '198.51.100.9']);
-		$db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_id = ?')->execute([$clone->key]);
+		$db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_customer_cloud_provision_id = ?')->execute([$clone->key]);
 	}
 
 	private function test_install_password_retirement() {
@@ -412,7 +412,7 @@ class CustomerCloudProvisioningTest {
 		$fake->getInstanceResult = ['id' => '77009', 'ip' => $ip, 'ipv6' => $ip6, 'status' => 'running'];
 		$probe->probeBooting($prov);
 		$prov->load();
-		$site_id = (int)$prov->get('cvp_mgn_node_id');
+		$site_id = (int)$prov->get('cvp_mgn_managed_node_id');
 		$site = new ManagedNode($site_id, TRUE);
 		check($site_id > 0 && $prov->get('cvp_status') === 'installing', 'the install is dispatched', (string)$probe->lastFailReason);
 		check(CustomerCloudProvision::for_machine_address($ip) !== null
@@ -454,7 +454,7 @@ class CustomerCloudProvisioningTest {
 		$hjr->set('ajr_agent_version', '1.21.0');
 		$hjr->set('ajr_status', AgentJoinRequest::STATUS_PENDING);
 		$hjr->save();
-		harness_register_row('ajr_agent_join_requests', 'ajr_id', $hjr->key);
+		harness_register_row('ajr_agent_join_requests', 'ajr_agent_join_request_id', $hjr->key);
 		// The SITE's own join from the same machine is not adoptable: it binds
 		// to the node the provisioner made, from that node's page.
 		$spair = sodium_crypto_sign_keypair();
@@ -466,7 +466,7 @@ class CustomerCloudProvisioningTest {
 		$sjr->set('ajr_source_ip', $ip);
 		$sjr->set('ajr_status', AgentJoinRequest::STATUS_PENDING);
 		$sjr->save();
-		harness_register_row('ajr_agent_join_requests', 'ajr_id', $sjr->key);
+		harness_register_row('ajr_agent_join_requests', 'ajr_agent_join_request_id', $sjr->key);
 		try {
 			AgentChannelEndpoint::adoptJoin($sjr);
 			check(false, 'the site\'s own join is sent to the provision\'s node, not adopted as a stray');
@@ -487,7 +487,7 @@ class CustomerCloudProvisioningTest {
 		$host_node = $adopted['node'];
 		$hjr->load();
 		check($host_node->get('mgn_host') === $ip, 'the host node is made at the instance\'s IPv4, not the IPv6 the join came from', (string)$host_node->get('mgn_host'));
-		check($adopted['host'] !== null && (int)$adopted['host']->get('mgh_mgn_host_node_id') === (int)$host_node->key,
+		check($adopted['host'] !== null && (int)$adopted['host']->get('mgh_mgn_managed_node_id') === (int)$host_node->key,
 			'and approval names it as the placement record\'s host agent');
 		check($host_node->get('mgn_agent_public_key') === base64_encode($hpub)
 			&& $hjr->get('ajr_status') === AgentJoinRequest::STATUS_APPROVED, 'with the joining key bound and the request approved');
@@ -510,7 +510,7 @@ class CustomerCloudProvisioningTest {
 
 		// The job fails: the password is kept, the reason is on the row, ops
 		// are told once.
-		$db->prepare("UPDATE mjb_management_jobs SET mjb_status = 'failed', mjb_error_message = 'the machine still accepted the install password' WHERE mjb_id = ?")
+		$db->prepare("UPDATE mjb_management_jobs SET mjb_status = 'failed', mjb_error_message = 'the machine still accepted the install password' WHERE mjb_management_job_id = ?")
 			->execute([$rjob->key]);
 		check($probe->probeInstallPassword($prov) === 1, 'a failed job advances the provision');
 		$prov->load();
@@ -530,7 +530,7 @@ class CustomerCloudProvisioningTest {
 		// A re-run of the job (its detail page) that completes retires it.
 		$rerun = ManagementJob::createJob($site_id, 'retire_install_password',
 			JobCommandBuilder::build_retire_install_password($site), ['provision_id' => (int)$prov->key], null);
-		$db->prepare("UPDATE mjb_management_jobs SET mjb_status = 'completed', mjb_output = 'INSTALL_PASSWORD_RETIRED' WHERE mjb_id = ?")
+		$db->prepare("UPDATE mjb_management_jobs SET mjb_status = 'completed', mjb_output = 'INSTALL_PASSWORD_RETIRED' WHERE mjb_management_job_id = ?")
 			->execute([$rerun->key]);
 		check($probe->probeInstallPassword($prov) === 1, 'a completed re-run advances the provision');
 		$prov->load();
@@ -590,11 +590,11 @@ class CustomerCloudProvisioningTest {
 		$fake->getInstanceResult = ['id' => '77009', 'ip' => $ip, 'ipv6' => $ip6, 'status' => 'running'];
 
 		// Cleanup: jobs, then the nodes (site first: its FK points at the host record), host record, provision.
-		$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_node_id IN (?, ?, ?)')->execute([$site_id, $host_node->key, $stranger->key]);
-		$db->prepare('UPDATE mgh_managed_hosts SET mgh_mgn_host_node_id = NULL WHERE mgh_host = ?')->execute([$ip]);
-		$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_id IN (?, ?, ?)')->execute([$site_id, $host_node->key, $stranger->key]);
+		$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id IN (?, ?, ?)')->execute([$site_id, $host_node->key, $stranger->key]);
+		$db->prepare('UPDATE mgh_managed_hosts SET mgh_mgn_managed_node_id = NULL WHERE mgh_host = ?')->execute([$ip]);
+		$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_managed_node_id IN (?, ?, ?)')->execute([$site_id, $host_node->key, $stranger->key]);
 		$db->prepare('DELETE FROM mgh_managed_hosts WHERE mgh_host = ?')->execute([$ip]);
-		$db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_id = ?')->execute([$prov->key]);
+		$db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_customer_cloud_provision_id = ?')->execute([$prov->key]);
 	}
 
 	private function test_account_tokens() {
@@ -611,7 +611,7 @@ class CustomerCloudProvisioningTest {
 		check($account->key > 0, 'account row created');
 
 		// Encrypted at rest: raw column value is not the plaintext.
-		$q = $this->db->prepare("SELECT cca_access_token, cca_refresh_token FROM cca_customer_cloud_accounts WHERE cca_id = ?");
+		$q = $this->db->prepare("SELECT cca_access_token, cca_refresh_token FROM cca_customer_cloud_accounts WHERE cca_customer_cloud_account_id = ?");
 		$q->execute([$account->key]);
 		$raw = $q->fetch(PDO::FETCH_ASSOC);
 		check(strpos($raw['cca_access_token'], 'access-secret-123') === false
@@ -875,7 +875,7 @@ class CustomerCloudProvisioningTest {
 
 		$after = new CustomerCloudProvision($provision->key, TRUE);
 		check($after->get('cvp_status') === 'ready'
-			&& (int)$after->get('cvp_cca_account_id') === (int)$account->key, 'pending_connect provision flipped to ready + linked');
+			&& (int)$after->get('cvp_cca_customer_cloud_account_id') === (int)$account->key, 'pending_connect provision flipped to ready + linked');
 
 		// A second grant for the same user updates, not duplicates.
 		$consumer->onTokenGranted($token, ['user_id' => $user2, 'provider' => 'linode']);
@@ -887,7 +887,7 @@ class CustomerCloudProvisioningTest {
 	private function test_reverse_dns() {
 		section('NodeReverseDns (injected fake driver)');
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeReverseDns.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
 
 		$blank_node = new ManagedNode(NULL);
 
@@ -931,7 +931,7 @@ class CustomerCloudProvisioningTest {
 		$provision->set('cvp_status', 'done');
 		$provision->set('cvp_instance_id', '424242');
 		$provision->set('cvp_instance_ip', '203.0.113.80');
-		$provision->set('cvp_mgn_node_id', $node->key);
+		$provision->set('cvp_mgn_managed_node_id', $node->key);
 		$provision->save();
 
 		$found = NodeReverseDns::provisionForNode($node);
@@ -977,7 +977,7 @@ class CustomerCloudProvisioningTest {
 		$q = $this->db->prepare("DELETE FROM cca_customer_cloud_accounts WHERE cca_usr_user_id IN (?, ?)");
 		$q->execute($ids);
 		foreach ($this->rdns_node_ids as $node_id) {
-			$q = $this->db->prepare("DELETE FROM mgn_managed_nodes WHERE mgn_id = ?");
+			$q = $this->db->prepare("DELETE FROM mgn_managed_nodes WHERE mgn_managed_node_id = ?");
 			$q->execute([$node_id]);
 		}
 	}

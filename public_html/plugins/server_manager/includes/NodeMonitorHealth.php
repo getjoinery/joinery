@@ -49,7 +49,7 @@
  * @version 1.2
  */
 
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
 
 class NodeMonitorHealth {
 
@@ -401,7 +401,7 @@ class NodeMonitorHealth {
 				'slug'   => $node->get('mgn_slug'),
 				'name'   => $node->get('mgn_name'),
 				'id'     => $node->key,
-				'link'   => '/admin/server_manager/node_detail?mgn_id=' . (int)$node->key . '&tab=backups',
+				'link'   => '/admin/server_manager/node_detail?mgn_managed_node_id=' . (int)$node->key . '&tab=backups',
 				'health' => $health,
 			];
 		}
@@ -551,8 +551,8 @@ class NodeMonitorHealth {
 		if ($node_id <= 0 || $type === '') { return false; }
 		$db = DbConnector::get_instance()->get_db_link();
 		$sql = 'SELECT mjb_error_message FROM mjb_management_jobs
-				WHERE mjb_mgn_node_id = ? AND mjb_job_type = ? AND mjb_agent_outcome = ?
-				ORDER BY mjb_id DESC LIMIT 50';
+				WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = ? AND mjb_agent_outcome = ?
+				ORDER BY mjb_management_job_id DESC LIMIT 50';
 		$stmt = $db->prepare($sql);
 		$stmt->execute([$node_id, $type, 'refused']);
 		foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $message) {
@@ -582,7 +582,7 @@ class NodeMonitorHealth {
 				'slug'   => $node->get('mgn_slug'),
 				'name'   => $node->get('mgn_name'),
 				'id'     => $node->key,
-				'link'   => '/admin/server_manager/node_detail?mgn_id=' . (int)$node->key,
+				'link'   => '/admin/server_manager/node_detail?mgn_managed_node_id=' . (int)$node->key,
 				'health' => self::script_trust_health($node),
 			];
 		}
@@ -877,11 +877,11 @@ class NodeMonitorHealth {
 	public static function backup_runs_from_here(int $node_id, int $limit = 60): array {
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare(
-			'SELECT mjb_id, mjb_status, mjb_result, mjb_error_message, mjb_completed_time, mjb_create_time '
+			'SELECT mjb_management_job_id, mjb_status, mjb_result, mjb_error_message, mjb_completed_time, mjb_create_time '
 			. 'FROM mjb_management_jobs '
-			. 'WHERE mjb_mgn_node_id = ? AND mjb_job_type = ? AND mjb_delete_time IS NULL '
+			. 'WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = ? AND mjb_delete_time IS NULL '
 			. "AND mjb_status IN ('completed', 'failed') "
-			. 'ORDER BY mjb_id DESC LIMIT ' . (int)$limit
+			. 'ORDER BY mjb_management_job_id DESC LIMIT ' . (int)$limit
 		);
 		$q->execute(array($node_id, 'backup_run'));
 		$rows = array();
@@ -892,7 +892,7 @@ class NodeMonitorHealth {
 				? (string)$result['message'] : trim((string)$row['mjb_error_message']);
 			$time = (string)($row['mjb_completed_time'] ?: $row['mjb_create_time']);
 			$rows[] = array(
-				'id'      => (int)$row['mjb_id'],
+				'id'      => (int)$row['mjb_management_job_id'],
 				'outcome' => $outcome,
 				'time'    => preg_match('/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/', $time, $m) ? $m[1] : $time,
 				'message' => $message,

@@ -815,7 +815,7 @@ return [
 		'id' => 'iem_015_reconcile_self_addressed_sends',
 		'version' => '1.104.0',
 		'up' => function($dbconnector) {
-			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
 			$dblink = $dbconnector->get_db_link();
 
 			// Pairs in ONE mailbox sharing ONE Message-ID: the composer's live row

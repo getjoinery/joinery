@@ -48,9 +48,9 @@
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grants_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxDirectConsumer.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailSetupCheck.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
@@ -209,7 +209,7 @@ if (!$pre_receiving) {
 section('Transport: a connected mailbox never leaks to platform egress');
 require_once(PathHelper::getIncludePath('includes/OutboundTransport.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSender.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_accounts_class.php'));
 $refusal = OutboundTransport::forHostedAlias('isb-feed@' . $imap_name);
 check($refusal->error !== null && stripos($refusal->error, 'connected account') !== false,
 	'forHostedAlias() refuses an IMAP-source address, naming the connected account',

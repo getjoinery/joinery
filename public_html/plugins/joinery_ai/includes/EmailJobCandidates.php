@@ -47,7 +47,7 @@
  * @changelog 1.2 - lookback_days floor on iem_received_time (default 7 days)
  */
 
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/aip_recipe_item_log_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_item_log_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxAliasConfig.php'));
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));

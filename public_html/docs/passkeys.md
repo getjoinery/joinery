@@ -84,7 +84,7 @@ sign-in is withdrawn.
 
 ## Persistence
 
-`data/passkeys_class.php` defines `Passkey` / `MultiPasskey` over
+`data/passkey_credentials_class.php` defines `Passkey` / `MultiPasskey` over
 `pkc_passkey_credentials`. One row per enrolled credential:
 
 - `pkc_credential_id` — base64url of the raw WebAuthn credential id; the lookup
@@ -95,7 +95,7 @@ sign-in is withdrawn.
   every ceremony round-trips through it. Never exported over the API
   (`$api_unreadable_fields`).
 - `pkc_sign_count`, `pkc_transports`, `pkc_aaguid`, `pkc_prf_capable`,
-  `pkc_discoverable`, `pkc_attachment`, `pkc_label`, `pkc_created_time`,
+  `pkc_discoverable`, `pkc_attachment`, `pkc_label`, `pkc_create_time`,
   `pkc_last_used_time` — denormalized-on-write conveniences for lookup, UI
   display, and capability detection.
 

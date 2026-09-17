@@ -83,7 +83,7 @@ through our registrar account, and how far along the hand-over is.</p>
 				<td><?php echo htmlspecialchars($row->get('rdm_buyer_email')); ?></td>
 				<td><?php echo htmlspecialchars($row->get_local('rdm_expiry_time', 'M j, Y') ?: '—'); ?></td>
 				<td><?php echo AdminPage::action_button('Mark push sent', '/admin/server_manager/domains',
-					array('hidden' => array('action' => 'mark_pushed', 'rdm_id' => $row->key))); ?></td>
+					array('hidden' => array('action' => 'mark_pushed', 'rdm_registered_domain_id' => $row->key))); ?></td>
 			</tr>
 		<?php endforeach; ?>
 		</tbody>
@@ -108,7 +108,7 @@ through our registrar account, and how far along the hand-over is.</p>
 				<td><?php echo htmlspecialchars($row->get('rdm_buyer_email')); ?></td>
 				<td><?php echo nl2br(htmlspecialchars((string)$row->get('rdm_error'))); ?></td>
 				<td><?php echo AdminPage::action_button('Retry', '/admin/server_manager/domains',
-					array('hidden' => array('action' => 'retry', 'rdm_id' => $row->key),
+					array('hidden' => array('action' => 'retry', 'rdm_registered_domain_id' => $row->key),
 						'confirm' => 'Queue ' . $row->get('rdm_domain') . ' for registration again?')); ?></td>
 			</tr>
 		<?php endforeach; ?>

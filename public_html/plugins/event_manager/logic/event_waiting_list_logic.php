@@ -6,7 +6,7 @@ function event_waiting_list_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/event_manager/data/events_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_waiting_lists_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/event_manager/data/waiting_lists_class.php'));
 
 	$event_id = $input['event_id'] ?? null;
 	$event_id = LibraryFunctions::fetch_variable_local($event_id, '', 1, 'Event id is missing', '', 'safemode', 'int');

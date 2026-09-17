@@ -80,7 +80,7 @@ class FleetBackupPolicy {
 	 * with nothing anyone could fix from the dashboard.
 	 */
 	public static function eligible_nodes(): array {
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
 		$nodes = new MultiManagedNode(array('deleted' => false, 'enabled' => true),
 			array('mgn_name' => 'ASC'), 1000, 0);
 		$nodes->load();

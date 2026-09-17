@@ -24,7 +24,7 @@ class EventWaitingListRecipientProvider implements RecipientGroupProvider {
     }
 
     public function resolve(int $reference_id): array {
-        require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_waiting_lists_class.php'));
+        require_once(PathHelper::getIncludePath('plugins/event_manager/data/waiting_lists_class.php'));
         $waiting = new MultiWaitingList(array('event_id' => $reference_id), NULL);
         $waiting->load();
         $user_ids = array();

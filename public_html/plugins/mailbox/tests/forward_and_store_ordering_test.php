@@ -19,15 +19,17 @@
  *
  * Run: php plugins/mailbox/tests/forward_and_store_ordering_test.php  (schema synced).
  *
+ * @version 1.1 - teardown goes through mailbox_purge_domains(), which also removes the
+ *   send attempts a forward records; the hand-rolled copy left one per alias behind
  * @version 1.0
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 require_once(__DIR__ . '/lib/mailbox_test_fixture.php');
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
 
 /**
@@ -180,10 +182,8 @@ class ForwardAndStoreOrderingTest {
 	private function tearDown() {
 		try {
 			if ($this->domain_id) {
-				$this->db->exec("DELETE FROM iem_inbound_email_messages WHERE iem_ied_inbound_email_domain_id = " . intval($this->domain_id));
 				$this->db->exec("DELETE FROM iel_inbound_email_logs WHERE iel_ied_inbound_email_domain_id = " . intval($this->domain_id));
-				$this->db->exec("DELETE FROM iea_inbound_email_aliases WHERE iea_ied_inbound_email_domain_id = " . intval($this->domain_id));
-				$this->db->exec("DELETE FROM ied_inbound_email_domains WHERE ied_inbound_email_domain_id = " . intval($this->domain_id));
+				mailbox_purge_domains('fas-test-' . $this->suffix . '.example');
 			}
 		} catch (\Throwable $e) {}
 	}

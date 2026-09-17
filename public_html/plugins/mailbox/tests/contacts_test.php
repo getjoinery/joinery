@@ -39,8 +39,8 @@ require_once(__DIR__ . '/../../../tests/lib/vault_fixtures.php');
 require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
 require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
 require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_contacts_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxContacts.php'));
 
@@ -323,10 +323,10 @@ check(intval($db->query("SELECT COUNT(*) FROM imc_mailbox_contacts WHERE imc_usr
 
 // ── Delete (owner-scoped) ────────────────────────────────────────────────────
 section('Delete');
-$del_id = intval($db->query("SELECT imc_mailbox_contact_id FROM imc_mailbox_contacts WHERE imc_usr_user_id = $iuid LIMIT 1")->fetchColumn());
+$del_deletion_rule_id = intval($db->query("SELECT imc_mailbox_contact_id FROM imc_mailbox_contacts WHERE imc_usr_user_id = $iuid LIMIT 1")->fetchColumn());
 $other = make_user('ContactOther', 5);
-check($svc->deleteContact((int)$other->key, $del_id) === false, 'a non-owner cannot delete a contact');
-check($svc->deleteContact($iuid, $del_id) === true, 'the owner can delete their contact');
-check(intval($db->query("SELECT COUNT(*) FROM imc_mailbox_contacts WHERE imc_mailbox_contact_id = $del_id")->fetchColumn()) === 0, 'the contact row is gone');
+check($svc->deleteContact((int)$other->key, $del_deletion_rule_id) === false, 'a non-owner cannot delete a contact');
+check($svc->deleteContact($iuid, $del_deletion_rule_id) === true, 'the owner can delete their contact');
+check(intval($db->query("SELECT COUNT(*) FROM imc_mailbox_contacts WHERE imc_mailbox_contact_id = $del_deletion_rule_id")->fetchColumn()) === 0, 'the contact row is gone');
 
 harness_finish();

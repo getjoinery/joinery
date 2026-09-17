@@ -9,8 +9,8 @@
  */
 function chat_thread_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-    require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
-    require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
+    require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversations_class.php'));
+    require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversation_messages_class.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRender.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSerializer.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
@@ -40,7 +40,7 @@ function chat_thread_logic(array $input): LogicResult {
 
     $rows = new MultiAiConversationMessage(
         ['conversation_id' => (int)$conversation->key, 'deleted' => false],
-        ['aim_message_id' => 'ASC']
+        ['aim_conversation_message_id' => 'ASC']
     );
     $rows->load();
 

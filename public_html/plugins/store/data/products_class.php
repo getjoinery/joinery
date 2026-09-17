@@ -57,7 +57,7 @@ class Product extends SystemBase {
 	protected static $foreign_key_actions = [
 		'pro_prg_product_group_id' => ['action' => 'prevent', 'message' => 'Cannot delete product group - products exist'],
 		'pro_fil_file_id' => ['action' => 'null'],
-		'pro_emt_receipt_template_id' => ['action' => 'null'],
+		'pro_emt_email_template_id' => ['action' => 'null'],
 		'pro_sbt_subscription_tier_id' => ['action' => 'prevent', 'message' => 'Cannot delete subscription tier - products still grant it'],
 		'pro_grp_group_id' => ['action' => 'prevent', 'message' => 'products still use this group for access control'],
 	];
@@ -111,7 +111,7 @@ class Product extends SystemBase {
 	    'pro_sbt_subscription_tier_id' => array('type'=>'int4'),
 	    'pro_tier_min_level' => array('type'=>'int4', 'is_nullable'=>true),
 	    'pro_fil_file_id' => array('type'=>'int4'),
-	    'pro_emt_receipt_template_id' => array('type'=>'int4', 'is_nullable'=>true),
+	    'pro_emt_email_template_id' => array('type'=>'int4', 'is_nullable'=>true),
 	    // Set once, on create, by admin_product_edit_logic. Nullable because
 	    // products that predate the column have no creator on record.
 	    'pro_created_by' => array('type'=>'int8', 'is_nullable'=>true),

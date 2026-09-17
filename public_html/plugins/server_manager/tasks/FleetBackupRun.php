@@ -46,7 +46,7 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetBa
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetBackupRetention.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/RecoveryKeyFleet.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupChainListHelper.php'));
 
 class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable {

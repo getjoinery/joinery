@@ -66,7 +66,7 @@ if (LibraryFunctions::isFormSubmission()) {
 	}
 
 	if ($action === 'unblock' || $action === 'allow_blocked') {
-		$block = new PersonaBlockedSender((int)($_POST['pbs_blocked_sender_id'] ?? 0), TRUE);
+		$block = new PersonaBlockedSender((int)($_POST['pbs_persona_blocked_sender_id'] ?? 0), TRUE);
 		if ($block->key && !$block->get('pbs_delete_time')) {
 			$author = (string)$block->get('pbs_author');
 			if ($action === 'allow_blocked') {
@@ -82,7 +82,7 @@ if (LibraryFunctions::isFormSubmission()) {
 	}
 
 	if ($action === 'disallow') {
-		$row = new PersonaAllowedSender((int)($_POST['pas_allowed_sender_id'] ?? 0), TRUE);
+		$row = new PersonaAllowedSender((int)($_POST['pas_persona_allowed_sender_id'] ?? 0), TRUE);
 		if ($row->key && !$row->get('pas_delete_time')) {
 			$row->soft_delete();
 			$announce(htmlspecialchars($row->get('pas_author')) . ' is an ordinary sender again — judged like anyone else.', 'Removed from allowed');
@@ -130,7 +130,7 @@ if (count($allowed) === 0) {
 			htmlspecialchars((string)$row->get('pas_note')),
 			$row->get_local('pas_create_time'),
 			AdminPage::action_button('Remove', $self, array(
-				'hidden' => array('action' => 'disallow', 'pas_allowed_sender_id' => $row->key),
+				'hidden' => array('action' => 'disallow', 'pas_persona_allowed_sender_id' => $row->key),
 				'confirm' => 'Remove ' . $row->get('pas_author') . ' from the allowed list? Their posts will be judged like anyone else\'s again.',
 			)),
 		));
@@ -159,11 +159,11 @@ if (count($blocks) === 0) {
 			$source,
 			$block->get_local('pbs_create_time'),
 			AdminPage::action_button('Unblock', $self, array(
-				'hidden' => array('action' => 'unblock', 'pbs_blocked_sender_id' => $block->key),
+				'hidden' => array('action' => 'unblock', 'pbs_persona_blocked_sender_id' => $block->key),
 			))
 			. ' '
 			. AdminPage::action_button('Allow', $self, array(
-				'hidden' => array('action' => 'allow_blocked', 'pbs_blocked_sender_id' => $block->key),
+				'hidden' => array('action' => 'allow_blocked', 'pbs_persona_blocked_sender_id' => $block->key),
 			)),
 		));
 	}

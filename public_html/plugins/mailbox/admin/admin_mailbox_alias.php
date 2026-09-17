@@ -71,7 +71,7 @@ $formwriter->dropinput('iea_ied_inbound_email_domain_id', 'Domain', [
 // (specs/mailbox_connect_flow.md § D), so its badge points there instead.
 if ($is_edit && $alias->get('iea_ied_inbound_email_domain_id')) {
 	$alias_domain_id = intval($alias->get('iea_ied_inbound_email_domain_id'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
 	$alias_domain = new InboundEmailDomain($alias_domain_id, TRUE);
 	if ($alias_domain->key) {
 		$alias_level = $alias->security_level();

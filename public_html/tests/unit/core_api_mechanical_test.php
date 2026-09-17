@@ -125,7 +125,7 @@ check($all_products->count_all() === $live->count_all() + $gone->count_all(),
 	$live->count_all() . ' + ' . $gone->count_all() . ' = ' . $all_products->count_all());
 
 // Models that never had the filter at all now have it.
-foreach (array('MultiEmailTemplateStore', 'MultiSubscriptionTier', 'MultiContentVersion', 'MultiDirectSpool') as $cls) {
+foreach (array('MultiEmailTemplate', 'MultiSubscriptionTier', 'MultiContentVersion', 'MultiDirectSpool') as $cls) {
 	$ok = true;
 	try { $m = new $cls(array('deleted' => false)); $m->count_all(); }
 	catch (Throwable $e) { $ok = false; }
@@ -243,8 +243,9 @@ section('Only the server may write during a page view');
 // otherwise have done. A user clicking something is none of those.
 $permitted = array(
 	'data/api_keys_class.php'                                 => 'API key last-used tracking, on read requests',
-	'data/backup_target_class.php'                            => 'a Backblaze credential completed with the region and endpoint Backblaze itself reports, written back once on the read that found them missing',
+	'data/backup_targets_class.php'                            => 'a Backblaze credential completed with the region and endpoint Backblaze itself reports, written back once on the read that found them missing',
 	'data/general_errors_class.php'                           => 'error rows, recorded on whatever request failed',
+	'data/logins_class.php'                                   => 'the login row and usr_lastlogin_time stamp, written when a remembered cookie resumes a session on a read request',
 	'includes/RequestLogger.php'                              => 'request log rows, including for reads',
 	'includes/setup_steps/mail_send.php'                      => 'receiving-domain row reconciled from the stored From address on a wizard view — the Direct records cannot be listed without it',
 	'includes/VaultAudit.php'                                 => 'vault window opened/closed, observed on whatever request noticed',

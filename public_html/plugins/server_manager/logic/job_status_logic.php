@@ -12,7 +12,7 @@
 
 function job_status_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-	require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
 	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmSecretRedactor.php'));
 

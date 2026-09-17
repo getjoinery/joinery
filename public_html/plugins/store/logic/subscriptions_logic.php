@@ -8,8 +8,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
-	require_once(PathHelper::getIncludePath('data/address_class.php'));
-	require_once(PathHelper::getIncludePath('data/phone_number_class.php'));
+	require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
+	require_once(PathHelper::getIncludePath('data/phone_numbers_class.php'));
 	require_once(PathHelper::getIncludePath('data/messages_class.php'));
 
 	$page_vars = array();

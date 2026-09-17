@@ -51,7 +51,7 @@ class UserEncryptionWrapping extends SystemBase {
 
 	protected static $foreign_key_actions = [
 		'uew_uev_user_encryption_vault_id' => ['action' => 'cascade'],
-		'uew_pkc_credential_id' => ['action' => 'cascade'],
+		'uew_pkc_passkey_credential_id' => ['action' => 'cascade'],
 	];
 
 	public static $api_readable = false;
@@ -66,13 +66,13 @@ class UserEncryptionWrapping extends SystemBase {
 		'uew_uev_user_encryption_vault_id' => array('type'=>'int8', 'is_nullable'=>false, 'index'=>true,
 			'foreign_key'=>array('table'=>'uev_user_encryption_vaults', 'column'=>'uev_user_encryption_vault_id', 'on_delete'=>'CASCADE')),
 		'uew_unlocker_type'      => array('type'=>'varchar(16)', 'is_nullable'=>false),
-		'uew_pkc_credential_id'  => array('type'=>'int8', 'is_nullable'=>true, 'index'=>true),
+		'uew_pkc_passkey_credential_id'  => array('type'=>'int8', 'is_nullable'=>true, 'index'=>true),
 		'uew_wrapped_secret_key' => array('type'=>'text', 'is_nullable'=>false),
 		'uew_salt'               => array('type'=>'varchar(64)', 'is_nullable'=>true),
 		'uew_key_generation'     => array('type'=>'int4', 'is_nullable'=>false, 'default'=>1),
 		'uew_is_used'            => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		'uew_label'              => array('type'=>'varchar(255)', 'is_nullable'=>true),
-		'uew_created_time'       => array('type'=>'timestamp(6)', 'default'=>'now()'),
+		'uew_create_time'       => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'uew_used_time'          => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 		'uew_delete_time'        => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	);
@@ -121,7 +121,7 @@ class UserEncryptionWrapping extends SystemBase {
 		$wrapping->set('uew_uev_user_encryption_vault_id', $vault_id);
 		$wrapping->set('uew_unlocker_type', $unlocker_type);
 		if ($credential_id !== null) {
-			$wrapping->set('uew_pkc_credential_id', $credential_id);
+			$wrapping->set('uew_pkc_passkey_credential_id', $credential_id);
 		}
 		if ($label !== null) {
 			$wrapping->set('uew_label', $label);
@@ -252,7 +252,7 @@ class MultiUserEncryptionWrapping extends SystemMultiBase {
 		if (isset($this->options['unlocker_type']))
 			$filters['uew_unlocker_type'] = [$this->options['unlocker_type'], PDO::PARAM_STR];
 		if (isset($this->options['credential_id']))
-			$filters['uew_pkc_credential_id'] = [$this->options['credential_id'], PDO::PARAM_INT];
+			$filters['uew_pkc_passkey_credential_id'] = [$this->options['credential_id'], PDO::PARAM_INT];
 		if (isset($this->options['is_used']))
 			$filters['uew_is_used'] = "= " . ($this->options['is_used'] ? 'TRUE' : 'FALSE');
 		// A reserved row (empty wrapping) is not an unlocker — see reserve().

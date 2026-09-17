@@ -615,7 +615,7 @@ class ScaffoldGenerator {
 
         // Paths (relative to repo root, plugin-rooted when into: targets a plugin).
         $this->ctx['paths'] = [
-            'data'              => $base . "data/{$entity_snake}_class.php",
+            'data'              => $base . "data/{$plural}_class.php",
             'public_list_logic' => $base . "logic/{$plural}_logic.php",
             'public_list_view'  => $base . "views/{$plural}.php",
             'public_edit_logic' => $base . "logic/{$entity_snake}_edit_logic.php",

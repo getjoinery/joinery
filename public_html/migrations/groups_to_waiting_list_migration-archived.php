@@ -9,7 +9,7 @@
 		require_once( __DIR__ . '/../data/users_class.php');
 		require_once( __DIR__ . '/../data/events_class.php');
 		require_once( __DIR__ . '/../data/event_registrants_class.php');
-		require_once( __DIR__ . '/../data/event_waiting_lists_class.php');
+		require_once( __DIR__ . '/../data/waiting_lists_class.php');
 
 		$settings = Globalvars::get_instance();
 

@@ -35,7 +35,7 @@ harness_boot();
 
 require_once(PathHelper::getIncludePath('plugins/event_manager/data/events_class.php'));
 require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_registrants_class.php'));
-require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_waiting_lists_class.php'));
+require_once(PathHelper::getIncludePath('plugins/event_manager/data/waiting_lists_class.php'));
 
 $db = DbConnector::get_instance()->get_db_link();
 

@@ -9,7 +9,7 @@
  * pending-state teardown are defined once.
  */
 require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
-require_once(PathHelper::getIncludePath('data/login_class.php'));
+require_once(PathHelper::getIncludePath('data/logins_class.php'));
 
 class Login2fa {
 
@@ -30,7 +30,7 @@ class Login2fa {
 			$_SESSION['totp_pending_return'], $_SESSION['totp_pending_expires']);
 
 		$session->store_session_variables($user);
-		LoginClass::StoreUserLogin($user->key, LoginClass::LOGIN_FORM);
+		Login::record($user->key, Login::LOGIN_FORM);
 
 		if ($remember) {
 			$session->save_user_to_cookie();

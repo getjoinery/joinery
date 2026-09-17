@@ -19,8 +19,8 @@ require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversations_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversation_messages_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSerializer.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
@@ -67,7 +67,7 @@ $msg->set('aim_role', AiConversationMessage::ROLE_ASSISTANT);
 $msg->set('aim_content', '');
 $msg->save();
 $msg->load();
-harness_register_row('aim_conversation_messages', 'aim_message_id', (int)$msg->key);
+harness_register_row('aim_conversation_messages', 'aim_conversation_message_id', (int)$msg->key);
 $turn_cols = ChatSeal::turnColumns($conv, (int)$msg->key, 'The target is undervalued at 4x EBITDA.',
     [['name' => 'query_model', 'is_error' => false]]);
 $turn_cols['aim_status'] = AiConversationMessage::STATUS_COMPLETE;
@@ -77,7 +77,7 @@ AiConversationMessage::updateColumns((int)$msg->key, $turn_cols);
 section('Seal at rest');
 $db = DbConnector::get_instance()->get_db_link();
 $raw_msg = (function () use ($db, $msg) {
-    $s = $db->prepare('SELECT * FROM aim_conversation_messages WHERE aim_message_id = ?');
+    $s = $db->prepare('SELECT * FROM aim_conversation_messages WHERE aim_conversation_message_id = ?');
     $s->execute([(int)$msg->key]); return $s->fetch(PDO::FETCH_ASSOC);
 })();
 $raw_conv = (function () use ($db, $conv) {
@@ -163,7 +163,7 @@ check(count($callbacks) >= 1, 'a chat re-seal callback is registered via the boo
 foreach ($callbacks as $cb) { call_user_func($cb, $uid, vault_fixture_key($kp1['secret']), 1, $kp2['public'], 2); }
 
 $raw_msg2 = (function () use ($db, $msg) {
-    $s = $db->prepare('SELECT * FROM aim_conversation_messages WHERE aim_message_id = ?');
+    $s = $db->prepare('SELECT * FROM aim_conversation_messages WHERE aim_conversation_message_id = ?');
     $s->execute([(int)$msg->key]); return $s->fetch(PDO::FETCH_ASSOC);
 })();
 $raw_conv2 = (function () use ($db, $conv) {

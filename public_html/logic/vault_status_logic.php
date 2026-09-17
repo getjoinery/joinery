@@ -37,10 +37,10 @@ function vault_status_logic(array $input): LogicResult {
 		$wrapping_list[] = [
 			'id'            => (int)$w->key,
 			'unlocker_type' => $type,
-			'credential_id' => $w->get('uew_pkc_credential_id') ? (int)$w->get('uew_pkc_credential_id') : null,
+			'credential_id' => $w->get('uew_pkc_passkey_credential_id') ? (int)$w->get('uew_pkc_passkey_credential_id') : null,
 			'label'         => $w->get('uew_label'),
 			'is_used'       => (bool)$w->get('uew_is_used'),
-			'created_time'  => $w->get('uew_created_time'),
+			'created_time'  => $w->get('uew_create_time'),
 		];
 	}
 

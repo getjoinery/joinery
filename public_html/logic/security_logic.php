@@ -34,7 +34,7 @@ function security_logic(array $input): LogicResult{
 	// never contradict what enforcement does (specs/second_factor_ux_coherence.md).
 	$live_passkey_count = 0;
 	if ($settings->get_setting('passkeys_enabled')) {
-		require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+		require_once(PathHelper::getIncludePath('data/passkey_credentials_class.php'));
 		$live_passkeys = new MultiPasskey(array('user_id' => (int)$user->key));
 		$live_passkeys->load();
 		$live_passkey_count = count($live_passkeys);
@@ -134,7 +134,7 @@ function security_logic(array $input): LogicResult{
 		// A recovery address on a mailbox hosted HERE is circular — locked out of the
 		// account, the user cannot read that inbox either. Same Population-2 guard the
 		// register/account-email flows apply (specs/mailbox_security_levels.md).
-		$domain_class = PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php');
+		$domain_class = PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php');
 		if (is_file($domain_class)) {
 			require_once($domain_class);
 			try {
@@ -296,7 +296,7 @@ function security_logic(array $input): LogicResult{
 		// Without this, disabling 2FA after revoking every passkey would
 		// leave the vault openable with a phished password + recovery code.
 		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
-		require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+		require_once(PathHelper::getIncludePath('data/passkey_credentials_class.php'));
 		$vaults = new MultiUserEncryptionVault(['user_id' => $user->key]);
 		$vaults->load();
 		if ($vaults->count()) {

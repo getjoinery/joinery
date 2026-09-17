@@ -730,7 +730,7 @@ class VaultUnlock {
 	}
 
 	public static function offerableCredentialIds(int $user_id, string $scope = 'user'): array {
-		require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+		require_once(PathHelper::getIncludePath('data/passkey_credentials_class.php'));
 		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 		require_once(PathHelper::getIncludePath('data/user_encryption_wrappings_class.php'));
 
@@ -743,7 +743,7 @@ class VaultUnlock {
 			$wrappings->load();
 			$ids = [];
 			foreach ($wrappings as $wrapping) {
-				$credential_id = (int)$wrapping->get('uew_pkc_credential_id');
+				$credential_id = (int)$wrapping->get('uew_pkc_passkey_credential_id');
 				if ($credential_id) {
 					$ids[$credential_id] = true;
 				}
@@ -835,7 +835,7 @@ class VaultUnlock {
 		// and the re-enrollment gate closes the exposure at their next page load.
 		if ($vaults->count() && empty($context['admin_reset'])) {
 			require_once(PathHelper::getIncludePath('data/users_class.php'));
-			require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+			require_once(PathHelper::getIncludePath('data/passkey_credentials_class.php'));
 			$user = new User($user_id, TRUE);
 			if (!$user->has_totp_enabled()) {
 				$live = new MultiPasskey(['user_id' => $user_id, 'deleted' => false]);
@@ -894,7 +894,7 @@ class VaultUnlock {
 			}
 			$type = $wrapping->get('uew_unlocker_type');
 			if ($type === UserEncryptionWrapping::TYPE_PASSKEY) {
-				$cred_id = (int)$wrapping->get('uew_pkc_credential_id');
+				$cred_id = (int)$wrapping->get('uew_pkc_passkey_credential_id');
 				if ($cred_id === $exclude_credential_id) {
 					continue;
 				}

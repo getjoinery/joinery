@@ -5,7 +5,7 @@
  * body with no admin chrome. Query param: eml_email_id.
  */
 
-require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
+require_once(PathHelper::getIncludePath('includes/EmailTemplateRenderer.php'));
 require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
 require_once(PathHelper::getIncludePath('data/emails_class.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));

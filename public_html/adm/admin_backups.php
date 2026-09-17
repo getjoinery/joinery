@@ -319,13 +319,13 @@ if ($rows) {
 		$ft = $page->getFormWriter('test_' . (int)$t->key);
 		$ft->begin_form();
 		$ft->hiddeninput('action', '', array('value' => 'test_target'));
-		$ft->hiddeninput('bkt_id', '', array('value' => (int)$t->key));
+		$ft->hiddeninput('bkt_backup_target_id', '', array('value' => (int)$t->key));
 		$ft->submitbutton('btn_test_' . (int)$t->key, 'Test', array('class' => 'btn btn-sm btn-outline-secondary'));
 		$ft->end_form();
 		$fd = $page->getFormWriter('del_' . (int)$t->key);
 		$fd->begin_form();
 		$fd->hiddeninput('action', '', array('value' => 'delete_target'));
-		$fd->hiddeninput('bkt_id', '', array('value' => (int)$t->key));
+		$fd->hiddeninput('bkt_backup_target_id', '', array('value' => (int)$t->key));
 		$fd->submitbutton('btn_del_' . (int)$t->key, 'Delete', array('class' => 'btn btn-sm btn-outline-secondary'));
 		$fd->end_form();
 		echo '</td></tr>';
@@ -350,7 +350,7 @@ if ($editing || $adding) {
 	$fw = $page->getFormWriter('target_form');
 	$fw->begin_form();
 	$fw->hiddeninput('action', '', array('value' => 'save_target'));
-	$fw->hiddeninput('bkt_id', '', array('value' => $editing ? (int)$editing->key : ''));
+	$fw->hiddeninput('bkt_backup_target_id', '', array('value' => $editing ? (int)$editing->key : ''));
 	$fw->textinput('bkt_name', 'Name', array('required' => true, 'value' => $editing ? $editing->get('bkt_name') : ''));
 	$fw->dropinput('bkt_provider', 'Provider', array(
 		'options' => array('b2' => 'Backblaze B2', 's3' => 'Amazon S3', 'linode' => 'Linode Object Storage'),
@@ -581,7 +581,7 @@ if (!$hrows) {
 			$fh = $page->getFormWriter('delh_' . (int)$h->key);
 			$fh->begin_form();
 			$fh->hiddeninput('action', '', array('value' => 'delete_history'));
-			$fh->hiddeninput('bkh_id', '', array('value' => (int)$h->key));
+			$fh->hiddeninput('bkh_backup_history_id', '', array('value' => (int)$h->key));
 			$fh->submitbutton('btn_delh_' . (int)$h->key, 'Hide', array('class' => 'btn btn-sm btn-outline-secondary'));
 			$fh->end_form();
 		}

@@ -182,7 +182,7 @@ class MessengerFederation {
 			return null;
 		}
 		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxViewer.php'));
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
 		require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectIdentity.php'));
 
 		$signable = null;

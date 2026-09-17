@@ -8,6 +8,9 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.64 - agent_report / agent_converge: the two words of recipe agent_supervision
+ *                 (agent 1.34.0) are addressable from the plane like host_report / host_converge,
+ *                 so the vocabulary parity the agent ships is the vocabulary the plane can dispatch
  * @version 1.63 - build_apply_update refuses a node that hosts no site (ManagedNode::hosts_site): a
  *                 machine in machine posture has no release to apply and its agent updates itself
  *                 from this plane; the Docker host was being sent one (2026-09-15)
@@ -318,6 +321,10 @@ class JobCommandBuilder {
 		// word of the same spec, new in 1.26.0. The plane sends the name and
 		// nothing else; which installer runs is compiled into the agent.
 		'host_converge' => '1.26.0',
+		// The agent's own supervision, observed and repaired: the two words of
+		// recipe agent_supervision, new in 1.34.0. Same compiled-names shape.
+		'agent_report'   => '1.34.0',
+		'agent_converge' => '1.34.0',
 	];
 
 	/**
@@ -1526,6 +1533,59 @@ class JobCommandBuilder {
 	}
 
 	/**
+	 * What would restart this agent if it stopped: the agent_report observe
+	 * word of recipe agent_supervision (agent_tier1_recipes.md). The node
+	 * reads the same four files restart_agent reads before it will exit —
+	 * whether systemd supervises this very process with a restarting unit,
+	 * and whether the cron keepalive is installed, executable and on. No
+	 * process runs, no parameters, no file content travels. The recipe loop
+	 * asks this on its own schedule; the plane asks it here when a person
+	 * wants the answer now.
+	 */
+	public static function build_agent_report($node) {
+		if (!self::has_primitive($node, 'agent_report')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot report its supervision: its agent "
+				. "does not offer the agent_report primitive. Apply an update to the node; "
+				. "the agent that ships with it does.");
+		}
+		return self::build_agent_report_primitive($node);
+	}
+
+	public static function build_agent_report_primitive($node) {
+		return ['primitive' => 'agent_report', 'params' => []];
+	}
+
+	/**
+	 * Write the agent's own supervision — the unit file, the cron keepalive,
+	 * the enabled switch — by running install_agent.sh through the host
+	 * runner in its single-installer mode, under the runner lock: the
+	 * agent_converge operate word of recipe agent_supervision. Which
+	 * installer runs is a constant compiled into the agent
+	 * (--only=install_agent.sh), never a parameter. Under the job marker the
+	 * installer writes supervision and restarts nothing; the running agent
+	 * swaps itself only through its own signed self-update. Refused by the
+	 * node on a machine with no site, since the support bundle carries no
+	 * install_agent.sh.
+	 *
+	 * PRIMITIVE ONLY, for the same reason as host_converge: the SSH way to
+	 * do this is a command, which is the shape this vocabulary ends.
+	 */
+	public static function build_agent_converge($node) {
+		if (!self::has_primitive($node, 'agent_converge')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot converge its agent's supervision: its agent "
+				. "does not offer the agent_converge primitive. Apply an update to the node; "
+				. "the agent that ships with it does.");
+		}
+		return self::build_agent_converge_primitive($node);
+	}
+
+	public static function build_agent_converge_primitive($node) {
+		return ['primitive' => 'agent_converge', 'params' => []];
+	}
+
+	/**
 	 * Restart a node's agent.
 	 *
 	 * PRIMITIVE ONLY, and that is the interesting part: there is no
@@ -1673,7 +1733,7 @@ class JobCommandBuilder {
 	 * Returns BackupTarget or null.
 	 */
 	public static function get_target($node) {
-		require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
+		require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 
 		// A node that names a shelf gets that shelf, and only that shelf. If the
 		// named one is gone or switched off, this returns null rather than
@@ -1715,7 +1775,7 @@ class JobCommandBuilder {
 	 * or several and no choice recorded for this node.
 	 */
 	private static function enabled_target_count() {
-		require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
+		require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 		$enabled = new MultiBackupTarget(array('enabled' => true, 'deleted' => false));
 		$enabled->load();
 		$count = 0;
@@ -2296,16 +2356,16 @@ class JobCommandBuilder {
 	/**
 	 * The HOST node a container victim's decommission is addressed to.
 	 *
-	 * The routing chain is the placement record: victim → mgn_mgh_host_id →
-	 * host row → mgh_mgn_host_node_id → the host's own paired ManagedNode.
+	 * The routing chain is the placement record: victim → mgn_mgh_managed_host_id →
+	 * host row → mgh_mgn_managed_node_id → the host's own paired ManagedNode.
 	 * Every missing link refuses naming its fix — the operator's next step is
 	 * in the message, not in a runbook.
 	 */
 	public static function decommission_host_node_for($node) {
-		$host_id = (int)$node->get('mgn_mgh_host_id');
+		$host_id = (int)$node->get('mgn_mgh_managed_host_id');
 		if (!$host_id) {
 			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' has no placement record (mgn_mgh_host_id), so this plane "
+				"Node '{$node->get('mgn_slug')}' has no placement record (mgn_mgh_managed_host_id), so this plane "
 				. "cannot say which host to address. Assign the node to its host first."
 			);
 		}
@@ -2410,7 +2470,7 @@ class JobCommandBuilder {
 		$db = DbConnector::get_instance()->get_db_link();
 		$hq = $db->prepare(
 			"SELECT COUNT(*) FROM mjb_management_jobs
-			 WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'decommission_node'
+			 WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'decommission_node'
 			   AND mjb_status IN ('pending', 'running')");
 		$hq->execute([(int)$host_node->key]);
 		if ((int)$hq->fetchColumn() > 0) {
@@ -2436,7 +2496,7 @@ class JobCommandBuilder {
 	private static function open_job_count($node) {
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare(
-			"SELECT COUNT(*) FROM mjb_management_jobs WHERE mjb_mgn_node_id = ? AND mjb_status IN ('pending', 'running')");
+			"SELECT COUNT(*) FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = ? AND mjb_status IN ('pending', 'running')");
 		$q->execute([(int)$node->key]);
 		return (int)$q->fetchColumn();
 	}
@@ -2542,7 +2602,7 @@ class JobCommandBuilder {
 	 *
 	 * The node itself on bare metal. For a container, its HOST's own paired
 	 * agent, reached the way decommission_site is routed: victim →
-	 * mgn_mgh_host_id → host row → mgh_mgn_host_node_id. Apache, certbot and
+	 * mgn_mgh_managed_host_id → host row → mgh_mgn_managed_node_id. Apache, certbot and
 	 * /etc/letsencrypt live on the host; a certificate issued from inside the
 	 * container is written to a filesystem the next rebuild discards, after
 	 * spending one of the five Let's Encrypt allows per domain per week. The
@@ -3051,22 +3111,22 @@ class JobCommandBuilder {
 	 */
 	public static function next_container_port($host_id, $exclude_node_id = 0) {
 		if (!(int)$host_id) {
-			throw new Exception('next_container_port requires a managed host id: a container node names its host by mgn_mgh_host_id.');
+			throw new Exception('next_container_port requires a managed host id: a container node names its host by mgn_mgh_managed_host_id.');
 		}
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare(
 			"SELECT COALESCE(MAX(n.mgn_port), 0)
 			 FROM mgn_managed_nodes n
-			 JOIN mgh_managed_hosts h ON h.mgh_id = n.mgn_mgh_host_id
-			 WHERE h.mgh_host = (SELECT mgh_host FROM mgh_managed_hosts WHERE mgh_id = ?)
-			   AND n.mgn_id <> ?");
+			 JOIN mgh_managed_hosts h ON h.mgh_managed_host_id = n.mgn_mgh_managed_host_id
+			 WHERE h.mgh_host = (SELECT mgh_host FROM mgh_managed_hosts WHERE mgh_managed_host_id = ?)
+			   AND n.mgn_managed_node_id <> ?");
 		$q->execute([(int)$host_id, (int)$exclude_node_id]);
 		$max = (int)$q->fetchColumn();
 		return $max >= 8080 ? $max + 1 : 8080;
 	}
 
 	private static function allocate_container_port($node) {
-		$host_id = (int)$node->get('mgn_mgh_host_id');
+		$host_id = (int)$node->get('mgn_mgh_managed_host_id');
 		if (!$host_id) {
 			$host = ManagedHost::ensure_for_node($node);
 			$host_id = (int)$host->key;

@@ -100,7 +100,7 @@ Both categories show up in the **Find orphans** view on the admin SEO list page 
 
 ## Sitemap
 
-`views/sitemap.php` is a thin XML wrapper around `SeoPageMetadata::enumerate_public_paths()`. Both the sitemap and the SEO row-population step share their discovery code — when a new entity type is added to enumeration, both systems pick it up. Paths with `spm_noindex = true` are excluded. `<lastmod>` uses the entity's `modify_time` for entity URLs, `spm_modify_time` for static rows, and current date as the final fallback.
+`views/sitemap.php` is a thin XML wrapper around `SeoPageMetadata::enumerate_public_paths()`. Both the sitemap and the SEO row-population step share their discovery code — when a new entity type is added to enumeration, both systems pick it up. Paths with `spm_noindex = true` are excluded. `<lastmod>` uses the entity's `modify_time` for entity URLs, `spm_update_time` for static rows, and current date as the final fallback.
 
 ## Limitations of the lazy/enumeration approach
 

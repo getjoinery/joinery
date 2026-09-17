@@ -8,7 +8,7 @@ function checkout_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('plugins/store/includes/PaypalHelper.php'));
 
 	require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php'));
-	require_once(PathHelper::getIncludePath('data/address_class.php'));
+	require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/store/data/coupon_codes_class.php'));
 

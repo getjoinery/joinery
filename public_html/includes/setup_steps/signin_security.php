@@ -14,7 +14,7 @@
  *   hint distinguishes an insecure (non-HTTPS) context from a browser that
  *   lacks WebAuthn.
  */
-require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+require_once(PathHelper::getIncludePath('data/passkey_credentials_class.php'));
 
 $setup_passkeys_enabled = (string)$settings->get_setting('passkeys_enabled') === '1';
 $setup_has_password = trim((string)$viewer->get('usr_password')) !== '';

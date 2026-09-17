@@ -15,10 +15,10 @@
 	$numperpage = 30;
 	$offset = LibraryFunctions::fetch_variable_local($_GET, 'offset', 0);
 	// Whitelist sort column + direction — order_by interpolates the column raw (S-6).
-	$sort_whitelist = ['mjb_id', 'mjb_job_type', 'mjb_status', 'mjb_create_time',
+	$sort_whitelist = ['mjb_management_job_id', 'mjb_job_type', 'mjb_status', 'mjb_create_time',
 		'mjb_started_time', 'mjb_completed_time'];
-	$sort = LibraryFunctions::fetch_variable_local($_GET, 'sort', 'mjb_id');
-	if (!in_array($sort, $sort_whitelist, true)) { $sort = 'mjb_id'; }
+	$sort = LibraryFunctions::fetch_variable_local($_GET, 'sort', 'mjb_management_job_id');
+	if (!in_array($sort, $sort_whitelist, true)) { $sort = 'mjb_management_job_id'; }
 	$sdirection = strtoupper(LibraryFunctions::fetch_variable_local($_GET, 'sdirection', 'DESC'));
 	if ($sdirection !== 'ASC' && $sdirection !== 'DESC') { $sdirection = 'DESC'; }
 
@@ -47,7 +47,7 @@
 			}
 			$fw_filter = $page->getFormWriter('jobs_filter_form', ['method' => 'GET']);
 			$fw_filter->begin_form();
-			$fw_filter->hiddeninput('mgn_id', '', ['value' => $node->key]);
+			$fw_filter->hiddeninput('mgn_managed_node_id', '', ['value' => $node->key]);
 			$fw_filter->hiddeninput('tab', '', ['value' => 'jobs']);
 			$fw_filter->dropinput('status', 'Status', [
 				'options'      => $status_options,
@@ -72,7 +72,7 @@
 	$table_options = [
 		'title' => 'Jobs',
 		'sortoptions' => [
-			'ID' => 'mjb_id',
+			'ID' => 'mjb_management_job_id',
 			'Type' => 'mjb_job_type',
 			'Status' => 'mjb_status',
 		],

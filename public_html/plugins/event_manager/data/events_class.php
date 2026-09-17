@@ -9,7 +9,7 @@ require_once(PathHelper::getIncludePath('plugins/event_manager/data/locations_cl
 require_once(PathHelper::getIncludePath('data/files_class.php'));
 require_once(PathHelper::getIncludePath('data/content_versions_class.php'));
 require_once(PathHelper::getIncludePath('data/groups_class.php'));
-require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_waiting_lists_class.php'));
+require_once(PathHelper::getIncludePath('plugins/event_manager/data/waiting_lists_class.php'));
 
 require_once(PathHelper::getIncludePath('includes/calendar-links/Link.php'));
 require_once(PathHelper::getIncludePath('includes/calendar-links/Generator.php'));
@@ -290,7 +290,7 @@ function get_leader() {
 		$searches = array();
 		$searches['event_id'] = $this->key;
 		$searches['future'] = 'now()';
-		$event_sessions_future = new MultiEventSessions($searches,
+		$event_sessions_future = new MultiEventSession($searches,
 			array('start_time'=>'ASC'), 1,
 		0);
 		$num_future_sessions = $event_sessions_future->count_all();
@@ -307,7 +307,7 @@ function get_leader() {
 		$searches = array();
 		$searches['event_id'] = $this->key;
 		$searches['deleted'] = false;
-		$event_sessions = new MultiEventSessions($searches);
+		$event_sessions = new MultiEventSession($searches);
 		return $event_sessions->count_all();
 	}
 
@@ -315,7 +315,7 @@ function get_leader() {
 		$searches = array();
 		$searches['event_id'] = $this->key;
 		$searches['deleted'] = false;
-		$event_sessions = new MultiEventSessions($searches,
+		$event_sessions = new MultiEventSession($searches,
 			array('evs_session_number'=>'ASC', 'evs_title'=>'ASC'));
 		$num_sessions = $event_sessions->count_all();
 		$event_sessions->load();	
@@ -328,7 +328,7 @@ function get_leader() {
 	}
 	
 	public function get_all_valid_session_numbers(){
-		$results = new MultiEventSessions(array('event_id' => $this->key, 'deleted' => false));
+		$results = new MultiEventSession(array('event_id' => $this->key, 'deleted' => false));
 		$results->load();
 
 		$existing_numbers = array();

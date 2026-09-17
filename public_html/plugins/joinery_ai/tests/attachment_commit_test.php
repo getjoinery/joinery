@@ -57,7 +57,7 @@ $msg->set('aim_role', AiConversationMessage::ROLE_USER);
 $msg->set('aim_content', 'What does this say?');
 $msg->save();
 $msg->load();
-harness_register_row('aim_conversation_messages', 'aim_message_id', (int)$msg->key);
+harness_register_row('aim_conversation_messages', 'aim_conversation_message_id', (int)$msg->key);
 
 /** Build the prepared entry exactly as ChatAttachmentIngest::prepare() would. */
 $prepare_one = function (string $file, string $as_name) use ($dir) {
@@ -94,7 +94,7 @@ check(count($stored) === 1, 'one attachment row exists', (string)count($stored))
 
 if (count($stored)) {
 	$link = $stored[0];
-	harness_register_row('aia_message_attachments', 'aia_attachment_id', (int)$link->key);
+	harness_register_row('aia_message_attachments', 'aia_message_attachment_id', (int)$link->key);
 	$file = new File((int)$link->get('aia_fil_file_id'), TRUE);
 	harness_defer(function () use ($file) { if ($file->key) { try { $file->permanent_delete(); } catch (Throwable $e) {} } });
 
@@ -132,7 +132,7 @@ $msg2->set('aim_role', AiConversationMessage::ROLE_USER);
 $msg2->set('aim_content', 'And this?');
 $msg2->save();
 $msg2->load();
-harness_register_row('aim_conversation_messages', 'aim_message_id', (int)$msg2->key);
+harness_register_row('aim_conversation_messages', 'aim_conversation_message_id', (int)$msg2->key);
 
 $liar = $prepare_one('sample.zip', 'bundle.zip');
 $liar['mime']     = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';

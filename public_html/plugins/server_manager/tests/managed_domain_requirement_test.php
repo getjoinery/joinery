@@ -321,7 +321,7 @@ check(count($filed) === 1, 'two invocations, one row — no double registration'
 $rdm = null;
 foreach ($filed as $row) { $rdm = $row; }
 if ($rdm) {
-	harness_register_row('rdm_registered_domains', 'rdm_id', $rdm->key);
+	harness_register_row('rdm_registered_domains', 'rdm_registered_domain_id', $rdm->key);
 	check($rdm->get('rdm_domain') === 'smith-family-test.com', 'the row carries the domain');
 	check((int)$rdm->get('rdm_usr_user_id') === (int)$buyer->key, 'and the buyer who owns it');
 	check($rdm->get('rdm_status') === RegisteredDomain::STATUS_PENDING,

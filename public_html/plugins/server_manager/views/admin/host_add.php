@@ -2,19 +2,19 @@
 /**
  * Server Manager - Add / Edit Host
  * URL: /admin/server_manager/host_add
- *      /admin/server_manager/host_add?mgh_id=N  (edit mode)
+ *      /admin/server_manager/host_add?mgh_managed_host_id=N  (edit mode)
  *
- * @version 1.1 - host agent link (mgh_mgn_host_node_id) and a delete action; a host is
+ * @version 1.1 - host agent link (mgh_mgn_managed_node_id) and a delete action; a host is
  *                deleted last, after its container sites and its own node identity
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_host_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_hosts_class.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(10);
 
-$is_edit = isset($_GET['mgh_id']) && (int)$_GET['mgh_id'] > 0;
-$host = $is_edit ? new ManagedHost((int)$_GET['mgh_id'], TRUE) : new ManagedHost(NULL);
+$is_edit = isset($_GET['mgh_managed_host_id']) && (int)$_GET['mgh_managed_host_id'] > 0;
+$host = $is_edit ? new ManagedHost((int)$_GET['mgh_managed_host_id'], TRUE) : new ManagedHost(NULL);
 
 $error = null;
 
@@ -56,7 +56,7 @@ if ($_POST && ($_POST['action'] ?? '') === 'delete_host' && $is_edit) {
 	$editable_fields = [
 		'mgh_name', 'mgh_slug', 'mgh_host', 'mgh_ssh_user', 'mgh_ssh_key_path',
 		'mgh_ssh_port', 'mgh_max_sites', 'mgh_provisioning_enabled', 'mgh_notes',
-		'mgh_mgn_host_node_id',
+		'mgh_mgn_managed_node_id',
 	];
 
 	foreach ($editable_fields as $field) {
@@ -68,7 +68,7 @@ if ($_POST && ($_POST['action'] ?? '') === 'delete_host' && $is_edit) {
 			$value = 22;
 		} elseif ($field === 'mgh_max_sites' && $value === '') {
 			$value = 50;
-		} elseif ($field === 'mgh_mgn_host_node_id') {
+		} elseif ($field === 'mgh_mgn_managed_node_id') {
 			$value = $value === '' ? null : (int)$value;
 		}
 		$host->set($field, $value);
@@ -117,7 +117,7 @@ if ($error) {
 $pageoptions = ['title' => $page_title];
 $page->begin_box($pageoptions);
 
-$form_action = $is_edit ? '/admin/server_manager/host_add?mgh_id=' . $host->key : '';
+$form_action = $is_edit ? '/admin/server_manager/host_add?mgh_managed_host_id=' . $host->key : '';
 $formwriter = $page->getFormWriter('host_form', ['model' => $host, 'action' => $form_action]);
 echo $formwriter->begin_form();
 
@@ -182,7 +182,7 @@ foreach ($candidate_nodes as $cn) {
 	}
 	$node_options[$cn->key] = $label;
 }
-$formwriter->dropinput('mgh_mgn_host_node_id', 'Host Agent Node', [
+$formwriter->dropinput('mgh_mgn_managed_node_id', 'Host Agent Node', [
 	'options' => $node_options,
 	'helptext' => 'The paired node record that IS this machine — where host-scope work (removing a container site) is addressed. Enroll the host\'s agent first, then link its node here.',
 ]);
@@ -211,7 +211,7 @@ if ($is_edit && $host->key) {
 		echo 'Remove those first.</p>';
 	} else {
 		echo '<p class="text-muted">Removes this placement record from the dashboard. The machine itself is untouched.</p>';
-		echo AdminPage::action_button('Delete Host', '/admin/server_manager/host_add?mgh_id=' . $host->key, [
+		echo AdminPage::action_button('Delete Host', '/admin/server_manager/host_add?mgh_managed_host_id=' . $host->key, [
 			'hidden'  => ['action' => 'delete_host'],
 			'confirm' => 'Delete this host record?',
 			'class'   => 'btn btn-danger btn-sm',

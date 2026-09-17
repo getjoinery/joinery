@@ -95,7 +95,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	$page_vars['numperpage'] = $numperpage;
 
-	$event_sessions = new MultiEventSessions(
+	$event_sessions = new MultiEventSession(
 		$searches,
 		array($sort=>$sdirection),
 		$numperpage,

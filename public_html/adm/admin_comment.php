@@ -82,7 +82,7 @@
 
 	$page->begin_box($options);
 
-	echo '<p>By: '.htmlspecialchars($comment->get('cmt_author_name')).' at '.$comment->get_local('cmt_created_time').'<br>';
+	echo '<p>By: '.htmlspecialchars($comment->get('cmt_author_name')).' at '.$comment->get_local('cmt_create_time').'<br>';
 	echo 'On: <a href="'.$post->get_url().'">'.$post->get('pst_title').'</a><br>';
 	if($comment->get('cmt_delete_time')){
 		echo 'Status: Deleted at '.$comment->get_local('cmt_delete_time').'<br />';

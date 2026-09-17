@@ -5,7 +5,7 @@
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
-	require_once(PathHelper::getIncludePath('data/phone_number_class.php'));
+	require_once(PathHelper::getIncludePath('data/phone_numbers_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(9);

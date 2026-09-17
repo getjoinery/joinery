@@ -29,14 +29,14 @@ if (php_sapi_name() !== 'cli') { echo "This test must be run from the command li
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 require_once(PathHelper::getIncludePath('data/email_templates_class.php'));
-require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
+require_once(PathHelper::getIncludePath('includes/EmailTemplateRenderer.php'));
 require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
 require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 
 /** Create a throwaway inner template and register it for teardown. */
 function tpl_fixture(string $subject_or_null, string $body): string {
 	$name = 'zz_rendertest_' . bin2hex(random_bytes(5));
-	$t = new EmailTemplateStore(NULL);
+	$t = new EmailTemplate(NULL);
 	$t->set('emt_name', $name);
 	$t->set('emt_type', 2); // inner
 	if ($subject_or_null !== '') { $t->set('emt_subject', $subject_or_null); }

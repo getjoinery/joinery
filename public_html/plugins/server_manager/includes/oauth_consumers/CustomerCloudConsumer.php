@@ -17,8 +17,8 @@
  */
 
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Consumer.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_account_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_accounts_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provisions_class.php'));
 
 class CustomerCloudConsumer implements OAuth2Consumer {
 
@@ -59,7 +59,7 @@ class CustomerCloudConsumer implements OAuth2Consumer {
 			if ($provision->get('cvp_provider') !== $provider) {
 				continue;
 			}
-			$provision->set('cvp_cca_account_id', $account->key);
+			$provision->set('cvp_cca_customer_cloud_account_id', $account->key);
 			$provision->set('cvp_status', 'ready');
 			$provision->save();
 		}

@@ -5,8 +5,8 @@ function account_edit_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
-	require_once(PathHelper::getIncludePath('data/address_class.php'));
-	require_once(PathHelper::getIncludePath('data/phone_number_class.php'));
+	require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
+	require_once(PathHelper::getIncludePath('data/phone_numbers_class.php'));
 	require_once(PathHelper::getIncludePath('data/files_class.php'));
 	require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
 	
@@ -92,7 +92,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$at = strrpos($new_email_addr, '@');
 			$new_domain = $at !== false ? strtolower(substr($new_email_addr, $at + 1)) : '';
 			$is_user_hosted = false;
-			$domain_class = PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php');
+			$domain_class = PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php');
 			if ($new_domain !== '' && is_file($domain_class)) {
 				require_once($domain_class);
 				if (class_exists('InboundEmailDomain')) {
@@ -152,7 +152,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
  * definition (GET /api/v1/form/account_edit).
  */
 function account_edit_logic_form($formwriter, $user = null, $input = []) {
-	require_once(PathHelper::getIncludePath('data/address_class.php'));
+	require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
 	$settings = Globalvars::get_instance();
 
 	if ($user) {

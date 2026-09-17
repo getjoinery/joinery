@@ -1,18 +1,18 @@
 <?php
 /** @joinery-test
  * name: email_template_iteration
- * tier: safe            # pure reflection over EmailTemplate; no DB, no mail
+ * tier: safe            # pure reflection over EmailTemplateRenderer; no DB, no mail
  * env: any
  * needs: []
  */
 // Phase 1 of receipts_refactor.md: verify {loop X as Y}...{end} iteration
-// in EmailTemplate. Exercises the engine directly via reflection so the test
+// in EmailTemplateRenderer. Exercises the engine directly via reflection so the test
 // doesn't depend on database fixtures or a working email pipeline.
 //
 // Usage: php tests/email/template_iteration_test.php
 
 require_once(__DIR__ . '/../lib/harness.php');
-require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
+require_once(PathHelper::getIncludePath('includes/EmailTemplateRenderer.php'));
 harness_boot();
 
 class EmailTemplateIterationTest {
@@ -22,7 +22,7 @@ class EmailTemplateIterationTest {
     private $substituteVariables;
 
     public function __construct() {
-        $reflection = new ReflectionClass('EmailTemplate');
+        $reflection = new ReflectionClass('EmailTemplateRenderer');
         $this->instance = $reflection->newInstanceWithoutConstructor();
 
         $this->renderString = $reflection->getMethod('_render_string');
@@ -46,7 +46,7 @@ class EmailTemplateIterationTest {
     }
 
     public function run() {
-        section('EmailTemplate {loop X as Y} iteration');
+        section('EmailTemplateRenderer {loop X as Y} iteration');
 
         $this->testNoOpForTemplatesWithoutLoops();
         $this->testSimpleLoop();

@@ -129,7 +129,7 @@ class RecipeRunContext implements ToolContext {
      */
     public function isKillRequested(): bool {
         $db = DbConnector::get_instance()->get_db_link();
-        $q = $db->prepare("SELECT rcr_kill_requested FROM rcr_recipe_runs WHERE rcr_run_id = ?");
+        $q = $db->prepare("SELECT rcr_kill_requested FROM rcr_recipe_runs WHERE rcr_recipe_run_id = ?");
         $q->execute([(int)$this->run->key]);
         return (bool)$q->fetchColumn();
     }

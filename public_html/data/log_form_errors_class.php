@@ -8,9 +8,9 @@ require_once(PathHelper::getIncludePath('includes/SingleRowAccessor.php'));
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 require_once(PathHelper::getIncludePath('includes/Validator.php'));
 
-class FormErrorException extends SystemBaseException {}
+class LogFormErrorException extends SystemBaseException {}
 
-class FormError extends SystemBase {	public static $prefix = 'lfe';
+class LogFormError extends SystemBase {	public static $prefix = 'lfe';
 
 	// REST API: audit/log table — admin-only (permission >= 5) read and write via the API; not user-scoped content.
 	function authenticate_read($data) {
@@ -62,8 +62,8 @@ function display_time($session) {
 		return $this->get_local('lfe_log_time', '%a, %d %b %Y %R:%S');
 	}	
 
-	public static function LogFormError($session, $request) { 
-		$obj = new FormError(NULL);
+	public static function log($session, $request) { 
+		$obj = new LogFormError(NULL);
 		$obj->set('lfe_usr_user_id', $session->get_user_id());
 		$obj->set('lfe_error', $request['messages']);
 		$obj->set('lfe_log_time', 'NOW()');
@@ -77,8 +77,8 @@ function display_time($session) {
 
 }
 
-class MultiFormError extends SystemMultiBase {
-	protected static $model_class = 'FormError';
+class MultiLogFormError extends SystemMultiBase {
+	protected static $model_class = 'LogFormError';
 
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$filters = [];

@@ -44,8 +44,8 @@ require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/registered_domains_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provisions_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/provisioning/ProvisionManagedDomains.php'));
 require_once(PathHelper::getIncludePath('includes/dns/DnsReconciler.php'));
 
@@ -172,9 +172,9 @@ $node->set('mgn_agent_primitives', 'managed_domain_prepare,managed_domain_notice
 $node->prepare();
 $node->save();
 $node->load();
-harness_register_row('mgn_managed_nodes', 'mgn_id', $node->key);
+harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $node->key);
 
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 
 /**
  * Belt and braces: every managed-domain job this node collects, gone.
@@ -188,7 +188,7 @@ function pmd_clear_jobs_for($node_id) {
 	harness_defer(function () use ($node_id) {
 		$db = DbConnector::get_instance()->get_db_link();
 		try {
-			$q = $db->prepare("DELETE FROM mjb_management_jobs WHERE mjb_mgn_node_id = ? "
+			$q = $db->prepare("DELETE FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = ? "
 				. "AND mjb_job_type IN ('managed_domain_prepare', 'managed_domain_notice')");
 			$q->execute(array((int)$node_id));
 		} catch (\Throwable $e) {
@@ -207,15 +207,15 @@ pmd_clear_jobs_for($node->key);
 function pmd_prepare_jobs($node, string $domain): array {
 	$db = DbConnector::get_instance()->get_db_link();
 	$q = $db->prepare(
-		"SELECT mjb_id, mjb_status, mjb_commands, mjb_parameters, mjb_completed_time
+		"SELECT mjb_management_job_id, mjb_status, mjb_commands, mjb_parameters, mjb_completed_time
 		 FROM mjb_management_jobs
-		 WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'managed_domain_prepare'
+		 WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'managed_domain_prepare'
 		   AND mjb_delete_time IS NULL AND mjb_parameters->>'domain' = ?
-		 ORDER BY mjb_id ASC");
+		 ORDER BY mjb_management_job_id ASC");
 	$q->execute(array((int)$node->key, $domain));
 	$jobs = $q->fetchAll(PDO::FETCH_ASSOC) ?: array();
 	foreach ($jobs as $job) {
-		harness_register_row('mjb_management_jobs', 'mjb_id', $job['mjb_id']);
+		harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $job['mjb_management_job_id']);
 	}
 	return $jobs;
 }
@@ -230,7 +230,7 @@ function pmd_prepare_jobs($node, string $domain): array {
  * what a following tick does.
  */
 function pmd_answer(array $job, array $payload, string $status = 'completed'): void {
-	$record = new ManagementJob((int)$job['mjb_id'], TRUE);
+	$record = new ManagementJob((int)$job['mjb_management_job_id'], TRUE);
 	$record->set('mjb_output', json_encode(array('api_version' => '1.0', 'data' => array(
 		'output'       => "site bootstrap noise\n" . json_encode($payload) . "\n",
 		'output_bytes' => 128,
@@ -303,7 +303,7 @@ function pmd_row($buyer, $node, $domain, $with_node = true) {
 	$row->set('rdm_usr_user_id', $buyer->key);
 	$row->set('rdm_buyer_email', $buyer->get('usr_email'));
 	$row->set('rdm_status', RegisteredDomain::STATUS_PENDING);
-	if ($with_node) { $row->set('rdm_mgn_node_id', $node->key); }
+	if ($with_node) { $row->set('rdm_mgn_managed_node_id', $node->key); }
 	$row->seal_registrant(array(
 		'first_name' => 'Jane', 'last_name' => 'Smith', 'address1' => '14 Elm Street',
 		'city' => 'Springfield', 'state_province' => 'IL', 'postal_code' => '62704',
@@ -311,7 +311,7 @@ function pmd_row($buyer, $node, $domain, $with_node = true) {
 	$row->prepare();
 	$row->save();
 	$row->load();
-	harness_register_row('rdm_registered_domains', 'rdm_id', $row->key);
+	harness_register_row('rdm_registered_domains', 'rdm_registered_domain_id', $row->key);
 	return $row;
 }
 
@@ -550,7 +550,7 @@ $bare_node->set('mgn_agent_primitives', 'check_status,backup_run');
 $bare_node->prepare();
 $bare_node->save();
 $bare_node->load();
-harness_register_row('mgn_managed_nodes', 'mgn_id', $bare_node->key);
+harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $bare_node->key);
 pmd_clear_jobs_for($bare_node->key);
 
 $phase = new PmdPhase(new PmdFakeRegistrar(), new PmdFakeReconciler());
@@ -612,7 +612,7 @@ check($shared->get('rdm_status') === RegisteredDomain::STATUS_ACTIVE, 'the row i
 // landed.
 $db = DbConnector::get_instance()->get_db_link();
 $q = $db->prepare("SELECT count(*) FROM mjb_management_jobs
-	WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'managed_domain_notice' AND mjb_delete_time IS NULL
+	WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'managed_domain_notice' AND mjb_delete_time IS NULL
 	  AND mjb_parameters->>'domain' = ?");
 $q->execute(array((int)$node->key, $shared->get('rdm_domain')));
 check((int)$q->fetchColumn() === 0,
@@ -639,12 +639,12 @@ $blank = new RegisteredDomain(NULL);
 $blank->set('rdm_registrar', 'pmdfake');
 $blank->set('rdm_domain', 'pmd-blank-' . $suffix . '.com');
 $blank->set('rdm_usr_user_id', $buyer->key);
-$blank->set('rdm_mgn_node_id', $node->key);
+$blank->set('rdm_mgn_managed_node_id', $node->key);
 $blank->set('rdm_status', RegisteredDomain::STATUS_PENDING);
 $blank->prepare();
 $blank->save();
 $blank->load();
-harness_register_row('rdm_registered_domains', 'rdm_id', $blank->key);
+harness_register_row('rdm_registered_domains', 'rdm_registered_domain_id', $blank->key);
 
 check(pmd_tick($phase, $blank) === 1, 'the tick resolves it');
 check($blank->get('rdm_status') === RegisteredDomain::STATUS_FAILED,

@@ -20,7 +20,7 @@
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
+require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 require_once(PathHelper::getIncludePath('includes/TargetTester.php'));
 require_once(PathHelper::getIncludePath('includes/TargetBackups.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetBackups.php'));
@@ -29,7 +29,7 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAdmin
 // handlers that also require it — a plain GET has to have it too.
 require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/RecoveryKeyFleet.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(10);
@@ -38,8 +38,8 @@ $session->set_return();
 // Load or create target
 $target = null;
 $is_edit = false;
-if (isset($_GET['bkt_id']) && $_GET['bkt_id']) {
-	$target = new BackupTarget(intval($_GET['bkt_id']), TRUE);
+if (isset($_GET['bkt_backup_target_id']) && $_GET['bkt_backup_target_id']) {
+	$target = new BackupTarget(intval($_GET['bkt_backup_target_id']), TRUE);
 	$is_edit = true;
 } elseif (isset($_GET['action']) && $_GET['action'] === 'add') {
 	$target = new BackupTarget(NULL);
@@ -96,7 +96,7 @@ if ($post_action === 'delete_backup_prefix' && $is_edit) {
 			$e->getMessage(), 'Error', $page_regex, DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 		));
 	}
-	header('Location: /admin/server_manager/targets?bkt_id=' . $target->key);
+	header('Location: /admin/server_manager/targets?bkt_backup_target_id=' . $target->key);
 	exit;
 }
 
@@ -116,7 +116,7 @@ if ($post_action === 'delete_backup_object' && $is_edit) {
 			$e->getMessage(), 'Error', $page_regex, DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 		));
 	}
-	header('Location: /admin/server_manager/targets?bkt_id=' . $target->key);
+	header('Location: /admin/server_manager/targets?bkt_backup_target_id=' . $target->key);
 	exit;
 }
 
@@ -301,7 +301,7 @@ if ($_POST && isset($_POST['bkt_name'])) {
 				DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 			));
 		}
-		header('Location: /admin/server_manager/targets?bkt_id=' . $target->key);
+		header('Location: /admin/server_manager/targets?bkt_backup_target_id=' . $target->key);
 		exit;
 	} catch (Exception $e) {
 		$error = $e->getMessage();
@@ -394,7 +394,7 @@ if ($rk_rows) {
 		$n  = $row['node'];
 		$rk = $row['rk'];
 		echo '<tr>';
-		echo '<td><a href="/admin/server_manager/node_detail?mgn_id=' . (int)$n->key . '&tab=backups">'
+		echo '<td><a href="/admin/server_manager/node_detail?mgn_managed_node_id=' . (int)$n->key . '&tab=backups">'
 		   . htmlspecialchars($n->get('mgn_name')) . '</a></td>';
 		echo '<td><span class="badge bg-' . ($rk_badges[$rk['state']] ?? 'secondary') . '">'
 		   . htmlspecialchars($rk_labels[$rk['state']] ?? $rk['state']) . '</span> ';
@@ -426,14 +426,14 @@ foreach ($all_targets as $t) {
 	$prov_label = $provider_labels[$prov] ?? $prov;
 	$enabled = $t->get('bkt_enabled');
 	echo '<tr>';
-	echo '<td><a href="/admin/server_manager/target_info?bkt_id=' . $t->key . '">' . htmlspecialchars($t->get('bkt_name')) . '</a></td>';
+	echo '<td><a href="/admin/server_manager/target_info?bkt_backup_target_id=' . $t->key . '">' . htmlspecialchars($t->get('bkt_name')) . '</a></td>';
 	echo '<td>' . htmlspecialchars($prov_label) . '</td>';
 	echo '<td>' . htmlspecialchars($t->get('bkt_bucket') ?: '-') . '</td>';
 	echo '<td>' . htmlspecialchars($t->get('bkt_path_prefix') ?: '-') . '</td>';
 	echo '<td><span class="badge bg-' . ($enabled ? 'success' : 'secondary') . '">' . ($enabled ? 'Enabled' : 'Disabled') . '</span></td>';
-	echo '<td><a href="/admin/server_manager/targets?bkt_id=' . $t->key . '" class="btn btn-sm btn-outline-primary">Edit</a> ';
+	echo '<td><a href="/admin/server_manager/targets?bkt_backup_target_id=' . $t->key . '" class="btn btn-sm btn-outline-primary">Edit</a> ';
 	// Test is a POST action (it hits the provider; a GET link is CSRF-triggerable).
-	echo '<form method="post" action="/admin/server_manager/targets?bkt_id=' . $t->key . '" style="display:inline;">';
+	echo '<form method="post" action="/admin/server_manager/targets?bkt_backup_target_id=' . $t->key . '" style="display:inline;">';
 	echo '<input type="hidden" name="action" value="test_target">';
 	echo SmAdminCsrf::field();
 	echo '<button type="submit" class="btn btn-sm btn-outline-secondary">Test</button>';
@@ -610,7 +610,7 @@ if ($target !== null) {
 
 	echo '<a href="/admin/server_manager/targets" class="btn btn-outline-secondary ms-2">Cancel</a>';
 	if ($is_edit) {
-		echo '<form method="post" action="/admin/server_manager/targets?bkt_id=' . $target->key . '" id="delete_target_form" style="display:inline;">';
+		echo '<form method="post" action="/admin/server_manager/targets?bkt_backup_target_id=' . $target->key . '" id="delete_target_form" style="display:inline;">';
 		echo '<input type="hidden" name="action" value="delete_target">';
 		echo SmAdminCsrf::field();
 		echo '<button type="button" class="btn btn-outline-danger ms-2" onclick="JoineryModal.confirm(\'Delete this target?\', function(){ document.getElementById(\'delete_target_form\').submit(); })">Delete</button>';
@@ -648,7 +648,7 @@ if ($target !== null) {
 					echo '<div><strong>' . htmlspecialchars($slug) . '</strong> ';
 					echo '<span class="badge bg-' . $badge . '">' . htmlspecialchars($g['status']) . '</span>';
 					if ($g['status'] === 'live' && $g['node_id']) {
-						echo ' <a class="small ms-1" href="/admin/server_manager/node_detail?mgn_id='
+						echo ' <a class="small ms-1" href="/admin/server_manager/node_detail?mgn_managed_node_id='
 							. (int)$g['node_id'] . '&tab=backups">manage on node</a>';
 					}
 					echo '<div class="text-muted small">' . $g['count'] . ' object'
@@ -665,7 +665,7 @@ if ($target !== null) {
 						echo '<td class="small text-muted">' . $fmt_bytes((int)$obj['size']) . '</td>';
 						echo '<td class="small text-muted">' . htmlspecialchars($obj['last_modified']) . '</td>';
 						echo '<td class="text-end">';
-						echo '<form method="post" action="/admin/server_manager/targets?bkt_id=' . $target->key . '" id="' . $oid . '" style="margin:0;">';
+						echo '<form method="post" action="/admin/server_manager/targets?bkt_backup_target_id=' . $target->key . '" id="' . $oid . '" style="margin:0;">';
 						echo '<input type="hidden" name="action" value="delete_backup_object">';
 						echo '<input type="hidden" name="key" value="' . htmlspecialchars($obj['key']) . '">';
 						echo SmAdminCsrf::field();
@@ -680,7 +680,7 @@ if ($target !== null) {
 
 					// Delete-all-for-this-site (whole prefix), type-to-confirm the slug.
 					$pid = 'delpfx_' . md5($slug);
-					echo '<form method="post" action="/admin/server_manager/targets?bkt_id=' . $target->key . '" id="' . $pid . '" style="margin:0;">';
+					echo '<form method="post" action="/admin/server_manager/targets?bkt_backup_target_id=' . $target->key . '" id="' . $pid . '" style="margin:0;">';
 					echo '<input type="hidden" name="action" value="delete_backup_prefix">';
 					echo '<input type="hidden" name="slug" value="' . htmlspecialchars($slug) . '">';
 					echo SmAdminCsrf::field();

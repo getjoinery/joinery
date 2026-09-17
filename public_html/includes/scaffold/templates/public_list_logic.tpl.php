@@ -5,7 +5,6 @@ function <?= $plural ?>_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('includes/Pager.php'));
-	require_once(PathHelper::getIncludePath('<?= $base ?>data/<?= $entity_snake ?>_class.php'));
 
 	$session = SessionControl::get_instance();
 <?php if ($public_permission !== null): ?>

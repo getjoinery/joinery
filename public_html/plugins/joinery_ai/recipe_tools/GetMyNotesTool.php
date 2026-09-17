@@ -1,7 +1,7 @@
 <?php
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunContext.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_notes_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/notes_class.php'));
 
 /**
  * Read notes the owner has saved, optionally filtered by an ILIKE search.

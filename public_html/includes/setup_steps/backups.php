@@ -13,7 +13,7 @@
  *                (as the Backups admin page does) instead of offering a bucket form
  * @version 2.2
  */
-require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
+require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
 
 $setup_bk_targets = new MultiBackupTarget(array('deleted' => false), array('bkt_name' => 'ASC'));
@@ -64,7 +64,7 @@ $setup_bk_manager = $setup_bk_managed ? (string)ManagementNodeStatus::manager_ur
 		<form method="POST" action="/setup">
 			<input type="hidden" name="action" value="test_target">
 			<input type="hidden" name="step" value="backups">
-			<input type="hidden" name="bkt_id" value="<?php echo (int)$setup_bk_target->key; ?>">
+			<input type="hidden" name="bkt_backup_target_id" value="<?php echo (int)$setup_bk_target->key; ?>">
 			<button type="submit" class="btn btn-secondary">Test the connection</button>
 		</form>
 <?php } else {
@@ -72,7 +72,7 @@ $setup_bk_manager = $setup_bk_managed ? (string)ManagementNodeStatus::manager_ur
 	$setup_bk_form->begin_form();
 	$setup_bk_form->hiddeninput('action', '', array('value' => 'save_target'));
 	$setup_bk_form->hiddeninput('step', '', array('value' => 'backups'));
-	$setup_bk_form->hiddeninput('bkt_id', '', array('value' => ''));
+	$setup_bk_form->hiddeninput('bkt_backup_target_id', '', array('value' => ''));
 	$setup_bk_form->hiddeninput('bkt_name', '', array('value' => 'Backups'));
 	echo $setup_bk_form->dropinput('bkt_provider', 'Provider', array(
 		'options' => array('b2' => 'Backblaze B2', 's3' => 'Amazon S3', 'linode' => 'Linode Object Storage'),

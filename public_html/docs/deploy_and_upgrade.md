@@ -270,7 +270,7 @@ Two things guard against it. `isUpgradeServer()` lives on `DeploymentHelper` rat
 
 **Dashboard surfaces (Server Manager):**
 
-On any node detail page (`/admin/server_manager/node_detail?mgn_id=N`), the **Updates** tab exposes:
+On any node detail page (`/admin/server_manager/node_detail?mgn_managed_node_id=N`), the **Updates** tab exposes:
 
 - **Apply Update** — single-site action, queues one `apply_update` job for that node.
 - **Upgrade All Sites on This Host** — fans out to every enabled, non-deleted node sharing the same `mgn_host`. Queues one independent `apply_update` job per sibling (so a per-site failure doesn't affect the others), then redirects to the Jobs page. To skip a specific site in the bulk run, disable it (`mgn_enabled = false`) via its node detail page first.

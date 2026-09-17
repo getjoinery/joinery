@@ -18,7 +18,7 @@ function vault_setup_passphrase_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/VaultCeremonies.php'));
 	require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
-	require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+	require_once(PathHelper::getIncludePath('data/passkey_credentials_class.php'));
 
 	$settings = Globalvars::get_instance();
 	if (!$settings->get_setting('passkeys_enabled')) {

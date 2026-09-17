@@ -548,13 +548,13 @@ foreach (AdminUserPanelRegistry::panels() as $panel) {
 						<tbody>
 							<?php foreach ($logins as $login): ?>
 								<tr>
-									<td><?php echo LibraryFunctions::convert_time($login->log_login_time, "UTC", $session->get_timezone()); ?></td>
+									<td><?php echo LibraryFunctions::convert_time($login->get('log_login_time'), "UTC", $session->get_timezone()); ?></td>
 								</tr>
 							<?php endforeach; ?>
 						</tbody>
 					</table>
 				</div>
-				<?php echo $logins_pager->record_count_info(count($logins), array('show_all_url' => $show_all_url)); ?>
+				<?php echo $logins_pager->record_count_info($logins->count(), array('show_all_url' => $show_all_url)); ?>
 			</div>
 		</div>
 	</div>

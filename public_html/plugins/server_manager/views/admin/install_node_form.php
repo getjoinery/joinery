@@ -22,10 +22,10 @@
  * @version 1.4 - Cloud-instance target (admin-origin provisions)
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_account_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_accounts_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provisions_class.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 
@@ -67,8 +67,8 @@ if ($_POST && isset($_POST['mgn_name'])) {
 
 		$cloud_account = null;
 		if ($is_cloud_target) {
-			$cca_id = intval($_POST['cca_account_id'] ?? 0);
-			$cloud_account = $cca_id ? new CustomerCloudAccount($cca_id, TRUE) : null;
+			$cca_customer_cloud_account_id = intval($_POST['cca_account_id'] ?? 0);
+			$cloud_account = $cca_customer_cloud_account_id ? new CustomerCloudAccount($cca_customer_cloud_account_id, TRUE) : null;
 			if (!$cloud_account || !$cloud_account->key
 					|| $cloud_account->get('cca_status') !== 'active'
 					|| $cloud_account->get('cca_delete_time')) {
@@ -136,7 +136,7 @@ if ($_POST && isset($_POST['mgn_name'])) {
 				$provision->set('cvp_buyer_email',    $owner->key ? $owner->get('usr_email') : '');
 				$provision->set('cvp_buyer_name',     $owner->key ? trim($owner->get('usr_first_name') . ' ' . $owner->get('usr_last_name')) : '');
 				$provision->set('cvp_status',         'ready');
-				$provision->set('cvp_cca_account_id', $cloud_account->key);
+				$provision->set('cvp_cca_customer_cloud_account_id', $cloud_account->key);
 				$provision->set('cvp_provider',       $cloud_account->get('cca_provider'));
 				$provision->set('cvp_region',         trim($_POST['cloud_region']));
 				$provision->set('cvp_instance_type',  trim($_POST['cloud_instance_type']));

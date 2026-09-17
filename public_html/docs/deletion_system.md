@@ -28,7 +28,7 @@ Examples:
 - ord_usr_user_id → references usr_users table
 - odi_pro_product_id → references pro_products table
 - evt_loc_location_id → references loc_locations table
-- aip_rcr_run_id → references rcr_recipe_runs table
+- aip_rcr_recipe_run_id → references rcr_recipe_runs table
 - ieg_iea_inbound_email_alias_id → references iea_inbound_email_aliases table
 ```
 
@@ -50,7 +50,7 @@ BookingType and BackupTarget; `cnv` is both Conversation and ContentVersion).
 The column name embeds the singular entity — `bkn_bkt_booking_type_id` names
 `bkt_booking_types` — so resolution matches that against the candidates'
 table names and accepts only an exact singular/plural match. A column that
-matches none of the candidates (`bkh_bkt_target_id` — the entity part is
+matches none of the candidates (`bkh_bkt_backup_target_id` — the entity part is
 abbreviated) stays unrecognized, and its declaration must name
 `source_table`/`source_class` explicitly.
 
@@ -358,7 +358,7 @@ Deletion rules are stored in the `del_deletion_rules` table:
 
 ```sql
 CREATE TABLE del_deletion_rules (
-    del_id BIGSERIAL PRIMARY KEY,
+    del_deletion_rule_id BIGSERIAL PRIMARY KEY,
     del_source_table VARCHAR(255),      -- Parent table (e.g., 'usr_users')
     del_target_table VARCHAR(255),      -- Child table (e.g., 'ord_orders')
     del_target_column VARCHAR(255),     -- Foreign key column (e.g., 'ord_usr_user_id')
@@ -430,7 +430,7 @@ $obj->permanent_delete($debug = true);  // Prints SQL without executing
 
 ### Key Classes
 
-**DeletionRule** (`/data/deletion_rule_class.php`)
+**DeletionRule** (`/data/deletion_rules_class.php`)
 - `registerModelsFromDiscovery($options)` - Discover and register model rules; returns warning strings for unresolvable declared overrides
 - `registerModelRules($model_class)` - Register one model's rules incrementally; returns the same kind of warnings
 - `pruneOrphanedRules()` - Delete rules whose source or target table matches no currently-loaded model

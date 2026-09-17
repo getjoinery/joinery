@@ -44,7 +44,7 @@ On the entity's existing admin edit page:
 
 ```php
 if (!empty(Post::$ab_testable)) {
-    require_once(PathHelper::getIncludePath('data/abt_tests_class.php'));
+    require_once(PathHelper::getIncludePath('data/tests_class.php'));
     AbTestVersionsPanel::render('Post', $post_id);
 }
 ```

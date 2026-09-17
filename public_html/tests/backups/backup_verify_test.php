@@ -239,7 +239,7 @@ $mk = function ($seq, $profile) use ($slug) {
 	$row->set('bkh_finish_time', '2026-09-0' . ($seq + 1) . ' 04:05:00');
 	$row->set('bkh_upload_time', '2026-09-0' . ($seq + 1) . ' 04:05:00');
 	$row->save();
-	harness_register_row('bkh_backup_history', 'bkh_id', $row->key);
+	harness_register_row('bkh_backup_history', 'bkh_backup_history_id', $row->key);
 	return $row;
 };
 $r0 = $mk(0, 'manager');

@@ -90,7 +90,7 @@ class RecipeWorkerSpawner {
     private static function claimNextRunnablePending(): ?int {
         require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeVaultScope.php'));
         $db = DbConnector::get_instance()->get_db_link();
-        $sql = "SELECT rcr_run_id, rcr_rcp_recipe_id FROM rcr_recipe_runs
+        $sql = "SELECT rcr_recipe_run_id, rcr_rcp_recipe_id FROM rcr_recipe_runs
                 WHERE rcr_status = ? AND rcr_delete_time IS NULL
                 ORDER BY rcr_started_time ASC";
         $q = $db->prepare($sql);
@@ -101,8 +101,8 @@ class RecipeWorkerSpawner {
             if ($recipe->key && !RecipeVaultScope::cronRunnable($recipe)) {
                 continue;   // in-window: not a worker's to run
             }
-            if (self::claim((int)$row['rcr_run_id'])) {
-                return (int)$row['rcr_run_id'];
+            if (self::claim((int)$row['rcr_recipe_run_id'])) {
+                return (int)$row['rcr_recipe_run_id'];
             }
             // Lost the claim race to another drainer; try the next candidate.
         }
@@ -118,7 +118,7 @@ class RecipeWorkerSpawner {
         $db = DbConnector::get_instance()->get_db_link();
         $sql = "UPDATE rcr_recipe_runs
                 SET rcr_status = ?, rcr_started_time = (NOW() AT TIME ZONE 'UTC')
-                WHERE rcr_run_id = ? AND rcr_status = ? AND rcr_delete_time IS NULL";
+                WHERE rcr_recipe_run_id = ? AND rcr_status = ? AND rcr_delete_time IS NULL";
         $q = $db->prepare($sql);
         $q->execute([RecipeRun::STATUS_RUNNING, $run_id, RecipeRun::STATUS_PENDING]);
         return $q->rowCount() === 1;

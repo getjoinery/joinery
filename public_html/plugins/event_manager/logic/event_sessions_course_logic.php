@@ -80,7 +80,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$searches = array();
 	$searches['event_id'] = $event->key;
 	$searches['deleted'] = false;
-	$event_sessions = new MultiEventSessions($searches,
+	$event_sessions = new MultiEventSession($searches,
 		array('session_number'=>'ASC'));
 	$event_sessions->load();
 	$page_vars['event_sessions'] = $event_sessions;

@@ -23,7 +23,7 @@ Consequences: `CalendarItemSource` is a read-only contract (no write methods); t
 
 `CalendarItem` (`includes/calendar/CalendarItem.php`) is the unit on the timeline — a value object, not necessarily a stored row. Fields: `start_utc`/`end_utc` (UTC instants), `all_day`, `type` (`event`/`booking`/`external`/`personal`), `title` (owner-visible only), `url` (owner-visible only), `blocks_availability`, `visibility` (`details`/`busy`), `source`, `source_key` (stable id `{source}:{record-id}` for redraw/diff, ICS UID, click-to-edit), and — on native entries only — the edit coordinates `entry_id` (the `cal_entries` row; the parent for a recurring occurrence) and `occurrence_date` (set only on virtual occurrences), so a consumer opens the right editor without parsing the `url`. At `busy` visibility the projection boundary strips `title`, `url`, and both edit coordinates.
 
-> **Note:** the stored native-entry model is `CalendarEntry` (`data/calendar_entry_class.php`, table `cal_entries`), which is distinct from the `CalendarItem` value object. `NativeCalendarItemSource` reads `CalendarEntry` rows and emits `CalendarItem` value objects.
+> **Note:** the stored native-entry model is `CalendarEntry` (`data/entries_class.php`, table `cal_entries`), which is distinct from the `CalendarItem` value object. `NativeCalendarItemSource` reads `CalendarEntry` rows and emits `CalendarItem` value objects.
 
 ### Visibility — enforced at the projection boundary
 

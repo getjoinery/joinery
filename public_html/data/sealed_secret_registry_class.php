@@ -23,7 +23,7 @@
 class SealedSecretRegistry extends SystemBase {
 	public static $prefix = 'ssr';
 	public static $tablename = 'ssr_sealed_secret_registry';
-	public static $pkey_column = 'ssr_id';
+	public static $pkey_column = 'ssr_sealed_secret_registry_id';
 
 	// The category's aggregate health from the last reconcile.
 	const STATE_UNKNOWN   = 'unknown';   // never reconciled
@@ -32,7 +32,7 @@ class SealedSecretRegistry extends SystemBase {
 	const STATE_ABSENT    = 'absent';    // configured nowhere — not set up
 
 	public static $field_specifications = array(
-		'ssr_id'            => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+		'ssr_sealed_secret_registry_id'            => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'ssr_locator'       => array('type'=>'varchar(255)', 'required'=>true, 'is_nullable'=>false, 'unique'=>true),
 		'ssr_source'        => array('type'=>'varchar(100)', 'required'=>true, 'is_nullable'=>false),
 		'ssr_kind'          => array('type'=>'varchar(40)', 'required'=>true, 'is_nullable'=>false,

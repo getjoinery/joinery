@@ -28,7 +28,7 @@ harness_boot();
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/DeliverabilityReportIngest.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/DeliverabilityReportParser.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/deliverability_report_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/deliverability_reports_class.php'));
 
 $FIX = __DIR__ . '/fixtures/deliverability/';
 $router = new InboundEmailRouter();

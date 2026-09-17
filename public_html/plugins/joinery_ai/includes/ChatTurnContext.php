@@ -2,7 +2,7 @@
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ToolContext.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ActionRegistry.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversations_class.php'));
 
 /**
  * Run context for one interactive chat turn. The interactive counterpart to
@@ -236,7 +236,7 @@ class ChatTurnContext implements ToolContext {
     public function isCancelRequested(): bool {
         if ($this->message_id <= 0) return false;
         $db = DbConnector::get_instance()->get_db_link();
-        $q = $db->prepare('SELECT aim_cancel_requested FROM aim_conversation_messages WHERE aim_message_id = ?');
+        $q = $db->prepare('SELECT aim_cancel_requested FROM aim_conversation_messages WHERE aim_conversation_message_id = ?');
         $q->execute([$this->message_id]);
         return (bool)$q->fetchColumn();
     }

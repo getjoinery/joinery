@@ -1,6 +1,6 @@
 <?php
 require_once('PathHelper.php');
-require_once('EmailTemplate.php');
+require_once('EmailTemplateRenderer.php');
 
 class EmailMessage {
     private $from;
@@ -42,7 +42,7 @@ class EmailMessage {
     public static function fromTemplate($templateName, $values = []) {
         try {
             // Create template directly with constructor
-            $template = new EmailTemplate($templateName);
+            $template = new EmailTemplateRenderer($templateName);
             $template->fill_template($values);
         } catch (EmailTemplateError $e) {
             throw new Exception('Template \'' . $templateName . '\' error: ' . $e->getMessage());

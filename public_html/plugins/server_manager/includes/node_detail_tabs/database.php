@@ -22,7 +22,7 @@
 	// destructive. Nothing is lost but the shortcut.
 
 	// Recent database ops for this node
-	$db_jobs = new MultiManagementJob(['deleted' => false, 'node_id' => $node->key], ['mjb_id' => 'DESC'], 20);
+	$db_jobs = new MultiManagementJob(['deleted' => false, 'node_id' => $node->key], ['mjb_management_job_id' => 'DESC'], 20);
 	$db_jobs->load();
 
 	$pageoptions = ['title' => 'Recent Database Operations'];

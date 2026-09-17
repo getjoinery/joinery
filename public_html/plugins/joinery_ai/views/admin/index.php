@@ -43,7 +43,7 @@ if (count($recipes)) {
         if ($oid > 0) $owner_ids[$oid] = true;
     }
     $placeholders = implode(',', array_fill(0, count($ids), '?'));
-    $sql = "SELECT DISTINCT ON (rcr_rcp_recipe_id) rcr_rcp_recipe_id, rcr_run_id,
+    $sql = "SELECT DISTINCT ON (rcr_rcp_recipe_id) rcr_rcp_recipe_id, rcr_recipe_run_id,
                    rcr_status, rcr_started_time
             FROM rcr_recipe_runs
             WHERE rcr_rcp_recipe_id IN ($placeholders)
@@ -212,7 +212,7 @@ foreach ($recipes as $recipe) {
     // (or, for pending rows, marks them cancelled directly).
     if ($latest && in_array($latest['rcr_status'], ['pending', 'running'], true)) {
         $actions .= ' <form method="post" action="/admin/joinery_ai/stop_run" class="d-inline">'
-                  . '<input type="hidden" name="rcr_run_id" value="' . (int)$latest['rcr_run_id'] . '">'
+                  . '<input type="hidden" name="rcr_recipe_run_id" value="' . (int)$latest['rcr_recipe_run_id'] . '">'
                   . '<input type="hidden" name="rcp_recipe_id" value="' . (int)$recipe->key . '">'
                   . '<button type="submit" class="btn btn-sm btn-outline-danger" '
                   . 'onclick="return confirm(\'Stop this run?\');">Stop</button>'

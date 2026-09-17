@@ -18,8 +18,8 @@ require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversations_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversation_messages_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatControls.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRunner.php'));
@@ -55,7 +55,7 @@ $make_standard = function (int $owner, string $title, string $body): AiConversat
         $m->set('aim_content', $body);
         $m->set('aim_status', AiConversationMessage::STATUS_COMPLETE);
         $m->save();
-        harness_register_row('aim_conversation_messages', 'aim_message_id', (int)$m->key);
+        harness_register_row('aim_conversation_messages', 'aim_conversation_message_id', (int)$m->key);
     }
     return $c;
 };
@@ -79,7 +79,7 @@ $make_sealed = function (int $owner, string $title, string $body): AiConversatio
         $m->set('aim_status', AiConversationMessage::STATUS_COMPLETE);
         $m->save();
         $m->load();
-        harness_register_row('aim_conversation_messages', 'aim_message_id', (int)$m->key);
+        harness_register_row('aim_conversation_messages', 'aim_conversation_message_id', (int)$m->key);
         $tcols = ChatSeal::turnColumns($c, (int)$m->key, $body, []);
         $tcols['aim_status'] = AiConversationMessage::STATUS_COMPLETE;
         AiConversationMessage::updateColumns((int)$m->key, $tcols);

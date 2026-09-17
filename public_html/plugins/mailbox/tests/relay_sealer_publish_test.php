@@ -231,7 +231,7 @@ foreach ($arches as $machine) {
 ok('  and does NOT ship the sealer Go source to the relay',
     count(preg_grep('#provisioning/relay-sealer/#', $declared)) === 0);
 $run_model = (string)@file_get_contents(
-    PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provision_class.php'));
+    PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provisions_class.php'));
 ok('a run refuses to start when this deployment carries no bundle',
     strpos($run_model, 'carries no support bundle') !== false);
 

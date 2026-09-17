@@ -30,9 +30,9 @@
 	);	
 	
 	$search_criteria = array();
-	$search_criteria['template_type'] = EmailTemplateStore::TEMPLATE_TYPE_INNER;
+	$search_criteria['template_type'] = EmailTemplate::TEMPLATE_TYPE_INNER;
 
-	$email_templates = new MultiEmailTemplateStore(
+	$email_templates = new MultiEmailTemplate(
 		$search_criteria,
 		array($sort=>$sdirection),
 		$numperpage,
@@ -60,13 +60,13 @@
 		array_push($rowvalues, '<a href="/admin/admin_email_template?emt_email_template_id='.$email_template->key.'">'.$email_template->get('emt_name').'</a>');
 		array_push($rowvalues, htmlspecialchars($email_template->get('emt_subject')));
 
-		if($email_template->get('emt_type') == EmailTemplateStore::TEMPLATE_TYPE_OUTER){
+		if($email_template->get('emt_type') == EmailTemplate::TEMPLATE_TYPE_OUTER){
 			array_push($rowvalues, 'Outer template');
 		}
-		else if($email_template->get('emt_type') == EmailTemplateStore::TEMPLATE_TYPE_INNER){
+		else if($email_template->get('emt_type') == EmailTemplate::TEMPLATE_TYPE_INNER){
 			array_push($rowvalues, 'Inner template');
 		} 	
-		else if($email_template->get('emt_type') == EmailTemplateStore::TEMPLATE_TYPE_FOOTER){
+		else if($email_template->get('emt_type') == EmailTemplate::TEMPLATE_TYPE_FOOTER){
 			array_push($rowvalues, 'Footer template');
 		}
 
@@ -76,9 +76,9 @@
 	$page->endtable($pager);		
 
 	$search_criteria = array();
-	$search_criteria['template_type'] = EmailTemplateStore::TEMPLATE_TYPE_OUTER;
+	$search_criteria['template_type'] = EmailTemplate::TEMPLATE_TYPE_OUTER;
 
-	$email_templates = new MultiEmailTemplateStore(
+	$email_templates = new MultiEmailTemplate(
 		$search_criteria,
 		array($sort=>$sdirection),
 		$numperpage,
@@ -105,13 +105,13 @@
 		$rowvalues = array();
 		array_push($rowvalues, '<a href="/admin/admin_email_template?emt_email_template_id='.$email_template->key.'">'.$email_template->get('emt_name').'</a>');
 
-		if($email_template->get('emt_type') == EmailTemplateStore::TEMPLATE_TYPE_OUTER){
+		if($email_template->get('emt_type') == EmailTemplate::TEMPLATE_TYPE_OUTER){
 			array_push($rowvalues, 'Outer template');
 		}
-		else if($email_template->get('emt_type') == EmailTemplateStore::TEMPLATE_TYPE_INNER){
+		else if($email_template->get('emt_type') == EmailTemplate::TEMPLATE_TYPE_INNER){
 			array_push($rowvalues, 'Inner template');
 		} 	
-		else if($email_template->get('emt_type') == EmailTemplateStore::TEMPLATE_TYPE_FOOTER){
+		else if($email_template->get('emt_type') == EmailTemplate::TEMPLATE_TYPE_FOOTER){
 			array_push($rowvalues, 'Footer template');
 		}
 
@@ -121,9 +121,9 @@
 	$page->endtable($pager);		
 
 	$search_criteria = array();
-	$search_criteria['template_type'] = EmailTemplateStore::TEMPLATE_TYPE_FOOTER;
+	$search_criteria['template_type'] = EmailTemplate::TEMPLATE_TYPE_FOOTER;
 
-	$email_templates = new MultiEmailTemplateStore(
+	$email_templates = new MultiEmailTemplate(
 		$search_criteria,
 		array($sort=>$sdirection),
 		$numperpage,
@@ -150,13 +150,13 @@
 		$rowvalues = array();
 		array_push($rowvalues, '<a href="/admin/admin_email_template?emt_email_template_id='.$email_template->key.'">'.$email_template->get('emt_name').'</a>');
 
-		if($email_template->get('emt_type') == EmailTemplateStore::TEMPLATE_TYPE_OUTER){
+		if($email_template->get('emt_type') == EmailTemplate::TEMPLATE_TYPE_OUTER){
 			array_push($rowvalues, 'Outer template');
 		}
-		else if($email_template->get('emt_type') == EmailTemplateStore::TEMPLATE_TYPE_INNER){
+		else if($email_template->get('emt_type') == EmailTemplate::TEMPLATE_TYPE_INNER){
 			array_push($rowvalues, 'Inner template');
 		} 	
-		else if($email_template->get('emt_type') == EmailTemplateStore::TEMPLATE_TYPE_FOOTER){
+		else if($email_template->get('emt_type') == EmailTemplate::TEMPLATE_TYPE_FOOTER){
 			array_push($rowvalues, 'Footer template');
 		}
 

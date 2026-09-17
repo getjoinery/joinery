@@ -19,7 +19,7 @@
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailHealth.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
 
 $settings_before = harness_settings_snapshot();
 harness_defer(function () use ($settings_before) { harness_settings_restore($settings_before); });
@@ -44,7 +44,7 @@ check(($v['probe']['state'] ?? '') === 'none' || ($v['probe']['state'] ?? '') ==
 
 // A clean probe, delivered just now. The header block carries the marker and
 // nothing of this server. The message needs a domain to belong to.
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
 $domain = new InboundEmailDomain(NULL);
 $domain->set('ied_domain', 'relay-send-gate-' . substr(md5(uniqid()), 0, 6) . '.example');
 $domain->set('ied_is_enabled', true);

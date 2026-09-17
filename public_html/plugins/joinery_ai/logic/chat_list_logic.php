@@ -8,7 +8,7 @@
  */
 function chat_list_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-    require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
+    require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversations_class.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSerializer.php'));
 
     $session = SessionControl::get_instance();

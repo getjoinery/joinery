@@ -40,7 +40,7 @@ return [
 					COALESCE(mgn_ssh_port, 22)       AS mgn_ssh_port
 				FROM mgn_managed_nodes
 				WHERE mgn_delete_time IS NULL
-				  AND mgn_mgh_host_id IS NULL
+				  AND mgn_mgh_managed_host_id IS NULL
 				GROUP BY
 					mgn_host,
 					COALESCE(mgn_ssh_user, 'root'),
@@ -65,7 +65,7 @@ return [
 						(mgh_slug, mgh_name, mgh_host, mgh_ssh_user, mgh_ssh_key_path,
 						 mgh_ssh_port, mgh_max_sites, mgh_provisioning_enabled, mgh_create_time)
 					VALUES (?, ?, ?, ?, ?, ?, 50, false, now())
-					RETURNING mgh_id
+					RETURNING mgh_managed_host_id
 				");
 				$ins->execute([
 					$slug,
@@ -80,12 +80,12 @@ return [
 				// Assign all matching nodes to this host
 				$upd = $dblink->prepare("
 					UPDATE mgn_managed_nodes
-					SET mgn_mgh_host_id = ?
+					SET mgn_mgh_managed_host_id = ?
 					WHERE mgn_host = ?
 					  AND COALESCE(mgn_ssh_user, 'root') = ?
 					  AND COALESCE(mgn_ssh_key_path, '')  = ?
 					  AND COALESCE(mgn_ssh_port, 22)       = ?
-					  AND mgn_mgh_host_id IS NULL
+					  AND mgn_mgh_managed_host_id IS NULL
 				");
 				$upd->execute([
 					$host_id,
@@ -102,7 +102,7 @@ return [
 	],
 
 	[
-		// The placement FK (mgn_mgh_host_id) is the only sibling identity —
+		// The placement FK (mgn_mgh_managed_host_id) is the only sibling identity —
 		// port allocation and host-scope routing read nothing else. sm_002
 		// filtered to LIVE rows, so soft-deleted rows kept a NULL FK and their
 		// port reservations were invisible to an FK-keyed allocator. Assign
@@ -116,12 +116,12 @@ return [
 			$dblink = $dbconnector->get_db_link();
 			$dblink->exec("
 				UPDATE mgn_managed_nodes n
-				SET mgn_mgh_host_id = (
-					SELECT h.mgh_id FROM mgh_managed_hosts h
+				SET mgn_mgh_managed_host_id = (
+					SELECT h.mgh_managed_host_id FROM mgh_managed_hosts h
 					WHERE h.mgh_host = n.mgn_host AND h.mgh_delete_time IS NULL
-					ORDER BY h.mgh_id ASC LIMIT 1
+					ORDER BY h.mgh_managed_host_id ASC LIMIT 1
 				)
-				WHERE n.mgn_mgh_host_id IS NULL
+				WHERE n.mgn_mgh_managed_host_id IS NULL
 				  AND EXISTS (
 					SELECT 1 FROM mgh_managed_hosts h2
 					WHERE h2.mgh_host = n.mgn_host AND h2.mgh_delete_time IS NULL

@@ -6,7 +6,7 @@ require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php'));
 require_once(PathHelper::getIncludePath('plugins/bookings/data/booking_types_class.php'));
-require_once(PathHelper::getIncludePath('plugins/bookings/data/booking_email_class.php'));
+require_once(PathHelper::getIncludePath('plugins/bookings/data/booking_emails_class.php'));
 
 /**
  * Sends booking reminders (at each configured offset before start) and a

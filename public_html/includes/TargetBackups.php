@@ -22,7 +22,7 @@
  */
 
 require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
-require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
+require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 
 class TargetBackupsException extends Exception {}
 

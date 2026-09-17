@@ -66,7 +66,7 @@ $mk_run = function (Recipe $recipe) {
 	$run->set('rcr_rcp_recipe_id', (int)$recipe->key);
 	$run->set('rcr_status', RecipeRun::STATUS_RUNNING);
 	$run->save();
-	harness_register_row('rcr_recipe_runs', 'rcr_run_id', (int)$run->key);
+	harness_register_row('rcr_recipe_runs', 'rcr_recipe_run_id', (int)$run->key);
 	return $run;
 };
 $pending_for = function (Recipe $recipe) use ($owner_uid) {

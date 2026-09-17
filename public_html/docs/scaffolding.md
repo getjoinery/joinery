@@ -15,7 +15,7 @@ The generator is **creation-only**: it writes new files and never edits an exist
 For an entity `Product` (prefix `prd`, plural `products`), the full set is:
 
 ```
-data/product_class.php                  # data        — Product + MultiProduct
+data/products_class.php                 # data        — Product + MultiProduct
 logic/products_logic.php                # public_list — list logic
 views/products.php                      # public_list — public list view
 logic/product_edit_logic.php            # public_edit — create/edit logic + descriptor
@@ -26,7 +26,7 @@ adm/logic/admin_product_edit_logic.php  # admin_edit  — admin edit logic + des
 adm/admin_product_edit.php              # admin_edit  — admin edit view
 ```
 
-Singular names derive from `entity` (`product_edit.php`, the `Product` class); plural names derive from the required `plural` slug (`products.php`, the `prd_products` table, the `/products` and `/admin/admin_products` URLs). No pluralization is inferred — `plural` is the single source for every plural-derived name.
+Singular names derive from `entity` (`product_edit.php`, the `Product` class); plural names derive from the required `plural` slug (`products_class.php`, `products.php`, the `prd_products` table, the `/products` and `/admin/admin_products` URLs). No pluralization is inferred — `plural` is the single source for every plural-derived name.
 
 No `serve.php` edits are needed: public views resolve by auto-discovery, admin pages by the `/admin/*` catch-all. A route that needs a `serve.php` entry (URL placeholder, feature flag, permission gate) is added by hand.
 

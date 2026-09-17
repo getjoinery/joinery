@@ -73,7 +73,7 @@ $by_type = [];
 foreach ($stored as $w) { $by_type[$w->get('uew_unlocker_type')] = $w; }
 check(isset($by_type['passkey']) && $by_type['passkey']->get('uew_wrapped_secret_key') === $passkey_blob, 'passkey wrapping is stored byte-for-byte (no server-side re-wrap)');
 check(isset($by_type['recovery']) && $by_type['recovery']->get('uew_wrapped_secret_key') === $recovery_blob, 'recovery wrapping is stored byte-for-byte');
-check((int)$by_type['passkey']->get('uew_pkc_credential_id') === (int)$passkey->key, 'passkey wrapping resolves the b64url credential to the internal pkc id (for the floor + revoke cleanup)');
+check((int)$by_type['passkey']->get('uew_pkc_passkey_credential_id') === (int)$passkey->key, 'passkey wrapping resolves the b64url credential to the internal pkc id (for the floor + revoke cleanup)');
 check($by_type['recovery']->get('uew_salt') === 'BROWSER_SALT_b64', 'recovery wrapping records the browser-supplied salt');
 
 // ---------------------------------------------------------------------------

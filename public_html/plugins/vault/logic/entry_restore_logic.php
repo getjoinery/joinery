@@ -19,7 +19,7 @@ function entry_restore_logic(array $input): LogicResult {
 		return LogicResult::error('That entry does not belong to you.');
 	}
 	$entry->set('vle_delete_time', null);
-	$entry->set('vle_updated_time', gmdate('Y-m-d H:i:s'));
+	$entry->set('vle_update_time', gmdate('Y-m-d H:i:s'));
 	$entry->save();
 
 	return LogicResult::render(['restored' => true]);

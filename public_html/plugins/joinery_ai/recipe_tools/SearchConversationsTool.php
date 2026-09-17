@@ -4,7 +4,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatTurnCon
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRunner.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatLevel.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversations_class.php'));
 
 /**
  * Search the acting user's OWN past chat conversations by keyword — so the

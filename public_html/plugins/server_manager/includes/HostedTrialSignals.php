@@ -37,7 +37,7 @@ class HostedTrialSignals {
 		if (!$order_item_id) {
 			return;
 		}
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/hosted_trial_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/hosted_trials_class.php'));
 		$trial = HostedTrial::for_order_item($order_item_id);
 		if ($trial === null) {
 			// Not a hosted subscription. Every other subscription on the
@@ -72,7 +72,7 @@ class HostedTrialSignals {
 		$trial->set('htr_shelf_ends_time', self::plus_days($now, self::shelf_days()));
 		$trial->set('htr_note', ucfirst($because) . ' on ' . $now . ' UTC.');
 		$trial->save();
-		error_log('HostedTrialSignals: hosting for provision #' . $trial->get('htr_cvp_provision_id')
+		error_log('HostedTrialSignals: hosting for provision #' . $trial->get('htr_cvp_customer_cloud_provision_id')
 			. ' entered its grace period (' . $because . '); it ends '
 			. $trial->get('htr_grace_ends_time') . ' UTC.');
 	}

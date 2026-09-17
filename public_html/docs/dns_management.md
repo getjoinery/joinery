@@ -24,7 +24,7 @@ visible diff here.
 | `DnsDriverRegistry` | `includes/dns/DnsDriverRegistry.php` | Discovers drivers by interface; resolves the deployment default |
 | `DnsReconciler` | `includes/dns/DnsReconciler.php` | The diff, the per-record apply, withdrawal |
 | `DnsOwnershipStore` | `includes/dns/DnsOwnershipStore.php` | "Is this record ours?", behind an interface so the diff is testable without a database |
-| `ManagedDnsRecord` | `data/dns_records_class.php` | The `dnr_dns_records` table behind that store |
+| `ManagedDnsRecord` | `data/managed_dns_records_class.php` | The `dnr_managed_dns_records` table behind that store |
 | `DnsPublishBox` | `includes/dns/DnsPublishBox.php` | The one publish surface every page shares |
 | `DnsPublishConsumer` | `includes/oauth/consumers/DnsPublishConsumer.php` | Performs a publish with an OAuth grant that never outlives the request |
 
@@ -198,7 +198,7 @@ and that credential lives for exactly one request:
 **Ephemeral is the only mode for the platform's own DNS writes. Nothing
 DNS-write-capable is ever stored here — not even sealed.** There is no
 persistence path in the code: `DnsDriverBase` refuses to be serialized and
-redacts itself from `var_dump`/`print_r`, and `dnr_dns_records` has no column
+redacts itself from `var_dump`/`print_r`, and `dnr_managed_dns_records` has no column
 that could hold a secret. Drift is *detected* credential-free, and unattended
 drift-fixing is out of scope for exactly this reason.
 
@@ -250,7 +250,7 @@ and "published a minute ago" look identical to a resolver and mean opposite
 things, so without it a successful publish would report its own records as
 missing and invite the operator to publish them again.
 
-A pending row is recognised from the write receipt in `dnr_dns_records`, not
+A pending row is recognised from the write receipt in `dnr_managed_dns_records`, not
 from a session flag: the receipt is durable, survives the browser, and is the
 same row that already decides what the platform may overwrite. It applies only
 to the public-DNS diff — the provider's own view has no propagation delay, so a
@@ -345,7 +345,7 @@ its path because a query string can carry a token.
 
 ## Ownership
 
-The platform manages only records it created or adopted, and `dnr_dns_records`
+The platform manages only records it created or adopted, and `dnr_managed_dns_records`
 is what makes that enforceable. It never modifies or deletes a record absent from
 that table, and removing a domain withdraws only what is listed — and offers to
 delete the zone only when it holds no records the platform does not own.

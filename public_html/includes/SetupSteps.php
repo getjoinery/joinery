@@ -580,7 +580,7 @@ class SetupSteps {
 				if (!$viewer->get('usr_password')) {
 					return true;
 				}
-				require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+				require_once(PathHelper::getIncludePath('data/passkey_credentials_class.php'));
 				return Passkey::userNeedsPassphraseFallback((int)$viewer->key);
 			},
 			'active' => function (?User $viewer): bool {
@@ -675,12 +675,12 @@ class SetupSteps {
 				if (!$viewer) {
 					return SetupSteps::STATUS_NONE;
 				}
-				require_once(PathHelper::getIncludePath('data/calendar_preference_class.php'));
+				require_once(PathHelper::getIncludePath('data/calendar_preferences_class.php'));
 				$prefs = new MultiCalendarPreference(array('user_id' => (int)$viewer->key));
 				if ($prefs->count_all() > 0) {
 					return SetupSteps::STATUS_GREEN;
 				}
-				require_once(PathHelper::getIncludePath('data/calendar_entry_class.php'));
+				require_once(PathHelper::getIncludePath('data/entries_class.php'));
 				$entries = new MultiCalendarEntry(array('subject_type' => 'user', 'subject_id' => (int)$viewer->key));
 				return $entries->count_all() > 0 ? SetupSteps::STATUS_GREEN : SetupSteps::STATUS_NONE;
 			},

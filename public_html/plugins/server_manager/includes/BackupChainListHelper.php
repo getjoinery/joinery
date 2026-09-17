@@ -19,7 +19,7 @@
  * @version 1.0
  */
 
-require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
+require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 require_once(PathHelper::getIncludePath('includes/TargetLister.php'));
 require_once(PathHelper::getIncludePath('includes/BackupChain.php'));
 require_once(PathHelper::getIncludePath('includes/BackupProfile.php'));

@@ -8,7 +8,7 @@
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/admin_tabs.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_log_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_logs_class.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(5);

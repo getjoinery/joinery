@@ -42,7 +42,7 @@ foreach ($comments as $comment){
 	$rowvalues = array();
 	array_push($rowvalues, "($comment->key) <a href='/admin/admin_comment?cmt_comment_id=$comment->key'>".substr($comment->get('cmt_body'), 0,40)."</a>");
 	array_push($rowvalues, $comment->get('cmt_author_name'));
-	array_push($rowvalues, $comment->get_local('cmt_created_time'));
+	array_push($rowvalues, $comment->get_local('cmt_create_time'));
 
 	if($comment->get('cmt_delete_time')) {
 		$status = 'Deleted';

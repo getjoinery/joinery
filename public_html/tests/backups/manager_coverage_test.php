@@ -28,7 +28,7 @@ function coverage_row(array $fields) {
 		$row->set($k, $v);
 	}
 	$row->save();
-	harness_register_row('bkh_backup_history', 'bkh_id', $row->key);
+	harness_register_row('bkh_backup_history', 'bkh_backup_history_id', $row->key);
 	return $row;
 }
 

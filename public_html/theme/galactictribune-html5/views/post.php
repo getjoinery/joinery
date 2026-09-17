@@ -130,7 +130,7 @@
 					<div class="flex items-start gap-4 mb-3">
 						<div>
 							<h3 class="font-semibold text-gray-900"><?php echo htmlspecialchars($comment->get('cmt_author_name')); ?></h3>
-							<p class="text-sm text-gray-500"><?php echo LibraryFunctions::convert_time($comment->get('cmt_created_time'), 'UTC', 'America/New_York'); ?></p>
+							<p class="text-sm text-gray-500"><?php echo LibraryFunctions::convert_time($comment->get('cmt_create_time'), 'UTC', 'America/New_York'); ?></p>
 						</div>
 					</div>
 					<div class="text-gray-700 mb-4">
@@ -190,7 +190,7 @@
 							<?php foreach($page_vars['replies_by_parent'][$comment->key] as $reply): ?>
 								<div class="ml-6 pl-4 border-l-2 border-gray-200 py-3">
 									<h4 class="font-semibold text-gray-900 text-sm"><?php echo htmlspecialchars($reply->get('cmt_author_name')); ?></h4>
-									<p class="text-xs text-gray-500 mb-2"><?php echo LibraryFunctions::convert_time($reply->get('cmt_created_time'), 'UTC', 'America/New_York'); ?></p>
+									<p class="text-xs text-gray-500 mb-2"><?php echo LibraryFunctions::convert_time($reply->get('cmt_create_time'), 'UTC', 'America/New_York'); ?></p>
 									<p class="text-gray-700 text-sm">
 										<?php echo $reply->get_sanitized_comment(); ?>
 									</p>

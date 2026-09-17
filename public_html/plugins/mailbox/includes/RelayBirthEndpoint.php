@@ -30,7 +30,7 @@
  * @version 1.0
  */
 
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provision_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provisions_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayProtocol.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayCloudProvisioner.php'));
 require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectIdentity.php'));

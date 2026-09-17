@@ -29,7 +29,7 @@
  */
 
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/mail_import_run_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/mail_import_runs_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/import/MailArchiveImporter.php'));
 
 class RunMailImports implements ScheduledTaskInterface {
@@ -314,7 +314,7 @@ class RunMailImports implements ScheduledTaskInterface {
 	private static function announce(string $signal, MailImportRun $run, array $extra): void {
 		try {
 			require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
-			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
 
 			$mailbox = '';
 			try {

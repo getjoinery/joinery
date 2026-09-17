@@ -32,10 +32,10 @@ class FleetBackups {
 	public static function slug_status_map() {
 		$map = [];
 		$db = DbConnector::get_instance()->get_db_link();
-		$q = $db->query('SELECT mgn_id, mgn_slug, mgn_delete_time FROM mgn_managed_nodes');
+		$q = $db->query('SELECT mgn_managed_node_id, mgn_slug, mgn_delete_time FROM mgn_managed_nodes');
 		foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
 			$map[$row['mgn_slug']] = [
-				'node_id' => (int)$row['mgn_id'],
+				'node_id' => (int)$row['mgn_managed_node_id'],
 				'deleted' => $row['mgn_delete_time'] !== null,
 			];
 		}

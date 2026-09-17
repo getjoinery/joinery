@@ -99,10 +99,10 @@ class ProvisionCustomerCloud {
 	private $errors = [];
 
 	public function run(array $config): array {
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_account_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_accounts_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provisions_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
 		require_once(PathHelper::getIncludePath('includes/cloud_compute/LinodeComputeDriver.php'));
@@ -311,10 +311,10 @@ class ProvisionCustomerCloud {
 	private function source_busy_with($source, $provision) {
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare(
-			"SELECT cvp_id FROM cvp_customer_cloud_provisions
-			 WHERE cvp_source_node_id = ? AND cvp_id <> ? AND cvp_delete_time IS NULL
+			"SELECT cvp_customer_cloud_provision_id FROM cvp_customer_cloud_provisions
+			 WHERE cvp_source_node_id = ? AND cvp_customer_cloud_provision_id <> ? AND cvp_delete_time IS NULL
 			   AND COALESCE(cvp_clone_key_sealed, '') <> ''
-			 ORDER BY cvp_id ASC LIMIT 1");
+			 ORDER BY cvp_customer_cloud_provision_id ASC LIMIT 1");
 		$q->execute([(int)$source->key, (int)$provision->key]);
 		$id = $q->fetchColumn();
 		return $id ? (int)$id : null;
@@ -478,7 +478,7 @@ class ProvisionCustomerCloud {
 		$node->load();
 
 		// A container on a shared host needs its placement record now. It is the
-		// only sibling identity (mgn_mgh_host_id), the port pool unions siblings
+		// only sibling identity (mgn_mgh_managed_host_id), the port pool unions siblings
 		// through it, and — once the host's own agent joins — it is the record
 		// link_host_node fills so host-scope work (decommission_site, certs,
 		// rebuild) can be routed.
@@ -540,7 +540,7 @@ class ProvisionCustomerCloud {
 		$job->set('mjb_external_order_item_id', $provision->get('cvp_external_order_item_id'));
 		$job->save();
 
-		$provision->set('cvp_mgn_node_id', $node->key);
+		$provision->set('cvp_mgn_managed_node_id', $node->key);
 		$provision->set('cvp_instance_ip', $instance['ip']);
 		$provision->set('cvp_instance_ipv6', (string)($instance['ipv6'] ?? ''));
 		$provision->set('cvp_status',      'installing');
@@ -556,11 +556,11 @@ class ProvisionCustomerCloud {
 	private function handle_installing($provision) {
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare(
-			"SELECT mjb_id FROM mjb_management_jobs " .
-			"WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'install_node' AND mjb_delete_time IS NULL " .
-			"ORDER BY mjb_id DESC LIMIT 1"
+			"SELECT mjb_management_job_id FROM mjb_management_jobs " .
+			"WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'install_node' AND mjb_delete_time IS NULL " .
+			"ORDER BY mjb_management_job_id DESC LIMIT 1"
 		);
-		$q->execute([$provision->get('cvp_mgn_node_id')]);
+		$q->execute([$provision->get('cvp_mgn_managed_node_id')]);
 		$job_id = $q->fetchColumn();
 		if (!$job_id) {
 			$this->alert_and_fail($provision, 'Install job disappeared — manual review required.');
@@ -578,7 +578,7 @@ class ProvisionCustomerCloud {
 			$job->load();
 		}
 
-		$node = new ManagedNode($provision->get('cvp_mgn_node_id'), TRUE);
+		$node = new ManagedNode($provision->get('cvp_mgn_managed_node_id'), TRUE);
 
 		if ($node->get('mgn_install_state') === null) {
 			$this->complete($provision, $node);
@@ -609,7 +609,7 @@ class ProvisionCustomerCloud {
 				return 1;
 			}
 		}
-		$node_id = (int)$provision->get('cvp_mgn_node_id');
+		$node_id = (int)$provision->get('cvp_mgn_managed_node_id');
 		if (!$node_id) {
 			return 0; // failed before a node existed — nothing to recover from
 		}
@@ -620,9 +620,9 @@ class ProvisionCustomerCloud {
 
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare(
-			"SELECT mjb_id FROM mjb_management_jobs " .
-			"WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'install_node' AND mjb_delete_time IS NULL " .
-			"ORDER BY mjb_id DESC LIMIT 1"
+			"SELECT mjb_management_job_id FROM mjb_management_jobs " .
+			"WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'install_node' AND mjb_delete_time IS NULL " .
+			"ORDER BY mjb_management_job_id DESC LIMIT 1"
 		);
 		$q->execute([$node_id]);
 		$job_id = $q->fetchColumn();
@@ -734,7 +734,7 @@ class ProvisionCustomerCloud {
 	 * fleet_enroll; dispatched -> done | failed by the job's answer.
 	 */
 	private function handle_seeding($provision) {
-		$node_id = (int)$provision->get('cvp_mgn_node_id');
+		$node_id = (int)$provision->get('cvp_mgn_managed_node_id');
 		$node = $node_id ? new ManagedNode($node_id, TRUE) : null;
 		if (!$node || !$node->key || $node->get('mgn_delete_time')) {
 			$provision->set('cvp_fleet_seed_state', 'failed');
@@ -835,7 +835,7 @@ class ProvisionCustomerCloud {
 			return ['driver' => new LinodeComputeDriver($token), 'reason' => '', 'park' => false];
 		}
 
-		$account_id = (int)$provision->get('cvp_cca_account_id');
+		$account_id = (int)$provision->get('cvp_cca_customer_cloud_account_id');
 		$account = $account_id ? new CustomerCloudAccount($account_id, TRUE) : null;
 		if (!$account || !$account->key || $account->get('cca_status') !== 'active') {
 			return ['driver' => null, 'reason' => 'Account link missing or not active.', 'park' => true];
@@ -898,7 +898,7 @@ class ProvisionCustomerCloud {
 	 */
 	protected function handle_install_password($provision) {
 		$state = (string)$provision->get('cvp_install_password');
-		$node_id = (int)$provision->get('cvp_mgn_node_id');
+		$node_id = (int)$provision->get('cvp_mgn_managed_node_id');
 		$node = $node_id ? new ManagedNode($node_id, TRUE) : null;
 		if (!$node || !$node->key || $node->get('mgn_delete_time')) {
 			if ($state === 'retire_failed') {
@@ -981,7 +981,7 @@ class ProvisionCustomerCloud {
 		$required = [];
 		if ($docker_mode === 'docker' && $install_mode !== 'bare') {
 			$required[] = ['node' => $node, 'role' => 'the site\'s agent'];
-			$host_id = (int)$node->get('mgn_mgh_host_id');
+			$host_id = (int)$node->get('mgn_mgh_managed_host_id');
 			$host = $host_id ? new ManagedHost($host_id, TRUE) : null;
 			$host_node = ($host && $host->key) ? $host->host_node() : null;
 			if (!$host_node) {
@@ -1005,7 +1005,7 @@ class ProvisionCustomerCloud {
 	 */
 	public static function machine_node_ids($provision): array {
 		$ids = [];
-		$site_id = (int)$provision->get('cvp_mgn_node_id');
+		$site_id = (int)$provision->get('cvp_mgn_managed_node_id');
 		if ($site_id) {
 			$ids[] = $site_id;
 		}
@@ -1028,7 +1028,7 @@ class ProvisionCustomerCloud {
 		switch ($state) {
 			case 'held':
 				if ($status === 'done') {
-					$node_id = (int)$provision->get('cvp_mgn_node_id');
+					$node_id = (int)$provision->get('cvp_mgn_managed_node_id');
 					$node = $node_id ? new ManagedNode($node_id, TRUE) : null;
 					if ($node && $node->key && !$node->get('mgn_delete_time')) {
 						$agents = self::machine_agents($provision, $node);
@@ -1161,7 +1161,7 @@ class ProvisionCustomerCloud {
 				$this->notify_ops('[hosted] Operator cloud token rejected: ' . $provision->get('cvp_domain'), $reason . "\n");
 				return 0;
 			}
-			$account_id = (int)$provision->get('cvp_cca_account_id');
+			$account_id = (int)$provision->get('cvp_cca_customer_cloud_account_id');
 			if ($account_id) {
 				$account = new CustomerCloudAccount($account_id, TRUE);
 				if ($account->key) {

@@ -1,7 +1,7 @@
 <?php
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_queued_actions_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversations_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversation_messages_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/QueueableToolInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolRegistry.php'));
 require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
@@ -96,7 +96,7 @@ class ActionQueue {
         $row->set('aqa_rcp_recipe_id', $recipe_id ?: null);
         $row->set('aqa_tool', $tool_name);
         $row->set('aqa_status', AiQueuedAction::STATUS_PENDING);
-        $row->set('aqa_created_time', gmdate('Y-m-d H:i:s'));
+        $row->set('aqa_create_time', gmdate('Y-m-d H:i:s'));
         $row->set('aqa_expires_time', self::expiryFor($expires_utc));
         // Cold: the arguments store in the clear, directly. Hot: the row is
         // INSERTed with the sealed column empty, then sealColumns() writes the
@@ -152,7 +152,7 @@ class ActionQueue {
                     break;
                 }
                 $row->set('aqa_arguments', json_encode($input, JSON_UNESCAPED_SLASHES));
-                $row->set('aqa_created_time', gmdate('Y-m-d H:i:s'));
+                $row->set('aqa_create_time', gmdate('Y-m-d H:i:s'));
                 $row->set('aqa_expires_time', self::expiryFor($expires_utc));
                 $row->save();
                 $row->load();
@@ -356,7 +356,7 @@ class ActionQueue {
             'source_type'     => (string)$row->get('aqa_source_type'),
             'recipe_name'     => self::recipeName((int)$row->get('aqa_rcp_recipe_id')),
             'conversation_id' => (int)$row->get('aqa_aic_conversation_id') ?: null,
-            'created_time'    => (string)$row->get('aqa_created_time'),
+            'created_time'    => (string)$row->get('aqa_create_time'),
             'expires_time'    => (string)$row->get('aqa_expires_time'),
             'resolved_time'   => (string)$row->get('aqa_resolved_time'),
         ];

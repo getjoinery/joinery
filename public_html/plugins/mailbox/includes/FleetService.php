@@ -23,9 +23,9 @@
  * @version 1.3
  */
 
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_fleet_shard_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_fleet_slot_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_fleet_domain_claim_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_fleet_shards_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_fleet_slots_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_fleet_domain_claims_class.php'));
 
 class FleetServiceException extends Exception {}
 
@@ -99,7 +99,7 @@ class FleetService {
 		}
 
 		$slot = new MailboxFleetSlot(NULL);
-		$slot->set('mft_mfs_shard_id', intval($shard->key));
+		$slot->set('mft_mfs_mailbox_fleet_shard_id', intval($shard->key));
 		$slot->set('mft_usr_user_id', $user_id);
 		$slot->set('mft_status', MailboxFleetSlot::STATUS_PROVISIONING);
 		$slot->set('mft_public_key', $public_key);
@@ -143,7 +143,7 @@ class FleetService {
 	 * row - everything RelayClient needs.
 	 */
 	public static function coordinates(MailboxFleetSlot $slot): array {
-		$shard = new MailboxFleetShard(intval($slot->get('mft_mfs_shard_id')), TRUE);
+		$shard = new MailboxFleetShard(intval($slot->get('mft_mfs_mailbox_fleet_shard_id')), TRUE);
 		$slug = (string)$slot->get('mft_slug');
 		return array(
 			'slot_id'         => intval($slot->key),
@@ -216,7 +216,7 @@ class FleetService {
 		}
 
 		$claim = new MailboxFleetDomainClaim(NULL);
-		$claim->set('mfd_mft_slot_id', intval($slot->key));
+		$claim->set('mfd_mft_mailbox_fleet_slot_id', intval($slot->key));
 		$claim->set('mfd_domain', $domain);
 		$claim->set('mfd_txt_token', 'joinery-fleet-verify-' . bin2hex(random_bytes(16)));
 		$claim->set('mfd_status', MailboxFleetDomainClaim::STATUS_PENDING);
@@ -231,7 +231,7 @@ class FleetService {
 	 * enforces the claim on every subsequent map sync).
 	 */
 	public static function verifyClaim(MailboxFleetSlot $slot, MailboxFleetDomainClaim $claim): array {
-		if (intval($claim->get('mfd_mft_slot_id')) !== intval($slot->key)) {
+		if (intval($claim->get('mfd_mft_mailbox_fleet_slot_id')) !== intval($slot->key)) {
 			throw new FleetServiceException('That claim does not belong to your slot.');
 		}
 		if ((string)$claim->get('mfd_status') === MailboxFleetDomainClaim::STATUS_VERIFIED) {
@@ -278,7 +278,7 @@ class FleetService {
 	 * the act was performed.
 	 */
 	public static function applyTenant(MailboxFleetSlot $slot, string $kind, array $extra = array()): bool {
-		$shard = new MailboxFleetShard(intval($slot->get('mft_mfs_shard_id')), TRUE);
+		$shard = new MailboxFleetShard(intval($slot->get('mft_mfs_mailbox_fleet_shard_id')), TRUE);
 		if (trim((string)$shard->get('mfs_identity_fingerprint')) === '' || trim((string)$shard->get('mfs_public_ip')) === '') {
 			error_log('FleetService: shard ' . $shard->key . ' has not been born yet; cannot ' . $kind . ' for slot ' . $slot->key);
 			return false;

@@ -8,7 +8,7 @@
 	require_once(PathHelper::getIncludePath('/plugins/store/data/orders_class.php'));
 	require_once(PathHelper::getIncludePath('/plugins/store/data/products_class.php'));
 	require_once(PathHelper::getIncludePath('/data/users_class.php'));
-	require_once(PathHelper::getIncludePath('/data/address_class.php'));
+	require_once(PathHelper::getIncludePath('/data/users_addrs_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);

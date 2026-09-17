@@ -31,8 +31,8 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
 
 function admin_mailbox_attachment_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachment_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachments_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxViewer.php'));
 
 	$session = SessionControl::get_instance();

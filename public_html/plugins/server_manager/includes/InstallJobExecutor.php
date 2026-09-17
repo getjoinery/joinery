@@ -81,10 +81,10 @@ class InstallJobExecutor {
 		try {
 			$types = "'" . implode("','", ManagementJob::BOOTSTRAP_JOB_TYPES) . "'";
 			$sel = $db->query(
-				"SELECT mjb_id FROM mjb_management_jobs " .
+				"SELECT mjb_management_job_id FROM mjb_management_jobs " .
 				"WHERE mjb_status = 'queued' AND mjb_job_type IN ({$types}) " .
 				"AND mjb_delete_time IS NULL " .
-				"ORDER BY mjb_id ASC LIMIT 1 FOR UPDATE SKIP LOCKED"
+				"ORDER BY mjb_management_job_id ASC LIMIT 1 FOR UPDATE SKIP LOCKED"
 			);
 			$row = $sel->fetch(PDO::FETCH_ASSOC);
 			if (!$row) { $db->commit(); return null; }
@@ -92,13 +92,13 @@ class InstallJobExecutor {
 			$upd = $db->prepare(
 				"UPDATE mjb_management_jobs " .
 				"SET mjb_status = 'running', mjb_started_time = now(), mjb_update_time = now() " .
-				"WHERE mjb_id = ? AND mjb_status = 'queued'"
+				"WHERE mjb_management_job_id = ? AND mjb_status = 'queued'"
 			);
-			$upd->execute([$row['mjb_id']]);
+			$upd->execute([$row['mjb_management_job_id']]);
 			$claimed = $upd->rowCount() === 1;
 			$db->commit();
 			if (!$claimed) { return null; }
-			return new ManagementJob((int)$row['mjb_id'], TRUE);
+			return new ManagementJob((int)$row['mjb_management_job_id'], TRUE);
 		} catch (Exception $e) {
 			$db->rollBack();
 			throw $e;
@@ -128,7 +128,7 @@ class InstallJobExecutor {
 				. " jobs; '{$type}' is not one of them.");
 			return;
 		}
-		$node = new ManagedNode((int)$job->get('mjb_mgn_node_id'), TRUE);
+		$node = new ManagedNode((int)$job->get('mjb_mgn_managed_node_id'), TRUE);
 		if (!$node->key) {
 			$this->finish($job, false, 'The install job names no live target node.');
 			return;
@@ -449,8 +449,8 @@ class InstallJobExecutor {
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare(
 			"SELECT {$column} FROM cvp_customer_cloud_provisions " .
-			"WHERE cvp_mgn_node_id = ? AND cvp_delete_time IS NULL " .
-			"ORDER BY cvp_id DESC LIMIT 1"
+			"WHERE cvp_mgn_managed_node_id = ? AND cvp_delete_time IS NULL " .
+			"ORDER BY cvp_customer_cloud_provision_id DESC LIMIT 1"
 		);
 		$q->execute([$node->key]);
 		$sealed = $q->fetchColumn();
@@ -466,7 +466,7 @@ class InstallJobExecutor {
 		$q = $db->prepare(
 			"UPDATE mjb_management_jobs " .
 			"SET mjb_output = COALESCE(mjb_output, '') || ?, mjb_current_step = ?, mjb_update_time = now() " .
-			"WHERE mjb_id = ?"
+			"WHERE mjb_management_job_id = ?"
 		);
 		$q->execute([$text, (int)$step_index, $job->key]);
 	}
@@ -477,12 +477,12 @@ class InstallJobExecutor {
 		if ($ok) {
 			$db->prepare(
 				"UPDATE mjb_management_jobs SET mjb_status = 'completed', " .
-				"mjb_completed_time = now(), mjb_update_time = now() WHERE mjb_id = ?"
+				"mjb_completed_time = now(), mjb_update_time = now() WHERE mjb_management_job_id = ?"
 			)->execute([$job->key]);
 		} else {
 			$db->prepare(
 				"UPDATE mjb_management_jobs SET mjb_status = 'failed', mjb_error_message = ?, " .
-				"mjb_completed_time = now(), mjb_update_time = now() WHERE mjb_id = ?"
+				"mjb_completed_time = now(), mjb_update_time = now() WHERE mjb_management_job_id = ?"
 			)->execute([mb_substr((string)$message, 0, 4000), $job->key]);
 		}
 	}

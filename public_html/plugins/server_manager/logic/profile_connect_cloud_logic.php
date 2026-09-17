@@ -20,8 +20,8 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
 
 function profile_connect_cloud_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-	require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_account_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_accounts_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provisions_class.php'));
 	require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Client.php'));
 	require_once(PathHelper::getIncludePath('includes/oauth/OAuth2ProviderRegistry.php'));
 
@@ -63,7 +63,7 @@ function profile_connect_cloud_logic(array $input): LogicResult {
 
 	$provisions = new MultiCustomerCloudProvision(
 		array('user_id' => $user_id, 'deleted' => false),
-		array('cvp_id' => 'DESC')
+		array('cvp_customer_cloud_provision_id' => 'DESC')
 	);
 	$provisions->load();
 

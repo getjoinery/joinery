@@ -27,7 +27,7 @@
 
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/EmailSecurityDigest.php'));
 
 // Both sides of the comparison — the fixture header and the code that decides

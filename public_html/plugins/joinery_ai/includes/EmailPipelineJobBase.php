@@ -2,11 +2,11 @@
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AreaScopedJobInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/EmailJobCandidates.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxAliasConfig.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/EmailSecurityDigest.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/EmailAttachmentDigest.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/aip_recipe_item_log_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_item_log_class.php'));
 
 /**
  * Shared spine of the three email pipeline jobs (triage, security scan,

@@ -167,10 +167,10 @@ section('The Status and Recent backups blocks render, and say verified restorabl
 
 $db->exec("UPDATE bkh_backup_history SET bkh_verify_time = '2026-09-10 10:00:00', bkh_verify_level = 3, bkh_verify_outcome = 'pass',"
 	. " bkh_verify_message = 'Rehearsed a restore of the backup of 2026-09-09 04:00 UTC: 5 archives, 2.1 MB, 44 files, 12 tables, 3 users.'"
-	. " WHERE bkh_id = " . (int)$r4->key);
+	. " WHERE bkh_backup_history_id = " . (int)$r4->key);
 $db->exec("UPDATE bkh_backup_history SET bkh_verify_time = '2026-09-12 10:00:00', bkh_verify_level = 2, bkh_verify_outcome = 'fail',"
 	. " bkh_verify_message = 'Verification of the backup of 2026-09-12 04:00 UTC failed: db-0005.sql.gz.enc could not be decrypted.'"
-	. " WHERE bkh_id = " . (int)$r5->key);
+	. " WHERE bkh_backup_history_id = " . (int)$r5->key);
 
 /** The page's box API, with FormWriter as the page would hand it out. */
 class BvsStubPage {
@@ -265,8 +265,8 @@ check(strpos($rendered, 'not verified &middot; Could not verify the backup of 20
 
 // The same skip landing on a run already proven: the proof stands, the skip rides beside it.
 $db->exec("UPDATE bkh_backup_history SET bkh_verify_message = 'Could not verify the backup of 2026-09-09 04:00 UTC: busy: another backup was running'"
-	. " WHERE bkh_id = " . (int)$r4->key);
-$db->exec('DELETE FROM bkh_backup_history WHERE bkh_id = ' . (int)$r6->key);
+	. " WHERE bkh_backup_history_id = " . (int)$r4->key);
+$db->exec('DELETE FROM bkh_backup_history WHERE bkh_backup_history_id = ' . (int)$r6->key);
 $history = new MultiBackupHistory(array('include_pruned' => true), array('bkh_start_time' => 'DESC'), 30, 0);
 $history->load();
 $milestones = _admin_backups_milestones();

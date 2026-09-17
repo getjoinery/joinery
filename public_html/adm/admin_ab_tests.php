@@ -10,7 +10,7 @@
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-require_once(PathHelper::getIncludePath('data/abt_tests_class.php'));
+require_once(PathHelper::getIncludePath('data/tests_class.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(5);

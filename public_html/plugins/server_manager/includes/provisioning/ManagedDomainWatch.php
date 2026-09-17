@@ -90,7 +90,7 @@ class ManagedDomainWatch {
 
 	public function run(array $config): array {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/registered_domains_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
 		require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 
 		if ($this->get_registrar() === null) {
@@ -408,7 +408,7 @@ class ManagedDomainWatch {
 	 *             fresh notice was dispatched.
 	 */
 	protected function converge_notice($row): int {
-		$node_id = (int)$row->get('rdm_mgn_node_id');
+		$node_id = (int)$row->get('rdm_mgn_managed_node_id');
 		if ($node_id <= 0) {
 			return 0;   // nothing built yet; there is no box to tell
 		}
@@ -543,7 +543,7 @@ class ManagedDomainWatch {
 	 */
 	protected function dispatch_notice($node, array $desired): int {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 
 		try {
 			$built = JobCommandBuilder::build_managed_domain_notice($node, $desired);
@@ -568,11 +568,11 @@ class ManagedDomainWatch {
 	protected function notice_jobs(int $node_id, string $domain): array {
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare(
-			"SELECT mjb_id, mjb_status, mjb_create_time, mjb_completed_time, mjb_parameters
+			"SELECT mjb_management_job_id, mjb_status, mjb_create_time, mjb_completed_time, mjb_parameters
 			 FROM mjb_management_jobs
-			 WHERE mjb_mgn_node_id = ? AND mjb_job_type = ? AND mjb_delete_time IS NULL
+			 WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = ? AND mjb_delete_time IS NULL
 			   AND mjb_parameters->>'domain' = ?
-			 ORDER BY mjb_create_time DESC, mjb_id DESC
+			 ORDER BY mjb_create_time DESC, mjb_management_job_id DESC
 			 LIMIT " . (int)self::NOTICE_JOB_LOOKBACK);
 		$q->execute(array($node_id, self::JOB_NOTICE, $domain));
 		return $q->fetchAll(PDO::FETCH_ASSOC) ?: array();

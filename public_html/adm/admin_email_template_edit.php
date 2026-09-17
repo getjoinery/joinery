@@ -10,11 +10,11 @@
 
 	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
 	if (isset($_POST['edit_primary_key_value'])) {
-		$email_template = new EmailTemplateStore($_POST['edit_primary_key_value'], TRUE);
+		$email_template = new EmailTemplate($_POST['edit_primary_key_value'], TRUE);
 	} elseif (isset($_GET['emt_email_template_id'])) {
-		$email_template = new EmailTemplateStore($_GET['emt_email_template_id'], TRUE);
+		$email_template = new EmailTemplate($_GET['emt_email_template_id'], TRUE);
 	} else {
-		$email_template = new EmailTemplateStore(NULL);
+		$email_template = new EmailTemplate(NULL);
 	}
 
 	if($_POST){
@@ -78,7 +78,7 @@
 		'helptext' => 'Email subject line (required)'
 	]);
 
-	$optionvals = array(EmailTemplateStore::TEMPLATE_TYPE_OUTER=>"Outer", EmailTemplateStore::TEMPLATE_TYPE_INNER=>"Inner", EmailTemplateStore::TEMPLATE_TYPE_FOOTER=>"Footer");
+	$optionvals = array(EmailTemplate::TEMPLATE_TYPE_OUTER=>"Outer", EmailTemplate::TEMPLATE_TYPE_INNER=>"Inner", EmailTemplate::TEMPLATE_TYPE_FOOTER=>"Footer");
 	$formwriter->dropinput('emt_type', 'Template Type', [
 		'options' => $optionvals
 	]);

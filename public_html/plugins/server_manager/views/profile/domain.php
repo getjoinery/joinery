@@ -104,7 +104,7 @@ echo PublicPage::BeginPage('Your Domain', $hoptions);
 	$formwriter = $page->getFormWriter('smdm_form_' . (int)$domain->key);
 	echo $formwriter->begin_form();
 	$formwriter->hiddeninput('action', '', array('value' => 'request_push'));
-	$formwriter->hiddeninput('rdm_id', '', array('value' => (int)$domain->key));
+	$formwriter->hiddeninput('rdm_registered_domain_id', '', array('value' => (int)$domain->key));
 	$formwriter->textinput('ncp_username', 'Your Namecheap username or account email', array(
 		'maxlength' => 128,
 		'helptext' => 'Exactly as it appears on your Namecheap account — that is where we send the domain.',

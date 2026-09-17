@@ -28,7 +28,7 @@
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_accounts_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailHealth.php'));
 require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2State.php'));

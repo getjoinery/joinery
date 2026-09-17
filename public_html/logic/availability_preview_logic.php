@@ -17,9 +17,9 @@ function availability_preview_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/calendar/CalendarSubject.php'));
 	require_once(PathHelper::getIncludePath('includes/calendar/CalendarItemSourceRegistry.php'));
 	require_once(PathHelper::getIncludePath('includes/scheduling/SlotGenerator.php'));
-	require_once(PathHelper::getIncludePath('data/schedule_class.php'));
-	require_once(PathHelper::getIncludePath('data/schedule_window_class.php'));
-	require_once(PathHelper::getIncludePath('data/schedule_override_class.php'));
+	require_once(PathHelper::getIncludePath('data/schedules_class.php'));
+	require_once(PathHelper::getIncludePath('data/schedule_windows_class.php'));
+	require_once(PathHelper::getIncludePath('data/schedule_overrides_class.php'));
 
 	$session = SessionControl::get_instance();
 	$user_id = $session->get_user_id();

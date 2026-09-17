@@ -18,11 +18,11 @@ plugins/joinery_ai/
   data/
     recipes_class.php          # Recipe model — prompt, schedule, allowed tools, owner, mode
     recipe_runs_class.php      # RecipeRun model — per-execution log with tool-call trace
-    recipe_notes_class.php     # RecipeNote model — agent ↔ human feedback channel
-    aip_recipe_item_log_class.php       # AipRecipeItemLog model — pipeline-mode processing log
-    ai_conversations_class.php          # AiConversation model — one chat thread
-    ai_conversation_messages_class.php  # AiConversationMessage model — one chat turn
-    ai_memories_class.php      # AiMemory model — durable cross-chat memory (user + shared scopes)
+    notes_class.php     # RecipeNote model — agent ↔ human feedback channel
+    recipe_item_log_class.php       # AipRecipeItemLog model — pipeline-mode processing log
+    conversations_class.php          # AiConversation model — one chat thread
+    conversation_messages_class.php  # AiConversationMessage model — one chat turn
+    memories_class.php      # AiMemory model — durable cross-chat memory (user + shared scopes)
   includes/
     AgentLoop.php              # Bounded tool-use loop shared by agent-mode recipes and chat
     ToolContext.php            # Interface both agent-mode run contexts implement
@@ -1298,7 +1298,7 @@ Caps are settings-tunable: `joinery_ai_attach_image_max_bytes` (5 MB), `joinery_
 
 ## Memory
 
-Durable facts the assistant recalls across separate chats and recipe runs — "this member is allergic to shellfish", "refunds are honored within 30 days" — stored in `mem_memories` (`AiMemory` / `MultiAiMemory`, `data/ai_memories_class.php`). Distinct from recipe notes: notes upsert by title (a mutable scratchpad the agent rewrites each run), memories **accumulate** (each fact is its own row) and add a shared scope.
+Durable facts the assistant recalls across separate chats and recipe runs — "this member is allergic to shellfish", "refunds are honored within 30 days" — stored in `mem_memories` (`AiMemory` / `MultiAiMemory`, `data/memories_class.php`). Distinct from recipe notes: notes upsert by title (a mutable scratchpad the agent rewrites each run), memories **accumulate** (each fact is its own row) and add a shared scope.
 
 **Two ownership scopes.**
 
@@ -1559,7 +1559,7 @@ The one cost concern shared across surfaces is the **plugin-wide monthly ceiling
 Every tool call appends to `rcr_tool_calls` with `name`, `input`, `output`, `started`, `completed`, `is_error`. The admin run-detail view (`/admin/joinery_ai/run`) renders the trace inline. Pipeline-mode runs reuse the same column for a different record shape — one entry per judged item (`item_key`, `label`, `status`, `verdict` or `error`) — which the run-detail view detects from the recipe's `rcp_mode` and renders as an item list instead of a tool-call trace. For ad-hoc debugging, query directly:
 
 ```sql
-SELECT rcr_tool_calls FROM rcr_recipe_runs WHERE rcr_run_id = ?;
+SELECT rcr_tool_calls FROM rcr_recipe_runs WHERE rcr_recipe_run_id = ?;
 ```
 
 ## See also

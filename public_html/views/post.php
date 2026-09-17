@@ -155,7 +155,7 @@
                             <img class="rounded-circle me-3" src="/assets/images/blank-avatar.png" width="50" height="50" alt="Avatar">
                             <div class="flex-grow-1">
                                 <h6 class="mb-0"><?php echo htmlspecialchars($comment->get('cmt_author_name')); ?></h6>
-                                <small class="text-muted"><?php echo LibraryFunctions::convert_time($comment->get('cmt_created_time'), 'UTC', 'America/New_York'); ?></small>
+                                <small class="text-muted"><?php echo LibraryFunctions::convert_time($comment->get('cmt_create_time'), 'UTC', 'America/New_York'); ?></small>
                                 <div class="mt-2 mb-3"><?php echo $comment->get_sanitized_comment(); ?></div>
                                 <button id="comment<?php echo $comment->key; ?>" class="commentbutton btn btn-outline btn-sm">Reply</button>
 
@@ -209,7 +209,7 @@
                                                 <div class="flex-grow-1 bg-light p-3 jy-radius-4">
                                                     <div class="d-flex justify-content-between mb-1">
                                                         <strong class="small"><?php echo htmlspecialchars($reply->get('cmt_author_name')); ?></strong>
-                                                        <small class="text-muted"><?php echo LibraryFunctions::convert_time($reply->get('cmt_created_time'), 'UTC', 'America/New_York'); ?></small>
+                                                        <small class="text-muted"><?php echo LibraryFunctions::convert_time($reply->get('cmt_create_time'), 'UTC', 'America/New_York'); ?></small>
                                                     </div>
                                                     <div class="small"><?php echo $reply->get_sanitized_comment(); ?></div>
                                                 </div>

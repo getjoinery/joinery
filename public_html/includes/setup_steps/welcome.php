@@ -5,7 +5,7 @@
  *
  * @version 1.0
  */
-require_once(PathHelper::getIncludePath('data/address_class.php'));
+require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
 
 $setup_tz_current = (string)$viewer->get('usr_timezone');
 $formwriter = $page->getFormWriter('setup-welcome', array('action' => '/setup', 'method' => 'POST'));

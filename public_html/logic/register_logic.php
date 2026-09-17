@@ -16,13 +16,13 @@ function register_logic(array $input): LogicResult{
 
 	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-	require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
+	require_once(PathHelper::getIncludePath('includes/EmailTemplateRenderer.php'));
 
 	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 	require_once(PathHelper::getIncludePath('includes/SingleRowAccessor.php'));
 
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
-	require_once(PathHelper::getIncludePath('data/address_class.php'));
+	require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;
@@ -184,7 +184,7 @@ function _register_email_is_platform_hosted(string $email): bool {
 	if ($domain === '') {
 		return false;
 	}
-	$domain_class = PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php');
+	$domain_class = PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php');
 	if (!is_file($domain_class)) {
 		return false;
 	}
@@ -207,7 +207,7 @@ function _register_email_is_platform_hosted(string $email): bool {
  * honeypot, captcha) stay in the web view, not here.
  */
 function register_logic_form($formwriter, $user = null, $input = []) {
-	require_once(PathHelper::getIncludePath('data/address_class.php'));
+	require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
 	$settings = Globalvars::get_instance();
 
 	$formwriter->textinput('usr_first_name', 'First Name:', [

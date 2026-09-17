@@ -129,12 +129,12 @@ class FleetProvisionSeeding {
 		$q = $db->prepare(
 			"SELECT cvp_domain FROM cvp_customer_cloud_provisions " .
 			"WHERE cvp_usr_user_id = ? AND cvp_fleet_seed_state = 'done' AND cvp_delete_time IS NULL " .
-			"AND cvp_mgn_node_id IS NOT NULL AND cvp_mgn_node_id <> ? " .
+			"AND cvp_mgn_managed_node_id IS NOT NULL AND cvp_mgn_managed_node_id <> ? " .
 			// A site that has been decommissioned holds nothing: its node row is
 			// soft-deleted and the credential it enrolled with has no site behind
 			// it, so the slot is free for the account's next site.
-			"AND EXISTS (SELECT 1 FROM mgn_managed_nodes WHERE mgn_id = cvp_mgn_node_id AND mgn_delete_time IS NULL) " .
-			"ORDER BY cvp_id LIMIT 1"
+			"AND EXISTS (SELECT 1 FROM mgn_managed_nodes WHERE mgn_managed_node_id = cvp_mgn_managed_node_id AND mgn_delete_time IS NULL) " .
+			"ORDER BY cvp_customer_cloud_provision_id LIMIT 1"
 		);
 		$q->execute(array($buyer_user_id, (int)$node->key));
 		$domain = $q->fetchColumn();

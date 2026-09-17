@@ -17,7 +17,7 @@
  */
 
 require_once(PathHelper::getIncludePath('includes/dns/DnsRecordPlan.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeReverseDns.php'));
 
 class NodeDnsPlan {

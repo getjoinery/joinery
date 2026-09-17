@@ -1,5 +1,5 @@
 <?php
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_memories_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/memories_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatLevel.php'));
 
 /**

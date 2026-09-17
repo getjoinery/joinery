@@ -5,7 +5,7 @@ function passkey_login_verify_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
 	require_once(PathHelper::getIncludePath('includes/PasskeyService.php'));
-	require_once(PathHelper::getIncludePath('data/login_class.php'));
+	require_once(PathHelper::getIncludePath('data/logins_class.php'));
 
 	$settings = Globalvars::get_instance();
 	if (!$settings->get_setting('passkeys_enabled')) {
@@ -45,7 +45,7 @@ function passkey_login_verify_logic(array $input): LogicResult {
 		);
 	}
 
-	LoginClass::StoreUserLogin($user->key, LoginClass::LOGIN_FORM);
+	Login::record($user->key, Login::LOGIN_FORM);
 
 	RequestLogger::log('passkey_login', 'verify', true, ['user_id' => $user->key]);
 

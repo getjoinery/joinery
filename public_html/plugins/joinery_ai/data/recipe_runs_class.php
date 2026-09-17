@@ -8,7 +8,7 @@ class RecipeRun extends SystemBase {
 
     public static $prefix = 'rcr';
     public static $tablename = 'rcr_recipe_runs';
-    public static $pkey_column = 'rcr_run_id';
+    public static $pkey_column = 'rcr_recipe_run_id';
 
     protected static $foreign_key_actions = array(
         // 'rcp' prefix collides: convention would resolve to RelayCloudProvision, not Recipe
@@ -32,7 +32,7 @@ class RecipeRun extends SystemBase {
     const TRIGGER_WINDOW   = 'window';
 
     public static $field_specifications = array(
-        'rcr_run_id'            => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+        'rcr_recipe_run_id'            => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
         'rcr_rcp_recipe_id'     => array('type'=>'int8', 'required'=>true),
         'rcr_started_time'      => array('type'=>'timestamp(6)', 'default'=>'now()'),
         'rcr_completed_time'    => array('type'=>'timestamp(6)'),

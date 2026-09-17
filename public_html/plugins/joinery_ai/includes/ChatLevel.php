@@ -104,7 +104,7 @@ class ChatLevel {
      */
     public static function changeLevel(AiConversation $c, string $target, int $uid): array {
         require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
-        require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversation_messages_class.php'));
 
         if (!in_array($target, ChatSeal::levels(), true)) {
             return ['ok' => false, 'error' => 'Invalid privacy level.'];
@@ -193,7 +193,7 @@ class ChatLevel {
             $c->load();
         }
         $rows = new MultiAiConversationMessage(
-            ['conversation_id' => (int)$c->key, 'deleted' => false], ['aim_message_id' => 'ASC']);
+            ['conversation_id' => (int)$c->key, 'deleted' => false], ['aim_conversation_message_id' => 'ASC']);
         $rows->load();
         foreach ($rows as $m) ChatSeal::sealExistingMessage($m, $c);
     }
@@ -202,7 +202,7 @@ class ChatLevel {
     private static function unsealConversationBackfill(AiConversation $c): void {
         require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
         $rows = new MultiAiConversationMessage(
-            ['conversation_id' => (int)$c->key, 'deleted' => false], ['aim_message_id' => 'ASC']);
+            ['conversation_id' => (int)$c->key, 'deleted' => false], ['aim_conversation_message_id' => 'ASC']);
         $rows->load();
         foreach ($rows as $m) ChatSeal::unsealExistingMessage($m);
 

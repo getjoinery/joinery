@@ -41,7 +41,7 @@ class PasskeyCeremony extends SystemBase {
 		'pks_purpose'             => array('type'=>'varchar(255)', 'is_nullable'=>false),
 		'pks_challenge'           => array('type'=>'text', 'is_nullable'=>true),
 		'pks_expires_time'        => array('type'=>'timestamp(6)', 'is_nullable'=>false),
-		'pks_created_time'        => array('type'=>'timestamp(6)', 'default'=>'now()'),
+		'pks_create_time'        => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
 }
 

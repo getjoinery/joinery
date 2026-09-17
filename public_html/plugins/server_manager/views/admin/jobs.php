@@ -8,8 +8,8 @@
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/Pager.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(10);
@@ -19,10 +19,10 @@ $numperpage = 30;
 $offset = LibraryFunctions::fetch_variable_local($_GET, 'offset', 0);
 // Whitelist sort column and direction — the Multi order_by interpolates the
 // column name raw (SystemBase), so an un-whitelisted value is SQL injection (S-6).
-$sort_whitelist = ['mjb_id', 'mjb_job_type', 'mjb_status', 'mjb_create_time',
-	'mjb_started_time', 'mjb_completed_time', 'mjb_mgn_node_id'];
-$sort = LibraryFunctions::fetch_variable_local($_GET, 'sort', 'mjb_id');
-if (!in_array($sort, $sort_whitelist, true)) { $sort = 'mjb_id'; }
+$sort_whitelist = ['mjb_management_job_id', 'mjb_job_type', 'mjb_status', 'mjb_create_time',
+	'mjb_started_time', 'mjb_completed_time', 'mjb_mgn_managed_node_id'];
+$sort = LibraryFunctions::fetch_variable_local($_GET, 'sort', 'mjb_management_job_id');
+if (!in_array($sort, $sort_whitelist, true)) { $sort = 'mjb_management_job_id'; }
 $sdirection = strtoupper(LibraryFunctions::fetch_variable_local($_GET, 'sdirection', 'DESC'));
 if ($sdirection !== 'ASC' && $sdirection !== 'DESC') { $sdirection = 'DESC'; }
 
@@ -109,7 +109,7 @@ $pager = new Pager(['numrecords' => $numrecords, 'numperpage' => $numperpage]);
 $table_options = [
 	'title' => 'Jobs',
 	'sortoptions' => [
-		'ID' => 'mjb_id',
+		'ID' => 'mjb_management_job_id',
 		'Type' => 'mjb_job_type',
 		'Status' => 'mjb_status',
 	],
@@ -125,7 +125,7 @@ foreach ($jobs as $job) {
 		default => 'warning',
 	};
 
-	$node_id = $job->get('mjb_mgn_node_id');
+	$node_id = $job->get('mjb_mgn_managed_node_id');
 	$node_name = $node_id && isset($node_map[$node_id]) ? $node_map[$node_id] : ($node_id ? "#{$node_id}" : 'Local');
 
 	$progress = $job->get('mjb_current_step') . '/' . $job->get('mjb_total_steps');

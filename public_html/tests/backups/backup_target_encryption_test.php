@@ -26,7 +26,7 @@ if (php_sapi_name() !== 'cli') { echo "This test must be run from the command li
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 
-require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
+require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
 
 $db = DbConnector::get_instance()->get_db_link();
@@ -38,7 +38,7 @@ try { new SecretBox(); } catch (\Throwable $e) { $has_secretbox = false; }
 
 /** Read the raw jsonb column, bypassing the model's decryption. */
 function raw_creds($db, $id) {
-	$stmt = $db->prepare('SELECT bkt_credentials FROM bkt_backup_targets WHERE bkt_id = ?');
+	$stmt = $db->prepare('SELECT bkt_credentials FROM bkt_backup_targets WHERE bkt_backup_target_id = ?');
 	$stmt->execute(array($id));
 	return (string)$stmt->fetchColumn();
 }
@@ -112,7 +112,7 @@ try {
 
 	// Simulate a pre-encryption row: write plaintext creds straight to the column.
 	$legacy = json_encode(array('access_key' => 'LEG_PUB', 'secret_key' => 'legacy_secret_42'));
-	$db->prepare('UPDATE bkt_backup_targets SET bkt_credentials = ?::jsonb WHERE bkt_id = ?')
+	$db->prepare('UPDATE bkt_backup_targets SET bkt_credentials = ?::jsonb WHERE bkt_backup_target_id = ?')
 	   ->execute(array($legacy, $created_id));
 
 	$legacy_read = new BackupTarget($created_id, TRUE);
@@ -167,7 +167,7 @@ try {
 	check($slot_read->get_node_credentials()['secret_key'] === $NODE_SECRET,
 		'node secret round-trips through get_node_credentials');
 
-	$stmt = $db->prepare('SELECT bkt_node_credentials FROM bkt_backup_targets WHERE bkt_id = ?');
+	$stmt = $db->prepare('SELECT bkt_node_credentials FROM bkt_backup_targets WHERE bkt_backup_target_id = ?');
 	$stmt->execute(array($created_id));
 	$raw_node = (string)$stmt->fetchColumn();
 	if ($has_secretbox) {
@@ -198,7 +198,7 @@ try {
 			$doomed = new BackupTarget($created_id, TRUE);
 			if ($doomed->key) { $doomed->permanent_delete(); }
 		} catch (\Throwable $e) {
-			$db->prepare('DELETE FROM bkt_backup_targets WHERE bkt_id = ?')->execute(array($created_id));
+			$db->prepare('DELETE FROM bkt_backup_targets WHERE bkt_backup_target_id = ?')->execute(array($created_id));
 		}
 	}
 }

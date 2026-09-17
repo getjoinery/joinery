@@ -44,7 +44,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineRun
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunContext.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/aip_recipe_item_log_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_item_log_class.php'));
 
 /** In-memory job: a fixed item list, real idempotency via the actual
  *  aip_recipe_item_log table (so the exclusion wiring is genuinely exercised,
@@ -249,7 +249,7 @@ ok('3 items logged (d4 never attempted)', $logged4 === 3);
 section('4. kill switch');
 FixtureJudgeJob::$items = [['item_key' => 'e1', 'digest' => 'e1', 'label' => 'E1']];
 [$recipe5, $run5, $ctx5] = make_recipe_and_run($owner_uid, 5, 5000);
-$q = $db->prepare("UPDATE rcr_recipe_runs SET rcr_kill_requested = TRUE WHERE rcr_run_id = ?");
+$q = $db->prepare("UPDATE rcr_recipe_runs SET rcr_kill_requested = TRUE WHERE rcr_recipe_run_id = ?");
 $q->execute([(int)$run5->key]);
 $provider5 = new ScriptedLlmProvider([['text' => '{"verdict": "keep"}']]);
 $result5 = PipelineRunner::run($provider5->resolution('fake/test-model'), $recipe5, $ctx5, 5, 5000, null, null);
