@@ -49,6 +49,9 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.40 - deleteLabel(): a custom label is removed from the site — every
+ *                 membership dropped, every feed binding unbound and untracked,
+ *                 the messages themselves untouched
  * @version 1.39 - getThread() returns each message's to / cc lists (iem_to /
  *                 iem_cc, or derived from the retained header block on a row
  *                 stored before those columns existed)
@@ -906,6 +909,59 @@ class MailboxService {
 		}
 		return array('id' => $labelId, 'name' => $label->get('ilb_name'),
 			'role' => InboundImapFolder::ROLE_CUSTOM);
+	}
+
+	/**
+	 * Delete a custom label from the site. The label is one shared concept across
+	 * every mailbox (its name is the global key), so this takes it off every message
+	 * that carries it and out of every mailbox's list — the messages themselves
+	 * are not touched. Every feed folder bound to it is unbound and untracked, so
+	 * the next sync neither re-materializes memberships nor re-mints the label from
+	 * the folder name (rediscovery never flips iif_is_tracked on an existing row).
+	 * The remote folder/label on the source is left as it is: nothing is deleted
+	 * on a provider by this call.
+	 *
+	 * Not reversible. Returns the deleted label's name and how many messages
+	 * carried it, or null when the label does not exist, is already deleted, or
+	 * the viewer cannot act on the mailbox the request came from.
+	 */
+	public function deleteLabel(int $aliasId, int $labelId): ?array {
+		if ($labelId <= 0 || $aliasId <= 0) {
+			return null;
+		}
+		if (!$this->viewer->isAllAccess() && !$this->viewer->canAccess($aliasId)) {
+			return null;
+		}
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare('SELECT 1 FROM ilb_inbound_email_labels
+			WHERE ilb_inbound_email_label_id = ? AND ilb_delete_time IS NULL');
+		$stmt->execute(array($labelId));
+		if (!$stmt->fetchColumn()) {
+			return null; // unknown, or already deleted
+		}
+		$label = new InboundEmailLabel($labelId, TRUE);
+
+		$stmt = $db->prepare('SELECT COUNT(*) FROM ilm_inbound_label_members
+			WHERE ilm_ilb_inbound_email_label_id = ? AND ilm_present_local = true');
+		$stmt->execute(array($labelId));
+		$carried = intval($stmt->fetchColumn());
+
+		// Every feed binding, on every account: unbind and stop tracking. A folder
+		// still pending its remote CREATE is simply never created.
+		$bindings = new MultiInboundImapFolder(array('label_id' => $labelId));
+		$bindings->load();
+		foreach ($bindings as $row) {
+			$folder = new InboundImapFolder($row->key, TRUE);
+			$folder->set('iif_ilb_inbound_email_label_id', null);
+			$folder->set('iif_is_tracked', false);
+			$folder->set('iif_pending_remote_create', false);
+			$folder->prepare();
+			$folder->save();
+		}
+
+		$name = (string)$label->get('ilb_name');
+		$label->softDelete(); // drops every membership row, then stamps the label
+		return array('id' => $labelId, 'name' => $name, 'messages' => $carried);
 	}
 
 	// -------------------------------------------------------------- threads

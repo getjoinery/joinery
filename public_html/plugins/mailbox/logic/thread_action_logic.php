@@ -5,7 +5,7 @@
  * POST /api/v1/action/mailbox/thread_action (session key). Params:
  * action ∈ {mark_read, mark_unread, star, unstar, delete, archive,
  * unarchive, mark_spam, mark_not_spam, allow_sender, restore, purge,
- * set_membership, create_folder},
+ * set_membership, create_folder, delete_label},
  * targets as ids[] (message ids) OR thread_key OR thread_keys[] (each expanded
  * server-side, optionally narrowed by alias_id), plus folder_id/present for
  * set_membership and name for create_folder. thread_keys[] is what the reader's
@@ -37,6 +37,14 @@ function thread_action_logic(array $input): LogicResult {
 
 	$action = isset($input['action']) ? (string)$input['action'] : '';
 	$alias_id = MailboxService::parseAliasParam($input['alias_id'] ?? null);
+
+	if ($action === 'delete_label') {
+		$deleted = $service->deleteLabel(intval($alias_id ?? 0), intval($input['folder_id'] ?? 0));
+		if ($deleted === null) {
+			return LogicResult::error('The label could not be deleted.');
+		}
+		return LogicResult::render(array('label' => $deleted));
+	}
 
 	// Resolve target ids: explicit ids[], one thread_key, or a whole selection as
 	// thread_keys[] — each expanded server-side and unioned, so a caller can never

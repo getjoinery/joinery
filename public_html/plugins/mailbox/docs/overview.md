@@ -3351,7 +3351,7 @@ The mailbox is exposed to API clients (the native mobile mail screens,
 | `mailboxes` | The viewer's granted mailboxes with unread/total counts, folder rails, per-mailbox `signature`, `own` flag and `drafts` count, plus `can_compose`; for an all-access viewer also `all_mail` and `unmatched` — an array of one entry per domain holding unrouted mail (`domain_id`, `domain`, `security_level`, `unread`, `total`, `trashed`) |
 | `thread_list` | Paged threads for a mailbox view — params `alias_id`, `q`, `unread_only`, `starred_only`, `spam`, `inbox`, `folder_id`, `drafts`, `page`; same row shapes as the web reader's list endpoint. `alias_id` takes a mailbox id, `unmatched:{domain_id}` for a domain's catch-all box, or nothing for all accessible mail |
 | `thread` | One full thread: messages with plain/HTML bodies, attachment manifest, and the thread's folder ids |
-| `thread_action` | The reader's full mutation set: `mark_read`/`mark_unread`, `star`/`unstar`, `archive`/`unarchive`, `delete`, `mark_spam`/`mark_not_spam`, `set_membership`, `create_folder` — targets `ids[]`, a `thread_key`, or `thread_keys[]` (the list's multi-select) |
+| `thread_action` | The reader's full mutation set: `mark_read`/`mark_unread`, `star`/`unstar`, `archive`/`unarchive`, `delete`, `mark_spam`/`mark_not_spam`, `set_membership`, `create_folder` — targets `ids[]`, a `thread_key`, or `thread_keys[]` (the list's multi-select); `delete_label` takes no targets, just `folder_id` (the label) and `alias_id` |
 | `send` | Reply / reply-all / forward / new message as the mailbox — `source_id` or `alias_id`, plus optional `bcc`, `body_html`, `inline_manifest`, `draft_id` (morph a draft); plain JSON or multipart `attachments[]`; forwards re-attach the original's parts server-side |
 | `draft_save` / `draft_get` / `draft_delete` | Create/update, reopen, and discard a compose draft (multipart attachments + `inline_manifest` on save; save returns the persisted `attachments`/`inline` lists) |
 | `draft_attachment_delete` | Remove one saved attachment from a draft — `draft_id`, `attachment_id` (author-scoped, non-inline) |
@@ -4468,6 +4468,22 @@ flag, then `COPY`s the message in; pull/ingest skip a pending folder until it ex
 Creation is idempotent (a folder that already exists is adopted). Conversely, a label
 created on the *source* is discovered each sync as an untracked folder — tick it on
 the mailbox editor to start syncing it.
+
+**Deleting a label.** Each row of the **Labels** panel carries a trash can at its right
+edge, shown when the row is hovered (always shown on a touch screen). It opens a
+confirmation that states the consequences and takes the label's name typed back before
+the **Delete label** button enables; the act is not reversible. `delete_label`
+(`MailboxService::deleteLabel`) removes the label from the site: a label is one shared
+name across every mailbox, so it comes off every message that carries it (the `ilm_`
+rows are dropped) and out of every mailbox's list, and the `ilb_` row is soft-deleted.
+**No message is deleted.** Every feed folder bound to the label is unbound and untracked,
+so the next sync neither re-materializes memberships nor re-mints the label from the
+folder name (rediscovery never flips `iif_is_tracked` on an existing row); the
+folder/label on the source itself is left as it is — nothing is deleted on a provider.
+A list filtered to the deleted label falls back to the mailbox's Inbox. A filter whose
+action applies the label keeps matching and simply skips the label. The name is free
+again: the uniqueness index on `ilb_name` covers live rows only, so creating the same
+name afterwards makes a fresh label.
 
 **The `\All` coverage view (Gmail All Mail).** An all-mail folder is tracked as a
 **coverage source**, not a navigable label: it ingests every message — including
