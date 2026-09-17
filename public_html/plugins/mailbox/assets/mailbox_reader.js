@@ -1,6 +1,8 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.65
+ * No framework. @version 2.66 — a label can be deleted from the Labels panel:
+ * a trash can at the row's right edge, shown on hover, opens a type-the-name
+ * confirmation; the label leaves every message and mailbox, the mail stays.
  *
  * The conversation list updates in place after mutations
  * (specs/implemented/mailbox_reader_list_persistence.md): actions that take rows out of
@@ -943,6 +945,9 @@
 				});
 				lab.appendChild(cb);
 				lab.appendChild(el('span', null, ' ' + f.name));
+				lab.appendChild(labelTrashBtn(f, state.aliasId, panel, function () {
+					afterLabelDelete(f, function () { afterBulk(null); renderBulkActions(); });
+				}));
 				panel.appendChild(lab);
 			}
 		});
@@ -1758,6 +1763,11 @@
 				});
 				lab.appendChild(cb);
 				lab.appendChild(el('span', null, ' ' + f.name));
+				lab.appendChild(labelTrashBtn(f, aliasId, panel, function () {
+					// The control lists labels from the switcher, so re-open the
+					// thread once the rail has been re-read and the label is gone.
+					afterLabelDelete(f, function () { openThread(t); });
+				}));
 				panel.appendChild(lab);
 			}
 		});
@@ -1807,6 +1817,115 @@
 		wrap.appendChild(btn);
 		wrap.appendChild(panel);
 		return wrap;
+	}
+
+	/**
+	 * The trash can at the right edge of a label row in the Labels panel. It is
+	 * quiet by default (low contrast, shown when the row is hovered or the button
+	 * focused — see .mbx-label-trash) because deleting a label is the rare act on
+	 * a row whose common act is a tick. The row is a <label> wrapping a checkbox,
+	 * so the click must be stopped before it toggles the box.
+	 */
+	function labelTrashBtn(f, aliasId, panel, after) {
+		var b = el('button', 'mbx-label-trash');
+		b.type = 'button';
+		b.title = 'Delete label “' + f.name + '”';
+		b.setAttribute('aria-label', b.title);
+		b.innerHTML = iconSvg('trash');
+		b.addEventListener('click', function (e) {
+			e.preventDefault();
+			e.stopPropagation();
+			panel.hidden = true;
+			confirmLabelDelete(f, aliasId, after);
+		});
+		return b;
+	}
+
+	/**
+	 * Deleting a label cannot be undone, so the confirmation says the two things
+	 * that matter — no mail is deleted, and there is no way back — and takes the
+	 * label's name typed back before it will act.
+	 */
+	function confirmLabelDelete(f, aliasId, after) {
+		var overlay = el('div', 'mbx-modal-overlay');
+		var modal = el('div', 'mbx-modal mbx-confirm-modal');
+		modal.appendChild(el('h3', 'mbx-modal-title', 'Delete label'));
+		modal.appendChild(el('p', 'mbx-modal-help',
+			'You are about to delete the “' + f.name + '” label. '
+			+ 'Deleting a label does not delete any emails, but is not reversible.'));
+
+		var field = el('label', 'mbx-confirm-field');
+		var prompt = el('span', 'mbx-confirm-prompt', 'Type ');
+		prompt.appendChild(el('strong', null, f.name));
+		prompt.appendChild(document.createTextNode(' to confirm'));
+		field.appendChild(prompt);
+		var input = document.createElement('input');
+		input.type = 'text';
+		input.className = 'mbx-confirm-input';
+		input.setAttribute('autocomplete', 'off');
+		input.setAttribute('spellcheck', 'false');
+		field.appendChild(input);
+		modal.appendChild(field);
+
+		var note = el('p', 'mbx-modal-help mbx-confirm-error', '');
+		note.hidden = true;
+		modal.appendChild(note);
+
+		var actions = el('div', 'mbx-modal-actions');
+		var cancel = el('button', 'mbx-action', 'Cancel');
+		cancel.type = 'button';
+		var confirm = el('button', 'mbx-action danger', 'Delete label');
+		confirm.type = 'button';
+		confirm.disabled = true;
+		actions.appendChild(cancel);
+		actions.appendChild(confirm);
+		modal.appendChild(actions);
+
+		function dismiss() {
+			document.removeEventListener('keydown', onKey);
+			closeModal(overlay);
+		}
+		function onKey(e) {
+			if (e.key !== 'Escape') return;
+			dismiss();
+		}
+		function matches() { return input.value.trim() === f.name; }
+		function submit() {
+			if (!matches() || confirm.disabled) return;
+			confirm.disabled = true;
+			note.hidden = true;
+			apiAction({ action: 'delete_label', aliasId: aliasId, folderId: f.id }).then(function (resp) {
+				if (!resp || !resp.label) {
+					note.textContent = 'The label could not be deleted.';
+					note.hidden = false;
+					confirm.disabled = !matches();
+					return;
+				}
+				dismiss();
+				if (after) after();
+			});
+		}
+		input.addEventListener('input', function () { confirm.disabled = !matches(); });
+		input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); submit(); } });
+		confirm.addEventListener('click', submit);
+		cancel.addEventListener('click', dismiss);
+		overlay.addEventListener('click', function (e) { if (e.target === overlay) dismiss(); });
+		document.addEventListener('keydown', onKey);
+
+		overlay.appendChild(modal);
+		document.body.appendChild(overlay);
+		input.focus();
+	}
+
+	// A deleted label is gone from the switcher, so re-read the rail; a list that
+	// was filtered to it has nothing to show, so it falls back to the mailbox's
+	// Inbox. `then` runs once the rail is current, for the caller's own rebuild.
+	function afterLabelDelete(f, then) {
+		var viewingIt = state.folderId != null && String(state.folderId) === String(f.id);
+		refreshMailboxes().then(function () {
+			if (viewingIt) { selectMailbox(state.aliasId, state.mailboxLabel); return; }
+			if (then) then();
+		});
 	}
 
 	function closeAllFolderPanels() {
@@ -4407,6 +4526,8 @@
 		// the conversation, then the selection.
 		document.addEventListener('keydown', function (e) {
 			if (e.key !== 'Escape') return;
+			// An open modal owns Esc: it closes itself, and nothing under it moves.
+			if (document.querySelector('.mbx-modal-overlay')) return;
 			var open = document.querySelector(
 				'.mbx-kebab-menu:not([hidden]), .mbx-folder-panel:not([hidden]), .mbx-select-panel:not([hidden])');
 			if (open) {
