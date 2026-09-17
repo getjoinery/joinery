@@ -101,6 +101,19 @@ function calendar_logic(array $input): LogicResult {
         // '' = use my default (stored NULL); 0 = no reminder; else minutes before start.
         $reminder = _calendar_parse_reminder(LibraryFunctions::fetch_variable_local($input, 'entry_reminder', '', '', '', 'safemode', NULL));
 
+        // Details (specs/calendar_entry_details.md). The full form always
+        // sends all three; a bad link is a form error, not a silent drop.
+        $details = [
+            'location' => (string)LibraryFunctions::fetch_variable_local($input, 'entry_location', '', '', '', 'safemode', NULL),
+            'link'     => (string)LibraryFunctions::fetch_variable_local($input, 'entry_link',     '', '', '', 'safemode', NULL),
+            'notes'    => (string)($input['entry_notes'] ?? ''),
+        ];
+        try {
+            CalendarEntry::normalize_link($details['link']);
+        } catch (CalendarEntryException $e) {
+            $page_vars['errors'][] = $e->getMessage();
+        }
+
         // Recurrence fields — read from the declarative FormWriter inputs.
         // The "Repeats" checkbox gates everything; frequency must be a known type.
         $rec_type     = null;
@@ -205,7 +218,7 @@ function calendar_logic(array $input): LogicResult {
                         $parent, ($scope ?: 'this'), $odate, $title, $all_day, $blocks,
                         $start_local, $end_local, $start_utc, $end_utc, $tz,
                         $rec_type, $rec_interval, $rec_days, $rec_week, $rec_end_date,
-                        $subject, $reminder
+                        $subject, $reminder, $details
                     );
                 }
             }
@@ -223,6 +236,7 @@ function calendar_logic(array $input): LogicResult {
                 _calendar_set_fields($entry, $title, $all_day, $blocks, $start_local, $end_local, $start_utc, $end_utc, $tz);
                 _calendar_set_recurrence($entry, $rec_type, $rec_interval, $rec_days, $rec_week, $rec_end_date);
                 $entry->set('cal_reminder_minutes', $reminder);
+                _calendar_apply_details($entry, $details);
                 $entry->save();
             }
             return LogicResult::redirect('/profile/calendar?saved=1');
@@ -315,6 +329,24 @@ function _calendar_set_fields(
 }
 
 /**
+ * Apply submitted detail fields — location, link, notes — to an entry. Only
+ * the keys present in $details are touched: the quick-entry popover sends
+ * location alone, and a quick edit must not clobber a stored link or notes.
+ * The link has been validated by the caller (normalize_link()); the setter's
+ * own check is the backstop.
+ */
+function _calendar_apply_details(CalendarEntry $entry, array $details): void {
+    if (!$details) {
+        return;
+    }
+    $entry->set_detail_fields(
+        array_key_exists('location', $details) ? $details['location'] : $entry->get('cal_location'),
+        array_key_exists('link',     $details) ? $details['link']     : $entry->get('cal_link'),
+        array_key_exists('notes',    $details) ? $details['notes']    : $entry->get('cal_notes')
+    );
+}
+
+/**
  * Normalize a submitted reminder choice for cal_reminder_minutes.
  * '' (use my default) → null; a valid lead choice (0 = no reminder, else
  * minutes before start) → int; anything else → null.
@@ -400,10 +432,20 @@ function _calendar_save_recurring_scope(
     ?int $rec_week,
     ?string $rec_end_date,
     $subject,
-    $reminder = false
+    $reminder = false,
+    array $details = []
 ): void {
     // $reminder: false = not submitted (keep/copy what the row has),
     // null = "use my default", int = explicit choice (0 = no reminder).
+    // $details: the location/link/notes keys the save sent (any subset);
+    // a replacement row or split-off parent copies the parent's values
+    // first, then applies what was sent.
+    $copy_details = function (CalendarEntry $target) use ($parent, $details): void {
+        $target->set('cal_location', $parent->get('cal_location'));
+        $target->set('cal_link',     $parent->get('cal_link'));
+        $target->set('cal_notes',    $parent->get('cal_notes'));
+        _calendar_apply_details($target, $details);
+    };
     switch ($scope) {
         case 'this':
             // Add exception for the original date.
@@ -421,6 +463,7 @@ function _calendar_save_recurring_scope(
             $rep->set('cal_parent_entry_date', $odate);
             _calendar_set_fields($rep, $title, $all_day, $blocks, $start_local, $end_local, $start_utc, $end_utc, $tz);
             $rep->set('cal_reminder_minutes', ($reminder === false) ? $parent->get('cal_reminder_minutes') : $reminder);
+            $copy_details($rep);
             $rep->save();
             break;
 
@@ -449,6 +492,7 @@ function _calendar_save_recurring_scope(
             _calendar_set_fields($new_parent, $title, $all_day, $blocks, $start_local, $end_local, $start_utc, $end_utc, $tz);
             _calendar_set_recurrence($new_parent, $rec_type, $rec_interval, $rec_days, $rec_week, $rec_end_date);
             $new_parent->set('cal_reminder_minutes', ($reminder === false) ? $parent->get('cal_reminder_minutes') : $reminder);
+            $copy_details($new_parent);
             $new_parent->save();
 
             foreach ($future_exceptions as $ex_date) {
@@ -467,6 +511,7 @@ function _calendar_save_recurring_scope(
             if ($reminder !== false) {
                 $parent->set('cal_reminder_minutes', $reminder);
             }
+            _calendar_apply_details($parent, $details);
             $parent->save();
             break;
     }

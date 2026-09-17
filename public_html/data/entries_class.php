@@ -50,6 +50,12 @@ class CalendarEntry extends SystemBase {
 		// else minutes before start (60|30|15|5). On a recurring parent it
 		// applies to every occurrence. Consumed by CalendarEmailEngine.
 		'cal_reminder_minutes' => array('type'=>'int4', 'is_nullable'=>true),
+		// Details (specs/calendar_entry_details.md): where it is, the one
+		// link that gets the owner in (join/ticket/confirmation; http(s)
+		// only), and plain-text notes. Written only via set_detail_fields().
+		'cal_location' => array('type'=>'varchar(255)', 'is_nullable'=>true),
+		'cal_link'     => array('type'=>'text',         'is_nullable'=>true),
+		'cal_notes'    => array('type'=>'text',         'is_nullable'=>true),
 		'cal_visibility' => array('type'=>'varchar(16)', 'default'=>'details'),
 		'cal_type' => array('type'=>'varchar(16)', 'default'=>'personal'),
 		'cal_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
@@ -143,6 +149,42 @@ class CalendarEntry extends SystemBase {
 		$this->set('cal_blocks_availability', $blocks);
 		$this->set('cal_visibility',  'details');
 		$this->set('cal_update_time', gmdate('Y-m-d H:i:s'));
+	}
+
+	const LINK_MAX_LENGTH  = 2048;
+	const NOTES_MAX_LENGTH = 10000;
+
+	/**
+	 * The link rule, on its own for callers that must validate before they
+	 * save. '' / NULL -> NULL. A non-empty value must be an absolute http(s)
+	 * URL of at most LINK_MAX_LENGTH characters, else CalendarEntryException
+	 * — a link is refused, never silently kept or silently dropped.
+	 */
+	public static function normalize_link(?string $raw): ?string {
+		$link = trim((string)$raw);
+		if ($link === '') {
+			return null;
+		}
+		if (mb_strlen($link) > self::LINK_MAX_LENGTH
+				|| !preg_match('#^https?://#i', $link)
+				|| filter_var($link, FILTER_VALIDATE_URL) === false) {
+			throw new CalendarEntryException('The link must be a full web address starting with http:// or https://.');
+		}
+		return $link;
+	}
+
+	/**
+	 * Set the detail fields — location, link, notes — for every write path
+	 * (the calendar form and API, the .ics importer, CalendarEntryImporter).
+	 * Empty and NULL both mean "no value". Location and notes are trimmed and
+	 * capped; the link goes through normalize_link() and throws when invalid.
+	 */
+	public function set_detail_fields(?string $location, ?string $link, ?string $notes): void {
+		$location = trim((string)$location);
+		$notes    = trim((string)$notes);
+		$this->set('cal_link',     self::normalize_link($link));
+		$this->set('cal_location', $location === '' ? null : mb_substr($location, 0, 255));
+		$this->set('cal_notes',    $notes === '' ? null : mb_substr($notes, 0, self::NOTES_MAX_LENGTH));
 	}
 
 	/** True when this entry is a recurring parent. */
@@ -461,6 +503,8 @@ class CalendarEntry extends SystemBase {
 				'url'                 => $visibility === CalendarItem::VIS_DETAILS
 					? '/profile/calendar/entry/' . $parent_id . '/occurrence/' . $date
 					: null,
+				'location'            => $visibility === CalendarItem::VIS_DETAILS ? $this->get('cal_location') : null,
+				'link'                => $visibility === CalendarItem::VIS_DETAILS ? $this->get('cal_link') : null,
 				'blocks_availability' => (bool)$this->get('cal_blocks_availability'),
 				'status'              => (string)($this->get('cal_status') ?: 'confirmed'),
 				'visibility'          => $visibility,

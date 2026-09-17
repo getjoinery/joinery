@@ -107,6 +107,18 @@ $titles = array_map(function ($c) { return $c['entry']->get('cal_title'); }, $du
 check(!in_array('Muted', $titles, true), 'override 0 mutes despite the 30-min default');
 check(in_array('B explicit hour', $titles, true), 'override 60 arms despite owner having no default');
 
+// ── Details in the reminder vars ────────────────────────────────────────────
+section('Reminder vars carry location, link, notes — escaped');
+$detailed = make_entry($userA->key, ['cal_title' => 'Detailed', 'cal_start_utc' => '2026-08-11 13:20:00']);
+$detailed->set_detail_fields('Room <4B> & annex', 'https://meet.example.com/x?a=1&b=2', "Line one\n<b>not bold</b>");
+$detailed->save();
+$vars = (new CalendarEmailEngine(NOW_UTC))->reminderVars($detailed, '2026-08-11 13:20:00', '2026-08-11 14:20:00', $userA);
+check($vars['location'] === 'Room &lt;4B&gt; &amp; annex', 'location is HTML-escaped', $vars['location']);
+check($vars['link'] === 'https://meet.example.com/x?a=1&amp;b=2', 'link is attribute-safe', $vars['link']);
+check($vars['notes'] === "Line one\n&lt;b&gt;not bold&lt;/b&gt;", 'notes are escaped and keep their newline for |nl2br', $vars['notes']);
+$plain = (new CalendarEmailEngine(NOW_UTC))->reminderVars(make_entry($userA->key, ['cal_title' => 'Plain', 'cal_start_utc' => '2026-08-11 15:00:00']), '2026-08-11 15:00:00', '2026-08-11 16:00:00', $userA);
+check($plain['location'] === '' && $plain['link'] === '' && $plain['notes'] === '', 'an entry without details yields empty vars (template conditionals stay closed)');
+
 // ── Exclusions ──────────────────────────────────────────────────────────────
 section('All-day and cancelled excluded');
 make_entry($userA->key, ['cal_title' => 'All day', 'cal_start_utc' => '2026-08-10 05:00:00', 'cal_end_utc' => '2026-08-11 05:00:00', 'cal_all_day' => true, 'cal_reminder_minutes' => 60]);

@@ -29,6 +29,7 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
  * session-gated compose transport is structurally unavailable — never route
  * these through resolveOutboundTransport().
  *
+ * @version 1.2 - reminderVars() carries location/link/notes (escaped); summary lines name the location
  * @version 1.1 - run() counts delivery failures ('failed') so the task can
  *                report them instead of a clean "Sent 0"
  */
@@ -230,6 +231,13 @@ class CalendarEmailEngine {
 			'recipient'     => $user->export_as_array(),
 			'title'         => (string)$entry->get('cal_title'),
 			'tentative'     => (($entry->get('cal_status') ?: 'confirmed') === 'tentative') ? '1' : '',
+			// Details are escaped HERE: the template renderer substitutes
+			// raw, and an AI-extracted entry's notes came from a stranger's
+			// email. The link is http(s) by construction (normalize_link()).
+			// notes keeps its newlines for the template's |nl2br modifier.
+			'location'      => htmlspecialchars((string)$entry->get('cal_location'), ENT_QUOTES, 'UTF-8'),
+			'link'          => htmlspecialchars((string)$entry->get('cal_link'), ENT_QUOTES, 'UTF-8'),
+			'notes'         => htmlspecialchars((string)$entry->get('cal_notes'), ENT_QUOTES, 'UTF-8'),
 			'start_display' => LibraryFunctions::convert_time($start_utc, 'UTC', $tz, 'l, M j, Y g:i A T'),
 			'end_display'   => LibraryFunctions::convert_time($end_utc, 'UTC', $tz, 'g:i A T'),
 			'start_short'   => LibraryFunctions::convert_time($start_utc, 'UTC', $tz, 'g:i A'),
@@ -327,6 +335,9 @@ class CalendarEmailEngine {
 				: LibraryFunctions::convert_time($item->start_utc, 'UTC', $tz, 'g:i A')
 					. ' – ' . LibraryFunctions::convert_time($item->end_utc, 'UTC', $tz, 'g:i A');
 			$line = $when . ' — ' . ($item->title !== null && $item->title !== '' ? $item->title : 'Busy');
+			if ($item->location !== null && $item->location !== '') {
+				$line .= ' @ ' . $item->location;
+			}
 			if ($item->status === 'tentative') {
 				$line .= ' (tentative)';
 			}

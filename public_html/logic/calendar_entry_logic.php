@@ -8,7 +8,8 @@
  * its own occurrence_date context (from the feed item) when editing a single
  * occurrence — the stored fields returned here are the series values.
  *
- * @version 1.0.0
+ * @version 1.1.0
+ * @changelog 1.1.0 - location, link, notes in the payload
  */
 
 require_once(__DIR__ . '/../includes/PathHelper.php');
@@ -66,6 +67,9 @@ function calendar_entry_logic(array $input): LogicResult {
 			'timezone'               => $tz,
 			'all_day'                => (bool)$entry->get('cal_all_day'),
 			'blocks_availability'    => (bool)$entry->get('cal_blocks_availability'),
+			'location'               => (string)($entry->get('cal_location') ?: ''),
+			'link'                   => (string)($entry->get('cal_link') ?: ''),
+			'notes'                  => (string)($entry->get('cal_notes') ?: ''),
 			'is_recurring_parent'    => $is_recurring,
 			'recurrence_description' => $is_recurring ? $entry->get_recurrence_description() : '',
 			'recurrence' => array(

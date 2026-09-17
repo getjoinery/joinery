@@ -20,7 +20,8 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_item_log
  * Lives in includes/, NOT pipeline_jobs/ — PipelineJobRegistry instantiates
  * every class it discovers there, and an abstract class cannot be.
  *
- * @version 1.3
+ * @version 1.4
+ * @changelog 1.4 - digestFor() so a job can rebuild what the model was shown
  * @changelog 1.3 - lookback_days config field: the shared mail-age floor
  *   (EmailJobCandidates), default 7 days
  * @changelog 1.2 - processingConsent() folds EVERY bound address, not only the
@@ -199,6 +200,21 @@ abstract class EmailPipelineJobBase implements PipelineJobInterface, AreaScopedJ
         if (!$msg->key) return null;
 
         $subject = trim((string)$msg->get('iem_subject'));
+        return [
+            'item_key' => (string)$msg->key,
+            'digest'   => $this->digestFor($msg),
+            'label'    => $subject !== '' ? $subject : '(no subject)',
+        ];
+    }
+
+    /**
+     * The text the model is shown for a message: the security digest plus,
+     * for jobs that read attachments, the attachment digest. Deterministic
+     * in the message, so a job can rebuild it at recordVerdict() time to ask
+     * "was this value actually in front of the model?" (the schedule job's
+     * link gate does exactly that).
+     */
+    protected function digestFor(InboundEmailMessage $msg): string {
         $digest = EmailSecurityDigest::build($msg);
         if ($this->includeAttachmentDigest()) {
             $attachments = EmailAttachmentDigest::build($msg);
@@ -206,11 +222,7 @@ abstract class EmailPipelineJobBase implements PipelineJobInterface, AreaScopedJ
                 $digest .= "\n\n" . $attachments;
             }
         }
-        return [
-            'item_key' => (string)$msg->key,
-            'digest'   => $digest,
-            'label'    => $subject !== '' ? $subject : '(no subject)',
-        ];
+        return $digest;
     }
 
     /**

@@ -20,7 +20,8 @@
  *
  * specs/joinery_ai_email_attachments.md
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - the ICS EVENT block carries url and a capped description
  */
 
 require_once(PathHelper::getIncludePath('data/files_class.php'));
@@ -34,6 +35,7 @@ class EmailAttachmentDigest {
 	const MAX_PARTS           = 10;   // manifest rows listed
 	const FILENAME_CAP_CHARS  = 120;
 	const TEXT_PER_PART_CHARS = 2000; // text/plain or rendered ICS, per part
+	const ICS_DESCRIPTION_CAP_CHARS = 500; // a VEVENT DESCRIPTION inside the ICS EVENT block
 	const TEXT_TOTAL_CHARS    = 4000; // all attachment text combined
 
 	/** Same collapsing idea as EmailSecurityDigest::WHITESPACE_RUN_PATTERN. */
@@ -191,6 +193,8 @@ class EmailAttachmentDigest {
 	 * ICS EVENT: <SUMMARY>
 	 *   start: <DTSTART value + tz as parsed>   end: <DTEND or duration-derived>
 	 *   location: <LOCATION or (none)>   organizer: <ORGANIZER or (none)>
+	 *   url: <URL or (none)>
+	 *   description: <DESCRIPTION, whitespace-collapsed, capped, or (none)>
 	 */
 	private static function renderOneEvent(array $props): string {
 		$summary = isset($props['SUMMARY']['value']) ? trim((string)$props['SUMMARY']['value']) : '';
@@ -210,9 +214,23 @@ class EmailAttachmentDigest {
 			$organizer = '(none)';
 		}
 
+		$url = isset($props['URL']['value']) ? trim((string)$props['URL']['value']) : '';
+		if ($url === '') {
+			$url = '(none)';
+		}
+		$description = isset($props['DESCRIPTION']['value'])
+			? self::collapseWhitespace((string)$props['DESCRIPTION']['value']) : '';
+		if ($description === '') {
+			$description = '(none)';
+		} elseif (mb_strlen($description, 'UTF-8') > self::ICS_DESCRIPTION_CAP_CHARS) {
+			$description = mb_substr($description, 0, self::ICS_DESCRIPTION_CAP_CHARS, 'UTF-8') . '…';
+		}
+
 		return "ICS EVENT: $summary\n"
 			. "  start: $start   end: $end\n"
-			. "  location: $location   organizer: $organizer";
+			. "  location: $location   organizer: $organizer\n"
+			. "  url: $url\n"
+			. "  description: $description";
 	}
 
 	/** DTSTART rendered with its timezone (TZID param, or UTC for a 'Z' value). */

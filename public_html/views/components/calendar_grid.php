@@ -12,6 +12,7 @@
  *   'feed_url'     - optional JSON endpoint; when set, paging refetches per range
  *   'initial_date' - Y-m-d to open on (default: today)
  *
+ * @version 1.4.1 - the chip tooltip carries the location
  * @version 1.4.0 - high-contrast restyle: blue default chips with a left
  *                  handle, past items grey with the colour on the handle
  */
@@ -146,7 +147,7 @@ $cid = 'calgrid_' . substr(md5(uniqid('', true)), 0, 8);
             : ((e || s) && (e || s) < new Date());
         if (isPast) { el.className += ' is-past'; }
         el.style.setProperty('--chip-color', color);
-        el.title = label;
+        el.title = label + (it.location ? ' \u00b7 ' + it.location : '');
         if (!it.all_day && s) {
             var tspan = document.createElement('span');
             tspan.className = 'calgrid-chip-time';

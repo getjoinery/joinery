@@ -17,17 +17,20 @@ require_once(PathHelper::getIncludePath('data/entries_class.php'));
  * one place the subject is fixed by the CALLER's code — never by anything
  * the model produced — for every consumer.
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - location, link, notes (specs/calendar_entry_details.md)
  */
 class CalendarEntryImporter {
 
     /**
      * @param int    $owner_user_id subject; fixed by the CALLER's code, never model output
      * @param array  $fields  title, start_local, end_local, timezone,
-     *                        all_day (bool), source, source_ref (nullable)
+     *                        all_day (bool), source, source_ref (nullable),
+     *                        location, link, notes (all optional; a missing
+     *                        key leaves an existing entry's value alone)
      * @return CalendarEntry the saved entry
      * @throws InvalidArgumentException on invalid timezone, unparseable
-     *         times, end <= start, or empty title
+     *         times, end <= start, empty title, or a link that is not http(s)
      */
     public static function upsert(int $owner_user_id, array $fields): CalendarEntry {
         $title    = trim((string)($fields['title'] ?? ''));
@@ -96,6 +99,15 @@ class CalendarEntryImporter {
 
         $entry->set('cal_status', 'tentative');
         $entry->set_core_fields($title, $all_day, true, $start_local, $end_local, $start_utc, $end_utc, $tz);
+        try {
+            $entry->set_detail_fields(
+                array_key_exists('location', $fields) ? $fields['location'] : $entry->get('cal_location'),
+                array_key_exists('link',     $fields) ? $fields['link']     : $entry->get('cal_link'),
+                array_key_exists('notes',    $fields) ? $fields['notes']    : $entry->get('cal_notes')
+            );
+        } catch (CalendarEntryException $e) {
+            throw new InvalidArgumentException('link: ' . $e->getMessage());
+        }
 
         $entry->prepare();
         $entry->save();

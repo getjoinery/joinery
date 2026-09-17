@@ -80,6 +80,8 @@ $ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n"
      . "DTSTART;TZID=America/New_York:20260601T120000\r\n"
      . "DTEND;TZID=America/New_York:20260601T130000\r\n"
      . "DESCRIPTION:line one\\nline two that is very very very very very very ver\r\n y long and folded\r\n"
+     . "LOCATION:Caf\\, Corner\r\n"
+     . "URL:https://maps.example.com/p?q=1&r=2\r\n"
      . "RRULE:FREQ=WEEKLY;BYDAY=MO\r\n"
      . "EXDATE;TZID=America/New_York:20260608T120000\r\n"
      . "EXDATE;TZID=America/New_York:20260615T120000\r\n"
@@ -97,6 +99,8 @@ ok('DESCRIPTION unfolded + newline-unescaped',
       && strpos($ev['props']['DESCRIPTION']['value'] ?? '', 'folded') !== false
       && strpos($ev['props']['DESCRIPTION']['value'] ?? '', ' long') !== false);
 ok('RRULE captured as raw value', ($ev['props']['RRULE']['value'] ?? null) === 'FREQ=WEEKLY;BYDAY=MO');
+ok('LOCATION unescaped', ($ev['props']['LOCATION']['value'] ?? null) === 'Caf, Corner');
+ok('URL kept verbatim (not text-unescaped)', ($ev['props']['URL']['value'] ?? null) === 'https://maps.example.com/p?q=1&r=2');
 ok('two EXDATEs accumulated', count($ev['exdates']) === 2);
 ok('VALARM not leaked into event props', !isset($ev['props']['ACTION']));
 

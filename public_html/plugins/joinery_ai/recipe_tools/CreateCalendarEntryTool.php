@@ -21,7 +21,9 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
  * The subject is always the acting user. Nothing in the input can aim the
  * entry at anyone else's calendar.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - location, link (shown in full), notes on the card and
+ *   through to the importer (specs/calendar_entry_details.md)
  * @changelog 1.1 - the card shows the time in the owner's zone with the
  *   email's own clock alongside, and names the source email (subject, sender,
  *   mailbox) instead of its row id
@@ -49,6 +51,16 @@ class CreateCalendarEntryTool implements RecipeToolInterface, QueueableToolInter
     public function renderProposedAction(array $input, ?int $owner_id = null): array {
         $lines = ['Add to your calendar: ' . ProposedActionFacts::scalar($input['title'] ?? '')];
         $lines[] = self::whenLine($input, $owner_id);
+        $location = trim((string)($input['location'] ?? ''));
+        if ($location !== '') $lines[] = 'Where: ' . ProposedActionFacts::scalar($location);
+        // The link is what the owner will click from the reminder email, so
+        // the card shows all of it — nothing can hide in a truncated tail.
+        $link = trim((string)($input['link'] ?? ''));
+        if ($link !== '') {
+            foreach (ProposedActionFacts::verbatim('Link', $link) as $l) $lines[] = $l;
+        }
+        $notes = trim((string)($input['notes'] ?? ''));
+        if ($notes !== '') $lines[] = 'Notes: ' . ProposedActionFacts::scalar($notes);
         $source = self::sourceLine($input, $owner_id);
         if ($source !== null) $lines[] = $source;
         return $lines;
@@ -197,6 +209,9 @@ class CreateCalendarEntryTool implements RecipeToolInterface, QueueableToolInter
                 'end_local'   => ['type' => 'string', 'description' => 'End, Y-m-d H:i:s wall clock. Defaults to one hour after the start.'],
                 'timezone'    => ['type' => 'string', 'description' => 'IANA timezone (e.g. America/New_York). Defaults to the owner\'s.'],
                 'all_day'     => ['type' => 'boolean', 'description' => 'True for a date with no time (a deadline, a due date).'],
+                'location'    => ['type' => 'string', 'description' => 'Where it is, as stated (room, address, venue, "Zoom"). Max 255 chars.'],
+                'link'        => ['type' => 'string', 'description' => 'The one http(s) URL that gets the owner in (join, tickets, confirmation), copied exactly.'],
+                'notes'       => ['type' => 'string', 'description' => 'Plain-text facts the owner will need (confirmation number, dial-in, what to bring).'],
             ],
         ];
     }
@@ -222,16 +237,25 @@ class CreateCalendarEntryTool implements RecipeToolInterface, QueueableToolInter
         $source_ref = isset($input['source_ref']) && trim((string)$input['source_ref']) !== ''
             ? trim((string)$input['source_ref']) : null;
 
+        $fields = [
+            'title'       => $title,
+            'start_local' => $start_local,
+            'end_local'   => $end_local,
+            'timezone'    => $tz,
+            'all_day'     => $all_day,
+            'source'      => $source_ref !== null ? 'email' : 'assistant',
+            'source_ref'  => $source_ref,
+        ];
+        // Details only when given: a re-proposal that omits one leaves the
+        // existing entry's value in place (the importer's rule).
+        foreach (['location', 'link', 'notes'] as $k) {
+            if (isset($input[$k]) && trim((string)$input[$k]) !== '') {
+                $fields[$k] = trim((string)$input[$k]);
+            }
+        }
+
         try {
-            $entry = CalendarEntryImporter::upsert($ctx->actingUserId(), [
-                'title'       => $title,
-                'start_local' => $start_local,
-                'end_local'   => $end_local,
-                'timezone'    => $tz,
-                'all_day'     => $all_day,
-                'source'      => $source_ref !== null ? 'email' : 'assistant',
-                'source_ref'  => $source_ref,
-            ]);
+            $entry = CalendarEntryImporter::upsert($ctx->actingUserId(), $fields);
         } catch (InvalidArgumentException $e) {
             return ['content' => 'create_calendar_entry error: ' . $e->getMessage(), 'is_error' => true];
         }

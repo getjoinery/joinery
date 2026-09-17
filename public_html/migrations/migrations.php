@@ -1510,3 +1510,13 @@
 	$migration['migration_file'] = 'content_version_prefix.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// The calendar reminder email says where the entry is, links to it, and
+	// carries its notes (specs/calendar_entry_details.md). Only a factory
+	// body is rewritten; the test passes once no factory body remains.
+	$migration = array();
+	$migration['database_version'] = '194';
+	$migration['test'] = "SELECT CASE WHEN EXISTS(SELECT 1 FROM emt_email_templates WHERE emt_name = 'calendar_reminder' AND emt_body NOT LIKE '%*location*%' AND emt_body LIKE '%Coming up: <strong>*title*</strong>%') THEN 0 ELSE 1 END AS count";
+	$migration['migration_file'] = 'migration_calendar_reminder_details.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
