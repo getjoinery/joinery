@@ -1,14 +1,24 @@
 # Agent log access: two observe words, one owner switch, and the node-side redactor
 
-**Status: BUILT 2026-09-17, uncommitted.** Agent side as 1.35.0 in
-/home/user1/joinery-agent (`redact/`, `primitives/log_access.go`,
-`observe_site_log.go`, `observe_log_table_tail.go`, the watcher projection,
-the claim field), platform side in this tree. Open before the spec moves to
-implemented: `update_database` on dev (the `mgn_agent_log_access` column on
-`managed_nodes_class.php` is the one edit held until it can run, because
-every fleet agent polls dev and a declared-but-missing column fails the
-claim), the db suites, an agent release and a platform release, and the
-live proof in §5. Original design note follows. Closes two rows of the running list in
+**Status: RELEASED 2026-09-18.** Platform 0.8.411 on every site node and agent 1.35.0 on all
+eleven agented nodes, each reporting both words and its switch (`on` everywhere a site runs;
+`off` on docker-prod, a host with no site and so no setting to read, which is the fail-closed
+reading the design asks for). Live proof (§5) run on dev 2026-09-18: `site_log {error, 50}`
+(job 22104) and `log_table_tail {logins, 20}` (job 22105) completed with IPs masked on the node;
+with dev's switch off, the same two words (jobs 22160, 22161) were refused with the owner's
+reason; switch restored. The proof found one defect, fixed the same day and uncommitted:
+`JobResultProcessor` had no handler for either word, so a completed log job never recorded a
+result and the job page showed only the raw transcript. `process_site_log` and
+`process_log_table_tail` record the envelope as the job's result, bounded on intake; the job
+page's log box and table render from it. The credential-line half of the proof (job 22204, a
+planted line carrying `dbpassword=...`, `api_key=...`, an address, an IP and a token) found the
+second defect: the address, IP and token were masked on the node, the two lowercase assignments
+were not, because both redactors matched the assignment shape only in uppercase. Fixed the same
+day on both sides, uncommitted: `SmSecretRedactor` 1.2 and the agent's `redact` package (agent
+1.35.1) mask `name=value` in any case for a name carrying password/passwd/token/secret or naming
+a secret key (`api_key` joins both lists); a lowercase name ending in `_key` stays readable. Still
+open before the spec moves: commit both repos, a platform release (which carries agent 1.35.1 to
+the fleet), then re-read the planted line on dev and see both values masked. Original design note follows. Closes two rows of the running list in
 `agent_recipes_and_vocabulary.md` (`site_log`, `log_table_tail`) and builds
 the node-side redaction pass that `sentinel_managed_recovery.md` §11 names
 as mandatory v1 work. Obeys every rule of `agent_recipes_and_vocabulary.md`

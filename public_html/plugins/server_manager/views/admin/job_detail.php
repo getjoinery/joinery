@@ -5,6 +5,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.7 - a log job whose result records read=false says so instead of dumping the flag
  * @version 1.6 - a site_log result renders its text as a log box and a log_table_tail result as a table,
  *                both through the redactor a second time (specs/agent_log_access.md §4); a pruned
  *                excerpt says so
@@ -258,7 +259,14 @@ $result = $job->get('mjb_result');
 if ($result) {
 	$result_data = is_string($result) ? json_decode($result, true) : $result;
 	$job_type    = (string)$job->get('mjb_job_type');
-	if (is_array($result_data) && !empty($result_data['pruned'])) {
+	if (is_array($result_data) && in_array($job_type, ManagementJob::LOG_EXCERPT_TYPES, true)
+		&& array_key_exists('read', $result_data) && !$result_data['read']) {
+		// The node completed the job but what came back was not a log envelope
+		// (JobResultProcessor::process_site_log / process_log_table_tail).
+		echo '<div class="card mb-3"><div class="card-body text-muted">The node completed this job but returned '
+			. 'no readable log excerpt; the transcript above is everything it said.</div></div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && !empty($result_data['pruned'])) {
 		// The retention sweep kept the job and dropped the excerpt
 		// (ManagementJob::purgeLogExcerpts).
 		echo '<div class="card mb-3"><div class="card-body text-muted">The log excerpt this job returned has been '
@@ -275,7 +283,7 @@ if ($result) {
 			. (empty($result_data['present'])
 				? 'not present on the node'
 				: (int)($result_data['lines_returned'] ?? 0) . ' line(s)'
-					. (!empty($result_data['truncated']) ? ', truncated to the cap' : '')
+					. (!empty($result_data['truncated']) ? ', more in the file' : '')
 					. ', ' . number_format((int)($result_data['size_bytes'] ?? 0)) . ' bytes on disk'
 					. ', modified ' . htmlspecialchars((string)($result_data['modified_time'] ?? '')))
 			. '</small></div>';
@@ -287,7 +295,7 @@ if ($result) {
 		echo '<div class="card mb-3"><div class="card-header"><strong>'
 			. htmlspecialchars(JobCommandBuilder::LOG_TABLES[$table] ?? $table)
 			. '</strong> <small class="text-muted">— ' . count($result_data['rows']) . ' newest row(s)'
-			. (!empty($result_data['truncated']) ? ', truncated to the cap' : '') . '</small></div>';
+			. (!empty($result_data['truncated']) ? ', cut to the size cap' : '') . '</small></div>';
 		echo '<div class="table-responsive"><table class="table table-sm table-striped mb-0"><thead><tr>';
 		foreach ($columns as $c) { echo '<th>' . htmlspecialchars((string)$c) . '</th>'; }
 		echo '</tr></thead><tbody>';
