@@ -36,6 +36,8 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.21 - adoptJoin places the node (ManagedHost::place_node): a join links an existing
+ *                 placement record at its address and mints none — a bare machine has no host row
  * @version 1.20 - log_access: the node reports whether its owner lets this plane read its logs (on|off),
  *                stored in mgn_agent_log_access so the Logs action is disabled with the owner's reason
  *                before a job is queued (specs/agent_log_access.md §1, reported at poll)
@@ -586,7 +588,11 @@ class AgentChannelEndpoint {
 		$node->prepare();
 		$node->save();
 		$node->load();
-		ManagedHost::ensure_for_node($node);
+		// A join never names a container, so this mints nothing: it links the
+		// node to a placement record that already exists at its address (a
+		// host's own agent landing on the record its containers point at) and
+		// leaves a bare machine as what it is — a node with no host row.
+		ManagedHost::place_node($node);
 
 		$host = self::approveJoin($request, $node);
 		return ['node' => $node, 'self' => $self, 'host' => $host];

@@ -1,7 +1,13 @@
 <?php
 /**
- * ManagedHost - A server that hosts one or more auto-provisioned Joinery sites.
+ * ManagedHost - the placement record for a Docker box: which container sites
+ * live on which machine. The machine itself is a ManagedNode in machine posture
+ * (no container name, no web root), named here by mgh_mgn_managed_node_id. A
+ * bare machine is only a node — its box identity IS its node — and has no
+ * record here.
  *
+ * @version 1.4 - place_node(): the posture rule for the add/join writers — link an existing
+ *                record at the address, mint one only for a container node
  * @version 1.3 - placement_for_addresses(): the live placement record keyed by any of a set of
  *                addresses, so a join over one family finds the record keyed by the other
  * @version 1.2 - link_host_node(): agent-join approval names a machine-posture node as its
@@ -96,14 +102,6 @@ class ManagedHost extends SystemBase {
 	}
 
 	/**
-	 * Link a node to its placement record, creating the record if none exists.
-	 *
-	 * A container node names its host by mgn_mgh_managed_host_id and nothing else, so
-	 * any path that is about to treat a node as a container (allocating it a
-	 * port, addressing its host) calls this first. Matching is by the host
-	 * address string once, here, at write time — never again at read time.
-	 */
-	/**
 	 * The live placement record whose host is any one of these addresses, or
 	 * null. A dual-stack machine is one record: whichever address the join
 	 * travelled over, the record keyed by its other address is the same box.
@@ -127,8 +125,38 @@ class ManagedHost extends SystemBase {
 		return null;
 	}
 
+	/**
+	 * Link a node to its placement record, creating the record if none exists.
+	 *
+	 * A container node names its host by mgn_mgh_managed_host_id and nothing else, so
+	 * any path that is about to treat a node as a container (allocating it a
+	 * port, addressing its host) calls this first. Matching is by the host
+	 * address string once, here, at write time — never again at read time.
+	 */
 	public static function ensure_for_node($node) {
 		$addr = trim((string)$node->get('mgn_host'));
+		return self::attach_node($node, $addr, true);
+	}
+
+	/**
+	 * The posture rule for the writers that see every kind of node — the manual
+	 * add/edit form and agent-join approval. A container names its placement,
+	 * and a record is minted for it when none exists. Any other node (a bare
+	 * machine, a host's own agent) is linked to a record that already exists at
+	 * its address and mints nothing: a bare machine's identity is its node, and
+	 * a placement record with no containers on it is dead weight the dashboard
+	 * would render as a one-site "host". Returns the record or null.
+	 */
+	public static function place_node($node) {
+		$addr = trim((string)$node->get('mgn_host'));
+		if ($addr === '') {
+			return null;
+		}
+		$is_container = trim((string)$node->get('mgn_container_name')) !== '';
+		return self::attach_node($node, $addr, $is_container);
+	}
+
+	private static function attach_node($node, $addr, $mint) {
 		if ($addr === '') {
 			throw new ManagedHostException('Cannot assign a host record: the node has no host address.');
 		}
@@ -149,6 +177,9 @@ class ManagedHost extends SystemBase {
 			}
 		}
 
+		if (!$host && !$mint) {
+			return null;
+		}
 		if (!$host) {
 			// mgh_slug is DB-unique across deleted rows too, so probe with a suffix
 			// loop the way the backfill migration did. The column is varchar(50);
