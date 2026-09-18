@@ -1669,4 +1669,78 @@ section('host_converge: primitive only, no parameters, refused without the word'
 		'its claim budget is the same runner\'s: fifteen minutes plus slack');
 }
 
+section('site_log / log_table_tail: closed choices, bounded counts, the owner\'s switch (specs/agent_log_access.md)');
+
+{
+	$log_node = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x04", 32)),
+		'mgn_agent_version'    => '1.35.0',
+		'mgn_agent_primitives' => 'check_status,site_log,log_table_tail',
+		'mgn_agent_log_access' => 'on',
+	));
+	$built = JobCommandBuilder::build_site_log($log_node, 'error', false, 100);
+	check($built === array('primitive' => 'site_log', 'params' => array('file' => 'error', 'previous' => false, 'lines' => 100)),
+		'site_log travels as the name, a file from the closed list, the rotation flag and a bounded count',
+		var_export($built, true));
+	$built = JobCommandBuilder::build_site_log($log_node, 'cron_scheduled_tasks', '1', '200');
+	check($built['params'] === array('file' => 'cron_scheduled_tasks', 'previous' => true, 'lines' => 200),
+		'the previous-rotation flag is a bool and the count an int, whatever the form posted');
+	check(JobCommandBuilder::transports_for('site_log') === array('primitive')
+		&& JobCommandBuilder::transports_for('log_table_tail') === array('primitive'),
+		'both log words have exactly one transport, the primitive: no SSH route, no API route');
+
+	$built = JobCommandBuilder::build_log_table_tail($log_node, 'logins', 20);
+	check($built === array('primitive' => 'log_table_tail', 'params' => array('table' => 'logins', 'rows' => 20)),
+		'log_table_tail travels as the name, a table from the closed list and a bounded count',
+		var_export($built, true));
+
+	foreach (array(array('../error', false, 10), array('error', false, 0), array('error', false, 201), array('access', false, 10)) as $bad) {
+		$threw = false;
+		try { JobCommandBuilder::build_site_log($log_node, $bad[0], $bad[1], $bad[2]); } catch (Exception $e) { $threw = true; }
+		check($threw, 'site_log refuses on the plane: ' . var_export($bad, true));
+	}
+	foreach (array(array('users', 10), array('logins', 0), array('logins', 999), array('log_logins', 10)) as $bad) {
+		$threw = false;
+		try { JobCommandBuilder::build_log_table_tail($log_node, $bad[0], $bad[1]); } catch (Exception $e) { $threw = true; }
+		check($threw, 'log_table_tail refuses on the plane: ' . var_export($bad, true));
+	}
+	check(!array_key_exists('access', JobCommandBuilder::SITE_LOG_FILES), 'the access log is not on the list (visitor addresses and URLs)');
+	check(count(JobCommandBuilder::SITE_LOG_FILES) === 5 && count(JobCommandBuilder::LOG_TABLES) === 5,
+		'the mirrored lists are the five files and five tables the spec names');
+
+	// The owner's switch, as the node last reported it: off is a refusal
+	// before a job exists, with the reason naming the switch.
+	$off_node = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x05", 32)),
+		'mgn_agent_version'    => '1.35.0',
+		'mgn_agent_primitives' => 'check_status,site_log,log_table_tail',
+		'mgn_agent_log_access' => 'off',
+	));
+	check(is_string(JobCommandBuilder::log_access_refusal($off_node))
+		&& strpos(JobCommandBuilder::log_access_refusal($off_node), 'agent_log_access') !== false,
+		'a node that reported its switch off yields a refusal naming the switch');
+	$threw = false;
+	try { JobCommandBuilder::build_site_log($off_node, 'error'); } catch (Exception $e) { $threw = strpos($e->getMessage(), 'not allowed log access') !== false; }
+	check($threw, 'and build_site_log refuses with the owner\'s reason instead of queuing a job the node would refuse');
+	check(JobCommandBuilder::log_access_refusal($log_node) === null, 'a node that reported on is not refused here');
+	$unreported = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x06", 32)),
+		'mgn_agent_version'    => '1.35.0',
+		'mgn_agent_primitives' => 'check_status,site_log,log_table_tail',
+	));
+	check(JobCommandBuilder::log_access_refusal($unreported) === null,
+		'a node that has not yet reported its switch is not refused here: the node decides, and says so in the job');
+
+	$without = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x07", 32)),
+		'mgn_agent_version'    => '1.34.0',
+		'mgn_agent_primitives' => 'check_status,host_report',
+	));
+	check(!JobCommandBuilder::has_primitive($without, 'site_log') && !JobCommandBuilder::has_primitive($without, 'log_table_tail'),
+		'a node whose vocabulary lacks the words is not offered them');
+	$threw = false;
+	try { JobCommandBuilder::build_site_log($without, 'error'); } catch (Exception $e) { $threw = strpos($e->getMessage(), 'site_log') !== false; }
+	check($threw, 'and build_site_log names the missing word in its refusal');
+}
+
 harness_finish();

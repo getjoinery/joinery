@@ -2488,6 +2488,18 @@
       "helptext": "Whether this machine runs the Joinery agent — the root service that performs backups, upgrades and health checks locally, and the only way a management node can be given work to do here. Set from the Management Node admin page, which is where the consequences can be explained; a bare checkbox would flip a setting and appear to do nothing until the next root moment. The agent binary is installed on every deployment regardless; this setting decides only whether it RUNS. The installer reads it at container start, site install and code upgrade: on starts the agent and sets up its supervision, off stops it and takes the supervision away. install.sh --enable-agent sets it at install time, which is how a node provisioned by a management node comes up running. Turning it on does not connect this machine to anything — that is a separate, deliberate act on the same page."
     },
     {
+      "name": "agent_log_access",
+      "default": "1",
+      "managed": true,
+      "helptext": "Whether a management node this machine is connected to may read this site's logs: the last lines of the error and task logs, and the newest rows of the login, request, event, form-error and webhook logs. The agent masks passwords, keys, tokens, addresses and the personal half of email addresses on this machine before anything is sent, and leaves member addresses, submitted forms and raw payloads out entirely. On by default; set from the Management Node admin page, where what it grants is explained. Off refuses every such request on this machine, and the management node is told why. No effect until the machine is connected to a management node. specs/agent_log_access.md."
+    },
+    {
+      "name": "agent_log_access_notice_seen",
+      "default": "",
+      "managed": true,
+      "helptext": "Set once an administrator has acknowledged the one-time notice that a connected management node can read this site's logs (agent_log_access), or has used the switch. A node connected after the release that introduced the switch never sees the notice, because the switch is on the page it used to connect."
+    },
+    {
       "name": "agent_join_request",
       "default": "",
       "managed": true,

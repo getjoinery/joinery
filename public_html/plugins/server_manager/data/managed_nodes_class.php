@@ -2,6 +2,9 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.21 - mgn_agent_log_access: the owner's log-access switch as the node last reported it at
+ *                poll (on|off), so the Logs action can show the reason before a job is queued
+ *                (specs/agent_log_access.md §1)
  * @version 1.20 - MultiManagedNode option reports_failing_recipe: the nodes whose stored recipe list
  *                 says a recipe's check last failed (an entry ending :fail), answered by the database
  * @version 1.19 - MultiManagedNode option reports_failed_units: the nodes whose latest host report
@@ -281,6 +284,12 @@ class ManagedNode extends SystemBase {
 		// bundle. It is the only evidence this plane gets that a bundle it
 		// serves actually landed.
 		'mgn_agent_bundle_version' => array('type'=>'varchar(32)'),
+
+		// Whether the node's owner lets this plane read its logs, as the
+		// agent reported it on its last poll: 'on', 'off', or empty for an
+		// agent that has no log words to gate. Reported, never set from here:
+		// the switch is on the node's own admin and the node enforces it.
+		'mgn_agent_log_access'    => array('type'=>'varchar(8)'),
 
 		'mgn_is_relay'            => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'mgn_create_time'         => array('type'=>'timestamp(6)', 'default'=>'now()'),

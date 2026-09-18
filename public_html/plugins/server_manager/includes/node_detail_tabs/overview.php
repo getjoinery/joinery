@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.18 - the Logs box: read a log file or a log table from a node whose agent ships site_log /
+ *                log_table_tail; shown disabled with the owner's reason when the node last reported
+ *                its log-access switch off (specs/agent_log_access.md §4)
  * @version 1.17 - the not-applicable caption covers both reasons a recipe does not tick here: a container agent
  *                 whose recipe's subject is the host, and a machine with no site whose recipe's repair is an
  *                 installer the support bundle does not carry (agent_supervision)
@@ -320,6 +323,57 @@
 		echo ' <button type="submit" form="nodeActionHostReport" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075" title="Read the machine now: failed units, fail2ban jails, SSH auth failures, sshd posture, reboot-required">Host Report</button>';
 	}
 	echo '</div>';
+
+	// The site's own logs, read on the node and redacted there, for a node
+	// whose agent ships the two log words. The owner's switch on the node
+	// decides; the node reports it at every poll, so a node that has said
+	// "off" gets the reason here instead of a job that would be refused.
+	$has_site_log  = JobCommandBuilder::has_primitive($node, 'site_log');
+	$has_log_table = JobCommandBuilder::has_primitive($node, 'log_table_tail');
+	if ($has_site_log || $has_log_table) {
+		$log_refusal = JobCommandBuilder::log_access_refusal($node);
+		echo '<details class="mt-2 ps-3"><summary class="small text-muted" style="cursor:pointer;">Logs</summary>';
+		if ($log_refusal !== null) {
+			echo '<div class="small text-muted mt-1">' . htmlspecialchars($log_refusal) . '</div>';
+		} else {
+			echo '<div class="small text-muted mt-1 mb-2">The last lines of one of the site\'s log files, or the newest rows of one of its log tables. '
+				. 'The node masks credentials and personal data before anything is sent; the result is on the job page.</div>';
+			echo '<div class="d-flex flex-wrap gap-4">';
+			if ($has_site_log) {
+				echo '<div>';
+				$fw_log = $page->getFormWriter('site_log_form', [
+					'action' => $base_url . '&tab=overview',
+					'values' => ['file' => 'error', 'lines' => '100'],
+				]);
+				$fw_log->begin_form();
+				$fw_log->hiddeninput('action', '', ['id' => 'site_log_action', 'value' => 'site_log']);
+				$fw_log->hiddeninput(SmAdminCsrf::FIELD, '', ['id' => 'site_log_csrf', 'value' => SmAdminCsrf::token()]);
+				$fw_log->dropinput('file', 'Log file', ['options' => JobCommandBuilder::SITE_LOG_FILES]);
+				$fw_log->checkboxinput('previous', 'Previous rotation (yesterday\'s file)');
+				$fw_log->numberinput('lines', 'Lines (1 to ' . JobCommandBuilder::LOG_MAX_COUNT . ')', ['min' => 1, 'max' => JobCommandBuilder::LOG_MAX_COUNT]);
+				$fw_log->submitbutton('btn_site_log', 'Read log file', ['class' => 'btn btn-sm btn-outline-secondary']);
+				$fw_log->end_form();
+				echo '</div>';
+			}
+			if ($has_log_table) {
+				echo '<div>';
+				$fw_tbl = $page->getFormWriter('log_table_form', [
+					'action' => $base_url . '&tab=overview',
+					'values' => ['table' => 'logins', 'rows' => '50'],
+				]);
+				$fw_tbl->begin_form();
+				$fw_tbl->hiddeninput('action', '', ['id' => 'log_table_action', 'value' => 'log_table_tail']);
+				$fw_tbl->hiddeninput(SmAdminCsrf::FIELD, '', ['id' => 'log_table_csrf', 'value' => SmAdminCsrf::token()]);
+				$fw_tbl->dropinput('table', 'Log table', ['options' => JobCommandBuilder::LOG_TABLES]);
+				$fw_tbl->numberinput('rows', 'Rows (1 to ' . JobCommandBuilder::LOG_MAX_COUNT . ')', ['min' => 1, 'max' => JobCommandBuilder::LOG_MAX_COUNT]);
+				$fw_tbl->submitbutton('btn_log_table', 'Read log table', ['class' => 'btn btn-sm btn-outline-secondary']);
+				$fw_tbl->end_form();
+				echo '</div>';
+			}
+			echo '</div>';
+		}
+		echo '</details>';
+	}
 
 	// Uptime monitoring status
 	$uptime_enabled = $node->get('mgn_uptime_enabled');

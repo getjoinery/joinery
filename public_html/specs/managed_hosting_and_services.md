@@ -840,6 +840,15 @@ Decisions for the owner:
 
 Engineering still to settle before the build:
 
+- **E0. The owner's record of what the plane read** — a precondition of
+  the first customer-owned node being paired, not of this build.
+  `agent_log_access.md` lets a paired plane read a node's redacted log
+  excerpts, on by default, and records each read only in the plane's job
+  row. That is the owner's record while owner and operator are the same
+  person; a customer's node needs its own, shown on its own Management Node
+  page, before it is paired. Small: the agent appends one line per read to
+  a root-owned file and the page shows the last twenty.
+
 - **E1. The enrolment skeleton's exact seam** — what moves from
   `FleetClient` / `FleetService` into core and what the mailbox fleet keeps.
   Read both before item 8 of §10.

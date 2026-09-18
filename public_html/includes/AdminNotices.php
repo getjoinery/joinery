@@ -19,6 +19,7 @@
  * is all a plugin needs. A renderer that throws is logged and skipped — an
  * admin page never fails to render because a notice could not decide.
  *
+ * @version 1.7 - agent_log_access joins the core notices (specs/agent_log_access.md §4.1, the one-time notice on an already-connected node)
  * @version 1.6 - recipe_case joins the core notices (specs/agent_tier1_recipes.md, the case on an unpaired node)
  * @version 1.5 - site_backup joins the core notices (specs/post_release_fleet_defects.md B3)
  * @version 1.4 - certificates joins the core notices (specs/implemented/tls_and_origin_trust.md WP11)
@@ -63,6 +64,11 @@ class AdminNotices {
 			// the agent rendered outward, "as reported by the agent's ledger".
 			// Silent while no case is open.
 			'recipe_case'    => array('RecipeCaseNotice', 'render'),
+			// A node that was already connected to a management node when log
+			// access arrived says so once: the plane can read its redacted
+			// log excerpts, and here is the switch. Silent once acknowledged,
+			// and never shown on a node connected after the switch existed.
+			'agent_log_access' => array('AgentLogAccessNotice', 'render'),
 		);
 	}
 

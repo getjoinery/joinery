@@ -381,6 +381,18 @@ check(stripos((string)AgentChannelEndpoint::validation_error($bad, $claim_spec),
 $bad = $claim; $bad['hold'] = 'fail2ban';
 check(stripos((string)AgentChannelEndpoint::validation_error($bad, $claim_spec), 'undeclared') !== false,
 	'Nothing in a claim names, holds, starts or arms a recipe: such a field is undeclared');
+// The owner's log-access switch rides the claim as a closed set
+// (specs/agent_log_access.md §1, reported at poll).
+foreach (array('on', 'off', '') as $v) {
+	$with = $claim; $with['log_access'] = $v;
+	check(AgentChannelEndpoint::validation_error($with, $claim_spec) === null,
+		"A claim reporting log_access '$v' is accepted", (string)AgentChannelEndpoint::validation_error($with, $claim_spec));
+}
+foreach (array('yes', '1', 'on;off', 'ON') as $v) {
+	$with = $claim; $with['log_access'] = $v;
+	check(AgentChannelEndpoint::validation_error($with, $claim_spec) !== null,
+		"log_access '$v' is outside the closed set and refused");
+}
 
 // ---------------------------------------------------------------------------
 section('A refusal is countable, not just readable');

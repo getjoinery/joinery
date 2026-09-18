@@ -12,6 +12,9 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
  * agent_join_state, which this page renders. No credential ever exists in the
  * web tier, and nothing this page stores could enroll anyone.
  *
+ * @version 1.3 - the log-access switch (agent_log_access, specs/agent_log_access.md): whether a connected
+ *                management node may read this site's redacted log excerpts; on by default, and the
+ *                one-time notice about it is acknowledged here (a POST, never a write on a page view)
  * @version 1.2 - the agent's own on/off switch (agent_enabled) lives here too: nothing on this page
  *                can happen on a machine that runs no agent, so it is the first thing decided
  * @version 1.1 - disconnect action: the node ends the connection from its own side by recording a
@@ -41,6 +44,29 @@ function admin_management_node_logic(array $input): LogicResult {
 	if (isset($input['action']) && $input['action'] === 'disable_agent') {
 		Setting::put('agent_enabled', '');
 		return LogicResult::redirect('/admin/admin_management_node?agent=off');
+	}
+
+	// Whether a connected management node may read this site's logs. The
+	// agent reads the same setting before every log word and refuses when it
+	// is off; the switch is the owner's, not the plane's. Either way it is
+	// flipped counts as having seen the notice about it.
+	if (isset($input['action']) && $input['action'] === 'log_access_on') {
+		Setting::put('agent_log_access', '1');
+		Setting::put('agent_log_access_notice_seen', '1');
+		return LogicResult::redirect('/admin/admin_management_node?logs=on');
+	}
+
+	if (isset($input['action']) && $input['action'] === 'log_access_off') {
+		Setting::put('agent_log_access', '');
+		Setting::put('agent_log_access_notice_seen', '1');
+		return LogicResult::redirect('/admin/admin_management_node?logs=off');
+	}
+
+	// The one-time notice's acknowledgement: a POST from the notice itself or
+	// from this page, never a write made because somebody viewed a page.
+	if (isset($input['action']) && $input['action'] === 'log_access_notice_seen') {
+		Setting::put('agent_log_access_notice_seen', '1');
+		return LogicResult::redirect('/admin/admin_management_node');
 	}
 
 	if (isset($input['action']) && $input['action'] === 'connect') {
@@ -92,6 +118,8 @@ function admin_management_node_logic(array $input): LogicResult {
 		'state'           => is_array($state) ? $state : null,
 		'leave_request'   => is_array($leave) ? $leave : null,
 		'agent_enabled'   => admin_management_node_agent_enabled($settings),
+		'log_access'      => admin_management_node_log_access($settings),
+		'log_access_switched' => isset($input['logs']) ? (string)$input['logs'] : '',
 		'agent_installed' => file_exists(ADMIN_MANAGEMENT_NODE_AGENT_BINARY),
 		'installer_hint'  => admin_management_node_installer_hint(),
 		'error'           => isset($input['error']) ? (string)$input['error'] : '',
@@ -113,6 +141,16 @@ define('ADMIN_MANAGEMENT_NODE_AGENT_BINARY', '/usr/local/bin/joinery-agent');
  */
 function admin_management_node_agent_enabled($settings): bool {
 	return admin_management_node_agent_switch_on((string)$settings->get_setting('agent_enabled'));
+}
+
+/**
+ * May a connected management node read this site's logs? Same spellings as
+ * the agent switch, because the agent reads this value with the same reader
+ * it reads agent_enabled with (quiet.go switchOn), and one setting read two
+ * ways is how a page and a machine come to disagree.
+ */
+function admin_management_node_log_access($settings): bool {
+	return admin_management_node_agent_switch_on((string)$settings->get_setting('agent_log_access'));
 }
 
 /**

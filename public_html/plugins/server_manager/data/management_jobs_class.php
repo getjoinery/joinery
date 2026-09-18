@@ -2,6 +2,9 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.21 - site_log and log_table_tail are filterable job types, and their excerpts have a retention
+ *                window: purgeLogExcerpts blanks the result and output of completed log jobs older than
+ *                server_manager_log_excerpt_retention_days and keeps the row (specs/agent_log_access.md §4)
  * @version 1.20 - host_converge is a filterable job type with a claim budget sized to the agent's fifteen
  *                minutes (the runner's ten-minute lock wait plus the installer)
  * @version 1.19 - host_report is a filterable job type (the default claim budget covers its minute)
@@ -47,6 +50,22 @@ class ManagementJob extends SystemBase {
 	public static $pkey_column = 'mjb_management_job_id';
 
 	public static $json_vars = array('mjb_commands', 'mjb_parameters', 'mjb_result');
+
+	/**
+	 * The log excerpts a site_log or log_table_tail job returned do not live on
+	 * this plane for good. The standard retention sweep (docs/scheduled_tasks.md
+	 * § Retention windows) hands the window to purgeLogExcerpts, which blanks
+	 * the excerpt and keeps the row: the job stays on the record, the redacted
+	 * lines it carried go.
+	 */
+	public static $retention_policy = array(
+		'label'          => 'Log excerpts',
+		'purge_method'   => 'purgeLogExcerpts',
+		'window_setting' => 'server_manager_log_excerpt_retention_days',
+	);
+
+	/** The job types whose result is a log excerpt and is pruned on the window above. */
+	const LOG_EXCERPT_TYPES = array('site_log', 'log_table_tail');
 
 	public static $field_specifications = array(
 		'mjb_management_job_id'                => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
@@ -613,7 +632,7 @@ class ManagementJob extends SystemBase {
 		// backup_project) are not offered: historical rows keep their type strings
 		// and still render, but a filter is for kinds of job that can still happen.
 		$types = [
-			'check_status', 'host_report', 'host_converge',
+			'check_status', 'host_report', 'host_converge', 'site_log', 'log_table_tail',
 			'restore_database', 'list_backups',
 			'restore_project', 'restore_chain', 'apply_update', 'decommission_node',
 			'backup_run',
@@ -685,6 +704,37 @@ class ManagementJob extends SystemBase {
 	 * @param int    $recent_seconds how long a completed job keeps counting as cover
 	 * @return bool
 	 */
+	/**
+	 * The retention rule's method: blank the result and output of every
+	 * completed log-excerpt job older than the window, in place of the excerpt
+	 * writing {"pruned": true} so the job page can say what happened. The row,
+	 * its type, timing and status stay: the record that the plane read this
+	 * node's logs on that day outlives the lines it read. A job that never
+	 * completed carries no excerpt and is left alone.
+	 *
+	 * @param int $days the resolved window
+	 * @return array ['removed' => int, 'message' => string]
+	 */
+	public static function purgeLogExcerpts($days) {
+		$db = DbConnector::get_instance()->get_db_link();
+		$types = "'" . implode("','", self::LOG_EXCERPT_TYPES) . "'";
+		$stmt = $db->prepare(
+			"UPDATE mjb_management_jobs
+			    SET mjb_result = '{\"pruned\": true}'::jsonb,
+			        mjb_output = NULL,
+			        mjb_update_time = now()
+			  WHERE mjb_job_type IN ($types)
+			    AND mjb_status = 'completed'
+			    AND COALESCE(mjb_result->>'pruned', '') <> 'true'
+			    AND COALESCE(mjb_completed_time, mjb_update_time, mjb_create_time) < now() - (INTERVAL '1 day' * :days)");
+		$stmt->execute(array(':days' => (int)$days));
+		$removed = $stmt->rowCount();
+		return array(
+			'removed' => $removed,
+			'message' => $removed ? $removed . ' excerpt(s) blanked, rows kept' : '',
+		);
+	}
+
 	static function activeOrRecentForNode($node_id, $type, $recent_seconds) {
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare(
