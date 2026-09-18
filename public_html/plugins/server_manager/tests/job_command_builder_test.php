@@ -718,7 +718,9 @@ check($install_teardown === 0, 'install_node emits no teardown step');
 // notes. There is no local step, no shell string and no other transport: the
 // signing key is root-only and the root agent is its one reader.
 $publisher = jcb_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x0e", 32)),
-	'mgn_agent_version' => '1.19.0', 'mgn_agent_primitives' => 'check_status,publish_upgrade'));
+	'mgn_agent_version' => '1.19.0', 'mgn_agent_primitives' => 'check_status,publish_upgrade',
+	'mgn_last_status_data' => json_encode(array('backup_recovery_state' => 'proven', 'server_manager_active' => true))));
+check(JobCommandBuilder::can_publish_release($publisher), 'a node whose agent carries the primitive and which reports Server Manager active is offered a publish');
 $pub_params = array('release_notes' => 'harness test', 'major' => 0, 'minor' => 8, 'patch' => 371);
 $pub_built = JobCommandBuilder::build_publish_upgrade($publisher, $pub_params);
 check(($pub_built['primitive'] ?? '') === 'publish_upgrade', 'publish_upgrade is a primitive envelope, not a step list');
@@ -749,6 +751,35 @@ try {
 } catch (Exception $e) { $pub_refused = $e->getMessage(); }
 check(strpos($pub_refused, '1.17.2') !== false,
       'an agent that does not report the primitive is refused, naming its version', $pub_refused);
+
+// A plain site never publishes: every agent compiles the primitive in, so the
+// node's own account of whether Server Manager is active decides, and a node
+// that has not said (an older agent) is not one.
+$pub_plain = jcb_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x1a", 32)),
+	'mgn_agent_version' => '1.36.0', 'mgn_agent_primitives' => 'check_status,publish_upgrade',
+	'mgn_last_status_data' => json_encode(array('server_manager_active' => false))));
+check(!JobCommandBuilder::can_publish_release($pub_plain), 'a plain site with a modern agent is not offered a publish');
+check($pub_plain->reports_management_status(), 'but it has answered the question');
+$pub_refused = '';
+try {
+	JobCommandBuilder::build_publish_upgrade($pub_plain, $pub_params);
+} catch (Exception $e) { $pub_refused = $e->getMessage(); }
+check(strpos($pub_refused, 'not a management node') !== false,
+      'and a hand-made POST is refused at build time, saying why', $pub_refused);
+
+$pub_unreported = jcb_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x1b", 32)),
+	'mgn_agent_version' => '1.35.0', 'mgn_agent_primitives' => 'check_status,publish_upgrade'));
+check(!JobCommandBuilder::can_publish_release($pub_unreported) && !$pub_unreported->reports_management_status(),
+      'an agent that has not reported either way is not offered a publish, and the page can tell it apart from a plain site');
+$pub_self = jcb_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x1c", 32)),
+	'mgn_agent_version' => '1.35.0', 'mgn_agent_primitives' => 'check_status,publish_upgrade',
+	'mgn_site_url' => rtrim((string)LibraryFunctions::get_absolute_url(), '/')));
+check($pub_self->is_self() && JobCommandBuilder::can_publish_release($pub_self),
+      'the plane\'s own record is a management node without a report: the code answering is the plugin');
+check(ManagedNode::is_management_node_from(array('server_manager_active' => 'true')) === false,
+      'the report is a boolean: a string "true" is not the fact');
+check(ManagedNode::is_management_node_from('{"server_manager_active":true}') === true,
+      'the rule reads the stored JSON as well as the array');
 
 require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 $bkt = new BackupTarget(NULL);
