@@ -12,8 +12,11 @@
  * Idempotent: re-running finds no email_triage row still named "Email triage".
  *
  * The recipes table belongs to the joinery_ai plugin, so it is checked for
- * before it is touched: a site that never activated the plugin has no table,
- * and seeds the renamed declaration on activation.
+ * before it is touched, and so is the rcp_pipeline_job column: a site that
+ * never activated the plugin has no table, and a site that activated it once
+ * and turned it off keeps the table but stops receiving its columns (plugin
+ * tables sync for active plugins only). Either way the renamed declaration
+ * is seeded on activation.
  */
 function email_triage_recipes_named_email_summaries() {
     $db = DbConnector::get_instance()->get_db_link();
@@ -22,6 +25,14 @@ function email_triage_recipes_named_email_summaries() {
     $q->execute();
     if ($q->fetchColumn() === null) {
         echo "  email summaries: no recipes table here (joinery_ai not active), nothing to rename\n";
+        return;
+    }
+    $q = $db->prepare(
+        "SELECT count(1) FROM information_schema.columns
+          WHERE table_name = 'rcp_recipes' AND column_name = 'rcp_pipeline_job'");
+    $q->execute();
+    if ((int)$q->fetchColumn() === 0) {
+        echo "  email summaries: recipes table carries no pipeline job here (joinery_ai inactive), nothing to rename\n";
         return;
     }
 
