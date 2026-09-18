@@ -84,6 +84,28 @@ foreach (array('email_service', 'defaultemail', 'smtp2go_api_key') as $name) {
 	check($read($name) === $before[$name], 'refusal left ' . $name . ' untouched');
 }
 
+section('install_mail_provider reaches the provider with a named key and is refused cleanly');
+// The one path the earlier refusals never enter: the owner is found, the
+// From address is derived, the candidate's settings are written and the
+// provider is asked. A bogus key is rejected live — exit 1, not a crash —
+// and the rejection puts every setting back. (0.8.396 died here on every
+// real key: the owner lookup, which only runs when the deploy form named
+// an admin address, had overwritten the provider list.)
+$admin_row = null;
+foreach (new MultiUser(array('usr_permission' => 10), array('usr_user_id' => 'ASC')) as $row) {
+	if (!$row->get('usr_delete_time')) { $admin_row = $row; break; }
+}
+list($code, $out) = install_tool_run($utils . '/install_mail_provider.php',
+	array('JOINERY_ADMIN_EMAIL' => (string)($admin_row ? $admin_row->get('usr_email') : ''),
+		'JOINERY_MAIL_API_KEY' => 'api-00000000000000000000000000000000', 'JOINERY_MAIL_PROVIDER' => 'smtp2go'));
+check($code === 1, 'a key the provider rejects: exit 1', 'exit ' . $code . ': ' . implode(' | ', $out));
+check(($out[0] ?? '') === 'INSTALL_MAIL_PROVIDER=error', 'the verdict is the first line', $out[0] ?? '(none)');
+check(stripos(install_tool_line($out, 'reason'), 'rejected') !== false, 'the reason says the provider rejected it',
+	install_tool_line($out, 'reason'));
+foreach (array('email_service', 'defaultemail', 'smtp2go_api_key') as $name) {
+	check($read($name) === $before[$name], 'the rejection put ' . $name . ' back');
+}
+
 section('install_backup_target refuses unusable input and writes nothing');
 list($code, $out) = install_tool_run($utils . '/install_backup_target.php', array());
 check($code === 2, 'no bucket: exit 2', 'exit ' . $code);

@@ -51,6 +51,9 @@
  * the sending domain), reason= on error. Exits 0 on success, 2 on unusable
  * input, 1 when the provider rejected the key or a write failed.
  *
+ * @version 1.2 - the owner lookup no longer overwrites the provider list
+ *                (every real key failed on Setting::put with an empty
+ *                name); an uncaught throw still answers with reason=
  * @version 1.1 - the provider is detected from the key when none is named
  *                (EmailSender::providersForApiKey), tried live in order; a
  *                provider without a registrar API is accepted and simply
@@ -80,6 +83,13 @@ function install_mail_provider_fail(string $reason, int $code): void {
 function install_mail_provider_line(string $value): string {
 	return str_replace(array("\r", "\n"), ' ', $value);
 }
+
+// Whatever escapes — a throw from a revert, a provider class, the settings
+// table — still answers in the contract, so the install records a reason
+// rather than a blank.
+set_exception_handler(function (Throwable $e): void {
+	install_mail_provider_fail(get_class($e) . ': ' . $e->getMessage() . ' at ' . basename($e->getFile()) . ':' . $e->getLine(), 1);
+});
 
 $named       = strtolower(trim((string)getenv('JOINERY_MAIL_PROVIDER')));
 $api_key     = trim((string)getenv('JOINERY_MAIL_API_KEY'));
@@ -126,8 +136,8 @@ foreach ($candidates as $candidate_key => $candidate_class) {
 // ---- The owner: the account the mailbox is granted to ----
 $owner = null;
 if ($admin_email !== '') {
-	$candidates = new MultiUser(array('usr_email' => $admin_email));
-	foreach ($candidates as $row) {
+	$matches = new MultiUser(array('usr_email' => $admin_email));
+	foreach ($matches as $row) {
 		if (!$row->get('usr_delete_time')) {
 			$owner = $row;
 			break;
