@@ -8,8 +8,8 @@ of the product; write findings inline under each item (rough notes are fine
 the pass is done and the findings are triaged.
 
 **The one-sentence recap of what got built:** the platform now reads your
-incoming mail for you — scores every message for danger, files it under
-your labels with a one-line summary you see in the inbox, and puts any
+incoming mail for you — scores every message for danger, writes a one-line
+summary you see in the inbox, and puts any
 real dated event (including calendar invites) on your calendar as a
 tentative entry — plus the chat assistant can add calendar entries when
 you ask. Everything below exercises one piece of that.
@@ -24,12 +24,6 @@ joineryemailtests" (#127). Both are manual-run right now.
 
 ## 1. Set up the world the features assume
 
-- [ ] **Create a real label vocabulary.** The triage AI can only file mail
-  into labels *you* have created — today there are just two test labels
-  ("deals", "test label"), so it answers "none" for almost everything.
-  Create the set you'd actually want (e.g. Receipts, Work, Personal,
-  Newsletters, Travel, Money) in the mailbox admin's label management.
-  *Judge:* was creating labels findable and painless?
 - [ ] **Put the recipes on a schedule.** Open each recipe and change
   **Runs** from "Manually only" to "As mail arrives". *Judge:* does the one
   control, and the sentence under it about how this recipe's mailbox is
@@ -58,9 +52,6 @@ joineryemailtests" (#127). Both are manual-run right now.
   *Judge:* are the summaries actually useful — would you triage your
   inbox from them? Are they accurate? Is italic enough of a cue that
   it's AI-written, or does it need more/less?
-- [ ] Check the labels the AI applied against what you'd have chosen.
-  *Judge:* with your real label set in place, how good is the filing?
-  Note any labels it should have but keeps missing.
 - [ ] Find the danger badge on any message scored 3+ (send yourself
   something phishing-shaped if you want to provoke one). *Judge:* badge
   visible enough? Score believable?

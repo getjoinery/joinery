@@ -1520,3 +1520,14 @@
 	$migration['migration_file'] = 'migration_calendar_reminder_details.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// The email triage recipe writes a summary and nothing else, and is named
+	// "Email summaries" to say so. recipes.json is create-only, so rows already
+	// seeded (and members' own instances) still carrying the factory name take
+	// the new one; a name an operator chose is left alone.
+	$migration = array();
+	$migration['database_version'] = '195';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'email_triage_recipes_named_email_summaries.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
