@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.4 - the fact arrives at poll (agent 1.37.0), so the unreported sentence says the next poll settles it
  * @version 1.3 - Publish Release is offered only to a management node (the node's own report that Server
  *                Manager is active); an agent that has not reported either way gets one sentence
  * @version 1.2 - a node that hosts no site gets one sentence in place of the version box and both
@@ -86,7 +87,7 @@
 	// serving releases to its fleet) gets published: from here, by the plane
 	// that manages it, with no shell on either machine. A plain site never
 	// publishes, so it sees nothing here; the node itself says which it is
-	// (server_manager_active in its check_status report).
+	// (server_manager on its poll, server_manager_active in a check_status report).
 	if (JobCommandBuilder::can_publish_release($node)) {
 		$running = (string)$node->get('mgn_joinery_version');
 		$pub_major = $pub_minor = $pub_patch = 0;
@@ -115,9 +116,9 @@
 		// than silently hiding an action the operator may be looking for.
 		$page->begin_box(['title' => 'Publish Release on This Node']);
 		echo '<p class="mb-0 text-muted">Publishing is offered once this node reports whether the Server Manager '
-			. 'plugin is active there, which its agent starts doing at 1.36.0 (this one is '
+			. 'plugin is active there, which its agent does on every poll from 1.37.0 (this one is '
 			. htmlspecialchars((string)($node->get('mgn_agent_version') ?: 'not reporting a version'))
-			. '). The next status check settles it.</p>';
+			. '). Its next poll settles it.</p>';
 		$page->end_box();
 	}
 

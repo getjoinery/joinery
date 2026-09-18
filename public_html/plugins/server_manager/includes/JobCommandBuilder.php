@@ -8,6 +8,7 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.67 - the management-node fact is read at poll (mgn_agent_server_manager) before check_status
  * @version 1.66 - can_publish_release / build_publish_upgrade: a publish is offered to, and built for, a
  *                 node that reports itself a management node (server_manager_active), not to every
  *                 agent that compiles the primitive in
@@ -1798,7 +1799,7 @@ class JobCommandBuilder {
 			throw new Exception(
 				"Node '{$node->get('mgn_slug')}' cannot publish: it is not a management node. A release is "
 				. 'published from a site with the Server Manager plugin active, which is what serves it; '
-				. 'this node has not reported that it is one (check_status server_manager_active).');
+				. 'this node has not reported that it is one (server_manager at poll, or check_status server_manager_active).');
 		}
 		return self::build_publish_upgrade_primitive($node, $params);
 	}

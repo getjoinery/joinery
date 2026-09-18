@@ -785,6 +785,20 @@ $pub_self = jcb_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\
 	'mgn_site_url' => rtrim((string)LibraryFunctions::get_absolute_url(), '/')));
 check($pub_self->is_self() && JobCommandBuilder::can_publish_release($pub_self),
       'the plane\'s own record is a management node without a report: the code answering is the plugin');
+// The fact arrives at poll on every cycle (mgn_agent_server_manager) and is
+// read before the check_status blob, which nothing runs routinely.
+$pub_polled = jcb_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x1d", 32)),
+	'mgn_agent_version' => '1.37.0', 'mgn_agent_primitives' => 'check_status,publish_upgrade',
+	'mgn_agent_server_manager' => 'active'));
+check(JobCommandBuilder::can_publish_release($pub_polled) && $pub_polled->reports_management_status(),
+      'a node whose poll says Server Manager is active is offered a publish with no check_status report at all');
+$pub_polled->set('mgn_agent_server_manager', 'inactive');
+$pub_polled->set('mgn_last_status_data', json_encode(array('server_manager_active' => true)));
+check(!JobCommandBuilder::can_publish_release($pub_polled),
+      'the poll is read first: a stale check_status report saying active does not outrank a poll saying inactive');
+$pub_polled->set('mgn_agent_server_manager', '');
+check(JobCommandBuilder::can_publish_release($pub_polled),
+      'with no poll answer the check_status report is the fallback');
 check(ManagedNode::is_management_node_from(array('server_manager_active' => 'true')) === false,
       'the report is a boolean: a string "true" is not the fact');
 check(ManagedNode::is_management_node_from('{"server_manager_active":true}') === true,
