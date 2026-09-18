@@ -8,6 +8,9 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.66 - can_publish_release / build_publish_upgrade: a publish is offered to, and built for, a
+ *                 node that reports itself a management node (server_manager_active), not to every
+ *                 agent that compiles the primitive in
  * @version 1.65 - site_log / log_table_tail: the two log words of specs/agent_log_access.md (agent 1.35.0).
  *                Closed choices mirrored here (SITE_LOG_FILES, LOG_TABLES) so a bad pick fails on the
  *                plane with a message; the node validates again and refuses when its owner's switch is off
@@ -1791,7 +1794,24 @@ class JobCommandBuilder {
 				. 'agent at ' . self::PRIMITIVE_MIN_AGENT_VERSION['publish_upgrade'] . ' or later, paired to '
 				. 'this site. Its agent is ' . ((string)$node->get('mgn_agent_version') ?: 'not reporting') . '.');
 		}
+		if (!$node->is_management_node()) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot publish: it is not a management node. A release is "
+				. 'published from a site with the Server Manager plugin active, which is what serves it; '
+				. 'this node has not reported that it is one (check_status server_manager_active).');
+		}
 		return self::build_publish_upgrade_primitive($node, $params);
+	}
+
+	/**
+	 * Whether the Publish Release action is offered for a node: its agent
+	 * carries the primitive AND the node itself says it is a management node.
+	 * The vocabulary alone is not enough — every agent compiles the primitive
+	 * in, and a plain site republishing itself is work for a release nothing
+	 * reads (specs/publish_as_node_action.md: "A plain node. Never publishes.").
+	 */
+	public static function can_publish_release($node): bool {
+		return self::has_primitive($node, 'publish_upgrade') && $node->is_management_node();
 	}
 
 	/**

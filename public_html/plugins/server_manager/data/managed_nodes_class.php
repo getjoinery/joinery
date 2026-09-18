@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.22 - is_management_node(): the node's own report that Server Manager is active there
+ *                (check_status server_manager_active), which is what makes it a node that publishes
  * @version 1.21 - mgn_agent_log_access: the owner's log-access switch as the node last reported it at
  *                poll (on|off), so the Logs action can show the reason before a job is queued
  *                (specs/agent_log_access.md §1)
@@ -326,6 +328,54 @@ class ManagedNode extends SystemBase {
 	public static function hosts_site_from($node): bool {
 		return trim((string)$node->get('mgn_web_root')) !== ''
 			&& !$node->get('mgn_skip_joinery_checks');
+	}
+
+	/**
+	 * Whether this node is a management node — a site with the Server Manager
+	 * plugin active, so it has a Publish page and an upgrades table it serves
+	 * releases from. Read from the node's own check_status report
+	 * (server_manager_active), never inferred: every agent compiles the
+	 * publish_upgrade primitive in, so its vocabulary cannot tell a plane from
+	 * a plain site. A node that has not reported the fact (an agent that
+	 * predates it) is not one, so the publish action is never offered on a
+	 * guess; the next check_status settles it.
+	 */
+	public function is_management_node(): bool {
+		// The plane's own record: the code answering IS the Server Manager
+		// plugin, active here. Nothing to report, and no first-release
+		// deadlock — the release that carries the reporting agent is published
+		// from this page before any agent has reported.
+		if ($this->is_self()) {
+			return true;
+		}
+		return self::is_management_node_from($this->get('mgn_last_status_data'));
+	}
+
+	/** Whether this record is this management node's own — the rule self_node() finds it by. */
+	public function is_self(): bool {
+		$own_url = rtrim((string)LibraryFunctions::get_absolute_url(), '/');
+		$site_url = rtrim(trim((string)$this->get('mgn_site_url')), '/');
+		return $own_url !== '' && $site_url === $own_url;
+	}
+
+	/** The rule is_management_node() applies, over a status-data array or its JSON. */
+	public static function is_management_node_from($status_data): bool {
+		if (is_string($status_data)) {
+			$status_data = json_decode($status_data, true);
+		}
+		return is_array($status_data) && ($status_data['server_manager_active'] ?? null) === true;
+	}
+
+	/** Whether the node's last check_status report says anything about Server Manager at all. */
+	public function reports_management_status(): bool {
+		if ($this->is_self()) {
+			return true;
+		}
+		$status_data = $this->get('mgn_last_status_data');
+		if (is_string($status_data)) {
+			$status_data = json_decode($status_data, true);
+		}
+		return is_array($status_data) && array_key_exists('server_manager_active', $status_data);
 	}
 
 	public static function self_node() {
