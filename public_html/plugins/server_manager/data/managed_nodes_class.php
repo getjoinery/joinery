@@ -2,6 +2,9 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.23 - mgn_agent_server_manager: whether Server Manager is active on the node as its agent
+ *                last reported at poll (active|inactive); is_management_node() reads it first, the
+ *                check_status blob second, because nothing runs check_status routinely
  * @version 1.22 - is_management_node(): the node's own report that Server Manager is active there
  *                (check_status server_manager_active), which is what makes it a node that publishes
  * @version 1.21 - mgn_agent_log_access: the owner's log-access switch as the node last reported it at
@@ -293,6 +296,13 @@ class ManagedNode extends SystemBase {
 		// the switch is on the node's own admin and the node enforces it.
 		'mgn_agent_log_access'    => array('type'=>'varchar(8)'),
 
+		// Whether the Server Manager plugin is active on the node, as the agent
+		// reported it on its last poll: 'active', 'inactive', or empty for an
+		// agent that predates the fact. This is what makes a node a management
+		// node (is_management_node()); the check_status report carries the
+		// same fact and is the fallback for an agent that polls without it.
+		'mgn_agent_server_manager' => array('type'=>'varchar(8)'),
+
 		'mgn_is_relay'            => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'mgn_create_time'         => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'mgn_update_time'         => array('type'=>'timestamp(6)'),
@@ -333,12 +343,14 @@ class ManagedNode extends SystemBase {
 	/**
 	 * Whether this node is a management node — a site with the Server Manager
 	 * plugin active, so it has a Publish page and an upgrades table it serves
-	 * releases from. Read from the node's own check_status report
-	 * (server_manager_active), never inferred: every agent compiles the
+	 * releases from. Read from the node's own report — at poll
+	 * (mgn_agent_server_manager) first, since every node polls and nothing
+	 * runs check_status routinely, then the check_status blob
+	 * (server_manager_active) — never inferred: every agent compiles the
 	 * publish_upgrade primitive in, so its vocabulary cannot tell a plane from
 	 * a plain site. A node that has not reported the fact (an agent that
 	 * predates it) is not one, so the publish action is never offered on a
-	 * guess; the next check_status settles it.
+	 * guess; its next poll settles it.
 	 */
 	public function is_management_node(): bool {
 		// The plane's own record: the code answering IS the Server Manager
@@ -347,6 +359,10 @@ class ManagedNode extends SystemBase {
 		// from this page before any agent has reported.
 		if ($this->is_self()) {
 			return true;
+		}
+		$at_poll = (string)$this->get('mgn_agent_server_manager');
+		if ($at_poll !== '') {
+			return $at_poll === 'active';
 		}
 		return self::is_management_node_from($this->get('mgn_last_status_data'));
 	}
@@ -366,9 +382,12 @@ class ManagedNode extends SystemBase {
 		return is_array($status_data) && ($status_data['server_manager_active'] ?? null) === true;
 	}
 
-	/** Whether the node's last check_status report says anything about Server Manager at all. */
+	/** Whether the node has said anything about Server Manager at all, at poll or in check_status. */
 	public function reports_management_status(): bool {
 		if ($this->is_self()) {
+			return true;
+		}
+		if ((string)$this->get('mgn_agent_server_manager') !== '') {
 			return true;
 		}
 		$status_data = $this->get('mgn_last_status_data');

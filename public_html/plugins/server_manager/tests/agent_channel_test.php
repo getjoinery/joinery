@@ -393,6 +393,19 @@ foreach (array('yes', '1', 'on;off', 'ON') as $v) {
 	check(AgentChannelEndpoint::validation_error($with, $claim_spec) !== null,
 		"log_access '$v' is outside the closed set and refused");
 }
+// Whether Server Manager is active on the node rides the claim the same way:
+// the fact that makes a node a management node, reported where every node
+// speaks every cycle, because nothing runs check_status routinely.
+foreach (array('active', 'inactive', '') as $v) {
+	$with = $claim; $with['server_manager'] = $v;
+	check(AgentChannelEndpoint::validation_error($with, $claim_spec) === null,
+		"A claim reporting server_manager '$v' is accepted", (string)AgentChannelEndpoint::validation_error($with, $claim_spec));
+}
+foreach (array('true', '1', 'Active', 'active,inactive') as $v) {
+	$with = $claim; $with['server_manager'] = $v;
+	check(AgentChannelEndpoint::validation_error($with, $claim_spec) !== null,
+		"server_manager '$v' is outside the closed set and refused");
+}
 
 // ---------------------------------------------------------------------------
 section('A refusal is countable, not just readable');

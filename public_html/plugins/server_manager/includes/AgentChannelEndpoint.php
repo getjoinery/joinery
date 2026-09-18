@@ -36,6 +36,9 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.22 - server_manager: the node reports at poll whether the Server Manager plugin is
+ *                 active there (active|inactive), the fact that makes it a management node; absent
+ *                 for an agent before 1.37.0
  * @version 1.21 - adoptJoin places the node (ManagedHost::place_node): a join links an existing
  *                 placement record at its address and mints none — a bare machine has no host row
  * @version 1.20 - log_access: the node reports whether its owner lets this plane read its logs (on|off),
@@ -833,6 +836,12 @@ class AgentChannelEndpoint {
 			// would run as root. A closed set, matched not interpolated.
 			'script_trust'   => ['type' => 'string', 'max' => 24,
 				'pattern' => '/^(ok|untrusted_manifest|untrusted_file)?$/'],
+			// Whether the Server Manager plugin is active on the node — what
+			// makes it a management node, the only kind offered a publish.
+			// Read by the agent from the node's own plugin registry with
+			// Plugin::is_active()'s rule. A closed set; absent for an agent
+			// before 1.37.0, or one whose database did not answer.
+			'server_manager' => ['type' => 'string', 'max' => 8, 'pattern' => '/^(active|inactive)?$/'],
 		];
 	}
 
@@ -896,6 +905,13 @@ class AgentChannelEndpoint {
 		if (array_key_exists('log_access', $in) && in_array((string)$in['log_access'], ['on', 'off'], true)
 			&& (string)$in['log_access'] !== (string)$node->get('mgn_agent_log_access')) {
 			$node->set('mgn_agent_log_access', (string)$in['log_access']);
+		}
+		// Whether Server Manager is active on the node, the same way: absent or
+		// empty leaves the last answer standing, so a poll the node's database
+		// could not answer does not turn a management node into a plain site.
+		if (array_key_exists('server_manager', $in) && in_array((string)$in['server_manager'], ['active', 'inactive'], true)
+			&& (string)$in['server_manager'] !== (string)$node->get('mgn_agent_server_manager')) {
+			$node->set('mgn_agent_server_manager', (string)$in['server_manager']);
 		}
 
 		// The node saying, unprompted, whether it can verify its own scripts.
