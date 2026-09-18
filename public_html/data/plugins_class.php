@@ -11,6 +11,8 @@ class PluginNotSentException extends PluginException {};
 /**
  * Plugin — a plugin's database row.
  *
+ * @version 1.4 - is_active() reads plg_active, the flag the loaders read; plg_status can say stale
+ *                while the plugin runs
  * @version 1.3 - save() forgets PluginHelper's per-request active set
  * @version 1.2 - the `uninstalled` status: uninstall keeps the row as the record
  *                (plg_uninstalled_time) while root removes the files
@@ -78,13 +80,11 @@ function authenticate_write($data) {
 	 * @return bool Active status
 	 */
 	public function is_active() {
-		// Use new status field if available, fall back to activated_time
-		$status = $this->get('plg_status');
-		if ($status) {
-			return $status === 'active';
-		}
-		// Legacy support
-		return !is_null($this->get('plg_activated_time'));
+		// plg_active is the flag every loader reads (PluginHelper's active set,
+		// PluginManager::syncTables). plg_status is a lifecycle note that can
+		// say 'stale' (no longer in the upgrade source's manifest) or 'error'
+		// while the plugin is switched on and running, so it cannot answer.
+		return (int)$this->get('plg_active') === 1;
 	}
 	
 	/**
