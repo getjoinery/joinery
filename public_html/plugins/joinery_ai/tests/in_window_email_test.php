@@ -302,7 +302,7 @@ try {
 
 	$summary = 'A sealed summary long enough to have overflowed the old varchar column, '
 		. 'which is exactly why this assertion exists at all.';
-	$job->recordVerdict((string)$older, array('label' => 'none', 'summary' => $summary),
+	$job->recordVerdict((string)$older, array('summary' => $summary),
 		$recipe, 'test-model');
 
 	$raw_after = $db->prepare("SELECT iem_subject, iem_sender, iem_body_plain, iem_content_sealed,
@@ -573,7 +573,7 @@ try {
 	$leaky_summary = 'A description of the encrypted body, written by the model.';
 	$trace = json_encode(array(array(
 		'item_key' => (string)$older, 'status' => 'done', 'label' => $leaky_subject,
-		'verdict'  => array('label' => 'none', 'summary' => $leaky_summary),
+		'verdict'  => array('summary' => $leaky_summary),
 	)));
 
 	$sealed_run = iw_run($recipe);

@@ -3,7 +3,7 @@
     "recipes": [
         {
             "key": "email_triage_default",
-            "name": "Email triage",
+            "name": "Email summaries",
             "pipeline_job": "email_triage",
             "requires_plugin": "mailbox",
             "prompt": "",
