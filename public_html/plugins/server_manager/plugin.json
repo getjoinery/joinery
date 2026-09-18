@@ -148,6 +148,21 @@
       "helptext": "The purchase question whose answer supplies the customer's domain."
     },
     {
+      "name": "server_manager_log_excerpt_retention_days",
+      "default": "30",
+      "group": "monitoring",
+      "label": "Days to keep log excerpts read from nodes",
+      "helptext": "A site_log or log_table_tail job brings back a redacted excerpt of a node's own logs. After this many days the excerpt is blanked and the job row is kept as the record that it ran. 0 keeps every excerpt.",
+      "type": "number",
+      "validation": {
+        "number": true,
+        "min": 0,
+        "messages": {
+          "min": "Must be 0 or more."
+        }
+      }
+    },
+    {
       "name": "server_manager_cert_expiry_warn_days",
       "default": "21",
       "group": "monitoring",

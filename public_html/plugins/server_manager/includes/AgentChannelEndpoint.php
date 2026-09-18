@@ -36,6 +36,9 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.20 - log_access: the node reports whether its owner lets this plane read its logs (on|off),
+ *                stored in mgn_agent_log_access so the Logs action is disabled with the owner's reason
+ *                before a job is queued (specs/agent_log_access.md §1, reported at poll)
  * @version 1.19 - a recipe entry may carry the check's last verdict after the mode (fail2ban:armed:fail),
  *                 a closed set (RECIPE_VERDICTS) dropped from an entry that cannot have been checked
  *                 (not-applicable); recipe_verdicts_of() reads it for the Host card and the fleet notice
@@ -813,6 +816,13 @@ class AgentChannelEndpoint {
 			// is attacker-controllable and none is believed as it arrives.
 			'cases'          => ['type' => 'object', 'max' => self::MAX_CASES_BYTES],
 			'bundle_version' => ['type' => 'string', 'max' => 32, 'pattern' => '/^[a-z0-9]*$/'],
+			// Whether the node's owner lets this plane read its logs: the
+			// agent_log_access switch on the node's own admin, read by the
+			// agent with the same rule its log words apply, and reported so
+			// the Logs action can be disabled with the reason instead of
+			// refused after the click. A closed set; absent for an agent
+			// before 1.35.0, which has no log words to gate.
+			'log_access'     => ['type' => 'string', 'max' => 3, 'pattern' => '/^(on|off)?$/'],
 			// The node's own answer to whether it can verify the scripts it
 			// would run as root. A closed set, matched not interpolated.
 			'script_trust'   => ['type' => 'string', 'max' => 24,
@@ -873,6 +883,13 @@ class AgentChannelEndpoint {
 		if (array_key_exists('bundle_version', $in)
 			&& (string)$in['bundle_version'] !== (string)$node->get('mgn_agent_bundle_version')) {
 			$node->set('mgn_agent_bundle_version', (string)$in['bundle_version']);
+		}
+		// The owner's log-access switch as the node last reported it. Absent
+		// stays absent (an agent with no log words says nothing); empty is
+		// treated the same, so only 'on' or 'off' is ever stored.
+		if (array_key_exists('log_access', $in) && in_array((string)$in['log_access'], ['on', 'off'], true)
+			&& (string)$in['log_access'] !== (string)$node->get('mgn_agent_log_access')) {
+			$node->set('mgn_agent_log_access', (string)$in['log_access']);
 		}
 
 		// The node saying, unprompted, whether it can verify its own scripts.

@@ -8,6 +8,9 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.65 - site_log / log_table_tail: the two log words of specs/agent_log_access.md (agent 1.35.0).
+ *                Closed choices mirrored here (SITE_LOG_FILES, LOG_TABLES) so a bad pick fails on the
+ *                plane with a message; the node validates again and refuses when its owner's switch is off
  * @version 1.64 - agent_report / agent_converge: the two words of recipe agent_supervision
  *                 (agent 1.34.0) are addressable from the plane like host_report / host_converge,
  *                 so the vocabulary parity the agent ships is the vocabulary the plane can dispatch
@@ -325,7 +328,38 @@ class JobCommandBuilder {
 		// recipe agent_supervision, new in 1.34.0. Same compiled-names shape.
 		'agent_report'   => '1.34.0',
 		'agent_converge' => '1.34.0',
+		// The site's own logs, redacted on the node, behind the owner's switch:
+		// the two words of specs/agent_log_access.md, new in 1.35.0.
+		'site_log'       => '1.35.0',
+		'log_table_tail' => '1.35.0',
 	];
+
+	/**
+	 * The log files site_log may name, and how the plane labels them. A mirror
+	 * of the enum compiled into the agent (primitives/observe_site_log.go): the
+	 * node refuses anything outside its own list whatever this says, so the
+	 * mirror exists only so the picker offers what the node accepts and a bad
+	 * value fails here with a message rather than there with a refusal.
+	 */
+	const SITE_LOG_FILES = [
+		'error'                => 'Error log',
+		'cron_scheduled_tasks' => 'Scheduled tasks log',
+		'joinery_ai_worker'    => 'AI worker log',
+		'install_executor'     => 'Install executor log',
+		'host_converger'       => 'Host converger log',
+	];
+
+	/** The log tables log_table_tail may name; same mirror discipline. */
+	const LOG_TABLES = [
+		'logins'      => 'Logins',
+		'requests'    => 'Request log',
+		'events'      => 'Event log',
+		'form_errors' => 'Form errors',
+		'webhooks'    => 'Webhook log',
+	];
+
+	/** The most lines or rows either log word returns; the node caps at the same figure. */
+	const LOG_MAX_COUNT = 200;
 
 	/**
 	 * The platform release that carries the decommission approval panel
@@ -1491,6 +1525,100 @@ class JobCommandBuilder {
 
 	public static function build_host_report_primitive($node) {
 		return ['primitive' => 'host_report', 'params' => []];
+	}
+
+	/**
+	 * The last lines of one of the site's own log files, read on the node,
+	 * redacted there, and refused there when the owner's log-access switch is
+	 * off (specs/agent_log_access.md §2.1). PRIMITIVE ONLY, like host_report,
+	 * and for the same reason: the SSH way to read a log is a command.
+	 *
+	 * @param string $file     one of SITE_LOG_FILES' keys
+	 * @param bool   $previous the most recent rotation instead of the current file
+	 * @param int    $lines    1..LOG_MAX_COUNT
+	 */
+	public static function build_site_log($node, $file, $previous = false, $lines = 100) {
+		if (!self::has_primitive($node, 'site_log')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot read its logs: its agent "
+				. "does not offer the site_log primitive. Apply an update to the node; "
+				. "the agent that ships with it does.");
+		}
+		self::assert_log_access($node);
+		return self::build_site_log_primitive($node, $file, $previous, $lines);
+	}
+
+	public static function build_site_log_primitive($node, $file, $previous = false, $lines = 100) {
+		$file = (string)$file;
+		if (!array_key_exists($file, self::SITE_LOG_FILES)) {
+			throw new Exception("'" . $file . "' is not a log file the node offers. Choose one of: "
+				. implode(', ', array_keys(self::SITE_LOG_FILES)) . '.');
+		}
+		return ['primitive' => 'site_log', 'params' => [
+			'file'     => $file,
+			'previous' => (bool)$previous,
+			'lines'    => self::bounded_log_count($lines, 'lines'),
+		]];
+	}
+
+	/**
+	 * The newest rows of one of the site's own log tables, from a compiled
+	 * column list on the node, redacted there, refused there when the switch
+	 * is off (specs/agent_log_access.md §2.2). Primitive only.
+	 *
+	 * @param string $table one of LOG_TABLES' keys
+	 * @param int    $rows  1..LOG_MAX_COUNT
+	 */
+	public static function build_log_table_tail($node, $table, $rows = 50) {
+		if (!self::has_primitive($node, 'log_table_tail')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot read its log tables: its agent "
+				. "does not offer the log_table_tail primitive. Apply an update to the node; "
+				. "the agent that ships with it does.");
+		}
+		self::assert_log_access($node);
+		return self::build_log_table_tail_primitive($node, $table, $rows);
+	}
+
+	public static function build_log_table_tail_primitive($node, $table, $rows = 50) {
+		$table = (string)$table;
+		if (!array_key_exists($table, self::LOG_TABLES)) {
+			throw new Exception("'" . $table . "' is not a log table the node offers. Choose one of: "
+				. implode(', ', array_keys(self::LOG_TABLES)) . '.');
+		}
+		return ['primitive' => 'log_table_tail', 'params' => [
+			'table' => $table,
+			'rows'  => self::bounded_log_count($rows, 'rows'),
+		]];
+	}
+
+	/**
+	 * Has the node's owner left log access on, as the node last reported? The
+	 * node enforces this itself; asking here only saves queuing a job whose
+	 * answer is already known. An agent that has never reported (no log words)
+	 * passes: has_primitive already turned it away.
+	 */
+	public static function log_access_refusal($node): ?string {
+		if ((string)$node->get('mgn_agent_log_access') === 'off') {
+			return "The owner of '{$node->get('mgn_slug')}' has not allowed log access: the "
+				. "agent_log_access switch on that site's Management Node page is off, and the node "
+				. "refuses log requests while it is.";
+		}
+		return null;
+	}
+
+	private static function assert_log_access($node) {
+		$refusal = self::log_access_refusal($node);
+		if ($refusal !== null) {
+			throw new Exception($refusal);
+		}
+	}
+
+	private static function bounded_log_count($n, $what) {
+		if (!is_numeric($n) || (int)$n < 1 || (int)$n > self::LOG_MAX_COUNT) {
+			throw new Exception(ucfirst($what) . ' must be between 1 and ' . self::LOG_MAX_COUNT . '.');
+		}
+		return (int)$n;
 	}
 
 	/**

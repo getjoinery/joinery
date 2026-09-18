@@ -5,6 +5,9 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.6 - a site_log result renders its text as a log box and a log_table_tail result as a table,
+ *                both through the redactor a second time (specs/agent_log_access.md §4); a pruned
+ *                excerpt says so
  * @version 1.5 - the output box and the poll offset read $job->transcript(), so a script primitive's
  *                transcript is shown as text rather than as the envelope it travels in
  * @version 1.4 - re-run goes through ManagementJob::rerun(), so a primitive job re-runs its primitive
@@ -254,6 +257,55 @@ $status_class = match($job->get('mjb_status')) {
 $result = $job->get('mjb_result');
 if ($result) {
 	$result_data = is_string($result) ? json_decode($result, true) : $result;
+	$job_type    = (string)$job->get('mjb_job_type');
+	if (is_array($result_data) && !empty($result_data['pruned'])) {
+		// The retention sweep kept the job and dropped the excerpt
+		// (ManagementJob::purgeLogExcerpts).
+		echo '<div class="card mb-3"><div class="card-body text-muted">The log excerpt this job returned has been '
+			. 'removed by the retention sweep; the job itself is kept as the record that it ran.</div></div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && $job_type === 'site_log' && array_key_exists('text', $result_data)) {
+		// The node redacted this before it left; the plane's redactor is the
+		// second pass, as it is for every transcript shown here.
+		$file = (string)($result_data['file'] ?? '');
+		echo '<div class="card mb-3"><div class="card-header"><strong>'
+			. htmlspecialchars(JobCommandBuilder::SITE_LOG_FILES[$file] ?? $file)
+			. (!empty($result_data['previous']) ? ' (previous rotation)' : '')
+			. '</strong> <small class="text-muted">— '
+			. (empty($result_data['present'])
+				? 'not present on the node'
+				: (int)($result_data['lines_returned'] ?? 0) . ' line(s)'
+					. (!empty($result_data['truncated']) ? ', truncated to the cap' : '')
+					. ', ' . number_format((int)($result_data['size_bytes'] ?? 0)) . ' bytes on disk'
+					. ', modified ' . htmlspecialchars((string)($result_data['modified_time'] ?? '')))
+			. '</small></div>';
+		echo '<pre class="svm-logbox">' . htmlspecialchars(SmSecretRedactor::redact((string)$result_data['text'])) . '</pre></div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && $job_type === 'log_table_tail' && isset($result_data['rows']) && is_array($result_data['rows'])) {
+		$table   = (string)($result_data['table'] ?? '');
+		$columns = is_array($result_data['columns'] ?? null) ? $result_data['columns'] : array();
+		echo '<div class="card mb-3"><div class="card-header"><strong>'
+			. htmlspecialchars(JobCommandBuilder::LOG_TABLES[$table] ?? $table)
+			. '</strong> <small class="text-muted">— ' . count($result_data['rows']) . ' newest row(s)'
+			. (!empty($result_data['truncated']) ? ', truncated to the cap' : '') . '</small></div>';
+		echo '<div class="table-responsive"><table class="table table-sm table-striped mb-0"><thead><tr>';
+		foreach ($columns as $c) { echo '<th>' . htmlspecialchars((string)$c) . '</th>'; }
+		echo '</tr></thead><tbody>';
+		foreach ($result_data['rows'] as $row) {
+			if (!is_array($row)) { continue; }
+			echo '<tr>';
+			foreach ($columns as $c) {
+				$v = $row[$c] ?? null;
+				if (is_bool($v)) { $v = $v ? 'true' : 'false'; }
+				elseif ($v === null) { $v = ''; }
+				elseif (!is_scalar($v)) { $v = json_encode($v); }
+				echo '<td>' . htmlspecialchars(SmSecretRedactor::redact((string)$v)) . '</td>';
+			}
+			echo '</tr>';
+		}
+		echo '</tbody></table></div></div>';
+		$result_data = null;
+	}
 	if ($result_data) {
 		echo '<div class="card mb-3"><div class="card-header"><strong>Structured Result</strong></div><div class="card-body">';
 		echo '<pre>' . htmlspecialchars(SmSecretRedactor::redact(json_encode($result_data, JSON_PRETTY_PRINT))) . '</pre>';

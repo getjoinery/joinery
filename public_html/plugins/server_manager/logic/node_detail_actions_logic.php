@@ -19,6 +19,9 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.30 - site_log and log_table_tail: the Logs forms on the overview post here; the picks are
+ *                bounded by JobCommandBuilder's mirrored lists and the node refuses again on its own
+ *                (specs/agent_log_access.md §4)
  * @version 1.29 - apply_update_all_on_host counts only nodes that host a site: the host's own node
  *                 shares the placement record and is neither an ungrouped site nor a sibling to
  *                 upgrade (docker-prod, 2026-09-15)
@@ -105,6 +108,8 @@ class NodeDetailActions {
 		'install_report'           => 'overview',
 		'host_report'              => 'overview',
 		'host_converge'            => 'overview',
+		'site_log'                 => 'overview',
+		'log_table_tail'           => 'overview',
 		'restore_database'         => 'database',
 		'restore_project'          => 'backups',
 		'restore_chain'            => 'backups',
@@ -189,6 +194,20 @@ class NodeDetailActions {
 			case 'host_report': {
 				$built = JobCommandBuilder::build_host_report($node);
 				$job = ManagementJob::createFromBuild($node->key, 'host_report', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'site_log': {
+				$built = JobCommandBuilder::build_site_log($node,
+					(string)($_POST['file'] ?? ''), !empty($_POST['previous']), (int)($_POST['lines'] ?? 100));
+				$job = ManagementJob::createFromBuild($node->key, 'site_log', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'log_table_tail': {
+				$built = JobCommandBuilder::build_log_table_tail($node,
+					(string)($_POST['table'] ?? ''), (int)($_POST['rows'] ?? 50));
+				$job = ManagementJob::createFromBuild($node->key, 'log_table_tail', $built, null, $uid);
 				return self::jobUrl($job);
 			}
 

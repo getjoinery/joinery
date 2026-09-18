@@ -7,6 +7,9 @@
  * a person approves the request on the management node after comparing the
  * key fingerprint both screens show (Phase 1.5, decision A6).
  *
+ * @version 1.3 - The log-access switch (specs/agent_log_access.md), between the agent switch and the
+ *                connection: what a connected management node may read of this site's logs, in
+ *                the owner's words, with the switch beside the explanation
  * @version 1.2 - The agent's own on/off switch, above everything else: none of the rest of this
  *                page means anything on a machine that is not running one
  * @version 1.1 - Disconnect: the node ends the connection from its own side (either side can);
@@ -26,6 +29,8 @@ $leave_request   = $page_vars['leave_request'];
 $agent_enabled   = $page_vars['agent_enabled'];
 $agent_installed = $page_vars['agent_installed'];
 $agent_switched  = $page_vars['agent_switched'];
+$log_access      = $page_vars['log_access'];
+$log_access_switched = $page_vars['log_access_switched'];
 $installer_hint  = $page_vars['installer_hint'];
 $error           = $page_vars['error'];
 $requested       = $page_vars['requested'];
@@ -91,6 +96,31 @@ if (!$agent_installed) {
 	   . '<div class="mt-2"><code>' . htmlspecialchars($installer_hint) . '</code></div>'
 	   . '</div>';
 }
+
+// What a connected management node may read of this site's logs. Between the
+// agent switch and the connection, so it is read in the same breath as the act
+// that gives a management node any sight of this machine. The agent enforces
+// it: a log request arriving while this is off is refused on this machine,
+// whatever the management node says.
+if ($log_access_switched === 'on') {
+	echo '<div class="alert alert-info" role="alert">Log access is on. A connected management node can read this site\'s redacted log excerpts.</div>';
+} elseif ($log_access_switched === 'off') {
+	echo '<div class="alert alert-info" role="alert">Log access is off. The agent refuses every log request from a management node from now on.</div>';
+}
+echo '<div class="card mb-3" style="max-width:46rem;"><div class="card-body">';
+echo '<h5 class="card-title mb-2">Let the management node read this site\'s logs <span class="badge ' . ($log_access ? 'bg-success' : 'bg-secondary') . '">' . ($log_access ? 'On' : 'Off') . '</span></h5>';
+echo '<p class="text-muted mb-2">When on, a management node this machine is connected to can ask for the last lines of the site\'s '
+   . 'error and task logs and the newest rows of the login, request, event, form-error and webhook logs. '
+   . 'Passwords, keys, tokens, addresses and the personal half of email addresses are masked on this machine before anything is sent; '
+   . 'member addresses, submitted forms and raw payloads are never sent at all. '
+   . 'When off, every such request is refused here, and the management node is told why. '
+   . 'On by default. It has no effect until this machine is connected to a management node.</p>';
+echo '<form method="POST" action="/admin/admin_management_node" class="d-inline">'
+   . '<input type="hidden" name="action" value="' . ($log_access ? 'log_access_off' : 'log_access_on') . '">'
+   . '<button type="submit" class="btn btn-sm ' . ($log_access ? 'btn-outline-secondary' : 'btn-primary') . '">'
+   . ($log_access ? 'Turn off log access' : 'Turn on log access') . '</button>'
+   . '</form>';
+echo '</div></div>';
 
 if ($status === 'connected') {
 	echo '<div class="alert alert-success" role="alert">';
