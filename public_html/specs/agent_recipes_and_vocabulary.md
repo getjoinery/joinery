@@ -191,6 +191,28 @@ and `file_head {file, lines}` (observe, closed lists, capped);
 **Recipes:** `fail2ban`, then `agent_supervision`, then Sentinel's rungs 1
 and 2 where the check is local and the repair deterministic.
 
+## Words the fleet has asked for — a running list
+
+What an operator reached for and did not have, recorded as it happens.
+Each entry says what was wanted, what was done instead, and the word or
+recipe that would close it. Every rule above applies: observe words are
+read-only with closed parameters and capped output; nothing here takes
+free text or a path.
+
+**2026-09-17, the 0.8.408 apply on joinerydemo (release carried a table
+rename, migration 192).** The whole apply went through `apply_update` and
+no shell was opened; what follows is what the operator could not see.
+
+| Wanted | Done instead | Word or recipe |
+|---|---|---|
+| Confirm the node's schema after a migration: the old table gone, the new column NOT NULL, a row count | Trusted the transcript's own lines | `schema_probe {table}` (observe): exists, row count, columns with type and nullability, indexes — the node's `information_schema` answer for one named table, no SQL taken from the plane |
+| Which plugins are active on the node, and their versions | Inferred from the absence of a plugin-migration line | `host_report` (or `check_status`) carries the plugin set: name, version, active — the platform's own registry, read not guessed |
+| The site's error log for the minutes after the swap | Nothing | `site_log {file, previous, lines}` (observe): the last N lines of one of the site's own log files from a compiled list, capped, redacted on the node — **BUILT** (agent 1.35.0), `agent_log_access.md` |
+| A deploy result to read rather than a transcript to grep | Grepped 70 KB of routing debug for six lines | `apply_update` posts a structured result beside the transcript: version before and after, each migration run with its row counts, schema changes, deploy-tier verdict, rollback yes/no. The transcript stays for forensics |
+| The site's own log tables after the swap: the last logins, request log rows, event log rows and webhook rows | Nothing | `log_table_tail {table, rows}` (observe): the newest N rows of one log table from a compiled list (`log_logins`, `rql_request_logs`, `evl_event_logs`, `wbh_webhook_logs`, `lfe_log_form_errors`), compiled column list per table, rows capped; the node's own query, no SQL taken from the plane. With `site_log`, gated by one owner-set switch on the node, on by default, redacted on the node — **BUILT** (agent 1.35.0), `agent_log_access.md` |
+| The affected pages rendered on the node as a signed-in user | Only `/` and `/login` from outside; the pages were checked on dev with a throwaway superadmin | `page_probe {view}` (observe): the node renders a view from a closed list as a throwaway session of the platform's own making and reports status, size and any SQL or PHP error in the body — the `deploy_site_responds` test, given a list |
+| Roll a release across the fleet in risk order, one node at a time, stopping at the first problem | Queued `apply_update` by hand per node from a script, waited on each job, grepped each transcript, queued the next | Not a node word — the node has `apply_update`. A **tier 2 recipe on the plane**, `staged_rollout {release, order}`: an ordered node list, one `apply_update` at a time, a gate between them read from the structured result above (completed, deploy tier green, version reported, no rollback), halt on the first miss and say which node and why. "Apply update to all on host" is its unordered ancestor |
+
 ## What complies with what
 
 - `agent_management_first_principles.md`: programme, status, acceptance.
