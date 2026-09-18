@@ -4465,6 +4465,16 @@ removes the custom-label membership (`MailboxService::setMembership`, via the
 pushes the change to the source, and an unbound (local) label is pure membership that
 never touches a remote.
 
+The list's selection toolbar carries the same control for every ticked
+conversation. Each list row arrives with `label_ids` (the custom labels any message
+in the thread carries — the same union the thread endpoint's `folders` reports), and
+a label's box reads the selection from them the way Gmail's does: ticked when every
+selected conversation has the label, mixed (indeterminate) when some do, clear when
+none does. Ticking puts the whole selection in, clearing takes it all out; the
+rows in hand are updated and the panel stays open, so several labels can be set
+in one visit. The one list change a label edit makes is taking the open label off
+the selection, which removes those rows from that label's view.
+
 **Creating a label/folder.** The same control has a **New label… / New folder…**
 field, and is present on every mailbox — one with no labels yet shows the button
 with just that field, since it is the one place a first label is made. Creating

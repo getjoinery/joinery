@@ -1,8 +1,9 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.67 — the Contact panel also lists everyone else the
- * open message names (its To and Cc) who is not yet in this mailbox's contacts,
- * each with a one-click Add, under the counterparty's card.
+ * No framework. @version 2.69 — the selection's Labels panel shows what the
+ * ticked conversations already carry (ticked / mixed / clear per label) and
+ * stays open across changes; the thread re-opened in place after a send keeps
+ * its labels ticked.
  *
  * The conversation list updates in place after mutations
  * (specs/implemented/mailbox_reader_list_persistence.md): actions that take rows out of
@@ -895,11 +896,27 @@
 		else { refreshThreads(); }
 	}
 
+	// A list row's custom labels (label_ids on the thread payload), read and
+	// kept current by both Labels panels so a row ticked in the list agrees with
+	// the conversation it opens into.
+	function threadHasLabel(t, labelId) {
+		return (t.label_ids || []).some(function (id) { return String(id) === String(labelId); });
+	}
+	function setThreadLabel(t, labelId, present) {
+		var ids = (t.label_ids || []).filter(function (id) { return String(id) !== String(labelId); });
+		if (present) { ids.push(labelId); }
+		t.label_ids = ids;
+	}
+
 	/**
 	 * Move/Labels for the selection. Same panel as the open conversation's control
-	 * (shared markup and CSS), with one difference: a selection has no single
-	 * membership to show, so every box starts unticked and a tick means "put all of
-	 * these in that folder". Returns null outside a single mailbox's scope.
+	 * (shared markup and CSS). A label's box reads the selection the way Gmail's
+	 * does: ticked when every selected conversation carries it, mixed
+	 * (indeterminate) when some do, clear when none does — each row's label_ids
+	 * comes with the list. Ticking puts all of them in; clearing takes all of
+	 * them out. A change updates the rows in hand and leaves the panel open, so
+	 * several labels can be set in one visit. Returns null outside a single
+	 * mailbox's scope.
 	 *
 	 * A mailbox with no labels yet still gets the control: the panel's New label…
 	 * field is the only place a label is made, so hiding the button on an empty
@@ -910,6 +927,7 @@
 		var info = mailboxFolders(state.aliasId);
 
 		var keys = selectedKeys();
+		var threads = selectedThreads();
 		var wrap = el('div', 'mbx-folder-ctl');
 		var btn = toolBtn(info.exclusive ? 'folder' : 'tag',
 			info.exclusive ? 'Move to' : 'Labels', false, function (e) {
@@ -935,12 +953,28 @@
 				var lab = el('label', 'mbx-folder-opt');
 				var cb = document.createElement('input');
 				cb.type = 'checkbox';
+				var carrying = threads.filter(function (t) { return threadHasLabel(t, f.id); }).length;
+				cb.checked = carrying > 0 && carrying === threads.length;
+				cb.indeterminate = carrying > 0 && carrying < threads.length;
 				cb.addEventListener('change', function () {
+					// A mixed box becomes ticked on click: "all of these", never
+					// "none of these" — the browser leaves checked=true, and
+					// present follows it.
+					var present = cb.checked;
+					cb.disabled = true;
 					apiAction({ action: 'set_membership', threadKeys: keys, aliasId: state.aliasId,
-						folderId: f.id, present: cb.checked })
+						folderId: f.id, present: present })
 						.then(function () {
+							cb.disabled = false;
+							cb.indeterminate = false;
+							cb.checked = present;
+							threads.forEach(function (t) { setThreadLabel(t, f.id, present); });
 							refreshMailboxes();
-							if (state.folderId != null) { refreshThreads(); }  // a filtered view may change
+							// Taking the open label off the selection takes its rows
+							// out of this view; nothing else changes what the list shows.
+							if (!present && state.folderId != null && String(state.folderId) === String(f.id)) {
+								afterBulk(keys);
+							}
 						});
 				});
 				lab.appendChild(cb);
@@ -1757,6 +1791,7 @@
 						folderId: f.id, present: cb.checked })
 						.then(function () {
 							current[String(f.id)] = cb.checked;
+							setThreadLabel(t, f.id, cb.checked); // the list row behind this thread
 							refreshMailboxes();
 							if (state.folderId != null) { refreshThreads(); } // a filtered view may change
 						});
@@ -4186,12 +4221,16 @@
 		});
 	}
 
-	// Reload the open thread's messages in place (after a send).
+	// Reload the open thread's messages in place (after a send). The thread's
+	// labels come back with the messages and are handed on, as openThread does —
+	// the Labels panel is rebuilt from them, and without them every box shows
+	// unticked until the thread is opened again from the list.
 	function reopenCurrentThread() {
 		var url = CFG.threadUrl + '?thread_key=' + encodeURIComponent(state.threadKey)
 			+ (state.aliasId != null ? '&alias_id=' + encodeURIComponent(state.aliasId) : '');
 		apiGet(url).then(function (data) {
-			renderThread(state.openThread || { thread_key: state.threadKey, subject: '' }, data.messages || []);
+			renderThread(state.openThread || { thread_key: state.threadKey, subject: '' },
+				data.messages || [], data.folders || []);
 		}).catch(function () {
 			// The send already succeeded — a failed repaint must not blank the
 			// thread, so leave what is on screen and let the next open refresh it.
