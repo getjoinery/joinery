@@ -70,6 +70,15 @@ function jcb_node(array $fields = array()) {
 	return $node;
 }
 
+// The fixture address gets its placement record here, once, registered for
+// cleanup. build_install_node mints one for the first container it places at
+// an address that has none, and a row minted mid-test is never registered, so
+// it outlived the run as a 192.0.2.10 host on the dashboard. Every later
+// container at the address links to this row (oldest live row wins), and a
+// leaked row from an earlier run is the one linked and reclaimed.
+$fixture_host = ManagedHost::ensure_for_node(jcb_node());
+harness_register_row('mgh_managed_hosts', 'mgh_managed_host_id', $fixture_host->key);
+
 /** Flatten the cmd text out of a step array. */
 function jcb_cmds($steps) {
 	$out = array();
