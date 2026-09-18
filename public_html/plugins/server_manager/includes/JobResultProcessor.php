@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.31 - process_site_log and process_log_table_tail record a log word's envelope as the job's
+ *                 result, bounded on intake, so the job page renders the excerpt (specs/agent_log_access.md)
  * @version 1.30 - a status check on a node that hosts no site (ManagedNode::hosts_site) queues no
  *                 recovery_key_report: the host has no key to report, the bundle does not carry the
  *                 reporting script, and the refusal read as a tampered file (docker-prod, 2026-09-15)
@@ -1799,6 +1801,97 @@ HTML;
 		usort($files, function($a, $b) { return ($b['mtime'] ?? 0) - ($a['mtime'] ?? 0); });
 
 		$job->set('mjb_result', json_encode(['files' => $files]));
+		$job->save();
+	}
+
+	/** The most bytes of log text a site_log result keeps; the node's own output cap, mirrored. */
+	const LOG_EXCERPT_MAX_BYTES = 65536;
+	/** The most columns a log_table_tail result keeps; every table the node knows has fewer. */
+	const LOG_TABLE_MAX_COLUMNS = 32;
+	/** The longest a single cell of a log_table_tail result may be. */
+	const LOG_TABLE_MAX_CELL = 4096;
+
+	/**
+	 * A site_log job's result is the node's envelope, reduced to the keys the
+	 * job page renders and bounded on intake (specs/agent_log_access.md §4).
+	 * The node redacted the text before it left; nothing here undoes that, and
+	 * the page's own redactor is the second pass. An unreadable envelope
+	 * records read=false rather than nothing, so the job never looks
+	 * unprocessed and the page says plainly that no excerpt came back.
+	 */
+	private static function process_site_log($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		if (!is_array($data) || !array_key_exists('text', $data)) {
+			$job->set('mjb_result', json_encode(['read' => false]));
+			$job->save();
+			return;
+		}
+		$text = is_string($data['text']) ? $data['text'] : '';
+		$truncated_here = strlen($text) > self::LOG_EXCERPT_MAX_BYTES;
+		if ($truncated_here) {
+			$text = substr($text, 0, self::LOG_EXCERPT_MAX_BYTES);
+		}
+		$file = preg_replace('/[^a-z0-9_]/', '', strtolower((string)($data['file'] ?? '')));
+		$job->set('mjb_result', json_encode([
+			'read'           => true,
+			'file'           => substr($file, 0, 64),
+			'previous'       => !empty($data['previous']),
+			'present'        => !empty($data['present']),
+			'size_bytes'     => max(0, (int)($data['size_bytes'] ?? 0)),
+			'modified_time'  => substr(preg_replace('/[^0-9TZ:\- ]/', '', (string)($data['modified_time'] ?? '')), 0, 32),
+			'lines_returned' => max(0, min((int)($data['lines_returned'] ?? 0), JobCommandBuilder::LOG_MAX_COUNT)),
+			'truncated'      => !empty($data['truncated']) || $truncated_here,
+			'text'           => $text,
+		]));
+		$job->save();
+	}
+
+	/**
+	 * A log_table_tail job's result: the node's columns and rows, kept only as
+	 * far as the plane's own caps (LOG_MAX_COUNT rows, LOG_TABLE_MAX_COLUMNS
+	 * columns, LOG_TABLE_MAX_CELL per cell) and with every cell reduced to a
+	 * scalar, so the page renders a table it can bound rather than whatever
+	 * shape the node chose to send.
+	 */
+	private static function process_log_table_tail($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		if (!is_array($data) || !isset($data['rows']) || !is_array($data['rows'])) {
+			$job->set('mjb_result', json_encode(['read' => false]));
+			$job->save();
+			return;
+		}
+		$columns = [];
+		foreach ((is_array($data['columns'] ?? null) ? $data['columns'] : []) as $c) {
+			if (!is_scalar($c)) { continue; }
+			$columns[] = substr(preg_replace('/[^A-Za-z0-9_]/', '', (string)$c), 0, 64);
+			if (count($columns) >= self::LOG_TABLE_MAX_COLUMNS) { break; }
+		}
+		$rows = [];
+		$truncated_here = count($data['rows']) > JobCommandBuilder::LOG_MAX_COUNT;
+		foreach (array_slice($data['rows'], 0, JobCommandBuilder::LOG_MAX_COUNT) as $row) {
+			if (!is_array($row)) { continue; }
+			$kept = [];
+			foreach ($columns as $c) {
+				$v = $row[$c] ?? null;
+				if (is_bool($v) || $v === null) {
+					$kept[$c] = $v;
+				} elseif (is_int($v) || is_float($v)) {
+					$kept[$c] = $v;
+				} else {
+					$kept[$c] = substr(is_scalar($v) ? (string)$v : json_encode($v), 0, self::LOG_TABLE_MAX_CELL);
+				}
+			}
+			$rows[] = $kept;
+		}
+		$table = preg_replace('/[^a-z0-9_]/', '', strtolower((string)($data['table'] ?? '')));
+		$job->set('mjb_result', json_encode([
+			'read'          => true,
+			'table'         => substr($table, 0, 64),
+			'columns'       => $columns,
+			'rows_returned' => count($rows),
+			'rows'          => $rows,
+			'truncated'     => !empty($data['truncated']) || $truncated_here,
+		]));
 		$job->save();
 	}
 

@@ -814,4 +814,67 @@ check(!JobResultProcessor::adopt_reported_verify($adopt_node, array(
 	'last_verify_time' => '2026-09-13 10:00:00', 'last_verify_outcome' => 'skipped')),
 	'a skip is never adopted — nothing was proven either way');
 
+// ---------------------------------------------------------------------------
+section('site_log / log_table_tail: the envelope becomes a bounded result the job page renders');
+
+$jrp_log_node = jrp_node();
+$site_env = json_encode(['api_version' => '1.0', 'data' => [
+	'file' => 'error', 'previous' => false, 'present' => true, 'size_bytes' => 93703,
+	'modified_time' => '2026-09-18T11:54:05Z', 'lines_returned' => 2, 'truncated' => false,
+	'text' => "[client <ip>:0] one\n[client <ip>:0] two\n",
+]]);
+$sj = jrp_job($jrp_log_node, 'site_log', "=== [Step 1/1] site_log ===\n" . $site_env . "\n[Step 1/1 OK]");
+JobResultProcessor::process($sj);
+$sr = json_decode((string)$sj->get('mjb_result'), true);
+check(is_array($sr) && $sr['read'] === true && $sr['file'] === 'error' && $sr['lines_returned'] === 2,
+	'a site_log envelope is recorded as the result with its file and line count', json_encode($sr));
+check(is_array($sr) && strpos($sr['text'], '[client <ip>:0] two') !== false,
+	'and the node-redacted text is carried as it arrived');
+check(in_array('site_log', JobResultProcessor::processable_types(), true)
+	&& in_array('log_table_tail', JobResultProcessor::processable_types(), true),
+	'both log words are types the processor reconciles');
+
+$big = json_encode(['api_version' => '1.0', 'data' => [
+	'file' => 'error', 'present' => true, 'lines_returned' => 999999, 'text' => str_repeat('x', JobResultProcessor::LOG_EXCERPT_MAX_BYTES + 100),
+]]);
+$bj = jrp_job($jrp_log_node, 'site_log', $big);
+JobResultProcessor::process($bj);
+$br = json_decode((string)$bj->get('mjb_result'), true);
+check(strlen($br['text']) === JobResultProcessor::LOG_EXCERPT_MAX_BYTES && $br['truncated'] === true
+	&& $br['lines_returned'] === JobCommandBuilder::LOG_MAX_COUNT,
+	'text past the node cap is cut on intake and marked truncated; the line count is bounded too');
+
+$nj = jrp_job($jrp_log_node, 'site_log', "nothing like an envelope");
+JobResultProcessor::process($nj);
+check((string)$nj->get('mjb_result') === json_encode(['read' => false]),
+	'output that is not a log envelope records read=false, never nothing', var_export($nj->get('mjb_result'), true));
+
+$rows = [];
+for ($i = 0; $i < JobCommandBuilder::LOG_MAX_COUNT + 5; $i++) {
+	$rows[] = ['log_login_id' => $i, 'log_login_type' => 2, 'note' => str_repeat('y', JobResultProcessor::LOG_TABLE_MAX_CELL + 10), 'nested' => ['a' => 1]];
+}
+$tab_env = json_encode(['api_version' => '1.0', 'data' => [
+	'table' => 'logins', 'columns' => ['log_login_id', 'log_login_type', 'note', 'nested', 'no such; column'],
+	'rows' => $rows, 'truncated' => false,
+]]);
+$tj = jrp_job($jrp_log_node, 'log_table_tail', $tab_env);
+JobResultProcessor::process($tj);
+$tr = json_decode((string)$tj->get('mjb_result'), true);
+check(is_array($tr) && $tr['read'] === true && $tr['table'] === 'logins'
+	&& count($tr['rows']) === JobCommandBuilder::LOG_MAX_COUNT && $tr['truncated'] === true,
+	'rows past the cap are dropped on intake and the result says so', json_encode(array_slice((array)$tr, 0, 3)));
+check(is_array($tr) && $tr['rows'][0]['log_login_id'] === 0 && $tr['rows'][0]['log_login_type'] === 2,
+	'numeric cells stay numbers');
+check(is_array($tr) && strlen($tr['rows'][0]['note']) === JobResultProcessor::LOG_TABLE_MAX_CELL,
+	'a cell longer than the cell cap is cut');
+check(is_array($tr) && $tr['rows'][0]['nested'] === '{"a":1}',
+	'a non-scalar cell is stored as its JSON text, never as structure');
+check(is_array($tr) && in_array('nosuchcolumn', $tr['columns'], true) && !in_array('no such; column', $tr['columns'], true),
+	'a column name is reduced to identifier characters');
+
+$tn = jrp_job($jrp_log_node, 'log_table_tail', json_encode(['api_version' => '1.0', 'data' => ['table' => 'logins']]));
+JobResultProcessor::process($tn);
+check((string)$tn->get('mjb_result') === json_encode(['read' => false]),
+	'a table envelope without rows records read=false');
+
 harness_finish();

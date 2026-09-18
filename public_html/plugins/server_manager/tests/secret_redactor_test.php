@@ -122,6 +122,17 @@ check(SmSecretRedactor::redact('PATH=/usr/local/bin:$PATH make release')
 	'a non-credential env var is left alone');
 
 // ---------------------------------------------------------------------------
+// The same shape in lower case, as a DSN, a query string or a config dump
+// writes it inside a log line (specs/agent_log_access.md live proof, 2026-09-18:
+// a planted dbpassword=... line reached the plane unmasked).
+foreach (["password={$SECRET}", "dbpassword={$SECRET};dbname=x", "csrf_token={$SECRET}", "api_key={$SECRET}", "client_secret={$SECRET}", "Token={$SECRET}"] as $line) {
+	$out = SmSecretRedactor::redact("log line: {$line} end");
+	check(strpos($out, $SECRET) === false && strpos($out, ' end') !== false, "lower-case assignment masked: {$line}", $out);
+}
+foreach (["primary_key=usr_user_id", "--key=/root/.ssh/id", "cache_key=abc123", "ssh_key_path=/root/.ssh"] as $line) {
+	check(SmSecretRedactor::redact($line) === $line, "not a secret, left readable: {$line}", SmSecretRedactor::redact($line));
+}
+
 section('non-credential text and edge cases pass through');
 // ---------------------------------------------------------------------------
 

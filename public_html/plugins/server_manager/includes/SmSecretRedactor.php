@@ -12,6 +12,10 @@
  * independently. Apply it wherever a persisted command or raw job output is
  * rendered.
  *
+ * @version 1.2 - the assignment shape is masked in any case for names carrying password/passwd/token/secret
+ *                and for the secret keys themselves (password=..., api_key=... inside a log line);
+ *                api_key joins the key list; the _KEY tail stays uppercase-only so flags and column
+ *                names stay readable. Mirrored in the agent's redact package (1.35.1)
  * @version 1.1 - mask shell env-var assignments (PGPASSWORD=..., *_TOKEN=...), the shape a
  *                hand-typed console command carries
  * @version 1.0
@@ -30,7 +34,7 @@ class SmSecretRedactor {
 	 * this engine, but the ordering says what is meant without relying on that.
 	 */
 	private static $secret_keys = array(
-		'secret_key', 'access_key', 'application_key', 'app_key',
+		'secret_key', 'access_key', 'application_key', 'app_key', 'api_key',
 		'api_secret', 'apk_secret_key', 'password', 'passwd', 'token', 'secret',
 		// The clone export key (clone_export_arm, and --clone-key= on the
 		// bootstrap command) — a bearer token and the dump's encryption password.
@@ -67,17 +71,25 @@ class SmSecretRedactor {
 		// The bootstrap's --clone-key=KEY flag (a quoted or bare value).
 		$text = preg_replace('/(--clone-key=)(\'[^\']*\'|"[^"]*"|\S+)/', '${1}' . self::MASK, $text);
 
-		// Shell env-var assignments — PGPASSWORD=..., AWS_SECRET_ACCESS_KEY=...,
-		// GITHUB_TOKEN=... — the shape a hand-typed console command uses. Matched
-		// on the conventional uppercase spelling so ordinary flags (--key=path)
-		// are left readable.
-		// A name qualifies by containing PASSWORD/PASSWD/TOKEN/SECRET anywhere
-		// (AWS_SECRET_ACCESS_KEY), or by ending in _KEY (API_KEY). Bare "KEY"
-		// anywhere would swallow SSH_KEY_PATH and similar, which carry paths
-		// rather than secrets — a redactor that eats the command is as unhelpful
-		// as one that leaks it.
+		// Assignments — PGPASSWORD=..., AWS_SECRET_ACCESS_KEY=..., GITHUB_TOKEN=...
+		// (the shape a hand-typed console command uses) and, in any case,
+		// password=..., dbpassword=..., csrf_token=..., api_key=... (the shape a
+		// DSN, a query string or a config dump uses inside a log line).
+		// A name qualifies by containing PASSWORD/PASSWD/TOKEN/SECRET anywhere,
+		// in any case, or by being one of the secret keys above, in any case.
 		$text = preg_replace(
-			'/\b([A-Z][A-Z0-9_]*(?:PASSWORD|PASSWD|TOKEN|SECRET)[A-Z0-9_]*|[A-Z][A-Z0-9_]*_KEY)=(?!\s)(\'[^\']*\'|"[^"]*"|\S+)/',
+			'/\b([A-Za-z][A-Za-z0-9_]*(?:password|passwd|token|secret)[A-Za-z0-9_]*|(?:' . $keys . '))=(?!\s)(\'[^\']*\'|"[^"]*"|\S+)/i',
+			'${1}=' . self::MASK,
+			$text
+		);
+		// A name ending in _KEY qualifies only in the conventional uppercase
+		// spelling (API_KEY, DEPLOY_KEY). Lowercase names ending in _key are
+		// the shape of ordinary flags and column names (--key=path,
+		// primary_key=usr_user_id, cache_key=...), which carry no secret, and
+		// a redactor that eats the diagnosis is as unhelpful as one that leaks
+		// it. Bare KEY anywhere would swallow SSH_KEY_PATH, which is a path.
+		$text = preg_replace(
+			'/\b([A-Z][A-Z0-9_]*_KEY)=(?!\s)(\'[^\']*\'|"[^"]*"|\S+)/',
 			'${1}=' . self::MASK,
 			$text
 		);
