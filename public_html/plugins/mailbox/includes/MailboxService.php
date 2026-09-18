@@ -49,6 +49,9 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.41 - listThreads() rows carry label_ids: the custom labels any message
+ *                 in the thread holds, so a selection's Labels panel can show what
+ *                 the selected conversations already carry
  * @version 1.40 - deleteLabel(): a custom label is removed from the site — every
  *                 membership dropped, every feed binding unbound and untracked,
  *                 the messages themselves untouched
@@ -1234,6 +1237,10 @@ class MailboxService {
 		// Which of this page's messages carry a real attachment, for the list
 		// paperclip. Presence only — the manifest itself is a thread-open cost.
 		$clipped = $this->messageIdsWithAttachments(array_unique($page_ids));
+		// Which custom labels each of this page's messages carries, for the
+		// selection's Labels panel (ticked when every selected conversation
+		// has the label, mixed when some do). One query for the page.
+		$labels_of = $this->labelIdsByMessage(array_unique($page_ids));
 
 		// When this thread purges, for the Trash list's date column. Computed for
 		// display and never stored: the window is a setting an operator can change,
@@ -1275,6 +1282,7 @@ class MailboxService {
 
 			$senders = array();
 			$has_attachment = false;
+			$label_ids = array();
 			foreach ($this->pgIntArray($r['member_ids']) as $mid) {
 				$s = trim((string)($content[$mid]['sender'] ?? ''));
 				if ($s !== '' && !in_array($s, $senders, true)) {
@@ -1282,6 +1290,9 @@ class MailboxService {
 				}
 				if (isset($clipped[$mid])) {
 					$has_attachment = true;
+				}
+				foreach ($labels_of[$mid] ?? array() as $lid) {
+					$label_ids[$lid] = true;
 				}
 			}
 
@@ -1303,6 +1314,9 @@ class MailboxService {
 				// True when any message in the thread has a real (non-inline)
 				// attachment — the list shows a paperclip beside the time.
 				'has_attachment' => $has_attachment,
+				// The custom labels (ilb_ ids) any message in the thread carries —
+				// the same union threadFolderIds() reports for an open thread.
+				'label_ids'    => array_map('intval', array_keys($label_ids)),
 				// AI security scan (specs/joinery_ai_email_security_scan.md):
 				// the highest danger score among the thread's messages, or
 				// null if none has been scanned. The list badge is silent
@@ -1891,6 +1905,26 @@ class MailboxService {
 		$out = array();
 		foreach ($this->db()->query($sql)->fetchAll(PDO::FETCH_ASSOC) as $r) {
 			$out[intval($r['mid'])] = true;
+		}
+		return $out;
+	}
+
+	/**
+	 * The custom-label ids each of these messages currently carries
+	 * (present_local), keyed by message id; a message with no label has no entry.
+	 * @return array<int, int[]>
+	 */
+	private function labelIdsByMessage(array $message_ids): array {
+		if (!count($message_ids)) {
+			return array();
+		}
+		$in = implode(',', array_map('intval', $message_ids));
+		$sql = "SELECT ilm_iem_inbound_email_message_id AS mid, ilm_ilb_inbound_email_label_id AS lid
+				FROM ilm_inbound_label_members
+				WHERE ilm_iem_inbound_email_message_id IN ($in) AND ilm_present_local = true";
+		$out = array();
+		foreach ($this->db()->query($sql)->fetchAll(PDO::FETCH_ASSOC) as $r) {
+			$out[intval($r['mid'])][] = intval($r['lid']);
 		}
 		return $out;
 	}

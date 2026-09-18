@@ -147,6 +147,26 @@ $service->setMembership(array($m1, $m2), $label_id, true);
 check($member_count($label_id) === 2, 'both messages carry the label');
 check($switcher_lists($service, $local_alias, $label_id), 'the switcher lists the label');
 
+// The list row says what the thread carries (label_ids), agreeing with what
+// the thread endpoint reports (folders) — the selection's Labels panel reads
+// the former, the open thread's the latter.
+$row_labels = function ($service, $alias_id, $thread_key) {
+	foreach ($service->listThreads($alias_id, array(), 1, 50)['threads'] as $t) {
+		if ($t['thread_key'] === $thread_key) { return $t['label_ids']; }
+	}
+	return null;
+};
+$stmt = $db->prepare('SELECT iem_thread_key FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = ?');
+$stmt->execute(array($m1));
+$m1_key = (string)$stmt->fetchColumn();
+check($row_labels($service, $local_alias, $m1_key) === array($label_id),
+	'the list row carries the label id', json_encode($row_labels($service, $local_alias, $m1_key)));
+check($service->threadFolderIds($local_alias, $m1_key) === array($label_id),
+	'and the thread endpoint reports the same label');
+$service->setMembership(array($m1), $label_id, false);
+check($row_labels($service, $local_alias, $m1_key) === array(), 'taking the label off empties the row\'s label_ids');
+$service->setMembership(array($m1), $label_id, true);
+
 $deleted = $service->deleteLabel($local_alias, $label_id);
 check(is_array($deleted) && $deleted['name'] === $name, 'deleteLabel returns the label\'s name', json_encode($deleted));
 check(is_array($deleted) && (int)$deleted['messages'] === 2, 'and how many messages carried it');
