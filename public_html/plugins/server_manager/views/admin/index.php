@@ -3,6 +3,8 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.25 - a host group is a Docker box: its own agent node in the header, its containers as the
+ *                 sites; every other node is a machine, listed flat (a node placed on a deleted host too)
  * @version 1.24 - a rejected join can be reopened for a day (reopen_join): a mis-click is reversible, and the machine
  *                keeps asking with the same key until it is answered
  * @version 1.23 - a provision's host join (claim <slug>-host) says approving makes the host node at the instance's IPv4
@@ -162,11 +164,31 @@ if (!$show_all) { $node_opts['deleted'] = false; }
 $nodes = new MultiManagedNode($node_opts, ['mgn_name' => 'ASC']);
 $nodes->load();
 
+// A host record is a Docker box's placement record: which containers live on
+// it, plus the box's own agent node (mgh_mgn_managed_node_id). So a host group
+// lists the sites placed on it and carries its own node in the header, and
+// every other node — a bare machine, a relay, a DNS box, this plane itself —
+// is a machine in its own right and is listed flat. A node placed on a host
+// that no longer exists is a machine too, not a site that vanishes with it.
+$live_host_ids = [];
+$host_node_ids = [];
+foreach ($hosts as $host) {
+	$live_host_ids[(int)$host->key] = true;
+	$hn = $host->host_node();
+	if ($hn) { $host_node_ids[(int)$hn->key] = (int)$host->key; }
+}
 $nodes_by_host = [];
+$machines = [];
 foreach ($nodes as $node) {
-	$hid = $node->get('mgn_mgh_managed_host_id');
-	$key = $hid !== null ? (int)$hid : 0; // 0 = ungrouped
-	$nodes_by_host[$key][] = $node;
+	$hid = (int)$node->get('mgn_mgh_managed_host_id');
+	if (isset($host_node_ids[(int)$node->key])) {
+		continue; // rendered in its host's header
+	}
+	if ($hid && isset($live_host_ids[$hid])) {
+		$nodes_by_host[$hid][] = $node;
+	} else {
+		$machines[] = $node;
+	}
 }
 
 // Load recent jobs
@@ -558,7 +580,7 @@ if ($agent_online) {
 		$page->begin_box($pageoptions);
 		?>
 
-		<?php if (count($hosts) === 0 && empty($nodes_by_host[0])): ?>
+		<?php if (count($hosts) === 0 && empty($machines)): ?>
 			<div class="alert alert-info mb-0">
 				<strong>No hosts configured yet.</strong>
 				<a href="/admin/server_manager/host_add" class="alert-link">Add your first host</a> or
@@ -574,6 +596,7 @@ if ($agent_online) {
 					$capacity_pct = $max_sites > 0 ? min(100, round($site_count / $max_sites * 100)) : 0;
 					$capacity_color = $capacity_pct >= 90 ? 'danger' : ($capacity_pct >= 70 ? 'warning' : 'secondary');
 					$prov_enabled = (bool)$host->get('mgh_provisioning_enabled');
+					$host_node  = $host->host_node();
 				?>
 				<div class="accordion-item">
 					<h2 class="accordion-header" id="hdr-<?php echo $host->key; ?>">
@@ -586,6 +609,9 @@ if ($agent_online) {
 								<div>
 									<strong><?php echo htmlspecialchars($host->get('mgh_name')); ?></strong>
 									<small class="text-muted ms-2"><?php echo htmlspecialchars($host->get('mgh_host')); ?></small>
+									<?php if (!$host_node): ?>
+										<div><small class="text-muted">No host agent paired — certificates and site removal on this box have no path until one joins.</small></div>
+									<?php endif; ?>
 								</div>
 								<div class="d-flex align-items-center gap-2">
 									<span class="badge bg-<?php echo $capacity_color; ?>"><?php echo $site_count; ?> / <?php echo $max_sites; ?> sites</span>
@@ -601,15 +627,17 @@ if ($agent_online) {
 					<div id="hc-<?php echo $host->key; ?>" class="accordion-collapse collapse show"
 						aria-labelledby="hdr-<?php echo $host->key; ?>">
 						<div class="accordion-body">
-							<?php if (empty($host_nodes)): ?>
-								<div class="text-muted small p-3">No sites on this host.</div>
-							<?php else: ?>
-								<div class="list-group list-group-flush">
-									<?php foreach ($host_nodes as $node): ?>
-										<?php echo render_node_row($node, $db, $session); ?>
-									<?php endforeach; ?>
-								</div>
-							<?php endif; ?>
+							<div class="list-group list-group-flush">
+								<?php if ($host_node): ?>
+									<?php echo render_node_row($host_node, $db, $session, 'host agent'); ?>
+								<?php endif; ?>
+								<?php foreach ($host_nodes as $node): ?>
+									<?php echo render_node_row($node, $db, $session); ?>
+								<?php endforeach; ?>
+								<?php if (empty($host_nodes)): ?>
+									<div class="text-muted small p-3">No sites on this host.</div>
+								<?php endif; ?>
+							</div>
 							<div class="p-2 border-top bg-light d-flex gap-2">
 								<a href="/admin/server_manager/install_node_form" class="btn btn-sm btn-outline-primary">Install Site</a>
 								<a href="/admin/server_manager/host_add?mgh_managed_host_id=<?php echo $host->key; ?>" class="btn btn-sm btn-outline-secondary">Edit Host</a>
@@ -619,26 +647,29 @@ if ($agent_online) {
 				</div>
 				<?php endforeach; ?>
 
-				<?php if (!empty($nodes_by_host[0])): ?>
-				<!-- Ungrouped nodes (no host assigned) -->
+				<?php if (!empty($machines)): ?>
+				<!-- Machines: every node that is not a container placed on a host -->
 				<div class="accordion-item">
-					<h2 class="accordion-header" id="hdr-ungrouped">
+					<h2 class="accordion-header" id="hdr-machines">
 						<button class="accordion-button" type="button"
 							data-bs-toggle="collapse"
-							data-bs-target="#hc-ungrouped"
+							data-bs-target="#hc-machines"
 							aria-expanded="true"
-							aria-controls="hc-ungrouped">
+							aria-controls="hc-machines">
 							<div class="d-flex justify-content-between align-items-center w-100 me-3">
-								<div><strong>Ungrouped Sites</strong></div>
-								<span class="badge bg-secondary"><?php echo count($nodes_by_host[0]); ?> sites</span>
+								<div>
+									<strong>Machines</strong>
+									<small class="text-muted ms-2">each runs its own site or service; nothing else is placed on it</small>
+								</div>
+								<span class="badge bg-secondary"><?php echo count($machines); ?></span>
 							</div>
 						</button>
 					</h2>
-					<div id="hc-ungrouped" class="accordion-collapse collapse show"
-						aria-labelledby="hdr-ungrouped">
+					<div id="hc-machines" class="accordion-collapse collapse show"
+						aria-labelledby="hdr-machines">
 						<div class="accordion-body p-0">
 							<div class="list-group list-group-flush">
-								<?php foreach ($nodes_by_host[0] as $node): ?>
+								<?php foreach ($machines as $node): ?>
 									<?php echo render_node_row($node, $db, $session); ?>
 								<?php endforeach; ?>
 							</div>
@@ -719,7 +750,7 @@ if ($agent_online) {
 /**
  * Render a single node row (used in each host panel and the ungrouped section).
  */
-function render_node_row($node, $db, $session) {
+function render_node_row($node, $db, $session, $role_badge = '') {
 	$status_data = $node->get('mgn_last_status_data');
 	if (is_string($status_data)) $status_data = json_decode($status_data, true);
 	$last_check = $node->get('mgn_last_status_check');
@@ -765,6 +796,9 @@ function render_node_row($node, $db, $session) {
 			<span class="badge bg-<?php echo $status_color; ?> me-2 js-status-badge">&bull;</span>
 			<div class="svm-minw0">
 				<strong><?php echo htmlspecialchars($node->get('mgn_name')); ?></strong>
+				<?php if ($role_badge !== ''): ?>
+					<span class="badge bg-primary ms-1"><?php echo htmlspecialchars($role_badge); ?></span>
+				<?php endif; ?>
 				<?php if ($node->get('mgn_delete_time')): ?>
 					<span class="badge bg-secondary ms-1" title="Removed <?php echo htmlspecialchars($node->get_local('mgn_delete_time', 'M j, Y')); ?>">Removed</span>
 				<?php endif; ?>

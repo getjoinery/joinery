@@ -659,8 +659,10 @@ $made_join_requests[] = $adopt_jr->key;
 check(AgentChannelEndpoint::isThisMachine('203.0.113.77') === false, 'A TEST-NET address is not this machine');
 check(AgentChannelEndpoint::isThisMachine('127.0.0.1') === true, 'The loopback address is this machine');
 
-// Only a host row the adoption MINTED is this test's to delete: ensure_for_node
-// links an existing row at the same address when there is one.
+// Only a host row the adoption MINTED is this test's to delete: place_node
+// links an existing row at the same address when there is one (and, for a
+// join, mints none — asserted below; the bookkeeping stays so a regression
+// that mints one is cleaned up rather than left on the dev database).
 $hosts_before = array_map('intval', $db->query('SELECT mgh_managed_host_id FROM mgh_managed_hosts')->fetchAll(PDO::FETCH_COLUMN));
 $adopted = AgentChannelEndpoint::adoptJoin($adopt_jr);
 $adopt_node = $adopted['node'];
@@ -678,7 +680,9 @@ check((bool)$adopt_node->get('mgn_enabled') === true, 'The record is enabled: th
 check($adopt_node->get('mgn_agent_public_key') === base64_encode($adopt_pub), 'Approval bound the requesting key to the new record');
 check($adopt_jr->get('ajr_status') === AgentJoinRequest::STATUS_APPROVED
 	&& (int)$adopt_jr->get('ajr_mgn_managed_node_id') === (int)$adopt_node->key, 'The request records the node it made');
-check(!empty($adopt_node->get('mgn_mgh_managed_host_id')), 'The record has a placement (host) row like a hand-made node');
+check(empty($adopt_node->get('mgn_mgh_managed_host_id')), 'A bare machine joining is only a node: no placement (host) row is minted for it');
+check(count(array_map('intval', $db->query('SELECT mgh_managed_host_id FROM mgh_managed_hosts')->fetchAll(PDO::FETCH_COLUMN))) === count($hosts_before),
+	'and the host table is exactly as it was');
 
 $second = AgentChannelEndpoint::freeSlug('agtest-Fresh Box.local');
 check($second === 'agtest-fresh-box-local-2', 'A second machine with the same name gets the next free slug', $second);

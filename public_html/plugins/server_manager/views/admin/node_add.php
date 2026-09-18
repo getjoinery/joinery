@@ -10,6 +10,7 @@
  * on someone else's machine (specs/ssh_single_bootstrap.md).
  * After save, redirects to node_detail.
  *
+ * @version 1.6 - the placement record is minted only for a container node (ManagedHost::place_node)
  * @version 1.5 - the auto-detect (SSH discovery) panel is gone; enrollment starts on the node
  * @version 1.4 - CSRF on the save handler; tcp_port check requires a port at save time
  * @version 1.3
@@ -78,11 +79,10 @@ if ($_POST && isset($_POST['mgn_name'])) {
 		$node->save();
 		$node->load();
 
-		// Link (or mint) the placement record. Every node names its machine by
-		// mgn_mgh_managed_host_id — sibling grouping (port allocation, upgrade-all,
-		// host-scope routing) reads nothing else, so the FK is set the moment
-		// the node exists rather than only when a host row happened to.
-		ManagedHost::ensure_for_node($node);
+		// A container names its placement record (minted here if none exists);
+		// sibling grouping and host-scope routing read nothing else. A bare
+		// machine is only a node and gets no record of its own.
+		ManagedHost::place_node($node);
 
 		$page_regex = '/\/admin\/server_manager/';
 		$session->save_message(new DisplayMessage(
