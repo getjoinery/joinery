@@ -38,6 +38,8 @@
  * has four states rather than one call: waiting for an answer is a state the
  * phase already knew how to be in, because an unstamped step is simply retried.
  *
+ * @version 1.3 - a name found taken after payment stamps rdm_taken_time, so the buyer's sites page
+ *                can offer an alternate (specs/managed_hosting_phase1_purchase.md §7)
  * @version 1.2 - the mail plan is asked over the agent channel, as a job whose whole
  *                vocabulary is the domain
  * @version 1.1 - send_failure_alert() is a protected seam, so tests intercept the mail edge
@@ -240,9 +242,13 @@ class ProvisionManagedDomains {
 				$this->mark_registered($row, $owned_expiry);
 				return 1;
 			}
+			// The one failure the buyer can fix: their sites page offers an
+			// alternate name on the strength of this stamp (§7).
+			$row->set('rdm_taken_time', gmdate('Y-m-d H:i:s'));
 			$this->fail_and_alert($row, 'The registrar reports ' . $domain . ' is no longer available'
 				. (empty($answer['message']) ? '.' : ': ' . $answer['message'])
-				. ' Nothing was charged by us for it — resolve with the buyer (refund, or an alternate name).');
+				. ' Nothing was charged by us for it. The buyer is offered an alternate name on their '
+				. 'sites page; if they choose one, the row returns to the queue on its own.');
 			return 1;
 		}
 

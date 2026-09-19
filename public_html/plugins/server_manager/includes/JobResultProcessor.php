@@ -5,6 +5,9 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.32 - the hosted welcome email carries the A-record instruction when the buyer brought their
+ *                 own domain (no registration row for the order), and says there is nothing to add only
+ *                 when this plane registered the name (specs/managed_hosting_phase1_purchase.md §14)
  * @version 1.31 - process_site_log and process_log_table_tail record a log word's envelope as the job's
  *                 result, bounded on intake, so the job page renders the excerpt (specs/agent_log_access.md)
  * @version 1.30 - a status check on a node that hosts no site (ManagedNode::hosts_site) queues no
@@ -1338,6 +1341,15 @@ class JobResultProcessor {
 		$hosted = $provision !== null && $provision->is_operator_hosted();
 		$sites_url = trim((string)$settings->get_setting('server_manager_hosted_manage_url'));
 
+		// A hosted site whose name this plane did NOT register is the buyer's
+		// own domain: the one thing left for them to do is the A record, and
+		// the email has to say so. Decided by the registration row, which
+		// exists exactly when the plane bought the name for this order.
+		$needs_dns = false;
+		if ($hosted) {
+			$needs_dns = !self::plane_registered_domain($provision);
+		}
+
 		$client = new GetJoineryApiClient($api_url, $pub_key, $sec_key);
 		$client->post('QueuedEmail', [
 			'equ_from'      => $from_email,
@@ -1347,10 +1359,23 @@ class JobResultProcessor {
 			'equ_subject'   => 'Your site is ready: ' . $domain,
 			'equ_body'      => $hosted
 				? self::build_hosted_welcome_email_body($domain, $user_name, $sites_url,
-					$provision->admin_password_state() === 'sealed')
+					$provision->admin_password_state() === 'sealed', $needs_dns ? $host_ip : '')
 				: self::build_welcome_email_body($domain, $host_ip, $user_name),
 			'equ_status'    => 2, // READY_TO_SEND
 		]);
+	}
+
+	/** Did this plane register the provision's domain (a registration row on its order)? */
+	public static function plane_registered_domain($provision): bool {
+		$order_item_id = (int)$provision->get('cvp_external_order_item_id');
+		if ($order_item_id <= 0 || !class_exists('MultiRegisteredDomain')) {
+			return false;
+		}
+		$rows = new MultiRegisteredDomain(['external_order_item_id' => $order_item_id, 'deleted' => false]);
+		foreach ($rows as $row) {
+			return true;
+		}
+		return false;
 	}
 
 	private static function build_welcome_email_body($domain, $host_ip, $user_name) {
@@ -1388,11 +1413,12 @@ HTML;
 	 * typed at a checkout. The password is shown once, behind a sign-in, on the
 	 * buyer's own sites page — which erases it as it shows it.
 	 */
-	private static function build_hosted_welcome_email_body($domain, $user_name, $sites_url, $has_password) {
+	private static function build_hosted_welcome_email_body($domain, $user_name, $sites_url, $has_password, $dns_ip = '') {
 		$name      = htmlspecialchars($user_name);
 		$dom       = htmlspecialchars($domain);
 		$login_url = htmlspecialchars('https://' . $domain . '/admin');
 		$sites     = htmlspecialchars($sites_url);
+		$ip        = htmlspecialchars($dns_ip);
 
 		$password_block = $has_password && $sites_url !== ''
 			? "<h3>Your password</h3>\n<p>For safety it is not in this email. Sign in to your account "
@@ -1401,13 +1427,26 @@ HTML;
 			: "<h3>Your password</h3>\n<p>Use the <strong>Forgot password</strong> link at "
 				. "<a href=\"{$login_url}\">{$login_url}</a> with this email address to set one.</p>";
 
+		// The buyer's own domain: the one record they add, and everything
+		// else already done. A domain this plane registered needs nothing.
+		$intro = $dns_ip !== ''
+			? "<p>Your site for <strong>{$dom}</strong> is built. The server, its email and its offsite "
+				. "backups are all set up and running — one thing is left, and it is yours to do.</p>\n"
+				. "<h3>Next step: point your domain at it</h3>\n"
+				. "<p>At your domain registrar, add an <strong>A record</strong> for <code>{$dom}</code> pointing to:</p>\n"
+				. "<p style=\"font-size:1.5em;text-align:center;font-weight:bold;letter-spacing:.05em;background:#f4f4f4;"
+				. "padding:12px;border-radius:4px\">{$ip}</p>\n"
+				. "<p>DNS changes typically take a few minutes to a few hours. Once your domain resolves to that "
+				. "address, HTTPS is provisioned automatically — nothing more to do on your part.</p>"
+			: "<p>Your site is live at <strong><a href=\"https://{$dom}\">https://{$dom}</a></strong>. The server, its\n"
+				. "email and its offsite backups are all set up and running — there is no DNS record to add and nothing\n"
+				. "to install.</p>";
+
 		return <<<HTML
 <html><body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px;color:#333">
 <h2 style="color:#1a1a1a">Your site is ready!</h2>
 <p>Hi {$name},</p>
-<p>Your site is live at <strong><a href="https://{$dom}">https://{$dom}</a></strong>. The server, its
-email and its offsite backups are all set up and running — there is no DNS record to add and nothing
-to install.</p>
+{$intro}
 
 <h3>Log in</h3>
 <p><a href="{$login_url}">{$login_url}</a> — your username is this email address.</p>

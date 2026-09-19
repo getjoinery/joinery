@@ -350,6 +350,24 @@ check($res->redirect === '/page/register-thanks',
 	'registration redirects to the thanks page',
 	'redirect: ' . var_export($res->redirect, true));
 
+// A visitor sent to sign in by a page that needs a member (/login?return=…)
+// who registers instead lands on that page: the account is signed in from
+// birth and the sign-in form kept the page in the session's return slot.
+$return_email = strtolower(reg_email('return'));
+reg_cleanup_email($return_email);
+$_SESSION = array();
+$_SESSION['returnurl'] = '/profile/server_manager/configure';
+$_SERVER['REMOTE_ADDR'] = '192.0.2.99';
+$res = harness_call_logic('logic/register_logic.php', 'register_logic', reg_input(array(
+	'usr_email'      => $return_email,
+	'usr_first_name' => 'Return',
+	'usr_last_name'  => 'Case',
+)), 'POST');
+check($res->error === null && $res->redirect === '/profile/server_manager/configure',
+	'a registration started from a page that needs a member lands back on that page',
+	'error: ' . var_export($res->error, true) . ' redirect: ' . var_export($res->redirect, true));
+check(empty($_SESSION['returnurl']), 'and the return slot is cleared, not left pointing at /register');
+
 $created = User::GetByEmail($good_email);
 check($created instanceof User, 'the account row exists');
 

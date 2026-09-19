@@ -325,6 +325,28 @@ check($res->redirect !== null && strpos($res->redirect, '/login') !== 0,
 	'/login itself is never the post-login destination',
 	'redirect: ' . var_export($res->redirect, true));
 
+// A page that needs a member links to /login?return=<page>. The sign-in form
+// keeps a local path in the slot — so a sign-in, or a registration started
+// from the form's own link, lands back on that page — and drops anything else
+// at the door.
+$_SESSION = array();
+$res = harness_call_logic('logic/login_logic.php', 'login_logic',
+	array('return' => '/profile/server_manager/configure'), 'GET');
+check($res->redirect === null && ($_SESSION['returnurl'] ?? '') === '/profile/server_manager/configure',
+	'a ?return= handed to the sign-in form is kept for after the sign-in',
+	'slot: ' . var_export($_SESSION['returnurl'] ?? null, true));
+$res = harness_call_logic('logic/login_logic.php', 'login_logic',
+	array('email' => $dest_email, 'password' => $dest_pass), 'POST');
+check($res->redirect === '/profile/server_manager/configure',
+	'and the sign-in goes there',
+	'redirect: ' . var_export($res->redirect, true));
+foreach (array('https://evil.example/', '//evil.example/', '/login?retry=1', 'profile') as $bad) {
+	$_SESSION = array();
+	harness_call_logic('logic/login_logic.php', 'login_logic', array('return' => $bad), 'GET');
+	check(empty($_SESSION['returnurl']), 'a handed return that is not a local page is not kept: ' . $bad,
+		'slot: ' . var_export($_SESSION['returnurl'] ?? null, true));
+}
+
 // ---------------------------------------------------------------------------
 section('Second-factor divert');
 
@@ -402,6 +424,12 @@ harness_set_setting_mem('alternate_loggedin_homepage', '/profile/mailbox');
 $res = harness_call_logic('logic/login_logic.php', 'login_logic', array(), 'GET');
 check($res->redirect === '/profile/mailbox',
 	'the signed-in homepage setting decides where they go',
+	'redirect: ' . var_export($res->redirect, true));
+
+$res = harness_call_logic('logic/login_logic.php', 'login_logic',
+	array('return' => '/profile/server_manager/configure'), 'GET');
+check($res->redirect === '/profile/server_manager/configure' && empty($_SESSION['returnurl']),
+	'a signed-in visitor handed a return goes straight there, and the slot is not left behind',
 	'redirect: ' . var_export($res->redirect, true));
 
 $_SESSION = array();

@@ -151,10 +151,13 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			'source_user_id' => $user->key,
 		));
 
+		// The page that sent this visitor to sign in (a Managed site's configure
+		// page, a shared chat) is in the same slot the sign-in form reads, and
+		// the account is signed in from birth, so the new member lands there.
 		$returnurl = $session->get_return();
-		$session->set_return(NULL);
+		$session->clear_return();
 
-		if ($returnurl) {
+		if ($returnurl && SessionControl::is_safe_return($returnurl)) {
 			return LogicResult::redirect($returnurl);
 		} else {
 			return LogicResult::redirect('/page/register-thanks');
@@ -242,13 +245,12 @@ function register_logic_form($formwriter, $user = null, $input = []) {
 		'value' => $settings->get_setting('default_timezone'),
 	]);
 
+	// Labels are plain text — FormWriter escapes every label, so markup in one
+	// renders as literal angle brackets (docs/formwriter.md § Labels). The
+	// policy's address rides in the help text, where it is also plain.
 	$privacy_url = trim((string)$settings->get_setting('privacy_url'));
-	$privacy_label = $privacy_url !== ''
-		? "I have read and agree to the <a href='" . htmlspecialchars($privacy_url, ENT_QUOTES, 'UTF-8') . "' target='_blank' rel='noopener'>privacy policy</a>"
-		: "I have read and agree to the privacy policy";
-	$formwriter->checkboxinput('privacy', $privacy_label, [
-		'value' => 'yes',
-	]);
+	$formwriter->checkboxinput('privacy', 'I have read and agree to the privacy policy'
+		. ($privacy_url !== '' ? ' (' . $privacy_url . ')' : ''), ['value' => 'yes']);
 	$formwriter->checkboxinput('newsletter', 'Please add me to the mailing list', [
 		'value' => 'yes',
 	]);

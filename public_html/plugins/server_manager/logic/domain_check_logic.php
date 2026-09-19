@@ -9,9 +9,10 @@
  * debounce plus the registrar's limits are the whole rate story at v1 volume.
  *
  * This answer is a courtesy, never the authority. The number that gets charged
- * is derived again, server-side, by ManagedDomainRequirement::validate() when
- * the form is submitted.
+ * is derived again, server-side, by ManagedDomainIntake when the configure
+ * page is submitted, and frozen on the draft from there.
  *
+ * @version 1.0.1 - the authority is ManagedDomainIntake
  * @version 1.0.0
  */
 

@@ -7,6 +7,9 @@
  * item shows its live state with a one-click action where the platform can
  * do the work itself.
  *
+ * @version 1.4 - the registrar promotion code on the domain card; the domain question card serves
+ *                shared-host products only and a customer-cloud site is configured on the buyer's
+ *                configure page (specs/managed_hosting_phase1_purchase.md §8)
  * @version 1.3 - the hosted-tier card, and the products section names both fulfillment references
  * @version 1.2 - the domain-registration card
  */
@@ -109,7 +112,10 @@ $page->begin_box(array());
 
 <hr>
 
-<h4>3. Domain question</h4>
+<h4>3. Domain question (shared-host products)</h4>
+<p>The Question a <strong>shared-host</strong> product asks at checkout for the buyer's domain, read by
+the Orders poll from the store. A customer-cloud product does not use it: the buyer configures their
+site — domain included — on the configure page before paying.</p>
 <table class="table table-sm">
 	<tr>
 		<th style="width:260px">Question</th>
@@ -129,10 +135,9 @@ $page->begin_box(array());
 					<a href="/admin/admin_product_edit?pro_product_id=<?= (int)$pid ?>"><?= htmlspecialchars($pname) ?></a>&nbsp;
 				<?php endforeach; ?>
 			<?php else: ?>
-				<span class="badge bg-warning">None attached directly</span>
-				— customer-cloud products ask it automatically via their fulfillment
-				provider; only shared-host products need it attached on the product
-				edit page.
+				<span class="badge bg-warning">None attached</span>
+				— attach it on a shared-host product's edit page. Customer-cloud
+				products do not use it.
 			<?php endif; ?>
 		</td>
 	</tr>
@@ -226,10 +231,10 @@ echo $fw_cloud->end_form();
 <hr>
 
 <h4>8. Domain registration</h4>
-<p>With this configured, a hosting product can also sell the buyer their domain name — they type
-the name they want at checkout, pay once, and the pipeline registers it with <strong>them</strong>
-as the legal owner, wires DNS to their box and turns on email. Leave it unset and buyers bring
-their own domain exactly as before.</p>
+<p>With this configured, the configure page offers to register the buyer's domain name — they type
+the name they want, see the live price, pay once with the hosting, and the pipeline registers it with
+<strong>them</strong> as the legal owner, wires DNS to their box and turns on email. Leave it unset and
+the page offers only "I own one already".</p>
 <table class="table table-sm">
 	<tr>
 		<th style="width:260px">Registrar</th>
@@ -247,6 +252,15 @@ their own domain exactly as before.</p>
 			— sealed at rest. Namecheap grants API access only to accounts with 20+ domains,
 			$50 in the balance, or $50 spent in the last two years, and only from an allowlisted
 			address.
+		</td>
+	</tr>
+	<tr>
+		<th>Promotion code</th>
+		<td>
+			<?= smps_badge($domains['promotion_present'], 'Set', 'None', 'secondary') ?>
+			— a registrar coupon. When set it rides every quote and every registration alike, so the
+			buyer pays what the registrar charges; an ending the code does not cover is quoted and
+			registered at the ordinary price.
 		</td>
 	</tr>
 	<tr>
@@ -288,6 +302,14 @@ $fw_domains->textinput('domain_tlds', 'Offered endings', ['value' => $domains['t
 $fw_domains->checkboxinput('ncp_sandbox', 'Use the Namecheap sandbox',
 	['checked' => $domains['sandbox'],
 	 'helptext' => 'Point registrar calls at the sandbox for an end-to-end rehearsal.']);
+$fw_domains->passwordinput('ncp_promotion_code', 'Namecheap promotion code', [
+	'helptext' => $domains['promotion_present']
+		? 'A code is stored. Leave blank to keep it; enter a new one to replace it.'
+		: 'A registrar coupon, if the account holds one. Leave blank for none.']);
+if ($domains['promotion_present']) {
+	$fw_domains->checkboxinput('ncp_promotion_code_clear', 'Remove the promotion code',
+		['helptext' => 'Quotes and registrations go back to the ordinary price.']);
+}
 $fw_domains->submitbutton('btn_save_domains', 'Save domain registrar settings');
 echo $fw_domains->end_form();
 ?>
@@ -344,6 +366,10 @@ $fw_hosted->passwordinput('smtp2go_api_key', 'SMTP2GO master API key', [
 		? 'A key is stored. Leave blank to keep it; enter a new one to replace it.'
 		: 'The master key every customer subaccount is administered with.')
 		. ' Only a per-customer SMTP user ever reaches a customer\'s box.']);
+$fw_hosted->checkboxinput('smtp2go_sandbox_users', 'Sandbox the SMTP users this plane mints',
+	['checked' => $hosted['smtp2go_sandbox_users'],
+	 'helptext' => 'Every customer SMTP user is created in SMTP2GO\'s sandbox status: accepted and counted, never '
+		. 'delivered. For a rehearsal plane. Leave off where real customers are hosted.']);
 $fw_hosted->passwordinput('smtp2go_webhook_secret', 'SMTP2GO webhook secret', [
 	'helptext' => ($hosted['webhook_present']
 		? 'A secret is stored. Leave blank to keep it; enter a new one to replace it.'
@@ -381,9 +407,12 @@ echo $fw_hosted->end_form();
 
 <h4>10. Products</h4>
 <p>Per hosting product (product edit page): pick <em>Customer cloud server</em>
-under Purchase grants — that is the entire setup, and the domain question is
-asked automatically. The reference you pick beside it decides <strong>whose
-account the server is born on</strong>:</p>
+under Purchase grants — that is the entire setup. The site itself is configured
+by the buyer on <code><?= htmlspecialchars($api['is_self'] ? '' : rtrim($api['url'], '/')) ?>/profile/server_manager/configure</code>
+— the domain (their own, or one registered here), the site name, the admin
+email — before they pay; the cart carries only the id of that configured site,
+and nothing is attached to the product by hand. The reference you pick decides
+<strong>whose account the server is born on</strong>:</p>
 <ul>
 	<li><strong>Create the server in the buyer's own cloud account</strong> — the buyer connects
 		their own provider account and is billed by it directly. Put the Connect link
@@ -391,15 +420,11 @@ account the server is born on</strong>:</p>
 		in the after-purchase message.</li>
 	<li><strong>Create the server on the operator's account (hosted)</strong> — this card's
 		settings apply. There is no Connect page: the buyer pays and the site appears. Give the
-		product a subscription version with a trial period, and the setup fee as a one-time line
-		in the same cart.</li>
+		product one subscription version; the domain year, when registered here, is its own
+		one-time line in the same cart.</li>
 </ul>
 <p>For <strong>shared-host</strong> products, attach the domain question as a
 requirement instead.</p>
-<p>To sell the buyer their domain in the same click, also tick
-<strong>Managed domain</strong> under <em>Info to collect before purchase</em>.
-It works with either fulfillment mode, and replaces the domain question for
-buyers who do not already own a name.</p>
 
 <?php
 $page->end_box();

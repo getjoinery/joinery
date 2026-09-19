@@ -6,6 +6,8 @@
  * POST actions delegate to ProvisioningSetup and redirect back with a
  * session message; GET renders the live status of every checklist item.
  *
+ * @version 1.3 - the hosted card saves the SMTP2GO sandbox-users switch
+ * @version 1.2 - the registrar promotion code is saved (and cleared) with the registrar card
  * @version 1.1 - the domain-registrar credentials card
  */
 
@@ -67,8 +69,18 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 				if ($key !== '') {
 					ProvisioningSetup::writeSecret('server_manager_namecheap_api_key', $key);
 				}
+				// The coupon follows the same blank-keeps rule, and unlike a key
+				// it can lapse, so there is an explicit way to remove it.
+				$code = trim($input['ncp_promotion_code'] ?? '');
+				if (!empty($input['ncp_promotion_code_clear'])) {
+					ProvisioningSetup::writeSecret('server_manager_namecheap_promotion_code', '');
+				} elseif ($code !== '') {
+					ProvisioningSetup::writeSecret('server_manager_namecheap_promotion_code', $code);
+				}
 				$message = 'Domain registrar settings saved.';
 			} elseif ($action === 'save_hosted') {
+				ProvisioningSetup::writeSetting('server_manager_smtp2go_sandbox_users',
+					!empty($input['smtp2go_sandbox_users']) ? '1' : '');
 				ProvisioningSetup::writeSetting('server_manager_hosted_send_allowance',
 					(string)max(0, (int)($input['send_allowance'] ?? 0)));
 				ProvisioningSetup::writeSetting('server_manager_hosted_shelf_allowance_gb',

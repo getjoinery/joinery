@@ -22,6 +22,17 @@ An account has up to two doors, and they are deliberately different:
 
 Everything below follows from keeping those doors separate.
 
+**A page that needs a member sends a visitor to `/login?return=<page>`.** The
+sign-in form keeps that page in the session's return slot
+(`SessionControl::set_return()`), and both doors out of the form read it: a
+sign-in redirects there, and a registration started from the form's own link
+lands there too, because a new account is signed in from birth. Only a local
+path is kept — no scheme, no protocol-relative host, never `/login` — and the
+same rule (`SessionControl::is_safe_return()`) is applied again when the slot
+is read back, so the slot can never become an open redirect. A signed-in
+member handed a return goes straight to it. Pinned by
+`tests/account_security/login_test.php` and `registration_test.php`.
+
 **Email activation gates every session-opening path.** When
 `activation_required_login` is on, an unactivated account is refused a session
 by web sign-in (`login_logic`) and by API login (`ApiAuth::attemptLogin`, the

@@ -568,6 +568,37 @@ check(Smtp2GoProvider::recordsOf(Smtp2GoProvider::entryFor(array('domains' => ar
 	'a domain the account does not hold yields nothing — which this leg treats as a failure, not a pass');
 
 // ---------------------------------------------------------------------------
+section('A rehearsal plane mints its SMTP users in the provider\'s sandbox');
+
+// The switch is read by the mail leg and handed to the client, which says
+// status=sandbox to the provider only when asked. Pinned at the wire, so a
+// plane with the switch on can never mint a user that delivers.
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/Smtp2GoClient.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/provisioning/ProvisionHostedMail.php'));
+$smtp_history = array();
+$smtp_mock = new \GuzzleHttp\Handler\MockHandler(array(
+	new \GuzzleHttp\Psr7\Response(200, array(), json_encode(array('data' => array('username' => 'u1')))),
+	new \GuzzleHttp\Psr7\Response(200, array(), json_encode(array('data' => array('username' => 'u2')))),
+));
+$smtp_stack = \GuzzleHttp\HandlerStack::create($smtp_mock);
+$smtp_stack->push(\GuzzleHttp\Middleware::history($smtp_history));
+$smtp_client = new Smtp2GoClient('test-key', new \GuzzleHttp\Client(array('handler' => $smtp_stack)));
+$smtp_client->addSmtpUser('sub1', 'u1', 'pw1');
+$smtp_client->addSmtpUser('sub1', 'u2', 'pw2', true);
+$sent = array();
+foreach ($smtp_history as $entry) {
+	$sent[] = json_decode((string)$entry['request']->getBody(), true) ?: array();
+}
+check(count($sent) === 2 && !isset($sent[0]['status']), 'an ordinary user is minted with no status — the provider\'s default delivers',
+	var_export($sent, true));
+check(($sent[1]['status'] ?? '') === 'sandbox', 'a sandboxed user says status=sandbox at the wire', var_export($sent, true));
+harness_set_setting_mem('server_manager_smtp2go_sandbox_users', '');
+check(!ProvisionHostedMail::sandbox_users(), 'the switch is off by default');
+harness_set_setting_mem('server_manager_smtp2go_sandbox_users', '1');
+check(ProvisionHostedMail::sandbox_users(), 'and on when the hosted card sets it');
+harness_set_setting_mem('server_manager_smtp2go_sandbox_users', '0');
+
+// ---------------------------------------------------------------------------
 section('Cleanup');
 
 check(true, 'fixtures were created inside the transaction');

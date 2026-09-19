@@ -7,6 +7,7 @@
  * registration that failed terminally and needs a decision about the buyer.
  * Everything else on this page is read-only reassurance.
  *
+ * @version 1.1 - the domain-product gate reads from ManagedDomainIntake
  * @version 1.0
  */
 
@@ -83,7 +84,6 @@ function admin_domains_logic(array $input): LogicResult {
 	$all->load();
 
 	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/domain_registrar/DomainRegistrarRegistry.php'));
-	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/requirements/ManagedDomainRequirement.php'));
 	$registrar = DomainRegistrarRegistry::firstConfigured();
 
 	return LogicResult::render(array(
@@ -95,7 +95,7 @@ function admin_domains_logic(array $input): LogicResult {
 		'ledger_limit'     => ADMIN_DOMAINS_LEDGER_LIMIT,
 		'registrar_label'  => $registrar ? $registrar::getLabel() : '',
 		'registrar_ready'  => $registrar !== null,
-		'product_ready'    => ManagedDomainRequirement::domainProductSellable(),
+		'product_ready'    => ManagedDomainIntake::domainProductSellable(),
 		'offered_tlds'     => DomainRegistrarRegistry::offeredTldsPhrase(),
 	));
 }

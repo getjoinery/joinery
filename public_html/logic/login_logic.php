@@ -187,14 +187,14 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 
 		$returnurl = $session->get_return();
-		$_SESSION['returnurl'] = NULL;
+		$session->clear_return();
 
 		// Only a local path may be followed — no scheme, no protocol-relative
-		// '//host'. The slot is server-written today; this keeps the redirect
-		// from becoming an open redirect if any future caller stores user
-		// input in it. '/login' itself is never a destination.
-		if ($returnurl && (strpos($returnurl, '/') !== 0 || strpos($returnurl, '//') === 0
-			|| strpos($returnurl, '/login') === 0)) {
+		// '//host'. The slot is written from a ?return= a page handed the
+		// sign-in form as well as by server-side bounces, so this is what
+		// keeps the redirect from becoming an open redirect. '/login' itself
+		// is never a destination.
+		if ($returnurl && !SessionControl::is_safe_return($returnurl)) {
 			$returnurl = FALSE;
 		}
 
@@ -211,12 +211,26 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
 
+	// A page that needs a member sends a visitor here with the page in
+	// ?return=. It is kept in the session, where a successful sign-in — or a
+	// registration, which reads the same slot — sends them back to it. Only
+	// a local path is kept; anything else is dropped here, not later.
+	$handed_return = SessionControl::is_safe_return($input['return'] ?? '') ? (string)$input['return'] : '';
+	if ($handed_return !== '') {
+		$session->set_return($handed_return);
+	}
+
 	// A member who is already signed in has nothing to do on the sign-in
-	// form. Send them where a successful login would have. The site root
-	// falls back to the public homepage when the signed-in one is blank, and
-	// the factory public homepage is this page, so without this a member
-	// with that setting cleared would land on a login form while logged in.
+	// form. Send them where the page that brought them wanted, else where a
+	// successful login would have. The site root falls back to the public
+	// homepage when the signed-in one is blank, and the factory public
+	// homepage is this page, so without this a member with that setting
+	// cleared would land on a login form while logged in.
 	if ($session->is_logged_in()) {
+		if ($handed_return !== '') {
+			$session->clear_return();
+			return LogicResult::redirect($handed_return);
+		}
 		$alternate_homepage = $settings->get_setting('alternate_loggedin_homepage');
 		return LogicResult::redirect($alternate_homepage ?: '/profile');
 	}

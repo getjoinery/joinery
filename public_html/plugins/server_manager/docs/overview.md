@@ -538,9 +538,10 @@ declares in `pro_fulfillment_provider`:
   product opts in by picking **Customer cloud server** in the product-edit
   Purchase grants picker (`CustomerCloudFulfillment`, registered with the
   store's FulfillmentRegistry from serve.php); that stamps the provider value
-  and contributes the domain question as a checkout requirement automatically.
-  The reference picked beside it decides **whose cloud account the server is
-  born on**, and it is the product's decision rather than the buyer's:
+  and contributes the one checkout requirement the line carries — the id of
+  the site the buyer configured beforehand (see **The buyer configures first**
+  below). The reference picked beside it decides **whose cloud account the
+  server is born on**, and it is the product's decision rather than the buyer's:
   - *the buyer's own account* — they connect it, the provider bills them, and
     none of the operator's keys are involved. See below.
   - *the operator's account (hosted)* — the operator's own token creates it,
@@ -550,10 +551,89 @@ declares in `pro_fulfillment_provider`:
 Every mode ends the same way: `install_node` completes, the welcome email goes
 out, and `ProvisionPendingSsl` turns HTTPS on once DNS resolves.
 
-A hosting product can also sell the buyer their **domain name** in the same
-click — see **Managed domain registration** below. That leg is orthogonal to
-compute mode: it attaches to shared-host and customer-cloud products alike,
-and when it is present the buyer never touches DNS at all.
+A customer-cloud buyer can have their **domain name** registered for them in
+the same payment — see **Managed domain registration** below. The choice is
+made on the configure page, and when it is made the buyer never touches DNS.
+
+### The buyer configures first, then pays; payment activates
+
+Nothing about a customer-cloud site is asked in the cart. The buyer describes
+it on one page, **`/profile/server_manager/configure`** (signed-in only; the
+Managed product page sends a buyer with no configured site there). A visitor
+with no session is sent first to **`/server_manager/start`**, step 1 of three:
+the account, offered as sign-in and sign-up side by side with no preference.
+Both forms post to the start page, which hands them to `login_logic` and
+`register_logic` — so every gate those hold (throttles, activation, the
+second-factor divert, the bot defences) holds there — shows a refusal in
+place, and lets every success land on the configure page through the
+session's return slot. Every page on the path carries the step strip
+(`ManagedSiteDraft::steps_html()`: 1 Your account, 2 Your site, 3 Payment;
+the summary, whose one button is Continue to payment, is step 3). The
+configure page asks for: the domain
+— their own, or one this plane registers for them, with the live availability
+check and price and the registrant contact block — the site's internal name,
+the region (`server_manager_hosted_regions`; one region in the list means the
+field does not render), and the site admin email. **Save and continue**
+validates everything (`ManagedSiteDraft::save_and_freeze`, with the domain
+gates in `ManagedDomainIntake`) and writes a **draft provision**: a
+`cvp_customer_cloud_provisions` row with `cvp_origin = buyer` at status
+`pending_payment`, carrying the domain source (`cvp_domain_source`: `own` |
+`register`), the frozen domain-year quote (`cvp_domain_quote`, `_time`) and
+the sealed registrant block (`cvp_registrant_sealed`). **A draft holds
+nothing** — no instance, no domain, no slug — and the pipeline cannot see it
+(`draft` and `pending_payment` are outside every phase's query).
+
+**Continue to payment** is a single-button form posting `product_id`,
+`product_version` and `managed_site=<draft id>` at the product's own URL, so
+the store's `product_logic` adds the line exactly as a product-page submit
+would. `ManagedSiteRequirement` — contributed by `CustomerCloudFulfillment::
+extraRequirements()`, never attached by hand — is the whole coupling: it
+renders no fields, `validate()` refuses anything but the signed-in buyer's own
+`pending_payment` draft, `process()` stores the draft id (`managed_site`) and
+the freeze time (`managed_site_frozen`) in the line's form data plus, when
+registering, the frozen quote under the keys the registration guard reads
+(`managed_domain_price_line`, `managed_domain`), and `extra_cart_lines()` adds
+the domain-year line from that frozen quote without ever re-quoting.
+
+The draft's states:
+
+| State | Meaning | Buyer actions on the sites page |
+|---|---|---|
+| `draft` | editable; expires after `server_manager_draft_days` (default 14) with no order item | Continue, Delete |
+| `pending_payment` | frozen; the cart line was built from it | Finish payment (the cart, or a fresh add), Edit, Delete |
+
+**Edit** on a frozen draft returns it to `draft` and drops its lines from the
+buyer's cart (the hosting line and the domain-year line). A copy of the line
+elsewhere is stale from then on: `CustomerCloudFulfillment::checkAvailability()`
+— asked through `FulfillmentRegistry::cartRefusal()` with the line's form data,
+on the checkout page before any payment session is created and by the charge
+handler before it charges a card, never after money has moved — refuses a line
+whose draft is not `pending_payment`, not the buyer's, or was frozen again since
+the line was made, with *You changed your site setup after adding it to the
+cart. Remove it from the cart and continue to payment again.* The checkout page
+shows the sentence in place of the payment forms. A line that goes bad between
+the payment session and the buyer's return is `fulfill()`'s to report (below).
+
+**Payment activates.** `fulfill()` loads the draft the paid line names,
+requires `pending_payment` and the buyer's ownership, and moves it to `ready`
+with `cvp_external_order_item_id` stamped, `cvp_hosting_mode` from the
+product's reference, and `cvp_mail_state = pending` on the operator's account
+(or `pending_connect`/`ready` by the buyer's grant on their own). When the
+draft registers a name, the `rdm_registered_domains` row is created here from
+the sealed registrant and the frozen quote, and the draft's copy of the
+registrant is erased. A slug or domain already held by a provision past
+payment fails the activation closed: the row keeps the paid order item at
+`failed`, so it is on the operator's board, and the alert names the clash.
+Any refusal at `fulfill()` is logged and emailed to the alert recipient with
+the order item id — the order is paid, so it is a person's task.
+
+The **Drafts** phase of the provisioning umbrella (`SweepSiteDrafts`, first in
+the sequence) soft-deletes a `draft` whose last change is older than
+`server_manager_draft_days`, and returns a `pending_payment` row that old to
+`draft` (its quote is stale). Both measure from `cvp_update_time`.
+
+**Shared-host products** are unchanged by this: they attach the domain
+Question, and the Orders poll reads its answer from the store.
 
 ### Activation — the Provisioning page
 
@@ -563,15 +643,15 @@ automatable step is a one-click, idempotent action backed by
 `includes/ProvisioningSetup.php` — mint the store API service user
 (`provisioning@<host>`, permission 5, password recovery disabled) and machine
 key and write the API settings (with a loopback probe badge and key
-rotation), create the domain Question, save the email settings, activate the
-scheduled tasks (the provisioning umbrella, which runs order polling,
-customer cloud, SSL and the managed-domain phases in one pass, plus the
-core Send Queued Emails task that drains the welcome-email queue), the
-domain-registrar credentials, and the customer-cloud settings (SSH key path
-with key/.pub existence badges, referral URL, instance defaults). The page
-also shows what stays manual: attaching the question or the Managed domain
-requirement to hosting products, opting a shared host in, and registering the
-Linode OAuth app. When the store
+rotation), create the domain Question (shared-host products only), save the
+email settings, activate the scheduled tasks (the provisioning umbrella, which
+runs the draft sweep, order polling, customer cloud, SSL and the
+managed-domain phases in one pass, plus the core Send Queued Emails task that
+drains the welcome-email queue), the domain-registrar credentials and
+promotion code, and the customer-cloud settings (referral URL, instance
+defaults). The page also shows what stays manual: attaching the question to
+shared-host products, opting a shared host in, and registering the Linode
+OAuth app. When the store
 is a remote site rather than the management node itself, the service key is
 minted on the store site and its values entered in the API settings fields.
 
@@ -593,13 +673,15 @@ The Provisioning page reports these, and cannot do them:
    via cron. The page's agent badge must show Online before anything below
    can execute.
 1. **Per hosting product.** For customer-cloud fulfilment, pick **Customer
-   cloud server** under Purchase grants; that stamps the provider and asks the
-   domain question at checkout. For a buyer-account product, put the Connect
-   link (`https://<management-node-host>/profile/server_manager/connect_cloud`)
+   cloud server** under Purchase grants; that stamps the provider, and the
+   buyer configures the site on `/profile/server_manager/configure` before
+   paying — nothing is attached to the product by hand. For a buyer-account
+   product, put the Connect link
+   (`https://<management-node-host>/profile/server_manager/connect_cloud`)
    in the after-purchase message; the Connect page is deliberately in no
    member menu. For shared-host products, attach the domain question as a
    requirement instead — the attachment is what makes an order a hosting
-   order. To sell the domain in the same click, see **Managed domain
+   order. To sell domains on the configure page, see **Managed domain
    registration** below.
 2. **Shared-host fulfilment only.** Opt at least one managed host in from the
    dashboard (Edit → Max Sites + Provisioning Enabled). Its IP is sent to
@@ -612,7 +694,9 @@ The Provisioning page reports these, and cannot do them:
 
 ### Verifying end to end
 
-1. Place a test order for a hosting product with a test domain.
+1. Place a test order for a hosting product with a test domain (for a
+   customer-cloud product: configure the site on
+   `/profile/server_manager/configure`, Continue to payment, pay).
 2. Wait up to 15 minutes for the next provisioning run.
 3. A new node appears under **Admin → Server Manager** at
    `install_state = installing` (shared host), or the buyer's Connect page
@@ -626,7 +710,9 @@ The Provisioning page reports these, and cannot do them:
 
 | Symptom | Likely cause |
 |---|---|
-| No node appears after 15 min | API credentials wrong (the page's probe badge), or the question not attached to the product — check the provisioning task's last run in Scheduled Tasks |
+| No node appears after 15 min | API credentials wrong (the page's probe badge), or (shared host) the question not attached to the product — check the provisioning task's last run in Scheduled Tasks |
+| `[managed-hosting] Paid but not activated: order item N` | The paid line's draft was not `pending_payment` (edited after the line was made, deleted, or another buyer's), or its name is held by a live provision. The order is paid; look at the provision on the dashboard and resolve with the buyer |
+| A site card says the name was taken before it could be registered | The registrar reported the name gone after payment (`rdm_taken_time`). The buyer chooses another name on the same card, at the paid price or less; the row returns to `pending` and registers on the next tick. If the box already exists, the operator is emailed to rename it by hand |
 | Node stuck at `install_failed` | The install job failed — open the job, fix the host, Retry |
 | SSL stuck at `pending` for hours | DNS not pointing at the node — `dig domain.com` |
 | SSL badge `failed` | ~16 hours of certbot failures — job output names rate limits or DNS |
@@ -655,11 +741,17 @@ Each provision is a `CustomerCloudProvision` row that the
 connected account → `booting` → running + IP → ManagedNode + `install_node`
 job → `installing` → `done` (or `failed`, which alerts the ops address).
 
-Provisions have two origins (`cvp_origin`):
+Provisions have three origins (`cvp_origin`):
 
-- **order** — created by a customer-cloud purchase. Starts at
+- **buyer** — created by the buyer on the configure page before paying, and
+  activated by the paid order (see **The buyer configures first** above).
+  Installs fresh + Docker, and sends the buyer welcome email on completion
+  (the order-item linkage drives it). The welcome email carries the A-record
+  instruction when the buyer brought their own domain (no registration row on
+  the order), and says there is nothing to add when this plane registered it.
+- **order** — created by the Orders poll from a shared-store order. Starts at
   `pending_connect`, installs fresh + Docker, and sends the buyer welcome
-  email on completion (the order-item linkage drives it).
+  email on completion.
 - **admin** — created by the Install New Node form's cloud-instance target.
   Starts at `ready` (the admin picked an already-connected account), carries
   its install parameters on the row (`cvp_docker_mode`, `cvp_install_mode`,
@@ -770,9 +862,15 @@ register:
    from the live registrar quote at checkout, so the buyer pays one year at
    cost.
 
-Then attach **Managed domain** to the hosting product from *Info to collect
-before purchase* on the product edit page. `server_manager_domain_tlds`
-(default `com net org`) bounds what can be asked for.
+With both set, the configure page offers *Register one for me*; without them
+it offers only *I own one already*. `server_manager_domain_tlds` (default
+`com net org`) bounds what can be asked for. A registrar **promotion code**
+(`server_manager_namecheap_promotion_code`, sealed, set on the same card)
+rides every quote and every registration alike — `PromotionCode` on
+`users.getPricing`, whose `CouponPrice` becomes the quote when the code
+applies to the ending, and the same `PromotionCode` on `domains.create` — so
+the buyer pays what the registrar charges. An ending the code does not cover
+quotes and registers at `YourPrice`.
 
 Both gates check the thing they name, not just the setting: a domain-year
 product that was deleted, or whose version was deactivated, reads as unusable
@@ -786,19 +884,30 @@ hosting with managed domains take card payment through Stripe.
 
 ### What the buyer's answer becomes
 
-`ManagedDomainRequirement` validates the submission against the registrar,
-live: the name has to be registrable, in an offered ending, available, and not
-premium, and the contact block has to be complete (including a phone number
-with an explicit country code — a bare number is refused rather than guessed
-at, because guessing puts a stranger's country code on a public WHOIS record).
+`ManagedDomainIntake` is the one gate for what a name and a registrant may
+be, called by the configure page and by the taken-name alternate: the name has
+to be registrable, in an offered ending, available, and not premium, and the
+contact block has to be complete (including a phone number with an explicit
+country code — a bare number is refused rather than guessed at, because
+guessing puts a stranger's country code on a public WHOIS record). The quote
+is the registrar's, live, at the moment the buyer presses Save and continue.
 
-The quote it gets back drives two things. It becomes a **second cart line**
-against the domain-year product, priced through the existing
-`prv_price_type = 'user'` path — a line rather than a surcharge because a line
-carries its own recurrence, and a one-time fee folded into a subscription line
-would bill every cycle. And after payment, `post_purchase()` files an
-`rdm_registered_domains` row for the pipeline to work from. Nothing
-price-shaped is ever read from the POST.
+That quote is frozen on the draft and drives two things. It becomes a
+**second cart line** against the domain-year product when the buyer continues
+to payment, priced through the existing `prv_price_type = 'user'` path — a
+line rather than a surcharge because a line carries its own recurrence, and a
+one-time fee folded into a subscription line would bill every cycle. And at
+activation, `CustomerCloudFulfillment` files the `rdm_registered_domains` row
+for the pipeline to work from, from the draft's sealed registrant and frozen
+quote. Nothing price-shaped is ever read from a browser.
+
+**When the name is gone after payment**, the registration phase parks the row
+`failed` with `rdm_taken_time` stamped, and the buyer's sites page offers an
+alternate name on that card. The alternate is gated the same way (shape,
+ending, availability) plus one rule: its quote must not exceed what was paid
+(`rdm_price_paid`). Submitting it returns the row to `pending` under the same
+paid-line guard; the provision's own domain and slug follow while no box
+exists yet, and once one does the operator is emailed to rename it by hand.
 
 ### Fulfillment
 
@@ -1597,10 +1706,15 @@ the buyer must re-connect).
 ### CustomerCloudProvision (`cvp_customer_cloud_provisions`)
 
 One cloud-instance provision, request to running site. `cvp_origin` is
-`order` (keyed to the getjoinery order item — `cvp_external_order_item_id`,
-unique, required for this origin) or `admin` (no order item); `cvp_status` is
-the state machine documented under
-[Customer-Cloud Fulfillment](#customer-cloud-fulfillment); install parameters
+`buyer` (the configure page's draft; `cvp_external_order_item_id` is stamped
+at activation and required from `ready` on), `order` (keyed to the getjoinery
+order item — `cvp_external_order_item_id`, unique, required for this origin)
+or `admin` (no order item); `cvp_status` is the state machine documented under
+[Customer-Cloud Fulfillment](#customer-cloud-fulfillment), preceded for a
+buyer row by `draft` and `pending_payment`; a buyer row also carries
+`cvp_domain_source` (`own` | `register`), the frozen `cvp_domain_quote` /
+`cvp_domain_quote_time` and the sealed `cvp_registrant_sealed`, held only
+until activation copies it to the registration row; install parameters
 ride on the row (`cvp_docker_mode`, `cvp_install_mode`, `cvp_source_node_id`,
 `cvp_backup_source`, `cvp_port`, `cvp_sitename`); links to the account
 (`cvp_cca_customer_cloud_account_id`), instance (`cvp_instance_id`/`_ip`), and resulting
@@ -1624,6 +1738,9 @@ ownership belongs to neither — the buyer is the registrant from registration.
   idempotency ledger: null means outstanding, stamped means never redone
 - `rdm_expiry_time`, `rdm_expiry_checked_time`, `rdm_prompt_pushed_time` --
   the countdown, its weekly refresh, and whether the buyer has been told
+- `rdm_taken_time` -- stamped beside `failed` when the registrar found the
+  name taken after payment; the one failure the buyer fixes themselves, by
+  choosing an alternate on their sites page
 
 ### ManagementJob (`mjb_management_jobs`)
 
@@ -1834,10 +1951,13 @@ Used by the backup browser on the Backups tab.
 | `includes/domain_registrar/DomainRegistrarProvider.php` | The registrar seam + `DomainRegistrarException` (transient vs terminal) |
 | `includes/domain_registrar/DomainRegistrarRegistry.php` | Interface-based registrar discovery, plus the shared domain-name and TLD gates |
 | `includes/domain_registrar/NamecheapRegistrar.php` | Namecheap: availability, pricing, registration, WHOIS privacy, expiry, custody probe |
-| `includes/requirements/ManagedDomainRequirement.php` | The checkout field, its live quote, the companion cart line, and the intake |
+| `includes/requirements/ManagedSiteRequirement.php` | The one answer a customer-cloud line carries: the buyer's frozen draft id, plus the domain-year line from its frozen quote |
+| `includes/ManagedSiteDraft.php` | The draft before payment: find, validate and freeze, unfreeze, delete, the Managed product and its price, the Continue-to-payment form |
+| `includes/ManagedDomainIntake.php` | The one gate for what a domain and a registrant may be, and the live quote |
+| `includes/provisioning/SweepSiteDrafts.php` | Expire old drafts, thaw old frozen ones |
 | `includes/provisioning/ProvisionManagedDomains.php` | Register → web DNS → mail DNS → PTR → active |
 | `includes/provisioning/ManagedDomainWatch.php` | Expiry refresh, the six-month prompt, custody detection, the node banner push |
-| `logic/domain_check_logic.php` | `/api/v1/action/server_manager/domain_check` — live availability for the checkout field |
+| `logic/domain_check_logic.php` | `/api/v1/action/server_manager/domain_check` — live availability for the configure page and the taken-name alternate |
 | `includes/JobCommandBuilder.php` | Command generation for all job types |
 | `includes/JobResultProcessor.php` | Parses completed job output into structured data |
 | `includes/S3Signer.php` | AWS SigV4 signer for S3-compatible storage (get/put/delete) |
@@ -1855,6 +1975,9 @@ Used by the backup browser on the Backups tab.
 | `views/admin/job_detail.php` | Single job output with live polling |
 | `views/admin/domains.php` | Managed domain queue -- pending pushes, failures, the full ledger |
 | `views/profile/domain.php` | The buyer's take-ownership flow (`/profile/server_manager/domain`) |
+| `views/start.php` | Step 1 of a Managed site: sign in or create an account, side by side (`/server_manager/start`) |
+| `views/profile/configure.php` | The buyer configures a Managed site and continues to payment (`/profile/server_manager/configure`) |
+| `views/profile/index.php` | The buyer's sites: drafts, progress, the one-time password reveal, the taken-name alternate (`/profile/server_manager`) |
 | `views/admin/nodes_edit.php` | Redirect stub (-> node_detail or node_add) |
 | `views/admin/nodes.php` | Redirect stub (-> dashboard) |
 | `views/admin/backups.php` | Redirect stub (-> dashboard or node_detail) |

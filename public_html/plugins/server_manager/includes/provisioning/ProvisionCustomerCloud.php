@@ -61,6 +61,7 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 2.4 - a test purchase's instance label and node name start with test_ (CustomerCloudProvision::external_name_prefix)
  * @version 2.3 - the instance's IPv6 is recorded at boot; join_approval_check accepts either address, takes a null node for the
  *                dashboard's host-join adoption, and machine_node_ids sees host records at either address
  * @version 2.2 - the seeding and retiring loops reload each provision before handling it: a stale copy's
@@ -229,8 +230,10 @@ class ProvisionCustomerCloud {
 		try {
 			$instance = $driver->createInstance(array(
 				// cvp id suffix keeps labels unique on the customer's account
-				// across re-provisions of the same domain.
-				'label'           => $provision->get('cvp_slug') . '-' . $provision->key,
+				// across re-provisions of the same domain. A test purchase's
+				// label starts with test_, so it is never mistaken for a
+				// customer's machine in the provider's console.
+				'label'           => $provision->external_name_prefix() . $provision->get('cvp_slug') . '-' . $provision->key,
 				'region'          => $region,
 				'type'            => $type,
 				'image'           => $image,
@@ -445,7 +448,9 @@ class ProvisionCustomerCloud {
 
 		if ($node === null) {
 			$node = new ManagedNode(NULL);
-			$node->set('mgn_name', $domain);
+			// The board's name for the node; a test purchase's starts with
+			// test_, so the fleet board tells a rehearsal from a customer.
+			$node->set('mgn_name', $provision->external_name_prefix() . $domain);
 			$node->set('mgn_slug', $slug);
 		}
 

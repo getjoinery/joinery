@@ -240,56 +240,48 @@ check(CustomerCloudFulfillment::mode_for_ref(0) === 'customer'
 check(CustomerCloudFulfillment::mode_for_ref(99) === 'customer',
 	'an unrecognised reference falls back to the buyer\'s own account, never to ours');
 
-// Unconfigured case FIRST: Globalvars caches non-blank settings on first
-// read, so the blank-setting check must run before the configured one.
+// The one requirement the line carries: the id of the site the buyer
+// configured beforehand. Contributed by the provider, never attached by hand,
+// whatever the domain-question setting says.
 require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php'));
 $fake_product = new Product(NULL);
-$q_setting_hold = ProvisioningSetup::readSetting('server_manager_provisioning_domain_question_id');
-ProvisioningSetup::writeSetting('server_manager_provisioning_domain_question_id', '');
-check($provider->extraRequirements($fake_product, 0) === array(),
-	'no requirement contributed when the question is unconfigured');
-ProvisioningSetup::writeSetting('server_manager_provisioning_domain_question_id', $q_setting_hold);
-
 $reqs = $provider->extraRequirements($fake_product, 0);
-check(count($reqs) === 1 && $reqs[0] instanceof QuestionRequirement,
-	'contributes the domain question as a checkout requirement');
+check(count($reqs) === 1 && $reqs[0] instanceof ManagedSiteRequirement,
+	'contributes ManagedSiteRequirement as the checkout requirement');
+$reqs = $provider->extraRequirements($fake_product, 1);
+check(count($reqs) === 1 && $reqs[0] instanceof ManagedSiteRequirement,
+	'for either hosting mode');
 
-// fulfill(): creates the provision row from the order's stored domain answer.
+// fulfill(): activates the draft the paid line names. The whole path —
+// draft, cart, activation, refusal — is managed_site_purchase_test; here only
+// the contract that a line with no draft is refused loudly, never silently.
 require_once(PathHelper::getIncludePath('plugins/store/data/orders_class.php'));
 require_once(PathHelper::getIncludePath('plugins/store/data/order_items_class.php'));
-require_once(PathHelper::getIncludePath('plugins/store/data/order_item_requirements_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provisions_class.php'));
 
+class PstFulfillment extends CustomerCloudFulfillment {
+	public static $alerts = array();
+	protected function alert_activation_problem(User $user, OrderItem $order_item, string $reason): void {
+		self::$alerts[] = $reason;
+	}
+}
 $buyer = make_user('CcfBuyer');
 $odi = new OrderItem(NULL);
 $odi->set('odi_ord_order_id', 999999901);
 $odi->set('odi_pro_product_id', 999999901);
 $odi->set('odi_usr_user_id', $buyer->key);
+$odi->set('odi_product_info', base64_encode(serialize(array('product_version' => 1))));
 $odi->save();
 $odi->load();
 harness_register_row('odi_order_items', 'odi_order_item_id', $odi->key);
 
-$oir = new OrderItemRequirement(NULL);
-$oir->set('oir_odi_order_item_id', $odi->key);
-$oir->set('oir_qst_question_id', $q1['question_id']);
-$oir->set('oir_label', 'Domain');
-$oir->set('oir_answer', 'Fulfill-Test.Example.COM');
-$oir->save();
-$oir->load();
-harness_register_row('oir_order_item_requirements', 'oir_order_item_requirement_id', $oir->key);
-
-$f1 = $provider->fulfill($buyer, $fake_product, $odi, new Order(NULL), 0);
-check((int)($f1['ref_id'] ?? 0) > 0, 'fulfill creates a provision row');
-$cvp = new CustomerCloudProvision((int)$f1['ref_id'], TRUE);
-harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $cvp->key);
-check($cvp->get('cvp_status') === 'pending_connect', 'provision starts at pending_connect (no grant)');
-check($cvp->get('cvp_slug') === 'fulfill-test-example-com', 'slug sanitized from the domain answer');
-check((int)$cvp->get('cvp_usr_user_id') === (int)$buyer->key, 'provision linked to the buyer');
-
-$f2 = $provider->fulfill($buyer, $fake_product, $odi, new Order(NULL), 0);
-check(($f2['ref_id'] ?? null) === null, 'second fulfill defers (row already exists)');
-$dupes = new MultiCustomerCloudProvision(array('external_order_item_id' => (int)$odi->key, 'deleted' => false));
-check((int)$dupes->count_all() === 1, 'no duplicate provision row created');
+$pst = new PstFulfillment();
+$f1 = $pst->fulfill($buyer, $fake_product, $odi, new Order(NULL), 0);
+check(($f1['ref_id'] ?? null) === null, 'a paid line naming no draft activates nothing');
+check(count(PstFulfillment::$alerts) === 1 && stripos(PstFulfillment::$alerts[0], 'no site draft') !== false,
+	'and the operator is alerted rather than the row being invented', var_export(PstFulfillment::$alerts, true));
+$none = new MultiCustomerCloudProvision(array('external_order_item_id' => (int)$odi->key, 'deleted' => false));
+check((int)$none->count_all() === 0, 'no provision row is created from a line with no draft');
 
 // ---------------------------------------------------------------------------
 section('status reflects state');

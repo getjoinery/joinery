@@ -183,8 +183,17 @@ function checkout_logic(array $input): LogicResult{
 		$page_vars['stripe_helper'] = $stripe_helper;
 	}
 
+	// Before any payment step exists, every line's fulfilment provider gets to
+	// refuse — an event with no seats left, a hosted site whose setup changed
+	// after it was added. A hosted Stripe Checkout session charges the card
+	// before the buyer is back here, so the question has to be asked before
+	// the session is created; a refusal replaces the payment forms with the
+	// sentence, and no session, plan or order is made.
+	require_once(PathHelper::getIncludePath('plugins/store/includes/FulfillmentRegistry.php'));
+	$page_vars['payment_refusal'] = ($cart->get_total() > 0) ? FulfillmentRegistry::cartRefusal($cart) : null;
+
 	// Payment setup requiring billing email (API calls, PayPal, stripe_checkout session)
-	if ($cart->get_total() > 0 && !empty($cart->billing_user['billing_email'])) {
+	if ($cart->get_total() > 0 && !empty($cart->billing_user['billing_email']) && $page_vars['payment_refusal'] === null) {
 
 		if ($settings->get_setting('use_paypal_checkout')) {
 			$paypal = new PaypalHelper();

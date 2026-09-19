@@ -2,18 +2,27 @@
 /**
  * CustomerCloudProvision - One cloud-instance provision, request to running site.
  *
- * Two origins (cvp_origin):
+ * Three origins (cvp_origin):
  *   order - created by PollHostingOrders when a paid order's product declares
  *           pro_fulfillment_provider = 'customer_cloud'; carries the order
  *           item linkage that drives the buyer welcome email.
  *   admin - created by the Install New Node form's cloud-instance target;
  *           no order item, no welcome email.
+ *   buyer - created by the buyer on the configure page BEFORE they pay
+ *           (specs/managed_hosting_phase1_purchase.md). It starts as a draft
+ *           and holds nothing — no instance, no domain, no slug — until the
+ *           store's fulfilment activates it with the paid order item, at which
+ *           point it is an order-shaped row and the pipeline takes it.
  *
  * Install parameters travel on the row (cvp_docker_mode, cvp_install_mode,
  * cvp_source_node_id, cvp_backup_source, cvp_port) and are honored by the
  * ProvisionCustomerCloud scheduled task, which advances every provision.
  *
  * Status flow:
+ *   draft           - a buyer's unfinished site setup; editable, expires
+ *   pending_payment - the setup is complete and frozen; its cart line was built
+ *                     from it, so it must not move under the line. Edit returns
+ *                     it to draft (and the cart line, if any, goes stale).
  *   pending_connect - waiting for the buyer's OAuth grant (Connect page)
  *   ready           - grant available; instance not yet created
  *   booting         - instance created on the customer's account; waiting for
@@ -30,6 +39,11 @@
  * retire_failed when the job could not prove the machine refuses it (the
  * password is kept, so the machine stays reachable).
  *
+ * @version 1.10 - is_test_purchase() / external_name_prefix(): a site bought with a test-mode payment names
+ *                 everything the pipeline creates for it outside the platform with test_ in front
+ * @version 1.9 - the buyer origin and the pre-payment states (draft, pending_payment); the draft's
+ *                domain source, frozen domain-year quote and sealed registrant block; held_by_live()
+ *                for the slug/domain rule at activation; sweep filters on the collection
  * @version 1.8 - cvp_instance_ipv6 + normalize_address()/machine_addresses(): a provision is found by either of its instance's addresses
  * @version 1.7 - dismiss_blockers()/can_dismiss(): a provision holding nothing — no instance, no node,
  *                no mail subaccount, no live install password, no paid order — can be cleared off the
@@ -71,7 +85,7 @@ class CustomerCloudProvision extends SystemBase {
 
 	public static $field_specifications = array(
 		'cvp_customer_cloud_provision_id'                     => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
-		'cvp_origin'                 => array('type'=>'varchar(10)', 'is_nullable'=>false, 'default'=>'order', 'allowed_values'=>array('order', 'admin')),
+		'cvp_origin'                 => array('type'=>'varchar(10)', 'is_nullable'=>false, 'default'=>'order', 'allowed_values'=>array('order', 'admin', 'buyer')),
 		'cvp_external_order_item_id' => array('type'=>'int8', 'unique'=>true),
 		'cvp_usr_user_id'            => array('type'=>'int8', 'required'=>true, 'is_nullable'=>false),
 		'cvp_domain'                 => array('type'=>'varchar(255)', 'required'=>true, 'is_nullable'=>false),
@@ -151,6 +165,15 @@ class CustomerCloudProvision extends SystemBase {
 		// instead of pretending the domain is set up.
 		'cvp_mail_records'           => array('type'=>'jsonb'),
 		'cvp_mail_error'             => array('type'=>'text'),
+		// The buyer-origin draft (specs/managed_hosting_phase1_purchase.md §5.1).
+		// own: the buyer brings a name they hold; the welcome email carries the
+		// A-record instruction. register: this plane buys the name for them
+		// after payment, from the quote frozen here at configure time and the
+		// registrant block sealed here. NULL on rows from the other origins.
+		'cvp_domain_source'          => array('type'=>'varchar(10)', 'allowed_values'=>array('own', 'register')),
+		'cvp_domain_quote'           => array('type'=>'numeric(10,2)'),
+		'cvp_domain_quote_time'      => array('type'=>'timestamp(6)'),
+		'cvp_registrant_sealed'      => array('type'=>'text'),
 		'cvp_error'                  => array('type'=>'text'),
 		'cvp_create_time'            => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'cvp_update_time'            => array('type'=>'timestamp(6)'),
@@ -171,11 +194,26 @@ class CustomerCloudProvision extends SystemBase {
 
 	private function validate_row() {
 		$origin = $this->get('cvp_origin') ?: 'order';
-		if (!in_array($origin, array('order', 'admin'), true)) {
+		if (!in_array($origin, array('order', 'admin', 'buyer'), true)) {
 			throw new CustomerCloudProvisionException("Unknown origin '{$origin}'.");
 		}
 		if ($origin === 'order' && empty($this->get('cvp_external_order_item_id'))) {
 			throw new CustomerCloudProvisionException('Order item id is required for order-origin provisions.');
+		}
+		$status = (string)($this->get('cvp_status') ?: 'pending_connect');
+		if ($origin === 'buyer' && !$this->is_pre_payment() && empty($this->get('cvp_external_order_item_id'))) {
+			// A buyer's row leaves the pre-payment states only by activation,
+			// and activation is what stamps the paid order item. A buyer row at
+			// ready with no order item is a site about to be built for free.
+			throw new CustomerCloudProvisionException(
+				"A buyer-origin provision at '{$status}' must carry the paid order item.");
+		}
+		if ($origin !== 'buyer' && $this->is_pre_payment()) {
+			throw new CustomerCloudProvisionException("Only a buyer-origin provision may be at '{$status}'.");
+		}
+		$domain_source = (string)$this->get('cvp_domain_source');
+		if ($domain_source !== '' && !in_array($domain_source, array('own', 'register'), true)) {
+			throw new CustomerCloudProvisionException("Unknown domain source '{$domain_source}'.");
 		}
 		$docker_mode = $this->get('cvp_docker_mode') ?: 'docker';
 		if (!in_array($docker_mode, array('docker', 'bare-metal'), true)) {
@@ -207,6 +245,153 @@ class CustomerCloudProvision extends SystemBase {
 
 	/** The provision statuses still working toward a running site, or stuck. */
 	const OPEN_STATUSES = array('pending_connect', 'ready', 'booting', 'installing', 'failed');
+
+	/**
+	 * The states a buyer's row passes through before any money moves. A row in
+	 * one of these holds nothing — no instance, no domain, no slug — and is the
+	 * buyer's to edit or delete; nothing in the pipeline can see it.
+	 */
+	const PRE_PAYMENT_STATUSES = array('draft', 'pending_payment');
+
+	/** Is this row still before payment (draft or frozen for the cart)? */
+	public function is_pre_payment(): bool {
+		return in_array((string)$this->get('cvp_status'), self::PRE_PAYMENT_STATUSES, true);
+	}
+
+	/**
+	 * Is this domain or slug already held by a provision that is past payment?
+	 *
+	 * Any status from ready on counts, failed included: a failed provision may
+	 * still hold an instance under that slug, and only a person can say
+	 * otherwise. Drafts never hold anything, so two buyers may draft the same
+	 * name and the second to pay is the one refused here — at activation, where
+	 * the paid order gets an alert and a person, never silently.
+	 */
+	public static function held_by_live(string $domain, string $slug, int $except_id = 0): ?CustomerCloudProvision {
+		$domain = strtolower(trim($domain));
+		$slug = strtolower(trim($slug));
+		foreach (array('domain' => $domain, 'slug' => $slug) as $option => $value) {
+			if ($value === '') {
+				continue;
+			}
+			$rows = new MultiCustomerCloudProvision(array(
+				$option => $value, 'past_payment' => true, 'deleted' => false,
+			), array('cvp_customer_cloud_provision_id' => 'DESC'));
+			foreach ($rows as $row) {
+				if ((int)$row->key !== $except_id) {
+					return $row;
+				}
+			}
+		}
+		return null;
+	}
+
+	// ------------------------------------------------------------------
+	// The draft's registrant snapshot (register source only)
+	// ------------------------------------------------------------------
+
+	/**
+	 * Hold the contact block the domain will be registered with, sealed. It is
+	 * a home address and phone number, kept only until activation copies it to
+	 * the registration row. Same zero-config tolerance as RegisteredDomain:
+	 * readable JSON where no secret_box_key exists.
+	 */
+	public function seal_registrant(array $contact): void {
+		$json = json_encode($contact);
+		try {
+			$box = new SecretBox();
+		} catch (\Throwable $e) {
+			$this->set('cvp_registrant_sealed', $json);
+			return;
+		}
+		$this->set('cvp_registrant_sealed',
+			json_encode(array('enc' => $box->seal('cvp_customer_cloud_provisions.cvp_registrant_sealed', $json))));
+	}
+
+	/** The stored contact block, or null when there is none / it cannot be read. */
+	public function open_registrant(): ?array {
+		$stored = trim((string)$this->get('cvp_registrant_sealed'));
+		if ($stored === '') {
+			return null;
+		}
+		$decoded = json_decode($stored, true);
+		if (!is_array($decoded)) {
+			return null;
+		}
+		if (isset($decoded['enc']) && is_string($decoded['enc']) && SecretBox::looksEncrypted($decoded['enc'])) {
+			$opened = (new SecretBox())->open($decoded['enc']);
+			if ($opened['value'] === null) {
+				return null;
+			}
+			$inner = json_decode($opened['value'], true);
+			return is_array($inner) ? $inner : null;
+		}
+		return $decoded;
+	}
+
+	/**
+	 * Every stored registrant blob, for the sealed-secret reconciler — the
+	 * column is a JSON {"enc":"<blob>"} envelope, which this unwraps.
+	 *
+	 * @return array<array{ref:string, blob:?string}>
+	 */
+	public static function eachRegistrantBlob(): array {
+		$out = array();
+		$rows = new MultiCustomerCloudProvision(array('deleted' => false, 'has_registrant' => true));
+		foreach ($rows as $row) {
+			$decoded = json_decode((string)$row->get('cvp_registrant_sealed'), true);
+			$blob = (is_array($decoded) && isset($decoded['enc']) && is_string($decoded['enc'])
+				&& SecretBox::looksEncrypted($decoded['enc'])) ? $decoded['enc'] : null;
+			$out[] = array('ref' => 'provision #' . $row->key . ' ' . $row->get('cvp_domain'), 'blob' => $blob);
+		}
+		return $out;
+	}
+
+	// ------------------------------------------------------------------
+	// Test purchases name what they create
+	// ------------------------------------------------------------------
+
+	/** What every external thing a test purchase creates is named with, in front. */
+	const TEST_NAME_PREFIX = 'test_';
+
+	/** @var ?bool memo of is_test_purchase() for this row */
+	private $test_purchase = null;
+
+	/**
+	 * Was this site bought with a test-mode payment? Then everything the
+	 * pipeline creates for it outside this platform — the cloud instance, the
+	 * mail subaccount and its SMTP user, the node's own name — is named with
+	 * TEST_NAME_PREFIX in front, so a rehearsal's leftovers can be told from a
+	 * customer's at a glance in every provider's console and never mistaken
+	 * for something to keep. Decided by the paid order's own test flag; a row
+	 * with no order (an admin's install) is not a test purchase.
+	 */
+	public function is_test_purchase(): bool {
+		if ($this->test_purchase !== null) {
+			return $this->test_purchase;
+		}
+		$this->test_purchase = false;
+		$item_id = (int)$this->get('cvp_external_order_item_id');
+		if ($item_id > 0 && class_exists('OrderItem')) {
+			try {
+				$item = new OrderItem($item_id, TRUE);
+				$order_id = $item->key ? (int)$item->get('odi_ord_order_id') : 0;
+				if ($order_id > 0) {
+					$order = new Order($order_id, TRUE);
+					$this->test_purchase = $order->key && (bool)$order->get('ord_test_mode');
+				}
+			} catch (\Throwable $e) {
+				error_log('CustomerCloudProvision: could not read the order behind provision #' . $this->key
+					. ' for its test flag: ' . $e->getMessage());
+			}
+		}
+		return $this->test_purchase;
+	}
+
+	/** TEST_NAME_PREFIX for a test purchase, '' otherwise: put it in front of every external name. */
+	public function external_name_prefix(): string {
+		return $this->is_test_purchase() ? self::TEST_NAME_PREFIX : '';
+	}
 
 	/** The install-password states in which the plane still holds a password. */
 	const PASSWORD_HELD_STATES = array('held', 'retiring', 'retire_failed');
@@ -427,6 +612,40 @@ class MultiCustomerCloudProvision extends SystemMultiBase {
 
 		if (isset($this->options['instance_ip'])) {
 			$filters['cvp_instance_ip'] = [$this->options['instance_ip'], PDO::PARAM_STR];
+		}
+
+		if (isset($this->options['origin'])) {
+			$filters['cvp_origin'] = [$this->options['origin'], PDO::PARAM_STR];
+		}
+
+		if (isset($this->options['domain'])) {
+			$filters['cvp_domain'] = [strtolower(trim((string)$this->options['domain'])), PDO::PARAM_STR];
+		}
+
+		if (isset($this->options['slug'])) {
+			$filters['cvp_slug'] = [strtolower(trim((string)$this->options['slug'])), PDO::PARAM_STR];
+		}
+
+		// Rows that are past payment: everything but the buyer's pre-payment
+		// states. The complement of the draft sweep's view of the table.
+		if (!empty($this->options['past_payment'])) {
+			$pre = "'" . implode("','", CustomerCloudProvision::PRE_PAYMENT_STATUSES) . "'";
+			$filters['cvp_status'] = "NOT IN ({$pre})";
+		}
+
+		if (!empty($this->options['has_registrant'])) {
+			$filters['cvp_registrant_sealed'] = "IS NOT NULL";
+		}
+
+		// The draft sweep: rows whose last change is older than a UTC timestamp
+		// (gmdate('Y-m-d H:i:s')). The value is validated to that shape here, so
+		// the literal condition below can never carry anything else.
+		if (isset($this->options['updated_before'])) {
+			$before = (string)$this->options['updated_before'];
+			if (!preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $before)) {
+				throw new CustomerCloudProvisionException('updated_before must be a Y-m-d H:i:s UTC timestamp.');
+			}
+			$filters['cvp_update_time'] = "< '" . $before . "'";
 		}
 
 		// Everything an operator still has a reason to watch: a provision working

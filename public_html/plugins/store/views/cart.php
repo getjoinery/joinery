@@ -92,9 +92,11 @@ foreach ($cart->items as $cart_item) {
     if (!empty($data['address']) && is_object($data['address'])) {
         $meta_rows['Address'] = htmlspecialchars($data['address']->get_address_string(', '), ENT_QUOTES, 'UTF-8');
     }
-    // Question answers (stored as arrays with 'question' and 'answer' keys)
+    // Answers stored as arrays with 'question' and 'answer' keys — a Question's
+    // answer (question_N) and anything a requirement stored in that shape (a
+    // registered domain, a configured site).
     foreach ($data as $field_key => $field_val) {
-        if (strpos($field_key, 'question_') === 0 && is_array($field_val)) {
+        if (is_array($field_val) && isset($field_val['question'], $field_val['answer'])) {
             $q_label = isset($field_val['question']) ? $field_val['question'] : $field_key;
             $q_answer = isset($field_val['answer']) ? $field_val['answer'] : '';
             if ($q_answer !== '') {

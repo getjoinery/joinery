@@ -82,8 +82,13 @@ happens.
 ### 4.1 Configure — `/profile/server_manager/configure`
 
 Signed-in only. The Managed product page on getjoinery and every "Managed"
-button in the site copy land here (a visitor who is not signed in registers
-or signs in first, as any profile page does). The page is one FormWriter form
+button in the site copy land here. **A visitor who is not signed in is sent
+to the start page, `/server_manager/start` (owner, 2026-09-19):** step 1 of
+three, the account, with sign-in and sign-up side by side and no preference,
+under a step strip (1 Your account, 2 Your site, 3 Payment) that every page
+on the path carries. Both forms are handled by the platform's own sign-in
+and sign-up handlers; a refusal is shown on the start page in place, and
+every success lands back here. The page is one FormWriter form
 that creates or edits a **draft provision** — a `cvp_customer_cloud_provisions`
 row at status `draft` with `cvp_origin = buyer`.
 
@@ -281,6 +286,18 @@ charge in `cart_charge_logic` — returns a sentence when the line's draft is
 not `pending_payment` or not the buyer's: *You changed your site setup
 after adding it to the cart. Remove it from the cart and continue to
 payment again.* Today it always returns null; this is its first use.
+
+**Where it is asked (review, 2026-09-19).** The seam runs in
+`cart_charge_logic`, and in the hosted Stripe Checkout mode that handler is
+the buyer's *return* from Stripe — the card is already charged. Asking there
+would send a paid buyer back to `/checkout` with the sentence and leave a
+paid order with no items and nobody told. So the question lives in one store
+helper, `FulfillmentRegistry::cartRefusal()`, asked in two places and only
+while declining is free: on the checkout page before any payment session,
+plan or order is created (a refusal replaces the payment forms with the
+sentence), and by the charge handler before it charges a card. It is never
+asked on the return from a hosted session; a line that goes bad in that
+window is `fulfill()`'s to alert (§6.2).
 
 **One store change makes it possible.** The interface today is
 `checkAvailability(Product $product, int $ref, int $quantity)`: it cannot
@@ -504,8 +521,10 @@ operator Linode token are sealed on dev, so the proof can run through to
 `done` on a real Nanode (delete each test instance at Linode afterwards;
 the platform never deletes). Two things the executor completes: the Stripe
 **test-mode webhook** endpoint and its signing secret
-(`stripe_endpoint_secret` is empty; activation runs from the webhook, so
-without it a test order pays and nothing activates), and the domain product
+(`stripe_endpoint_secret` is empty; in the hosted Checkout mode the webhook
+records the paid order and the buyer's return page creates the items and
+runs activation — see the note under §6.3; dev runs `stripe_regular`, where
+the charge and the activation are one request), and the domain product
 (`store_domain_registration_product_id` is empty; the Provisioning Setup
 registrar card creates it). Dev is a development plane only; the production
 Server Manager is getjoinery, and the live gate (item 6) runs there with the
