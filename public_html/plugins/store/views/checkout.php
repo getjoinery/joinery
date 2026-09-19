@@ -261,6 +261,11 @@
                             The email <strong><?php echo htmlspecialchars($cart->billing_user['billing_email'], ENT_QUOTES, 'UTF-8'); ?></strong> already exists in our system.
                             <a href="/login">Log in</a> to continue checkout.
                         </div>
+                        <?php elseif (!empty($page_vars['payment_refusal'])): ?>
+                        <div class="alert alert-warning">
+                            <?php echo htmlspecialchars($page_vars['payment_refusal'], ENT_QUOTES, 'UTF-8'); ?>
+                            <a href="/cart">Go to your cart</a>
+                        </div>
                         <?php else: ?>
 
                             <?php if (($settings->get_setting('checkout_type') == 'stripe_checkout' || $settings->get_setting('checkout_type') == 'stripe_regular') && !empty($page_vars['stripe_helper'])): ?>

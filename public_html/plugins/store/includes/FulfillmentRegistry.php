@@ -13,6 +13,11 @@
  * Store-owned registry. Fail soft: a product with no fulfillment provider simply
  * has nothing to fulfill.
  *
+ * @version 1.3.0 - cartRefusal(): one place asks every line's provider whether it can still be
+ *                  delivered, so the checkout page asks before a hosted payment session exists and
+ *                  the charge asks again only while declining is still free
+ * @version 1.2.0 - checkAvailability() receives the cart line's form data, so a provider whose
+ *                  availability depends on what the buyer answered can see the answer
  * @version 1.1.0
  */
 
@@ -40,14 +45,17 @@ interface FulfillmentProvider {
      * Return NULL to proceed, or a buyer-facing sentence explaining the refusal
      * (it is shown to them as-is).
      *
-     * $quantity is the number of units this cart line would consume.
+     * $quantity is the number of units this cart line would consume. $data is
+     * the line's form data — the buyer's validated answers as process() stored
+     * them — for a provider whose availability depends on what was answered
+     * (a Managed site's draft, say) rather than on the product alone.
      *
      * Advisory, not a lock: two checkouts can pass this concurrently and both
      * proceed. It closes the ordinary case — a full event still selling seats —
      * not a determined race. A provider needing a hard guarantee enforces it
      * with a database constraint of its own.
      */
-    public function checkAvailability(Product $product, int $ref, int $quantity): ?string;
+    public function checkAvailability(Product $product, int $ref, int $quantity, array $data = []): ?string;
     /**
      * Run fulfillment on a successful, paid purchase. Returns
      * ['ref_id' => ?int, 'label' => ?string, 'labels' => ?array] for the
@@ -76,6 +84,47 @@ class FulfillmentRegistry {
     /** All registered providers, registration order. */
     public static function all(): array {
         return array_values(self::$providers);
+    }
+
+    /**
+     * The first line in the cart whose provider says it cannot be delivered,
+     * as the buyer-facing sentence — or null when every line may proceed.
+     *
+     * Asked wherever a payment step is about to start: on the checkout page
+     * before a hosted payment session is created, and by the charge handler
+     * before it charges a card. Never asked after money has moved — a line
+     * that goes bad between the session and the return is fulfil()'s to
+     * report, because the order is paid by then.
+     *
+     * A provider that throws is treated as available: the checkout must not
+     * go down because one provider cannot answer, and fulfil() reports the
+     * truth afterwards.
+     */
+    public static function cartRefusal($cart): ?string {
+        foreach ($cart->items as $cart_item) {
+            list($quantity, $product, $data) = $cart_item;
+            if (!$product->get('pro_fulfillment_provider')) {
+                continue;
+            }
+            $provider = self::get($product->get('pro_fulfillment_provider'));
+            if (!$provider) {
+                // An unresolvable provider is handled after the charge, where
+                // it is already logged and stamped onto the order.
+                continue;
+            }
+            try {
+                $unavailable = $provider->checkAvailability(
+                    $product, (int)$product->get('pro_fulfillment_ref'), (int)$quantity, (array)$data);
+            } catch (\Throwable $e) {
+                error_log('FulfillmentRegistry::cartRefusal: checkAvailability failed for product #'
+                    . $product->key . ': ' . $e->getMessage());
+                $unavailable = null;
+            }
+            if ($unavailable !== null) {
+                return $unavailable;
+            }
+        }
+        return null;
     }
 
     /** Register core-visible fulfillment providers. */

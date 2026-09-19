@@ -24,7 +24,7 @@ See also: [Questions & Surveys](questions_surveys.md) — the underlying questio
 | `NewsletterSignupRequirement` | Newsletter Signup | Optional email opt-in checkbox |
 | `QuestionRequirement` | Question | Any single `Question` (all types supported) |
 | `SurveyRequirement` | Survey | All questions in a `Survey`, saves `SurveyAnswer` records on purchase |
-| `ManagedDomainRequirement` | Managed domain | The domain name the buyer wants plus the WHOIS contact block; quotes it live at the registrar, adds a one-year domain line to the cart, and files the registration for the provisioning pipeline. Registered by the server_manager plugin — see [Server Manager](../../server_manager/docs/overview.md) |
+| `ManagedSiteRequirement` | Managed site | One hidden answer: the id of the site the buyer configured on Server Manager's configure page before paying. Renders no fields; refuses anything but the signed-in buyer's own frozen draft; adds the one-year domain line from the quote frozen on that draft. Contributed by the `customer_cloud` fulfillment provider, never attached as a `pri_` row — see [Server Manager](../../server_manager/docs/overview.md#the-buyer-configures-first-then-pays-payment-activates) |
 
 ## Admin UI
 
@@ -128,7 +128,9 @@ form data `process()` produced.
 - **Deterministic.** The same form data must produce the same lines. Editing a
   cart item finds the lines it previously contributed by recomputing them from
   the old answers, then replaces them — a requirement that varied its output
-  would strand its own stale line.
+  would strand its own stale line. A price that comes from a live lookup is
+  therefore frozen into the form data at `process()` (a Managed site's domain
+  quote lives on its draft row) and read back from there, never re-quoted here.
 
 A separate line rather than a folded-in fee because a line carries its own
 product version and therefore its own recurrence: a one-time charge folded

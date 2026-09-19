@@ -49,7 +49,15 @@ function passkey_login_verify_logic(array $input): LogicResult {
 
 	RequestLogger::log('passkey_login', 'verify', true, ['user_id' => $user->key]);
 
-	$alternate_homepage = $settings->get_setting('alternate_loggedin_homepage');
+	// The page that sent the visitor to sign in is in the session's return
+	// slot, the same one a password sign-in reads; a passkey sign-in goes
+	// there too, under the same local-path rule.
+	$session = SessionControl::get_instance();
+	$returnurl = $session->get_return();
+	$session->clear_return();
+	if (!$returnurl || !SessionControl::is_safe_return($returnurl)) {
+		$returnurl = $settings->get_setting('alternate_loggedin_homepage') ?: '/profile';
+	}
 	return LogicResult::render([
 		'user' => [
 			'usr_user_id' => $user->key,
@@ -57,7 +65,7 @@ function passkey_login_verify_logic(array $input): LogicResult {
 			'usr_first_name' => $user->get('usr_first_name'),
 			'usr_last_name'  => $user->get('usr_last_name'),
 		],
-		'redirect' => $alternate_homepage ?: '/profile',
+		'redirect' => $returnurl,
 	]);
 }
 

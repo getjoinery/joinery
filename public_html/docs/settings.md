@@ -250,11 +250,12 @@ Two consequences worth knowing:
 
 The domain-registration leg's credentials
 (`server_manager_namecheap_api_user`, `_api_key`, `_client_ip`, `_sandbox`,
-and `server_manager_domain_tlds`) are declared by the server_manager plugin
-but entered on **Server Manager → Provisioning**, not on the settings page —
-the card there seals the API key at rest through `ProvisioningSetup::
-writeSecret()` and shows the account-eligibility and IP-allowlist constraints
-beside the field they apply to. `secret: true` on a declaration marks a value
+`_promotion_code`, and `server_manager_domain_tlds`) are declared by the
+server_manager plugin but entered on **Server Manager → Provisioning**, not on
+the settings page — the card there seals the API key and the promotion code
+at rest through `ProvisioningSetup::writeSecret()` and shows the
+account-eligibility and IP-allowlist constraints beside the field they apply
+to. `secret: true` on a declaration marks a value
 as one not to display; it does not encrypt it, which is why the credential
 has a writer that does.
 

@@ -23,6 +23,13 @@
  * status instead — only a pending row may attempt a purchase — because a
  * timestamp written after a charge is one crash away from a second charge.
  *
+ * rdm_taken_time is the one failure the buyer can fix themselves: the name
+ * was taken by somebody else between the quote and the purchase. It is
+ * stamped by the registration phase beside the parked status, the buyer's
+ * sites page offers an alternate name on its strength, and submitting one
+ * clears it and returns the row to pending under the same paid-line guard.
+ *
+ * @version 1.1 - rdm_taken_time (specs/managed_hosting_phase1_purchase.md §7), offers_alternate() and take_alternate()
  * @version 1.0
  */
 
@@ -90,6 +97,7 @@ class RegisteredDomain extends SystemBase {
 		'rdm_dns_mail_time'          => array('type'=>'timestamp(6)'),
 		'rdm_ptr_time'               => array('type'=>'timestamp(6)'),
 		'rdm_prompt_pushed_time'     => array('type'=>'timestamp(6)'),
+		'rdm_taken_time'             => array('type'=>'timestamp(6)'),
 		'rdm_error'                  => array('type'=>'text'),
 		'rdm_create_time'            => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'rdm_update_time'            => array('type'=>'timestamp(6)'),
@@ -221,6 +229,27 @@ class RegisteredDomain extends SystemBase {
 	public function fail(string $message): void {
 		$this->set('rdm_status', self::STATUS_FAILED);
 		$this->set('rdm_error', mb_substr($message, 0, 4000));
+		$this->save();
+	}
+
+	/** Is the buyer being offered an alternate name for this row? */
+	public function offers_alternate(): bool {
+		return $this->get('rdm_status') === self::STATUS_FAILED
+			&& trim((string)$this->get('rdm_taken_time')) !== '';
+	}
+
+	/**
+	 * The buyer chose another name for a registration that found its first one
+	 * taken. The row goes back to pending under the same paid-line guard: the
+	 * paid amount is unchanged and the guard compares against it, so a dearer
+	 * name is refused before it gets here (ManagedDomainIntake quotes it) and
+	 * refused again at registration if it somehow is not.
+	 */
+	public function take_alternate(string $domain): void {
+		$this->set('rdm_domain', strtolower(trim($domain)));
+		$this->set('rdm_status', self::STATUS_PENDING);
+		$this->set('rdm_taken_time', null);
+		$this->set('rdm_error', null);
 		$this->save();
 	}
 }

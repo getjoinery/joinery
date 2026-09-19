@@ -16,6 +16,8 @@
  * entered in the settings fields.
  *
  * @version 1.4 - the domain-registration leg's status and sealed credentials
+ * @version 1.4 - domainStatus() reports whether a registrar promotion code is set; the domain
+ *                product gate reads from ManagedDomainIntake
  * @version 1.3 - readSecret()/writeSecret() generalize the sealed-setting path
  * @version 1.2
  */
@@ -368,15 +370,15 @@ class ProvisioningSetup {
 	 */
 	public static function domainStatus(): array {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/domain_registrar/DomainRegistrarRegistry.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/requirements/ManagedDomainRequirement.php'));
 		$registrar = DomainRegistrarRegistry::firstConfigured();
 		$product_id = (int)self::readSetting('store_domain_registration_product_id');
 		// Sellable means the product LOADS and can price a line, not merely
 		// that the setting holds a number — a deleted product still would.
-		$product_ok = ManagedDomainRequirement::domainProductSellable();
+		$product_ok = ManagedDomainIntake::domainProductSellable();
 		return array(
 			'api_user'    => self::readSetting('server_manager_namecheap_api_user'),
 			'key_present' => trim(self::readSecret('server_manager_namecheap_api_key')) !== '',
+			'promotion_present' => trim(self::readSecret('server_manager_namecheap_promotion_code')) !== '',
 			'client_ip'   => self::readSetting('server_manager_namecheap_client_ip'),
 			'sandbox'     => self::readSetting('server_manager_namecheap_sandbox') !== '',
 			'tlds_raw'    => implode(' ', DomainRegistrarRegistry::offeredTlds()),
@@ -406,6 +408,7 @@ class ProvisioningSetup {
 		return array(
 			'token_present'         => $token,
 			'smtp2go_present'       => $smtp2go,
+			'smtp2go_sandbox_users' => in_array(trim(self::readSetting('server_manager_smtp2go_sandbox_users')), array('', '0'), true) === false,
 			'webhook_present'       => trim(self::readSecret('server_manager_smtp2go_webhook_secret')) !== '',
 			'send_allowance'        => self::readSetting('server_manager_hosted_send_allowance'),
 			'shelf_allowance_gb'    => self::readSetting('server_manager_hosted_shelf_allowance_gb'),

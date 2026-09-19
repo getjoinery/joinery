@@ -47,6 +47,9 @@
  * amber state on the wizard is the right answer to a provider outage — not a
  * failed provision.
  *
+ * @version 1.2 - a test purchase's subaccount label and SMTP username start with test_
+ * @version 1.1 - server_manager_smtp2go_sandbox_users: a rehearsal plane mints every customer SMTP user
+ *                in the provider's sandbox status, so nothing it builds can email anyone
  * @version 1.0
  */
 
@@ -162,7 +165,7 @@ class ProvisionHostedMail {
 			// again. It is one call, so a duplicate is recoverable by hand; a
 			// forgotten one is not.
 			$id = $this->client->addSubaccount(
-				'Joinery hosted — ' . $domain,
+				$provision->external_name_prefix() . 'Joinery hosted — ' . $domain,
 				trim((string)$provision->get('cvp_buyer_email')));
 			$provision->set('cvp_smtp2go_subaccount_id', $id);
 			$provision->save();
@@ -329,10 +332,10 @@ class ProvisionHostedMail {
 			return 0;
 		}
 		$subaccount = (string)$provision->get('cvp_smtp2go_subaccount_id');
-		$username = Smtp2GoClient::mintUsername((string)$provision->get('cvp_slug'));
+		$username = Smtp2GoClient::mintUsername((string)$provision->get('cvp_slug'), $provision->external_name_prefix());
 		$password = Smtp2GoClient::mintPassword();
 
-		$user = $this->client->addSmtpUser($subaccount, $username, $password);
+		$user = $this->client->addSmtpUser($subaccount, $username, $password, self::sandbox_users());
 
 		// The username is recorded so the credential can be revoked by name;
 		// the password is NOT stored. It exists for exactly as long as it takes
@@ -404,13 +407,23 @@ class ProvisionHostedMail {
 		// to re-send. A spare SMTP user inside the customer's own subaccount is
 		// a cost worth paying for a site that can send — bounded by the attempt
 		// count above so it stays a cost and not a leak.
-		$username = Smtp2GoClient::mintUsername((string)$provision->get('cvp_slug'));
+		$username = Smtp2GoClient::mintUsername((string)$provision->get('cvp_slug'), $provision->external_name_prefix());
 		$password = Smtp2GoClient::mintPassword();
 		$user = $this->client->addSmtpUser(
-			(string)$provision->get('cvp_smtp2go_subaccount_id'), $username, $password);
+			(string)$provision->get('cvp_smtp2go_subaccount_id'), $username, $password, self::sandbox_users());
 		$provision->set('cvp_smtp2go_user_id', $user['username'] !== '' ? $user['username'] : $user['id']);
 		$provision->save();
 		return $this->dispatch_settings($provision, $user['username'], $user['password']) ? 1 : 0;
+	}
+
+	/**
+	 * Does this plane mint its customers' SMTP users in the provider's sandbox
+	 * status (accepted, counted, never delivered)? On for a rehearsal plane, so
+	 * a site built to prove the pipeline can email nobody; off for real.
+	 */
+	public static function sandbox_users(): bool {
+		$value = trim((string)Globalvars::get_instance()->get_setting('server_manager_smtp2go_sandbox_users', false, true));
+		return $value !== '' && $value !== '0';
 	}
 
 	/**

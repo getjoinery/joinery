@@ -612,6 +612,26 @@ check(AgentChannelEndpoint::reported_addresses(['addresses' => [$ds_v6, $ds_v4, 
 	AgentChannelEndpoint::reported_addresses(['addresses' => [$ds_v6, $ds_v4, 'not-an-address', 42, $ds_v4, '']]));
 check(AgentChannelEndpoint::reported_addresses(['addresses' => 'x']) === '' && AgentChannelEndpoint::reported_addresses([]) === '',
 	'a missing or malformed list is no addresses');
+
+// The join the agent actually sends, held against the strict spec the
+// handler applies. A field the handler reads but the spec does not declare
+// refuses every join that carries it — which is what stopped every new
+// machine pairing between 15 and 19 September 2026.
+$real_join = [
+	'claimed_name'     => 'test380s-com',
+	'agent_public_key' => base64_encode(random_bytes(32)),
+	'agent_version'    => '1.37.1',
+	'addresses'        => [$ds_v4, $ds_v6],
+];
+check(AgentChannelEndpoint::validation_error($real_join, AgentChannelEndpoint::join_spec()) === null,
+	'the join the agent sends — claimed name, key, version, addresses — passes the join spec',
+	var_export(AgentChannelEndpoint::validation_error($real_join, AgentChannelEndpoint::join_spec()), true));
+check(AgentChannelEndpoint::validation_error(['claimed_name' => 'x', 'agent_public_key' => 'k'], AgentChannelEndpoint::join_spec()) === null,
+	'and a join from an agent too old to send addresses still passes');
+check(AgentChannelEndpoint::validation_error(['claimed_name' => 'x', 'agent_public_key' => 'k', 'addresses' => 'not-a-list'],
+	AgentChannelEndpoint::join_spec()) !== null, 'addresses that are not a list are refused');
+check(AgentChannelEndpoint::validation_error(['claimed_name' => 'x', 'agent_public_key' => 'k', 'addresses' => array_fill(0, 65, '1.2.3.4')],
+	AgentChannelEndpoint::join_spec()) !== null, 'and a flood of them is refused at the door');
 $flood_addrs = [];
 for ($i = 1; $i <= AgentJoinRequest::MAX_ADDRESSES + 10; $i++) { $flood_addrs[] = '203.0.113.' . $i; }
 check(count(explode(',', AgentChannelEndpoint::reported_addresses(['addresses' => $flood_addrs]))) === AgentJoinRequest::MAX_ADDRESSES,

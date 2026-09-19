@@ -36,6 +36,10 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.23 - the join spec declares the addresses list the join has carried since 1.17, so the
+ *                 strict validator stops refusing every join from an agent that sends one; the
+ *                 validator gains the 'list' type; the spec is public so a test holds the agent's
+ *                 real payload against it
  * @version 1.22 - server_manager: the node reports at poll whether the Server Manager plugin is
  *                 active there (active|inactive), the fact that makes it a management node; absent
  *                 for an agent before 1.37.0
@@ -370,6 +374,17 @@ class AgentChannelEndpoint {
 						return "Field '{$field}' must be true or false.";
 					}
 					break;
+				case 'list':
+					// A JSON array. The empty one is indistinguishable from {}
+					// in PHP and is accepted as the empty list it almost
+					// certainly is. 'max' bounds the item count.
+					if (!is_array($value) || ($value !== [] && !array_is_list($value))) {
+						return "Field '{$field}' must be a JSON list.";
+					}
+					if (isset($rules['max']) && count($value) > (int)$rules['max']) {
+						return "Field '{$field}' has more than {$rules['max']} items.";
+					}
+					break;
 				case 'object':
 					// An empty array is PHP's rendering of {} as well as of [],
 					// so it passes as the empty object it almost certainly is.
@@ -420,12 +435,26 @@ class AgentChannelEndpoint {
 	 * Repeating a request with the same public key is idempotent — the agent
 	 * retries while it waits, and each retry finds its own row.
 	 */
-	private static function handle_join($body) {
-		$in = self::validate($body, [
+	/**
+	 * The fields a join may carry — the closed set the strict validator holds
+	 * every join to. Public so the test can hold the agent's real payload
+	 * against it: a field read from the body but missing here refuses every
+	 * join that carries it, which is how no new machine could pair for four
+	 * days after the join learned to report its addresses.
+	 */
+	public static function join_spec(): array {
+		return [
 			'claimed_name'     => ['type' => 'string', 'required' => true, 'max' => 255],
 			'agent_public_key' => ['type' => 'string', 'required' => true, 'max' => 64],
 			'agent_version'    => ['type' => 'string', 'max' => 20],
-		]);
+			// Every address the machine answers on; reported_addresses() keeps
+			// the valid, distinct ones up to AgentJoinRequest::MAX_ADDRESSES.
+			'addresses'        => ['type' => 'list', 'max' => 64],
+		];
+	}
+
+	private static function handle_join($body) {
+		$in = self::validate($body, self::join_spec());
 
 		$public_key = base64_decode($in['agent_public_key'], true);
 		if ($public_key === false || strlen($public_key) !== SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES) {

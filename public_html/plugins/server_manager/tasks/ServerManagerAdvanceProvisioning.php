@@ -6,6 +6,8 @@
  *
  * The phases are stages of one journey and have a real order:
  *
+ *  0. Drafts        expire the site drafts nobody came back for, and thaw the
+ *                   frozen ones whose domain quote has gone stale.
  *  1. Poll orders   ask getjoinery for newly paid hosting orders and start an
  *                   install job (or a customer-cloud provision row) for each.
  *  2. Customer cloud  work the customer-cloud provision state machine.
@@ -32,6 +34,7 @@
  * provisioning, and its up/down alerting must not sit behind a provisioning
  * call that hangs.
  *
+ * @version 1.3 - the site-draft sweep runs first (specs/managed_hosting_phase1_purchase.md §10 item 5)
  * @version 1.2 - the hosted tier runs as two more phases, last: mail for a site this operator hosts,
  *                then the trial clock and allowance banners (specs/hosted_trial_provisioning.md)
  * @version 1.1 - the managed-domain leg runs as two more phases
@@ -44,6 +47,7 @@ class ServerManagerAdvanceProvisioning implements ScheduledTaskInterface {
 	public function run(array $config) {
 		$base = 'plugins/server_manager/includes/provisioning/';
 		$phases = array(
+			'Drafts'         => array($base . 'SweepSiteDrafts.php', 'SweepSiteDrafts'),
 			'Orders'         => array($base . 'PollHostingOrders.php', 'PollHostingOrders'),
 			'Customer cloud' => array($base . 'ProvisionCustomerCloud.php', 'ProvisionCustomerCloud'),
 			'SSL'            => array($base . 'ProvisionPendingSsl.php', 'ProvisionPendingSsl'),

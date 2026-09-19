@@ -24,6 +24,18 @@
  * NamecheapDnsDriver via the shared reconciler, which is the only writer that
  * understands that Namecheap's setHosts replaces the entire host list.
  *
+ * A promotion code, when the operator holds one, rides BOTH the pricing call
+ * and the create call. Both or neither: the paid-line guard compares what the
+ * buyer paid with what the registrar charges, and a coupon applied on one side
+ * only breaks that comparison in one direction or the other.
+ *
+ * @version 1.1.2 - dnsCredential() carries the endpoint (sandbox or live), so the DNS driver talks to the
+ *                  same Namecheap the registrar registered with
+ * @version 1.1.1 - the pricing answer is walked by property, not xpath: the live response's default
+ *                  namespace made the xpath match nothing, so every quote was "could not price"
+ * @version 1.1 - the promotion code (specs/managed_hosting_phase1_purchase.md §10 item 2a): passed as
+ *                PromotionCode on users.getPricing and domains.create; the quote reads CouponPrice when
+ *                the registrar returned one, else YourPrice
  * @version 1.0
  */
 
@@ -87,6 +99,18 @@ class NamecheapRegistrar implements DomainRegistrarProvider {
 	private static function sandbox(): bool {
 		$value = self::setting('server_manager_namecheap_sandbox');
 		return $value !== '' && $value !== '0';
+	}
+
+	/** The operator's registrar coupon, or '' when none is set. Sealed at rest. */
+	public static function promotionCode(): string {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/ProvisioningSetup.php'));
+		return trim(ProvisioningSetup::readSecret('server_manager_namecheap_promotion_code'));
+	}
+
+	/** The PromotionCode parameter, when a code is set; nothing otherwise. */
+	private static function promotionParams(): array {
+		$code = self::promotionCode();
+		return $code === '' ? array() : array('PromotionCode' => $code);
 	}
 
 	// ------------------------------------------------------------------
@@ -164,6 +188,10 @@ class NamecheapRegistrar implements DomainRegistrarProvider {
 		foreach (array('Registrant', 'Tech', 'Admin', 'AuxBilling') as $role) {
 			$params += $this->contactParams($role, $registrant);
 		}
+		// The same code the quote was priced with. A registration at full price
+		// after a discounted quote would leave the buyer's payment short of what
+		// the registrar charged; the paid-line guard would then park the row.
+		$params += self::promotionParams();
 
 		$xml = $this->call('namecheap.domains.create', $params, 'POST');
 		$result = $xml->CommandResponse->DomainCreateResult ?? null;
@@ -227,6 +255,10 @@ class NamecheapRegistrar implements DomainRegistrarProvider {
 			'api_user'  => self::apiUser(),
 			'api_key'   => self::apiKey(),
 			'client_ip' => self::clientIp(),
+			// The DNS driver must talk to the same Namecheap the registrar
+			// does: a sandbox account's key is invalid at the live endpoint,
+			// so a domain registered in the sandbox would never get its DNS.
+			'api_base'  => self::sandbox() ? self::API_BASE_SANDBOX : self::API_BASE,
 		);
 	}
 
@@ -312,16 +344,44 @@ class NamecheapRegistrar implements DomainRegistrarProvider {
 			'ProductCategory' => 'DOMAINS',
 			'ActionName'      => 'REGISTER',
 			'ProductName'     => $tld,
-		));
+		) + self::promotionParams());
 
-		$nodes = $xml->xpath('//Product[@Name="' . $tld . '"]/Price[@Duration="1"]');
-		if (empty($nodes)) {
+		// Walked by property, never by xpath: the live answer carries a default
+		// namespace (xmlns="http://api.namecheap.com/xml.response"), and
+		// SimpleXML's xpath() matches nothing in it unless a prefix is
+		// registered, while property access follows the document's namespace
+		// on its own — which is how every other reader in this class works.
+		$price_node = null;
+		$result = $xml->CommandResponse->UserGetPricingResult ?? null;
+		foreach (($result->ProductType ?? array()) as $type) {
+			foreach (($type->ProductCategory ?? array()) as $category) {
+				foreach (($category->Product ?? array()) as $product) {
+					if (strtolower((string)$product['Name']) !== strtolower($tld)) {
+						continue;
+					}
+					foreach (($product->Price ?? array()) as $price) {
+						if ((string)$price['Duration'] === '1') {
+							$price_node = $price;
+							break 4;
+						}
+					}
+				}
+			}
+		}
+		if ($price_node === null) {
 			return null;
 		}
-		$price_node = $nodes[0];
 		// YourPrice is what the operator is charged; that is the number passed
-		// through to the buyer. Price/RegularPrice are list prices.
+		// through to the buyer. Price/RegularPrice are list prices. CouponPrice
+		// is what the promotion code brings it to — set only when the code
+		// applies to this TLD, and empty otherwise, so it is read only when it
+		// is a number. An excluded TLD quotes at YourPrice and registers at
+		// YourPrice, which is what keeps the two sides equal.
 		$value = (string)($price_node['YourPrice'] ?: $price_node['Price']);
+		$coupon = trim((string)($price_node['CouponPrice'] ?? ''));
+		if (self::promotionCode() !== '' && $coupon !== '' && is_numeric($coupon)) {
+			$value = $coupon;
+		}
 		if ($value === '' || !is_numeric($value)) {
 			return null;
 		}

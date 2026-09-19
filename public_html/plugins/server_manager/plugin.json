@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.22.29",
+  "version": "1.23.0",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -210,6 +210,22 @@
       "type": "text"
     },
     {
+      "name": "server_manager_hosted_regions",
+      "default": "",
+      "group": "hosted",
+      "label": "Regions a buyer may choose",
+      "type": "text",
+      "helptext": "Space-separated Linode region ids offered on the Managed configure page. Empty means the one region in Customer cloud region, and the field does not render."
+    },
+    {
+      "name": "server_manager_draft_days",
+      "default": "14",
+      "group": "hosted",
+      "label": "Days a site draft is kept",
+      "type": "number",
+      "helptext": "A Managed site draft the buyer never continued is deleted after this many days; one frozen for the cart but never paid returns to draft, because its domain quote is stale."
+    },
+    {
       "name": "server_manager_upgrade_retention_count",
       "default": "3",
       "helptext": "How many recent core upgrade archives to keep on disk. Older archives are removed after each publish; their release-history records are always kept. Archives marked Keep, and any version a managed node is running, are never removed. Set to 0 to keep every archive.",
@@ -346,6 +362,14 @@
       "helptext": "Space-separated. A domain outside these endings is refused at checkout."
     },
     {
+      "name": "server_manager_namecheap_promotion_code",
+      "default": "",
+      "secret": true,
+      "group": "domains",
+      "label": "Namecheap promotion code",
+      "helptext": "A registrar coupon applied to every domain quote and every registration alike, so the buyer pays what the registrar charges. Set it on the Provisioning Setup page, which seals it at rest. Empty means no coupon."
+    },
+    {
       "name": "server_manager_domain_orphan_swept_id",
       "default": "0",
       "managed": true,
@@ -366,6 +390,14 @@
       "group": "hosted",
       "label": "SMTP2GO master API key",
       "helptext": "The master key every hosted customer's subaccount is administered with. Set it on the Provisioning Setup page, which seals it at rest. Only a per-customer SMTP user ever reaches a customer's box."
+    },
+    {
+      "name": "server_manager_smtp2go_sandbox_users",
+      "default": "",
+      "group": "hosted",
+      "label": "Sandbox the SMTP users this plane mints",
+      "type": "checkbox",
+      "helptext": "Every customer SMTP user is created in SMTP2GO's sandbox status: mail through it is accepted and counted but never delivered. For a rehearsal plane, so a site built to prove the pipeline can email nobody. Leave off on a plane that hosts real customers."
     },
     {
       "name": "server_manager_smtp2go_webhook_secret",
@@ -513,6 +545,19 @@
       "feature": "Hosted tier",
       "kind": "ephemeral",
       "locator": "cvp_customer_cloud_provisions.cvp_admin_pass_sealed"
+    },
+    {
+      "label": "Managed site draft's domain registrant contact",
+      "feature": "Hosted tier",
+      "kind": "operator",
+      "locator": "cvp_customer_cloud_provisions.cvp_registrant_sealed",
+      "enumerator": "CustomerCloudProvision::eachRegistrantBlob"
+    },
+    {
+      "label": "Namecheap promotion code",
+      "feature": "Domain registration",
+      "kind": "operator",
+      "locator": "server_manager_namecheap_promotion_code"
     }
   ],
   "signals": {

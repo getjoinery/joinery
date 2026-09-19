@@ -18,9 +18,20 @@ always available to it.
 
 ## What the buyer sees
 
-They pay, and a few minutes later their site is live at the domain they typed,
-with email that sends and backups that run. The welcome email carries the
-address and a link to **their sites page** (`/profile/server_manager`), where
+They describe the site on one page — **`/profile/server_manager/configure`**:
+the domain (their own, or one this plane registers for them at cost, quoted
+live), the site's name, the region when more than one is offered, and the
+admin email — see the price as a sentence, and continue to payment. The cart
+carries one line for hosting and, when a name is registered, one for the
+domain year; nothing about the site is asked there. Until they pay, the setup
+is a draft on their sites page (Continue, Edit, Delete) that holds nothing and
+expires after `server_manager_draft_days`. Payment activates it (see
+[Server Manager § The buyer configures first](overview.md#the-buyer-configures-first-then-pays-payment-activates)).
+
+A few minutes after paying their site is live at that domain, with email that
+sends and backups that run. The welcome email carries the address — and, for a
+domain they brought themselves, the one A record to add — and a link to
+**their sites page** (`/profile/server_manager`), where
 the admin password their account was born with is shown **once** — reading it
 erases it, and the site asks them to choose their own at first sign-in. The
 password is never in an email: email is a copy that persists in somebody else's
@@ -86,6 +97,14 @@ than pretending otherwise.
 `ProvisionHostedMail` builds it, one step per tick, each stamped on
 `cvp_mail_state` so a crash resumes rather than repeats:
 
+0. **A test purchase names what it creates.** A site bought with a test-mode
+   payment (`ord_test_mode` on the order) names everything the pipeline
+   creates for it outside the platform with `test_` in front — the cloud
+   instance's label, the node's name on the fleet board, the mail subaccount's
+   label and its SMTP username (`CustomerCloudProvision::external_name_prefix()`)
+   — so a rehearsal's leftovers are told from a customer's in every provider's
+   console and are never mistaken for something to keep. The registered
+   domain keeps its own name; a sandbox registration is not real.
 1. **A subaccount per customer.** The unit of isolation: its own SMTP users,
    its own sender domains, its own usage counter and its own monthly cap. Other
    customers' logs and recipients are invisible to it.
@@ -95,7 +114,11 @@ than pretending otherwise.
 3. **Its DNS records**, published where this operator holds the zone. Where it
    does not, the records are kept on the provision and the leg says who has to
    publish them; it does not stall waiting for something nobody here can do.
-4. **One SMTP user**, inside that subaccount. Its username and password are the
+4. **One SMTP user**, inside that subaccount. On a rehearsal plane
+   (`server_manager_smtp2go_sandbox_users` on, from the Provisioning Setup
+   hosted card) it is minted in the provider's sandbox status: mail through it
+   is accepted and counted but never delivered, so a site built to prove the
+   pipeline can email nobody. Its username and password are the
    only credential that reaches the box, handed over by the
    `hosted_mail_settings` primitive — which carries nine *values* whose setting
    names live in a script on the node, so this management node cannot name a
@@ -209,6 +232,10 @@ mail is a site whose owner cannot reset their own password.
 
 Then, on the product: pick *Customer cloud server* under Purchase grants and
 choose **Create the server on the operator's account (hosted)**. Give it one
-monthly subscription version. A trial is optional: a version that carries one
-needs the same length set under Hosted tier, so the banner counts down to the
-right day; with none, a new site is subscribed from checkout.
+monthly subscription version; nothing is attached under *Info to collect
+before purchase* — the provider contributes the one requirement the line
+carries, and the buyer configures the site before paying. A trial is optional:
+a version that carries one needs the same length set under Hosted tier, so the
+banner counts down to the right day; with none, a new site is subscribed from
+checkout. `server_manager_hosted_regions` lists the regions the configure page
+offers; empty means the one customer-cloud region and no choice shown.

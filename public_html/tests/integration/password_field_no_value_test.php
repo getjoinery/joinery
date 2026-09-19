@@ -30,6 +30,7 @@
  *
  * Run: php tests/integration/password_field_no_value_test.php
  *
+ * @version 1.1 - a promotion code is credential-shaped (server_manager_namecheap_promotion_code)
  * @version 1.0
  */
 
@@ -175,7 +176,9 @@ $public_by_design = array(
 	'mailjet_api_key'     => 'Mailjet documents this as the public part of the pair',
 );
 
-$credential_shaped = '/(secret|password|passwd|_token$|api_key|apikey|_pkey|_private$|private_key|signing_key|service_account|credential)/i';
+// A promotion code belongs here too: whoever holds it gets the discount, so it
+// is kept like a key, not published like a price.
+$credential_shaped = '/(secret|password|passwd|_token$|api_key|apikey|_pkey|_private$|private_key|signing_key|service_account|credential|promotion_code|promo_code)/i';
 $unmarked = array();
 foreach (SettingsDeclarations::all() as $name => $declaration) {
 	// A machine-written value never reaches a form, so it cannot leak through one.

@@ -20,18 +20,13 @@ $routes = [
 
 // ---- Product fulfillment: customer-cloud server (the store↔server_manager
 // seam). Registered only when the store plugin is present; picking it on a
-// product is the entire product-side setup for BYO-cloud hosting.
+// product is the entire product-side setup for cloud hosting. The provider
+// contributes the one requirement its line carries (ManagedSiteRequirement:
+// the id of the site the buyer configured on /profile/server_manager/configure),
+// so nothing is attached by hand on the product edit page.
 $smf_registry = PathHelper::getIncludePath('plugins/store/includes/FulfillmentRegistry.php');
 if (file_exists($smf_registry)) {
 	require_once($smf_registry);
 	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/fulfillment_providers/CustomerCloudFulfillment.php'));
 	FulfillmentRegistry::register(new CustomerCloudFulfillment());
-
-	// ---- Product requirement: managed domain registration. Attached per
-	// product (a pri_ row, picked from "Info to collect before purchase"),
-	// never injected by a fulfillment provider — an injected requirement never
-	// receives post_purchase(), and this type's whole intake IS post_purchase.
-	// A pri_ attachment also keeps the domain leg orthogonal to compute mode:
-	// shared-host products have no fulfillment provider at all.
-	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/requirements/ManagedDomainRequirement.php'));
 }

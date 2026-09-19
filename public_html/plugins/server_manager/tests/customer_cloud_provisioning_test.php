@@ -24,6 +24,7 @@
  *
  * Run: php plugins/server_manager/tests/customer_cloud_provisioning_test.php
  *
+ * @version 1.4 - the buyer origin and its pre-payment states (specs/managed_hosting_phase1_purchase.md §5)
  * @version 1.3 - dismiss rules: which provisions can be cleared off the board, and what blocks the rest
  * @version 1.2 - node fixtures carry the HarnessTest prefix so a killed run's rows self-reclaim at the next db boot
  * @version 1.1
@@ -781,6 +782,54 @@ class CustomerCloudProvisioningTest {
 			check(false, 'order-origin without order item rejected');
 		} catch (CustomerCloudProvisionException $e) {
 			check(true, 'order-origin without order item rejected');
+		}
+
+		// Buyer origin: a draft needs no order item; leaving the pre-payment
+		// states does.
+		$draft = new CustomerCloudProvision(NULL);
+		$draft->set('cvp_origin', 'buyer');
+		$draft->set('cvp_usr_user_id', $this->user_id);
+		$draft->set('cvp_domain', 'buyerdraft.example.com');
+		$draft->set('cvp_slug', 'buyerdraft-example-com');
+		$draft->set('cvp_status', 'draft');
+		$draft->save();
+		check($draft->key > 0 && $draft->is_pre_payment(), 'buyer-origin draft saves without an order item');
+		$draft->set('cvp_status', 'pending_payment');
+		$draft->save();
+		check($draft->is_pre_payment(), 'and so does a frozen one');
+		try {
+			$draft->set('cvp_status', 'ready');
+			$draft->save();
+			check(false, 'buyer-origin at ready without an order item rejected');
+		} catch (CustomerCloudProvisionException $e) {
+			check(true, 'buyer-origin at ready without an order item rejected');
+		}
+		$draft->set('cvp_external_order_item_id', 990000 + random_int(0, 99999));
+		$draft->save();
+		check($draft->get('cvp_status') === 'ready', 'with the order item stamped, ready is allowed');
+		try {
+			$bad = new CustomerCloudProvision(NULL);
+			$bad->set('cvp_origin', 'admin');
+			$bad->set('cvp_usr_user_id', $this->user_id);
+			$bad->set('cvp_domain', 'admindraft.example.com');
+			$bad->set('cvp_slug', 'admindraft-example-com');
+			$bad->set('cvp_status', 'draft');
+			$bad->save();
+			check(false, 'only a buyer row may be a draft');
+		} catch (CustomerCloudProvisionException $e) {
+			check(true, 'only a buyer row may be a draft');
+		}
+		try {
+			$bad = new CustomerCloudProvision(NULL);
+			$bad->set('cvp_origin', 'admin');
+			$bad->set('cvp_usr_user_id', $this->user_id);
+			$bad->set('cvp_domain', 'badsource.example.com');
+			$bad->set('cvp_slug', 'badsource-example-com');
+			$bad->set('cvp_domain_source', 'stolen');
+			$bad->save();
+			check(false, 'an unknown domain source rejected');
+		} catch (CustomerCloudProvisionException $e) {
+			check(true, 'an unknown domain source rejected');
 		}
 
 		// From-backup demands a source node.

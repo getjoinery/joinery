@@ -242,29 +242,16 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	//refuse while the purchase can still be declined for free. fulfill() runs
 	//only after payment succeeds, so a refusal there would mean the buyer has
 	//already been charged for something that cannot be delivered.
+	//
+	//Asked only while declining IS free. On the return from a hosted Stripe
+	//Checkout session the card is already charged; a refusal here would send
+	//the buyer back to /checkout with an error and leave a paid order with no
+	//items and nobody told. The checkout page asked before that session was
+	//created; a line that went bad in between is fulfill()'s to report.
 	require_once(PathHelper::getIncludePath('plugins/store/includes/FulfillmentRegistry.php'));
-	foreach($cart->items as $key => $cart_item) {
-		list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
-		if(!$product->get('pro_fulfillment_provider')){
-			continue;
-		}
-		$availability_provider = FulfillmentRegistry::get($product->get('pro_fulfillment_provider'));
-		if(!$availability_provider){
-			//An unresolvable provider is handled after the charge, where it is
-			//already logged and stamped onto the order.
-			continue;
-		}
-		try {
-			$unavailable = $availability_provider->checkAvailability(
-				$product, (int)$product->get('pro_fulfillment_ref'), (int)$quantity);
-		}
-		catch (\Throwable $e) {
-			//A provider that cannot answer must not take the checkout down with
-			//it; treat silence as available and let fulfillment report the truth.
-			error_log('cart_charge_logic: checkAvailability failed for product #'
-				. $product->key . ': ' . $e->getMessage());
-			$unavailable = null;
-		}
+	$money_moved = ($settings->get_setting('checkout_type') == 'stripe_checkout' && !empty($_GET['session_id']));
+	if(!$money_moved){
+		$unavailable = FulfillmentRegistry::cartRefusal($cart);
 		if($unavailable !== null){
 			return _checkout_error($unavailable);
 		}
@@ -391,18 +378,22 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	if($cart->get_non_recurring_total()){
 		if($payment_service == 'stripe_regular'){
 
-			//PROCESS RECURRING ITEMS
+			//THE CARD CHARGE COVERS THE ONE-TIME LINES ONLY. A subscription line
+			//is billed by its own Stripe subscription (below), so it must not
+			//appear in this charge's description: the buyer's statement would
+			//name a hosting fee the charge did not include.
 			$stripe_item_list = array();
 			foreach($cart->items as $key => $cart_item) {
-				$email_fill = array();
 				list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
+				if($product_version->is_subscription()){
+					continue;
+				}
 				$product_name = $product->get('pro_name').' '. $product_version->get('prv_version_name');
-				$email_fill['purchase_amount'] = $price - $discount;
 
 				//ASSEMBLE THE STRIPE CHARGE DESCRIPTION
 				$stripe_current_item = substr($product_name, 0, 40) .' ('.$quantity.') - $'. ($price - $discount). ' ';
-				array_push($stripe_item_list, $stripe_current_item);		
-			}	
+				array_push($stripe_item_list, $stripe_current_item);
+			}
 
 			try{
 				$charge_result = $stripe_helper->executePaymentWithErrorHandling(

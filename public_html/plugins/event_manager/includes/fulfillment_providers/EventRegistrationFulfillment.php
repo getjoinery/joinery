@@ -10,6 +10,8 @@
  * on the confirmation page. The store never has to know events exist.
  *
  * Registered from event_manager's serve.php.
+ *
+ * @version 1.1 - checkAvailability() takes the line's form data (interface change); unused here
  */
 require_once(PathHelper::getIncludePath('plugins/store/includes/FulfillmentRegistry.php'));
 
@@ -61,7 +63,7 @@ class EventRegistrationFulfillment implements FulfillmentProvider {
      * refuses the whole purchase, named so a buyer knows which event blocked
      * it. An event with no evt_max_signups is uncapped.
      */
-    public function checkAvailability(Product $product, int $ref, int $quantity): ?string {
+    public function checkAvailability(Product $product, int $ref, int $quantity, array $data = []): ?string {
         require_once(PathHelper::getIncludePath('plugins/event_manager/data/events_class.php'));
         require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_registrants_class.php'));
 

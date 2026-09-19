@@ -90,6 +90,8 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.2 - clear_return() empties the post-login destination; set_return() with nothing
+ *                stores the current request, so it was never a way to clear the slot
  * @version 1.1 - The Cloudflare edge ranges are read from includes/cloudflare_ip_ranges.txt,
  *                the one list the installer also reads (B2); a request with no User-Agent
  *                header reads as an empty agent, which crawlerDetect() already treats as a
@@ -1850,6 +1852,23 @@ class SessionControl{
 			return $_SESSION['returnurl'];
 		}
 		return FALSE;
+	}
+
+	/** Forget the post-login destination. */
+	function clear_return() {
+		$_SESSION['returnurl'] = NULL;
+	}
+
+	/**
+	 * A destination a page may hand the sign-in form (/login?return=/somewhere)
+	 * and the form may store: a local path only — no scheme, no
+	 * protocol-relative host, and never /login itself. The same rule the
+	 * post-login redirect applies when it reads the slot back.
+	 */
+	static function is_safe_return($candidate) {
+		$candidate = (string)$candidate;
+		return $candidate !== '' && strpos($candidate, '/') === 0
+			&& strpos($candidate, '//') !== 0 && strpos($candidate, '/login') !== 0;
 	}
 
 	function get_last_admin() {

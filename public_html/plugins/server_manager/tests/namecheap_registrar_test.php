@@ -51,7 +51,10 @@ use GuzzleHttp\Psr7\Request;
 harness_set_setting_mem('server_manager_namecheap_api_user', 'testoperator');
 harness_set_setting_mem('server_manager_namecheap_api_key', 'not-a-real-key');
 harness_set_setting_mem('server_manager_namecheap_client_ip', '203.0.113.10');
-harness_set_setting_mem('server_manager_namecheap_sandbox', '');
+// '0', not '': Globalvars falls through to the database for an in-memory
+// blank, and a deployment with the sandbox ON would then run these checks
+// against the sandbox URL. The driver reads '0' as off.
+harness_set_setting_mem('server_manager_namecheap_sandbox', '0');
 
 /** A registrar wired to a scripted queue of responses, plus the request log. */
 function ncp_driver(array $responses): array {
@@ -79,10 +82,12 @@ function ncp_params($transaction): array {
 	return $query;
 }
 
+// The namespace is the live API's own. A fixture without it let a reader that
+// only works on namespace-less XML pass here and fail on every real answer.
 function ncp_xml(string $inner, string $status = 'OK'): Response {
 	return new Response(200, array('Content-Type' => 'text/xml'),
 		'<?xml version="1.0" encoding="utf-8"?>'
-		. '<ApiResponse Status="' . $status . '" xmlns="">' . $inner . '</ApiResponse>');
+		. '<ApiResponse Status="' . $status . '" xmlns="http://api.namecheap.com/xml.response">' . $inner . '</ApiResponse>');
 }
 
 function ncp_pricing_xml(string $tld, string $your_price): string {
@@ -338,7 +343,7 @@ $driver->getExpiry('a.com');
 check(strpos((string)$log[0]['request']->getUri(), 'api.sandbox.namecheap.com') !== false,
 	'with the sandbox on, nothing reaches the real registrar',
 	'went to: ' . (string)$log[0]['request']->getUri());
-harness_set_setting_mem('server_manager_namecheap_sandbox', '');
+harness_set_setting_mem('server_manager_namecheap_sandbox', '0');
 
 // ---------------------------------------------------------------------------
 section('A phone number is never guessed at');
@@ -377,7 +382,93 @@ check($driver->dnsDriverKey() === 'namecheap',
 $credential = $driver->dnsCredential();
 check(isset($credential['api_user'], $credential['api_key'], $credential['client_ip']),
 	'and hands over exactly the fields NamecheapDnsDriver::credentialFields() declares');
+// Plus the endpoint: a sandbox key is invalid at the live API, so the driver
+// has to be sent where the name was registered.
+harness_set_setting_mem('server_manager_namecheap_sandbox', '1');
+check(($driver->dnsCredential()['api_base'] ?? '') === NamecheapRegistrar::API_BASE_SANDBOX,
+	'with the sandbox on, the DNS driver is pointed at the sandbox endpoint');
+harness_set_setting_mem('server_manager_namecheap_sandbox', '0');
+check(($driver->dnsCredential()['api_base'] ?? '') === NamecheapRegistrar::API_BASE,
+	'with it off, at the live endpoint');
 check($driver->graduationMechanism() === 'account_push',
 	'custody moves by account push, so the pipeline queues an operator task');
+
+// ---------------------------------------------------------------------------
+section('A promotion code rides the quote AND the registration, or neither');
+
+/** A pricing answer carrying the coupon price the registrar computed. */
+function ncp_coupon_pricing_xml(string $tld, string $your_price, string $coupon_price): string {
+	return '<CommandResponse Type="namecheap.users.getPricing"><UserGetPricingResult>'
+		. '<ProductType Name="domains"><ProductCategory Name="register">'
+		. '<Product Name="' . $tld . '">'
+		. '<Price Duration="1" DurationType="YEAR" Price="13.98" RegularPrice="13.98" '
+		. 'YourPrice="' . $your_price . '" CouponPrice="' . $coupon_price . '" Currency="USD"/>'
+		. '</Product></ProductCategory></ProductType></UserGetPricingResult></CommandResponse>';
+}
+
+// No code set: nothing is sent, and a CouponPrice the registrar happens to
+// return is ignored — the operator did not ask for it and would not be
+// charged it.
+harness_set_setting_mem('server_manager_namecheap_promotion_code', '');
+if (NamecheapRegistrar::promotionCode() !== '') {
+	// An in-memory blank falls through to the database, so on a deployment
+	// that holds a real code the no-code case cannot be staged.
+	harness_skip('no-code case', 'this deployment has a promotion code set; the no-code checks cannot be staged in memory');
+} else {
+	list($driver, $log) = ncp_driver(array(
+		ncp_xml('<CommandResponse Type="namecheap.domains.check">'
+			. '<DomainCheckResult Domain="coupon-none.com" Available="true" ErrorNo="0" IsPremiumName="false" IcannFee="0"/>'
+			. '</CommandResponse>'),
+		ncp_xml(ncp_coupon_pricing_xml('com', '10.00', '8.00')),
+	));
+	$answers = $driver->checkAvailability(array('coupon-none.com'));
+	check(!isset(ncp_params($log[1])['PromotionCode']), 'with no code set, the pricing call carries no PromotionCode');
+	check($answers['coupon-none.com']['price_year'] === '10.00',
+		'and the quote is YourPrice even when the answer carries a CouponPrice',
+		'got: ' . var_export($answers['coupon-none.com']['price_year'], true));
+}
+
+// A code set: it is sent, and the quote is what the coupon brings the price to.
+harness_set_setting_mem('server_manager_namecheap_promotion_code', 'TESTCODE20');
+list($driver, $log) = ncp_driver(array(
+	ncp_xml('<CommandResponse Type="namecheap.domains.check">'
+		. '<DomainCheckResult Domain="coupon-yes.com" Available="true" ErrorNo="0" IsPremiumName="false" IcannFee="0.18"/>'
+		. '</CommandResponse>'),
+	ncp_xml(ncp_coupon_pricing_xml('com', '10.00', '8.00')),
+));
+$answers = $driver->checkAvailability(array('coupon-yes.com'));
+check((ncp_params($log[1])['PromotionCode'] ?? '') === 'TESTCODE20', 'the pricing call passes the code as PromotionCode');
+check($answers['coupon-yes.com']['price_year'] === '8.18',
+	'the quote is CouponPrice plus the ICANN fee', 'got: ' . var_export($answers['coupon-yes.com']['price_year'], true));
+
+// A TLD the code does not cover answers with an empty CouponPrice: the quote
+// falls back to YourPrice, which is also what the registration will charge.
+list($driver, $log) = ncp_driver(array(
+	ncp_xml('<CommandResponse Type="namecheap.domains.check">'
+		. '<DomainCheckResult Domain="coupon-excluded.org" Available="true" ErrorNo="0" IsPremiumName="false" IcannFee="0"/>'
+		. '</CommandResponse>'),
+	ncp_xml(ncp_coupon_pricing_xml('org', '11.00', '')),
+));
+$answers = $driver->checkAvailability(array('coupon-excluded.org'));
+check($answers['coupon-excluded.org']['price_year'] === '11.00',
+	'an excluded ending quotes at YourPrice', 'got: ' . var_export($answers['coupon-excluded.org']['price_year'], true));
+
+// The registration carries the same code, so the two sides of the paid-line
+// guard see the same price.
+list($driver, $log) = ncp_driver(array(
+	ncp_xml('<CommandResponse Type="namecheap.domains.create">'
+		. '<DomainCreateResult Domain="coupon-yes.com" Registered="true" ChargedAmount="8.18" '
+		. 'DomainID="1235" OrderID="100" TransactionID="89" WhoisguardEnable="true" '
+		. 'NonRealTimeDomain="false"/></CommandResponse>'),
+	ncp_xml('<CommandResponse Type="namecheap.domains.getInfo">'
+		. '<DomainGetInfoResult Status="Ok" DomainName="coupon-yes.com">'
+		. '<DomainDetails><CreatedDate>08/25/2026</CreatedDate>'
+		. '<ExpiredDate>08/25/2027</ExpiredDate></DomainDetails>'
+		. '<Whoisguard Enabled="True"><ID>778</ID></Whoisguard>'
+		. '</DomainGetInfoResult></CommandResponse>'),
+));
+$driver->register('coupon-yes.com', $buyer, 1);
+check((ncp_params($log[0])['PromotionCode'] ?? '') === 'TESTCODE20', 'the create call passes the same PromotionCode');
+harness_set_setting_mem('server_manager_namecheap_promotion_code', '');
 
 harness_finish();

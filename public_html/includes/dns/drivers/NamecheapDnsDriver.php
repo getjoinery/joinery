@@ -20,6 +20,8 @@
  * BasicDNS, and it has no concept of a delegated subdomain zone: the zone is
  * always the registered domain.
  *
+ * @version 1.3 - the credential may carry api_base, so a registrar that registered in the sandbox
+ *                sends the driver there too; the live endpoint stays the default
  * @version 1.2 - The large-account gate is declared as apiGateNote()
  * @version 1.1 - SRV write fails closed on an unread list; a sub-host SRV is refused
  * @version 1.0
@@ -431,8 +433,11 @@ class NamecheapDnsDriver extends DnsDriverBase {
 			? array('form_params' => $query)
 			: array('query' => $query);
 
+		// The credential may name the endpoint (the registrar hands over the
+		// sandbox one when it registered there); the live API otherwise.
+		$base = $this->cred('api_base', self::API_BASE);
 		try {
-			$response = $this->http->request($method, self::API_BASE, $options);
+			$response = $this->http->request($method, $base, $options);
 		} catch (Throwable $e) {
 			throw new DnsProviderException('Namecheap request failed: ' . $e->getMessage(), 0, $e);
 		}

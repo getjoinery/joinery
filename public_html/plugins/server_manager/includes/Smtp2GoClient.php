@@ -33,6 +33,8 @@
  * site's are the same thing at the provider, so they must not be read by two
  * pieces of code that can drift apart.
  *
+ * @version 1.3 - mintUsername() takes a prefix (test_ for a test purchase)
+ * @version 1.2 - addSmtpUser() can mint the user in the provider's sandbox status (accepted, never delivered)
  * @version 1.1
  */
 
@@ -175,12 +177,20 @@ class Smtp2GoClient {
 	 *
 	 * @return array{username:string, password:string, id:string}
 	 */
-	public function addSmtpUser(string $subaccount_id, string $username, string $password): array {
-		$data = $this->post('users/smtp/add', array(
+	public function addSmtpUser(string $subaccount_id, string $username, string $password, bool $sandbox = false): array {
+		$params = array(
 			'subaccount_id'  => $subaccount_id,
 			'username'       => $username,
 			'email_password' => $password,
-		));
+		);
+		if ($sandbox) {
+			// The provider's own sandbox: mail sent through this user is
+			// accepted and counted but never delivered. A rehearsal plane
+			// mints its customers' users this way so nothing it builds can
+			// email anyone.
+			$params['status'] = 'sandbox';
+		}
+		$data = $this->post('users/smtp/add', $params);
 		return array(
 			'username' => $username,
 			'password' => $password,
@@ -305,11 +315,13 @@ class Smtp2GoClient {
 	 * the provider accepts, with a short random tail so a re-provision of the
 	 * same domain never collides with a user that still exists.
 	 */
-	public static function mintUsername(string $slug): string {
+	public static function mintUsername(string $slug, string $prefix = ''): string {
 		$base = strtolower(preg_replace('/[^a-z0-9]/i', '', $slug));
 		$base = substr($base, 0, 24);
 		if ($base === '') { $base = 'site'; }
-		return $base . '-' . bin2hex(random_bytes(3));
+		// A prefix (test_ for a test purchase) is kept as given: the provider
+		// accepts letters, digits, dashes and underscores in a username.
+		return $prefix . $base . '-' . bin2hex(random_bytes(3));
 	}
 
 	/** A password for that user. Read by nobody: it is pushed, not shown. */
