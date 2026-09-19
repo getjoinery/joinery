@@ -196,7 +196,14 @@ interface DkimRecordSource {
  * DMARC alignment), SMTP2GO (domain/add, which is not optional there: it
  * refuses to send from a sender domain the account does not hold).
  *
- * @version 1.0
+ * Both also answer, outside the interface (callers check is_callable):
+ *   getSendingDomainState(string $domain): string — the provider's state word
+ *     for the domain ('active', ...), 'not_registered', or '' when the API
+ *     did not answer;
+ *   getSendingDomainError(string $domain): string — why the state was '', as
+ *     one sentence the operator can act on, or '' when the lookup succeeded.
+ *
+ * @version 1.1
  */
 interface SendingDomainRegistrar {
     /**

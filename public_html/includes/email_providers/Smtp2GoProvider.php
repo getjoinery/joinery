@@ -27,6 +27,13 @@
  * envelope sender and no chosen envelope recipients, so it cannot express what
  * inbound forwarding needs. Forwarding keeps using the SMTP relay.
  *
+ * @version 1.3 - a domain the account does not hold is 'not_registered', not '':
+ *                SMTP2GO answers that filter with a 400 "…or it doesn't exist",
+ *                which the reader took for an outage, so a fresh domain was
+ *                never registered (isUnknownDomainAnswer)
+ * @version 1.2 - getSendingDomainError(): why the last domain lookup failed, in the
+ *                operator's terms — a key too narrow for the Sender Domains
+ *                endpoints is named as such, with the checkbox that fixes it
  * @version 1.1 - SingleKeyProvider: declares the shape of its API keys
  * @version 1.0
  */
@@ -62,6 +69,8 @@ class Smtp2GoProvider implements EmailServiceProvider, DkimRecordSource, Sending
     private static $domain_state = array();
     /** @var array<string,array|null> Per-request cache of domain => response entry. */
     private static $domain_entry = array();
+    /** @var array<string,string> Per-request cache of domain => why the lookup failed ('' = it did not). */
+    private static $domain_error = array();
 
     public static function getKey(): string {
         return 'smtp2go';
@@ -361,14 +370,14 @@ class Smtp2GoProvider implements EmailServiceProvider, DkimRecordSource, Sending
             return array('status' => 'ok');
         }
         if ($state === '') {
-            return array('status' => 'unreachable', 'error' => 'SMTP2GO did not answer.');
+            return array('status' => 'unreachable', 'error' => self::getSendingDomainError($domain) ?: 'SMTP2GO did not answer.');
         }
 
         try {
             $data = self::post('domain/add', array('domain' => $domain));
         } catch (Throwable $e) {
             error_log('[Smtp2GoProvider] createSendingDomain(' . $domain . ') failed: ' . $e->getMessage());
-            return array('status' => 'error', 'error' => $e->getMessage());
+            return array('status' => 'error', 'error' => self::explainFailure($e));
         }
         self::forget($domain);
         // The add response already carries the domain's records, so a caller
@@ -391,7 +400,9 @@ class Smtp2GoProvider implements EmailServiceProvider, DkimRecordSource, Sending
         try {
             $data = self::post('domain/verify', array('domain' => $domain));
         } catch (Throwable $e) {
-            error_log('[Smtp2GoProvider] verifySendingDomain(' . $domain . ') failed: ' . $e->getMessage());
+            if (!self::isUnknownDomainAnswer($e)) {
+                error_log('[Smtp2GoProvider] verifySendingDomain(' . $domain . ') failed: ' . $e->getMessage());
+            }
             self::forget($domain);
             return self::getSendingDomainState($domain);
         }
@@ -413,16 +424,68 @@ class Smtp2GoProvider implements EmailServiceProvider, DkimRecordSource, Sending
         if (!array_key_exists($domain, self::$domain_state)) {
             $entry = null;
             $state = '';
+            $error = '';
             try {
                 $entry = self::entryFor(self::post('domain/view', array('domain' => $domain)), $domain);
                 $state = self::stateOf($entry);
             } catch (Throwable $e) {
-                error_log('[Smtp2GoProvider] getSendingDomainState(' . $domain . ') failed: ' . $e->getMessage());
+                if (self::isUnknownDomainAnswer($e)) {
+                    // The API answered; the account does not hold the domain.
+                    $state = 'not_registered';
+                } else {
+                    error_log('[Smtp2GoProvider] getSendingDomainState(' . $domain . ') failed: ' . $e->getMessage());
+                    $error = self::explainFailure($e);
+                }
             }
             self::$domain_entry[$domain] = $entry;
             self::$domain_state[$domain] = $state;
+            self::$domain_error[$domain] = $error;
         }
         return self::$domain_state[$domain];
+    }
+
+    /**
+     * Why getSendingDomainState($domain) answered '' — one sentence an
+     * operator can act on — or '' when the last lookup succeeded. Runs the
+     * lookup if nothing has asked yet this request.
+     */
+    public static function getSendingDomainError(string $domain): string {
+        $domain = self::normalizeDomain($domain);
+        if ($domain === '') { return ''; }
+        self::getSendingDomainState($domain);
+        return self::$domain_error[$domain] ?? '';
+    }
+
+    /**
+     * SMTP2GO's answer for a domain the account does not hold. Filtering
+     * domain/view (and domain/verify) by a domain that is not in the account
+     * is not an empty list there but a 400 reading "An error occurred fetching
+     * the sender domain X or it doesn't exist". That is an answer, not an
+     * outage: reading it as '' made a fresh domain look unreachable, so it was
+     * never registered — the install skipped domain/add and the wizard never
+     * offered the Register button.
+     */
+    public static function isUnknownDomainAnswer(Throwable $e): bool {
+        return (int)$e->getCode() === 400
+            && preg_match('/doesn\'?t exist|does not exist|not found/i', $e->getMessage()) === 1;
+    }
+
+    /**
+     * A failed API call in the operator's terms. The one failure worth its
+     * own sentence is a real key that is too narrow: SMTP2GO answers 403 to a
+     * key issued without the Sender Domains permission, and sending still
+     * works with such a key, so nothing else on the site says what is wrong.
+     */
+    private static function explainFailure(Throwable $e): string {
+        $message = $e->getMessage();
+        if ((int)$e->getCode() === 403 || stripos($message, 'permission') !== false || stripos($message, 'forbidden') !== false) {
+            return 'This API key is not allowed to manage sender domains. In SMTP2GO, under Sending and then API Keys, '
+                . 'give it the Sender Domains permission, then press Refresh.';
+        }
+        if ((int)$e->getCode() === 401 || stripos($message, 'unauthor') !== false) {
+            return 'SMTP2GO rejected the API key. Check it was copied whole and is not disabled.';
+        }
+        return 'SMTP2GO did not answer: ' . $message;
     }
 
     // ── DkimRecordSource ────────────────────────────────────────────────

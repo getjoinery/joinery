@@ -131,14 +131,16 @@
 <?php
 		$force_render = ($page_vars['force_render_step'] ?? '') === $current_key;
 		$was_declined = !empty($declined[$current_key]);
-		if ($statuses[$current_key] === SetupSteps::STATUS_GREEN && !$force_render && !$was_declined) {
+		$is_green = ($statuses[$current_key] === SetupSteps::STATUS_GREEN && !$force_render && !$was_declined);
+		if ($is_green) {
 ?>
 			<div class="setup-done-row">
 				<span class="setup-dot green"></span>
 				<span>Already done — nothing needed here.</span>
 			</div>
 <?php
-		} else {
+		}
+		if (!$is_green || !empty($current_step['render_when_done'])) {
 			if ($was_declined) {
 ?>
 			<div class="jy-callout jy-callout-info">
