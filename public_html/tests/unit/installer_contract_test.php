@@ -893,6 +893,9 @@ check(strpos($site_init_src, 'install_services.txt') !== false
     && strpos($site_init_src, 'MAIL_OUTCOME="failed:') !== false
     && strpos($site_init_src, 'BACKUP_OUTCOME="failed:') !== false,
     '_site_init.sh records each outcome in config/install_services.txt');
+check(preg_match('/chmod 640 "\$SERVICES_FILE"\s*\n\s*chown root:www-data "\$SERVICES_FILE"/', $site_init_src) === 1,
+    'the outcomes file is web-readable (640 root:www-data), so the wizard\'s first screen can show it',
+    'the StackScript path never shows its closing summary; InstallReport is where the owner sees it');
 check(strpos($install_src, 'install_services.txt') !== false
     && strpos($install_src, 'The setup wizard will ask for the key again') !== false,
     'install.sh\'s closing summary reads it and names what the wizard will ask for');

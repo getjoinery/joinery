@@ -31,7 +31,11 @@
  * The expensive work (provider API lookups, the record plan) runs only when
  * its stage renders — the step's status closure stays cheap.
  *
- * @version 3.4
+ * @version 3.5
+ * @changelog 3.5 - When the provider cannot report the domain's state, the dns
+ *   stage shows the provider's reason (getSendingDomainError) — an API key
+ *   without the Sender Domains permission is named, with the fix — instead
+ *   of a generic "didn't answer, press Refresh".
  * @changelog 3.3 - SMTP2GO is the preselected, recommended provider: one API
  *   key sends mail and registers the sending domain, and its free tier covers
  *   a small site. Mailgun remains in the picker, unchanged.
@@ -372,7 +376,7 @@ if ($setup_send_stage === 'dns') {
 		Tell us where your domain is managed and we'll add them for you.</p>
 <?php } ?>
 
-<?php if ($setup_send_state !== 'not_registered') { ?>
+<?php if ($setup_send_state !== 'not_registered' && $setup_send_state !== '') { ?>
 	<!-- The detection status: amber because it is the one thing still standing
 	     between here and a working sender. The refresh control lives inside it,
 	     vertically centered on the right — the message names the button that
@@ -421,8 +425,22 @@ if ($setup_send_stage === 'dns') {
 			<button type="submit" class="btn btn-primary">Register <?php echo htmlspecialchars($setup_send_domain); ?> with <?php echo htmlspecialchars($setup_send_service_label); ?></button>
 		</form>
 <?php } else { ?>
-<?php if ($setup_send_state === '') { ?>
-		<p class="jy-muted"><?php echo htmlspecialchars($setup_send_service_label); ?> didn't answer just now — the records may be incomplete. Press Refresh in a moment.</p>
+<?php if ($setup_send_state === '') {
+		// The provider could not say where the domain stands. Say why in its
+		// own words — a key too narrow to read domains is the common case, and
+		// "press Refresh" would never fix that.
+		$setup_send_state_error = is_callable(array($setup_send_provider_class, 'getSendingDomainError'))
+			? trim((string)$setup_send_provider_class::getSendingDomainError($setup_send_domain)) : '';
+?>
+		<div class="jy-alert jy-alert-error" style="display:flex; align-items:center; justify-content:space-between; gap:12px">
+			<div><?php echo htmlspecialchars($setup_send_service_label); ?> couldn't tell us about <strong><?php echo htmlspecialchars($setup_send_domain); ?></strong>.
+				<?php echo $setup_send_state_error !== '' ? htmlspecialchars($setup_send_state_error) : 'It did not answer just now — press Refresh in a moment.'; ?></div>
+			<form method="POST" action="/setup" style="flex:none; margin:0">
+				<input type="hidden" name="action" value="mail_send_verify">
+				<input type="hidden" name="step" value="mail_send">
+				<button type="submit" class="btn btn-secondary">Refresh</button>
+			</form>
+		</div>
 <?php } ?>
 <?php if ($setup_send_has_plan && $setup_send_drivers) { ?>
 		<ul class="jy-tabs-list" role="tablist">

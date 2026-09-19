@@ -331,7 +331,7 @@ JOINERY_BACKUP_BUCKET=joinerybackups JOINERY_BACKUP_KEY_ID=… JOINERY_BACKUP_KE
 sudo -E ./install.sh site mysite mysite.com
 ```
 
-Outcomes land in `{site root}/config/install_services.txt` (`mail=`, `backup=`, `dns_credential=`, each `done:`, `failed:` or `skipped:`), which the closing summary reads; the first-task email notice is printed only when email was not set up. On Docker, every `JOINERY_*` input `_site_init.sh` reads crosses into the container from one list in `install.sh` (`SITE_INIT_ENV_INPUTS`). Each tool is CLI-only, reads only the environment, and can be run by hand on an existing site.
+Outcomes land in `{site root}/config/install_services.txt` (`mail=`, `backup=`, `dns_credential=`, each `done:`, `failed:` or `skipped:`; `640 root:www-data`, no secrets), which the closing summary reads and the setup wizard's Welcome step shows (`InstallReport`) — on a Linode StackScript deploy the closing summary is never seen, so the wizard is where the owner learns what the keys they handed over did; the first-task email notice is printed only when email was not set up. On Docker, every `JOINERY_*` input `_site_init.sh` reads crosses into the container from one list in `install.sh` (`SITE_INIT_ENV_INPUTS`). Each tool is CLI-only, reads only the environment, and can be run by hand on an existing site.
 
 `JOINERY_INSTALL_BUNDLE=none` installs no plugins. Bundles are flat lists and never extend one another — they are alternative products rather than layers, so each names everything it wants.
 

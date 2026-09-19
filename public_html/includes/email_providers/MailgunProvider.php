@@ -17,6 +17,7 @@
  * Implements SendingDomainRegistrar: the same API can create a sending domain,
  * which is what makes the machine sender ceremony's register step a button.
  *
+ * @version 1.10 - getSendingDomainError(): why the last sending-domain lookup failed
  * @version 1.9 - SendReceiptSource (the send response's id) and DeliveryEventSource (the
  *   Events API by Message-ID: accepted, delivered, deferred, failed, with the receiving
  *   server's own words) — specs/mailbox_message_timeline.md A3/A4
@@ -39,6 +40,8 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
 
     /** @var array<string,string> Per-request cache: sending domain => account state ('' = not in account / lookup failed). */
     private static $sending_domain_state = [];
+    /** @var array<string,string> Per-request cache of domain => why the state lookup failed ('' = it did not). */
+    private static $sending_domain_error = [];
 
     public static function getKey(): string {
         return 'mailgun';
@@ -549,19 +552,33 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
     public static function getSendingDomainState(string $domain): string {
         if (!array_key_exists($domain, self::$sending_domain_state)) {
             $state = '';
+            $error = '';
             try {
                 $d = self::client()->domains()->show($domain)->getDomain();
                 $state = ($d && method_exists($d, 'getState')) ? strtolower((string)$d->getState()) : '';
             } catch (\Mailgun\Exception\HttpClientException $e) {
                 if ($e->getCode() === 404) {
                     $state = 'not_registered';
+                } else {
+                    $error = 'Mailgun did not answer (' . $e->getCode() . '): ' . $e->getMessage();
                 }
             } catch (\Throwable $e) {
                 // API did not answer — leave ''.
+                $error = 'Mailgun did not answer: ' . $e->getMessage();
             }
             self::$sending_domain_state[$domain] = $state;
+            self::$sending_domain_error[$domain] = $error;
         }
         return self::$sending_domain_state[$domain];
+    }
+
+    /**
+     * Why getSendingDomainState($domain) answered '', or '' when the last
+     * lookup succeeded. Runs the lookup if nothing has asked yet this request.
+     */
+    public static function getSendingDomainError(string $domain): string {
+        self::getSendingDomainState($domain);
+        return self::$sending_domain_error[$domain] ?? '';
     }
 
     // ── Submission-domain alignment ─────────────────────────────────────

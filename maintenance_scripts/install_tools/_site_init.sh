@@ -799,9 +799,12 @@ if [ -z "$CLONE_FROM" ] && [ "$DB_EXISTS" = false ]; then
     unset JOINERY_BACKUP_KEY
 
     if [ -n "$MAIL_OUTCOME$BACKUP_OUTCOME$DNS_CRED_OUTCOME" ]; then
+        # Readable by the web user: the setup wizard shows these outcomes on
+        # its first screen, and the values hold no secrets. Same ownership
+        # as Globalvars_site.php.
         : > "$SERVICES_FILE"
-        chmod 600 "$SERVICES_FILE"
-        chown root:root "$SERVICES_FILE" 2>/dev/null || true
+        chmod 640 "$SERVICES_FILE"
+        chown root:www-data "$SERVICES_FILE" 2>/dev/null || true
         {
             [ -n "$DNS_CRED_OUTCOME" ] && printf 'dns_credential=%s\n' "$DNS_CRED_OUTCOME"
             [ -n "$MAIL_OUTCOME" ]     && printf 'mail=%s\n' "$MAIL_OUTCOME"

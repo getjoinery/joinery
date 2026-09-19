@@ -6,7 +6,12 @@
  * (start_enable / confirm_enable). Included by views/setup.php with $page,
  * $page_vars, $viewer, $settings, $next_key in scope.
  *
- * @version 1.2
+ * @version 1.4
+ * @changelog 1.4 - Renders once the step is green too: an existing passkey shows
+ *   as done and points at the security page for more; the authenticator app
+ *   stays offered as an optional extra (Fortress needs it).
+ * @changelog 1.3 - The authenticator-app section says what it is for; the
+ *   password prompt says why a signed-in browser is not enough.
  * @changelog 1.2 - The insecure-context hint names the Secure connection step
  *   instead of protocol jargon.
  * @changelog 1.1 - Password-confirm input uses the jy-ui form-control style;
@@ -71,24 +76,25 @@ $totp_backup_codes = $page_vars['totp_backup_codes'] ?? array();
 	<div class="jy-fieldset">
 		<h4>Passkey</h4>
 <?php if ($setup_passkey_count > 0) { ?>
-		<p class="jy-muted">You already have <?php echo (int)$setup_passkey_count; ?> passkey<?php echo $setup_passkey_count === 1 ? '' : 's'; ?>.</p>
+		<p><span class="badge badge-success">On</span> You have <?php echo (int)$setup_passkey_count; ?> passkey<?php echo $setup_passkey_count === 1 ? '' : 's'; ?>. Add more from your <a href="/profile/security">security page</a>.</p>
 <?php } else { ?>
 <?php if ($setup_has_password) { ?>
 		<div id="setup-pk-password-row">
 			<label for="setup-pk-password">Confirm your password to add your first passkey</label>
+			<p class="jy-muted">A passkey signs you in on its own, so adding one always asks for more than a signed-in browser.</p>
 			<input type="password" id="setup-pk-password" autocomplete="current-password" class="form-control">
 		</div>
-<?php } ?>
 <?php } ?>
 		<div class="jy-mt-2">
 			<button type="button" class="btn btn-primary" id="setup-pk-add">Add a passkey</button>
 		</div>
 		<p class="jy-muted" id="setup-pk-hint"></p>
+<?php } ?>
 	</div>
 <?php } ?>
 
 	<div class="jy-fieldset jy-mt-3">
-		<h4>Authenticator app</h4>
+		<h4>Authenticator app <span class="jy-muted" style="font-weight: normal; font-size: 0.85em;">(optional)</span></h4>
 <?php if ($setup_totp_enabled) { ?>
 		<p><span class="badge badge-success">On</span> Authenticator codes are enabled for your account.</p>
 <?php } elseif ($totp_in_progress) { ?>
@@ -111,6 +117,7 @@ $totp_backup_codes = $page_vars['totp_backup_codes'] ?? array();
 		$formwriter->end_form();
 ?>
 <?php } else { ?>
+		<p class="jy-muted">A second way to sign in, using 6-digit codes from an app such as Google Authenticator, Authy or 1Password. Codes work in any browser, and they get you back in if you lose the device that holds your passkey. Not required now — you can turn them on later from your security page — but a Fortress-level account has to have them.</p>
 		<form method="POST" action="/setup">
 			<input type="hidden" name="action" value="start_enable">
 			<input type="hidden" name="step" value="signin_security">

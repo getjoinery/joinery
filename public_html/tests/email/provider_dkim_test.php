@@ -20,6 +20,9 @@
  *
  * Run: php tests/run.php safe --filter=provider_dkim
  *
+ * @version 1.2
+ * @changelog 1.2 - SMTP2GO: the 400 "or it doesn't exist" answer for a domain the
+ *   account does not hold reads as not_registered (isUnknownDomainAnswer)
  * @version 1.1
  * @changelog 1.1 - SMTP2GO: the domain-answer readers every consumer shares
  *   (entryFor / recordsOf / stateOf) and the deliberate absence of an SPF
@@ -153,6 +156,18 @@ try {
 	check(Smtp2GoProvider::stateOf(null) === 'not_registered',
 		'and an absent domain is not_registered, never a silent pass');
 	check(Smtp2GoProvider::recordsOf(null) === array(), 'with no records to publish');
+
+	// Filtering domain/view by a domain the account does not hold is not an
+	// empty list at SMTP2GO but a 400 — the wording observed live on
+	// 2026-09-19. It is an answer (not_registered), not an outage ('').
+	$unknown = new RuntimeException('SMTP2GO domain/view failed (400): An error occurred fetching the sender domain '
+		. 'test3.getjoinery.com or it doesn\'t exist - Code(IAPI1XKBMzdcXp6eMmS9M9LcfMgyt5k)', 400);
+	check(Smtp2GoProvider::isUnknownDomainAnswer($unknown),
+		'the 400 "or it doesn\'t exist" answer is read as the account not holding the domain');
+	check(!Smtp2GoProvider::isUnknownDomainAnswer(new RuntimeException('SMTP2GO domain/view failed (403): Forbidden', 403)),
+		'a 403 is not — a key too narrow for sender domains stays a failure to explain');
+	check(!Smtp2GoProvider::isUnknownDomainAnswer(new RuntimeException('SMTP2GO domain/view failed (400): Bad request', 400)),
+		'nor is any other 400');
 
 	// A half-formed record is worse than a missing one: it looks published.
 	$half = array('domains' => array(array('domain' => array(

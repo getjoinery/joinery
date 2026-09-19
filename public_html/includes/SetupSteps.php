@@ -28,11 +28,16 @@
  *   'real_status' optional callable(?User $viewer): string — the same question
  *                 as status() ignoring any decision, so the wizard can tell a
  *                 step that is truly done from one that was declined
+ *   'render_when_done' optional bool — keep showing the partial once the
+ *                 step is green, for a step that has optional extras a
+ *                 finished user may still want (default: the done row alone)
  *
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
- * @version 1.14
+ * @version 1.15
+ * @changelog 1.15 - 'render_when_done': the Sign-in security partial stays up once a
+ *   passkey exists, so the optional authenticator app can still be added.
  * @changelog 1.14 - The Backups step treats the nightly backup and its verification as one item:
  *   BackupNightly switches both on, so the backup task being on is the whole answer.
  * @version 1.13
@@ -536,6 +541,7 @@ class SetupSteps {
 			'order' => 10,
 			'copy'  => 'A passkey lets you sign in with your fingerprint or security key, and protects your account even if your password leaks. Add one now — codes from an authenticator app work as the fallback.',
 			'render_file' => 'includes/setup_steps/signin_security.php',
+			'render_when_done' => true,
 			'home_url' => '/profile/security',
 			'dismiss_line' => 'Your account has no second factor.',
 			'status' => function (?User $viewer): string {

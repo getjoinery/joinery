@@ -1741,7 +1741,7 @@
     },
     {
       "name": "privacy_url",
-      "default": "",
+      "default": "https://getjoinery.com/page/privacy",
       "group": "general",
       "label": "Privacy Policy URL",
       "type": "text",
@@ -1908,7 +1908,8 @@
       "default": "",
       "group": "site_identity",
       "label": "Site name",
-      "type": "text"
+      "type": "text",
+      "helptext": "Shown in page titles, emails, and the header."
     },
     {
       "name": "smtp_helo",
@@ -1972,7 +1973,7 @@
     },
     {
       "name": "terms_url",
-      "default": "",
+      "default": "https://getjoinery.com/page/terms",
       "group": "general",
       "label": "Terms of Service URL",
       "type": "text",
