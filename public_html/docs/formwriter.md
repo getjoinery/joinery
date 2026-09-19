@@ -1388,6 +1388,8 @@ $formwriter->textinput('email', 'Email', [
 | `matches` | `equalTo` | Must match another field | `'matches' => 'password'` |
 | `pattern` | `pattern` | Regex match | `'pattern' => '/^[A-Z0-9]+$/'` |
 
+**Note:** A `pattern` rule is one PHP regex used on both sides. Write it with any PHP delimiter and flags (`'#^sk_test_[a-z0-9]+$#i'`); the browser receives the bare source and the flags JavaScript shares (`i`, `m`, `s`, `u`) through `FormWriterV2Base::phpRegexToJs()`. Flags JavaScript lacks (`x`, `D`, `U`) apply on the server only.
+
 **Note:** The `matches` rule value is a **field name** (e.g., `'password'`), not a CSS selector. FormWriter outputs it as `equalTo` in JavaScript, where `form.elements[name]` looks up the target field.
 
 ### Custom Error Messages

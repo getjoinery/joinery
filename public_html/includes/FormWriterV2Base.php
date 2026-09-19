@@ -7,6 +7,9 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
+ * @version 2.26.1 - phpRegexToJs(): a pattern rule reaches the browser with any PHP
+ *   delimiter stripped and its flags carried, not only /.../ — #...# rules (the
+ *   Stripe keys, the URL settings) refused every correct value client-side
  * @version 2.26.0 - detectModelFromFieldName() finds a field's model through
  *   ClassAutoloader::modelPrefixes() — the cached prefix index — instead of
  *   loading every data class on the platform (~400 files, ~400 ms per page
@@ -2454,6 +2457,61 @@ abstract class FormWriterV2Base {
      * @param array  $rules FormWriter validation rule array
      * @param string $label Human label used in error messages
      */
+    /**
+     * Turn a PHP PCRE pattern into what the browser validator needs.
+     *
+     * A declared rule is one regex used twice: on the server through
+     * preg_match(), and in the browser through new RegExp(). PHP wraps a
+     * pattern in a delimiter of the author's choosing — /.../, #...#, ~...~,
+     * or a bracket pair — with flags after it; JavaScript takes the bare
+     * source and the flags separately. Stripping only /.../ left every other
+     * delimiter in the source the browser compiled, so a rule such as
+     * #^sk_test_...$# could never match in the browser and refused every
+     * correct value before the form was even sent, while the server would have
+     * accepted it.
+     *
+     * Flags that JavaScript shares with PCRE (i, m, s, u) carry over; the rest
+     * (x, D, U, A, ...) have no JS counterpart and are dropped — a pattern
+     * relying on one of those is validated by the server alone.
+     *
+     * @param string $pattern As declared, e.g. '#^(/|https?://)#i'
+     * @return array|string ['source' => ..., 'flags' => ...] when delimited;
+     *                      the input unchanged when it carries no delimiter,
+     *                      so an already-bare pattern keeps working.
+     */
+    public static function phpRegexToJs(string $pattern) {
+        $pattern = trim($pattern);
+        if ($pattern === '') {
+            return $pattern;
+        }
+        $open = $pattern[0];
+        // A delimiter is any non-alphanumeric, non-backslash, non-whitespace
+        // character (PHP's own rule).
+        if (ctype_alnum($open) || $open === '\\' || ctype_space($open)) {
+            return $pattern;
+        }
+        $pairs = array('(' => ')', '{' => '}', '[' => ']', '<' => '>');
+        $close = $pairs[$open] ?? $open;
+        $end = strrpos($pattern, $close);
+        if ($end === false || $end === 0) {
+            return $pattern;
+        }
+        $flags = substr($pattern, $end + 1);
+        if ($flags !== '' && !ctype_alpha($flags)) {
+            // Whatever follows the last closing delimiter is not a flag
+            // string, so this was not a delimited pattern after all.
+            return $pattern;
+        }
+        $source = substr($pattern, 1, $end - 1);
+        $js_flags = '';
+        foreach (str_split($flags) as $flag) {
+            if (strpos('imsu', $flag) !== false && strpos($js_flags, $flag) === false) {
+                $js_flags .= $flag;
+            }
+        }
+        return array('source' => $source, 'flags' => $js_flags);
+    }
+
     public function registerValidationField($name, array $rules, $label = '') {
         $this->fields[$name] = [
             'name' => $name,
@@ -2972,12 +3030,11 @@ abstract class FormWriterV2Base {
                         break;
 
                     case 'pattern':
-                        // Convert PHP regex to JS regex (remove delimiters if present)
-                        $pattern = $param;
-                        if (preg_match('/^\/(.*)\/[imsxu]*$/', $pattern, $matches)) {
-                            $pattern = $matches[1];
-                        }
-                        $field_js_rules['pattern'] = $pattern;
+                        // The rule is a PHP regex; the browser needs a JS one.
+                        // Any PHP delimiter and its flags are honoured — a rule
+                        // written as #...#i must refuse the same values in the
+                        // browser as on the server (see phpRegexToJs()).
+                        $field_js_rules['pattern'] = self::phpRegexToJs((string)$param);
                         if (isset($fieldRules['messages']['pattern'])) {
                             $field_js_messages['pattern'] = $fieldRules['messages']['pattern'];
                         }

@@ -1,6 +1,8 @@
 /**
  * Joinery Validation System - Pure JavaScript validation library
  * No jQuery dependencies, works alongside jQuery validation if present
+ * @version 1.2.3 - the pattern rule accepts {source, flags} so a PHP rule's delimiter
+ *   and flags survive the trip to the browser
  * @version 1.2.2
  * @changelog 1.2.1 - A submit event another listener already cancelled is
  *   left alone. The re-dispatch exists so other listeners can veto a
@@ -1150,8 +1152,11 @@ console.log('%c=== JOINERY VALIDATION v1.2.0 ===', 'color: blue; font-weight: bo
     // Pattern validator
     JoineryValidator.addValidator("pattern", function(value, element, param) {
         if (!value) return true;
-        // param is the regex pattern
-        var regex = new RegExp(param);
+        // param is either a bare regex source, or {source, flags} as
+        // FormWriterV2Base::phpRegexToJs() emits it for a declared PHP rule.
+        var regex = (param && typeof param === 'object')
+            ? new RegExp(param.source, param.flags || '')
+            : new RegExp(param);
         return regex.test(value);
     }, "Please match the required format");
 
