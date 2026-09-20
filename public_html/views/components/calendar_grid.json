@@ -30,6 +30,13 @@
                 "label": "Initial Date (Y-m-d)",
                 "type": "textinput",
                 "default": ""
+            },
+            {
+                "name": "timezone",
+                "label": "Timezone (IANA)",
+                "type": "textinput",
+                "help": "Zone the items render in; a feed reply's timezone overrides. Empty = the browser's zone.",
+                "default": ""
             }
         ]
     },

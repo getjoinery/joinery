@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   Joinery Default UI Kit  ·  custom.css  ·  v2.12.0
+   Joinery Default UI Kit  ·  custom.css  ·  v2.14.0
    Pure Slate design. Themeable values live in --jy-* tokens on
    :root so branded themes can override them without understanding
    internals. Component rules are scoped under .jy-ui to prevent
@@ -866,6 +866,19 @@ body.jy-default .jy-app-bar h1 { font-size: var(--jy-text-xl); font-weight: 600;
 .jy-ui .btn-destructive:hover,
 .jy-ui .btn-danger:hover {
   background: color-mix(in srgb, var(--jy-color-danger) 85%, black);
+}
+/* Quiet destructive: a delete that sits beside the primary action without
+   competing with it. Pale red at rest, fills red on hover/focus. */
+.jy-ui .btn-danger-soft {
+  background: var(--jy-color-danger-bg);
+  color: var(--jy-color-danger);
+  border-color: color-mix(in srgb, var(--jy-color-danger) 30%, transparent);
+}
+.jy-ui .btn-danger-soft:hover,
+.jy-ui .btn-danger-soft:focus-visible {
+  background: var(--jy-color-danger);
+  color: #ffffff;
+  border-color: var(--jy-color-danger);
 }
 
 .jy-ui .btn-sm {
@@ -1791,8 +1804,16 @@ dialog.jy-ui::backdrop { background: rgba(0, 0, 0, 0.45); }
 .jy-ui .cal-note { background: var(--jy-color-success-bg, #e6f7ec); border: 1px solid var(--jy-color-success, #2d7d46); padding: .5rem .8rem; border-radius: var(--jy-radius-sm); margin-bottom: 1rem; }
 .jy-ui .cal-note-detail { margin: .4rem 0 0; padding-left: 1.2rem; font-size: .9em; }
 .jy-ui .cal-error { background: var(--jy-color-danger-bg); border: 1px solid var(--jy-color-danger); padding: .5rem .8rem; border-radius: var(--jy-radius-sm); margin-bottom: 1rem; }
-.jy-ui .cal-full-form { border: 1px solid var(--jy-color-border); border-radius: var(--jy-radius-md); padding: 1rem 1.25rem; margin-top: 1.5rem; background: var(--jy-color-surface); }
+/* The full entry form lives in its own page-owned <dialog> (the kit dialog
+   stays free for the scope/confirm questions asked on top of it). Wider than
+   the kit default so the recurrence controls fit; the content column scrolls. */
+dialog.jy-ui.cal-form-dialog { max-width: 640px; }
+dialog.jy-ui.cal-form-dialog[open] { display: block; overflow-y: auto; }
 .jy-ui .cal-full-form h2 { margin-top: 0; }
+/* Action row shared by the entry form and its delete form: Save and Cancel
+   together, Delete pushed to the far side. Wraps on a narrow screen. */
+.jy-ui .cal-form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-top: 1rem; padding-top: .75rem; border-top: 1px solid var(--jy-color-border); }
+.jy-ui .cal-form-actions .cal-form-delete { margin-left: auto; }
 .jy-ui .cal-tz { color: var(--jy-color-text-muted); font-size: .9375rem; }
 /* First-run import prompt — retires for good once the calendar has an entry. */
 .jy-ui .cal-firstrun { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; border: 1px solid var(--jy-color-border); border-radius: var(--jy-radius-md); background: var(--jy-color-surface); padding: .75rem 1rem; }
@@ -1803,7 +1824,7 @@ dialog.jy-ui::backdrop { background: rgba(0, 0, 0, 0.45); }
 .jy-ui .cal-recurrence-section { margin-top: .75rem; border-top: 1px solid var(--jy-color-border); padding-top: .75rem; }
 .jy-ui .cal-rec-desc { font-size: .9375rem; color: var(--jy-color-text-muted); font-style: italic; margin-top: .25rem; min-height: 1.2em; }
 .jy-ui .cal-rec-desc.is-static { font-style: normal; }
-/* Scope choosers (edit/delete recurring) render through JoineryModal.open;
+/* Scope choosers (save/delete recurring) render through JoineryModal.open;
    only their inner content is styled here. */
 .jy-ui .cal-scope-heading { margin: 0 0 1rem; font-size: 1.15rem; }
 .jy-ui .cal-scope-options { display: flex; flex-direction: column; gap: .5rem; }
@@ -1812,16 +1833,25 @@ dialog.jy-ui::backdrop { background: rgba(0, 0, 0, 0.45); }
 .jy-ui.cal-popup { position: fixed; z-index: 9000; width: 340px; background: var(--jy-color-bg); border-radius: var(--jy-radius-lg); box-shadow: 0 8px 28px rgba(0, 0, 0, .18), 0 2px 8px rgba(0, 0, 0, .10); display: none; }
 .jy-ui .cal-popup-header { display: flex; align-items: center; justify-content: space-between; padding: .6rem .8rem .4rem; border-bottom: 1px solid var(--jy-color-border); }
 .jy-ui .cal-popup-title { font-weight: 600; font-size: 1rem; color: var(--jy-color-text-muted); }
+.jy-ui .cal-popup-tools { display: flex; align-items: center; gap: .1rem; }
 .jy-ui .cal-popup-close { background: none; border: none; cursor: pointer; font-size: 1.3rem; color: var(--jy-color-text-subtle); padding: .1rem .3rem; border-radius: var(--jy-radius-sm); }
 .jy-ui .cal-popup-close:hover { background: var(--jy-color-surface); color: var(--jy-color-text); }
+/* Edit / delete icons in the popover header (view mode). */
+.jy-ui .cal-popup-icon { background: none; border: none; cursor: pointer; color: var(--jy-color-text-subtle); padding: .3rem; border-radius: var(--jy-radius-sm); display: inline-flex; line-height: 0; }
+.jy-ui .cal-popup-icon:hover { background: var(--jy-color-surface); color: var(--jy-color-text); }
+.jy-ui .cal-popup-icon.is-danger:hover { color: var(--jy-color-danger); background: var(--jy-color-danger-bg); }
+/* View mode: the entry's details, read-only. */
+.jy-ui .cal-popup-view { padding: .6rem .8rem .8rem; display: flex; flex-direction: column; gap: .35rem; font-size: .9375rem; }
+.jy-ui .cal-popup-when { font-weight: 600; }
+.jy-ui .cal-popup-line { color: var(--jy-color-text-muted); overflow-wrap: anywhere; }
+.jy-ui .cal-popup-line a { color: var(--jy-color-primary); }
+.jy-ui .cal-popup-notes { white-space: pre-wrap; overflow-wrap: anywhere; border-top: 1px solid var(--jy-color-border); padding-top: .4rem; margin-top: .2rem; max-height: 10rem; overflow-y: auto; }
 .jy-ui .cal-popup-body { padding: .5rem .8rem; overflow-y: auto; max-height: calc(100vh - 190px); }
 .jy-ui .cal-popup-body .form-group { margin-bottom: .6rem; }
 .jy-ui .cal-popup-footer { display: flex; align-items: center; justify-content: space-between; padding: .6rem .8rem .8rem; border-top: 1px solid var(--jy-color-border); gap: .4rem; }
 .jy-ui .cal-popup-more { background: none; border: none; cursor: pointer; color: var(--jy-color-text-muted); font: inherit; font-size: .9375rem; padding: .3rem .5rem; border-radius: var(--jy-radius-sm); text-decoration: none; }
 .jy-ui .cal-popup-more:hover { background: var(--jy-color-surface); }
 .jy-ui .cal-popup-right { display: flex; gap: .4rem; margin-left: auto; }
-.jy-ui .cal-popup-delete { background: none; border: 1px solid var(--jy-color-danger); color: var(--jy-color-danger); border-radius: var(--jy-radius-sm); padding: .3rem .7rem; cursor: pointer; font: inherit; font-size: .9375rem; }
-.jy-ui .cal-popup-delete:hover { background: var(--jy-color-danger-bg); }
 .jy-ui .cal-popup-save { background: var(--jy-color-primary); color: var(--jy-color-primary-text); border: none; border-radius: var(--jy-radius-sm); padding: .3rem .9rem; cursor: pointer; font: inherit; font-size: .9375rem; font-weight: 600; }
 .jy-ui .cal-popup-save:hover { background: var(--jy-color-primary-hover); }
 .jy-ui .cal-popup-error { background: var(--jy-color-danger-bg); border: 1px solid var(--jy-color-danger); padding: .3rem .6rem; border-radius: var(--jy-radius-sm); font-size: .875rem; margin: 0 .8rem .4rem; display: none; }

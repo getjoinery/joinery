@@ -512,6 +512,7 @@ class CalendarEntry extends SystemBase {
 				'source_key'          => 'native:cal-' . $parent_id . '-' . $date,
 				'entry_id'            => (int)$parent_id,
 				'occurrence_date'     => $date,
+				'timezone'            => $this->get('cal_timezone') ?: null,
 			]);
 		}
 

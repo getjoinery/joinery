@@ -153,6 +153,34 @@ foreach ($src_items as $i) {
 ok('blocking entry reports blocks_availability=true', $blocking && $blocking->blocks_availability === true);
 ok('non-blocking entry reports blocks_availability=false', $nonblocking && $nonblocking->blocks_availability === false);
 
+section('Entry written in another zone rides the feed with that zone');
+// 9:00 AM Los Angeles on a fixed summer date = 16:00 UTC. The item's UTC
+// instant is what the grid places; its timezone is what the popover names.
+$la = new CalendarEntry(NULL);
+$la->set('cal_subject_type', $subject->type);
+$la->set('cal_subject_id', $subject->id);
+$la->set('cal_type', 'personal');
+$la->set_core_fields('LA standup', false, false, '2030-07-10 09:00:00', '2030-07-10 10:00:00', '2030-07-10 16:00:00', '2030-07-10 17:00:00', 'America/Los_Angeles');
+$la->save();
+harness_register_row('cal_entries', 'cal_entry_id', (int)$la->key);
+$la_item = null;
+foreach ($src->getItems($subject, '2030-07-09 00:00:00', '2030-07-12 00:00:00', CalendarItem::VIS_DETAILS) as $i) {
+    if ($i->source_key === 'native:cal-' . $la->key) { $la_item = $i; }
+}
+ok('standalone item carries the entry zone', $la_item && $la_item->timezone === 'America/Los_Angeles' && $la_item->start_utc === '2030-07-10 16:00:00');
+ok('toArray() exposes timezone', $la_item && ($la_item->toArray()['timezone'] ?? null) === 'America/Los_Angeles');
+ok('busy visibility strips the zone', $la_item && $la_item->atVisibility(CalendarItem::VIS_BUSY)->timezone === null);
+
+$la->set('cal_recurrence_type', 'daily');
+$la->set('cal_recurrence_interval', 1);
+$la->save();
+$occ = null;
+foreach ($src->getItems($subject, '2030-07-11 00:00:00', '2030-07-12 00:00:00', CalendarItem::VIS_DETAILS) as $i) {
+    if ($i->entry_id === (int)$la->key && $i->occurrence_date === '2030-07-11') { $occ = $i; }
+}
+ok('recurring occurrence keeps the parent zone and its 9 AM wall-clock', $occ && $occ->timezone === 'America/Los_Angeles' && $occ->start_utc === '2030-07-11 16:00:00');
+$la->soft_delete();
+
 // cleanup + confirm the source drops soft-deleted entries
 $entry->soft_delete();
 $free->soft_delete();

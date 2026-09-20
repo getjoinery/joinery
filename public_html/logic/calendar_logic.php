@@ -29,7 +29,6 @@ function calendar_logic(array $input): LogicResult {
         'is_occurrence'   => false,
         'parent_entry'    => null,
         'occurrence_date' => null,
-        'show_scope_modal'=> false,
     ];
 
     $auth = ['current_user_id' => $user_id, 'current_user_permission' => $session->get_permission()];
@@ -51,7 +50,7 @@ function calendar_logic(array $input): LogicResult {
                 $entry->soft_delete();
             }
         }
-        return LogicResult::redirect('/profile/calendar?deleted=1');
+        return LogicResult::redirect('/profile/calendar?deleted=1' . _calendar_month_param($odate ?: $entry->get_local('cal_start_utc', 'Y-m-d')));
     }
 
     // -------------------------------------------------------------------------
@@ -98,6 +97,20 @@ function calendar_logic(array $input): LogicResult {
         $end_t   = LibraryFunctions::fetch_variable_local($input, 'entry_end',   '', '', '', 'safemode', NULL);
         $scope   = LibraryFunctions::fetch_variable_local($input, 'scope', '', '', '', 'safemode', NULL);
         $odate   = LibraryFunctions::fetch_variable_local($input, 'occurrence_date', '', '', '', 'safemode', NULL);
+
+        // The zone the wall-clock times are in. The form offers a picker
+        // (default: the profile zone); an unknown id is a form error, never a
+        // silent fallback that would store the times in the wrong zone.
+        $entry_tz = trim((string)LibraryFunctions::fetch_variable_local($input, 'entry_timezone', '', '', '', 'safemode', NULL));
+        if ($entry_tz === '') {
+            $entry_tz = $tz;
+        } elseif (!in_array($entry_tz, DateTimeZone::listIdentifiers(), true)) {
+            $page_vars['errors'][] = 'Choose a time zone from the list.';
+            $entry_tz = $tz;
+        }
+        $tz = $entry_tz;   // every conversion and stored cal_timezone below
+        $page_vars['entry_timezone'] = $tz;
+
         // '' = use my default (stored NULL); 0 = no reminder; else minutes before start.
         $reminder = _calendar_parse_reminder(LibraryFunctions::fetch_variable_local($input, 'entry_reminder', '', '', '', 'safemode', NULL));
 
@@ -239,7 +252,7 @@ function calendar_logic(array $input): LogicResult {
                 _calendar_apply_details($entry, $details);
                 $entry->save();
             }
-            return LogicResult::redirect('/profile/calendar?saved=1');
+            return LogicResult::redirect('/profile/calendar?saved=1' . _calendar_month_param($date));
         }
     }
 
@@ -251,6 +264,12 @@ function calendar_logic(array $input): LogicResult {
     $edit_id      = LibraryFunctions::fetch_variable_local($input, 'entry_id',        NULL, '', '', 'safemode', 'int');
     $edit_entry   = LibraryFunctions::fetch_variable_local($input, 'edit_entry',      NULL, '', '', 'safemode', 'int');
 
+    // A failed occurrence save posts entry_id + occurrence_date; it re-renders
+    // as the same occurrence edit, not as an edit of the whole series.
+    if (!$parent_id && $edit_id && preg_match('/^\d{4}-\d{2}-\d{2}$/', $occ_date)) {
+        $parent_id = $edit_id;
+    }
+
     if ($parent_id && preg_match('/^\d{4}-\d{2}-\d{2}$/', $occ_date)) {
         // Virtual occurrence: /profile/calendar/entry/{parent_id}/occurrence/{date}
         $parent = new CalendarEntry($parent_id, true);
@@ -260,7 +279,6 @@ function calendar_logic(array $input): LogicResult {
                 $page_vars['parent_entry']     = $parent;
                 $page_vars['occurrence_date']  = $occ_date;
                 $page_vars['is_occurrence']    = true;
-                $page_vars['show_scope_modal'] = true;
                 $page_vars['entry']            = $parent; // pre-fill form from parent values
             }
         }
@@ -313,6 +331,11 @@ function calendar_logic(array $input): LogicResult {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** `&m=Y-m-d` so the grid reopens on the month the reader was working in. */
+function _calendar_month_param($date): string {
+    return preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$date) ? '&m=' . $date : '';
+}
 
 function _calendar_set_fields(
     CalendarEntry $entry,
