@@ -206,7 +206,10 @@ management node minted for it. Each set is written by its own primitive, and
 each of those carries **values only** — the setting names live in a script on
 the node (`utils/managed_domain_notice.php`, `utils/hosted_plan_notice.php`,
 `utils/hosted_mail_settings.php`, `utils/fleet_enroll.php`), where the
-management node cannot reach them.
+management node cannot reach them. The mail names are
+`HostedMailSettingsMap::MAP`, one list on the node that the script and the
+services enrol path (a self-hosted site's own Email step, writing the values
+getjoinery answered) both write through.
 
 **There is no general settings writer, and that is the design.** A primitive
 that took a name and a value would let whatever is on the other end of that

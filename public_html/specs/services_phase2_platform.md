@@ -406,9 +406,13 @@ bounce or complaint enforcement, per the 2026-09-06 decision.
    (today's `S3Signer` calls with a credential) and a brokered one (asks
    the broker, performs the HTTP itself). `BackupRunner`,
    `BackupVerifyLauncher` and `TargetTester` call the interface; the
-   `managed` provider selects the brokered one. **Lands after the
+   `managed` provider selects the brokered one. **Lands last, after the
    streaming-upload work (`backup_streaming_upload.md`, built and at its stop
-   point 2026-09-20, uncommitted) — never across it.** That build already
+   point 2026-09-20) and the offloaded-files WP1 and WP2
+   (`backup_offloaded_files.md`) are committed — never across either: all
+   three edit `BackupRunner` in one working tree.** Every other item of
+   this spec proceeds without waiting; the `managed` target in item 6
+   waits with this one. That build already
    routes every multipart call through the signer's one private
    `request()` → `attempt()` seam and reaches the signer only through
    `destination()` and `stream_engine()`, so 2b is a swap at that seam.

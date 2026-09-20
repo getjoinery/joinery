@@ -30,6 +30,7 @@
  * rather than per-subaccount, so it is one piece of operator setup, not a step
  * of every customer's provisioning.
  *
+ * @version 1.2 - a delivery for a services tenant's SMTP user moves that tenant's figure (E4)
  * @version 1.1
  */
 
@@ -104,8 +105,20 @@ $events = (isset($payload[0]) && is_array($payload[0])) ? $payload : array($payl
 $counted = 0;
 foreach ($events as $event) {
 	if (!is_array($event)) { continue; }
+	$kind = strtolower(trim((string)($event['event'] ?? $event['type'] ?? '')));
 	$trial = smtp2go_webhook_trial_for($event);
-	if ($trial === null) { continue; }
+	if ($trial === null) {
+		// Not a Managed site's credential: a self-hosted services tenant's,
+		// perhaps. Same rule — deliveries move its banner figure, nothing more;
+		// the reconcile overwrites it with the provider's own count each pass.
+		if (($kind === 'processed' || $kind === 'delivered')
+				&& JoineryServices::countWebhookSend(
+					trim((string)($event['auth'] ?? $event['username'] ?? '')),
+					trim((string)($event['subaccount_id'] ?? '')))) {
+			$counted++;
+		}
+		continue;
+	}
 
 	// The count resets with the calendar month, matching the allowance it is
 	// shown against. Done on read rather than by a job: a monthly job that
@@ -116,7 +129,7 @@ foreach ($events as $event) {
 		$trial->set('htr_counts_reset_time', gmdate('Y-m-d H:i:s'));
 	}
 
-	switch (strtolower(trim((string)($event['event'] ?? $event['type'] ?? '')))) {
+	switch ($kind) {
 		case 'processed':
 		case 'delivered':
 			$trial->set('htr_sent_count', (int)$trial->get('htr_sent_count') + 1);

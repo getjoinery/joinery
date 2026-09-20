@@ -1053,6 +1053,138 @@ expiry, a custody probe, and which DNS driver serves its zones. It has no
 renewal call and no DNS methods — the platform never renews, and records are
 published through the shared DNS stack by driver key.
 
+## Joinery-run services for self-hosted sites
+
+A self-hosted site can send its email through this plane's SMTP2GO account
+and keep its offsite backups on this plane's shelf, on credentials cut to its
+own slice, for as long as a paid-through date on this plane says so. The
+customer's own Managed site uses the same legs because that is what Managed
+is; a self-hosted site *rents* them, and the difference is only how the
+credential reaches the box. The master keys never leave this machine.
+
+**The account link.** Nobody types a key. The site's setup wizard (Email or
+Backups step) shows a **Connect your getjoinery account** button; it mints a
+single-use state bound to the owner's browser session and sends them to
+`/services/authorize?site=&return=&state=` here. Signed out, they go through
+the platform's sign-in (sign-up beside it) and come back; signed in, the page
+names the site and the account and takes one click. Approval is a POST that
+mints an `ApiKey` for the site (`ServicesConnect::mintKey`: machine, read +
+write, no delete, named *Joinery services* — `apk_name` is varchar(32), so the
+host is recorded on the tenant rows, not the key) and redirects to the site's
+own return address with the pair and the state, once. The return must be on
+the site's host over https. One active key per site per account: a
+re-connect mints a new key, moves the site's rows to it and deactivates the
+earlier one. Connecting is the site's first contact: one `ServiceTenant` row
+per service is created at `unpaid`.
+
+**The tenant row** (`svt_service_tenants`, `ServiceTenant`) is one site's
+standing with one service (`mail` | `shelf`), keyed by the connected key
+(`svt_apk_api_key_id`); the host is a label refreshed on every status call.
+What decides is `svt_paid_until`: null means never entitled. States: `unpaid`
+(no date yet), `provisioning`, `active`, `suspended` (the date passed and the
+grace ran out), `released` (the customer left, or the account holder
+disconnected). The four shared states are the core `ServiceTenantLadder`'s
+vocabulary. The figure (`svt_figure`) is sends this month for mail — the
+provider's month-to-date count, read hourly by the reconcile, nudged between
+reads by the SMTP2GO webhook — and the ledger's completed bytes for the shelf.
+
+**The actions** the site calls over its key, all under
+`/api/v1/action/server_manager/`: `services_enroll` (service, host),
+`services_status` (host), `services_release` (service), and the five shelf
+broker actions below. `JoineryServices` is the operator side of all of them.
+
+- *Mail enrol* builds everything at once (`Smtp2GoLeg`, shared with
+  `ProvisionHostedMail`): the subaccount capped at
+  `server_manager_hosted_send_allowance`, the sender domain `mail.<host>`
+  (zero DNS records from the provider fails loudly), and one SMTP user. The
+  answer carries the send values (host, port, username, password, sender,
+  HELO, hostname) and the DNS records; the site writes them and publishes
+  the records. The password is never kept on this plane: a second enrol
+  removes the tenant's SMTP user and mints a fresh one in the same
+  subaccount, so the answer is always a working credential. A host change
+  adds the new sender domain and releases the old. The status answer
+  reports `domain_added` until the provider verifies the domain, probed once
+  per status call.
+- *Shelf enrol* mints nothing: the answer is the tenant's slug, the shelf
+  path prefix, `{prefix}/{slug}/`, the 90-day retention promise and the
+  bucket's coordinates — no credential anywhere in it.
+- *Status* is umbrella contract C2 per service: `figure`, `allowance`,
+  `paid_until`, `state`, `notice`, the first door (`action_label`,
+  `action_url` — the referral settings `server_manager_smtp2go_referral_url`
+  and `server_manager_storage_referral_url`, `''` when unset), `manage_url`
+  (the account's Connected sites page), plus the ready-made banner row
+  (`label`, `used_label`, `allowance_label`, `percent`).
+- *Release* closes mail's subaccount now, or marks the shelf tenant released
+  so the broker refuses it; the shelf is kept 90 days from that day
+  (`svt_prune_after_time`) and then pruned. Idempotent.
+
+**The shelf broker** (`ShelfBroker`, `ShelfPresigner`): no box ever holds a
+storage credential. For every object it writes or reads a site asks the plane
+for a presigned URL — one request, one key, one operation, good for an hour,
+SigV4-signed with the plane's own credential for its shelf target
+(`server_manager_services_shelf_target_id`, or the one enabled backup target
+when blank). Presigned URLs are the S3 standard, so the shelf is any
+S3-compatible store by construction. Five actions: `shelf_begin_run`
+(profile, chain, artifacts with sizes → a run id and base key
+`{prefix}/{slug}/{profile}/`, refused with the sentence the site's run history
+records when the ledger's bytes plus the declared sizes would cross the
+allowance, or when the tenant is not usable); `shelf_sign` (run id, name,
+operation — `put`, `multipart_create`, `multipart_parts` in batches of ten
+and `multipart_complete` need an open run and a key inside its base key;
+`get` needs no run: with run id 0 the name is relative to the tenant's own
+prefix, as `shelf_list` answers it; nothing signs a delete); `shelf_list` (a
+prefix inside the tenant's own; keys answered relative to it);
+`shelf_finish_run` (the objects completed; the ledger marks them, and
+everything else the run signed is cancelled — an open multipart aborted at
+the provider with the plane's credential, a row never completed dropped);
+`shelf_status`
+(the C2 fields plus `writable` and `readable`). Writes need a usable tenant;
+reads (`shelf_list`, a `get`) are allowed to a suspended or released tenant
+until `svt_pruned_time` is set, so the retention promise is a readable one.
+The ledger (`svo_shelf_objects`, `ShelfObject`) holds one row per tenant and
+key — tenant, run, key, bytes, chain, signed and completed times; a key a
+later run signs again (a chain's manifest, rewritten by every incremental)
+moves its row to that run and is counted once: the row stays completed at
+the size the earlier run finished it, whatever the later run does, until
+that run names it finished. A key signed again while its row holds a
+multipart upload id has that upload aborted at the provider first, so a
+retried `multipart_create` orphans nothing — so the figure is exact and
+immediate; runs are `svr_shelf_runs` (`ShelfRun`), spent once finished or
+aborted.
+
+**The reconcile** is the `Services` phase of `ServerManagerAdvanceProvisioning`
+(`ServiceTenantWatch`), last, every tick. Per tenant row: the allowance is
+re-read and a changed one re-sets the subaccount limit; the date is compared
+every pass and the row walked down the ladder — `server_manager_services_grace_days`
+(14) after the date passes the row is suspended (mail's subaccount closed;
+the shelf broker refusing) and the retention clock starts, and a new date at
+any point before the prune reactivates in place; an act the provider refused
+(unreachable) is retried next pass. Mail's figure is read from the provider
+hourly. The shelf ledger is reconciled against a real listing daily (an
+object the shelf lacks is dropped, a multipart still open at the provider
+aborted first; one the ledger lacks is adopted at its listed size); a run open longer than 36 hours is aborted on the plane's side,
+its open multipart cancelled with the plane's credential; every active
+tenant's shelf is pruned to the newest `server_manager_services_shelf_keep_chains`
+(4) chains per profile, chains whole, a chain with an open run never
+touched; a suspended or released tenant whose prune-after day has come loses
+its whole prefix once, and the row says so.
+
+**Operator pages.** The **Service Tenants** page
+(`/admin/server_manager/service_tenants`) lists every row with state, figure,
+date and the ladder's timestamps, and carries the two acts: **Grant** (write
+the paid-through date — what entitles a tenant in this phase; a stopped row
+with a date ahead comes back in place now, an unpaid row waits for the site's
+next enrol) and **Release**. Managed sites have no row and never appear. The
+account holder's **Connected sites** page (`/profile/server_manager/services`)
+lists their linked sites with each service's state, date and figure, and
+carries **Disconnect**, which deactivates the site's key and then releases
+every service it holds; a provider refusal on one release is surfaced after
+the rest have run, with the key already off.
+
+**The webhook** (`ajax/smtp2go_webhook`) maps a delivery to a Managed site by
+its SMTP username first; one it cannot map is tried against the tenant rows'
+usernames and moves that tenant's figure.
+
 ## Backup Targets
 
 Backup targets define where backup files are uploaded after creation. Each node can optionally have a backup target assigned. If no target is set, backups remain local only on the remote server.

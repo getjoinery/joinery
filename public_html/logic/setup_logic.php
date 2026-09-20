@@ -6,6 +6,11 @@
  * step mounts an existing ceremony or panel; this logic owns only the shell:
  * step resolution, dismissal, "not now" decisions, and the welcome save.
  *
+ * @version 2.9.1
+ * @changelog 2.9.1 - services_disconnect releases both services, mail and shelf
+ * @changelog 2.9 - services_connect / services_disconnect link this site to a getjoinery
+ *   account; "It arrived" releases a getjoinery mail service the site no longer sends
+ *   through (specs/services_phase2_platform.md §4, §9, E8)
  * @version 2.8
  * @changelog 2.8 - action=leave ("Go to your site" on the final checklist)
  *   records usr_setup_reviewed_time so the login interrupt stops; skipped
@@ -289,6 +294,28 @@ function setup_logic(array $input): LogicResult {
 		}
 	}
 
+	// Joinery-run services: Connect starts the link (a POST minting the
+	// single-use state, then the operator's authorise page); Disconnect
+	// deactivates this site's key there and forgets the pair here. Both
+	// are the owner's acts (specs/services_phase2_platform.md §4).
+	if ($action === 'services_connect' && $permission >= 10) {
+		try {
+			return LogicResult::redirect(ServicesClient::connectUrl((string)($input['step'] ?? 'mail_send')));
+		} catch (\Throwable $e) {
+			$error = $e->getMessage();
+		}
+	}
+	if ($action === 'services_disconnect' && $permission >= 10) {
+		if (ServicesClient::mailEnrolled()) {
+			$error = 'This site still sends its email through getjoinery. Switch to your own provider first; the release happens when the new one is proven.';
+		} else {
+			_setup_services_disconnect();
+			ServicesClient::clearConnection();
+			SetupSteps::invalidateSessionCache();
+			return LogicResult::redirect('/setup?step=' . urlencode((string)($input['step'] ?? 'mail_send')));
+		}
+	}
+
 	// Sending email: the same declared settings the email settings page
 	// writes, validated first exactly as that page does.
 	if ($action === 'mail_send_save') {
@@ -329,17 +356,30 @@ function setup_logic(array $input): LogicResult {
 			'source' => 'core',
 			'names' => $names,
 		));
+		$reg = null;
 		if (!empty($write['errors'])) {
 			$first = reset($write['errors']);
 			$error = is_array($first) ? (string)reset($first) : (string)$first;
-		} elseif ($service !== '') {
+		} elseif ($service === ServicesClient::MAIL_SERVICE_KEY) {
+			// getjoinery's service is configured BY registering: the enrol
+			// call answers the send values, so it runs before validation, and
+			// a site that is not entitled is told the operator's sentence.
+			$reg = _setup_mail_register($viewer, $service);
+			if ($reg['registered'] === false) {
+				$error = $reg['register_error'] !== '' ? $reg['register_error']
+					: 'getjoinery could not set up email for this site.';
+			}
+		}
+		if ($error === '' && $service !== '') {
 			$validation = EmailSender::validateService($service);
 			if (empty($validation['valid'])) {
 				$error = 'That service is not fully configured: ' . implode(', ', $validation['errors'] ?? array());
 			}
 		}
 		if ($error === '') {
-			$reg = _setup_mail_register($viewer, $service);
+			if ($reg === null) {
+				$reg = _setup_mail_register($viewer, $service);
+			}
 			if ($reg['registered'] !== null) {
 				$_SESSION['setup_mail_send_result'] = array(
 					'registered' => $reg['registered'],
@@ -552,6 +592,12 @@ function setup_logic(array $input): LogicResult {
 	if ($action === 'mail_send_confirm') {
 		require_once(PathHelper::getIncludePath('data/settings_class.php'));
 		Setting::put('email_test_send_last_success', gmdate('Y-m-d H:i:s'));
+		// The switch-over (specs/services_phase2_platform.md §9, E8): the new
+		// provider is proven, so a getjoinery mail service this site still
+		// holds is released now — its subaccount closed on the plane, its
+		// dead credential cleared here when it no longer drives the send
+		// path — and the records the plane published are listed to remove.
+		$_SESSION['setup_services_released'] = _setup_services_release_mail_if_switched();
 		SetupSteps::invalidateSessionCache();
 		return LogicResult::redirect('/setup?step=mail_send');
 	}
@@ -825,6 +871,76 @@ function _setup_refresh_receiving_verdict(string $domain): void {
 	$model->set('ied_setup_status', $status);
 	$model->set('ied_setup_checked_time', gmdate('Y-m-d H:i:s'));
 	$model->save();
+}
+
+/**
+ * Disconnect's release: every service this site holds on the plane, mail and
+ * shelf, released over the key before the site forgets it. A service the
+ * site never held ("holds no ... service") is the same outcome as a release
+ * and says nothing; any other refusal — a key the operator already cut off —
+ * is logged, since the outcome is the same and the site is leaving anyway.
+ * Answers the services released.
+ */
+function _setup_services_disconnect(): array {
+	$released = array();
+	if (!ServicesClient::connected()) {
+		return $released;
+	}
+	$client = new ServicesClient();
+	foreach (array('mail', 'shelf') as $service) {
+		try {
+			$client->release($service);
+			$released[] = $service;
+		} catch (\Throwable $e) {
+			if (strpos($e->getMessage(), 'holds no') === false) {
+				error_log('setup: services release of ' . $service . ' on disconnect: ' . $e->getMessage());
+			}
+		}
+	}
+	return $released;
+}
+
+/**
+ * The mail switch-over's release. Called once the new provider is proven:
+ * when this site is connected to getjoinery and holds a mail service there
+ * but no longer sends through it, the service is released and the SMTP
+ * settings that carried its credential are cleared unless the provider in
+ * use is plain SMTP with its own values. Answers the records the plane
+ * published (for the operator to remove) or null when nothing was released.
+ */
+function _setup_services_release_mail_if_switched(): ?array {
+	if (!ServicesClient::connected() || ServicesClient::mailEnrolled()) {
+		return null;
+	}
+	$state = ServicesClient::mailState();
+	if (($state['domain'] ?? '') === '' || in_array((string)($state['state'] ?? ''), array('', 'unpaid', 'released'), true)) {
+		return null;
+	}
+	try {
+		$answer = (new ServicesClient())->release('mail');
+	} catch (\Throwable $e) {
+		error_log('setup: services mail release failed: ' . $e->getMessage());
+		return array('error' => $e->getMessage(), 'records' => (array)($state['records'] ?? array()));
+	}
+	// The credential is dead now. Where the site's provider is not SMTP the
+	// smtp_* rows still hold it; clear them. An SMTP provider with the
+	// operator's values still in place would fail on its own, which is the
+	// honest outcome — the owner typed those on purpose or not at all.
+	$service = trim((string)Globalvars::get_instance()->get_setting('email_service', false, true));
+	if ($service !== 'smtp') {
+		$blank = array();
+		foreach (HostedMailSettingsMap::MAP as $key) {
+			$blank[$key] = '';
+		}
+		$blank['service'] = $service;   // the provider in use stays
+		try {
+			HostedMailSettingsMap::apply($blank);
+		} catch (\Throwable $e) {
+			error_log('setup: clearing the dead SMTP settings: ' . $e->getMessage());
+		}
+	}
+	return array('error' => '', 'records' => (array)($answer['records'] ?? $state['records'] ?? array()),
+		'domain' => (string)($answer['domain'] ?? $state['domain'] ?? ''));
 }
 
 /**

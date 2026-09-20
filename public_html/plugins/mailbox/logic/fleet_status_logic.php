@@ -2,10 +2,12 @@
 /**
  * fleet_status - the tenant's slot state, coordinates, and domain claims.
  *
- * Polled by the tenant deployment after fleet_enroll (the shard-side
- * provisioning job runs asynchronously) and by its setup checks. Reconciles
- * the last lifecycle job into the slot status lazily, so a finished
- * provisioning shows active here without waiting for the operator's cron.
+ * Polled by the tenant deployment after fleet_enroll and by its setup checks.
+ * The slot's status is whatever the relay reconcile task last wrote: every
+ * lifecycle act moves it on the shard's verdict there and then
+ * (FleetService::applyTenant), so there is nothing to fold in here.
+ *
+ * @version 1.1 - reads the slot as it is; the lazy reconcile went with the ssh era
  */
 function fleet_status_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -20,8 +22,6 @@ function fleet_status_logic(array $input): LogicResult {
 	if ($slot === null) {
 		return LogicResult::render(array('enrolled' => false));
 	}
-
-	FleetService::reconcile($slot);
 
 	$claims = new MultiMailboxFleetDomainClaim(array(
 		'slot_id' => intval($slot->key), 'live' => true, 'deleted' => false,

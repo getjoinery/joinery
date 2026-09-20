@@ -28,6 +28,8 @@
  * A phase that throws is caught and recorded, and the later phases still run.
  * Phase 1 failing must not strand mail already sitting on the relay's spool.
  *
+ * @version 1.3 - phase 5 walks each slot down the core ServiceTenantLadder; a blank grace setting
+ *                reads as 14 days and 0 is honoured
  * @version 1.2 - phase 2 announces mailbox.relay_pickup_stopped / _recovered on transition
  *                (mrl_pickup_alarm_time), and a relay without an identity pin is an error
  * @version 1.1 - phase 3: relay scanner health (specs/mailbox_relay_scanner_health.md)
@@ -306,9 +308,8 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 	/**
 	 * Phase 5 — operator-side brain of the shared relay fleet.
 	 *
-	 * Reconciles finished shard lifecycle jobs into slot statuses, dispatches
-	 * flagged work as server_manager jobs, and re-checks each active slot's
-	 * entitlement with the grace-window suspension.
+	 * Applies pending work on the shards, then walks every active or suspended
+	 * slot one step down (or back up) the entitlement ladder.
 	 */
 	private function reconcileFleet() {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetService.php'));
@@ -353,48 +354,34 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 				continue;
 			}
 
-			// 2. Entitlement re-check (active slots only).
-			if ($status === MailboxFleetSlot::STATUS_ACTIVE) {
+			// 2. The entitlement ladder (core ServiceTenantLadder): active →
+			//    lapse → grace → suspended, and back to active in place when the
+			//    subscription returns. The provider-side act on both rungs is the
+			//    same: re-sync the shard's allowlist, which a suspension empties
+			//    and a reactivation restores.
+			if ($status === MailboxFleetSlot::STATUS_ACTIVE || $status === MailboxFleetSlot::STATUS_SUSPENDED) {
 				$user_id = intval($slot->get('mft_usr_user_id'));
-				$now = gmdate('Y-m-d H:i:s');
-				if ($user_id > 0 && FleetService::entitled($user_id)) {
-					$slot->set('mft_entitlement_check_time', $now);
-					if ($slot->get('mft_entitlement_lapse_time') !== null) {
-						$slot->set('mft_entitlement_lapse_time', null); // re-subscribed inside the window
-					}
-					$slot->save();
-				} else {
-					if ($slot->get('mft_entitlement_lapse_time') === null) {
-						$slot->set('mft_entitlement_lapse_time', $now);
-						$slot->save();
-						$notes[] = 'slot ' . $slot->key . ' entitlement lapsed — grace window started';
-					} else {
-						$grace_days = max(1, intval(Globalvars::get_instance()->get_setting('mailbox_fleet_grace_days')) ?: 14);
-						$deadline = LibraryFunctions::time_shift(
-							(string)$slot->get('mft_entitlement_lapse_time'), $grace_days . ' days', 'Y-m-d H:i:s');
-						if ($now > $deadline) {
-							$slot->set('mft_status', MailboxFleetSlot::STATUS_SUSPENDED);
-							$slot->set('mft_needs_domain_sync', true); // empties the shard allowlist
-							$slot->save();
-							FleetService::applyTenant($slot, 'set_domains');
-							$dispatched++;
-							$suspended++;
-						}
-					}
-				}
-			}
-
-			// A suspended slot whose owner re-subscribes reactivates on the next
-			// pass: restore the allowlist and the tenant is back.
-			if ($status === MailboxFleetSlot::STATUS_SUSPENDED) {
-				$user_id = intval($slot->get('mft_usr_user_id'));
-				if ($user_id > 0 && FleetService::entitled($user_id)) {
-					$slot->set('mft_status', MailboxFleetSlot::STATUS_ACTIVE);
-					$slot->set('mft_entitlement_lapse_time', null);
-					$slot->set('mft_needs_domain_sync', true);
-					$slot->save();
-					FleetService::applyTenant($slot, 'set_domains');
+				$entitled = $user_id > 0 && FleetService::entitled($user_id);
+				// Blank means the declared default; 0 is a real answer (suspend on the
+				// pass after the lapse), which the ladder honours.
+				$grace_raw = trim((string)Globalvars::get_instance()->get_setting('mailbox_fleet_grace_days'));
+				$grace_days = $grace_raw === '' ? 14 : max(0, intval($grace_raw));
+				$resync = function (MailboxFleetSlot $row) use (&$dispatched) {
+					$row->set('mft_needs_domain_sync', true);
+					$row->save();
+					FleetService::applyTenant($row, 'set_domains');
 					$dispatched++;
+				};
+				$step = ServiceTenantLadder::advance($slot, array(
+					'state'      => 'mft_status',
+					'lapse_time' => 'mft_entitlement_lapse_time',
+					'check_time' => 'mft_entitlement_check_time',
+				), $entitled, $grace_days, $resync, $resync);
+				if ($step === ServiceTenantLadder::STEP_LAPSED) {
+					$notes[] = 'slot ' . $slot->key . ' entitlement lapsed — grace window started';
+				} elseif ($step === ServiceTenantLadder::STEP_SUSPENDED) {
+					$suspended++;
+				} elseif ($step === ServiceTenantLadder::STEP_REACTIVATED) {
 					$notes[] = 'slot ' . $slot->key . ' reactivated';
 				}
 			}

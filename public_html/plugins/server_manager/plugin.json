@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.23.0",
+  "version": "1.24.0",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -82,12 +82,19 @@
           "title": "Domains",
           "url": "/admin/server_manager/domains",
           "order": 9
+        },
+        {
+          "slug": "server-manager-service-tenants",
+          "title": "Service Tenants",
+          "url": "/admin/server_manager/service_tenants",
+          "order": 10
         }
       ]
     }
   ],
   "settingsGroups": {
     "service": "Joinery service API",
+    "services": "Joinery-run services (mail and shelf tenants)",
     "provisioning": "Customer provisioning",
     "monitoring": "Monitoring",
     "publishing": "Publishing",
@@ -476,6 +483,44 @@
       "default": "",
       "managed": true,
       "helptext": "When the operator was last told the account's outbound transfer pool passed 80%. Written by the hosted watch so one alert is sent per billing period, not one per tick."
+    },
+    {
+      "name": "server_manager_services_grace_days",
+      "default": "14",
+      "group": "services",
+      "label": "Services grace after the paid-through date (days)",
+      "type": "number",
+      "validation": {
+        "number": true,
+        "min": 0,
+        "messages": {
+          "min": "Must be 0 or more."
+        }
+      },
+      "helptext": "How long a self-hosted site keeps using our outbound mail and backup shelf after its paid-through date passes. At the end mail's subaccount is closed and the shelf broker refuses the site; the shelf is kept 90 days from that day and then pruned. Blank means 14."
+    },
+    {
+      "name": "server_manager_services_shelf_target_id",
+      "default": "",
+      "group": "services",
+      "label": "Backup shelf target",
+      "type": "text",
+      "helptext": "The id of the backup target row whose bucket is the services shelf: the broker signs every tenant upload against that row's credential, and each tenant lives under its own prefix inside it. Blank means the one enabled target, which is the answer on a plane with exactly one."
+    },
+    {
+      "name": "server_manager_services_shelf_keep_chains",
+      "default": "4",
+      "group": "services",
+      "label": "Shelf restore points kept per site",
+      "type": "number",
+      "validation": {
+        "number": true,
+        "min": 1,
+        "messages": {
+          "min": "Must be 1 or more."
+        }
+      },
+      "helptext": "How many backup chains (restore points) the plane keeps on the shelf for each tenant site, per profile. Older chains are pruned whole by the reconcile; a chain still being written is never touched. Blank means 4."
     }
   ],
   "sealed_secrets": [

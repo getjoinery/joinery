@@ -31,6 +31,11 @@
  * The expensive work (provider API lookups, the record plan) runs only when
  * its stage renders — the step's status closure stays cheap.
  *
+ * @version 3.6
+ * @changelog 3.6 - getjoinery's included email service is a provider choice: an unlinked
+ *   site shows the Connect button, a linked one enrols on Save; the prove stage names the
+ *   service and the switch-over lists the records to remove
+ *   (specs/services_phase2_platform.md §4, §9)
  * @version 3.5
  * @changelog 3.5 - When the provider cannot report the domain's state, the dns
  *   stage shows the provider's reason (getSendingDomainError) — an API key
@@ -140,6 +145,37 @@ $setup_send_service_label = EmailSender::getAvailableServices()[$setup_send_serv
 $setup_send_notice = $_SESSION['setup_mail_send_result'] ?? null;
 unset($_SESSION['setup_mail_send_result']);
 
+// The Connect return and the switch-over's release each leave one message
+// for this render (specs/services_phase2_platform.md §4, §9).
+$setup_services_connect = $_SESSION['setup_services_connect_result'] ?? null;
+unset($_SESSION['setup_services_connect_result']);
+$setup_services_released = $_SESSION['setup_services_released'] ?? null;
+unset($_SESSION['setup_services_released']);
+$setup_services_connected = ServicesClient::connected();
+$setup_services_account = ServicesClient::account();
+$setup_services_mail = ServicesClient::mailState();
+if (is_array($setup_services_connect)) {
+	echo '<div class="jy-alert ' . (!empty($setup_services_connect['ok']) ? 'jy-alert-success' : 'jy-alert-error') . '">'
+		. htmlspecialchars((string)$setup_services_connect['message']) . '</div>';
+}
+if (is_array($setup_services_released)) {
+	if ((string)($setup_services_released['error'] ?? '') !== '') {
+		echo '<div class="jy-alert jy-alert-error">Your new provider is proven, but getjoinery could not be told to close the old service: '
+			. htmlspecialchars((string)$setup_services_released['error']) . ' It will be released on the next daily check.</div>';
+	} else {
+		echo '<div class="jy-alert jy-alert-info">Your new provider is proven and email through getjoinery is closed.';
+		if (!empty($setup_services_released['records'])) {
+			echo ' These records for <code>' . htmlspecialchars((string)($setup_services_released['domain'] ?? '')) . '</code> no longer do anything and can be removed from your DNS:<ul>';
+			foreach ((array)$setup_services_released['records'] as $setup_services_rec) {
+				echo '<li><code>' . htmlspecialchars((string)($setup_services_rec['type'] ?? 'CNAME')) . ' '
+					. htmlspecialchars((string)($setup_services_rec['name'] ?? '')) . '</code></li>';
+			}
+			echo '</ul>';
+		}
+		echo '</div>';
+	}
+}
+
 // ---- Which face renders, derived from live state ----
 $setup_send_provider_class = ($setup_send_service !== '')
 	? (EmailSender::getDiscoveredProviders()[$setup_send_service] ?? null) : null;
@@ -239,6 +275,11 @@ if ($setup_send_stage === 'prove') {
 			</form>
 <?php } ?>
 		</div>
+<?php if ($setup_send_service === ServicesClient::MAIL_SERVICE_KEY) { ?>
+		<p class="jy-muted jy-mt-2">Sending through getjoinery's email service<?php echo $setup_services_account !== '' ? ' as ' . htmlspecialchars($setup_services_account) : ''; ?><?php
+			if (!empty($setup_services_mail['paid_until'])) { echo ', paid through ' . htmlspecialchars(LibraryFunctions::convert_time((string)$setup_services_mail['paid_until'], 'UTC', SessionControl::get_instance()->get_timezone(), 'M j, Y')); } ?>.
+			To move to your own provider, change the email settings below and prove the new one; the getjoinery service closes when it is proven.</p>
+<?php } ?>
 <?php if ($setup_send_last !== '') { ?>
 		<p class="jy-muted jy-mt-2">Last successful test: <?php echo htmlspecialchars(LibraryFunctions::convert_time($setup_send_last, 'UTC', SessionControl::get_instance()->get_timezone(), 'M j, Y g:i A T')); ?></p>
 <?php } ?>
@@ -670,7 +711,11 @@ if ($setup_send_stage === 'dns') {
 
 if ($setup_send_stage === 'form' && $setup_send_blocker !== null && $setup_send_service !== '') {
 ?>
-	<div class="jy-alert jy-alert-error"><?php echo htmlspecialchars($setup_send_blocker); ?></div>
+	<div class="jy-alert jy-alert-error"><?php echo htmlspecialchars($setup_send_blocker); ?><?php
+		if ($setup_send_service === ServicesClient::MAIL_SERVICE_KEY && !empty($setup_services_mail['manage_url'])
+				&& preg_match('#^https://#', (string)$setup_services_mail['manage_url'])) {
+			echo ' <a href="' . htmlspecialchars((string)$setup_services_mail['manage_url']) . '">Your sites on getjoinery</a>.';
+		} ?></div>
 <?php
 }
 
@@ -763,6 +808,37 @@ echo '</div>';
 </div>
 <?php
 $formwriter->end_form();
+
+// getjoinery's included service: no credential to type. An unlinked site
+// shows the one Connect button (a POST: it mints the state and sends the
+// owner to getjoinery to approve the link); a linked one names its account,
+// and Save above is the enrol.
+?>
+<div class="setup-provider-fields d-none jy-mt-2" data-email-provider="<?php echo htmlspecialchars(ServicesClient::MAIL_SERVICE_KEY); ?>">
+<?php if (!$setup_services_connected) { ?>
+	<p class="jy-muted">Email through getjoinery needs this site linked to a getjoinery account. Nothing is typed: press Connect,
+		sign in or sign up there, approve the link, and you land back here.</p>
+	<form method="POST" action="/setup">
+		<input type="hidden" name="action" value="services_connect">
+		<input type="hidden" name="step" value="mail_send">
+		<button type="submit" class="btn btn-secondary">Connect your getjoinery account</button>
+	</form>
+<?php } else { ?>
+	<p class="jy-muted">This site is connected to getjoinery<?php echo $setup_services_account !== '' ? ' as <strong>' . htmlspecialchars($setup_services_account) . '</strong>' : ''; ?>.
+		Save above to send through it; the records to publish follow on the next screen.
+		<?php if (!empty($setup_services_mail['manage_url']) && preg_match('#^https://#', (string)$setup_services_mail['manage_url'])) { ?>
+			<a href="<?php echo htmlspecialchars((string)$setup_services_mail['manage_url']); ?>">Your sites on getjoinery</a>.
+		<?php } ?></p>
+	<?php if ($setup_send_service !== ServicesClient::MAIL_SERVICE_KEY) { ?>
+	<form method="POST" action="/setup">
+		<input type="hidden" name="action" value="services_disconnect">
+		<input type="hidden" name="step" value="mail_send">
+		<button type="submit" class="btn btn-secondary btn-sm">Disconnect this site from getjoinery</button>
+	</form>
+	<?php } ?>
+<?php } ?>
+</div>
+<?php
 
 if ($setup_send_stage === 'prove') {
 	echo '</div></details>';

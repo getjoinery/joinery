@@ -47,6 +47,7 @@
  * Prints HOSTED_PLAN_NOTICE=ok or =error; exits 0 on success, 2 on unusable
  * input, 1 on a write that failed.
  *
+ * @version 1.2 - services joins the states the banner renders
  * @version 1.1 - born managed means born requiring a second factor of admins
  */
 
@@ -73,7 +74,7 @@ $notice_settings = array(
 );
 
 /** The billing states the banner renders. Anything else renders nothing. */
-$plan_states = array('trial', 'subscribed', 'grace', 'shutdown', '');
+$plan_states = array('trial', 'subscribed', 'grace', 'shutdown', 'services', '');
 
 $raw = stream_get_contents(STDIN);
 $supplied = json_decode((string)$raw, true);

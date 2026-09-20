@@ -400,6 +400,38 @@ lives on a subdomain of the sending domain, SPF is evaluated against a record
 SMTP2GO maintains behind that CNAME, so `getSpfMechanism()` returns `''` and
 the From domain needs no `include:`.
 
+**getjoinery (included email service):**
+```php
+// Settings — written by the enrol answer, never typed
+email_service = "joinery_services"
+smtp_host, smtp_port, smtp_username, smtp_password, smtp_sender, smtp_helo, smtp_hostname, smtp_auth
+```
+
+A self-hosted site connected to a getjoinery account can send through
+getjoinery's own SMTP2GO account, inside a subaccount of its own, with an
+SMTP user cut to that slice. `JoineryServicesProvider` is the SMTP provider with the
+sending domain answered by the operator: choosing it on the setup wizard's
+Email step shows the **Connect your getjoinery account** button on an
+unlinked site (`ServicesClient::connectUrl()` → the operator's authorise page →
+`/services_connected` seals the pair into `services_api_public_key` /
+`services_api_secret_key`), and Save on a linked site is the enrol
+(`createSendingDomain()` → `services_enroll`). An entitled answer carries the
+send values, written through `HostedMailSettingsMap` — the same list a Managed
+node's `utils/hosted_mail_settings.php` writes — and the DNS records for
+`mail.<host>`, which the wizard's dns stage publishes like any provider's
+(`getDkimStatus()`); `getSendingDomainState()` reads `services_mail_state`,
+refreshed by every status call, and reports `active` once the operator says
+the domain verified. A site that is not entitled is told the operator's
+sentence and its page on getjoinery, and nothing is written. The daily
+`ServicesStatusPoll` task writes the site's standing into the five
+`hosted_plan_*` banner settings under the `services` state.
+
+Moving to your own provider is the same Email step: choose the provider, save
+its credentials, send the test, press *It arrived* — and the getjoinery
+service is released on that click (`services_release`), its subaccount closed
+on the plane, the dead SMTP values cleared here, and the `mail.<host>` records
+listed to remove. The new provider is proven before the old one is closed.
+
 **Mailgun Configuration:**
 ```php
 // Settings

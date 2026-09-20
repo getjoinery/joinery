@@ -2598,8 +2598,13 @@ operator console are unaffected. When offered, the Settings tab's *Hosted
 relay connection* box takes the operator's service URL + the customer
 account's API key
 (`mailbox_fleet_service_url` / `mailbox_fleet_api_public_key` /
-`mailbox_fleet_api_secret_key`); enrollment itself is a button in the Setup
-tab's Relay section. `FleetClient` calls the operator's
+`mailbox_fleet_api_secret_key`, a declared sealed secret stored encrypted
+wherever the box has a `secret_box_key`); enrollment itself is a button in the
+Setup tab's Relay section. `FleetClient` is the core `ServiceClient` — the one
+tenant-side shape for any service another deployment runs (an API key pair in
+`public-key` / `secret-key` headers, a JSON POST to
+`/api/v1/action/{plugin}/{action}`, the remote `error` text on refusal) — with
+the relay's own actions on top. It calls the operator's
 `/api/v1/action/mailbox/fleet_*` actions: `fleet_enroll` sends this box's
 relay client public key and returns the slot coordinates (per-tenant MX
 hostname, the shard's identity pin and address, spool directory), which fold
@@ -2621,9 +2626,14 @@ automation calls — they are not user-facing steps.
 **Operator side** (the deployment with `mailbox_fleet_service_enabled` +
 `mailbox_fleet_mx_zone` set): the fleet service is the brain — `FleetService`
 assigns shards (least-loaded born shard with capacity), issues and verifies
-domain claims, and checks entitlement (the `mailbox_fleet_slot` tier feature,
-re-checked periodically with a `mailbox_fleet_grace_days` grace window before
-suspension empties the tenant's shard allowlist). Every decision is effected as
+domain claims, and checks entitlement (the `mailbox_fleet_slot` tier feature).
+The relay reconcile walks each slot down the core `ServiceTenantLadder` — the
+grace-then-suspend ladder every rented service shares: a lapse starts a
+`mailbox_fleet_grace_days` window, suspension past it empties the tenant's
+shard allowlist, and a subscription that returns at any point reactivates the
+slot in place. The slot's `provisioning | active | suspended | released`
+states are the ladder's vocabulary; `evicted` is the fleet's own last rung.
+Every decision is effected as
 one operator-signed request to the shard's tenant routes
 (`FleetService::applyTenant`) from the relay reconcile task, the slot's status
 moving on the verdict. The operator's control panel is the

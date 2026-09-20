@@ -29,6 +29,8 @@
  * nothing: with no hosted_plan_state there is no notice, which is what keeps a
  * self-hosted install silent.
  *
+ * @version 1.1 - the services state: a self-hosted site renting mail and the shelf
+ *                (specs/services_phase2_platform.md §9)
  * @version 1.0
  */
 
@@ -43,7 +45,15 @@ class HostedPlanNotice {
 	 * whether the customer is paying and folding them in here would lose one
 	 * fact to say the other.
 	 */
-	const STATES = array('trial', 'subscribed', 'grace', 'shutdown');
+	const STATES = array('trial', 'subscribed', 'grace', 'shutdown', self::STATE_SERVICES);
+
+	/**
+	 * A self-hosted site renting services from the operator — outbound mail,
+	 * the backup shelf — against a paid-through date, with the site itself in
+	 * the owner's own hands. The site writes the five settings itself from
+	 * the daily status poll (ServicesStatusPoll); no billing sentence.
+	 */
+	const STATE_SERVICES = 'services';
 
 	/** Percentage of an allowance at which its line turns into a warning. */
 	const ALLOWANCE_WARN_PERCENT = 80;
@@ -98,7 +108,8 @@ class HostedPlanNotice {
 
 		if ($url !== '' && preg_match('#^https://#i', $url)) {
 			$out .= '<a class="jy-hosted-plan__action" href="'
-				. htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '">Manage hosting</a>';
+				. htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '">'
+				. ($state === self::STATE_SERVICES ? 'Your sites on getjoinery' : 'Manage hosting') . '</a>';
 		}
 
 		$rows = self::renderAllowances($allowances);
@@ -202,6 +213,11 @@ class HostedPlanNotice {
 					'Everything keeps running' . ($when !== '' ? ' until ' . $when : ' for now')
 						. '. After that this site is shut down, and its backups are kept for a while '
 						. 'longer so it can be brought back. Updating the card on file is all it takes.');
+			case self::STATE_SERVICES:
+				return array(
+					'This site uses getjoinery\'s email service and backup shelf.',
+					($when !== '' ? 'They are paid for until ' . $when . '.' : 'They run against a paid-through date.')
+						. ' The site itself is yours; only what is listed below is looked after for you.');
 			case 'shutdown':
 				return array(
 					'This site has been shut down.',

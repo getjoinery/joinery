@@ -81,6 +81,7 @@
  * of them is a password, and job output is stored on the management node and
  * read by people). Exits 0 on success, 2 on unusable input, 1 on a failed write.
  *
+ * @version 1.1 - the names are HostedMailSettingsMap::MAP, shared with the services enrol path
  * @version 1.0
  */
 
@@ -95,22 +96,14 @@ require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
 
 /**
- * The nine settings this script may write, and which incoming value fills each.
- *
- * This map is the security boundary. Adding an entry widens what a management
- * node can reach on every node in the fleet, and it belongs in a commit
- * somebody reviews — not in a parameter.
+ * The nine settings this script may write, and which incoming value fills each,
+ * are HostedMailSettingsMap::MAP — one list on this machine, shared with the
+ * services enrol path so the two can never drift. This map is the security
+ * boundary. Adding an entry widens what a management node can reach on every
+ * node in the fleet, and it belongs in a commit somebody reviews — not in a
+ * parameter.
  */
-$mail_settings = array(
-	'email_service' => 'service',
-	'smtp_host'     => 'host',
-	'smtp_port'     => 'port',
-	'smtp_username' => 'username',
-	'smtp_password' => 'password',
-	'smtp_sender'   => 'sender',
-	'smtp_helo'     => 'helo',
-	'smtp_hostname' => 'hostname',
-);
+require_once(PathHelper::getIncludePath('includes/HostedMailSettingsMap.php'));
 
 /** The providers this script will point the site at. */
 $allowed_services = array('smtp', '');
@@ -154,31 +147,15 @@ $values = array(
 	'hostname' => trim((string)($supplied['hostname'] ?? '')),
 );
 
-$written = array();
-foreach ($mail_settings as $setting => $key) {
-	try {
-		Setting::put($setting, $values[$key]);
-	} catch (Throwable $e) {
-		// A declared-settings refusal, or the database. Either way the box is
-		// now half-written, which is worth saying out loud: the caller
-		// re-dispatches from desired state, so the next push repairs it.
-		fwrite(STDERR, "HOSTED_MAIL_SETTINGS=error\n" . $setting . ': ' . $e->getMessage() . "\n");
-		if ($written) {
-			fwrite(STDERR, 'Already written: ' . implode(', ', $written) . "\n");
-		}
-		exit(1);
-	}
-	$written[] = $setting;
-}
-
-// smtp_auth is derived rather than sent: authentication is required exactly
-// when a username was supplied, and that is not a judgement the wire needs to
-// carry.
+// The nine writes, smtp_auth derived from whether a username was supplied
+// (authentication is required exactly then; the wire need not carry it).
 try {
-	Setting::put('smtp_auth', $values['username'] !== '' ? '1' : '0');
-	$written[] = 'smtp_auth';
+	$written = HostedMailSettingsMap::apply($values);
 } catch (Throwable $e) {
-	fwrite(STDERR, "HOSTED_MAIL_SETTINGS=error\nsmtp_auth: " . $e->getMessage() . "\n");
+	// A declared-settings refusal, or the database. Either way the box may be
+	// half-written, which is worth saying out loud: the caller re-dispatches
+	// from desired state, so the next push repairs it.
+	fwrite(STDERR, "HOSTED_MAIL_SETTINGS=error\n" . $e->getMessage() . "\n");
 	exit(1);
 }
 

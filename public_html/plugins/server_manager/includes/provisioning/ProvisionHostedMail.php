@@ -47,6 +47,7 @@
  * amber state on the wizard is the right answer to a provider outage — not a
  * failed provision.
  *
+ * @version 1.3 - the provider acts are Smtp2GoLeg's, shared with the services tenant enrol
  * @version 1.2 - a test purchase's subaccount label and SMTP username start with test_
  * @version 1.1 - server_manager_smtp2go_sandbox_users: a rehearsal plane mints every customer SMTP user
  *                in the provider's sandbox status, so nothing it builds can email anyone
@@ -164,13 +165,13 @@ class ProvisionHostedMail {
 			// orphan subaccount at the provider that this plane never names
 			// again. It is one call, so a duplicate is recoverable by hand; a
 			// forgotten one is not.
-			$id = $this->client->addSubaccount(
+			$id = Smtp2GoLeg::createSubaccount($this->client,
 				$provision->external_name_prefix() . 'Joinery hosted — ' . $domain,
 				trim((string)$provision->get('cvp_buyer_email')));
 			$provision->set('cvp_smtp2go_subaccount_id', $id);
 			$provision->save();
 		}
-		$this->client->setSubaccountLimit($id, self::send_allowance());
+		Smtp2GoLeg::setLimit($this->client, $id, self::send_allowance());
 		$provision->set('cvp_mail_state', 'subaccount_created');
 		$provision->set('cvp_mail_error', null);
 		$provision->save();
@@ -188,33 +189,23 @@ class ProvisionHostedMail {
 	 * record this plane published.
 	 */
 	public static function sending_domain(string $domain): string {
-		return 'mail.' . strtolower(trim($domain));
+		return Smtp2GoLeg::sendingDomain($domain);
 	}
 
 	private function add_domain($provision): int {
 		$sender = self::sending_domain((string)$provision->get('cvp_domain'));
-		$result = $this->client->addDomain(
-			(string)$provision->get('cvp_smtp2go_subaccount_id'), $sender);
-
-		$provision->set('cvp_smtp2go_domain_id', $result['id']);
-		$provision->set('cvp_mail_records', json_encode($result['records']));
-
-		// NO RECORDS IS A FAILURE, not a note. A sending domain with nothing to
-		// publish never verifies, so mail from this site would be unsigned for
-		// ever — while the subaccount, the domain and the SMTP user all looked
-		// set up and every dashboard read green. The likeliest cause is this
-		// client not recognising the shape the provider answered in, which is
-		// exactly the kind of thing that must stop the line rather than pass
-		// quietly through it.
-		if (!$result['records']) {
-			$this->fail_leg($provision,
-				'The provider registered the sending domain but this platform could not read any DNS '
-				. 'records out of its answer. Nothing was published, so mail from this site would be '
-				. 'unsigned. Capture the domain/add response and check Smtp2GoProvider::recordsOf '
-				. 'against it before retrying.');
+		try {
+			$result = Smtp2GoLeg::addSenderDomain($this->client,
+				(string)$provision->get('cvp_smtp2go_subaccount_id'), $sender);
+		} catch (Smtp2GoLegException $e) {
+			// Zero records from the provider: the leg stops the line here
+			// rather than marching on to a domain that never verifies.
+			$this->fail_leg($provision, $e->getMessage());
 			return 1;
 		}
 
+		$provision->set('cvp_smtp2go_domain_id', $result['id']);
+		$provision->set('cvp_mail_records', json_encode($result['records']));
 		$provision->set('cvp_mail_state', 'domain_added');
 		$provision->set('cvp_mail_error', null);
 		$provision->save();
@@ -331,11 +322,8 @@ class ProvisionHostedMail {
 		if (!$this->node_can_take_settings($provision)) {
 			return 0;
 		}
-		$subaccount = (string)$provision->get('cvp_smtp2go_subaccount_id');
-		$username = Smtp2GoClient::mintUsername((string)$provision->get('cvp_slug'), $provision->external_name_prefix());
-		$password = Smtp2GoClient::mintPassword();
-
-		$user = $this->client->addSmtpUser($subaccount, $username, $password, self::sandbox_users());
+		$user = Smtp2GoLeg::mintSmtpUser($this->client, (string)$provision->get('cvp_smtp2go_subaccount_id'),
+			(string)$provision->get('cvp_slug'), $provision->external_name_prefix());
 
 		// The username is recorded so the credential can be revoked by name;
 		// the password is NOT stored. It exists for exactly as long as it takes
@@ -407,10 +395,8 @@ class ProvisionHostedMail {
 		// to re-send. A spare SMTP user inside the customer's own subaccount is
 		// a cost worth paying for a site that can send — bounded by the attempt
 		// count above so it stays a cost and not a leak.
-		$username = Smtp2GoClient::mintUsername((string)$provision->get('cvp_slug'), $provision->external_name_prefix());
-		$password = Smtp2GoClient::mintPassword();
-		$user = $this->client->addSmtpUser(
-			(string)$provision->get('cvp_smtp2go_subaccount_id'), $username, $password, self::sandbox_users());
+		$user = Smtp2GoLeg::mintSmtpUser($this->client, (string)$provision->get('cvp_smtp2go_subaccount_id'),
+			(string)$provision->get('cvp_slug'), $provision->external_name_prefix());
 		$provision->set('cvp_smtp2go_user_id', $user['username'] !== '' ? $user['username'] : $user['id']);
 		$provision->save();
 		return $this->dispatch_settings($provision, $user['username'], $user['password']) ? 1 : 0;
@@ -422,8 +408,7 @@ class ProvisionHostedMail {
 	 * a site built to prove the pipeline can email nobody; off for real.
 	 */
 	public static function sandbox_users(): bool {
-		$value = trim((string)Globalvars::get_instance()->get_setting('server_manager_smtp2go_sandbox_users', false, true));
-		return $value !== '' && $value !== '0';
+		return Smtp2GoLeg::sandboxUsers();
 	}
 
 	/**
@@ -477,21 +462,10 @@ class ProvisionHostedMail {
 		$sender = self::sending_domain((string)$provision->get('cvp_domain'));
 
 		try {
-			$built = JobCommandBuilder::build_hosted_mail_settings($node, array(
-				'service'  => 'smtp',
-				'host'     => 'mail.smtp2go.com',
-				'port'     => 587,
-				'username' => $username,
-				'password' => $password,
-				// The envelope sender and the HELO name are the SENDING
-				// identity, which is the subdomain the provider verified — not
-				// the apex the site answers on. Getting this wrong is the
-				// difference between mail that authenticates and mail that
-				// lands in spam.
-				'sender'   => 'bounces@' . $sender,
-				'helo'     => $sender,
-				'hostname' => $sender,
-			));
+			// The same values a services tenant is handed back in its enrol
+			// response; here they travel to the node's own settings script.
+			$built = JobCommandBuilder::build_hosted_mail_settings($node,
+				Smtp2GoLeg::sendValues($username, $password, $sender));
 		} catch (Throwable $e) {
 			$this->note_transient($provision, 'Cannot push mail settings — ' . $e->getMessage());
 			return false;
@@ -507,9 +481,7 @@ class ProvisionHostedMail {
 
 	/** The monthly send allowance every hosted subaccount is capped at. */
 	public static function send_allowance(): int {
-		$value = (int)Globalvars::get_instance()->get_setting(
-			'server_manager_hosted_send_allowance', true, true);
-		return $value > 0 ? $value : 1000;
+		return Smtp2GoLeg::sendAllowance();
 	}
 
 	/** The DNS records the provider described, as stored. */

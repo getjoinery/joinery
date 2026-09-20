@@ -30,11 +30,13 @@
  * Writes go through Setting::put, which refuses a name that is not declared.
  * The three names are the mailbox plugin's, so on a site where that plugin is
  * not active the write is refused and this script says so — there is nothing
- * to enroll there.
+ * to enroll there. The secret key is stored sealed (its setting is a declared
+ * sealed secret) wherever this site has a secret_box_key.
  *
  * Prints one line — FLEET_ENROLL=ok or =error — and exits 0 on success, 2 on
  * unusable input, 1 on a write that failed.
  *
+ * @version 1.1 - the secret key is sealed at write
  * @version 1.0
  */
 
@@ -87,7 +89,9 @@ if (!preg_match('/^public_[a-z0-9]{8,64}$/', $values['public_key'])
 $written = array();
 foreach ($fleet_settings as $setting => $key) {
 	try {
-		Setting::put($setting, $values[$key]);
+		Setting::put($setting, $key === 'secret_key'
+			? ServiceClient::storedSecret($setting, $values[$key])
+			: $values[$key]);
 	} catch (Throwable $e) {
 		// A declared-settings refusal (the mailbox plugin is not active here),
 		// or the database. Either way the site may be half-written, which is
