@@ -19,6 +19,9 @@
  *                   the one SMTP credential that reaches their box.
  *  7. Hosted watch  the commercial half of a hosted site: the trial clock, the
  *                   allowance banners, and what falls due when a payment fails.
+ *  8. Services      the self-hosted sites renting our mail and backup shelf:
+ *                   the paid-through date against the ladder, the meters, the
+ *                   shelf ledger against a listing, and retention.
  *
  * The hosted phases come last on purpose. Both act on a site that is already
  * up, so a slow provider or an unconfigured account there must not sit in front
@@ -34,6 +37,7 @@
  * provisioning, and its up/down alerting must not sit behind a provisioning
  * call that hangs.
  *
+ * @version 1.4 - the services reconcile runs last (specs/services_phase2_platform.md §10 item 3)
  * @version 1.3 - the site-draft sweep runs first (specs/managed_hosting_phase1_purchase.md §10 item 5)
  * @version 1.2 - the hosted tier runs as two more phases, last: mail for a site this operator hosts,
  *                then the trial clock and allowance banners (specs/hosted_trial_provisioning.md)
@@ -55,6 +59,7 @@ class ServerManagerAdvanceProvisioning implements ScheduledTaskInterface {
 			'Domain watch'   => array($base . 'ManagedDomainWatch.php', 'ManagedDomainWatch'),
 			'Hosted mail'    => array($base . 'ProvisionHostedMail.php', 'ProvisionHostedMail'),
 			'Hosted watch'   => array($base . 'HostedTrialWatch.php', 'HostedTrialWatch'),
+			'Services'       => array($base . 'ServiceTenantWatch.php', 'ServiceTenantWatch'),
 		);
 
 		$parts = array();

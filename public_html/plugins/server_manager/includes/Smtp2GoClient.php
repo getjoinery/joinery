@@ -33,6 +33,7 @@
  * site's are the same thing at the provider, so they must not be read by two
  * pieces of code that can drift apart.
  *
+ * @version 1.4 - removeDomain(): a services tenant that changes host releases its old sender domain
  * @version 1.3 - mintUsername() takes a prefix (test_ for a test purchase)
  * @version 1.2 - addSmtpUser() can mint the user in the provider's sandbox status (accepted, never delivered)
  * @version 1.1
@@ -155,6 +156,18 @@ class Smtp2GoClient {
 			'domain'        => $domain,
 		));
 		return Smtp2GoProvider::stateOf(Smtp2GoProvider::entryFor($data, $domain)) === 'active';
+	}
+
+	/**
+	 * Take a sender domain out of the subaccount. Used when a services tenant
+	 * changes host: the old sending identity is released so its DNS records
+	 * stop meaning anything at the provider.
+	 */
+	public function removeDomain(string $subaccount_id, string $domain): void {
+		$this->post('domain/remove', array(
+			'subaccount_id' => $subaccount_id,
+			'domain'        => $domain,
+		));
 	}
 
 	/** The domain's current state and the records it still wants. */

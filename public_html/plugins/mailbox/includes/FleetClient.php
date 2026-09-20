@@ -11,11 +11,17 @@
  * exactly as against a self-hosted relay. Hosted vs self-hosted differs only
  * in where the coordinates came from.
  *
+ * The connection itself — the three settings, the JSON POST with the key pair
+ * in the headers, the error contract — is the core ServiceClient; this class
+ * is the relay-specific half: what to send on enrol, and what to do with the
+ * coordinates that come back.
+ *
  * Ownership challenges are filed automatically (fileDomainClaims): on
  * enrollment for every already-registered hosted domain, and on domain
  * registration while a slot exists. The Setup tab's ownership row re-verifies
  * them on every check pass — publishing the TXT record is all the user does.
  *
+ * @version 1.6 - extends the core ServiceClient: configured(), call() and the exception live there
  * @version 1.5 - the ssh era is over: enrollment sends the relay client public key only, and
  *                a shard's identity pin plus address are the whole coordinate set
  *                (specs/relay_without_a_shell.md)
@@ -24,22 +30,19 @@
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 
-class FleetClientException extends Exception {}
-
-class FleetClient {
-
-	/** @var Globalvars */
-	private $settings;
+class FleetClient extends ServiceClient {
 
 	public function __construct() {
-		$this->settings = Globalvars::get_instance();
+		parent::__construct('mailbox_fleet_service_url', 'mailbox_fleet_api_public_key',
+			'mailbox_fleet_api_secret_key', 'mailbox');
 	}
 
-	/** True when the three fleet-service settings are filled in. */
-	public function configured(): bool {
-		return trim((string)$this->settings->get_setting('mailbox_fleet_service_url')) !== ''
-			&& trim((string)$this->settings->get_setting('mailbox_fleet_api_public_key')) !== ''
-			&& trim((string)$this->settings->get_setting('mailbox_fleet_api_secret_key')) !== '';
+	protected function label(): string {
+		return 'Fleet service';
+	}
+
+	protected function notConfiguredMessage(): string {
+		return 'Fleet service is not configured — set the service URL and API keys on the relay page.';
 	}
 
 	/**
@@ -162,50 +165,5 @@ class FleetClient {
 			}
 		}
 		return null;
-	}
-
-	/**
-	 * One fleet API call. Returns the response's data array; throws
-	 * FleetClientException with a user-facing message on any failure.
-	 */
-	public function call(string $action, array $payload): array {
-		if (!$this->configured()) {
-			throw new FleetClientException(
-				'Fleet service is not configured — set the service URL and API keys on the relay page.');
-		}
-		$base = rtrim(trim((string)$this->settings->get_setting('mailbox_fleet_service_url')), '/');
-		$url = $base . '/api/v1/action/mailbox/' . $action;
-
-		$ch = curl_init($url);
-		curl_setopt_array($ch, array(
-			CURLOPT_POST           => true,
-			CURLOPT_POSTFIELDS     => json_encode($payload),
-			CURLOPT_RETURNTRANSFER => true,
-			CURLOPT_TIMEOUT        => 15,
-			CURLOPT_CONNECTTIMEOUT => 5,
-			CURLOPT_HTTPHEADER     => array(
-				'Content-Type: application/json',
-				// Dash spelling: Apache→FPM stacks silently drop header names
-				// containing underscores (see api/apiv1.php's normalization).
-				'public-key: ' . trim((string)$this->settings->get_setting('mailbox_fleet_api_public_key')),
-				'secret-key: ' . trim((string)$this->settings->get_setting('mailbox_fleet_api_secret_key')),
-			),
-		));
-		$body = curl_exec($ch);
-		$err = curl_error($ch);
-		$http = intval(curl_getinfo($ch, CURLINFO_RESPONSE_CODE));
-
-		if ($body === false) {
-			throw new FleetClientException('Could not reach the fleet service: ' . $err);
-		}
-		$decoded = json_decode((string)$body, true);
-		if (!is_array($decoded)) {
-			throw new FleetClientException('Fleet service returned an unreadable response (HTTP ' . $http . ').');
-		}
-		if ($http !== 200) {
-			$msg = (string)($decoded['error'] ?? $decoded['error_message'] ?? $decoded['message'] ?? ('HTTP ' . $http));
-			throw new FleetClientException('Fleet service: ' . $msg);
-		}
-		return is_array($decoded['data'] ?? null) ? $decoded['data'] : array();
 	}
 }

@@ -54,7 +54,8 @@
     "email_provider_ses": "Amazon SES",
     "email_provider_smtp": "SMTP",
     "email_provider_smtp2go": "SMTP2GO",
-    "inbound_provider": "Inbound provider settings"
+    "inbound_provider": "Inbound provider settings",
+    "services": "Joinery-run services"
   },
   "settings": [
     {
@@ -2833,6 +2834,42 @@
       "default": "",
       "managed": true,
       "helptext": "Where the site's owner manages their hosting with the operator. Written by the management node."
+    },
+    {
+      "name": "services_url",
+      "default": "https://getjoinery.com",
+      "group": "services",
+      "label": "Services URL",
+      "type": "text",
+      "helptext": "The Joinery deployment this site rents outbound email and its backup shelf from. The Connect button on the setup wizard's Email and Backups steps links this site to an account there; nothing here is typed by hand."
+    },
+    {
+      "name": "services_api_public_key",
+      "default": "",
+      "group": "services",
+      "label": "Services API public key",
+      "type": "text",
+      "helptext": "The public half of the key the services deployment minted for this site when it was connected. Written by the Connect return; the pair is this site's identity there."
+    },
+    {
+      "name": "services_api_secret_key",
+      "default": "",
+      "secret": true,
+      "group": "services",
+      "label": "Services API secret key",
+      "helptext": "The secret half, sealed at rest. Written by the Connect return; never shown."
+    },
+    {
+      "name": "services_account",
+      "default": "",
+      "managed": true,
+      "helptext": "The account this site is connected to at the services deployment, as shown on the wizard step. Written by the Connect return."
+    },
+    {
+      "name": "services_mail_state",
+      "default": "",
+      "managed": true,
+      "helptext": "What the services deployment last said about this site's outbound mail through it, as JSON: the sender domain, whether it has verified, the DNS records to publish, the state and the paid-through date. Written by the enrol call and the daily status poll; read by the getjoinery email provider."
     }
   ],
   "_sealed_secrets_comment": "Every kind of value SecretBox seals is declared here (and in each plugin.json). This is what makes SecretBox::seal() refuse an unregistered value and what the reconciler and import scrub walk. Distinct from a setting's secret:true, which only masks a form field. locator is code-free: a setting name for a singleton, table.column for a row-scoped kind. See includes/SealedSecretsDeclarations.php.",
@@ -2843,6 +2880,12 @@
       "kind": "regenerable",
       "locator": "file_signed_url_key",
       "reprovision": "File::provisionSigningKey"
+    },
+    {
+      "label": "Services API secret key",
+      "feature": "Joinery-run services (this site's connected key)",
+      "kind": "regenerable-breaks-things",
+      "locator": "services_api_secret_key"
     },
     {
       "label": "Google OAuth client secret",

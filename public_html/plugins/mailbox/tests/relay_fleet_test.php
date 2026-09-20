@@ -16,6 +16,9 @@
  *   - FleetService coordinates carry the shard's identity pin and address; no tunnel;
  *     slot counting sees only live
  *     slot's address; domain-claim uniqueness is fleet-wide.
+ *   - The fleet sits on the core enrolment skeleton: FleetClient is a
+ *     ServiceClient, the slot's states are the ServiceTenantLadder's, and the
+ *     reconcile's entitlement ladder persists through a real slot row.
  *
  * Creates scratch shard/slot/claim/relay rows and deletes them. Skips the
  * fleet sections when the fleet tables have not been created yet (run
@@ -23,7 +26,8 @@
  *
  * Run: php tests/run.php db --filter=relay_fleet
  *
- * @version 1.2
+ * @version 1.4 - the fleet on the core skeleton: client, state vocabulary, the ladder on a slot row
+ * @version 1.3 - fleet_status exercised through the action
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -41,6 +45,7 @@ class RelayFleetTest {
 			$this->testRelayTenantHelpers();
 			$this->testExporterFragment();
 			$this->testFleetAllocationAndClaims();
+			$this->testFleetOnTheSkeleton();
 		} catch (\Throwable $e) {
 			check(false, 'uncaught ' . get_class($e), $e->getMessage());
 		} finally {
@@ -216,6 +221,87 @@ class RelayFleetTest {
 			'releaseSlot revokes the slot\'s live claims');
 		check(MailboxFleetDomainClaim::liveClaimByOtherSlot('relay-fleet-release.example', intval($slot_b->key)) === null,
 			'a released slot\'s domains are claimable elsewhere');
+
+		// The status action a tenant polls: it renders the slot as the reconcile
+		// task left it. Exercised through the action so a call into a method
+		// FleetService no longer has fails here, not on a tenant's relay page.
+		require_once(PathHelper::getIncludePath('tests/lib/logic.php'));
+		$tenant = make_user('fleet_status');
+		$slot_b->set('mft_usr_user_id', intval($tenant->key));
+		$slot_b->set('mft_slug', 't' . intval($slot_b->key));
+		$slot_b->set('mft_mx_hostname', 't' . intval($slot_b->key) . '.mx.fleet-test.example');
+		$slot_b->save();
+		$saved_session = $_SESSION ?? array();
+		$_SESSION = array('loggedin' => 1, 'usr_user_id' => intval($tenant->key), 'permission' => 0);
+		try {
+			$status = harness_call_logic('plugins/mailbox/logic/fleet_status_logic.php', 'fleet_status_logic', array());
+			check(!$status->error && !empty($status->data['enrolled']), 'fleet_status renders an enrolled slot');
+			check((string)($status->data['coordinates']['status'] ?? '') === MailboxFleetSlot::STATUS_ACTIVE,
+				'fleet_status carries the slot status the reconcile task wrote');
+			check(($status->data['coordinates']['slug'] ?? '') === 't' . intval($slot_b->key),
+				'fleet_status carries the caller\'s own slot');
+		} finally {
+			$_SESSION = $saved_session;
+		}
+	}
+
+	// The fleet on the core skeleton (specs/services_phase2_platform.md §10
+	// item 1): the pieces the relay reconcile and the tenant client now share
+	// with every other rented service.
+	private function testFleetOnTheSkeleton() {
+		section('fleet on the skeleton');
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetClient.php'));
+		check(is_subclass_of('FleetClient', 'ServiceClient'), 'FleetClient is a ServiceClient');
+		check(MailboxFleetSlot::STATUS_ACTIVE === ServiceTenantLadder::STATE_ACTIVE
+			&& MailboxFleetSlot::STATUS_SUSPENDED === ServiceTenantLadder::STATE_SUSPENDED
+			&& MailboxFleetSlot::STATUS_RELEASED === ServiceTenantLadder::STATE_RELEASED
+			&& MailboxFleetSlot::STATUS_PROVISIONING === ServiceTenantLadder::STATE_PROVISIONING,
+			'the slot\'s four shared states are the ladder\'s vocabulary');
+
+		if (!$this->tableExists('mfs_mailbox_fleet_shards') || !$this->tableExists('mft_mailbox_fleet_slots')) {
+			harness_skip('fleet tables not created yet — run update_database');
+			return;
+		}
+		$shard = new MailboxFleetShard(NULL);
+		$shard->set('mfs_name', 'relay_fleet_test ladder shard');
+		$shard->set('mfs_capacity', 1);
+		$shard->save();
+		$this->cleanup[] = array('mfs_mailbox_fleet_shards', 'mfs_mailbox_fleet_shard_id', intval($shard->key));
+		$slot = new MailboxFleetSlot(NULL);
+		$slot->set('mft_mfs_mailbox_fleet_shard_id', intval($shard->key));
+		$slot->set('mft_status', MailboxFleetSlot::STATUS_ACTIVE);
+		$slot->set('mft_public_key', base64_encode(str_repeat("\x05", 32)));
+		$slot->save();
+		$this->cleanup[] = array('mft_mailbox_fleet_slots', 'mft_mailbox_fleet_slot_id', intval($slot->key));
+
+		// The same column map and the same closures the reconcile hands the
+		// ladder, with the shard act stubbed: what is pinned here is that the
+		// rungs land in the slot's own columns.
+		$columns = array('state' => 'mft_status', 'lapse_time' => 'mft_entitlement_lapse_time',
+			'check_time' => 'mft_entitlement_check_time');
+		$acts = array();
+		$resync = function (MailboxFleetSlot $row) use (&$acts) {
+			$row->set('mft_needs_domain_sync', true);
+			$row->save();
+			$acts[] = (string)$row->get('mft_status');
+		};
+		ServiceTenantLadder::advance($slot, $columns, false, 14, $resync, $resync, '2026-09-01 00:00:00');
+		$fresh = new MailboxFleetSlot(intval($slot->key), TRUE);
+		check(substr((string)$fresh->get('mft_entitlement_lapse_time'), 0, 19) === '2026-09-01 00:00:00',
+			'the lapse lands in mft_entitlement_lapse_time');
+		$step = ServiceTenantLadder::advance($fresh, $columns, false, 14, $resync, $resync, '2026-09-16 00:00:00');
+		$fresh = new MailboxFleetSlot(intval($slot->key), TRUE);
+		check($step === ServiceTenantLadder::STEP_SUSPENDED && (string)$fresh->get('mft_status') === MailboxFleetSlot::STATUS_SUSPENDED,
+			'past the grace window the slot row is suspended');
+		check((bool)$fresh->get('mft_needs_domain_sync') && $acts === array('suspended'),
+			'the suspend act flags the allowlist re-sync on the saved row');
+		$step = ServiceTenantLadder::advance($fresh, $columns, true, 14, $resync, $resync, '2026-09-20 00:00:00');
+		$fresh = new MailboxFleetSlot(intval($slot->key), TRUE);
+		check($step === ServiceTenantLadder::STEP_REACTIVATED && (string)$fresh->get('mft_status') === MailboxFleetSlot::STATUS_ACTIVE
+			&& $fresh->get('mft_entitlement_lapse_time') === null
+			&& substr((string)$fresh->get('mft_entitlement_check_time'), 0, 19) === '2026-09-20 00:00:00',
+			'entitlement returning reactivates the slot in place');
+		check($acts === array('suspended', 'active'), 'the reactivate act ran once more');
 	}
 
 	private function cleanupRows() {

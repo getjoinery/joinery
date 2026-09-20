@@ -197,10 +197,6 @@ class MultiApiKey extends SystemMultiBase {
             $filters['apk_type'] = [$this->options['type'], PDO::PARAM_STR];
         }
 
-        if (isset($this->options['published'])) {
-            $filters['apk_is_published'] = $this->options['published'] ? "= TRUE" : "= FALSE";
-        }
-
 
         return $this->_get_resultsv2('apk_api_keys', $filters, $this->order_by, $only_count, $debug);
     }

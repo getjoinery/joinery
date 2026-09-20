@@ -6,6 +6,7 @@
  * POST actions delegate to ProvisioningSetup and redirect back with a
  * session message; GET renders the live status of every checklist item.
  *
+ * @version 1.4 - the master-key field arrives as hosted_smtp2go_master_key (the view's field name; smtp2go_api_key is core's)
  * @version 1.3 - the hosted card saves the SMTP2GO sandbox-users switch
  * @version 1.2 - the registrar promotion code is saved (and cleared) with the registrar card
  * @version 1.1 - the domain-registrar credentials card
@@ -102,7 +103,7 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 				// erasing it every time the rest of the card is saved.
 				foreach (array(
 					'operator_cloud_token'   => 'server_manager_operator_cloud_token',
-					'smtp2go_api_key'        => 'server_manager_smtp2go_api_key',
+					'hosted_smtp2go_master_key' => 'server_manager_smtp2go_api_key',
 					'smtp2go_webhook_secret' => 'server_manager_smtp2go_webhook_secret',
 				) as $field => $setting) {
 					$value = trim($input[$field] ?? '');

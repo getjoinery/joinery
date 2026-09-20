@@ -1,6 +1,8 @@
 <?php
 // serve.php - Hybrid routing system with RouteHelper
 // Core dependencies (PathHelper, Globalvars, SessionControl) are loaded by RouteHelper after static route check
+// @version 1.8.0 — /services/authorize is the server_manager plugin's Connect
+// approval page (specs/services_phase2_platform.md §4).
 // @version 1.7.0 — a signed /uploads request may carry a serve grant
 // (includes/FileServeGrant.php): redeemed only behind a verified signature, it
 // lets the sealed decrypt hooks run without a session — the reader's sandboxed
@@ -135,6 +137,11 @@ $routes = [
         '/cart_charge'  => ['view' => 'views/cart_charge',  'plugin' => 'store', 'check_setting' => 'products_active'],
         '/cart_confirm' => ['view' => 'views/cart_confirm', 'plugin' => 'store', 'check_setting' => 'products_active'],
         '/cart_clear'   => ['view' => 'views/cart_clear',   'plugin' => 'store', 'check_setting' => 'products_active'],
+
+        // Joinery-run services — a self-hosted site's owner approves the link
+        // between their site and their account here; the site's key travels
+        // back in the redirect (specs/services_phase2_platform.md §4).
+        '/services/authorize' => ['view' => 'views/services/authorize', 'plugin' => 'server_manager'],
 
         // Joinery Direct — the instance-to-instance endpoint (docs/joinery_direct.md).
         // A route rather than a service: the box already terminates TLS for its

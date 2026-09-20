@@ -1,7 +1,7 @@
 {
     "name": "Mailbox",
     "description": "Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS",
-    "version": "1.118.2",
+    "version": "1.118.3",
     "author": "Joinery",
     "license": "PolyForm-Noncommercial-1.0.0",
     "status": "stable",
@@ -794,6 +794,12 @@
             "feature": "Mailbox inbound IMAP",
             "kind": "operator",
             "locator": "iia_inbound_imap_accounts.iia_oauth_refresh_token_enc"
+        },
+        {
+            "label": "Relay fleet API secret key",
+            "feature": "Hosted relay fleet (tenant side)",
+            "kind": "regenerable-breaks-things",
+            "locator": "mailbox_fleet_api_secret_key"
         },
         {
             "label": "Relay transport secret",

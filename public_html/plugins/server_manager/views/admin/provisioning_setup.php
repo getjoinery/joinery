@@ -7,6 +7,7 @@
  * item shows its live state with a one-click action where the platform can
  * do the work itself.
  *
+ * @version 1.5 - the hosted card's master-key field is named hosted_smtp2go_master_key: smtp2go_api_key is the core email provider's declared setting, which FormWriter refuses to hand-draw
  * @version 1.4 - the registrar promotion code on the domain card; the domain question card serves
  *                shared-host products only and a customer-cloud site is configured on the buyer's
  *                configure page (specs/managed_hosting_phase1_purchase.md §8)
@@ -361,7 +362,7 @@ $fw_hosted->passwordinput('operator_cloud_token', 'Operator cloud token', [
 		? 'A token is stored. Leave blank to keep it; enter a new one to replace it.'
 		: 'A Linode personal access token scoped linodes:read_write.')
 		. ' It stays on this management node — no machine this plane creates ever receives it.']);
-$fw_hosted->passwordinput('smtp2go_api_key', 'SMTP2GO master API key', [
+$fw_hosted->passwordinput('hosted_smtp2go_master_key', 'SMTP2GO master API key', [
 	'helptext' => ($hosted['smtp2go_present']
 		? 'A key is stored. Leave blank to keep it; enter a new one to replace it.'
 		: 'The master key every customer subaccount is administered with.')

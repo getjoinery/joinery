@@ -11,6 +11,7 @@
  * fleet_status can reconcile lazily (server_manager never learns what a
  * tenant is).
  *
+ * @version 1.1 - the four shared status values come from the core ServiceTenantLadder
  * @version 1.0
  */
 
@@ -23,10 +24,13 @@ class MailboxFleetSlot extends SystemBase {
 	public static $tablename = 'mft_mailbox_fleet_slots';
 	public static $pkey_column = 'mft_mailbox_fleet_slot_id';
 
-	const STATUS_PROVISIONING = 'provisioning';
-	const STATUS_ACTIVE       = 'active';
-	const STATUS_SUSPENDED    = 'suspended';
-	const STATUS_RELEASED     = 'released';
+	// The four shared rungs are the core ServiceTenantLadder's vocabulary,
+	// which the relay reconcile walks; evicted is the fleet's own last rung
+	// (the shard has removed the tenant).
+	const STATUS_PROVISIONING = ServiceTenantLadder::STATE_PROVISIONING;
+	const STATUS_ACTIVE       = ServiceTenantLadder::STATE_ACTIVE;
+	const STATUS_SUSPENDED    = ServiceTenantLadder::STATE_SUSPENDED;
+	const STATUS_RELEASED     = ServiceTenantLadder::STATE_RELEASED;
 	const STATUS_EVICTED      = 'evicted';
 
 	protected static $foreign_key_actions = [
