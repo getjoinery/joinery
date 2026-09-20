@@ -47,6 +47,11 @@ class CalendarItem {
     public $entry_id = null;
     public $occurrence_date = null;
 
+    // The zone the entry was written in (IANA id; native entries only). The
+    // instants above are UTC regardless; this lets a viewer in another zone
+    // see "9:00 AM in Los Angeles" beside their own local rendering.
+    public $timezone = null;
+
     /** Default colour per type; a source may override via the `color` key. */
     private $color = null;
 
@@ -89,6 +94,7 @@ class CalendarItem {
             $copy->link = null;
             $copy->entry_id = null;
             $copy->occurrence_date = null;
+            $copy->timezone = null;
             $copy->visibility = self::VIS_BUSY;
             return $copy;
         }
@@ -111,6 +117,7 @@ class CalendarItem {
             'blocks_availability' => $this->blocks_availability,
             'entry_id'            => $this->entry_id,
             'occurrence_date'     => $this->occurrence_date,
+            'timezone'            => $this->timezone,
         ];
     }
 }

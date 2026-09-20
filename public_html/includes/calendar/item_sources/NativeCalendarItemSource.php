@@ -59,6 +59,7 @@ class NativeCalendarItemSource implements CalendarItemSource {
                 'source'              => self::getKey(),
                 'source_key'          => 'native:cal-' . $entry->key,
                 'entry_id'            => (int)$entry->key,
+                'timezone'            => $entry->get('cal_timezone') ?: null,
             ]);
         }
 

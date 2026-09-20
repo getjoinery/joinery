@@ -650,6 +650,15 @@ button.dropdown-item {
 .btn-outline-secondary { background: transparent; border-color: var(--border); color: var(--body-color); }
 .btn-outline-secondary:hover { background: var(--lighter); }
 
+.btn-outline-danger { background: transparent; border-color: var(--danger); color: var(--danger); }
+.btn-outline-danger:hover { background: var(--danger); color: #fff; }
+
+.btn-outline-success { background: transparent; border-color: var(--success); color: #006b3f; }
+.btn-outline-success:hover { background: var(--success); color: #fff; }
+
+.btn-outline-warning { background: transparent; border-color: var(--warning); color: #b8541c; }
+.btn-outline-warning:hover { background: var(--warning); color: #fff; }
+
 /* Soft default button */
 .btn-soft-default {
     background: var(--white);
