@@ -130,9 +130,14 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	    'usr_is_disabled' => array('type'=>'bool', 'default'=>false),
 	    'usr_lastlogin_time' => array('type'=>'timestamp(6)'),
 	    'usr_terms_accepted_time' => array('type'=>'timestamp(6)'),
-	    // When the user chose "Finish later" on the /setup wizard. Completion is
-	    // never stored — only this dismissal (specs/setup_wizard.md).
+	    // When the user chose "Finish later" on the /setup wizard: the login
+	    // interrupt and the header pill both stop. Completion is never stored
+	    // (specs/setup_wizard.md).
 	    'usr_setup_dismissed_time' => array('type'=>'timestamp(6)'),
+	    // When the user reached the wizard's final checklist and left for the
+	    // site: the login interrupt stops, the header pill stays until every
+	    // step is green.
+	    'usr_setup_reviewed_time' => array('type'=>'timestamp(6)'),
 	    'usr_pic_picture_id' => array('type'=>'int4'),
 	    'usr_phn_phone_number_id' => array('type'=>'int4'),
 	    'usr_contact_preferences' => array('type'=>'varchar(32)'),

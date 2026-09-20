@@ -146,17 +146,19 @@ for ($i = 0; $i < 10; $i++) {
 check(login_is_retry($res), 'the tenth failure is still a credential refusal, not a throttle refusal',
 	'redirect: ' . var_export($res->redirect, true));
 
+// Every refusal is a redirect back to the form carrying its message: an error
+// result with no page data would land on the exception page instead.
 $res = login_call(array('email' => $email, 'password' => 'wrong_11'));
-check($res->error !== null && stripos((string)$res->error, 'too many failed') !== false,
+check($res->redirect === '/login?msgtext=too_many_attempts',
 	'the eleventh failure from one address is throttled',
-	'error: ' . var_export($res->error, true));
+	'redirect: ' . var_export($res->redirect, true) . ' error: ' . var_export($res->error, true));
 
 // The throttle outranks a correct password: once the budget is gone, the right
 // credential does not buy a way past it.
 $res = login_call(array('email' => $email, 'password' => $password));
-check($res->error !== null && stripos((string)$res->error, 'too many failed') !== false,
+check($res->redirect === '/login?msgtext=too_many_attempts',
 	'a throttled address is refused even with the correct password',
-	'error: ' . var_export($res->error, true));
+	'redirect: ' . var_export($res->redirect, true) . ' error: ' . var_export($res->error, true));
 
 // Per-IP keying, asserted both ways.
 $clean_ip = '192.0.2.21';
@@ -260,9 +262,10 @@ $unactivated->save();
 
 harness_set_setting_mem('activation_required_login', '1');
 $res = login_call(array('email' => $unactivated_email, 'password' => $unactivated_pass));
-check($res->error !== null && stripos((string)$res->error, 'activation') !== false,
-	'an unactivated account is refused when the site requires activation',
-	'error: ' . var_export($res->error, true));
+check($res->error === null
+		&& $res->redirect === '/login?msgtext=activation_sent&e=' . rawurlencode($unactivated_email),
+	'an unactivated account is sent back to the form with the activation message, never a thrown error',
+	'redirect: ' . var_export($res->redirect, true) . ' error: ' . var_export($res->error, true));
 
 $unactivated->set('usr_is_activated', TRUE);
 $unactivated->save();

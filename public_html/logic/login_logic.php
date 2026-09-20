@@ -64,7 +64,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			}
 		}
 		else {
-			return LogicResult::error('You cannot activate a user while being logged in as another user.');
+			return LogicResult::redirect('/login?msgtext=activate_other_user');
 		}
 	}
 
@@ -84,7 +84,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				require_once(__DIR__ . '/../includes/Exceptions/AuthenticationException.php');
 				throw new AuthenticationException('Too many failed login attempts. Please try again in 15 minutes.');
 			} else {
-				return LogicResult::error('Too many failed login attempts. Please try again in 15 minutes.');
+				return LogicResult::redirect('/login?msgtext=too_many_attempts');
 			}
 		}
 
@@ -135,10 +135,18 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		$settings = Globalvars::get_instance();
 		$page_vars['settings'] = $settings;
 
+		// Right password, unactivated account: send the activation email again
+		// and say so on the form. A refusal here is a message on the login page,
+		// never a thrown error — process_logic turns an error with no page data
+		// into the exception page.
 		if($settings->get_setting('activation_required_login')){
 			if(!$user->get('usr_is_activated')){
 				Activation::email_activate_send($user);
-				return LogicResult::error('This site requires email activation before you can log in.  An activation email has been sent to '.$user->get('usr_email').'. Please click on the link inside to activate');
+				if ($ajax) {
+					require_once(__DIR__ . '/../includes/Exceptions/AuthenticationException.php');
+					throw new AuthenticationException('This account requires email activation before signing in. An activation email has been sent to ' . $user->get('usr_email') . ' — click the link inside to activate.');
+				}
+				return LogicResult::redirect('/login?msgtext=activation_sent&e=' . rawurlencode($user->get('usr_email')));
 			}
 		}
 
@@ -235,10 +243,22 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		return LogicResult::redirect($alternate_homepage ?: '/profile');
 	}
 
+	$email = '';
+	if (isset($input['e'])) {
+		$e = rawurldecode($input['e']);
+		if (LibraryFunctions::IsValidEmail($e)) {
+			$page_vars['email'] = $e;
+			$email = $e;
+		}
+	}
+
 	$login_messages = array(
 		'email_verified'=>'Your email is now verified.  Please log in to improve your profile.',
 		'email_not_verified'=>'Your email address was unable to be verified because of an incorrect or expired verification code.  Please log in to resend your verification code',
 		'login_to_email_verify'=>'Please log in to verify your email address.',
+		'activation_sent'=>'This site requires email activation before you can log in. An activation email has been sent to ' . ($email !== '' ? $email : 'your address') . ' — click the link inside to activate, then log in again.',
+		'too_many_attempts'=>'Too many failed login attempts. Please try again in 15 minutes.',
+		'activate_other_user'=>'You cannot activate a user while being logged in as another user.',
 	);
 
 	if(isset($input['msgtext'])){
@@ -255,14 +275,6 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$message = new DisplayMessage('Your username or password was incorrect.  Please try again below, or sign up if you don\'t have an account.  If you forgot your password, <a href="/password-reset-1">click here</a> and we\'ll send you a new one.', 'Login warning', '/\/login.*/', DisplayMessage::MESSAGE_WARNING, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, "loginbox", TRUE);
 		}
 		$session->save_message($message);
-	}
-
-	$email = '';
-	if (isset($input['e'])) {
-		$e = rawurldecode($input['e']);
-		if (LibraryFunctions::IsValidEmail($e)) {
-			$page_vars['email'] = $e;
-		}
 	}
 
 	return LogicResult::render($page_vars);

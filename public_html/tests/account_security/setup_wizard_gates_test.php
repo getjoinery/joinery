@@ -52,4 +52,26 @@ check($res->redirect !== '/change-password-required',
 	'redirect: ' . var_export($res->redirect, true));
 unset($_SESSION['usr_user_id'], $_SESSION['loggedin'], $_SESSION['force_password_change']);
 
+section('Leaving from the final checklist ends the interrupt but not the pill');
+$leaver = make_user('SetupLeave', 10);
+$leaver->set('usr_setup_dismissed_time', null);
+$leaver->save();
+$_SESSION['usr_user_id'] = (int)$leaver->key;
+$_SESSION['loggedin'] = true;
+$_SESSION['permission'] = 10;
+SetupSteps::resetViewer(); // viewerUser() is cached per request; this is a new viewer
+check(!SetupSteps::leftWizard($leaver), 'a fresh account has not left the wizard');
+$res = harness_call_logic('logic/setup_logic.php', 'setup_logic', array('action' => 'leave'), 'POST');
+check($res->redirect === '/admin', 'Go to your site lands the owner on the site',
+	'redirect: ' . var_export($res->redirect, true) . ' error: ' . var_export($res->error, true));
+$leaver->load();
+check($leaver->get('usr_setup_reviewed_time') !== null && $leaver->get('usr_setup_dismissed_time') === null,
+	'leaving records the review, not a dismissal — the header pill keeps counting the skipped steps',
+	'reviewed: ' . var_export($leaver->get('usr_setup_reviewed_time'), true) . ' dismissed: ' . var_export($leaver->get('usr_setup_dismissed_time'), true));
+check(SetupSteps::leftWizard($leaver), 'the login interrupt stops for a reviewed wizard');
+$dismisser = make_user('SetupDismiss', 10);
+check(SetupSteps::leftWizard($dismisser), 'and for a dismissed one (the fixture default)');
+unset($_SESSION['usr_user_id'], $_SESSION['loggedin'], $_SESSION['permission']);
+SetupSteps::resetViewer();
+
 harness_finish();

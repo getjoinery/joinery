@@ -889,8 +889,11 @@ answer, recorded in `sud_setup_decisions`; real state always outranks the
 decision row).
 
 The login redirect lives in `SessionControl::check_permission()` alongside the
-other interstitials and fires only for accounts that have never dismissed the
-wizard (`usr_setup_dismissed_time`). `SetupSteps::interruptExempt()` names the
+other interstitials and fires only for accounts that have never left the
+wizard (`SetupSteps::leftWizard()`): neither "Finish later"
+(`usr_setup_dismissed_time`, which also hides the header pill) nor "Go to your
+site" from the final checklist (`usr_setup_reviewed_time`, after which the pill
+keeps counting the skipped steps). `SetupSteps::interruptExempt()` names the
 paths it leaves alone: the wizard, logout, the API, the security page (where
 the encryption step sends a user to add a passkey that can derive a key) and
 the step-up ceremony. The wizard applies the forced-password-change and terms

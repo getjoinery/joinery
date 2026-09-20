@@ -19,7 +19,6 @@
 	if ($site_name === '') {
 		$site_name = 'Joinery';
 	}
-	$home_url = ($permission >= 10) ? '/admin' : '/profile';
 
 	$current_step = null;
 	foreach ($steps as $s) {
@@ -119,7 +118,10 @@
 			</ul>
 			<div class="setup-nav">
 				<span></span>
-				<a class="btn btn-primary" href="<?php echo htmlspecialchars($home_url); ?>">Go to your site</a>
+				<form method="POST" action="/setup">
+					<input type="hidden" name="action" value="leave">
+					<button type="submit" class="btn btn-primary">Go to your site</button>
+				</form>
 			</div>
 <?php } elseif ($current_step !== null) { ?>
 			<h1><?php echo htmlspecialchars($current_step['title']); ?></h1>
