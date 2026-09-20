@@ -35,7 +35,10 @@
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
- * @version 1.15
+ * @version 1.16
+ * @changelog 1.16 - shouldInterrupt() also stops for usr_setup_reviewed_time —
+ *   set when the owner leaves from the final checklist — while pillCounts()
+ *   keeps the header pill up until every step is green.
  * @changelog 1.15 - 'render_when_done': the Sign-in security partial stays up once a
  *   passkey exists, so the optional authenticator app can still be added.
  * @changelog 1.14 - The Backups step treats the nightly backup and its verification as one item:
@@ -264,9 +267,10 @@ class SetupSteps {
 
 	/**
 	 * Whether the login redirect to /setup should fire for this request:
-	 * the viewer has never dismissed the wizard and a step in their scope is
-	 * not green. Once dismissal or all-green is seen, an all-clear sticks in
-	 * the session and this costs nothing further.
+	 * the viewer has neither dismissed the wizard nor reviewed it to the end,
+	 * and a step in their scope is not green. Once either mark or all-green
+	 * is seen, an all-clear sticks in the session and this costs nothing
+	 * further.
 	 */
 	/**
 	 * Paths the login interrupt leaves alone. The wizard itself and logout;
@@ -281,6 +285,15 @@ class SetupSteps {
 			return true;
 		}
 		return strpos($path, '/api/v1/') === 0;
+	}
+
+	/**
+	 * Either way out of the wizard ends the login interrupt: "Finish later",
+	 * or walking through to the final checklist and leaving from there. Only
+	 * the first also hides the header pill (pillCounts).
+	 */
+	public static function leftWizard(User $viewer): bool {
+		return (bool)$viewer->get('usr_setup_dismissed_time') || (bool)$viewer->get('usr_setup_reviewed_time');
 	}
 
 	public static function shouldInterrupt(): bool {
@@ -298,7 +311,7 @@ class SetupSteps {
 		if (!$viewer || !$viewer->key) {
 			return false;
 		}
-		if ($viewer->get('usr_setup_dismissed_time')) {
+		if (self::leftWizard($viewer)) {
 			$_SESSION[self::SESSION_CLEAR] = 1;
 			return false;
 		}
@@ -356,6 +369,12 @@ class SetupSteps {
 	public static function invalidateSessionCache(): void {
 		unset($_SESSION[self::SESSION_CLEAR]);
 		unset($_SESSION[self::SESSION_PILL]);
+	}
+
+	/** Forget the per-request viewer so the next call reloads it (tests only). */
+	public static function resetViewer(): void {
+		self::$viewer_user = null;
+		self::$viewer_loaded = false;
 	}
 
 	/** Clear the registry (tests only). */

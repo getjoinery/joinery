@@ -6,6 +6,10 @@
  * step mounts an existing ceremony or panel; this logic owns only the shell:
  * step resolution, dismissal, "not now" decisions, and the welcome save.
  *
+ * @version 2.8
+ * @changelog 2.8 - action=leave ("Go to your site" on the final checklist)
+ *   records usr_setup_reviewed_time so the login interrupt stops; skipped
+ *   steps stay in the header pill.
  * @version 2.7
  * @changelog 2.7 - The email step's provider registration and DNS publish are
  *   two functions (_setup_mail_register, _setup_mail_publish) the wizard's
@@ -117,6 +121,18 @@ function setup_logic(array $input): LogicResult {
 			SetupSteps::invalidateSessionCache();
 			return LogicResult::redirect($permission >= 10 ? '/admin' : '/profile');
 		}
+	}
+
+	// "Go to your site" from the final checklist. The owner has seen every
+	// step, so the login interrupt stops; what they skipped stays counted in
+	// the header pill until it is done.
+	if ($action === 'leave') {
+		if (!$viewer->get('usr_setup_reviewed_time')) {
+			$viewer->set('usr_setup_reviewed_time', gmdate('Y-m-d H:i:s'));
+			$viewer->save();
+			SetupSteps::invalidateSessionCache();
+		}
+		return LogicResult::redirect($permission >= 10 ? '/admin' : '/profile');
 	}
 
 	// "Not now" on an optional step: records a decision, never completion.
