@@ -73,15 +73,19 @@ Phase 1 instantiates it as `ManagedSiteRequirement` → a draft provision
 ## Contract C2 — the tenant row and the status response (phase 2 → phase 3)
 
 `svt_service_tenants`, one row per site per service, with at least:
-`svt_paid_until` (timestamp, null = not entitled), `svt_allowance`
-(integer, the service's unit: sends a month or GB), `svt_state`, the
-provider ids, the figure and its measured time, and the ladder timestamps.
+`svt_apk_api_key_id` (the connected key — the site's identity; the host is
+a label beside it), `svt_paid_until` (timestamp, null = not entitled),
+`svt_allowance` (integer, the service's unit: sends a month or GB),
+`svt_state`, the provider ids, the figure and its measured time, and the
+ladder timestamps.
 Phase 2 writes the date from an admin grant action; phase 3 writes it from
 a payment. The reconcile treats the two identically.
 
 The **status** action returns, per service: `figure`, `allowance`,
-`paid_until`, `state`, `notice`, and — added by phase 3 — the product on
-sale for this tenant (`label`, `price`, `url`), empty when none. The site
+`paid_until`, `state`, `notice`, the first door (`action_label`,
+`action_url` — the plane's referral link for that service, empty when
+unset), and — added by phase 3 — the product on sale for this tenant
+(`label`, `price`, `url`), empty when none. The site
 writes these into the five banner settings and never interprets them
 further; the second door renders only when the product fields are present.
 
@@ -108,9 +112,10 @@ Phase 1's gate runs there.
 
 **getjoinery (the production Server Manager) still needs, before any live
 gate:** SMTP2GO account, master key, webhook secret, MSP and affiliate
-enrolment; a Linode token scoped `linodes:read_write`; a B2 bucket and a
-master key with `writeKeys`, `listKeys`, `deleteKeys` (the current key
-cannot create keys, so every shelf path ships off until then); Namecheap
+enrolment; a Linode token scoped `linodes:read_write`; a shelf bucket on any
+S3-compatible store with a credential that can list, read, write and
+delete in it (the shelf is brokered, phase 2 §3 — nothing mints keys, so
+no key-management capability is needed); Namecheap
 API eligibility on the live account and the plane's IP allowlisted; a
 storage referral link.
 

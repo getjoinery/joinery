@@ -40,12 +40,41 @@ written against the streamed engine this one produces.
 
 **Decisions already made — do not reopen:**
 
-- The archive streams; the database dump still lands on disk, compressed.
+- The archive streams, and so does the database dump in chain mode and in
+  database-only mode. Only the small metadata artifact lands on disk.
 - The runner completes a multipart upload only after the engine's exit status
   is known; the status arrives after the bytes.
-- The manager credential is not changed; multipart abort is already within
-  `writeFiles` (§ The manager profile).
+- The manager credential is not changed by this spec; multipart abort is
+  already within `writeFiles` (§ The manager profile). **But see the
+  brokered-shelf block below:** put the signing of each multipart call
+  behind one seam so that credential can later be no credential at all.
 - The part size stays at the existing constant.
+
+**Brokered shelf — deltas from `services_phase2_platform.md` D3 (owner,
+2026-09-20).** The shelf a management node keeps for its nodes is becoming
+*brokered*: no node ever holds a storage credential; for every object it
+asks the plane for a presigned URL (PUT, GET, and multipart create / part /
+complete / abort), signed inside the node's own prefix, never a delete. That
+lands as phase 2 items 2a (the broker, presigning beside `presign_get`)
+and 2b (an object-store seam in the engine: a direct implementation that is
+today's signer with a credential, and a brokered one that asks the plane),
+**after this spec, never across it** — phase 2 §10 says so. What 2b needs
+from this build, so it is a swap and not a rewrite, **this build already
+provides** (executor, 2026-09-20): `put_stream()`, `complete_stream()` and
+`abort_stream()` issue every multipart call — create, part, complete, abort
+— through the signer's one private `request()` → `attempt()` seam; nothing
+signs inline. Today that seam signs with `$creds`; the brokered store makes
+it return URLs the plane signed. Part payload hashing, retries and the
+complete-only-after-status rule are the loop's and do not move. The runner
+reaches the signer only through `destination()` (creds, bucket, base key)
+and `stream_engine()`; 2b turns that triple into a store object.
+- `discard_failed_run()`'s remote delete of an orphaned files object is a
+  site-profile act. On a brokered shelf it becomes *abort the unfinished
+  multipart through the broker*; a completed orphan is the plane's ledger's
+  to prune. Write the delete behind the same seam.
+- The per-run `writeFiles` key in the manager profile stays until 2a
+  retires it; nothing here should make it harder to remove (no new reads of
+  `mint_run_credentials()` outside `plan_manager()`'s existing slot).
 
 **Stop points** (hand back to the owner; do not work around):
 
@@ -99,11 +128,13 @@ orientation; re-grep before editing):
   "${BACKUP_DIR}/${FINAL_ARCHIVE}"`). `restore_project.sh` expects: one
   top-level directory (386), the dump at its root (416), `project_files/`
   (431), `apache_config/` (464).
-- `backup_database.sh`: the encrypted path dumps to
+- `backup_database.sh` (3.4): the encrypted path dumps to
   `mktemp /tmp/jy_backup_XXXXXXXX.sql` (109–110), then `gzip -9 < tmp |
   openssl … -pass fd:3 -out "$backup_file"` under `pipefail` in a subshell
-  (119); the plaintext path already pipes (158). Remove the temp file and its
-  sweep (108).
+  (119); the plaintext path already pipes (158); the output name is
+  `${db_name}-${now}.sql.gz.enc` (99). Remove the temp file and its sweep
+  (108); add `--archive -` / `--report FILE` beside `--non-interactive` and
+  `--key-file` (argument loop from 418).
 - `BackupRunner`: `execute_chain()` 616 (files engine → db engine → meta →
   `add_run` → `write` manifest → `upload_chain`; the failure branch clears
   the snapshot and calls `discard_failed_run()`); `run_files_engine()` 848
@@ -145,13 +176,16 @@ A backup run writes the site's archive to local disk, then uploads it. On the
 smallest nodes (25 GB) that means a site can only be backed up while its own
 size is free beside it, and a site that grows past half the disk stops being
 backed up at all. This spec streams the archive from tar straight into the
-bucket through the signer's multipart path, so **no archive is ever on the
-node**. What a run holds on disk shrinks to the compressed database dump.
+bucket through the signer's multipart path, and streams the database dump
+the same way, so **no archive and no dump is ever on the node**. What a chain
+run holds on disk shrinks to the metadata artifact, a few kilobytes.
 
 It is independent of `backup_offloaded_files.md` (files in the cloud store).
 That spec shrinks the tar by keeping offloaded files out of it; this one keeps
-whatever tar produces off the disk. With both, a run's peak disk is the site
-tree plus the compressed dump plus one object's ciphertext, and nothing else.
+whatever the engines produce off the disk. With both, a run's peak disk is
+the live site tree plus one object's ciphertext, and nothing else. On a
+mail-heavy site the database *is* the site — dev's is 925 MB, dominated by
+mail-adjacent tables — which is why the dump streams too.
 
 ## The gap, precisely
 
@@ -181,10 +215,14 @@ artifacts, and the delete-after-upload setting defaulted to off until
 
 | | Today | After |
 |---|---|---|
-| Chain run | site + archive + dump (plain + compressed) | site + dump (compressed) |
-| Standalone full run | site + **copy of site** + archive + dump (plain + compressed) | site + dump (compressed) |
-| Database-only run | dump (plain + compressed) | dump (compressed) |
-| Between runs | up to seven days of archives | dumps and metadata only, same window |
+| Chain run | site + archive + dump (plain + compressed) | site |
+| Standalone full run | site + **copy of site** + archive + dump (plain + compressed) | site + dump (compressed, inside the staging directory for the length of the tar) |
+| Database-only run | dump (plain + compressed) | nothing |
+| Between runs | up to seven days of archives | metadata, manifest and snapshot only |
+
+The standalone archive carries the dump **inside** the tar, so that mode alone
+must have the compressed dump on disk while tar reads it. It is deleted with
+the staging directory the moment the stream closes.
 
 Memory: one upload part, 100 MiB, exactly what the multipart path costs today
 for any artifact over 1 GiB. Nothing here raises it.
@@ -242,21 +280,27 @@ it was being read as exit 1, which is accepted today, and a real failure as
 
 ### Chain mode (`backup_files.sh`, `execute_chain()`)
 
-The files engine streams; the archive's `bytes` and `sha256` come from the
-upload. The database dump and metadata are made on disk as today (both small,
-both bounded) and uploaded by `upload_chain()` with the manifest, which now
-also carries the already-uploaded files artifact. Artifact entries carry their
-bucket `key`; a files artifact has no `path`.
+The files engine streams, then the database engine streams, each under the
+contract above; both artifacts' `bytes` and `sha256` come from the upload.
+The metadata artifact is made on disk as today (kilobytes) and uploaded by
+`upload_chain()` with the manifest, which now also carries the two
+already-uploaded artifacts. Artifact entries carry their bucket `key`; a
+streamed artifact has no `path`. `run_db_engine()` no longer renames a
+produced file: the artifact name `db-{seq}.sql.gz.enc` is the object key from
+the start.
 
 A failure between the files upload and the manifest upload (the database
-engine fails, say) leaves an uploaded files object the manifest does not name.
+stream fails, say) leaves an uploaded files object the manifest does not name.
 `discard_failed_run()` deletes it where the credential can delete (the site
-profile). On the manager shelf the credential is write-only, so the object
-stays until its chain is pruned whole — a bounded, harmless orphan, and the
-same one a failed `upload_chain()` can leave today.
+profile with its own target). On the manager shelf the credential is
+write-only, so the object stays until its chain is pruned whole — a bounded,
+harmless orphan, and the same one a failed `upload_chain()` can leave today.
+Under the brokered shelf the same orphan is a ledger row the plane's
+reconcile drops (phase 2 §3), and an *unfinished* multipart is aborted by
+asking the broker.
 
 `full_size_warning()` reads the streamed byte count. `delete_local` has no
-files artifact to delete; it still removes the dump and metadata.
+files or database artifact to delete; it still removes the metadata artifact.
 
 ### Standalone full mode (`backup_project.sh`, `execute_full()`)
 
@@ -279,10 +323,23 @@ the sidecar, and records both.
 
 ### The database dump (`backup_database.sh`)
 
-`pg_dump | gzip | openssl` in one pipeline under `pipefail`, to the output
-file. The plaintext temp file and its stale-leftover sweep go. The dump still
-lands on disk compressed and encrypted, and is uploaded as today: it is the
-one artifact that stays local, and it is the smallest.
+`pg_dump | gzip | openssl` in one pipeline under `pipefail`. The plaintext
+temp file and its stale-leftover sweep go in every mode. The script gains the
+same stream contract as the archive engines — `--archive -` writes the
+encrypted dump to stdout, `--report FILE` records `DUMP_RC` and `ENC_RC`
+after the stream closes — and the runner completes the upload only when
+`pg_dump` exited 0. A dump that failed part-way is never on the shelf.
+
+Chain mode streams the dump as `db-{seq}.sql.gz.enc`. Database-only mode
+(`backup_type = database`, `execute_full()` → `run_engine()`) streams it as
+the standalone artifact and uploads the envelope sidecar beside it. The
+standalone **project** archive is the one place the dump is written to disk:
+it is a member of that tar, so it is dumped into the staging directory
+compressed, archived, and deleted with the directory.
+
+A database-only restore reads a local file, as it does today, and the file
+arrives the way every artifact does: `download_backup` fetches it from the
+shelf by presigned link, ledger-checked. Nothing on that path changes.
 
 ### The ledger
 
@@ -294,21 +351,28 @@ the hash is taken by the process that pushed them, from the same bytes.
 
 ### What stays on disk between runs
 
-The dump, the metadata artifact, the chain manifest and the snapshot. Local
-retention and delete-after-upload govern the first two; the manifest and
-snapshot are never swept, as today. A restore or a verify fetches from the
+The metadata artifact, the chain manifest and the snapshot. Local retention
+and delete-after-upload govern the first; the manifest and snapshot are never
+swept, as today. A restore or a verify fetches from the
 bucket, as it does now — `BackupStaging` already re-uses only what is in its
 own work directory, never the backup directory.
 
 ### The manager profile
 
-Same code, same credential. The per-run key is a Backblaze application key
-minted with the single capability `writeFiles`, restricted to the node's name
-prefix (`AgentChannelEndpoint.php:1116-1126`). Every multipart call the
-stream makes — create, upload part, complete, and abort (`b2_cancel_large_file`
-on the S3 surface) — is a `writeFiles` operation, and `put_file()` already
-takes the multipart path under this key for every dump over 1 GiB. Nothing new
-is asked of the credential.
+Same code, same credential, for now. The per-run key is a Backblaze
+application key minted with the single capability `writeFiles`, restricted to
+the node's name prefix (`AgentChannelEndpoint.php:1116-1126`). Every multipart
+call the stream makes — create, upload part, complete, and abort
+(`b2_cancel_large_file` on the S3 surface) — is a `writeFiles` operation, and
+`put_file()` already takes the multipart path under this key for every dump
+over 1 GiB. Nothing new is asked of the credential.
+
+The credential itself is going: under the brokered shelf (phase 2 D3, the
+block at the top) the job carries a per-run token in the slot the key
+occupies today, and the node's run asks the broker for each URL the stream
+needs. The B2-only key mint is what made the manager profile provider-bound;
+with it gone the shelf is any S3-compatible store. This spec's loop is the
+one the brokered store drives, which is why the signing sits behind a seam.
 
 ## What this does not change
 
@@ -324,7 +388,7 @@ is asked of the credential.
 
 - **Backups page:** the run message no longer says the local copy was removed
   (there is none); the help text for *Delete the local copy once uploaded*
-  says it governs the database dump and metadata.
+  says it governs the metadata artifact and a standalone archive's staging.
 - **Backups tab (node):** unchanged.
 
 No new settings.
@@ -351,8 +415,14 @@ No new settings.
   after streaming leaves nothing on the fixture and the run fails under the
   existing discard rule; `full_size_warning()` sees the streamed count.
 - `tests/backups/backup_ledger_test.php` gains `record_hash()`.
-- `tests/backups/restore_database_envelope_test.php` (or the database gate)
-  proves the pipelined dump opens unchanged.
+- `tests/backups/backup_database_stream_gate.sh` (db): a streamed dump
+  decrypts and loads into a throwaway database identical to a written one; no
+  plaintext temp file exists at any point (the `jy_backup_*` glob is empty
+  throughout); a `pg_dump` failure is reported after the stream and the
+  runner-side rule refuses it; a database-only run leaves nothing in the
+  output directory but the envelope sidecar's upload record.
+- `tests/backups/restore_database_envelope_test.php` proves a streamed dump
+  opens unchanged.
 
 ## Docs
 
@@ -362,8 +432,6 @@ scripts carry the contract in their headers. Current state only.
 
 ## Out of scope
 
-- Streaming the database dump; it is the smallest artifact and the one a
-  database-only restore reads from disk.
 - Streaming a restore or a verify.
 - Changing the part size or the multipart threshold.
 
@@ -375,5 +443,6 @@ scripts carry the contract in their headers. Current state only.
   and runner test.
 - **WP3** `backup_project.sh` stream mode without the staging copy,
   `execute_full()` on it, gate.
-- **WP4** `backup_database.sh` pipeline.
+- **WP4** `backup_database.sh` pipeline and stream mode, `run_db_engine()`
+  and the database-only `execute_full()` path on it, gate.
 - **WP5** Docs, Backups page wording, settings help text.

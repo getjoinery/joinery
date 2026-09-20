@@ -65,6 +65,34 @@ the step ordering below is written against the streamed files engine.
   capability on any provider. It gets presigned links (§ Rollout). (D1)
 - Restores fetch objects by presigned link, paged at ≤150 per job. No read
   key, on any provider. (D2)
+
+**Brokered shelf — deltas from `services_phase2_platform.md` D3 (owner,
+2026-09-20).** D1 and D2 get stronger, not weaker: the manager shelf is
+becoming *brokered*, so a node holds **no** shelf credential of any kind —
+not write-only either. Every write, including the object store's
+`objects/{epoch}/…` puts, is a presigned PUT the plane signs inside the
+node's own prefix; reads stay the presigned links this spec already uses.
+That lands as phase 2 items 2a (the broker) and 2b (an object-store seam in
+the engine) after or with `backup_streaming_upload.md`. What it means here:
+
+- Where this spec says the manager run stores an object with
+  `S3Signer::put_file()` under the credential it is handed, read: through
+  the store the runner's destination gives it — the direct store today, the
+  brokered store after 2b. Keep the object step's puts on that one path so
+  the swap is a swap.
+- The `manager` block's `credentials` field is the slot the per-run token
+  takes over; the three fields this spec adds (`objects`,
+  `objects_index_url`, `epoch_envelope_urls`) are unchanged and remain
+  presigned links from the plane.
+- "The node cannot list that shelf — the credential is write-only" becomes
+  "the node does not list that shelf": the broker *could* answer a list, but
+  the index-by-link design (D1) stands and is the cheaper, already-listed
+  answer. Do not add a list call.
+- A self-hosted site on the phase 2 `managed` target (its shelf is ours,
+  brokered) runs the **site** profile, and its object store puts and lists
+  go through the brokered store the same way; its own-bucket target is the
+  direct store, untouched. The site profile's logic does not fork on that.
+- Nothing in this spec's restore, verify, index or retention design changes.
 - Objects are not ledgered; the index is. (§ The index)
 - The plain index carries no plaintext hash, size or MIME type. (§ The index)
 - One store budget covers local sources and catch-up alike. (§ The run)
@@ -185,6 +213,12 @@ orientation; re-grep before editing):
 - Scripts: `backup_files.sh` argument loop (84–100), `ARCHIVE` (118),
   tar (210–217), report lines (262–266). `restore_chain.sh`: database restore
   at 409–422, reconcile from 424; the objects step goes between them.
+- Notices: `includes/AdminNotices.php` (`register(string $name, callable
+  $renderer)`, `render()`, `resetForTests()`); `includes/SiteBackupNotice.php`
+  (1.0) is the model — `render()` reads one stored fact and returns HTML or
+  `''`, with its own small CSS. The file-store key is the
+  `cloud_storage_access_key` setting; the target's is in
+  `BackupTarget::get_credentials()['access_key']`.
 - Admin: `adm/admin_backups.php` + `adm/logic/admin_backups_logic.php` (1.8,
   `$milestones`), `adm/admin_cloud_storage.php` (1.3) +
   `adm/logic/admin_cloud_storage_logic.php` (2.2),
@@ -290,7 +324,8 @@ local copy. It has never been downloaded to make a backup and never will be.
   holds and re-copies nothing; a lost local record costs at most one run's
   worth of re-stores, never the store.
 - **No node reads a shelf with a credential.** The write-only manager
-  credential stays write-only on every provider; what a node needs to read
+  credential stays write-only on every provider until the brokered shelf
+  removes it altogether (the D3 block above); what a node needs to read
   arrives as a presigned link, as every restore does today. Nothing here adds
   a capability to a stored or minted key, so nothing here is provider-specific
   beyond the Backblaze minting that already exists.
@@ -717,6 +752,24 @@ nothing else new.
   inventory result.
 - **Recovery Readiness:** epochs openable only by a retired key.
 - **Management dashboard node card:** shelf size already includes objects.
+- **Same account, said plainly.** When the site's backup target and the file
+  store share an access key (`cloud_storage_access_key` equals the target's),
+  the Backups page and the cloud-storage page both say: "Your backup shelf and
+  your file store are on the same account. Losing that account loses both. A
+  copy taken by a management node is the one that survives it." The object
+  store protects against a deleted bucket, a revoked key and an accidental
+  `rm`; only a shelf on another account protects against the account itself.
+  The same-key test is the whole rule — accounts are not detectable, keys
+  are.
+- **An admin notice, not only a page.** A count on a page is read by nobody.
+  `BackupObjectsNotice` registers with `AdminNotices::register()` beside
+  `SiteBackupNotice` and renders on every admin page when either holds:
+  waiting bytes exceed **2 GB**, or an enabled profile's newest successful run
+  is older than **7 days** while anything waits. Constants on the class, not
+  settings. Text: "N files (X GB) are waiting for the management node's
+  backup, which last succeeded D days ago. They stay on this server until it
+  does." — or "…waiting for this site's backup…" for the site profile. It
+  clears itself when nothing waits.
 
 ## Does this work with incremental backups?
 
@@ -769,14 +822,19 @@ already starts; the fake file bucket is `tests/lib/cloud_fixtures.php`.
   plane's paging yields ≤150 links per job and covers every index entry once.
 - `tests/unit/core_api_mechanical_test.php`: the release step and the restore
   flip are server-initiated writes.
+- `tests/backups/backup_objects_notice_test.php` (safe): the notice renders
+  above the byte threshold, above the age threshold with anything waiting,
+  and not otherwise; the same-account line appears exactly when the two
+  access keys match.
 
 ## Docs
 
 `docs/backups.md` — object store layout, epochs, the objects retention family,
 verification rows, restore step, node disk table, the manager request fields,
-the settings table's default. `docs/cloud_storage.md` — the tick's store and
-release rule, enabled profiles, the inventory, the waiting count, `head()` on
-the driver interface. Current state only.
+the settings table's default, and one paragraph on what each shelf protects
+against (the same-account point above). `docs/cloud_storage.md` — the tick's
+store and release rule, enabled profiles, the inventory, the waiting count,
+the notice, `head()` on the driver interface. Current state only.
 
 ## Out of scope
 
@@ -830,4 +888,5 @@ No new settings. One default changes:
   the plane, `BackupStaging` prefix.
 - **WP5** `CloudStorageDriver::head()`, the file-store inventory, **Bring them
   back** on both kinds of site.
-- **WP6** Admin surfaces, Recovery Readiness, docs, tests.
+- **WP6** Admin surfaces, the same-account line, `BackupObjectsNotice`,
+  Recovery Readiness, docs, tests.
