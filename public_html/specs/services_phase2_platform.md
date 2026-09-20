@@ -123,13 +123,51 @@ grace-lapse reconcile. The mailbox fleet migrates onto it; mail and backups
 are its second and third consumers. Backups are core, so the tenant side of
 that one lives in core, not a plugin.
 
-**The account link.** A self-hosted site needs a getjoinery account. The
-wizard step says so in one line and offers the two ways in: paste an API key
-from your getjoinery profile, or — when the install came through the
-StackScript or the configure page and the key was seeded — nothing. Seeding
-is the existing customer-cloud pattern (`FleetProvisionSeeding`) and is not
-new work for Managed; for the StackScript it is a field on the deploy form
-(Q4 in §13).
+**The account link.** A self-hosted site needs a getjoinery account, and
+the site has to be bound to it once. Nobody types a key. Two ways in:
+
+- **Born through getjoinery** (Managed, or the buyer's own cloud from the
+  configure page): the plane mints the buyer's key and seeds it over the
+  agent channel with the `fleet_enroll` primitive — the existing
+  customer-cloud pattern (`FleetProvisionSeeding`), no new work.
+- **Born anywhere else** (the StackScript, a plain install): the wizard
+  step shows one **Connect your getjoinery account** button. The browser
+  goes to an authorise page on getjoinery carrying the site's identity and
+  its return address; the owner signs in or signs up there (the existing
+  side-by-side start page shape), approves *link this site*, and
+  getjoinery mints a key against their account and returns it to the site
+  over the redirect. The site stores the key pair sealed, and the step is
+  now the same one-click Enrol a seeded site shows. Someone with no
+  getjoinery account yet is covered, which a paste never was.
+
+The authorise flow, owner decision 2026-09-20:
+
+- **The site starts it.** The step's button is a POST that mints a
+  single-use state (`OAuth2State`, the platform's own carrier) binding the
+  return address to this browser session, then redirects to
+  `{services_url}/services/authorize?site={host}&return={url}&state={s}`.
+  The return address must be the site's own origin (`webDir`), so a
+  crafted link cannot send a key elsewhere.
+- **getjoinery asks once.** Signed out, the authorise page routes through
+  the start page and comes back. Signed in, it names the site and the
+  account and takes one click. It mints an `ApiKey` named for the site
+  (`Services: {host}`, read + write, no delete — the seeding's own
+  permission), one active per site per account: connecting again
+  deactivates the earlier key for that site rather than leaving two.
+- **The key returns in the redirect, once.** The redirect carries the
+  public key, the secret and the state; the site verifies the state,
+  seals the pair into `server_manager_services_api_public_key` /
+  `_secret_key`, and the secret is never shown on either side. A redirect
+  that lands twice, or with a spent state, is refused and the owner told
+  to connect again. The secret is in one URL for one hop over TLS, the same
+  exposure as every OAuth code exchange the platform already performs.
+- **Re-connect is always allowed** and is how a lost or rotated key is
+  replaced: the old key goes inactive when the new one is minted.
+- **A connected site names its account.** The wizard step and the Backups
+  page show which getjoinery account the site is linked to, with
+  *Disconnect* (deactivates the key on getjoinery through release, then
+  clears the pair). Disconnecting a site with an active service is
+  refused with the sentence saying to release the service first.
 
 **Enrol, per service:**
 
@@ -235,9 +273,9 @@ bounce or complaint enforcement, per the 2026-09-06 decision.
 ## 9. The site side
 
 - **The wizard's Email and Backups steps** each offer *use getjoinery's
-  account* beside the existing providers. The step needs the site's
-  getjoinery API key (pasted once from the profile, or seeded — Q4), calls
-  enrol, and on *entitled* writes what §4's table says. On *not entitled*
+  account* beside the existing providers. An unlinked site shows the
+  Connect button (§4) in that slot; a linked one calls enrol, and on
+  *entitled* writes what §4's table says. On *not entitled*
   it says so and links to the site's page on getjoinery (in this phase that
   page shows the date and nothing to buy; phase 3 adds the card).
 - **The `managed` backup target provider:** behaves as `b2` for the engine;
@@ -266,7 +304,8 @@ bounce or complaint enforcement, per the 2026-09-06 decision.
     Nothing is deleted while the customer has only one copy.
 - **Settings** on the site: `server_manager_services_url` (default
   `https://getjoinery.com`), `server_manager_services_api_public_key` /
-  `_secret_key` (sealed). On the plane: `server_manager_services_grace_days`
+  `_secret_key` (sealed), `server_manager_services_account` (the account's
+  display, written by the connect return, shown on the step). On the plane: `server_manager_services_grace_days`
   (14). The allowances and the referral links are the existing settings.
 
 ## 10. Build order
@@ -283,23 +322,31 @@ bounce or complaint enforcement, per the 2026-09-06 decision.
    from `ProvisionHostedMail` with the node-less branch.
 3. The reconcile and metering as phases of `ServerManagerAdvanceProvisioning`
    (§5): prefix sums, limit re-set, the ladder, the retention prune.
-4. The Service Tenants admin page (`/admin/server_manager/service_tenants`):
+4. The authorise page on the plane (`/services/authorize`, §4): the
+   start-page routing for a signed-out visitor, the one-click approval,
+   the key mint (one active per site per account), the redirect back.
+   The site side of the link — the state, the return check, the sealed
+   write, the account display, Disconnect — is part of item 6.
+5. The Service Tenants admin page (`/admin/server_manager/service_tenants`):
    the list with state, figure and date; the grant action (tenant, service,
    date); release; and the ladder's timestamps. The page is also where the
    Managed-included case is invisible, since no tenant row exists for it.
-5. Site side (§9): the wizard choice, the `managed` target, the status poll,
-   the `services` banner state, the switch-over forms.
-6. Docs: `plugins/server_manager/docs/overview.md` (the services),
+6. Site side (§9): the Connect button and the return handler, the wizard
+   choice, the `managed` target, the status poll, the `services` banner
+   state, the switch-over forms.
+7. Docs: `plugins/server_manager/docs/overview.md` (the services),
    `docs/backups.md` (the `managed` provider), `docs/email_system.md` (the
    getjoinery send choice), `plugins/mailbox/docs/overview.md` (the fleet on
    the skeleton).
-7. Tests: §7, plus the skeleton's own suite and the fleet's suite green on
-   the skeleton.
+8. Tests: §7, plus the skeleton's own suite and the fleet's suite green on
+   the skeleton, and the link: a spent state refused, a return address off
+   the site's origin refused, a second connect deactivating the first key.
 
 ## 11. Verification
 
-1. A fresh StackScript box against dev as the operator: paste the key, try
-   Email → *not entitled*; grant a date on the admin page; enrol mail, send
+1. A fresh StackScript box against dev as the operator: Connect from the
+   Email step with no dev account yet, sign up on the way, land back
+   linked; try Email → *not entitled*; grant a date on the admin page; enrol mail, send
    the test message through the subaccount, publish the records, see the
    figure on the banner.
 2. Enrol backups, take a chain; prove from the operator side that the
@@ -323,10 +370,8 @@ bounce or complaint enforcement, per the 2026-09-06 decision.
 
 ## 13. Open
 
-- **Q4. The StackScript deploy form:** add an optional getjoinery API key
-  field so the wizard steps arrive linked to the account, or leave the
-  paste. The field is the one-click story; the paste is zero new surface on
-  a form that is public.
+- **Q4. Resolved 2026-09-20:** the Connect button (§4). No key field on
+  the public StackScript deploy form, and no paste anywhere.
 - **E1. The enrolment skeleton's exact seam** — what moves from
   `FleetClient` / `FleetService` into core and what the mailbox fleet keeps.
   Read both before item 1 of §10.
