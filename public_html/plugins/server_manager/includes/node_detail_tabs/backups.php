@@ -9,7 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
- * @version 1.12 - "Offloaded files on the shelf: N objects, X GB by <party>; last indexed at the run of …"
+ * @version 1.12 - "Offloaded files in backup storage: N objects, X GB by <party>; last indexed at the run of …"
  *                 from the listing's object-store totals (BackupChainListHelper 1.3)
  * @version 1.11 - Bring them back: the node's offloaded files the file store has lost, brought home from the
  *                 newest run that carries an offloaded-files index, as the paged job loop the plane drives
@@ -20,14 +20,14 @@
  *                 verified, and the policy editor has the days-between-verifications field
  * @version 1.9 - the schedule summary and the fleet-default dropdown share one sentence that says
  *                what is kept: N full backups with their incrementals, and how many days that is
- * @version 1.8 - the shelf is listed as one row per backup run (when, full or incremental, who took
+ * @version 1.8 - backup storage is listed as one row per backup run (when, full or incremental, who took
  *                it, size) with the last backup, last full backup and oldest backup held stated above it;
  *                restore is offered per run. Chains and restore points are how it is stored, not what
  *                an operator is looking for
  * @version 1.7 - a failing fleet backup links the failed job next to its reason
- * @version 1.6 - the backup-target line and recoverable box resolve the shelf via get_target(), the
+ * @version 1.6 - the backup-target line and recoverable box resolve backup storage via get_target(), the
  *                same fallback the job builder uses, so a node that names no target but backs up to the
- *                sole enabled shelf reads as cloud-backed instead of "Local only"
+ *                sole enabled backup storage reads as cloud-backed instead of "Local only"
  * @version 1.5 - recoverability is read from the NODE's own verified recovery key, not this management
  *                node's: backups seal to the key the node holds, so a node without a verified one
  *                is shown as unable to back up and the run button is not offered
@@ -48,7 +48,7 @@
 
 	// Where this node's backups actually go — resolved the SAME way the job
 	// builder resolves it, so the tab never says "Local only" about a node that
-	// is in fact uploading to the management node's sole enabled shelf. Reading the
+	// is in fact uploading to the management node's sole enabled backup storage. Reading the
 	// raw mgn_bkt_backup_target_id here was how a working, cloud-backed node
 	// showed as local-only whenever it named no target of its own.
 	require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
@@ -63,12 +63,12 @@
 		// Make the fallback legible rather than silent: this node named no shelf,
 		// so it is using the only one this management node has.
 		if (!$names_own) {
-			$target_name .= ' &mdash; <span class="text-muted">the management node\'s only shelf (this node names none)</span>';
+			$target_name .= ' &mdash; <span class="text-muted">the management node\'s only backup storage (this node names none)</span>';
 		}
 	} elseif ($names_own) {
 		// It named a shelf, but that shelf is gone or switched off — not the same
 		// thing as choosing local-only, and worth saying so.
-		$target_name = 'Local only (the shelf this node named is missing or switched off)';
+		$target_name = 'Local only (backup storage this node named is missing or switched off)';
 	}
 
 	echo '<div class="alert alert-light border mb-3">';
@@ -410,10 +410,10 @@
 
 	$page->end_box();
 
-	// ── Backups on the shelf ──
+	// ── Backups in backup storage ──
 	//
 	// One row per run, newest first, whichever chain it sits in. A chain (one
-	// full plus the incrementals after it) is how the shelf is organised and how
+	// full plus the incrementals after it) is how backup storage is organised and how
 	// a restore replays; what an operator asks is when the last backup was, when
 	// the last full was, and how far back the oldest reaches — so those are
 	// stated first, and every run is offered for restore on its own row. Chain
@@ -451,7 +451,7 @@
 			};
 			$newest_full = null;
 			foreach ($shelf_runs as $entry) { if ($entry['run']['level'] === 0) { $newest_full = $entry; break; } }
-			// The last verify, beside the three facts about the shelf. This is
+			// The last verify, beside the three facts about backup storage. This is
 			// the plane's copy of what the node proved (mgn_backup_verify_*),
 			// refreshed from every verify job and every status report.
 			require_once(PathHelper::getIncludePath('includes/BackupVerifier.php'));
@@ -491,10 +491,10 @@
 					    . BackupChainListHelper::format_size($o['bytes'])
 					    . ' <span class="text-muted small">by ' . htmlspecialchars(strtolower($profile_labels[$profile] ?? $profile)) . '</span>';
 				}
-				echo '<tr><th>Offloaded files on the shelf</th><td>' . ($store_words ? implode('; ', $store_words) : 'none listed');
+				echo '<tr><th>Offloaded files in backup storage</th><td>' . ($store_words ? implode('; ', $store_words) : 'none listed');
 				echo $objects_run !== null
 				   ? '; last indexed at the run of ' . htmlspecialchars($run_when($objects_run['run']))
-				   : '; <span class="text-muted">not indexed by any run on the shelf</span>';
+				   : '; <span class="text-muted">not indexed by any run in backup storage</span>';
 				if ($objects_run !== null) {
 					$oa = htmlspecialchars(json_encode($objects_run['chain']['chain_id'])) . ', '
 					    . htmlspecialchars(json_encode($objects_run['chain']['profile'])) . ', ' . (int)$objects_run['run']['seq'] . ', '
@@ -502,8 +502,8 @@
 					echo ' <button type="button" class="btn btn-outline-primary btn-sm ms-2" onclick="bringBackObjects(' . $oa . ')">Bring them back</button>';
 				}
 				echo ''
-				   . '<div class="text-muted small mt-1">Files the site moved to its cloud file store are in no archive; each is on this shelf once. '
-				   . 'Bring them back asks the node which of them its file store can no longer serve and sends those home from the shelf, '
+				   . '<div class="text-muted small mt-1">Files the site moved to its cloud file store are in no archive; each is in this backup storage once. '
+				   . 'Bring them back asks the node which of them its file store can no longer serve and sends those home from backup storage, '
 				   . 'a page of signed links per job. Nothing on the node is overwritten; nothing in any bucket is deleted.</div></td></tr>';
 			}
 			echo '</tbody></table>';

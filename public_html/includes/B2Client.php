@@ -12,7 +12,7 @@
  * the same one to every node in the fleet. On a machine somebody else
  * administers — a hosted customer's box, where they are permission 10 — that
  * shared key can write anywhere in the fleet's bucket. Minting per run turns
- * "a key that can write the fleet's shelf" into "a key that can add objects
+ * "a key that can write the fleet's backup storage" into "a key that can add objects
  * under this node's own prefix, for as long as this run takes"
  * (specs/hosted_trial_provisioning.md §4.5). The blast radius of a key read off
  * a customer's box goes from the fleet to that customer's own directory, and
@@ -27,6 +27,7 @@
  * creates it. Nothing here stores one; the caller hands it straight to the job
  * being dispatched.
  *
+ * @version 1.1 - authorize() keeps what the key is allowed to do (capabilities, pinned bucket, prefix)
  * @version 1.0
  */
 
@@ -61,7 +62,7 @@ class B2Client {
 	 * key operations, and the S3-compatible endpoint the archives themselves
 	 * travel to.
 	 *
-	 * @return array{account_id:string, api_url:string, s3_endpoint:string, token:string}
+	 * @return array{account_id:string, api_url:string, s3_endpoint:string, token:string, allowed:array}
 	 */
 	public function authorize(): array {
 		if ($this->auth !== null) {
@@ -82,11 +83,25 @@ class B2Client {
 		if (!is_array($data) || empty($data['authorizationToken'])) {
 			throw new B2Exception('B2 authorize returned no token.');
 		}
+		// What the key may do, as Backblaze states it: its capabilities and
+		// the one bucket it is pinned to (bucketName empty for a key that
+		// opens every bucket on the account). The v3 answer carries these
+		// directly under apiInfo.storageApi; v2 carried them under allowed.
+		// BucketCheck reads this to say what a key can reach before anything
+		// is saved.
+		$storage = $data['apiInfo']['storageApi'] ?? array();
+		$allowed = isset($storage['capabilities']) ? $storage : (array)($data['allowed'] ?? array());
 		$this->auth = array(
 			'account_id'  => (string)($data['accountId'] ?? ''),
 			'api_url'     => rtrim((string)($data['apiInfo']['storageApi']['apiUrl'] ?? ''), '/'),
 			's3_endpoint' => (string)($data['apiInfo']['storageApi']['s3ApiUrl'] ?? ''),
 			'token'       => (string)$data['authorizationToken'],
+			'allowed'     => array(
+				'capabilities' => array_values((array)($allowed['capabilities'] ?? array())),
+				'bucketId'     => (string)($allowed['bucketId'] ?? ''),
+				'bucketName'   => (string)($allowed['bucketName'] ?? ''),
+				'namePrefix'   => (string)($allowed['namePrefix'] ?? ''),
+			),
 		);
 		if ($this->auth['api_url'] === '') {
 			throw new B2Exception('B2 authorize returned no storage API address.');

@@ -7,13 +7,13 @@
  * timeout: 300
  */
 /**
- * This site bringing its own offloaded files back from its own shelf
+ * This site bringing its own offloaded files back from its own backup storage
  * (specs/backup_offloaded_files.md § Verification, "The file store is
  * checked too"; BackupObjectRestoreLauncher), against a real run on the
  * local-provider fixture:
  *
  *   - a run stores three offloaded files; the file bucket then serves one.
- *     Bring them back (missing mode) reads the run's index off the shelf,
+ *     Bring them back (missing mode) reads the run's index from backup storage,
  *     signs its own links, brings the two home, records them local, marks
  *     the inventory record, and drops them from the missing list; a second
  *     run has nothing to do

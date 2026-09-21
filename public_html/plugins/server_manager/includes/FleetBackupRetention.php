@@ -1,6 +1,6 @@
 <?php
 /**
- * FleetBackupRetention — pruning the shelf this management node owns.
+ * FleetBackupRetention — pruning backup storage this management node owns.
  *
  * This is the one place the manager profile deliberately keeps work OFF the
  * node. A node is handed a write-only credential: it can add its archives and
@@ -23,24 +23,24 @@
  * backup, and it looks like a restore point right up until someone needs it.
  *
  * @version 1.5 - check_shelf() also reads every standalone full's index and requires its stored
- *                objects on the shelf, as it does a chain's newest run's; the two families are
+ *                objects in backup storage, as it does a chain's newest run's; the two families are
  *                checked by the same rule (compare_index)
  * @version 1.4.1 - an objects index that cannot be read, newest or older, ends the object prune with
  *                  nothing deleted: a transient read failure never costs a retained run its objects
  * @version 1.4 - the object family (specs/backup_offloaded_files.md § Retention): group() files
  *                nothing under objects/ as a restore point; prune_objects() deletes an object only
- *                when no retained run's index names its shelf location and it landed before the
+ *                when no retained run's index names its backup storage location and it landed before the
  *                newest retained run, and an emptied epoch's envelope with it (never the newest
  *                epoch's); check_shelf() reads each chain's newest index and requires every object
- *                it marks stored to be on the shelf at its recorded size, with its epoch envelope.
+ *                it marks stored to be in backup storage at its recorded size, with its epoch envelope.
  *                index_links() picks the newest index and every envelope for the run request.
  * @version 1.3 - check_shelf() answers in two parts: what is wrong with the backups it read, and
  *                which manifests it could not read this pass — a transport error is reported by the
  *                pass, never stamped as an incomplete backup; the reader is injectable for the test
- * @version 1.2 - the shelf check: every artifact a chain's manifest names must be on the shelf at the
+ * @version 1.2 - the backup storage check: every artifact a chain's manifest names must be in backup storage at the
  *                recorded size, and the manifest must carry its envelope. compare_manifest is the pure
  *                rule; check_shelf reads each manifest off the listing prune() already takes
- * @version 1.1 - the pass also sizes the shelf, from the listing it already takes: the hosted
+ * @version 1.1 - the pass also sizes backup storage, from the listing it already takes: the hosted
  *                tier's storage allowance needs no meter of its own
  * @version 1.0
  */
@@ -55,7 +55,7 @@ require_once(PathHelper::getIncludePath('includes/BackupNaming.php'));
 class FleetBackupRetention {
 
 	/**
-	 * Prune one node's manager shelf to the newest $keep restore points.
+	 * Prune one node's manager-profile backup storage to the newest $keep restore points.
 	 *
 	 * Called immediately BEFORE dispatching that node's next run, which is the
 	 * right moment for two reasons: it is once per backup cycle rather than once
@@ -64,13 +64,13 @@ class FleetBackupRetention {
 	 *
 	 * The result also carries what the listing SAW — `listed` and
 	 * `newest_object_time` — because the listing is the bucket's own testimony
-	 * about this node's shelf, taken with this management node's credential. The
+	 * about this node's backup storage, taken with this management node's credential. The
 	 * scheduler stamps it on the node, and the health check compares it against
 	 * what the node claims: a node that reports success while nothing new lands
-	 * on the shelf is the one failure the node's own reporting can never admit
+	 * in backup storage is the one failure the node's own reporting can never admit
 	 * to.
 	 *
-	 * It also SIZES the shelf, from the same listing. That figure is what the
+	 * It also SIZES backup storage, from the same listing. That figure is what the
 	 * hosted tier's storage allowance is measured against, and taking it here
 	 * is why the allowance needs no meter of its own: the pass already walks the
 	 * whole prefix and the provider already returns each object's size, so the
@@ -79,7 +79,7 @@ class FleetBackupRetention {
 	 * actually keeping.
 	 *
 	 * The listing itself comes back too (`objects`, less what was pruned, and
-	 * the `base` it was taken under) so the shelf check can read from the same
+	 * the `base` it was taken under) so the backup storage check can read from the same
 	 * testimony without listing again.
 	 *
 	 * @return array{kept:int, pruned:int, deleted_objects:int, error:string,
@@ -105,7 +105,7 @@ class FleetBackupRetention {
 			$base = $prefix . '/' . $slug . '/' . BackupProfile::path_segment(BackupProfile::MANAGER) . '/';
 			$objects = S3Signer::list($creds, $bucket, $base);
 			if (!is_array($objects)) {
-				$result['error'] = 'the shelf could not be listed';
+				$result['error'] = 'backup storage could not be listed';
 				return $result;
 			}
 			$result['listed'] = true;
@@ -247,7 +247,7 @@ class FleetBackupRetention {
 
 	/**
 	 * The YYYYMMDD_HHMMSS stamp in a group name. A name with no stamp sorts as
-	 * the oldest thing on the shelf: it is not a restore point this code ever
+	 * the oldest thing in backup storage: it is not a restore point this code ever
 	 * wrote, so it must not occupy a keep slot that a real one needs.
 	 */
 	private static function stamp_of($name) {
@@ -270,7 +270,7 @@ class FleetBackupRetention {
 	}
 
 	/**
-	 * When something last LANDED on this shelf, from the provider's
+	 * When something last LANDED in this backup storage, from the provider's
 	 * last-modified stamps — UTC 'Y-m-d H:i:s', or '' for an empty listing.
 	 *
 	 * The write time rather than the name stamp on purpose: a chain directory
@@ -290,8 +290,8 @@ class FleetBackupRetention {
 	}
 
 	/**
-	 * The shelf check — level 1 of backup verification, and free: is every
-	 * backup on this node's shelf whole?
+	 * The backup storage check — level 1 of backup verification, and free: is every
+	 * backup in this node's backup storage whole?
 	 *
 	 * For every chain the listing holds a manifest for, the manifest is read
 	 * (one small GET each) and compared to the listing: every artifact it names
@@ -303,17 +303,17 @@ class FleetBackupRetention {
 	 *
 	 * Offloaded files are checked the same way for both families: the newest
 	 * run's index of each chain, and the index beside each standalone full,
-	 * is read, and every object it marks stored must be on the shelf at its
+	 * is read, and every object it marks stored must be in backup storage at its
 	 * recorded size under an epoch whose envelope is there.
 	 *
 	 * Two answers, kept apart because they mean different things:
 	 *
 	 *   problem  what is wrong with a backup whose manifest WAS read — one line
 	 *            naming it, '' when every backup read is whole. A fact about
-	 *            the shelf, stamped on the node's card.
+	 *            backup storage, stamped on the node's card.
 	 *   unread   manifests that could not be fetched this pass (a transport
 	 *            error, an HTTP status) — one line naming them, '' when all
-	 *            were read. A fact about this pass, not the shelf: reported in
+	 *            were read. A fact about this pass, not backup storage: reported in
 	 *            the pass and never stamped, so a network blip is not shown as
 	 *            an incomplete backup.
 	 *
@@ -374,7 +374,7 @@ class FleetBackupRetention {
 				continue;
 			}
 			// The newest run's objects index: every object it marks stored must
-			// be on the shelf at its recorded size, under an epoch whose
+			// be in backup storage at its recorded size, under an epoch whose
 			// envelope is there. One more small GET per chain; no per-object
 			// request, the listing already carries key and size.
 			$runs = $manifest['runs'] ?? array();
@@ -464,7 +464,7 @@ class FleetBackupRetention {
 	}
 
 	/**
-	 * The pure rule behind the object half of the shelf check: one index
+	 * The pure rule behind the object half of the backup storage check: one index
 	 * against the store the listing shows. '' when whole.
 	 */
 	public static function compare_index(array $index, array $store_objects, array $envelopes, $set) {
@@ -480,12 +480,12 @@ class FleetBackupRetention {
 			$expected = (int)($e['object_bytes'] ?? 0);
 			$actual = $store_objects[$loc]['size'];
 			if ($wrong === '' && $expected > 0 && $actual !== null && $actual !== $expected) {
-				$wrong = (string)$e['name'] . ' at ' . $actual . ' bytes on the shelf where its index records ' . $expected;
+				$wrong = (string)$e['name'] . ' at ' . $actual . ' bytes in backup storage where its index records ' . $expected;
 			}
 		}
 		if ($missing > 0) {
 			return 'the backup set ' . $set . ' names ' . $missing . ' offloaded file' . ($missing === 1 ? '' : 's')
-				. ' its shelf does not hold (' . $first_missing . ($missing > 1 ? ', …' : '') . ')';
+				. ' its backup storage does not hold (' . $first_missing . ($missing > 1 ? ', …' : '') . ')';
 		}
 		if ($wrong !== '') {
 			return 'the backup set ' . $set . ' holds the offloaded file ' . $wrong;
@@ -493,7 +493,7 @@ class FleetBackupRetention {
 		foreach (($index['epochs'] ?? array()) as $epoch) {
 			if (!isset($envelopes[(string)$epoch])) {
 				return 'the backup set ' . $set . ' names offloaded files in ' . $epoch
-					. ' but that epoch\'s envelope is not on the shelf, so no key can be recovered for them';
+					. ' but that epoch\'s envelope is not in backup storage, so no key can be recovered for them';
 			}
 		}
 		return '';
@@ -501,7 +501,7 @@ class FleetBackupRetention {
 
 	/**
 	 * The object family's retention. An object is deleted when no retained
-	 * run's index names its shelf location AND it landed before the newest
+	 * run's index names its backup storage location AND it landed before the newest
 	 * retained run started — an object uploaded after the newest run has had
 	 * no run to be indexed by. Retained runs are every run of every kept
 	 * chain plus every kept standalone full. The newest index of each kept
@@ -609,7 +609,7 @@ class FleetBackupRetention {
 
 	/**
 	 * What the run request carries about the object store, from the listing
-	 * the pass already took: the key of the newest index on the shelf (the
+	 * the pass already took: the key of the newest index in backup storage (the
 	 * newest group's newest run), or '' when none, and every epoch envelope's
 	 * key by epoch id. The caller signs them.
 	 *
@@ -636,7 +636,7 @@ class FleetBackupRetention {
 	}
 
 	/**
-	 * The pure rule behind the shelf check: one manifest against what the
+	 * The pure rule behind the backup storage check: one manifest against what the
 	 * listing holds under its directory, as [name => bytes]. Returns '' when
 	 * whole, otherwise one line saying what is wrong, in words a person reads
 	 * on the node's card.
@@ -651,13 +651,13 @@ class FleetBackupRetention {
 				$name = (string)($a['name'] ?? '');
 				if ($name === '') { continue; }
 				if (!array_key_exists($name, $present)) {
-					return 'the backup set ' . $set . ' names ' . $name . ' in its manifest but it is not on the shelf';
+					return 'the backup set ' . $set . ' names ' . $name . ' in its manifest but it is not in backup storage';
 				}
 				$expected = (int)($a['bytes'] ?? 0);
 				$actual = $present[$name];
 				if ($expected > 0 && $actual !== null && $actual !== $expected) {
 					return 'the backup set ' . $set . ' holds ' . $name . ' at ' . $actual
-						. ' bytes on the shelf where its manifest records ' . $expected;
+						. ' bytes in backup storage where its manifest records ' . $expected;
 				}
 			}
 		}
@@ -671,6 +671,6 @@ class FleetBackupRetention {
 		if ($ts === false && preg_match('/(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/', (string)$dir, $m)) {
 			$ts = gmmktime((int)$m[4], (int)$m[5], (int)$m[6], (int)$m[2], (int)$m[3], (int)$m[1]);
 		}
-		return $ts ? 'begun ' . gmdate('Y-m-d H:i', $ts) . ' UTC' : 'on the shelf';
+		return $ts ? 'begun ' . gmdate('Y-m-d H:i', $ts) . ' UTC' : 'in backup storage';
 	}
 }

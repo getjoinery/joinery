@@ -28,7 +28,7 @@ class FileBlobException extends SystemBaseException {}
  * pointing at a blob is in the same visibility class. Dedup scoping and the
  * flip / copy-on-write split in File::move_to_correct_directory() maintain it.
  *
- * @version 1.2.1 - a cloud row can hold local bytes while it waits for a backup shelf, so
+ * @version 1.2.1 - a cloud row can hold local bytes while it waits for a backup storage, so
  *                  reclaiming one deletes its bucket bytes AND unlinks its local paths; a blob
  *                  permanently deleted while waiting leaves nothing behind
  * @version 1.2.0
@@ -487,7 +487,7 @@ class FileBlob extends SystemBase {
 			if ($blob->get('fbb_storage_driver') === 'cloud') {
 				$blob->_delete_cloud_bytes();
 				// A cloud row may still hold local bytes: offload keeps them
-				// until every enabled backup profile's shelf has the object.
+				// until every enabled backup profile's backup storage has the object.
 				$blob->_unlink_local_paths();
 			} else {
 				$blob->_delete_local_bytes();

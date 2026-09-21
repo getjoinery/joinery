@@ -9,7 +9,7 @@
  * nothing to buy here; the date is what the operator set.
  *
  * Disconnect is a POST: every service the site holds is released (mail's
- * subaccount closed; the shelf kept 90 days and then pruned) and the site's
+ * subaccount closed; backup storage kept 90 days and then pruned) and the site's
  * key is deactivated. It is how the account holder cuts off a site they no
  * longer run, or one they were tricked into approving.
  *
@@ -35,7 +35,7 @@ function profile_services_logic(array $input): LogicResult {
 		try {
 			$released = ServicesConnect::disconnect($user_id, $host);
 			$session->save_message(new DisplayMessage(htmlspecialchars($host) . ' is disconnected: its key no longer works and '
-				. $released . ' service(s) were released. Backups on the shelf are kept ' . ServiceTenant::RETENTION_DAYS
+				. $released . ' service(s) were released. Stored backups are kept ' . ServiceTenant::RETENTION_DAYS
 				. ' days and then pruned.', 'Disconnected', $self_regex,
 				DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
 		} catch (\Throwable $e) {

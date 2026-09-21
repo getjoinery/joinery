@@ -1,11 +1,11 @@
 <?php
 /**
- * ShelfObject — the ledger: one row per object the shelf broker signed
+ * ShelfObject — the ledger: one row per object the backup storage broker signed
  * (specs/services_phase2_platform.md §3, §6).
  *
  * The plane records every key it signs a write for — tenant, run, key,
  * bytes, chain, when it was signed and when the site said it completed — so
- * the meter is exact and immediate: the figure on a tenant's shelf row is the
+ * the meter is exact and immediate: the figure in a tenant's backup storage row is the
  * sum of its completed rows, no listing pass needed, and a run that would
  * cross the allowance is refused before a byte moves. The prune pass
  * reconciles this against a real listing: an object signed but never
@@ -68,7 +68,7 @@ class ShelfObject extends SystemBase {
 		return parent::save($debug);
 	}
 
-	/** The tenant's completed bytes: the figure on its shelf row. */
+	/** The tenant's completed bytes: the figure in its backup storage row. */
 	public static function completedBytes(int $tenant_id): int {
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare("SELECT COALESCE(SUM(svo_bytes), 0) FROM svo_shelf_objects

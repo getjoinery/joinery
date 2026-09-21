@@ -29,7 +29,7 @@
  * nothing: with no hosted_plan_state there is no notice, which is what keeps a
  * self-hosted install silent.
  *
- * @version 1.1 - the services state: a self-hosted site renting mail and the shelf
+ * @version 1.1 - the services state: a self-hosted site renting mail and backup storage
  *                (specs/services_phase2_platform.md §9)
  * @version 1.0
  */
@@ -49,7 +49,7 @@ class HostedPlanNotice {
 
 	/**
 	 * A self-hosted site renting services from the operator — outbound mail,
-	 * the backup shelf — against a paid-through date, with the site itself in
+	 * the backup storage — against a paid-through date, with the site itself in
 	 * the owner's own hands. The site writes the five settings itself from
 	 * the daily status poll (ServicesStatusPoll); no billing sentence.
 	 */
@@ -205,7 +205,7 @@ class HostedPlanNotice {
 						. 'trial ends — there is nothing to do.');
 			case 'grace':
 				// No arithmetic on periods this deployment does not know. Both
-				// the grace and the shelf are operator settings, and a sentence
+				// the grace and backup storage are operator settings, and a sentence
 				// here that hardcoded the difference between them would go quietly
 				// wrong the day either changed — while still reading as a promise.
 				return array(
@@ -215,13 +215,13 @@ class HostedPlanNotice {
 						. 'longer so it can be brought back. Updating the card on file is all it takes.');
 			case self::STATE_SERVICES:
 				return array(
-					'This site uses getjoinery\'s email service and backup shelf.',
+					'This site uses getjoinery\'s email service and backup storage.',
 					($when !== '' ? 'They are paid for until ' . $when . '.' : 'They run against a paid-through date.')
 						. ' The site itself is yours; only what is listed below is looked after for you.');
 			case 'shutdown':
 				return array(
 					'This site has been shut down.',
-					'Hosting ended after an unpaid subscription. The backups are still on the shelf and '
+					'Hosting ended after an unpaid subscription. The backups are still in backup storage and '
 						. 'the site can be brought back — with your own recovery key — until they are pruned.');
 			default:
 				return array(

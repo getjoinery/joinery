@@ -22,7 +22,7 @@
  *                                   rather than an immediate shutdown.
  *
  * WHAT IT NEVER DOES IS ACT. It moves dates on a row. The shutdown, the
- * operator's deletion task and the shelf prune are HostedTrialWatch's, on its
+ * operator's deletion task and backup storage prune are HostedTrialWatch's, on its
  * own schedule — because a webhook arrives inside somebody's HTTP request, and
  * powering off a customer's machine from inside a webhook is how a retry, a
  * duplicate delivery or a provider outage becomes an outage of ours.

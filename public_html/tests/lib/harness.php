@@ -223,7 +223,7 @@ function harness_boot(array $overrides = array()) {
 		harness_set_setting_mem('email_test_recipient', 'joineryemailtests@' . HARNESS_FIXTURE_DOMAIN);
 		$h['test_recipient'] = 'joineryemailtests@' . HARNESS_FIXTURE_DOMAIN;
 
-		// A test run must not copy files to the site's real backup shelf. The
+		// A test run must not copy files to the site's real backup storage. The
 		// offload tick asks BackupProfile::enabled() before it releases a row's
 		// local bytes and, when the site profile is enabled — as it is on dev,
 		// whose target is a real Backblaze bucket — copies the original there

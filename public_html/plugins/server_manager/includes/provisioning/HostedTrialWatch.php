@@ -328,7 +328,7 @@ class HostedTrialWatch {
 	 * there is no bigger plan, and a customer who has outgrown the hosting is
 	 * better served by their own provider. Each figure comes from the party
 	 * that actually counts it: the mail provider counts sends, the retention
-	 * pass sizes the shelf, the node reports its own disk. None of them is
+	 * pass sizes backup storage, the node reports its own disk. None of them is
 	 * copied into a meter here that could disagree with the thing that decides.
 	 */
 	public function allowances($provision, $trial): array {
@@ -402,15 +402,15 @@ class HostedTrialWatch {
 		if ($used_gb >= $allowance_gb && $stored_mode !== 'off') {
 			$node->set('mgn_backup_policy', json_encode(array('enabled' => false, 'paused_for_shelf' => true)));
 			$node->save();
-			$trial->set('htr_note', 'Backups paused on ' . gmdate('Y-m-d') . ': shelf at '
+			$trial->set('htr_note', 'Backups paused on ' . gmdate('Y-m-d') . ': backup storage at '
 				. self::gb($used_gb) . ' of ' . $allowance_gb . ' GB.');
 			$trial->save();
 			error_log('HostedTrialWatch: fleet backups paused for ' . $provision->get('cvp_domain')
-				. ' — shelf at ' . self::gb($used_gb) . ' of ' . $allowance_gb . ' GB.');
+				. ' — backup storage at ' . self::gb($used_gb) . ' of ' . $allowance_gb . ' GB.');
 			return 1;
 		}
 
-		// And back on when the shelf comes down — retention prunes it every
+		// And back on when backup storage comes down — retention prunes it every
 		// cycle, so a customer who deletes a large upload gets their backups
 		// back without asking. Only a pause THIS put there is lifted: a policy
 		// somebody switched off deliberately stays off.
@@ -420,7 +420,7 @@ class HostedTrialWatch {
 			$trial->set('htr_note', null);
 			$trial->save();
 			error_log('HostedTrialWatch: fleet backups resumed for ' . $provision->get('cvp_domain')
-				. ' — shelf back to ' . self::gb($used_gb) . '.');
+				. ' — backup storage back to ' . self::gb($used_gb) . '.');
 			return 1;
 		}
 		return 0;
@@ -442,7 +442,7 @@ class HostedTrialWatch {
 
 	/**
 	 * The sentence a customer's banner carries while their backups are paused
-	 * for the shelf allowance, or ''.
+	 * for backup storage allowance, or ''.
 	 */
 	private function storage_pause_notice($provision): string {
 		$node = $this->node_of($provision);
@@ -453,7 +453,7 @@ class HostedTrialWatch {
 			'server_manager_hosted_shelf_allowance_gb', true, true));
 		return 'Offsite backups of this site are paused: it is using its whole '
 			. $allowance_gb . ' GB backup allowance. They start again on their own once the '
-			. 'shelf comes back under it, or move to your own storage to lift the limit.';
+			. 'backup storage comes back under it, or move to your own storage to lift the limit.';
 	}
 
 	// ── 4. The end of a grace period ──────────────────────────────────────────
@@ -531,10 +531,10 @@ class HostedTrialWatch {
 		return 1;
 	}
 
-	// ── 5. The shelf, afterwards ──────────────────────────────────────────────
+	// ── 5. Backup storage, afterwards ──────────────────────────────────────────────
 
 	/**
-	 * Prune a shut-down customer's shelf once the keep-period is up.
+	 * Prune a shut-down customer's backup storage once the keep-period is up.
 	 *
 	 * Between the shutdown and this, a returning customer is recoverable: a
 	 * fresh install plus restore-over-agent, which needs THEIR recovery key.
@@ -559,7 +559,7 @@ class HostedTrialWatch {
 		// it is done here, explicitly, with the plane's own credential.
 		require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
 		// The WHOLE slug prefix, both profiles. Everything under it is on this
-		// operator's shelf and was kept under this operator's retention promise;
+		// operator's backup storage and was kept under this operator's retention promise;
 		// a customer who pointed their own backups at their own bucket has
 		// nothing here to lose.
 		$creds  = $target->get_credentials();
@@ -571,7 +571,7 @@ class HostedTrialWatch {
 		}
 		$objects = S3Signer::list($creds, $bucket, $base);
 		if (!is_array($objects)) {
-			$this->errors[] = $provision->get('cvp_domain') . ': the shelf could not be listed for pruning.';
+			$this->errors[] = $provision->get('cvp_domain') . ': backup storage could not be listed for pruning.';
 			return 0;
 		}
 		$deleted = 0;
@@ -588,9 +588,9 @@ class HostedTrialWatch {
 		$node->set('mgn_backup_shelf_checked_time', gmdate('Y-m-d H:i:s'));
 		$node->save();
 		$trial->set('htr_shelf_ends_time', null);
-		$trial->set('htr_note', 'The backup shelf was pruned on ' . gmdate('Y-m-d') . '.');
+		$trial->set('htr_note', 'Backup storage was pruned on ' . gmdate('Y-m-d') . '.');
 		$trial->save();
-		error_log('HostedTrialWatch: pruned ' . $deleted . ' object(s) from the shelf of '
+		error_log('HostedTrialWatch: pruned ' . $deleted . ' object(s) from backup storage of '
 			. $provision->get('cvp_domain') . ' after its keep-period ended.');
 		return 1;
 	}

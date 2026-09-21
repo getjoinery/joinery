@@ -174,7 +174,7 @@ $store->objects[$tag . 'big.jpg'] = $plain[$tag . 'big.jpg'];
 $index_with_gap = $index;
 $index_with_gap['objects'][] = array('name' => $tag . 'never.bin', 'epoch' => '', 'object_bytes' => 0, 'object_sha256' => '', 'stored' => false);
 $s = BackupObjectRestore::survey($index_with_gap, 'missing');
-check($s['not_stored'] === 1 && $s['indexed'] === 3, 'an entry the index says never reached the shelf is counted, not wanted', json_encode($s));
+check($s['not_stored'] === 1 && $s['indexed'] === 3, 'an entry the index says never reached backup storage is counted, not wanted', json_encode($s));
 $s = BackupObjectRestore::survey(array('objects' => array(array('name' => 'nobody_' . $tag, 'epoch' => $epoch, 'object_bytes' => 1, 'object_sha256' => 'x', 'stored' => true))), 'all');
 check($s['no_row'] === 1 && $s['wanted'] === 0, 'a name the restored database has no row for is skipped', json_encode($s));
 
@@ -283,7 +283,7 @@ try { BackupObjectRestore::restore($index, array($tag . 'big.jpg'), 'all', $keys
 catch (BackupObjectRestoreException $e) { $threw = $e->getMessage(); }
 check(strpos($threw, 'no download link') !== false && strpos($threw, $tag . 'big.jpg') !== false, 'a wanted name with no link fails by name', $threw);
 
-// A flipped byte on the shelf is refused before decryption.
+// A flipped byte in backup storage is refused before decryption.
 $set_cloud($tag . 'mid.bin'); unlink($home . '/' . $tag . 'mid.bin');
 $obj_file = $shelf_file($base . 'objects/' . $epoch . '/' . $tag . 'mid.bin.enc');
 $good = file_get_contents($obj_file);
@@ -352,7 +352,7 @@ $page_r = array('result' => 'ok', 'mode' => 'all', 'run' => 'r', 'indexed' => 3,
 $text = BackupObjectRestore::format_contract($page_r);
 check(preg_match('/^RESTORE_OBJECTS_RESTORED=36$/m', $text) === 1 && strpos($text, 'RESTORE_OBJECTS_WANT') === false, 'a page prints what it placed and no survey lines');
 check(BackupObjectRestore::describe($page_r) === 'Brought 36 offloaded files home (412 MB) (2 already on disk)', 'in words', BackupObjectRestore::describe($page_r));
-check(BackupObjectRestore::describe($survey_r) === '2 offloaded files to bring home (1 offloaded file never reached the shelf; 1 need nothing: served by the file store, or already here; the first 2 named)',
+check(BackupObjectRestore::describe($survey_r) === '2 offloaded files to bring home (1 offloaded file never reached backup storage; 1 need nothing: served by the file store, or already here; the first 2 named)',
 	'a survey in words', BackupObjectRestore::describe($survey_r));
 check(BackupObjectRestore::parse_contract('nothing')['result'] === 'fail' && strpos(BackupObjectRestore::describe(array('result' => 'fail', 'reason' => 'x')), 'Could not bring') === 0,
 	'no result is a failure, worded');

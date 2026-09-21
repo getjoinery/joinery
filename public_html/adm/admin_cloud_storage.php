@@ -2,14 +2,18 @@
 /**
  * Cloud Storage Admin Page
  *
- * Single-button workflow: Save runs Test Connection, persists settings,
- * activates the sync task. When enabled, Pause and "Disable and Pull
- * Files Back to Local" appear alongside Save. Health status block at top.
- * Carries the optional private-store bucket field + its privacy-gate results,
- * and a private-store "Disable and Pull Back" off-ramp when it holds cloud objects.
+ * Health status block at top. Then the store in one of three shapes: the setup
+ * form when nothing is configured; what is stored, read-only, with Pause or
+ * Enable, Disable and Pull Files Back to Local, and Remove as the state
+ * allows; and a form for what may change — only the key, the public URL and
+ * the private bucket while files are in the bucket, everything otherwise.
+ * Save runs the bucket and key check and persists only when it passes.
+ * Carries the private store's privacy-gate results and its own pull-back.
  *
+ * @version 1.6 - the store's three shapes; locked fields shown, not edited; Enable and Remove; the
+ *                Status box is one state sentence plus lines only for what needs attention
  * @version 1.5 - the Status box says what waits on this server for a backup before its local copy is
- *                released, and that the file store and the backup shelf share an account when they do
+ *                released, and that the file store and backup storage share an account when they do
  * @version 1.4 - the file-store check in the Status box: when it last looked, "N offloaded files are
  *                missing from the file store; the backup holds M of them", and Bring them back
  * @version 1.3
@@ -35,157 +39,106 @@ $page->admin_header(array(
 ));
 
 // =====================================================
-// HEALTH STATUS BLOCK
+// STATUS
 // =====================================================
-$pageoptions = array('title' => 'Status');
-$page->begin_box($pageoptions);
+// One sentence for the state, with every healthy figure folded into it, under
+// the traffic light. A coloured box only for a problem or a warning. Nothing
+// for an absence: a driver that answers, a task whose last run succeeded, a private
+// store nobody configured, say nothing here.
+echo '<p style="max-width: 800px; margin-bottom: 16px;">If your Joinery is running out of disk space, you can add a storage bucket below and Joinery will intelligently offload files to the bucket. '
+	. 'Those files will be accessible just like locally, but you\'ll pay for storage and transfer according to your bucket provider\'s policies.</p>';
+
+$page->begin_box(array('title' => 'Status'));
 
 $dot = function($color) {
 	return '<span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:' . $color . '; margin-right:6px; vertical-align:middle;"></span>';
 };
+$when  = function ($utc) use ($session) { return htmlspecialchars(LibraryFunctions::convert_time($utc, 'UTC', $session->get_timezone())); };
+$files = function ($count, $bytes = null) {
+	return number_format((int)$count) . ' file' . ((int)$count === 1 ? '' : 's')
+		. ($bytes !== null && (int)$count > 0 ? ' (' . BackupRunner::human((int)$bytes) . ')' : '');
+};
+// The state wears the traffic light; a problem or a warning is a coloured box;
+// a plain fact is plain text.
+$state   = function ($color, $html) use ($dot) { echo '<div style="margin-bottom: 8px;">' . $dot($color) . $html . '</div>'; };
+$problem = function ($html) { echo '<div class="alert alert-danger" style="margin-bottom: 8px;">' . $html . '</div>'; };
+$warn    = function ($html) { echo '<div class="alert alert-warning" style="margin-bottom: 8px;">' . $html . '</div>'; };
+$info    = function ($html) { echo '<div style="margin-bottom: 8px;">' . $html . '</div>'; };
 
-// Cron heartbeat
-echo '<div style="margin-bottom: 8px;">';
-if ($health['cron']['ok']) {
-	echo $dot('#28a745') . '<strong>Cron heartbeat:</strong> healthy ';
-	echo '<small class="text-muted">(last tick: ' . htmlspecialchars(LibraryFunctions::convert_time($health['cron']['last'], 'UTC', $session->get_timezone())) . ')</small>';
+$c = $health['counts'];
+$last_run = !empty($health['sync_task']['last_run']) ? '; last run ' . $when($health['sync_task']['last_run']) : '';
+
+// The state.
+if (!$configured) {
+	$state('#999', '<strong>Not set up.</strong> ' . $files($c['pending'], $c['pending_bytes']) . ' on this server would move to a bucket once one is set up.');
+} elseif ($draining) {
+	$last = !empty($health['reverse_task']['last_run']) ? '; last run ' . $when($health['reverse_task']['last_run']) : '';
+	$state('#0d6efd', '<strong>Pulling files back.</strong> ' . $files($c['cloud'], $c['cloud_bytes']) . ' still in the bucket' . $last . '.'
+		. (!empty($health['reverse_task']['last_message']) ? '<br><small class="text-muted">' . htmlspecialchars($health['reverse_task']['last_message']) . '</small>' : ''));
+} elseif ($enabled) {
+	$state('#28a745', '<strong>Active.</strong> ' . $files($c['cloud'], $c['cloud_bytes']) . ' in the bucket, ' . $files($c['pending'], $c['pending_bytes']) . ' waiting to move, '
+		. number_format((int)$c['migrated_this_week']) . ' moved this week' . $last_run . '.');
 } else {
-	echo $dot('#dc3545') . '<strong>Cron heartbeat:</strong> not running. ';
-	if ($health['cron']['last']) {
-		echo 'Last tick: ' . htmlspecialchars(LibraryFunctions::convert_time($health['cron']['last'], 'UTC', $session->get_timezone()));
-	} else {
-		echo 'Last tick: <em>never</em>.';
-	}
-	echo '<br><small>New uploads aren\'t migrating to cloud. Verify the crontab and the cron daemon.</small>';
-}
-echo '</div>';
-
-// Driver health
-echo '<div style="margin-bottom: 8px;">';
-if (!$enabled) {
-	echo $dot('#999') . '<strong>Driver:</strong> not enabled';
-} elseif ($health['driver'] && $health['driver']['ok']) {
-	$color = $health['driver']['elapsed_ms'] > 2000 ? '#ffc107' : '#28a745';
-	echo $dot($color) . '<strong>Driver:</strong> ' . htmlspecialchars($health['driver']['message']) . ' ';
-	echo '<small class="text-muted">(' . (int)$health['driver']['elapsed_ms'] . ' ms)</small>';
-} else {
-	$msg = $health['driver']['message'] ?? 'unknown';
-	echo $dot('#dc3545') . '<strong>Driver:</strong> ' . htmlspecialchars($msg);
-	echo '<br><small>Save again to re-run the full diagnostic.</small>';
-}
-echo '</div>';
-
-// Sync task
-echo '<div style="margin-bottom: 8px;">';
-if ($health['sync_task']) {
-	$color = $health['sync_task']['is_active']
-		? ($health['sync_task']['last_status'] === 'error' ? '#dc3545' : '#28a745')
-		: '#999';
-	echo $dot($color) . '<strong>Sync task:</strong> ';
-	echo $health['sync_task']['is_active'] ? 'active' : 'inactive';
-	if ($health['sync_task']['last_run']) {
-		echo ' &middot; last run: ' . htmlspecialchars(LibraryFunctions::convert_time($health['sync_task']['last_run'], 'UTC', $session->get_timezone()));
-		if ($health['sync_task']['last_status']) echo ' (' . htmlspecialchars($health['sync_task']['last_status']) . ')';
-		if ($health['sync_task']['last_message']) {
-			echo '<br><small class="text-muted">' . htmlspecialchars($health['sync_task']['last_message']) . '</small>';
-		}
-	}
-} else {
-	echo $dot('#999') . '<strong>Sync task:</strong> not registered';
-}
-echo '</div>';
-
-// File counts
-echo '<div style="margin-bottom: 8px;">';
-echo $dot('#0d6efd') . '<strong>Files:</strong> ';
-echo (int)$health['counts']['cloud'] . ' in cloud &middot; ';
-echo (int)$health['counts']['pending'] . ' pending migration &middot; ';
-echo (int)$health['counts']['migrated_this_week'] . ' migrated this week';
-if ($health['counts']['stuck'] > 0) {
-	echo ' &middot; <span style="color:#dc3545;"><strong>' . (int)$health['counts']['stuck'] . ' stuck</strong></span>';
-}
-echo '</div>';
-
-// Offloaded files whose local copy is still here because a backup that stores
-// offloaded files has not taken them yet — and the same-account line, because
-// a shelf on the account the file store is on does not survive that account.
-$waiting_line = BackupObjectsStatus::waiting_sentence($objects_status);
-$same_account = BackupObjectsStatus::same_account_line($objects_status);
-if ($waiting_line !== '' || $same_account !== '') {
-	echo '<div style="margin-bottom: 8px;">';
-	echo $dot('#0d6efd') . '<strong>Waiting for backup:</strong> ';
-	echo $waiting_line !== ''
-		? htmlspecialchars($waiting_line) . ' <a href="/admin/admin_backups">Backups</a>'
-		: 'nothing; every offloaded file is on the backup shelf.';
-	if ($same_account !== '') {
-		echo '<div class="alert alert-warning mt-2 mb-0">' . htmlspecialchars($same_account) . '</div>';
-	}
-	echo '</div>';
+	$state('#999', '<strong>Off.</strong> ' . ((int)$c['cloud'] > 0
+		? $files($c['cloud'], $c['cloud_bytes']) . ' in the bucket keep serving from it; ' . $files($c['pending'], $c['pending_bytes']) . ' on this server would move once enabled.'
+		: $files($c['pending'], $c['pending_bytes']) . ' on this server would move to the bucket once enabled.'));
 }
 
-// The daily file-store check: every offloaded file HEADed in the bucket, the
-// ones it cannot serve named, and the way back for them.
+// What needs attention.
+if (!$health['cron']['ok']) {
+	$problem('<strong>Cron is not running;</strong> nothing moves until it does. Last tick: '
+		. ($health['cron']['last'] ? $when($health['cron']['last']) : '<em>never</em>') . '.');
+}
+if ($enabled && !empty($health['driver']) && !$health['driver']['ok']) {
+	$problem('<strong>The bucket did not answer:</strong> ' . htmlspecialchars((string)($health['driver']['message'] ?? 'unknown')) . ' Save to run the full check.');
+}
+if (!empty($health['sync_task']) && $health['sync_task']['is_active'] && $health['sync_task']['last_status'] === 'error') {
+	$problem('<strong>The last run failed:</strong> ' . htmlspecialchars((string)$health['sync_task']['last_message']));
+}
+if ((int)$c['stuck'] > 0) {
+	$problem('<strong>' . $files($c['stuck']) . ' failed to move 5 or more times.</strong> Retry below.');
+}
+
+// What is worth knowing.
 if (CloudStoreInventoryPanel::has_content($inventory)) {
-	echo '<div style="margin-bottom: 8px;">';
-	echo $dot((int)$inventory['missing_count'] > 0 ? '#dc3545' : '#28a745') . '<strong>File store check:</strong>';
-	echo '<div style="margin-top:4px;">' . CloudStoreInventoryPanel::render($inventory, $objects_source, '/admin/admin_cloud_storage', $manager_url) . '</div>';
-	echo '</div>';
+	$panel = CloudStoreInventoryPanel::render($inventory, $objects_source, '/admin/admin_cloud_storage', $manager_url);
+	if ((int)$inventory['missing_count'] > 0) { $problem($panel); } else { $info($panel); }
 }
-
-// Private store status
-echo '<div style="margin-bottom: 8px;">';
-if (!empty($private_status['enabled'])) {
-	echo $dot('#28a745') . '<strong>Private store:</strong> enabled (verified non-public)';
-	if (!empty($private_status['cloud_count'])) {
-		echo ' &middot; ' . (int)$private_status['cloud_count'] . ' object(s) in cloud';
-	}
-} elseif (!empty($private_status['configured'])) {
-	echo $dot('#ffc107') . '<strong>Private store:</strong> bucket configured but not gated. Save to run the anonymous-read-denied check.';
-} else {
-	echo $dot('#999') . '<strong>Private store:</strong> not configured';
+$waiting_line = BackupObjectsStatus::waiting_sentence($objects_status);
+if ($waiting_line !== '') {
+	$info(htmlspecialchars($waiting_line) . ' <a href="/admin/admin_backups">Backups</a>');
 }
-echo '</div>';
-
-// Private-store pull-back: offered whenever the private store is enabled or still
-// holds cloud objects, so its off-ramp mirrors the public store's.
+$same_account = $configured ? BackupObjectsStatus::same_account_line($objects_status) : '';
+if ($same_account !== '') {
+	$warn(htmlspecialchars($same_account));
+}
 $private_cloud = (int)($private_status['cloud_count'] ?? 0);
+if (!empty($private_status['enabled'])) {
+	$info('<strong>Private bucket:</strong> ' . $files($private_cloud) . '.');
+} elseif (!empty($private_status['configured'])) {
+	$warn('<strong>Private bucket</strong> is set but not yet proven private. Save runs the check.');
+}
 if (!empty($private_status['enabled']) || $private_cloud > 0) {
 	echo '<div style="margin-bottom: 12px;">';
-	$pconfirm = 'Disable the private store and PULL ALL ' . $private_cloud
-		. ' cloud-stored object(s) (offloaded inbound-mail raw) BACK TO LOCAL DISK? '
-		. 'Ensure enough free space before continuing. The bucket binding stays until you clear it and Save once the count reaches zero.';
 	echo AdminPage::action_button('Disable Private Store and Pull Back', '/admin/admin_cloud_storage', array(
 		'hidden'  => array('action' => 'disable_and_pull_private'),
-		'confirm' => $pconfirm,
+		'confirm' => 'Disable the private store and pull all ' . $private_cloud . ' object(s) (offloaded inbound-mail raw) back to this server? '
+			. 'Ensure enough free space before continuing. The bucket stays named until you clear it and Save once the count reaches zero.',
 		'class'   => 'btn btn-danger btn-sm',
 	));
 	echo '</div>';
 }
 
-// Reverse task (only when active)
-if (!empty($health['reverse_task'])) {
-	echo '<div style="margin-bottom: 8px;">';
-	echo $dot('#0d6efd') . '<strong>Pull-back in progress.</strong> ';
-	if ($health['reverse_task']['last_run']) {
-		echo 'Last run: ' . htmlspecialchars(LibraryFunctions::convert_time($health['reverse_task']['last_run'], 'UTC', $session->get_timezone()));
-		if ($health['reverse_task']['last_message']) {
-			echo '<br><small class="text-muted">' . htmlspecialchars($health['reverse_task']['last_message']) . '</small>';
-		}
-	}
-	echo '</div>';
-}
-
-// Stuck files list
+// Stuck files, with their Retry.
 if (!empty($health['stuck_rows'])) {
-	echo '<div style="margin-top: 16px;">';
-	echo '<strong>Stuck files (failed 5+ times):</strong>';
+	echo '<div style="margin-top: 8px;">';
 	echo '<table class="table table-sm" style="margin-top: 6px;"><thead><tr>';
 	echo '<th>File</th><th>Last attempt</th><th>Failures</th><th></th>';
 	echo '</tr></thead><tbody>';
 	foreach ($health['stuck_rows'] as $row) {
 		echo '<tr>';
 		echo '<td>' . htmlspecialchars($row['fbb_stored_name']) . ' <small class="text-muted">(#' . (int)$row['fbb_file_blob_id'] . ')</small></td>';
-		echo '<td>' . ($row['fbb_sync_last_attempt'] ? htmlspecialchars(LibraryFunctions::convert_time($row['fbb_sync_last_attempt'], 'UTC', $session->get_timezone())) : '—') . '</td>';
+		echo '<td>' . ($row['fbb_sync_last_attempt'] ? $when($row['fbb_sync_last_attempt']) : '—') . '</td>';
 		echo '<td>' . (int)$row['fbb_sync_failed_count'] . '</td>';
 		echo '<td>';
 		echo '<form method="post" action="/admin/admin_cloud_storage" style="display:inline;">';
@@ -276,76 +229,146 @@ if (!empty($private_test_results)) {
 }
 
 // =====================================================
-// SETTINGS FORM
+// THE STORE
 // =====================================================
-$pageoptions = array('title' => $enabled ? 'Cloud Storage Settings' : 'Configure Cloud Storage');
-$page->begin_box($pageoptions);
-
-if (!$enabled) {
-	echo '<p style="color:#666;">Public uploaded files (photos, gallery images, blog images) can be moved to a customer-owned S3-compatible bucket. Permissioned/private files always stay on local disk.</p>';
-} else {
-	echo '<p style="color:#666; margin-bottom: 8px;"><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#28a745; margin-right:6px;"></span><strong>Cloud storage is active.</strong> Click Save to re-test the connection. Pause to stop new migrations (existing cloud-stored files keep serving from the bucket).</p>';
-}
-
-$formwriter = $page->getFormWriter('cloud_storage_form', ['action' => '/admin/admin_cloud_storage', 'method' => 'post', 'id' => 'cloud_storage_form']);
-$formwriter->begin_form();
-$formwriter->hiddeninput('action', '', array('value' => 'save'));
-
+// Three shapes. Nothing configured: the setup form. Configured: what is
+// stored, read-only, with the actions that fit its state. While files are in
+// the bucket (or on their way back) the endpoint, region and bucket are
+// locked — the records point at objects there — and only the key, the
+// public URL and the private bucket may change. With nothing in the bucket
+// the whole configuration may change or be removed.
+$fields_in_order = array(
+	'cloud_storage_endpoint', 'cloud_storage_region', 'cloud_storage_bucket',
+	'cloud_storage_access_key', 'cloud_storage_secret_key',
+	'cloud_storage_public_base_url', 'cloud_storage_private_bucket',
+);
+$field_values = array(
+	'cloud_storage_endpoint'        => $settings_values['endpoint'],
+	'cloud_storage_region'          => $settings_values['region'],
+	'cloud_storage_bucket'          => $settings_values['bucket'],
+	'cloud_storage_access_key'      => $settings_values['access_key'],
+	'cloud_storage_secret_key'      => $settings_values['secret_key'],
+	'cloud_storage_public_base_url' => $settings_values['public_base_url'],
+	'cloud_storage_private_bucket'  => $settings_values['private_bucket'],
+);
 // The fields come from the cloud_storage declarations, so this page and the
-// core settings tab show the same thing. The enabled and draining flags are
-// declared machine-written: this page sets them after a live bucket test,
-// which is not something an admin can assert by ticking a box.
-SettingsFieldRenderer::renderGroup($formwriter, 'cloud_storage', array(
-	'source' => 'core',
-	// No Clear box on the secret key: this page writes its own settings after a
-	// live bucket test, so it has no way to honour one, and a bucket configured
-	// with no key is not a state worth offering. Removing cloud storage is what
-	// Disable and Pull Back below is for.
-	'field_options' => array(
-		'cloud_storage_secret_key' => array('clearable' => false),
-	),
-	'values' => array(
-		'cloud_storage_endpoint'        => $settings_values['endpoint'],
-		'cloud_storage_region'          => $settings_values['region'],
-		'cloud_storage_bucket'          => $settings_values['bucket'],
-		'cloud_storage_access_key'      => $settings_values['access_key'],
-		'cloud_storage_secret_key'      => $settings_values['secret_key'],
-		'cloud_storage_public_base_url' => $settings_values['public_base_url'],
-		'cloud_storage_private_bucket'  => $settings_values['private_bucket'],
-	),
-));
-
-// Egress-cost inline banner (live as the admin types — reflects current value).
-echo '<div id="egress_warning" style="display:none;" class="alert alert-warning">'
+// core settings tab show the same thing; drawn one at a time so the form reads
+// in the order a person fills it in, not the declaration order. No Clear box
+// on the secret key: this page writes its own settings after a live bucket
+// test, and a bucket with no key is not a state worth offering.
+$draw_fields = function ($formwriter, array $names) use ($field_values) {
+	foreach ($names as $name) {
+		SettingsFieldRenderer::renderGroup($formwriter, 'cloud_storage', array(
+			'source'        => 'core',
+			'only'          => array($name),
+			'field_options' => array('cloud_storage_secret_key' => array('clearable' => false)),
+			'values'        => $field_values,
+		));
+	}
+};
+$egress_banner = '<div id="egress_warning" style="display:none;" class="alert alert-warning">'
 	. '<strong>Egress warning:</strong> This looks like a raw <span id="egress_provider">bucket</span> URL. Without a CDN you\'ll pay egress on every file view, which can exceed storage savings. '
 	. 'Cheaper patterns: B2 + Cloudflare (free egress via Bandwidth Alliance), Cloudflare R2, or Bunny.net in front of a bucket. See <code>docs/cloud_storage.md</code>.'
 	. '</div>';
+$save_failed = !empty($errors) || !empty($private_errors) || (!empty($test_results) && !$test_results['ok']);
 
-echo '<div style="margin-top: 18px; display: flex; gap: 8px; flex-wrap: wrap;">';
-$formwriter->submitbutton('btn_save', 'Save', array('class' => 'btn btn-primary'));
-echo '</div>';
-echo $formwriter->end_form();
-
-if ($enabled) {
-	echo '<div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">';
-	echo AdminPage::action_button('Pause Cloud Storage', '/admin/admin_cloud_storage', array(
-		'hidden'  => array('action' => 'pause'),
-		'confirm' => 'Pause cloud storage? Existing cloud-stored files will continue to serve from the bucket; new uploads will stay local.',
-		'class'   => 'btn btn-warning',
-	));
-	$pull_count = (int)$health['counts']['cloud'];
-	$disk_free = function_exists('disk_free_space') ? @disk_free_space($settings_values['public_base_url'] ? '/tmp' : '/') : null;
-	$free_label = $disk_free !== null ? round($disk_free / 1024 / 1024 / 1024, 1) . ' GB free' : 'unknown free space';
-	$confirm_msg = 'Disable cloud storage and PULL ALL ' . $pull_count . ' bucket-stored files BACK TO LOCAL DISK? Local disk: ' . $free_label . '. Ensure several GB of free space before continuing.';
-	echo AdminPage::action_button('Disable and Pull Files Back to Local', '/admin/admin_cloud_storage', array(
-		'hidden'  => array('action' => 'disable_and_pull'),
-		'confirm' => $confirm_msg,
-		'class'   => 'btn btn-danger',
-	));
+if (!$configured) {
+	$page->begin_box(array('title' => 'Set up cloud storage'));
+	echo '<p style="color:#666;">Public files (photos, gallery and blog images) move to the bucket. Files people must be signed in to see stay on this server unless a private bucket is named too.</p>';
+	$formwriter = $page->getFormWriter('cloud_storage_form', ['action' => '/admin/admin_cloud_storage', 'method' => 'post', 'id' => 'cloud_storage_form']);
+	$formwriter->begin_form();
+	$formwriter->hiddeninput('action', '', array('value' => 'save'));
+	$draw_fields($formwriter, $fields_in_order);
+	echo $egress_banner;
+	echo '<div style="margin-top: 18px;">';
+	$formwriter->submitbutton('btn_save', 'Save', array('class' => 'btn btn-primary'));
 	echo '</div>';
-}
+	echo $formwriter->end_form();
+	$page->end_box();
+} else {
+	// The state is said once, in the Status box above; this box is what is stored.
+	$page->begin_box(array('title' => 'Cloud storage'));
 
-$page->end_box();
+	$stored = Globalvars::get_instance();
+	$show = function ($label, $value, $muted = '') {
+		echo '<tr><th style="width: 180px; font-weight: 600;">' . htmlspecialchars($label) . '</th><td>'
+			. ($value !== '' ? htmlspecialchars($value) : '<span class="text-muted">' . htmlspecialchars($muted) . '</span>') . '</td></tr>';
+	};
+	echo '<table class="table table-sm" style="max-width: 800px;"><tbody>';
+	$show('Endpoint', (string)$stored->get_setting('cloud_storage_endpoint'));
+	$show('Region', (string)$stored->get_setting('cloud_storage_region'), 'none');
+	$show('Bucket', (string)$stored->get_setting('cloud_storage_bucket'));
+	$show('Access key', (string)$stored->get_setting('cloud_storage_access_key'));
+	$show('Secret key', '', $stored->get_setting('cloud_storage_secret_key') !== '' ? 'stored' : 'none');
+	$show('Public base URL', (string)$stored->get_setting('cloud_storage_public_base_url'), 'the bucket\'s own address');
+	$show('Private bucket', (string)$stored->get_setting('cloud_storage_private_bucket'), 'none');
+	$show('Files in the bucket', $files($public_cloud, $health['counts']['cloud_bytes']) . ((int)($private_status['cloud_count'] ?? 0) > 0 ? ' public, ' . $files($private_status['cloud_count']) . ' private' : ''));
+	echo '</tbody></table>';
+
+	// The actions that fit the state.
+	echo '<div style="margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap;">';
+	if ($enabled) {
+		echo AdminPage::action_button('Pause', '/admin/admin_cloud_storage', array(
+			'hidden'  => array('action' => 'pause'),
+			'confirm' => 'Pause cloud storage? Files already in the bucket keep serving from it; new uploads stay on this server. Enable again at any time.',
+			'class'   => 'btn btn-warning',
+		));
+	} else {
+		echo AdminPage::action_button('Enable', '/admin/admin_cloud_storage', array(
+			'hidden'  => array('action' => 'enable'),
+			'class'   => 'btn btn-primary',
+		));
+	}
+	if (($enabled || (int)$public_cloud > 0) && !$draining) {
+		$disk_free = function_exists('disk_free_space') ? @disk_free_space('/') : null;
+		$free_label = $disk_free !== null ? round($disk_free / 1024 / 1024 / 1024, 1) . ' GB free' : 'unknown free space';
+		echo AdminPage::action_button('Disable and Pull Files Back to Local', '/admin/admin_cloud_storage', array(
+			'hidden'  => array('action' => 'disable_and_pull'),
+			'confirm' => 'Disable cloud storage and pull all ' . (int)$public_cloud . ' bucket-stored files back to this server? Local disk: ' . $free_label . '. Ensure several GB of free space before continuing.',
+			'class'   => 'btn btn-danger',
+		));
+	}
+	if (!$locked && !$enabled) {
+		echo AdminPage::action_button('Remove', '/admin/admin_cloud_storage', array(
+			'hidden'  => array('action' => 'remove'),
+			'confirm' => 'Forget this bucket and key? Nothing is in the bucket, so no file is affected. Uploads stay on this server.',
+			'class'   => 'btn btn-outline-danger',
+		));
+	}
+	echo '</div>';
+
+	if ($locked) {
+		// Only what may change while files are in the bucket.
+		echo '<p class="text-muted small" style="margin-top: 14px; margin-bottom: 6px;">The endpoint, region and bucket cannot change while files are in the bucket: their records point at objects there. '
+			. 'To move to another bucket, disable and pull the files back first. The key and the public URL may change at any time; Save proves the new key before it is stored.</p>';
+		$formwriter = $page->getFormWriter('cloud_storage_form', ['action' => '/admin/admin_cloud_storage', 'method' => 'post', 'id' => 'cloud_storage_form']);
+		$formwriter->begin_form();
+		$formwriter->hiddeninput('action', '', array('value' => 'save'));
+		$draw_fields($formwriter, array('cloud_storage_access_key', 'cloud_storage_secret_key', 'cloud_storage_public_base_url', 'cloud_storage_private_bucket'));
+		echo $egress_banner;
+		echo '<div style="margin-top: 12px;">';
+		$formwriter->submitbutton('btn_save', 'Save', array('class' => 'btn btn-primary'));
+		echo '</div>';
+		echo $formwriter->end_form();
+	} else {
+		// Nothing is in the bucket, so everything may change. Folded away
+		// until asked for; open when a save just failed so the fix is in view.
+		echo '<details style="margin-top: 14px;"' . ($save_failed ? ' open' : '') . '>';
+		echo '<summary style="cursor: pointer; font-weight: 600;">Change settings</summary>';
+		echo '<p class="text-muted small" style="margin-top: 8px;">Nothing is in the bucket, so any of these may change. Save proves the bucket and the key before anything is stored.</p>';
+		$formwriter = $page->getFormWriter('cloud_storage_form', ['action' => '/admin/admin_cloud_storage', 'method' => 'post', 'id' => 'cloud_storage_form']);
+		$formwriter->begin_form();
+		$formwriter->hiddeninput('action', '', array('value' => 'save'));
+		$draw_fields($formwriter, $fields_in_order);
+		echo $egress_banner;
+		echo '<div style="margin-top: 12px;">';
+		$formwriter->submitbutton('btn_save', 'Save', array('class' => 'btn btn-primary'));
+		echo '</div>';
+		echo $formwriter->end_form();
+		echo '</details>';
+	}
+	$page->end_box();
+}
 
 // =====================================================
 // CLIENT-SIDE: live egress warning + region auto-fill + pre-save confirm

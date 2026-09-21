@@ -297,7 +297,7 @@ class S3Signer {
 	 *
 	 * $complete = false is for a caller whose producer reports success only
 	 * AFTER its output closes (tar's exit status arrives after the bytes).
-	 * Nothing then reaches the shelf inside this call: the parts go up but
+	 * Nothing then reaches backup storage inside this call: the parts go up but
 	 * CompleteMultipartUpload is not issued, and a stream short enough for a
 	 * single PUT is held in memory unsent. The result carries 'pending', an
 	 * opaque handle for complete_stream() or abort_stream(); 'status' is 0
@@ -466,7 +466,7 @@ class S3Signer {
 	/**
 	 * Decline a put_stream() that was asked not to complete. A multipart upload
 	 * is aborted (best effort, as every abort is); a held buffer is simply
-	 * dropped. Either way nothing of the stream is on the shelf afterwards.
+	 * dropped. Either way nothing of the stream is in backup storage afterwards.
 	 */
 	public static function abort_stream(array $pending) {
 		if (!empty($pending['upload_id'])) {
@@ -921,8 +921,8 @@ class S3Signer {
 	 *
 	 * This exists so that a node fetching a backup back out of the bucket never
 	 * receives a bucket credential. The standing rule for the fleet is that a
-	 * node holds a WRITE-ONLY credential — it may add to the shelf and may not
-	 * read from it or clear it — because a node that could read the shelf is a
+	 * node holds a WRITE-ONLY credential — it may add to backup storage and may not
+	 * read from it or clear it — because a node that could read backup storage is a
 	 * node whose compromise reaches every other node's backups. A restore needs
 	 * a read, and the honest way to grant exactly one read is to sign one, here,
 	 * on the machine that already holds the credential, and hand over the

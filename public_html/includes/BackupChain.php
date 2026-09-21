@@ -334,7 +334,7 @@ class BackupChain {
 	 *
 	 * The profile segment is required rather than defaulted: this list is handed
 	 * to a delete, and guessing the wrong segment would either delete nothing
-	 * (harmless but silent) or address another party's shelf.
+	 * (harmless but silent) or address another party's backup storage.
 	 */
 	public static function object_keys(array $manifest, $prefix, $slug, $profile) {
 		$dir = rtrim($prefix, '/') . '/' . $slug . '/' . BackupProfile::path_segment($profile)

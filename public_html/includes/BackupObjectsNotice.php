@@ -6,7 +6,7 @@
  *
  * A file the site moved to its cloud file store keeps its local bytes until
  * every backup that stores offloaded files holds it. That is what makes the
- * copy on the shelf certain — and it is also how a backup that stopped
+ * copy in backup storage certain — and it is also how a backup that stopped
  * running fills a small disk, a page-count at a time, with nobody looking at
  * the page. So the count leaves the page and stands on every admin page when
  * either holds:

@@ -1,6 +1,6 @@
 <?php
 /**
- * ShelfRun — one backup run a tenant asked the shelf broker to take
+ * ShelfRun — one backup run a tenant asked the backup storage broker to take
  * (specs/services_phase2_platform.md §3).
  *
  * A run is opened by shelf_begin_run with what it means to write (the
@@ -61,10 +61,10 @@ class ShelfRun extends SystemBase {
 
 	function save($debug = false) {
 		if (!(int)$this->get('svr_svt_service_tenant_id')) {
-			throw new ShelfRunException('A shelf run belongs to a tenant.');
+			throw new ShelfRunException('A backup storage run belongs to a tenant.');
 		}
 		if (trim((string)$this->get('svr_base_key')) === '') {
-			throw new ShelfRunException('A shelf run has a base key.');
+			throw new ShelfRunException('A backup storage run has a base key.');
 		}
 		$this->set('svr_update_time', gmdate('Y-m-d H:i:s'));
 		return parent::save($debug);

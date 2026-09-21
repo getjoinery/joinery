@@ -26,8 +26,8 @@
  *                 folded into mgn_last_status_data: the two shapes stay apart (agent_tier1_recipes Q2)
  * @version 1.15 - mgn_backup_verify_time / _level / _outcome / _message: when this node last proved
  *                 one of its backups restorable, stamped from the verify_backup job result and the
- *                 status report; mgn_backup_shelf_problem: what the fleet pass's shelf check found
- *                 wrong with a backup on the shelf, empty when every backup is whole
+ *                 status report; mgn_backup_shelf_problem: what the fleet pass's backup storage check found
+ *                 wrong with a backup in backup storage, empty when every backup is whole
  * @version 1.14 - managed_by(): which management node this site's own agent is connected to, from the
  *                 agent_join_state setting; a plane that is another plane's node publishes from there
  * @version 1.13 - self_node(): the management node's record of itself, found by its own site URL.
@@ -48,10 +48,10 @@
  *                secret (Phase 1.5, A6); pending requests live in ajr_agent_join_requests
  * @version 1.6 - agent channel: node-generated public key (a verifier, never a credential), one-time
  *                pairing token hash + expiry, paired/last-poll stamps, per-node cutover flag
- * @version 1.6 - mgn_backup_shelf_bytes: what the node's shelf holds, summed from the listing the
+ * @version 1.6 - mgn_backup_shelf_bytes: what the node's backup storage holds, summed from the listing the
  *                retention pass already takes
  * @version 1.5 - mgn_backup_shelf_checked_time / mgn_backup_shelf_newest_time: the bucket's own
- *                testimony about the fleet-backup shelf, so a node claiming success while nothing
+ *                testimony about the fleet-backup storage, so a node claiming success while nothing
  *                lands is catchable
  * @version 1.4 - mgn_allow_console: per-node opt-in for the node detail Console tab
  * @version 1.3.4
@@ -154,7 +154,7 @@ class ManagedNode extends SystemBase {
 		// no list of which primitives are script-backed and must not invent one.
 		'mgn_script_trust_job_type' => array('type'=>'varchar(50)'),
 
-		// The bucket's own testimony about this node's shelf: when this management
+		// The bucket's own testimony about this node's backup storage: when this management
 		// node last listed it, and the newest object write it saw. Stamped by
 		// the scheduler from the retention pass's listing — taken with this
 		// management node's credential, never the node's word. Comparing these
@@ -162,16 +162,16 @@ class ManagedNode extends SystemBase {
 		// reporting success while nothing actually lands.
 		'mgn_backup_shelf_checked_time' => array('type'=>'timestamp(6)'),
 		'mgn_backup_shelf_newest_time'  => array('type'=>'timestamp(6)'),
-		// How much this node's shelf holds, in bytes, as of that same check.
+		// How much this node's backup storage holds, in bytes, as of that same check.
 		// Summed from the listing the retention pass already takes rather than
 		// measured separately: the pass walks the whole prefix every cycle and
 		// the provider returns each object's size, so the figure is free and is
 		// taken with the one credential that can see the whole shelf.
 		'mgn_backup_shelf_bytes'        => array('type'=>'int8'),
-		// What the fleet pass's shelf check found wrong: an artifact a manifest
+		// What the fleet pass's backup storage check found wrong: an artifact a manifest
 		// names that the listing does not hold, or holds at a different size,
 		// or a manifest with no envelope. One line of text, empty when every
-		// backup on the shelf is whole. Stamped on every pass from the same
+		// backup in backup storage is whole. Stamped on every pass from the same
 		// listing as the three columns above.
 		'mgn_backup_shelf_problem'      => array('type'=>'text'),
 		// When this node last proved one of its backups restorable, and how:

@@ -18,7 +18,7 @@
  *
  * Offloaded files (specs/backup_offloaded_files.md § Verification) are proven
  * with the rest. Level 2 opens the epoch envelope of every epoch the run's
- * index names with this machine's own key — no request per object; the shelf
+ * index names with this machine's own key — no request per object; backup storage
  * listing already proved presence and size. Level 3 also brings back the
  * sample the request links (the 5 largest and 15 random, picked by whoever
  * signed the links from the same index), checks each against the index's
@@ -78,7 +78,7 @@
  *   VERIFY_BYTES=<bytes read>
  *   VERIFY_FILES=<entries listed (2) or files restored (3)>
  *   VERIFY_OBJECTS=<offloaded files proven recoverable: stored, epoch envelope opened>
- *   VERIFY_OBJECT_BYTES=<their bytes on the shelf>
+ *   VERIFY_OBJECT_BYTES=<their bytes in backup storage>
  *   VERIFY_OBJECTS_SAMPLED=<n opened and compared>  (level 3 only)
  *   VERIFY_TABLES=<n>                          (level 3 only)
  *   VERIFY_ROWS=usr_users:<n>,<table>:<n>,…    (level 3 only)
@@ -296,7 +296,7 @@ if (!BackupVerifier::is_runnable_level($level)) {
 }
 
 // ── Where, and under which locks ────────────────────────────────────────────
-// verify-<pid> inside the PROFILE's directory — the one whose shelf the chain
+// verify-<pid> inside the PROFILE's directory — the one whose backup storage the chain
 // came from — so a manager-profile verify and a site-profile verify never share
 // a directory, and the local sweep finds either where it looks for backups.
 try {
@@ -414,7 +414,7 @@ try {
 	// `gone`, so the next pass verifies the newer chain rather than retrying.
 	$reason = $e->getMessage();
 	if ($fetching !== '' && preg_match('/HTTP 40[34]\b/', $reason)) {
-		$reason = 'gone: ' . $fetching . ' is no longer on the shelf (' . $reason . ')';
+		$reason = 'gone: ' . $fetching . ' is no longer in backup storage (' . $reason . ')';
 	}
 	$failed = array(
 		'result'   => BackupVerifier::RESULT_FAIL,

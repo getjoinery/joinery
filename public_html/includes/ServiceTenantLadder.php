@@ -4,7 +4,7 @@
  * walks its tenant rows down, and back up.
  *
  * (specs/services_phase2_platform.md §5, §14 E1). A tenant of a service the
- * operator runs (a relay slot, outbound mail, the backup shelf) holds a row
+ * operator runs (a relay slot, outbound mail, backup storage) holds a row
  * with a state and two timestamps. Each reconcile pass asks one question —
  * is this tenant still entitled? — and the ladder turns the answer into the
  * row's next state:
@@ -27,7 +27,7 @@
  * The state vocabulary is shared by every tenant row: provisioning (asked
  * for, not yet usable), active, suspended (entitlement lapsed past the
  * window), released (the tenant left). A service may add rungs of its own
- * beyond these — the mailbox fleet's `evicted`, the shelf's retention clock —
+ * beyond these — the mailbox fleet's `evicted`, backup storage's retention clock —
  * on its own side of the closures.
  *
  * @version 1.0 - lifted from MailboxRelayReconcile phase 5's entitlement re-check

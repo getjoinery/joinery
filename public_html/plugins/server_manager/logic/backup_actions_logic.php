@@ -11,7 +11,7 @@
  * the cached backup list. Superadmin only (floor 10).
  *
  * @version 1.6.0 - restore_objects: Bring them back — the node's offloaded files the file store has lost,
- *                  brought home from the shelf by pages of signed links (FleetObjectRestore::start, the
+ *                  brought home from backup storage by pages of signed links (FleetObjectRestore::start, the
  *                  survey job; the pages follow from its result)
  * @version 1.5.0 - verify_backup: prove a backup restorable on the node without restoring it, at
  *                  level 2 (opened and read) or 3 (rehearsed into scratch), as a job like stage_chain
@@ -309,9 +309,9 @@ function backup_actions_logic(array $input): LogicResult {
 		return LogicResult::render(['success' => true, 'job_id' => $job->key]);
 	}
 
-	// ── Bring offloaded files back from the shelf ───────────────────────────
+	// ── Bring offloaded files back from backup storage ───────────────────────────
 	//
-	// The node's offloaded files are on its shelf once each; the file store
+	// The node's offloaded files are in its backup storage once each; the file store
 	// may have lost some. This starts the loop FleetObjectRestore drives: a
 	// survey job asks the node which the file store cannot serve, and a page
 	// of signed links per answer follows from each result. Nothing on the
@@ -396,7 +396,7 @@ function backup_actions_logic_descriptor(): array {
 			'local_path' => ['type' => 'string', 'required' => false, 'label' => 'Local path'],
 			'cloud_path' => ['type' => 'string', 'required' => false, 'label' => 'Cloud path'],
 			'chain_id'   => ['type' => 'string', 'required' => false, 'label' => 'Backup set (stage_chain / verify_backup)'],
-			'profile'    => ['type' => 'string', 'required' => false, 'label' => 'Whose shelf: site or manager'],
+			'profile'    => ['type' => 'string', 'required' => false, 'label' => 'Whose backup storage: site or manager'],
 			'seq'        => ['type' => 'int',    'required' => false, 'label' => 'Run within the set (default newest)'],
 			'level'      => ['type' => 'int',    'required' => false, 'label' => 'Verify level: 2 open and read, 3 rehearse (verify_backup)'],
 			'mode'       => ['type' => 'string', 'required' => false, 'enum' => ['missing', 'all'], 'label' => 'Which offloaded files to bring back: missing (default) or all (restore_objects)'],

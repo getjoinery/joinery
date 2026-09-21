@@ -1,9 +1,9 @@
 <?php
 /**
- * BackupObjectRestore — bringing offloaded files home from the backup shelf.
+ * BackupObjectRestore — bringing offloaded files home from backup storage.
  *
  * A backup's archives carry no offloaded file: every blob whose bytes live in
- * the file bucket is on the shelf once, encrypted under an epoch key, and a
+ * the file bucket is in backup storage once, encrypted under an epoch key, and a
  * run's index names each with its encrypted size and hash
  * (BackupObjects). After the archives and the database are back, this puts the
  * files back where the site expects them — but only the ones the file bucket
@@ -12,7 +12,7 @@
  *
  * The bytes come from one of two sources and are treated the same way: a tree
  * an operator downloaded with the site's own credential
- * (restore_chain.sh --objects DIR, the shelf's objects/{epoch}/ layout), or a
+ * (restore_chain.sh --objects DIR, the objects/{epoch}/ layout backup storage uses), or a
  * page of presigned links a management node signed (utils/restore_objects.php
  * as the restore_objects primitive). Either way an object is checked against
  * the index before it is decrypted, decrypted to the placement the storage
@@ -167,7 +167,7 @@ class BackupObjectRestore {
 
 	/**
 	 * The request the shell path makes (restore_chain.sh --objects, or an
-	 * operator by hand): an index file, a directory in the shelf's
+	 * operator by hand): an index file, a directory in the layout backup storage uses,
 	 * objects/{epoch}/ layout, the mode, and — where the site key does not
 	 * open an epoch — a key file per epoch, recovered with backup_envelope.php.
 	 *
@@ -193,7 +193,7 @@ class BackupObjectRestore {
 		$dir = rtrim((string)($config['objects_dir'] ?? ''), '/');
 		$dry = !empty($config['dry_run']);
 		if (!$dry && ($dir === '' || !is_dir($dir))) {
-			throw new BackupObjectRestoreException("'objects_dir' must be a directory holding the shelf's objects/{epoch}/ tree",
+			throw new BackupObjectRestoreException("'objects_dir' must be a directory holding objects/{epoch}/ tree backup storage uses",
 				BackupObjectRestoreException::MALFORMED);
 		}
 		$mode = (string)($config['mode'] ?? self::MODE_MISSING);
@@ -546,7 +546,7 @@ class BackupObjectRestore {
 		$sha = (string)$blob->get('fbb_sha256');
 		if ($sha !== '' && !hash_equals($sha, (string)hash_file('sha256', $path))) {
 			throw new BackupObjectRestoreException('offloaded file ' . $name . ($is_placed ? ': the file already at ' . $path . ' is not this file'
-				: ' decrypts to bytes whose hash is not the one its record holds') . ($is_placed ? '; nothing is overwritten' : ' — the shelf holds a different file'));
+				: ' decrypts to bytes whose hash is not the one its record holds') . ($is_placed ? '; nothing is overwritten' : ' — backup storage holds a different file'));
 		}
 	}
 
@@ -586,7 +586,7 @@ class BackupObjectRestore {
 
 	// -------------------------------------------------------------- sources
 
-	/** A source over a downloaded tree in the shelf's objects/{epoch}/ layout. Nothing is temporary. */
+	/** A source over a downloaded tree in the objects/{epoch}/ layout backup storage uses. Nothing is temporary. */
 	public static function tree_source($dir) {
 		$dir = rtrim((string)$dir, '/');
 		return function ($name, array $entry) use ($dir) {
@@ -630,7 +630,7 @@ class BackupObjectRestore {
 	 * The result lines a script prints and a management node reads back.
 	 * A survey carries WANTED, WANT (the capped list) and EPOCHS; a page
 	 * carries RESTORED, BYTES and KEPT; both carry the counts of what was
-	 * skipped and what was never on the shelf.
+	 * skipped and what was never in backup storage.
 	 */
 	public static function format_contract(array $r) {
 		$lines = array();
@@ -716,7 +716,7 @@ class BackupObjectRestore {
 		$n = function ($v) { return number_format((int)$v); };
 		$files = function ($v) use ($n) { return $n($v) . ' offloaded file' . ((int)$v === 1 ? '' : 's'); };
 		$notes = array();
-		if (!empty($r['not_stored'])) { $notes[] = $files($r['not_stored']) . ' never reached the shelf'; }
+		if (!empty($r['not_stored'])) { $notes[] = $files($r['not_stored']) . ' never reached backup storage'; }
 		if (isset($r['restored'])) {
 			$text = 'Brought ' . $files($r['restored']) . ' home (' . BackupFetch::human((int)($r['bytes'] ?? 0)) . ')';
 			if (!empty($r['kept'])) { $notes[] = $n($r['kept']) . ' already on disk'; }

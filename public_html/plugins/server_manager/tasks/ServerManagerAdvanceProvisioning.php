@@ -19,7 +19,7 @@
  *                   the one SMTP credential that reaches their box.
  *  7. Hosted watch  the commercial half of a hosted site: the trial clock, the
  *                   allowance banners, and what falls due when a payment fails.
- *  8. Services      the self-hosted sites renting our mail and backup shelf:
+ *  8. Services      the self-hosted sites renting our mail and backup storage:
  *                   the paid-through date against the ladder, the meters, the
  *                   shelf ledger against a listing, and retention.
  *

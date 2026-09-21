@@ -30,7 +30,7 @@ function shelf_finish_run_logic(array $input): LogicResult {
 
 function shelf_finish_run_logic_descriptor(): array {
 	return array(
-		'description'      => 'Close a shelf run, naming the objects the site completed ([{name, bytes}]). The ledger marks them complete and the figure is refreshed.',
+		'description'      => 'Close a backup storage run, naming the objects the site completed ([{name, bytes}]). The ledger marks them complete and the figure is refreshed.',
 		'requires_session' => true,
 		'mutates'          => true,
 		'input'            => array(

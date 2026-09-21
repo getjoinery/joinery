@@ -12,7 +12,7 @@
  *   - the PHP cipher and `openssl enc` open each other's output, at every
  *     awkward length, and a wrong key is refused
  *   - epoch decisions: none, kept, recovery rotated, site key cannot open
- *   - the shelf picture from a listing; the held set from an index
+ *   - backup storage picture from a listing; the held set from an index
  *   - the index: every cloud blob, stored or not, ciphertext facts only
  *   - the exclude list names the original and every variant, in both
  *     placements, and nothing outside the project
@@ -115,7 +115,7 @@ check(BackupObjects::epoch_decision($stored, $fpr_a, false) === 'envelope_unopen
 check(BackupObjects::epoch_decision($stored, '', false) === 'envelope_unopenable', 'with no current fingerprint the rotation test is skipped, not failed');
 
 // ── Shelf picture and held set ─────────────────────────────────────────────
-section('The shelf picture from a listing');
+section('Backup storage picture from a listing');
 
 $prefix = 'joinery-backups/site-a/site/objects/';
 $listing = array(
@@ -144,7 +144,7 @@ check($held['beach.jpg']['object_sha256'] === str_repeat('1', 64), 'with its has
 check(BackupObjects::held_from_index(null) === array(), 'no index means nothing held');
 
 // ── Index ───────────────────────────────────────────────────────────────────
-section('The index says what was live and what the shelf held');
+section('The index says what was live and what backup storage held');
 
 $plan = array('profile' => 'site', 'output_dir' => $work . '/site');
 $objects = array(
@@ -201,7 +201,7 @@ check($ex !== '' && is_file($ex) && file_get_contents($ex) === implode("\n", $li
 check(BackupObjects::write_exclude_file($plan, array(), $root) === '', 'and writes nothing when there is nothing to exclude');
 
 // ── Release rule ────────────────────────────────────────────────────────────
-section('Local bytes go only once every enabled shelf holds the object');
+section('Local bytes go only once every enabled backup storage holds the object');
 
 $site_holds = array('beach.jpg' => array('epoch' => 'e', 'object_bytes' => 1, 'object_sha256' => 'x'));
 $mgr_holds  = array('beach.jpg' => array('epoch' => 'e', 'object_bytes' => 1, 'object_sha256' => 'x'), 'other.jpg' => array());
@@ -228,7 +228,7 @@ check(BackupObjects::held_path_for('manager', $work) === $work . '/manager/objec
 $sets = BackupObjects::held_sets(array('site', 'manager'), $work);
 check($sets['site'] === null && isset($sets['manager']['tick.jpg']), 'held_sets() reads each enabled profile\'s file, null where there is none');
 
-// A run rewrites the file from its own picture of the shelf, but the tick
+// A run rewrites the file from its own picture of backup storage, but the tick
 // keeps storing while the run is going: an entry the file gained since the
 // run read it survives the rewrite; one the run saw and no longer holds goes.
 $seen = array_keys($after);
@@ -256,7 +256,7 @@ $objs2 = array(
 $released = BackupObjects::release_waiting($objs2, array('manager'), $work);
 check($released === 1, 'release_waiting() releases the one blob the manager holds', (string)$released);
 check(!is_file($work . '/tree/static_files/uploads/tick.jpg') && !is_file($work . '/tree/static_files/uploads/thumb/tick.jpg'), 'original and variant are both gone');
-check(is_file($work . '/tree/static_files/uploads/wait.jpg'), 'the blob no shelf holds keeps its bytes');
+check(is_file($work . '/tree/static_files/uploads/wait.jpg'), 'the blob no backup storage holds keeps its bytes');
 check(BackupObjects::release_waiting($objs2, array(), $work) === 1, 'with no profile enabled everything with bytes is released');
 
 // ── The objects kind through the chain, staging and the verifier ────────────

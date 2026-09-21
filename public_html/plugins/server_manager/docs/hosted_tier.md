@@ -7,7 +7,7 @@ difference between them is **whose**:
   provider bills them directly, and none of this operator's keys are involved.
 - **Hosted.** The server is created on this operator's account with this
   operator's token, its outbound mail goes through this operator's mail
-  provider, and its backups land on this fleet's shelf. The buyer connects
+  provider, and its backups land in this fleet's backup storage. The buyer connects
   nothing, pastes no DNS record, and reads no password off a server.
 
 Nobody chooses between them at checkout. The choice is the product's: the
@@ -177,7 +177,7 @@ Two consequences follow, and both are fleet-wide rather than hosted-only:
 provision holds the state — `trial`, `subscribed`, `grace`, `shutdown` — and
 nothing else: there are no meter columns, because every figure already lives
 with the party that measures it (the mail provider counts sends, the retention
-pass sizes the shelf, the node reports its own disk).
+pass sizes backup storage, the node reports its own disk).
 
 A new site opens **subscribed**: hosting is billed from checkout. The `trial`
 state exists for a deployment that configures a free period (**Hosted tier →
@@ -196,7 +196,7 @@ The watch then acts on those dates, on its own schedule:
 |---|---|
 | A charge fails | The grace period starts and the site's banner says so. It does not restart on a second failed retry — a card that never works would otherwise buy unlimited hosting. |
 | The grace ends | The instance is **shut down** by API and `hosted.deletion_required` is raised, asking a person to delete it at the provider. It keeps billing until they do; that is the price of rule 4. The node's fleet backups and uptime checks are switched off in the same step, so a machine somebody turned off on purpose does not spend the next month failing runs and tripping down-alerts over the one line that is actually actionable. |
-| The shelf date passes | The customer's whole prefix is pruned. Between the shutdown and this, a returning customer is recoverable — a fresh install plus restore-over-agent, with **their** recovery key. |
+| Backup storage date passes | The customer's whole prefix is pruned. Between the shutdown and this, a returning customer is recoverable — a fresh install plus restore-over-agent, with **their** recovery key. |
 | A payment arrives | Everything pending is cancelled. After a shutdown, bringing the site back is a deliberate manual step: the machine may have been deleted by then, and a signal cannot know that. |
 
 Both dates are counted from the **failed payment**, not from the shutdown, so
@@ -212,7 +212,7 @@ one action for its service, and only once that allowance is actually near.
 | Allowance | Measured by | At 100% |
 |---|---|---|
 | Sends per month | the mail provider's own count | the provider refuses until the month rolls |
-| Backup shelf | the retention pass's listing (`mgn_backup_shelf_bytes`) | this node's fleet backups are paused, the site's banner says so, and nothing is deleted. They resume on their own once the shelf comes back under the allowance. |
+| Backup storage | the retention pass's listing (`mgn_backup_shelf_bytes`) | this node's fleet backups are paused, the site's banner says so, and nothing is deleted. They resume on their own once backup storage comes back under the allowance. |
 | Disk | the node's own status check | nothing automatic — a full disk stops the site on its own |
 | Outbound transfer | the account-wide pool | one operator alert per billing period. There is no per-customer figure, because there is no per-customer bill. |
 
@@ -225,7 +225,7 @@ of a webhook.
 
 **Server Manager → Provisioning → Hosted tier** takes everything: the cloud
 token, the mail provider's master key and webhook secret, the allowances, the
-grace and shelf periods, the sites-page address pushed to each site's banner,
+grace and backup storage periods, the sites-page address pushed to each site's banner,
 and the two referral links the off-ramps use. Until the token and the mail key
 are both present, a hosted order cannot be fulfilled — a hosted site without
 mail is a site whose owner cannot reset their own password.

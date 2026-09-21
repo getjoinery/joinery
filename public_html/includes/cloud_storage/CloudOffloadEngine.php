@@ -17,7 +17,7 @@
  *
  * @version 1.2 - after the flip to cloud, the backup's object store has its say before the local
  *                bytes go (BackupObjects::after_offload): it copies the original to the site's
- *                backup shelf when that profile is enabled, and the bytes are unlinked only once
+ *                backup storage when that profile is enabled, and the bytes are unlinked only once
  *                every enabled profile holds the object. With no profile enabled, or a consumer
  *                the store cannot describe, this is the unconditional unlink it always was.
  * @version 1.1
@@ -172,8 +172,8 @@ class CloudOffloadEngine {
 		$upd->execute([$id]);
 
 		// Only now may the local bytes go — original + variants — and only if
-		// every backup shelf that will hold this object already does. The store
-		// to the site's own shelf happens inside this call, under the row lock
+		// every backup storage that will hold this object already does. The store
+		// to the site's own backup storage happens inside this call, under the row lock
 		// this tick already holds; a failure there leaves the bytes and the
 		// next site run stores it. A row left `cloud` with local bytes is the
 		// normal state of a file waiting for a management node's backup.

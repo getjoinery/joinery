@@ -977,6 +977,7 @@
       "default": "",
       "group": "cloud_storage",
       "label": "Access key",
+      "helptext": "A key for this bucket only, with list, read, write and delete. Backblaze: listFiles, readFiles, writeFiles, deleteFiles. Amazon: s3:ListBucket, s3:GetObject, s3:PutObject, s3:DeleteObject.",
       "type": "text"
     },
     {
@@ -984,6 +985,7 @@
       "default": "",
       "group": "cloud_storage",
       "label": "Bucket name",
+      "helptext": "A public bucket used for nothing else. Not the backup bucket.",
       "type": "text"
     },
     {
@@ -2847,7 +2849,7 @@
       "group": "services",
       "label": "Services URL",
       "type": "text",
-      "helptext": "The Joinery deployment this site rents outbound email and its backup shelf from. The Connect button on the setup wizard's Email and Backups steps links this site to an account there; nothing here is typed by hand."
+      "helptext": "The Joinery deployment this site rents outbound email and its backup storage from. The Connect button on the setup wizard's Email and Backups steps links this site to an account there; nothing here is typed by hand."
     },
     {
       "name": "services_api_public_key",

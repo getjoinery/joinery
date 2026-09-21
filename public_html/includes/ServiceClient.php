@@ -4,7 +4,7 @@
  *
  * (specs/services_phase2_platform.md §4, §14 E1). One deployment rents
  * something from another: a relay slot on the mailbox fleet, outbound mail,
- * the backup shelf. Whatever the service, the tenant reaches it the same way:
+ * the backup storage. Whatever the service, the tenant reaches it the same way:
  * the operator's `/api/v1/action/{segment}/{action}` endpoint, as JSON, with
  * the tenant account's API key pair in the request headers — the pair alone
  * is the identity on the wire, and the operator resolves the tenant from the

@@ -945,7 +945,7 @@ if ($sole_count === 1) {
 	$inferred = JobCommandBuilder::get_target(jcb_node(array(
 		'mgn_web_root' => '/var/www/html/inferred/public_html')));
 	check($inferred !== null && $inferred->key == $sole_id,
-		'a node naming no target resolves to the sole enabled shelf',
+		'a node naming no target resolves to the sole enabled backup storage',
 		'resolved: ' . var_export($inferred ? $inferred->key : null, true));
 } else {
 	harness_skip('sole-shelf inference', "this deployment has {$sole_count} enabled targets, not 1");
@@ -1047,7 +1047,7 @@ check(($run_config['type'] ?? '') === 'project' && ($run_config['mode'] ?? '') =
 	'unrecognised type and mode coerce to the defaults rather than travelling as text');
 
 // The object store rides on the request for an agent that accepts it: the
-// flag, a signed link to the newest index on the node's manager shelf, and a
+// flag, a signed link to the newest index in the manager-profile backup storage, and a
 // signed link per epoch envelope — from the listing the scheduler hands over,
 // or one taken here. An older agent gets none of them and runs as before.
 $obj_base = 'joinery-backups/' . $run_node->get('mgn_slug') . '/manager/';
@@ -1073,13 +1073,13 @@ JobCommandBuilder::set_shelf_listing_for_tests($obj_listing);
 $obj_config = JobCommandBuilder::build_backup_run($obj_node)['params'];
 check(($obj_config['objects'] ?? null) === true, 'an agent at the floor is asked to store offloaded files');
 check(strpos((string)($obj_config['objects_index_url'] ?? ''), 'https://shelf.invalid/' . $obj_base . 'chain-20260901_030000/objects-0001.json.gz?') === 0,
-	'the index link names the newest run\'s index on the shelf', (string)($obj_config['objects_index_url'] ?? ''));
+	'the index link names the newest run\'s index in backup storage', (string)($obj_config['objects_index_url'] ?? ''));
 check(array_keys((array)($obj_config['epoch_envelope_urls'] ?? array())) === array('epoch-20260801_000000', 'epoch-20260901_000000')
 	&& strpos((string)$obj_config['epoch_envelope_urls']['epoch-20260801_000000'], 'objects/epoch-20260801_000000/envelope.json?') !== false,
-	'every epoch envelope on the shelf is linked, keyed by epoch', json_encode($obj_config['epoch_envelope_urls'] ?? null));
+	'every epoch envelope in backup storage is linked, keyed by epoch', json_encode($obj_config['epoch_envelope_urls'] ?? null));
 $obj_config = JobCommandBuilder::build_backup_run($obj_node, array('objects_links' => array('index' => '', 'envelopes' => array())))['params'];
 check(($obj_config['objects'] ?? null) === true && !isset($obj_config['objects_index_url']) && !isset($obj_config['epoch_envelope_urls']),
-	'links the scheduler hands over are used as they are: an empty shelf sends the flag and no link');
+	'links the scheduler hands over are used as they are: an empty backup storage sends the flag and no link');
 $obj_config = JobCommandBuilder::build_backup_run($obj_node, array('type' => 'database'))['params'];
 check(!isset($obj_config['objects']), 'a database-only run carries no object store');
 JobCommandBuilder::set_shelf_listing_for_tests(null);
@@ -1107,7 +1107,7 @@ check(in_array('backup_run', ManagementJob::filterTypes(), true),
 // as well is what puts the reason in front of an operator, and keeps the fleet
 // schedule from filling the job log with runs that were never going to work.
 // Never a quiet unencrypted fallback: an unencrypted whole site on somebody
-// else's shelf is the outcome the refusal exists to prevent.
+// else's backup storage is the outcome the refusal exists to prevent.
 $rk_cases = array(
 	'a node holding no key'            => array('unconfigured', ''),
 	'a node holding an unreadable one' => array('invalid', ''),
@@ -1547,7 +1547,7 @@ check($retire_syntax_rc === 0, 'the generated script parses under bash -n', impl
 
 section('verify_backup: the same links as a Prepare, plus a level, and nothing destructive');
 
-// A node whose agent ships verify_backup, naming a shelf of its own. The shelf
+// A node whose agent ships verify_backup, naming a shelf of its own. Backup storage
 // listing is stood in for, so this signs no real link and needs no bucket.
 $verify_bkt = new BackupTarget(NULL);
 $verify_bkt->set('bkt_name', 'HarnessTest Verify Target ' . bin2hex(random_bytes(3)));
@@ -1722,7 +1722,7 @@ if (!$verify_target) {
 		'it carries the run, the mode and the index link, and no object or envelope links', json_encode(array_keys($survey['params'])));
 	check($survey['params']['seq'] === 1 && $survey['params']['mode'] === 'missing'
 		&& $strip($survey['params']['index_url']) === 'https://shelf.invalid/' . $oprefix . 'objects-0001.json.gz',
-		'the newest run on the shelf, in missing mode, its index signed', json_encode($survey['params']));
+		'the newest run in backup storage, in missing mode, its index signed', json_encode($survey['params']));
 	check(strpos($survey['params']['index_url'], 'X-Amz-Expires=' . ManagementJob::PRIMITIVE_CLAIM_BUDGETS['restore_objects']) !== false,
 		'the link expires with the restore_objects claim budget');
 	$survey0 = JobCommandBuilder::build_restore_objects($objects_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager', 'seq' => 0, 'mode' => 'all'));

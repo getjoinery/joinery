@@ -14,6 +14,9 @@
  * that task is active; the tick drives every store of every visibility from the
  * registry, so the admin never names a profile or a per-store task.
  *
+ * @version 2.5 - the page's shape (configured, locked, public_cloud, draining); a field the form did not
+ *                post keeps its stored value, so Enable re-proves the stored settings and the locked
+ *                form posts only what may change; the remove action forgets an empty store
  * @version 2.4 - objects_status (BackupObjectsStatus::compute()) for the waiting-for-backup count and
  *                size and the same-account line
  * @version 2.3 - the daily file-store check (inventory) and who brings a missing file back
@@ -45,8 +48,19 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 	$private_test_results = null;  // private store
 	$private_errors = array();
 
+	// A field the form did not post keeps its stored value. The page shows the
+	// locked fields (endpoint, region, bucket) read-only while files are in the
+	// bucket and posts only the ones that may change; Enable posts nothing and
+	// re-proves the stored settings.
+	$posted = function ($key) use ($input, $settings) {
+		return array_key_exists($key, $input) ? trim((string)$input[$key]) : trim((string)$settings->get_setting($key));
+	};
+
 	if ($input && isset($input['action'])) {
 		$action = $input['action'];
+		if ($action === 'enable') {
+			$action = 'save';
+		}
 
 		if ($action === 'save') {
 			// ---- Public store -------------------------------------------------
@@ -58,12 +72,12 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 				$secret_key = (string)$settings->get_setting('cloud_storage_secret_key');
 			}
 			$opts = array(
-				'endpoint'        => trim($input['cloud_storage_endpoint'] ?? ''),
-				'region'          => trim($input['cloud_storage_region'] ?? ''),
-				'bucket'          => trim($input['cloud_storage_bucket'] ?? ''),
-				'access_key'      => trim($input['cloud_storage_access_key'] ?? ''),
+				'endpoint'        => $posted('cloud_storage_endpoint'),
+				'region'          => $posted('cloud_storage_region'),
+				'bucket'          => $posted('cloud_storage_bucket'),
+				'access_key'      => $posted('cloud_storage_access_key'),
 				'secret_key'      => $secret_key,
-				'public_base_url' => trim($input['cloud_storage_public_base_url'] ?? ''),
+				'public_base_url' => $posted('cloud_storage_public_base_url'),
 			);
 			$public_ok = false;
 			foreach (['endpoint', 'bucket', 'access_key', 'secret_key'] as $field) {
@@ -91,7 +105,7 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 			}
 
 			// ---- Private store (independent) ----------------------------------
-			$private_bucket = trim($input['cloud_storage_private_bucket'] ?? '');
+			$private_bucket = $posted('cloud_storage_private_bucket');
 			$private_handled = false;
 			$private_ok = true;
 			if ($private_bucket !== '') {
@@ -158,6 +172,31 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 				return LogicResult::redirect('/admin/admin_cloud_storage');
 			}
 			// otherwise fall through and render diagnostics inline
+		}
+		elseif ($action === 'remove') {
+			// Forget the bucket and the key. Only when nothing is in the bucket
+			// and nothing is on its way back: a binding that still names
+			// offloaded files is what the pull-back reads.
+			if (CloudStorageLifecycle::cloudRowCount('public') > 0 || CloudStorageLifecycle::cloudRowCount('private') > 0
+					|| $settings->get_setting('cloud_storage_draining') || $settings->get_setting('cloud_storage_private_draining')) {
+				$session->save_message(new DisplayMessage(
+					'Files are still in the bucket, or on their way back. Disable and pull them back first; remove once the count is zero.',
+					'Not removed', '/\/admin\/admin_cloud_storage/',
+					DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+				return LogicResult::redirect('/admin/admin_cloud_storage');
+			}
+			CloudStorageLifecycle::setEnabled('public', false, $session, array(
+				'cloud_storage_endpoint' => '', 'cloud_storage_region' => '', 'cloud_storage_bucket' => '',
+				'cloud_storage_access_key' => '', 'cloud_storage_secret_key' => '', 'cloud_storage_public_base_url' => '',
+			));
+			CloudStorageLifecycle::setEnabled('private', false, $session, array('cloud_storage_private_bucket' => ''));
+			CloudStorageLifecycle::stopDrain('public', $session);
+			CloudStorageLifecycle::stopDrain('private', $session);
+			$session->save_message(new DisplayMessage(
+				'Cloud storage removed. Uploads stay on this server.',
+				'Removed', '/\/admin\/admin_cloud_storage/',
+				DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+			return LogicResult::redirect('/admin/admin_cloud_storage');
 		}
 		elseif ($action === 'pause') {
 			// Pause: stop offloading new files; keep existing cloud files serving
@@ -243,12 +282,21 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 			'private_bucket'  => $pick('cloud_storage_private_bucket'),
 		),
 		'enabled'              => (bool)$settings->get_setting('cloud_storage_enabled'),
+		// The page's shape: a store is configured once a bucket, endpoint and key
+		// are stored; it is locked while files are in either bucket or on their
+		// way back, when only the key, the public URL and the private bucket may change.
+		'configured'           => $settings->get_setting('cloud_storage_bucket') !== '' && $settings->get_setting('cloud_storage_endpoint') !== ''
+		                          && $settings->get_setting('cloud_storage_access_key') !== '',
+		'public_cloud'         => CloudStorageLifecycle::cloudRowCount('public'),
+		'draining'             => (bool)$settings->get_setting('cloud_storage_draining') || (bool)$settings->get_setting('cloud_storage_private_draining'),
 		'private_enabled'      => (bool)$settings->get_setting('cloud_storage_private_enabled'),
 		'private_status'       => array(
-			'configured' => $settings->get_setting('cloud_storage_private_bucket') !== '',
+			'configured' => trim((string)$settings->get_setting('cloud_storage_private_bucket')) !== '',
 			'enabled'    => (bool)$settings->get_setting('cloud_storage_private_enabled'),
 			'cloud_count'=> CloudStorageLifecycle::cloudRowCount('private'),
 		),
+		'locked'               => CloudStorageLifecycle::cloudRowCount('public') > 0 || CloudStorageLifecycle::cloudRowCount('private') > 0
+		                          || (bool)$settings->get_setting('cloud_storage_draining') || (bool)$settings->get_setting('cloud_storage_private_draining'),
 		'errors'               => $errors,
 		'test_results'         => $test_results,
 		'private_errors'       => $private_errors,

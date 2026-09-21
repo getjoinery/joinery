@@ -1,7 +1,7 @@
 <?php
 /**
  * JoineryServices — the operator side of the services a self-hosted site
- * rents from this plane: outbound mail and the backup shelf
+ * rents from this plane: outbound mail and backup storage
  * (specs/services_phase2_platform.md §2–§6, umbrella contract C2).
  *
  * A site reaches this through three API actions over its connected key
@@ -24,7 +24,7 @@
  * subaccount. The subaccount and the sender domain are created once and kept.
  *
  * THE MASTER KEYS NEVER LEAVE THIS MACHINE. What crosses to a site is one
- * SMTP username and password inside its own subaccount, or nothing (the shelf).
+ * SMTP username and password inside its own subaccount, or nothing (backup storage).
  *
  * @version 1.0
  */
@@ -43,7 +43,7 @@ class JoineryServices {
 		return $raw === '' ? 14 : max(0, intval($raw));
 	}
 
-	/** The allowance in the service's own unit: sends a month, or bytes on the shelf. */
+	/** The allowance in the service's own unit: sends a month, or bytes in backup storage. */
 	public static function allowance(string $service): int {
 		if ($service === ServiceTenant::SERVICE_MAIL) {
 			return Smtp2GoLeg::sendAllowance();
@@ -71,7 +71,7 @@ class JoineryServices {
 	}
 
 	/**
-	 * The plane's shelf target: the row the setting names, else the one
+	 * The plane's backup storage target: the row the setting names, else the one
 	 * enabled target. Null when there is none or the choice is ambiguous.
 	 */
 	public static function shelfTarget(): ?BackupTarget {
@@ -94,7 +94,7 @@ class JoineryServices {
 		return $count === 1 ? $sole : null;
 	}
 
-	/** The shelf's path prefix (no trailing slash); every tenant lives under {prefix}/{slug}/. */
+	/** Backup storage's path prefix (no trailing slash); every tenant lives under {prefix}/{slug}/. */
 	public static function shelfPathPrefix(BackupTarget $target): string {
 		return rtrim(trim((string)$target->get('bkt_path_prefix')) ?: 'joinery-backups', '/');
 	}
@@ -279,13 +279,13 @@ class JoineryServices {
 		}
 	}
 
-	/** The shelf: nothing minted. A slug and a prefix, and the broker signs inside them. */
+	/** Backup storage: nothing minted. A slug and a prefix, and the broker signs inside them. */
 	private static function enrolShelf(ServiceTenant $row): array {
 		$target = self::shelfTarget();
 		if ($target === null) {
-			$row->set('svt_notice', 'No backup shelf target is configured on this plane.');
+			$row->set('svt_notice', 'No backup storage target is configured on this plane.');
 			$row->save();
-			throw new JoineryServicesException('The backup shelf is not available from this operator yet: no shelf target is configured.');
+			throw new JoineryServicesException('Backup storage is not available from this operator yet: no backup storage target is configured.');
 		}
 		$row->set('svt_state', ServiceTenant::STATE_ACTIVE);
 		$row->set('svt_notice', null);
@@ -556,8 +556,8 @@ class JoineryServices {
 			return 'Outbound mail through getjoinery has stopped: the paid-through date has passed. '
 				. 'Renew to send again, or move to your own email account.';
 		}
-		return 'Offsite backups to the getjoinery shelf have stopped: the paid-through date has passed. '
-			. 'Your local backups continue. The shelf is kept ' . ServiceTenant::RETENTION_DAYS
+		return 'Offsite backups to the getjoinery backup storage have stopped: the paid-through date has passed. '
+			. 'Your local backups continue. Backup storage is kept ' . ServiceTenant::RETENTION_DAYS
 			. ' days from today; renew before then and it carries on in place.';
 	}
 
@@ -565,7 +565,7 @@ class JoineryServices {
 		if ($service === ServiceTenant::SERVICE_MAIL) {
 			return 'Outbound mail through getjoinery is closed. The mail.<domain> records it published can be removed.';
 		}
-		return 'The getjoinery shelf is no longer used. Its copies are kept ' . ServiceTenant::RETENTION_DAYS
+		return 'The getjoinery backup storage is no longer used. Its copies are kept ' . ServiceTenant::RETENTION_DAYS
 			. ' days from today and then pruned.';
 	}
 

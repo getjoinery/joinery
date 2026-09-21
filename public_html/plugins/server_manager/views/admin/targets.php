@@ -5,6 +5,9 @@
  *
  * CRUD page for managing backup storage targets (B2, S3, Linode).
  *
+ * @version 2.7 - an enabled target is proven before it is saved (TargetTester 4.0: own bucket, private,
+ *                prune, the node key write-only, Backblaze capabilities); a failing one is not saved;
+ *                the key fields name the permissions each key needs
  * @version 2.6 - node credential (write-only): a target can hold a second key handed to nodes
  *                during a backup run, so the delete-capable key never leaves the management node.
  *                B2 and S3 only; Linode cannot express write-without-delete and says so.
@@ -282,25 +285,27 @@ if ($_POST && isset($_POST['bkt_name'])) {
 		if ($error !== null) {
 			throw new Exception($error); // undecryptable stored creds — do not save a silent merge-with-nothing
 		}
+		// Proven before it is saved: an enabled target that cannot do its job
+		// is not saved at all, and the form says why with the values kept. A
+		// disabled target is saved untested; enabling it is a save, and that
+		// save tests it.
+		$test_result = null;
+		if ($target->get('bkt_enabled')) {
+			$test_result = TargetTester::test($target);
+			if (!$test_result['success']) {
+				throw new Exception('Not saved. ' . $test_result['message']);
+			}
+		}
 		$target->prepare();
 		$target->save();
 		$target->load();
 
-		$test_result = TargetTester::test($target);
 		$page_regex = '/\/admin\/server_manager/';
-		if ($test_result['success']) {
-			$session->save_message(new DisplayMessage(
-				'Target saved. ' . $test_result['message'],
-				'Success', $page_regex,
-				DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
-			));
-		} else {
-			$session->save_message(new DisplayMessage(
-				'Target saved, but connection test failed: ' . $test_result['message'],
-				'Warning', $page_regex,
-				DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
-			));
-		}
+		$session->save_message(new DisplayMessage(
+			'Target saved. ' . ($test_result ? $test_result['message'] : 'It is disabled, so it was not tested; enabling it tests it.'),
+			'Success', $page_regex,
+			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+		));
 		header('Location: /admin/server_manager/targets?bkt_backup_target_id=' . $target->key);
 		exit;
 	} catch (Exception $e) {
@@ -525,7 +530,7 @@ if ($target !== null) {
 	echo '<div id="b2Fields"' . ($current_provider === 'b2' ? '' : ' hidden') . '>';
 	echo '<p class="fw-semibold text-muted mt-2 mb-1">Backblaze B2 Credentials</p>';
 	$formwriter->textinput('cred_key_id', 'Application Key ID', [
-		'helptext' => 'Create via Backblaze → Account → Application Keys. Must be a scoped key — the master account key will not work with the S3-compatible API.',
+		'helptext' => 'A key for this bucket only, with listFiles, readFiles, writeFiles, deleteFiles. Add writeKeys, listKeys, deleteKeys to mint a key per run. The master account key will not work.',
 	]);
 	$formwriter->passwordinput('cred_app_key', 'Application Key', [
 		'helptext' => $is_edit ? 'Leave blank to keep the current key. Region is auto-detected on save.' : 'Region is auto-detected on save.',
@@ -535,7 +540,9 @@ if ($target !== null) {
 	// ── S3 Credentials ──
 	echo '<div id="s3Fields"' . ($current_provider === 's3' ? '' : ' hidden') . '>';
 	echo '<p class="fw-semibold text-muted mt-2 mb-1">Amazon S3 Credentials</p>';
-	$formwriter->textinput('cred_s3_access_key', 'Access Key');
+	$formwriter->textinput('cred_s3_access_key', 'Access Key', [
+		'helptext' => 'An IAM user with s3:ListBucket, s3:GetObject, s3:PutObject, s3:DeleteObject on this bucket only.',
+	]);
 	$formwriter->passwordinput('cred_s3_secret_key', 'Secret Key', $is_edit ? ['helptext' => 'Leave blank to keep the current key.'] : []);
 	$formwriter->textinput('cred_s3_region', 'Region', ['placeholder' => 'us-east-1']);
 	echo '</div>';
@@ -554,7 +561,7 @@ if ($target !== null) {
 	echo '<p class="fw-semibold text-muted mt-2 mb-1">Node Credential (write-only)'
 		. ($has_node_creds ? ' <span class="badge bg-success">configured</span>' : '') . '</p>';
 	$formwriter->textinput('node_cred_key_id', 'Node Application Key ID', [
-		'helptext' => 'Optional second B2 key, created with write but not delete capability on this bucket. Nodes are handed this key during a backup run, so a compromised node cannot erase the shelf; the main key above never leaves this management node.',
+		'helptext' => 'Optional. A key for this bucket with writeFiles and not deleteFiles. Nodes are handed it for each run, so a compromised node cannot erase backups.',
 	]);
 	$formwriter->passwordinput('node_cred_app_key', 'Node Application Key', [
 		'helptext' => $has_node_creds ? 'Leave blank to keep the current key.' : 'Leave empty to keep handing nodes the main key.',
@@ -595,7 +602,7 @@ if ($target !== null) {
 		'helptext' => 'Each backup run is handed a key created for it, pinned to that node\'s own '
 			. 'directory in this bucket, write-only, expiring with the run — so a key read off a '
 			. 'machine somebody else administers opens their directory for an hour rather than the '
-			. 'whole fleet\'s shelf forever. <strong>Check first that the main key above is allowed '
+			. 'whole fleet\'s backup storage forever. <strong>Check first that the main key above is allowed '
 			. 'to create keys</strong> (writeKeys, listKeys, deleteKeys): a key that cannot mint '
 			. 'fails every run rather than falling back, which is deliberate — a silent fall back to '
 			. 'the shared key would defeat the point. Off, runs use the node credential above.',

@@ -8,22 +8,22 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
- * @version 1.71 - restore_objects: bring a run's offloaded files home from the manager shelf, paged
+ * @version 1.71 - restore_objects: bring a run's offloaded files home from the manager-profile backup storage, paged
  *                 (specs/backup_offloaded_files.md § Restore). build_restore_objects signs the run's
  *                 index and, on a page job, a page of object links with the envelopes of their epochs,
  *                 filled to the job's byte ceiling (FleetObjectRestore::page); a survey carries the
  *                 index alone. PRIMITIVE_MIN_AGENT_VERSION['restore_objects'] is the agent floor.
- * @version 1.70.1 - shelf_run_index() takes the newest run from the highest run number on the shelf, not
+ * @version 1.70.1 - shelf_run_index() takes the newest run from the highest run number in backup storage, not
  *                   the highest-numbered index: a newest run made before the agent carried offloaded
  *                   files has no index, and an older run's links for it would be refused on the node
  * @version 1.70 - verify_backup carries the offloaded-files links to a node whose agent accepts them
- *                 (VERIFY_BACKUP_OBJECTS_MIN_AGENT_VERSION): the run's index is read off the shelf, a
+ *                 (VERIFY_BACKUP_OBJECTS_MIN_AGENT_VERSION): the run's index is read from backup storage, a
  *                 link is signed per epoch envelope it names, and a rehearsal's request also carries
  *                 the sample (specs/backup_offloaded_files.md § Verification)
  * @version 1.69 - services joins the hosting states the banner renders (one list in four places)
  * @version 1.68 - backup_run carries the object store to a node whose agent accepts it
  *                 (BACKUP_RUN_OBJECTS_MIN_AGENT_VERSION): objects, a signed link to the newest index
- *                 on the node's manager shelf, and a signed link per epoch envelope — from the
+ *                 in the manager-profile backup storage, and a signed link per epoch envelope — from the
  *                 listing the scheduler already took, or one taken here for a run started by hand
  *                 (specs/backup_offloaded_files.md § Rollout)
  * @version 1.67 - the management-node fact is read at poll (mgn_agent_server_manager) before check_status
@@ -163,7 +163,7 @@
  * @version 1.26 - paths and the site URL are cast before parsing, so an unset one
  *                 raises nothing on PHP 8.5
  * @version 1.25 - node-bound backup steps carry __SM_NODE_CREDS_<id>__ when the target holds a
- *                 write-only node credential, so a node is handed a key that can add to the shelf
+ *                 write-only node credential, so a node is handed a key that can add to backup storage
  *                 but never erase it; the main (delete-capable) credential then stays on the
  *                 management node. With no node credential configured, the main token is emitted
  *                 and nothing changes.
@@ -301,7 +301,7 @@ class JobCommandBuilder {
 		'restore_database' => '1.13.0',
 		'restore_project'  => '1.13.0',
 		'restore_chain'    => '1.13.0',
-		// Bringing a backup back off the shelf, which is what makes any of the
+		// Bringing a backup back from backup storage, which is what makes any of the
 		// above have something to restore FROM.
 		'download_backup'  => '1.13.0',
 		'stage_chain'      => '1.13.0',
@@ -354,7 +354,7 @@ class JobCommandBuilder {
 		// the two words of specs/agent_log_access.md, new in 1.35.0.
 		'site_log'       => '1.35.0',
 		'log_table_tail' => '1.35.0',
-		// Bringing a run's offloaded files home from the shelf, a page of
+		// Bringing a run's offloaded files home from backup storage, a page of
 		// signed links at a time (specs/backup_offloaded_files.md § Restore).
 		// The agent that carries the object store on backup_run and
 		// verify_backup carries this word too.
@@ -963,7 +963,7 @@ class JobCommandBuilder {
 	 * to restore. The price is paid knowingly: recovering a node's backup needs
 	 * that node's recovery key, and no key here opens the fleet.
 	 *
-	 * The credential is a WRITE-ONLY one. The node can add objects to the shelf
+	 * The credential is a WRITE-ONLY one. The node can add objects to backup storage
 	 * and cannot remove any, so a compromised node cannot erase the fleet's
 	 * backups — which is why manager retention runs on the management node instead
 	 * (see FleetBackupRetention) and why this job never asks the node to prune.
@@ -1052,7 +1052,7 @@ class JobCommandBuilder {
 		];
 
 		// The object store, for an agent that accepts the fields. The newest
-		// index on the node's manager shelf and every epoch envelope are
+		// index in the manager-profile backup storage and every epoch envelope are
 		// signed here, per run; the node reads them by link and never holds
 		// a credential that could. The scheduler hands over the keys it read
 		// from the listing it took to prune; a run started by hand lists.
@@ -1091,7 +1091,7 @@ class JobCommandBuilder {
 		return $version !== '' && version_compare($version, self::BACKUP_RUN_OBJECTS_MIN_AGENT_VERSION, '>=');
 	}
 
-	/** The newest index and every epoch envelope on the node's manager shelf, by key, from a fresh listing. */
+	/** The newest index and every epoch envelope in the node's manager-profile backup storage, by key, from a fresh listing. */
 	private static function shelf_index_links($node, $target, $slug) {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetBackupRetention.php'));
 		$prefix = rtrim(trim((string)$target->get('bkt_path_prefix')) ?: 'joinery-backups', '/');
@@ -1392,7 +1392,7 @@ class JobCommandBuilder {
 			throw new Exception('A chain restore needs the chain id (for example chain-20260807_231507).');
 		}
 
-		// normalize('') means the SITE profile, a different shelf — so an unset
+		// normalize('') means the SITE profile, a different backup storage — so an unset
 		// parameter defaults to manager here rather than falling through to it,
 		// exactly as the SSH path does.
 		// NO PROFILE. The SSH path needs one to compose the bucket key
@@ -1951,7 +1951,7 @@ class JobCommandBuilder {
 	 * BUILD time puts the reason in front of the operator immediately, and keeps
 	 * the fleet schedule from filling the job log with runs that were never going
 	 * to work. Never silently downgrade: the alternative to a refusal here is an
-	 * unencrypted copy of a whole site on somebody else's shelf.
+	 * unencrypted copy of a whole site in somebody else's backup storage.
 	 */
 	private static function assert_node_can_be_backed_up($node) {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/RecoveryKeyFleet.php'));
@@ -2040,7 +2040,7 @@ class JobCommandBuilder {
 		}
 		if (!self::has_primitive($node, 'upload_backup')) {
 			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' cannot push a backup to the shelf: that needs a "
+				"Node '{$node->get('mgn_slug')}' cannot push a backup to backup storage: that needs a "
 				. 'paired agent. There is no SSH equivalent — the old one heredoc-fed the node an '
 				. 'uploader with the bucket credentials inside it. Pair the node.');
 		}
@@ -2107,7 +2107,7 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * Bring one of a node's own backups back from the shelf, onto the node.
+	 * Bring one of a node's own backups back from backup storage, onto the node.
 	 *
 	 * THE OPERATION THAT MADE RESTORE POSSIBLE AGAIN. Every node in the fleet
 	 * deletes its local archive once it is safely uploaded — right for a small
@@ -2118,8 +2118,8 @@ class JobCommandBuilder {
 	 * permitted and still restored nothing.
 	 *
 	 * NO CREDENTIAL IS SENT, and that is the whole design of this builder. A node
-	 * holds a WRITE-ONLY bucket credential on purpose: it may add to the shelf
-	 * and may not read from it, because a node that could read the shelf is a
+	 * holds a WRITE-ONLY bucket credential on purpose: it may add to backup storage
+	 * and may not read from it, because a node that could read backup storage is a
 	 * node whose compromise reaches every other node's backups. So this plane
 	 * signs ONE object key here, with the credential it already holds, for a
 	 * window no longer than the job's own claim budget, and sends the SIGNATURE.
@@ -2166,7 +2166,7 @@ class JobCommandBuilder {
 		$target = self::get_target($node);
 		if (!$target) {
 			throw new Exception("Node '{$node->get('mgn_slug')}' has no enabled cloud backup target, "
-				. 'so there is no shelf to fetch from.');
+				. 'so there is no backup storage to fetch from.');
 		}
 
 		$profile = in_array(($params['profile'] ?? ''), ['site', 'manager'], true)
@@ -2185,7 +2185,7 @@ class JobCommandBuilder {
 			// against. This plane's own backups of a node are manager-profile,
 			// which is why that is the default here as it is on every other
 			// backup primitive. node_object_key() has already checked it agrees
-			// with the shelf the object is actually on.
+			// with backup storage the object is actually on.
 			'profile'  => $profile,
 			'url'      => S3Signer::presign_get($creds, $target->get('bkt_bucket'), '/' . ltrim($key, '/'), $expires),
 		];
@@ -2278,7 +2278,7 @@ class JobCommandBuilder {
 		// The run's offloaded files, for an agent that accepts the links: the
 		// run's index is read here (one small GET), a link is signed per epoch
 		// envelope it names, and a rehearsal also gets the sample. The node
-		// opens the envelopes with its own key and never lists the shelf.
+		// opens the envelopes with its own key and never lists backup storage.
 		if (self::agent_accepts_verify_backup_objects($node)) {
 			$index = self::shelf_run_index($signed, $primitive_params['seq'] ?? null);
 			if ($index !== null) {
@@ -2306,10 +2306,10 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * The objects index of the run a verify names, read off the chain's shelf
+	 * The objects index of the run a verify names, read off the chain's backup storage
 	 * listing: objects-NNNN for the run asked for, or the newest run's when
 	 * the node is to verify the newest. The newest run is the highest run
-	 * number any artifact on the shelf carries, not the highest-numbered
+	 * number any artifact in backup storage carries, not the highest-numbered
 	 * index: a run made before the agent could carry offloaded files wrote
 	 * no index, and an older run's index sent for it would be refused on the
 	 * node as a request that does not match the run. Null when the run
@@ -2344,7 +2344,7 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * The newest run on a chain's shelf: the highest run number any artifact
+	 * The newest run in a chain's backup storage: the highest run number any artifact
 	 * carries, whatever kind it is. Null when nothing there is a run artifact.
 	 */
 	private static function shelf_newest_run(array $artifact_urls) {
@@ -2357,7 +2357,7 @@ class JobCommandBuilder {
 		return $newest;
 	}
 
-	/** One signed GET for a key on a node's shelf — or the test stand-in while a fixture listing is set. */
+	/** One signed GET for a key in a node's backup storage — or the test stand-in while a fixture listing is set. */
 	private static function sign_shelf_key($target, $key, $expires) {
 		return (self::$shelf_listing_for_tests !== null)
 			? 'https://shelf.invalid/' . ltrim($key, '/') . '?X-Amz-Expires=' . $expires . '&X-Amz-Signature=test'
@@ -2365,10 +2365,10 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * Bring a run's offloaded files home from the node's shelf, one page at a
+	 * Bring a run's offloaded files home from the node's backup storage, one page at a
 	 * time (specs/backup_offloaded_files.md § Restore).
 	 *
-	 * The node never lists the shelf and never holds a read credential: it
+	 * The node never lists backup storage and never holds a read credential: it
 	 * gets the run's index by signed link and, on a page job, a signed link
 	 * per object with the envelope of each epoch those objects are sealed
 	 * under, and opens the envelopes with its own key. A job with no object
@@ -2382,7 +2382,7 @@ class JobCommandBuilder {
 	 * $params:
 	 *   chain_id  - required
 	 *   profile   - site | manager; default manager
-	 *   seq       - the run; default the newest on the shelf
+	 *   seq       - the run; default the newest in backup storage
 	 *   mode      - missing (default) | all
 	 *   names     - the objects to bring home, in order; absent for a survey.
 	 *               As many as fit the job's byte ceiling are taken from the
@@ -2393,7 +2393,7 @@ class JobCommandBuilder {
 	public static function build_restore_objects($node, $params = []) {
 		if (!self::has_primitive($node, 'restore_objects')) {
 			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' cannot bring offloaded files home from its shelf: that needs a paired agent "
+				"Node '{$node->get('mgn_slug')}' cannot bring offloaded files home from its backup storage: that needs a paired agent "
 				. 'of at least ' . self::PRIMITIVE_MIN_AGENT_VERSION['restore_objects'] . '.');
 		}
 		return self::build_restore_objects_primitive($node, $params);
@@ -2413,11 +2413,11 @@ class JobCommandBuilder {
 		$urls   = $signed['params']['artifact_urls'];
 		$seq    = isset($signed['params']['seq']) ? (int)$signed['params']['seq'] : self::shelf_newest_run($urls);
 		if ($seq === null) {
-			throw new Exception("Nothing under {$signed['params']['chain_id']} on the shelf is a run.");
+			throw new Exception("Nothing under {$signed['params']['chain_id']} in backup storage is a run.");
 		}
 		$index_name = BackupChain::artifact_name('objects', $seq);
 		if (!isset($urls[$index_name])) {
-			throw new Exception("Run {$seq} of {$signed['params']['chain_id']} carries no offloaded-files index on the shelf, "
+			throw new Exception("Run {$seq} of {$signed['params']['chain_id']} carries no offloaded-files index in backup storage, "
 				. 'so there is nothing to bring home from it.');
 		}
 
@@ -2435,7 +2435,7 @@ class JobCommandBuilder {
 			$index = self::shelf_run_index($signed, $seq);
 			if ($index === null) {
 				throw new Exception("The offloaded-files index of run {$seq} of {$signed['params']['chain_id']} could not be read "
-					. 'off the shelf, so no page of links can be signed from it.');
+					. 'from backup storage, so no page of links can be signed from it.');
 			}
 			$base    = dirname($signed['chain_key']) . '/';
 			$expires = self::signed_link_seconds('restore_objects');
@@ -2449,7 +2449,7 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * Sign every object under one chain on a node's shelf, keyed by bare name.
+	 * Sign every object under one chain in a node's backup storage, keyed by bare name.
 	 *
 	 * This is the whole of what the plane contributes to staging and to
 	 * verifying: it signs what is THERE, and the node picks from what its own
@@ -2462,7 +2462,7 @@ class JobCommandBuilder {
 	 * them ($operation), so a link never outlives its job.
 	 *
 	 * @return array ['params' => [chain_id, profile, manifest_url, artifact_urls, seq?],
-	 *                'chain_key' => the chain's key on the shelf, 'target' => the BackupTarget]
+	 *                'chain_key' => the chain's key in backup storage, 'target' => the BackupTarget]
 	 */
 	/**
 	 * A shelf listing to use in place of the bucket's, for tests of the two
@@ -2503,7 +2503,7 @@ class JobCommandBuilder {
 		if (!preg_match('/^[A-Za-z0-9_-]+$/', $slug)) {
 			throw new Exception("Node slug '{$slug}' cannot be used as a bucket path segment.");
 		}
-		// normalize('') means the SITE profile, a different shelf — so an unset
+		// normalize('') means the SITE profile, a different backup storage — so an unset
 		// parameter defaults to manager rather than falling through to it, the
 		// same rule the restore builders follow.
 		$profile   = BackupProfile::normalize(trim((string)($params['profile'] ?? '')) ?: BackupProfile::MANAGER);
@@ -2513,7 +2513,7 @@ class JobCommandBuilder {
 			? self::$shelf_listing_for_tests
 			: S3Signer::list($creds, $target->get('bkt_bucket'), $chain_key . '/');
 		if (empty($listing) || !is_array($listing)) {
-			throw new Exception("Nothing is stored under {$chain_id} on this node's shelf, so there is "
+			throw new Exception("Nothing is stored under {$chain_id} in this node's backup storage, so there is "
 				. 'nothing to stage.');
 		}
 
@@ -2548,11 +2548,11 @@ class JobCommandBuilder {
 		}
 
 		if ($manifest_url === '') {
-			throw new Exception("The chain {$chain_id} has no manifest on the shelf, so its artifacts "
+			throw new Exception("The chain {$chain_id} has no manifest in backup storage, so its artifacts "
 				. 'cannot be identified. A chain without its manifest is not a restore point.');
 		}
 		if (!$artifact_urls) {
-			throw new Exception("The chain {$chain_id} has a manifest but no artifacts on the shelf.");
+			throw new Exception("The chain {$chain_id} has a manifest but no artifacts in backup storage.");
 		}
 
 		$primitive_params = [
@@ -2624,7 +2624,7 @@ class JobCommandBuilder {
 	/**
 	 * The object key a download may name, checked to be one of THIS node's.
 	 *
-	 * The caller passes the key it read out of the shelf listing, which is the
+	 * The caller passes the key it read out of backup storage listing, which is the
 	 * honest source — this plane should not be recomputing an object layout the
 	 * node's own backup engine already decided. What it must not do is sign a
 	 * key belonging to a different node: every node's archives live in one
@@ -2644,10 +2644,10 @@ class JobCommandBuilder {
 		$prefix = rtrim(trim((string)$target->get('bkt_path_prefix')) ?: 'joinery-backups', '/');
 		$node_prefix = $prefix . '/' . $slug . '/';
 		if (strpos($key, $node_prefix) !== 0) {
-			throw new Exception("That backup is not on node '{$slug}' shelf, so it will not be sent there.");
+			throw new Exception("That backup is not in node '{$slug}' backup storage, so it will not be sent there.");
 		}
 
-		// The profile has to agree with the shelf the object is actually on.
+		// The profile has to agree with backup storage the object is actually on.
 		//
 		// The two are chosen independently — one from the caller's parameter,
 		// one from the object key it read out of a listing — and nothing made
@@ -2661,7 +2661,7 @@ class JobCommandBuilder {
 		$rest = substr($key, strlen($node_prefix));
 		$segment = strtok($rest, '/');
 		if ($profile !== null && in_array($segment, array('site', 'manager'), true) && $segment !== $profile) {
-			throw new Exception("That backup is on the '{$segment}' shelf but the restore names the "
+			throw new Exception("That backup is in the '{$segment}' backup storage but the restore names the "
 				. "'{$profile}' one. The node would look for it in the wrong directory and refuse.");
 		}
 		return $key;
@@ -2683,7 +2683,7 @@ class JobCommandBuilder {
 	 * one bucket, one name prefix, one capability and a lifetime, so the node
 	 * is handed a key minted at pickup that can add objects under ITS OWN
 	 * prefix, write-only, expiring with the run. A key read off a node then
-	 * opens that node's directory for an hour, rather than the fleet's shelf
+	 * opens that node's directory for an hour, rather than the fleet's backup storage
 	 * forever.
 	 *
 	 * __SM_NODE_CREDS_<id>__ — no minting, but the target holds a second,
@@ -2703,7 +2703,7 @@ class JobCommandBuilder {
 		// Best first: a key minted for THIS run, pinned to this node's own
 		// prefix and expiring with the job. The other two hand every node in
 		// the fleet the same key, which on a machine somebody else administers
-		// is a key that can write the whole fleet's shelf.
+		// is a key that can write the whole fleet's backup storage.
 		if ($target->can_mint_run_keys()) {
 			return '__SM_RUN_CREDS_' . (int)$target->key . '__';
 		}
@@ -2723,7 +2723,7 @@ class JobCommandBuilder {
 		throw new Exception(
 			"Node '{$node->get('mgn_slug')}' cannot run list_backups: it has no paired agent "
 			. "reporting the list_backups primitive, and that is the only way to ask a node "
-			. "what is on its shelf."
+			. "what is in its backup storage."
 		);
 	}
 

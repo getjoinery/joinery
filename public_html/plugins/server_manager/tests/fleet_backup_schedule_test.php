@@ -216,7 +216,7 @@ check($names === array(
 	'a mixed shelf sorts newest first by timestamp, whatever each name starts with',
 	implode(' > ', $names));
 
-section('Nothing outside this node\'s own shelf is ever grouped');
+section('Nothing outside this node\'s own backup storage is ever grouped');
 
 $groups = FleetBackupRetention::group(array(
 	array('key' => $base . 'chain-20260801_000000/manifest.json'),
@@ -224,14 +224,14 @@ $groups = FleetBackupRetention::group(array(
 	array('key' => 'joinery-backups/othernode/manager/chain-20260801_000000/manifest.json'),
 ), $base);
 check(count($groups) === 1,
-	'the site profile\'s shelf and another node\'s shelf are both out of scope',
+	'the site profile\'s backup storage and another node\'s backup storage are both out of scope',
 	(string)count($groups));
 
 // ── The bucket's testimony ──────────────────────────────────────────────────
 section('The listing says when something last actually landed');
 
 check(FleetBackupRetention::newest_object_time(array()) === '',
-	'an empty shelf has no newest write');
+	'an empty backup storage has no newest write');
 
 // Write time, not name stamp: a chain directory keeps its start stamp for its
 // whole life, but every run that extends it writes new objects.
@@ -258,7 +258,7 @@ $health_node = function (array $extra) use ($run) {
 	), $extra));
 };
 
-// Honest node: the shelf was listed after the run and holds a write from it.
+// Honest node: backup storage was listed after the run and holds a write from it.
 $h = NodeMonitorHealth::fleet_backup_health($health_node(array(
 	'mgn_backup_shelf_checked_time' => gmdate('Y-m-d H:i:s', $now - 600),
 	'mgn_backup_shelf_newest_time'  => gmdate('Y-m-d H:i:s', $now - 7000),
@@ -271,14 +271,14 @@ $h = NodeMonitorHealth::fleet_backup_health($health_node(array(
 	'mgn_backup_shelf_newest_time'  => gmdate('Y-m-d H:i:s', $now - 200000),
 )), $policy);
 check($h['is_problem'] && $h['label'] === 'Backups are not landing',
-	'a claimed success with no new object on the shelf is a problem', $h['label']);
+	'a claimed success with no new object in backup storage is a problem', $h['label']);
 
 $h = NodeMonitorHealth::fleet_backup_health($health_node(array(
 	'mgn_backup_shelf_checked_time' => gmdate('Y-m-d H:i:s', $now - 600),
 	'mgn_backup_shelf_newest_time'  => null,
 )), $policy);
 check($h['is_problem'] && $h['label'] === 'Backups are not landing',
-	'an empty shelf listed after a claimed success is the same lie', $h['label']);
+	'an empty backup storage listed after a claimed success is the same lie', $h['label']);
 
 // No listing since the run: no verdict either way. The check only ever speaks
 // from evidence gathered AFTER the claim it is judging.
@@ -473,9 +473,9 @@ check(!$h['is_problem'] && strpos($h['detail'], 'Since then: Could not verify') 
 	'a skip after a pass rides beside it with both numbers', $h['detail']);
 
 $h = NodeMonitorHealth::fleet_backup_health($hn(array(
-	'mgn_backup_shelf_problem' => 'the backup set begun 2026-09-12 04:45 UTC names files-0001.tar.gz.enc in its manifest but it is not on the shelf')), $vpolicy);
-check($h['is_problem'] && $h['label'] === 'A backup on the shelf is incomplete', 'a shelf problem is a problem', $h['label']);
-check(strpos($h['detail'], 'names files-0001.tar.gz.enc in its manifest but it is not on the shelf') !== false,
+	'mgn_backup_shelf_problem' => 'the backup set begun 2026-09-12 04:45 UTC names files-0001.tar.gz.enc in its manifest but it is not in backup storage')), $vpolicy);
+check($h['is_problem'] && $h['label'] === 'A stored backup is incomplete', 'a shelf problem is a problem', $h['label']);
+check(strpos($h['detail'], 'names files-0001.tar.gz.enc in its manifest but it is not in backup storage') !== false,
 	'with the pass\'s words', $h['detail']);
 
 $h = NodeMonitorHealth::fleet_backup_health($hn(array()), array_merge($vpolicy, array('verify_every_days' => 0)));
@@ -493,7 +493,7 @@ foreach (array(
 		'nobody reads "chain", "seq" or "restore point" on the card', $h['label'] . ' — ' . $h['detail']);
 }
 
-section('The shelf check: every artifact a manifest names, at its size, and an envelope');
+section('The backup storage check: every artifact a manifest names, at its size, and an envelope');
 
 $sm = array(
 	'version' => 1, 'chain_id' => 'chain-20260912_044520', 'created' => '2026-09-12T04:45:20Z',
@@ -513,12 +513,12 @@ check(FleetBackupRetention::compare_manifest($sm, $whole) === '', 'a whole set h
 
 $short = $whole; $short['files-0001.tar.gz.enc'] = 150;
 $p = FleetBackupRetention::compare_manifest($sm, $short);
-check($p === 'the backup set begun 2026-09-12 04:45 UTC holds files-0001.tar.gz.enc at 150 bytes on the shelf where its manifest records 200',
+check($p === 'the backup set begun 2026-09-12 04:45 UTC holds files-0001.tar.gz.enc at 150 bytes in backup storage where its manifest records 200',
 	'an artifact short by bytes is named with both numbers', $p);
 
 $missing = $whole; unset($missing['db-0001.sql.gz.enc']);
 $p = FleetBackupRetention::compare_manifest($sm, $missing);
-check($p === 'the backup set begun 2026-09-12 04:45 UTC names db-0001.sql.gz.enc in its manifest but it is not on the shelf',
+check($p === 'the backup set begun 2026-09-12 04:45 UTC names db-0001.sql.gz.enc in its manifest but it is not in backup storage',
 	'a missing artifact is named', $p);
 
 $no_env = $sm; unset($no_env['envelope']);
@@ -535,7 +535,7 @@ foreach (array($p, FleetBackupRetention::compare_manifest($sm, $short)) as $w) {
 }
 
 // ── The whole shelf: a manifest that cannot be read is not an incomplete backup ──
-section('A manifest the shelf check could not read is this pass\'s problem, not the backup\'s');
+section('A manifest the backup storage check could not read is this pass\'s problem, not the backup\'s');
 
 $base = 'joinery-backups/demo/manager';
 $listing = array();
@@ -610,7 +610,7 @@ $groups = FleetBackupRetention::group($shelf, $base);
 check(!isset($groups['objects']) && array_keys($groups) === array('chain-20260901_030000', 'demo-20260825_120000.tar.gz.enc', 'chain-20260820_030000'),
 	'group() files nothing under objects/ as a restore point, so a prune never deletes the store', implode(' > ', array_keys($groups)));
 check(count($groups['demo-20260825_120000.tar.gz.enc']['keys']) === 3, 'a standalone index is filed with its archive and envelope', json_encode($groups['demo-20260825_120000.tar.gz.enc']['keys']));
-check(FleetBackupRetention::total_bytes($shelf) === 28711, 'the shelf size still counts the objects — they are what the customer keeps', (string)FleetBackupRetention::total_bytes($shelf));
+check(FleetBackupRetention::total_bytes($shelf) === 28711, 'backup storage size still counts the objects — they are what the customer keeps', (string)FleetBackupRetention::total_bytes($shelf));
 $store = FleetBackupRetention::object_store($shelf, $base);
 check(array_keys($store['objects']) === array('epoch-20260801_000000/beach.jpg', 'epoch-20260801_000000/old.jpg', 'epoch-20260901_000000/dune.png',
 	'epoch-20260901_000000/fresh.png', 'epoch-20260810_000000/lonely.gif'), 'object_store() keys objects by shelf location', json_encode(array_keys($store['objects'])));
@@ -625,9 +625,9 @@ $standalone_first = array_filter($shelf, function ($o) { return strpos($o['key']
 check(FleetBackupRetention::index_links(array_values($standalone_first), $base)['index'] === $base . 'demo-20260825_120000.objects.json.gz',
 	'a standalone full\'s index is picked when it is the newest restore point');
 check(FleetBackupRetention::index_links(array(array('key' => $base . 'chain-20260901_030000/manifest.json')), $base)['index'] === '',
-	'no index on the shelf means no link — the node then holds nothing');
+	'no index in backup storage means no link — the node then holds nothing');
 
-section('The shelf check reads the newest run\'s index and wants every stored object there');
+section('The backup storage check reads the newest run\'s index and wants every stored object there');
 $idx = array('version' => 1, 'created' => '2026-09-02T03:00:00Z', 'epochs' => array('epoch-20260801_000000', 'epoch-20260901_000000'), 'objects' => array(
 	array('name' => 'beach.jpg', 'epoch' => 'epoch-20260801_000000', 'object_bytes' => 4000, 'object_sha256' => 'a', 'stored' => true),
 	array('name' => 'dune.png', 'epoch' => 'epoch-20260901_000000', 'object_bytes' => 1200, 'object_sha256' => 'b', 'stored' => true),
@@ -637,13 +637,13 @@ $set = 'begun 2026-09-01 03:00 UTC';
 check(FleetBackupRetention::compare_index($idx, $store['objects'], $store['envelopes'], $set) === '', 'a whole store has nothing to say');
 $gone = $store['objects']; unset($gone['epoch-20260801_000000/beach.jpg']);
 $p = FleetBackupRetention::compare_index($idx, $gone, $store['envelopes'], $set);
-check($p === 'the backup set begun 2026-09-01 03:00 UTC names 1 offloaded file its shelf does not hold (beach.jpg)', 'a missing object is named', $p);
+check($p === 'the backup set begun 2026-09-01 03:00 UTC names 1 offloaded file its backup storage does not hold (beach.jpg)', 'a missing object is named', $p);
 $short = $store['objects']; $short['epoch-20260901_000000/dune.png']['size'] = 7;
 $p = FleetBackupRetention::compare_index($idx, $short, $store['envelopes'], $set);
-check(strpos($p, 'holds the offloaded file dune.png at 7 bytes on the shelf where its index records 1200') !== false, 'a wrong size is named', $p);
+check(strpos($p, 'holds the offloaded file dune.png at 7 bytes in backup storage where its index records 1200') !== false, 'a wrong size is named', $p);
 $no_env = $store['envelopes']; unset($no_env['epoch-20260901_000000']);
 $p = FleetBackupRetention::compare_index($idx, $store['objects'], $no_env, $set);
-check(strpos($p, 'epoch-20260901_000000 but that epoch\'s envelope is not on the shelf') !== false, 'a missing epoch envelope is named', $p);
+check(strpos($p, 'epoch-20260901_000000 but that epoch\'s envelope is not in backup storage') !== false, 'a missing epoch envelope is named', $p);
 check(FleetBackupRetention::compare_index($idx, array(), array(), $set) !== '' && FleetBackupRetention::compare_index(array('objects' => array()), array(), array(), $set) === '',
 	'an index naming nothing stored is whole on an empty store');
 
@@ -672,7 +672,7 @@ $r = FleetBackupRetention::check_shelf($shelf_o, $base, $creds, 'bucket', $by_ke
 check($r['problem'] === '' && $r['unread'] === '', 'manifest whole, newest index whole: nothing to say', json_encode($r));
 $r = FleetBackupRetention::check_shelf(array_values(array_filter($shelf_o, function ($o) { return basename($o['key']) !== 'dune.png.enc'; })), $base, $creds, 'bucket',
 	$by_key(array('manifest.json' => $manifest_o, 'objects-0001.json.gz' => $idx)));
-check(strpos($r['problem'], 'names 1 offloaded file its shelf does not hold (dune.png)') !== false, 'an object missing from the shelf is the backup set\'s problem', json_encode($r));
+check(strpos($r['problem'], 'names 1 offloaded file its backup storage does not hold (dune.png)') !== false, 'an object missing from backup storage is the backup set\'s problem', json_encode($r));
 $r = FleetBackupRetention::check_shelf($shelf_o, $base, $creds, 'bucket', $by_key(array('manifest.json' => $manifest_o, 'objects-0001.json.gz' => new Exception('HTTP 503'))));
 check($r['problem'] === '' && strpos($r['unread'], 'offloaded-files index of the backup set begun 2026-09-01 03:00 UTC could not be read (HTTP 503)') !== false,
 	'an index that could not be read is this pass\'s problem, never stamped', json_encode($r));
@@ -686,11 +686,11 @@ $r = FleetBackupRetention::check_shelf($shelf_f, $base, $creds, 'bucket', $by_ke
 check($r['problem'] === '' && $r['unread'] === '', 'a standalone full whose index is whole has nothing to say', json_encode($r));
 $r = FleetBackupRetention::check_shelf(array_values(array_filter($shelf_f, function ($o) { return basename($o['key']) !== 'lonely.gif.enc'; })),
 	$base, $creds, 'bucket', $by_key(array('demo-20260825_120000.objects.json.gz' => $idx_full)));
-check(strpos($r['problem'], 'the backup set begun 2026-08-25 12:00 UTC names 1 offloaded file its shelf does not hold (lonely.gif)') !== false,
-	'an object a standalone full\'s index names and the shelf lacks is that backup\'s problem', json_encode($r));
+check(strpos($r['problem'], 'the backup set begun 2026-08-25 12:00 UTC names 1 offloaded file its backup storage does not hold (lonely.gif)') !== false,
+	'an object a standalone full\'s index names and backup storage lacks is that backup\'s problem', json_encode($r));
 $r = FleetBackupRetention::check_shelf(array_values(array_filter($shelf_f, function ($o) { return strpos($o['key'], 'epoch-20260810_000000/envelope.json') === false; })),
 	$base, $creds, 'bucket', $by_key(array('demo-20260825_120000.objects.json.gz' => $idx_full)));
-check(strpos($r['problem'], 'epoch-20260810_000000 but that epoch\'s envelope is not on the shelf') !== false, 'and so is its epoch\'s missing envelope', json_encode($r));
+check(strpos($r['problem'], 'epoch-20260810_000000 but that epoch\'s envelope is not in backup storage') !== false, 'and so is its epoch\'s missing envelope', json_encode($r));
 $r = FleetBackupRetention::check_shelf($shelf_f, $base, $creds, 'bucket', $by_key(array('demo-20260825_120000.objects.json.gz' => new Exception('HTTP 503'))));
 check($r['problem'] === '' && strpos($r['unread'], 'offloaded-files index of the backup set begun 2026-08-25 12:00 UTC could not be read (HTTP 503)') !== false,
 	'a standalone index that could not be read is this pass\'s problem, never stamped', json_encode($r));

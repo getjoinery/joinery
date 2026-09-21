@@ -2,7 +2,7 @@
 /**
  * FleetBackupRun — this management node's own backups of the nodes it manages.
  *
- * The node does the backup. This decides when, prunes the shelf beforehand, and
+ * The node does the backup. This decides when, prunes backup storage beforehand, and
  * dispatches one job per due node. Everything that makes a backup good — the
  * chain, the envelope, the upload, the local sweep — happens on the node
  * through the same engine it uses for its own copies.
@@ -13,7 +13,7 @@
  * under this management node's key.
  *
  * The same pass also proves the backups it takes. Every retention listing is
- * checked against each backup's own manifest (the shelf check, free), and every
+ * checked against each backup's own manifest (the backup storage check, free), and every
  * verify_every_days the node is asked to open and read its newest backup to the
  * end (a verify_backup job, level 2). Verification is dispatched under the same
  * concurrency cap as a backup and never on a node whose backup, stage or verify
@@ -28,12 +28,12 @@
  *   - no more than N run at once across the whole fleet.
  *
  * @version 1.5 - the run request carries the object store: the newest index and every epoch envelope
- *                on the node's manager shelf, read off the listing the prune already took, are handed
+ *                in the manager-profile backup storage, read off the listing the prune already took, are handed
  *                to the builder to sign (specs/backup_offloaded_files.md § Rollout)
- * @version 1.4 - a manifest the shelf check could not read is reported by the pass, not stamped as an
+ * @version 1.4 - a manifest the backup storage check could not read is reported by the pass, not stamped as an
  *                incomplete backup (the stamp is written only from a complete reading); the verify decision is handed the node's newest verify_backup job, so a verify
  *                that failed on the node counts as attempted and is not re-dispatched every tick
- * @version 1.3 - the pass verifies as well as backs up: the shelf check (level 1) runs on every
+ * @version 1.3 - the pass verifies as well as backs up: the backup storage check (level 1) runs on every
  *                retention listing and stamps mgn_backup_shelf_problem, and a level 2 verify of the
  *                newest backup is dispatched when the policy says one is due, under the same
  *                concurrency cap and never beside a running backup, stage or verify
@@ -181,7 +181,7 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 					if ($pruned['error'] !== '') {
 						// Worth saying, never worth stopping for: too many restore
 						// points is a bill, no backup is an outage.
-						$problems[] = $slug . ' shelf: ' . $pruned['error'];
+						$problems[] = $slug . ' backup storage: ' . $pruned['error'];
 					}
 					if (!empty($pruned['listed'])) {
 						// The bucket's testimony, stamped beside the node's own
@@ -196,7 +196,7 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 							// tier's storage allowance is measured against this figure and
 							// needs no meter of its own.
 							$node->set('mgn_backup_shelf_bytes', (int)($pruned['bytes'] ?? 0));
-							// The shelf check: is every backup on the shelf whole? Read
+							// The backup storage check: is every backup in backup storage whole? Read
 							// from the listing just taken, one small GET per backup for
 							// its manifest. Empty when nothing is wrong; the health check
 							// turns anything else into a problem on the node's card. A
@@ -208,13 +208,13 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 								(array)($pruned['objects'] ?? array()), (string)($pruned['base'] ?? ''),
 								$target->get_credentials(), (string)$target->get('bkt_bucket'));
 							if ($shelf['unread'] !== '') {
-								$problems[] = $slug . ' shelf: ' . $shelf['unread'];
+								$problems[] = $slug . ' backup storage: ' . $shelf['unread'];
 							} else {
 								$node->set('mgn_backup_shelf_problem', $shelf['problem']);
 							}
 							$node->save();
 						} catch (Throwable $e) {
-							error_log('FleetBackupRun: could not stamp the shelf check for node '
+							error_log('FleetBackupRun: could not stamp the backup storage check for node '
 								. $slug . ': ' . $e->getMessage());
 						}
 					}
@@ -225,7 +225,7 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 					'mode'               => $policy['mode'],
 					'full_interval_days' => $policy['full_interval_days'],
 				);
-				// What the node's manager shelf holds of its offloaded files —
+				// What the node's manager-profile backup storage holds of its offloaded files —
 				// the newest index and the epoch envelopes — from the listing
 				// just taken, so the builder signs links without listing again.
 				if (is_array($pruned) && !empty($pruned['listed'])) {
@@ -263,7 +263,7 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 			// A pass that dispatched nothing because nothing was due is a
 			// successful pass, not a skipped one. 'error' is reserved for a pass
 			// that could not do its job at all — every node it tried failed.
-			// One node's shelf hiccup among successful dispatches is carried in
+			// One node's backup storage hiccup among successful dispatches is carried in
 			// the message, where per-node monitoring picks the node up anyway.
 			'status'  => ($problems && !$dispatched) ? 'error' : 'success',
 			'message' => implode('; ', $parts) . '.',
@@ -273,7 +273,7 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 	/**
 	 * Dispatch a level 2 verify of this node's newest backup from here.
 	 *
-	 * The newest manager-profile chain on the shelf, as the Backups tab lists
+	 * The newest manager-profile chain in backup storage, as the Backups tab lists
 	 * it; the node picks the newest run inside it (no seq is sent). Always
 	 * level 2: a rehearsal is a person's decision, and no schedule can select
 	 * it.
@@ -281,14 +281,14 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 	private static function dispatch_verify($node) {
 		$listed = BackupChainListHelper::for_node($node, 20);
 		if (!empty($listed['error'])) {
-			throw new Exception('the shelf could not be listed: ' . $listed['error']);
+			throw new Exception('backup storage could not be listed: ' . $listed['error']);
 		}
 		$newest = null;
 		foreach ($listed['chains'] as $chain) {
 			if (($chain['profile'] ?? '') === BackupProfile::MANAGER) { $newest = $chain; break; }
 		}
 		if ($newest === null) {
-			throw new Exception('no backup taken from here is on the shelf to verify');
+			throw new Exception('no backup taken from here is in backup storage to verify');
 		}
 		$params = array(
 			'chain_id' => $newest['chain_id'],
@@ -321,7 +321,7 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 	/**
 	 * How many backups and verifies are already in flight across the fleet.
 	 * One budget for both: a verify downloads and reads as much as a backup
-	 * uploads, and the cap is about the shelf and the network, not the kind of
+	 * uploads, and the cap is about backup storage and the network, not the kind of
 	 * job.
 	 */
 	private static function in_flight_count() {

@@ -6,7 +6,7 @@
  * needs: []
  */
 /**
- * The shelf broker (specs/services_phase2_platform.md §3, §7 — build item 2a):
+ * The backup storage broker (specs/services_phase2_platform.md §3, §7 — build item 2a):
  * the plane signs what a tenant may do and keeps the ledger of what it signed.
  *
  *   - The presigner signs GET exactly as S3Signer::presign_get does, signs PUT
@@ -88,7 +88,7 @@ try {
 }
 check(strpos(ShelfPresigner::put($creds, 'bkt', 'k/one', 10), 'X-Amz-Expires=60') !== false, 'expiry floors at 60 s');
 
-// ── The fixture and the plane's shelf target ────────────────────────────────
+// ── The fixture and the plane's backup storage target ────────────────────────────────
 $fx = s3fx_start();
 if ($fx === null) {
 	section('fixture');
@@ -100,7 +100,7 @@ harness_defer(function () use ($fx) { s3fx_stop($fx); });
 $fx_creds = s3fx_creds($fx);
 
 $target = new BackupTarget(NULL);
-$target->set('bkt_name', 'harnesstest shelf broker target');
+$target->set('bkt_name', 'harnesstest backup storage broker target');
 $target->set('bkt_provider', 's3');
 $target->set('bkt_bucket', 'shelf');
 $target->set('bkt_path_prefix', 'harness-backups');

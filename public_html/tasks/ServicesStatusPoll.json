@@ -1,6 +1,6 @@
 {
     "name": "Services status poll",
-    "description": "Asks getjoinery once a day where this site stands with the services it rents there — outbound email and the backup shelf: how much of each allowance is used, the paid-through date, and any notice — and writes the answer into the hosting banner every admin page shows. Does nothing on a site that is not connected.",
+    "description": "Asks getjoinery once a day where this site stands with the services it rents there — outbound email and backup storage: how much of each allowance is used, the paid-through date, and any notice — and writes the answer into the hosting banner every admin page shows. Does nothing on a site that is not connected.",
     "default_frequency": "daily",
     "default_time": "05:30:00",
     "activate_on_install": true

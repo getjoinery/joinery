@@ -91,7 +91,7 @@ check((int)$resp['status'] === 200 && s3fx_object($fx, 'bkt', '/even.bin') === $
 check(s3fx_count($fx, 'part') === 5, 'two parts for two parts\' worth', 'part total ' . s3fx_count($fx, 'part'));
 
 // ─────────────────────────────────────────────────────────────────────────────
-section('Deferred completion: nothing is on the shelf until the caller says so');
+section('Deferred completion: nothing is in backup storage until the caller says so');
 
 $resp = S3Signer::put_stream($creds, 'bkt', '/deferred-big.bin', $as_stream($big), 'application/octet-stream', false, ST_PART);
 check(isset($resp['pending']) && (int)$resp['status'] === 0, 'a deferred multipart returns a pending handle and no status');

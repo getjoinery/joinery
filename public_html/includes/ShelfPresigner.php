@@ -4,10 +4,10 @@
  *
  * A presigned URL is one HTTP request, to one object key, for one operation,
  * valid for minutes, signed with a credential the requester never sees. The
- * shelf broker (specs/services_phase2_platform.md §3) hands these to a site
+ * backup storage broker (specs/services_phase2_platform.md §3) hands these to a site
  * for every object it writes or reads, so no box ever holds a storage
  * credential; the standard is honoured identically by Backblaze, AWS and
- * Linode, which is what makes the shelf cross-provider by construction.
+ * Linode, which is what makes backup storage cross-provider by construction.
  *
  * The signing is the same as S3Signer::presign_get() — the verb and the
  * query are what vary: PUT for a single upload, GET for a read, POST ?uploads

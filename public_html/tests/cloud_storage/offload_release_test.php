@@ -7,7 +7,7 @@
  * timeout: 120
  */
 /**
- * The offload tick, after the flip to cloud: store to the site's backup shelf,
+ * The offload tick, after the flip to cloud: store to the site's backup storage,
  * then release the local bytes only when every enabled backup profile holds
  * the object (specs/backup_offloaded_files.md § The offload tick).
  *
@@ -17,7 +17,7 @@
  * shelf:
  *
  *   - no profile enabled: released at offload, as it always was
- *   - site profile enabled: the object lands on the site shelf under the
+ *   - site profile enabled: the object lands in the site's backup storage under the
  *     current epoch, held.json names it, the bytes go
  *   - manager profile enabled too and its held set lacks the object: the
  *     bytes stay; once its held set names it, the run's release lets them go
@@ -126,11 +126,11 @@ $r = $sync_row->invoke(null, $profile, (int)$b0->key, $driver);
 check($r === 'pushed', 'the row is pushed', (string)$r);
 check((new FileBlob($b0->key, true))->get('fbb_storage_driver') === 'cloud', 'and flipped to cloud');
 check(!is_file($p0), 'the local bytes are gone');
-check($shelf_objects() === array(), 'nothing went to the backup shelf');
+check($shelf_objects() === array(), 'nothing went to backup storage');
 check(!is_file($out . '/objects/held.json'), 'and no held set was written');
 
 // ─────────────────────────────────────────────────────────────────────────────
-section('Site profile enabled: stored to the site shelf, then released');
+section('Site profile enabled: stored to the site\'s backup storage, then released');
 
 BackupProfile::$enabled_for_tests = array(BackupProfile::SITE);
 $bytes1 = random_bytes(5000);
@@ -143,7 +143,7 @@ $objs = $shelf_objects();
 $epoch = explode('/', $objs[0] ?? '/')[0];
 check(count($objs) === 2 && preg_match('/^epoch-\d{8}_\d{6}$/', $epoch) === 1
 	&& in_array($epoch . '/' . $n1 . '.enc', $objs, true) && in_array($epoch . '/envelope.json', $objs, true),
-	'the object and the epoch envelope are on the site shelf', json_encode($objs));
+	'the object and the epoch envelope are on the site\'s backup storage', json_encode($objs));
 $env = json_decode((string)s3fx_object($fx, 'bkt', '/' . $base . 'objects/' . $epoch . '/envelope.json'), true);
 $epoch_key = BackupEnvelope::open_as_site($env);
 file_put_contents($work . '/o.enc', s3fx_object($fx, 'bkt', '/' . $base . 'objects/' . $epoch . '/' . $n1 . '.enc'));
@@ -152,7 +152,7 @@ check(file_get_contents($work . '/o.plain') === $bytes1, 'the object decrypts wi
 $held = BackupObjects::read_held($plan);
 check(is_array($held) && isset($held[$n1]) && $held[$n1]['epoch'] === $epoch
 	&& $held[$n1]['object_sha256'] === hash_file('sha256', $work . '/o.enc'), 'held.json names it with epoch and hash', json_encode($held));
-check(!is_file($p1), 'the local bytes are gone: the only enabled shelf holds them');
+check(!is_file($p1), 'the local bytes are gone: the only enabled backup storage holds them');
 check(!glob($out . '/objects/tmp/*'), 'no ciphertext is left in objects/tmp');
 check(count($driver->ops('put')) === 1, 'the file-bucket push happened once, through its own driver');
 check(json_decode(file_get_contents($out . '/objects/epoch.json'), true)['id'] === $epoch, 'epoch.json records the epoch the tick minted');
@@ -173,7 +173,7 @@ list($b2, $p2, $n2) = $make_blob('wait', $bytes2);
 $r = $sync_row->invoke(null, $profile, (int)$b2->key, new RecordingMockDriver());
 check($r === 'pushed', 'the row is pushed', (string)$r);
 check((new FileBlob($b2->key, true))->get('fbb_storage_driver') === 'cloud', 'and flipped to cloud');
-check(in_array($epoch . '/' . $n2 . '.enc', $shelf_objects(), true), 'the site shelf holds it');
+check(in_array($epoch . '/' . $n2 . '.enc', $shelf_objects(), true), 'the site\'s backup storage holds it');
 check(is_file($p2) && file_get_contents($p2) === $bytes2, 'the local bytes STAY: the manager profile has no held set');
 $held = BackupObjects::read_held($plan);
 check(isset($held[$n2]), 'the site held set names it');
@@ -213,9 +213,9 @@ if ($fx_fail === null) {
 	check($r === 'pushed', 'the offload itself succeeds', (string)$r);
 	check((new FileBlob($b4->key, true))->get('fbb_storage_driver') === 'cloud', 'the row is cloud');
 	check(is_file($p4) && file_get_contents($p4) === $bytes4, 'the local bytes stay');
-	check(s3fx_keys($fx_fail) === array(), 'nothing landed on the shelf');
+	check(s3fx_keys($fx_fail) === array(), 'nothing landed in backup storage');
 	check(!glob($work . '/failshelf/objects/tmp/*'), 'no ciphertext is left behind');
-	check(!is_file($work . '/failshelf/objects/epoch.json'), 'no epoch is recorded for an envelope the shelf never took');
+	check(!is_file($work . '/failshelf/objects/epoch.json'), 'no epoch is recorded for an envelope backup storage never took');
 	check(!is_file($work . '/failshelf/objects/held.json'), 'and nothing is held');
 	BackupObjects::$test_hooks = array('site_plan' => $plan);
 }

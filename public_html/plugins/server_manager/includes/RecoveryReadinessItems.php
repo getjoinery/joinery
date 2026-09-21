@@ -14,7 +14,7 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  *     the provider console login is the only non-circular way back to the
  *     backups, and the platform cannot check it for you.
  *
- * @version 1.2.0 - the recovery-key card warns when offloaded files on the shelf open only with a
+ * @version 1.2.0 - the recovery-key card warns when offloaded files in backup storage open only with a
  *                  retired recovery key: "N objects (X GB) open only with a retired recovery key"
  *                  (specs/backup_offloaded_files.md § Key model), from the record the run keeps
  * @version 1.1.0
@@ -77,7 +77,7 @@ class RecoveryReadinessItems {
 	}
 
 	/**
-	 * Offloaded files copied to the shelf under an earlier recovery key that
+	 * Offloaded files copied to backup storage under an earlier recovery key that
 	 * this key does not open. A rotation re-seals every epoch the site key can
 	 * still open; one it cannot stays sealed to the retired key alone, and
 	 * nothing re-copies it. The run writes the list down; this reads it.
@@ -94,7 +94,7 @@ class RecoveryReadinessItems {
 			return '';
 		}
 		$n = (int)$summary['count'];
-		return $n . ' offloaded file object' . ($n === 1 ? '' : 's') . ' (' . BackupRunner::human((int)$summary['bytes']) . ') on the backup shelf '
+		return $n . ' offloaded file object' . ($n === 1 ? '' : 's') . ' (' . BackupRunner::human((int)$summary['bytes']) . ') in backup storage '
 			. ($n === 1 ? 'opens' : 'open') . ' only with a retired recovery key (epoch' . (count($summary['epochs']) === 1 ? '' : 's') . ' '
 			. implode(', ', $summary['epochs']) . '). Keep that key where you keep this one; nothing copies them again under the current key.';
 	}

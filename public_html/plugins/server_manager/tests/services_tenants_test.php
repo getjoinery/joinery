@@ -17,7 +17,7 @@
  *     send values the site writes. A second enrol mints a fresh credential in
  *     the same subaccount and creates nothing else. A host change re-enrols
  *     the sender domain. Zero records from the provider fails loudly.
- *   - Shelf enrol mints nothing: a slug, a prefix inside the plane's shelf
+ *   - Shelf enrol mints nothing: a slug, a prefix inside the plane's backup storage
  *     target, and no credential anywhere in the answer.
  *   - Status is contract C2 per service; the webhook nudges the mail figure and
  *     a figure from an earlier month reads as 0.
@@ -270,7 +270,7 @@ check((string)ServiceTenant::forKey($key_id, 'mail')->get('svt_host') === 'renam
 // ---------------------------------------------------------------------------
 section('shelf enrol: a slug and a prefix, no credential');
 $target = new BackupTarget(NULL);
-$target->set('bkt_name', 'harnesstest services shelf');
+$target->set('bkt_name', 'harnesstest services backup storage');
 $target->set('bkt_provider', 's3');
 $target->set('bkt_bucket', 'harness-shelf');
 $target->set('bkt_path_prefix', 'harness-backups');
@@ -282,12 +282,12 @@ harness_set_setting_mem('server_manager_services_shelf_target_id', (string)$targ
 
 $shelf = JoineryServices::enrol($owner->key, $key_id, 'shelf', $host2, $client);
 $shelf_row = $track(ServiceTenant::forKey($key_id, 'shelf'));
-check($shelf['entitled'] === false && (string)$shelf_row->get('svt_state') === 'unpaid', 'the shelf row starts unpaid too');
+check($shelf['entitled'] === false && (string)$shelf_row->get('svt_state') === 'unpaid', 'backup storage row starts unpaid too');
 JoineryServices::grant($shelf_row, '2030-06-30 12:00:00', $client);
 $shelf = JoineryServices::enrol($owner->key, $key_id, 'shelf', $host2, $client);
 $c = $shelf['shelf'] ?? array();
 $slug = 't' . (int)$shelf_row->key;
-check($shelf['entitled'] === true && $shelf['state'] === 'active', 'entitled: the shelf row is active');
+check($shelf['entitled'] === true && $shelf['state'] === 'active', 'entitled: backup storage row is active');
 check(($c['slug'] ?? '') === $slug && ($c['path_prefix'] ?? '') === 'harness-backups'
 	&& ($c['prefix'] ?? '') === 'harness-backups/' . $slug . '/', 'the tenant lives at {prefix}/{slug}/');
 check(($c['retention_days'] ?? 0) === 90, 'the 90-day promise is in the answer');
@@ -296,15 +296,15 @@ check(($c['bucket'] ?? '') === 'harness-shelf' && ($c['region'] ?? '') === 'us-e
 $flat = json_encode($shelf);
 check(strpos($flat, 'AKIA-harness') === false && strpos($flat, 'harness-secret') === false
 	&& !isset($c['access_key']) && !isset($c['secret_key']), 'no credential anywhere in the answer');
-check($shelf['allowance'] === 10 * 1073741824 && $shelf['allowance_label'] === '10 GB', 'the shelf allowance is in bytes');
-check(count($drain()) === 0, 'the shelf touches no mail provider');
+check($shelf['allowance'] === 10 * 1073741824 && $shelf['allowance_label'] === '10 GB', 'backup storage allowance is in bytes');
+check(count($drain()) === 0, 'backup storage touches no mail provider');
 
 harness_set_setting_mem('server_manager_services_shelf_target_id', '999999999');
 try {
 	JoineryServices::enrol($owner->key, $key_id, 'shelf', $host2, $client);
-	check(false, 'a missing shelf target refuses');
+	check(false, 'a missing backup storage target refuses');
 } catch (JoineryServicesException $e) {
-	check(strpos($e->getMessage(), 'no shelf target') !== false, 'a missing shelf target refuses with a sentence');
+	check(strpos($e->getMessage(), 'no backup storage target') !== false, 'a missing backup storage target refuses with a sentence');
 }
 harness_set_setting_mem('server_manager_services_shelf_target_id', (string)$target->key);
 
@@ -328,7 +328,7 @@ $expected_prune = LibraryFunctions::time_shift((string)$shelf_row->get('svt_revo
 check((string)$shelf_row->get('svt_state') === 'released'
 	&& substr((string)$shelf_row->get('svt_prune_after_time'), 0, 19) === $expected_prune,
 	'shelf release sets prune-after = revoked + 90 days');
-check(strpos((string)$srel['notice'], '90 days') !== false, 'the notice says the shelf is kept 90 days');
+check(strpos((string)$srel['notice'], '90 days') !== false, 'the notice says backup storage is kept 90 days');
 try {
 	JoineryServices::release($owner->key, $key_id, 'nothing', $client);
 	check(false, 'an unknown service refuses');
@@ -348,8 +348,8 @@ check((string)$row->get('svt_state') === 'active' && $row->get('svt_revoked_time
 JoineryServices::grant($shelf_row, '2031-01-01', $client);
 $shelf_row = ServiceTenant::forKey($key_id, 'shelf');
 check((string)$shelf_row->get('svt_state') === 'active' && $shelf_row->get('svt_prune_after_time') === null,
-	'the shelf comes back in place with its prune date cleared');
-check(count($drain()) === 0, 'the shelf touches no provider to come back');
+	'backup storage comes back in place with its prune date cleared');
+check(count($drain()) === 0, 'backup storage touches no provider to come back');
 
 section('the ladder\'s two acts');
 $reply(array(array()));                                   // subaccount/close
@@ -430,7 +430,7 @@ try {
 	$r = harness_call_logic('plugins/server_manager/logic/services_release_logic.php', 'services_release_logic',
 		array('service' => 'shelf'));
 	check(!$r->error && $r->data['released'] === true && (string)ServiceTenant::forKey($key_id, 'shelf')->get('svt_state') === 'released',
-		'services_release releases the shelf over the action');
+		'services_release releases backup storage over the action');
 	$_SESSION['api_key_id'] = null;
 	$r = harness_call_logic('plugins/server_manager/logic/services_status_logic.php', 'services_status_logic', array());
 	check($r->error !== '' && $r->error !== null, 'without a connected key the status action refuses');

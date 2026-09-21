@@ -1,6 +1,6 @@
 <?php
 /**
- * shelf_begin_run - a site asks the shelf broker to take a backup run.
+ * shelf_begin_run - a site asks the backup storage broker to take a backup run.
  *
  * (specs/services_phase2_platform.md §3). Over the connected key. The plane
  * checks the tenant is usable and that the ledger's bytes plus the declared
@@ -33,7 +33,7 @@ function shelf_begin_run_logic(array $input): LogicResult {
 
 function shelf_begin_run_logic_descriptor(): array {
 	return array(
-		'description'      => 'Open a backup run on the operator\'s shelf: declares the profile, chain and artifacts (names and sizes); answers a run id and base key, or refuses with the cause.',
+		'description'      => 'Open a backup run on the operator\'s backup storage: declares the profile, chain and artifacts (names and sizes); answers a run id and base key, or refuses with the cause.',
 		'requires_session' => true,
 		'mutates'          => true,
 		'input'            => array(

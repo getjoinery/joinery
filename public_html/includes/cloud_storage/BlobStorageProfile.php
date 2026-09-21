@@ -14,6 +14,7 @@
  * public profile owns the world-readable blobs (fbb_is_private = FALSE); the
  * private subclass owns the rest.
  *
+ * @version 1.2 - sizeColumn(): the health figures carry bytes beside counts
  * @version 1.1 - backupObjects()/backupObject(): the enumeration the backup's object store reads —
  *                every cloud row of this store with its name and the local paths its bytes
  *                occupy or would occupy (specs/backup_offloaded_files.md). A capability the
@@ -32,6 +33,8 @@ class BlobStorageProfile implements StorageProfile {
 	public function driverColumn(): string      { return 'fbb_storage_driver'; }
 	public function failedCountColumn(): string { return 'fbb_sync_failed_count'; }
 	public function lastAttemptColumn(): string { return 'fbb_sync_last_attempt'; }
+	/** The column a row's size is read from, so the status can say how much sits where. */
+	public function sizeColumn(): string        { return 'fbb_size_bytes'; }
 
 	public function visibility(): string { return 'public'; }
 

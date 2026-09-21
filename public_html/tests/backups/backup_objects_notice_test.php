@@ -6,7 +6,7 @@
  * needs: []
  */
 /**
- * Offloaded files and the shelf, as the admin surfaces say it
+ * Offloaded files and backup storage, as the admin surfaces say it
  * (specs/backup_offloaded_files.md § Admin surfaces), over fixtures:
  *
  *   - the figures: what each enabled backup holds (from its held set), what
@@ -77,10 +77,10 @@ $keys = array('store' => 'K1', 'target' => 'K2');
 $st = BackupObjectsStatus::figures($rows, array(BackupProfile::SITE, BackupProfile::MANAGER), $held, $runs, $keys);
 
 check($st['total']['count'] === 5 && $st['total']['bytes'] === 18 * $MB, 'every cloud row is counted with its size');
-check($st['shelf']['site']['count'] === 3 && $st['shelf']['site']['bytes'] === 600, 'the site shelf holds three objects, 600 bytes');
-check($st['shelf']['manager']['count'] === 1 && $st['shelf']['manager']['known'] === true, 'the manager shelf holds one');
-check($st['shelf']['site']['indexed']['time'] === '2026-09-20 03:00:00', 'the site shelf names its last indexing run');
-check($st['shelf']['manager']['indexed'] === null, 'the manager shelf has no index yet');
+check($st['shelf']['site']['count'] === 3 && $st['shelf']['site']['bytes'] === 600, 'the site\'s backup storage holds three objects, 600 bytes');
+check($st['shelf']['manager']['count'] === 1 && $st['shelf']['manager']['known'] === true, 'the manager\'s backup storage holds one');
+check($st['shelf']['site']['indexed']['time'] === '2026-09-20 03:00:00', 'the site\'s backup storage names its last indexing run');
+check($st['shelf']['manager']['indexed'] === null, 'the manager\'s backup storage has no index yet');
 // a: on disk, held by both → releasable. b: on disk, held by nobody → waiting for both.
 // c: on disk, manager lacks → waiting for manager. d: gone, manager lacks → catch-up. e: gone, both lack → catch-up.
 check($st['releasable']['count'] === 1 && $st['releasable']['bytes'] === 3 * $MB, 'a file every backup holds is releasable, sized by its stat');
@@ -102,7 +102,7 @@ $st3 = BackupObjectsStatus::figures($rows, array(), array(), array(), $keys);
 check($st3['waiting']['count'] === 0 && $st3['catchup']['count'] === 0 && $st3['releasable']['count'] === 3, 'with no backup enabled nothing waits or is to copy; local copies are simply releasable');
 check($st3['shelf'] === array(), 'no shelf lines without an enabled profile');
 
-// A profile enabled with no held.json yet: everything waits on it, and the shelf says none yet.
+// A profile enabled with no held.json yet: everything waits on it, and backup storage says none yet.
 $st4 = BackupObjectsStatus::figures($rows, array(BackupProfile::SITE), array(BackupProfile::SITE => null), array(), $keys);
 check($st4['shelf']['site']['known'] === false && $st4['shelf']['site']['count'] === 0, 'a profile with no held set is "none yet"');
 check($st4['waiting']['count'] === 3 && $st4['catchup']['count'] === 2, 'everything waits on a backup that has stored nothing');
@@ -110,9 +110,9 @@ check($st4['waiting']['count'] === 3 && $st4['catchup']['count'] === 2, 'everyth
 section('The sentences');
 
 $lines = BackupObjectsStatus::shelf_sentences($st);
-check($lines['site'] === 'Offloaded files on the shelf (this site\'s backup): 3 objects, 600 B; last indexed at the run of 2026-09-20 03:00 UTC.', 'the site shelf line: ' . $lines['site']);
-check($lines['manager'] === 'Offloaded files on the shelf (the management node\'s backup): 1 object, 100 B; not indexed yet.', 'the manager shelf line: ' . $lines['manager']);
-check(BackupObjectsStatus::shelf_sentences($st4)['site'] === 'Offloaded files on the shelf (this site\'s backup): none yet; the first run that stores them writes the record.', 'the none-yet line');
+check($lines['site'] === 'Offloaded files in backup storage (this site\'s backup): 3 objects, 600 B; last indexed at the run of 2026-09-20 03:00 UTC.', 'the site\'s backup storage line: ' . $lines['site']);
+check($lines['manager'] === 'Offloaded files in backup storage (the management node\'s backup): 1 object, 100 B; not indexed yet.', 'the manager\'s backup storage line: ' . $lines['manager']);
+check(BackupObjectsStatus::shelf_sentences($st4)['site'] === 'Offloaded files in backup storage (this site\'s backup): none yet; the first run that stores them writes the record.', 'the none-yet line');
 check(BackupObjectsStatus::waiting_sentence($st) === '2 files (3 MB) waiting for this site\'s backup and the management node\'s backup before their local copy is released.',
 	'the waiting sentence names both backups: ' . BackupObjectsStatus::waiting_sentence($st));
 check(BackupObjectsStatus::waiting_sentence($st2) === '1 file (2 MB) waiting for this site\'s backup and the management node\'s backup before its local copy is released.',
@@ -130,7 +130,7 @@ check(BackupObjectsStatus::same_account('', '') === false, 'two blanks are not a
 check(BackupObjectsStatus::same_account('AKIA1', null) === false, 'no target: no match');
 check(BackupObjectsStatus::same_account(' AKIA1 ', 'AKIA1') === true, 'whitespace around a key does not hide a match');
 $same = BackupObjectsStatus::figures($rows, array(), array(), array(), array('store' => 'AKIA1', 'target' => 'AKIA1'));
-check(BackupObjectsStatus::same_account_line($same) === 'Your backup shelf and your file store are on the same account. Losing that account loses both. A copy taken by a management node is the one that survives it.',
+check(BackupObjectsStatus::same_account_line($same) === 'Backup storage and the file store share one account; losing it loses both. A management node\'s copy would survive it.',
 	'the line, exactly when the keys match');
 check(BackupObjectsStatus::same_account_line($st) === '', 'and not otherwise');
 
@@ -231,7 +231,7 @@ check(BackupObjects::read_retired_file($base . '/objects/does-not-exist.json') =
 
 if (class_exists('RecoveryReadinessItems')) {
 	$w = RecoveryReadinessItems::retiredEpochsWarning($base);
-	check(strpos($w, '1 offloaded file object (500 B) on the backup shelf opens only with a retired recovery key (epoch epoch-20260201_000000)') === 0,
+	check(strpos($w, '1 offloaded file object (500 B) in backup storage opens only with a retired recovery key (epoch epoch-20260201_000000)') === 0,
 		'the readiness card warning: ' . $w);
 	BackupObjects::write_retired_epochs(array('output_dir' => $base . '/manager', 'profile' => BackupProfile::MANAGER), array());
 	check(RecoveryReadinessItems::retiredEpochsWarning($base) === '', 'and nothing when every epoch opens');

@@ -21,7 +21,7 @@
  *
  * Run: php tests/security/parser_surfaces_test.php
  *
- * @version 1.1 - BackupObjects reads this site's own gzipped objects index back off its shelf
+ * @version 1.1 - BackupObjects reads this site's own gzipped objects index back off its backup storage
  * @version 1.0
  */
 require_once(__DIR__ . '/../lib/harness.php');
@@ -49,7 +49,7 @@ $allowed = array(
 	'plugins/server_manager/includes/domain_registrar/NamecheapRegistrar.php' => 'the registrar\'s API response under our own credentials',
 	'plugins/mailbox/includes/import/ZipReader.php'      => 'an archive the owner uploaded to import, once, under their eye',
 	'plugins/mailbox/includes/import/TarReader.php'      => 'an archive the owner uploaded to import, once, under their eye',
-	'includes/BackupObjects.php'                         => 'this site\'s own objects index, read back off its own backup shelf (site credential, or a link its management node signed), size-capped',
+	'includes/BackupObjects.php'                         => 'this site\'s own objects index, read back off its own backup storage (site credential, or a link its management node signed), size-capped',
 );
 
 $dirs = array('includes', 'data', 'logic', 'utils', 'adm', 'views', 'api', 'ajax', 'plugins', 'theme');

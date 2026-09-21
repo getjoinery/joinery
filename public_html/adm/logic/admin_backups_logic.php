@@ -6,6 +6,8 @@
  * opens them, how many are kept, and what has actually happened. No fleet, no
  * agent — server_manager is a layer on top of this, not a prerequisite for it.
  *
+ * @version 1.11 - save_target proves an enabled target before saving it (TargetTester 4.0) and refuses
+ *                 one that fails, saying why
  * @version 1.10 - objects_status (BackupObjectsStatus::compute()): what each backup holds of the offloaded
  *                 files, what waits on this server for a backup, what is still to copy from the file
  *                 store, and whether the file store and the site's target share an account
@@ -119,7 +121,7 @@ function admin_backups_logic($input = array()) {
 		// cannot serve, and who brings them back on this site.
 		'inventory'      => CloudStoreInventory::current(),
 		'objects_source' => CloudStoreInventoryPanel::source(ManagementNodeStatus::is_managed()),
-		// Offloaded files and the shelf: held, waiting, still to copy, same account.
+		// Offloaded files and backup storage: held, waiting, still to copy, same account.
 		'objects_status' => BackupObjectsStatus::compute(),
 	));
 }
@@ -254,13 +256,27 @@ function _admin_backups_handle($action, array $input, $session) {
 						'endpoint'   => (string)($input['endpoint'] ?? ($existing['endpoint'] ?? '')),
 					));
 					if ($completed['note'] !== '') {
-						$b2_note = ' ' . $completed['note'] . ' The test will say so.';
+						$b2_note = ' ' . $completed['note'];
 					}
 					$target->set('bkt_credentials', $completed['creds']);
 				}
 				$target->set('bkt_enabled', !empty($input['bkt_enabled']));
+				// Proven before it is saved: an enabled target that cannot do
+				// its job is not saved, and the message says why. A disabled
+				// target is saved untested; enabling it is a save, and that
+				// save tests it.
+				if ($target->get('bkt_enabled')) {
+					$test = TargetTester::test($target);
+					if (!$test['success']) {
+						$say('Not saved. ' . $test['message'] . ($b2_note ?? ''), false);
+						return $url;
+					}
+					$target->save();
+					$say('Target saved. ' . $test['message'], true);
+					return $url;
+				}
 				$target->save();
-				$say('Target saved.' . ($b2_note ?? ''), true);
+				$say('Target saved. It is disabled, so it was not tested; enabling it tests it.' . ($b2_note ?? ''), true);
 				return $url;
 			}
 

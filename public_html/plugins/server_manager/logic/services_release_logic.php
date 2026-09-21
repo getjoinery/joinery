@@ -4,7 +4,7 @@
  *
  * (specs/services_phase2_platform.md §4, §9 the switch-over). The customer's
  * own act, once their own provider is proven: mail's subaccount is closed and
- * the records this plane published are listed for replacement; the shelf is
+ * the records this plane published are listed for replacement; backup storage is
  * marked released so the broker refuses it, and its copies are kept
  * RETENTION_DAYS from today before pruning. Idempotent.
  *
@@ -32,11 +32,11 @@ function services_release_logic(array $input): LogicResult {
 
 function services_release_logic_descriptor(): array {
 	return array(
-		'description'      => 'Stop using one of the operator\'s services (mail or shelf). Mail\'s subaccount is closed; the shelf is kept 90 days and then pruned.',
+		'description'      => 'Stop using one of the operator\'s services (mail or shelf, which is backup storage). Mail\'s subaccount is closed; backup storage is kept 90 days and then pruned.',
 		'requires_session' => true,
 		'mutates'          => true,
 		'input'            => array(
-			'service' => array('type' => 'string', 'required' => true, 'label' => 'Service: mail or shelf'),
+			'service' => array('type' => 'string', 'required' => true, 'label' => 'Service: mail or shelf (backup storage)'),
 		),
 	);
 }

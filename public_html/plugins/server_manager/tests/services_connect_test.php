@@ -159,7 +159,7 @@ try {
 }
 $keys = $keys_of($owner->key);
 check($keys[$third['key_id']] === false, 'the key is deactivated although the mail close failed');
-check((string)ServiceTenant::forKey($third['key_id'], 'shelf')->get('svt_state') === 'released', 'the shelf row is released although mail came first and failed');
+check((string)ServiceTenant::forKey($third['key_id'], 'shelf')->get('svt_state') === 'released', 'backup storage row is released although mail came first and failed');
 check((string)ServiceTenant::forKey($third['key_id'], 'mail')->get('svt_state') === 'active', 'the mail row keeps its state for the next attempt');
 
 // ── The authorise page ──────────────────────────────────────────────────────

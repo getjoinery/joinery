@@ -457,7 +457,7 @@ Only after the answer verifies does the host run the bundled, self-verifying `re
 | `backup_run` | This management node's own backup of a node. The node runs its backup engine — chain, envelope, upload, local sweep — with the bucket and a write-only credential supplied for that run and never stored there. What opens the archive is not supplied: the node seals to the recovery key it holds and has verified | No |
 | `stage_chain` | Put a whole backup chain back on the node, ready to restore: the plane signs a link to every object under the chain (`JobCommandBuilder::sign_chain_links`) and the node reads its own manifest, fetches what a restore of the run needs, checks each against its upload ledger and recovers the chain key from its own `backup_site_key`. The `stage_chain` **operate primitive** (script `utils/stage_chain.php`); no approval | No |
 | `verify_backup` | Prove one of the node's backups restorable without restoring it, as the `verify_backup` **operate primitive** (script `utils/verify_backup.php`, agent 1.24.0+): the same links as `stage_chain` plus a level — 2 opens and reads every artifact to the end, 3 rehearses a restore into a scratch tree and a throwaway database on the node. Nothing on the site is touched, so no approval; the schedule dispatches level 2, a person chooses 3. The `VERIFY_*` result lines stamp `mgn_backup_verify_*` (`JobResultProcessor::process_verify_backup`). See [Verifying backups](../../../docs/backups.md#verifying-backups) | No |
-| `restore_objects` | Bring a run's offloaded files home from the node's manager shelf, as the `restore_objects` **operate primitive** (script `utils/restore_objects.php`, agent 1.38.0+), paged and driven from the plane (`FleetObjectRestore`): a survey job carries the run's index link and the node answers with the names the file bucket cannot serve; each page job carries the signed links for a slice of them with the envelope of each epoch they are sealed under, filled to the job's byte ceiling, and its result issues the next page. Started by a completed `restore_chain` in `missing` mode (`JobResultProcessor::process_restore_chain`), and by hand from the node's Backups tab (**Bring them back**, the `restore_objects` backup action) when the node's own daily file-store check has found offloaded files its bucket can no longer serve. Overwrites nothing and deletes nothing in any bucket, so no approval. See [Restoring a managed node](../../../docs/backups.md#restoring-a-managed-node-from-its-management-node) | No |
+| `restore_objects` | Bring a run's offloaded files home from the node's manager-profile backup storage, as the `restore_objects` **operate primitive** (script `utils/restore_objects.php`, agent 1.38.0+), paged and driven from the plane (`FleetObjectRestore`): a survey job carries the run's index link and the node answers with the names the file bucket cannot serve; each page job carries the signed links for a slice of them with the envelope of each epoch they are sealed under, filled to the job's byte ceiling, and its result issues the next page. Started by a completed `restore_chain` in `missing` mode (`JobResultProcessor::process_restore_chain`), and by hand from the node's Backups tab (**Bring them back**, the `restore_objects` backup action) when the node's own daily file-store check has found offloaded files its bucket can no longer serve. Overwrites nothing and deletes nothing in any bucket, so no approval. See [Restoring a managed node](../../../docs/backups.md#restoring-a-managed-node-from-its-management-node) | No |
 | `decommission_node` | Permanently remove one container site from its shared host, as the `decommission_site` primitive on the **host's own paired agent** — the site itself approves its removal first (see [Removing a container site](#removing-a-container-site-decommission)) | **Yes** |
 
 Destructive operations auto-backup the target database before proceeding. The UI requires explicit confirmation checkboxes.
@@ -1057,7 +1057,7 @@ published through the shared DNS stack by driver key.
 ## Joinery-run services for self-hosted sites
 
 A self-hosted site can send its email through this plane's SMTP2GO account
-and keep its offsite backups on this plane's shelf, on credentials cut to its
+and keep its offsite backups in this plane's backup storage, on credentials cut to its
 own slice, for as long as a paid-through date on this plane says so. The
 customer's own Managed site uses the same legs because that is what Managed
 is; a self-hosted site *rents* them, and the difference is only how the
@@ -1087,7 +1087,7 @@ grace ran out), `released` (the customer left, or the account holder
 disconnected). The four shared states are the core `ServiceTenantLadder`'s
 vocabulary. The figure (`svt_figure`) is sends this month for mail — the
 provider's month-to-date count, read hourly by the reconcile, nudged between
-reads by the SMTP2GO webhook — and the ledger's completed bytes for the shelf.
+reads by the SMTP2GO webhook — and the ledger's completed bytes for backup storage.
 
 **The actions** the site calls over its key, all under
 `/api/v1/action/server_manager/`: `services_enroll` (service, host),
@@ -1106,7 +1106,7 @@ broker actions below. `JoineryServices` is the operator side of all of them.
   adds the new sender domain and releases the old. The status answer
   reports `domain_added` until the provider verifies the domain, probed once
   per status call.
-- *Shelf enrol* mints nothing: the answer is the tenant's slug, the shelf
+- *Shelf enrol* mints nothing: the answer is the tenant's slug, backup storage
   path prefix, `{prefix}/{slug}/`, the 90-day retention promise and the
   bucket's coordinates — no credential anywhere in it.
 - *Status* is umbrella contract C2 per service: `figure`, `allowance`,
@@ -1115,16 +1115,16 @@ broker actions below. `JoineryServices` is the operator side of all of them.
   and `server_manager_storage_referral_url`, `''` when unset), `manage_url`
   (the account's Connected sites page), plus the ready-made banner row
   (`label`, `used_label`, `allowance_label`, `percent`).
-- *Release* closes mail's subaccount now, or marks the shelf tenant released
-  so the broker refuses it; the shelf is kept 90 days from that day
+- *Release* closes mail's subaccount now, or marks backup storage tenant released
+  so the broker refuses it; backup storage is kept 90 days from that day
   (`svt_prune_after_time`) and then pruned. Idempotent.
 
-**The shelf broker** (`ShelfBroker`, `ShelfPresigner`): no box ever holds a
+**The backup storage broker** (`ShelfBroker`, `ShelfPresigner`): no box ever holds a
 storage credential. For every object it writes or reads a site asks the plane
 for a presigned URL — one request, one key, one operation, good for an hour,
-SigV4-signed with the plane's own credential for its shelf target
+SigV4-signed with the plane's own credential for its backup storage target
 (`server_manager_services_shelf_target_id`, or the one enabled backup target
-when blank). Presigned URLs are the S3 standard, so the shelf is any
+when blank). Presigned URLs are the S3 standard, so backup storage is any
 S3-compatible store by construction. Five actions: `shelf_begin_run`
 (profile, chain, artifacts with sizes → a run id and base key
 `{prefix}/{slug}/{profile}/`, refused with the sentence the site's run history
@@ -1158,14 +1158,14 @@ aborted.
 re-read and a changed one re-sets the subaccount limit; the date is compared
 every pass and the row walked down the ladder — `server_manager_services_grace_days`
 (14) after the date passes the row is suspended (mail's subaccount closed;
-the shelf broker refusing) and the retention clock starts, and a new date at
+the backup storage broker refusing) and the retention clock starts, and a new date at
 any point before the prune reactivates in place; an act the provider refused
 (unreachable) is retried next pass. Mail's figure is read from the provider
-hourly. The shelf ledger is reconciled against a real listing daily (an
-object the shelf lacks is dropped, a multipart still open at the provider
+hourly. The backup storage ledger is reconciled against a real listing daily (an
+object backup storage lacks is dropped, a multipart still open at the provider
 aborted first; one the ledger lacks is adopted at its listed size); a run open longer than 36 hours is aborted on the plane's side,
 its open multipart cancelled with the plane's credential; every active
-tenant's shelf is pruned to the newest `server_manager_services_shelf_keep_chains`
+tenant's backup storage is pruned to the newest `server_manager_services_shelf_keep_chains`
 (4) chains per profile, chains whole, a chain with an open run never
 touched; a suspended or released tenant whose prune-after day has come loses
 its whole prefix once, and the row says so.
@@ -1223,7 +1223,7 @@ Credentials are stored on the `bkt_backup_targets` table using a unified shape f
 {"access_key": "...", "secret_key": "...", "region": "...", "endpoint": "..."}
 ```
 
-Two columns hold two keys: `bkt_credentials` is the main (delete-capable) credential the management node itself uses, and `bkt_node_credentials` optionally holds a write-only key handed to nodes instead (see *The node may write to the shelf but never erase it*). Both are SecretBox-sealed at rest.
+Two columns hold two keys: `bkt_credentials` is the main (delete-capable) credential the management node itself uses, and `bkt_node_credentials` optionally holds a write-only key handed to nodes instead (see *The node may write to backup storage but never erase it*). Both are SecretBox-sealed at rest.
 
 A persisted job never contains a credential — a node-bound **upload** (`backup_run`, `upload_backup`) carries a placeholder token that the agent channel resolves in memory when the job is handed out: `__SM_NODE_CREDS_<target_id>__` for the write-only node slot whenever it is filled, `__SM_CREDS_<target_id>__` otherwise. The channel resolves exactly the slot the token names and never falls back to the other, so a job built against a since-emptied slot fails visibly rather than running with a more powerful key than intended.
 
@@ -1251,7 +1251,7 @@ The **Backups** tab on each node includes a file browser that lists backup files
 - **Upload to cloud** — offered on rows that exist only on the node, when the node has an enabled cloud target. Creates an `upload_backup` job that pushes that one file from the node to the target. The transfer runs on the node, where the file already is; routing it through the management node would drag the archive down and push it straight back up. The local copy is kept regardless of the node's delete-after-upload setting — an operator asking for an offsite copy of a file they are looking at did not ask for that file to disappear, and deleting stays an explicit action. The button waits for the job's real verdict, so a failed transfer reports as failed with a link to the job output rather than reading as done
 - **Delete** — single Delete button per row that removes the file from every location it exists in (local, cloud, or both); the confirmation dialog names the file and locations explicitly
 - **Restore Full Project** — for `.tar.gz` archives, see the `restore_project` row in the Job Types table
-- **Backups** — one row per backup run on the node's shelf, newest first (when, full or incremental, who took it, size), with the last backup, the last full backup and the oldest backup held stated above the list; read from each chain's `manifest.json` by `BackupChainListHelper`, which lists the node's own prefix on the shelf, every page of it, so ten thousand offloaded-file objects under one node never push a manifest off the end of the list. Restoring a run replays the last full before it and every incremental up to it, in order. Chain artifacts are deliberately absent from the flat file table above — listed there, `files-0003.tar.gz.enc` invites a restore of one incremental with no full under it, which restores nothing at all. **Last verified restorable** is stated with the three facts (level name, date, the node's own counts, or the reason it failed), and each run's **Verify** button opens a dialog with two choices, *Open and read* and *Rehearse a restore (needs about N free on the node)*, the room worked out from the runs' recorded sizes the way the node works it out before downloading. Either creates a `verify_backup` job; the poller reports what the node said, and a reload shows it above and on the node's card. An **Offloaded files on the shelf** row totals the object store from the same listing — "N objects, X GB by this management node; last indexed at the run of …" — and, when a run on the shelf carries an offloaded-files index, offers **Bring them back**: the `restore_objects` survey job in `missing` mode, whose pages follow as their own jobs; the node's own Backups page says what its file store is missing, the plane only asks
+- **Backups** — one row per backup run in the node's backup storage, newest first (when, full or incremental, who took it, size), with the last backup, the last full backup and the oldest backup held stated above the list; read from each chain's `manifest.json` by `BackupChainListHelper`, which lists the node's own prefix in backup storage, every page of it, so ten thousand offloaded-file objects under one node never push a manifest off the end of the list. Restoring a run replays the last full before it and every incremental up to it, in order. Chain artifacts are deliberately absent from the flat file table above — listed there, `files-0003.tar.gz.enc` invites a restore of one incremental with no full under it, which restores nothing at all. **Last verified restorable** is stated with the three facts (level name, date, the node's own counts, or the reason it failed), and each run's **Verify** button opens a dialog with two choices, *Open and read* and *Rehearse a restore (needs about N free on the node)*, the room worked out from the runs' recorded sizes the way the node works it out before downloading. Either creates a `verify_backup` job; the poller reports what the node said, and a reload shows it above and on the node's card. An **Offloaded files in backup storage** row totals the object store from the same listing — "N objects, X GB by this management node; last indexed at the run of …" — and, when a run in backup storage carries an offloaded-files index, offers **Bring them back**: the `restore_objects` survey job in `missing` mode, whose pages follow as their own jobs; the node's own Backups page says what its file store is missing, the plane only asks
 
 ### What a restore asks, and what it decides
 
@@ -1327,7 +1327,7 @@ until a restore was attempted. Every backup job therefore carries no key
 material, and `backup_envelope.php mint` refuses one if a job passes it anyway.
 A node with no verified recovery key of its own is refused a backup, loudly, at
 build time and again on the node — never quietly downgraded to an unencrypted
-archive on somebody else's shelf.
+archive in somebody else's backup storage.
 
 - The recovery keypair is generated with
   `maintenance_scripts/sysadmin_tools/escrow_keypair.php` (standalone PHP + sodium,
@@ -1404,7 +1404,7 @@ not a node whose backups are late.
 ### Backups across the fleet
 
 This management node takes its own backups of the nodes it manages. They are a
-separate party's copies of each site, on this management node's shelf — the
+separate party's copies of each site, in this node's backup storage — the
 `manager` profile described in
 [Backups](../../../docs/backups.md#two-parties-two-profiles). A site's own
 backups are the `site` profile: its own schedule, its own business.
@@ -1432,7 +1432,7 @@ management node that had been tampered with cannot re-seal the fleet's next back
 to a key of its choosing. A node holds no key to anyone's backups but its own, and
 a node that leaves this fleet takes nothing with it.
 
-#### The node may write to the shelf but never erase it
+#### The node may write to backup storage but never erase it
 
 A backup target holds two credential slots. The main credential
 (`bkt_credentials`) is the management node's own — it lists, prunes and downloads.
@@ -1442,7 +1442,7 @@ on B2, `s3:PutObject` without `s3:DeleteObject` on S3. When it is set, that is
 the key nodes are handed during a run: a node can add its archives and remove
 nothing. When no node credential is configured, nodes receive the main key —
 functional, but a compromised node then briefly holds a key that could erase
-the shelf, so a fleet target wants the node slot filled.
+backup storage, so a fleet target wants the node slot filled.
 
 `FleetBackupRetention` prunes from here, with the delete-capable main
 credential that never leaves this machine. A credential that can delete is a
@@ -1470,7 +1470,7 @@ Two provider notes:
 #### Scheduling
 
 The **Fleet Backups** task (`plugins/server_manager/tasks/FleetBackupRun.php`)
-runs every cron tick, finds due nodes, prunes each one's shelf, and dispatches
+runs every cron tick, finds due nodes, prunes each one's backup storage, and dispatches
 one `backup_run` per node.
 
 `FleetBackupPolicy` resolves each node's schedule: the declared fleet settings,
@@ -1511,23 +1511,23 @@ machine that is already unwell.
 The same pass proves the backups it takes, at two of the three levels described
 in [Verifying backups](../../../docs/backups.md#verifying-backups):
 
-- **The shelf check** runs on every retention listing, free: for each backup on
-  the node's manager shelf the pass reads the manifest (one small GET) and
+- **The backup storage check** runs on every retention listing, free: for each backup on
+  the node's manager-profile backup storage the pass reads the manifest (one small GET) and
   checks every artifact it names is in the listing at the recorded size, and
   that the manifest carries its envelope (`FleetBackupRetention::check_shelf`;
   `compare_manifest` is the pure rule). What it finds is stamped on
   `mgn_backup_shelf_problem` — one line in the pass's words, empty when every
   backup is whole — and the health check turns anything else into **"A backup
-  on the shelf is incomplete"** on the node's card. It catches a partial
+  in backup storage is incomplete"** on the node's card. It catches a partial
   upload, an object deleted out from under retention, and a manifest rewritten
   after its artifacts were pruned. A manifest the pass could not *read* (a
-  transport error, an HTTP status) is a fact about the pass, not the shelf: it
+  transport error, an HTTP status) is a fact about the pass, not backup storage: it
   is named in the pass's report and the stamp is left as it was, so a network
   blip is neither shown as an incomplete backup nor clears a real one found
   last time. The check runs on every retention listing, which is once per
   backup cycle for each node, not on every tick.
 - **Opened and read** is dispatched as a `verify_backup` job (level 2, of the
-  newest backup on the shelf) when `FleetBackupPolicy::is_verify_due()` says
+  newest backup in backup storage) when `FleetBackupPolicy::is_verify_due()` says
   so: the policy's `verify_every_days` is above zero (fleet default
   `server_manager_fleet_backup_verify_every_days`, 30; 0 means never, stored
   as a decision), the node has a successful backup from here, and either no
@@ -1574,12 +1574,12 @@ stamped at its job's completion time, so a refusal read by the sweep hours later
 still says when it happened.
 
 **The node's word is cross-checked against the bucket.** The retention pass
-lists each node's shelf with this management node's own credential before every
-run, and the scheduler stamps what it saw — when the shelf was listed and the
+lists each node's backup storage with this management node's own credential before every
+run, and the scheduler stamps what it saw — when backup storage was listed and the
 newest object write on it — onto `mgn_backup_shelf_checked_time` and
 `mgn_backup_shelf_newest_time`. The health check compares that against the
-node's claimed last run: a shelf listed after a claimed success that holds
-nothing written since raises **"Backups are not landing"**. The shelf is the
+node's claimed last run: backup storage listed after a claimed success that holds
+nothing written since raises **"Backups are not landing"**. Backup storage is the
 one witness a compromised or misconfigured node cannot talk into its story —
 everything else in the health picture is the node reporting on itself.
 
@@ -1590,7 +1590,7 @@ somebody's decision.
 answers**, from `mgn_backup_verify_*` (stamped by `process_verify_backup` from
 the job's `VERIFY_*` lines, and adopted from the node's own status report when
 the node verified itself and that is newer — `adopt_reported_verify`).
-`NodeMonitorHealth::verify_state()` gives four answers: a shelf problem (above)
+`NodeMonitorHealth::verify_state()` gives four answers: a backup storage problem (above)
 is a problem; a verify that failed is a problem, in the node's own words, with
 the note that nothing is retried automatically; a pass older than 60 days is
 **stale**, a problem; and never verified is information on a healthy card

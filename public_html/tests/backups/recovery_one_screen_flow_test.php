@@ -159,7 +159,7 @@ $message = '';
 try { BackupRunner::plan(rof_manager_config()); }
 catch (Throwable $e) { $message = $e->getMessage(); }
 check(strpos($message, 'no proven recovery key') !== false,
-	'and so does no key at all — never a quiet unencrypted copy on somebody else\'s shelf', $message);
+	'and so does no key at all — never a quiet unencrypted copy in somebody else\'s backup storage', $message);
 
 // ── Cleanup ─────────────────────────────────────────────────────────────
 rof_put_setting('backup_recovery_public_key', '');

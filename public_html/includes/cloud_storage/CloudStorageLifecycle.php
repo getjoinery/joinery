@@ -28,6 +28,9 @@
  * each store to its own rows via the profile's optional reverseEligibilityWhere()
  * ownership gate.
  *
+ * @version 1.7 - health() counts carry pending_bytes and cloud_bytes where the profile names a size column
+ * @version 1.6 - testConnection() first asks BucketCheck: the bucket is not a backup target's, and on
+ *                Backblaze the key reaches this bucket and can list, read, write and delete
  * @version 1.5 - the tick stays active, and the daily file-store check runs, while any offloaded file
  *                exists — a paused store serves the same files as an active one, and a file the bucket
  *                lost is otherwise invisible until a visitor gets a 404. It deactivates only when no
@@ -55,6 +58,33 @@ class CloudStorageLifecycle {
 		require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageS3Driver.php'));
 		$steps = [];
 		$ok = true;
+
+		// Step 0: its own bucket, and what the key may do. Decided before the
+		// network is touched: a bucket that already holds this site's backups
+		// is refused outright, and on Backblaze the key states what it can
+		// reach and do, so a key pinned elsewhere or one that cannot delete
+		// is named now rather than found by the first permanent delete.
+		$others = BucketCheck::backup_target_buckets();
+		$own = BucketCheck::collision_step((string)($opts['bucket'] ?? ''), (string)($opts['endpoint'] ?? ''), $others, 'files');
+		$steps[] = $own;
+		if ($own['status'] === 'fail') {
+			$steps[] = ['label' => 'Reach + authenticate', 'status' => 'skip', 'message' => 'skipped (prior step failed)'];
+			$steps[] = ['label' => self::_read_label($visibility), 'status' => 'skip', 'message' => 'skipped (prior step failed)'];
+			$steps[] = ['label' => 'Delete', 'status' => 'skip', 'message' => 'skipped (prior step failed)'];
+			return ['ok' => false, 'steps' => $steps];
+		}
+		if (BucketCheck::is_b2((string)($opts['endpoint'] ?? ''))) {
+			$key_steps = BucketCheck::b2_key_steps(
+				['access_key' => (string)($opts['access_key'] ?? ''), 'secret_key' => (string)($opts['secret_key'] ?? '')],
+				(string)($opts['bucket'] ?? ''), BucketCheck::B2_FILE_STORE_CAPABILITIES, 'file store key', $others);
+			foreach ($key_steps as $step) { $steps[] = $step; }
+			if (BucketCheck::failed($key_steps)) {
+				$steps[] = ['label' => 'Reach + authenticate', 'status' => 'skip', 'message' => 'skipped (prior step failed)'];
+				$steps[] = ['label' => self::_read_label($visibility), 'status' => 'skip', 'message' => 'skipped (prior step failed)'];
+				$steps[] = ['label' => 'Delete', 'status' => 'skip', 'message' => 'skipped (prior step failed)'];
+				return ['ok' => false, 'steps' => $steps];
+			}
+		}
 
 		// Step 1: HeadBucket.
 		try {
@@ -179,15 +209,7 @@ class CloudStorageLifecycle {
 	 * numeric status, or 0 if the connection could not be made (refused/timeout).
 	 */
 	private static function _anonymous_status(string $url): int {
-		$context = stream_context_create(['http' => ['method' => 'GET', 'timeout' => 5, 'ignore_errors' => true]]);
-		$lines = @get_headers($url, false, $context);
-		if (!$lines || !is_array($lines)) {
-			return 0;
-		}
-		if (preg_match('/\s(\d{3})\s/', ' ' . $lines[0] . ' ', $m)) {
-			return (int)$m[1];
-		}
-		return 0;
+		return BucketCheck::anonymous_status($url);
 	}
 
 	// ====================================================================
@@ -531,7 +553,7 @@ class CloudStorageLifecycle {
 
 		// Counts: pending (eligible local) / cloud / stuck / migrated this week.
 		$dblink = DbConnector::get_instance()->get_db_link();
-		$h['counts'] = ['pending' => 0, 'cloud' => 0, 'stuck' => 0, 'migrated_this_week' => 0];
+		$h['counts'] = ['pending' => 0, 'cloud' => 0, 'stuck' => 0, 'migrated_this_week' => 0, 'pending_bytes' => 0, 'cloud_bytes' => 0];
 		$gate = trim($profile->eligibilityWhere());
 		$gate_sql = $gate !== '' ? " AND ($gate)" : '';
 		// Cloud-side counts are scoped to this store's own rows when the table is
@@ -543,12 +565,17 @@ class CloudStorageLifecycle {
 		$drv = $profile->driverColumn();
 		$failed = $profile->failedCountColumn();
 		$last_attempt = $profile->lastAttemptColumn();
+		// Bytes beside the counts, where the profile names a size column.
+		$size = method_exists($profile, 'sizeColumn') ? $profile->sizeColumn() : '0';
 		try {
 			$row = $dblink->query("
 				SELECT
 				  COUNT(*) FILTER (WHERE ($drv IS NULL OR $drv = 'local')
 				                   AND COALESCE($failed, 0) < " . CloudOffloadEngine::FAILED_COUNT_CAP . "$gate_sql) AS pending,
+				  COALESCE(SUM($size) FILTER (WHERE ($drv IS NULL OR $drv = 'local')
+				                   AND COALESCE($failed, 0) < " . CloudOffloadEngine::FAILED_COUNT_CAP . "$gate_sql), 0) AS pending_bytes,
 				  COUNT(*) FILTER (WHERE $drv = 'cloud'$own_sql) AS cloud,
+				  COALESCE(SUM($size) FILTER (WHERE $drv = 'cloud'$own_sql), 0) AS cloud_bytes,
 				  COUNT(*) FILTER (WHERE COALESCE($failed, 0) >= " . CloudOffloadEngine::FAILED_COUNT_CAP . ") AS stuck,
 				  COUNT(*) FILTER (WHERE $drv = 'cloud'$own_sql
 				                   AND $last_attempt > now() - interval '7 days') AS migrated_this_week

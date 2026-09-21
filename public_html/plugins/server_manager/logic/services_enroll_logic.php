@@ -1,7 +1,7 @@
 <?php
 /**
  * services_enroll - a self-hosted site asks for one of this operator's
- * services: outbound mail, or the backup shelf.
+ * services: outbound mail, or backup storage.
  *
  * (specs/services_phase2_platform.md §4). Called by the SITE against this
  * plane's /api/v1 over its connected key; runs as the account that key
@@ -9,7 +9,7 @@
  * is created at `unpaid` on first contact and the answer is *not entitled*
  * until an operator grants a date; a site that is entitled gets the service
  * built in this call and the response carries what it writes: the send
- * values and the DNS records for mail, the slug and prefix for the shelf.
+ * values and the DNS records for mail, the slug and prefix for backup storage.
  *
  * Idempotent on the row. For mail a repeat mints a fresh SMTP user inside the
  * same subaccount (the password is never kept on this plane), so the answer
@@ -39,11 +39,11 @@ function services_enroll_logic(array $input): LogicResult {
 
 function services_enroll_logic_descriptor(): array {
 	return array(
-		'description'      => 'Enrol this site for one of the operator\'s services (mail or shelf). Answers the tenant\'s state and, when entitled, what the site writes: SMTP send values and DNS records for mail, the shelf slug and prefix for backups.',
+		'description'      => 'Enrol this site for one of the operator\'s services (mail or shelf, which is backup storage). Answers the tenant\'s state and, when entitled, what the site writes: SMTP send values and DNS records for mail, backup storage slug and prefix for backups.',
 		'requires_session' => true,
 		'mutates'          => true,
 		'input'            => array(
-			'service' => array('type' => 'string', 'required' => true, 'label' => 'Service: mail or shelf'),
+			'service' => array('type' => 'string', 'required' => true, 'label' => 'Service: mail or shelf (backup storage)'),
 			'host'    => array('type' => 'string', 'required' => true, 'label' => 'This site\'s hostname'),
 		),
 	);

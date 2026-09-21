@@ -1,6 +1,6 @@
 <?php
 /**
- * BackupFetch — how this machine pulls one of its own backups back off the shelf.
+ * BackupFetch — how this machine pulls one of its own backups back from backup storage.
  *
  * One place, because two scripts need it (a standalone archive, and every
  * artifact of a chain) and the interesting part must not be written twice: a
@@ -9,7 +9,7 @@
  *
  * WHAT ARRIVES INSTEAD OF A CREDENTIAL. A pre-signed URL — one object key,
  * expiring, signed on the machine that owns the bucket. The node's own stored
- * credential is write-only on purpose (a node that could read the shelf is a
+ * credential is write-only on purpose (a node that could read backup storage is a
  * node whose compromise reaches every other node's backups), and nothing here
  * widens that: a signature is not a key, it names one object, and the object
  * name is inside the signature so it cannot be re-pointed.
@@ -213,7 +213,7 @@ class BackupFetch {
 	 * the size, so the free-space check has a real number to work with instead
 	 * of a guess.
 	 *
-	 * @param string $profile  site | manager — whose shelf the artifact came from
+	 * @param string $profile  site | manager — whose backup storage the artifact came from
 	 * @param string $dir      Absolute directory it lands in
 	 * @param string $relname  Ledger key: the name relative to the profile's backup
 	 *                         directory, chain subdirectory included

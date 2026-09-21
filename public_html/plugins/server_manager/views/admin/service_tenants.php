@@ -3,7 +3,7 @@
  * Server Manager - Service Tenants
  * URL: /admin/server_manager/service_tenants
  *
- * Every self-hosted site renting this plane's outbound mail or backup shelf,
+ * Every self-hosted site renting this plane's outbound mail or backup storage,
  * one row per service, with the grant (a date) and release acts.
  *
  * @version 1.0 - specs/services_phase2_platform.md §10 item 5
@@ -37,10 +37,10 @@ $page->admin_header(array(
 $page->begin_box(array());
 ?>
 
-<p>Self-hosted sites using this plane's outbound email and backup shelf. A site connects from its own
+<p>Self-hosted sites using this plane's outbound email and backup storage. A site connects from its own
 setup wizard, which creates its rows here <em>unpaid</em>; nothing works until you grant a paid-through
 date. The reconcile compares the date every pass: <?php echo (int)$grace_days; ?> days of grace after it
-passes, then the service stops and the shelf is kept <?php echo ServiceTenant::RETENTION_DAYS; ?> days
+passes, then the service stops and backup storage is kept <?php echo ServiceTenant::RETENTION_DAYS; ?> days
 before it is pruned. A new date before then reactivates in place. Managed sites do not appear here.</p>
 
 <?php if (!$mail_ready || $shelf_target === null): ?>
@@ -50,8 +50,8 @@ before it is pruned. A new date before then reactivates in place. Managed sites 
 		<a href="/admin/server_manager/provisioning_setup">Provisioning Setup</a> page, so a mail enrol is refused.
 	<?php endif; ?>
 	<?php if ($shelf_target === null): ?>
-		<strong>No shelf target</strong> — set <em>Backup shelf target</em> in the Server Manager settings
-		(or keep exactly one enabled backup target), or a shelf enrol is refused.
+		<strong>No backup storage target</strong> — set <em>Backup storage target</em> in the Server Manager settings
+		(or keep exactly one enabled backup target), or a backup storage enrol is refused.
 	<?php endif; ?>
 </div>
 <?php endif; ?>
@@ -108,7 +108,7 @@ before it is pruned. A new date before then reactivates in place. Managed sites 
 				<?php if ($s['state'] !== 'released' && $s['state'] !== 'unpaid'): ?>
 					<?php echo AdminPage::action_button('Release', $page_url, array(
 						'hidden'  => array('action' => 'release', 'svt_service_tenant_id' => $id),
-						'confirm' => 'Release ' . $row->get('svt_host') . '\'s ' . $s['service'] . '? Mail closes now; a shelf is kept '
+						'confirm' => 'Release ' . $row->get('svt_host') . '\'s ' . ($s['service'] === 'shelf' ? 'backup storage' : $s['service']) . '? Mail closes now; backup storage is kept '
 							. ServiceTenant::RETENTION_DAYS . ' days and then pruned.')); ?>
 				<?php endif; ?>
 			</td>

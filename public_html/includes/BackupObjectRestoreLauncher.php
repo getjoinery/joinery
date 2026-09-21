@@ -1,7 +1,7 @@
 <?php
 /**
  * BackupObjectRestoreLauncher — this site bringing its own offloaded files
- * back from its own backup shelf.
+ * back from its own backup storage.
  *
  * No agent, no management node. When the file store has lost an offloaded
  * file (CloudStoreInventory says which), a site with a backup target of its
@@ -151,7 +151,7 @@ class BackupObjectRestoreLauncher {
 	}
 
 	/**
-	 * The whole run, in this process: read the run's index off the shelf,
+	 * The whole run, in this process: read the run's index from backup storage,
 	 * survey, then page by page sign links, fetch, check, decrypt, place and
 	 * record. The outcome is written to the inventory record whatever happens
 	 * and returned in the shape BackupObjectRestore::format_contract() prints.
@@ -200,7 +200,7 @@ class BackupObjectRestoreLauncher {
 			$index = BackupObjects::fetch_index_key($plan, $base . $chain_id . '/' . $index_name);
 			if ($index === null) {
 				throw new BackupObjectRestoreLauncherException('run ' . $seq . ' of ' . $chain_id
-					. ' has no offloaded-files index on the shelf, so nothing can be brought back from it');
+					. ' has no offloaded-files index in backup storage, so nothing can be brought back from it');
 			}
 			$base_result['run'] = (string)($index['run'] ?? $base_result['run']);
 			$stored = count(BackupObjects::index_entries($index));
