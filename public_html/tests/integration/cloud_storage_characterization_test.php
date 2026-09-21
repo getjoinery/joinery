@@ -13,11 +13,13 @@
  * silently. It drives the engine's private _sync_row / _pull_row through a mock
  * driver via reflection, against a SINGLE real fbb_file_blobs fixture (never the
  * batch entry, which would touch other rows), using the real BlobStorageProfile
- * adapter — the offload descriptor now lives on the blob, shared by every file
- * that references it.
+ * adapter — the offload descriptor lives on the blob, shared by every file
+ * that references it. Only a private blob moves, so the fixtures are private
+ * and live in the restricted directory; a public blob is never eligible.
  *
  * Run: php tests/integration/cloud_storage_characterization_test.php
  *
+ * @version 3.0 - one private store: the fixtures are private blobs; a public blob is never eligible
  * @version 2.0
  */
 
@@ -42,7 +44,7 @@ $created_blob_ids = [];
 $created_task_ids = [];
 $temp_paths = [];
 
-/** A real fbb_file_blobs fixture. Public + local by default. */
+/** A real fbb_file_blobs fixture. Private + local by default. */
 function make_blob_row(array $overrides = []) {
 	global $created_blob_ids;
 	$name = '_chartest_' . bin2hex(random_bytes(6)) . '.bin';
@@ -50,7 +52,7 @@ function make_blob_row(array $overrides = []) {
 	$b->set('fbb_stored_name', $name);
 	$b->set('fbb_size_bytes', 16);
 	$b->set('fbb_mime_type', $overrides['fbb_mime_type'] ?? 'application/octet-stream');
-	$b->set('fbb_is_private', $overrides['fbb_is_private'] ?? false);
+	$b->set('fbb_is_private', $overrides['fbb_is_private'] ?? true);
 	$b->set('fbb_reference_count', 1);
 	$b->set('fbb_storage_driver', $overrides['fbb_storage_driver'] ?? 'local');
 	$b->set('fbb_sync_failed_count', $overrides['fbb_sync_failed_count'] ?? 0);
@@ -72,8 +74,8 @@ try {
 	// 1. Forward happy path: push → flip to 'cloud' → local file deleted
 	// -------------------------------------------------------------------
 	$b = make_blob_row();
-	$orig_path = $fast_dir . '/' . $b->get('fbb_stored_name'); // public → fast dir
-	if (!is_dir($fast_dir)) { mkdir($fast_dir, 0777, true); }
+	$orig_path = $upload_dir . '/' . $b->get('fbb_stored_name'); // private → restricted dir
+	if (!is_dir($upload_dir)) { mkdir($upload_dir, 0777, true); }
 	file_put_contents($orig_path, "original-bytes\n");
 	$temp_paths[] = $orig_path;
 
@@ -104,18 +106,35 @@ try {
 	// could not catch a regression in the actual query.)
 
 	// -------------------------------------------------------------------
+	// 2b. A public blob is never eligible: nothing is pushed, nothing recorded
+	// -------------------------------------------------------------------
+	$bp = make_blob_row(['fbb_is_private' => false]);
+	$origp = $fast_dir . '/' . $bp->get('fbb_stored_name');
+	if (!is_dir($fast_dir)) { mkdir($fast_dir, 0777, true); }
+	file_put_contents($origp, "public-bytes\n");
+	$temp_paths[] = $origp;
+	$driverp = new RecordingMockDriver();
+	$resp = $sync_row->invoke(null, $profile, (int)$bp->key, $driverp);
+	$reloadedp = new FileBlob($bp->key, true);
+	ok('public blob: not eligible (isEligibleRow false)', $profile->isEligibleRow((int)$bp->key) === false);
+	ok('public blob: returns skipped', $resp === 'skipped');
+	ok('public blob: nothing pushed', count($driverp->ops('put')) === 0);
+	ok('public blob: row stays local, no failure recorded', $reloadedp->get('fbb_storage_driver') === 'local' && (int)$reloadedp->get('fbb_sync_failed_count') === 0);
+	ok('public blob: local bytes untouched', file_exists($origp));
+
+	// -------------------------------------------------------------------
 	// 3. Mid-flight ineligibility: push undone, row stays local
 	// -------------------------------------------------------------------
 	$b3 = make_blob_row();
-	$orig3 = $fast_dir . '/' . $b3->get('fbb_stored_name');
+	$orig3 = $upload_dir . '/' . $b3->get('fbb_stored_name');
 	file_put_contents($orig3, "original-bytes-3\n");
 	$temp_paths[] = $orig3;
 	$driver3 = new RecordingMockDriver();
 	$fid3 = (int)$b3->key;
-	// During the push, flip the blob private so the post-push reload re-check
-	// fails for the public profile (isEligibleRow → false).
+	// During the push, flip the blob public so the post-push reload re-check
+	// fails (isEligibleRow → false): a public blob never reaches the bucket.
 	$driver3->on_put = function($key) use ($dblink, $fid3) {
-		$u = $dblink->prepare("UPDATE fbb_file_blobs SET fbb_is_private = TRUE WHERE fbb_file_blob_id = ?");
+		$u = $dblink->prepare("UPDATE fbb_file_blobs SET fbb_is_private = FALSE WHERE fbb_file_blob_id = ?");
 		$u->execute([$fid3]);
 	};
 	$res3 = $sync_row->invoke(null, $profile, $fid3, $driver3);
@@ -132,11 +151,11 @@ try {
 	$driver4 = new RecordingMockDriver();
 	$res4 = $pull_row->invoke(null, $profile, (int)$b4->key, $driver4);
 	$reloaded4 = new FileBlob($b4->key, true);
-	$local4 = $fast_dir . '/' . $b4->get('fbb_stored_name');
+	$local4 = $upload_dir . '/' . $b4->get('fbb_stored_name');
 	$temp_paths[] = $local4;
 	ok('reverse: returns pulled', $res4 === 'pulled');
 	ok('reverse: row flipped to local', $reloaded4->get('fbb_storage_driver') === 'local');
-	ok('reverse: bytes placed in public fast dir', file_exists($local4));
+	ok('reverse: bytes placed in the restricted dir', file_exists($local4));
 	$ops4 = array_map(fn($c) => $c['op'], $driver4->calls);
 	$first_get = array_search('get', $ops4, true);
 	$first_del = array_search('delete', $ops4, true);

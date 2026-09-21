@@ -91,7 +91,7 @@ before declarations are loadable.
 | `options_from` | `Class::method` returning a `value: label` map, for options that are discovered rather than fixed. |
 | `options_include` | Path to the file defining that class, when it is not one of the always-loaded core classes. |
 | `validation` | A FormWriter validation rule array, verbatim. |
-| `show_when` | `{ "other_setting": "value" }`. Compiles to FormWriter `visibility_rules`. |
+| `show_when` | `{ "other_setting": "value" }`, or a list of values any one of which shows the field. Compiles to FormWriter `visibility_rules`. |
 | `secret` | A credential: never emits its stored value, and only a non-empty submission is written. |
 | `vault_gated` | Changing it requires an open vault unlock window. |
 | `managed` | Machine-written. Never rendered on a form. Mutually exclusive with `label`. |
@@ -374,9 +374,18 @@ that reveals it:
   "show_when": { "blog_active": "1" } }
 ```
 
+A field several choices share names them all:
+
+```json
+{ "name": "cloud_storage_region", "group": "cloud_storage", "label": "Region",
+  "show_when": { "cloud_storage_provider": ["generic", "s3", "wasabi"] } }
+```
+
 The renderer inverts this into FormWriter `visibility_rules` on the trigger
 field, across the whole page — so a picker in one box can reveal fields in a
-later one. Never hand-roll a JS toggle.
+later one — and over the whole group before a page's `only` narrows it, so a
+page that draws a group one field at a time in its own order still gets the
+picker's rules. Never hand-roll a JS toggle.
 
 ## Wrapping declared fields with context
 

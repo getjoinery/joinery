@@ -26,6 +26,9 @@
  *     reports the offloaded files unproven
  *
  * Run: php tests/backups/backup_verify_objects_test.php
+ *
+ * @version 1.1 - one file store: an object's visibility reads private
+ * @version 1.0
  */
 
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
@@ -92,7 +95,7 @@ $id = -9101;
 foreach ($plain as $name => $bytes) {
 	file_put_contents($up . '/' . $name, $bytes);
 	$blobs[$name] = array('id' => $id--, 'name' => $name, 'original' => $up . '/' . $name, 'paths' => array($up . '/' . $name),
-		'remote_key' => $name, 'content_type' => 'application/octet-stream', 'visibility' => 'public');
+		'remote_key' => $name, 'content_type' => 'application/octet-stream', 'visibility' => 'private');
 	$ins = $scratch->prepare('INSERT INTO fbb_file_blobs VALUES (?, ?, ?)');
 	$ins->execute(array($name, $rows[$name] ? hash('sha256', $bytes) : null, strlen($bytes)));
 	unset($ins);   // a statement left alive holds the connection, and a held connection blocks the DROP at the end

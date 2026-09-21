@@ -41,6 +41,8 @@
  * Nothing here prints a key or a credential; the index and every result carry
  * names, sizes and hashes of ciphertext only.
  *
+ * @version 1.2.1 - fetch_from_store() reads the one file store; an object's visibility field only ever
+ *                  reads private
  * @version 1.2 - retired-epochs.json: a run writes down the epochs it found sealed to a retired recovery
  *                key that the site key cannot open (reseal_epochs() 'unopenable'), and
  *                retired_summary() turns that plus held.json into "N objects (X GB) open only with a
@@ -1112,15 +1114,15 @@ class BackupObjects {
 		return $result;
 	}
 
-	/** Bring one original down from the file store, by the driver its visibility uses. */
+	/** Bring one original down from the file store. */
 	private static function fetch_from_store(array $obj, $sink) {
 		if (isset(self::$test_hooks['catchup'])) {
 			$driver = self::$test_hooks['catchup'];
 		} else {
-			$driver = CloudStorageDriverFactory::forVisibilityWithFallback((string)($obj['visibility'] ?? 'public'));
+			$driver = CloudStorageDriverFactory::driverWithFallback();
 		}
 		if (!$driver) {
-			throw new BackupObjectsException('no local copy and the ' . ($obj['visibility'] ?? 'public') . ' file store is not configured');
+			throw new BackupObjectsException('no local copy and the file store is not configured');
 		}
 		$driver->get((string)$obj['remote_key'], $sink);
 		if (!is_file($sink)) {

@@ -18,7 +18,7 @@ class FileBlobException extends SystemBaseException {}
  * blob carries a reference count and is deleted only when the last file lets go.
  *
  * Everything physical lives here: where the bytes sit (fast-serve dir vs
- * restricted dir; public vs verified-private bucket), how they are read back,
+ * restricted dir; the verified-private bucket for private bytes only), how they are read back,
  * resized, moved between visibility classes, offloaded, and reclaimed. File
  * delegates every byte operation to its blob; nothing here knows about
  * permissions, which are a File concern.
@@ -28,6 +28,8 @@ class FileBlobException extends SystemBaseException {}
  * pointing at a blob is in the same visibility class. Dedup scoping and the
  * flip / copy-on-write split in File::move_to_correct_directory() maintain it.
  *
+ * @version 1.2.2 - one private store: the driver is resolved with no visibility; a cloud blob is always
+ *                  a private blob, and flipping one public pulls its bytes home before the record flips
  * @version 1.2.1 - a cloud row can hold local bytes while it waits for a backup storage, so
  *                  reclaiming one deletes its bucket bytes AND unlinks its local paths; a blob
  *                  permanently deleted while waiting leaves nothing behind
@@ -185,17 +187,14 @@ class FileBlob extends SystemBase {
 	}
 
 	// ------------------------------------------------------------------
-	// Cloud driver resolution — visibility picks the store (public bucket vs
-	// verified-private bucket), exactly as File did.
+	// Cloud driver resolution — the one private store. Only a private blob
+	// ever reaches it; a cloud blob's bytes are read back through the driver
+	// whether the store is enabled, paused or draining.
 	// ------------------------------------------------------------------
-
-	private function _cloud_visibility() {
-		return $this->is_private_bool() ? 'private' : 'public';
-	}
 
 	private function _cloud_driver() {
 		require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
-		return CloudStorageDriverFactory::forVisibilityWithFallback($this->_cloud_visibility());
+		return CloudStorageDriverFactory::driverWithFallback();
 	}
 
 	// ==================================================================
@@ -572,8 +571,10 @@ class FileBlob extends SystemBase {
 	/**
 	 * Move THIS blob (the only reference) into the target visibility class. A
 	 * local blob's bytes are renamed between the fast-serve and restricted dirs;
-	 * a cloud blob is pulled home into the target dir (the next offload tick
-	 * re-places it in the correct bucket). fbb_is_private is updated to match.
+	 * a cloud blob is pulled home into the target dir before its record flips,
+	 * so a blob made public is local by the time it reads public — nothing on a
+	 * page is ever served from the bucket. A blob made private stays local until
+	 * the next offload tick moves it. fbb_is_private is updated to match.
 	 */
 	public function flipVisibility($to_private) {
 		$to_private = $to_private ? true : false;
@@ -819,11 +820,9 @@ class FileBlob extends SystemBase {
 	 * DB commit; temps live until commit so they stay rollback material.
 	 */
 	private function _pull_back_from_cloud($to_private) {
-		require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
-		$source_visibility = $this->_cloud_visibility(); // where the bytes physically are now
-		$driver = CloudStorageDriverFactory::forVisibilityWithFallback($source_visibility);
+		$driver = $this->_cloud_driver();
 		if (!$driver) {
-			throw new FileBlobException('Cannot pull blob back from cloud: ' . $source_visibility . ' driver not configured.');
+			throw new FileBlobException('Cannot pull blob back from cloud: the store is not configured.');
 		}
 
 		$name = $this->get('fbb_stored_name');

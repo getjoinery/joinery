@@ -12,12 +12,13 @@
  *  - LOCAL round-trip: write() lands a file under {site_root}/storage/ and read()
  *    returns identical bytes; itemsForRow()/reverseItemsForRow() enumerate the one
  *    .eml; a missing file makes itemsForRow() null and read() throw cleanly.
- *  - CLOUD round-trip via a mock private driver (injected into the factory cache):
+ *  - CLOUD round-trip via a mock driver (injected into the factory cache):
  *    read('cloud') pulls + returns bytes; delete('cloud') removes the object.
  *  - delete() is a no-op for inline / remote (nothing platform-owned).
  *
  * Run: php plugins/mailbox/tests/raw_message_store_test.php  (schema synced).
  *
+ * @version 1.1 - one store: the mock is injected into the factory's single cache
  * @version 1.0
  */
 
@@ -188,9 +189,9 @@ class RawMessageStoreTest {
 		$this->ok(!$threw, 'delete() is a silent no-op for inline and remote');
 	}
 
-	/** Force CloudStorageDriverFactory::forVisibility('private') to return $mock. */
+	/** Force CloudStorageDriverFactory::driver() to return $mock. */
 	private function injectPrivateDriver($mock) {
-		$ref = new ReflectionProperty('CloudStorageDriverFactory', 'cached_private');
+		$ref = new ReflectionProperty('CloudStorageDriverFactory', 'cached');
 		$ref->setValue(null, $mock);
 	}
 

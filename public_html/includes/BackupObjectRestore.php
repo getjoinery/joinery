@@ -37,6 +37,7 @@
  * it is handed; the two test hooks stand in for the file bucket and the
  * placement so a suite can run against scratch.
  *
+ * @version 1.0.2 - one file store: placement() and served() resolve it with no visibility
  * @version 1.0.1 - a survey's list is capped by bytes as well as by count (a name can be 255 bytes,
  *                  and the agent drops the middle of output past 64 KiB); in missing mode a row the
  *                  file bucket serves is left alone even when a copy is on disk
@@ -95,8 +96,8 @@ class BackupObjectRestore {
 	const ROW_LOCK_TRIES = 5;
 
 	/**
-	 * Test seams. 'store' => fn(string $visibility): ?CloudStorageDriver, the
-	 * file bucket a blob is served from; 'placement' => fn(FileBlob): string,
+	 * Test seams. 'store' => fn(): ?CloudStorageDriver, the file bucket a
+	 * blob is served from; 'placement' => fn(FileBlob): string,
 	 * where its original belongs on disk. Production leaves both unset.
 	 */
 	public static $test_hooks = array();
@@ -300,24 +301,22 @@ class BackupObjectRestore {
 		if (isset(self::$test_hooks['placement'])) {
 			return (string)call_user_func(self::$test_hooks['placement'], $blob);
 		}
-		$visibility = $blob->is_private_bool() ? 'private' : 'public';
-		foreach (StorageProfileRegistry::forVisibility($visibility) as $profile) {
+		foreach (StorageProfileRegistry::all() as $profile) {
 			if ($profile->table() !== FileBlob::$tablename) { continue; }
 			$items = $profile->reverseItemsForRow((int)$blob->key);
 			if (!empty($items[0]['local_path'])) {
 				return (string)$items[0]['local_path'];
 			}
 		}
-		throw new BackupObjectRestoreException('no storage profile places ' . $visibility . ' files on this site, so '
+		throw new BackupObjectRestoreException('no storage profile places files on this site, so '
 			. $blob->get('fbb_stored_name') . ' has nowhere to go');
 	}
 
 	/** Can the file bucket serve this blob's original, at its recorded size? */
 	public static function served(FileBlob $blob) {
-		$visibility = $blob->is_private_bool() ? 'private' : 'public';
 		$driver = isset(self::$test_hooks['store'])
-			? call_user_func(self::$test_hooks['store'], $visibility)
-			: CloudStorageDriverFactory::forVisibilityWithFallback($visibility);
+			? call_user_func(self::$test_hooks['store'])
+			: CloudStorageDriverFactory::driverWithFallback();
 		if (!$driver) {
 			return false;
 		}

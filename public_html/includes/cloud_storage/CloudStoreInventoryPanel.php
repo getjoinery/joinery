@@ -18,6 +18,7 @@
  *
  * Pure over the summary it is handed; nothing here reads a setting or a row.
  *
+ * @version 1.0.2 - one file store: "no store is configured" names no visibility
  * @version 1.0.1 - the button hides while a Bring them back is running by the launcher's own rule
  *                  (BackupObjectRestoreLauncher::in_progress), not for ever after one dies unreported
  * @version 1.0
@@ -76,7 +77,7 @@ class CloudStoreInventoryPanel {
 			$line = 'Checked ' . number_format((int)$summary['checked']) . ' offloaded file' . ((int)$summary['checked'] === 1 ? '' : 's')
 				. ' in the file store ' . BackupVerifier::when_words((string)$summary['checked_at']);
 			if ((int)$summary['unchecked'] > 0) {
-				$line .= '; ' . number_format((int)$summary['unchecked']) . ' could not be checked (no store is configured for them)';
+				$line .= '; ' . number_format((int)$summary['unchecked']) . ' could not be checked (no store is configured)';
 			}
 			$line .= (int)$summary['missing_count'] === 0 ? '. All present.' : '.';
 			$out .= '<p class="mb-1' . ((int)$summary['missing_count'] === 0 ? ' text-muted' : '') . '">' . $h($line) . '</p>';

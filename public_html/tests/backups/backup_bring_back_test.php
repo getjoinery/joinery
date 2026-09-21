@@ -29,6 +29,9 @@
  * settings table.
  *
  * Run: php tests/backups/backup_bring_back_test.php
+ *
+ * @version 1.1 - one file store: the cloud rows are private blobs, the store seam takes no argument
+ * @version 1.0
  */
 
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
@@ -84,12 +87,12 @@ foreach ($plain as $name => $bytes) {
 	$blob->set('fbb_size_bytes', strlen($bytes));
 	$blob->set('fbb_sha256', hash('sha256', $bytes));
 	$blob->set('fbb_mime_type', 'application/octet-stream');
-	$blob->set('fbb_is_private', false);
+	$blob->set('fbb_is_private', true);
 	$blob->set('fbb_storage_driver', 'cloud');
 	$blob->save();
 	$ids[$name] = (int)$blob->key;
 	$blobs[$name] = array('id' => (int)$blob->key, 'name' => $name, 'original' => $up . '/' . $name, 'paths' => array($up . '/' . $name),
-		'remote_key' => $name, 'content_type' => 'application/octet-stream', 'visibility' => 'public');
+		'remote_key' => $name, 'content_type' => 'application/octet-stream', 'visibility' => 'private');
 }
 harness_defer(function () use ($pdo, $ids) {
 	$q = $pdo->prepare('DELETE FROM fbb_file_blobs WHERE fbb_file_blob_id = ?');
@@ -109,7 +112,7 @@ $set_cloud = function ($name) use ($pdo, $ids) {
 $store = new InMemoryBlobDriver();
 $store->objects[$tag . 'big.jpg'] = $plain[$tag . 'big.jpg'];
 BackupObjectRestore::$test_hooks = array(
-	'store'     => function ($visibility) use ($store) { return $store; },
+	'store'     => function () use ($store) { return $store; },
 	'placement' => function (FileBlob $b) use ($home) { return $home . '/' . $b->get('fbb_stored_name'); },
 );
 BackupObjects::$test_hooks = array('enumerator' => function () use (&$blobs) { return array_values($blobs); });
@@ -171,9 +174,9 @@ foreach ($plain as $name => $bytes) { check(!is_file($up . '/' . $name), $name .
 $rec = CloudStoreInventory::blank_record();
 $rec['last'] = array('started' => '2026-09-21 03:00:00', 'finished' => '2026-09-21 03:00:00', 'checked' => 3, 'unchecked' => 0,
 	'missing' => array(
-		$tag . 'mid.bin'  => array('id' => $ids[$tag . 'mid.bin'], 'visibility' => 'public', 'size' => 9000, 'reason' => 'absent'),
-		$tag . 'tiny.pdf' => array('id' => $ids[$tag . 'tiny.pdf'], 'visibility' => 'public', 'size' => 305, 'reason' => 'absent'),
-		'stranger.bin'    => array('id' => 0, 'visibility' => 'public', 'size' => 1, 'reason' => 'absent'),
+		$tag . 'mid.bin'  => array('id' => $ids[$tag . 'mid.bin'], 'size' => 9000, 'reason' => 'absent'),
+		$tag . 'tiny.pdf' => array('id' => $ids[$tag . 'tiny.pdf'], 'size' => 305, 'reason' => 'absent'),
+		'stranger.bin'    => array('id' => 0, 'size' => 1, 'reason' => 'absent'),
 	));
 CloudStoreInventory::write($rec);
 

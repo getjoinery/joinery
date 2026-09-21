@@ -27,6 +27,7 @@
  * the last completed pass, and what the last Bring them back did. No schema.
  * It carries names, sizes and counts; never a key or a credential.
  *
+ * @version 1.1 - one file store: one driver per tick, one "did not answer" state; a row carries no visibility
  * @version 1.0
  */
 
@@ -57,8 +58,8 @@ class CloudStoreInventory {
 	/**
 	 * Test seams. Keys:
 	 *   rows    callable(int $after_id, int $limit): array   the cloud rows past a cursor, each
-	 *           ['id','name','remote_key','visibility','size'], instead of fbb_file_blobs
-	 *   driver  callable(string $visibility): ?CloudStorageDriver   instead of the factory
+	 *           ['id','name','remote_key','size'], instead of fbb_file_blobs
+	 *   driver  callable(): ?CloudStorageDriver   the file store's driver, instead of the factory
 	 *   record  array|null   the record, held here instead of the setting (array_key_exists decides)
 	 */
 	public static $test_hooks = array();
@@ -142,26 +143,11 @@ class CloudStoreInventory {
 
 		$started_at = microtime(true);
 		$checked_this_tick = 0;
-		$drivers = array();   // visibility => driver|null|false (false: did not answer this tick)
-		$driver_for = function ($visibility) use (&$drivers) {
-			if (!array_key_exists($visibility, $drivers)) {
-				$driver = self::driver($visibility);
-				if ($driver !== null) {
-					try {
-						$ping = $driver->ping();
-						if (empty($ping['ok'])) { $driver = false; }
-					} catch (\Throwable $e) {
-						$driver = false;
-					}
-				}
-				$drivers[$visibility] = $driver;
-			}
-			return $drivers[$visibility];
-		};
+		$driver = false;   // false: not yet asked; null: no store configured; a driver: answered its ping
+		$stalled = false;  // the store did not answer its ping this tick
 
 		$exhausted = false;
-		$stalled = '';
-		while (!$exhausted && $stalled === '') {
+		while (!$exhausted && !$stalled) {
 			$rows = self::rows((int)$pass['cursor'], self::BATCH);
 			if (!$rows) {
 				$exhausted = true;
@@ -171,12 +157,20 @@ class CloudStoreInventory {
 				if ($checked_this_tick >= $max_rows || (microtime(true) - $started_at) >= $budget) {
 					break 2;
 				}
-				$visibility = (string)($row['visibility'] ?? 'public');
-				$driver = $driver_for($visibility);
 				if ($driver === false) {
+					$driver = self::driver();
+					if ($driver !== null) {
+						try {
+							$ping = $driver->ping();
+							if (empty($ping['ok'])) { $stalled = true; }
+						} catch (\Throwable $e) {
+							$stalled = true;
+						}
+					}
+				}
+				if ($stalled) {
 					// The store did not answer its ping this tick: nothing is
 					// called missing on its word; the cursor stays here.
-					$stalled = $visibility;
 					break 2;
 				}
 				$name = (string)$row['name'];
@@ -186,8 +180,7 @@ class CloudStoreInventory {
 					$reason = self::check($driver, $row);
 					if ($reason !== null) {
 						$pass['missing'][$name] = array(
-							'id' => (int)$row['id'], 'visibility' => $visibility,
-							'size' => (int)($row['size'] ?? 0), 'reason' => $reason,
+							'id' => (int)$row['id'], 'size' => (int)($row['size'] ?? 0), 'reason' => $reason,
 						);
 					} else {
 						unset($pass['missing'][$name]);
@@ -216,14 +209,14 @@ class CloudStoreInventory {
 			return array('status' => 'finished', 'checked' => $checked_this_tick,
 				'message' => 'file store check finished: ' . number_format((int)$pass['checked']) . ' offloaded file'
 					. ((int)$pass['checked'] === 1 ? '' : 's') . ' checked, ' . ($n === 0 ? 'none missing' : number_format($n) . ' missing')
-					. ($pass['unchecked'] > 0 ? ', ' . number_format((int)$pass['unchecked']) . ' not checked (no store configured for them)' : ''));
+					. ($pass['unchecked'] > 0 ? ', ' . number_format((int)$pass['unchecked']) . ' not checked (no store configured)' : ''));
 		}
 
 		$record['pass'] = $pass;
 		self::write($record);
-		if ($stalled !== '') {
+		if ($stalled) {
 			return array('status' => 'waiting', 'checked' => $checked_this_tick,
-				'message' => 'file store check paused: the ' . $stalled . ' file store did not answer; it resumes next tick');
+				'message' => 'file store check paused: the file store did not answer; it resumes next tick');
 		}
 		return array('status' => 'running', 'checked' => $checked_this_tick,
 			'message' => 'file store check: ' . number_format((int)$pass['checked']) . ' offloaded files checked so far'
@@ -271,18 +264,17 @@ class CloudStoreInventory {
 				'id'         => (int)$blob->key,
 				'name'       => (string)$blob->get('fbb_stored_name'),
 				'remote_key' => $blob->remote_key_for('original'),
-				'visibility' => $blob->is_private_bool() ? 'private' : 'public',
 				'size'       => (int)$blob->get('fbb_size_bytes'),
 			);
 		}
 		return $out;
 	}
 
-	private static function driver($visibility) {
+	private static function driver() {
 		if (isset(self::$test_hooks['driver'])) {
-			return call_user_func(self::$test_hooks['driver'], (string)$visibility);
+			return call_user_func(self::$test_hooks['driver']);
 		}
-		return CloudStorageDriverFactory::forVisibilityWithFallback((string)$visibility);
+		return CloudStorageDriverFactory::driverWithFallback();
 	}
 
 	// ---------------------------------------------------------- bring back

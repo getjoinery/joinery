@@ -388,12 +388,19 @@
 			'api_rate_limits',
 			'logging',
 			'upgrade',
-			'cloud_storage',
 			'oauth',
 			'dns',
 			'joinery_direct',
 			'mobile_apps',
 		), array('heading_level' => 'h5'));
+
+		// A bucket is set up where it is proved before it is stored: the cloud
+		// storage page tests the bucket and key and settles what the provider
+		// decides, and the Backups page does the same for a backup target. A
+		// plain settings save would do neither, so neither group is drawn here.
+		echo '<h5>Cloud storage and backups</h5>';
+		echo '<p>The file bucket is set up on <a href="/admin/admin_cloud_storage">Cloud Storage</a> and backup storage on '
+			. '<a href="/admin/admin_backups">Backups</a>. Each proves the bucket and key before saving them.</p>';
 
 		echo '<hr>';
 	}

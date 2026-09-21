@@ -6,6 +6,7 @@
  * The driver handles only cloud-side operations — local file handling
  * stays in the existing File / RouteHelper code paths.
  *
+ * @version 1.2 - url() is the bucket's own address, read only by the privacy gate
  * @version 1.1 - head(): does the bucket hold this object, and at what size — the question the
  *                backup's object restore and the file-store inventory ask without moving bytes
  * @version 1.0
@@ -66,7 +67,9 @@ interface CloudStorageDriver {
 	public function head(string $remote_key): ?array;
 
 	/**
-	 * Public URL for an object (CDN domain or bucket URL).
+	 * The bucket's own address for an object — what a public bucket would
+	 * serve it from. Nothing is served by it; the privacy gate fetches it
+	 * anonymously to prove the bucket refuses.
 	 *
 	 * @param string $remote_key  Bucket key (without prefix).
 	 * @return string  Absolute URL.

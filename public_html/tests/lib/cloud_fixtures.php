@@ -16,9 +16,12 @@
  * One profile double:
  *
  *   - ScratchTableProfile — a StorageProfile backed by a caller-owned scratch
- *     table and on-disk base dir. Eligibility/visibility/ownership are supplied
- *     as options so one class serves the public-offload, private-offload, and
- *     ownership-gated cases.
+ *     table and on-disk base dir. Eligibility and ownership are supplied as
+ *     options so one class serves the plain and the ownership-gated cases. It
+ *     answers visibility() 'private', as every profile of the one store does.
+ *
+ * @version 1.1 - one private store: ScratchTableProfile answers private, with no visibility option
+ * @version 1.0
  */
 
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriver.php'));
@@ -139,7 +142,6 @@ class InMemoryBlobDriver implements CloudStorageDriver {
  * Options (all optional):
  *   pkey, driver_col, failed_col, last_attempt_col — column names (defaults
  *     'id' / 'drv' / 'failed' / 'last_attempt')
- *   visibility               — 'public' (default) or 'private'
  *   eligibility_where        — forward-offload SQL gate (default 'TRUE')
  *   reverse_eligibility_where — reverse (restore) ownership gate; default ''
  *     means "no reverse gate", identical to a profile that omits the method
@@ -160,7 +162,6 @@ class ScratchTableProfile implements StorageProfile {
 			'driver_col'                => 'drv',
 			'failed_col'                => 'failed',
 			'last_attempt_col'          => 'last_attempt',
-			'visibility'                => 'public',
 			'eligibility_where'         => 'TRUE',
 			'reverse_eligibility_where' => '',
 			'is_eligible'               => null,
@@ -176,7 +177,7 @@ class ScratchTableProfile implements StorageProfile {
 	public function driverColumn(): string { return $this->opts['driver_col']; }
 	public function failedCountColumn(): string { return $this->opts['failed_col']; }
 	public function lastAttemptColumn(): string { return $this->opts['last_attempt_col']; }
-	public function visibility(): string { return $this->opts['visibility']; }
+	public function visibility(): string { return 'private'; }
 	public function eligibilityWhere(): string { return $this->opts['eligibility_where']; }
 	public function reverseEligibilityWhere(): string { return $this->opts['reverse_eligibility_where']; }
 

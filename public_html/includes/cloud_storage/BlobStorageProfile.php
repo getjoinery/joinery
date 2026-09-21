@@ -1,19 +1,22 @@
 <?php
 /**
- * BlobStorageProfile — the public offload consumer for file blobs.
+ * BlobStorageProfile — the offload consumer for private file blobs.
  *
  * A thin adapter over FileBlob (fbb_file_blobs), re-expressing its physical
  * methods through the StorageProfile seam so the shared CloudOffloadEngine +
- * CloudStorageLifecycle can drive the public-blob offload. No blob code moves
+ * CloudStorageLifecycle can drive the blob offload. No blob code moves
  * here — this only maps the fbb_ descriptor columns and enumerates the
  * original + FileBlob::variant_size_keys() slots per blob (registry sizes for
  * images, the recorded encrypted-thumbnail slot for ciphertext blobs).
  *
- * fbb_file_blobs is shared by the public and private blob profiles, split by
- * fbb_is_private (the same shared-table mechanism the old File pair used). The
- * public profile owns the world-readable blobs (fbb_is_private = FALSE); the
- * private subclass owns the rest.
+ * Only a private blob (fbb_is_private = TRUE) is eligible: member uploads,
+ * Drive files, sealed vault files. A public blob — anything a page serves —
+ * is never eligible and stays on this server, so nothing on a page is ever
+ * served from the bucket. A cloud blob that is made public is pulled back
+ * before its record flips (FileBlob::flipVisibility()).
  *
+ * @version 1.3 - one private store: visibility() answers private, eligibility is fbb_is_private = TRUE,
+ *                the public profile is gone (specs/cloud_storage_private_only.md)
  * @version 1.2 - sizeColumn(): the health figures carry bytes beside counts
  * @version 1.1 - backupObjects()/backupObject(): the enumeration the backup's object store reads —
  *                every cloud row of this store with its name and the local paths its bytes
@@ -36,17 +39,17 @@ class BlobStorageProfile implements StorageProfile {
 	/** The column a row's size is read from, so the status can say how much sits where. */
 	public function sizeColumn(): string        { return 'fbb_size_bytes'; }
 
-	public function visibility(): string { return 'public'; }
+	public function visibility(): string { return 'private'; }
 
-	/** Public store: the world-readable blobs. */
+	/** Only a private blob moves; a public blob is never eligible. */
 	public function eligibilityWhere(): string {
-		return 'fbb_is_private = FALSE';
+		return 'fbb_is_private = TRUE';
 	}
 
 	/**
-	 * Ownership gate for the reverse/drain path when the table is shared. Every
-	 * cloud blob belongs to exactly one store, split by fbb_is_private — for the
-	 * public store the forward and ownership gates coincide.
+	 * Ownership gate for the reverse/drain path and the cloud-row count: the
+	 * cloud rows that are this store's. A public blob never reaches the bucket,
+	 * so the forward and ownership gates coincide.
 	 */
 	public function reverseEligibilityWhere(): string {
 		return $this->eligibilityWhere();
@@ -64,7 +67,7 @@ class BlobStorageProfile implements StorageProfile {
 		}
 		$flag = $blob->get('fbb_storage_driver');
 		$is_local = ($flag === null || $flag === '' || $flag === 'local');
-		return $is_local && !$blob->is_private_bool();
+		return $is_local && $blob->is_private_bool();
 	}
 
 	public function itemsForRow(int $id): ?array {
@@ -106,7 +109,7 @@ class BlobStorageProfile implements StorageProfile {
 	 */
 	public function backupObjects(): array {
 		$blobs = new MultiFileBlob(
-			['storage_driver' => 'cloud', 'is_private' => $this->visibility() === 'private'],
+			['storage_driver' => 'cloud', 'is_private' => true],
 			['fbb_file_blob_id' => 'ASC']);
 		$out = [];
 		foreach ($blobs as $blob) {
@@ -118,7 +121,7 @@ class BlobStorageProfile implements StorageProfile {
 	/** One row in the shape backupObjects() lists, or null when the row is gone or not this store's. */
 	public function backupObject(int $id): ?array {
 		$blob = new FileBlob($id, true);
-		if (!$blob->key || ($blob->is_private_bool() !== ($this->visibility() === 'private'))) {
+		if (!$blob->key || !$blob->is_private_bool()) {
 			return null;
 		}
 		return $this->describe_for_backup($blob);

@@ -29,6 +29,7 @@
  * outside the web root; the cloud tier is the verified-private bucket reached
  * only through the shared driver's server-side get() — never a public URL.
  *
+ * @version 1.4 - one store: the driver is resolved with no visibility argument
  * @version 1.3
  */
 
@@ -257,7 +258,7 @@ class RawMessageStore implements StorageProfile {
 	 * — not a band-aid: the binding is valid and the bytes are private either way.
 	 */
 	private static function privateDriver() {
-		return CloudStorageDriverFactory::forVisibilityWithFallback('private');
+		return CloudStorageDriverFactory::driverWithFallback();
 	}
 
 	private function _driverFlag(int $id): ?string {

@@ -2,18 +2,19 @@
 /**
  * Cloud Storage Admin Logic
  *
- * Thin caller over the shared CloudStorageLifecycle. The page manages the
- * public-blob store (BlobStorageProfile) and, independently, the private
- * store's bucket configuration + privacy gate. Save = test + persist +
- * activate, per store present in the form; each store's Save is validated
- * independently (a private-bucket failure never blocks the public Save, and
- * vice versa). Pause and "Disable and Pull Files Back to Local" act on the
- * public store; the private store has its own "Disable and Pull Back" that
- * drains its cloud objects to local. Offload itself runs through one platform
- * task (CloudOffloadRun): enabling a store sets it to offload mode and ensures
- * that task is active; the tick drives every store of every visibility from the
- * registry, so the admin never names a profile or a per-store task.
+ * Thin caller over the shared CloudStorageLifecycle. The page manages the one
+ * file store: a private bucket that holds private uploads, Drive files and
+ * inbound mail. Save = check + persist + activate; the check stores nothing
+ * on a fail. Pause, "Disable and Pull Files Back to Local" and Remove act on
+ * the store. Offload itself runs through one platform task (CloudOffloadRun):
+ * enabling the store sets it to offload mode and ensures that task is active;
+ * the tick drives every profile from the registry, so the admin never names a
+ * profile or a per-store task.
  *
+ * @version 3.0 - one private store (specs/cloud_storage_private_only.md): one Save, one binding, one
+ *                pull-back; the private-store fields and disable_and_pull_private are gone
+ * @version 2.6 - the provider picker: StorageProvider::complete() settles the endpoint and region a
+ *                provider decides (Backblaze from the key) before the check runs; remove resets it
  * @version 2.5 - the page's shape (configured, locked, public_cloud, draining); a field the form did not
  *                post keeps its stored value, so Enable re-proves the stored settings and the locked
  *                form posts only what may change; the remove action forgets an empty store
@@ -41,12 +42,10 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 	$session->check_permission(10);
 
 	$settings = Globalvars::get_instance();
-	$profile  = new BlobStorageProfile();   // the public store this page manages
+	$profile  = new BlobStorageProfile();   // the file-blob profile, whose figures the page shows
 
-	$test_results = null;          // public store
+	$test_results = null;
 	$errors = array();
-	$private_test_results = null;  // private store
-	$private_errors = array();
 
 	// A field the form did not post keeps its stored value. The page shows the
 	// locked fields (endpoint, region, bucket) read-only while files are in the
@@ -63,40 +62,49 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 		}
 
 		if ($action === 'save') {
-			// ---- Public store -------------------------------------------------
 			// The secret key is a password field, so it never carries its stored
 			// value into the page. A blank submission therefore means "keep the
-			// stored key" — the connection test below needs a real key to run.
+			// stored key" — the check below needs a real key to run.
 			$secret_key = trim($input['cloud_storage_secret_key'] ?? '');
 			if ($secret_key === '') {
 				$secret_key = (string)$settings->get_setting('cloud_storage_secret_key');
 			}
 			$opts = array(
-				'endpoint'        => $posted('cloud_storage_endpoint'),
-				'region'          => $posted('cloud_storage_region'),
-				'bucket'          => $posted('cloud_storage_bucket'),
-				'access_key'      => $posted('cloud_storage_access_key'),
-				'secret_key'      => $secret_key,
-				'public_base_url' => $posted('cloud_storage_public_base_url'),
+				'provider'   => $posted('cloud_storage_provider'),
+				'endpoint'   => $posted('cloud_storage_endpoint'),
+				'region'     => $posted('cloud_storage_region'),
+				'bucket'     => $posted('cloud_storage_bucket'),
+				'access_key' => $posted('cloud_storage_access_key'),
+				'secret_key' => $secret_key,
 			);
-			$public_ok = false;
-			foreach (['endpoint', 'bucket', 'access_key', 'secret_key'] as $field) {
+			$saved = false;
+			foreach (['bucket', 'access_key', 'secret_key'] as $field) {
 				if ($opts[$field] === '') {
 					$errors[] = ucfirst(str_replace('_', ' ', $field)) . ' is required.';
 				}
 			}
+			// The provider decides the endpoint and region it did not ask for:
+			// Amazon, Wasabi, DigitalOcean and Linode from the region, Cloudflare
+			// R2 a fixed region, Backblaze both from the key.
 			if (empty($errors)) {
-				$mutable = CloudStorageLifecycle::assertBindingMutable($opts, 'public');
+				$settled = StorageProvider::complete($opts);
+				$opts = $settled['opts'];
+				if (!$settled['ok']) {
+					$errors[] = $settled['message'];
+				}
+			}
+			if (empty($errors)) {
+				$mutable = CloudStorageLifecycle::assertBindingMutable($opts);
 				if (!$mutable['ok']) {
 					$errors[] = $mutable['message'];
 				} else {
-					$test_results = CloudStorageLifecycle::testConnection($opts, 'public');
+					$test_results = CloudStorageLifecycle::testConnection($opts);
 					if ($test_results['ok']) {
-						$persist = CloudStorageLifecycle::persistSettings($opts, 'public', $session);
+						$persist = CloudStorageLifecycle::persistSettings($opts, $session);
 						if ($persist['ok']) {
-							CloudStorageLifecycle::stopDrain('public', $session); // enabling cancels any in-progress drain
+							CloudStorageLifecycle::stopDrain($session); // enabling cancels any in-progress drain
 							CloudStorageLifecycle::ensureTickActive();
-							$public_ok = true;
+							$saved = true;
 						} else {
 							$errors[] = $persist['message'];
 						}
@@ -104,67 +112,10 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 				}
 			}
 
-			// ---- Private store (independent) ----------------------------------
-			$private_bucket = $posted('cloud_storage_private_bucket');
-			$private_handled = false;
-			$private_ok = true;
-			if ($private_bucket !== '') {
-				$private_handled = true;
-				$private_ok = false;
-				$private_opts = array(
-					'endpoint'        => $opts['endpoint'],
-					'region'          => $opts['region'],
-					'bucket'          => $private_bucket,
-					'access_key'      => $opts['access_key'],
-					'secret_key'      => $opts['secret_key'],
-					'public_base_url' => '',
-				);
-				$pmutable = CloudStorageLifecycle::assertBindingMutable($private_opts, 'private');
-				if (!$pmutable['ok']) {
-					$private_errors[] = $pmutable['message'];
-				} else {
-					$private_test_results = CloudStorageLifecycle::testConnection($private_opts, 'private');
-					if ($private_test_results['ok']) {
-						$ppersist = CloudStorageLifecycle::persistSettings($private_opts, 'private', $session);
-						if ($ppersist['ok']) {
-							// Gate passed + latch set: the single offload tick now
-							// offloads every private-visibility store (private files,
-							// inbound-mail raw) on its next run.
-							CloudStorageLifecycle::stopDrain('private', $session); // enabling cancels any in-progress drain
-							CloudStorageLifecycle::ensureTickActive();
-							$private_ok = true;
-						} else {
-							$private_errors[] = $ppersist['message'];
-						}
-					}
-				}
-			} else {
-				// Cleared private bucket: degrade cleanly (disable + blank) unless
-				// it would strand private cloud rows.
-				if ($settings->get_setting('cloud_storage_private_bucket') !== '' || $settings->get_setting('cloud_storage_private_enabled')) {
-					$private_handled = true;
-					$private_ok = false;
-					$pmutable = CloudStorageLifecycle::assertBindingMutable(['endpoint' => $opts['endpoint'], 'bucket' => ''], 'private');
-					if (!$pmutable['ok']) {
-						$private_errors[] = $pmutable['message'];
-					} else {
-						CloudStorageLifecycle::setEnabled('private', false, $session, ['cloud_storage_private_bucket' => '']);
-						CloudStorageLifecycle::stopDrain('private', $session); // guard 1 already ensured no cloud rows remain; tick self-deactivates when idle
-						$private_ok = true;
-					}
-				}
-			}
-
-			// ---- Redirect only when nothing needs inline diagnostics ----------
-			$public_clean  = empty($errors) && ($public_ok || (empty($opts['endpoint']) && empty($opts['bucket'])));
-			$private_clean = empty($private_errors) && $private_ok;
-			if ($public_clean && $private_clean) {
-				$saved = array();
-				if ($public_ok)                  $saved[] = 'Public files store enabled. Migration of existing public files will start on the next cron tick.';
-				if ($private_handled && $private_bucket !== '') $saved[] = 'Private store verified non-public and enabled.';
-				if ($private_handled && $private_bucket === '') $saved[] = 'Private store cleared.';
+			// Redirect only when nothing needs inline diagnostics.
+			if (empty($errors) && $saved) {
 				$session->save_message(new DisplayMessage(
-					$saved ? implode(' ', $saved) : 'No changes.',
+					'Cloud storage enabled. Private files start moving to the bucket on the next cron tick.',
 					'Saved', '/\/admin\/admin_cloud_storage/',
 					DisplayMessage::MESSAGE_ANNOUNCEMENT,
 					DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
@@ -177,21 +128,19 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 			// Forget the bucket and the key. Only when nothing is in the bucket
 			// and nothing is on its way back: a binding that still names
 			// offloaded files is what the pull-back reads.
-			if (CloudStorageLifecycle::cloudRowCount('public') > 0 || CloudStorageLifecycle::cloudRowCount('private') > 0
-					|| $settings->get_setting('cloud_storage_draining') || $settings->get_setting('cloud_storage_private_draining')) {
+			if (CloudStorageLifecycle::cloudRowCount() > 0 || $settings->get_setting('cloud_storage_draining')) {
 				$session->save_message(new DisplayMessage(
 					'Files are still in the bucket, or on their way back. Disable and pull them back first; remove once the count is zero.',
 					'Not removed', '/\/admin\/admin_cloud_storage/',
 					DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
 				return LogicResult::redirect('/admin/admin_cloud_storage');
 			}
-			CloudStorageLifecycle::setEnabled('public', false, $session, array(
+			CloudStorageLifecycle::setEnabled(false, $session, array(
+				'cloud_storage_provider' => StorageProvider::GENERIC,
 				'cloud_storage_endpoint' => '', 'cloud_storage_region' => '', 'cloud_storage_bucket' => '',
-				'cloud_storage_access_key' => '', 'cloud_storage_secret_key' => '', 'cloud_storage_public_base_url' => '',
+				'cloud_storage_access_key' => '', 'cloud_storage_secret_key' => '',
 			));
-			CloudStorageLifecycle::setEnabled('private', false, $session, array('cloud_storage_private_bucket' => ''));
-			CloudStorageLifecycle::stopDrain('public', $session);
-			CloudStorageLifecycle::stopDrain('private', $session);
+			CloudStorageLifecycle::stopDrain($session);
 			$session->save_message(new DisplayMessage(
 				'Cloud storage removed. Uploads stay on this server.',
 				'Removed', '/\/admin\/admin_cloud_storage/',
@@ -202,10 +151,10 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 			// Pause: stop offloading new files; keep existing cloud files serving
 			// (idle mode, not drain). The tick keeps running while those files
 			// exist, for the daily file-store check.
-			CloudStorageLifecycle::setEnabled('public', false, $session);
-			CloudStorageLifecycle::stopDrain('public', $session);
+			CloudStorageLifecycle::setEnabled(false, $session);
+			CloudStorageLifecycle::stopDrain($session);
 			$session->save_message(new DisplayMessage(
-				'Cloud storage paused. Existing cloud-stored files continue to serve from the bucket.',
+				'Cloud storage paused. Files already in the bucket keep being served from it.',
 				'Paused', '/\/admin\/admin_cloud_storage/',
 				DisplayMessage::MESSAGE_ANNOUNCEMENT,
 				DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
@@ -214,28 +163,12 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 		}
 		elseif ($action === 'disable_and_pull') {
 			// Disable the latch and set the draining flag; the offload tick pulls
-			// public cloud files back to local until none remain, then clears the
+			// every cloud file back to local until none remain, then clears the
 			// flag itself.
-			CloudStorageLifecycle::setEnabled('public', false, $session);
-			CloudStorageLifecycle::startDrain('public', $session);
+			CloudStorageLifecycle::setEnabled(false, $session);
+			CloudStorageLifecycle::startDrain($session);
 			$session->save_message(new DisplayMessage(
 				'Pull-back started. Bucket-stored files will be returned to local disk over the next several cron ticks.',
-				'Pull-back queued', '/\/admin\/admin_cloud_storage/',
-				DisplayMessage::MESSAGE_ANNOUNCEMENT,
-				DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
-			));
-			return LogicResult::redirect('/admin/admin_cloud_storage');
-		}
-		elseif ($action === 'disable_and_pull_private') {
-			// Disable the private store's latch (forVisibility('private') goes null)
-			// but KEEP the bucket binding so the tick's drain can still read — it
-			// resolves the driver with-fallback to the unlatched binding. The
-			// bucket is cleared later by a Save with an empty field, once guard 1
-			// sees zero cloud rows.
-			CloudStorageLifecycle::setEnabled('private', false, $session);
-			CloudStorageLifecycle::startDrain('private', $session);
-			$session->save_message(new DisplayMessage(
-				'Private-store pull-back started. Offloaded inbound-mail raw will return to local disk over the next several cron ticks; clear the private bucket field and Save once it reaches zero to fully remove it.',
 				'Pull-back queued', '/\/admin\/admin_cloud_storage/',
 				DisplayMessage::MESSAGE_ANNOUNCEMENT,
 				DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
@@ -270,37 +203,32 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 		return $settings->get_setting($key);
 	};
 
+	$cloud_count = CloudStorageLifecycle::cloudRowCount();
 	$page_data = array(
 		'session'         => $session,
 		'settings_values' => array(
+			// A store saved before the picker existed shows as the provider its
+			// endpoint belongs to.
+			'provider'        => isset($input['cloud_storage_provider'])
+				? StorageProvider::normalise($input['cloud_storage_provider'])
+				: StorageProvider::effective($settings->get_setting('cloud_storage_provider'), $settings->get_setting('cloud_storage_endpoint')),
 			'endpoint'        => $pick('cloud_storage_endpoint'),
 			'region'          => $pick('cloud_storage_region'),
 			'bucket'          => $pick('cloud_storage_bucket'),
 			'access_key'      => $pick('cloud_storage_access_key'),
 			'secret_key'      => $pick('cloud_storage_secret_key'),
-			'public_base_url' => $pick('cloud_storage_public_base_url'),
-			'private_bucket'  => $pick('cloud_storage_private_bucket'),
 		),
 		'enabled'              => (bool)$settings->get_setting('cloud_storage_enabled'),
-		// The page's shape: a store is configured once a bucket, endpoint and key
-		// are stored; it is locked while files are in either bucket or on their
-		// way back, when only the key, the public URL and the private bucket may change.
+		// The page's shape: the store is configured once a bucket, endpoint and
+		// key are stored; it is locked while files are in the bucket or on their
+		// way back, when only the key may change.
 		'configured'           => $settings->get_setting('cloud_storage_bucket') !== '' && $settings->get_setting('cloud_storage_endpoint') !== ''
 		                          && $settings->get_setting('cloud_storage_access_key') !== '',
-		'public_cloud'         => CloudStorageLifecycle::cloudRowCount('public'),
-		'draining'             => (bool)$settings->get_setting('cloud_storage_draining') || (bool)$settings->get_setting('cloud_storage_private_draining'),
-		'private_enabled'      => (bool)$settings->get_setting('cloud_storage_private_enabled'),
-		'private_status'       => array(
-			'configured' => trim((string)$settings->get_setting('cloud_storage_private_bucket')) !== '',
-			'enabled'    => (bool)$settings->get_setting('cloud_storage_private_enabled'),
-			'cloud_count'=> CloudStorageLifecycle::cloudRowCount('private'),
-		),
-		'locked'               => CloudStorageLifecycle::cloudRowCount('public') > 0 || CloudStorageLifecycle::cloudRowCount('private') > 0
-		                          || (bool)$settings->get_setting('cloud_storage_draining') || (bool)$settings->get_setting('cloud_storage_private_draining'),
+		'cloud_count'          => $cloud_count,
+		'draining'             => (bool)$settings->get_setting('cloud_storage_draining'),
+		'locked'               => $cloud_count > 0 || (bool)$settings->get_setting('cloud_storage_draining'),
 		'errors'               => $errors,
 		'test_results'         => $test_results,
-		'private_errors'       => $private_errors,
-		'private_test_results' => $private_test_results,
 		'health'               => CloudStorageLifecycle::health($profile),
 		// The daily file-store check and who brings a missing file back.
 		'inventory'            => CloudStoreInventory::current(),

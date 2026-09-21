@@ -30,6 +30,9 @@
  * proven with it.
  *
  * Run: php tests/cloud_storage/offload_release_test.php
+ *
+ * @version 1.1 - one private store: the blobs are private, in the restricted directory
+ * @version 1.0
  */
 
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
@@ -58,8 +61,8 @@ $out  = $work . '/backups';
 harness_defer(function() use ($work) { exec('chmod -R u+rwX ' . escapeshellarg($work) . ' 2>/dev/null; rm -rf ' . escapeshellarg($work)); });
 
 $settings = Globalvars::get_instance();
-$fast_dir = dirname($settings->get_setting('upload_dir')) . '/static_files/uploads';
-if (!is_dir($fast_dir)) { @mkdir($fast_dir, 0777, true); }
+$restricted_dir = rtrim((string)$settings->get_setting('upload_dir'), '/');
+if (!is_dir($restricted_dir)) { @mkdir($restricted_dir, 0777, true); }
 $temp_paths = array();
 harness_defer(function () use (&$temp_paths) { foreach ($temp_paths as $p) { if (is_file($p)) { @unlink($p); } } });
 
@@ -68,20 +71,20 @@ $profile  = new BlobStorageProfile();
 $sync_row = new ReflectionMethod('CloudOffloadEngine', '_sync_row');
 $sync_row->setAccessible(true);
 
-/** A real public blob row with local bytes in the fast-serve directory. */
-$make_blob = function ($tag, $bytes) use (&$temp_paths, $fast_dir) {
+/** A real private blob row with local bytes in the restricted directory. */
+$make_blob = function ($tag, $bytes) use (&$temp_paths, $restricted_dir) {
 	$name = 'jyor_' . getmypid() . '_' . $tag . '.bin';
 	$b = new FileBlob(NULL);
 	$b->set('fbb_stored_name', $name);
 	$b->set('fbb_size_bytes', strlen($bytes));
 	$b->set('fbb_mime_type', 'application/octet-stream');
-	$b->set('fbb_is_private', false);
+	$b->set('fbb_is_private', true);
 	$b->set('fbb_reference_count', 1);
 	$b->set('fbb_storage_driver', 'local');
 	$b->set('fbb_sync_failed_count', 0);
 	$b->save();
 	harness_register_row('fbb_file_blobs', 'fbb_file_blob_id', $b->key);
-	$path = $fast_dir . '/' . $name;
+	$path = $restricted_dir . '/' . $name;
 	file_put_contents($path, $bytes);
 	$temp_paths[] = $path;
 	return array($b, $path, $name);
@@ -244,7 +247,7 @@ section('A blob permanently deleted while waiting leaves no local file');
 // off on dev, so the bucket delete has no driver (logged as an orphan) and
 // the local paths are what is left to remove.
 list($b6, $p6, $n6) = $make_blob('reclaim', random_bytes(64));
-$thumb_dir = $fast_dir . '/avatar';
+$thumb_dir = $restricted_dir . '/avatar';
 if (!is_dir($thumb_dir)) { @mkdir($thumb_dir, 0777, true); }
 $dblink->prepare("UPDATE fbb_file_blobs SET fbb_storage_driver = 'cloud', fbb_mime_type = 'image/png' WHERE fbb_file_blob_id = ?")->execute(array($b6->key));
 file_put_contents($thumb_dir . '/' . $n6, 'thumb');

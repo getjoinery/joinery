@@ -3,7 +3,7 @@
  * A local S3-compatible provider for the backup suites.
  *
  * `php -S` on a loopback port speaking just enough of the S3 REST surface for
- * S3Signer's callers: PutObject, GetObject, HeadObject, DeleteObject,
+ * S3Signer's callers: PutObject, GetObject, HeadObject, HeadBucket, DeleteObject,
  * ListObjectsV2 (prefix, one page), and the multipart family — create returns
  * an UploadId, each part is stored under its number and answered with an
  * ETag, complete assembles the parts into the object, abort is recorded.
@@ -32,6 +32,7 @@
  *   s3fx_object($fx, 'bucket', '/k');  // the bytes, or null
  *   s3fx_count($fx, 'complete');       // how many completes were seen
  *
+ * @version 1.2 - HeadBucket answers 200, so the cloud storage check's reach step passes over the fixture
  * @version 1.1 - anonymous reads refused unless FIXTURE_ANON_READ; write-only key by id prefix
  * @version 1.0
  */
@@ -235,6 +236,10 @@ if ($method === "GET") {
 	header("Content-Type: application/octet-stream");
 	header("Content-Length: " . filesize($file));
 	readfile($file);
+	return true;
+}
+if ($method === "HEAD" && $key === "") {
+	$bump("head_bucket");   // HeadBucket: the cloud storage check's reach step
 	return true;
 }
 if ($method === "HEAD") {
