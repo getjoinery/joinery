@@ -14,6 +14,10 @@
  * Everything here is pure except the map I/O and the git readers, so
  * tests/unit/changed_selection_test.php exercises the selection logic with
  * fabricated maps and change lists.
+ *
+ * @version 1.1 - only the runner, the selection, the discovery and the harness run everything; a
+ *                fixture library under tests/lib/ selects by reach like any other file
+ * @version 1.0
  */
 
 /** Where the map lives: beside class_map.php, per box, never committed. */
@@ -110,9 +114,16 @@ function coverage_select($tests, $map, $changed) {
 	$core_dirs = array('public_html/includes/', 'public_html/data/', 'public_html/logic/',
 		'public_html/views/', 'public_html/adm/', 'public_html/api/', 'public_html/ajax/',
 		'public_html/theme/');
-	// The harness or the runner changing invalidates every recorded reach.
+	// The runner, the selection, the discovery and the harness changing
+	// invalidates every recorded reach: no suite loads the first three, so
+	// reach cannot see them, and the harness is under every suite and every
+	// shell gate's subject. Anything else under tests/lib/ — a fixture
+	// library, the HTTP or logic helpers — is loaded by the suites that use it
+	// and recorded in their reach, so it selects like any other file.
+	$harness = array('public_html/tests/run.php', 'public_html/tests/lib/harness.php',
+		'public_html/tests/lib/coverage.php', 'public_html/tests/lib/discovery.php');
 	foreach ($changed as $c) {
-		if (strpos($c, 'public_html/tests/lib/') === 0 || $c === 'public_html/tests/run.php') {
+		if (in_array($c, $harness, true)) {
 			return array('run_all' => 'the test harness itself changed (' . $c . ')',
 				'selected' => array(), 'uncovered' => array());
 		}
