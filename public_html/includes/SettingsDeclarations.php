@@ -20,13 +20,15 @@
  *                of the always-loaded core classes.
  *   validation   A FormWriter validation rule array, verbatim. No new
  *                vocabulary — see FormWriterV2Base::validateField().
- *   show_when    { "other_setting": "value" }, compiled to FormWriter
+ *   show_when    { "other_setting": "value" }, or a list of values any one
+ *                of which shows the field, compiled to FormWriter
  *                visibility_rules.
  *   secret       Rendered as a password field, never emits the stored value,
  *                and only a non-empty submission is written.
  *   vault_gated  Writing it requires an open vault unlock window.
  *   managed      Machine-written. Never rendered on a form.
  *
+ * @version 1.1 - show_when takes a list of values
  * @version 1.0
  */
 class SettingsDeclarations {
@@ -300,6 +302,15 @@ class SettingsDeclarations {
 
 			if (isset($d['show_when']) && !is_array($d['show_when'])) {
 				$errors[] = "{$where}: show_when must be a map of setting name to value.";
+			} elseif (isset($d['show_when'])) {
+				foreach ($d['show_when'] as $trigger => $value) {
+					foreach ((array)$value as $one) {
+						if (!is_scalar($one)) {
+							$errors[] = "{$where}: show_when {$trigger} must be a value or a list of values.";
+							break;
+						}
+					}
+				}
 			}
 
 			// A secret is normally a password field, but some are genuinely

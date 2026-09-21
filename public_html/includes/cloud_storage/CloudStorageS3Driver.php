@@ -9,6 +9,9 @@
  * Path-style vs virtual-hosted addressing is auto-detected from the
  * endpoint hostname (AWS → virtual-hosted, everything else → path-style).
  *
+ * @version 1.2 - one private store: no public base URL option; url() is the bucket's own address for an
+ *                object, derived from endpoint + bucket (the endpoint's port kept), read only by the
+ *                privacy gate's anonymous probe; the raw-host and CDN inspections are gone
  * @version 1.1 - head(): HeadObject as size and ETag, the interface's presence check; size() reads it
  * @version 1.0
  */
@@ -24,16 +27,15 @@ class CloudStorageS3Driver implements CloudStorageDriver {
 
 	private $client;
 	private $bucket;
-	private $public_base_url;
+	private $bucket_url;
 
 	public function __construct(array $opts = []) {
 		$settings = Globalvars::get_instance();
-		$endpoint   = $opts['endpoint']        ?? $settings->get_setting('cloud_storage_endpoint');
-		$region     = $opts['region']          ?? $settings->get_setting('cloud_storage_region');
-		$bucket     = $opts['bucket']          ?? $settings->get_setting('cloud_storage_bucket');
-		$access_key = $opts['access_key']      ?? $settings->get_setting('cloud_storage_access_key');
-		$secret_key = $opts['secret_key']      ?? $settings->get_setting('cloud_storage_secret_key');
-		$public_url = $opts['public_base_url'] ?? $settings->get_setting('cloud_storage_public_base_url');
+		$endpoint   = $opts['endpoint']   ?? $settings->get_setting('cloud_storage_endpoint');
+		$region     = $opts['region']     ?? $settings->get_setting('cloud_storage_region');
+		$bucket     = $opts['bucket']     ?? $settings->get_setting('cloud_storage_bucket');
+		$access_key = $opts['access_key'] ?? $settings->get_setting('cloud_storage_access_key');
+		$secret_key = $opts['secret_key'] ?? $settings->get_setting('cloud_storage_secret_key');
 
 		if (!$endpoint || !$bucket || !$access_key || !$secret_key) {
 			throw new RuntimeException('CloudStorageS3Driver requires endpoint, bucket, access_key, secret_key.');
@@ -58,11 +60,15 @@ class CloudStorageS3Driver implements CloudStorageDriver {
 			],
 		]);
 
-		// Auto-derive a public base URL when none is configured. The customer
-		// only fills cloud_storage_public_base_url if they have a CDN/custom domain.
-		$this->public_base_url = $public_url
-			? rtrim($public_url, '/')
-			: self::derivePublicBaseUrl($endpoint_url, $endpoint_host, $bucket, $path_style);
+		// The bucket's own address: the URL an object would be served from if
+		// the bucket were public. url() builds on it, and the privacy gate's
+		// anonymous probe is the only thing that fetches it.
+		$scheme = parse_url($endpoint_url, PHP_URL_SCHEME) ?: 'https';
+		$port   = parse_url($endpoint_url, PHP_URL_PORT);
+		$authority = $endpoint_host . ($port ? ':' . $port : '');
+		$this->bucket_url = $path_style
+			? $scheme . '://' . $authority . '/' . $bucket
+			: $scheme . '://' . $bucket . '.' . $authority;
 	}
 
 	/**
@@ -153,7 +159,7 @@ class CloudStorageS3Driver implements CloudStorageDriver {
 	}
 
 	public function url(string $remote_key): string {
-		return $this->public_base_url . '/' . self::pathPrefix() . '/' . ltrim($remote_key, '/');
+		return $this->bucket_url . '/' . self::pathPrefix() . '/' . ltrim($remote_key, '/');
 	}
 
 	public function ping(): array {
@@ -216,96 +222,6 @@ class CloudStorageS3Driver implements CloudStorageDriver {
 	}
 
 	/**
-	 * Public-facing path prefix (same as pathPrefix(), exposed for callers
-	 * that need to construct paths against the public base URL — e.g. the
-	 * admin Test Connection probe URL).
-	 */
-	public static function getPathPrefix(): string {
-		return self::pathPrefix();
-	}
-
-	/**
-	 * Public base URL exposed so the admin Test Connection HEAD probe can
-	 * reach the scratch object without re-deriving the URL.
-	 */
-	public function getPublicBaseUrl(): string {
-		return $this->public_base_url;
-	}
-
-	/**
-	 * Hostname-pattern check (instant, no network) — returns provider label
-	 * if the URL looks like a raw bucket hostname, null otherwise.
-	 *
-	 * Used to surface the egress-cost warning before the admin clicks Save.
-	 * Custom-domain-CNAMEd-to-raw-bucket cases are caught later by the
-	 * response-header check during Test Connection.
-	 */
-	public static function looksLikeRawBucketHost(string $public_base_url): ?string {
-		$host = strtolower(parse_url($public_base_url, PHP_URL_HOST) ?? '');
-		if (!$host) return null;
-
-		static $raw_patterns = [
-			'/\.amazonaws\.com$/'          => 'AWS S3',
-			'/\.backblazeb2\.com$/'        => 'Backblaze B2',
-			'/\.wasabisys\.com$/'          => 'Wasabi',
-			'/\.digitaloceanspaces\.com$/' => 'DigitalOcean Spaces',
-		];
-		foreach ($raw_patterns as $pattern => $label) {
-			if (preg_match($pattern, $host)) return $label;
-		}
-		return null;
-	}
-
-	/**
-	 * Response-header check (definitive, runs during Test Connection). Looks
-	 * for positive CDN markers first; falls back to raw-bucket markers.
-	 *
-	 * @param string $probe_url  Full public URL to a scratch probe object.
-	 * @return array  ['reachable' => bool, 'cdn' => ?string, 'raw_provider' => ?string]
-	 */
-	public static function inspectPublicUrl(string $probe_url): array {
-		$context = stream_context_create([
-			'http' => ['method' => 'HEAD', 'timeout' => 5, 'ignore_errors' => true],
-		]);
-		$raw = @get_headers($probe_url, true, $context);
-		if ($raw === false) {
-			return ['reachable' => false, 'cdn' => null, 'raw_provider' => null];
-		}
-		$h = [];
-		foreach ($raw as $k => $v) {
-			if (is_string($k)) $h[strtolower($k)] = is_array($v) ? end($v) : $v;
-		}
-
-		// Positive CDN markers — these win over raw markers (CDN sits in front of bucket).
-		if (isset($h['cf-ray'])
-			|| (isset($h['server']) && stripos($h['server'], 'cloudflare') !== false)) {
-			return ['reachable' => true, 'cdn' => 'Cloudflare', 'raw_provider' => null];
-		}
-		if (isset($h['x-amz-cf-id']) || isset($h['x-amz-cf-pop'])) {
-			return ['reachable' => true, 'cdn' => 'CloudFront', 'raw_provider' => null];
-		}
-		if (isset($h['x-bunnycdn-pop']) || isset($h['cdn-cachekey'])) {
-			return ['reachable' => true, 'cdn' => 'Bunny', 'raw_provider' => null];
-		}
-		if (isset($h['x-served-by']) && stripos($h['x-served-by'], 'cache-') !== false) {
-			return ['reachable' => true, 'cdn' => 'Fastly', 'raw_provider' => null];
-		}
-		if (isset($h['x-vercel-cache'])) {
-			return ['reachable' => true, 'cdn' => 'Vercel', 'raw_provider' => null];
-		}
-
-		// Raw-bucket markers (no CDN detected above).
-		if (isset($h['x-bz-file-id']) || isset($h['x-bz-content-sha1'])) {
-			return ['reachable' => true, 'cdn' => null, 'raw_provider' => 'Backblaze B2'];
-		}
-		if (isset($h['x-amz-id-2']) || isset($h['x-amz-request-id'])) {
-			return ['reachable' => true, 'cdn' => null, 'raw_provider' => 'AWS S3 / S3-compatible'];
-		}
-
-		return ['reachable' => true, 'cdn' => null, 'raw_provider' => null];
-	}
-
-	/**
 	 * Accept either a hostname (s3.us-west-002.backblazeb2.com) or a full URL
 	 * for the endpoint setting; always return a scheme-prefixed URL for the SDK.
 	 */
@@ -314,19 +230,5 @@ class CloudStorageS3Driver implements CloudStorageDriver {
 			return rtrim($endpoint, '/');
 		}
 		return 'https://' . rtrim($endpoint, '/');
-	}
-
-	/**
-	 * Auto-derived public base URL when none is configured. Points at the
-	 * bucket root, not the path prefix; URL generation appends the prefix
-	 * per-key.
-	 */
-	private static function derivePublicBaseUrl(string $endpoint_url, string $endpoint_host, string $bucket, bool $path_style): string {
-		$scheme = parse_url($endpoint_url, PHP_URL_SCHEME) ?: 'https';
-		if (!$path_style) {
-			// AWS virtual-hosted: https://{bucket}.s3.{region}.amazonaws.com
-			return $scheme . '://' . $bucket . '.' . $endpoint_host;
-		}
-		return $scheme . '://' . $endpoint_host . '/' . $bucket;
 	}
 }

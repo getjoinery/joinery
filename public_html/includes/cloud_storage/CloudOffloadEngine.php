@@ -2,19 +2,19 @@
 /**
  * CloudOffloadEngine — the one shared offload orchestration.
  *
- * The shared per-row offload logic, table-agnostic and visibility-blind: it
- * resolves its driver from
- * forVisibility($profile->visibility()) and reaches every consumer-specific
+ * The shared per-row offload logic, table-agnostic: it resolves its driver
+ * from CloudStorageDriverFactory::driver() and reaches every consumer-specific
  * detail through the StorageProfile seam. The per-row logic — bounded batch,
  * per-row advisory lock, the PUT→reload→flip→delete ordering invariant, the
  * failure-count cap — is preserved exactly from the standalone tasks; only
  * $file-> became $profile-> of the same shape.
  *
- * When two stores share one table (the public and private File profiles share
- * fil_files), the reverse/drain path scopes its cloud rows to one store via the
- * profile's optional reverseEligibilityWhere() ownership gate, probed with
- * method_exists() — the same capability-probe style used for putMany().
+ * A profile whose table also holds rows that are not its own (fbb_file_blobs
+ * holds public blobs that never move) scopes the reverse/drain path to its own
+ * cloud rows via the optional reverseEligibilityWhere() ownership gate, probed
+ * with method_exists() — the same capability-probe style used for putMany().
  *
+ * @version 1.3 - one store: the driver is resolved with no visibility argument
  * @version 1.2 - after the flip to cloud, the backup's object store has its say before the local
  *                bytes go (BackupObjects::after_offload): it copies the original to the site's
  *                backup storage when that profile is enabled, and the bytes are unlinked only once
@@ -40,13 +40,13 @@ class CloudOffloadEngine {
 	// FORWARD — local -> cloud
 	// ====================================================================
 	public static function syncBatch(StorageProfile $profile, ?CloudStorageDriver $driver = null): array {
-		// Production resolves the driver from the store's visibility; tests may
-		// inject a mock driver to exercise the orchestration without a bucket.
+		// Production resolves the store's driver; tests may inject a mock
+		// driver to exercise the orchestration without a bucket.
 		if ($driver === null) {
-			$driver = CloudStorageDriverFactory::forVisibility($profile->visibility());
+			$driver = CloudStorageDriverFactory::driver();
 		}
 		if (!$driver) {
-			return ['status' => 'skipped', 'message' => $profile->visibility() . ' store not enabled'];
+			return ['status' => 'skipped', 'message' => 'store not enabled'];
 		}
 
 		$dblink = DbConnector::get_instance()->get_db_link();
@@ -83,7 +83,7 @@ class CloudOffloadEngine {
 				elseif ($result === 'skipped') $skipped++;
 				else                           $failed++;
 			} catch (Exception $e) {
-				error_log('CloudOffload forward ' . $profile->visibility() . '/' . get_class($profile) . ' row ' . $id . ' fatal: ' . $e->getMessage());
+				error_log('CloudOffload forward ' . get_class($profile) . ' row ' . $id . ' fatal: ' . $e->getMessage());
 				$failed++;
 			} finally {
 				self::_unlock($dblink, $id);
@@ -192,10 +192,9 @@ class CloudOffloadEngine {
 	public static function reverseBatch(StorageProfile $profile, ?CloudStorageDriver $driver = null): array {
 		$dblink = DbConnector::get_instance()->get_db_link();
 
-		// Ownership gate: when several stores share one table (the public and
-		// private File profiles share fil_files), each store's reverse/drain
-		// must touch only the cloud rows that physically live in ITS bucket.
-		// A profile that owns its table outright omits the method → no gate.
+		// Ownership gate: a profile whose table also holds rows that are not
+		// its own scopes the reverse/drain to the cloud rows that are. A
+		// profile that owns its table outright omits the method → no gate.
 		$own = (method_exists($profile, 'reverseEligibilityWhere'))
 			? trim($profile->reverseEligibilityWhere()) : '';
 		$own_sql = $own !== '' ? " AND ($own)" : '';
@@ -209,18 +208,15 @@ class CloudOffloadEngine {
 		}
 
 		// Reverse runs against a *disabled* store (pull-back follows a disable),
-		// so forVisibility() — which honours the enabled latch — is the wrong
-		// resolver here. Fall back to the unlatched binding so a draining store
-		// still has a driver with its latch off. Losing this fallback would
-		// silently no-op every pull-back. (Tests may inject a mock driver.)
+		// so driver() — which honours the enabled latch — is the wrong resolver
+		// here. Fall back to the unlatched binding so a draining store still has
+		// a driver with its latch off. Losing this fallback would silently no-op
+		// every pull-back. (Tests may inject a mock driver.)
 		if ($driver === null) {
-			$driver = CloudStorageDriverFactory::forVisibility($profile->visibility());
-			if (!$driver) {
-				$driver = CloudStorageDriverFactory::forVisibilityUnlatched($profile->visibility());
-			}
+			$driver = CloudStorageDriverFactory::driverWithFallback();
 		}
 		if (!$driver) {
-			return ['status' => 'error', 'message' => 'driver unconfigured for ' . $profile->visibility() . ' store'];
+			return ['status' => 'error', 'message' => 'driver unconfigured for the store'];
 		}
 
 		$batch_q = $dblink->prepare(
@@ -250,7 +246,7 @@ class CloudOffloadEngine {
 				elseif ($result === 'skipped') $skipped++;
 				else                           $failed++;
 			} catch (Exception $e) {
-				error_log('CloudOffload reverse ' . $profile->visibility() . '/' . get_class($profile) . ' row ' . $id . ' fatal: ' . $e->getMessage());
+				error_log('CloudOffload reverse ' . get_class($profile) . ' row ' . $id . ' fatal: ' . $e->getMessage());
 				$failed++;
 			} finally {
 				self::_unlock($dblink, $id);
@@ -353,8 +349,7 @@ class CloudOffloadEngine {
 			}
 		}
 		if (!empty($failed_keys)) {
-			error_log('CLOUD_STORAGE_ORPHAN: visibility=' . $profile->visibility()
-				. ' table=' . $profile->table() . ' keys=' . implode(',', $failed_keys));
+			error_log('CLOUD_STORAGE_ORPHAN: table=' . $profile->table() . ' keys=' . implode(',', $failed_keys));
 		}
 
 		$drop_temps();

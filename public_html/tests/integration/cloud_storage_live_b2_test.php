@@ -12,9 +12,10 @@
  * leave open:
  *   A. Driver round-trip (put/get/delete/putMany/url/ping) against the bucket.
  *   B. Full offload cycle through CloudOffloadEngine with NO injected driver
- *      (forVisibility resolves the real driver) — forward + a pull-back that
+ *      (driver() resolves the real driver) — forward + a pull-back that
  *      exercises the reverse-driver FALLBACK (store "disabled").
- *   C. Privacy gate DENY path end-to-end (real anonymous read, private bucket).
+ *   C. The Save check end-to-end, the privacy gate among its steps (real
+ *      anonymous read, private bucket).
  *   D. Privacy gate FAIL pipeline (real anonymous 2xx → reject) via a stand-in.
  *   E. Image rows: multi-object (original + variants) push + pull through bucket.
  *   F. BlobStorageProfile's real variant enumeration (forward + reverse).
@@ -22,7 +23,8 @@
  *   H. Time-budget bound (skipped — would need a 60s run or a prod seam).
  *   I. persistSettings + setEnabled round-trip (guard-1 inside, latch, restore).
  *   J. Declarative registry + multi-profile guard-1 over an on-disk (un-activated)
- *      plugin — proves the deactivation-hole closure and cross-profile summation.
+ *      plugin — proves the deactivation-hole closure and cross-profile summation,
+ *      and that a profile answering public is refused.
  *
  * Bucket writes are scratch objects under a unique prefix; DB writes are in
  * dedicated temp tables or self-cleaned fixture rows; settings mutations are
@@ -31,6 +33,7 @@
  *
  * Run: php tests/integration/cloud_storage_live_b2_test.php
  *
+ * @version 2.1 - one store: the factory's single binding, the Save check's steps, the registry's refusal
  * @version 2.0
  */
 
@@ -55,7 +58,7 @@ function set_enabled_mem($value) {
 	CloudStorageDriverFactory::reset();
 }
 
-$opts = CloudStorageDriverFactory::bindingFor('public');
+$opts = CloudStorageDriverFactory::binding() + ['provider' => Globalvars::get_instance()->get_setting('cloud_storage_provider')];
 if (empty($opts['bucket']) || empty($opts['access_key'])) {
 	harness_skip('bucket configured', 'no bucket configured; nothing to test');
 	harness_finish();
@@ -92,7 +95,7 @@ class LiveProfile implements StorageProfile {
 	public function driverColumn(): string { return 'drv'; }
 	public function failedCountColumn(): string { return 'failed'; }
 	public function lastAttemptColumn(): string { return 'last_attempt'; }
-	public function visibility(): string { return 'public'; }
+	public function visibility(): string { return 'private'; }
 	public function eligibilityWhere(): string { return 'eligible = true'; }
 	private function _row($id) { $db = DbConnector::get_instance()->get_db_link(); $q = $db->prepare("SELECT * FROM {$this->table} WHERE id=?"); $q->execute([$id]); return $q->fetch(PDO::FETCH_ASSOC); }
 	public function rowExists(int $id): bool { return (bool)$this->_row($id); }
@@ -177,21 +180,22 @@ try {
 	$probe = $BASE . '/dl/row0.txt'; $driver->get("$PREFIX/row{$ids[0]}/original", $probe);
 	ok('forward: object readable from bucket', file_get_contents($probe) === "row-{$ids[0]}-$RUN\n");
 	set_enabled_mem('');
-	ok('precondition: forVisibility(public) null when disabled', CloudStorageDriverFactory::forVisibility('public') === null);
+	ok('precondition: driver() null when disabled', CloudStorageDriverFactory::driver() === null);
 	$rev = CloudOffloadEngine::reverseBatch($profile);
 	ok('reverse(fallback): status success', $rev['status'] === 'success');
 	ok('reverse(fallback): rows flipped back to local', $drvflag($TABLE, $ids[0]) === 'local' && $drvflag($TABLE, $ids[1]) === 'local');
 	ok('reverse(fallback): bytes pulled back from bucket', file_exists("$BASE/restore/{$ids[0]}/original") && file_get_contents("$BASE/restore/{$ids[0]}/original") === "row-{$ids[0]}-$RUN\n");
 
-	section('C. Privacy gate DENY path end-to-end (real anonymous read)');
-	$gate = CloudStorageLifecycle::testConnection($opts, 'private');
-	$vstep = null; foreach ($gate['steps'] as $s) { if ($s['label'] === 'Verify NOT publicly readable') $vstep = $s; }
+	section('C. The Save check end-to-end (real anonymous read)');
+	$gate = CloudStorageLifecycle::testConnection($opts);
+	$vstep = null; foreach ($gate['steps'] as $s) { if ($s['label'] === CloudStorageLifecycle::STEP_PRIVATE) $vstep = $s; }
 	ok('gate: overall ok (bucket is private)', $gate['ok'] === true);
 	ok('gate: anonymous read DENIED ⇒ pass', $vstep && $vstep['status'] === 'pass');
+	$labels = array_map(fn($s) => $s['label'], $gate['steps']);
+	ok('gate: own bucket, reach, write, private, delete', array_slice($labels, -4) === ['Reach', 'Write', 'Private', 'Delete'] && $labels[0] === 'Its own bucket');
 
 	section('D. Privacy gate FAIL pipeline (real anonymous 2xx stand-in)');
-	$anon = new ReflectionMethod('CloudStorageLifecycle', '_anonymous_status');
-	$status = $anon->invoke(null, 'https://www.google.com/generate_204');
+	$status = BucketCheck::anonymous_status('https://www.google.com/generate_204');
 	if ($status === 0) { harness_skip('FAIL pipeline', 'no outbound network to the 2xx stand-in URL'); }
 	else {
 		ok('real anonymous fetch parses a 2xx status', $status >= 200 && $status < 300);
@@ -222,12 +226,12 @@ try {
 	$fname = '_varprofiletest_' . $RUN . '.png';
 	$vb = new FileBlob(NULL);
 	$vb->set('fbb_stored_name', $fname); $vb->set('fbb_size_bytes', 10);
-	$vb->set('fbb_mime_type', 'image/png'); $vb->set('fbb_is_private', false);
+	$vb->set('fbb_mime_type', 'image/png'); $vb->set('fbb_is_private', true);
 	$vb->set('fbb_reference_count', 1); $vb->set('fbb_storage_driver', 'local');
 	$vb->save(); $created_blob_ids[] = $vb->key;
-	// A public blob's bytes live in the fast-serve dir. Place original + 2 of the
+	// A private blob's bytes live in the restricted dir. Place original + 2 of the
 	// 5 variants on disk (leave 'hero' absent), keyed on the stored name.
-	$paths = [$fast_dir . '/' . $fname, $fast_dir . '/avatar/' . $fname, $fast_dir . '/content/' . $fname];
+	$paths = [$upload_dir . '/' . $fname, $upload_dir . '/avatar/' . $fname, $upload_dir . '/content/' . $fname];
 	foreach ($paths as $p) { if (!is_dir(dirname($p))) @mkdir(dirname($p), 0777, true); file_put_contents($p, "png-bytes\n"); $file_disk_paths[] = $p; }
 	$fp = new BlobStorageProfile();
 	$fwd_items = $fp->itemsForRow((int)$vb->key);
@@ -265,15 +269,15 @@ try {
 	section('H. Time-budget bound');
 	harness_skip('TIME_BUDGET_SECONDS break', 'would require a 60s run or a production testability seam; verified by code review only');
 
-	section('I. persistSettings + setEnabled round-trip (public, snapshot-restore)');
+	section('I. persistSettings + setEnabled round-trip (snapshot-restore)');
 	// Read straight from the DB: persistSettings writes the row but (correctly)
 	// does not refresh the in-memory singleton — the admin flow redirects.
 	$read_enabled = function() use ($dblink) { $q = $dblink->query("SELECT stg_value FROM stg_settings WHERE stg_name='cloud_storage_enabled'"); return (string)$q->fetchColumn(); };
-	$persist = CloudStorageLifecycle::persistSettings($opts, 'public', null);
-	ok('persistSettings(public, same binding): ok', $persist['ok'] === true);
+	$persist = CloudStorageLifecycle::persistSettings($opts, null);
+	ok('persistSettings(same binding): ok', $persist['ok'] === true);
 	ok('persistSettings latched cloud_storage_enabled=1', $read_enabled() === '1');
-	CloudStorageLifecycle::setEnabled('public', false, null);
-	ok('setEnabled(public,false) wrote 0', $read_enabled() === '0');
+	CloudStorageLifecycle::setEnabled(false, null);
+	ok('setEnabled(false) wrote 0', $read_enabled() === '0');
 
 	section('J. Declarative registry + multi-profile guard-1 (on-disk, un-activated plugin)');
 	$pname = '_tmpstoragetest_' . $RUN;
@@ -288,7 +292,7 @@ try {
 		. "  public function driverColumn(): string { return 'drv'; }\n"
 		. "  public function failedCountColumn(): string { return 'failed'; }\n"
 		. "  public function lastAttemptColumn(): string { return 'last_attempt'; }\n"
-		. "  public function visibility(): string { return 'public'; }\n"
+		. "  public function visibility(): string { return 'private'; }\n"
 		. "  public function eligibilityWhere(): string { return ''; }\n"
 		. "  public function rowExists(int \$id): bool { return false; }\n"
 		. "  public function isEligibleRow(int \$id): bool { return false; }\n"
@@ -303,14 +307,20 @@ try {
 	StorageProfileRegistry::reset();
 	$classes = array_map('get_class', StorageProfileRegistry::all());
 	ok('registry sees on-disk profile from an UN-activated plugin (deactivation hole closed)', in_array($cls, $classes));
-	$pub_classes = array_map('get_class', StorageProfileRegistry::forVisibility('public'));
-	ok('registry groups it under its declared visibility', in_array($cls, $pub_classes) && in_array('BlobStorageProfile', $pub_classes));
+	ok('registry holds it beside the core profile', in_array('BlobStorageProfile', $classes));
+	$pub_cls = 'TmpPublicProfile_' . $RUN;
+	file_put_contents($temp_plugin_dir . '/includes/' . $pub_cls . '.php', str_replace([$cls, "'private'"], [$pub_cls, "'public'"], $class_src));
+	@chmod($temp_plugin_dir . '/includes/' . $pub_cls . '.php', 0666);
+	file_put_contents($temp_plugin_dir . '/plugin.json', json_encode(['name' => $pname, 'version' => '1.0.0', 'storage_profiles' => [$cls, $pub_cls]]));
+	StorageProfileRegistry::reset();
+	$classes = array_map('get_class', StorageProfileRegistry::all());
+	ok('registry refuses a declared profile that answers public', !in_array($pub_cls, $classes) && in_array($cls, $classes));
 
-	$baseline = CloudStorageLifecycle::cloudRowCount('public');
+	$baseline = CloudStorageLifecycle::cloudRowCount();
 	$dblink->exec("INSERT INTO $JTABLE (drv) VALUES ('cloud')");
-	$after = CloudStorageLifecycle::cloudRowCount('public');
+	$after = CloudStorageLifecycle::cloudRowCount();
 	ok('cloudRowCount sums across profiles (incl. the temp table)', $after === $baseline + 1);
-	$g1 = CloudStorageLifecycle::assertBindingMutable(['endpoint' => $opts['endpoint'], 'bucket' => 'a-different-bucket-' . $RUN], 'public');
+	$g1 = CloudStorageLifecycle::assertBindingMutable(['endpoint' => $opts['endpoint'], 'bucket' => 'a-different-bucket-' . $RUN]);
 	ok('guard-1 rejects bucket change while ANOTHER profile holds a cloud row', $g1['ok'] === false);
 
 } finally {

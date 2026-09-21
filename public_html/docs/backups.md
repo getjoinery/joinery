@@ -1288,7 +1288,7 @@ values kept; the separate **Test** button runs the same check on a saved
 target. A disabled target is saved untested, and enabling it is a save. The
 steps, in order, stopping where the rest would be meaningless:
 
-1. **Its own bucket.** Not the file store's public or private bucket
+1. **Its own bucket.** Not the file store's bucket
    (`BucketCheck::collision_step`, by name and endpoint host). Refused
    outright, before the network: one bucket for files and backups means one
    deletion or one public-read setting takes both.

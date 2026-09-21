@@ -24,6 +24,9 @@
  *   - the cloud storage test starts with the same two questions
  *
  * Run: php tests/backups/bucket_check_test.php
+ *
+ * @version 1.1 - one file store bucket, labelled "the file store"; the cloud storage check's steps
+ * @version 1.0
  */
 
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
@@ -72,16 +75,24 @@ check(BucketCheck::is_b2('https://s3.us-east-005.backblazeb2.com') && !BucketChe
 // ── collision, both directions ──────────────────────────────────────
 section('Its own bucket: the two sides refuse each other');
 
-$others = array(array('bucket' => 'shared', 'endpoint' => 'https://s3.example', 'label' => 'the public file store'));
+$others = array(array('bucket' => 'shared', 'endpoint' => 'https://s3.example', 'label' => 'the file store'));
 $s = BucketCheck::collision_step('shared', 'https://s3.example', $others, 'backups');
-check($s['status'] === 'fail' && strpos($s['message'], 'already the public file store') !== false && strpos($s['message'], 'private bucket for backups') !== false,
+check($s['status'] === 'fail' && strpos($s['message'], 'already the file store') !== false && strpos($s['message'], 'private bucket for backups') !== false,
 	'a backup target named after the file store bucket fails and says what to do', $s['message']);
 $s = BucketCheck::collision_step('other', 'https://s3.example', $others, 'backups');
 check($s['status'] === 'pass', 'another bucket passes');
 $others = array(array('bucket' => 'bk', 'endpoint' => '', 'label' => 'the backup target "Nightly"'));
 $s = BucketCheck::collision_step('bk', 'https://s3.example', $others, 'files');
-check($s['status'] === 'fail' && strpos($s['message'], 'already the backup target "Nightly"') !== false && strpos($s['message'], 'bucket for files') !== false,
+check($s['status'] === 'fail' && strpos($s['message'], 'already the backup target "Nightly"') !== false && strpos($s['message'], 'private bucket for files') !== false,
 	'a file store named after a backup bucket fails the other way round', $s['message']);
+
+section('The file store bucket is the one bucket, from the settings');
+harness_set_setting_mem('cloud_storage_endpoint', 'https://s3.example');
+harness_set_setting_mem('cloud_storage_bucket', '');
+check(BucketCheck::file_store_buckets() === array(), 'no bucket set: none');
+harness_set_setting_mem('cloud_storage_bucket', 'files');
+check(BucketCheck::file_store_buckets() === array(array('bucket' => 'files', 'endpoint' => 'https://s3.example', 'label' => 'the file store')),
+	'the one bucket, labelled the file store', json_encode(BucketCheck::file_store_buckets()));
 
 // ── the fixture ─────────────────────────────────────────────────────
 $fx = s3fx_start();
@@ -103,10 +114,10 @@ if ($fx === null) {
 	section('The file store bucket is refused before the network is touched');
 	$lists = s3fx_count($fx, 'list');
 	BucketCheck::$test_hooks = array('file_store_buckets' => function () use ($creds) {
-		return array(array('bucket' => 'bk', 'endpoint' => $creds['endpoint'], 'label' => 'the public file store'));
+		return array(array('bucket' => 'bk', 'endpoint' => $creds['endpoint'], 'label' => 'the file store'));
 	});
 	$r = TargetTester::test($make_target($creds));
-	check($r['success'] === false && strpos($r['message'], 'already the public file store') !== false, 'refused, naming the file store', $r['message']);
+	check($r['success'] === false && strpos($r['message'], 'already the file store') !== false, 'refused, naming the file store', $r['message']);
 	check($labels($r['steps']) === array('Its own bucket'), 'nothing after the first step ran', json_encode($labels($r['steps'])));
 	check(s3fx_count($fx, 'list') === $lists, 'no list call was made');
 
@@ -122,14 +133,15 @@ if ($fx === null) {
 		return array(array('bucket' => 'files', 'endpoint' => $creds['endpoint'], 'label' => 'the backup target "Nightly"'));
 	});
 	$r = CloudStorageLifecycle::testConnection(array('endpoint' => $creds['endpoint'], 'region' => 'r', 'bucket' => 'files',
-		'access_key' => 'k', 'secret_key' => 's', 'public_base_url' => ''), 'public');
+		'access_key' => 'k', 'secret_key' => 's'));
 	check($r['ok'] === false && $r['steps'][0]['label'] === 'Its own bucket' && $r['steps'][0]['status'] === 'fail'
 		&& strpos($r['steps'][0]['message'], 'the backup target "Nightly"') !== false, 'the file store is refused a backup bucket', json_encode($r['steps'][0]));
-	check(count($r['steps']) === 4 && $r['steps'][1]['status'] === 'skip' && $r['steps'][3]['status'] === 'skip', 'the network steps are skipped');
+	check($labels($r['steps']) === array('Its own bucket', 'Reach', 'Write', 'Private', 'Delete') && $labels($r['steps'], 'skip') === array('Reach', 'Write', 'Private', 'Delete'),
+		'the network steps are skipped', json_encode($labels($r['steps'])));
 	BucketCheck::$test_hooks = array('backup_target_buckets' => $no_store, 'is_b2' => true,
 		'b2_allowed' => function () { return array('capabilities' => array('listFiles', 'readFiles', 'writeFiles'), 'bucketName' => 'files'); });
 	$r = CloudStorageLifecycle::testConnection(array('endpoint' => $creds['endpoint'], 'region' => 'r', 'bucket' => 'files',
-		'access_key' => 'k', 'secret_key' => 's', 'public_base_url' => ''), 'private');
+		'access_key' => 'k', 'secret_key' => 's'));
 	check($r['ok'] === false && $step($r['steps'], 'File store key capabilities')['status'] === 'fail'
 		&& strpos($step($r['steps'], 'File store key capabilities')['message'], 'cannot deleteFiles') !== false,
 		'a file store key that cannot delete is refused before the network', json_encode($r['steps']));
@@ -183,7 +195,7 @@ if ($fx_wo === null) {
 // ── what Backblaze says a key may do ────────────────────────────────
 section('A Backblaze key: pinned elsewhere fails, account-wide warns, a missing capability fails');
 
-$others = array(array('bucket' => 'photos', 'endpoint' => 'https://s3.us-east-005.backblazeb2.com', 'label' => 'the public file store'));
+$others = array(array('bucket' => 'photos', 'endpoint' => 'https://s3.us-east-005.backblazeb2.com', 'label' => 'the file store'));
 $all = BucketCheck::B2_BACKUP_CAPABILITIES;
 BucketCheck::$test_hooks = array('b2_allowed' => function () use ($all) { return array('capabilities' => $all, 'bucketName' => 'elsewhere'); });
 $steps = BucketCheck::b2_key_steps(array('access_key' => 'k', 'secret_key' => 's'), 'bk', $all, 'main key', $others);
@@ -191,7 +203,7 @@ check($steps[0]['status'] === 'fail' && strpos($steps[0]['message'], 'made for t
 
 BucketCheck::$test_hooks = array('b2_allowed' => function () use ($all) { return array('capabilities' => $all, 'bucketName' => ''); });
 $steps = BucketCheck::b2_key_steps(array('access_key' => 'k', 'secret_key' => 's'), 'bk', $all, 'main key', $others);
-check($steps[0]['status'] === 'warn' && strpos($steps[0]['message'], 'opens every bucket on the account, including photos (the public file store)') !== false,
+check($steps[0]['status'] === 'warn' && strpos($steps[0]['message'], 'opens every bucket on the account, including photos (the file store)') !== false,
 	'an account-wide key warns and names the file store bucket it also opens', $steps[0]['message']);
 check($steps[1]['status'] === 'pass', 'with every capability, capabilities pass');
 

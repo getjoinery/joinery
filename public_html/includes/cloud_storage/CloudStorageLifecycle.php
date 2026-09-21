@@ -1,33 +1,37 @@
 <?php
 /**
- * CloudStorageLifecycle — the one shared admin lifecycle for offload stores.
+ * CloudStorageLifecycle — the one shared admin lifecycle for the file store.
  *
- * The relocated admin save/test/activate/health helpers, parameterized by
- * store (visibility) and profile. The storage layer holds the per-visibility
- * setting bindings, so the lifecycle resolves them from a visibility string.
- * It owns the binding-immutability guard:
+ * The admin save/test/activate/health helpers over the one store: a private
+ * bucket, one binding, every declared profile. It owns the
+ * binding-immutability guard:
  *
- *   Guard 1 (binding immutability): the (endpoint, bucket) identity of a store
- *   is immutable while that store holds any 'cloud' row — to switch, disable +
+ *   Guard 1 (binding immutability): the (endpoint, bucket) identity of the
+ *   store is immutable while it holds any 'cloud' row — to switch, disable +
  *   pull back to local first. Access-key rotation (same binding) stays allowed.
  *
- * testConnection branches on visibility for the read-policy assertion:
- *   public  → anonymous read must WORK.
- *   private → anonymous read must be DENIED (the privacy hard-gate). The probe
- *             is the sole sanctioned url() call on a private store.
+ * testConnection() is the Save check, in order, storing nothing on a fail:
+ * its own bucket and what the key may do (BucketCheck), reach, write, the
+ * privacy gate — an anonymous read of the probe must be DENIED; the probe is
+ * the sole sanctioned url() call — and delete.
  *
  * Offload is driven by ONE scheduled task (CloudOffloadRun) for the whole
- * platform. A store's direction each tick is its MODE — offload / drain / idle —
- * derived from the store's enabled latch + draining flag (modeForVisibility()).
+ * platform. The store's direction each tick is its MODE — offload / drain /
+ * idle — derived from the enabled latch + draining flag (mode()).
  * runOffloadTick() walks every declared profile (the registry) and dispatches
  * by mode, so a new consumer adds a StorageProfile and zero tasks. There is no
- * forward/reverse mutual-exclusion to enforce: a store has one mode per tick.
+ * forward/reverse mutual-exclusion to enforce: the store has one mode per tick.
  *
- * When two profiles share a table (the public and private File profiles share
- * fil_files), the binding-immutability count and health cloud-side counts scope
- * each store to its own rows via the profile's optional reverseEligibilityWhere()
- * ownership gate.
+ * A profile whose table also holds rows that are not its own (fbb_file_blobs
+ * holds public blobs, which never move) scopes the binding-immutability count
+ * and the health cloud-side counts to its own rows via its optional
+ * reverseEligibilityWhere() ownership gate.
  *
+ * @version 2.0 - one private store (specs/cloud_storage_private_only.md): testConnection() takes only
+ *                $opts and runs own bucket and key, reach, write, the privacy gate, delete; every
+ *                helper loses its visibility argument; _settings_map() writes provider, endpoint,
+ *                region, bucket, access key, secret key, enabled
+ * @version 1.8 - the public store's Save writes cloud_storage_provider beside the binding
  * @version 1.7 - health() counts carry pending_bytes and cloud_bytes where the profile names a size column
  * @version 1.6 - testConnection() first asks BucketCheck: the bucket is not a backup target's, and on
  *                Backblaze the key reaches this bucket and can list, read, write and delete
@@ -51,13 +55,21 @@ require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
 class CloudStorageLifecycle {
 
 	// ====================================================================
-	// Test connection — branches on visibility for the read-policy assertion.
-	// PUT/HEAD/DELETE probe mechanics are shared.
+	// The Save check: own bucket and key, reach, write, private, delete.
 	// ====================================================================
-	public static function testConnection(array $opts, string $visibility): array {
+	const STEP_REACH   = 'Reach';
+	const STEP_WRITE   = 'Write';
+	const STEP_PRIVATE = 'Private';
+	const STEP_DELETE  = 'Delete';
+
+	public static function testConnection(array $opts): array {
 		require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageS3Driver.php'));
 		$steps = [];
-		$ok = true;
+		$skip = function (array &$steps, array $labels) {
+			foreach ($labels as $label) {
+				$steps[] = ['label' => $label, 'status' => 'skip', 'message' => 'skipped (prior step failed)'];
+			}
+		};
 
 		// Step 0: its own bucket, and what the key may do. Decided before the
 		// network is touched: a bucket that already holds this site's backups
@@ -68,9 +80,7 @@ class CloudStorageLifecycle {
 		$own = BucketCheck::collision_step((string)($opts['bucket'] ?? ''), (string)($opts['endpoint'] ?? ''), $others, 'files');
 		$steps[] = $own;
 		if ($own['status'] === 'fail') {
-			$steps[] = ['label' => 'Reach + authenticate', 'status' => 'skip', 'message' => 'skipped (prior step failed)'];
-			$steps[] = ['label' => self::_read_label($visibility), 'status' => 'skip', 'message' => 'skipped (prior step failed)'];
-			$steps[] = ['label' => 'Delete', 'status' => 'skip', 'message' => 'skipped (prior step failed)'];
+			$skip($steps, [self::STEP_REACH, self::STEP_WRITE, self::STEP_PRIVATE, self::STEP_DELETE]);
 			return ['ok' => false, 'steps' => $steps];
 		}
 		if (BucketCheck::is_b2((string)($opts['endpoint'] ?? ''))) {
@@ -79,112 +89,64 @@ class CloudStorageLifecycle {
 				(string)($opts['bucket'] ?? ''), BucketCheck::B2_FILE_STORE_CAPABILITIES, 'file store key', $others);
 			foreach ($key_steps as $step) { $steps[] = $step; }
 			if (BucketCheck::failed($key_steps)) {
-				$steps[] = ['label' => 'Reach + authenticate', 'status' => 'skip', 'message' => 'skipped (prior step failed)'];
-				$steps[] = ['label' => self::_read_label($visibility), 'status' => 'skip', 'message' => 'skipped (prior step failed)'];
-				$steps[] = ['label' => 'Delete', 'status' => 'skip', 'message' => 'skipped (prior step failed)'];
+				$skip($steps, [self::STEP_REACH, self::STEP_WRITE, self::STEP_PRIVATE, self::STEP_DELETE]);
 				return ['ok' => false, 'steps' => $steps];
 			}
 		}
 
-		// Step 1: HeadBucket.
+		// Step 1: reach — the key can list the bucket.
 		try {
 			$driver = CloudStorageDriverFactory::fromOptions($opts);
 			$ping = $driver->ping();
 			if ($ping['ok']) {
-				$steps[] = ['label' => 'Reach + authenticate', 'status' => 'pass',
+				$steps[] = ['label' => self::STEP_REACH, 'status' => 'pass',
 					'message' => 'Reached and authenticated (' . htmlspecialchars($opts['endpoint']) . ')'];
 			} else {
-				$steps[] = ['label' => 'Reach + authenticate', 'status' => 'fail', 'message' => 'HeadBucket failed.', 'raw' => $ping['message']];
-				$steps[] = ['label' => self::_read_label($visibility), 'status' => 'skip', 'message' => 'skipped (prior step failed)'];
-				$steps[] = ['label' => 'Delete', 'status' => 'skip', 'message' => 'skipped (prior step failed)'];
+				$steps[] = ['label' => self::STEP_REACH, 'status' => 'fail', 'message' => 'The bucket could not be reached with this key.', 'raw' => $ping['message']];
+				$skip($steps, [self::STEP_WRITE, self::STEP_PRIVATE, self::STEP_DELETE]);
 				return ['ok' => false, 'steps' => $steps];
 			}
 		} catch (Exception $e) {
-			return ['ok' => false, 'steps' => [
-				['label' => 'Reach + authenticate', 'status' => 'fail', 'message' => 'Driver could not be constructed.', 'raw' => $e->getMessage()],
-				['label' => self::_read_label($visibility), 'status' => 'skip', 'message' => 'skipped (prior step failed)'],
-				['label' => 'Delete', 'status' => 'skip', 'message' => 'skipped (prior step failed)'],
-			]];
-		}
-
-		// Step 2: PUT scratch probe.
-		$probe_name = '_joinery_probe-' . bin2hex(random_bytes(4)) . '.txt';
-		$probe_local = sys_get_temp_dir() . '/' . $probe_name;
-		file_put_contents($probe_local, "joinery-cloud-storage-test\n");
-
-		$probe_pushed = false;
-		try {
-			$driver->put($probe_local, $probe_name, 'text/plain');
-			$probe_pushed = true;
-		} catch (Exception $e) {
-			$steps[] = ['label' => self::_read_label($visibility), 'status' => 'fail', 'message' => 'PUT to bucket failed.', 'raw' => $e->getMessage()];
-			@unlink($probe_local);
-			$steps[] = ['label' => 'Delete', 'status' => 'skip', 'message' => 'skipped (prior step failed)'];
+			$steps[] = ['label' => self::STEP_REACH, 'status' => 'fail', 'message' => 'Driver could not be constructed.', 'raw' => $e->getMessage()];
+			$skip($steps, [self::STEP_WRITE, self::STEP_PRIVATE, self::STEP_DELETE]);
 			return ['ok' => false, 'steps' => $steps];
 		}
 
-		// The bucket's direct URL for the probe — the exact URL a misconfigured
-		// public bucket would serve, fetched anonymously (no credentials).
-		$probe_url = $driver->url($probe_name);
-
-		if ($visibility === 'private') {
-			// PRIVACY HARD-GATE: anonymous read must be DENIED.
-			$verdict = self::privacyVerdict(self::_anonymous_status($probe_url));
-			if (!$verdict['pass']) {
-				$ok = false;
-			}
-			$steps[] = ['label' => 'Verify NOT publicly readable',
-				'status' => $verdict['pass'] ? 'pass' : 'fail',
-				'message' => $verdict['message'], 'raw' => $probe_url];
-		} else {
-			// PUBLIC: anonymous read must WORK (CDN markers inspected too).
-			$inspection = CloudStorageS3Driver::inspectPublicUrl($probe_url);
-			if (!$inspection['reachable']) {
-				$ok = false;
-				$steps[] = ['label' => 'Write + read public', 'status' => 'fail',
-					'message' => 'Public read of probe failed (HEAD did not return a response).', 'raw' => $probe_url];
-			} else {
-				$head_lines = @get_headers($probe_url);
-				$status_line = $head_lines && is_array($head_lines) ? $head_lines[0] : '';
-				if (preg_match('/\b(200|204)\b/', $status_line)) {
-					if ($inspection['cdn']) {
-						$detail = ' — ' . $inspection['cdn'] . ' detected (CDN egress).';
-					} elseif ($inspection['raw_provider']) {
-						$detail = ' — ' . $inspection['raw_provider'] . ' (egress warning applies).';
-					} else {
-						$detail = '';
-					}
-					$steps[] = ['label' => 'Write + read public', 'status' => 'pass', 'message' => 'Public read OK' . $detail,
-						'cdn' => $inspection['cdn'], 'raw_provider' => $inspection['raw_provider']];
-				} elseif (preg_match('/\b(401|403)\b/', $status_line, $code_m)) {
-					$steps[] = ['label' => 'Write + read public', 'status' => 'warn',
-						'message' => 'PUT OK; public read returned ' . $code_m[1] . '. Bucket appears to be private. Files served via the bucket URL will ' . $code_m[1] . ' to users until the bucket policy allows GetObject (or a CDN/proxy fronts the bucket).',
-						'raw' => $probe_url];
-				} else {
-					$ok = false;
-					$steps[] = ['label' => 'Write + read public', 'status' => 'fail',
-						'message' => 'Public read returned: ' . $status_line . '. Check the public base URL.', 'raw' => $probe_url];
-				}
-			}
+		// Step 2: write — a probe object lands.
+		$probe_name = '_joinery_probe-' . bin2hex(random_bytes(4)) . '.txt';
+		$probe_local = sys_get_temp_dir() . '/' . $probe_name;
+		file_put_contents($probe_local, "joinery-cloud-storage-test\n");
+		try {
+			$driver->put($probe_local, $probe_name, 'text/plain');
+			$steps[] = ['label' => self::STEP_WRITE, 'status' => 'pass', 'message' => 'A probe object was written.'];
+		} catch (Exception $e) {
+			@unlink($probe_local);
+			$steps[] = ['label' => self::STEP_WRITE, 'status' => 'fail', 'message' => 'The key cannot write to this bucket.', 'raw' => $e->getMessage()];
+			$skip($steps, [self::STEP_PRIVATE, self::STEP_DELETE]);
+			return ['ok' => false, 'steps' => $steps];
 		}
 
-		// Step 3: DELETE scratch probe.
-		if ($probe_pushed) {
-			try {
-				$driver->delete($probe_name);
-				$steps[] = ['label' => 'Delete', 'status' => 'pass', 'message' => 'Scratch probe deleted.'];
-			} catch (Exception $e) {
-				$steps[] = ['label' => 'Delete', 'status' => 'warn',
-					'message' => 'Credentials lack delete permission. permanent_delete and permission flips will fail until fixed.', 'raw' => $e->getMessage()];
-			}
+		// Step 3: private — the gate. The bucket's direct URL for the probe is
+		// the exact URL a public bucket would serve; it is fetched anonymously,
+		// no credentials, and a 2xx refuses the Save.
+		$ok = true;
+		$verdict = self::privacyVerdict(BucketCheck::anonymous_status($driver->url($probe_name)));
+		if (!$verdict['pass']) {
+			$ok = false;
+		}
+		$steps[] = ['label' => self::STEP_PRIVATE, 'status' => $verdict['pass'] ? 'pass' : 'fail', 'message' => $verdict['message']];
+
+		// Step 4: delete — the probe goes, so permanent delete and retention work.
+		try {
+			$driver->delete($probe_name);
+			$steps[] = ['label' => self::STEP_DELETE, 'status' => 'pass', 'message' => 'The probe object was deleted.'];
+		} catch (Exception $e) {
+			$steps[] = ['label' => self::STEP_DELETE, 'status' => 'warn',
+				'message' => 'The key cannot delete from this bucket. Permanent delete and permission flips will fail until it can.', 'raw' => $e->getMessage()];
 		}
 
 		@unlink($probe_local);
 		return ['ok' => $ok, 'steps' => $steps];
-	}
-
-	private static function _read_label(string $visibility): string {
-		return $visibility === 'private' ? 'Verify NOT publicly readable' : 'Write + read public';
 	}
 
 	/**
@@ -197,56 +159,46 @@ class CloudStorageLifecycle {
 	public static function privacyVerdict(int $status): array {
 		if ($status >= 200 && $status < 300) {
 			return ['pass' => false,
-				'message' => 'This bucket is publicly readable (anonymous GET returned ' . $status
-					. '); it cannot be used for private files. Make it private and re-test.'];
+				'message' => 'This bucket is publicly readable (an anonymous request got HTTP ' . $status
+					. '); it cannot hold private files. Make it private at the provider and save again.'];
 		}
-		$shown = $status > 0 ? (string)$status : 'connection refused';
-		return ['pass' => true, 'message' => 'Anonymous read denied (' . $shown . '). Bucket is private.'];
-	}
-
-	/**
-	 * Anonymous HTTP status for a URL — no credentials, no body. Returns the
-	 * numeric status, or 0 if the connection could not be made (refused/timeout).
-	 */
-	private static function _anonymous_status(string $url): int {
-		return BucketCheck::anonymous_status($url);
+		$shown = $status > 0 ? 'HTTP ' . $status : 'connection refused';
+		return ['pass' => true, 'message' => 'Nobody can read this bucket without a key (' . $shown . ').'];
 	}
 
 	// ====================================================================
 	// Guard 1 — binding immutability.
 	// ====================================================================
 	/**
-	 * Reject a Save that changes (endpoint, bucket) for a store that holds any
-	 * 'cloud' row (summed across that visibility's profiles). Same binding ⇒
-	 * key rotation allowed. Returns ['ok'=>true] or ['ok'=>false,'message'=>..].
+	 * Reject a Save that changes (endpoint, bucket) while the store holds any
+	 * 'cloud' row (summed across every profile). Same binding ⇒ key rotation
+	 * allowed. Returns ['ok'=>true] or ['ok'=>false,'message'=>..].
 	 */
-	public static function assertBindingMutable(array $opts, string $visibility): array {
-		$stored = CloudStorageDriverFactory::bindingFor($visibility);
+	public static function assertBindingMutable(array $opts): array {
+		$stored = CloudStorageDriverFactory::binding();
 		$same_endpoint = trim((string)($opts['endpoint'] ?? '')) === trim((string)$stored['endpoint']);
 		$same_bucket   = trim((string)($opts['bucket'] ?? ''))   === trim((string)$stored['bucket']);
 		if ($same_endpoint && $same_bucket) {
 			return ['ok' => true];
 		}
-		$cloud_rows = self::cloudRowCount($visibility);
+		$cloud_rows = self::cloudRowCount();
 		if ($cloud_rows > 0) {
 			return ['ok' => false,
-				'message' => 'This ' . $visibility . ' store holds ' . $cloud_rows
-					. ' offloaded object(s); pull them back to local before changing the endpoint or bucket.'];
+				'message' => 'The bucket holds ' . $cloud_rows
+					. ' offloaded file(s); pull them back to local before changing the endpoint or bucket.'];
 		}
 		return ['ok' => true];
 	}
 
 	/**
-	 * Sum of 'cloud' rows across every profile of a visibility. When several
-	 * profiles share a table (the public and private File profiles share
-	 * fil_files), each is scoped to the cloud rows physically in ITS bucket via
-	 * the optional reverseEligibilityWhere() ownership gate — so guard 1 counts
-	 * a store's own offloaded objects, not the other store's.
+	 * Sum of 'cloud' rows across every profile. A profile whose table also
+	 * holds rows that are not its own is scoped to the cloud rows that are, via
+	 * the optional reverseEligibilityWhere() ownership gate.
 	 */
-	public static function cloudRowCount(string $visibility): int {
+	public static function cloudRowCount(): int {
 		$dblink = DbConnector::get_instance()->get_db_link();
 		$total = 0;
-		foreach (StorageProfileRegistry::forVisibility($visibility) as $profile) {
+		foreach (StorageProfileRegistry::all() as $profile) {
 			$own = (method_exists($profile, 'reverseEligibilityWhere'))
 				? trim($profile->reverseEligibilityWhere()) : '';
 			$own_sql = $own !== '' ? " AND ($own)" : '';
@@ -260,58 +212,42 @@ class CloudStorageLifecycle {
 	}
 
 	// ====================================================================
-	// Persist settings — guard 1 first; latch the visibility's enabled flag.
+	// Persist settings — guard 1 first; latch the enabled flag.
 	// ====================================================================
-	public static function persistSettings(array $opts, string $visibility, $session): array {
-		$mutable = self::assertBindingMutable($opts, $visibility);
+	public static function persistSettings(array $opts, $session): array {
+		$mutable = self::assertBindingMutable($opts);
 		if (!$mutable['ok']) {
 			return ['ok' => false, 'message' => $mutable['message']];
 		}
-		$map = self::_settings_map($visibility, $opts);
-		self::_write_settings($map, $session);
+		self::_write_settings(self::_settings_map($opts), $session);
 		CloudStorageDriverFactory::reset();
 		return ['ok' => true];
 	}
 
-	/**
-	 * The setting map written for a store's Save. Public writes the full
-	 * binding + enables; private writes only its bucket + latches its enabled
-	 * flag (shared creds are owned by the public Save).
-	 */
-	private static function _settings_map(string $visibility, array $opts): array {
-		if ($visibility === 'private') {
-			return [
-				'cloud_storage_private_bucket'  => trim((string)($opts['bucket'] ?? '')),
-				'cloud_storage_private_enabled' => '1',
-			];
-		}
+	/** The setting map a Save writes: the binding, and the enabled latch. */
+	private static function _settings_map(array $opts): array {
 		return [
-			'cloud_storage_endpoint'        => $opts['endpoint'] ?? '',
-			'cloud_storage_region'          => $opts['region'] ?? '',
-			'cloud_storage_bucket'          => $opts['bucket'] ?? '',
-			'cloud_storage_access_key'      => $opts['access_key'] ?? '',
-			'cloud_storage_secret_key'      => $opts['secret_key'] ?? '',
-			'cloud_storage_public_base_url' => $opts['public_base_url'] ?? '',
-			'cloud_storage_enabled'         => '1',
+			'cloud_storage_provider'   => StorageProvider::normalise($opts['provider'] ?? ''),
+			'cloud_storage_endpoint'   => $opts['endpoint'] ?? '',
+			'cloud_storage_region'     => $opts['region'] ?? '',
+			'cloud_storage_bucket'     => $opts['bucket'] ?? '',
+			'cloud_storage_access_key' => $opts['access_key'] ?? '',
+			'cloud_storage_secret_key' => $opts['secret_key'] ?? '',
+			'cloud_storage_enabled'    => '1',
 		];
 	}
 
 	/**
-	 * Disable a store (pause / clear). Sets the visibility's enabled flag off,
-	 * and for a cleared private store also blanks its bucket. Used by the
-	 * pause / disable flows.
+	 * Set the enabled latch, with any other settings to write beside it (a
+	 * Remove blanks the binding). Used by the pause / disable / remove flows.
 	 */
-	public static function setEnabled(string $visibility, bool $enabled, $session, array $extra = []): void {
-		$map = [self::_enabled_setting($visibility) => $enabled ? '1' : '0'];
+	public static function setEnabled(bool $enabled, $session, array $extra = []): void {
+		$map = ['cloud_storage_enabled' => $enabled ? '1' : '0'];
 		foreach ($extra as $k => $v) {
 			$map[$k] = $v;
 		}
 		self::_write_settings($map, $session);
 		CloudStorageDriverFactory::reset();
-	}
-
-	private static function _enabled_setting(string $visibility): string {
-		return $visibility === 'private' ? 'cloud_storage_private_enabled' : 'cloud_storage_enabled';
 	}
 
 	private static function _write_settings(array $map, $session): void {
@@ -341,8 +277,8 @@ class CloudStorageLifecycle {
 	// ====================================================================
 	// Offload modes + the single offload tick.
 	//
-	// One scheduled task (CloudOffloadRun) drives every store. Each store's
-	// direction for a tick is its MODE, derived from store-level settings:
+	// One scheduled task (CloudOffloadRun) drives every profile. The store's
+	// direction for a tick is its MODE, derived from its settings:
 	//
 	//   offload — store enabled: push eligible local rows up to the bucket.
 	//   drain   — store disabled with the draining flag set (Disable-and-Pull):
@@ -350,25 +286,20 @@ class CloudStorageLifecycle {
 	//   idle    — store disabled, not draining (paused / never configured):
 	//             do nothing; existing cloud rows keep serving.
 	//
-	// A row can never ping-pong between local and cloud: a store has exactly one
-	// mode per tick, so the old forward/reverse mutual-exclusion is structural
-	// now rather than an enforced guard.
+	// A row can never ping-pong between local and cloud: the store has exactly
+	// one mode per tick, so forward/reverse mutual-exclusion is structural
+	// rather than an enforced guard.
 	// ====================================================================
 
 	const TICK_TASK = 'CloudOffloadRun';
 
-	/** Setting holding a store's draining flag. */
-	private static function _draining_setting(string $visibility): string {
-		return $visibility === 'private' ? 'cloud_storage_private_draining' : 'cloud_storage_draining';
-	}
-
-	/** A store's current offload mode: 'offload' | 'drain' | 'idle'. */
-	public static function modeForVisibility(string $visibility): string {
+	/** The store's current offload mode: 'offload' | 'drain' | 'idle'. */
+	public static function mode(): string {
 		$s = Globalvars::get_instance();
-		if ($s->get_setting(self::_enabled_setting($visibility))) {
+		if ($s->get_setting('cloud_storage_enabled')) {
 			return 'offload';
 		}
-		if ($s->get_setting(self::_draining_setting($visibility))) {
+		if ($s->get_setting('cloud_storage_draining')) {
 			return 'drain';
 		}
 		return 'idle';
@@ -379,30 +310,31 @@ class CloudStorageLifecycle {
 		self::_activate_task(self::TICK_TASK);
 	}
 
-	/** Begin draining a store back to local (Disable-and-Pull-Back). */
-	public static function startDrain(string $visibility, $session): void {
-		self::_write_settings([self::_draining_setting($visibility) => '1'], $session);
+	/** Begin draining the store back to local (Disable-and-Pull-Back). */
+	public static function startDrain($session): void {
+		self::_write_settings(['cloud_storage_draining' => '1'], $session);
 		CloudStorageDriverFactory::reset();
 		self::ensureTickActive();
 	}
 
-	/** Stop draining a store (drain finished, or store re-enabled). */
-	public static function stopDrain(string $visibility, $session): void {
-		self::_write_settings([self::_draining_setting($visibility) => '0'], $session);
+	/** Stop draining (drain finished, or store re-enabled). */
+	public static function stopDrain($session): void {
+		self::_write_settings(['cloud_storage_draining' => '0'], $session);
 		CloudStorageDriverFactory::reset();
 	}
 
 	/**
-	 * The single offload tick: drive every declared store by its mode. Offload
-	 * stores push local→cloud; draining stores pull cloud→local and, once their
-	 * cloud rows reach zero, clear their draining flag. Self-deactivates when no
-	 * store is offloading or draining, so an idle platform runs nothing.
+	 * The single offload tick: drive every declared profile by the store's
+	 * mode. Offload pushes local→cloud; drain pulls cloud→local and, once the
+	 * cloud rows reach zero, clears the draining flag. Self-deactivates when
+	 * the store is neither offloading nor draining and no offloaded file
+	 * remains, so an idle platform runs nothing.
 	 */
 	public static function runOffloadTick(): array {
 		$msgs = [];
 		$had_error = false;
+		$mode = self::mode();
 		foreach (StorageProfileRegistry::all() as $profile) {
-			$mode = self::modeForVisibility($profile->visibility());
 			if ($mode === 'offload') {
 				$r = CloudOffloadEngine::syncBatch($profile);
 			} elseif ($mode === 'drain') {
@@ -411,22 +343,16 @@ class CloudStorageLifecycle {
 				continue;
 			}
 			if (($r['status'] ?? '') === 'error') $had_error = true;
-			$msgs[] = $profile->visibility() . '/' . get_class($profile) . ': ' . ($r['message'] ?? '');
+			$msgs[] = get_class($profile) . ': ' . ($r['message'] ?? '');
 		}
 
-		// A store finishes draining when no cloud rows remain across its profiles.
-		$in_motion = false;
-		$cloud_rows = 0;
-		foreach (['public', 'private'] as $visibility) {
-			$rows = self::cloudRowCount($visibility);
-			$cloud_rows += $rows;
-			$mode = self::modeForVisibility($visibility);
-			if ($mode === 'drain' && $rows === 0) {
-				self::stopDrain($visibility, null);
-				$mode = 'idle';
-			}
-			if ($mode !== 'idle') $in_motion = true;
+		// The store finishes draining when no cloud rows remain across every profile.
+		$cloud_rows = self::cloudRowCount();
+		if ($mode === 'drain' && $cloud_rows === 0) {
+			self::stopDrain(null);
+			$mode = 'idle';
 		}
+		$in_motion = ($mode !== 'idle');
 
 		// While any offloaded file exists, the daily file-store check takes its
 		// slice: every offloaded file HEADed once a day, the ones the bucket
@@ -446,8 +372,8 @@ class CloudStorageLifecycle {
 
 		if (!$msgs) {
 			$msgs[] = $cloud_rows > 0
-				? 'no store offloading or draining; ' . number_format($cloud_rows) . ' offloaded file' . ($cloud_rows === 1 ? '' : 's') . ' under the daily check'
-				: 'no store offloading or draining';
+				? 'not offloading or draining; ' . number_format($cloud_rows) . ' offloaded file' . ($cloud_rows === 1 ? '' : 's') . ' under the daily check'
+				: 'not offloading or draining';
 		}
 		$out = [
 			'status'  => $had_error ? 'error' : 'success',
@@ -512,9 +438,9 @@ class CloudStorageLifecycle {
 		}
 		$h['cron'] = ['ok' => $cron_ok, 'last' => $last_cron];
 
-		// Driver ping for this store's visibility (only if usable).
+		// Driver ping (only if the store is usable).
 		$h['driver'] = null;
-		$driver = CloudStorageDriverFactory::forVisibility($profile->visibility());
+		$driver = CloudStorageDriverFactory::driver();
 		if ($driver) {
 			try {
 				$start = microtime(true);
@@ -526,10 +452,9 @@ class CloudStorageLifecycle {
 			}
 		}
 
-		// Offload task status. One CloudOffloadRun tick drives every store, so
-		// both the sync line and (when this store is draining) the pull-back box
-		// read the same task row. reverse_task is populated only while THIS
-		// store's mode is 'drain', preserving the admin view's per-store display.
+		// Offload task status. One CloudOffloadRun tick drives every profile, so
+		// both the sync line and (while draining) the pull-back box read the
+		// same task row. reverse_task is populated only while the mode is 'drain'.
 		$h['sync_task'] = null;
 		$h['reverse_task'] = null;
 		$tick = null;
@@ -546,7 +471,7 @@ class CloudStorageLifecycle {
 				'last_message' => $tick->get('sct_last_run_message'),
 			];
 			$h['sync_task'] = $status;
-			if (self::modeForVisibility($profile->visibility()) === 'drain') {
+			if (self::mode() === 'drain') {
 				$h['reverse_task'] = $status;
 			}
 		}
@@ -556,9 +481,9 @@ class CloudStorageLifecycle {
 		$h['counts'] = ['pending' => 0, 'cloud' => 0, 'stuck' => 0, 'migrated_this_week' => 0, 'pending_bytes' => 0, 'cloud_bytes' => 0];
 		$gate = trim($profile->eligibilityWhere());
 		$gate_sql = $gate !== '' ? " AND ($gate)" : '';
-		// Cloud-side counts are scoped to this store's own rows when the table is
-		// shared (public/private File profiles share fil_files), so a store's
-		// health reflects only the objects in its bucket.
+		// Cloud-side counts are scoped to the profile's own rows when its table
+		// also holds rows that are not its own, so the figures are the objects
+		// in the bucket.
 		$own = (method_exists($profile, 'reverseEligibilityWhere'))
 			? trim($profile->reverseEligibilityWhere()) : '';
 		$own_sql = $own !== '' ? " AND ($own)" : '';

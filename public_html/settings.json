@@ -973,26 +973,86 @@
       "helptext": "DEAD. No reader. Comment spam control is use_captcha_comments. Declared so the surviving row is not an orphan. Safe to purge."
     },
     {
-      "name": "cloud_storage_access_key",
+      "name": "cloud_storage_provider",
+      "default": "generic",
+      "group": "cloud_storage",
+      "label": "Provider",
+      "type": "select",
+      "options_from": "StorageProvider::options",
+      "helptext": "Only the fields the provider needs are shown. Generic fits MinIO and any other S3 compatible service."
+    },
+    {
+      "name": "cloud_storage_endpoint",
       "default": "",
       "group": "cloud_storage",
-      "label": "Access key",
-      "helptext": "A key for this bucket only, with list, read, write and delete. Backblaze: listFiles, readFiles, writeFiles, deleteFiles. Amazon: s3:ListBucket, s3:GetObject, s3:PutObject, s3:DeleteObject.",
-      "type": "text"
+      "label": "Endpoint hostname",
+      "type": "text",
+      "helptext": "The provider's S3 hostname, with or without https://.",
+      "show_when": {
+        "cloud_storage_provider": [
+          "generic",
+          "r2"
+        ]
+      }
+    },
+    {
+      "name": "cloud_storage_region",
+      "default": "",
+      "group": "cloud_storage",
+      "label": "Region",
+      "type": "text",
+      "helptext": "What the provider calls the bucket's region or datacenter.",
+      "show_when": {
+        "cloud_storage_provider": [
+          "generic",
+          "s3",
+          "wasabi",
+          "digitalocean",
+          "linode"
+        ]
+      }
     },
     {
       "name": "cloud_storage_bucket",
       "default": "",
       "group": "cloud_storage",
       "label": "Bucket name",
-      "helptext": "A public bucket used for nothing else. Not the backup bucket.",
-      "type": "text"
+      "type": "text",
+      "helptext": "A private bucket used for nothing else. Not the backup bucket. Save refuses a bucket anyone can read."
+    },
+    {
+      "name": "cloud_storage_access_key",
+      "default": "",
+      "group": "cloud_storage",
+      "label": "Access key",
+      "type": "text",
+      "helptext": "A key for this bucket only, with list, read, write and delete. Backblaze: listFiles, readFiles, writeFiles, deleteFiles. Amazon: s3:ListBucket, s3:GetObject, s3:PutObject, s3:DeleteObject."
+    },
+    {
+      "name": "cloud_storage_secret_key",
+      "default": "",
+      "secret": true,
+      "group": "cloud_storage",
+      "label": "Secret key",
+      "helptext": "Rotate it with the bucket provider if you suspect it has been exposed."
+    },
+    {
+      "name": "cloud_storage_public_base_url",
+      "default": "",
+      "managed": true,
+      "helptext": "DEAD. No reader. Nothing is read from the file store by URL. Declared so a surviving row is not an orphan. Safe to purge."
+    },
+    {
+      "name": "cloud_storage_private_bucket",
+      "default": "",
+      "managed": true,
+      "helptext": "DEAD. No reader. The file store is one private bucket, cloud_storage_bucket. Declared so a surviving row is not an orphan. Safe to purge."
     },
     {
       "name": "cloud_storage_draining",
       "default": "0",
       "managed": true,
-      "helptext": "Written by the cloud storage page. Set while files are being moved back off the public bucket."
+      "helptext": "Written by the cloud storage page. Set while files are being moved back off the bucket."
     },
     {
       "name": "cloud_storage_enabled",
@@ -1007,56 +1067,16 @@
       "helptext": "Written by the offload tick's daily file-store check: which offloaded files the file bucket could not serve, when it last looked, and what the last Bring them back did. JSON; read by the cloud storage and Backups pages."
     },
     {
-      "name": "cloud_storage_endpoint",
-      "default": "",
-      "group": "cloud_storage",
-      "label": "Endpoint hostname",
-      "type": "text",
-      "helptext": "For example s3.us-west-002.backblazeb2.com or s3.amazonaws.com. With or without https://."
-    },
-    {
-      "name": "cloud_storage_private_bucket",
-      "default": "",
-      "helptext": "A second bucket on the same account, sharing the endpoint, region and keys above. On save it is tested to confirm anonymous reads are denied before anything is stored there. Leave empty for no private store.",
-      "group": "cloud_storage",
-      "label": "Private bucket name",
-      "type": "text"
-    },
-    {
       "name": "cloud_storage_private_draining",
       "default": "0",
       "managed": true,
-      "helptext": "Written by the cloud storage page. Set while files are being moved back off the private bucket."
+      "helptext": "DEAD. No reader. cloud_storage_draining is the one drain flag. Declared so a surviving row is not an orphan. Safe to purge."
     },
     {
       "name": "cloud_storage_private_enabled",
       "default": "0",
       "managed": true,
-      "helptext": "Written by the cloud storage page once the private bucket is confirmed to deny anonymous reads."
-    },
-    {
-      "name": "cloud_storage_public_base_url",
-      "default": "",
-      "group": "cloud_storage",
-      "label": "Public base URL",
-      "type": "text",
-      "helptext": "Leave empty to derive it from the endpoint and bucket. Set it when a CDN fronts the bucket, e.g. https://cdn.example.com."
-    },
-    {
-      "name": "cloud_storage_region",
-      "default": "",
-      "group": "cloud_storage",
-      "label": "Region",
-      "type": "text",
-      "helptext": "For example us-east-1 or us-west-002. Auto-fills from the endpoint where the endpoint says."
-    },
-    {
-      "name": "cloud_storage_secret_key",
-      "default": "",
-      "secret": true,
-      "group": "cloud_storage",
-      "label": "Secret key",
-      "helptext": "Rotate it with the bucket provider if you suspect it has been exposed."
+      "helptext": "DEAD. No reader. cloud_storage_enabled is the one latch. Declared so a surviving row is not an orphan. Safe to purge."
     },
     {
       "name": "cookie_consent_mode",

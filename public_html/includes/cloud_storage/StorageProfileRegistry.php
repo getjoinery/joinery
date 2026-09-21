@@ -5,9 +5,13 @@
  * Profiles are declared, not self-registered at runtime, so the registry sees
  * them regardless of whether the owning plugin is active — matching how the
  * platform already declares plugin settings and menus. This is what lets the
- * lifecycle and guard 1 operate over "every profile of a given visibility":
- * a deactivated plugin leaves its files (and so its declaration and class) on
- * disk, so the guard can still see its cloud rows.
+ * lifecycle and guard 1 operate over every profile: a deactivated plugin
+ * leaves its files (and so its declaration and class) on disk, so the guard
+ * can still see its cloud rows.
+ *
+ * The bucket is private and holds private things only, so a profile whose
+ * visibility() is not 'private' is refused here: logged and left out. A
+ * consumer cannot opt a public set into the bucket by declaring one.
  *
  *   - Core profiles  → listed in storage_profiles.json at the public_html root,
  *                      class file at includes/cloud_storage/<ClassName>.php.
@@ -19,6 +23,7 @@
  * instantiated profile's visibility(), never the manifest. Implementations
  * must have a no-argument constructor.
  *
+ * @version 1.1 - all() refuses a profile that is not private; forVisibility() is gone, there is one store
  * @version 1.0
  */
 
@@ -30,9 +35,10 @@ class StorageProfileRegistry {
 	private static $profiles = null;
 
 	/**
-	 * All declared, instantiable profiles (core + every plugin on disk,
-	 * active or not). A declared class that cannot be loaded or instantiated
-	 * is logged and skipped — one bad declaration never blanks the registry.
+	 * All declared, instantiable, private profiles (core + every plugin on
+	 * disk, active or not). A declared class that cannot be loaded or
+	 * instantiated, or that does not answer 'private', is logged and skipped —
+	 * one bad declaration never blanks the registry.
 	 *
 	 * @return StorageProfile[]
 	 */
@@ -57,22 +63,6 @@ class StorageProfileRegistry {
 		}
 
 		return array_values(self::$profiles);
-	}
-
-	/**
-	 * Profiles whose visibility() matches $visibility — the set the storage
-	 * layer treats as a single store.
-	 *
-	 * @return StorageProfile[]
-	 */
-	public static function forVisibility(string $visibility): array {
-		$out = [];
-		foreach (self::all() as $profile) {
-			if ($profile->visibility() === $visibility) {
-				$out[] = $profile;
-			}
-		}
-		return $out;
 	}
 
 	/** Clear the cache (tests after declaring a new profile on disk). */
@@ -122,6 +112,10 @@ class StorageProfileRegistry {
 			$instance = new $class();
 			if (!($instance instanceof StorageProfile)) {
 				error_log('StorageProfileRegistry: ' . $class . ' does not implement StorageProfile');
+				return;
+			}
+			if ($instance->visibility() !== 'private') {
+				error_log('StorageProfileRegistry: ' . $class . ' refused — the file store holds private things only, and it answers visibility() "' . $instance->visibility() . '"');
 				return;
 			}
 			self::$profiles[$class] = $instance;

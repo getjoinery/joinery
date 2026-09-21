@@ -16,8 +16,8 @@
  *   - a pass is taken a slice per tick, leaving a cursor, and a row that
  *     recovers between slices leaves the list
  *   - a bucket that does not answer its ping stalls the tick and names nothing
- *     missing; a HEAD that says absent is asked twice; a visibility with no
- *     store is counted as unchecked
+ *     missing; a HEAD that says absent is asked twice; with no store
+ *     configured every row is counted as unchecked
  *   - the summary counts how many of the missing a backup storage holds, and the
  *     sentence reads the way the pages say it
  *   - a Bring them back's names leave the missing list; the panel renders the
@@ -27,6 +27,9 @@
  * bucket are fixtures.
  *
  * Run: php tests/cloud_storage/store_inventory_test.php
+ *
+ * @version 1.1 - one file store: one driver, rows carry no visibility
+ * @version 1.0
  */
 
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
@@ -40,20 +43,18 @@ require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStoreInvent
 require_once(PathHelper::getIncludePath('includes/BackupObjectRestoreLauncher.php'));
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
-// Seven cloud rows: five public, two private. The public bucket lacks b.jpg,
-// holds e.bin at the wrong size; the private bucket has both of its files.
+// Seven cloud rows. The bucket lacks b.jpg and holds e.bin at the wrong size.
 $rows = array();
-$mk = function ($id, $name, $vis, $size) use (&$rows) {
-	$rows[] = array('id' => $id, 'name' => $name, 'remote_key' => $name, 'visibility' => $vis, 'size' => $size);
+$mk = function ($id, $name, $size) use (&$rows) {
+	$rows[] = array('id' => $id, 'name' => $name, 'remote_key' => $name, 'size' => $size);
 };
-$mk(10, 'a.jpg', 'public', 11); $mk(20, 'b.jpg', 'public', 22); $mk(30, 'c.pdf', 'public', 33);
-$mk(40, 'p1.eml', 'private', 44); $mk(50, 'd.png', 'public', 55); $mk(60, 'p2.eml', 'private', 66); $mk(70, 'e.bin', 'public', 77);
+$mk(10, 'a.jpg', 11); $mk(20, 'b.jpg', 22); $mk(30, 'c.pdf', 33);
+$mk(40, 'p1.eml', 44); $mk(50, 'd.png', 55); $mk(60, 'p2.eml', 66); $mk(70, 'e.bin', 77);
 
-$public = new InMemoryBlobDriver();
-$public->objects = array('a.jpg' => str_repeat('a', 11), 'c.pdf' => str_repeat('c', 33), 'd.png' => str_repeat('d', 55), 'e.bin' => 'short');
-$private = new InMemoryBlobDriver();
-$private->objects = array('p1.eml' => str_repeat('p', 44), 'p2.eml' => str_repeat('q', 66));
-$drivers = array('public' => $public, 'private' => $private);
+$store = new InMemoryBlobDriver();
+$store->objects = array('a.jpg' => str_repeat('a', 11), 'c.pdf' => str_repeat('c', 33), 'd.png' => str_repeat('d', 55), 'e.bin' => 'short',
+	'p1.eml' => str_repeat('p', 44), 'p2.eml' => str_repeat('q', 66));
+$driver = $store;
 
 CloudStoreInventory::$test_hooks = array(
 	'record' => array(),
@@ -62,7 +63,7 @@ CloudStoreInventory::$test_hooks = array(
 		foreach ($rows as $r) { if ($r['id'] > $after) { $out[] = $r; } }
 		return array_slice($out, 0, $limit);
 	},
-	'driver' => function ($vis) use (&$drivers) { return $drivers[$vis] ?? null; },
+	'driver' => function () use (&$driver) { return $driver; },
 );
 harness_defer(function () { CloudStoreInventory::$test_hooks = array('record' => array()); });
 $record = function () { return CloudStoreInventory::read(); };
@@ -79,8 +80,8 @@ check($rec['pass'] === null && is_array($rec['last']), 'the pass is over; the re
 check(array_keys($rec['last']['missing']) === array('b.jpg', 'e.bin'), 'b.jpg (absent) and e.bin (wrong size) are missing', json_encode(array_keys($rec['last']['missing'])));
 check($rec['last']['missing']['b.jpg']['reason'] === CloudStoreInventory::REASON_ABSENT
 	&& $rec['last']['missing']['e.bin']['reason'] === CloudStoreInventory::REASON_SIZE
-	&& $rec['last']['missing']['b.jpg']['id'] === 20 && $rec['last']['missing']['b.jpg']['visibility'] === 'public',
-	'each carries its reason, id and visibility', json_encode($rec['last']['missing']));
+	&& $rec['last']['missing']['b.jpg']['id'] === 20 && $rec['last']['missing']['b.jpg']['size'] === 22,
+	'each carries its reason, id and size', json_encode($rec['last']['missing']));
 check($rec['last']['checked'] === 7 && $rec['last']['unchecked'] === 0 && $rec['last']['finished'] === '2026-09-21 03:00:00', 'counts and the time', json_encode($rec['last']));
 check(strpos(json_encode($rec), 'secret') === false && strpos(json_encode($rec), 'key') === false, 'the record carries names and counts only');
 
@@ -95,7 +96,7 @@ check(CloudStoreInventory::due($record(), strtotime('2026-09-22 03:00:00 UTC')),
 // ─────────────────────────────────────────────────────────────────────────────
 section('A pass in slices, with a cursor');
 
-$public->objects['b.jpg'] = str_repeat('b', 22);   // b.jpg is back; e.bin still short
+$store->objects['b.jpg'] = str_repeat('b', 22);   // b.jpg is back; e.bin still short
 $r = CloudStoreInventory::tick('2026-09-22 03:00:00', 60, 3);
 check($r['status'] === 'running' && $r['checked'] === 3, 'a tick that may check three checks three and leaves a cursor', json_encode($r));
 $rec = $record();
@@ -125,12 +126,12 @@ section('A bucket that will not answer names nothing missing');
 $mute = new class extends InMemoryBlobDriver {
 	public function ping(): array { return array('ok' => false, 'message' => 'timed out'); }
 };
-$drivers['public'] = $mute;
+$driver = $mute;
 $r = CloudStoreInventory::tick('2026-09-22 04:01:00', 60);
-check($r['status'] === 'waiting' && strpos($r['message'], 'public file store did not answer') !== false, 'the tick waits and says which store', json_encode($r));
+check($r['status'] === 'waiting' && strpos($r['message'], 'the file store did not answer') !== false, 'the tick waits and says so', json_encode($r));
 $rec = $record();
 check(is_array($rec['pass']) && $rec['pass']['cursor'] === 0 && $rec['pass']['missing'] === array(), 'nothing was checked and nothing called missing', json_encode($rec['pass']));
-$drivers['public'] = $public;
+$driver = $store;
 
 // Absent is asked twice before it counts.
 $flaky = new class extends InMemoryBlobDriver {
@@ -141,32 +142,39 @@ $flaky = new class extends InMemoryBlobDriver {
 		return parent::head($remote_key);
 	}
 };
-$flaky->objects = $public->objects;
-$drivers['public'] = $flaky;
+$flaky->objects = $store->objects;
+$driver = $flaky;
 $r = CloudStoreInventory::tick('2026-09-22 04:02:00', 60);
 check($r['status'] === 'finished', 'the pass finishes', json_encode($r));
 $rec = $record();
 check(array_keys($rec['last']['missing']) === array('e.bin') && $flaky->asked['a.jpg'] === 2 && $flaky->asked['e.bin'] === 2,
 	'a first "absent" is asked again; only the file the bucket really lacks or holds wrong is missing', json_encode($flaky->asked));
-$drivers['public'] = $public;
+$driver = $store;
 
-// A visibility with no store configured cannot be checked, and is counted.
-$drivers['private'] = null;
+// With no store configured nothing can be checked, and every row is counted.
+$driver = null;
 $rec = $record(); $rec['last']['finished'] = '2026-09-20 00:00:00'; CloudStoreInventory::write($rec);
 $r = CloudStoreInventory::tick('2026-09-22 05:00:00', 60);
 $rec = $record();
-check($r['status'] === 'finished' && $rec['last']['checked'] === 5 && $rec['last']['unchecked'] === 2, 'two private rows are unchecked, five checked', json_encode($rec['last']));
-check(strpos($r['message'], '2 not checked (no store configured for them)') !== false, 'and the line says so', $r['message']);
-$drivers['private'] = $private;
+check($r['status'] === 'finished' && $rec['last']['checked'] === 0 && $rec['last']['unchecked'] === 7, 'all seven rows are unchecked', json_encode($rec['last']));
+check(strpos($r['message'], '7 not checked (no store configured)') !== false, 'and the line says so', $r['message']);
+$html = CloudStoreInventoryPanel::render(CloudStoreInventory::summary($rec, array()), CloudStoreInventoryPanel::SOURCE_SITE, '/admin/admin_backups');
+check(strpos($html, '7 could not be checked (no store is configured)') !== false, 'the panel says how many could not be checked', $html);
+$driver = $store;
+
+// The store back: a full pass again, so the later sections read a checked one.
+$rec = $record(); $rec['last']['finished'] = '2026-09-20 00:00:00'; CloudStoreInventory::write($rec);
+$r = CloudStoreInventory::tick('2026-09-22 05:30:00', 60);
+check($r['status'] === 'finished' && $record()['last']['checked'] === 7, 'with the store back every row is checked', json_encode($r));
 
 // ─────────────────────────────────────────────────────────────────────────────
 section('The summary and the sentence');
 
 $rec = $record();
 $rec['last']['missing'] = array(
-	'b.jpg' => array('id' => 20, 'visibility' => 'public', 'size' => 22, 'reason' => 'absent'),
-	'e.bin' => array('id' => 70, 'visibility' => 'public', 'size' => 77, 'reason' => 'size'),
-	'p2.eml' => array('id' => 60, 'visibility' => 'private', 'size' => 66, 'reason' => 'absent'),
+	'b.jpg' => array('id' => 20, 'size' => 22, 'reason' => 'absent'),
+	'e.bin' => array('id' => 70, 'size' => 77, 'reason' => 'size'),
+	'p2.eml' => array('id' => 60, 'size' => 66, 'reason' => 'absent'),
 );
 $held = array('site' => array('b.jpg' => array('epoch' => 'epoch-20260901_000000'), 'a.jpg' => array()), 'manager' => array('p2.eml' => array()));
 $s = CloudStoreInventory::summary($rec, $held);
@@ -224,7 +232,7 @@ $html = CloudStoreInventoryPanel::render($s, CloudStoreInventoryPanel::SOURCE_SI
 check(strpos($html, '1 offloaded file is missing from the file store; the backup holds it.') !== false, 'the sentence is in the panel');
 check(strpos($html, 'name="action" value="bring_back_objects"') !== false && strpos($html, '>Bring them back<') !== false
 	&& strpos($html, 'action="/admin/admin_backups"') !== false, 'a site with its own backup storage gets the button, posting to the page it is on');
-check(strpos($html, 'Checked 5 offloaded files in the file store 2026-09-22 05:00 UTC') !== false, 'when it last looked');
+check(strpos($html, 'Checked 7 offloaded files in the file store 2026-09-22 05:30 UTC') !== false, 'when it last looked');
 $html = CloudStoreInventoryPanel::render($s, CloudStoreInventoryPanel::SOURCE_MANAGER, '/admin/admin_backups', 'https://manager.example');
 check(strpos($html, 'bring_back_objects') === false && strpos($html, 'https://manager.example') !== false
 	&& strpos($html, 'on its Backups tab') !== false, 'a managed site is told the management node runs it, by URL, with no button');

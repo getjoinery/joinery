@@ -967,7 +967,7 @@ never overwritten.
 | `type` | No | `text` | `text`, `number`, `checkbox`, `select`, `password`, `textarea`. |
 | `options` / `options_from` | For `select` | — | Literal `value: label` map, or `Class::method` returning one. `options_from` needs `options_include` unless the class is core. |
 | `validation` | No | — | A FormWriter rule array, verbatim. Enforced on every write path. |
-| `show_when` | No | — | `{ "other_setting": "value" }` — reveals this field when that setting has that value. |
+| `show_when` | No | — | `{ "other_setting": "value" }` — reveals this field when that setting has that value; a list of values reveals it for any one of them. |
 | `secret` | No | `false` | A credential: never emits its stored value, a blank submission keeps it, and a Clear checkbox beside it wipes it. |
 | `vault_gated` | No | `false` | Changing it requires an open vault unlock window. |
 | `managed` | No | `false` | Machine-written. Never rendered. Mutually exclusive with `label`. |

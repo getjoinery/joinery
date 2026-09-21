@@ -3,13 +3,18 @@
  * Cloud Storage Admin Page
  *
  * Health status block at top. Then the store in one of three shapes: the setup
- * form when nothing is configured; what is stored, read-only, with Pause or
+ * form when nothing is configured, headed by a provider picker that shows only
+ * the fields the provider needs (StorageProvider); what is stored, read-only, with Pause or
  * Enable, Disable and Pull Files Back to Local, and Remove as the state
- * allows; and a form for what may change — only the key, the public URL and
- * the private bucket while files are in the bucket, everything otherwise.
- * Save runs the bucket and key check and persists only when it passes.
- * Carries the private store's privacy-gate results and its own pull-back.
+ * allows; and a form for what may change — only the key while files are in
+ * the bucket, everything otherwise. Save runs the bucket and key check, the
+ * privacy gate among its steps, and persists only when it passes.
  *
+ * @version 2.0 - one private store (specs/cloud_storage_private_only.md): the intro says what moves;
+ *                the forms draw provider, endpoint, region, bucket and the key; the private-store lines,
+ *                the second pull-back, the egress banner and the pre-save confirm are gone
+ * @version 1.7 - the provider picker heads the form; the endpoint and region fields show only for
+ *                a provider that asks for them, and the script fills each field's example and help
  * @version 1.6 - the store's three shapes; locked fields shown, not edited; Enable and Remove; the
  *                Status box is one state sentence plus lines only for what needs attention
  * @version 1.5 - the Status box says what waits on this server for a backup before its local copy is
@@ -43,10 +48,11 @@ $page->admin_header(array(
 // =====================================================
 // One sentence for the state, with every healthy figure folded into it, under
 // the traffic light. A coloured box only for a problem or a warning. Nothing
-// for an absence: a driver that answers, a task whose last run succeeded, a private
-// store nobody configured, say nothing here.
+// for an absence: a driver that answers, a task whose last run succeeded, say
+// nothing here.
 echo '<p style="max-width: 800px; margin-bottom: 16px;">If your Joinery is running out of disk space, you can add a storage bucket below and Joinery will intelligently offload files to the bucket. '
-	. 'Those files will be accessible just like locally, but you\'ll pay for storage and transfer according to your bucket provider\'s policies.</p>';
+	. 'Those files will be accessible just like locally, but you\'ll pay for storage and transfer according to your bucket provider\'s policies. '
+	. 'Only files people must be signed in to see move: private uploads, Drive files and inbound mail. Public images and downloads stay on this server, so nothing on a page is served from the bucket.</p>';
 
 $page->begin_box(array('title' => 'Status'));
 
@@ -112,23 +118,6 @@ $same_account = $configured ? BackupObjectsStatus::same_account_line($objects_st
 if ($same_account !== '') {
 	$warn(htmlspecialchars($same_account));
 }
-$private_cloud = (int)($private_status['cloud_count'] ?? 0);
-if (!empty($private_status['enabled'])) {
-	$info('<strong>Private bucket:</strong> ' . $files($private_cloud) . '.');
-} elseif (!empty($private_status['configured'])) {
-	$warn('<strong>Private bucket</strong> is set but not yet proven private. Save runs the check.');
-}
-if (!empty($private_status['enabled']) || $private_cloud > 0) {
-	echo '<div style="margin-bottom: 12px;">';
-	echo AdminPage::action_button('Disable Private Store and Pull Back', '/admin/admin_cloud_storage', array(
-		'hidden'  => array('action' => 'disable_and_pull_private'),
-		'confirm' => 'Disable the private store and pull all ' . $private_cloud . ' object(s) (offloaded inbound-mail raw) back to this server? '
-			. 'Ensure enough free space before continuing. The bucket stays named until you clear it and Save once the count reaches zero.',
-		'class'   => 'btn btn-danger btn-sm',
-	));
-	echo '</div>';
-}
-
 // Stuck files, with their Retry.
 if (!empty($health['stuck_rows'])) {
 	echo '<div style="margin-top: 8px;">';
@@ -195,65 +184,31 @@ if (!empty($test_results)) {
 }
 
 // =====================================================
-// PRIVATE STORE: errors + privacy-gate results (inline after a failed save)
-// =====================================================
-if (!empty($private_errors)) {
-	echo '<div class="alert alert-danger">';
-	echo '<strong>Private store not saved:</strong><ul style="margin-bottom:0;">';
-	foreach ($private_errors as $e) echo '<li>' . htmlspecialchars($e) . '</li>';
-	echo '</ul></div>';
-}
-if (!empty($private_test_results)) {
-	$pageoptions = array('title' => 'Private store — privacy gate results');
-	$page->begin_box($pageoptions);
-	if (!$private_test_results['ok']) {
-		echo '<div class="alert alert-danger">The private bucket was NOT enabled. Anonymous reads must be denied before it can hold private files.</div>';
-	}
-	echo '<table class="table table-sm" style="max-width: 800px;"><tbody>';
-	foreach ($private_test_results['steps'] as $step) {
-		$icon_color = '#999'; $icon = '—';
-		if ($step['status'] === 'pass') { $icon = '✓'; $icon_color = '#28a745'; }
-		elseif ($step['status'] === 'fail') { $icon = '✗'; $icon_color = '#dc3545'; }
-		elseif ($step['status'] === 'warn') { $icon = '!'; $icon_color = '#ffc107'; }
-		echo '<tr>';
-		echo '<td style="width:30px; color:' . $icon_color . '; font-weight:bold; font-size: 1.2em;">' . $icon . '</td>';
-		echo '<td><strong>' . htmlspecialchars($step['label']) . ':</strong> ' . htmlspecialchars($step['message']);
-		if (!empty($step['raw'])) {
-			echo '<br><small class="text-muted">Raw: <code>' . htmlspecialchars($step['raw']) . '</code></small>';
-		}
-		echo '</td>';
-		echo '</tr>';
-	}
-	echo '</tbody></table>';
-	$page->end_box();
-}
-
-// =====================================================
 // THE STORE
 // =====================================================
 // Three shapes. Nothing configured: the setup form. Configured: what is
 // stored, read-only, with the actions that fit its state. While files are in
 // the bucket (or on their way back) the endpoint, region and bucket are
-// locked — the records point at objects there — and only the key, the
-// public URL and the private bucket may change. With nothing in the bucket
-// the whole configuration may change or be removed.
+// locked — the records point at objects there — and only the key may
+// change. With nothing in the bucket the whole configuration may change or
+// be removed.
 $fields_in_order = array(
-	'cloud_storage_endpoint', 'cloud_storage_region', 'cloud_storage_bucket',
+	'cloud_storage_provider', 'cloud_storage_endpoint', 'cloud_storage_region', 'cloud_storage_bucket',
 	'cloud_storage_access_key', 'cloud_storage_secret_key',
-	'cloud_storage_public_base_url', 'cloud_storage_private_bucket',
 );
 $field_values = array(
-	'cloud_storage_endpoint'        => $settings_values['endpoint'],
-	'cloud_storage_region'          => $settings_values['region'],
-	'cloud_storage_bucket'          => $settings_values['bucket'],
-	'cloud_storage_access_key'      => $settings_values['access_key'],
-	'cloud_storage_secret_key'      => $settings_values['secret_key'],
-	'cloud_storage_public_base_url' => $settings_values['public_base_url'],
-	'cloud_storage_private_bucket'  => $settings_values['private_bucket'],
+	'cloud_storage_provider'   => $settings_values['provider'],
+	'cloud_storage_endpoint'   => $settings_values['endpoint'],
+	'cloud_storage_region'     => $settings_values['region'],
+	'cloud_storage_bucket'     => $settings_values['bucket'],
+	'cloud_storage_access_key' => $settings_values['access_key'],
+	'cloud_storage_secret_key' => $settings_values['secret_key'],
 );
-// The fields come from the cloud_storage declarations, so this page and the
-// core settings tab show the same thing; drawn one at a time so the form reads
-// in the order a person fills it in, not the declaration order. No Clear box
+// The fields come from the cloud_storage declarations, and this page is the
+// only one that draws them: a plain settings save would store a bucket and
+// key nobody proved. Drawn one at a time so the form reads
+// in the order a person fills it in, and so the locked form can draw a subset.
+// The provider's show_when rules ride on the picker whichever fields follow. No Clear box
 // on the secret key: this page writes its own settings after a live bucket
 // test, and a bucket with no key is not a state worth offering.
 $draw_fields = function ($formwriter, array $names) use ($field_values) {
@@ -266,20 +221,15 @@ $draw_fields = function ($formwriter, array $names) use ($field_values) {
 		));
 	}
 };
-$egress_banner = '<div id="egress_warning" style="display:none;" class="alert alert-warning">'
-	. '<strong>Egress warning:</strong> This looks like a raw <span id="egress_provider">bucket</span> URL. Without a CDN you\'ll pay egress on every file view, which can exceed storage savings. '
-	. 'Cheaper patterns: B2 + Cloudflare (free egress via Bandwidth Alliance), Cloudflare R2, or Bunny.net in front of a bucket. See <code>docs/cloud_storage.md</code>.'
-	. '</div>';
-$save_failed = !empty($errors) || !empty($private_errors) || (!empty($test_results) && !$test_results['ok']);
+$save_failed = !empty($errors) || (!empty($test_results) && !$test_results['ok']);
 
 if (!$configured) {
 	$page->begin_box(array('title' => 'Set up cloud storage'));
-	echo '<p style="color:#666;">Public files (photos, gallery and blog images) move to the bucket. Files people must be signed in to see stay on this server unless a private bucket is named too.</p>';
+	echo '<p style="color:#666;">The bucket must be private: Save refuses one anyone can read.</p>';
 	$formwriter = $page->getFormWriter('cloud_storage_form', ['action' => '/admin/admin_cloud_storage', 'method' => 'post', 'id' => 'cloud_storage_form']);
 	$formwriter->begin_form();
 	$formwriter->hiddeninput('action', '', array('value' => 'save'));
 	$draw_fields($formwriter, $fields_in_order);
-	echo $egress_banner;
 	echo '<div style="margin-top: 18px;">';
 	$formwriter->submitbutton('btn_save', 'Save', array('class' => 'btn btn-primary'));
 	echo '</div>';
@@ -295,14 +245,13 @@ if (!$configured) {
 			. ($value !== '' ? htmlspecialchars($value) : '<span class="text-muted">' . htmlspecialchars($muted) . '</span>') . '</td></tr>';
 	};
 	echo '<table class="table table-sm" style="max-width: 800px;"><tbody>';
+	$show('Provider', StorageProvider::label(StorageProvider::effective($stored->get_setting('cloud_storage_provider'), $stored->get_setting('cloud_storage_endpoint'))));
 	$show('Endpoint', (string)$stored->get_setting('cloud_storage_endpoint'));
 	$show('Region', (string)$stored->get_setting('cloud_storage_region'), 'none');
 	$show('Bucket', (string)$stored->get_setting('cloud_storage_bucket'));
 	$show('Access key', (string)$stored->get_setting('cloud_storage_access_key'));
 	$show('Secret key', '', $stored->get_setting('cloud_storage_secret_key') !== '' ? 'stored' : 'none');
-	$show('Public base URL', (string)$stored->get_setting('cloud_storage_public_base_url'), 'the bucket\'s own address');
-	$show('Private bucket', (string)$stored->get_setting('cloud_storage_private_bucket'), 'none');
-	$show('Files in the bucket', $files($public_cloud, $health['counts']['cloud_bytes']) . ((int)($private_status['cloud_count'] ?? 0) > 0 ? ' public, ' . $files($private_status['cloud_count']) . ' private' : ''));
+	$show('Files in the bucket', $files($cloud_count, $health['counts']['cloud_bytes']));
 	echo '</tbody></table>';
 
 	// The actions that fit the state.
@@ -319,12 +268,12 @@ if (!$configured) {
 			'class'   => 'btn btn-primary',
 		));
 	}
-	if (($enabled || (int)$public_cloud > 0) && !$draining) {
+	if (($enabled || (int)$cloud_count > 0) && !$draining) {
 		$disk_free = function_exists('disk_free_space') ? @disk_free_space('/') : null;
 		$free_label = $disk_free !== null ? round($disk_free / 1024 / 1024 / 1024, 1) . ' GB free' : 'unknown free space';
 		echo AdminPage::action_button('Disable and Pull Files Back to Local', '/admin/admin_cloud_storage', array(
 			'hidden'  => array('action' => 'disable_and_pull'),
-			'confirm' => 'Disable cloud storage and pull all ' . (int)$public_cloud . ' bucket-stored files back to this server? Local disk: ' . $free_label . '. Ensure several GB of free space before continuing.',
+			'confirm' => 'Disable cloud storage and pull all ' . (int)$cloud_count . ' bucket-stored files back to this server? Local disk: ' . $free_label . '. Ensure several GB of free space before continuing.',
 			'class'   => 'btn btn-danger',
 		));
 	}
@@ -339,13 +288,12 @@ if (!$configured) {
 
 	if ($locked) {
 		// Only what may change while files are in the bucket.
-		echo '<p class="text-muted small" style="margin-top: 14px; margin-bottom: 6px;">The endpoint, region and bucket cannot change while files are in the bucket: their records point at objects there. '
-			. 'To move to another bucket, disable and pull the files back first. The key and the public URL may change at any time; Save proves the new key before it is stored.</p>';
+		echo '<p class="text-muted small" style="margin-top: 14px; margin-bottom: 6px;">The provider, endpoint, region and bucket cannot change while files are in the bucket: their records point at objects there. '
+			. 'To move to another bucket, disable and pull the files back first. The key may change at any time; Save proves the new key before it is stored.</p>';
 		$formwriter = $page->getFormWriter('cloud_storage_form', ['action' => '/admin/admin_cloud_storage', 'method' => 'post', 'id' => 'cloud_storage_form']);
 		$formwriter->begin_form();
 		$formwriter->hiddeninput('action', '', array('value' => 'save'));
-		$draw_fields($formwriter, array('cloud_storage_access_key', 'cloud_storage_secret_key', 'cloud_storage_public_base_url', 'cloud_storage_private_bucket'));
-		echo $egress_banner;
+		$draw_fields($formwriter, array('cloud_storage_access_key', 'cloud_storage_secret_key'));
 		echo '<div style="margin-top: 12px;">';
 		$formwriter->submitbutton('btn_save', 'Save', array('class' => 'btn btn-primary'));
 		echo '</div>';
@@ -360,7 +308,6 @@ if (!$configured) {
 		$formwriter->begin_form();
 		$formwriter->hiddeninput('action', '', array('value' => 'save'));
 		$draw_fields($formwriter, $fields_in_order);
-		echo $egress_banner;
 		echo '<div style="margin-top: 12px;">';
 		$formwriter->submitbutton('btn_save', 'Save', array('class' => 'btn btn-primary'));
 		echo '</div>';
@@ -371,19 +318,22 @@ if (!$configured) {
 }
 
 // =====================================================
-// CLIENT-SIDE: live egress warning + region auto-fill + pre-save confirm
+// CLIENT-SIDE: the provider's fields + region auto-fill
 // =====================================================
 ?>
 <script>
 (function() {
-	function detectRawHost(host) {
-		var h = (host || '').toLowerCase();
-		if (!h) return null;
-		if (/\.amazonaws\.com$/.test(h))          return 'AWS S3';
-		if (/\.backblazeb2\.com$/.test(h))        return 'Backblaze B2';
-		if (/\.wasabisys\.com$/.test(h))          return 'Wasabi';
-		if (/\.digitaloceanspaces\.com$/.test(h)) return 'DigitalOcean Spaces';
-		return null;
+	// What each provider asks for and names, from StorageProvider. The picker's
+	// show/hide is FormWriter's; this fills each shown field's example and help.
+	var providers = <?php echo json_encode(StorageProvider::catalogue()); ?>;
+	var provider = document.getElementById('cloud_storage_provider');
+	function currentProvider() {
+		var p = provider ? provider.value : '';
+		return providers[p] ? p : 'generic';
+	}
+	function helpOf(id) {
+		var c = document.getElementById(id + '_container');
+		return c ? c.querySelector('.form-help') : null;
 	}
 	function hostnameOf(s) {
 		if (!s) return '';
@@ -393,53 +343,32 @@ if (!$configured) {
 
 	var endpoint = document.getElementById('cloud_storage_endpoint');
 	var region   = document.getElementById('cloud_storage_region');
-	var publicUrl = document.getElementById('cloud_storage_public_base_url');
-	var warningBox = document.getElementById('egress_warning');
-	var warningProvider = document.getElementById('egress_provider');
 
-	function refreshEgressWarning() {
-		var src = (publicUrl && publicUrl.value) ? publicUrl.value : (endpoint ? endpoint.value : '');
-		var host = hostnameOf(src);
-		var provider = detectRawHost(host);
-		if (provider) {
-			warningProvider.textContent = provider;
-			warningBox.style.display = 'block';
-		} else {
-			warningBox.style.display = 'none';
+	function applyProvider() {
+		var spec = providers[currentProvider()];
+		if (endpoint) {
+			endpoint.placeholder = spec.example.endpoint || '';
+			var eh = helpOf('cloud_storage_endpoint');
+			if (eh && spec.endpoint_help) eh.textContent = spec.endpoint_help;
+		}
+		if (region) {
+			region.placeholder = spec.example.region || '';
+			var rh = helpOf('cloud_storage_region');
+			if (rh && spec.region_help) rh.textContent = spec.region_help;
 		}
 	}
-	if (publicUrl) publicUrl.addEventListener('input', refreshEgressWarning);
-	if (endpoint)  endpoint.addEventListener('input', refreshEgressWarning);
-	refreshEgressWarning();
+	if (provider) provider.addEventListener('change', applyProvider);
+	applyProvider();
 
-	// Region auto-fill on endpoint blur.
+	// Region auto-fill on endpoint blur, for a generic endpoint that says.
 	if (endpoint && region) {
 		endpoint.addEventListener('blur', function() {
-			if (region.value) return;
+			if (region.value || currentProvider() !== 'generic') return;
 			var host = hostnameOf(endpoint.value);
 			// s3.<region>.backblazeb2.com  → us-west-002
 			// s3.<region>.amazonaws.com    → us-east-1
 			var m = host.match(/^s3[.-]([a-z0-9-]+)\.(amazonaws|backblazeb2|wasabisys|digitaloceanspaces)\.com$/);
 			if (m && m[1] && m[1] !== 's3') region.value = m[1];
-		});
-	}
-
-	// Pre-enable confirm dialog when raw bucket URL detected.
-	var form = document.getElementById('cloud_storage_form');
-	if (form) {
-		form.addEventListener('submit', function(e) {
-			// Only on Save action (not the action_button POSTs which submit standalone forms).
-			var actionInput = form.querySelector('input[name="action"]');
-			if (!actionInput || actionInput.value !== 'save') return;
-			var src = (publicUrl && publicUrl.value) ? publicUrl.value : (endpoint ? endpoint.value : '');
-			var provider = detectRawHost(hostnameOf(src));
-			if (provider) {
-				e.preventDefault();
-				var msg = 'Your public URL appears to be a raw ' + provider + ' bucket. '
-				        + 'Without a CDN you\'ll pay egress on every file view, which can exceed storage savings. '
-				        + 'Continue anyway?';
-				JoineryModal.confirm(msg, function() { form.submit(); }, { confirmLabel: 'Continue', confirmStyle: 'primary' });
-			}
 		});
 	}
 })();

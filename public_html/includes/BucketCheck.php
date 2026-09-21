@@ -3,9 +3,9 @@
  * BucketCheck — the questions both bucket forms ask before they save.
  *
  * A site keeps two kinds of bucket: backup storage (a backup target) and the
- * file store (the cloud storage page's public and private buckets). Each is
- * safe only when it is not the other, when it is read by nobody it should
- * not be, and when its key can do the job and not much more. These are the
+ * file store (the cloud storage page's one private bucket). Each is safe
+ * only when it is not the other, when it is read by nobody it should not
+ * be, and when its key can do the job and not much more. These are the
  * shared pieces; TargetTester runs them for a backup target and
  * CloudStorageLifecycle::testConnection() for the file store. Every answer
  * is a step: ['label', 'status' => pass|warn|fail, 'message'] in words an
@@ -19,6 +19,9 @@
  *   'anonymous_status'      => fn($url): int         the HTTP status an anonymous GET gets
  *   'is_b2'                 => bool                  treat any endpoint as Backblaze
  *
+ * @version 1.2 - file_store_buckets() is the one file store bucket; a collision names one deletion, not
+ *                a public read, since both kinds of bucket are private
+ * @version 1.1 - b2_allowed() also carries the S3 endpoint Backblaze names for the key
  * @version 1.0 - specs/storage_bucket_and_key_check.md
  */
 
@@ -54,21 +57,17 @@ class BucketCheck {
 		return $host === $other_host;
 	}
 
-	/** The file store's buckets: [['bucket', 'endpoint', 'label'], …], only those set. */
+	/** The file store's bucket: [['bucket', 'endpoint', 'label']] when one is set, else []. */
 	public static function file_store_buckets() {
 		if (isset(self::$test_hooks['file_store_buckets'])) {
 			return call_user_func(self::$test_hooks['file_store_buckets']);
 		}
 		$settings = Globalvars::get_instance();
-		$endpoint = (string)$settings->get_setting('cloud_storage_endpoint');
-		$out = array();
-		foreach (array('cloud_storage_bucket' => 'the public file store', 'cloud_storage_private_bucket' => 'the private file store') as $name => $label) {
-			$bucket = trim((string)$settings->get_setting($name));
-			if ($bucket !== '') {
-				$out[] = array('bucket' => $bucket, 'endpoint' => $endpoint, 'label' => $label);
-			}
+		$bucket = trim((string)$settings->get_setting('cloud_storage_bucket'));
+		if ($bucket === '') {
+			return array();
 		}
-		return $out;
+		return array(array('bucket' => $bucket, 'endpoint' => (string)$settings->get_setting('cloud_storage_endpoint'), 'label' => 'the file store'));
 	}
 
 	/** Every backup target's bucket, except the one being edited: [['bucket', 'endpoint', 'label'], …]. */
@@ -100,7 +99,7 @@ class BucketCheck {
 	/**
 	 * The step that says whether $bucket is already one of $others. A match is
 	 * a fail: files and backups in one bucket means one mistaken deletion, or
-	 * one public-read setting, takes both.
+	 * one mistaken bucket setting, takes both.
 	 *
 	 * @param string $bucket   the bucket being saved
 	 * @param string $endpoint its endpoint
@@ -113,8 +112,8 @@ class BucketCheck {
 				return array('label' => 'Its own bucket', 'status' => 'fail',
 					'message' => 'The bucket "' . $bucket . '" is already ' . $other['label'] . '. '
 						. ($purpose === 'backups'
-							? 'Backups need a bucket of their own: a file bucket is public, and one deletion or one public-read setting would take files and backups together. Make a private bucket for backups and name it here.'
-							: 'Files need a bucket of their own: this one holds backups, and one deletion or one public-read setting would take files and backups together. Make a bucket for files and name it here.'));
+							? 'Backups need a bucket of their own: this one holds files, and one deletion or one mistaken bucket setting would take files and backups together. Make a private bucket for backups and name it here.'
+							: 'Files need a bucket of their own: this one holds backups, and one deletion or one mistaken bucket setting would take files and backups together. Make a private bucket for files and name it here.'));
 			}
 		}
 		return array('label' => 'Its own bucket', 'status' => 'pass',
@@ -175,18 +174,24 @@ class BucketCheck {
 	 * is pinned to (empty for a key that opens every bucket on the account).
 	 * Throws on a refused or unreachable authorize.
 	 *
-	 * @return array{capabilities: array, bucketName: string, namePrefix: string}
+	 * Also carries the S3 endpoint Backblaze names for the account
+	 * (s3_endpoint, a URL), which is how the cloud storage form learns the
+	 * endpoint and region from the key alone (StorageProvider::complete()).
+	 *
+	 * @return array{capabilities: array, bucketName: string, namePrefix: string, s3_endpoint: string}
 	 */
 	public static function b2_allowed($key_id, $app_key) {
 		if (isset(self::$test_hooks['b2_allowed'])) {
 			$allowed = call_user_func(self::$test_hooks['b2_allowed'], $key_id, $app_key);
 		} else {
-			$allowed = (new B2Client((string)$key_id, (string)$app_key))->authorize()['allowed'] ?? array();
+			$auth = (new B2Client((string)$key_id, (string)$app_key))->authorize();
+			$allowed = ($auth['allowed'] ?? array()) + array('s3_endpoint' => (string)($auth['s3_endpoint'] ?? ''));
 		}
 		return array(
 			'capabilities' => array_values(array_map('strval', (array)($allowed['capabilities'] ?? array()))),
 			'bucketName'   => (string)($allowed['bucketName'] ?? ''),
 			'namePrefix'   => (string)($allowed['namePrefix'] ?? ''),
+			's3_endpoint'  => (string)($allowed['s3_endpoint'] ?? ''),
 		);
 	}
 

@@ -133,8 +133,9 @@ for the remaining references. That is correct dedup behavior, not a leak.
 ## Visibility
 
 Public vs private is a *physical placement* — public bytes go to the fast-serve
-directory / public bucket, private bytes to the restricted directory /
-verified-private bucket — so it is a **blob** property, `fbb_is_private`. But it
+directory and stay on this server, private bytes to the restricted directory
+and from there to the private bucket — so it is a **blob** property,
+`fbb_is_private`. But it
 is *derived* from the referencing files. The invariant: **every file referencing
 a blob is in the same visibility class.** It is maintained by:
 
@@ -161,7 +162,7 @@ a blob is in the same visibility class.** It is maintained by:
 | Identity, ownership, title, `fil_name` (URL), visibility gates, signed URLs | `File` (`data/files_class.php`) |
 | Stored name, size, sha256, MIME, driver, offload counters, refcount | `FileBlob` (`data/file_blobs_class.php`) |
 | Paths, reads, resize, variant layout, cloud put/get/delete, pull-back, flip / split | `FileBlob` — `File` delegates (`get_filesystem_path`, `read_bytes`, `remote_key_for`, `resize`, `delete_resized`, `storage_driver`) |
-| Offload eligibility + per-row enumeration for the shared engine | `BlobStorageProfile` / `BlobPrivateStorageProfile` |
+| Offload eligibility (private blobs only) + per-row enumeration for the shared engine | `BlobStorageProfile` |
 
 Cloud offload of blob bytes runs through the platform's unified offload engine —
 see [Cloud Storage](cloud_storage.md). Signed short-lived links to private files

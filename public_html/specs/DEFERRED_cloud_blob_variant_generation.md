@@ -6,9 +6,10 @@ notices it. Nothing here is scheduled.
 
 ## What this is
 
-On a site that keeps its uploaded bytes in a cloud bucket, an image that arrived without
-anyone asking for thumbnails will never get one. It shows as a blank tile in every listing,
-forever, and nothing in the system will fix it on its own.
+On a site that keeps its private uploaded bytes in a cloud bucket (mail attachments, Drive
+images — the only bytes that move), an image that arrived without anyone asking for
+thumbnails will never get one. It shows as a blank tile in every listing, forever, and
+nothing in the system will fix it on its own.
 
 Locally this is already solved: the first time someone looks at a thumbnail that was never
 built, the server builds that one size and serves it. The bytes are right there on disk, so

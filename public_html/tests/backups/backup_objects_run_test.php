@@ -28,6 +28,9 @@
  *   - site retention deletes an object only when no retained index names it
  *
  * Run: php tests/backups/backup_objects_run_test.php
+ *
+ * @version 1.1 - one file store: an object's visibility reads private
+ * @version 1.0
  */
 
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
@@ -93,7 +96,7 @@ $blob = function ($id, $name, $bytes = null, $variants = array('thumb')) use (&$
 		$store->objects[$name] = $bytes;
 	}
 	$blobs[$name] = array('id' => $id, 'name' => $name, 'original' => $up . '/' . $name, 'paths' => $paths,
-		'remote_key' => $name, 'content_type' => 'application/octet-stream', 'visibility' => 'public');
+		'remote_key' => $name, 'content_type' => 'application/octet-stream', 'visibility' => 'private');
 };
 $a_bytes = random_bytes(70000);
 $blob(-9001, 'a.jpg', $a_bytes);

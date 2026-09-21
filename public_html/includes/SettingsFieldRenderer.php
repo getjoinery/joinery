@@ -12,7 +12,10 @@
  * reasoning about the deployment, which is the page's job. What it may not do
  * is invent a field the manifest does not declare.
  *
- * @version 1.4
+ * @version 1.5
+ * @changelog 1.5 - a show_when may list several values; the visibility rules
+ *   are built over the whole group before `only` narrows it, so a group a
+ *   page draws one field at a time keeps its show/hide.
  * @changelog 1.4 - field_options learns skip_options and option_labels for
  *   selects, so a page can drop a choice it cannot offer or annotate one —
  *   still narrowing and labeling only, never inventing a choice.
@@ -73,16 +76,19 @@ class SettingsFieldRenderer {
 	public static function renderGroup($form, string $group, array $options = array()): array {
 		require_once(PathHelper::getIncludePath('includes/SettingsDeclarations.php'));
 
-		$fields = SettingsDeclarations::forGroup($group, $options['source'] ?? null);
-		if (empty($fields)) return array();
-
-		$fields = self::selected($fields, $options);
+		$group_fields = SettingsDeclarations::forGroup($group, $options['source'] ?? null);
+		if (empty($group_fields)) return array();
 
 		// show_when is declared on the field that gets hidden; FormWriter wants
 		// the rules on the field that does the hiding. Inverting is done over
 		// everything the page will render, not just this group — a picker in
-		// one box routinely reveals fields in the next one.
-		$triggers = $options['triggers'] ?? self::buildVisibilityRules($fields, $fields);
+		// one box routinely reveals fields in the next one. Within a group it
+		// is done before `only` narrows it, so a page that draws a group one
+		// field at a time, in its own order, still gets the picker's rules;
+		// the generated script skips an id it cannot find.
+		$triggers = $options['triggers'] ?? self::buildVisibilityRules($group_fields, $group_fields);
+
+		$fields = self::selected($group_fields, $options);
 
 		$rendered = array();
 		foreach ($fields as $declaration) {
@@ -441,16 +447,19 @@ class SettingsFieldRenderer {
 
 		foreach ($fields as $declaration) {
 			if (empty($declaration['show_when']) || !is_array($declaration['show_when'])) continue;
-			foreach ($declaration['show_when'] as $trigger => $trigger_value) {
-				$key = self::visibilityKey($by_name[$trigger] ?? array(), $trigger_value);
-				$dependants[$trigger][$key][] = $declaration['name'];
-				// A credential's Clear box travels with the field it clears.
-				// Left out, a hidden credential leaves an orphaned "Clear the
-				// stored X" checkbox on screen with no field above it. The
-				// generated script skips ids it cannot find, so naming the box
-				// when it was not rendered costs nothing.
-				if (!empty($declaration['secret'])) {
-					$dependants[$trigger][$key][] = self::CLEAR_PREFIX . $declaration['name'];
+			foreach ($declaration['show_when'] as $trigger => $trigger_values) {
+				// One value, or a list any one of which shows the field.
+				foreach ((array)$trigger_values as $trigger_value) {
+					$key = self::visibilityKey($by_name[$trigger] ?? array(), $trigger_value);
+					$dependants[$trigger][$key][] = $declaration['name'];
+					// A credential's Clear box travels with the field it clears.
+					// Left out, a hidden credential leaves an orphaned "Clear the
+					// stored X" checkbox on screen with no field above it. The
+					// generated script skips ids it cannot find, so naming the box
+					// when it was not rendered costs nothing.
+					if (!empty($declaration['secret'])) {
+						$dependants[$trigger][$key][] = self::CLEAR_PREFIX . $declaration['name'];
+					}
 				}
 			}
 		}

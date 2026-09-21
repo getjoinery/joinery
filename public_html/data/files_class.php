@@ -45,7 +45,10 @@ interface FileStreamingDecryptor {
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
- * @version 1.11.0
+ * @version 1.12.0
+ * @changelog 1.12.0 - get_url() always mints a local /uploads/* URL: a public
+ *   file is a local file, and nothing on a page is served from the bucket
+ *   (specs/cloud_storage_private_only.md).
  * @changelog 1.11.0 - source_opens_through_hook(): a listing can ask whether a
  *   source's bytes are opened server-side, so it never mints a thumbnail URL
  *   for ciphertext. fil_usr_user_id indexed: DriveUsage sums a member's files
@@ -1503,27 +1506,11 @@ public static function get_by_name($name, $search_deleted = false) {
 	 */
 	function get_url($size_key='original', $format='short') {
 
-		// Cloud-stored files. PUBLIC files: the world-readable bucket URL goes
-		// straight to the browser, no PHP in the loop — stable and cacheable.
-		// ($format=='short' is treated as 'full' because the bucket is a
-		// different domain.) PRIVATE files must NEVER expose a bucket URL — they
-		// fall through to the local /uploads/* pattern, which serve.php
-		// gate-streams from the verified-private bucket after is_viewable().
-		if ($this->storage_driver() === 'cloud') {
-			if ($this->is_public()) {
-				require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
-				$driver = CloudStorageDriverFactory::default();
-				if ($driver) {
-					return $driver->url($this->remote_key_for($size_key));
-				}
-				// Falls through to the local URL pattern if cloud is unconfigured.
-				// /uploads/* will then 302-redirect once cloud is reconfigured —
-				// or 404 if the bucket bytes are gone.
-			}
-			// Private (or public-but-unconfigured): fall through to the local
-			// /uploads/* URL, which routes through serve.php (gated stream for
-			// private cloud bytes; the "never url()" rule).
-		}
+		// Every file's URL is a local /uploads/* URL. A public file is a local
+		// file, served by the fast path. A private file's URL routes through
+		// serve.php, which gate-streams the bytes — from the bucket when the
+		// blob is offloaded — after is_viewable(); a bucket URL is never
+		// exposed.
 
 		$settings = Globalvars::get_instance();
 		$upload_web_dir = $settings->get_setting('upload_web_dir');

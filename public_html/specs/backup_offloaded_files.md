@@ -118,7 +118,7 @@ the engine) after or with `backup_streaming_upload.md`. What it means here:
 **Dev facts, verified 2026-09-20** (values read from the dev database; none
 are credentials):
 
-- Cloud offload is off (`cloud_storage_enabled` 0, private store 0). Blobs:
+- Cloud offload is off (`cloud_storage_enabled` 0). Blobs:
   1890 `local`, 1 `cloud` (a leftover). Every offload test runs against
   `tests/lib/cloud_fixtures.php` (`RecordingMockDriver`, `InMemoryBlobDriver`);
   neither has `head()` yet.
@@ -144,8 +144,8 @@ orientation; re-grep before editing):
   flip → unlink; the per-row advisory lock is `_lock()` /
   `ADVISORY_LOCK_NAMESPACE = -42` with the blob id as the second key.
   `BlobStorageProfile::itemsForRow()` enumerates original + variants;
-  `reverseItemsForRow()` (92) is the placement a restore uses. The private
-  profile is `BlobPrivateStorageProfile`, split by `fbb_is_private`.
+  `reverseItemsForRow()` (92) is the placement a restore uses. The profile
+  is eligible for private blobs only (`fbb_is_private = TRUE`).
 - `FileBlob` (`data/file_blobs_class.php`): `fbb_stored_name` unique;
   `release()` (394) → `_reclaim()` (466) branches on driver; `resize()` (992)
   regenerates variants from a local original; `splitCopy()` (567) is the only
@@ -449,8 +449,8 @@ holds **only what a shelf listing already shows**:
 
 `object_bytes` and `object_sha256` are the **encrypted** object's; `stored`
 says whether it was on the shelf when the index was written. No plaintext
-size, hash or MIME type: the private store offloads private blobs too
-(`BlobPrivateStorageProfile`), and a plain file the management node reads must
+size, hash or MIME type: the store offloads private blobs
+(`BlobStorageProfile`), and a plain file the management node reads must
 not carry a fingerprint of a private file's content. Everything a restore needs
 about the plaintext is in the blob row, which is restored first. Twenty
 gigabytes of photos is ~10k entries, ~150 kB gzipped.

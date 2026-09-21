@@ -22,6 +22,7 @@
  *
  * Run: php plugins/mailbox/tests/inbound_raw_storage_test.php  (schema synced).
  *
+ * @version 2.1 - one store: the mock is injected into the factory's single cache
  * @version 2.0
  */
 
@@ -352,7 +353,7 @@ class InboundRawStorageTest {
 	}
 
 	private function injectPrivateDriver($mock) {
-		$ref = new ReflectionProperty('CloudStorageDriverFactory', 'cached_private');
+		$ref = new ReflectionProperty('CloudStorageDriverFactory', 'cached');
 		$ref->setValue(null, $mock);
 	}
 

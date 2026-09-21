@@ -1,6 +1,8 @@
 <?php
 // serve.php - Hybrid routing system with RouteHelper
 // Core dependencies (PathHelper, Globalvars, SessionControl) are loaded by RouteHelper after static route check
+// @version 1.9.0 — /uploads/* never redirects to a bucket: a cloud file is a
+// private file, gate-streamed through this server (specs/cloud_storage_private_only.md).
 // @version 1.8.0 — /services/authorize is the server_manager plugin's Connect
 // approval page (specs/services_phase2_platform.md §4).
 // @version 1.7.0 — a signed /uploads request may carry a serve grant
@@ -376,81 +378,72 @@ $routes = [
                 FileServeGrant::redeemAndActivate(intval($file_obj->key), $size_key, $_GET['grant']);
             }
 
+            // A cloud file is a private file: only private blobs move to the
+            // bucket, and one made public is pulled home before its record
+            // flips. Gate first (404, never 403, to avoid confirming
+            // existence — same as the local restricted path), then stream
+            // the bytes through this server; a bucket URL is never exposed.
             if ($file_obj && $file_obj->storage_driver() === 'cloud') {
                 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
-
-                if ($file_obj->is_public()) {
-                    $driver = CloudStorageDriverFactory::default();
-                    if ($driver) {
-                        $url = $driver->url($file_obj->remote_key_for($size_key));
-                        header('Cache-Control: public, max-age=86400');
-                        header('Location: ' . $url, true, 302);
-                        return true;
-                    }
-                    // Fall through to local check if driver isn't available.
-                } else {
-                    // Private cloud file: gate first (404, never 403, to avoid
-                    // confirming existence — same as the local restricted path).
-                    if (!$signed_ok && !$file_obj->is_viewable($session)) {
-                        require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-                        LibraryFunctions::display_404_page();
-                        return true;
-                    }
-                    $driver = CloudStorageDriverFactory::forVisibilityWithFallback('private');
-                    if ($driver) {
-                        // A Range request is answered by the bucket, not by
-                        // pulling the object down and throwing most of it away.
-                        // Only the original variant qualifies: its size is known
-                        // from the blob without a round trip, and nobody
-                        // range-requests a thumbnail.
-                        // A sealed file's stored bytes are a container, so a
-                        // bucket range over them would be a range of ciphertext
-                        // at the wrong offsets. The whole object comes down and
-                        // the container answers the range honestly against
-                        // PLAINTEXT offsets (File::serve_from_path's streaming
-                        // branch). Local blobs — every blob until a site turns on
-                        // offload — never take this path at all.
-                        $range = null;
-                        if ($size_key === 'original' && !$file_obj->is_sealed()) {
-                            $total = (int)$file_obj->size_bytes();
-                            $parsed = File::parse_range_header($_SERVER['HTTP_RANGE'] ?? null, $total);
-                            if ($parsed === false) {
-                                http_response_code(416);
-                                header('Accept-Ranges: bytes');
-                                header('Content-Range: bytes */' . $total);
-                                header('Content-Length: 0');
-                                return true;
-                            }
-                            if (is_array($parsed)) {
-                                $range = $parsed + array('total' => $total);
-                            }
-                        }
-                        $tmp = tempnam(sys_get_temp_dir(), 'fil_priv_');
-                        $got = false;
-                        if ($tmp !== false) {
-                            try {
-                                if ($range !== null) {
-                                    $driver->get_range($file_obj->remote_key_for($size_key), $tmp, $range['start'], $range['end']);
-                                } else {
-                                    $driver->get($file_obj->remote_key_for($size_key), $tmp);
-                                }
-                                $got = true;
-                            } catch (Exception $e) {
-                                error_log('Private cloud serve: GET failed for fil=' . $file_obj->key . ' — ' . $e->getMessage());
-                            }
-                        }
-                        if ($got) {
-                            $file_obj->serve_from_path($tmp, 'private, max-age=0, no-store', $range, $size_key);
-                            @unlink($tmp);
+                if (!$signed_ok && !$file_obj->is_viewable($session)) {
+                    require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+                    LibraryFunctions::display_404_page();
+                    return true;
+                }
+                $driver = CloudStorageDriverFactory::driverWithFallback();
+                if ($driver) {
+                    // A Range request is answered by the bucket, not by
+                    // pulling the object down and throwing most of it away.
+                    // Only the original variant qualifies: its size is known
+                    // from the blob without a round trip, and nobody
+                    // range-requests a thumbnail.
+                    // A sealed file's stored bytes are a container, so a
+                    // bucket range over them would be a range of ciphertext
+                    // at the wrong offsets. The whole object comes down and
+                    // the container answers the range honestly against
+                    // PLAINTEXT offsets (File::serve_from_path's streaming
+                    // branch). Local blobs — every blob until a site turns on
+                    // offload — never take this path at all.
+                    $range = null;
+                    if ($size_key === 'original' && !$file_obj->is_sealed()) {
+                        $total = (int)$file_obj->size_bytes();
+                        $parsed = File::parse_range_header($_SERVER['HTTP_RANGE'] ?? null, $total);
+                        if ($parsed === false) {
+                            http_response_code(416);
+                            header('Accept-Ranges: bytes');
+                            header('Content-Range: bytes */' . $total);
+                            header('Content-Length: 0');
                             return true;
                         }
-                        if ($tmp !== false) { @unlink($tmp); }
-                        require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-                        LibraryFunctions::display_404_page();
+                        if (is_array($parsed)) {
+                            $range = $parsed + array('total' => $total);
+                        }
+                    }
+                    $tmp = tempnam(sys_get_temp_dir(), 'fil_priv_');
+                    $got = false;
+                    if ($tmp !== false) {
+                        try {
+                            if ($range !== null) {
+                                $driver->get_range($file_obj->remote_key_for($size_key), $tmp, $range['start'], $range['end']);
+                            } else {
+                                $driver->get($file_obj->remote_key_for($size_key), $tmp);
+                            }
+                            $got = true;
+                        } catch (Exception $e) {
+                            error_log('Private cloud serve: GET failed for fil=' . $file_obj->key . ' — ' . $e->getMessage());
+                        }
+                    }
+                    if ($got) {
+                        $file_obj->serve_from_path($tmp, 'private, max-age=0, no-store', $range, $size_key);
+                        @unlink($tmp);
                         return true;
                     }
-                    // Private driver unconfigured: fall through to local check (degraded).
+                    if ($tmp !== false) { @unlink($tmp); }
+                    require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+                    LibraryFunctions::display_404_page();
+                    return true;
                 }
+                // Store unconfigured: fall through to the local check (degraded).
             }
 
             // Resolve the local bytes through the blob (keyed on the physical
