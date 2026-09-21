@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+#Version 3.8 - pg_dump | gzip | openssl is one pipeline: the plaintext dump never lands on disk
+#              in any mode (the /tmp/jy_backup_* temp file and its sweep are gone). Stream mode:
+#              `--archive -` writes the encrypted dump to stdout and nothing else does, and
+#              `--report FILE` records DUMP_RC and ENC_RC once the stream has been produced.
+#              The password lookup runs after the arguments are parsed, so the named database's
+#              own site config is the one consulted (it ran before parsing and always fell
+#              through to whichever site config `find` returned first)
 #Version 3.7 - Config parsing anchored to the assignment statement; a commented-out
 #              line or a trailing comment can no longer supply the database name
 #Version 3.6 - The all-databases sweep skips each site's configured dbname_test,
@@ -20,77 +27,98 @@ ENCRYPT_BACKUPS=true
 NON_INTERACTIVE=false
 ENCRYPTION_KEY=""
 KEY_FILE=""
+STREAM=false
+REPORT_FILE=""
+DUMP_RC=0
+ENC_RC=0
 
-# Authentication order: 1) .pgpass, 2) config file, 3) interactive prompt
-
-# Check for .pgpass file first
-if [[ -f ~/.pgpass ]]; then
-    echo "✓ Found .pgpass file - using passwordless authentication."
-elif [[ -n "$PGPASSWORD" ]]; then
-    echo "✓ Found PGPASSWORD environment variable - using passwordless authentication."
-else
-    # Try to find and load password from config file
-    CONFIG_FILE=""
-    CONFIG_PASSWORD=""
+# Authentication order: 1) .pgpass, 2) config file, 3) interactive prompt.
+# Called after the arguments are parsed, so DATABASE_NAME is known and the
+# named database's own site config is tried before any other.
+load_db_password() {
+    # Check for .pgpass file first
+    if [[ -f ~/.pgpass ]]; then
+        echo "✓ Found .pgpass file - using passwordless authentication."
+    elif [[ -n "$PGPASSWORD" ]]; then
+        echo "✓ Found PGPASSWORD environment variable - using passwordless authentication."
+    else
+        # Try to find and load password from config file
+        CONFIG_FILE=""
+        CONFIG_PASSWORD=""
     
-    # Strategy 1: Try database names with _test suffix removed
-    # Note: For backup script, we might only have one database name, so check if it's available
-    if [[ -n "$DATABASE_NAME" ]]; then
-        # Single database backup - try the specified database name
-        for DB_NAME in "$DATABASE_NAME"; do
-            # Remove _test suffix if present
-            SITENAME="${DB_NAME%_test}"
-            if [[ -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ]]; then
-                CONFIG_FILE="/var/www/html/${SITENAME}/config/Globalvars_site.php"
-                break
-            fi
-        done
+        # Strategy 1: Try database names with _test suffix removed
+        # Note: For backup script, we might only have one database name, so check if it's available
+        if [[ -n "$DATABASE_NAME" ]]; then
+            # Single database backup - try the specified database name
+            for DB_NAME in "$DATABASE_NAME"; do
+                # Remove _test suffix if present
+                SITENAME="${DB_NAME%_test}"
+                if [[ -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ]]; then
+                    CONFIG_FILE="/var/www/html/${SITENAME}/config/Globalvars_site.php"
+                    break
+                fi
+            done
         
-        # Strategy 2: Try original database name as-is
-        if [[ -z "$CONFIG_FILE" ]] && [[ -f "/var/www/html/${DATABASE_NAME}/config/Globalvars_site.php" ]]; then
-            CONFIG_FILE="/var/www/html/${DATABASE_NAME}/config/Globalvars_site.php"
+            # Strategy 2: Try original database name as-is
+            if [[ -z "$CONFIG_FILE" ]] && [[ -f "/var/www/html/${DATABASE_NAME}/config/Globalvars_site.php" ]]; then
+                CONFIG_FILE="/var/www/html/${DATABASE_NAME}/config/Globalvars_site.php"
+            fi
         fi
-    fi
     
-    # Strategy 3: Look for any config file in /var/www/html/*/config/
-    if [[ -z "$CONFIG_FILE" ]]; then
-        CONFIG_FILE=$(find /var/www/html/*/config/Globalvars_site.php 2>/dev/null | head -1)
-    fi
-    
-    if [[ -n "$CONFIG_FILE" ]] && [[ -f "$CONFIG_FILE" ]]; then
-        echo "✓ Found config file: $CONFIG_FILE"
-        # Extract password from config file
-        CONFIG_PASSWORD=$(grep "dbpassword.*=" "$CONFIG_FILE" | head -1 | sed "s/.*'\(.*\)'.*/\1/")
-        if [[ -n "$CONFIG_PASSWORD" ]]; then
-            export PGPASSWORD="$CONFIG_PASSWORD"
-            echo "✓ Using database password from config file."
+        # Strategy 3: Look for any config file in /var/www/html/*/config/
+        if [[ -z "$CONFIG_FILE" ]]; then
+            CONFIG_FILE=$(find /var/www/html/*/config/Globalvars_site.php 2>/dev/null | head -1)
         fi
-    fi
     
-    # If still no password, fall back to interactive prompt (unless non-interactive)
-    if [[ -z "$PGPASSWORD" ]]; then
-        echo "⚠️  No .pgpass file found, no config file found, and PGPASSWORD not set."
-        echo "You will be prompted for the postgres password multiple times."
-        echo ""
-        echo "To avoid this in the future, either:"
-        echo "  1) Create a .pgpass file: echo 'localhost:5432:*:postgres:YOUR_PASSWORD' > ~/.pgpass && chmod 600 ~/.pgpass"
-        echo "  2) Set PGPASSWORD: export PGPASSWORD='your_password'"
-        echo "  3) Ensure config file exists at /var/www/html/SITENAME/config/Globalvars_site.php"
-        echo ""
-        # Note: NON_INTERACTIVE not set yet during initial config loading
-        # This prompt will be skipped if running via automated scripts that set PGPASSWORD
-        if [[ "${NON_INTERACTIVE:-false}" != "true" ]]; then
-            read -p "Press Enter to continue with password prompts..."
+        if [[ -n "$CONFIG_FILE" ]] && [[ -f "$CONFIG_FILE" ]]; then
+            echo "✓ Found config file: $CONFIG_FILE"
+            # Extract password from config file
+            CONFIG_PASSWORD=$(grep "dbpassword.*=" "$CONFIG_FILE" | head -1 | sed "s/.*'\(.*\)'.*/\1/")
+            if [[ -n "$CONFIG_PASSWORD" ]]; then
+                export PGPASSWORD="$CONFIG_PASSWORD"
+                echo "✓ Using database password from config file."
+            fi
+        fi
+    
+        # If still no password, fall back to interactive prompt (unless non-interactive)
+        if [[ -z "$PGPASSWORD" ]]; then
+            echo "⚠️  No .pgpass file found, no config file found, and PGPASSWORD not set."
+            echo "You will be prompted for the postgres password multiple times."
             echo ""
+            echo "To avoid this in the future, either:"
+            echo "  1) Create a .pgpass file: echo 'localhost:5432:*:postgres:YOUR_PASSWORD' > ~/.pgpass && chmod 600 ~/.pgpass"
+            echo "  2) Set PGPASSWORD: export PGPASSWORD='your_password'"
+            echo "  3) Ensure config file exists at /var/www/html/SITENAME/config/Globalvars_site.php"
+            echo ""
+            # Note: NON_INTERACTIVE not set yet during initial config loading
+            # This prompt will be skipped if running via automated scripts that set PGPASSWORD
+            if [[ "${NON_INTERACTIVE:-false}" != "true" ]]; then
+                read -p "Press Enter to continue with password prompts..."
+                echo ""
+            fi
         fi
     fi
-fi
+}
 
 # Full timestamp so same-day backups never overwrite each other (locally or in
 # the bucket); matches backup_project.sh granularity.
 now=$(date +"%Y%m%d_%H%M%S")
 
-# Function to backup a single database
+# Stream mode: the report says what happened, after the bytes. DUMP_RC is
+# pg_dump's exit status, ENC_RC openssl's (gzip's failure surfaces as an
+# openssl read error or a pg_dump SIGPIPE, never silently).
+write_report() {
+    if [ "$STREAM" = true ] && [ -n "$REPORT_FILE" ]; then
+        printf 'DUMP_RC=%s\nENC_RC=%s\n' "$DUMP_RC" "$ENC_RC" > "$REPORT_FILE"
+    fi
+}
+
+# Function to backup a single database.
+#
+# One pipeline, pg_dump | gzip | openssl, so the plaintext dump is never on
+# disk: a mail-heavy site's database IS the site, and a temp file of it
+# doubled the run's disk for nothing. The statuses are read from PIPESTATUS
+# rather than pipefail so the report can say WHICH stage failed.
 backup_database() {
     local db_name="$1"
     local backup_file
@@ -100,50 +128,46 @@ backup_database() {
         echo "📦 Backing up database (encrypted): $db_name"
         echo ""
 
-        # Create compressed + encrypted backup using temporary file. The
-        # jy_backup_ prefix makes a stranded dump identifiable; a hard kill
-        # (SIGKILL) runs no cleanup, so every run sweeps its own stale
-        # leftovers instead.
-        find /tmp -maxdepth 1 -name 'jy_backup_*' -user "$(id -un)" -mmin +1440 -delete 2>/dev/null
-        local temp_file=$(mktemp --suffix=.sql /tmp/jy_backup_XXXXXXXX)
-
-        if pg_dump -U postgres "$db_name" > "$temp_file"; then
-            echo "✓ Database dump completed"
-
-            local encrypt_result=1
-            if [ -n "$ENCRYPTION_KEY" ]; then
-                # Non-interactive: key crosses on fd 3, never argv (visible in ps
-                # for the whole encrypt on shared boxes). pipefail in a subshell
-                # so a gzip read failure can't yield a valid-looking .enc of a
-                # truncated stream reported as success.
-                if ( set -o pipefail; gzip -9 < "$temp_file" | openssl enc -aes-256-cbc -salt -pbkdf2 -pass fd:3 -out "$backup_file" 2>/dev/null ) 3< <(printf '%s\n' "$ENCRYPTION_KEY"); then
-                    encrypt_result=0
-                fi
+        local pipe
+        if [ -n "$ENCRYPTION_KEY" ]; then
+            # Non-interactive: key crosses on fd 3, never argv (visible in ps
+            # for the whole encrypt on shared boxes).
+            if [ "$STREAM" = true ]; then
+                pg_dump -U postgres "$db_name" | gzip -9 | openssl enc -aes-256-cbc -salt -pbkdf2 -pass fd:3 3< <(printf '%s\n' "$ENCRYPTION_KEY") >&4
             else
-                # Interactive: prompt for password
-                echo ""
-                echo "🔐 Enter encryption password for backup file:"
-                if gzip -9 < "$temp_file" | openssl enc -aes-256-cbc -salt -pbkdf2 -out "$backup_file"; then
-                    encrypt_result=0
-                fi
+                pg_dump -U postgres "$db_name" | gzip -9 | openssl enc -aes-256-cbc -salt -pbkdf2 -pass fd:3 -out "$backup_file" 3< <(printf '%s\n' "$ENCRYPTION_KEY")
             fi
-
-            if [ $encrypt_result -eq 0 ]; then
-                rm -f "$temp_file"
-                # Set restrictive permissions on encrypted file
-                chmod 600 "$backup_file"
-                echo "✓ Encrypted backup of '$db_name' complete: $backup_file"
-                echo "  File size: $(ls -lh "$backup_file" | awk '{print $5}')"
-                echo "  To decrypt: openssl enc -aes-256-cbc -d -pbkdf2 -in $backup_file | gunzip > ${db_name}-restored.sql"
-            else
-                rm -f "$temp_file"
-                echo "✗ Error during compression/encryption of '$db_name'"
-                return 1
-            fi
+            pipe=("${PIPESTATUS[@]}")
         else
-            rm -f "$temp_file"
-            echo "✗ Error during pg_dump of '$db_name'"
+            # Interactive: prompt for password
+            echo ""
+            echo "🔐 Enter encryption password for backup file:"
+            pg_dump -U postgres "$db_name" | gzip -9 | openssl enc -aes-256-cbc -salt -pbkdf2 -out "$backup_file"
+            pipe=("${PIPESTATUS[@]}")
+        fi
+        DUMP_RC=${pipe[0]:-1}
+        ENC_RC=${pipe[2]:-1}
+        if [ "${pipe[1]:-1}" -ne 0 ] && [ "$ENC_RC" -eq 0 ]; then ENC_RC=1; fi
+        write_report
+
+        if [ "$DUMP_RC" -ne 0 ]; then
+            [ "$STREAM" = true ] || rm -f "$backup_file"
+            echo "✗ Error during pg_dump of '$db_name' (exit ${DUMP_RC})"
             return 1
+        fi
+        if [ "$ENC_RC" -ne 0 ]; then
+            [ "$STREAM" = true ] || rm -f "$backup_file"
+            echo "✗ Error during compression/encryption of '$db_name'"
+            return 1
+        fi
+        if [ "$STREAM" = true ]; then
+            echo "✓ Encrypted backup of '$db_name' streamed"
+        else
+            # Set restrictive permissions on encrypted file
+            chmod 600 "$backup_file"
+            echo "✓ Encrypted backup of '$db_name' complete: $backup_file"
+            echo "  File size: $(ls -lh "$backup_file" | awk '{print $5}')"
+            echo "  To decrypt: openssl enc -aes-256-cbc -d -pbkdf2 -in $backup_file | gunzip > ${db_name}-restored.sql"
         fi
     else
         # Plaintext still means compressed (.sql.gz) so it matches every backup
@@ -153,16 +177,28 @@ backup_database() {
         echo "⚠️  WARNING: Creating unencrypted backup file!"
         echo ""
 
-        # Create compressed plaintext backup. pipefail in a subshell so a pg_dump
-        # failure isn't masked by gzip succeeding on empty input.
-        if ( set -o pipefail; pg_dump -U postgres "$db_name" | gzip -9 > "$backup_file" ); then
+        local pipe
+        if [ "$STREAM" = true ]; then
+            pg_dump -U postgres "$db_name" | gzip -9 >&4
+        else
+            pg_dump -U postgres "$db_name" | gzip -9 > "$backup_file"
+        fi
+        pipe=("${PIPESTATUS[@]}")
+        DUMP_RC=${pipe[0]:-1}
+        ENC_RC=${pipe[1]:-1}
+        write_report
+        if [ "$DUMP_RC" -ne 0 ] || [ "$ENC_RC" -ne 0 ]; then
+            [ "$STREAM" = true ] || rm -f "$backup_file"
+            echo "✗ Error backing up '$db_name'"
+            return 1
+        fi
+        if [ "$STREAM" = true ]; then
+            echo "✓ Plaintext backup of '$db_name' streamed"
+        else
             # Set restrictive permissions on plaintext file
             chmod 600 "$backup_file"
             echo "✓ Plaintext backup of '$db_name' complete: $backup_file"
             echo "  File size: $(ls -lh "$backup_file" | awk '{print $5}')"
-        else
-            echo "✗ Error backing up '$db_name'"
-            return 1
         fi
     fi
 }
@@ -385,6 +421,9 @@ show_help() {
     echo "  --non-interactive, -n     Use encryption key from env var or file (no prompts)"
     echo "  --key-file PATH           Read the encryption key from PATH"
     echo "  --plaintext, -p           Create unencrypted backups"
+    echo "  --archive -               Stream mode: the encrypted dump goes to stdout and nothing"
+    echo "                            else does (one database only; requires --report FILE)"
+    echo "  --report FILE             Stream mode: DUMP_RC and ENC_RC are written here after the stream"
     echo "  --help, -h                Show this help message"
     echo ""
     echo "Non-Interactive Mode:"
@@ -432,6 +471,18 @@ while [[ $# -gt 0 ]]; do
             KEY_FILE="${1#*=}"
             shift
             ;;
+        --archive)
+            if [ "${2:-}" != "-" ]; then
+                echo "Error: --archive only accepts '-' (stdout)" >&2
+                exit 1
+            fi
+            STREAM=true
+            shift 2
+            ;;
+        --report)
+            REPORT_FILE="${2:-}"
+            shift 2
+            ;;
         --help|-h)
             show_help
             exit 0
@@ -449,6 +500,30 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Stream mode: one database, a report file, and stdout reserved for the dump.
+# Everything this script says moves to stderr wholesale (the real stdout is
+# kept on fd 4 for the pipeline), before anything below can print.
+if [ "$STREAM" = true ]; then
+    # Said on stderr: a stream-mode caller is not reading stdout for text.
+    if [ -z "${DATABASE_NAME:-}" ]; then
+        echo "Error: --archive - streams ONE database; name it" >&2
+        exit 1
+    fi
+    if [ -z "$REPORT_FILE" ]; then
+        echo "Error: --archive - requires --report FILE" >&2
+        exit 1
+    fi
+    if [ ! -d "$(dirname "$REPORT_FILE")" ]; then
+        echo "Error: report directory does not exist: $(dirname "$REPORT_FILE")" >&2
+        exit 1
+    fi
+    rm -f "$REPORT_FILE"
+    exec 4>&1 1>&2
+fi
+
+# The password, now that the database is named.
+load_db_password
 
 # Handle non-interactive mode encryption key
 if [ "$NON_INTERACTIVE" = true ] && [ "$ENCRYPT_BACKUPS" = true ]; then

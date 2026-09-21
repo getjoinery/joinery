@@ -8,6 +8,24 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.71 - restore_objects: bring a run's offloaded files home from the manager shelf, paged
+ *                 (specs/backup_offloaded_files.md § Restore). build_restore_objects signs the run's
+ *                 index and, on a page job, a page of object links with the envelopes of their epochs,
+ *                 filled to the job's byte ceiling (FleetObjectRestore::page); a survey carries the
+ *                 index alone. PRIMITIVE_MIN_AGENT_VERSION['restore_objects'] is the agent floor.
+ * @version 1.70.1 - shelf_run_index() takes the newest run from the highest run number on the shelf, not
+ *                   the highest-numbered index: a newest run made before the agent carried offloaded
+ *                   files has no index, and an older run's links for it would be refused on the node
+ * @version 1.70 - verify_backup carries the offloaded-files links to a node whose agent accepts them
+ *                 (VERIFY_BACKUP_OBJECTS_MIN_AGENT_VERSION): the run's index is read off the shelf, a
+ *                 link is signed per epoch envelope it names, and a rehearsal's request also carries
+ *                 the sample (specs/backup_offloaded_files.md § Verification)
+ * @version 1.69 - services joins the hosting states the banner renders (one list in four places)
+ * @version 1.68 - backup_run carries the object store to a node whose agent accepts it
+ *                 (BACKUP_RUN_OBJECTS_MIN_AGENT_VERSION): objects, a signed link to the newest index
+ *                 on the node's manager shelf, and a signed link per epoch envelope — from the
+ *                 listing the scheduler already took, or one taken here for a run started by hand
+ *                 (specs/backup_offloaded_files.md § Rollout)
  * @version 1.67 - the management-node fact is read at poll (mgn_agent_server_manager) before check_status
  * @version 1.66 - can_publish_release / build_publish_upgrade: a publish is offered to, and built for, a
  *                 node that reports itself a management node (server_manager_active), not to every
@@ -336,6 +354,11 @@ class JobCommandBuilder {
 		// the two words of specs/agent_log_access.md, new in 1.35.0.
 		'site_log'       => '1.35.0',
 		'log_table_tail' => '1.35.0',
+		// Bringing a run's offloaded files home from the shelf, a page of
+		// signed links at a time (specs/backup_offloaded_files.md § Restore).
+		// The agent that carries the object store on backup_run and
+		// verify_backup carries this word too.
+		'restore_objects' => '1.38.0',
 	];
 
 	/**
@@ -386,6 +409,23 @@ class JobCommandBuilder {
 	 * what it will not do.
 	 */
 	const DESTRUCTIVE_PRIMITIVES = ['restore_database', 'restore_project', 'restore_chain', 'decommission_site'];
+
+	/**
+	 * The agent version whose backup_run vocabulary accepts the object-store
+	 * fields (objects, objects_index_url, epoch_envelope_urls). An older
+	 * agent refuses a job carrying them as out-of-vocabulary, so they are sent
+	 * only to a node at or past this version; every other node runs its
+	 * backup exactly as before and holds no offloaded files for it.
+	 */
+	const BACKUP_RUN_OBJECTS_MIN_AGENT_VERSION = '1.38.0';
+
+	/**
+	 * The agent version whose verify_backup vocabulary accepts the
+	 * offloaded-files links (epoch_envelope_urls, object_urls). Sent only to
+	 * a node at or past it; an older agent's verify proves the archives as
+	 * before and reports its offloaded files unproven.
+	 */
+	const VERIFY_BACKUP_OBJECTS_MIN_AGENT_VERSION = '1.38.0';
 
 	/**
 	 * May this node be sent a destructive primitive job?
@@ -1011,7 +1051,55 @@ class JobCommandBuilder {
 				?? $node->get('mgn_delete_local_after_upload')),
 		];
 
+		// The object store, for an agent that accepts the fields. The newest
+		// index on the node's manager shelf and every epoch envelope are
+		// signed here, per run; the node reads them by link and never holds
+		// a credential that could. The scheduler hands over the keys it read
+		// from the listing it took to prune; a run started by hand lists.
+		if ($config['type'] === 'project' && self::agent_accepts_backup_run_objects($node)) {
+			$links = $params['objects_links'] ?? null;
+			if (!is_array($links)) {
+				$links = self::shelf_index_links($node, $target, $slug);
+			}
+			$expires = self::signed_link_seconds('backup_run');
+			$sign = function ($key) use ($target, $expires) {
+				return (self::$shelf_listing_for_tests !== null)
+					? 'https://shelf.invalid/' . ltrim($key, '/') . '?X-Amz-Expires=' . $expires . '&X-Amz-Signature=test'
+					: S3Signer::presign_get($target->get_credentials(), $target->get('bkt_bucket'), '/' . ltrim($key, '/'), $expires);
+			};
+			$config['objects'] = true;
+			if (!empty($links['index'])) {
+				$config['objects_index_url'] = $sign((string)$links['index']);
+			}
+			$envelopes = [];
+			foreach ((array)($links['envelopes'] ?? []) as $epoch => $key) {
+				if (preg_match('/^epoch-\d{8}_\d{6}$/', (string)$epoch)) {
+					$envelopes[(string)$epoch] = $sign((string)$key);
+				}
+			}
+			if ($envelopes) {
+				$config['epoch_envelope_urls'] = $envelopes;
+			}
+		}
+
 		return $config;
+	}
+
+	/** Does this node's agent accept the object-store fields on backup_run? */
+	public static function agent_accepts_backup_run_objects($node) {
+		$version = trim((string)$node->get('mgn_agent_version'));
+		return $version !== '' && version_compare($version, self::BACKUP_RUN_OBJECTS_MIN_AGENT_VERSION, '>=');
+	}
+
+	/** The newest index and every epoch envelope on the node's manager shelf, by key, from a fresh listing. */
+	private static function shelf_index_links($node, $target, $slug) {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetBackupRetention.php'));
+		$prefix = rtrim(trim((string)$target->get('bkt_path_prefix')) ?: 'joinery-backups', '/');
+		$base = $prefix . '/' . $slug . '/' . BackupProfile::path_segment(BackupProfile::MANAGER) . '/';
+		$listing = (self::$shelf_listing_for_tests !== null)
+			? self::$shelf_listing_for_tests
+			: S3Signer::list($target->get_credentials(), $target->get('bkt_bucket'), $base);
+		return FleetBackupRetention::index_links(is_array($listing) ? $listing : [], $base);
 	}
 
 
@@ -2186,7 +2274,178 @@ class JobCommandBuilder {
 		$signed = self::sign_chain_links($node, $params, 'verify_backup');
 		$primitive_params = $signed['params'];
 		$primitive_params['level'] = $level;
+
+		// The run's offloaded files, for an agent that accepts the links: the
+		// run's index is read here (one small GET), a link is signed per epoch
+		// envelope it names, and a rehearsal also gets the sample. The node
+		// opens the envelopes with its own key and never lists the shelf.
+		if (self::agent_accepts_verify_backup_objects($node)) {
+			$index = self::shelf_run_index($signed, $primitive_params['seq'] ?? null);
+			if ($index !== null) {
+				require_once(PathHelper::getIncludePath('includes/BackupVerifyLauncher.php'));
+				$base = dirname($signed['chain_key']) . '/';
+				$expires = self::signed_link_seconds('verify_backup');
+				$links = BackupVerifyLauncher::object_links($index, $level, function ($relname) use ($signed, $base, $expires) {
+					return self::sign_shelf_key($signed['target'], $base . $relname, $expires);
+				});
+				$primitive_params = array_merge($primitive_params, $links);
+				$size = strlen((string)json_encode($primitive_params));
+				if ($size > ManagementJob::MAX_PARAMS_BYTES) {
+					throw new Exception("Verifying {$primitive_params['chain_id']} would need {$size} bytes of signed links, over the "
+						. ManagementJob::MAX_PARAMS_BYTES . '-byte job limit.');
+				}
+			}
+		}
 		return ['primitive' => 'verify_backup', 'params' => $primitive_params];
+	}
+
+	/** Does this node's agent accept the offloaded-files links on verify_backup? */
+	public static function agent_accepts_verify_backup_objects($node) {
+		$version = trim((string)$node->get('mgn_agent_version'));
+		return $version !== '' && version_compare($version, self::VERIFY_BACKUP_OBJECTS_MIN_AGENT_VERSION, '>=');
+	}
+
+	/**
+	 * The objects index of the run a verify names, read off the chain's shelf
+	 * listing: objects-NNNN for the run asked for, or the newest run's when
+	 * the node is to verify the newest. The newest run is the highest run
+	 * number any artifact on the shelf carries, not the highest-numbered
+	 * index: a run made before the agent could carry offloaded files wrote
+	 * no index, and an older run's index sent for it would be refused on the
+	 * node as a request that does not match the run. Null when the run
+	 * carries none, or the index could not be read — the node then answers
+	 * for the missing links by name, which is the honest answer.
+	 */
+	private static function shelf_run_index(array $signed, $seq) {
+		require_once(PathHelper::getIncludePath('includes/BackupObjects.php'));
+		$names = [];
+		foreach (array_keys($signed['params']['artifact_urls']) as $name) {
+			if (preg_match('/^objects-(\d{4})\./', (string)$name, $m)) {
+				$names[(int)$m[1]] = (string)$name;
+			}
+		}
+		if (!$names) { return null; }
+		$name = $names[($seq !== null) ? (int)$seq : self::shelf_newest_run($signed['params']['artifact_urls'])] ?? null;
+		if ($name === null) { return null; }
+		$key = $signed['chain_key'] . '/' . $name;
+		try {
+			if (self::$shelf_listing_for_tests !== null) {
+				$body = self::$shelf_bodies_for_tests[$key] ?? null;
+				if ($body === null) { return null; }
+				return is_array($body) ? $body : BackupObjects::decode_index((string)$body, $name);
+			}
+			$resp = S3Signer::get($signed['target']->get_credentials(), $signed['target']->get('bkt_bucket'), '/' . ltrim($key, '/'));
+			if ((int)($resp['status'] ?? 0) !== 200) { return null; }
+			return BackupObjects::decode_index((string)($resp['body'] ?? ''), $name);
+		} catch (Throwable $e) {
+			error_log('JobCommandBuilder: could not read ' . $key . ' for the verify request: ' . $e->getMessage());
+			return null;
+		}
+	}
+
+	/**
+	 * The newest run on a chain's shelf: the highest run number any artifact
+	 * carries, whatever kind it is. Null when nothing there is a run artifact.
+	 */
+	private static function shelf_newest_run(array $artifact_urls) {
+		$newest = null;
+		foreach (array_keys($artifact_urls) as $name) {
+			if (preg_match('/^(files|db|meta|objects)-(\d{4})\./', (string)$name, $m)) {
+				$newest = max((int)$newest, (int)$m[2]);
+			}
+		}
+		return $newest;
+	}
+
+	/** One signed GET for a key on a node's shelf — or the test stand-in while a fixture listing is set. */
+	private static function sign_shelf_key($target, $key, $expires) {
+		return (self::$shelf_listing_for_tests !== null)
+			? 'https://shelf.invalid/' . ltrim($key, '/') . '?X-Amz-Expires=' . $expires . '&X-Amz-Signature=test'
+			: S3Signer::presign_get($target->get_credentials(), $target->get('bkt_bucket'), '/' . ltrim($key, '/'), $expires);
+	}
+
+	/**
+	 * Bring a run's offloaded files home from the node's shelf, one page at a
+	 * time (specs/backup_offloaded_files.md § Restore).
+	 *
+	 * The node never lists the shelf and never holds a read credential: it
+	 * gets the run's index by signed link and, on a page job, a signed link
+	 * per object with the envelope of each epoch those objects are sealed
+	 * under, and opens the envelopes with its own key. A job with no object
+	 * links is a SURVEY — the node answers with the names it would bring home
+	 * — and FleetObjectRestore drives the pages from that answer, one job per
+	 * page, each issued when the one before it reports.
+	 *
+	 * ClassOperate on the node: nothing is overwritten and nothing in any
+	 * bucket is deleted, so no page needs an approval.
+	 *
+	 * $params:
+	 *   chain_id  - required
+	 *   profile   - site | manager; default manager
+	 *   seq       - the run; default the newest on the shelf
+	 *   mode      - missing (default) | all
+	 *   names     - the objects to bring home, in order; absent for a survey.
+	 *               As many as fit the job's byte ceiling are taken from the
+	 *               front; 'count' in the return says how many.
+	 *
+	 * @return array ['primitive' => 'restore_objects', 'params' => …, 'count' => n taken from names]
+	 */
+	public static function build_restore_objects($node, $params = []) {
+		if (!self::has_primitive($node, 'restore_objects')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot bring offloaded files home from its shelf: that needs a paired agent "
+				. 'of at least ' . self::PRIMITIVE_MIN_AGENT_VERSION['restore_objects'] . '.');
+		}
+		return self::build_restore_objects_primitive($node, $params);
+	}
+
+	public static function build_restore_objects_primitive($node, $params = []) {
+		require_once(PathHelper::getIncludePath('includes/BackupObjectRestore.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetObjectRestore.php'));
+
+		$mode = (string)($params['mode'] ?? BackupObjectRestore::MODE_MISSING);
+		if (!BackupObjectRestore::is_mode($mode)) {
+			throw new Exception('Bringing offloaded files home needs a mode: missing (only what the file store cannot serve) or all.');
+		}
+
+		// The same listing and links a Prepare signs; the index is one of them.
+		$signed = self::sign_chain_links($node, $params, 'restore_objects');
+		$urls   = $signed['params']['artifact_urls'];
+		$seq    = isset($signed['params']['seq']) ? (int)$signed['params']['seq'] : self::shelf_newest_run($urls);
+		if ($seq === null) {
+			throw new Exception("Nothing under {$signed['params']['chain_id']} on the shelf is a run.");
+		}
+		$index_name = BackupChain::artifact_name('objects', $seq);
+		if (!isset($urls[$index_name])) {
+			throw new Exception("Run {$seq} of {$signed['params']['chain_id']} carries no offloaded-files index on the shelf, "
+				. 'so there is nothing to bring home from it.');
+		}
+
+		$primitive_params = [
+			'chain_id'  => $signed['params']['chain_id'],
+			'profile'   => $signed['params']['profile'],
+			'seq'       => $seq,
+			'mode'      => $mode,
+			'index_url' => $urls[$index_name],
+		];
+		$count = 0;
+
+		$names = array_values(array_map('strval', (array)($params['names'] ?? [])));
+		if ($names) {
+			$index = self::shelf_run_index($signed, $seq);
+			if ($index === null) {
+				throw new Exception("The offloaded-files index of run {$seq} of {$signed['params']['chain_id']} could not be read "
+					. 'off the shelf, so no page of links can be signed from it.');
+			}
+			$base    = dirname($signed['chain_key']) . '/';
+			$expires = self::signed_link_seconds('restore_objects');
+			$page = FleetObjectRestore::page($index, $names, $primitive_params, function ($relname) use ($signed, $base, $expires) {
+				return self::sign_shelf_key($signed['target'], $base . $relname, $expires);
+			});
+			$primitive_params = $page['params'];
+			$count = (int)$page['count'];
+		}
+		return ['primitive' => 'restore_objects', 'params' => $primitive_params, 'count' => $count];
 	}
 
 	/**
@@ -2202,7 +2461,8 @@ class JobCommandBuilder {
 	 * The links expire with the claim budget of the primitive that carries
 	 * them ($operation), so a link never outlives its job.
 	 *
-	 * @return array ['params' => [chain_id, profile, manifest_url, artifact_urls, seq?]]
+	 * @return array ['params' => [chain_id, profile, manifest_url, artifact_urls, seq?],
+	 *                'chain_key' => the chain's key on the shelf, 'target' => the BackupTarget]
 	 */
 	/**
 	 * A shelf listing to use in place of the bucket's, for tests of the two
@@ -2212,8 +2472,12 @@ class JobCommandBuilder {
 	 */
 	private static $shelf_listing_for_tests = null;
 
-	public static function set_shelf_listing_for_tests(?array $listing) {
+	/** Tests only: key => decoded objects index (or gzipped bytes) the fixture shelf answers a read with. */
+	private static $shelf_bodies_for_tests = [];
+
+	public static function set_shelf_listing_for_tests(?array $listing, array $bodies = []) {
 		self::$shelf_listing_for_tests = $listing;
+		self::$shelf_bodies_for_tests  = $bodies;
 	}
 
 	private static function sign_chain_links($node, array $params, $operation) {
@@ -2316,7 +2580,7 @@ class JobCommandBuilder {
 				. 'single staging job can describe — start a fresh chain, or restore it from a shell.');
 		}
 
-		return ['params' => $primitive_params];
+		return ['params' => $primitive_params, 'chain_key' => $chain_key, 'target' => $target];
 	}
 
 	/**
@@ -3175,7 +3439,7 @@ class JobCommandBuilder {
 	 * them — they are independent of whether the customer is paying, and both
 	 * arrive as the notice sentence instead.
 	 */
-	const HOSTED_PLAN_STATES = ['trial', 'subscribed', 'grace', 'shutdown', ''];
+	const HOSTED_PLAN_STATES = ['trial', 'subscribed', 'grace', 'shutdown', 'services', ''];
 
 	public static function is_cloudflare_domain($domain) {
 		try {

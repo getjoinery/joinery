@@ -12,6 +12,8 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
  * agent_join_state, which this page renders. No credential ever exists in the
  * web tier, and nothing this page stores could enroll anyone.
  *
+ * @version 1.4 - disconnecting also removes the manager backup profile's object-store marker, so
+ *                offloaded files stop waiting for a management node's backup that will not come
  * @version 1.3 - the log-access switch (agent_log_access, specs/agent_log_access.md): whether a connected
  *                management node may read this site's redacted log excerpts; on by default, and the
  *                one-time notice about it is acknowledged here (a POST, never a write on a page view)
@@ -100,6 +102,13 @@ function admin_management_node_logic(array $input): LogicResult {
 		Setting::put('agent_leave_request', json_encode([
 			'requested_time' => gmdate('Y-m-d H:i:s'),
 		]));
+		// The management node's backups stop with the connection, so its
+		// profile must stop holding this site's offloaded files on disk.
+		try {
+			BackupObjects::clear_enabled(BackupRunner::output_dir());
+		} catch (\Throwable $e) {
+			error_log('admin_management_node: could not clear the manager object-store marker: ' . $e->getMessage());
+		}
 		return LogicResult::redirect('/admin/admin_management_node');
 	}
 

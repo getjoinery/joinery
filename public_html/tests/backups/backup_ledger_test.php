@@ -223,6 +223,40 @@ check(TestBackupLedger::lookup('manager', 'db_2026-08-30.sql.gz.enc') !== null,
 check(TestBackupLedger::verify('manager', 'db_2026-08-31.sql.gz.enc', $imposter)['ok'],
 	'and the second verifies on its own bytes');
 
+// ── Streamed artifacts ──────────────────────────────────────────────────────
+section('An artifact streamed to the bucket is recorded from its hash');
+
+// A streamed archive never exists as a file here: the runner hashed and counted
+// the bytes as they went up. The entry it records has to be exactly what a
+// file-hashed entry is, because a download verifies against it the same way.
+$streamed = $tmp . '/files-0003.tar.gz.enc';
+file_put_contents($streamed, 'bytes that went up as a stream');
+$sha = hash('sha256', 'bytes that went up as a stream');
+check(TestBackupLedger::record_hash('site', 'chain-20260901_000000/files-0003.tar.gz.enc', $sha, 30, 'k/files-0003'),
+	'record_hash() records a streamed artifact');
+$entry = TestBackupLedger::lookup('site', 'chain-20260901_000000/files-0003.tar.gz.enc');
+check($entry !== null && $entry['sha256'] === $sha && (int)$entry['bytes'] === 30 && $entry['object_key'] === 'k/files-0003',
+	'the entry carries the hash, the count and the key', json_encode($entry));
+check(TestBackupLedger::verify('site', 'chain-20260901_000000/files-0003.tar.gz.enc', $streamed)['ok'],
+	'a download of those bytes verifies against it, exactly as a file-hashed entry would');
+check(!TestBackupLedger::verify('site', 'chain-20260901_000000/files-0003.tar.gz.enc', $imposter)['ok'],
+	'and other bytes are still refused');
+
+check(!TestBackupLedger::record_hash('site', 'chain-20260901_000000/files-0004.tar.gz.enc', '', 30),
+	'a blank hash is refused — an entry that vouches for nothing is not an entry');
+check(!TestBackupLedger::record_hash('site', 'chain-20260901_000000/files-0004.tar.gz.enc', 'not-a-hash', 30),
+	'a malformed hash is refused');
+check(TestBackupLedger::lookup('site', 'chain-20260901_000000/files-0004.tar.gz.enc') === null,
+	'and nothing was written for either');
+
+// The rewritten-name history is shared code: a streamed manifest-shaped name
+// keeps its earlier version too.
+TestBackupLedger::record_hash('site', 'chain-20260901_000000/manifest.json', str_repeat('a', 64), 10);
+TestBackupLedger::record_hash('site', 'chain-20260901_000000/manifest.json', str_repeat('b', 64), 11);
+$m = TestBackupLedger::lookup('site', 'chain-20260901_000000/manifest.json');
+check($m['sha256'] === str_repeat('b', 64) && ($m['previous'][0]['sha256'] ?? '') === str_repeat('a', 64),
+	'a rewritten name recorded by hash keeps its earlier version');
+
 // ── A ledger anything can write is not evidence ─────────────────────────────
 section('A ledger the group or the world can write is refused, not believed');
 

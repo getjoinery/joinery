@@ -11,6 +11,11 @@
  * So chains are listed as chains: one row per chain, with the runs inside it as
  * the restore points, read from the manifest that is the restore contract.
  *
+ * @version 1.3 - the listing is this node's own prefix, every page of it (S3Signer::list), not the first
+ *                2000 keys of the whole target: ten thousand offloaded-file objects under one node's
+ *                objects/ would otherwise push another node's chain manifests off the end and empty its
+ *                list. The pass also totals the object store per profile ('objects': count, bytes,
+ *                epochs) for the node tab's "Offloaded files on the shelf" line
  * @version 1.2 - each run also carries its artifacts' sizes by kind (files, db, meta), so a page can
  *                say how much room a rehearsal of that run needs without reading the manifest again
  * @version 1.1 - the shelf is resolved via JobCommandBuilder::get_target(), so a node that names no
@@ -20,8 +25,8 @@
  */
 
 require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
-require_once(PathHelper::getIncludePath('includes/TargetLister.php'));
 require_once(PathHelper::getIncludePath('includes/BackupChain.php'));
+require_once(PathHelper::getIncludePath('includes/BackupObjects.php'));
 require_once(PathHelper::getIncludePath('includes/BackupProfile.php'));
 require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
 
@@ -54,9 +59,11 @@ class BackupChainListHelper {
 	 *
 	 * Each: ['chain_id', 'created', 'updated', 'runs' => [['seq','level','time','bytes',
 	 * 'artifacts' => [kind => bytes]]], 'bytes'].
-	 * Returns ['chains' => [...], 'error' => ?string]. An unreachable shelf is an
-	 * error to report, never an empty list — "no restore points" and "we could
-	 * not ask" must not look the same.
+	 * Returns ['chains' => [...], 'objects' => [profile => ['count', 'bytes', 'epochs']],
+	 * 'error' => ?string]. 'objects' is the object store — the offloaded files
+	 * each profile keeps once under objects/ — as the listing shows it.
+	 * An unreachable shelf is an error to report, never an empty list — "no
+	 * restore points" and "we could not ask" must not look the same.
 	 */
 	public static function for_node($node, $max_chains = 20) {
 		// Resolve the shelf the SAME way the job builder does, so a node that names
@@ -67,32 +74,53 @@ class BackupChainListHelper {
 		// target (or null), so no separate bkt_enabled check is needed.
 		$target = JobCommandBuilder::get_target($node);
 		if (!$target) {
-			return ['chains' => [], 'error' => null];
+			return ['chains' => [], 'objects' => [], 'error' => null];
 		}
 
 		$slug   = (string)$node->get('mgn_slug');
 		$prefix = rtrim((string)($target->get('bkt_path_prefix') ?: 'joinery-backups'), '/') . '/';
 		$node_prefix = $prefix . $slug . '/';
 
-		$listing = TargetLister::list_files($target, 2000);
-		if (!$listing['success']) {
-			return ['chains' => [], 'error' => $listing['error'] ?? 'unknown error'];
+		$creds  = $target->get_credentials();
+		$bucket = $target->get('bkt_bucket');
+		if (trim((string)$bucket) === '' || $slug === '') {
+			return ['chains' => [], 'objects' => [], 'error' => 'No bucket configured.'];
+		}
+		// This node's prefix only, every page of it: the shelf holds one object
+		// per offloaded file, and a cap on the whole target would fill with them.
+		try {
+			$files = S3Signer::list($creds, $bucket, $node_prefix);
+		} catch (Exception $e) {
+			return ['chains' => [], 'objects' => [], 'error' => $e->getMessage()];
 		}
 
-		// Gather the manifests, and the byte total of each chain's objects, in
-		// one pass over the listing. Keys read {slug}/{profile}/{chain_id}/{name},
-		// and the profile has to be carried through: it is part of the path a
-		// restore reads from, and it names which party's backup this is.
+		// Gather the manifests, the byte total of each chain's objects, and the
+		// object store per profile, in one pass over the listing. Keys read
+		// {slug}/{profile}/{chain_id}/{name}, and the profile has to be carried
+		// through: it is part of the path a restore reads from, and it names
+		// which party's backup this is.
 		$manifest_keys = [];
 		$profiles = [];
 		$sizes = [];
-		foreach ($listing['files'] as $f) {
+		$objects = [];
+		foreach ($files as $f) {
 			$key = $f['key'];
 			if (strpos($key, $node_prefix) !== 0) { continue; }
 			$parts = explode('/', substr($key, strlen($node_prefix)));
 			if (count($parts) < 3) { continue; }
 
 			list($profile, $dir) = $parts;
+			if ($dir === BackupObjects::DIR) {
+				// objects/{epoch}/{name}.enc, and one envelope.json per epoch.
+				if (count($parts) !== 4 || strpos($parts[2], BackupObjects::EPOCH_PREFIX) !== 0) { continue; }
+				$objects[$profile] = $objects[$profile] ?? ['count' => 0, 'bytes' => 0, 'epochs' => []];
+				$objects[$profile]['epochs'][$parts[2]] = true;
+				if (substr($parts[3], -strlen(BackupObjects::OBJECT_SUFFIX)) === BackupObjects::OBJECT_SUFFIX) {
+					$objects[$profile]['count']++;
+					$objects[$profile]['bytes'] += (int)$f['size'];
+				}
+				continue;
+			}
 			if (strpos($dir, BackupChain::DIR_PREFIX) !== 0) { continue; }
 
 			$sizes[$dir] = ($sizes[$dir] ?? 0) + (int)$f['size'];
@@ -104,9 +132,8 @@ class BackupChainListHelper {
 
 		krsort($manifest_keys);            // chain ids sort chronologically by name
 		$manifest_keys = array_slice($manifest_keys, 0, $max_chains, true);
-
-		$creds  = $target->get_credentials();
-		$bucket = $target->get('bkt_bucket');
+		foreach ($objects as &$o) { $o['epochs'] = count($o['epochs']); }
+		unset($o);
 
 		$chains = [];
 		foreach ($manifest_keys as $chain_id => $key) {
@@ -147,7 +174,7 @@ class BackupChainListHelper {
 			];
 		}
 
-		return ['chains' => $chains, 'error' => null];
+		return ['chains' => $chains, 'objects' => $objects, 'error' => null];
 	}
 
 	/** Bytes as a short human string, matching the flat file listing's style. */

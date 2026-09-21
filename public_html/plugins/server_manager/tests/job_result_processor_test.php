@@ -742,6 +742,20 @@ check($v['result'] === 'skipped' && $v['needs_bytes'] === 2600000000 && $v['free
 check($v['message'] === 'Could not verify the backup of 2026-09-13 04:45 UTC: needs 2.4 GB free, has 858.3 MB.',
 	'and says them for a person', $v['message']);
 
+// A rehearsal that proved the run's offloaded files: the three object lines
+// read back as counts and reach the words.
+$vobjects = "VERIFY_RESULT=pass\nVERIFY_LEVEL=3\nVERIFY_RUN=chain-20260912_044520/3\nVERIFY_RUN_TIME=2026-09-13 04:45:20\n"
+	. "VERIFY_ARTIFACTS=4\nVERIFY_BYTES=751829197\nVERIFY_FILES=1842\nVERIFY_OBJECTS=1204\nVERIFY_OBJECT_BYTES=3435973836\n"
+	. "VERIFY_OBJECTS_SAMPLED=20\nVERIFY_TABLES=214\nVERIFY_ROWS=usr_users:12\nVERIFY_DURATION=600\n";
+$v = JobResultProcessor::parse_verify_backup_result($vobjects, 'completed');
+check($v['objects'] === 1204 && $v['object_bytes'] === 3435973836 && $v['objects_sampled'] === 20, 'the offloaded-files counters read back as integers', var_export($v, true));
+check(strpos($v['message'], '1,204 offloaded files (3.2 GB), 20 of them opened') !== false, 'and the message says how many were proven and opened', $v['message']);
+$v = JobResultProcessor::parse_verify_backup_result("VERIFY_RESULT=fail\nVERIFY_LEVEL=2\nVERIFY_RUN=chain-20260912_044520/3\nVERIFY_RUN_TIME=2026-09-13 04:45:20\n"
+	. "VERIFY_ARTIFACTS=4\nVERIFY_BYTES=100\nVERIFY_FILES=10\nVERIFY_OBJECTS=0\nVERIFY_OBJECT_BYTES=0\nVERIFY_DURATION=2\n"
+	. "VERIFY_REASON=gone: objects/epoch-20260901_000000/beach.jpg.enc is no longer on the shelf (HTTP 404 from storage)\n", 'failed');
+check($v['result'] === 'fail' && strpos($v['message'], 'failed: gone: objects/epoch-20260901_000000/beach.jpg.enc') !== false,
+	'an object gone from the shelf fails the verify by name', $v['message']);
+
 $v = JobResultProcessor::parse_verify_backup_result("=== [Step 1/1] ===\nsome agent noise\n", 'failed', 'Refused by the node: tree manifest signature does not verify');
 check($v['result'] === 'fail' && strpos($v['reason'], 'Refused by the node') === 0,
 	'a job that died before printing a result is a failed verify with the job\'s own error', var_export($v, true));
@@ -876,5 +890,193 @@ $tn = jrp_job($jrp_log_node, 'log_table_tail', json_encode(['api_version' => '1.
 JobResultProcessor::process($tn);
 check((string)$tn->get('mjb_result') === json_encode(['read' => false]),
 	'a table envelope without rows records read=false');
+
+// ---------------------------------------------------------------------------
+section('restore_objects: the node\'s answer is recorded and the next page of the loop is issued');
+
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetObjectRestore.php'));
+require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
+
+// The pure parse: a survey, a page, a job that died before printing.
+$survey_out = "RESTORE_OBJECTS_RESULT=ok\nRESTORE_OBJECTS_MODE=missing\nRESTORE_OBJECTS_RUN=chain-20260901_040000/1\n"
+	. "RESTORE_OBJECTS_INDEXED=3\nRESTORE_OBJECTS_NOT_ON_SHELF=1\nRESTORE_OBJECTS_WANTED=2\n"
+	. "RESTORE_OBJECTS_EPOCHS=epoch-20260801_000000:1,epoch-20260901_000000:1\nRESTORE_OBJECTS_WANT=beach.jpg,dune.png\n"
+	. "RESTORE_OBJECTS_SKIPPED=1\nRESTORE_OBJECTS_DURATION=3\n";
+$r = JobResultProcessor::parse_restore_objects_result("=== [Step 1/1] ===\n" . json_encode(array('api_version' => 1, 'data' => array('output' => $survey_out))), 'completed');
+check($r['result'] === 'ok' && $r['want'] === array('beach.jpg', 'dune.png') && $r['wanted'] === 2 && $r['more'] === false
+	&& $r['epochs'] === array('epoch-20260801_000000' => 1, 'epoch-20260901_000000' => 1),
+	'a survey reads back through the envelope with its names and epochs', var_export($r, true));
+check($r['message'] === '2 offloaded files to bring home (1 offloaded file never reached the shelf; 1 need nothing: served by the file store, or already here)',
+	'and says so for a person', $r['message']);
+$page_out = "fetching objects/epoch-20260801_000000/beach.jpg.enc\nrestored beach.jpg (3.9 KB)\nRESTORE_OBJECTS_RESULT=ok\nRESTORE_OBJECTS_MODE=missing\n"
+	. "RESTORE_OBJECTS_RUN=chain-20260901_040000/1\nRESTORE_OBJECTS_INDEXED=3\nRESTORE_OBJECTS_NOT_ON_SHELF=1\nRESTORE_OBJECTS_RESTORED=2\n"
+	. "RESTORE_OBJECTS_BYTES=5200\nRESTORE_OBJECTS_KEPT=0\nRESTORE_OBJECTS_SKIPPED=0\nRESTORE_OBJECTS_DURATION=9\n";
+$r = JobResultProcessor::parse_restore_objects_result($page_out, 'completed');
+check($r['restored'] === 2 && $r['bytes'] === 5200 && strpos($r['message'], 'Brought 2 offloaded files home (5.1 KB)') === 0, 'a page reads back with its counts', $r['message']);
+$r = JobResultProcessor::parse_restore_objects_result("noise\n", 'failed', 'Refused by the node: out of vocabulary');
+check($r['result'] === 'fail' && strpos($r['reason'], 'Refused by the node') === 0 && strpos($r['message'], 'Could not bring') === 0,
+	'a job that died before printing is a failed step with the job\'s own error', var_export($r, true));
+check(JobResultProcessor::parse_restore_objects_result('', 'completed')['result'] === 'fail', 'a completed job with no result line is never read as ok');
+
+// The loop, over a stood-in shelf: a node whose agent has the word and a
+// chain whose newest run carries an index naming two stored objects.
+$ro_bkt = new BackupTarget(NULL);
+$ro_bkt->set('bkt_name', 'HarnessTest RO Target ' . bin2hex(random_bytes(3)));
+$ro_bkt->set('bkt_provider', 'b2');
+$ro_bkt->set('bkt_bucket', 'harness-ro-bucket');
+$ro_bkt->set('bkt_enabled', true);
+$ro_bkt->set('bkt_credentials', json_encode(array('key_id' => 'k', 'application_key' => 'a')));
+$ro_bkt->save();
+harness_register_row('bkt_backup_targets', 'bkt_backup_target_id', $ro_bkt->key);
+$ro_node = jrp_node(array(
+	'mgn_web_root'             => '/var/www/html/rosite/public_html',
+	'mgn_slug'                 => 'rosite-' . bin2hex(random_bytes(2)),
+	'mgn_bkt_backup_target_id' => $ro_bkt->key,
+	'mgn_agent_public_key'     => base64_encode(str_repeat("\x05", 32)),
+	'mgn_agent_version'        => JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION['restore_objects'],
+	'mgn_last_status_data'     => json_encode(array('backup_recovery_state' => 'proven')),
+	'mgn_backup_recovery_fpr'  => str_repeat('c3', 32)));
+$ro_target = JobCommandBuilder::get_target($ro_node);
+if (!$ro_target) {
+	harness_skip('restore_objects loop', 'no enabled backup target on this management node to resolve a shelf against');
+} else {
+	$ro_prefix = rtrim((string)($ro_target->get('bkt_path_prefix') ?: 'joinery-backups'), '/') . '/' . $ro_node->get('mgn_slug') . '/manager/chain-20260901_040000/';
+	$ro_index = array('version' => 1, 'profile' => 'manager', 'run' => 'chain-20260901_040000/1', 'created' => '2026-09-02T04:00:00Z',
+		'epochs' => array('epoch-20260801_000000', 'epoch-20260901_000000'), 'objects' => array(
+		array('name' => 'beach.jpg', 'epoch' => 'epoch-20260801_000000', 'object_bytes' => 4000, 'object_sha256' => str_repeat('a', 64), 'stored' => true),
+		array('name' => 'dune.png',  'epoch' => 'epoch-20260901_000000', 'object_bytes' => 1200, 'object_sha256' => str_repeat('b', 64), 'stored' => true),
+	));
+	JobCommandBuilder::set_shelf_listing_for_tests(array(
+		array('key' => $ro_prefix . 'manifest.json',         'size' => 900),
+		array('key' => $ro_prefix . 'files-0000.tar.gz.enc', 'size' => 1000),
+		array('key' => $ro_prefix . 'files-0001.tar.gz.enc', 'size' => 200),
+		array('key' => $ro_prefix . 'db-0001.sql.gz.enc',    'size' => 110),
+		array('key' => $ro_prefix . 'objects-0001.json.gz',  'size' => 300),
+	), array($ro_prefix . 'objects-0001.json.gz' => $ro_index));
+	harness_defer(function () { JobCommandBuilder::set_shelf_listing_for_tests(null); });
+
+	$ro_jobs = function ($type, $after_id) use ($ro_node) {
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare("SELECT mjb_management_job_id FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = ?
+			AND mjb_management_job_id > ? AND mjb_delete_time IS NULL ORDER BY mjb_management_job_id");
+		$q->execute(array($ro_node->key, $type, (int)$after_id));
+		$out = array();
+		foreach ($q->fetchAll(PDO::FETCH_COLUMN, 0) as $id) {
+			harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $id);
+			$out[] = new ManagementJob((int)$id, TRUE);
+		}
+		return $out;
+	};
+	$finish = function ($job, $output, $status = 'completed') {
+		$job->set('mjb_status', $status);
+		$job->set('mjb_output', $output);
+		$job->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
+		$job->save();
+		JobResultProcessor::process($job);
+		$job->load();
+		return json_decode((string)$job->get('mjb_result'), true);
+	};
+
+	// 1. The chain restore's last step starts a survey.
+	$rc = new ManagementJob(NULL);
+	$rc->set('mjb_mgn_managed_node_id', $ro_node->key);
+	$rc->set('mjb_job_type', 'restore_chain');
+	$rc->set('mjb_status', 'completed');
+	$rc->set('mjb_commands', array());
+	$rc->set('mjb_parameters', json_encode(array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager', 'seq' => '', 'domain' => 'x.test')));
+	$rc->set('mjb_output', "RESTORE_OK\n");
+	$rc->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
+	$rc->save();
+	harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $rc->key);
+	JobResultProcessor::process($rc);
+	$rc->load();
+	$rc_result = json_decode((string)$rc->get('mjb_result'), true);
+	$surveys = $ro_jobs('restore_objects', $rc->key);
+	check(count($surveys) === 1 && ($rc_result['objects_job'] ?? null) === (int)$surveys[0]->key,
+		'a completed chain restore starts the offloaded-files survey and records its job', json_encode($rc_result));
+	$survey_job = $surveys[0];
+	$srec = json_decode((string)$survey_job->get('mjb_parameters'), true);
+	$scmd = json_decode((string)$survey_job->get('mjb_commands'), true);
+	check($scmd['primitive'] === 'restore_objects' && $scmd['params']['mode'] === 'missing' && $scmd['params']['seq'] === 1
+		&& !isset($scmd['params']['object_urls']) && $srec['step'] === 'survey' && $srec['root'] === (int)$rc->key,
+		'in missing mode, for the newest run, with no object links, recorded as the survey of this restore', json_encode($scmd) . json_encode($srec));
+
+	// 2. The survey's answer issues the first page.
+	$sres = $finish($survey_job, $survey_out);
+	check($sres['want'] === array('beach.jpg', 'dune.png') && $sres['restore_status'] === 'ok', 'the survey\'s names are recorded on its result', json_encode($sres));
+	$pages = $ro_jobs('restore_objects', $survey_job->key);
+	check(count($pages) === 1 && ($sres['next_job'] ?? null) === (int)$pages[0]->key, 'and one page job follows it', json_encode($sres));
+	$page_job = $pages[0];
+	$pcmd = json_decode((string)$page_job->get('mjb_commands'), true);
+	$prec = json_decode((string)$page_job->get('mjb_parameters'), true);
+	// jsonb keeps a map's members, not their order.
+	$pobjects = array_keys($pcmd['params']['object_urls'] ?? array()); sort($pobjects);
+	$pepochs  = array_keys($pcmd['params']['epoch_envelope_urls'] ?? array()); sort($pepochs);
+	check($pobjects === array('beach.jpg', 'dune.png') && $pepochs === array('epoch-20260801_000000', 'epoch-20260901_000000'),
+		'the page carries the two objects and both envelopes', json_encode($pcmd['params']));
+	check($prec['step'] === 'page' && $prec['origin'] === (int)$survey_job->key && $prec['cursor'] === 0 && $prec['count'] === 2 && $prec['root'] === (int)$rc->key,
+		'its record names the survey, the slice and the restore it belongs to', json_encode($prec));
+
+	// 3. The last page ends the loop.
+	$pres = $finish($page_job, $page_out);
+	check($pres['restored'] === 2 && $pres['next_job'] === null && $pres['next'] === 'every page of the survey is done',
+		'the page\'s counts are recorded and, the answer covered, no further job is issued', json_encode($pres));
+	check(count($ro_jobs('restore_objects', $page_job->key)) === 0, 'nothing else was queued');
+
+	// 4. A capped survey: pages, then a fresh survey.
+	$survey2 = FleetObjectRestore::start($ro_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager', 'mode' => 'all'), null);
+	harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $survey2->key);
+	$s2res = $finish($survey2, str_replace("RESTORE_OBJECTS_WANT=beach.jpg,dune.png\n", "RESTORE_OBJECTS_WANT=beach.jpg\nRESTORE_OBJECTS_MORE=1\n", $survey_out));
+	$p2 = $ro_jobs('restore_objects', $survey2->key);
+	check(count($p2) === 1 && $s2res['more'] === true && array_keys(json_decode((string)$p2[0]->get('mjb_commands'), true)['params']['object_urls']) === array('beach.jpg'),
+		'a capped survey pages what it named', json_encode($s2res));
+	$p2res = $finish($p2[0], $page_out);
+	$s3 = $ro_jobs('restore_objects', $p2[0]->key);
+	$s3rec = count($s3) ? json_decode((string)$s3[0]->get('mjb_parameters'), true) : array();
+	check(count($s3) === 1 && ($s3rec['step'] ?? '') === 'survey' && ($s3rec['mode'] ?? '') === 'all' && ($p2res['next_job'] ?? null) === (int)$s3[0]->key,
+		'and once its pages are done a fresh survey asks for the rest, in the same mode', json_encode($p2res) . json_encode($s3rec));
+	$s3res = $finish($s3[0], str_replace("RESTORE_OBJECTS_WANT=beach.jpg,dune.png\n", "RESTORE_OBJECTS_WANT=\n", $survey_out));
+	check($s3res['next_job'] === null && $s3res['next'] === 'the survey named nothing to bring home' && count($ro_jobs('restore_objects', $s3[0]->key)) === 0,
+		'a survey that names nothing ends the loop', json_encode($s3res));
+
+	// 5. A failed page ends the loop with its reason.
+	$survey4 = FleetObjectRestore::start($ro_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager'), null);
+	harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $survey4->key);
+	$finish($survey4, $survey_out);
+	$p4 = $ro_jobs('restore_objects', $survey4->key);
+	$p4res = $finish($p4[0], "RESTORE_OBJECTS_RESULT=fail\nRESTORE_OBJECTS_MODE=missing\nRESTORE_OBJECTS_REASON=offloaded file dune.png: dune.png.enc does not match its recorded hash\n", 'failed');
+	check($p4res['restore_status'] === 'fail' && strpos($p4res['message'], 'offloaded file dune.png') !== false && $p4res['next_job'] === null
+		&& count($ro_jobs('restore_objects', $p4[0]->key)) === 0,
+		'a failed page records why and issues nothing after it', json_encode($p4res));
+
+	// 6. A stale chain-restore result does not start anything; a node without the word is told so.
+	$rc_old = new ManagementJob(NULL);
+	$rc_old->set('mjb_mgn_managed_node_id', $ro_node->key);
+	$rc_old->set('mjb_job_type', 'restore_chain');
+	$rc_old->set('mjb_status', 'completed');
+	$rc_old->set('mjb_commands', array());
+	$rc_old->set('mjb_parameters', json_encode(array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager')));
+	$rc_old->set('mjb_completed_time', '2026-08-01 00:00:00');
+	$rc_old->save();
+	harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $rc_old->key);
+	JobResultProcessor::process($rc_old);
+	$rc_old->load();
+	$old_res = json_decode((string)$rc_old->get('mjb_result'), true);
+	check(!isset($old_res['objects_job']) && strpos((string)($old_res['objects'] ?? ''), 'before its result was read') !== false
+		&& count($ro_jobs('restore_objects', $rc_old->key)) === 0,
+		'a chain restore whose result is read long after it finished starts no loop and says why', json_encode($old_res));
+	$plain_node = jrp_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x06", 32)), 'mgn_agent_version' => '1.13.0',
+		'mgn_bkt_backup_target_id' => $ro_bkt->key));
+	$rc_plain = jrp_job($plain_node, 'restore_chain', "RESTORE_OK\n");
+	$rc_plain->set('mjb_parameters', json_encode(array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager')));
+	$rc_plain->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
+	$rc_plain->save();
+	JobResultProcessor::process($rc_plain);
+	$rc_plain->load();
+	$plain_res = json_decode((string)$rc_plain->get('mjb_result'), true);
+	check(strpos((string)($plain_res['objects'] ?? ''), 'paired agent of at least') !== false && count($ro_jobs('restore_objects', $rc_plain->key)) === 0,
+		'a node whose agent lacks the word gets its restore recorded and the reason no files followed', json_encode($plain_res));
+}
 
 harness_finish();

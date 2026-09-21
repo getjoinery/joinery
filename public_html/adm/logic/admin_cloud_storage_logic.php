@@ -14,6 +14,11 @@
  * that task is active; the tick drives every store of every visibility from the
  * registry, so the admin never names a profile or a per-store task.
  *
+ * @version 2.4 - objects_status (BackupObjectsStatus::compute()) for the waiting-for-backup count and
+ *                size and the same-account line
+ * @version 2.3 - the daily file-store check (inventory) and who brings a missing file back
+ *                (objects_source) are handed to the page; the bring_back_objects action starts
+ *                this site's own Bring them back in the background
  * @version 2.2
  */
 
@@ -23,6 +28,11 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageLifecycle.php'));
 	require_once(PathHelper::getIncludePath('includes/cloud_storage/BlobStorageProfile.php'));
+	require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStoreInventory.php'));
+	require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStoreInventoryPanel.php'));
+	require_once(PathHelper::getIncludePath('includes/BackupObjectRestoreLauncher.php'));
+	require_once(PathHelper::getIncludePath('includes/BackupObjectsStatus.php'));
+	require_once(PathHelper::getIncludePath('includes/ManagementNodeStatus.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);
@@ -151,8 +161,8 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 		}
 		elseif ($action === 'pause') {
 			// Pause: stop offloading new files; keep existing cloud files serving
-			// (idle mode, not drain). The tick self-deactivates if nothing else
-			// is offloading or draining.
+			// (idle mode, not drain). The tick keeps running while those files
+			// exist, for the daily file-store check.
 			CloudStorageLifecycle::setEnabled('public', false, $session);
 			CloudStorageLifecycle::stopDrain('public', $session);
 			$session->save_message(new DisplayMessage(
@@ -193,6 +203,20 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 			));
 			return LogicResult::redirect('/admin/admin_cloud_storage');
 		}
+		elseif ($action === CloudStoreInventoryPanel::ACTION) {
+			// Bring the offloaded files the file store has lost back from this
+			// site's own newest backup, in the background. Only what the file
+			// store cannot serve is touched.
+			try {
+				$message = BackupObjectRestoreLauncher::start_newest(BackupObjectRestore::MODE_MISSING);
+				$session->save_message(new DisplayMessage($message, 'Started', '/\/admin\/admin_cloud_storage/',
+					DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+			} catch (Exception $e) {
+				$session->save_message(new DisplayMessage($e->getMessage(), 'Error', '/\/admin\/admin_cloud_storage/',
+					DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+			}
+			return LogicResult::redirect('/admin/admin_cloud_storage');
+		}
 		elseif ($action === 'retry_stuck' && isset($input['fbb_file_blob_id'])) {
 			$dblink = DbConnector::get_instance()->get_db_link();
 			$q = $dblink->prepare("UPDATE fbb_file_blobs SET fbb_sync_failed_count = 0 WHERE fbb_file_blob_id = ?");
@@ -230,6 +254,11 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 		'private_errors'       => $private_errors,
 		'private_test_results' => $private_test_results,
 		'health'               => CloudStorageLifecycle::health($profile),
+		// The daily file-store check and who brings a missing file back.
+		'inventory'            => CloudStoreInventory::current(),
+		'objects_source'       => CloudStoreInventoryPanel::source(ManagementNodeStatus::is_managed()),
+		'objects_status'       => BackupObjectsStatus::compute(),
+		'manager_url'          => ManagementNodeStatus::manager_url(),
 	);
 
 	return LogicResult::render($page_data);

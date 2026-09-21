@@ -25,6 +25,16 @@
  * should use — 2 for a malformed request, 1 for a transfer, envelope or
  * integrity failure — and whose message is exactly what the script used to say.
  *
+ * @version 1.3 - fetch_envelopes(), fetch_object() and fetch_index() stand alone, so the object
+ *                restore (utils/restore_objects.php) brings objects back one at a time through the
+ *                same checks a verify's sample passes; fetch_objects() composes them
+ * @version 1.2 - offloaded files come back the same way (specs/backup_offloaded_files.md § Verification):
+ *                link_map() is the shape of a map of epoch envelope links or object links, and
+ *                fetch_objects() stages the envelopes a run's index names and a sample of its
+ *                objects, each object checked against the index's size and hash — the index, not
+ *                the ledger, is the record objects are checked against
+ * @version 1.1 - wanted() lists the run's objects index with its dump and metadata, so a staged
+ *                chain carries the record of which offloaded files were live at that run
  * @version 1.0
  */
 
@@ -32,6 +42,7 @@ require_once(PathHelper::getIncludePath('includes/BackupChain.php'));
 require_once(PathHelper::getIncludePath('includes/BackupEnvelope.php'));
 require_once(PathHelper::getIncludePath('includes/BackupFetch.php'));
 require_once(PathHelper::getIncludePath('includes/BackupProfile.php'));
+require_once(PathHelper::getIncludePath('includes/BackupObjects.php'));
 
 class BackupStagingException extends Exception {
 
@@ -56,6 +67,31 @@ class BackupStaging {
 
 	/** Bounds on a run number a caller may name. */
 	const MAX_SEQ = 100000;
+
+	/**
+	 * The one shape a link may be keyed by: a bare name that is safe as a file
+	 * name and can never be a path. The agent's backupFileName pattern, byte
+	 * for byte.
+	 */
+	const LINK_NAME_PATTERN = '/^[A-Za-z0-9][A-Za-z0-9._-]*$/';
+
+	/** An epoch id (BackupObjects::epoch_id), the only key an envelope link may carry. */
+	const EPOCH_ID_PATTERN = '/^epoch-[0-9]{8}_[0-9]{6}$/';
+
+	/** The most object links one request may carry: a page (§ Restore), and far above a verify's sample. */
+	const MAX_OBJECT_LINKS = 150;
+
+	/** The largest epoch envelope a fetch will accept; a real one is under 2 KB. */
+	const ENVELOPE_MAX_BYTES = 65536;
+
+	/** Subdirectory of a working directory that staged offloaded files land in, epoch by epoch. */
+	const OBJECTS_DIR = 'objects';
+
+	/**
+	 * Tests only: fn(string $url, string $sink, int $max_bytes): array{ok,error}
+	 * in place of BackupFetch::fetch, which refuses anything but https.
+	 */
+	public static $fetch_for_tests = null;
 
 	// -------------------------------------------------------------- request
 
@@ -144,6 +180,40 @@ class BackupStaging {
 		return $out;
 	}
 
+	/**
+	 * A map of links keyed by name, as a request carries one: every key must
+	 * match $key_pattern (a bare name, or an epoch id), every value must be an
+	 * https URL, and there may be at most $max of them. Absent or null is an
+	 * empty map. Anything else is a malformed request.
+	 *
+	 * @throws BackupStagingException code MALFORMED
+	 */
+	public static function link_map($value, $what, $key_pattern = self::LINK_NAME_PATTERN, $max = self::MAX_OBJECT_LINKS) {
+		if ($value === null) {
+			return array();
+		}
+		if (!is_array($value)) {
+			throw new BackupStagingException("'" . $what . "' must be a map of name to signed URL", BackupStagingException::MALFORMED);
+		}
+		if (count($value) > (int)$max) {
+			throw new BackupStagingException("'" . $what . "' carries " . count($value) . ' links; at most ' . (int)$max
+				. ' may travel in one request', BackupStagingException::MALFORMED);
+		}
+		$out = array();
+		foreach ($value as $name => $url) {
+			$name = (string)$name;
+			if ($name === '' || strlen($name) > 255 || !preg_match($key_pattern, $name)) {
+				throw new BackupStagingException("a link in '" . $what . "' is keyed by something that is not a name",
+					BackupStagingException::MALFORMED);
+			}
+			if (!BackupFetch::is_signed_url((string)$url)) {
+				throw new BackupStagingException('the link for ' . $name . ' is not an https URL', BackupStagingException::MALFORMED);
+			}
+			$out[$name] = (string)$url;
+		}
+		return $out;
+	}
+
 	// ------------------------------------------------------------ workspace
 
 	/**
@@ -225,15 +295,15 @@ class BackupStaging {
 	/**
 	 * The artifact names a restore of this plan needs, in the order they are
 	 * applied: the full and every incremental up to the chosen run, then that
-	 * run's database dump and metadata. From the plan, so the caller has no say
-	 * in it.
+	 * run's database dump, metadata and objects index. From the plan, so the
+	 * caller has no say in it.
 	 */
 	public static function wanted(array $plan) {
 		$wanted = array();
 		foreach ($plan['files'] as $a) {
 			$wanted[] = (string)$a['name'];
 		}
-		foreach (array('db', 'meta') as $kind) {
+		foreach (array('db', 'meta', 'objects') as $kind) {
 			if (!empty($plan[$kind]['name'])) {
 				$wanted[] = (string)$plan[$kind]['name'];
 			}
@@ -329,5 +399,147 @@ class BackupStaging {
 			$bytes += (int)$got['bytes'];
 		}
 		return array('fetched' => $fetched, 'bytes' => $bytes);
+	}
+
+	// -------------------------------------------------------------- objects
+
+	/**
+	 * Bring back what a verify of a run's offloaded files needs: the epoch
+	 * envelope of every epoch the index's stored entries name, and the sample
+	 * of objects the request linked. Under $work/objects/{epoch}/, the shelf's
+	 * own layout, so a restore that reads a tree finds the same shape.
+	 *
+	 * Objects are not ledgered — the index is, as an artifact of the run — so
+	 * each object is checked against the index: fetched under the recorded
+	 * size as a ceiling, then its size and hash against the entry, before it
+	 * counts as staged. An envelope is small and content-checked by the
+	 * verifier (it must open); here it is capped and landed 0600.
+	 *
+	 * Every sampled name must be one the index marks stored, and every epoch
+	 * named must have a link: a name the index lacks, or an epoch with no
+	 * link, is a request that does not match the run it names.
+	 *
+	 * @param array $index         the decoded objects index of the run
+	 * @param array $envelope_urls epoch id => signed URL (link_map'd)
+	 * @param array $object_urls   name => signed URL (link_map'd), the sample
+	 * @param callable|null $progress fn('fetching', $name) before each transfer
+	 * @return array ['envelopes' => epoch => path, 'objects' => name => path, 'bytes' => int]
+	 * @throws BackupStagingException
+	 */
+	public static function fetch_objects($work, array $index, array $envelope_urls, array $object_urls, ?callable $progress = null) {
+		$entries = BackupObjects::index_entries($index);
+		foreach (array_keys($object_urls) as $name) {
+			if (!isset($entries[(string)$name])) {
+				throw new BackupStagingException('the request links the offloaded file ' . $name
+					. ', which this run\'s index does not mark stored', BackupStagingException::MALFORMED);
+			}
+		}
+
+		$out = self::fetch_envelopes($work, $index, $envelope_urls, $progress);
+		$out['objects'] = array();
+		foreach ($object_urls as $name => $url) {
+			$got = self::fetch_object($work, (string)$name, $entries[(string)$name], $url, $progress);
+			$out['objects'][(string)$name] = $got['path'];
+			$out['bytes'] += (int)$got['bytes'];
+		}
+		return $out;
+	}
+
+	/**
+	 * The epoch envelope of every epoch the index's stored entries name, under
+	 * $work/objects/{epoch}/envelope.json. An epoch with no link is a request
+	 * that does not match the run it names, and fails by name.
+	 *
+	 * @return array ['envelopes' => epoch => path, 'bytes' => int]
+	 * @throws BackupStagingException
+	 */
+	public static function fetch_envelopes($work, array $index, array $envelope_urls, ?callable $progress = null) {
+		$work = rtrim($work, '/');
+		$epochs = array();
+		foreach (BackupObjects::index_entries($index) as $e) { $epochs[(string)$e['epoch']] = true; }
+		ksort($epochs);
+
+		$out = array('envelopes' => array(), 'bytes' => 0);
+		foreach (array_keys($epochs) as $epoch) {
+			if (!isset($envelope_urls[$epoch])) {
+				throw new BackupStagingException('no download link was supplied for the envelope of ' . $epoch
+					. ', which this run\'s offloaded files are sealed under');
+			}
+			$dir = $work . '/' . self::OBJECTS_DIR . '/' . $epoch;
+			self::prepare_workspace($dir);
+			$relname = BackupObjects::envelope_relname($epoch);
+			if ($progress) { $progress('fetching', $relname); }
+			$path = $dir . '/' . BackupObjects::ENVELOPE_NAME;
+			$got = self::fetch_link($envelope_urls[$epoch], $path, self::ENVELOPE_MAX_BYTES);
+			if (!$got['ok']) {
+				throw new BackupStagingException('could not bring back the envelope of ' . $epoch . ': ' . $got['error']);
+			}
+			$out['envelopes'][$epoch] = $path;
+			$out['bytes'] += (int)@filesize($path);
+		}
+		return $out;
+	}
+
+	/**
+	 * One object, by link, under $work/objects/{epoch}/{name}.enc: fetched
+	 * under its recorded size as a ceiling, then checked against the index
+	 * entry's size and hash before it counts as staged. A restore brings
+	 * objects back one at a time through this, so at most one object's
+	 * ciphertext is ever on disk for it.
+	 *
+	 * @param string $name  the object's name in the index
+	 * @param array  $entry its stored entry (epoch, object_bytes, object_sha256; BackupObjects::index_entries)
+	 * @return array ['path' => string, 'bytes' => int]
+	 * @throws BackupStagingException
+	 */
+	public static function fetch_object($work, $name, array $entry, $url, ?callable $progress = null) {
+		$work  = rtrim($work, '/');
+		$name  = (string)$name;
+		$epoch = (string)$entry['epoch'];
+		$dir = $work . '/' . self::OBJECTS_DIR . '/' . $epoch;
+		self::prepare_workspace($dir);
+		$relname = BackupObjects::object_relname($epoch, $name);
+		if ($progress) { $progress('fetching', $relname); }
+		$path = $dir . '/' . $name . BackupObjects::OBJECT_SUFFIX;
+		$got = self::fetch_link($url, $path, BackupFetch::size_ceiling((int)$entry['object_bytes']));
+		if (!$got['ok']) {
+			throw new BackupStagingException('could not bring back the offloaded file ' . $name . ': ' . $got['error']);
+		}
+		try {
+			BackupChain::verify_artifact($path, array('bytes' => (int)$entry['object_bytes'], 'sha256' => (string)$entry['object_sha256']));
+		} catch (Exception $ex) {
+			@unlink($path);
+			throw new BackupStagingException('offloaded file ' . $name . ': ' . str_replace('the manifest', 'its index', $ex->getMessage()));
+		}
+		return array('path' => $path, 'bytes' => (int)@filesize($path));
+	}
+
+	/**
+	 * A run's objects index by link, ledger-checked like every artifact: the
+	 * index is what a fetched object is verified against, so it is trusted
+	 * only when this machine recorded uploading it.
+	 *
+	 * @return array the decoded index
+	 * @throws BackupStagingException
+	 */
+	public static function fetch_index($profile, $work, $chain_id, $seq, $index_url) {
+		$name = BackupChain::artifact_name('objects', (int)$seq);
+		$got = BackupFetch::fetch_artifact($profile, $work, $chain_id . '/' . $name, $name, $index_url);
+		if (!$got['ok']) {
+			throw new BackupStagingException('could not bring back the offloaded-files index of run ' . (int)$seq . ': ' . $got['error']);
+		}
+		try {
+			return BackupObjects::read_index_file($got['path']);
+		} catch (BackupObjectsException $e) {
+			throw new BackupStagingException($e->getMessage());
+		}
+	}
+
+	/** One fetch, through BackupFetch or the test hook. */
+	private static function fetch_link($url, $sink, $max_bytes) {
+		if (self::$fetch_for_tests !== null) {
+			return call_user_func(self::$fetch_for_tests, (string)$url, (string)$sink, (int)$max_bytes);
+		}
+		return BackupFetch::fetch((string)$url, (string)$sink, (int)$max_bytes);
 	}
 }

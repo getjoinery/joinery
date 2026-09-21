@@ -16,6 +16,14 @@
  *   under the backup working area and loads the dump into a throwaway database
  *   on this machine's own PostgreSQL, counts what came back, and deletes both.
  *
+ * Offloaded files (specs/backup_offloaded_files.md § Verification) are proven
+ * with the rest. Level 2 opens the epoch envelope of every epoch the run's
+ * index names with this machine's own key — no request per object; the shelf
+ * listing already proved presence and size. Level 3 also brings back the
+ * sample the request links (the 5 largest and 15 random, picked by whoever
+ * signed the links from the same index), checks each against the index's
+ * hash, decrypts it, and compares it to the rehearsed database's row.
+ *
  * Nothing on the live site is touched at either level. The working directory
  * is removed on every exit path, including a fatal, because a verify that left
  * a staged chain behind would be a disk leak on a machine that may already be
@@ -38,16 +46,24 @@
  *   {"chain_id":"chain-20260912_044520","profile":"manager","level":2,
  *    "manifest_url":"https://…signed…",
  *    "artifact_urls":{"files-0000.tar.gz.enc":"https://…","db-0000.sql.gz.enc":"https://…"},
+ *    "epoch_envelope_urls":{"epoch-20260901_000000":"https://…"},
+ *    "object_urls":{"beach.jpg":"https://…"},
  *    "seq":1}
  *   EOF
  *
  * seq is optional and defaults to the newest run in the manifest.
+ * epoch_envelope_urls carries a signed link per epoch the run's index names
+ * (needed whenever the run carries offloaded files); object_urls carries the
+ * level-3 sample, keyed by the object's name in the index. Both are optional
+ * on the wire and bounded (BackupStaging::link_map).
  *
  * The shell entry (maintenance_scripts/sysadmin_tools/verify_backup.sh) drives
  * the same engine over a chain an operator downloaded by hand, with a key the
  * operator recovered — the one path that exercises the recovery private key.
  * That request names a directory instead of links, and nothing is fetched,
- * locked or removed except a rehearsal's own scratch tree:
+ * locked or removed except a rehearsal's own scratch tree. It holds a chain
+ * key, not the site key, so offloaded files are not proven on this path
+ * (VERIFY_OBJECTS=0):
  *
  *   {"artifacts_dir":"/path/to/chain","key_file":"/path/to/chain.key","level":2,
  *    "seq":1,"project":"name"}
@@ -61,6 +77,9 @@
  *   VERIFY_ARTIFACTS=<n read>
  *   VERIFY_BYTES=<bytes read>
  *   VERIFY_FILES=<entries listed (2) or files restored (3)>
+ *   VERIFY_OBJECTS=<offloaded files proven recoverable: stored, epoch envelope opened>
+ *   VERIFY_OBJECT_BYTES=<their bytes on the shelf>
+ *   VERIFY_OBJECTS_SAMPLED=<n opened and compared>  (level 3 only)
  *   VERIFY_TABLES=<n>                          (level 3 only)
  *   VERIFY_ROWS=usr_users:<n>,<table>:<n>,…    (level 3 only)
  *   VERIFY_DURATION=<seconds>
@@ -77,6 +96,9 @@
  * Validate with `php -l` only — never the file validator (this is a CLI with a
  * run-on-include body).
  *
+ * @version 1.2 - offloaded files: epoch_envelope_urls and object_urls in the request, staged through
+ *                BackupStaging::fetch_objects after the set and handed to the verifier; the disk
+ *                check is repeated with the sample's bytes once the index has been read
  * @version 1.1 - a skip, and a refusal after the request named its run, leave the reason on the
  *                run's history row (message only) instead of no trace; the stamp itself is
  *                BackupVerifier::stamp_history; the chain key is opened before the set is downloaded
@@ -243,7 +265,10 @@ if (is_array($config) && array_key_exists('artifacts_dir', $config)) {
 }
 
 try {
-	$request = BackupStaging::parse_request($config, array('level'));
+	$request = BackupStaging::parse_request($config, array('level', 'epoch_envelope_urls', 'object_urls'));
+	$envelope_urls = BackupStaging::link_map($request['epoch_envelope_urls'] ?? null, 'epoch_envelope_urls',
+		BackupStaging::EPOCH_ID_PATTERN, 64);
+	$object_urls   = BackupStaging::link_map($request['object_urls'] ?? null, 'object_urls');
 } catch (BackupStagingException $e) {
 	verify_backup_refuse($e->getMessage(), $e->getCode());
 }
@@ -256,6 +281,9 @@ $artifact_urls = $request['artifact_urls'];
 $seq           = $request['seq'];
 $level         = isset($request['level']) ? (int)$request['level'] : 0;
 unset($request);
+if ($object_urls && $level !== BackupVerifier::LEVEL_REHEARSE) {
+	verify_backup_refuse('a sample of offloaded files is opened by a rehearsal (level 3) only');
+}
 
 // From here a refusal names its run. A seq of null is the newest run in the
 // manifest, which is not known yet; the note then goes to the newest row of
@@ -340,10 +368,46 @@ try {
 		verify_backup_finish($skip);
 	}
 
+	$on_fetch = function ($what, $name) use (&$fetching) {
+		$fetching = ($what === 'fetching') ? $name : '';
+	};
 	BackupStaging::fetch_artifacts($profile, $work, $chain_id, BackupStaging::wanted($plan),
-		$artifact_urls, $plan['seq'], function ($what, $name) use (&$fetching) {
-			$fetching = ($what === 'fetching') ? $name : '';
-		});
+		$artifact_urls, $plan['seq'], $on_fetch);
+	$fetching = '';
+
+	// The run's offloaded files: the index is staged with the set; from it,
+	// every epoch envelope it names and — for a rehearsal — the sample the
+	// request linked. A run with no index has none, and links for it are
+	// a request that does not match the run.
+	$objects = null;
+	if (!empty($plan['objects']['name'])) {
+		$index = BackupObjects::read_index_file($work . '/' . $plan['objects']['name']);
+		if ($object_urls) {
+			// The sample's bytes were unknown at the first disk check; the set
+			// is on disk by now and is not counted twice.
+			$skip = BackupVerifier::disk_check($manifest, $plan['seq'], $level, $profile_dir, null,
+				BackupVerifier::sample_bytes($index, array_keys($object_urls)), true);
+			if ($skip !== null) {
+				verify_backup_stamp($skip, $chain_id, $plan['seq'], $profile);
+				verify_backup_finish($skip);
+			}
+		}
+		$objects = BackupStaging::fetch_objects($work, $index, $envelope_urls, $object_urls, $on_fetch);
+		unset($index);
+	} elseif ($object_urls) {
+		verify_backup_refuse('the request links offloaded files, but run ' . (int)$plan['seq'] . ' of '
+			. $chain_id . ' carries no index of them');
+	}
+} catch (BackupObjectsException $e) {
+	$failed = array(
+		'result'   => BackupVerifier::RESULT_FAIL,
+		'level'    => $level,
+		'run'      => $chain_id . '/' . (int)$plan['seq'],
+		'run_time' => BackupVerifier::run_time($manifest, $plan['seq']),
+		'reason'   => $e->getMessage(),
+	);
+	verify_backup_stamp($failed, $chain_id, $plan['seq'], $profile);
+	verify_backup_finish($failed);
 } catch (BackupStagingException $e) {
 	// The set could not be staged, which is a verify failure with the node's own
 	// reason. An object retention deleted from under this verify is named as
@@ -368,10 +432,10 @@ if ($level === BackupVerifier::LEVEL_REHEARSE) {
 	$db = verify_backup_db();
 	$GLOBALS['verify_backup_cleanup']['db']      = $db;
 	$GLOBALS['verify_backup_cleanup']['db_name'] = BackupVerifier::throwaway_db_name((string)($manifest['slug'] ?? 'site'));
-	$result = BackupVerifier::rehearse($work, $manifest, $plan['seq'], $key_file, $db);
+	$result = BackupVerifier::rehearse($work, $manifest, $plan['seq'], $key_file, $db, '', $objects);
 	$GLOBALS['verify_backup_cleanup']['db_name'] = '';   // rehearse() dropped it on its way out
 } else {
-	$result = BackupVerifier::read_all($work, $manifest, $plan['seq'], $key_file);
+	$result = BackupVerifier::read_all($work, $manifest, $plan['seq'], $key_file, $objects);
 }
 
 // ── Stamp the run's own history row ─────────────────────────────────────────

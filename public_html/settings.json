@@ -159,11 +159,11 @@
       "group": "backups",
       "label": "Days to keep backups on this machine",
       "type": "text",
-      "helptext": "Local copies are a convenience, not the archive. This also sweeps the auto_pre_* snapshots a restore leaves behind, which are the same size as a full backup and were never cleaned up by anything. 0 means never delete local files."
+      "helptext": "Archives and dumps stream to the bucket and are never kept on this server; this window governs the small files a run does leave behind (a chain run's metadata artifact, a standalone archive's envelope) and sweeps the auto_pre_* snapshots a restore leaves behind, which are the size of a full backup. 0 means never delete local files."
     },
     {
       "name": "backup_delete_local_after_upload",
-      "default": "0",
+      "default": "1",
       "group": "backups",
       "label": "Delete the local copy once uploaded",
       "type": "select",
@@ -171,7 +171,7 @@
         "0": "No — keep it until it ages out",
         "1": "Yes — upload and remove"
       },
-      "helptext": "For machines with little disk. Leaving it off means a restore can use the local copy without a download."
+      "helptext": "Archives and dumps stream to the bucket and are never on this server. This governs what a run does leave behind: a chain run's metadata artifact and a standalone archive's envelope file. On, they are removed as soon as the upload is confirmed; off, they age out with the local retention window."
     },
     {
       "name": "backup_path_slug",
@@ -997,6 +997,12 @@
       "default": "0",
       "managed": true,
       "helptext": "Written by the cloud storage page once a bucket passes its connection test, and by the pause control. Never set by hand — turning it on without a working bucket breaks uploads."
+    },
+    {
+      "name": "cloud_storage_inventory",
+      "default": "",
+      "managed": true,
+      "helptext": "Written by the offload tick's daily file-store check: which offloaded files the file bucket could not serve, when it last looked, and what the last Bring them back did. JSON; read by the cloud storage and Backups pages."
     },
     {
       "name": "cloud_storage_endpoint",

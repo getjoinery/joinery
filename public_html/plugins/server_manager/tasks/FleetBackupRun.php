@@ -27,6 +27,9 @@
  *     slow node gets fewer backups rather than a queue;
  *   - no more than N run at once across the whole fleet.
  *
+ * @version 1.5 - the run request carries the object store: the newest index and every epoch envelope
+ *                on the node's manager shelf, read off the listing the prune already took, are handed
+ *                to the builder to sign (specs/backup_offloaded_files.md § Rollout)
  * @version 1.4 - a manifest the shelf check could not read is reported by the pass, not stamped as an
  *                incomplete backup (the stamp is written only from a complete reading); the verify decision is handed the node's newest verify_backup job, so a verify
  *                that failed on the node counts as attempted and is not re-dispatched every tick
@@ -172,6 +175,7 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 				// confirmed present in the bucket, so a run that failed part-way
 				// can never be counted as a restore point.
 				$target = JobCommandBuilder::get_target($node);
+				$pruned = null;   // this node's listing, never a previous node's
 				if ($target) {
 					$pruned = FleetBackupRetention::prune($node, $target, $policy['keep']);
 					if ($pruned['error'] !== '') {
@@ -221,6 +225,13 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 					'mode'               => $policy['mode'],
 					'full_interval_days' => $policy['full_interval_days'],
 				);
+				// What the node's manager shelf holds of its offloaded files —
+				// the newest index and the epoch envelopes — from the listing
+				// just taken, so the builder signs links without listing again.
+				if (is_array($pruned) && !empty($pruned['listed'])) {
+					$params['objects_links'] = FleetBackupRetention::index_links(
+						(array)($pruned['objects'] ?? array()), (string)($pruned['base'] ?? ''));
+				}
 				// createFromBuild, not createJob: build_backup_run() returns a
 				// primitive envelope, and only this entry point stores one
 				// correctly. An unpaired node throws and lands in problems[].

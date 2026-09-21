@@ -8,6 +8,10 @@
  * Carries the optional private-store bucket field + its privacy-gate results,
  * and a private-store "Disable and Pull Back" off-ramp when it holds cloud objects.
  *
+ * @version 1.5 - the Status box says what waits on this server for a backup before its local copy is
+ *                released, and that the file store and the backup shelf share an account when they do
+ * @version 1.4 - the file-store check in the Status box: when it last looked, "N offloaded files are
+ *                missing from the file store; the backup holds M of them", and Bring them back
  * @version 1.3
  */
 
@@ -101,6 +105,32 @@ if ($health['counts']['stuck'] > 0) {
 	echo ' &middot; <span style="color:#dc3545;"><strong>' . (int)$health['counts']['stuck'] . ' stuck</strong></span>';
 }
 echo '</div>';
+
+// Offloaded files whose local copy is still here because a backup that stores
+// offloaded files has not taken them yet — and the same-account line, because
+// a shelf on the account the file store is on does not survive that account.
+$waiting_line = BackupObjectsStatus::waiting_sentence($objects_status);
+$same_account = BackupObjectsStatus::same_account_line($objects_status);
+if ($waiting_line !== '' || $same_account !== '') {
+	echo '<div style="margin-bottom: 8px;">';
+	echo $dot('#0d6efd') . '<strong>Waiting for backup:</strong> ';
+	echo $waiting_line !== ''
+		? htmlspecialchars($waiting_line) . ' <a href="/admin/admin_backups">Backups</a>'
+		: 'nothing; every offloaded file is on the backup shelf.';
+	if ($same_account !== '') {
+		echo '<div class="alert alert-warning mt-2 mb-0">' . htmlspecialchars($same_account) . '</div>';
+	}
+	echo '</div>';
+}
+
+// The daily file-store check: every offloaded file HEADed in the bucket, the
+// ones it cannot serve named, and the way back for them.
+if (CloudStoreInventoryPanel::has_content($inventory)) {
+	echo '<div style="margin-bottom: 8px;">';
+	echo $dot((int)$inventory['missing_count'] > 0 ? '#dc3545' : '#28a745') . '<strong>File store check:</strong>';
+	echo '<div style="margin-top:4px;">' . CloudStoreInventoryPanel::render($inventory, $objects_source, '/admin/admin_cloud_storage', $manager_url) . '</div>';
+	echo '</div>';
+}
 
 // Private store status
 echo '<div style="margin-bottom: 8px;">';

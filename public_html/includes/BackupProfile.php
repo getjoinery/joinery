@@ -22,6 +22,9 @@
  *            management node's key, which travels with the run and is never
  *            stored here
  *
+ * @version 1.1 - enabled(): which profiles hold a site's offloaded files until their shelf has
+ *                them (specs/backup_offloaded_files.md § Enabled profiles). The one place
+ *                the two tests live; the release rule and the offload tick both ask here.
  * @version 1.0
  */
 
@@ -103,6 +106,65 @@ class BackupProfile {
 	 */
 	public static function path_segment($name): string {
 		return self::normalize($name);
+	}
+
+	/**
+	 * Name of the marker file, in the manager profile's objects directory, that
+	 * says a management node running the object store has dispatched a run
+	 * here. Until it exists the manager profile does not hold bytes: a node
+	 * whose management node has not been upgraded behaves as it always did
+	 * instead of holding uploads for a run that will never store them. Leaving
+	 * the management node removes it.
+	 */
+	const OBJECTS_ENABLED_MARKER = 'objects/enabled';
+
+	/**
+	 * Tests only: when set, enabled() returns this list instead of reading the
+	 * machine. A suite driving the offload tick against a fixture shelf must
+	 * not find dev's real target enabled and upload to it.
+	 */
+	public static $enabled_for_tests = null;
+
+	/**
+	 * The profiles whose shelf must hold an offloaded file before its local
+	 * bytes may be released — the profiles that will store it.
+	 *
+	 *   site     exactly the conditions plan_site() refuses without — a target
+	 *            that is enabled and undeleted, a proven recovery key — and a
+	 *            backup type with files in it (not database-only)
+	 *   manager  this machine has joined a management node, AND a manager run
+	 *            carrying the object store has already reached here (the marker)
+	 *
+	 * Ordered as names() is. Reads settings and the disk; never throws.
+	 */
+	public static function enabled(): array {
+		if (is_array(self::$enabled_for_tests)) {
+			return self::$enabled_for_tests;
+		}
+		$out = array();
+		try {
+			if (BackupRunner::site_target() !== null
+				&& BackupRecoveryKey::is_ready()
+				&& BackupRunner::site_backup_type() !== 'database') {
+				$out[] = self::SITE;
+			}
+		} catch (\Throwable $e) {
+			// A target that cannot be loaded is not an enabled one.
+		}
+		try {
+			if (ManagementNodeStatus::is_managed()
+				&& is_file(self::output_dir(self::MANAGER, BackupRunner::output_dir()) . '/' . self::OBJECTS_ENABLED_MARKER)) {
+				$out[] = self::MANAGER;
+			}
+		} catch (\Throwable $e) {
+			// No resolvable working directory means no manager run has been here.
+		}
+		return $out;
+	}
+
+	/** Is this one profile enabled for the object store? */
+	public static function is_enabled($name): bool {
+		return in_array(self::normalize($name), self::enabled(), true);
 	}
 
 	/**

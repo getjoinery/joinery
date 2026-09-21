@@ -141,7 +141,8 @@ return array(
 ```
 
 This is the right pattern for self-limiting tasks (e.g. `CloudOffloadRun`
-deactivates itself once no store is offloading or draining). The runner reads the flag, sets
+deactivates itself once no store is offloading or draining and no offloaded file
+remains). The runner reads the flag, sets
 `sct_is_active = false` on the task row, and saves — so the row is not
 re-evaluated on subsequent ticks until something explicitly reactivates
 it.

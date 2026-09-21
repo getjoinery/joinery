@@ -9,6 +9,11 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.12 - "Offloaded files on the shelf: N objects, X GB by <party>; last indexed at the run of …"
+ *                 from the listing's object-store totals (BackupChainListHelper 1.3)
+ * @version 1.11 - Bring them back: the node's offloaded files the file store has lost, brought home from the
+ *                 newest run that carries an offloaded-files index, as the paged job loop the plane drives
+ *                 (restore_objects through backup_actions); the poller reports the survey and points at the jobs
  * @version 1.10 - verified restorable: the last verify is stated with the three facts above the run
  *                 list, a Verify button per run offers "open and read" or "rehearse a restore" (with
  *                 the room the node needs), the schedule sentence says how often the newest backup is
@@ -469,6 +474,38 @@
 			echo '<tr><th>Last full backup</th><td>' . $run_line($newest_full) . '</td></tr>';
 			echo '<tr><th>Oldest backup held</th><td>' . $run_line($shelf_runs ? end($shelf_runs) : null) . '</td></tr>';
 			echo '<tr><th>Last verified restorable</th><td>' . $verify_line . '</td></tr>';
+			// Offloaded files: the newest run that carries an offloaded-files
+			// index is the one they come home from. The node checks its file
+			// store daily and shows what is missing on its own Backups page;
+			// bringing them back is this plane's job to run, so the button is here.
+			$objects_run = null;
+			foreach ($shelf_runs as $entry) {
+				if (isset($entry['run']['artifacts']['objects'])) { $objects_run = $entry; break; }
+			}
+			$object_store = $chain_list['objects'] ?? [];
+			if ($objects_run !== null || $object_store) {
+				// "N objects, X GB" per party that keeps them, then the run that last indexed them.
+				$store_words = [];
+				foreach ($object_store as $profile => $o) {
+					$store_words[] = number_format((int)$o['count']) . ' object' . ((int)$o['count'] === 1 ? '' : 's') . ', '
+					    . BackupChainListHelper::format_size($o['bytes'])
+					    . ' <span class="text-muted small">by ' . htmlspecialchars(strtolower($profile_labels[$profile] ?? $profile)) . '</span>';
+				}
+				echo '<tr><th>Offloaded files on the shelf</th><td>' . ($store_words ? implode('; ', $store_words) : 'none listed');
+				echo $objects_run !== null
+				   ? '; last indexed at the run of ' . htmlspecialchars($run_when($objects_run['run']))
+				   : '; <span class="text-muted">not indexed by any run on the shelf</span>';
+				if ($objects_run !== null) {
+					$oa = htmlspecialchars(json_encode($objects_run['chain']['chain_id'])) . ', '
+					    . htmlspecialchars(json_encode($objects_run['chain']['profile'])) . ', ' . (int)$objects_run['run']['seq'] . ', '
+					    . htmlspecialchars(json_encode($run_when($objects_run['run']))) . ', this';
+					echo ' <button type="button" class="btn btn-outline-primary btn-sm ms-2" onclick="bringBackObjects(' . $oa . ')">Bring them back</button>';
+				}
+				echo ''
+				   . '<div class="text-muted small mt-1">Files the site moved to its cloud file store are in no archive; each is on this shelf once. '
+				   . 'Bring them back asks the node which of them its file store can no longer serve and sends those home from the shelf, '
+				   . 'a page of signed links per job. Nothing on the node is overwritten; nothing in any bucket is deleted.</div></td></tr>';
+			}
 			echo '</tbody></table>';
 
 			echo '<table class="table table-striped table-sm">';
@@ -978,6 +1015,36 @@ function submitVerifyModal(level) {
 		.catch(function() {
 			verifyBackupFailed(btn, 'Request failed');
 		});
+}
+// Bring the node's offloaded files the file store has lost home from the
+// shelf. The first job is a survey: the node names what its file store cannot
+// serve, and this plane signs a page of links per answer (FleetObjectRestore).
+// The poller follows the survey; the pages are their own jobs in the list.
+function bringBackObjects(chainId, profile, seq, when, btn) {
+	JoineryModal.confirm('Bring back the offloaded files the node\'s file store can no longer serve, from the backup of '
+		+ when + '? Only files the file store cannot serve are touched; nothing on the node is overwritten and nothing in any bucket is deleted.', function() {
+		var status = document.getElementById('backupScanStatus');
+		if (btn) { btn.disabled = true; btn.textContent = 'Asking the node...'; }
+		status.style.display = 'block';
+		status.innerHTML = '<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span> '
+			+ 'Asking the node which offloaded files its file store cannot serve...</span>';
+		smApiPost('backup_actions', { action: 'restore_objects', node_id: backupNodeId,
+				chain_id: chainId, profile: profile, seq: seq, mode: 'missing' })
+			.then(function(data) {
+				if (!data.success) {
+					if (btn) { btn.disabled = false; btn.textContent = 'Bring them back'; }
+					status.innerHTML = '<span class="text-danger">' + smEsc(data.message) + '</span>';
+					return;
+				}
+				pollTransferJob(data.job_id, btn, 'Bring them back',
+					'The node has answered. Each page of files comes home as its own job; '
+					+ 'the job list shows them, and the node\'s Backups page shows what is still missing.');
+			})
+			.catch(function() {
+				if (btn) { btn.disabled = false; btn.textContent = 'Bring them back'; }
+				status.innerHTML = '<span class="text-danger">Request failed</span>';
+			});
+	});
 }
 function verifyBackupFailed(btn, html) {
 	if (btn) { btn.disabled = false; btn.textContent = 'Verify'; }

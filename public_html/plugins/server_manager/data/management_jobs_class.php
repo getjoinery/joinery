@@ -2,6 +2,10 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.23 - MAX_PARAMS_BYTES is 60 KiB, 4 KiB under the 64 KiB job body an agent reads (the
+ *                 wrapper around the params is ~150 bytes), so a Bring them back page fills the body
+ *                 with links (specs/backup_offloaded_files.md § Restore); agent 1.38.0 matches it
+ * @version 1.22 - restore_objects has a claim budget sized to the agent's declared two hours
  * @version 1.21 - site_log and log_table_tail are filterable job types, and their excerpts have a retention
  *                window: purgeLogExcerpts blanks the result and output of completed log jobs older than
  *                server_manager_log_excerpt_retention_days and keeps the row (specs/agent_log_access.md §4)
@@ -273,6 +277,9 @@ class ManagementJob extends SystemBase {
 		// A whole chain's transfer plus reading every byte of it, plus at level
 		// 3 a replay and a database load. Sized to the agent's declared 3h.
 		'verify_backup'         => 11400, // 3h + slack
+		// One page of offloaded files fetched and decrypted one at a time, or
+		// a survey's HEAD per file. Sized to the agent's declared 2h.
+		'restore_objects'       => 7800,  // 2h + slack
 		// Removing a container site from its host: the teardown is minutes,
 		// the victim's approval window is the hour. Sized above the agent's
 		// declared 15m + ApprovalWindow.
@@ -309,8 +316,14 @@ class ManagementJob extends SystemBase {
 	/** After this many lost claims the job fails rather than looping forever. */
 	const MAX_CLAIM_ATTEMPTS = 3;
 
-	/** Ceiling on a primitive job's params, matched byte-for-byte on the node. */
-	const MAX_PARAMS_BYTES = 16384;
+	/**
+	 * Ceiling on a primitive job's params, matched byte-for-byte on the node
+	 * (agent primitives.MaxParamsBytes). 4 KiB under AgentChannelEndpoint::MAX_JOB_BODY,
+	 * the whole answer an agent will read: the wrapper around the params is about
+	 * 150 bytes, and the rest is headroom. A page of Bring them back links is
+	 * filled to this.
+	 */
+	const MAX_PARAMS_BYTES = 61440;
 
 	/** The outcomes a node agent may report. Anything else is refused at the endpoint. */
 	const AGENT_OUTCOMES = ['completed', 'failed', 'refused'];

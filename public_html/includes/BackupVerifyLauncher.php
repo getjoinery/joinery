@@ -19,6 +19,10 @@
  * level in the background the way Run now starts a backup, and the result
  * lands on the run's own history row where Recent backups shows it.
  *
+ * @version 1.2 - offloaded files travel with the request (specs/backup_offloaded_files.md § Verification):
+ *                the run's index is read off the shelf, a link is signed for each epoch envelope it
+ *                names, and a rehearsal's request also carries the sample — object_links() is the
+ *                pure part, shared in shape with the management node's builder
  * @version 1.1 - due() has no settling wait on a never-verified site (the daily backup was always
  *                newer than a day, so the first verify never came); detach() hands the request to the background verify on an explicit descriptor:
  *                a backgrounded job's stdin is /dev/null in non-interactive bash, so the verify
@@ -31,6 +35,7 @@ require_once(PathHelper::getIncludePath('includes/BackupVerifier.php'));
 require_once(PathHelper::getIncludePath('includes/BackupChain.php'));
 require_once(PathHelper::getIncludePath('includes/BackupProfile.php'));
 require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
+require_once(PathHelper::getIncludePath('includes/BackupObjects.php'));
 require_once(PathHelper::getIncludePath('data/backup_history_class.php'));
 
 class BackupVerifyLauncherException extends Exception {}
@@ -182,7 +187,60 @@ class BackupVerifyLauncher {
 		);
 		$seq = ($seq === null) ? (int)$run->get('bkh_chain_seq') : (int)$seq;
 		$request['seq'] = $seq;
+
+		// The run's offloaded files: its index, read off the shelf, says which
+		// epoch envelopes the verify must open and — for a rehearsal — which
+		// objects to open. A run with no index on the shelf gets no links;
+		// the verify then fails on the missing artifact, by name.
+		$index_name = BackupChain::artifact_name('objects', $seq);
+		$index = null;
+		if (isset($artifact_urls[$index_name])) {
+			try {
+				$resp = S3Signer::get($creds, $bucket, '/' . ltrim($chain_key . '/' . $index_name, '/'));
+				if ((int)($resp['status'] ?? 0) === 200) {
+					$index = BackupObjects::decode_index((string)($resp['body'] ?? ''), $index_name);
+				}
+			} catch (\Throwable $e) {
+				error_log('BackupVerifyLauncher: could not read ' . $index_name . ': ' . $e->getMessage());
+			}
+		}
+		if ($index !== null) {
+			$objects_base = $prefix . '/' . $slug . '/' . BackupProfile::path_segment(BackupProfile::SITE) . '/';
+			$links = self::object_links($index, (int)$level, function ($relname) use ($creds, $bucket, $objects_base) {
+				return S3Signer::presign_get($creds, $bucket, '/' . ltrim($objects_base . $relname, '/'), self::LINK_SECONDS);
+			});
+			$request = array_merge($request, $links);
+		}
 		return $request;
+	}
+
+	/**
+	 * The object-store links a verify request carries, from the run's index:
+	 * a link per epoch envelope the index names, and at level 3 a link per
+	 * sampled object (BackupVerifier::sample_objects). $sign turns a name
+	 * relative to the profile's base key (objects/{epoch}/…) into a signed
+	 * URL. Pure but for the sample's draw; the management node's builder
+	 * composes the same two maps with its own signer.
+	 *
+	 * @return array{epoch_envelope_urls?:array, object_urls?:array}
+	 */
+	public static function object_links(array $index, $level, callable $sign) {
+		$out = array();
+		$entries = BackupObjects::index_entries($index);
+		$epochs = array();
+		foreach ($entries as $e) {
+			if (preg_match(BackupStaging::EPOCH_ID_PATTERN, (string)$e['epoch'])) { $epochs[(string)$e['epoch']] = true; }
+		}
+		ksort($epochs);
+		foreach (array_keys($epochs) as $epoch) {
+			$out['epoch_envelope_urls'][$epoch] = $sign(BackupObjects::envelope_relname($epoch));
+		}
+		if ((int)$level === BackupVerifier::LEVEL_REHEARSE) {
+			foreach (BackupVerifier::sample_objects($index) as $name) {
+				$out['object_urls'][$name] = $sign(BackupObjects::object_relname((string)$entries[$name]['epoch'], $name));
+			}
+		}
+		return $out;
 	}
 
 	/**

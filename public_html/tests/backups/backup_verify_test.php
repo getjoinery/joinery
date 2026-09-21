@@ -80,7 +80,7 @@ foreach (array('result', 'level', 'run', 'run_time', 'artifacts', 'bytes', 'file
 }
 check($back['rows'] === $pass['rows'], 'the row counts come back as a map with integer counts');
 check(!array_key_exists('reason', $back), 'no reason was printed, so none is read');
-check(strpos($text, "\n") !== false && substr_count(trim($text), "\n") === 9,
+check(strpos($text, "\n") !== false && substr_count(trim($text), "\n") === 11,
 	'one key per line, nothing else', $text);
 
 $fail = array('result' => 'fail', 'level' => 2, 'run' => 'chain-20260901_040000/2', 'run_time' => '2026-09-03 04:00:00',
@@ -133,6 +133,87 @@ foreach (array(BackupVerifier::describe($pass), BackupVerifier::describe($fail),
 check(BackupVerifier::level_name(1) === 'checked on the shelf' && BackupVerifier::level_name(2) === 'opened and read'
 	&& BackupVerifier::level_name(3) === 'rehearsed' && BackupVerifier::level_name(4) === '',
 	'the three levels have their page names and nothing else does');
+
+// ── Offloaded files ─────────────────────────────────────────────────────────
+section('Offloaded files: the contract, the words, the sample and the link maps');
+
+$with_objects = array_merge($pass, array('objects' => 1204, 'object_bytes' => 3435973836, 'objects_sampled' => 20));
+$text = BackupVerifier::format_contract($with_objects);
+check(preg_match('/^VERIFY_OBJECTS=1204$/m', $text) === 1 && preg_match('/^VERIFY_OBJECT_BYTES=3435973836$/m', $text) === 1
+	&& preg_match('/^VERIFY_OBJECTS_SAMPLED=20$/m', $text) === 1, 'a rehearsal prints the three object lines', $text);
+$back = BackupVerifier::parse_contract($text);
+check($back['objects'] === 1204 && $back['object_bytes'] === 3435973836 && $back['objects_sampled'] === 20,
+	'and they read back as integers');
+$text = BackupVerifier::format_contract(array_merge($fail, array('objects' => 7, 'object_bytes' => 700, 'objects_sampled' => 3)));
+check(preg_match('/^VERIFY_OBJECTS=7$/m', $text) === 1 && strpos($text, 'VERIFY_OBJECTS_SAMPLED') === false,
+	'level 2 prints the count and bytes and never a sample line', $text);
+check(preg_match('/^VERIFY_OBJECTS=0$/m', BackupVerifier::format_contract($pass)) === 1,
+	'a result with no offloaded files says 0, so the plane never reads an absent line as unknown');
+$words = BackupVerifier::describe($with_objects);
+check(strpos($words, '1,204 offloaded files (3.2 GB), 20 of them opened') !== false, 'a rehearsal says how many were proven and how many opened', $words);
+$words = BackupVerifier::describe(array('result' => 'pass', 'level' => 2, 'run_time' => '2026-09-13 04:45:20',
+	'artifacts' => 4, 'bytes' => 751829197, 'files' => 1842, 'objects' => 1, 'object_bytes' => 2048));
+check(strpos($words, '1 offloaded file (2 KB).') !== false && strpos($words, 'opened') === false,
+	'level 2 names the count and size only', $words);
+check(strpos(BackupVerifier::describe($pass), 'offloaded') === false, 'a run with none says nothing about them');
+
+// The sample: the largest few, then a random draw from the rest; only names
+// a link can carry.
+$index = array('version' => 1, 'objects' => array());
+for ($i = 1; $i <= 40; $i++) {
+	$index['objects'][] = array('name' => sprintf('o%02d.bin', $i), 'epoch' => 'epoch-20260901_000000',
+		'object_bytes' => $i * 1000, 'object_sha256' => str_repeat('a', 64), 'stored' => true);
+}
+$index['objects'][] = array('name' => 'waiting.bin', 'epoch' => '', 'object_bytes' => 0, 'object_sha256' => '', 'stored' => false);
+$index['objects'][] = array('name' => '.hidden.bin', 'epoch' => 'epoch-20260901_000000', 'object_bytes' => 999999, 'object_sha256' => str_repeat('b', 64), 'stored' => true);
+$sample = BackupVerifier::sample_objects($index);
+check(count($sample) === 20 && count(array_unique($sample)) === 20, 'twenty distinct names', json_encode($sample));
+check(array_slice($sample, 0, 5) === array('o40.bin', 'o39.bin', 'o38.bin', 'o37.bin', 'o36.bin'), 'the five largest come first, largest first', json_encode(array_slice($sample, 0, 5)));
+check(!in_array('waiting.bin', $sample, true) && !in_array('.hidden.bin', $sample, true),
+	'nothing unstored, and nothing a link could not be keyed by (a leading dot)');
+$rest = array_slice($sample, 5);
+$in_rest = count(array_filter($rest, function ($n) { return preg_match('/^o(0[1-9]|[12]\d|3[0-5])\.bin$/', $n); }));
+check($in_rest === 15, 'fifteen more, all drawn from the rest', json_encode($rest));
+$small = array('version' => 1, 'objects' => array_slice($index['objects'], 0, 3));
+check(count(BackupVerifier::sample_objects($small)) === 3, 'a store smaller than the sample is sampled whole');
+check(BackupVerifier::sample_objects(array('version' => 1, 'objects' => array())) === array(), 'an empty index samples nothing');
+check(BackupVerifier::sample_bytes($index, array('o40.bin', 'o01.bin')) === 41000 + 40000,
+	'the sample\'s disk need is every ciphertext plus one plaintext of the largest', BackupVerifier::sample_bytes($index, array('o40.bin', 'o01.bin')));
+check(BackupVerifier::disk_needed($manifest, 2, 3, 81000) === 1632 + 2000 + 360 + 81000, 'and the disk check takes it');
+check(BackupVerifier::disk_needed($manifest, 2, 3, 81000, true) === 2000 + 360 + 81000,
+	'once the set is staged, the second check counts the sample and the rehearsal, not the set again');
+$again = BackupVerifier::disk_check($manifest, 2, 3, '/nonexistent', 2000 + 360 + 81000 - 1, 81000, true);
+check(is_array($again) && $again['needs_bytes'] === 2000 + 360 + 81000, 'and skips with that number');
+
+// The link maps a request carries: names or epoch ids as keys, https values,
+// bounded — or the request is malformed.
+$refused = function ($value, $what, $pattern = BackupStaging::LINK_NAME_PATTERN, $max = BackupStaging::MAX_OBJECT_LINKS) {
+	try { BackupStaging::link_map($value, $what, $pattern, $max); return ''; }
+	catch (BackupStagingException $e) { return $e->getCode() === BackupStagingException::MALFORMED ? $e->getMessage() : 'wrong code'; }
+};
+check(BackupStaging::link_map(null, 'object_urls') === array(), 'absent is an empty map');
+check(BackupStaging::link_map(array('beach.jpg' => 'https://x.invalid/b?sig=1'), 'object_urls') === array('beach.jpg' => 'https://x.invalid/b?sig=1'), 'a well-formed map passes');
+check($refused('not a map', 'object_urls') !== '', 'a string is refused');
+check(strpos($refused(array('../beach.jpg' => 'https://x.invalid/b'), 'object_urls'), 'not a name') !== false, 'a path key is refused');
+check($refused(array('.hidden' => 'https://x.invalid/b'), 'object_urls') !== '', 'a hidden-file key is refused');
+check(strpos($refused(array('beach.jpg' => 'http://x.invalid/b'), 'object_urls'), 'https') !== false, 'a plain-http link is refused');
+check($refused(array('chain-20260901_000000' => 'https://x.invalid/e'), 'epoch_envelope_urls', BackupStaging::EPOCH_ID_PATTERN) !== ''
+	&& BackupStaging::link_map(array('epoch-20260901_000000' => 'https://x.invalid/e'), 'epoch_envelope_urls', BackupStaging::EPOCH_ID_PATTERN) !== array(),
+	'an envelope map is keyed by epoch ids only');
+$many = array(); for ($i = 0; $i < 151; $i++) { $many['o' . $i] = 'https://x.invalid/o'; }
+check(strpos($refused($many, 'object_urls'), 'at most 150') !== false, 'more than a page of links is refused');
+
+// The script refuses a sample on a level that opens none, before it locks or fetches.
+$req = json_encode(array('chain_id' => 'chain-20260901_040000', 'profile' => 'site', 'level' => 2,
+	'manifest_url' => 'https://x.invalid/m?sig=1', 'artifact_urls' => array('files-0000.tar.gz.enc' => 'https://x.invalid/f?sig=1'),
+	'object_urls' => array('beach.jpg' => 'https://x.invalid/b?sig=1')));
+$desc = array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w'));
+$proc = proc_open('php ' . escapeshellarg(PathHelper::getIncludePath('utils/verify_backup.php')), $desc, $pipes);
+fwrite($pipes[0], $req); fclose($pipes[0]);
+$out = stream_get_contents($pipes[1]); $err = stream_get_contents($pipes[2]); fclose($pipes[1]); fclose($pipes[2]);
+$rc = proc_close($proc);
+check($rc === 2 && strpos($out, 'VERIFY_RESULT=fail') !== false && strpos($err, 'level 3') !== false,
+	'object links on a level-2 request are a malformed request (exit 2), named', $err);
 
 // ── Disk arithmetic ─────────────────────────────────────────────────────────
 section('Disk needed before anything is downloaded');

@@ -1046,6 +1046,49 @@ $run_config = JobCommandBuilder::build_backup_run($run_node, array(
 check(($run_config['type'] ?? '') === 'project' && ($run_config['mode'] ?? '') === 'chain',
 	'unrecognised type and mode coerce to the defaults rather than travelling as text');
 
+// The object store rides on the request for an agent that accepts it: the
+// flag, a signed link to the newest index on the node's manager shelf, and a
+// signed link per epoch envelope — from the listing the scheduler hands over,
+// or one taken here. An older agent gets none of them and runs as before.
+$obj_base = 'joinery-backups/' . $run_node->get('mgn_slug') . '/manager/';
+$obj_listing = array(
+	array('key' => $obj_base . 'chain-20260901_030000/manifest.json', 'size' => 900),
+	array('key' => $obj_base . 'chain-20260901_030000/objects-0000.json.gz', 'size' => 300),
+	array('key' => $obj_base . 'chain-20260901_030000/objects-0001.json.gz', 'size' => 310),
+	array('key' => $obj_base . 'chain-20260820_030000/objects-0004.json.gz', 'size' => 200),
+	array('key' => $obj_base . 'objects/epoch-20260801_000000/envelope.json', 'size' => 800),
+	array('key' => $obj_base . 'objects/epoch-20260801_000000/beach.jpg.enc', 'size' => 4000),
+	array('key' => $obj_base . 'objects/epoch-20260901_000000/envelope.json', 'size' => 800),
+);
+JobCommandBuilder::set_shelf_listing_for_tests($obj_listing);
+$obj_node = jcb_node(array(
+	'mgn_web_root' => '/var/www/html/objnode/public_html',
+	'mgn_bkt_backup_target_id' => $bkt->key,
+	'mgn_agent_public_key' => base64_encode(str_repeat("\x0a", 32)),
+	'mgn_agent_version'    => JobCommandBuilder::BACKUP_RUN_OBJECTS_MIN_AGENT_VERSION));
+$obj_base = 'joinery-backups/' . $obj_node->get('mgn_slug') . '/manager/';
+foreach ($obj_listing as &$o) { $o['key'] = $obj_base . substr($o['key'], strpos($o['key'], '/manager/') + 9); }
+unset($o);
+JobCommandBuilder::set_shelf_listing_for_tests($obj_listing);
+$obj_config = JobCommandBuilder::build_backup_run($obj_node)['params'];
+check(($obj_config['objects'] ?? null) === true, 'an agent at the floor is asked to store offloaded files');
+check(strpos((string)($obj_config['objects_index_url'] ?? ''), 'https://shelf.invalid/' . $obj_base . 'chain-20260901_030000/objects-0001.json.gz?') === 0,
+	'the index link names the newest run\'s index on the shelf', (string)($obj_config['objects_index_url'] ?? ''));
+check(array_keys((array)($obj_config['epoch_envelope_urls'] ?? array())) === array('epoch-20260801_000000', 'epoch-20260901_000000')
+	&& strpos((string)$obj_config['epoch_envelope_urls']['epoch-20260801_000000'], 'objects/epoch-20260801_000000/envelope.json?') !== false,
+	'every epoch envelope on the shelf is linked, keyed by epoch', json_encode($obj_config['epoch_envelope_urls'] ?? null));
+$obj_config = JobCommandBuilder::build_backup_run($obj_node, array('objects_links' => array('index' => '', 'envelopes' => array())))['params'];
+check(($obj_config['objects'] ?? null) === true && !isset($obj_config['objects_index_url']) && !isset($obj_config['epoch_envelope_urls']),
+	'links the scheduler hands over are used as they are: an empty shelf sends the flag and no link');
+$obj_config = JobCommandBuilder::build_backup_run($obj_node, array('type' => 'database'))['params'];
+check(!isset($obj_config['objects']), 'a database-only run carries no object store');
+JobCommandBuilder::set_shelf_listing_for_tests(null);
+$old_config = JobCommandBuilder::build_backup_run($run_node)['params'];
+check(!isset($old_config['objects']) && !isset($old_config['objects_index_url']) && !isset($old_config['epoch_envelope_urls']),
+	'an older agent is sent none of the object-store fields (it would refuse the job)');
+check(!JobCommandBuilder::agent_accepts_backup_run_objects(jcb_node(array('mgn_agent_version' => ''))),
+	'an unknown agent version is not sent them either');
+
 // An unpaired node with an otherwise valid config is refused with the fix.
 $bru_threw = '';
 try {
@@ -1592,6 +1635,181 @@ if (!$verify_target) {
 	} catch (Exception $e) { $threw = $e->getMessage(); }
 	check(strpos($threw, JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION['verify_backup']) !== false,
 		'an agent that predates verify_backup is refused, naming the version it needs', $threw);
+
+	// ── Offloaded files ─────────────────────────────────────────────────────
+	// The chain's newest run carries an index; the plane reads it, signs a
+	// link per epoch envelope it names, and for a rehearsal the sample — to
+	// an agent whose verify_backup accepts the links. An older agent gets
+	// the request it always got.
+	$vindex = array('version' => 1, 'profile' => 'manager', 'run' => 'chain-20260901_040000/1', 'created' => '2026-09-02T04:00:00Z',
+		'epochs' => array('epoch-20260801_000000', 'epoch-20260901_000000'), 'objects' => array(
+		array('name' => 'beach.jpg', 'epoch' => 'epoch-20260801_000000', 'object_bytes' => 4000, 'object_sha256' => str_repeat('a', 64), 'stored' => true),
+		array('name' => 'dune.png',  'epoch' => 'epoch-20260901_000000', 'object_bytes' => 1200, 'object_sha256' => str_repeat('b', 64), 'stored' => true),
+		array('name' => 'waiting.jpg', 'epoch' => '', 'object_bytes' => 0, 'object_sha256' => '', 'stored' => false),
+	));
+	$vindex0 = array_merge($vindex, array('run' => 'chain-20260901_040000/0', 'epochs' => array('epoch-20260801_000000'),
+		'objects' => array($vindex['objects'][0])));
+	$oprefix = str_replace('/verifysite/', '/verifysite-objects/', $vprefix);
+	$vlisting_o = array();
+	foreach ($vlisting as $o) { $o['key'] = str_replace('/verifysite/', '/verifysite-objects/', $o['key']); $vlisting_o[] = $o; }
+	$vlisting_o[] = array('key' => $oprefix . 'objects-0000.json.gz', 'size' => 300);
+	$vlisting_o[] = array('key' => $oprefix . 'objects-0001.json.gz', 'size' => 310);
+	JobCommandBuilder::set_shelf_listing_for_tests($vlisting_o, array(
+		$oprefix . 'objects-0000.json.gz' => $vindex0,
+		$oprefix . 'objects-0001.json.gz' => $vindex,
+	));
+	$objects_node = jcb_node(array(
+		'mgn_web_root'             => '/var/www/html/verifysite/public_html',
+		'mgn_slug'                 => 'verifysite-objects',
+		'mgn_bkt_backup_target_id' => $verify_bkt->key,
+		'mgn_agent_public_key'     => base64_encode(str_repeat("\x04", 32)),
+		'mgn_agent_version'        => JobCommandBuilder::VERIFY_BACKUP_OBJECTS_MIN_AGENT_VERSION));
+	$vbase = dirname(rtrim($oprefix, '/')) . '/';
+	$v2 = JobCommandBuilder::build_verify_backup($objects_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager', 'level' => 2));
+	check(array_keys($v2['params']['epoch_envelope_urls'] ?? array()) === array('epoch-20260801_000000', 'epoch-20260901_000000'),
+		'a level-2 request carries a signed link per epoch the newest run\'s index names', json_encode(array_keys($v2['params']['epoch_envelope_urls'] ?? array())));
+	check($strip($v2['params']['epoch_envelope_urls']['epoch-20260901_000000']) === 'https://shelf.invalid/' . $vbase . 'objects/epoch-20260901_000000/envelope.json',
+		'the link names objects/{epoch}/envelope.json under the node\'s manager prefix', $v2['params']['epoch_envelope_urls']['epoch-20260901_000000']);
+	check(!isset($v2['params']['object_urls']), 'and no object links: level 2 opens envelopes only');
+	check(strpos($v2['params']['epoch_envelope_urls']['epoch-20260801_000000'], 'X-Amz-Expires=' . ManagementJob::PRIMITIVE_CLAIM_BUDGETS['verify_backup']) !== false,
+		'the envelope links expire with the verify job');
+	$v3 = JobCommandBuilder::build_verify_backup($objects_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager', 'level' => 3));
+	check(array_keys($v3['params']['object_urls'] ?? array()) === array('beach.jpg', 'dune.png'),
+		'a rehearsal also carries the sample — every stored object of a small store, largest first, never one waiting', json_encode(array_keys($v3['params']['object_urls'] ?? array())));
+	check($strip($v3['params']['object_urls']['dune.png']) === 'https://shelf.invalid/' . $vbase . 'objects/epoch-20260901_000000/dune.png.enc',
+		'each object link names objects/{epoch}/{name}.enc');
+	$v30 = JobCommandBuilder::build_verify_backup($objects_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager', 'level' => 3, 'seq' => 0));
+	check(array_keys($v30['params']['epoch_envelope_urls']) === array('epoch-20260801_000000') && array_keys($v30['params']['object_urls']) === array('beach.jpg'),
+		'a verify of a chosen run reads that run\'s index', json_encode($v30['params']['object_urls'] ?? null));
+	$vjson = (string)json_encode($v3);
+	check(strpos($vjson, 'recovery') === false && strpos($vjson, 'credential') === false && strpos($vjson, 'access_key') === false,
+		'still no key and no credential travel', $vjson);
+	JobCommandBuilder::set_shelf_listing_for_tests($vlisting);
+	$v_old = JobCommandBuilder::build_verify_backup($verify_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager', 'level' => 3));
+	check(!isset($v_old['params']['epoch_envelope_urls']) && !isset($v_old['params']['object_urls']),
+		'an agent before ' . JobCommandBuilder::VERIFY_BACKUP_OBJECTS_MIN_AGENT_VERSION . ' is sent the request it always got');
+	JobCommandBuilder::set_shelf_listing_for_tests(array_slice($vlisting_o, 0, count($vlisting)));
+	$v_none = JobCommandBuilder::build_verify_backup($objects_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager', 'level' => 3));
+	check(!isset($v_none['params']['epoch_envelope_urls']) && !isset($v_none['params']['object_urls']),
+		'a chain whose runs carry no index gets no object links');
+	// The newest run wrote no index (it ran before the agent could carry
+	// offloaded files); an older run's index is not sent for it.
+	$vlisting_gap = $vlisting_o;
+	$vlisting_gap[] = array('key' => $oprefix . 'files-0002.tar.gz.enc', 'size' => 210);
+	$vlisting_gap[] = array('key' => $oprefix . 'db-0002.sql.gz.enc',    'size' => 120);
+	JobCommandBuilder::set_shelf_listing_for_tests($vlisting_gap, array(
+		$oprefix . 'objects-0000.json.gz' => $vindex0,
+		$oprefix . 'objects-0001.json.gz' => $vindex,
+	));
+	$v_gap = JobCommandBuilder::build_verify_backup($objects_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager', 'level' => 3));
+	check(!isset($v_gap['params']['epoch_envelope_urls']) && !isset($v_gap['params']['object_urls']),
+		'a newest run with no index gets no object links, even when an older run has one', json_encode($v_gap['params']));
+	$v_gap1 = JobCommandBuilder::build_verify_backup($objects_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager', 'level' => 3, 'seq' => 1));
+	check(array_keys($v_gap1['params']['object_urls'] ?? array()) === array('beach.jpg', 'dune.png'), 'while naming run 1 still reads run 1\'s index');
+
+	// ── restore_objects: the index by link, then pages of links ─────────────
+	// (specs/backup_offloaded_files.md § Restore). A survey carries the run's
+	// index and nothing else; a page carries what fits of the names it is
+	// given, with the envelope of each epoch those objects are sealed under.
+	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetObjectRestore.php'));
+	JobCommandBuilder::set_shelf_listing_for_tests($vlisting_o, array(
+		$oprefix . 'objects-0000.json.gz' => $vindex0,
+		$oprefix . 'objects-0001.json.gz' => $vindex,
+	));
+	$survey = JobCommandBuilder::build_restore_objects($objects_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager'));
+	check($survey['primitive'] === 'restore_objects' && $survey['count'] === 0, 'a request with no names is the survey');
+	check(array_keys($survey['params']) === array('chain_id', 'profile', 'seq', 'mode', 'index_url'),
+		'it carries the run, the mode and the index link, and no object or envelope links', json_encode(array_keys($survey['params'])));
+	check($survey['params']['seq'] === 1 && $survey['params']['mode'] === 'missing'
+		&& $strip($survey['params']['index_url']) === 'https://shelf.invalid/' . $oprefix . 'objects-0001.json.gz',
+		'the newest run on the shelf, in missing mode, its index signed', json_encode($survey['params']));
+	check(strpos($survey['params']['index_url'], 'X-Amz-Expires=' . ManagementJob::PRIMITIVE_CLAIM_BUDGETS['restore_objects']) !== false,
+		'the link expires with the restore_objects claim budget');
+	$survey0 = JobCommandBuilder::build_restore_objects($objects_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager', 'seq' => 0, 'mode' => 'all'));
+	check($survey0['params']['seq'] === 0 && $survey0['params']['mode'] === 'all'
+		&& $strip($survey0['params']['index_url']) === 'https://shelf.invalid/' . $oprefix . 'objects-0000.json.gz',
+		'a chosen run and mode travel, with that run\'s index');
+
+	$page = JobCommandBuilder::build_restore_objects($objects_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager',
+		'names' => array('beach.jpg', 'dune.png', 'stranger.bin')));
+	check(array_keys($page['params']['object_urls'] ?? array()) === array('beach.jpg', 'dune.png') && $page['count'] === 3,
+		'a page signs the names the index marks stored and moves past one it does not', json_encode($page));
+	check(array_keys($page['params']['epoch_envelope_urls'] ?? array()) === array('epoch-20260801_000000', 'epoch-20260901_000000'),
+		'with the envelope of each epoch the page\'s objects are sealed under');
+	check($strip($page['params']['object_urls']['dune.png']) === 'https://shelf.invalid/' . $vbase . 'objects/epoch-20260901_000000/dune.png.enc'
+		&& $strip($page['params']['epoch_envelope_urls']['epoch-20260901_000000']) === 'https://shelf.invalid/' . $vbase . 'objects/epoch-20260901_000000/envelope.json',
+		'each link names the object or envelope under the node\'s manager prefix');
+	$page1 = JobCommandBuilder::build_restore_objects($objects_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager', 'names' => array('dune.png')));
+	check(array_keys($page1['params']['epoch_envelope_urls']) === array('epoch-20260901_000000'), 'a page names only the epochs it needs');
+	$none = JobCommandBuilder::build_restore_objects($objects_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager', 'names' => array('x.bin', 'y.bin')));
+	check(!isset($none['params']['object_urls']) && $none['count'] === 2, 'names the index lacks are consumed and no link is signed for them');
+	$rjson = (string)json_encode($page);
+	check(strpos($rjson, 'recovery') === false && strpos($rjson, 'credential') === false && strpos($rjson, 'access_key') === false,
+		'no key and no credential travel', $rjson);
+	$threw = '';
+	try { JobCommandBuilder::build_restore_objects($objects_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager', 'mode' => 'some')); }
+	catch (Exception $e) { $threw = $e->getMessage(); }
+	check(strpos($threw, 'mode') !== false, 'a mode that is not missing or all is refused', $threw);
+	$threw = '';
+	try { JobCommandBuilder::build_restore_objects($verify_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager')); }
+	catch (Exception $e) { $threw = $e->getMessage(); }
+	check(strpos($threw, JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION['restore_objects']) !== false,
+		'an agent before ' . JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION['restore_objects'] . ' is refused, naming the version', $threw);
+	JobCommandBuilder::set_shelf_listing_for_tests($vlisting_gap, array($oprefix . 'objects-0001.json.gz' => $vindex));
+	$threw = '';
+	try { JobCommandBuilder::build_restore_objects($objects_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager')); }
+	catch (Exception $e) { $threw = $e->getMessage(); }
+	check(strpos($threw, 'Run 2') === 0 && strpos($threw, 'no offloaded-files index') !== false,
+		'a newest run with no index is refused by run number, not answered with an older run\'s', $threw);
+
+	// Paging is pure and bounded two ways: never more than PAGE_MAX objects,
+	// never over the job's byte ceiling — and every name is covered once.
+	$many = array('version' => 1, 'profile' => 'manager', 'run' => 'r', 'created' => '', 'epochs' => array(), 'objects' => array());
+	$many_names = array();
+	for ($i = 0; $i < 400; $i++) {
+		$name = 'blob_' . str_pad((string)$i, 3, '0', STR_PAD_LEFT) . '_' . str_repeat('x', 20) . '.bin';
+		$many_names[] = $name;
+		$many['objects'][] = array('name' => $name, 'epoch' => 'epoch-2026090' . ($i % 3) . '_000000', 'object_bytes' => 10 + $i,
+			'object_sha256' => str_repeat('c', 64), 'stored' => true);
+	}
+	$base_params = array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager', 'seq' => 1, 'mode' => 'missing',
+		'index_url' => 'https://shelf.invalid/i?X-Amz-Signature=' . str_repeat('s', 64));
+	// A long link: a provider that signs with a session token runs past 500
+	// bytes, and 150 of those do not fit the byte ceiling, so it is bytes
+	// that close the page.
+	$long_sign  = function ($relname) { return 'https://shelf.invalid/' . $relname . '?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential='
+		. str_repeat('c', 60) . '&X-Amz-Security-Token=' . str_repeat('t', 300) . '&X-Amz-Date=20260920T120000Z&X-Amz-Expires=7800&X-Amz-SignedHeaders=host&X-Amz-Signature=' . str_repeat('f', 64); };
+	$short_sign = function ($relname) { return 'https://s.invalid/o?s=' . substr(md5($relname), 0, 6); };
+	$walk = function ($sign) use ($many, $many_names, $base_params) {
+		$pages = array(); $cursor = 0; $guard = 0;
+		while ($cursor < count($many_names) && $guard++ < 1000) {
+			$p = FleetObjectRestore::page($many, array_slice($many_names, $cursor), $base_params, $sign);
+			$pages[] = $p; $cursor += max(1, $p['count']);
+		}
+		return $pages;
+	};
+	$pages = $walk($long_sign);
+	$covered = array(); $ok_size = true; $ok_max = true; $ok_epochs = true;
+	foreach ($pages as $p) {
+		$covered = array_merge($covered, array_keys($p['params']['object_urls']));
+		$ok_size = $ok_size && strlen(json_encode($p['params'])) <= ManagementJob::MAX_PARAMS_BYTES;
+		$ok_max  = $ok_max && count($p['params']['object_urls']) <= BackupObjectRestore::PAGE_MAX;
+		$epochs_needed = array();
+		foreach (array_keys($p['params']['object_urls']) as $n) { $epochs_needed[$many['objects'][(int)substr($n, 5, 3)]['epoch']] = true; }
+		ksort($epochs_needed);
+		$ok_epochs = $ok_epochs && array_keys($epochs_needed) === array_keys($p['params']['epoch_envelope_urls']);
+	}
+	check(count($pages) > 3 && $ok_size && count($pages[0]['params']['object_urls']) < BackupObjectRestore::PAGE_MAX,
+		'with long links a page is filled to the byte ceiling, under PAGE_MAX, and never over it',
+		count($pages) . ' pages; first holds ' . count($pages[0]['params']['object_urls']));
+	check($covered === $many_names, 'and the pages cover every name once, in order', count($covered) . ' of ' . count($many_names));
+	check($ok_epochs, 'each page carries exactly the envelopes its objects need');
+	$first = $pages[0];
+	$one_more = FleetObjectRestore::page($many, array_slice($many_names, 0, $first['count'] + 1), $base_params, $long_sign);
+	check($one_more['count'] === $first['count'], 'one more name would not fit: the page is full, not merely large');
+	$pages = $walk($short_sign);
+	check(count($pages) === 3 && count($pages[0]['params']['object_urls']) === BackupObjectRestore::PAGE_MAX && $ok_max,
+		'with short links the page stops at PAGE_MAX (' . BackupObjectRestore::PAGE_MAX . ') objects', count($pages) . ' pages');
 	JobCommandBuilder::set_shelf_listing_for_tests(null);
 }
 
