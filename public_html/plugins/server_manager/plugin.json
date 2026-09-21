@@ -94,7 +94,7 @@
   ],
   "settingsGroups": {
     "service": "Joinery service API",
-    "services": "Joinery-run services (mail and shelf tenants)",
+    "services": "Joinery-run services (mail and backup storage tenants)",
     "provisioning": "Customer provisioning",
     "monitoring": "Monitoring",
     "publishing": "Publishing",
@@ -302,7 +302,7 @@
       "group": "backups",
       "label": "Restore points kept per node",
       "type": "number",
-      "helptext": "How many backups to keep on this management node's shelf for each node. Chains are kept or deleted whole, never partly."
+      "helptext": "How many backups to keep in this node's backup storage for each node. Chains are kept or deleted whole, never partly."
     },
     {
       "name": "server_manager_fleet_backup_full_interval_days",
@@ -318,7 +318,7 @@
       "group": "backups",
       "label": "Days between backup verifications (0 = never)",
       "type": "number",
-      "helptext": "How often each node's newest backup is verified restorable by opening and reading it on the node: every archive it depends on is downloaded from the shelf, decrypted with the node's own key and read to the end, then removed. Nothing on the site is touched. Each verification downloads the whole set once, so on metered storage it is that much egress per node per interval."
+      "helptext": "How often each node's newest backup is verified restorable by opening and reading it on the node: every archive it depends on is downloaded from backup storage, decrypted with the node's own key and read to the end, then removed. Nothing on the site is touched. Each verification downloads the whole set once, so on metered storage it is that much egress per node per interval."
     },
     {
       "name": "server_manager_fleet_backup_max_concurrent",
@@ -426,9 +426,9 @@
       "name": "server_manager_hosted_shelf_allowance_gb",
       "default": "10",
       "group": "hosted",
-      "label": "Backup shelf per customer (GB)",
+      "label": "Backup storage per customer (GB)",
       "type": "number",
-      "helptext": "How much of the fleet shelf a hosted customer's backups may occupy before their runs stop. Measured from the listing the retention pass already takes."
+      "helptext": "How much of the fleet's backup storage a hosted customer's backups may occupy before their runs stop. Measured from the listing the retention pass already takes."
     },
     {
       "name": "server_manager_hosted_trial_days",
@@ -450,9 +450,9 @@
       "name": "server_manager_hosted_shelf_days",
       "default": "90",
       "group": "hosted",
-      "label": "Backup shelf kept after non-payment (days)",
+      "label": "Backup storage kept after non-payment (days)",
       "type": "number",
-      "helptext": "How long a shut-down customer's backups stay on the shelf before the retention pass prunes them. Counted from the failed payment, not the shutdown."
+      "helptext": "How long a shut-down customer's backups stay in backup storage before the retention pass prunes them. Counted from the failed payment, not the shutdown."
     },
     {
       "name": "server_manager_hosted_manage_url",
@@ -476,7 +476,7 @@
       "group": "hosted",
       "type": "text",
       "label": "Backup storage referral URL",
-      "helptext": "Where a customer who outgrows the backup shelf opens their own bucket. Shown on their banner only when that allowance is near."
+      "helptext": "Where a customer who outgrows its backup storage opens their own bucket. Shown on their banner only when that allowance is near."
     },
     {
       "name": "server_manager_hosted_transfer_alerted_time",
@@ -497,21 +497,21 @@
           "min": "Must be 0 or more."
         }
       },
-      "helptext": "How long a self-hosted site keeps using our outbound mail and backup shelf after its paid-through date passes. At the end mail's subaccount is closed and the shelf broker refuses the site; the shelf is kept 90 days from that day and then pruned. Blank means 14."
+      "helptext": "How long a self-hosted site keeps using our outbound mail and backup storage after its paid-through date passes. At the end mail's subaccount is closed and the backup storage broker refuses the site; backup storage is kept 90 days from that day and then pruned. Blank means 14."
     },
     {
       "name": "server_manager_services_shelf_target_id",
       "default": "",
       "group": "services",
-      "label": "Backup shelf target",
+      "label": "Backup storage target",
       "type": "text",
-      "helptext": "The id of the backup target row whose bucket is the services shelf: the broker signs every tenant upload against that row's credential, and each tenant lives under its own prefix inside it. Blank means the one enabled target, which is the answer on a plane with exactly one."
+      "helptext": "The id of the backup target row whose bucket is the services backup storage: the broker signs every tenant upload against that row's credential, and each tenant lives under its own prefix inside it. Blank means the one enabled target, which is the answer on a plane with exactly one."
     },
     {
       "name": "server_manager_services_shelf_keep_chains",
       "default": "4",
       "group": "services",
-      "label": "Shelf restore points kept per site",
+      "label": "Backup storage restore points kept per site",
       "type": "number",
       "validation": {
         "number": true,
@@ -520,7 +520,7 @@
           "min": "Must be 1 or more."
         }
       },
-      "helptext": "How many backup chains (restore points) the plane keeps on the shelf for each tenant site, per profile. Older chains are pruned whole by the reconcile; a chain still being written is never touched. Blank means 4."
+      "helptext": "How many backup chains (restore points) the plane keeps in backup storage for each tenant site, per profile. Older chains are pruned whole by the reconcile; a chain still being written is never touched. Blank means 4."
     }
   ],
   "sealed_secrets": [

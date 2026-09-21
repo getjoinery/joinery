@@ -12,7 +12,7 @@
  *      governs every tenant.
  *   2. The ladder (core ServiceTenantLadder): the date is compared every pass,
  *      so no signal is needed. A passed date starts the grace window; past it
- *      the row is suspended — mail's subaccount closed, the shelf broker
+ *      the row is suspended — mail's subaccount closed, the backup storage broker
  *      refusing — and the retention clock starts. A new date at any point
  *      before the prune reactivates in place.
  *   3. The meter. Mail: the provider's own month-to-date count, read hourly,
@@ -23,7 +23,7 @@
  *   4. Abandoned runs: a run left open past ShelfBroker::STALE_RUN_HOURS is
  *      aborted on the plane's side (its open multipart cancelled with the
  *      plane's credential, its unfinished ledger rows dropped).
- *   5. Retention. Every active tenant's shelf is pruned to the newest
+ *   5. Retention. Every active tenant's backup storage is pruned to the newest
  *      server_manager_services_shelf_keep_chains chains per profile, chains
  *      whole, a chain with an open run never touched. A suspended or released
  *      tenant whose prune-after day has come loses its whole prefix, once,
@@ -174,7 +174,7 @@ class ServiceTenantWatch {
 	}
 
 	/**
-	 * The ledger against a listing, daily. What is on the shelf is the truth;
+	 * The ledger against a listing, daily. What is in backup storage is the truth;
 	 * the ledger is brought to it in both directions, and the figure follows.
 	 */
 	private function reconcile_shelf(ServiceTenant $row, string $now): int {
@@ -213,7 +213,7 @@ class ServiceTenantWatch {
 				continue;
 			}
 			if (!isset($listed[$key])) {
-				// Signed (or once completed) and not on the shelf: nothing to
+				// Signed (or once completed) and not in backup storage: nothing to
 				// count. A multipart still open at the provider is aborted
 				// there before the row goes.
 				ShelfBroker::abortObject($object);
@@ -232,7 +232,7 @@ class ServiceTenantWatch {
 			if (isset($known[$key])) {
 				continue;
 			}
-			// On the shelf and unknown to the ledger: it occupies the tenant's
+			// In backup storage and unknown to the ledger: it occupies the tenant's
 			// allowance whoever wrote it, so it is counted.
 			$object = new ShelfObject(NULL);
 			$object->set('svo_svt_service_tenant_id', (int)$row->key);
@@ -348,16 +348,16 @@ class ServiceTenantWatch {
 		$row->set('svt_figure', 0);
 		$row->set('svt_figure_time', $now);
 		$row->set('svt_pruned_time', $now);
-		$row->set('svt_notice', 'The getjoinery shelf copies of this site were pruned on ' . substr($now, 0, 10)
+		$row->set('svt_notice', 'The getjoinery backup storage copies of this site were pruned on ' . substr($now, 0, 10)
 			. ', ' . ServiceTenant::RETENTION_DAYS . ' days after the service stopped.');
 		$row->save();
-		error_log('ServiceTenantWatch: pruned ' . $deleted . ' object(s) from the shelf of ' . $this->label($row) . '.');
+		error_log('ServiceTenantWatch: pruned ' . $deleted . ' object(s) from backup storage of ' . $this->label($row) . '.');
 		return 1;
 	}
 
 	// ── Helpers ──────────────────────────────────────────────────────────────
 
-	/** The chains kept per profile on every active tenant's shelf. */
+	/** The chains kept per profile on every active tenant's backup storage. */
 	public static function keep_chains(): int {
 		$raw = trim((string)Globalvars::get_instance()->get_setting('server_manager_services_shelf_keep_chains', false, true));
 		return $raw === '' ? 4 : max(1, intval($raw));
@@ -386,7 +386,7 @@ class ServiceTenantWatch {
 		try {
 			$creds = (array)$target->get_credentials();
 		} catch (\Throwable $e) {
-			$this->errors[] = 'the shelf credential cannot be read: ' . $e->getMessage();
+			$this->errors[] = 'the backup storage credential cannot be read: ' . $e->getMessage();
 			return array(null, array(), '', '');
 		}
 		$bucket = trim((string)$target->get('bkt_bucket'));

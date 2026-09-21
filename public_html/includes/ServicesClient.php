@@ -1,7 +1,7 @@
 <?php
 /**
  * ServicesClient — this site's side of the services it rents from a Joinery
- * deployment: outbound mail and the backup shelf
+ * deployment: outbound mail and backup storage
  * (specs/services_phase2_platform.md §4, §9).
  *
  * The connection is three core settings — services_url, and the key pair
@@ -175,7 +175,7 @@ class ServicesClient extends ServiceClient {
 		return $answer;
 	}
 
-	// ── The shelf broker ──────────────────────────────────────────────────────
+	// ── The backup storage broker ──────────────────────────────────────────────────────
 
 	public function shelfBeginRun(string $profile, string $chain, array $artifacts): array {
 		return $this->call('shelf_begin_run', array('profile' => $profile, 'chain' => $chain, 'artifacts' => $artifacts));

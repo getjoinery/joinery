@@ -12,7 +12,7 @@
  * those are what is asserted:
  *
  *   * retention decides which restore points to delete — it must never empty
- *     the shelf, whatever it is asked for
+ *     backup storage, whatever it is asked for
  *   * the local sweep deletes files by age — it must not take the envelope off
  *     an archive it is keeping, and 0 must mean never
  *   * the local sweep must reach inside chain directories, and must leave the
@@ -29,7 +29,7 @@ require_once(PathHelper::getIncludePath('includes/BackupRunner.php'));
 require_once(PathHelper::getIncludePath('includes/BackupEnvelope.php'));
 
 // ── Retention selection ─────────────────────────────────────────────────────
-section('Retention never empties the shelf');
+section('Retention never empties backup storage');
 
 $rows = array('newest', 'a', 'b', 'c', 'd', 'oldest');
 
@@ -40,7 +40,7 @@ check(BackupRunner::surplus($rows, 6) === array(),
 check(BackupRunner::surplus($rows, 10) === array(),
 	'keeping more than exist drops nothing');
 check(BackupRunner::surplus(array(), 4) === array(),
-	'an empty shelf has nothing surplus');
+	'an empty backup storage has nothing surplus');
 check(BackupRunner::surplus(array('only'), 1) === array(),
 	'a single backup is never surplus');
 
@@ -210,7 +210,7 @@ check($result['status'] === 'skipped',
 check(stripos($result['message'], 'target') !== false, 'and says what is missing', $result['message']);
 check($run_ms < 2000, 'refusing costs nothing', $run_ms . 'ms');
 $shelf_after = is_dir($shelf) ? scandir($shelf) : array();
-check($shelf_after === $shelf_before, 'the shelf is untouched — no chain directory was created');
+check($shelf_after === $shelf_before, 'backup storage is untouched — no chain directory was created');
 $hist_after = (int)$db->query('SELECT count(*) FROM bkh_backup_history')->fetchColumn();
 check($hist_after === $hist_before, 'and no history row was written');
 

@@ -13,7 +13,7 @@
  *   - level 2 stages the epoch envelope the run's index names and opens it
  *     with the site key; the stored objects it covers are counted in
  *     VERIFY_OBJECTS / VERIFY_OBJECT_BYTES; no object is fetched
- *   - a missing envelope link, an envelope the shelf no longer holds, and an
+ *   - a missing envelope link, an envelope backup storage no longer holds, and an
  *     envelope minted for another epoch each fail by name
  *   - level 3 brings back the sample the launcher picks from the same index,
  *     checks each against the index's hash, decrypts it with the epoch key
@@ -131,7 +131,7 @@ $run = function () use ($execute_chain, $plan) {
 $shelf = function ($key) use ($fx) { return s3fx_object($fx, 'bkt', '/' . $key); };
 
 // The fetch the staging code makes, answered by the fixture shelf: a link is
-// https://shelf.invalid/<key>, and what is not on the shelf is a 404.
+// https://shelf.invalid/<key>, and what is not in backup storage is a 404.
 $fetched = array();
 BackupStaging::$fetch_for_tests = function ($url, $sink, $max) use ($shelf, &$fetched) {
 	$key = substr((string)parse_url($url, PHP_URL_PATH), 1);
@@ -208,12 +208,12 @@ $threw = '';
 try { $stage($chain_id, $manifest, 0, array()); } catch (BackupStagingException $e) { $threw = $e->getMessage(); }
 check(strpos($threw, 'no download link was supplied for the envelope of ' . $epoch) !== false, 'a request with no envelope link for a named epoch is refused by name', $threw);
 
-// The envelope is not on the shelf.
+// The envelope is not in backup storage.
 $gone_link = array('epoch_envelope_urls' => array($epoch => 'https://shelf.invalid/' . $base . 'objects/' . $epoch . '/nothing.json?X-Amz-Signature=test'));
 $threw = '';
 try { $stage($chain_id, $manifest, 0, $gone_link); } catch (BackupStagingException $e) { $threw = $e->getMessage(); }
 check(strpos($threw, 'could not bring back the envelope of ' . $epoch) !== false && strpos($threw, 'HTTP 404') !== false,
-	'an envelope the shelf no longer holds fails as a 404, which the script words as gone', $threw);
+	'an envelope backup storage no longer holds fails as a 404, which the script words as gone', $threw);
 
 // An envelope minted for something else, staged under this epoch's name.
 list($dir_x, $key_x, $objects_x) = $stage($chain_id, $manifest, 0, $links2);

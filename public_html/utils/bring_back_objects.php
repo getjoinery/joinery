@@ -1,12 +1,12 @@
 <?php
 /**
  * bring_back_objects.php — this site brings its offloaded files back from its
- * own backup shelf.
+ * own backup storage.
  *
  * The file store has lost some offloaded files (the cloud-storage page's
  * daily check says which), and this site backs itself up to a target of its
  * own, so a copy of each is on that shelf. This reads the named run's
- * offloaded-files index off the shelf with the site's own credential, works
+ * offloaded-files index from backup storage with the site's own credential, works
  * out which files the file bucket cannot serve, and brings them home a page
  * at a time — each fetched by a link this machine signs for itself, checked
  * against the index, decrypted with the site's own key, placed where the site
@@ -31,7 +31,7 @@
  * when it finished, 1 when it stopped on a failure, 2 when the request could
  * not be understood.
  *
- * A site backed up only by a management node has no shelf credential here;
+ * A site backed up only by a management node has no backup storage credential here;
  * its files come back as a management-node job (Bring them back on the node's
  * Backups tab there). No key and no credential is printed.
  *

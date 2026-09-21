@@ -17,7 +17,7 @@ require_once(PathHelper::getThemeFilePath('profile_services_logic.php', 'logic',
 $page_vars = process_logic(profile_services_logic(array_merge($_GET, $_POST, $params ?? [])));
 extract($page_vars);
 
-$service_labels = array('mail' => 'Outbound email', 'shelf' => 'Backup shelf');
+$service_labels = array('mail' => 'Outbound email', 'shelf' => 'Backup storage');
 $state_labels = array(
 	'unpaid'       => 'Not yet entitled',
 	'provisioning' => 'Setting up',
@@ -70,7 +70,7 @@ echo PublicPage::BeginPage('Connected sites', $hoptions);
 		<div class="sms-actions">
 			<?php echo PublicPage::action_button('Disconnect', $self_url, array(
 				'hidden'  => array('action' => 'disconnect', 'host' => $site['host']),
-				'confirm' => 'Disconnect ' . $site['host'] . '? Its key stops working, its outbound email through getjoinery is closed, and its backup shelf is kept 90 days and then pruned.',
+				'confirm' => 'Disconnect ' . $site['host'] . '? Its key stops working, its outbound email through getjoinery is closed, and its backup storage is kept 90 days and then pruned.',
 				'class'   => 'sms-secondary-btn',
 			)); ?>
 		</div>

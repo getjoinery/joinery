@@ -33,14 +33,14 @@ function shelf_sign_logic(array $input): LogicResult {
 	} catch (ShelfBrokerException $e) {
 		return LogicResult::error($e->getMessage());
 	} catch (ShelfPresignerException $e) {
-		return LogicResult::error('The shelf could not sign that request: ' . $e->getMessage());
+		return LogicResult::error('Backup storage could not sign that request: ' . $e->getMessage());
 	}
 	return LogicResult::render($data);
 }
 
 function shelf_sign_logic_descriptor(): array {
 	return array(
-		'description'      => 'A presigned URL for one shelf object: put, multipart_create, multipart_parts (a batch of up to ten part URLs) or multipart_complete inside an open run; get inside the site\'s own prefix (run_id 0) or a run\'s base key, allowed until the site\'s copies are pruned. Never a delete.',
+		'description'      => 'A presigned URL for one backup storage object: put, multipart_create, multipart_parts (a batch of up to ten part URLs) or multipart_complete inside an open run; get inside the site\'s own prefix (run_id 0) or a run\'s base key, allowed until the site\'s copies are pruned. Never a delete.',
 		'requires_session' => true,
 		'mutates'          => true,
 		'input'            => array(

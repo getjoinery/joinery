@@ -16,6 +16,11 @@
  *   FIXTURE_COMPLETE_ERRORS=n  the first n CompleteMultipartUpload calls answer
  *                              HTTP 200 with an <Error> body (the trap)
  *   FIXTURE_FAIL_PUT=1         every plain PutObject answers 400
+ *   FIXTURE_ANON_READ=1        a GET/HEAD with no Authorization header and no
+ *                              X-Amz-Signature answers as a public bucket would;
+ *                              without it such a read is refused with 403
+ *   FIXTURE_WRITE_ONLY_KEY=1   a DELETE signed by a key id starting "wo-" is
+ *                              refused with 403 (a write-only key)
  *
  * Keep request bodies under 1 KB: above that curl sends `Expect: 100-continue`,
  * which the built-in server never answers, costing a second of dead wait each.
@@ -27,6 +32,7 @@
  *   s3fx_object($fx, 'bucket', '/k');  // the bytes, or null
  *   s3fx_count($fx, 'complete');       // how many completes were seen
  *
+ * @version 1.1 - anonymous reads refused unless FIXTURE_ANON_READ; write-only key by id prefix
  * @version 1.0
  */
 
@@ -136,6 +142,18 @@ $store = function($bytes) use ($file, $full) {
 };
 header("Content-Type: application/xml");
 
+// Who is asking: a SigV4 header names the key id; a presigned link carries
+// X-Amz-Signature; anything else is anonymous.
+$auth = (string)($_SERVER["HTTP_AUTHORIZATION"] ?? "");
+$key_id = preg_match("#Credential=([^/]+)/#", $auth, $cm) ? $cm[1] : "";
+$anonymous = $auth === "" && !isset($q["X-Amz-Signature"]);
+if ($anonymous && ($method === "GET" || $method === "HEAD") && (int)getenv("FIXTURE_ANON_READ") !== 1) {
+	$bump("anonymous");
+	http_response_code(403);
+	echo "<?xml version=\"1.0\"?><Error><Code>AccessDenied</Code><Message>anonymous read refused</Message></Error>";
+	return true;
+}
+
 if ($method === "POST" && array_key_exists("uploads", $q)) {
 	$n = $bump("create");
 	echo "<?xml version=\"1.0\"?><InitiateMultipartUploadResult><UploadId>fixture-upload-" . $n . "</UploadId></InitiateMultipartUploadResult>";
@@ -228,6 +246,11 @@ if ($method === "HEAD") {
 }
 if ($method === "DELETE") {
 	$bump("delete");
+	if ((int)getenv("FIXTURE_WRITE_ONLY_KEY") === 1 && strpos($key_id, "wo-") === 0) {
+		http_response_code(403);
+		echo "<?xml version=\"1.0\"?><Error><Code>AccessDenied</Code><Message>this key cannot delete</Message></Error>";
+		return true;
+	}
 	@unlink($file);
 	@unlink($file . ".key");
 	http_response_code(204);

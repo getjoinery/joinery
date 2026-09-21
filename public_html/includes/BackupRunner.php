@@ -44,7 +44,7 @@
  *                 profile's enabled marker; epoch envelopes arriving by link are re-sealed after
  *                 a recovery-key rotation the same way the site profile re-seals its own.
  * @version 1.17 - offloaded files are part of the backup (specs/backup_offloaded_files.md): a run
- *                 with files in it reads what its shelf holds, stores every cloud blob the shelf
+ *                 with files in it reads what its backup storage holds, stores every cloud blob backup storage
  *                 lacks (one at a time, inside OBJECT_STORE_BUDGET_*), excludes every cloud blob's
  *                 local paths from the archive, writes the objects index as an artifact of the
  *                 run, records the held set, and releases the local bytes every enabled profile
@@ -87,7 +87,7 @@
  * @version 1.6 - a rotated recovery key ends the current chain: the next run starts a fresh chain
  *                sealed to the new key instead of extending one only the old key opens
  * @version 1.6 - a failed chain run removes the empty chain directory it created;
- *                one husk per failed run had been accumulating on the shelf forever
+ *                one husk per failed run had been accumulating in backup storage forever
  * @version 1.5 - a manager-profile run seals to THIS machine's own proven recovery key, read
  *                locally. A run carrying key material is refused, and a machine with no proven
  *                key of its own refuses to back up rather than sealing to a key it was handed
@@ -130,7 +130,7 @@ class BackupRunnerException extends Exception {}
  *
  * The manager profile is handed its bucket and credentials by whoever triggered
  * the run; they are never stored here. That a node holds no credential which
- * could reach another site's shelf is a security property, so this is
+ * could reach another site's backup storage is a security property, so this is
  * deliberately NOT a BackupTarget model: there is no save(), no table and no
  * persistence path to forget to avoid. It carries only the surface a run reads.
  */
@@ -389,12 +389,12 @@ class BackupRunner {
 			'keep_cloud'   => max(1, (int)self::setting('backup_retention_count')),
 			'keep_local'   => max(0, (int)self::setting('backup_local_retention_days')),
 			'delete_local' => (string)self::setting('backup_delete_local_after_upload') === '1',
-			// This site prunes its own shelf. It holds the credentials, and the
+			// This site prunes its own backup storage. It holds the credentials, and the
 			// backups being counted are its own.
 			'prunes_cloud' => true,
-			// Offloaded files are stored on this shelf and indexed by every run
+			// Offloaded files are stored in this backup storage and indexed by every run
 			// with files in it; a database-only backup carries no files and its
-			// profile is not enabled for objects. What the shelf holds is read
+			// profile is not enabled for objects. What backup storage holds is read
 			// by listing it: this profile holds the credential that can.
 			'objects'        => ($type !== 'database'),
 			'objects_source' => 'listing',
@@ -443,7 +443,7 @@ class BackupRunner {
 	 *
 	 * A site with no proven key of its own cannot take an encrypted backup for
 	 * anybody, and says so. Never silently downgrade: an unencrypted copy of the
-	 * whole database on somebody else's shelf is the outcome that refusal exists
+	 * whole database in somebody else's backup storage is the outcome that refusal exists
 	 * to prevent.
 	 */
 	private static function plan_manager(array $config) {
@@ -523,19 +523,19 @@ class BackupRunner {
 			'keep_local'   => max(0, (int)($m['keep_local_days'] ?? 7)),
 			'delete_local' => !empty($m['delete_local_after_upload']),
 			// Cloud pruning is not this machine's decision. The credential it
-			// was handed cannot delete, and the shelf being counted belongs to
+			// was handed cannot delete, and backup storage being counted belongs to
 			// whoever triggered the run — retention runs there, with a
 			// delete-capable credential that never comes here. This plan carries
 			// no keep count at all: the flag is the whole answer, and there is
 			// no second number for it to disagree with.
 			'prunes_cloud' => false,
-			// The object store on the manager shelf is driven by three request
+			// The object store in the manager-profile backup storage is driven by three request
 			// fields a management node running that code sends. A request
 			// without `objects` — an older management node — stores nothing and
 			// holds nothing, so a node upgraded ahead of its management node
 			// behaves as it always did. The credential cannot list, so what the
 			// shelf holds arrives as the newest index by link, never by listing;
-			// a request with no link means the shelf holds nothing yet. Links
+			// a request with no link means backup storage holds nothing yet. Links
 			// are https or nothing: a signature is a bearer token.
 			'objects'             => $objects,
 			'objects_source'      => 'index',
@@ -767,12 +767,12 @@ class BackupRunner {
 		$objects = null;
 		try {
 			try {
-				// Offloaded files first, so that at commit the shelf holds
-				// everything the archive leaves out: what the shelf holds, the
+				// Offloaded files first, so that at commit backup storage holds
+				// everything the archive leaves out: what backup storage holds, the
 				// exclude list, the store step.
 				$objects = self::begin_objects($plan, $chain_id . '/' . $seq);
 				// The files archive streams straight to the bucket: by the time
-				// run_files_engine() returns, the object is complete on the shelf
+				// run_files_engine() returns, the object is complete in backup storage
 				// and the artifact carries its key. It is never on this disk.
 				$artifacts['files'] = self::run_files_engine($plan, $chain_id, $chain_d, $seq, $snar, $key_file,
 					$objects ? $objects['exclude'] : '');
@@ -851,7 +851,7 @@ class BackupRunner {
 			}
 		}
 
-		// The run is committed: record what the shelf now holds, and release
+		// The run is committed: record what backup storage now holds, and release
 		// the local bytes every enabled profile holds.
 		$released = $objects ? self::finish_objects($plan, $objects) : 0;
 
@@ -970,11 +970,11 @@ class BackupRunner {
 	}
 
 	/**
-	 * A failed run must not leave an empty chain directory on the shelf.
+	 * A failed run must not leave an empty chain directory in backup storage.
 	 * rmdir refuses a directory with anything in it, so this can only ever
 	 * remove a husk — a run that failed before producing an artifact. Left
 	 * alone they accumulate one per failed run (159 were standing on the dev
-	 * shelf when this was written) and make the shelf unreadable.
+	 * shelf when this was written) and make backup storage unreadable.
 	 */
 	private static function remove_empty_chain_dir($chain_d) {
 		@rmdir($chain_d);
@@ -1046,7 +1046,7 @@ class BackupRunner {
 	 * deferred; when the stream closes the process is reaped, its report file
 	 * read, and $accept asked whether the archive is whole — it returns '' to
 	 * complete the upload, or the reason to refuse it. A refused upload is
-	 * aborted, so nothing partial or empty is ever on the shelf, and the
+	 * aborted, so nothing partial or empty is ever in backup storage, and the
 	 * refusal is thrown with the engine's stderr tail. The exit status is
 	 * checked before $accept: an engine that exited non-zero is refused whatever
 	 * its report says.
@@ -1147,7 +1147,7 @@ class BackupRunner {
 	 * Dump the database in full, as its own artifact, on every run — streamed
 	 * straight to the bucket as db-{seq}.sql.gz.enc, the object key from the
 	 * start. The upload completes only when pg_dump exited 0 and openssl 0: a
-	 * dump that failed part-way is never on the shelf.
+	 * dump that failed part-way is never in backup storage.
 	 */
 	private static function run_db_engine(array $plan, $chain_id, $chain_d, $seq, $key_file) {
 		$name   = BackupChain::artifact_name('db', $seq);
@@ -1478,7 +1478,7 @@ class BackupRunner {
 
 	/**
 	 * A standalone database dump, streamed: named the way the engine names a
-	 * dump ({database}-{stamp}.sql.gz.enc), so nothing that reads the shelf can
+	 * dump ({database}-{stamp}.sql.gz.enc), so nothing that reads backup storage can
 	 * tell it from one the engine wrote. The envelope is minted for the name up
 	 * front and its sidecar is the run's one file.
 	 *
@@ -1517,7 +1517,7 @@ class BackupRunner {
 	 *
 	 * The profile segment is what stops two parties' backups landing in one
 	 * pile: without it a listing cannot tell whose backup is whose, and
-	 * neither party's retention can reason about the shelf it is responsible
+	 * neither party's retention can reason about backup storage it is responsible
 	 * for.
 	 */
 	private static function destination(array $plan) {
@@ -1598,7 +1598,7 @@ class BackupRunner {
 
 	/**
 	 * The object-store steps a run takes BEFORE its archive, for a profile
-	 * that stores offloaded files (plan['objects']): what the shelf holds, the
+	 * that stores offloaded files (plan['objects']): what backup storage holds, the
 	 * archive's exclude list, the store step, and — site profile, after a
 	 * recovery-key rotation — the re-seal of older epoch envelopes.
 	 *
@@ -1628,7 +1628,7 @@ class BackupRunner {
 			self::OBJECT_STORE_BUDGET_BYTES, self::OBJECT_STORE_BUDGET_SECONDS, $picture['unhashed']);
 
 		// Older epochs sealed to a previous recovery key are re-sealed to the
-		// current one: the site profile reads their envelopes off its shelf,
+		// current one: the site profile reads their envelopes off its backup storage,
 		// the manager profile reads the ones its request linked.
 		$resealed = array('resealed' => array(), 'unopenable' => array());
 		$examined = false;
@@ -1652,7 +1652,7 @@ class BackupRunner {
 		}
 
 		// A manager run whose request carried the object store: from here the
-		// manager profile holds local bytes until its shelf has them.
+		// manager profile holds local bytes until its backup storage has them.
 		if ($plan['profile'] === BackupProfile::MANAGER) {
 			BackupObjects::mark_enabled($plan);
 		}
@@ -1708,7 +1708,7 @@ class BackupRunner {
 		$stored = count($ctx['stored']);
 		$on_shelf = 0;
 		foreach (($ctx['index']['objects'] ?? array()) as $e) { if (!empty($e['stored'])) { $on_shelf++; } }
-		$note = ' — ' . $on_shelf . ' of ' . $total . ' offloaded file' . ($total === 1 ? '' : 's') . ' on the shelf';
+		$note = ' — ' . $on_shelf . ' of ' . $total . ' offloaded file' . ($total === 1 ? '' : 's') . ' in backup storage';
 		if ($stored) { $note .= ', ' . $stored . ' copied this run (' . self::human($store['bytes']) . ')'; }
 		if (!empty($store['budget_hit'])) { $note .= ', budget reached'; }
 		if (!empty($store['failed'])) { $note .= ', ' . $store['failed'] . ' failed'; }
@@ -1721,7 +1721,7 @@ class BackupRunner {
 		$msg = '';
 		$stored = count($ctx['stored']);
 		if ($stored) {
-			$msg .= "; copied {$stored} offloaded file" . ($stored === 1 ? '' : 's') . ' (' . self::human($ctx['store']['bytes']) . ') to the shelf';
+			$msg .= "; copied {$stored} offloaded file" . ($stored === 1 ? '' : 's') . ' (' . self::human($ctx['store']['bytes']) . ') to backup storage';
 		}
 		if (!empty($ctx['store']['budget_hit'])) {
 			$left = 0;
@@ -1747,7 +1747,7 @@ class BackupRunner {
 	 * this site's own history — chain runs and standalone fulls alike — or ''
 	 * when there is none. Read from history rather than from the local chain
 	 * manifest so a machine restored from a backup (backups/ is in no archive)
-	 * still finds the hashes its shelf's objects were recorded with.
+	 * still finds the hashes its backup storage's objects were recorded with.
 	 */
 	private static function previous_index_key(array $plan) {
 		$rows = new MultiBackupHistory(
@@ -1929,7 +1929,7 @@ class BackupRunner {
 	 * sees them. The only other code that removes a local chain file is
 	 * enforce_chain_retention(), and that returns early unless this machine
 	 * prunes the bucket — which a managed node deliberately does not do, since
-	 * the shelf belongs to the management node and the credential it is handed
+	 * backup storage belongs to the management node and the credential it is handed
 	 * cannot delete. Age those artifacts out only here and a node running
 	 * incrementals keeps every archive it has ever made, reporting 'swept 0' on
 	 * every run while the disk fills.

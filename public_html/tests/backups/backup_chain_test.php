@@ -189,7 +189,7 @@ check(in_array('joinery-backups/mysite/site/chain-20260801_000000/manifest.json'
 	'the manifest is among the chain objects');
 $mgr_keys = BackupChain::object_keys($chain, 'joinery-backups', 'mysite', BackupProfile::MANAGER);
 check(in_array('joinery-backups/mysite/manager/chain-20260801_000000/manifest.json', $mgr_keys, true),
-	'the same chain under the manager profile addresses a different shelf');
+	'the same chain under the manager profile addresses a different backup storage');
 check(count(array_intersect($keys, $mgr_keys)) === 0,
 	'and the two profiles share no object key at all');
 check(count($keys) === 1 + (4 * 2), 'every artifact of every run is listed for deletion', (string)count($keys));

@@ -149,7 +149,7 @@ check($swept === 1 && !is_file($mgr_file), 'the manager sweep takes its own', (s
 @unlink($site_file); @unlink($mgr_file); @rmdir($mgr_out); @rmdir($site_out);
 
 // ── Retention ───────────────────────────────────────────────────────────────
-section('The manager profile never prunes the shelf it does not own');
+section('The manager profile never prunes backup storage it does not own');
 
 // The credential a node is handed for a manager run cannot delete. Retention
 // there belongs to the management node — so both passes must decline outright

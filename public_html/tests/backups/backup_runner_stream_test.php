@@ -130,19 +130,19 @@ $run0 = $manifest['runs'][0] ?? array();
 $files0 = $run0['artifacts']['files'] ?? array();
 $key = 'joinery-backups/' . $slug . '/manager/' . $chain_id . '/files-0000.tar.gz.enc';
 $object = s3fx_object($fx, 'bkt', '/' . $key);
-check($object !== null, 'the files object is on the shelf under the chain key', $key);
+check($object !== null, 'the files object is in backup storage under the chain key', $key);
 check($object !== null && (int)$files0['bytes'] === strlen($object), 'the manifest\'s bytes equal the object\'s', ($files0['bytes'] ?? '?') . ' vs ' . strlen((string)$object));
 check($object !== null && $files0['sha256'] === hash('sha256', $object), 'the manifest\'s sha256 equals the object\'s');
 check((int)$run0['level'] === 0, 'the first run is a full');
 $db_object = s3fx_object($fx, 'bkt', '/joinery-backups/' . $slug . '/manager/' . $chain_id . '/db-0000.sql.gz.enc');
-check($db_object !== null, 'the database dump is on the shelf');
+check($db_object !== null, 'the database dump is in backup storage');
 check(!is_file($chain_d . '/db-0000.sql.gz.enc') && !glob($chain_d . '/*.sql.gz.enc'), 'and no dump is on disk',
 	implode(',', array_map('basename', glob($chain_d . '/*') ?: array())));
 $db0 = $run0['artifacts']['db'] ?? array();
 check($db_object !== null && (int)$db0['bytes'] === strlen($db_object) && $db0['sha256'] === hash('sha256', $db_object),
 	'the manifest\'s dump bytes and sha256 equal the object\'s');
 check(!glob('/tmp/jy_backup_*'), 'no plaintext dump temp file exists');
-check(s3fx_object($fx, 'bkt', '/joinery-backups/' . $slug . '/manager/' . $chain_id . '/manifest.json') !== null, 'the manifest is on the shelf');
+check(s3fx_object($fx, 'bkt', '/joinery-backups/' . $slug . '/manager/' . $chain_id . '/manifest.json') !== null, 'the manifest is in backup storage');
 
 $history_artifacts = $history->artifacts();
 $files_hist = null;
@@ -180,7 +180,7 @@ $manifest = BackupChain::read($chain_d . '/manifest.json');
 check(count($manifest['runs']) === 2 && (int)$manifest['runs'][1]['level'] === 1, 'the chain has two runs, the second incremental',
 	json_encode(array_map(function ($r) { return $r['level']; }, $manifest['runs'])));
 $object1 = s3fx_object($fx, 'bkt', '/joinery-backups/' . $slug . '/manager/' . $chain_id . '/files-0001.tar.gz.enc');
-check($object1 !== null && (int)$manifest['runs'][1]['artifacts']['files']['bytes'] === strlen($object1), 'the incremental is on the shelf with its recorded size');
+check($object1 !== null && (int)$manifest['runs'][1]['artifacts']['files']['bytes'] === strlen($object1), 'the incremental is in backup storage with its recorded size');
 check(!is_file($chain_d . '/files-0001.tar.gz.enc'), 'and not on disk');
 list($rc, $lines) = $decrypt_list($object1, $data_key);
 check($rc === 0 && in_array('site/public_html/new.txt', $lines, true) && !in_array('site/public_html/sub/data.bin', $lines, true),
@@ -188,7 +188,7 @@ check($rc === 0 && in_array('site/public_html/new.txt', $lines, true) && !in_arr
 check(strpos((string)$result['message'], 'Incremental backup') === 0, 'the run message says incremental', $result['message']);
 
 // ─────────────────────────────────────────────────────────────────────────────
-section('An engine that fails after streaming leaves nothing on the shelf and the run is discarded');
+section('An engine that fails after streaming leaves nothing in backup storage and the run is discarded');
 
 $has_sudo = false;
 exec('sudo -n -l 2>/dev/null', $sudo_out, $sudo_rc);
@@ -211,8 +211,8 @@ if ($has_sudo) {
 	check($result === null && $error !== null, 'the run fails', json_encode($result));
 	check(stripos((string)$error, 'tar exit 2') !== false, 'and names tar\'s exit status', (string)$error);
 	check(s3fx_object($fx, 'bkt', '/joinery-backups/' . $slug . '/manager/' . $chain_id . '/files-0002.tar.gz.enc') === null,
-		'no files-0002 object is on the shelf');
-	check(s3fx_keys($fx) === $objects_before, 'the shelf holds exactly what it held before the failed run');
+		'no files-0002 object is in backup storage');
+	check(s3fx_keys($fx) === $objects_before, 'backup storage holds exactly what it held before the failed run');
 	check(s3fx_count($fx, 'put') === $puts_before, 'nothing was PUT for the refused archive',
 		'the small-stream path holds its buffer until the engine\'s verdict');
 	check(!is_file($snar), 'the snapshot was cleared, so the next run starts a fresh chain');
@@ -299,7 +299,7 @@ check(count($left) === 1 && preg_match('/^' . preg_quote($dbname, '/') . '-\d{8}
 	'the output directory holds exactly the envelope sidecar', implode(',', $left));
 $db_obj_name = substr($left[0] ?? '', 0, -strlen(BackupEnvelope::SIDECAR_SUFFIX));
 $db_obj = s3fx_object($fx, 'bkt', '/joinery-backups/' . $slug . '/manager/' . $db_obj_name);
-check($db_obj !== null && strlen($db_obj) > 64, 'the dump object is on the shelf', $db_obj_name);
+check($db_obj !== null && strlen($db_obj) > 64, 'the dump object is in backup storage', $db_obj_name);
 check(s3fx_object($fx, 'bkt', '/joinery-backups/' . $slug . '/manager/' . $db_obj_name . BackupEnvelope::SIDECAR_SUFFIX) !== null, 'with its sidecar');
 $db_env = BackupEnvelope::read_sidecar($db_dir . '/' . $left[0]);
 list($rc, $sql) = $decrypt_sql($db_obj, BackupEnvelope::open_as_site($db_env));
@@ -361,7 +361,7 @@ $sidecar_name = $left[0] ?? '';
 $object_name = substr($sidecar_name, 0, -strlen(BackupEnvelope::SIDECAR_SUFFIX));
 $full_key = 'joinery-backups/' . $slug . '/manager/' . $object_name;
 $full_object = s3fx_object($fx, 'bkt', '/' . $full_key);
-check($full_object !== null && strlen($full_object) > 64, 'the archive object is on the shelf', $full_key);
+check($full_object !== null && strlen($full_object) > 64, 'the archive object is in backup storage', $full_key);
 check(s3fx_object($fx, 'bkt', '/' . $full_key . BackupEnvelope::SIDECAR_SUFFIX) !== null, 'and its sidecar beside it');
 $full_arts = $hist_full->artifacts();
 check(count($full_arts) === 2 && ($full_arts[0]['kind'] ?? '') === 'archive' && !isset($full_arts[0]['path'])

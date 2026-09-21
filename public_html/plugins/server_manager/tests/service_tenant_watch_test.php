@@ -11,11 +11,11 @@
  * listing, and retention.
  *
  *   - The ladder: a passed date lapses, grace holds, past grace suspends
- *     (mail's subaccount closed; the shelf refused) and starts the retention
+ *     (mail's subaccount closed; backup storage refused) and starts the retention
  *     clock; a new date reactivates at every stage before the prune.
  *   - Mail's figure is the provider's own month-to-date count, read hourly;
  *     the allowance setting re-sets the subaccount limit when it changes.
- *   - The ledger reconciles against a listing: an object the shelf does not
+ *   - The ledger reconciles against a listing: an object backup storage does not
  *     have is dropped, one the ledger does not have is adopted at its listed
  *     size, and an abandoned run is aborted (its multipart cancelled).
  *   - Retention: chains pruned whole to the keep count, per profile, newest
@@ -23,7 +23,7 @@
  *     prefix pruned once its day comes, and the row says so.
  *   - An act the provider refused is retried on the next pass.
  *
- * The mail provider is a Guzzle MockHandler; the shelf is the local S3
+ * The mail provider is a Guzzle MockHandler; backup storage is the local S3
  * fixture. Rows go to the test database and are deleted.
  *
  * Run: php tests/run.php --only=plugins/server_manager/tests/service_tenant_watch_test.php
@@ -230,7 +230,7 @@ $shelf = ServiceTenant::forKey($key_id, 'shelf');
 $slug = (string)$shelf->get('svt_slug');
 $base = 'hb/' . $slug . '/';
 
-// Three chains on the shelf through the broker, oldest first.
+// Three chains in backup storage through the broker, oldest first.
 $run_ids = array();
 foreach (array('chain-20260901_010000', 'chain-20260910_010000', 'chain-20260920_010000') as $chain) {
 	$b = ShelfBroker::beginRun($shelf, 'site', $chain, array(array('name' => $chain . '/db', 'bytes' => 10), array('name' => $chain . '/files', 'bytes' => 20)));
@@ -251,7 +251,7 @@ $shelf = ServiceTenant::forKey($key_id, 'shelf');
 $keys = s3fx_keys($fx);
 check(!in_array('shelf/' . $base . 'site/chain-20260901_010000/db', $keys, true)
 	&& !in_array('shelf/' . $base . 'site/chain-20260901_010000/files', $keys, true),
-	'the oldest chain is gone from the shelf, both objects');
+	'the oldest chain is gone from backup storage, both objects');
 check(in_array('shelf/' . $base . 'site/chain-20260910_010000/db', $keys, true)
 	&& in_array('shelf/' . $base . 'site/chain-20260920_010000/files', $keys, true), 'the newest two stay');
 check((int)$shelf->get('svt_figure') === 60 && ShelfObject::completedBytes((int)$shelf->key) === 60, 'the figure follows: 60 bytes');
@@ -277,17 +277,17 @@ section('shelf: an abandoned run is aborted; the listing corrects the ledger');
 $db->exec("UPDATE svr_shelf_runs SET svr_create_time = now() - interval '48 hours' WHERE svr_shelf_run_id = " . (int)$open['run_id']);
 $shelf->set('svt_reconciled_time', null);
 $shelf->save();
-// Something on the shelf the ledger never saw, and a ledger row for something gone.
+// Something in backup storage the ledger never saw, and a ledger row for something gone.
 $put_raw($base . 'site/chain-20260920_010000/stray', str_repeat('s', 7));
 $db->exec("UPDATE svo_shelf_objects SET svo_key = '" . $base . "site/chain-20260920_010000/vanished' WHERE svo_key = '" . $base . "site/chain-20260910_010000/db'");
 $watch->watch($shelf, '2026-09-22 00:00:00');
 $shelf = ServiceTenant::forKey($key_id, 'shelf');
 check((string)(new ShelfRun((int)$open['run_id'], TRUE))->get('svr_state') === 'aborted', 'a run open 48 hours is aborted');
-check(ShelfObject::forKey((int)$shelf->key, $base . 'site/chain-20260920_010000/vanished') === null, 'a ledger row the shelf does not have is dropped');
+check(ShelfObject::forKey((int)$shelf->key, $base . 'site/chain-20260920_010000/vanished') === null, 'a ledger row backup storage does not have is dropped');
 $stray = ShelfObject::forKey((int)$shelf->key, $base . 'site/chain-20260920_010000/stray');
 check($stray !== null && (int)$stray->get('svo_bytes') === 7 && $stray->get('svo_completed_time') !== null
 	&& (string)$stray->get('svo_chain') === 'chain-20260920_010000', 'an object the ledger did not have is adopted at its listed size');
-// db of 0910 was renamed away in the ledger and is on the shelf → adopted back (10); the aborted run's db (1) adopted too.
+// db of 0910 was renamed away in the ledger and is in backup storage → adopted back (10); the aborted run's db (1) adopted too.
 check((int)$shelf->get('svt_figure') === ShelfObject::completedBytes((int)$shelf->key), 'the figure is the reconciled ledger');
 
 section('shelf: the ladder suspends, the day comes, the prefix is pruned once');

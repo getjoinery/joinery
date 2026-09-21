@@ -267,7 +267,7 @@ class ManagementJob extends SystemBase {
 		'restore_database'      => 8400,  // 70m + 60m approval + slack
 		'restore_project'       => 8400,  // 70m + 60m approval + slack
 		'restore_chain'         => 15720, // 2h20m + 60m approval, with room
-		// Bringing a backup back off the shelf. Mirrors upload_backup's budget,
+		// Bringing a backup back from backup storage. Mirrors upload_backup's budget,
 		// because it is the same transfer in the other direction and S3Signer's
 		// window is what bounds both.
 		'download_backup'       => 5220,  // 85m + slack

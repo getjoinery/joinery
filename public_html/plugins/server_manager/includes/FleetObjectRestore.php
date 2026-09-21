@@ -3,7 +3,7 @@
  * FleetObjectRestore — the management node's side of bringing a node's
  * offloaded files home, one page of signed links at a time.
  *
- * A node never lists its manager shelf and never holds a read credential, so
+ * A node never lists its manager-profile backup storage and never holds a read credential, so
  * every object it brings home arrives by a link this plane signed
  * (specs/backup_offloaded_files.md § Restore). A link is a few hundred bytes
  * and a job is ManagementJob::MAX_PARAMS_BYTES, so a store is many small jobs,
@@ -64,7 +64,7 @@ class FleetObjectRestore {
 	 * @param array    $index  the run's decoded objects index
 	 * @param array    $names  candidate names, in order
 	 * @param array    $params the primitive params so far (chain_id, profile, seq, mode, index_url)
-	 * @param callable $sign   fn(string $relname): string — a signed GET for objects/… on the shelf
+	 * @param callable $sign   fn(string $relname): string — a signed GET for objects/… in backup storage
 	 * @return array ['params' => the params with object_urls and epoch_envelope_urls, 'count' => n names consumed,
 	 *                'unindexed' => n passed over]
 	 */
@@ -109,7 +109,7 @@ class FleetObjectRestore {
 
 	/**
 	 * Start the loop: a survey of the run. $params: chain_id (required),
-	 * profile (default manager), seq (default the newest on the shelf), mode
+	 * profile (default manager), seq (default the newest in backup storage), mode
 	 * (default missing). $root is the job this loop is the last step of (a
 	 * chain restore), recorded on every job of the loop.
 	 *

@@ -1,6 +1,6 @@
 <?php
 /**
- * shelf_status - the shelf tenant's standing: the C2 fields for the shelf,
+ * shelf_status - backup storage tenant's standing: the C2 fields for backup storage,
  * plus the sentence saying why it cannot write now, if any.
  *
  * (specs/services_phase2_platform.md §3). What the site's Test button asks.
@@ -29,7 +29,7 @@ function shelf_status_logic(array $input): LogicResult {
 
 function shelf_status_logic_descriptor(): array {
 	return array(
-		'description'      => 'This site\'s standing on the operator\'s shelf: figure, allowance, paid-through date, state, notice, whether a run would be accepted now, and whether its copies can still be read.',
+		'description'      => 'This site\'s standing on the operator\'s backup storage: figure, allowance, paid-through date, state, notice, whether a run would be accepted now, and whether its copies can still be read.',
 		'requires_session' => true,
 		'mutates'          => false,
 		'input'            => array(),

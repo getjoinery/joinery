@@ -20,7 +20,7 @@
  * lands on the run's own history row where Recent backups shows it.
  *
  * @version 1.2 - offloaded files travel with the request (specs/backup_offloaded_files.md § Verification):
- *                the run's index is read off the shelf, a link is signed for each epoch envelope it
+ *                the run's index is read from backup storage, a link is signed for each epoch envelope it
  *                names, and a rehearsal's request also carries the sample — object_links() is the
  *                pure part, shared in shape with the management node's builder
  * @version 1.1 - due() has no settling wait on a never-verified site (the daily backup was always
@@ -188,9 +188,9 @@ class BackupVerifyLauncher {
 		$seq = ($seq === null) ? (int)$run->get('bkh_chain_seq') : (int)$seq;
 		$request['seq'] = $seq;
 
-		// The run's offloaded files: its index, read off the shelf, says which
+		// The run's offloaded files: its index, read from backup storage, says which
 		// epoch envelopes the verify must open and — for a rehearsal — which
-		// objects to open. A run with no index on the shelf gets no links;
+		// objects to open. A run with no index in backup storage gets no links;
 		// the verify then fails on the missing artifact, by name.
 		$index_name = BackupChain::artifact_name('objects', $seq);
 		$index = null;

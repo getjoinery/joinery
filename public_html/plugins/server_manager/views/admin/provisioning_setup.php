@@ -320,7 +320,7 @@ echo $fw_domains->end_form();
 <h4>9. Hosted tier</h4>
 <p>The second hosting product: the server is created on <strong>this
 operator's</strong> cloud account, its outbound mail goes through this
-operator's SMTP2GO account, and its backups land on this fleet's shelf. The
+operator's SMTP2GO account, and its backups land in this fleet's backup storage. The
 buyer connects nothing and pastes nothing. Leave this card empty and the hosted
 product simply cannot be fulfilled — the bring-your-own-cloud product is
 unaffected.</p>
@@ -337,7 +337,7 @@ unaffected.</p>
 		<th>Allowances</th>
 		<td>
 			<?= (int)$hosted['send_allowance'] ?> sends a month and
-			<?= (int)$hosted['shelf_allowance_gb'] ?> GB of backup shelf per customer.
+			<?= (int)$hosted['shelf_allowance_gb'] ?> GB of backup storage per customer.
 			Exceeding one is an off-ramp to the customer's own account, never a bigger plan —
 			the referral links below are what the site's banner offers, and only once the
 			allowance is actually near.
@@ -379,7 +379,7 @@ $fw_hosted->passwordinput('smtp2go_webhook_secret', 'SMTP2GO webhook secret', [
 $fw_hosted->textinput('send_allowance', 'Sends per month, per customer',
 	['value' => $hosted['send_allowance'],
 	 'helptext' => 'Set as the monthly limit on every customer subaccount. The provider counts and enforces it.']);
-$fw_hosted->textinput('shelf_allowance_gb', 'Backup shelf per customer (GB)',
+$fw_hosted->textinput('shelf_allowance_gb', 'Backup storage per customer (GB)',
 	['value' => $hosted['shelf_allowance_gb'],
 	 'helptext' => 'Measured from the listing the retention pass already takes; runs stop at 100%.']);
 $fw_hosted->textinput('trial_days', 'Free trial length (days, 0 for none)',
@@ -387,7 +387,7 @@ $fw_hosted->textinput('trial_days', 'Free trial length (days, 0 for none)',
 	 'helptext' => 'Zero means hosting is billed from checkout and a new site opens as subscribed. Otherwise it must match the trial period on the product, and it is what a new site counts down to before its subscription has told us a date.']);
 $fw_hosted->textinput('grace_days', 'Grace after a failed payment (days)',
 	['value' => $hosted['grace_days']]);
-$fw_hosted->textinput('shelf_days', 'Backup shelf kept after non-payment (days)',
+$fw_hosted->textinput('shelf_days', 'Backup storage kept after non-payment (days)',
 	['value' => $hosted['shelf_days']]);
 $fw_hosted->textinput('manage_url', 'Where customers manage their hosting',
 	['value' => $hosted['manage_url'],
@@ -399,7 +399,7 @@ $fw_hosted->textinput('smtp2go_referral_url', 'SMTP2GO referral URL',
 	 'helptext' => 'Offered to a customer whose send allowance is nearly gone.']);
 $fw_hosted->textinput('storage_referral_url', 'Backup storage referral URL',
 	['value' => $hosted['storage_referral_url'],
-	 'helptext' => 'Offered to a customer whose backup shelf is nearly full.']);
+	 'helptext' => 'Offered to a customer whose backup storage is nearly full.']);
 $fw_hosted->submitbutton('btn_save_hosted', 'Save hosted tier settings');
 echo $fw_hosted->end_form();
 ?>

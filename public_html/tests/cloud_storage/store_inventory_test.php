@@ -18,7 +18,7 @@
  *   - a bucket that does not answer its ping stalls the tick and names nothing
  *     missing; a HEAD that says absent is asked twice; a visibility with no
  *     store is counted as unchecked
- *   - the summary counts how many of the missing a backup shelf holds, and the
+ *   - the summary counts how many of the missing a backup storage holds, and the
  *     sentence reads the way the pages say it
  *   - a Bring them back's names leave the missing list; the panel renders the
  *     three sources without a notice
@@ -170,7 +170,7 @@ $rec['last']['missing'] = array(
 );
 $held = array('site' => array('b.jpg' => array('epoch' => 'epoch-20260901_000000'), 'a.jpg' => array()), 'manager' => array('p2.eml' => array()));
 $s = CloudStoreInventory::summary($rec, $held);
-check($s['missing_count'] === 3 && $s['held'] === 2, 'three missing, two of them on a shelf (either profile counts)', json_encode($s));
+check($s['missing_count'] === 3 && $s['held'] === 2, 'three missing, two of them in backup storage (either profile counts)', json_encode($s));
 check(CloudStoreInventory::sentence($s) === '3 offloaded files are missing from the file store; the backup holds 2 of them.', 'the sentence', CloudStoreInventory::sentence($s));
 $s = CloudStoreInventory::summary($rec, array('site' => $rec['last']['missing']));
 check(CloudStoreInventory::sentence($s) === '3 offloaded files are missing from the file store; the backup holds all of them.', 'all held', CloudStoreInventory::sentence($s));
@@ -203,8 +203,8 @@ check(array_keys($s['missing']) === array('p2.eml') && $s['missing_count'] === 1
 $words = BackupObjectRestoreLauncher::describe_last($s['bring_back']);
 check(strpos($words, 'Last brought back 2026-09-22 06:05 UTC: Brought 2 offloaded files home (99 B)') === 0, 'the last bring back in words', $words);
 check(BackupObjectRestoreLauncher::describe_last(null) === '' && BackupObjectRestoreLauncher::describe_last(array()) === '', 'nothing to say when there has never been one');
-$failed = array('started' => '2026-09-22 07:00:00', 'finished' => '2026-09-22 07:01:00', 'result' => 'fail', 'reason' => 'the shelf did not answer', 'by' => 'this site');
-check(strpos(BackupObjectRestoreLauncher::describe_last($failed), 'Could not bring the offloaded files home: the shelf did not answer') !== false, 'a failure says why');
+$failed = array('started' => '2026-09-22 07:00:00', 'finished' => '2026-09-22 07:01:00', 'result' => 'fail', 'reason' => 'backup storage did not answer', 'by' => 'this site');
+check(strpos(BackupObjectRestoreLauncher::describe_last($failed), 'Could not bring the offloaded files home: backup storage did not answer') !== false, 'a failure says why');
 
 // One that started and never reported: running for STALE_SECONDS, dead after.
 $live = array('started' => gmdate('Y-m-d H:i:s', time() - 600), 'finished' => null, 'restored' => 3);
@@ -223,13 +223,13 @@ section('The panel, for each kind of site');
 $html = CloudStoreInventoryPanel::render($s, CloudStoreInventoryPanel::SOURCE_SITE, '/admin/admin_backups');
 check(strpos($html, '1 offloaded file is missing from the file store; the backup holds it.') !== false, 'the sentence is in the panel');
 check(strpos($html, 'name="action" value="bring_back_objects"') !== false && strpos($html, '>Bring them back<') !== false
-	&& strpos($html, 'action="/admin/admin_backups"') !== false, 'a site with its own shelf gets the button, posting to the page it is on');
+	&& strpos($html, 'action="/admin/admin_backups"') !== false, 'a site with its own backup storage gets the button, posting to the page it is on');
 check(strpos($html, 'Checked 5 offloaded files in the file store 2026-09-22 05:00 UTC') !== false, 'when it last looked');
 $html = CloudStoreInventoryPanel::render($s, CloudStoreInventoryPanel::SOURCE_MANAGER, '/admin/admin_backups', 'https://manager.example');
 check(strpos($html, 'bring_back_objects') === false && strpos($html, 'https://manager.example') !== false
 	&& strpos($html, 'on its Backups tab') !== false, 'a managed site is told the management node runs it, by URL, with no button');
 $html = CloudStoreInventoryPanel::render($s, CloudStoreInventoryPanel::SOURCE_NONE, '/admin/admin_backups');
-check(strpos($html, 'bring_back_objects') === false && strpos($html, 'No backup of this site holds offloaded files') !== false, 'a site with no shelf is told there is nothing to bring them back from');
+check(strpos($html, 'bring_back_objects') === false && strpos($html, 'No backup of this site holds offloaded files') !== false, 'a site with no backup storage is told there is nothing to bring them back from');
 $running = $s; $running['bring_back'] = array('started' => gmdate('Y-m-d H:i:s', time() - 60), 'finished' => null, 'restored' => 1, 'by' => 'this site');
 $html = CloudStoreInventoryPanel::render($running, CloudStoreInventoryPanel::SOURCE_SITE, '/admin/admin_backups');
 check(strpos($html, 'bring_back_objects') === false && strpos($html, '1 home so far') !== false, 'no second button while one is running');

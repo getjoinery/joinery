@@ -1,6 +1,6 @@
 <?php
 /**
- * BackupStaging — bringing one of this machine's own chains back off the shelf.
+ * BackupStaging — bringing one of this machine's own chains back from backup storage.
  *
  * Two scripts need the same thing and must not be allowed to drift: Prepare
  * (utils/stage_chain.php) stages a chain so a restore can be approved against
@@ -406,7 +406,7 @@ class BackupStaging {
 	/**
 	 * Bring back what a verify of a run's offloaded files needs: the epoch
 	 * envelope of every epoch the index's stored entries name, and the sample
-	 * of objects the request linked. Under $work/objects/{epoch}/, the shelf's
+	 * of objects the request linked. Under $work/objects/{epoch}/, backup storage's
 	 * own layout, so a restore that reads a tree finds the same shape.
 	 *
 	 * Objects are not ledgered — the index is, as an artifact of the run — so

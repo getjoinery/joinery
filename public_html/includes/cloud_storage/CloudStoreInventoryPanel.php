@@ -30,7 +30,7 @@ require_once(PathHelper::getIncludePath('includes/BackupVerifier.php'));
 class CloudStoreInventoryPanel {
 
 	/** Who brings a missing file back on this site. */
-	const SOURCE_SITE    = 'site';      // this site, from its own shelf
+	const SOURCE_SITE    = 'site';      // this site, from its own backup storage
 	const SOURCE_MANAGER = 'manager';   // the management node, as a job from its Backups tab
 	const SOURCE_NONE    = 'none';      // nobody: no backup of this site holds offloaded files
 
@@ -41,7 +41,7 @@ class CloudStoreInventoryPanel {
 	const ACTION = 'bring_back_objects';
 
 	/**
-	 * Which source this site has: its own shelf when it has a backup of its own
+	 * Which source this site has: its own backup storage when it has a backup of its own
 	 * to read from, the management node when one manages it, otherwise none.
 	 */
 	public static function source($is_managed) {
@@ -93,7 +93,7 @@ class CloudStoreInventoryPanel {
 			$out .= '<div class="alert alert-warning mb-2"><strong>' . $h(CloudStoreInventory::sentence($summary)) . '</strong>';
 			switch ($source) {
 				case self::SOURCE_SITE:
-					$out .= ' Bringing them back reads each one off this site\'s own backup shelf, opens it with this site\'s key, and puts it '
+					$out .= ' Bringing them back reads each one off this site\'s own backup storage, opens it with this site\'s key, and puts it '
 						. 'back where the site expects it; a file the file store can serve again by then is left alone. Nothing is overwritten.';
 					break;
 				case self::SOURCE_MANAGER:

@@ -10,8 +10,8 @@
  * Chain artifacts are deliberately absent: a chain is one restore point made of
  * many files, and BackupChainListHelper lists those as chains.
  *
- * @version 1.2 - cloud listing resolves the shelf via JobCommandBuilder::get_target(), so a node that
- *                names no target still has its remote backups listed (from the sole enabled shelf)
+ * @version 1.2 - cloud listing resolves backup storage via JobCommandBuilder::get_target(), so a node that
+ *                names no target still has its remote backups listed (from the sole enabled backup storage)
  *                instead of showing local files only
  * @version 1.1 - chain artifacts are excluded from the flat list
  * @version 1.0
@@ -55,7 +55,7 @@ class BackupListHelper {
 
 		// Live cloud listing via TargetLister.
 		//
-		// The shelf is resolved the SAME way the job builder resolves it — a node
+		// Backup storage is resolved the SAME way the job builder resolves it — a node
 		// that names no target still backs up to the sole enabled one, so its
 		// cloud archives have to be listed here too rather than being invisible
 		// because mgn_bkt_backup_target_id happens to be blank. Reading the raw

@@ -40,7 +40,7 @@ $page->public_header(array(
 		<?php else: ?>
 			<p class="sms-start-lead">
 				<strong><?php echo htmlspecialchars($host); ?></strong> is asking to use your account's services
-				&mdash; outbound email and the backup shelf &mdash; as
+				&mdash; outbound email and backup storage &mdash; as
 				<strong><?php echo htmlspecialchars($account); ?></strong>.
 				<?php if ($already): ?>
 					This site is already linked to this account; approving again replaces its key.

@@ -615,7 +615,7 @@ alone.
 The Server Manager's **FleetBackupRun** task (`every_run`) schedules the
 manager-profile backups — this management node's own copies of the nodes it
 manages, under its own recovery key. The node does the backup; the task decides
-when, prunes the node's manager shelf first with the management node's
+when, prunes the node's manager-profile backup storage first with the management node's
 delete-capable credential, and dispatches one `backup_run` job per due node.
 
 Three rules keep a fleet of these from behaving like a thundering herd: each
@@ -630,7 +630,7 @@ supports dry run. See the
 policy model and the `backup_run` job type.
 
 The same pass proves the backups it takes. Every retention listing is checked
-against each backup's own manifest (the shelf check, stamped on
+against each backup's own manifest (the backup storage check, stamped on
 `mgn_backup_shelf_problem`), and when a node's policy says a verification is
 due (`verify_every_days`, fleet default 30) the pass dispatches a
 `verify_backup` job that opens and reads the node's newest backup to the end
@@ -666,7 +666,7 @@ rehearsal (level 3) is the Backups page's own button, a person's choice.
 | `tasks/WeeklyEventsDigest.php` | Example email digest task |
 | `plugins/store/tasks/ReconcileSubscriptions.php` | Subscription backstop across all providers |
 | `plugins/mailbox/tasks/MailboxRelayReconcile.php` | Example ordered-phase task |
-| `plugins/server_manager/tasks/FleetBackupRun.php` | Fleet backup dispatch (manager profile), the shelf check and `verify_backup` dispatch |
+| `plugins/server_manager/tasks/FleetBackupRun.php` | Fleet backup dispatch (manager profile), the backup storage check and `verify_backup` dispatch |
 | `tasks/BackupVerify.php` | A site opening and reading its own newest backup on its interval |
 | `tasks/RecipeCaseMail.php` | One plain-text superadmin mail per recipe per day while the agent's rendered case under `cache/recipes/` is open, delivered locally and rendered by the agent within the day — never for a case a management node has, and not for a record the agent has stopped rendering (hourly, activated on install) |
 | `migrations/migration_scheduled_tasks_init.php` | Setup migration |

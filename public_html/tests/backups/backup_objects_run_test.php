@@ -11,7 +11,7 @@
  * (specs/backup_offloaded_files.md), against a local provider, a throwaway
  * tree and a throwaway database:
  *
- *   - the first run stores every cloud blob the shelf lacks — local originals
+ *   - the first run stores every cloud blob backup storage lacks — local originals
  *     and one fetched from the file store (catch-up) — under one epoch whose
  *     envelope the site key opens, writes the index as an artifact of the
  *     run (manifest, shelf, history), excludes every cloud blob's paths from
@@ -120,8 +120,8 @@ $make_plan = function ($slug, array $over = array()) use ($fx, $out, $tree, $dbn
 	$plan['project']     = 'site';
 	$plan['project_dir'] = $tree;
 	$plan['database']    = $dbname;
-	// A manager plan on a shelf this test can list: the site profile's way of
-	// reading the shelf, and its own pruning, on the fixture.
+	// A manager plan in backup storage this test can list: the site profile's way of
+	// reading backup storage, and its own pruning, on the fixture.
 	$plan['objects']        = true;
 	$plan['objects_source'] = 'listing';
 	$plan['prunes_cloud']   = true;
@@ -182,7 +182,7 @@ $chain_dir_of = function ($plan) {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-section('The first run stores every cloud blob the shelf lacks and indexes them');
+section('The first run stores every cloud blob backup storage lacks and indexes them');
 
 list($result, $error, $history) = $run($plan);
 check($error === null && ($result['status'] ?? '') === 'success', 'the run succeeds', (string)$error . ' ' . json_encode($result));
@@ -196,13 +196,13 @@ $epochs = array_values(array_unique(array_map(function ($k) { return explode('/'
 check(count($epochs) === 1 && preg_match('/^epoch-\d{8}_\d{6}$/', $epochs[0]), 'everything went under one epoch', json_encode($epochs));
 $epoch = $epochs[0] ?? '';
 check($objects_on_shelf === array($epoch . '/a.jpg.enc', $epoch . '/b.bin.enc', $epoch . '/c.pdf.enc', $epoch . '/envelope.json'),
-	'the shelf holds the three objects and the epoch envelope', json_encode($objects_on_shelf));
+	'backup storage holds the three objects and the epoch envelope', json_encode($objects_on_shelf));
 
 $epoch_file = json_decode(file_get_contents($plan['output_dir'] . '/objects/epoch.json'), true);
 check(($epoch_file['id'] ?? '') === $epoch, 'epoch.json records the epoch', json_encode($epoch_file['id'] ?? null));
 $env_shelf = json_decode((string)s3fx_object($fx, 'bkt', '/' . $base . 'objects/' . $epoch . '/envelope.json'), true);
 check(is_array($env_shelf) && ($env_shelf['artifact'] ?? '') === $epoch && $env_shelf === $epoch_file['envelope'],
-	'the envelope on the shelf is the epoch\'s, artifact = epoch id, and epoch.json holds a copy');
+	'the envelope in backup storage is the epoch\'s, artifact = epoch id, and epoch.json holds a copy');
 $epoch_key = BackupEnvelope::open_as_site($env_shelf);
 $kinds = array_map(function ($r) { return $r['kind']; }, $env_shelf['recipients']);
 check($kinds === array('recovery', 'site'), 'sealed to recovery and site, like a chain', json_encode($kinds));
@@ -220,7 +220,7 @@ $idx_art = $run0['artifacts']['objects'] ?? null;
 check($idx_art !== null && $idx_art['name'] === 'objects-0000.json.gz', 'the manifest carries the objects index', json_encode($idx_art));
 $idx_bytes = s3fx_object($fx, 'bkt', '/' . $base . $chain_id . '/objects-0000.json.gz');
 check($idx_bytes !== null && strlen($idx_bytes) === (int)$idx_art['bytes'] && hash('sha256', $idx_bytes) === $idx_art['sha256'],
-	'the index is on the shelf with the manifest\'s bytes and hash');
+	'the index is in backup storage with the manifest\'s bytes and hash');
 $index = $shelf_index($base . $chain_id . '/objects-0000.json.gz');
 $by = array(); foreach ($index['objects'] as $e) { $by[$e['name']] = $e; }
 check(count($by) === 3 && $by['a.jpg']['stored'] && $by['b.bin']['stored'] && $by['c.pdf']['stored'], 'the index marks all three stored');
@@ -233,7 +233,7 @@ $hist_kinds = array_map(function ($a) { return $a['kind']; }, $history->artifact
 check(in_array('objects', $hist_kinds, true), 'the history row records the index artifact', json_encode($hist_kinds));
 $hist_obj = null; foreach ($history->artifacts() as $a) { if ($a['kind'] === 'objects') { $hist_obj = $a; } }
 check(($hist_obj['key'] ?? '') === $base . $chain_id . '/objects-0000.json.gz', 'with its bucket key');
-check(strpos((string)$history->get('bkh_message'), '3 of 3 offloaded files on the shelf, 3 copied this run') !== false,
+check(strpos((string)$history->get('bkh_message'), '3 of 3 offloaded files in backup storage, 3 copied this run') !== false,
 	'the history message counts the objects', (string)$history->get('bkh_message'));
 check(strpos((string)$result['message'], 'copied 3 offloaded files') !== false && strpos((string)$result['message'], 'released 2 local cop') !== false,
 	'the task message says what was copied and released', $result['message']);
@@ -333,7 +333,7 @@ BackupObjects::held_add($plan, 'locked.bin', $r);
 // ─────────────────────────────────────────────────────────────────────────────
 section('A manager run reading the index by link, with no listing, stores only what the index lacks');
 
-// The newest index on the shelf names everything but a new blob; the link
+// The newest index in backup storage names everything but a new blob; the link
 // fetch is stubbed (the fixture speaks http; the real fetch insists on https).
 // e1/e3 were stored outside any index: the manager profile has no listing to
 // say so, and re-stores them from the file store (one run's worth). e2 is
@@ -355,7 +355,7 @@ $puts_before = s3fx_count($fx, 'put');
 list($result, $error) = $run($link_plan);
 check($error === null, 'the run succeeds', (string)$error);
 check($fetched === 1, 'the index link was fetched once');
-check(s3fx_count($fx, 'list') === $lists_before, 'the shelf was never listed');
+check(s3fx_count($fx, 'list') === $lists_before, 'backup storage was never listed');
 check(s3fx_object($fx, 'bkt', '/' . $base . 'objects/' . $epoch . '/f.jpg.enc') !== null, 'the blob the index lacked was stored');
 check(s3fx_object($fx, 'bkt', '/' . $base . 'objects/' . $epoch . '/a.jpg.enc') === $a_enc_before, 'the ones it named were not');
 $held = BackupObjects::read_held($link_plan);
@@ -374,7 +374,7 @@ $blob(-9010, 'g.bin', random_bytes(64), array());
 list($result, $error) = $run($nolink_plan);
 check($error === null, 'a run with no index link succeeds', (string)$error);
 $after = s3fx_object($fx, 'bkt', '/' . $base . 'objects/' . $epoch . '/a.jpg.enc');
-check($after !== null && $after !== $a_enc_before, 'with no link and no held.json nothing is held, so the shelf\'s objects are stored again from the file store (bounded to one run\'s worth)');
+check($after !== null && $after !== $a_enc_before, 'with no link and no held.json nothing is held, so backup storage\'s objects are stored again from the file store (bounded to one run\'s worth)');
 $a_enc_before = $after;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -435,7 +435,7 @@ $archive = $arts[0]['name'] ?? '';
 $idx_hist = null; foreach ($arts as $a) { if (($a['kind'] ?? '') === 'objects') { $idx_hist = $a; } }
 check(preg_match('/^site-\d{8}_\d{6}\.tar\.gz\.enc$/', $archive) === 1 && $idx_hist !== null
 	&& $idx_hist['name'] === BackupNaming::index_for_archive($archive), 'the index carries the archive\'s stamp', $archive . ' / ' . json_encode($idx_hist['name'] ?? null));
-check(s3fx_object($fx, 'bkt', '/' . $base . $idx_hist['name']) !== null, 'and is on the shelf beside it');
+check(s3fx_object($fx, 'bkt', '/' . $base . $idx_hist['name']) !== null, 'and is in backup storage beside it');
 $sidx = $shelf_index($base . $idx_hist['name']);
 check($sidx['run'] === $archive, 'its run label is the archive name', $sidx['run']);
 check(s3fx_object($fx, 'bkt', '/' . $base . 'objects/' . $epoch . '/i.bin.enc') !== null, 'the standalone run stored the new blob');
@@ -479,7 +479,7 @@ sleep(1);
 list($result, $error) = $run($keep1);
 check($error === null && strpos((string)$result['message'], 'Full backup') === 0, 'a fresh chain starts', (string)$error . ' ' . ($result['message'] ?? ''));
 check(strpos((string)$result['message'], 'pruned 1 old backup') !== false, 'chain 2 was pruned', $result['message']);
-check(s3fx_object($fx, 'bkt', '/' . $base . 'objects/' . $epoch . '/b.bin.enc') === null, 'b.bin\'s object is gone from the shelf');
+check(s3fx_object($fx, 'bkt', '/' . $base . 'objects/' . $epoch . '/b.bin.enc') === null, 'b.bin\'s object is gone from backup storage');
 check(s3fx_object($fx, 'bkt', '/' . $base . 'objects/' . $epoch . '/a.jpg.enc') !== null, 'a.jpg\'s stays');
 check(s3fx_object($fx, 'bkt', '/' . $base . 'objects/' . $epoch . '/envelope.json') !== null, 'the epoch envelope stays while the epoch has objects');
 check(strpos((string)$result['message'], 'removed 1 offloaded file no kept backup names') !== false, 'the message says so', $result['message']);
@@ -525,20 +525,20 @@ BackupObjects::$test_hooks['fetch'] = function ($url, $sink) use ($fx, $env_key,
 };
 $rot_plan = $make_plan($slug, array('objects_source' => 'index', 'objects_index_url' => 'https://shelf.invalid/' . $index_key . '?sig=test',
 	'epoch_envelope_urls' => array($epoch => 'https://shelf.invalid/' . $env_key . '?sig=env'),
-	'recovery_fpr' => str_repeat('f', 64)));   // "the recovery key changed": nothing on the shelf is sealed to this
+	'recovery_fpr' => str_repeat('f', 64)));   // "the recovery key changed": nothing in backup storage is sealed to this
 sleep(1);
 list($result, $error) = $run($rot_plan);
 check($error === null, 'the run succeeds', (string)$error);
 check($fetched_env === 1, 'the envelope link was fetched once');
 $env_after = json_decode((string)s3fx_object($fx, 'bkt', '/' . $env_key), true);
 check(is_array($env_after) && $env_after['created'] !== $env_before['created'] && $env_after['artifact'] === $epoch,
-	'the epoch envelope on the shelf was re-sealed and uploaded again under the same name', json_encode(array($env_before['created'] ?? null, $env_after['created'] ?? null)));
+	'the epoch envelope in backup storage was re-sealed and uploaded again under the same name', json_encode(array($env_before['created'] ?? null, $env_after['created'] ?? null)));
 check(BackupEnvelope::open_as_site($env_after) === BackupEnvelope::open_as_site($env_before), 'with the same data key');
 check(strpos((string)$result['message'], 're-sealed 1 epoch envelope') !== false, 'and the run says so', $result['message']);
 unset(BackupObjects::$test_hooks['fetch']);
 
 section('An epoch the site key cannot open is written down as retired, and the run says so');
-// The envelope on the shelf is replaced by one sealed to the recovery key and
+// The envelope in backup storage is replaced by one sealed to the recovery key and
 // a site key this machine does not hold: after another rotation the run can
 // neither re-seal it nor open it, so it stays sealed to the retired key alone.
 $foreign = sodium_crypto_box_keypair();
@@ -566,7 +566,7 @@ check(BackupObjects::read_retired_file($retired_file) === array($epoch), 'retire
 $retired = BackupObjects::retired_summary(array(BackupProfile::MANAGER), $lost_plan['base_dir']);
 check($retired['epochs'] === array($epoch) && $retired['count'] > 0 && $retired['bytes'] > 0,
 	'Recovery Readiness counts the objects in it from held.json', json_encode($retired));
-check(json_decode((string)s3fx_object($fx, 'bkt', '/' . $env_key), true) === $lost_env, 'the envelope on the shelf is left as it was');
+check(json_decode((string)s3fx_object($fx, 'bkt', '/' . $env_key), true) === $lost_env, 'the envelope in backup storage is left as it was');
 unset(BackupObjects::$test_hooks['fetch']);
 
 // Debris check on the machine.

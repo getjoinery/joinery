@@ -4,7 +4,7 @@
  *
  * Once a site's uploaded file is offloaded to the customer's file bucket its
  * bytes exist in exactly one place, and the tar the backup makes does not
- * carry it. This class puts every such file on the backup shelf once, while
+ * carry it. This class puts every such file in backup storage once, while
  * it is still on the server's disk, encrypted and named by its immutable
  * stored name, and never moves it again:
  *
@@ -19,12 +19,12 @@
  * On the node, beside the profile's chain directories:
  *
  *   {profile output dir}/objects/epoch.json   the current epoch id and its envelope
- *   {profile output dir}/objects/held.json    what this profile's shelf held as of its last run
+ *   {profile output dir}/objects/held.json    what this profile's backup storage held as of its last run
  *   {profile output dir}/objects/enabled      manager profile only — a manager run carrying
  *                                             the object store has been here
  *   {profile output dir}/objects/tmp/         one object's ciphertext during an upload
  *
- * Local bytes are released only once every enabled profile's shelf holds the
+ * Local bytes are released only once every enabled profile's backup storage holds the
  * object (BackupProfile::enabled()); may_release() is that rule, pure.
  *
  * Objects are encrypted here, in PHP, in the same stock format as archives
@@ -32,9 +32,9 @@
  * AES-256-CBC, PKCS7), so `openssl enc -d -aes-256-cbc -pbkdf2` opens an object
  * with the epoch key exactly as it opens an archive with a chain key.
  *
- * What is stored is read from the shelf, never from a node-side record alone:
+ * What is stored is read from backup storage, never from a node-side record alone:
  * the site profile lists its `objects/` prefix; the manager profile is handed
- * the newest index on its shelf by link. held.json is a cache of that picture
+ * the newest index in its backup storage by link. held.json is a cache of that picture
  * plus what the tick stored since, rewritten whole by every run, and losing it
  * costs at most one run's worth of re-stores.
  *
@@ -137,7 +137,7 @@ class BackupObjects {
 		}
 	}
 
-	/** Object name on the shelf, relative to the profile's base key. */
+	/** Object name in backup storage, relative to the profile's base key. */
 	public static function object_relname($epoch, $name) {
 		return self::DIR . '/' . $epoch . '/' . $name . self::OBJECT_SUFFIX;
 	}
@@ -352,8 +352,8 @@ class BackupObjects {
 
 	/**
 	 * The current epoch: its id and its data key, minting a new one when the
-	 * rules say so. The envelope goes to the shelf BEFORE the node records the
-	 * epoch, so an epoch the node names is always one the shelf can open.
+	 * rules say so. The envelope goes to backup storage BEFORE the node records the
+	 * epoch, so an epoch the node names is always one backup storage can open.
 	 *
 	 * Returns ['id', 'data_key', 'envelope', 'reason'] — reason is '' when the
 	 * epoch was kept.
@@ -400,7 +400,7 @@ class BackupObjects {
 		@chmod($path, 0664);
 	}
 
-	/** Put an epoch envelope on the shelf (a new epoch, or one re-sealed on rotation). */
+	/** Put an epoch envelope in backup storage (a new epoch, or one re-sealed on rotation). */
 	private static function upload_envelope(array $plan, $id, array $envelope) {
 		$tmp = self::tmp_dir($plan) . '/' . $id . '-' . self::ENVELOPE_NAME . '.' . getmypid();
 		if (@file_put_contents($tmp, BackupEnvelope::encode($envelope)) === false) {
@@ -421,7 +421,7 @@ class BackupObjects {
 	 * Epochs the site key cannot open are returned under 'unopenable' for
 	 * Recovery Readiness to report; nothing is re-copied automatically.
 	 *
-	 * @param array $envelopes epoch id => decoded envelope, as read off the shelf
+	 * @param array $envelopes epoch id => decoded envelope, as read from backup storage
 	 */
 	public static function reseal_epochs(array $plan, array $envelopes) {
 		$current = (string)($plan['recovery_fpr'] ?? '');
@@ -456,7 +456,7 @@ class BackupObjects {
 		return array('resealed' => $resealed, 'unopenable' => $unopenable);
 	}
 
-	/** Fetch and decode every epoch envelope the site shelf lists. */
+	/** Fetch and decode every epoch envelope the site's backup storage lists. */
 	public static function envelopes_site(array $plan, array $shelf) {
 		$out = array();
 		list($creds, $bucket, $base) = self::destination($plan);
@@ -527,7 +527,7 @@ class BackupObjects {
 	// ------------------------------------------------------ what is held
 
 	/**
-	 * Read the objects/ prefix of the site shelf into the shelf picture:
+	 * Read the objects/ prefix of the site's backup storage into backup storage picture:
 	 * ['objects' => name => ['epoch', 'object_bytes', 'last_modified'],
 	 *  'envelopes' => epoch id => true]. One request per thousand objects.
 	 */
@@ -537,7 +537,7 @@ class BackupObjects {
 		return self::parse_listing(S3Signer::list($creds, $bucket, ltrim($prefix, '/')), ltrim($prefix, '/'));
 	}
 
-	/** The shelf picture from a raw listing. Pure. Anything not objects/{epoch}/{name} is ignored. */
+	/** Backup storage picture from a raw listing. Pure. Anything not objects/{epoch}/{name} is ignored. */
 	public static function parse_listing(array $objects, $prefix) {
 		$out = array('objects' => array(), 'envelopes' => array());
 		$prefix = ltrim((string)$prefix, '/');
@@ -581,10 +581,10 @@ class BackupObjects {
 	}
 
 	/**
-	 * What the shelf holds, for this run: names with epoch, size and hash.
+	 * What backup storage holds, for this run: names with epoch, size and hash.
 	 *
 	 * Site profile: the listing is the authority on presence and size; hashes
-	 * come from the newest index on the shelf (fetched by key) and from
+	 * come from the newest index in backup storage (fetched by key) and from
 	 * held.json (what the tick stored since). An object the listing shows with
 	 * no hash from either source is reported under 'unhashed' — the run
 	 * re-stores it if it can, which costs one upload and is the price of a
@@ -637,7 +637,7 @@ class BackupObjects {
 				continue;
 			}
 			// Present, but its hash is unknown or its record disagrees with
-			// what is there: hold it by what the shelf says, hashless, and let
+			// what is there: hold it by what backup storage says, hashless, and let
 			// the run replace it where it can.
 			$held[$name] = array('epoch' => $seen['epoch'], 'object_bytes' => (int)$seen['object_bytes'], 'object_sha256' => '');
 			$unhashed[] = $name;
@@ -672,7 +672,7 @@ class BackupObjects {
 	/**
 	 * Rewrite held.json — what a run does at its end — from what the run held
 	 * and stored. The tick keeps storing while a run is going, and each of
-	 * its stores adds an entry the run's picture of the shelf predates; those
+	 * its stores adds an entry the run's picture of backup storage predates; those
 	 * entries are kept. $seen_names is what the file named when the run read
 	 * it: an entry the file has now that was not there then is the tick's,
 	 * and goes in; anything the run's set lacks that WAS there then is
@@ -734,7 +734,7 @@ class BackupObjects {
 	 * re-seal: sealed to a recovery key that is no longer this site's, and not
 	 * openable with the site key either. Those objects open only with the
 	 * retired key, and nothing re-copies them; Recovery Readiness says so from
-	 * this file rather than by reading the shelf on a page load. An empty list
+	 * this file rather than by reading backup storage on a page load. An empty list
 	 * is written too — the fact that every epoch opens is a fact.
 	 */
 	public static function write_retired_epochs(array $plan, array $unopenable) {
@@ -812,7 +812,7 @@ class BackupObjects {
 		}
 	}
 
-	/** Read an index off the site shelf by key. Null when it is not there. */
+	/** Read an index off the site's backup storage by key. Null when it is not there. */
 	public static function fetch_index_key(array $plan, $key) {
 		list($creds, $bucket) = self::destination($plan);
 		$tmp = self::tmp_dir($plan) . '/index-' . getmypid() . '.json.gz';
@@ -856,7 +856,7 @@ class BackupObjects {
 	 * The index: every cloud blob, with whether it is stored. Pure.
 	 *
 	 * @param array $objects the enumerated cloud objects
-	 * @param array $held    name => entry, what the shelf held before this run
+	 * @param array $held    name => entry, what backup storage held before this run
 	 * @param array $stored  name => entry, what this run stored
 	 */
 	public static function build_index(array $plan, $run_label, array $objects, array $held, array $stored) {
@@ -975,14 +975,14 @@ class BackupObjects {
 	// ---------------------------------------------------------------- store
 
 	/**
-	 * Put one object on the shelf: under the offload engine's per-row lock,
+	 * Put one object in backup storage: under the offload engine's per-row lock,
 	 * encrypt the source with the epoch key to objects/tmp, upload it, unlink
 	 * the ciphertext. Returns ['epoch', 'bytes', 'sha256'], or null when the
 	 * row's lock is held by someone else (the tick is pushing it right now —
 	 * the next run takes it).
 	 *
 	 * The lock is what keeps two encryptions of one file — salted differently
-	 * — from both being uploaded, the later PUT winning on the shelf while the
+	 * — from both being uploaded, the later PUT winning in backup storage while the
 	 * index recorded the earlier hash. Advisory locks are re-entrant within a
 	 * session, so the tick, which already holds its row's lock, takes it again
 	 * here without waiting.
@@ -1070,13 +1070,13 @@ class BackupObjects {
 					@unlink($plain_tmp);
 					$result['fetch_failed']++;
 					$result['catchup_left']++;
-					error_log('BackupObjects: could not fetch ' . $obj['name'] . ' from the file store to copy it to the backup shelf: ' . $e->getMessage());
+					error_log('BackupObjects: could not fetch ' . $obj['name'] . ' from the file store to copy it to backup storage: ' . $e->getMessage());
 					continue;
 				}
 			}
 			// The epoch is minted only once there is a plaintext to encrypt:
 			// a run whose every catch-up fetch fails leaves no envelope-only
-			// epoch on the shelf. A failure here is the shelf refusing the
+			// epoch in backup storage. A failure here is backup storage refusing the
 			// envelope, and it propagates: the run fails, as any shelf write
 			// failing before the first object does.
 			if ($epoch === null) {
@@ -1106,8 +1106,8 @@ class BackupObjects {
 
 		if (!$result['stored'] && $result['failed'] > 0) {
 			throw new BackupObjectsException(
-				'None of the ' . $result['failed'] . ' offloaded files this run tried to copy to the backup shelf '
-				. 'could be stored. The shelf cannot be written; see the error log for the provider\'s answer.');
+				'None of the ' . $result['failed'] . ' offloaded files this run tried to copy to backup storage '
+				. 'could be stored. Backup storage cannot be written; see the error log for the provider\'s answer.');
 		}
 		return $result;
 	}
@@ -1185,7 +1185,7 @@ class BackupObjects {
 	}
 
 	/**
-	 * The offload tick, after the flip to `cloud`: store to the site shelf when
+	 * The offload tick, after the flip to `cloud`: store to the site's backup storage when
 	 * the site profile is enabled, then say whether the engine may unlink the
 	 * local bytes. Never throws — a failed store leaves the row `cloud` with
 	 * its bytes, and the next site run's listing shows the object missing and
@@ -1215,7 +1215,7 @@ class BackupObjects {
 					self::held_add($plan, $name, $r);
 				}
 			} catch (\Throwable $e) {
-				error_log('BackupObjects: the offload tick could not copy ' . $name . ' to the backup shelf ('
+				error_log('BackupObjects: the offload tick could not copy ' . $name . ' to backup storage ('
 					. $e->getMessage() . '); keeping its local bytes until a run stores it.');
 			}
 		}

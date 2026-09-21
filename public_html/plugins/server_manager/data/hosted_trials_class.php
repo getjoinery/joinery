@@ -8,7 +8,7 @@
  * payment fails. This is the commercial half, one row per provision.
  *
  * WHAT IS NOT HERE IS THE POINT (specs/hosted_trial_provisioning.md §8). There
- * are no meter columns. The shelf figure lives on the node row, where the
+ * are no meter columns. Backup storage figure lives on the node row, where the
  * retention pass already measures it; sends are counted by the mail provider,
  * which is also what enforces them; disk is the figure the node's own status
  * check already reports; and outbound transfer is an account-wide pool with no

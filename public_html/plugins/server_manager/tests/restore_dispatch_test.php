@@ -212,7 +212,7 @@ $forever = S3Signer::presign_get($creds, 'a-bucket', '/x/y.sql.gz', 99999999);
 check(strpos($forever, 'X-Amz-Expires=604800') !== false,
 	'an absurd window is clamped to the seven-day maximum, not signed as asked');
 
-// The profile and the shelf the object is on have to agree. They are chosen
+// The profile and backup storage the object is on have to agree. They are chosen
 // independently — one a parameter, one read out of a listing — so nothing made
 // them, and a mismatch is a job that was always going to be refused on the node
 // for a reason unrelated to what went wrong.
@@ -224,14 +224,14 @@ try {
 		'cloud_path' => 'joinery-backups/testnode/manager/db.sql.gz.enc'));
 } catch (Exception $e) { $mismatch = $e->getMessage(); }
 if (strpos($mismatch, 'no enabled cloud backup target') !== false) {
-	// The shelf is resolved before the key is checked, so a box with no target
+	// Backup storage is resolved before the key is checked, so a box with no target
 	// configured cannot reach this. Reported as skipped rather than passing on
 	// the wrong refusal.
-	harness_skip('a profile that disagrees with the object\'s own shelf is refused here',
+	harness_skip('a profile that disagrees with the object\'s own backup storage is refused here',
 		'this box has no enabled backup target to resolve');
 } else {
-	check(strpos($mismatch, "'manager' shelf") !== false && strpos($mismatch, "'site' one") !== false,
-		'a profile that disagrees with the object\'s own shelf is refused here', $mismatch);
+	check(strpos($mismatch, "'manager' backup storage") !== false && strpos($mismatch, "'site' one") !== false,
+		'a profile that disagrees with the object\'s own backup storage is refused here', $mismatch);
 }
 
 // ── 4. A restore with nowhere to go says so ─────────────────────────────────

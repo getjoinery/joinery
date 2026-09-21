@@ -56,7 +56,7 @@ class BackupProfile {
 	/**
 	 * Accept a profile name, or say so. Unknown names throw rather than falling
 	 * back to `site`: a typo that silently ran as the site profile would seal a
-	 * management node's backup to the site's key and file it on the site's shelf.
+	 * management node's backup to the site's key and file it in the site's backup storage.
 	 */
 	public static function normalize($name): string {
 		$name = trim((string)$name);
@@ -126,7 +126,7 @@ class BackupProfile {
 	public static $enabled_for_tests = null;
 
 	/**
-	 * The profiles whose shelf must hold an offloaded file before its local
+	 * The profiles whose backup storage must hold an offloaded file before its local
 	 * bytes may be released — the profiles that will store it.
 	 *
 	 *   site     exactly the conditions plan_site() refuses without — a target

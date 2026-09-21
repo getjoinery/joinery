@@ -2,7 +2,8 @@
 /**
  * admin_backups — the Backups page.
  *
- * @version 1.11 - the Offloaded files box carries the figures: what each backup holds on the shelf and when
+ * @version 1.12 - the target form's bucket and key fields say what each must be; Save proves it
+ * @version 1.11 - the Offloaded files box carries the figures: what each backup holds in backup storage and when
  *                 it was last indexed, what is still to copy from the file store, what waits on this
  *                 server for a backup before its local copy goes, and the same-account line when the
  *                 file store and this site's target share an access key
@@ -301,7 +302,7 @@ if (!$recovery['is_ready'] || $rotating) {
 
 // ── Offloaded files ─────────────────────────────────────────────────────────
 // Files whose bytes live in the file bucket are in no archive; each is on the
-// backup shelf once, and the daily check asks the bucket whether it still has
+// backup storage once, and the daily check asks the bucket whether it still has
 // every one. Shown once the check has run or a Bring them back has happened,
 // so a site that offloads nothing never sees an empty box.
 if (BackupObjectsStatus::has_content($objects_status) || CloudStoreInventoryPanel::has_content($inventory)) {
@@ -316,7 +317,7 @@ if (BackupObjectsStatus::has_content($objects_status) || CloudStoreInventoryPane
 	if (!$objects_status['enabled'] && $total['count'] > 0) {
 		echo '<p class="mb-1 text-muted">No backup of this site stores offloaded files yet: a backup target of this site\'s own '
 		   . '(with a proven recovery key and a backup type that includes files), or a management node, copies each one to '
-		   . 'its shelf from its next run on.</p>';
+		   . 'its backup storage from its next run on.</p>';
 	}
 	$catchup = BackupObjectsStatus::catchup_sentence($objects_status);
 	if ($catchup !== '') {
@@ -336,7 +337,7 @@ if (BackupObjectsStatus::has_content($objects_status) || CloudStoreInventoryPane
 		echo CloudStoreInventoryPanel::render($inventory, $objects_source, '/admin/admin_backups', $manager_url);
 	}
 	echo '<p class="text-muted small mt-2 mb-0">Files moved to the cloud file store are served from there and are not '
-	   . 'in the backup archives; each is copied to the backup shelf once instead, and its local copy stays on this server '
+	   . 'in the backup archives; each is copied to backup storage once instead, and its local copy stays on this server '
 	   . 'until every backup that stores offloaded files holds it. Once a day every offloaded file is '
 	   . 'checked in the file store. <a href="/admin/admin_cloud_storage">Cloud storage</a></p>';
 	$page->end_box();
@@ -419,11 +420,14 @@ if ($editing || $adding) {
 			'linode' => array('show' => array('region', 'endpoint')),
 		),
 	));
-	$fw->textinput('bkt_bucket', 'Bucket', array('value' => $editing ? (string)$editing->get('bkt_bucket') : ''));
+	$fw->textinput('bkt_bucket', 'Bucket', array('value' => $editing ? (string)$editing->get('bkt_bucket') : '',
+		'helptext' => 'A private bucket used for nothing else.'));
 	$fw->textinput('bkt_path_prefix', 'Folder inside the bucket',
 		array('value' => $editing ? (string)$editing->get('bkt_path_prefix') : 'joinery-backups'));
 	$fw->textinput('access_key', 'Access key ID',
-		array('autocomplete' => 'off', 'helptext' => $editing ? 'Leave blank to keep the stored key.' : ''));
+		array('autocomplete' => 'off', 'helptext' => ($editing ? 'Leave blank to keep the stored key. ' : '')
+			. 'A key for this bucket only, with list, read, write and delete. Backblaze: listFiles, readFiles, writeFiles, deleteFiles. '
+			. 'Amazon: s3:ListBucket, s3:GetObject, s3:PutObject, s3:DeleteObject.'));
 	$fw->passwordinput('secret_key', 'Secret key',
 		array('autocomplete' => 'new-password', 'helptext' => $editing ? 'Leave blank to keep the stored key.' : ''));
 	$fw->textinput('region', 'Region', array('value' => ''));

@@ -130,7 +130,7 @@ foreach (array(BackupVerifier::describe($pass), BackupVerifier::describe($fail),
 	check(stripos($w, 'chain') === false && stripos($w, 'seq') === false && stripos($w, 'restore point') === false,
 		'nobody reads "chain", "seq" or "restore point"', $w);
 }
-check(BackupVerifier::level_name(1) === 'checked on the shelf' && BackupVerifier::level_name(2) === 'opened and read'
+check(BackupVerifier::level_name(1) === 'checked in backup storage' && BackupVerifier::level_name(2) === 'opened and read'
 	&& BackupVerifier::level_name(3) === 'rehearsed' && BackupVerifier::level_name(4) === '',
 	'the three levels have their page names and nothing else does');
 

@@ -486,7 +486,7 @@ if ($agent_online) {
 <?php endif; ?>
 
 <?php // Backups this management node takes are not happening. Its own runs, its
-      // own shelf, its own responsibility — which is why this is an alarm.
+      // own backup storage, its own responsibility — which is why this is an alarm.
       // Two shapes land here and both belong: runs that fail or stop landing,
       // and nodes that cannot be backed up at all because they hold no verified
       // recovery key. The second is not fixable from here, and the line says so

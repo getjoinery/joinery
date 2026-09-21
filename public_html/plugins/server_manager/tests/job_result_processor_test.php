@@ -752,9 +752,9 @@ check($v['objects'] === 1204 && $v['object_bytes'] === 3435973836 && $v['objects
 check(strpos($v['message'], '1,204 offloaded files (3.2 GB), 20 of them opened') !== false, 'and the message says how many were proven and opened', $v['message']);
 $v = JobResultProcessor::parse_verify_backup_result("VERIFY_RESULT=fail\nVERIFY_LEVEL=2\nVERIFY_RUN=chain-20260912_044520/3\nVERIFY_RUN_TIME=2026-09-13 04:45:20\n"
 	. "VERIFY_ARTIFACTS=4\nVERIFY_BYTES=100\nVERIFY_FILES=10\nVERIFY_OBJECTS=0\nVERIFY_OBJECT_BYTES=0\nVERIFY_DURATION=2\n"
-	. "VERIFY_REASON=gone: objects/epoch-20260901_000000/beach.jpg.enc is no longer on the shelf (HTTP 404 from storage)\n", 'failed');
+	. "VERIFY_REASON=gone: objects/epoch-20260901_000000/beach.jpg.enc is no longer in backup storage (HTTP 404 from storage)\n", 'failed');
 check($v['result'] === 'fail' && strpos($v['message'], 'failed: gone: objects/epoch-20260901_000000/beach.jpg.enc') !== false,
-	'an object gone from the shelf fails the verify by name', $v['message']);
+	'an object gone from backup storage fails the verify by name', $v['message']);
 
 $v = JobResultProcessor::parse_verify_backup_result("=== [Step 1/1] ===\nsome agent noise\n", 'failed', 'Refused by the node: tree manifest signature does not verify');
 check($v['result'] === 'fail' && strpos($v['reason'], 'Refused by the node') === 0,
@@ -907,7 +907,7 @@ $r = JobResultProcessor::parse_restore_objects_result("=== [Step 1/1] ===\n" . j
 check($r['result'] === 'ok' && $r['want'] === array('beach.jpg', 'dune.png') && $r['wanted'] === 2 && $r['more'] === false
 	&& $r['epochs'] === array('epoch-20260801_000000' => 1, 'epoch-20260901_000000' => 1),
 	'a survey reads back through the envelope with its names and epochs', var_export($r, true));
-check($r['message'] === '2 offloaded files to bring home (1 offloaded file never reached the shelf; 1 need nothing: served by the file store, or already here)',
+check($r['message'] === '2 offloaded files to bring home (1 offloaded file never reached backup storage; 1 need nothing: served by the file store, or already here)',
 	'and says so for a person', $r['message']);
 $page_out = "fetching objects/epoch-20260801_000000/beach.jpg.enc\nrestored beach.jpg (3.9 KB)\nRESTORE_OBJECTS_RESULT=ok\nRESTORE_OBJECTS_MODE=missing\n"
 	. "RESTORE_OBJECTS_RUN=chain-20260901_040000/1\nRESTORE_OBJECTS_INDEXED=3\nRESTORE_OBJECTS_NOT_ON_SHELF=1\nRESTORE_OBJECTS_RESTORED=2\n"

@@ -3,7 +3,7 @@
  * restore_objects.php — bring a backup's offloaded files home.
  *
  * A backup's archives carry no offloaded file: a blob whose bytes live in the
- * file bucket is on the backup shelf once, encrypted under an epoch key, and
+ * file bucket is in backup storage once, encrypted under an epoch key, and
  * named by the run's offloaded-files index (objects-NNNN.json.gz). This runs
  * AFTER the archives and the database are restored and puts those files back
  * where the site expects them — only the ones the file bucket cannot serve
@@ -45,7 +45,7 @@
  *   RESTORE_OBJECTS_MODE=missing|all
  *   RESTORE_OBJECTS_RUN=<run the index describes>
  *   RESTORE_OBJECTS_INDEXED=<stored entries in the index>
- *   RESTORE_OBJECTS_NOT_ON_SHELF=<entries the index says never reached the shelf>
+ *   RESTORE_OBJECTS_NOT_ON_SHELF=<entries the index says never reached backup storage>
  *   RESTORE_OBJECTS_WANTED=<n to bring home>            (survey, dry run, tree)
  *   RESTORE_OBJECTS_EPOCHS=<epoch:n,…>                  (survey, dry run, tree)
  *   RESTORE_OBJECTS_WANT=<name,name,…>                  (survey; capped, MORE=1 when truncated)

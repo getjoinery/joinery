@@ -3,7 +3,7 @@
  * BackupChainListHelper — the restore points a node actually has.
  *
  * The fleet's scheduled backups are CHAINS: one full plus the incrementals that
- * depend on it, in a directory of their own on the shelf. The flat file listing
+ * depend on it, in a directory of their own in backup storage. The flat file listing
  * cannot represent that. It sees `files-0003.tar.gz.enc` as one more archive
  * and offers to restore it, which would apply an incremental with no full under
  * it — not a smaller restore, no restore at all.
@@ -15,11 +15,11 @@
  *                2000 keys of the whole target: ten thousand offloaded-file objects under one node's
  *                objects/ would otherwise push another node's chain manifests off the end and empty its
  *                list. The pass also totals the object store per profile ('objects': count, bytes,
- *                epochs) for the node tab's "Offloaded files on the shelf" line
+ *                epochs) for the node tab's "Offloaded files in backup storage" line
  * @version 1.2 - each run also carries its artifacts' sizes by kind (files, db, meta), so a page can
  *                say how much room a rehearsal of that run needs without reading the manifest again
- * @version 1.1 - the shelf is resolved via JobCommandBuilder::get_target(), so a node that names no
- *                target still has its chains listed (from the sole enabled shelf) instead of appearing
+ * @version 1.1 - backup storage is resolved via JobCommandBuilder::get_target(), so a node that names no
+ *                target still has its chains listed (from the sole enabled backup storage) instead of appearing
  *                to have no restore points
  * @version 1.0
  */
@@ -47,7 +47,7 @@ class BackupChainListHelper {
 	 * decoration: a site backs itself up and a management node takes its own
 	 * copies, and those are two parties' backups under two recovery keys. A
 	 * restore that guessed the segment would look for a management node's chain
-	 * on the site's own shelf.
+	 * in the own backup storage.
 	 */
 	public static function chain_path($target, $slug, $profile, $chain_id) {
 		$prefix = rtrim((string)($target->get('bkt_path_prefix') ?: 'joinery-backups'), '/');
@@ -55,7 +55,7 @@ class BackupChainListHelper {
 	}
 
 	/**
-	 * Chains on this node's shelf, newest first.
+	 * Chains in this node's backup storage, newest first.
 	 *
 	 * Each: ['chain_id', 'created', 'updated', 'runs' => [['seq','level','time','bytes',
 	 * 'artifacts' => [kind => bytes]]], 'bytes'].
@@ -66,8 +66,8 @@ class BackupChainListHelper {
 	 * restore points" and "we could not ask" must not look the same.
 	 */
 	public static function for_node($node, $max_chains = 20) {
-		// Resolve the shelf the SAME way the job builder does, so a node that names
-		// no target still has the chains it wrote to the sole enabled shelf listed
+		// Resolve backup storage the SAME way the job builder does, so a node that names
+		// no target still has the chains it wrote to the sole enabled backup storage listed
 		// here. Reading the raw mgn_bkt_backup_target_id returned an empty list for
 		// every such node — indistinguishable from "no restore points" when
 		// backups were in fact landing fine. get_target returns only an enabled
@@ -86,7 +86,7 @@ class BackupChainListHelper {
 		if (trim((string)$bucket) === '' || $slug === '') {
 			return ['chains' => [], 'objects' => [], 'error' => 'No bucket configured.'];
 		}
-		// This node's prefix only, every page of it: the shelf holds one object
+		// This node's prefix only, every page of it: backup storage holds one object
 		// per offloaded file, and a cap on the whole target would fill with them.
 		try {
 			$files = S3Signer::list($creds, $bucket, $node_prefix);

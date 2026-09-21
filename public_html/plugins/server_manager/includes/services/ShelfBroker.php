@@ -4,9 +4,9 @@
  * ledger of what it signed (specs/services_phase2_platform.md §3, D3).
  *
  * No box ever holds a storage credential. For every object a site writes or
- * reads on the shelf it asks here for a presigned URL: one request, one key,
+ * reads in backup storage it asks here for a presigned URL: one request, one key,
  * one operation, good for an hour, signed with the plane's own credential
- * for its shelf target. The broker checks, then signs:
+ * for its backup storage target. The broker checks, then signs:
  *
  *   begin_run    the tenant is usable (active, date ahead), and the ledger's
  *                completed bytes plus the run's declared sizes fit inside the
@@ -63,17 +63,17 @@ class ShelfBroker {
 	/** The one sentence saying why a tenant cannot read now, or '' while its objects exist. */
 	public static function readRefusal(ServiceTenant $row): string {
 		if ($row->get('svt_pruned_time') !== null) {
-			return 'The getjoinery shelf copies of this site were pruned on '
+			return 'The getjoinery backup storage copies of this site were pruned on '
 				. substr((string)$row->get('svt_pruned_time'), 0, 10) . '; nothing remains to read.';
 		}
 		return '';
 	}
 
-	/** The shelf row for this key, or a refusal. */
+	/** Backup storage row for this key, or a refusal. */
 	public static function tenantFor(int $user_id, int $key_id): ServiceTenant {
 		$row = ServiceTenant::forKey($key_id, ServiceTenant::SERVICE_SHELF);
 		if ($row === null || (int)$row->get('svt_usr_user_id') !== $user_id) {
-			throw new ShelfBrokerException('This site is not enrolled for the backup shelf.');
+			throw new ShelfBrokerException('This site is not enrolled for backup storage.');
 		}
 		return $row;
 	}
@@ -82,36 +82,36 @@ class ShelfBroker {
 	public static function refusal(ServiceTenant $row): string {
 		$state = (string)$row->get('svt_state');
 		if ($state === ServiceTenant::STATE_RELEASED) {
-			return 'The getjoinery shelf is no longer in use for this site (released).';
+			return 'The getjoinery backup storage is no longer in use for this site (released).';
 		}
 		if ($state === ServiceTenant::STATE_SUSPENDED) {
 			return (string)$row->get('svt_notice') ?: JoineryServices::suspendedNotice(ServiceTenant::SERVICE_SHELF);
 		}
 		if (!$row->entitled()) {
 			return $row->get('svt_paid_until') === null
-				? 'This site is not entitled to the getjoinery shelf: no paid-through date has been set.'
-				: 'This site\'s paid-through date for the getjoinery shelf has passed.';
+				? 'This site is not entitled to the getjoinery backup storage: no paid-through date has been set.'
+				: 'This site\'s paid-through date for the getjoinery backup storage has passed.';
 		}
 		if ($state !== ServiceTenant::STATE_ACTIVE) {
-			return 'The getjoinery shelf is not active for this site (' . $state . ').';
+			return 'The getjoinery backup storage is not active for this site (' . $state . ').';
 		}
 		return '';
 	}
 
-	/** The plane's shelf target and its credential, or a refusal that names the plane's fault. */
+	/** The plane's backup storage target and its credential, or a refusal that names the plane's fault. */
 	private static function shelf(): array {
 		$target = JoineryServices::shelfTarget();
 		if ($target === null) {
-			throw new ShelfBrokerException('The operator has no shelf target configured; nothing can be signed.');
+			throw new ShelfBrokerException('The operator has no backup storage target configured; nothing can be signed.');
 		}
 		try {
 			$creds = (array)$target->get_credentials();
 		} catch (\Throwable $e) {
-			throw new ShelfBrokerException('The operator\'s shelf credential cannot be read; nothing can be signed.');
+			throw new ShelfBrokerException('The operator\'s backup storage credential cannot be read; nothing can be signed.');
 		}
 		$bucket = trim((string)$target->get('bkt_bucket'));
 		if ($bucket === '' || empty($creds['access_key']) || empty($creds['secret_key'])) {
-			throw new ShelfBrokerException('The operator\'s shelf target is incomplete; nothing can be signed.');
+			throw new ShelfBrokerException('The operator\'s backup storage target is incomplete; nothing can be signed.');
 		}
 		return array($target, $creds, $bucket);
 	}
@@ -158,11 +158,11 @@ class ShelfBroker {
 		$allowance = (int)$row->get('svt_allowance') ?: JoineryServices::allowance(ServiceTenant::SERVICE_SHELF);
 		$used = ShelfObject::completedBytes((int)$row->key);
 		if ($used + $declared > $allowance) {
-			$sentence = 'This run would put the shelf over its allowance: '
+			$sentence = 'This run would put backup storage over its allowance: '
 				. JoineryServices::formatFigure(ServiceTenant::SERVICE_SHELF, $used) . ' stored plus '
 				. JoineryServices::formatFigure(ServiceTenant::SERVICE_SHELF, $declared) . ' declared, of '
 				. JoineryServices::formatFigure(ServiceTenant::SERVICE_SHELF, $allowance)
-				. '. Local backups continue; the shelf copy was not taken. Older chains are pruned by retention, '
+				. '. Local backups continue; the backup storage copy was not taken. Older chains are pruned by retention, '
 				. 'or move to your own storage to lift the limit.';
 			$row->set('svt_notice', $sentence);
 			$row->save();
@@ -204,7 +204,7 @@ class ShelfBroker {
 	 */
 	public static function sign(ServiceTenant $row, int $run_id, string $name, string $operation, array $args = array()): array {
 		if (!in_array($operation, self::OPERATIONS, true)) {
-			throw new ShelfBrokerException('The shelf broker does not sign "' . $operation . '".');
+			throw new ShelfBrokerException('The backup storage broker does not sign "' . $operation . '".');
 		}
 		$name = self::cleanName($name);
 		if ($name === '') {
@@ -281,7 +281,7 @@ class ShelfBroker {
 		$base = self::tenantPrefix($row, $target);
 		$sub = ltrim(trim($sub), '/');
 		if ($sub !== '' && self::cleanName(rtrim($sub, '/')) === '') {
-			throw new ShelfBrokerException('That is not a prefix inside this site\'s shelf.');
+			throw new ShelfBrokerException('That is not a prefix inside this site\'s backup storage.');
 		}
 		$objects = S3Signer::list($creds, $bucket, $base . $sub);
 		$out = array();
@@ -441,7 +441,7 @@ class ShelfBroker {
 	 * every incremental) takes the row over: it is that run's to complete
 	 * from here, and the object is counted once whichever run wrote it. A
 	 * row already completed keeps its completed time and size — that object
-	 * is on the shelf until the new one lands over it — and takes the new
+	 * is in backup storage until the new one lands over it — and takes the new
 	 * size when the run finishes it. An upload the row still holds is
 	 * aborted at the provider before its id is let go.
 	 */

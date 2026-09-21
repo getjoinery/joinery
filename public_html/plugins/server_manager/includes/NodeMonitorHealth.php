@@ -335,7 +335,7 @@ class NodeMonitorHealth {
 	 * this site has proven possession of: the management node's runs execute as
 	 * root, so they carry config/agent_signing_key, and a matching fingerprint
 	 * means the person holding this site's key can open them. A copy sealed to
-	 * some other party's key lives on that party's shelf under that party's
+	 * some other party's key lives in that party's backup storage under that party's
 	 * custody and is not evidence that the trust root here is recoverable.
 	 */
 	private static function has_offsite_project_backup(): bool {
@@ -696,14 +696,14 @@ class NodeMonitorHealth {
 		}
 
 		// The node's report and the bucket disagree. The report says the last
-		// run succeeded; the shelf — listed from here with this management node's
+		// run succeeded; backup storage — listed from here with this management node's
 		// own credential, after that run — holds nothing written since. The
 		// shelf is the one witness a compromised or misconfigured node cannot
 		// talk into its story, so this is the only check that catches a node
 		// lying by omission. An hour of slack absorbs clock skew between the
 		// node and the storage provider.
 		// Empty columns stay false: strtotime(' UTC') on a bare timezone reads
-		// as "now", which would make an empty shelf look freshly written to.
+		// as "now", which would make an empty backup storage look freshly written to.
 		$checked_raw = trim((string)$node->get('mgn_backup_shelf_checked_time'));
 		$newest_raw  = trim((string)$node->get('mgn_backup_shelf_newest_time'));
 		$checked = ($checked_raw !== '') ? strtotime($checked_raw . ' UTC') : false;
@@ -712,7 +712,7 @@ class NodeMonitorHealth {
 		if ($checked !== false && $claimed !== false && $checked > $claimed
 			&& ($newest === false || $newest < $claimed - 3600)) {
 			return self::result('backups', 'Backups are not landing',
-				'This node reports its backups succeeding, but its shelf was listed '
+				'This node reports its backups succeeding, but its backup storage was listed '
 				. self::humanize(time() - $checked) . ' ago and nothing has actually arrived since the '
 				. 'run it reported. The archive either never uploaded or went somewhere else.', true);
 		}
@@ -738,7 +738,7 @@ class NodeMonitorHealth {
 	 *
 	 * Four answers, in the order they are checked:
 	 *
-	 *   shelf problem   the fleet pass's shelf check found a backup on the
+	 *   shelf problem   the fleet pass's backup storage check found a backup on the
 	 *                   shelf that is not whole (an artifact missing or short,
 	 *                   a manifest with no envelope). A problem, in the pass's
 	 *                   words — this is the one a level 2 would fail on.
@@ -764,8 +764,8 @@ class NodeMonitorHealth {
 	public static function verify_state($node, array $policy, $first_backup = null): array {
 		$shelf = trim((string)$node->get('mgn_backup_shelf_problem'));
 		if ($shelf !== '') {
-			return array('is_problem' => true, 'label' => 'A backup on the shelf is incomplete',
-				'detail' => 'The last listing of this node\'s shelf found ' . $shelf
+			return array('is_problem' => true, 'label' => 'A stored backup is incomplete',
+				'detail' => 'The last listing of this node\'s backup storage found ' . $shelf
 					. '. A restore that reached that backup would stop there.');
 		}
 

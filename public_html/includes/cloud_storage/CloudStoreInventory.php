@@ -316,7 +316,7 @@ class CloudStoreInventory {
 	 * @param array $record   read()
 	 * @param array $held     profile => (name => entry) | null — BackupObjects::held_sets() of the enabled profiles
 	 * @return array ['checked_at' => string|null, 'checked' => n, 'unchecked' => n, 'missing' => name => entry,
-	 *                'missing_count' => n, 'held' => n (of the missing, on a backup shelf; null when no
+	 *                'missing_count' => n, 'held' => n (of the missing, in backup storage; null when no
 	 *                profile has a held set to say), 'running' => bool,
 	 *                'running_since' => string|null, 'running_checked' => n, 'bring_back' => array|null]
 	 */

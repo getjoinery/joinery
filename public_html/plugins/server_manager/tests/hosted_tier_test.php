@@ -209,7 +209,7 @@ $first_deadline = (string)$trial->get('htr_grace_ends_time');
 check($first_deadline !== '' && strtotime($first_deadline . ' UTC') > time(),
 	'with a deadline in the future', $first_deadline);
 check(trim((string)$trial->get('htr_shelf_ends_time')) !== '',
-	'and the shelf date set from the SAME moment, so "kept ninety days" is countable '
+	'and backup storage date set from the SAME moment, so "kept ninety days" is countable '
 	. 'from the day they stopped paying');
 check(trim((string)$trial->get('htr_shutdown_time')) === '',
 	'nothing was shut down: a webhook moves dates, it does not power off machines');

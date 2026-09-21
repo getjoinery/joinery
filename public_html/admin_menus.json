@@ -380,6 +380,14 @@
             "order": 10,
             "permission": 10,
             "parent": "system"
+        },
+        {
+            "slug": "cloud-storage",
+            "title": "Cloud Storage",
+            "url": "admin_cloud_storage",
+            "order": 11,
+            "permission": 10,
+            "parent": "system"
         }
     ],
     "profileMenu": [

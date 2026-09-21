@@ -22,7 +22,7 @@
  *   scratch tree under the working directory and restore_database.sh into a
  *   database this engine creates and drops. Proves the set is recoverable.
  *
- * Level 1, "checked on the shelf", is the management node's and lives in the
+ * Level 1, "checked in backup storage", is the management node's and lives in the
  * fleet backup pass; it needs no artifact on disk.
  *
  * No network. Fetching is BackupStaging's job, so this can be driven against a
@@ -41,7 +41,7 @@
  *                contract; disk_needed() takes the sample's bytes
  * @version 1.2 - the objects index is read with the run's other artifacts: sized and hashed against
  *                the manifest, then opened as a gzipped index; its entry count is carried as
- *                'objects'. disk_needed() counts it. Per-object checks are the shelf's and the
+ *                'objects'. disk_needed() counts it. Per-object checks are backup storage's and the
  *                rehearsal's (specs/backup_offloaded_files.md § Verification)
  * @version 1.1 - stamp_history()/note_history() are the history stamp, here so the test can drive it:
  *                a skip or a refusal stamps the run's message only, so a verify a person started
@@ -68,7 +68,7 @@ class BackupVerifier {
 
 	/** How each level is named where a person reads. */
 	const LEVEL_NAMES = array(
-		self::LEVEL_SHELF    => 'checked on the shelf',
+		self::LEVEL_SHELF    => 'checked in backup storage',
 		self::LEVEL_READ     => 'opened and read',
 		self::LEVEL_REHEARSE => 'rehearsed',
 	);
@@ -99,7 +99,7 @@ class BackupVerifier {
 	 * The offloaded files a rehearsal opens: the largest few, because a
 	 * damaged large object is the costly one to lose, and a random handful,
 	 * because the largest are always the same ones. Level 2 opens the epoch
-	 * envelopes only — the shelf listing already proves presence and size, and
+	 * envelopes only — backup storage listing already proves presence and size, and
 	 * a request per object would be ten thousand requests to learn the same.
 	 */
 	const SAMPLE_LARGEST = 5;
@@ -115,7 +115,7 @@ class BackupVerifier {
 		return self::LEVEL_NAMES[(int)$level] ?? '';
 	}
 
-	/** Is this a level this engine runs? Level 1 is the shelf check, elsewhere. */
+	/** Is this a level this engine runs? Level 1 is the backup storage check, elsewhere. */
 	public static function is_runnable_level($level) {
 		return in_array((int)$level, array(self::LEVEL_READ, self::LEVEL_REHEARSE), true);
 	}
@@ -246,7 +246,7 @@ class BackupVerifier {
 	 * other artifact. With $objects given (what BackupStaging::fetch_objects
 	 * staged), every epoch envelope the index's stored entries name must be
 	 * there and must open with this machine's own key — that is what makes
-	 * the objects the shelf holds recoverable here; 'objects' and
+	 * the objects backup storage holds recoverable here; 'objects' and
 	 * 'object_bytes' then count the stored objects that proof covers. Null
 	 * means nothing about them was staged (the operator's shell entry, which
 	 * holds a chain key and not the site key), and they count as unproven.
@@ -458,7 +458,7 @@ class BackupVerifier {
 			$result['rows']   = $counts['rows'];
 
 			// The sample, against the rows the dump brought back: the one
-			// check that ties an object on the shelf to the file the site
+			// check that ties an object in backup storage to the file the site
 			// would serve.
 			$sample = self::open_sample($work, $plan, $objects, self::connect($db, $db_name));
 			if (!$sample['ok']) {
@@ -797,7 +797,7 @@ class BackupVerifier {
 	/**
 	 * Open the objects index: it is plain, so this is the gunzip and the
 	 * decode, and the count of entries it names. The objects themselves are
-	 * checked on the shelf and in the rehearsal, never one request at a time
+	 * checked in backup storage and in the rehearsal, never one request at a time
 	 * here.
 	 */
 	private static function read_index($path) {
@@ -817,7 +817,7 @@ class BackupVerifier {
 	 * bytes of the stored objects the proof covers.
 	 *
 	 * A missing envelope is the same failure as a missing artifact: the
-	 * objects under it are on the shelf and nothing here can open them.
+	 * objects under it are in backup storage and nothing here can open them.
 	 */
 	private static function open_epochs(array $index, array $objects) {
 		$count = 0; $bytes = 0; $epochs = array();
@@ -832,7 +832,7 @@ class BackupVerifier {
 			$path = (string)($objects['envelopes'][$epoch] ?? '');
 			$holds = $n . ' offloaded file' . ($n === 1 ? '' : 's');
 			if ($path === '' || !is_file($path)) {
-				return array('ok' => false, 'error' => 'gone: the envelope of ' . $epoch . ' is not on the shelf, so no key '
+				return array('ok' => false, 'error' => 'gone: the envelope of ' . $epoch . ' is not in backup storage, so no key '
 					. 'can be recovered for the ' . $holds . ' it holds');
 			}
 			try {
@@ -929,7 +929,7 @@ class BackupVerifier {
 			if ($want_hash !== '') {
 				if (!hash_equals(strtolower($want_hash), strtolower((string)$hash))) {
 					return array('ok' => false, 'error' => 'offloaded file ' . $name . ' decrypts to bytes whose hash is not the '
-						. 'one the rehearsed database records for it — the shelf holds a different file', 'sampled' => $sampled);
+						. 'one the rehearsed database records for it — backup storage holds a different file', 'sampled' => $sampled);
 				}
 			} elseif ((int)$row['fbb_size_bytes'] !== (int)$size) {
 				return array('ok' => false, 'error' => 'offloaded file ' . $name . ' decrypts to ' . (int)$size

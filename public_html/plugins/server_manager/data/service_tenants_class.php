@@ -3,11 +3,11 @@
  * ServiceTenant — one self-hosted site's standing with one service this
  * operator runs (specs/services_phase2_platform.md §6, umbrella contract C2).
  *
- * A site that uses our outbound mail or our backup shelf holds one row per
+ * A site that uses our outbound mail or our backup storage holds one row per
  * service. The row is KEYED BY THE CONNECTED KEY (svt_apk_api_key_id, D2): the
  * Connect flow mints one API key per site, so the key is the site. The host is
  * a label the site reports and may change; a renamed site keeps its row and
- * its shelf.
+ * its backup storage.
  *
  * What decides whether the service works is the date: svt_paid_until, null
  * meaning never entitled. In this phase an operator writes it from the
@@ -23,7 +23,7 @@
  *                 (mail only: a subaccount without its sender domain yet).
  *   active        entitled and working.
  *   suspended     the date passed and the grace window ran out: mail's
- *                 subaccount is closed, the shelf broker refuses the tenant.
+ *                 subaccount is closed, the backup storage broker refuses the tenant.
  *                 The 90-day retention clock (svt_prune_after_time) runs from
  *                 svt_revoked_time. A new date reactivates in place.
  *   released      the customer left the service (the switch-over) or the
@@ -31,7 +31,7 @@
  *
  * THE FIGURE IS NOT A METER THE PLANE TRUSTS. For mail it is the provider's
  * month-to-date count (read by the reconcile; the webhook nudges it between
- * reads); the provider enforces the limit. For the shelf it is the sum of
+ * reads); the provider enforces the limit. For backup storage it is the sum of
  * the ledger's completed objects, which the broker keeps exact; the broker
  * refuses a run that would cross the allowance.
  *
@@ -66,7 +66,7 @@ class ServiceTenant extends SystemBase {
 	const MAIL_DOMAIN_ADDED    = 'domain_added';
 	const MAIL_DOMAIN_VERIFIED = 'domain_verified';
 
-	/** Days the shelf is kept after suspension or release: a customer-facing promise. */
+	/** Days backup storage is kept after suspension or release: a customer-facing promise. */
 	const RETENTION_DAYS = 90;
 
 	protected static $foreign_key_actions = array(
@@ -93,7 +93,7 @@ class ServiceTenant extends SystemBase {
 		'svt_host'               => array('type'=>'varchar(255)'),
 		'svt_service'            => array('type'=>'varchar(16)', 'is_nullable'=>false,
 			'allowed_values'=>array('mail', 'shelf')),
-		// The tenant's name at the provider and on the shelf: t<id>, so a
+		// The tenant's name at the provider and in backup storage: t<id>, so a
 		// bucket listing or a subaccount label names no customer.
 		'svt_slug'               => array('type'=>'varchar(28)'),
 		'svt_state'              => array('type'=>'varchar(20)', 'is_nullable'=>false, 'default'=>'unpaid',
@@ -114,7 +114,7 @@ class ServiceTenant extends SystemBase {
 		// svt_lapse_time + server_manager_services_grace_days.
 		'svt_lapse_time'         => array('type'=>'timestamp(6)'),
 		// When the service actually stopped (suspended past grace, or released),
-		// and the day the shelf may be pruned: revoked + RETENTION_DAYS. Stored,
+		// and the day backup storage may be pruned: revoked + RETENTION_DAYS. Stored,
 		// because it is a promise made to the customer on that day.
 		'svt_revoked_time'       => array('type'=>'timestamp(6)'),
 		'svt_prune_after_time'   => array('type'=>'timestamp(6)'),
@@ -235,7 +235,7 @@ class MultiServiceTenant extends SystemMultiBase {
 		if (isset($this->options['provider_subaccount_id'])) {
 			$filters['svt_provider_subaccount_id'] = array((string)$this->options['provider_subaccount_id'], PDO::PARAM_STR);
 		}
-		// Rows whose shelf may be pruned now.
+		// Rows whose backup storage may be pruned now.
 		if (!empty($this->options['prune_due'])) {
 			$filters['svt_prune_after_time'] = "<= now() AND svt_pruned_time IS NULL";
 		}

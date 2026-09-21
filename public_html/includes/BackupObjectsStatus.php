@@ -2,14 +2,14 @@
 /**
  * BackupObjectsStatus — the figures the Backups page, the cloud-storage page
  * and the admin notice show about offloaded files and their place on the
- * backup shelf (specs/backup_offloaded_files.md § Admin surfaces).
+ * backup storage (specs/backup_offloaded_files.md § Admin surfaces).
  *
  * A file the site moved to its cloud file store is in no archive; each is
- * copied to the backup shelf once, and its local bytes stay on this server
+ * copied to backup storage once, and its local bytes stay on this server
  * until every backup that stores offloaded files holds it. From that, four
  * figures a person asks for:
  *
- *   on the shelf   what each enabled backup holds — N objects, X GB — and
+ *   in backup storage   what each enabled backup holds — N objects, X GB — and
  *                  the run that last indexed them (held.json, history)
  *   waiting        offloaded files whose local copy is still here because
  *                  some enabled backup lacks them: "M files (X GB) waiting
@@ -139,8 +139,7 @@ class BackupObjectsStatus {
 
 	// ------------------------------------------------------------ sentences
 
-	const SAME_ACCOUNT_LINE = 'Your backup shelf and your file store are on the same account. Losing that account loses both. '
-		. 'A copy taken by a management node is the one that survives it.';
+	const SAME_ACCOUNT_LINE = 'Backup storage and the file store share one account; losing it loses both. A management node\'s copy would survive it.';
 
 	/** The same-account warning, or '' when the keys differ. */
 	public static function same_account_line(array $status) {
@@ -183,13 +182,13 @@ class BackupObjectsStatus {
 	}
 
 	/**
-	 * One line per enabled backup: "Offloaded files on the shelf (this site's
+	 * One line per enabled backup: "Offloaded files in backup storage (this site's
 	 * backup): N objects, X GB; last indexed at the run of <when>."
 	 */
 	public static function shelf_sentences(array $status) {
 		$out = array();
 		foreach (($status['shelf'] ?? array()) as $profile => $s) {
-			$line = 'Offloaded files on the shelf (' . self::backup_words(array($profile)) . '): ';
+			$line = 'Offloaded files in backup storage (' . self::backup_words(array($profile)) . '): ';
 			if (empty($s['known'])) {
 				$line .= 'none yet; the first run that stores them writes the record.';
 			} else {
