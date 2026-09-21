@@ -3,12 +3,16 @@
  * server_manager/backup_actions — backup browser actions.
  *
  * Input: action ∈ {refresh_list, delete_file, upload_file, download_file,
- * stage_chain, verify_backup, list_status} + node_id (+ target/local_path/cloud_path
+ * stage_chain, verify_backup, restore_objects, list_status} + node_id (+ target/local_path/cloud_path
  * for delete_file, local_path for upload_file, cloud_path for download_file,
  * chain_id/profile[/seq] for stage_chain, chain_id/profile/level[/seq] for
- * verify_backup, job_id for list_status). Everything but list_status creates a
- * job; list_status returns the cached backup list. Superadmin only (floor 10).
+ * verify_backup, chain_id/profile[/seq][/mode] for restore_objects, job_id for
+ * list_status). Everything but list_status creates a job; list_status returns
+ * the cached backup list. Superadmin only (floor 10).
  *
+ * @version 1.6.0 - restore_objects: Bring them back — the node's offloaded files the file store has lost,
+ *                  brought home from the shelf by pages of signed links (FleetObjectRestore::start, the
+ *                  survey job; the pages follow from its result)
  * @version 1.5.0 - verify_backup: prove a backup restorable on the node without restoring it, at
  *                  level 2 (opened and read) or 3 (rehearsed into scratch), as a job like stage_chain
  * @version 1.4.0 - download_file and stage_chain: bring a cloud-only backup, or a whole
@@ -305,6 +309,32 @@ function backup_actions_logic(array $input): LogicResult {
 		return LogicResult::render(['success' => true, 'job_id' => $job->key]);
 	}
 
+	// ── Bring offloaded files back from the shelf ───────────────────────────
+	//
+	// The node's offloaded files are on its shelf once each; the file store
+	// may have lost some. This starts the loop FleetObjectRestore drives: a
+	// survey job asks the node which the file store cannot serve, and a page
+	// of signed links per answer follows from each result. Nothing on the
+	// node is overwritten and nothing in any bucket is deleted, so it is a job
+	// like staging — no approval.
+	if ($action === 'restore_objects') {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetObjectRestore.php'));
+		$params = [
+			'chain_id' => trim((string)($input['chain_id'] ?? '')),
+			'profile'  => trim((string)($input['profile'] ?? '')),
+			'mode'     => trim((string)($input['mode'] ?? '')) ?: BackupObjectRestore::MODE_MISSING,
+		];
+		if (isset($input['seq']) && $input['seq'] !== '') {
+			$params['seq'] = (int)$input['seq'];
+		}
+		try {
+			$job = FleetObjectRestore::start($node, $params, $session->get_user_id());
+		} catch (Exception $e) {
+			return LogicResult::render(['success' => false, 'message' => $e->getMessage()]);
+		}
+		return LogicResult::render(['success' => true, 'job_id' => $job->key]);
+	}
+
 	if ($action === 'list_status') {
 		$job_id = isset($input['job_id']) ? (int) $input['job_id'] : 0;
 
@@ -354,12 +384,12 @@ function backup_actions_logic(array $input): LogicResult {
 
 function backup_actions_logic_descriptor(): array {
 	return [
-		'description' => 'Backup browser actions (refresh_list / delete_file / upload_file / download_file / stage_chain / verify_backup / list_status) for a managed node.',
+		'description' => 'Backup browser actions (refresh_list / delete_file / upload_file / download_file / stage_chain / verify_backup / restore_objects / list_status) for a managed node.',
 		'mutates'     => true,
 		'requires_session'        => true,
 		'auth'        => ['min_user_permission' => 10],
 		'input'       => [
-			'action'     => ['type' => 'string', 'required' => false, 'enum' => ['refresh_list', 'delete_file', 'upload_file', 'download_file', 'stage_chain', 'verify_backup', 'list_status'], 'label' => 'Action'],
+			'action'     => ['type' => 'string', 'required' => false, 'enum' => ['refresh_list', 'delete_file', 'upload_file', 'download_file', 'stage_chain', 'verify_backup', 'restore_objects', 'list_status'], 'label' => 'Action'],
 			'node_id'    => ['type' => 'int',    'required' => false, 'label' => 'Node ID'],
 			'job_id'     => ['type' => 'int',    'required' => false, 'label' => 'Job ID (list_status)'],
 			'target'     => ['type' => 'string', 'required' => false, 'label' => 'Delete target'],
@@ -369,6 +399,7 @@ function backup_actions_logic_descriptor(): array {
 			'profile'    => ['type' => 'string', 'required' => false, 'label' => 'Whose shelf: site or manager'],
 			'seq'        => ['type' => 'int',    'required' => false, 'label' => 'Run within the set (default newest)'],
 			'level'      => ['type' => 'int',    'required' => false, 'label' => 'Verify level: 2 open and read, 3 rehearse (verify_backup)'],
+			'mode'       => ['type' => 'string', 'required' => false, 'enum' => ['missing', 'all'], 'label' => 'Which offloaded files to bring back: missing (default) or all (restore_objects)'],
 		],
 	];
 }

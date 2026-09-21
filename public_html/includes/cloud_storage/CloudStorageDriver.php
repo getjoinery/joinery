@@ -6,6 +6,8 @@
  * The driver handles only cloud-side operations — local file handling
  * stays in the existing File / RouteHelper code paths.
  *
+ * @version 1.1 - head(): does the bucket hold this object, and at what size — the question the
+ *                backup's object restore and the file-store inventory ask without moving bytes
  * @version 1.0
  */
 
@@ -52,6 +54,16 @@ interface CloudStorageDriver {
 	 * @throws RuntimeException on hard delete failure (other than not-found).
 	 */
 	public function delete(string $remote_key): void;
+
+	/**
+	 * Does the bucket hold this object? Metadata only, never a download.
+	 *
+	 * @param string $remote_key  Bucket key (without prefix).
+	 * @return array|null  ['size' => int, 'etag' => string] when present; null when absent
+	 *                     or when the bucket could not answer (the caller treats
+	 *                     both as "cannot be served from here").
+	 */
+	public function head(string $remote_key): ?array;
 
 	/**
 	 * Public URL for an object (CDN domain or bucket URL).

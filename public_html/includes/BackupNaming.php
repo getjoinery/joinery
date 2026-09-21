@@ -11,6 +11,10 @@
  *
  * One list, consulted by everyone.
  *
+ * @version 1.1 - the objects index beside a standalone archive ({archive}.objects.json.gz, same
+ *                stamp): named, recognised, and mapped back to its archive, so listings and
+ *                retention file it with the archive and its envelope. It is not a backup artifact
+ *                and never a restore button.
  * @version 1.0
  */
 
@@ -89,6 +93,29 @@ class BackupNaming {
 			return '';
 		}
 		return in_array($ext, self::PROJECT_EXTENSIONS, true) ? 'project' : 'database';
+	}
+
+	/** Suffix of the objects index that goes with a standalone archive. */
+	const INDEX_SUFFIX = '.objects.json.gz';
+
+	/** The objects index name for a standalone archive: the stamp survives, the archive suffix does not. */
+	public static function index_for_archive($archive_name) {
+		$ext = self::extension_of($archive_name);
+		$base = ($ext !== '') ? substr((string)$archive_name, 0, -strlen($ext)) : (string)$archive_name;
+		return $base . self::INDEX_SUFFIX;
+	}
+
+	/** Is this the objects index beside a standalone archive? */
+	public static function is_index($name) {
+		return substr((string)$name, -strlen(self::INDEX_SUFFIX)) === self::INDEX_SUFFIX;
+	}
+
+	/** The archive stem an index belongs to (name without its archive suffix), or '' if this is not an index. */
+	public static function archive_stem_for_index($name) {
+		if (!self::is_index($name)) {
+			return '';
+		}
+		return substr((string)$name, 0, -strlen(self::INDEX_SUFFIX));
 	}
 
 	/** The artifact name an envelope belongs to, or '' if this is not an envelope. */

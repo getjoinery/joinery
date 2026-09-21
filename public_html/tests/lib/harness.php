@@ -223,6 +223,23 @@ function harness_boot(array $overrides = array()) {
 		harness_set_setting_mem('email_test_recipient', 'joineryemailtests@' . HARNESS_FIXTURE_DOMAIN);
 		$h['test_recipient'] = 'joineryemailtests@' . HARNESS_FIXTURE_DOMAIN;
 
+		// A test run must not copy files to the site's real backup shelf. The
+		// offload tick asks BackupProfile::enabled() before it releases a row's
+		// local bytes and, when the site profile is enabled — as it is on dev,
+		// whose target is a real Backblaze bucket — copies the original there
+		// first. Every suite that drives the engine with a mock driver would
+		// otherwise put its fixture bytes and an epoch envelope on the real
+		// shelf. No profile is enabled in a test process unless the suite says
+		// so; a suite about the store sets the list itself, with a plan on a
+		// fixture shelf.
+		BackupProfile::$enabled_for_tests = array();
+
+		// Nor write the site's file-store inventory: the offload tick's daily
+		// check and a Bring them back record what they did in a settings row
+		// (CloudStoreInventory::SETTING). In a test process that record lives
+		// in memory unless the suite says otherwise.
+		CloudStoreInventory::$test_hooks['record'] = array();
+
 		// Mail this run sends is cleaned up at BOTH ends, because one end is not
 		// enough. Redirecting it keeps it away from people; this is what keeps it
 		// from accumulating for good, since a message delivered to an address no

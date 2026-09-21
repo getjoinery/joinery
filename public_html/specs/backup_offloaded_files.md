@@ -1,6 +1,6 @@
 # Backups — Files That Live in the Cloud Store
 
-**Status:** Unbuilt. Reviewed 2026-09-20; findings and decisions D1/D2 folded in.
+**Status:** Built, WP0–WP6 reviewed 2026-09-21; tests green. Awaiting agent 1.38.0, the release and the owner's live gate (stop point 3). Reviewed 2026-09-20; findings and decisions D1/D2 folded in.
 **Date:** 2026-09-20
 
 ## For the executor — read this first
@@ -721,8 +721,10 @@ over; the node fetched it with its own credential.
 **Manager profile — presigned links, paged.** A node never receives a bucket
 credential for a read, on any provider; it receives signatures, one per object,
 as it does for every artifact today. A presigned link is ~350 bytes and the
-plane-to-node job body is 64 KiB, so the management node hands links over in
-**pages of at most 150**, one job per page, driving the loop itself:
+plane-to-node job body is 64 KiB, of which a job's parameters may fill 60 KiB
+(`ManagementJob::MAX_PARAMS_BYTES`, matched by the agent), so the management
+node hands links over in **pages of at most 150**, filled by bytes to that
+ceiling, one job per page, driving the loop itself:
 
 - `missing` mode: the first job carries the index link; the node HEADs the
   file bucket and reports the names it cannot serve (names only, ~40 bytes

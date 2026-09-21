@@ -79,7 +79,17 @@ class RecordingMockDriver implements CloudStorageDriver {
 	public function url(string $remote_key): string { return 'https://mock/' . $remote_key; }
 	public function ping(): array { return ['ok' => true, 'message' => 'mock']; }
 
-	/** The ops log, optionally filtered to one op ('put'|'get'|'delete'). */
+	/** @var string[] remote_keys head() answers as absent (everything else is present at its synthetic size) */
+	public $absent_keys = [];
+
+	public function head(string $remote_key): ?array {
+		$this->calls[] = ['op' => 'head', 'key' => $remote_key];
+		if (in_array($remote_key, $this->absent_keys, true)) { return null; }
+		$bytes = "bytes:$remote_key\n";
+		return ['size' => strlen($bytes), 'etag' => md5($bytes)];
+	}
+
+	/** The ops log, optionally filtered to one op ('put'|'get'|'delete'|'head'). */
 	public function ops($filter = null): array {
 		return array_values(array_filter($this->calls, function ($c) use ($filter) {
 			return $filter === null || $c['op'] === $filter;
@@ -117,6 +127,10 @@ class InMemoryBlobDriver implements CloudStorageDriver {
 	public function delete(string $remote_key): void { unset($this->objects[$remote_key]); }
 	public function url(string $remote_key): string { return ''; }
 	public function ping(): array { return ['ok' => true, 'message' => 'mock']; }
+	public function head(string $remote_key): ?array {
+		if (!array_key_exists($remote_key, $this->objects)) { return null; }
+		return ['size' => strlen($this->objects[$remote_key]), 'etag' => md5($this->objects[$remote_key])];
+	}
 }
 
 /**

@@ -6,6 +6,12 @@
  * opens them, how many are kept, and what has actually happened. No fleet, no
  * agent — server_manager is a layer on top of this, not a prerequisite for it.
  *
+ * @version 1.10 - objects_status (BackupObjectsStatus::compute()): what each backup holds of the offloaded
+ *                 files, what waits on this server for a backup, what is still to copy from the file
+ *                 store, and whether the file store and the site's target share an account
+ * @version 1.9 - offloaded files (specs/backup_offloaded_files.md § Verification): the page reads the daily
+ *                file-store check (inventory) and who brings a missing file back (objects_source); the
+ *                bring_back_objects action starts this site's own Bring them back in the background
  * @version 1.8 - milestones['verify_attempt']: a verify that proved nothing either way (skipped or
  *                refused) and is about a backup no older than the last proof, so the Status box can
  *                say what became of a verify a person started
@@ -35,6 +41,10 @@ require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 require_once(PathHelper::getIncludePath('data/backup_history_class.php'));
 require_once(PathHelper::getIncludePath('includes/BackupVerifyLauncher.php'));
 require_once(PathHelper::getIncludePath('data/recovery_verifications_class.php'));
+require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStoreInventory.php'));
+require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStoreInventoryPanel.php'));
+require_once(PathHelper::getIncludePath('includes/BackupObjectsStatus.php'));
+require_once(PathHelper::getIncludePath('includes/BackupObjectRestoreLauncher.php'));
 
 function admin_backups_logic($input = array()) {
 	$session = SessionControl::get_instance();
@@ -105,6 +115,12 @@ function admin_backups_logic($input = array()) {
 		'manager_url'   => ManagementNodeStatus::manager_url(),
 		'approval'      => RestoreApproval::pending(),
 		'decommission_approval' => DecommissionApproval::pending(),
+		// The daily file-store check: which offloaded files the file bucket
+		// cannot serve, and who brings them back on this site.
+		'inventory'      => CloudStoreInventory::current(),
+		'objects_source' => CloudStoreInventoryPanel::source(ManagementNodeStatus::is_managed()),
+		// Offloaded files and the shelf: held, waiting, still to copy, same account.
+		'objects_status' => BackupObjectsStatus::compute(),
 	));
 }
 
@@ -343,6 +359,15 @@ function _admin_backups_handle($action, array $input, $session) {
 				$say(($level === BackupVerifier::LEVEL_REHEARSE ? 'Rehearsing a restore of' : 'Opening and reading')
 					. ' the backup of ' . BackupVerifier::when_words((string)$run->get('bkh_start_time'))
 					. ' in the background. The result appears here when it is done.', true);
+				return $url;
+			}
+
+			case CloudStoreInventoryPanel::ACTION: {
+				// Bring the offloaded files the file store has lost back from
+				// this site's own newest backup, in the background. Only what
+				// the file store cannot serve is touched; the result lands on
+				// the inventory record the Offloaded files box reads.
+				$say(BackupObjectRestoreLauncher::start_newest(BackupObjectRestore::MODE_MISSING), true);
 				return $url;
 			}
 

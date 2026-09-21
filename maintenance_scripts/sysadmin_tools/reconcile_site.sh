@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 # reconcile_site.sh - a site's SHAPE: read it, or make a site match this machine's
+# Version: 1.2.3 - the --print-shape database probe reads stdin from /dev/null and skips a config
+#                  that names no database: a psql password prompt blocked the whole backup run
 # Version: 1.2.2 - the sudo probe lists the rules and requires NOPASSWD: ALL (see backup_files.sh 1.1.2)
 # Version: 1.2.1 - the sudo capability probe asks with -v instead of running true,
 #                  which sudo mails root about when the account may not. Same
@@ -183,11 +185,14 @@ if [ "$PRINT_SHAPE" = true ]; then
     # The server's version, not the client's: a dump restored onto a different
     # major is the normal case, and knowing which one it came off is what makes
     # an incompatibility legible later.
+    # stdin is /dev/null so a password prompt fails instead of blocking: this
+    # runs inside every backup, and a probe that waits on a terminal nobody is
+    # at would hang the run. A config that names no database is not probed.
     PG_VERSION=""
-    if command -v psql > /dev/null 2>&1; then
+    if command -v psql > /dev/null 2>&1 && [ -n "$(config_value dbname)" ]; then
         export PGPASSWORD="$(config_value dbpassword)"
         PG_VERSION="$(psql -U "$(config_value dbusername)" -d "$(config_value dbname)" \
-            -tAc 'SHOW server_version' 2>/dev/null \
+            -tAc 'SHOW server_version' 2>/dev/null < /dev/null \
             | sed -n 's/^[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -1)"
         unset PGPASSWORD
     fi

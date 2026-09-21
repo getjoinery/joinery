@@ -79,7 +79,8 @@ platform. Each tick it walks every declared `StorageProfile` (the registry) and
 runs each store in its current **mode**: `offload` pushes local → cloud,
 `drain` pulls cloud → local, `idle` is skipped. A new offload consumer therefore
 adds a `StorageProfile` and **zero** tasks. The task self-deactivates when no
-store is offloading or draining. (See *Offload modes* below.)
+store is offloading or draining and no offloaded file remains; while any does,
+it keeps running for the daily file-store check. (See *Offload modes* below.)
 
 ### Visibility — the two stores
 
@@ -141,6 +142,93 @@ A store has exactly one mode per tick, so a row can never ping-pong between loca
 and cloud — the old forward/reverse mutual-exclusion is **structural** now, not an
 enforced guard. Enabling a store sets it to offload mode and activates
 `CloudOffloadRun`; pause sets idle; Disable-and-Pull sets the draining flag.
+
+### An offloaded file is on the backup shelf before its local copy goes
+
+The archives a backup takes carry no `cloud` blob (the runner hands the files
+engine an exclude list naming every one, original and variants). Each is
+copied to the backup shelf **once** instead, encrypted, under
+`objects/{epoch}/{name}.enc` — see `docs/backups.md` § Offloaded files on the
+shelf. The tick is where the two meet. `CloudOffloadEngine::_sync_row()`,
+after the flip to `cloud`, calls `BackupObjects::after_offload()` in place of
+an unconditional unlink:
+
+1. **Store.** When the site profile is enabled, the original is encrypted with
+   the site epoch key and uploaded to the site's own shelf, one object's
+   ciphertext on disk for the length of the upload. A failed store leaves the
+   row `cloud` with its bytes; the next site run's shelf listing shows the
+   object missing and stores it. Nothing is retried in the tick.
+2. **Release.** The local bytes — original and variants — are unlinked only
+   when **every enabled profile holds the object**: the site profile by the
+   store that just succeeded (or its `held.json`), the manager profile by its
+   `held.json`, written by the management node's runs. With no profile
+   enabled the release is unconditional, and the file is served from the
+   bucket alone.
+
+"Enabled" is one fact, `BackupProfile::enabled()`: the site profile when a
+target is enabled, the recovery key is proven and the backup type includes
+files; the manager profile when this machine has joined a management node
+*and* a manager run carrying the object store has been here (the
+`objects/enabled` marker). A node whose management node does not run the
+object store holds nothing for it.
+
+So a file can sit on this server, offloaded but not yet released, for as long
+as a backup that stores offloaded files has not run. That figure is on the
+cloud-storage page's Status block and the Backups page's **Offloaded files**
+box — "M files (X GB) waiting for the management node's backup before their
+local copy is released" (`BackupObjectsStatus`: every `cloud` row whose
+original is still on disk, one `stat` per row on page load, no column and no
+cache) — and, because a count on a page is read by nobody, on every admin
+page as a notice when it matters: `BackupObjectsNotice` stands when the
+waiting bytes exceed 2 GB, or when anything waits for a backup whose newest
+success is older than 7 days (or that has never succeeded) — "N files (X GB)
+are waiting for the management node's backup, which last succeeded D days
+ago. They stay on this server until it does." — and clears itself when
+nothing waits. The thresholds are constants on the class.
+
+When the file store and this site's backup target share an access key
+(`cloud_storage_access_key` equals the target's), both pages also say so:
+"Your backup shelf and your file store are on the same account. Losing that
+account loses both. A copy taken by a management node is the one that
+survives it." The same-key test is the whole rule — accounts are not
+detectable, keys are.
+
+### The file store is checked daily
+
+Once a file is offloaded, the bucket is the only place its bytes are served
+from, and a file the bucket has lost is otherwise invisible until a visitor
+gets a 404. So the tick asks: while any offloaded file exists — paused store
+or not — `CloudStoreInventory::tick()` runs inside `runOffloadTick()` and, once a day,
+HEADs every `cloud` blob in its bucket (`CloudStorageDriver::head()`), a
+slice per tick (`TICK_BUDGET_SECONDS` of HEADs, then a cursor) so ten
+thousand files never hold the scheduler. A file the bucket does not have, or
+holds at a size other than its row records, goes on the missing list by name.
+
+The check never calls a file missing on a bucket's silence: a tick pings the
+store first and waits when it does not answer, and a HEAD that says absent is
+asked once more before it counts. A visibility with no store bound cannot be
+checked and is counted as such.
+
+The result is one settings row, `cloud_storage_inventory` (JSON: the pass in
+progress, the last completed pass with its missing names, and what the last
+Bring them back did). No schema. Both the cloud-storage page and the Backups
+page read it (`CloudStoreInventoryPanel`) and say: "N offloaded files are
+missing from the file store; the backup holds M of them" — M counted against
+what the enabled backup profiles' shelves hold (`BackupObjects::held_sets()`),
+or "known after its next run" when no profile has a run since the object store
+shipped. The action beside it, **Bring them back**, is the object restore in
+`missing` mode against the newest backup (see `docs/backups.md` § Restore):
+
+- a site with a backup target of its own runs it here, in the background
+  (`BackupObjectRestoreLauncher::start_newest()` → `utils/bring_back_objects.php`),
+  with links it signs for itself and its own key;
+- a site backed up only by its management node is told so, with the node's
+  URL: the job is started from that node's Backups tab
+  (`FleetObjectRestore::start()` through the `restore_objects` backup action);
+- a site with neither is told nothing holds them.
+
+A file brought home leaves the missing list at once; the daily pass corrects
+the rest.
 
 ### Declarative profile registry
 
@@ -269,6 +357,7 @@ Stored in `stg_settings`:
 | `cloud_storage_enabled` | internal | Flipped by the Save flow when Test Connection passes. |
 | `cloud_storage_private_bucket` | no | A separate bucket on the **same** account (shares endpoint/region/keys) for the verified-private store. Empty = no private store. |
 | `cloud_storage_private_enabled` | internal | Latched true only after a private-bucket Save whose anonymous-read-denied gate passed. Not edited directly. |
+| `cloud_storage_inventory` | internal | The daily file-store check's record (JSON): the pass in progress, the last completed pass and its missing names, the last Bring them back. Written by the tick and the launcher; read by the cloud-storage and Backups pages. |
 
 ### Auto-Derivations
 
@@ -300,7 +389,12 @@ When enabled, two additional buttons appear:
   of files and free local disk space.
 
 The page also renders a live status block at the top: cron heartbeat,
-driver ping, offload task status, file counts, and any "stuck" rows
+driver ping, offload task status, file counts, what waits for a backup
+before its local copy is released and the same-account line when the file
+store and the backup shelf share an access key (§ An offloaded file is on the
+backup shelf before its local copy goes), the file-store check (when it
+last looked, what is missing, **Bring them back**, and what the last Bring
+them back did — § The file store is checked daily), and any "stuck" rows
 (failed 5+ times). Stuck rows have a per-row "Retry" button.
 
 ### Test Connection Steps
@@ -526,12 +620,14 @@ SVG can never render inline from our origin.
 | `permanent_delete` bucket-delete fails | Logged as `CLOUD_STORAGE_ORPHAN`; row is still deleted. | Manual cleanup via `aws s3 rm` or equivalent. |
 | Public→private flip phase 3 fails | Logged as `CLOUD_STORAGE_PARTIAL_FLIP`. | Manual recovery: flip the row to `'local'` and re-upload. |
 | File becomes private during async push | Detected by re-check after PUTs; just-pushed objects deleted; row stays local. | Automatic. |
+| Backup stops running while files offload | Local copies of offloaded files stay on this server (the release rule above); the Status block and the Backups page count them, and the admin notice stands past 2 GB or a week without a successful backup. | Fix the backup; the next successful run releases them. |
+| Bucket loses an offloaded file | The daily file-store check names it on the cloud-storage and Backups pages: "N offloaded files are missing from the file store; the backup holds M of them". | **Bring them back** restores it from the backup shelf (this site's own, or the management node's job). |
 
 ## File-by-File Architecture
 
 | File | Role |
 |------|------|
-| `includes/cloud_storage/CloudStorageDriver.php` | Interface (put/get/delete/url/ping). |
+| `includes/cloud_storage/CloudStorageDriver.php` | Interface (put/get/get_range/head/delete/url/ping). `head()` is the presence check — size and ETag, or `null` — the backup's object restore asks before bringing a file home. |
 | `includes/cloud_storage/CloudStorageS3Driver.php` | Sole implementation. Handles AWS, B2, R2, Wasabi, etc. |
 | `includes/cloud_storage/CloudStorageDriverFactory.php` | `default()`/`forVisibility()` return a configured driver or `null`; `forVisibilityUnlatched()` builds from the raw binding for pull-back; `bindingFor()` is the per-visibility setting map; `fromOptions()` builds from explicit settings. |
 | `includes/cloud_storage/StorageProfile.php` | The per-consumer seam interface. |
@@ -539,13 +635,18 @@ SVG can never render inline from our origin.
 | `storage_profiles.json` | Core profile manifest (declares `BlobStorageProfile` + `BlobPrivateStorageProfile`). |
 | `includes/cloud_storage/CloudOffloadEngine.php` | Table-agnostic forward/reverse batch + per-row logic; reverse/count honour the optional `reverseEligibilityWhere()` ownership gate for shared tables. |
 | `includes/cloud_storage/CloudStorageLifecycle.php` | Shared admin save/test/health + the binding-immutability guard + per-visibility bindings + the privacy gate verdict; owns the offload modes (`modeForVisibility`, `startDrain`/`stopDrain`, `ensureTickActive`) and the `runOffloadTick()` orchestration; cloud-row counts scoped per store via the ownership gate. |
+| `includes/cloud_storage/CloudStoreInventory.php` | The daily file-store check: `tick()` HEADs every cloud blob a slice per tick and writes the missing names to the `cloud_storage_inventory` setting; `summary()`/`sentence()` are what the pages say; `note_bring_back()`/`forget_missing()` are the launcher's marks. |
+| `includes/cloud_storage/CloudStoreInventoryPanel.php` | The block both pages render from that record: when it last looked, the sentence, **Bring them back** (or who runs it), the last Bring them back. `source()` says who brings a file back on this site. |
+| `includes/BackupObjectsStatus.php` | The figures about offloaded files and the shelf: what each enabled backup holds, what waits here (one `stat` per cloud row), what is still to copy from the file store, the same-account test; the sentences both pages show. Reads this machine only. |
+| `includes/BackupObjectsNotice.php` | The admin-header notice when waiting bytes pass 2 GB or anything waits on a backup a week without a success; a core `AdminNotices` renderer beside `SiteBackupNotice`. |
+| `includes/BackupObjectRestoreLauncher.php` | This site's own Bring them back: reads the newest run's index off its shelf, surveys, signs its own links a page at a time and runs `BackupObjectRestore`; `start_newest()` detaches `utils/bring_back_objects.php`. |
 | `includes/cloud_storage/BlobStorageProfile.php` | Public-blob adapter over the `FileBlob` methods (`visibility=public`). |
 | `includes/cloud_storage/BlobPrivateStorageProfile.php` | Restricted-blob adapter (`visibility=private`); extends `BlobStorageProfile`, overriding visibility, eligibility, and the ownership gate. |
 | `data/file_blobs_class.php` | The physical `FileBlob` (`fbb_file_blobs`): stored bytes, refcount, offload state, visibility flip / copy-on-write split, and all cloud methods (`resize()`, `delete_resized()`, pull-back, cloud delete). |
 | `data/files_class.php` | The logical `File`: identity, ownership, visibility gates, signed URLs. Physical operations delegate to its `FileBlob` (`get_url()`, `permanent_delete()` → `FileBlob::release()`, `move_to_correct_directory()` → flip / copy-on-write split). |
-| `tasks/CloudOffloadRun.php` | The one offload task for the whole platform. Calls `CloudStorageLifecycle::runOffloadTick()`, which drives every store by mode (offload/drain/idle); self-deactivates when nothing is offloading or draining. |
+| `tasks/CloudOffloadRun.php` | The one offload task for the whole platform. Calls `CloudStorageLifecycle::runOffloadTick()`, which drives every store by mode (offload/drain/idle) and gives the daily file-store check its slice; self-deactivates when nothing is offloading or draining and no offloaded file remains. |
 | `adm/admin_cloud_storage.php` | Admin UI. Save = test + persist + activate; carries the private-bucket field + privacy-gate results. |
-| `adm/logic/admin_cloud_storage_logic.php` | Thin caller over `CloudStorageLifecycle`, per store; Save/Pause/Disable-and-Pull/Retry handlers. |
+| `adm/logic/admin_cloud_storage_logic.php` | Thin caller over `CloudStorageLifecycle`, per store; Save/Pause/Disable-and-Pull/Retry handlers; `bring_back_objects` starts this site's own Bring them back. |
 | `serve.php` | `/uploads/*` route: resolves the file's blob, 302-redirects public cloud bytes, gate-streams private cloud bytes through PHP after `is_viewable()`; resolves the local path through the blob (so a dedup secondary finds the shared bytes). |
 | `includes/UploadHandler.php` | `get_unique_filename()` consults active `fil_name` rows and `fbb_stored_name` so a landing name never collides with a live file or an offloaded blob object. |
 | `utils/process_scheduled_tasks.php` | Per-task advisory locking (prereq for the offload tick — prevents tick-overlap races). |

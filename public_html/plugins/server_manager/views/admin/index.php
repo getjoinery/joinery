@@ -3,6 +3,8 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.26 - the readiness alert's warning clause no longer lists two kinds when a card can carry a third
+ *                 (offloaded files sealed to a retired recovery key)
  * @version 1.25 - a host group is a Docker box: its own agent node in the header, its containers as the
  *                 sites; every other node is a machine, listed flat (a node placed on a deleted host too)
  * @version 1.24 - a rejected join can be reopened for a day (reopen_join): a mis-click is reversible, and the machine
@@ -514,7 +516,7 @@ if ($agent_online) {
 	$bits = [];
 	if ($readiness_attention['never'])    { $bits[] = $readiness_attention['never'] . ' must-save ' . ($readiness_attention['never'] === 1 ? 'secret has' : 'secrets have') . ' never been verified'; }
 	if ($readiness_attention['stale'])    { $bits[] = $readiness_attention['stale'] . ' ' . ($readiness_attention['stale'] === 1 ? 'was' : 'were') . ' last verified over ' . RecoveryReadiness::STALE_DAYS . ' days ago'; }
-	if ($readiness_attention['warnings']) { $bits[] = $readiness_attention['warnings'] . ' ' . ($readiness_attention['warnings'] === 1 ? 'carries' : 'carry') . ' warnings (low recovery codes, missing passkey)'; }
+	if ($readiness_attention['warnings']) { $bits[] = $readiness_attention['warnings'] . ' ' . ($readiness_attention['warnings'] === 1 ? 'carries' : 'carry') . ' warnings'; }
 	echo htmlspecialchars(implode('; ', $bits)) . '.';
 	?>
 	<a href="/admin/admin_recovery_readiness" class="alert-link">Review and verify</a>.

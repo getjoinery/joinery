@@ -1531,3 +1531,25 @@
 	$migration['migration_file'] = 'email_triage_recipes_named_email_summaries.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// What a backup run leaves on disk is removed once uploaded: archives and
+	// dumps stream to the bucket, and the local leftovers are what fills a
+	// small node (specs/backup_offloaded_files.md § Settings). Rows still at
+	// the old factory '0' turn on; an operator can turn the setting off again.
+	$migration = array();
+	$migration['database_version'] = '196';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'backup_delete_local_after_upload_on_by_default.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
+	// The offload tick keeps running while any offloaded file exists, for the
+	// daily file-store check (specs/backup_offloaded_files.md § The file store
+	// is checked too). A site that paused its store before that rule has the
+	// tick switched off; wake it once where offloaded files exist.
+	$migration = array();
+	$migration['database_version'] = '197';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'cloud_offload_tick_while_files_offloaded.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

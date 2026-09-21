@@ -32,6 +32,17 @@
  * the shape format_contract() prints; nothing here prints, and nothing here
  * accepts a key other than the file it is pointed at.
  *
+ * @version 1.3 - offloaded files at each level (specs/backup_offloaded_files.md § Verification): level 2
+ *                opens every epoch envelope the run's index names with the site key, and 'objects' /
+ *                'object_bytes' count the stored objects that proved; level 3 also opens the staged
+ *                sample (the 5 largest and 15 random, picked by sample_objects()) and compares each
+ *                plaintext to the rehearsed database's row — fbb_sha256 where recorded, size
+ *                otherwise. VERIFY_OBJECTS, VERIFY_OBJECT_BYTES and VERIFY_OBJECTS_SAMPLED join the
+ *                contract; disk_needed() takes the sample's bytes
+ * @version 1.2 - the objects index is read with the run's other artifacts: sized and hashed against
+ *                the manifest, then opened as a gzipped index; its entry count is carried as
+ *                'objects'. disk_needed() counts it. Per-object checks are the shelf's and the
+ *                rehearsal's (specs/backup_offloaded_files.md § Verification)
  * @version 1.1 - stamp_history()/note_history() are the history stamp, here so the test can drive it:
  *                a skip or a refusal stamps the run's message only, so a verify a person started
  *                leaves a trace on the page whatever became of it; is_attempt_message() names one.
@@ -43,6 +54,8 @@
 
 require_once(PathHelper::getIncludePath('includes/BackupChain.php'));
 require_once(PathHelper::getIncludePath('includes/BackupFetch.php'));
+require_once(PathHelper::getIncludePath('includes/BackupObjects.php'));
+require_once(PathHelper::getIncludePath('includes/BackupStaging.php'));
 require_once(PathHelper::getIncludePath('data/backup_history_class.php'));
 
 class BackupVerifierException extends Exception {}
@@ -82,6 +95,19 @@ class BackupVerifier {
 	/** Ceiling on one decrypt-and-read of one artifact. */
 	const READ_TIMEOUT = 3600;
 
+	/**
+	 * The offloaded files a rehearsal opens: the largest few, because a
+	 * damaged large object is the costly one to lose, and a random handful,
+	 * because the largest are always the same ones. Level 2 opens the epoch
+	 * envelopes only — the shelf listing already proves presence and size, and
+	 * a request per object would be ten thousand requests to learn the same.
+	 */
+	const SAMPLE_LARGEST = 5;
+	const SAMPLE_RANDOM  = 15;
+
+	/** Name of the one plaintext a sample check holds at a time, under the working directory. */
+	const SAMPLE_PLAIN = 'sample.plain';
+
 	// ---------------------------------------------------------------- words
 
 	/** The level's name for a person, or '' for a level that has none. */
@@ -92,6 +118,54 @@ class BackupVerifier {
 	/** Is this a level this engine runs? Level 1 is the shelf check, elsewhere. */
 	public static function is_runnable_level($level) {
 		return in_array((int)$level, array(self::LEVEL_READ, self::LEVEL_REHEARSE), true);
+	}
+
+	// --------------------------------------------------------------- sample
+
+	/**
+	 * The offloaded files a rehearsal of this index opens: the SAMPLE_LARGEST
+	 * biggest stored objects, then SAMPLE_RANDOM more drawn at random from the
+	 * rest. Names only, in the order they should be fetched (largest first, so
+	 * the disk check is honest early). Pure, except for the draw.
+	 *
+	 * Only names a link can carry are candidates (BackupStaging::LINK_NAME_PATTERN);
+	 * the launcher signs exactly these, and the node refuses any other key.
+	 *
+	 * @return string[] names, at most SAMPLE_LARGEST + SAMPLE_RANDOM
+	 */
+	public static function sample_objects(array $index, $largest = null, $random = null) {
+		$largest = ($largest === null) ? self::SAMPLE_LARGEST : max(0, (int)$largest);
+		$random  = ($random === null)  ? self::SAMPLE_RANDOM  : max(0, (int)$random);
+		$stored = array();
+		foreach (BackupObjects::index_entries($index) as $name => $e) {
+			$name = (string)$name;
+			if (strlen($name) <= 255 && preg_match(BackupStaging::LINK_NAME_PATTERN, $name)) {
+				$stored[] = array($name, (int)$e['object_bytes']);
+			}
+		}
+		usort($stored, function ($a, $b) { return ($b[1] <=> $a[1]) ?: strcmp($a[0], $b[0]); });
+		$names = array_map(function ($s) { return $s[0]; }, $stored);
+		$picked = array_slice($names, 0, $largest);
+		$rest = array_slice($names, $largest);
+		shuffle($rest);
+		foreach (array_slice($rest, 0, $random) as $name) { $picked[] = $name; }
+		return $picked;
+	}
+
+	/**
+	 * Bytes a staged sample takes: every sampled object's ciphertext, plus one
+	 * plaintext (the largest) held while it is hashed. From the index, so the
+	 * disk check runs before the first object is fetched.
+	 */
+	public static function sample_bytes(array $index, array $names) {
+		$entries = BackupObjects::index_entries($index);
+		$sum = 0; $max = 0;
+		foreach ($names as $name) {
+			$b = (int)($entries[(string)$name]['object_bytes'] ?? 0);
+			$sum += $b;
+			if ($b > $max) { $max = $b; }
+		}
+		return $sum + $max;
 	}
 
 	// ----------------------------------------------------------------- disk
@@ -107,20 +181,27 @@ class BackupVerifier {
 	 * the number this defends is the disk of a machine that may already be
 	 * tight, and the cost of being wrong in the other direction is a verify
 	 * that fills it.
+	 *
+	 * $extra_bytes is what else the verify will put on disk — a rehearsal's
+	 * sample of offloaded files (sample_bytes), known once the index is read.
+	 * $staged says the set is already on disk, so it is not counted again:
+	 * the second check, made after the download, measures free space the set
+	 * has already taken.
 	 */
-	public static function disk_needed(array $manifest, $seq, $level) {
+	public static function disk_needed(array $manifest, $seq, $level, $extra_bytes = 0, $staged = false) {
 		$plan = BackupChain::restore_plan($manifest, $seq);
 		$set = 0;
 		foreach ($plan['files'] as $a) { $set += (int)($a['bytes'] ?? 0); }
-		foreach (array('db', 'meta') as $kind) {
+		foreach (array('db', 'meta', 'objects') as $kind) {
 			if (!empty($plan[$kind])) { $set += (int)($plan[$kind]['bytes'] ?? 0); }
 		}
+		$needed = ($staged ? 0 : $set) + max(0, (int)$extra_bytes);
 		if ((int)$level < self::LEVEL_REHEARSE) {
-			return $set;
+			return $needed;
 		}
 		$full_files = (int)($plan['files'][0]['bytes'] ?? 0);
 		$dump       = !empty($plan['db']) ? (int)($plan['db']['bytes'] ?? 0) : 0;
-		return $set + ($full_files * 2) + ($dump * 3);
+		return $needed + ($full_files * 2) + ($dump * 3);
 	}
 
 	/**
@@ -130,8 +211,8 @@ class BackupVerifier {
 	 * a skip is neither a pass nor a failure, and it says both numbers so the
 	 * card can say "needs N free, has M".
 	 */
-	public static function disk_check(array $manifest, $seq, $level, $dir, $free = null) {
-		$needed = self::disk_needed($manifest, $seq, $level);
+	public static function disk_check(array $manifest, $seq, $level, $dir, $free = null, $extra_bytes = 0, $staged = false) {
+		$needed = self::disk_needed($manifest, $seq, $level, $extra_bytes, $staged);
 		if ($free === null) {
 			$free = @disk_free_space($dir);
 		}
@@ -161,12 +242,22 @@ class BackupVerifier {
 	 * the files archives list (directories excluded, so the number reads like a
 	 * file count).
 	 *
+	 * Offloaded files: the run's index is sized, hashed and opened like every
+	 * other artifact. With $objects given (what BackupStaging::fetch_objects
+	 * staged), every epoch envelope the index's stored entries name must be
+	 * there and must open with this machine's own key — that is what makes
+	 * the objects the shelf holds recoverable here; 'objects' and
+	 * 'object_bytes' then count the stored objects that proof covers. Null
+	 * means nothing about them was staged (the operator's shell entry, which
+	 * holds a chain key and not the site key), and they count as unproven.
+	 *
 	 * @param string $work     Directory holding manifest.json and the artifacts
 	 * @param array  $manifest The decoded manifest
 	 * @param int|null $seq    The run; null for the newest
 	 * @param string $key_file The recovered chain data key
+	 * @param array|null $objects ['envelopes' => epoch => path, 'objects' => name => path]
 	 */
-	public static function read_all($work, array $manifest, $seq, $key_file) {
+	public static function read_all($work, array $manifest, $seq, $key_file, ?array $objects = null) {
 		$started = microtime(true);
 		$work = rtrim($work, '/');
 		$level = self::LEVEL_READ;
@@ -183,12 +274,14 @@ class BackupVerifier {
 			return self::failed($result, 'the chain key at ' . basename((string)$key_file) . ' is not readable', $started);
 		}
 
-		// In restore order: the full, every incremental, then the run's dump
-		// and its metadata. Same list a restore would apply, from the same code.
+		// In restore order: the full, every incremental, then the run's dump,
+		// its metadata and its objects index. Same list a restore would apply,
+		// from the same code.
 		$ordered = array();
 		foreach ($plan['files'] as $a) { $ordered[] = array('kind' => 'files', 'entry' => $a); }
-		if (!empty($plan['db']))   { $ordered[] = array('kind' => 'db',   'entry' => $plan['db']); }
-		if (!empty($plan['meta'])) { $ordered[] = array('kind' => 'meta', 'entry' => $plan['meta']); }
+		if (!empty($plan['db']))      { $ordered[] = array('kind' => 'db',      'entry' => $plan['db']); }
+		if (!empty($plan['meta']))    { $ordered[] = array('kind' => 'meta',    'entry' => $plan['meta']); }
+		if (!empty($plan['objects'])) { $ordered[] = array('kind' => 'objects', 'entry' => $plan['objects']); }
 
 		$root = '';
 		foreach ($ordered as $item) {
@@ -206,6 +299,8 @@ class BackupVerifier {
 
 			if ($item['kind'] === 'db') {
 				$read = self::read_dump($path, $key_file);
+			} elseif ($item['kind'] === 'objects') {
+				$read = self::read_index($path);
 			} else {
 				$read = self::list_archive($path, $key_file);
 			}
@@ -215,6 +310,14 @@ class BackupVerifier {
 
 			$result['artifacts']++;
 			$result['bytes'] += (int)@filesize($path);
+			if ($item['kind'] === 'objects' && $objects !== null) {
+				$epochs = self::open_epochs($read['index'], $objects);
+				if (!$epochs['ok']) {
+					return self::failed($result, $epochs['error'], $started);
+				}
+				$result['objects']      = $epochs['count'];
+				$result['object_bytes'] = $epochs['bytes'];
+			}
 			if ($item['kind'] === 'files') {
 				$result['files'] += (int)$read['entries'];
 				if ($root === '' && $read['root'] !== '') {
@@ -249,13 +352,20 @@ class BackupVerifier {
 	 * be the name the archive carries (restore_chain.sh refuses any other), and
 	 * left blank it is read from the archive.
 	 *
+	 * $objects, as for read_all(), plus the staged sample under 'objects'
+	 * (name => path): each is checked against the index's hash, decrypted with
+	 * its epoch key, and compared to the rehearsed database's row for that
+	 * name — fbb_sha256 where the row records one, fbb_size_bytes otherwise.
+	 * A run with no dump, or a row the dump lacks, still has to hash and
+	 * decrypt. 'objects_sampled' counts what was opened.
+	 *
 	 * @return array the result; 'db_name' carries the throwaway database's name
 	 */
-	public static function rehearse($work, array $manifest, $seq, $key_file, array $db, $project = '') {
+	public static function rehearse($work, array $manifest, $seq, $key_file, array $db, $project = '', ?array $objects = null) {
 		$started = microtime(true);
 		$work = rtrim($work, '/');
 
-		$result = self::read_all($work, $manifest, $seq, $key_file);
+		$result = self::read_all($work, $manifest, $seq, $key_file, $objects);
 		$result['level'] = self::LEVEL_REHEARSE;
 		if ($result['result'] !== self::RESULT_PASS) {
 			$result['duration'] = self::elapsed($started);
@@ -298,7 +408,13 @@ class BackupVerifier {
 
 		// ── The database ────────────────────────────────────────────────
 		if (empty($plan['db']['name'])) {
-			// A files-only run has no dump to load; the rehearsal is the tree.
+			// A files-only run has no dump to load; the rehearsal is the tree,
+			// and the sample is opened with nothing to compare it to.
+			$sample = self::open_sample($work, $plan, $objects, null);
+			if (!$sample['ok']) {
+				return self::failed($result, $sample['error'], $started);
+			}
+			$result['objects_sampled'] = $sample['sampled'];
 			$result['tables'] = 0;
 			$result['rows']   = array();
 			$result['result'] = self::RESULT_PASS;
@@ -340,6 +456,15 @@ class BackupVerifier {
 			$counts = self::count_database($db, $db_name);
 			$result['tables'] = $counts['tables'];
 			$result['rows']   = $counts['rows'];
+
+			// The sample, against the rows the dump brought back: the one
+			// check that ties an object on the shelf to the file the site
+			// would serve.
+			$sample = self::open_sample($work, $plan, $objects, self::connect($db, $db_name));
+			if (!$sample['ok']) {
+				return self::failed($result, $sample['error'], $started);
+			}
+			$result['objects_sampled'] = $sample['sampled'];
 		} catch (\Throwable $e) {
 			return self::failed($result, 'counting the rehearsed database failed: ' . $e->getMessage(), $started);
 		} finally {
@@ -401,6 +526,11 @@ class BackupVerifier {
 		$lines[] = 'VERIFY_ARTIFACTS=' . (int)($r['artifacts'] ?? 0);
 		$lines[] = 'VERIFY_BYTES=' . (int)($r['bytes'] ?? 0);
 		$lines[] = 'VERIFY_FILES=' . (int)($r['files'] ?? 0);
+		$lines[] = 'VERIFY_OBJECTS=' . (int)($r['objects'] ?? 0);
+		$lines[] = 'VERIFY_OBJECT_BYTES=' . (int)($r['object_bytes'] ?? 0);
+		if ((int)($r['level'] ?? 0) === self::LEVEL_REHEARSE && isset($r['objects_sampled'])) {
+			$lines[] = 'VERIFY_OBJECTS_SAMPLED=' . (int)$r['objects_sampled'];
+		}
 		if ((int)($r['level'] ?? 0) === self::LEVEL_REHEARSE && isset($r['tables'])) {
 			$lines[] = 'VERIFY_TABLES=' . (int)$r['tables'];
 			$rows = array();
@@ -437,6 +567,7 @@ class BackupVerifier {
 			switch ($key) {
 				case 'level': case 'artifacts': case 'bytes': case 'files': case 'tables':
 				case 'duration': case 'needs_bytes': case 'free_bytes':
+				case 'objects': case 'object_bytes': case 'objects_sampled':
 					$out[$key] = (int)$val;
 					break;
 				case 'rows':
@@ -461,7 +592,8 @@ class BackupVerifier {
 	/**
 	 * The result in plain words, for a job record, a task message or a card:
 	 * "Opened and read the backup of 2026-09-13 04:45 UTC: 3 archives, 717 MB,
-	 * 1,842 files".
+	 * 1,842 files, 1,204 offloaded files (3.2 GB)" — and for a rehearsal,
+	 * "…, 20 of them opened".
 	 */
 	public static function describe(array $r) {
 		$level  = (int)($r['level'] ?? 0);
@@ -491,6 +623,14 @@ class BackupVerifier {
 		$parts[] = $n . ' archive' . ($n === 1 ? '' : 's');
 		$parts[] = BackupFetch::human((int)($r['bytes'] ?? 0));
 		$parts[] = number_format((int)($r['files'] ?? 0)) . ' files';
+		$objects = (int)($r['objects'] ?? 0);
+		if ($objects > 0) {
+			$parts[] = number_format($objects) . ' offloaded file' . ($objects === 1 ? '' : 's')
+				. ' (' . BackupFetch::human((int)($r['object_bytes'] ?? 0)) . ')';
+			if ($level === self::LEVEL_REHEARSE && (int)($r['objects_sampled'] ?? 0) > 0) {
+				$parts[] = number_format((int)$r['objects_sampled']) . ' of them opened';
+			}
+		}
 		if ($level === self::LEVEL_REHEARSE) {
 			$parts[] = number_format((int)($r['tables'] ?? 0)) . ' tables';
 			$rows = (array)($r['rows'] ?? array());
@@ -607,6 +747,8 @@ class BackupVerifier {
 			'artifacts' => 0,
 			'bytes'     => 0,
 			'files'     => 0,
+			'objects'   => 0,
+			'object_bytes' => 0,
 			'duration'  => 0,
 			'reason'    => '',
 		);
@@ -652,6 +794,151 @@ class BackupVerifier {
 	 * a plain dump opens with "PostgreSQL database dump"; a custom-format one
 	 * with PGDMP, in which case pg_restore --list must be able to read it.
 	 */
+	/**
+	 * Open the objects index: it is plain, so this is the gunzip and the
+	 * decode, and the count of entries it names. The objects themselves are
+	 * checked on the shelf and in the rehearsal, never one request at a time
+	 * here.
+	 */
+	private static function read_index($path) {
+		try {
+			$index = BackupObjects::read_index_file($path);
+		} catch (\Throwable $e) {
+			return array('ok' => false, 'error' => $e->getMessage());
+		}
+		return array('ok' => true, 'entries' => count($index['objects']), 'index' => $index);
+	}
+
+	/**
+	 * Level 2's proof for offloaded files: every epoch the index's stored
+	 * entries name has its envelope staged, the envelope is the one minted
+	 * for that epoch, and this machine's own key opens it. Returns the opened
+	 * data keys by epoch (for the rehearsal's sample) with the count and
+	 * bytes of the stored objects the proof covers.
+	 *
+	 * A missing envelope is the same failure as a missing artifact: the
+	 * objects under it are on the shelf and nothing here can open them.
+	 */
+	private static function open_epochs(array $index, array $objects) {
+		$count = 0; $bytes = 0; $epochs = array();
+		foreach (BackupObjects::index_entries($index) as $e) {
+			$count++;
+			$bytes += (int)$e['object_bytes'];
+			$epochs[(string)$e['epoch']] = ($epochs[(string)$e['epoch']] ?? 0) + 1;
+		}
+		$keys = array();
+		ksort($epochs);
+		foreach ($epochs as $epoch => $n) {
+			$path = (string)($objects['envelopes'][$epoch] ?? '');
+			$holds = $n . ' offloaded file' . ($n === 1 ? '' : 's');
+			if ($path === '' || !is_file($path)) {
+				return array('ok' => false, 'error' => 'gone: the envelope of ' . $epoch . ' is not on the shelf, so no key '
+					. 'can be recovered for the ' . $holds . ' it holds');
+			}
+			try {
+				$envelope = BackupEnvelope::read_sidecar($path);
+			} catch (\Throwable $ex) {
+				return array('ok' => false, 'error' => 'the envelope of ' . $epoch . ' is not readable: ' . $ex->getMessage());
+			}
+			$sealed_for = (string)($envelope['artifact'] ?? '');
+			if ($sealed_for !== '' && $sealed_for !== (string)$epoch) {
+				return array('ok' => false, 'error' => 'the envelope staged for ' . $epoch . ' was minted for '
+					. $sealed_for . ' — it is not that epoch\'s, so its ' . $holds . ' cannot be opened');
+			}
+			try {
+				$keys[(string)$epoch] = BackupEnvelope::open_as_site($envelope);
+			} catch (\Throwable $ex) {
+				return array('ok' => false, 'error' => 'the envelope of ' . $epoch . ' does not open with this '
+					. 'machine\'s own backup key, so its ' . $holds . ' cannot be recovered here: ' . $ex->getMessage());
+			}
+		}
+		return array('ok' => true, 'error' => '', 'keys' => $keys, 'count' => $count, 'bytes' => $bytes);
+	}
+
+	/**
+	 * Level 3's proof for offloaded files: each staged sample object is
+	 * checked against the index's recorded hash, decrypted with its epoch's
+	 * key, and — when the rehearsed database has the blob's row — its
+	 * plaintext compared to fbb_sha256 where the row records one, to
+	 * fbb_size_bytes otherwise. One plaintext on disk at a time, removed
+	 * before the next. Nothing staged means nothing sampled, and that is
+	 * a pass with 0 opened, never a failure.
+	 */
+	private static function open_sample($work, array $plan, ?array $objects, ?PDO $pdo) {
+		$staged = ($objects !== null) ? (array)($objects['objects'] ?? array()) : array();
+		if (!$staged) {
+			return array('ok' => true, 'error' => '', 'sampled' => 0);
+		}
+		if (empty($plan['objects']['name'])) {
+			return array('ok' => false, 'error' => 'offloaded files were staged for a run that carries no index of them', 'sampled' => 0);
+		}
+		try {
+			$index = BackupObjects::read_index_file(rtrim($work, '/') . '/' . $plan['objects']['name']);
+		} catch (\Throwable $e) {
+			return array('ok' => false, 'error' => $e->getMessage(), 'sampled' => 0);
+		}
+		$epochs = self::open_epochs($index, $objects);
+		if (!$epochs['ok']) {
+			return array('ok' => false, 'error' => $epochs['error'], 'sampled' => 0);
+		}
+		$entries = BackupObjects::index_entries($index);
+
+		$row_of = null;
+		if ($pdo !== null) {
+			try {
+				$row_of = $pdo->prepare('SELECT fbb_sha256, fbb_size_bytes FROM fbb_file_blobs WHERE fbb_stored_name = ?');
+			} catch (\Throwable $e) {
+				$row_of = null;   // a dump with no blob table: the sample still has to open
+			}
+		}
+
+		$plain = rtrim($work, '/') . '/' . self::SAMPLE_PLAIN;
+		$sampled = 0;
+		foreach ($staged as $name => $path) {
+			$name = (string)$name;
+			$e = $entries[$name] ?? null;
+			if ($e === null) {
+				return array('ok' => false, 'error' => 'the sample carries ' . $name . ', which the run\'s index does not mark stored', 'sampled' => $sampled);
+			}
+			try {
+				BackupChain::verify_artifact((string)$path, array('bytes' => $e['object_bytes'], 'sha256' => $e['object_sha256']));
+			} catch (\Throwable $ex) {
+				return array('ok' => false, 'error' => 'offloaded file ' . $name . ': ' . $ex->getMessage(), 'sampled' => $sampled);
+			}
+			try {
+				$size = BackupObjects::decrypt_file((string)$path, $plain, $epochs['keys'][(string)$e['epoch']]);
+				$hash = hash_file('sha256', $plain);
+			} catch (\Throwable $ex) {
+				@unlink($plain);
+				return array('ok' => false, 'error' => 'offloaded file ' . $name . ' could not be decrypted with the key of '
+					. $e['epoch'] . ': ' . $ex->getMessage(), 'sampled' => $sampled);
+			}
+			@unlink($plain);
+			$sampled++;
+
+			if ($row_of === null) { continue; }
+			try {
+				$row_of->execute(array($name));
+				$row = $row_of->fetch(PDO::FETCH_ASSOC);
+			} catch (\Throwable $ex) {
+				$row_of = null;   // no blob table in this dump
+				continue;
+			}
+			if (!$row) { continue; }   // a blob deleted between the index and the dump: nothing to compare to
+			$want_hash = trim((string)($row['fbb_sha256'] ?? ''));
+			if ($want_hash !== '') {
+				if (!hash_equals(strtolower($want_hash), strtolower((string)$hash))) {
+					return array('ok' => false, 'error' => 'offloaded file ' . $name . ' decrypts to bytes whose hash is not the '
+						. 'one the rehearsed database records for it — the shelf holds a different file', 'sampled' => $sampled);
+				}
+			} elseif ((int)$row['fbb_size_bytes'] !== (int)$size) {
+				return array('ok' => false, 'error' => 'offloaded file ' . $name . ' decrypts to ' . (int)$size
+					. ' bytes where the rehearsed database records ' . (int)$row['fbb_size_bytes'], 'sampled' => $sampled);
+			}
+		}
+		return array('ok' => true, 'error' => '', 'sampled' => $sampled);
+	}
+
 	private static function read_dump($path, $key_file) {
 		$head = tempnam(sys_get_temp_dir(), 'jy_verify_head_');
 		@chmod($head, 0600);

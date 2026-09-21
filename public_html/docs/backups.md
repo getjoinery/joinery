@@ -136,9 +136,39 @@ the next was 37 kB.
 **Full every time.** One self-contained archive per run:
 
 ```
-{path_prefix}/{slug}/{profile}/{project}-{timestamp}.tar.gz.enc            the archive
-{path_prefix}/{slug}/{profile}/{project}-{timestamp}.tar.gz.enc.keys.json  its envelope
+{path_prefix}/{slug}/{profile}/{project}-{YYYYMMDD_HHMMSS}.tar.gz.enc            the archive
+{path_prefix}/{slug}/{profile}/{project}-{YYYYMMDD_HHMMSS}.tar.gz.enc.keys.json  its envelope
 ```
+
+A database-only backup is the same shape with `{database}-{YYYYMMDD_HHMMSS}.sql.gz.enc`
+as the archive. All three families carry the same stamp, which is what a
+management node's retention sorts a shelf by.
+
+**Nothing an engine produces lands on this disk.** The files archive, the
+standalone archive and the database dump are each one pipeline —
+`tar | openssl` or `pg_dump | gzip | openssl` — whose stdout the runner hands
+to `S3Signer::put_stream()`, which uploads it as it flows. What a run holds on
+disk is the metadata artifact (kilobytes), the chain manifest, the snapshot,
+and, for a standalone archive, the compressed database dump for the length of
+the tar (it is a member of that archive, staged beside the output and removed
+with the staging directory). A standalone archive is built from the **live**
+tree — a second `-C` into the site root with the members renamed under
+`project_files/` — so no copy of the site is ever made. On the smallest nodes
+this is the difference between a site that can be backed up and one that
+cannot: peak disk during a run is the site itself.
+
+The engine's verdict arrives after its bytes. tar reports a file that changed
+while it was being read as exit 1 (accepted — the normal case on a live tree)
+and a real failure as 2 or more; `pg_dump` reports its own. So each engine in
+stream mode (`--archive -`) writes its statuses to a report file
+(`--report FILE`) once the stream has been fully produced, and the runner
+completes the upload only when the process exited 0, the report says tar 0
+or 1 (or `pg_dump` 0), openssl 0, and at least 64 bytes went up — an openssl
+envelope around an empty stream is 32 bytes, and a backup of nothing is never
+recorded as a backup. Anything else aborts the upload: nothing partial or
+empty is ever on the shelf, and a chain run that fails this way is discarded
+under the ordinary rule (snapshot cleared, manifest restored, the run's other
+objects deleted where the credential can delete).
 
 Everything is AES-256-CBC (PBKDF2, random salt). `slug` defaults to the project
 directory name — the same value a management node would use for this site — so a
@@ -166,6 +196,141 @@ The virtualhost travels for **reference**, not for reinstallation — see
 
 An archive with no `shape.json` restores normally: the source shape reads as
 unknown and the restore reconciles against the target regardless.
+
+## Offloaded files on the shelf
+
+A site that offloads its uploaded files to a cloud file store
+(`docs/cloud_storage.md`) serves them from that bucket, and its archives carry
+none of them: the runner hands the files engine an exclude list naming every
+`cloud` blob's local paths, original and variants. Each offloaded file is on
+the backup shelf **once** instead — encrypted, content-addressed, kept for as
+long as any retained run's index names it — so a restore point stays whole
+whatever the chain does, and a chain's incrementals never carry a day of
+photos the shelf already holds.
+
+```
+{prefix}/{slug}/{profile}/
+    chain-{id}/
+        objects-0003.json.gz          the run's index — plain gzipped JSON, like the manifest
+    {slug}-{stamp}.objects.json.gz    a standalone full's index, same stamp as its archive
+    objects/
+        {epoch}/
+            envelope.json             the epoch's sealed data key
+            {fbb_stored_name}.enc     one object per offloaded blob
+```
+
+**The index** is a manifest artifact of kind `objects` and names every
+offloaded blob the run knew: `name`, `epoch`, the **encrypted** object's
+`object_bytes` and `object_sha256`, and `stored` — whether it was on the shelf
+when the index was written. No plaintext size, hash or MIME type: the private
+store offloads private blobs too, and a plain file the management node reads
+must not carry a fingerprint of a private file's content. Everything a restore
+needs about the plaintext is in the blob row, which is restored first. Objects
+are not ledgered; their integrity chain is manifest → index → object, each
+verified against the one above before it is opened.
+
+**Epochs** are the key model. One data key with one envelope at
+`objects/{epoch}/envelope.json` — the ordinary envelope, sealed to the same two
+recipients as every chain — encrypts every object stored while the epoch is
+current, in the same `aes-256-cbc-pbkdf2` form as an archive, so the
+*Opening a backup with no Joinery anywhere* procedure opens an object
+unchanged. A new epoch starts when there is none, when the recovery recipient
+changed, or when the site key cannot open the current envelope (degrade, never
+fail every run). On recovery-key rotation the older epochs are **re-sealed**,
+not re-encrypted: each envelope the site key opens is rebuilt with the new
+recovery recipient added and uploaded again under its name, so the new key
+opens everything and the old key still opens what it always did. An epoch the
+site key cannot open stays sealed to the retired key alone; the run writes
+those down (`objects/retired-epochs.json`), names them in its message (so a
+management node's job result and this site's history say so), and **Recovery
+Readiness** says so on the recovery-key card — "N objects (X GB) open only
+with a retired recovery key" — with no automatic re-copy. Keep that key.
+
+**Enabled profiles, and the hold.** A profile stores offloaded files when it
+is *enabled* (`BackupProfile::enabled()`): the site profile when a target is
+enabled, the recovery key proven and the backup type includes files; the
+manager profile when this machine has joined a management node and a manager
+run carrying the object store has been here (the `objects/enabled` marker).
+An offloaded file's local bytes stay on this server until **every enabled
+profile holds it** — the site profile by the store the offload tick makes on
+the way out (`docs/cloud_storage.md` § An offloaded file is on the backup
+shelf before its local copy goes), the manager profile by its `held.json`,
+which the management node's runs write. Only then are the original and its
+variants released. With no profile enabled nothing is held, and the file
+store alone serves the file.
+
+**The run.** Before the archive: the epoch; what the shelf holds (the site
+profile lists its `objects/` prefix; the manager profile reads the newest
+manager index through the presigned `objects_index_url` in its request, union
+`held.json`); the exclude list; then the store — every `cloud` blob not held,
+one at a time under the offload engine's per-row lock, local originals first,
+then **catch-up**: a blob with no local bytes is fetched from the file bucket,
+encrypted and uploaded, both temporaries deleted. One budget covers the whole
+step, **2 GB or 20 minutes** (`BackupRunner::OBJECT_STORE_BUDGET_*`, constants);
+what it leaves is indexed `stored: false` and taken next run, and the Backups
+page says "N files (X GB) still to copy from the file store" until it reaches
+zero. Then the engines with the exclude file, the index, the commit, and —
+after the run is offsite — `held.json` and the release. A run whose request
+did not ask for objects (a management node not running the object store, a
+database-only backup) stores nothing and holds nothing.
+
+**The manager run request** carries three fields from a management node
+running the object store: `objects: true`, `objects_index_url` (a presigned
+GET for the newest manager index, or absent when there is none) and
+`epoch_envelope_urls` (`{epoch id: presigned GET}` for every envelope in the
+listing, what the re-seal reads). A node whose management node sends none of
+them behaves as if the object store did not exist.
+
+**Node disk.** Every step is bounded:
+
+| Step | Extra disk held | For how long |
+|---|---|---|
+| Offload tick, site shelf store | one object's ciphertext | the one upload |
+| Waiting for the manager run | uploads since the last successful manager run | until that run |
+| Run store step | one object's ciphertext | per object |
+| Catch-up | one object's plaintext + ciphertext | per object |
+| Tar | as before, **less** every `cloud` blob | as before |
+
+On the node, per profile, beside the chain directories: `objects/epoch.json`
+(the current epoch and its envelope), `objects/held.json` (what this
+profile's shelf held as of its last run — a cache, rewritten whole by every
+run, consulted only by the release rule), `objects/retired-epochs.json`,
+`objects/enabled` (manager profile) and `objects/tmp/`.
+
+**Retention.** Objects are a third family beside chains and standalone
+fulls, pruned by whoever prunes that shelf: the management node's
+`FleetBackupRetention::prune()` deletes an object when no retained run's index
+names it and it is older than the newest retained run's start, and stops
+without deleting when any index it needs cannot be read; the site's own
+`enforce_object_retention()` deletes, when a chain or standalone full is
+pruned, every object its indexes name that no retained index names. An empty
+epoch's envelope goes with its last object.
+
+**What each shelf protects against.** The object store protects against a
+deleted bucket, a revoked key and an accidental `rm` in the file store. It
+does not protect against losing the *account* the shelf is on: when the site's
+backup target and the file store share an access key, the Backups page and
+the cloud-storage page both say "Your backup shelf and your file store are on
+the same account. Losing that account loses both. A copy taken by a management
+node is the one that survives it." The same-key test is the whole rule.
+
+**On the pages.** The Backups page's **Offloaded files** box: how many files
+live in the file store; per enabled backup, "Offloaded files on the shelf
+(this site's backup): N objects, X GB; last indexed at the run of …"; what is
+still to copy from the file store; "M files (X GB) waiting for the management
+node's backup before their local copy is released" (every `cloud` row whose
+original is still on disk — one `stat` per row on page load, no column, no
+cache; `BackupObjectsStatus`); the same-account line; and the daily file-store
+check with **Bring them back** (§ The file store is checked too). The
+cloud-storage page's Status block has the waiting count and size. The
+node's Backups tab on the management node reads the shelf listing:
+"Offloaded files on the shelf: N objects, X GB by this management node; last
+indexed at the run of …", with **Bring them back**. And because a count on a
+page is read by nobody, `BackupObjectsNotice` stands on every admin page when
+the waiting bytes pass 2 GB or anything waits for a backup that has not
+succeeded in 7 days: "N files (X GB) are waiting for the management node's
+backup, which last succeeded D days ago. They stay on this server until it
+does." It clears itself when nothing waits.
 
 ## What a restore reconciles
 
@@ -259,10 +424,13 @@ snapshot advances while tar runs, before the run is committed to the manifest
 and confirmed in the bucket, so carrying it past a failure would quietly leave
 the failed run's changes out of the chain. The next run starts a fresh chain
 instead — one extra full, never a silently broken backup. The failed run also
-deletes its own artifacts and puts the manifest back to its pre-run state: the
-abandoned run's archives can be gigabytes a small disk does not have to spare
-until chain retention removes the chain, and a local manifest describing a run
-the bucket never received must not survive to be uploaded by anything later.
+removes what it made and puts the manifest back to its pre-run state: the
+metadata artifact on disk, and any object it had already streamed to the shelf
+where the credential can delete (the site profile). Under the manager profile's
+write-only credential an already-streamed files object stays until its chain is
+pruned whole — a bounded orphan the manifest never names. A local manifest
+describing a run the bucket never received must not survive to be uploaded by
+anything later.
 
 Runs are serialized with a lock in the working directory; a run that finds
 another in progress reports itself skipped rather than racing it for the
@@ -289,12 +457,50 @@ the plan and needs no key. `--domain` names the domain the restored site is to
 answer to; without it the site keeps the domain this machine's config already
 names.
 
+**Offloaded files.** The archives carry no file the site offloaded to its
+file bucket; those are on the shelf under `objects/{epoch}/`, named by the
+run's index (`objects-NNNN.json.gz` beside the run's archives). Download that
+tree with the site's own credential and hand it over:
+
+```
+bash maintenance_scripts/sysadmin_tools/restore_chain.sh {project} \
+    --artifacts {downloaded chain dir} --key-file /tmp/k --objects {downloaded objects dir} \
+    [--objects-mode missing|all] [--epoch-key epoch-20260901_000000=/tmp/e]
+```
+
+The step runs after the database is loaded, because the blob row is what says
+where each file belongs and how big it is. It runs the restored tree's own
+`utils/restore_objects.php`: each object is checked against the index's size
+and hash before it is decrypted, decrypted into its placement, checked against
+its row (size, and `fbb_sha256` where the row records one), put in place, and
+only then is the row set to `local`. `missing` (the default) brings home only
+what the file bucket cannot serve — the bucket is `HEAD`ed per file — and `all`
+brings every offloaded file home, for a site leaving its bucket. Nothing on
+disk is overwritten (a file already at the placement is adopted when it matches
+its row and refused by name when it does not) and nothing in any bucket is
+deleted; running it again finishes what an interrupted run left. Variants are
+regenerated on demand. Each epoch's envelope opens with the machine's own
+`backup_site_key`; for an epoch it does not open, recover the key with
+`backup_envelope.php open --sidecar {epoch}/envelope.json --private …` and pass
+it as `--epoch-key`. The script can be run on its own, and `--dry-run` says
+how many files would come home and from which epochs:
+
+```
+php public_html/utils/restore_objects.php --index {chain dir}/objects-0003.json.gz \
+    --objects {objects dir} [--mode missing|all] [--dry-run]
+```
+
 From the dashboard: the node's **Backups** tab lists every run on the node's
 shelf, newest first, with the last backup, the last full backup and the oldest
-backup held stated above the list; each row's Restore button runs the
-`restore_chain` job for that run. That job recovers the chain key on the node
+backup held stated above the list — and, when a run on the shelf carries an
+offloaded-files index, an **Offloaded files** row with **Bring them back**,
+which runs the `restore_objects` loop below in `missing` mode against the
+newest such run without restoring anything else; each row's Restore button
+runs the `restore_chain` job for that run. That job recovers the chain key on the node
 from the node's own `backup_site_key`, so no recovery private key travels in a
-job record. A chain taken by a machine that no longer exists is
+job record. Once it completes, the run's offloaded files follow in `missing`
+mode as the paged `restore_objects` jobs described under *Restoring a managed
+node* below. A chain taken by a machine that no longer exists is
 restored from a shell with the recovery key, as above.
 
 ## Key model: one envelope per backup
@@ -441,7 +647,10 @@ as a deliberate rotation. Three properties make it safe:
 
 - **Old backups keep opening.** Each chain's data key was sealed at chain
   start; rotation never touches it. Keep the old private key until every chain
-  sealed to it has been retired.
+  sealed to it has been retired. Offloaded files' epoch envelopes are
+  re-sealed to the new key by the next run where the site key opens them; one
+  it cannot open is named on Recovery Readiness as opening only with the
+  retired key.
 - **Nothing seals to the new key until it is proven.** An interrupted rotation
   leaves the key unproven, and backups refuse to run — loudly — until the
   ceremony is finished (or run again with a fresh key).
@@ -480,35 +689,54 @@ the forms hide both: `BackupTarget::complete_credentials()` fills them from
 Backblaze's own authorize answer at save time, and `get_credentials()` fills
 them on read for a row that still lacks either, writing the completed
 credential back once (a server-initiated reconciliation) so the signer never
-sees an incomplete B2 credential. An
-artifact of 1 GiB or less goes up as one signed streamed PUT. Above that,
-`put_file()` switches to the **multipart API** on its own: no setting, no
-caller involvement. The threshold sits deliberately far below the 5 GB
-single-PUT cap every provider enforces, so the multipart path is exercised by
-routine artifacts (a nightly database dump crosses it) rather than only by the
-oversized archive it exists for.
+sees an incomplete B2 credential.
 
-Parts are 100 MiB: each is read into memory, hashed, and signed with its real
-payload hash, so the provider verifies every part's bytes against the
-signature, and a failed part is re-read from disk and retried on the same
-budget as any other request. One part is also the peak memory cost, sized for
-the smallest node. `CompleteMultipartUpload` responses are checked by **body**,
-not just status — a provider can answer HTTP 200 with an `<Error>` document,
-and that response is retried and then surfaced as a failure, never recorded as
-a backup. Any failure aborts the multipart upload so no partial object is left
-claimable; because an abort can itself be lost (the process can die), the
-bucket should carry a cancel-unfinished-multipart lifecycle rule (B2: cancel
-unfinished large files after 7 days) as the backstop.
+**Streamed artifacts** — the files archive, the standalone archive, the
+database dump — go through `S3Signer::put_stream()`: an engine's stdout,
+unknown length, never re-readable. The stream is read one part at a time,
+hashed and counted as it goes. A stream that ends inside the first part is
+sent as one signed PUT of the buffered bytes; anything longer opens a
+multipart upload once the first full part is in hand, and each part is a
+string signed with its real payload hash, so a retry re-sends the bytes it
+holds. The runner asks for completion to be **deferred**: the parts go up (or
+the small buffer is held) while the engine runs, and `CompleteMultipartUpload`
+— or the single PUT — is issued only after the engine's report has been read.
+A refused archive is aborted, and under the small-stream shape nothing was
+ever sent, which is what lets a write-only credential refuse an archive with
+no object to delete.
 
-`sha256` and `bytes` are computed from the local file either way; a restore
-verifies against them and cannot tell how the object was uploaded.
+**File artifacts** — the metadata artifact, the chain manifest, an envelope
+sidecar — go through `put_file()`. At 1 GiB or less that is one signed
+streamed PUT; above it `put_file()` switches to the **multipart API** on its
+own, with the source re-read from disk on a retry.
+
+Parts are 100 MiB in both paths: each is held in memory, hashed, and signed
+with its real payload hash, so the provider verifies every part's bytes
+against the signature, and a failed part is retried on the same budget as any
+other request. One part is also the peak memory cost, sized for the smallest
+node; 100 MiB × the API's 10 000-part cap is about 1 TB per object.
+`CompleteMultipartUpload` responses are checked by **body**, not just status —
+a provider can answer HTTP 200 with an `<Error>` document, and that response
+is retried and then surfaced as a failure, never recorded as a backup. Any
+failure aborts the multipart upload so no partial object is left claimable;
+because an abort can itself be lost (the process can die), the bucket should
+carry a cancel-unfinished-multipart lifecycle rule (B2: cancel unfinished
+large files after 7 days) as the backstop.
+
+`sha256` and `bytes` are the hash and count of the bytes that went up — taken
+from the stream by the process that pushed them, or from the local file for a
+file artifact. A restore verifies against them and cannot tell how the object
+was uploaded.
 
 ### The upload ledger
 
 Every artifact that reaches the bucket is also recorded on the machine that made
 it, in `config/backup-ledger/{profile}.json`: the artifact's name relative to
 its backup directory, its sha256, its size, and when it went up. `BackupLedger`
-writes it, from `BackupRunner::upload()`, at the moment of upload.
+writes it at the moment of upload: `record()` hashes a file artifact from disk,
+and `record_hash()` records a streamed artifact from the hash and count the
+upload itself took — the same claim, this machine made these bytes, taken by
+the process that pushed them from the same bytes.
 
 It exists for one adversary: the party that chooses where a restore's bytes come
 from. When a management node runs this machine's backups it also owns the bucket
@@ -568,19 +796,24 @@ match.
   every run prunes both: standalone archives are counted and deleted per restore
   point, chains only ever whole. A site switched between modes keeps aging its
   old backups out, and no pass can delete a chain's full out from under its
-  incrementals.
-- **Local** — keep M days in `/backups` (default 7). The local copy is a
-  convenience, not the archive: it lets a restore skip the download, and this
-  window says how long that is worth the disk. Age is per file, so an old
-  chain's early runs go while its recent runs stay, and the emptied chain
+  incrementals. Offloaded files under `objects/` are a third family, deleted
+  only when no retained run's index names them ([Offloaded files on the
+  shelf](#offloaded-files-on-the-shelf)).
+- **Local** — keep M days in `/backups` (default 7). What a run leaves on this
+  disk is small: the chain's metadata artifact, and a standalone run's envelope
+  sidecar. The archives and the dumps stream to the bucket and are never here.
+  This window says how long those leftovers are kept. Age is per file, so an
+  old chain's early runs go while its recent runs stay, and the emptied chain
   directory is left for chain retention to retire. A chain's `manifest.json`
   and the snapshot beside it are never swept — they are what make the chain
   extendable, and without either the next run silently starts a fresh full. The
   sweep also removes the `auto_pre_*` snapshots a restore leaves behind, which
   are the size of a full backup. An archive and its envelope are always swept
-  together. `0` means never. With **Delete the local copy once uploaded** on, a
-  chain run removes its artifacts as soon as they are confirmed offsite instead
-  of waiting out the window.
+  together. `0` means never. **Delete the local copy once uploaded** is on by
+  default: a run removes its metadata artifact (and a standalone run its
+  sidecar) as soon as they are confirmed offsite instead of waiting out the
+  window; a restore or a verify fetches from the bucket either way. Turned off,
+  the leftovers stay until the window ages them out.
 
   On a machine a management node backs up, this window is the *only* thing
   bounding local disk. Chain retention deletes a chain's local directory as
@@ -686,6 +919,31 @@ node reports from its database can trail its files until then. A restore also le
 archive it was given in the backup directory; the local sweep expires it on the
 ordinary `keep_local_days` schedule.
 
+**Bring the offloaded files home.** The archives carry no file the site
+offloaded to its file bucket, so once the chain restore completes the plane
+brings those home too, in `missing` mode — only what the file bucket cannot
+serve. The node never lists its shelf and holds no read credential, so every
+object arrives by a link the plane signs, and a job is bounded, so the work is
+paged and the plane drives the loop (`FleetObjectRestore`): a **survey** job
+(the `restore_objects` primitive with the run's index link and no object
+links) has the node read the index — ledger-checked like every artifact —
+`HEAD` its file bucket per offloaded file, and answer with the names it would
+bring home (`RESTORE_OBJECTS_WANT`, at most a thousand, `RESTORE_OBJECTS_MORE`
+when there are more). The plane signs a **page** of links from that answer —
+object links plus the envelope of each epoch those objects are sealed under,
+filled to the job's byte ceiling and never more than 150 — and each page's
+result issues the next, so no link waits in a queue past its expiry. When the
+pages are done and the survey said there was more, a fresh survey names the
+next thousand; a survey that names nothing ends the loop. The node opens each
+envelope with its own key, fetches objects one at a time, checks each against
+the index before decrypting it and against its row after, and sets the row to
+`local` only once the file is in place. `restore_objects` is an operate
+primitive: it overwrites nothing and deletes nothing in any bucket, so no page
+needs an approval. A failed page ends the loop with its reason on its own job;
+a restore whose result is read long after it finished starts none. The job's
+record names the survey it pages and its slice, and the survey's result holds
+the names, so a store of ten thousand files is stored once, not once per page.
+
 **The management node is not in that path at all** — not as a gate, and not as a
 relay. The challenge and the answer live entirely between the node's own site and
 its own agent, and the restore vocabulary declares no parameter through which an
@@ -718,9 +976,9 @@ a date, and the level it was proven at:
 
 | Level | Where it runs | What it does | What it proves | Cost |
 |---|---|---|---|---|
-| **Checked on the shelf** | The management node, on every retention listing | Every artifact each backup's manifest names is in the bucket listing at the recorded size, and the manifest carries its envelope | Present and complete | The listing the pass already takes, plus one small read per backup. Seconds, no disk |
-| **Opened and read** | The node (or the site itself), on a schedule | The set a restore of the run needs — the full, every incremental up to it, that run's database dump and metadata — is downloaded, checked against the manifest's sizes and hashes, decrypted with the machine's own key and read to the end: `tar -tz` for the archives, a full decompression and a header check for the dump | Decryptable and structurally sound with the key this machine holds | Downloads the whole set once; disk equal to the set, freed at the end; a minute or three |
-| **Rehearsed** | The node (or the site itself), only when a person asks | Opened and read, then the files are replayed into a scratch directory under the backup working area and the dump is loaded into a throwaway database on the machine's own PostgreSQL; what came back is counted (files, bytes, tables, rows in `usr_users` and the three largest tables) and both are deleted | Recoverable | The set plus roughly twice the site plus the database, freed at the end; a few minutes |
+| **Checked on the shelf** | The management node, on every retention listing | Every artifact each backup's manifest names is in the bucket listing at the recorded size, and the manifest carries its envelope. Every offloaded file the newest run's index (and each standalone full's index) marks stored is in the listing under `objects/` at its recorded encrypted size, and its epoch's envelope is there | Present and complete | The listing the pass already takes, plus one small read per backup and one per index. Seconds, no disk |
+| **Opened and read** | The node (or the site itself), on a schedule | The set a restore of the run needs — the full, every incremental up to it, that run's database dump, metadata and offloaded-files index — is downloaded, checked against the manifest's sizes and hashes, decrypted with the machine's own key and read to the end: `tar -tz` for the archives, a full decompression and a header check for the dump. Every epoch envelope the index names is fetched and opened with the machine's own key; no request is made per offloaded file, because the shelf listing already proved each one present at its size | Decryptable and structurally sound with the key this machine holds, offloaded files included | Downloads the whole set once; disk equal to the set, freed at the end; a minute or three |
+| **Rehearsed** | The node (or the site itself), only when a person asks | Opened and read, then the files are replayed into a scratch directory under the backup working area and the dump is loaded into a throwaway database on the machine's own PostgreSQL; what came back is counted (files, bytes, tables, rows in `usr_users` and the three largest tables) and both are deleted. A sample of the offloaded files — the 5 largest and 15 drawn at random — is downloaded, checked against the index's hash, decrypted with its epoch key and compared to the rehearsed database's row for it: `fbb_sha256` where the row records one, `fbb_size_bytes` otherwise | Recoverable | The set plus the sample plus roughly twice the site plus the database, freed at the end; a few minutes |
 
 Nothing on the live site is touched at any level. The run verified is always the
 newest: it is the one a restore would start from, and it exercises everything
@@ -757,13 +1015,27 @@ not a fresh full. A failing verify is a person's problem to look at.
 agent primitive, or from the site's own scheduled task and Backups page). It
 takes JSON on stdin and nothing on argv: the chain, the profile, the level, a
 signed link to the manifest and a signed link to every object under the chain,
-keyed by bare name, and optionally the run. Everything about *what may be
-fetched* is `BackupStaging`'s, shared with Prepare, so a verify can never fetch
+keyed by bare name, optionally the run, and — when the run carries offloaded
+files — a signed link per epoch envelope the run's index names
+(`epoch_envelope_urls`, keyed by epoch id) and, for a rehearsal, the sample
+(`object_urls`, keyed by the object's name in the index, at most 20). Whoever
+signs the links reads the run's index off the shelf to pick them: the site's
+own launcher (`BackupVerifyLauncher::object_links()`) and the management
+node's builder alike. Everything about *what may be fetched* is
+`BackupStaging`'s, shared with Prepare, so a verify can never fetch
 something a Prepare would refuse: the manifest is read on the machine, the
 artifact list comes from `BackupChain::restore_plan()`, every fetch is checked
 against the upload ledger, and the chain key is recovered from the machine's
-own `config/backup_site_key`. `BackupVerifier` is the level 2 and 3 engine
-over an already-staged directory (`read_all`, `rehearse`, `disk_needed`).
+own `config/backup_site_key`. Offloaded files are not ledgered — their index
+is — so `BackupStaging::fetch_objects()` checks each sampled object against the
+index's recorded size and hash instead, and lands it under
+`objects/{epoch}/` in the working directory. `BackupVerifier` is the level 2
+and 3 engine over an already-staged directory (`read_all`, `rehearse`,
+`disk_needed`, `sample_objects`). A management node sends the two link maps
+only to an agent at or past `JobCommandBuilder::VERIFY_BACKUP_OBJECTS_MIN_AGENT_VERSION`;
+a run that carries offloaded files but whose request links no envelope for an
+epoch they need fails by name, because the objects under it cannot be opened
+here.
 
 The script works in `{site}/backups/{profile}/verify-{pid}/`, under the same
 two locks as a backup run (so it never reads a chain a run is writing), checks
@@ -783,6 +1055,9 @@ VERIFY_RUN_TIME=<manifest run time, UTC>
 VERIFY_ARTIFACTS=<n read>
 VERIFY_BYTES=<bytes read>
 VERIFY_FILES=<entries listed (2) or files restored (3)>
+VERIFY_OBJECTS=<offloaded files proven recoverable: stored, epoch envelope opened>
+VERIFY_OBJECT_BYTES=<their bytes on the shelf>
+VERIFY_OBJECTS_SAMPLED=<n opened and compared>     (level 3 only)
 VERIFY_TABLES=<n>                            (level 3 only)
 VERIFY_ROWS=usr_users:<n>,<table>:<n>,…      (level 3 only)
 VERIFY_DURATION=<seconds>
@@ -794,9 +1069,10 @@ VERIFY_FREE_BYTES=<n>                        (skipped for disk only)
 Exit 0 on pass or skipped, 1 on fail, 2 on a request it could not understand. A
 skip's reason is `disk` (with both numbers, so the card can say "needs N free,
 has M"), `createdb`, or `busy`. An object retention deleted from under a verify
-in flight fails with reason `gone`, naming the object; the next pass verifies
-the newer backup, and the retention pass never holds a deletion for a verify —
-a verify must not be able to keep a backup alive.
+in flight fails with reason `gone`, naming the object — an archive, an epoch
+envelope or a sampled offloaded file alike; the next pass verifies the newer
+backup, and the retention pass never holds a deletion for a verify — a verify
+must not be able to keep a backup alive.
 
 ### The site's own backups
 
@@ -823,6 +1099,46 @@ backup no older than the last proof.
 
 `BackupVerifyLauncher` is the site side (`newest_run`, `due`, `request`, `run`,
 `start`).
+
+### The file store is checked too
+
+Verification proves the shelf holds what the index says. The other side —
+does the *file bucket* still hold every offloaded file it is serving? — is
+asked daily by the offload tick (`CloudStoreInventory`, `docs/cloud_storage.md`
+§ The file store is checked daily): every `cloud` blob is `HEAD`ed in its
+bucket, a slice per tick, and a file the bucket lacks or holds at the wrong
+size is written down by name. The Backups page's **Offloaded files** box and
+the cloud-storage page's Status block both say when it last looked and, when
+anything is missing, "N offloaded files are missing from the file store; the
+backup holds M of them" — M counted against the enabled profiles' held sets —
+with **Bring them back** beside it:
+
+- **A site with a backup target of its own** runs it here, in the background
+  (`BackupObjectRestoreLauncher::start_newest()` → `utils/bring_back_objects.php`,
+  the request on stdin as a verify's is). The launcher reads the newest run's
+  offloaded-files index off the site's own shelf, surveys it in `missing` mode
+  (the bucket is `HEAD`ed per file, so a file the bucket has recovered by then
+  is left alone), and brings the rest home a page at a time — each page's
+  object and envelope links signed here with the site's own credential
+  (`S3Signer::presign_get`) and opened with its own key; the engine is the
+  same `BackupObjectRestore` the node path runs. One at a time, by a lock in
+  the profile's `objects/` directory. What it did lands on the inventory
+  record, both pages read it, and the names it brought home leave the missing
+  list at once.
+- **A site backed up only by its management node** holds no shelf credential,
+  so the box names the management node and its URL: from that node's Backups
+  tab, **Bring them back** (the `restore_objects` backup action →
+  `FleetObjectRestore::start()`) runs the paged survey-and-page loop described
+  under *Restoring a managed node*, in `missing` mode, against the newest run
+  on the shelf that carries an offloaded-files index. The management node does
+  not see the node's missing list; the survey job asks the node.
+- **A site with neither** is told nothing holds them.
+
+From a shell, the same run as the pages start:
+
+```
+php public_html/utils/bring_back_objects.php --chain chain-20260912_044520 --seq 3 [--mode missing|all]
+```
 
 ### Verifying by hand, with the recovery key
 
@@ -852,6 +1168,10 @@ report, leaves the chain directory as it was (a rehearsal's `scratch/` is
 removed), and exits 0 on pass or skipped, 1 on fail, 2 on a request it could
 not understand. `--project` names the directory the archive carries, for a
 rehearsal; left out it is read from the archive, and a wrong name is refused.
+This path holds a chain key, not the site key, so it proves the archives and
+reports the run's offloaded files unproven (`VERIFY_OBJECTS=0`); those are
+proven by the fetching path, which opens their epoch envelopes with the site
+key.
 
 ### Disk and egress
 
@@ -861,6 +1181,13 @@ fleet of nodes; weekly across nine nodes would still be under 40 GB a month.
 A rehearsal needs scratch disk of roughly twice the site plus the database, and
 a PostgreSQL role that can create a database. Both are checked before anything
 is downloaded, and the machine says the numbers when it declines.
+
+A **backup** needs no scratch disk beyond the site itself. Every archive and
+every dump streams from its engine into the bucket; a chain run's peak disk is
+the live tree plus the metadata artifact, a database-only run's is nothing,
+and a standalone whole-site run's is the live tree plus its compressed dump
+for the length of the tar. Memory is one upload part, 100 MiB. The
+double-space need is a restore's and a verify's, not a backup's.
 
 ## The node tool
 
@@ -992,7 +1319,7 @@ plaintext and hand the restore engine a file it will not decrypt.
 | `backup_output_dir` | `/backups` | Working directory backups are built in |
 | `backup_exclude` | — | Extra directory names to skip (build output, caches). A name matches a directory of that name at **any depth** — this is tar's exclude semantics, and it applies to the built-in skips (`vendor`, `cache`, `tmp`, `logs`, …) too |
 | `backup_local_retention_days` | `7` | Days kept locally; 0 never sweeps |
-| `backup_delete_local_after_upload` | off | Remove the local copy once uploaded |
+| `backup_delete_local_after_upload` | on | Remove what a run left on disk — the metadata artifact, a standalone run's envelope sidecar — once uploaded; archives and dumps stream and are never on disk |
 | `backup_path_slug` | project dir | Folder in the bucket this site files under |
 
 ## The account backups run as

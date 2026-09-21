@@ -14,6 +14,10 @@
  * public profile owns the world-readable blobs (fbb_is_private = FALSE); the
  * private subclass owns the rest.
  *
+ * @version 1.1 - backupObjects()/backupObject(): the enumeration the backup's object store reads —
+ *                every cloud row of this store with its name and the local paths its bytes
+ *                occupy or would occupy (specs/backup_offloaded_files.md). A capability the
+ *                backup probes with method_exists(), the way the engine probes putMany().
  * @version 1.0
  */
 
@@ -89,11 +93,76 @@ class BlobStorageProfile implements StorageProfile {
 		return $items;
 	}
 
+	/**
+	 * Every row of THIS store whose bytes live in the cloud, as the backup's
+	 * object store sees them: the immutable object name (fbb_stored_name), the
+	 * local path the original occupies while it waits for a shelf, every local
+	 * path original and variants occupy (the archive's exclude list), and how
+	 * to fetch the original from the file store when no local copy is left.
+	 * One query; the placement is computed, never stat()ed here.
+	 */
+	public function backupObjects(): array {
+		$blobs = new MultiFileBlob(
+			['storage_driver' => 'cloud', 'is_private' => $this->visibility() === 'private'],
+			['fbb_file_blob_id' => 'ASC']);
+		$out = [];
+		foreach ($blobs as $blob) {
+			$out[] = $this->describe_for_backup($blob);
+		}
+		return $out;
+	}
+
+	/** One row in the shape backupObjects() lists, or null when the row is gone or not this store's. */
+	public function backupObject(int $id): ?array {
+		$blob = new FileBlob($id, true);
+		if (!$blob->key || ($blob->is_private_bool() !== ($this->visibility() === 'private'))) {
+			return null;
+		}
+		return $this->describe_for_backup($blob);
+	}
+
+	private function describe_for_backup(FileBlob $blob): array {
+		// Both placements, not only the visibility's own: a blob's bytes may sit
+		// in either directory during a visibility flip (filesystem_path() looks
+		// in both), and a path the archive should skip is a path in either.
+		$settings       = Globalvars::get_instance();
+		$restricted_dir = rtrim((string)$settings->get_setting('upload_dir'), '/');
+		$fast_dir       = dirname($restricted_dir) . '/static_files/uploads';
+		$own_dir        = $blob->is_private_bool() ? $restricted_dir : $fast_dir;
+		$name           = (string)$blob->get('fbb_stored_name');
+
+		$paths = [];
+		foreach ([$own_dir, ($own_dir === $fast_dir ? $restricted_dir : $fast_dir)] as $dir) {
+			$paths[] = $dir . '/' . $name;
+			foreach ($blob->variant_size_keys() as $size_key) {
+				$paths[] = $dir . '/' . $size_key . '/' . $name;
+			}
+		}
+		$original = $own_dir . '/' . $name;
+		foreach ([$fast_dir . '/' . $name, $restricted_dir . '/' . $name] as $candidate) {
+			if (is_file($candidate)) { $original = $candidate; break; }
+		}
+		return [
+			'id'           => (int)$blob->key,
+			'name'         => (string)$blob->get('fbb_stored_name'),
+			'original'     => $original,
+			'paths'        => $paths,
+			'remote_key'   => $blob->remote_key_for('original'),
+			'content_type' => $blob->get('fbb_mime_type') ?: 'application/octet-stream',
+			'visibility'   => $this->visibility(),
+		];
+	}
+
 	public function reverseItemsForRow(int $id): array {
 		$blob = new FileBlob($id, true);
 		if (!$blob->key) {
 			return [];
 		}
+		return $this->placement($blob);
+	}
+
+	/** The reverse enumeration for a blob already in hand: no second load per row. */
+	private function placement(FileBlob $blob): array {
 		$settings       = Globalvars::get_instance();
 		$restricted_dir = $settings->get_setting('upload_dir');
 		$fast_dir       = dirname($restricted_dir) . '/static_files/uploads';

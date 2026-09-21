@@ -1,6 +1,27 @@
 #!/usr/bin/env bash
 
 # backup_project.sh - Complete project backup script
+# Version: 2.8.0 - `--exclude-from FILE` (stream mode): paths relative to the project directory,
+#                  one per line, left out of the archive — the local paths of every file the
+#                  backup's object store accounts for (specs/backup_offloaded_files.md). Literal
+#                  and unanchored, evaluated on the member name before the rename.
+# Version: 2.7.1 - the stream-mode rename applies to hard-link targets as well as member names
+#                  (transform flags rh, not r): a hard link inside the live tree pointed at the
+#                  untransformed name and the whole archive failed to extract. Symlink targets
+#                  are still left as they are.
+# Version: 2.7.0 - stream mode: `--archive -` writes the encrypted archive to stdout and nothing
+#                  else does; `--report FILE` records TAR_RC and ENC_RC once the stream has been
+#                  fully produced. In stream mode the site tree is NOT copied: tar archives the
+#                  staged dump, apache_config/ and shape.json together with the LIVE tree under
+#                  project_files/ (a second -C and a --transform on member names only), so a
+#                  run holds one compressed dump on disk instead of a second copy of the site.
+#                  --name NAME sets the archive name (the caller may need to know it up front);
+#                  --project-dir DIR archives that tree, for tests against a throwaway one.
+#                  The timestamp is YYYYMMDD_HHMMSS, the stamp the database dumps and the chain
+#                  directories carry, so a standalone project archive sorts by date on a shelf
+#                  a management node prunes instead of as the oldest thing on it. backups/ and
+#                  target/ are excluded in both modes: an archive that carries earlier archives
+#                  grows without limit, and target/ is regenerable build output.
 # Version: 2.6.3 - the sudo probe lists the rules and requires NOPASSWD: ALL; -v said yes to an
 #                  account allowed one helper, and the rsync it then ran under sudo was refused
 # Version: 2.6.2 - the sudo capability probe asks with -v instead of running true,
@@ -36,19 +57,39 @@
 #
 # Usage:
 #   ./backup_project.sh PROJECT_NAME [--plaintext] [--non-interactive] [--output-dir DIR]
+#   ./backup_project.sh PROJECT_NAME --non-interactive --key-file PATH --archive - --report FILE --output-dir DIR
 #
 # Options:
 #   PROJECT_NAME      Name of the project to backup (required)
 #                     Must match the directory name in /var/www/html/
+#   --project-dir DIR Archive THIS directory instead of /var/www/html/PROJECT_NAME
+#   --name NAME       Archive name without extension (default: PROJECT-YYYYMMDD_HHMMSS)
 #   --plaintext       Create an unencrypted backup (default: encrypted)
 #   --non-interactive Use encryption key from env var or file (no prompts)
 #   --key-file PATH   Read the encryption key from PATH
-#   --output-dir DIR  Directory to create backup in (default: current directory)
+#   --output-dir DIR  Directory to create backup in (default: current directory).
+#                     In stream mode: where the small staging directory lives.
+#   --archive -       Stream mode: the encrypted archive goes to stdout and NOTHING
+#                     else does (every human line is on stderr). The site tree is
+#                     not copied; the staging directory holds only the database
+#                     dump, apache_config/ and shape.json. Requires --report.
+#   --report FILE     Stream mode: once the stream has been fully produced, the
+#                     TAR_RC and ENC_RC lines are written to FILE. The reader has
+#                     the byte count and the hash from what it read.
+#   --exclude-from F  Stream mode: a file of paths relative to the project
+#                     directory, one per line, to leave out of the archive. The
+#                     runner writes the local paths of every offloaded file here;
+#                     the objects index accounts for them. Literal names.
 #   --help            Show help message
 #
 # Output:
-#   Creates PROJECT-YYYY-MM-DD-HHMMSS.tar.gz.enc in output directory
-#   (.tar.gz when --plaintext is passed)
+#   Creates PROJECT-YYYYMMDD_HHMMSS.tar.gz.enc in output directory
+#   (.tar.gz when --plaintext is passed); the last stdout line is
+#   BACKUP_ARCHIVE=<path>. In stream mode stdout is the archive.
+#
+# Report (stream mode, written to --report FILE):
+#   TAR_RC=<n>        0 ok; 1 a file changed while being read (accepted); >=2 failed
+#   ENC_RC=<n>        openssl's exit status (0 ok)
 #
 # Examples:
 #   ./backup_project.sh myproject                          # Encrypted, interactive
@@ -108,6 +149,11 @@ show_help() {
     echo "  --non-interactive, -n     Use encryption key from env var or file (no prompts)"
     echo "  --key-file PATH           Read the encryption key from PATH"
     echo "  --output-dir DIR, -o DIR  Directory to create backup in (default: current directory)"
+    echo "  --project-dir DIR         Archive this directory instead of /var/www/html/PROJECT_NAME"
+    echo "  --name NAME               Archive name without extension"
+    echo "  --archive -               Stream the encrypted archive to stdout (requires --report FILE)"
+    echo "  --report FILE             Stream mode: TAR_RC and ENC_RC are written here after the stream"
+    echo "  --exclude-from FILE       Stream mode: leave out the paths listed in FILE (relative to the project)"
     echo "  --help, -h                Show this help message"
     echo ""
     echo "Non-Interactive Mode:"
@@ -124,7 +170,7 @@ show_help() {
     echo "  $0 joinerytest -n -o /tmp              # Automated backup to /tmp"
     echo ""
     echo "The script will create:"
-    echo "  - An encrypted archive named: PROJECT-YYYY-MM-DD-HHMMSS.tar.gz.enc"
+    echo "  - An encrypted archive named: PROJECT-YYYYMMDD_HHMMSS.tar.gz.enc"
     echo "  - Contents: database backup, /var/www/html/PROJECT/, Apache virtualhost config"
 }
 
@@ -134,6 +180,11 @@ ENCRYPT_DB=true
 NON_INTERACTIVE=false
 OUTPUT_DIR=""
 KEY_FILE=""
+PROJECT_DIR_OVERRIDE=""
+NAME_OVERRIDE=""
+STREAM=false
+REPORT_FILE=""
+EXCLUDE_FROM=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -167,6 +218,50 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             ;;
+        --project-dir)
+            if [[ -n "${2:-}" && ! "$2" =~ ^- ]]; then
+                PROJECT_DIR_OVERRIDE="$2"
+                shift 2
+            else
+                print_error "--project-dir requires a directory argument"
+                exit 1
+            fi
+            ;;
+        --name)
+            if [[ -n "${2:-}" && ! "$2" =~ ^- ]]; then
+                NAME_OVERRIDE="$2"
+                shift 2
+            else
+                print_error "--name requires a name argument"
+                exit 1
+            fi
+            ;;
+        --archive)
+            if [ "${2:-}" != "-" ]; then
+                print_error "--archive only accepts '-' (stdout)"
+                exit 1
+            fi
+            STREAM=true
+            shift 2
+            ;;
+        --report)
+            if [[ -n "${2:-}" && ! "$2" =~ ^- ]]; then
+                REPORT_FILE="$2"
+                shift 2
+            else
+                print_error "--report requires a file argument"
+                exit 1
+            fi
+            ;;
+        --exclude-from)
+            if [[ -n "${2:-}" && ! "$2" =~ ^- ]]; then
+                EXCLUDE_FROM="$2"
+                shift 2
+            else
+                print_error "--exclude-from requires a file argument"
+                exit 1
+            fi
+            ;;
         --help|-h)
             show_help
             exit 0
@@ -196,10 +291,32 @@ if [ -z "$PROJECT_NAME" ]; then
     exit 1
 fi
 
-# Generate timestamp for backup filename
-TIMESTAMP=$(date +"%Y-%m-%d-%H%M%S")
+# Stream mode: stdout IS the archive, so everything this script says moves to
+# stderr wholesale — the engines it calls print to stdout too — and the real
+# stdout is kept on fd 4 for the one pipeline that writes the archive.
+if [ "$STREAM" = true ]; then
+    # Said on stderr: a stream-mode caller is not reading stdout for text.
+    if [ -z "$REPORT_FILE" ]; then
+        print_error "--archive - requires --report FILE" >&2
+        exit 1
+    fi
+    if [ ! -d "$(dirname "$REPORT_FILE")" ]; then
+        print_error "Report directory does not exist: $(dirname "$REPORT_FILE")" >&2
+        exit 1
+    fi
+    rm -f "$REPORT_FILE"
+    exec 4>&1 1>&2
+fi
+
+# Generate timestamp for backup filename. YYYYMMDD_HHMMSS: the same stamp the
+# database dumps and the chain directories carry, which is what a management
+# node's retention sorts a shelf by.
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 BACKUP_DIR="${OUTPUT_DIR:-$(pwd)}"
-BACKUP_NAME="${PROJECT_NAME}-${TIMESTAMP}"
+BACKUP_NAME="${NAME_OVERRIDE:-${PROJECT_NAME}-${TIMESTAMP}}"
+case "$BACKUP_NAME" in
+    */*|.*|"") print_error "--name must be a plain file name"; exit 1 ;;
+esac
 
 # The archive carries the whole site tree, config/ included — the database
 # password, the secret box key, the agent signing key, the relay pull key. It is
@@ -245,7 +362,8 @@ if [ -n "$OUTPUT_DIR" ]; then
 fi
 
 # Verify project directory exists
-PROJECT_DIR="/var/www/html/${PROJECT_NAME}"
+PROJECT_DIR="${PROJECT_DIR_OVERRIDE:-/var/www/html/${PROJECT_NAME}}"
+PROJECT_DIR="${PROJECT_DIR%/}"
 if [ ! -d "$PROJECT_DIR" ]; then
     print_error "Project directory does not exist: $PROJECT_DIR"
     exit 1
@@ -404,6 +522,19 @@ else
     print_info "Environment: Bare metal"
 fi
 
+# The excludes, shared by the copy (file mode) and the tar (stream mode).
+# backups/ is where this archive is being staged and where earlier archives
+# wait to be uploaded: an archive that carries them grows without limit.
+# target/ is Cargo's build output, regenerable and large.
+TREE_EXCLUDES=(vendor node_modules .git logs cache tmp sessions backups target)
+
+if [ "$STREAM" = true ]; then
+    # Stream mode archives the LIVE tree straight into the tar below (a second
+    # -C into the site root, member names prefixed with --transform). Nothing
+    # is copied: the staging directory holds only what is not in the tree.
+    print_info "Stream mode: the site tree is archived in place, not copied"
+else
+
 # Create project files subdirectory
 mkdir -p "${TEMP_DIR}/${BACKUP_NAME}/project_files"
 
@@ -432,16 +563,11 @@ fi
 
 # Use rsync to copy project files
 # Included: uploads/, static_files/, config/, public_html/, maintenance_scripts/
-# Excluded: vendor/, node_modules/, .git/, logs/, cache/, tmp/, sessions/
+# Excluded: TREE_EXCLUDES, as directories at any depth
+RSYNC_EXCLUDES=()
+for x in "${TREE_EXCLUDES[@]}"; do RSYNC_EXCLUDES+=(--exclude="${x}/"); done
 RSYNC_STATUS=0
-$SUDO rsync -a \
-    --exclude='vendor/' \
-    --exclude='node_modules/' \
-    --exclude='.git/' \
-    --exclude='logs/' \
-    --exclude='cache/' \
-    --exclude='tmp/' \
-    --exclude='sessions/' \
+$SUDO rsync -a "${RSYNC_EXCLUDES[@]}" \
     "$PROJECT_DIR/" "${TEMP_DIR}/${BACKUP_NAME}/project_files/" || RSYNC_STATUS=$?
 
 # set -e would abort at the rsync line and skip this entirely, so the status is
@@ -469,6 +595,8 @@ for dir in uploads static_files config public_html; do
         print_info "  - ${dir}/: ${dir_size}"
     fi
 done
+
+fi   # end of the file-mode copy
 
 # Step 3: Backup Apache virtualhost configuration (if available)
 if [ -n "$VHOST_FILE" ]; then
@@ -544,6 +672,8 @@ Excluded from project files:
 - cache/ (regenerated)
 - tmp/ (temporary files)
 - sessions/ (regenerated)
+- backups/ (earlier archives; never inside an archive)
+- target/ (build output, regenerated)
 
 Restoration Instructions:
 ========================
@@ -562,6 +692,75 @@ EOF
 print_success "Metadata file created"
 
 # Step 5: Create final tar.gz archive
+if [ "$STREAM" = true ]; then
+    print_info "Streaming archive: $FINAL_ARCHIVE"
+
+    # One tar over two roots: the staging directory (dump, apache_config/,
+    # shape.json, backup_info.txt — already under BACKUP_NAME/) and the live
+    # site tree, whose members are renamed under BACKUP_NAME/project_files/ so
+    # the archive has exactly the layout restore_project.sh reads. flags=r
+    # applies the rename to member names only — a symbolic link's target is
+    # left as it is, exactly as the rsync copy left it; h renames hard-link
+    # targets too, since they name another member of this same archive.
+    TAR_EXCLUDES=()
+    for x in "${TREE_EXCLUDES[@]}"; do TAR_EXCLUDES+=(--exclude="$x"); done
+    # The offloaded files' local paths, literal and unanchored, matched on the
+    # member name before the rename (`./static_files/uploads/x.jpg`). Last, so
+    # --no-wildcards reaches nothing else.
+    if [ -n "$EXCLUDE_FROM" ]; then
+        TAR_EXCLUDES+=(--no-wildcards --exclude-from="$EXCLUDE_FROM")
+    fi
+    SUDO_TAR=""
+    if [ "$(id -u)" -ne 0 ]; then
+        if command -v sudo >/dev/null 2>&1 && sudo -n -l 2>/dev/null | grep -Eq 'NOPASSWD:([[:space:]]*[A-Z]+:)*[[:space:]]*ALL([[:space:]]|$)'; then
+            SUDO_TAR="sudo"
+        else
+            print_warning "No passwordless sudo — reading as $(whoami); an unreadable file will fail this backup"
+        fi
+    fi
+    TAR_CMD=(${SUDO_TAR:+$SUDO_TAR} tar --warning=no-file-changed --warning=no-file-removed "${TAR_EXCLUDES[@]}"
+             -czf - -C "$TEMP_DIR" "$BACKUP_NAME"
+             -C "$PROJECT_DIR" --transform="flags=rh;s,^\.\$,${BACKUP_NAME}/project_files,;s,^\./,${BACKUP_NAME}/project_files/," .)
+
+    TAR_RC=0
+    ENC_RC=0
+    if [ "$ENCRYPT_DB" = true ]; then
+        set +e +o pipefail
+        if [ "$ARCHIVE_KEY_SOURCE" = "env" ]; then
+            "${TAR_CMD[@]}" | openssl enc -aes-256-cbc -salt -pbkdf2 -pass fd:3 3< <(printf '%s\n' "$BACKUP_ENCRYPTION_KEY") >&4
+        else
+            "${TAR_CMD[@]}" | openssl enc -aes-256-cbc -salt -pbkdf2 -pass fd:3 3< "$ARCHIVE_KEY_SOURCE" >&4
+        fi
+        PIPE=("${PIPESTATUS[@]}")
+        set -e -o pipefail
+        TAR_RC=${PIPE[0]:-2}
+        ENC_RC=${PIPE[1]:-1}
+    else
+        set +e
+        "${TAR_CMD[@]}" >&4
+        TAR_RC=$?
+        set -e
+    fi
+    # The archive's stdout is done with; from here everything is stderr and
+    # the report. Closing fd 4 is what lets a reader see end of stream before
+    # this script has exited.
+    exec 4>&-
+    printf 'TAR_RC=%s\nENC_RC=%s\n' "$TAR_RC" "$ENC_RC" > "$REPORT_FILE"
+
+    if [ "$ENC_RC" -ne 0 ]; then
+        print_error "Encrypting the archive failed (openssl exit ${ENC_RC})"
+        exit 1
+    fi
+    if [ "$TAR_RC" -eq 1 ]; then
+        print_warning "Some files changed while being read; the archive carries their state at read time"
+    elif [ "$TAR_RC" -ne 0 ]; then
+        print_error "Archive failed (tar exit ${TAR_RC})"
+        exit 1
+    fi
+    print_success "Streamed ${FINAL_ARCHIVE}"
+    exit 0
+fi
+
 print_info "Creating final archive: $FINAL_ARCHIVE"
 
 cd "$TEMP_DIR"

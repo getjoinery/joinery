@@ -97,14 +97,35 @@ try {
 	harness_set_setting_mem('cloud_storage_private_enabled', '1');
 	ok('private: own enabled latch ⇒ offload', CloudStorageLifecycle::modeForVisibility('private') === 'offload');
 
-	// With every store idle, the tick is a no-op that asks to self-deactivate.
+	// With every store idle but a file still offloaded (a paused store), the
+	// tick moves nothing, gives the daily file-store check its slice, and stays
+	// active: a paused store serves the same files as an active one. No store
+	// is bound here, so the check counts the row as one it cannot check.
 	harness_set_setting_mem('cloud_storage_enabled', '0');
 	harness_set_setting_mem('cloud_storage_draining', '0');
 	harness_set_setting_mem('cloud_storage_private_enabled', '0');
 	harness_set_setting_mem('cloud_storage_private_draining', '0');
+	CloudStoreInventory::$test_hooks['driver'] = function ($visibility) { return null; };
+	CloudStoreInventory::$test_hooks['record'] = array();
 	$tick = CloudStorageLifecycle::runOffloadTick();
-	ok('runOffloadTick: all stores idle ⇒ deactivate signal', !empty($tick['deactivate']));
+	ok('runOffloadTick: all stores idle, a file offloaded ⇒ no deactivate signal', empty($tick['deactivate']));
 	ok('runOffloadTick: status success when idle', ($tick['status'] ?? '') === 'success');
+	ok('runOffloadTick: the daily check took its slice', strpos((string)$tick['message'], 'not checked (no store configured') !== false
+		|| strpos((string)$tick['message'], 'under the daily check') !== false);
+	unset(CloudStoreInventory::$test_hooks['driver']);
+	CloudStoreInventory::$test_hooks['record'] = array();
+
+	// With the offloaded file gone as well, there is nothing to move and
+	// nothing to check, and the tick asks to be switched off.
+	$d = $dblink->prepare("DELETE FROM fbb_file_blobs WHERE fbb_file_blob_id = ?");
+	$d->execute([$cloud_fixture_id]);
+	$cloud_fixture_id = null;
+	$tick = CloudStorageLifecycle::runOffloadTick();
+	if (CloudStorageLifecycle::cloudRowCount('public') + CloudStorageLifecycle::cloudRowCount('private') === 0) {
+		ok('runOffloadTick: all stores idle, nothing offloaded ⇒ deactivate signal', !empty($tick['deactivate']));
+	} else {
+		ok('runOffloadTick: this site has offloaded files of its own, so the tick stays active', empty($tick['deactivate']));
+	}
 
 } finally {
 	if ($cloud_fixture_id) {

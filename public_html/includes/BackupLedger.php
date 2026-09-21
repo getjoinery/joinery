@@ -63,6 +63,8 @@
  * backups that matter are taken by the root agent (the backup_run primitive), so
  * they are ledgered as a matter of course.
  *
+ * @version 1.3 - record_hash(): an artifact streamed to the bucket is recorded from the hash and
+ *                count taken as it went, sharing record()'s entry, history and eviction code
  * @version 1.2 - untrusted() — a ledger group or other can write is refused here, not only by
  *                the agent, so a download refuses before the bytes move instead of after
  * @version 1.1 - a name that is legitimately rewritten (manifest.json, once per chain run)
@@ -155,7 +157,29 @@ class BackupLedger {
 		if (!is_string($sha) || $sha === '') {
 			return false;
 		}
+		return self::store($profile, $relname, $sha, (int)@filesize($path), $object_key);
+	}
 
+	/**
+	 * Record an artifact that never existed as a file here: one this machine
+	 * streamed to the bucket, hashing and counting the bytes as they went. The
+	 * ledger's claim holds exactly as it does for record() — this machine made
+	 * these bytes, and the hash was taken by the process that pushed them, from
+	 * the same bytes — so the entry is indistinguishable from a file-hashed one.
+	 * A blank or malformed hash is refused: an entry that vouches for nothing
+	 * would let a download verify against nothing.
+	 */
+	public static function record_hash($profile, $relname, $sha256, $bytes, $object_key = '') {
+		$relname = self::normalize_relname($relname);
+		$sha256 = strtolower(trim((string)$sha256));
+		if ($relname === '' || !preg_match('/^[0-9a-f]{64}$/', $sha256) || (int)$bytes < 0) {
+			return false;
+		}
+		return self::store($profile, $relname, $sha256, (int)$bytes, $object_key);
+	}
+
+	/** The one place an entry is built, versioned and evicted; record() and record_hash() both land here. */
+	private static function store($profile, $relname, $sha, $bytes, $object_key) {
 		$entries = static::read($profile);
 
 		// A NAME CAN LEGITIMATELY BE REWRITTEN, and when it is, the version it
@@ -193,7 +217,7 @@ class BackupLedger {
 
 		$entries[$relname] = array(
 			'sha256'        => $sha,
-			'bytes'         => (int)@filesize($path),
+			'bytes'         => (int)$bytes,
 			'uploaded_time' => gmdate('Y-m-d H:i:s'),
 			'object_key'    => (string)$object_key,
 		);

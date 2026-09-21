@@ -22,6 +22,18 @@
  * incrementals whose full is gone, which is not a smaller backup — it is no
  * backup, and it looks like a restore point right up until someone needs it.
  *
+ * @version 1.5 - check_shelf() also reads every standalone full's index and requires its stored
+ *                objects on the shelf, as it does a chain's newest run's; the two families are
+ *                checked by the same rule (compare_index)
+ * @version 1.4.1 - an objects index that cannot be read, newest or older, ends the object prune with
+ *                  nothing deleted: a transient read failure never costs a retained run its objects
+ * @version 1.4 - the object family (specs/backup_offloaded_files.md § Retention): group() files
+ *                nothing under objects/ as a restore point; prune_objects() deletes an object only
+ *                when no retained run's index names its shelf location and it landed before the
+ *                newest retained run, and an emptied epoch's envelope with it (never the newest
+ *                epoch's); check_shelf() reads each chain's newest index and requires every object
+ *                it marks stored to be on the shelf at its recorded size, with its epoch envelope.
+ *                index_links() picks the newest index and every envelope for the run request.
  * @version 1.3 - check_shelf() answers in two parts: what is wrong with the backups it read, and
  *                which manifests it could not read this pass — a transport error is reported by the
  *                pass, never stamped as an incomplete backup; the reader is injectable for the test
@@ -37,6 +49,8 @@ require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
 require_once(PathHelper::getIncludePath('includes/BackupProfile.php'));
 require_once(PathHelper::getIncludePath('includes/BackupEnvelope.php'));
 require_once(PathHelper::getIncludePath('includes/BackupChain.php'));
+require_once(PathHelper::getIncludePath('includes/BackupObjects.php'));
+require_once(PathHelper::getIncludePath('includes/BackupNaming.php'));
 
 class FleetBackupRetention {
 
@@ -72,7 +86,7 @@ class FleetBackupRetention {
 	 *               listed:bool, newest_object_time:string, bytes:int,
 	 *               objects:array, base:string}
 	 */
-	public static function prune($node, $target, $keep) {
+	public static function prune($node, $target, $keep, $read = null) {
 		$keep = max(1, (int)$keep);
 		$result = array('kept' => 0, 'pruned' => 0, 'deleted_objects' => 0, 'error' => '',
 			'listed' => false, 'newest_object_time' => '', 'bytes' => 0, 'objects' => array(), 'base' => '');
@@ -100,20 +114,35 @@ class FleetBackupRetention {
 			$groups = self::group($objects, $base);
 			$result['kept'] = min(count($groups), $keep);
 
+			$delete = function ($key) use ($creds, $bucket) {
+				$resp = S3Signer::delete($creds, $bucket, '/' . ltrim($key, '/'));
+				$status = (int)($resp['status'] ?? 0);
+				// 404 is the state we were asking for.
+				if (($status < 200 || $status >= 300) && $status !== 404) {
+					throw new Exception('HTTP ' . $status . ' deleting ' . $key);
+				}
+			};
+
 			$surplus = array_slice(array_values($groups), $keep);
 			$pruned_keys = array();
 			foreach ($surplus as $group) {
 				foreach ($group['keys'] as $key) {
-					$resp = S3Signer::delete($creds, $bucket, '/' . ltrim($key, '/'));
-					$status = (int)($resp['status'] ?? 0);
-					// 404 is the state we were asking for.
-					if (($status < 200 || $status >= 300) && $status !== 404) {
-						throw new Exception('HTTP ' . $status . ' deleting ' . $key);
-					}
+					$delete($key);
 					$result['deleted_objects']++;
 					$pruned_keys[$key] = true;
 				}
 				$result['pruned']++;
+			}
+
+			// The third family: offloaded files no retained run names any more.
+			// Judged from the runs that are LEFT, so it runs after the groups.
+			$kept_groups = array_slice(array_values($groups), 0, $keep);
+			if ($read === null) {
+				$read = self::shelf_reader($creds, $bucket);
+			}
+			foreach (self::prune_objects($objects, $base, $kept_groups, $read, $delete) as $key) {
+				$result['deleted_objects']++;
+				$pruned_keys[$key] = true;
 			}
 			// Sized from what is LEFT, so the figure is what this node is
 			// keeping rather than what it briefly held. Objects the provider
@@ -161,6 +190,19 @@ class FleetBackupRetention {
 	public static function group(array $objects, $base) {
 		$groups = array();
 
+		// Standalone archives first, by stem, so an objects index (which
+		// carries the stem and not the archive suffix) can be filed with its
+		// archive and its envelope.
+		$archives_by_stem = array();
+		foreach ($objects as $obj) {
+			$key = is_array($obj) ? (string)($obj['key'] ?? $obj['Key'] ?? '') : (string)$obj;
+			if ($key === '' || strpos($key, $base) !== 0) { continue; }
+			$rel = substr($key, strlen($base));
+			if ($rel === '' || strpos($rel, '/') !== false || !BackupNaming::is_backup($rel)) { continue; }
+			$ext = BackupNaming::extension_of($rel);
+			$archives_by_stem[substr($rel, 0, -strlen($ext))] = $rel;
+		}
+
 		foreach ($objects as $obj) {
 			$key = is_array($obj) ? (string)($obj['key'] ?? $obj['Key'] ?? '') : (string)$obj;
 			if ($key === '' || strpos($key, $base) !== 0) {
@@ -173,12 +215,19 @@ class FleetBackupRetention {
 			if ($slash !== false) {
 				// Anything inside a directory belongs to that directory's group.
 				$name = substr($rel, 0, $slash);
+				// Except the object store: objects/ is not a restore point, and
+				// filed as one it would carry no stamp, sort oldest, and be the
+				// first thing pruned. Its own rule is prune_objects().
+				if ($name === BackupObjects::DIR) { continue; }
 			} else {
 				// A standalone archive and its envelope share a group. The sidecar
 				// suffix is stripped so the two land together.
 				$name = $rel;
 				if (BackupEnvelope::is_sidecar_name($name)) {
 					$name = substr($name, 0, -strlen(BackupEnvelope::SIDECAR_SUFFIX));
+				} elseif (BackupNaming::is_index($name)) {
+					$stem = BackupNaming::archive_stem_for_index($name);
+					$name = $archives_by_stem[$stem] ?? $name;
 				}
 			}
 
@@ -252,6 +301,11 @@ class FleetBackupRetention {
 	 * artifacts were pruned — three ways a backup can look present on the
 	 * dashboard and be nothing when it is needed.
 	 *
+	 * Offloaded files are checked the same way for both families: the newest
+	 * run's index of each chain, and the index beside each standalone full,
+	 * is read, and every object it marks stored must be on the shelf at its
+	 * recorded size under an epoch whose envelope is there.
+	 *
 	 * Two answers, kept apart because they mean different things:
 	 *
 	 *   problem  what is wrong with a backup whose manifest WAS read — one line
@@ -275,12 +329,17 @@ class FleetBackupRetention {
 		$base = rtrim((string)$base, '/') . '/';
 		$present = array();      // chain dir => [name => size]
 		$manifests = array();    // chain dir => manifest key
+		$standalone = array();   // index key => the archive's name, for a standalone full
 		foreach ($objects as $obj) {
 			if (!is_array($obj)) { continue; }
 			$key = (string)($obj['key'] ?? $obj['Key'] ?? '');
 			if ($key === '' || strpos($key, $base) !== 0) { continue; }
 			$rel = substr($key, strlen($base));
 			$parts = explode('/', $rel);
+			if (count($parts) === 1 && BackupNaming::is_index($rel)) {
+				$standalone[$key] = BackupNaming::archive_stem_for_index($rel);
+				continue;
+			}
 			if (count($parts) !== 2 || strpos($parts[0], BackupChain::DIR_PREFIX) !== 0) { continue; }
 			list($dir, $name) = $parts;
 			$size = $obj['size'] ?? $obj['Size'] ?? null;
@@ -289,15 +348,10 @@ class FleetBackupRetention {
 				$manifests[$dir] = $key;
 			}
 		}
+		$store = self::object_store($objects, $base);
 
 		if ($read === null) {
-			$read = function ($key) use ($creds, $bucket) {
-				$resp = S3Signer::get($creds, $bucket, '/' . ltrim($key, '/'));
-				if ((int)($resp['status'] ?? 0) !== 200) {
-					throw new Exception('HTTP ' . (int)($resp['status'] ?? 0));
-				}
-				return BackupChain::decode((string)($resp['body'] ?? ''));
-			};
+			$read = self::shelf_reader($creds, $bucket);
 		}
 
 		$problems = array();
@@ -317,9 +371,268 @@ class FleetBackupRetention {
 			$problem = self::compare_manifest($manifest, $present[$dir] ?? array());
 			if ($problem !== '') {
 				$problems[] = $problem;
+				continue;
+			}
+			// The newest run's objects index: every object it marks stored must
+			// be on the shelf at its recorded size, under an epoch whose
+			// envelope is there. One more small GET per chain; no per-object
+			// request, the listing already carries key and size.
+			$runs = $manifest['runs'] ?? array();
+			$last = $runs ? $runs[count($runs) - 1] : array();
+			$index_name = (string)($last['artifacts']['objects']['name'] ?? '');
+			if ($index_name === '') { continue; }
+			try {
+				$index = $read($base . $dir . '/' . $index_name);
+				if (!is_array($index)) {
+					throw new Exception('not an objects index');
+				}
+			} catch (Throwable $e) {
+				$unread[] = 'the offloaded-files index of the backup set ' . self::set_words($dir, $manifest)
+					. ' could not be read (' . $e->getMessage() . ')';
+				continue;
+			}
+			$problem = self::compare_index($index, $store['objects'], $store['envelopes'], self::set_words($dir, $manifest));
+			if ($problem !== '') {
+				$problems[] = $problem;
+			}
+		}
+
+		// A standalone full's index, beside its archive: the same rule.
+		ksort($standalone);
+		foreach ($standalone as $key => $stem) {
+			try {
+				$index = $read($key);
+				if (!is_array($index)) {
+					throw new Exception('not an objects index');
+				}
+			} catch (Throwable $e) {
+				$unread[] = 'the offloaded-files index of the backup set ' . self::set_words($stem, null)
+					. ' could not be read (' . $e->getMessage() . ')';
+				continue;
+			}
+			$problem = self::compare_index($index, $store['objects'], $store['envelopes'], self::set_words($stem, null));
+			if ($problem !== '') {
+				$problems[] = $problem;
 			}
 		}
 		return array('problem' => implode('; ', $problems), 'unread' => implode('; ', $unread));
+	}
+
+	/** The default reader: a signed GET, decoded as a manifest or as a gzipped objects index by name. */
+	private static function shelf_reader(array $creds, $bucket) {
+		return function ($key) use ($creds, $bucket) {
+			$resp = S3Signer::get($creds, $bucket, '/' . ltrim($key, '/'));
+			if ((int)($resp['status'] ?? 0) !== 200) {
+				throw new Exception('HTTP ' . (int)($resp['status'] ?? 0));
+			}
+			$body = (string)($resp['body'] ?? '');
+			if (substr($key, -8) === '.json.gz') {
+				return BackupObjects::decode_index($body);
+			}
+			return BackupChain::decode($body);
+		};
+	}
+
+	/**
+	 * The object store as the listing shows it: objects by shelf location
+	 * (epoch/name => ['key', 'size', 'last_modified']) and envelopes by epoch.
+	 */
+	public static function object_store(array $objects, $base) {
+		$base = rtrim((string)$base, '/') . '/';
+		$out = array('objects' => array(), 'envelopes' => array());
+		foreach ($objects as $obj) {
+			if (!is_array($obj)) { continue; }
+			$key = (string)($obj['key'] ?? $obj['Key'] ?? '');
+			if ($key === '' || strpos($key, $base . BackupObjects::DIR . '/') !== 0) { continue; }
+			$parts = explode('/', substr($key, strlen($base . BackupObjects::DIR . '/')));
+			if (count($parts) !== 2 || strpos($parts[0], BackupObjects::EPOCH_PREFIX) !== 0 || $parts[1] === '') { continue; }
+			list($epoch, $file) = $parts;
+			$size = $obj['size'] ?? $obj['Size'] ?? null;
+			if ($file === BackupObjects::ENVELOPE_NAME) {
+				$out['envelopes'][$epoch] = $key;
+				continue;
+			}
+			if (substr($file, -strlen(BackupObjects::OBJECT_SUFFIX)) !== BackupObjects::OBJECT_SUFFIX) { continue; }
+			$name = substr($file, 0, -strlen(BackupObjects::OBJECT_SUFFIX));
+			$out['objects'][$epoch . '/' . $name] = array(
+				'key'           => $key,
+				'size'          => is_numeric($size) ? (int)$size : null,
+				'last_modified' => (string)($obj['last_modified'] ?? $obj['LastModified'] ?? ''),
+			);
+		}
+		return $out;
+	}
+
+	/**
+	 * The pure rule behind the object half of the shelf check: one index
+	 * against the store the listing shows. '' when whole.
+	 */
+	public static function compare_index(array $index, array $store_objects, array $envelopes, $set) {
+		$missing = 0; $first_missing = ''; $wrong = '';
+		foreach (($index['objects'] ?? array()) as $e) {
+			if (empty($e['stored'])) { continue; }
+			$loc = (string)($e['epoch'] ?? '') . '/' . (string)($e['name'] ?? '');
+			if (!isset($store_objects[$loc])) {
+				$missing++;
+				if ($first_missing === '') { $first_missing = (string)$e['name']; }
+				continue;
+			}
+			$expected = (int)($e['object_bytes'] ?? 0);
+			$actual = $store_objects[$loc]['size'];
+			if ($wrong === '' && $expected > 0 && $actual !== null && $actual !== $expected) {
+				$wrong = (string)$e['name'] . ' at ' . $actual . ' bytes on the shelf where its index records ' . $expected;
+			}
+		}
+		if ($missing > 0) {
+			return 'the backup set ' . $set . ' names ' . $missing . ' offloaded file' . ($missing === 1 ? '' : 's')
+				. ' its shelf does not hold (' . $first_missing . ($missing > 1 ? ', …' : '') . ')';
+		}
+		if ($wrong !== '') {
+			return 'the backup set ' . $set . ' holds the offloaded file ' . $wrong;
+		}
+		foreach (($index['epochs'] ?? array()) as $epoch) {
+			if (!isset($envelopes[(string)$epoch])) {
+				return 'the backup set ' . $set . ' names offloaded files in ' . $epoch
+					. ' but that epoch\'s envelope is not on the shelf, so no key can be recovered for them';
+			}
+		}
+		return '';
+	}
+
+	/**
+	 * The object family's retention. An object is deleted when no retained
+	 * run's index names its shelf location AND it landed before the newest
+	 * retained run started — an object uploaded after the newest run has had
+	 * no run to be indexed by. Retained runs are every run of every kept
+	 * chain plus every kept standalone full. The newest index of each kept
+	 * chain is read first (and every standalone's); only a location absent
+	 * from all of those costs a read of the older indexes. Any index that
+	 * cannot be read ends the pass with nothing deleted. An epoch left with
+	 * no objects loses its envelope, except the newest epoch, which is where
+	 * the node's next store goes.
+	 *
+	 * When no kept run carries an index at all, nothing is judged and nothing
+	 * goes: there is no record to judge by.
+	 *
+	 * @param array    $objects    the listing under $base
+	 * @param array    $kept       the kept groups, as group() returns them
+	 * @param callable $read       fn(key): decoded index
+	 * @param callable $delete     fn(key): void, throws on failure
+	 * @return string[] the keys deleted
+	 */
+	public static function prune_objects(array $objects, $base, array $kept, $read, $delete) {
+		$base = rtrim((string)$base, '/') . '/';
+		$store = self::object_store($objects, $base);
+		if (!$store['objects'] && !$store['envelopes']) {
+			return array();
+		}
+
+		// Index keys of the kept runs: each chain's newest first, every
+		// standalone's, then the chains' older runs.
+		$first = array(); $rest = array();
+		foreach ($kept as $group) {
+			$chain = array();
+			foreach ($group['keys'] as $key) {
+				$name = substr($key, strlen($base . $group['name'] . '/'));
+				if (strpos($group['name'], BackupChain::DIR_PREFIX) === 0) {
+					if (preg_match('/^objects-\d{4}\.json\.gz$/', (string)$name)) { $chain[] = $key; }
+				} elseif (BackupNaming::is_index(basename($key))) {
+					$first[] = $key;
+				}
+			}
+			if ($chain) {
+				rsort($chain);
+				$first[] = array_shift($chain);
+				foreach ($chain as $k) { $rest[] = $k; }
+			}
+		}
+		if (!$first) {
+			return array();
+		}
+
+		$candidates = $store['objects'];
+		$newest_run = 0;
+		$read_any = false;
+		foreach (array_merge($first, $rest) as $i => $key) {
+			$is_first = $i < count($first);
+			if (!$candidates && !$is_first) { break; }
+			try {
+				$index = $read($key);
+			} catch (Throwable $e) {
+				// An index that cannot be read — the newest, or an older run's
+				// that alone may name what remains — leaves every object
+				// unjudged: nothing goes this pass. A transient read failure
+				// must never cost a retained restore point its objects.
+				error_log('FleetBackupRetention: could not read the objects index ' . $key . ': ' . $e->getMessage()
+					. '; no offloaded file is pruned this pass.');
+				return array();
+			}
+			$read_any = true;
+			$created = strtotime((string)($index['created'] ?? ''));
+			if ($created !== false && $created > $newest_run) { $newest_run = $created; }
+			foreach (array_keys(BackupObjects::index_locations($index)) as $loc) {
+				unset($candidates[$loc]);
+			}
+		}
+		if (!$read_any || $newest_run === 0) {
+			return array();
+		}
+
+		$deleted = array();
+		$touched = array();
+		foreach ($candidates as $loc => $o) {
+			$landed = strtotime((string)$o['last_modified']);
+			if ($landed === false || $landed >= $newest_run) { continue; }
+			$delete($o['key']);
+			$deleted[] = $o['key'];
+			$touched[substr($loc, 0, strpos($loc, '/'))] = true;
+			unset($store['objects'][$loc]);
+		}
+
+		// Envelopes of emptied epochs, never the newest epoch's.
+		$epochs = array_keys($store['envelopes']);
+		sort($epochs);
+		$newest_epoch = $epochs ? end($epochs) : '';
+		foreach (array_keys($touched) as $epoch) {
+			if ($epoch === $newest_epoch || !isset($store['envelopes'][$epoch])) { continue; }
+			$left = false;
+			foreach ($store['objects'] as $loc => $o) {
+				if (strpos($loc, $epoch . '/') === 0) { $left = true; break; }
+			}
+			if (!$left) {
+				$delete($store['envelopes'][$epoch]);
+				$deleted[] = $store['envelopes'][$epoch];
+			}
+		}
+		return $deleted;
+	}
+
+	/**
+	 * What the run request carries about the object store, from the listing
+	 * the pass already took: the key of the newest index on the shelf (the
+	 * newest group's newest run), or '' when none, and every epoch envelope's
+	 * key by epoch id. The caller signs them.
+	 *
+	 * @return array{index:string, envelopes:array<string,string>}
+	 */
+	public static function index_links(array $objects, $base) {
+		$base = rtrim((string)$base, '/') . '/';
+		$index = '';
+		foreach (self::group($objects, $base) as $group) {
+			$chain = array();
+			foreach ($group['keys'] as $key) {
+				$name = basename($key);
+				if (strpos($group['name'], BackupChain::DIR_PREFIX) === 0) {
+					if (preg_match('/^objects-\d{4}\.json\.gz$/', $name)) { $chain[] = $key; }
+				} elseif (BackupNaming::is_index($name)) {
+					$index = $key;
+				}
+			}
+			if ($chain) { rsort($chain); $index = $chain[0]; }
+			if ($index !== '') { break; }
+		}
+		$store = self::object_store($objects, $base);
+		return array('index' => $index, 'envelopes' => $store['envelopes']);
 	}
 
 	/**

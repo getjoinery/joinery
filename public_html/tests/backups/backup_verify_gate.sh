@@ -138,6 +138,7 @@ chk "having read the full, the incremental and the dump" "$(kv "$OUT" VERIFY_ART
 chk "and every byte of them" "$(kv "$OUT" VERIFY_BYTES)" "$((B0 + B1 + D1B))"
 chk "and listed entries" "$([ "$(kv "$OUT" VERIFY_FILES)" -gt 0 ] && echo yes || echo no)" "yes"
 chk "with no reason line on a pass" "$(kv "$OUT" VERIFY_REASON)" ""
+chk "offloaded files are reported unproven on the shell path (no site key here)" "$(kv "$OUT" VERIFY_OBJECTS)" "0"
 chk "the chain directory is left as it was" \
     "$(ls "$W/arts" | sort | tr '\n' ' ')" "db-0001.sql.gz.enc files-0000.tar.gz.enc files-0001.tar.gz.enc manifest.json "
 

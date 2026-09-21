@@ -1,6 +1,6 @@
 # Backups — The Archive Never Lands on Disk
 
-**Status:** Unbuilt.
+**Status:** Built and reviewed 2026-09-21; tests green. Awaiting the release and the owner's live gate (stop point 1).
 **Date:** 2026-09-20
 
 ## For the executor — read this first

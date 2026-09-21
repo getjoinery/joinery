@@ -131,6 +131,7 @@ class NoopDriver implements CloudStorageDriver {
 	public function delete(string $k): void {}
 	public function url(string $k): string { return 'noop://' . $k; }
 	public function ping(): array { return ['ok' => true, 'message' => 'noop']; }
+	public function head(string $k): ?array { return null; }
 }
 
 $drvflag = function($table, $id) use ($dblink) { $q = $dblink->prepare("SELECT drv FROM $table WHERE id=?"); $q->execute([$id]); return $q->fetchColumn(); };

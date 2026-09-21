@@ -9,6 +9,9 @@
  * Expected credential shape: ['access_key' => ..., 'secret_key' => ...,
  *                             'region' => ..., 'endpoint' => ...]
  *
+ * @version 1.6 - put_stream(): a stream of unknown length (an engine's stdout) goes up through the
+ *                multipart path, hashed and counted as it goes, with completion deferrable so a
+ *                caller can refuse an archive whose producer failed after the bytes
  * @version 1.5 - presign_get(): a URL that reads one object for a bounded time, so a node can
  *                fetch a backup back without ever being handed a bucket credential
  * @version 1.4 - multipart upload: put_file() switches to the S3 multipart API above
@@ -273,6 +276,239 @@ class S3Signer {
 				self::abort_multipart($creds, $bucket, $path, $upload_id);
 			}
 		}
+	}
+
+	/**
+	 * Upload a stream of unknown length that cannot be re-read — an engine's
+	 * stdout — without ever landing it on disk.
+	 *
+	 * The stream is read one part at a time (MULTIPART_PART_BYTES: the same
+	 * peak memory as put_file()'s multipart path), hashed and counted as it
+	 * goes. A stream that ends inside the first part is sent as one signed PUT
+	 * of the buffered bytes, length known, exactly as a small file is. Anything
+	 * longer opens a multipart upload once the first full part is in hand; each
+	 * part is a string signed with its real payload hash, so a retry re-sends
+	 * the bytes it holds and needs no seekable source.
+	 *
+	 * Returns the ordinary ['status','body','headers','attempts','retry_log']
+	 * shape plus 'bytes' and 'sha256' of everything read from the stream. A
+	 * failed part hands back that part's response and aborts the upload, as
+	 * put_file_multipart() does.
+	 *
+	 * $complete = false is for a caller whose producer reports success only
+	 * AFTER its output closes (tar's exit status arrives after the bytes).
+	 * Nothing then reaches the shelf inside this call: the parts go up but
+	 * CompleteMultipartUpload is not issued, and a stream short enough for a
+	 * single PUT is held in memory unsent. The result carries 'pending', an
+	 * opaque handle for complete_stream() or abort_stream(); 'status' is 0
+	 * until one of them is called. That is what lets a caller refuse an archive
+	 * whose producer failed after the stream closed, with no object to delete
+	 * — which matters under a write-only credential.
+	 *
+	 * $part_size is overridable for tests against a local fixture; production
+	 * callers never pass it.
+	 */
+	public static function put_stream($creds, $bucket, $path, $fh, $content_type = 'application/octet-stream', $complete = true, $part_size = self::MULTIPART_PART_BYTES) {
+		$part_size = (int)$part_size;
+		if ($part_size <= 0) {
+			throw new S3SignerException('Invalid multipart part size: ' . $part_size . '.');
+		}
+		if (!is_resource($fh)) {
+			throw new S3SignerException('put_stream() needs an open stream.');
+		}
+
+		$hash = hash_init('sha256');
+		$bytes = 0;
+
+		// The first part decides the shape. Short of a part, or exactly one
+		// part with nothing behind it, is a single PUT; otherwise multipart.
+		// The peek is one byte, so memory stays at one part.
+		$first = self::read_up_to($fh, $part_size);
+		hash_update($hash, $first);
+		$bytes += strlen($first);
+		$carry = '';
+		if (strlen($first) === $part_size) {
+			$carry = self::read_up_to($fh, 1);
+		}
+
+		$pending = array(
+			'creds' => $creds, 'bucket' => $bucket, 'path' => $path, 'content_type' => $content_type,
+			'upload_id' => null, 'etags' => array(), 'buffer' => null, 'bytes' => 0, 'sha256' => '',
+		);
+
+		if ($carry === '') {
+			// Everything fits in one request. Sent now, or held for the caller.
+			$pending['buffer'] = $first;
+			$pending['bytes']  = $bytes;
+			$pending['sha256'] = hash_final($hash);
+			$first = null;
+			if (!$complete) {
+				return self::stream_pending_result($pending, 0);
+			}
+			return self::complete_stream($pending);
+		}
+
+		$create = self::request('POST', $creds, $bucket, $path, array('uploads' => ''), null, 0, $content_type);
+		if ((int)$create['status'] < 200 || (int)$create['status'] >= 300) {
+			return self::with_stream_totals($create, $bytes, hash_final($hash));
+		}
+		$upload_id = null;
+		if (preg_match('#<UploadId>(.*?)</UploadId>#s', (string)$create['body'], $m)) {
+			$upload_id = html_entity_decode(trim($m[1]), ENT_XML1 | ENT_QUOTES, 'UTF-8');
+		}
+		if ($upload_id === null || $upload_id === '') {
+			throw new S3SignerException('CreateMultipartUpload returned no uploadId.');
+		}
+		$pending['upload_id'] = $upload_id;
+
+		$attempts = (int)$create['attempts'];
+		$done = false;
+		try {
+			$number = 0;
+			$chunk = $first;
+			$first = null;
+			while ($chunk !== '') {
+				$number++;
+				if ($number > self::MULTIPART_MAX_PARTS) {
+					throw new S3SignerException('The stream needs more than ' . self::MULTIPART_MAX_PARTS
+						. ' parts of ' . $part_size . ' bytes, over the API cap.');
+				}
+				$resp = self::request('PUT', $creds, $bucket, $path,
+					array('partNumber' => (string)$number, 'uploadId' => $upload_id),
+					$chunk, strlen($chunk));
+				$attempts += (int)$resp['attempts'];
+				if ((int)$resp['status'] < 200 || (int)$resp['status'] >= 300) {
+					$resp['retry_log'][] = 'multipart: streamed part ' . $number . ' failed; upload aborted';
+					return self::with_stream_totals($resp, $bytes, hash_final($hash));
+				}
+				$etag = trim((string)($resp['headers']['etag'] ?? ''));
+				if ($etag === '') {
+					throw new S3SignerException('UploadPart returned no ETag for part ' . $number . '.');
+				}
+				$pending['etags'][$number] = $etag;
+
+				// The next part starts with the byte peeked to decide the shape
+				// (or with whatever the previous read left over), then fills to
+				// the part size or to the end of the stream.
+				$chunk = $carry;
+				$carry = '';
+				if (strlen($chunk) < $part_size) {
+					$chunk .= self::read_up_to($fh, $part_size - strlen($chunk));
+				}
+				hash_update($hash, $chunk);
+				$bytes += strlen($chunk);
+			}
+
+			$pending['bytes']  = $bytes;
+			$pending['sha256'] = hash_final($hash);
+			$done = true;
+			if (!$complete) {
+				return self::stream_pending_result($pending, $attempts);
+			}
+			$final = self::complete_stream($pending);
+			$final['attempts'] += $attempts;
+			return $final;
+		} finally {
+			if (!$done) {
+				self::abort_multipart($creds, $bucket, $path, $upload_id);
+			}
+		}
+	}
+
+	/**
+	 * Finish a put_stream() that was asked not to complete: the single PUT of
+	 * the held buffer, or CompleteMultipartUpload over the parts already up,
+	 * with the same 200-with-<Error> guard as put_file_multipart(). Returns the
+	 * ordinary response shape plus 'bytes' and 'sha256'. Any failure aborts the
+	 * multipart upload, so nothing partial is left claimable.
+	 */
+	public static function complete_stream(array $pending) {
+		$creds = $pending['creds']; $bucket = $pending['bucket']; $path = $pending['path'];
+		$bytes = (int)$pending['bytes']; $sha256 = (string)$pending['sha256'];
+
+		if ($pending['upload_id'] === null) {
+			$buffer = (string)$pending['buffer'];
+			$resp = self::request('PUT', $creds, $bucket, $path, array(), $buffer, strlen($buffer), $pending['content_type']);
+			return self::with_stream_totals($resp, $bytes, $sha256);
+		}
+
+		$upload_id = $pending['upload_id'];
+		$xml = self::build_complete_xml($pending['etags']);
+		$done = false;
+		try {
+			$resp = null;
+			for ($try = 1; $try <= self::MAX_ATTEMPTS; $try++) {
+				$resp = self::request('POST', $creds, $bucket, $path, array('uploadId' => $upload_id),
+					$xml, strlen($xml), 'application/xml');
+				if ((int)$resp['status'] < 200 || (int)$resp['status'] >= 300) {
+					$resp['retry_log'][] = 'multipart: CompleteMultipartUpload failed; upload aborted';
+					return self::with_stream_totals($resp, $bytes, $sha256);
+				}
+				if (self::complete_body_ok($resp['body'])) {
+					$done = true;
+					return self::with_stream_totals($resp, $bytes, $sha256);
+				}
+				if ($try < self::MAX_ATTEMPTS) {
+					sleep(self::RETRY_BASE_DELAY_SECONDS * (1 << ($try - 1)));
+				}
+			}
+			$resp['retry_log'][] = 'multipart: CompleteMultipartUpload answered HTTP ' . $resp['status']
+				. ' with an error body after ' . self::MAX_ATTEMPTS . ' attempts; upload aborted';
+			$resp['status'] = 500;
+			return self::with_stream_totals($resp, $bytes, $sha256);
+		} finally {
+			if (!$done) {
+				self::abort_multipart($creds, $bucket, $path, $upload_id);
+			}
+		}
+	}
+
+	/**
+	 * Decline a put_stream() that was asked not to complete. A multipart upload
+	 * is aborted (best effort, as every abort is); a held buffer is simply
+	 * dropped. Either way nothing of the stream is on the shelf afterwards.
+	 */
+	public static function abort_stream(array $pending) {
+		if (!empty($pending['upload_id'])) {
+			self::abort_multipart($pending['creds'], $pending['bucket'], $pending['path'], $pending['upload_id']);
+		}
+	}
+
+	private static function stream_pending_result(array $pending, $attempts) {
+		return array(
+			'status' => 0, 'body' => '', 'headers' => array(), 'attempts' => (int)$attempts, 'retry_log' => array(),
+			'bytes' => (int)$pending['bytes'], 'sha256' => (string)$pending['sha256'], 'pending' => $pending,
+		);
+	}
+
+	private static function with_stream_totals(array $resp, $bytes, $sha256) {
+		$resp['bytes'] = (int)$bytes;
+		$resp['sha256'] = (string)$sha256;
+		return $resp;
+	}
+
+	/**
+	 * Read up to $bytes from a stream, stopping early only at end of stream.
+	 * A pipe hands back whatever is ready on each fread(), so one call is not
+	 * one part; this loops until the part is full or the producer has closed.
+	 */
+	private static function read_up_to($fh, $bytes) {
+		$chunk = '';
+		$remaining = (int)$bytes;
+		while ($remaining > 0) {
+			$piece = fread($fh, min($remaining, 8388608));
+			if ($piece === false || $piece === '') {
+				if (feof($fh)) { break; }
+				// Not EOF and nothing ready: a blocking stream does not do this,
+				// but a non-blocking one can. Wait for data rather than spin.
+				$r = array($fh); $w = null; $e = null;
+				if (@stream_select($r, $w, $e, 1) === false) { break; }
+				continue;
+			}
+			$chunk .= $piece;
+			$remaining -= strlen($piece);
+		}
+		return $chunk;
 	}
 
 	/**

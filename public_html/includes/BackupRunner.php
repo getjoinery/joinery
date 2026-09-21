@@ -33,6 +33,35 @@
  * profile sweeps its own working directory by age, because the machine holding
  * the files is the only one that can.
  *
+ * @version 1.18.2 - the run's message names the epoch envelopes only a retired recovery key opens, so a
+ *                   management node's job result and the node's own history say so
+ * @version 1.18.1 - a run that examined the epoch envelopes records the ones only a retired recovery
+ *                   key opens (objects/retired-epochs.json) for Recovery Readiness
+ * @version 1.18 - the manager profile carries offloaded files too (specs/backup_offloaded_files.md
+ *                 § Rollout): plan_manager() reads the three request fields a management node
+ *                 running the object store sends — objects, objects_index_url,
+ *                 epoch_envelope_urls — and a run whose request carried objects writes the
+ *                 profile's enabled marker; epoch envelopes arriving by link are re-sealed after
+ *                 a recovery-key rotation the same way the site profile re-seals its own.
+ * @version 1.17 - offloaded files are part of the backup (specs/backup_offloaded_files.md): a run
+ *                 with files in it reads what its shelf holds, stores every cloud blob the shelf
+ *                 lacks (one at a time, inside OBJECT_STORE_BUDGET_*), excludes every cloud blob's
+ *                 local paths from the archive, writes the objects index as an artifact of the
+ *                 run, records the held set, and releases the local bytes every enabled profile
+ *                 holds. Site retention deletes the objects only pruned runs named.
+ * @version 1.16 - the database dump streams too (backup_database.sh --archive -), in chain mode as
+ *                 db-{seq}.sql.gz.enc and in database-only mode as the standalone artifact with its
+ *                 envelope sidecar; the upload completes only when pg_dump exited 0. Nothing a run
+ *                 makes but the metadata artifact and a sidecar is ever on this disk
+ * @version 1.15 - a standalone whole-site archive streams too (backup_project.sh --archive -): the
+ *                 object is named up front so the envelope is minted for it, and no staging copy
+ *                 of the tree is made. upload() passes an already-streamed artifact through
+ * @version 1.14 - the files archive streams from tar straight into the bucket (S3Signer::put_stream)
+ *                 and never lands on disk: stream_engine() hands the engine's stdout to the signer
+ *                 with completion deferred, reads the engine's report after the bytes, and
+ *                 completes the upload only when tar and openssl succeeded and at least 64 bytes
+ *                 went up. A streamed artifact carries its bucket key and no path; a failed run
+ *                 deletes the streamed object where the credential can
  * @version 1.13 - sweep_local removes verify working directories older than a day, and the
  *                 backup locks are acquirable by a verify (take_locks / release_locks) so a
  *                 verify never reads a chain a run is writing
@@ -92,6 +121,7 @@ require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
 require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 require_once(PathHelper::getIncludePath('data/backup_history_class.php'));
 require_once(PathHelper::getIncludePath('includes/BackupVerifier.php'));
+require_once(PathHelper::getIncludePath('includes/BackupObjects.php'));
 
 class BackupRunnerException extends Exception {}
 
@@ -144,6 +174,19 @@ class BackupRunner {
 	 * any one of them invalidates every run after it.
 	 */
 	const MAX_INCREMENTALS = 30;
+
+	/**
+	 * One budget covers a run's whole object store step — local originals
+	 * and catch-up from the file store alike: 2 GB or 20 minutes, whichever
+	 * comes first. Bytes transferred, not bytes held: the step holds one
+	 * object's ciphertext at a time. What the budget leaves is indexed
+	 * `stored: false` and taken next run. Constants, not settings: a manager
+	 * run after a week of failed runs, or a first run on a big site, needs a
+	 * ceiling inside a nightly task that has one, and nobody should be able
+	 * to remove it.
+	 */
+	const OBJECT_STORE_BUDGET_BYTES = 2147483648;
+	const OBJECT_STORE_BUDGET_SECONDS = 1200;
 
 	/**
 	 * Run one backup end to end. Returns a scheduled-task result array.
@@ -297,20 +340,13 @@ class BackupRunner {
 	 * nothing outside this machine, which is the whole point of it.
 	 */
 	private static function plan_site(array $config) {
-		$type = (string)($config['backup_type'] ?? self::setting('backup_type'));
+		$type = isset($config['backup_type']) ? (string)$config['backup_type'] : self::site_backup_type();
 		if ($type !== 'database') { $type = 'project'; }
 
-		$target_id = (int)self::setting('backup_target_id');
-		$target = null;
-		if ($target_id) {
-			try {
-				$candidate = new BackupTarget($target_id, TRUE);
-				if ($candidate->key && $candidate->get('bkt_enabled') && !$candidate->get('bkt_delete_time')) {
-					$target = $candidate;
-				}
-			} catch (\Throwable $e) {
-				throw new BackupRunnerException('The configured backup target could not be loaded.');
-			}
+		try {
+			$target = self::site_target();
+		} catch (\Throwable $e) {
+			throw new BackupRunnerException('The configured backup target could not be loaded.');
 		}
 
 		if (!$target) {
@@ -356,7 +392,36 @@ class BackupRunner {
 			// This site prunes its own shelf. It holds the credentials, and the
 			// backups being counted are its own.
 			'prunes_cloud' => true,
+			// Offloaded files are stored on this shelf and indexed by every run
+			// with files in it; a database-only backup carries no files and its
+			// profile is not enabled for objects. What the shelf holds is read
+			// by listing it: this profile holds the credential that can.
+			'objects'        => ($type !== 'database'),
+			'objects_source' => 'listing',
 		);
+	}
+
+	/**
+	 * The site's own target when one is configured, enabled and undeleted;
+	 * null otherwise. Shared by plan_site() and BackupProfile::enabled(), so
+	 * "does this site back itself up" has one answer. Throws when the row
+	 * cannot be loaded at all.
+	 */
+	public static function site_target() {
+		$target_id = (int)self::setting('backup_target_id');
+		if (!$target_id) {
+			return null;
+		}
+		$candidate = new BackupTarget($target_id, TRUE);
+		if ($candidate->key && $candidate->get('bkt_enabled') && !$candidate->get('bkt_delete_time')) {
+			return $candidate;
+		}
+		return null;
+	}
+
+	/** The configured site backup type: 'project' or 'database'. */
+	public static function site_backup_type() {
+		return ((string)self::setting('backup_type') === 'database') ? 'database' : 'project';
 	}
 
 	/**
@@ -439,6 +504,7 @@ class BackupRunner {
 				. 'No management node can supply this for you. (' . $e->getMessage() . ')');
 		}
 		$base = self::output_dir();
+		$objects = ($type !== 'database') && !empty($m['objects']);
 
 		return array(
 			'profile'      => BackupProfile::MANAGER,
@@ -463,7 +529,33 @@ class BackupRunner {
 			// no keep count at all: the flag is the whole answer, and there is
 			// no second number for it to disagree with.
 			'prunes_cloud' => false,
+			// The object store on the manager shelf is driven by three request
+			// fields a management node running that code sends. A request
+			// without `objects` — an older management node — stores nothing and
+			// holds nothing, so a node upgraded ahead of its management node
+			// behaves as it always did. The credential cannot list, so what the
+			// shelf holds arrives as the newest index by link, never by listing;
+			// a request with no link means the shelf holds nothing yet. Links
+			// are https or nothing: a signature is a bearer token.
+			'objects'             => $objects,
+			'objects_source'      => 'index',
+			'objects_index_url'   => ($objects && BackupFetch::is_signed_url($m['objects_index_url'] ?? '')) ? (string)$m['objects_index_url'] : '',
+			'epoch_envelope_urls' => $objects ? self::epoch_envelope_urls($m['epoch_envelope_urls'] ?? null) : array(),
 		);
+	}
+
+	/** The epoch envelope links a request carries: epoch id => https link, anything else dropped. */
+	private static function epoch_envelope_urls($raw) {
+		$out = array();
+		if (!is_array($raw)) {
+			return $out;
+		}
+		foreach ($raw as $epoch => $url) {
+			if (preg_match('/^epoch-\d{8}_\d{6}$/', (string)$epoch) && BackupFetch::is_signed_url($url)) {
+				$out[(string)$epoch] = (string)$url;
+			}
+		}
+		return $out;
 	}
 
 	/**
@@ -672,14 +764,28 @@ class BackupRunner {
 		$manifest_path = $chain_d . '/' . BackupChain::MANIFEST_NAME;
 
 		$artifacts = array();
+		$objects = null;
 		try {
 			try {
-				$artifacts['files'] = self::run_files_engine($plan, $chain_d, $seq, $snar, $key_file);
-				$artifacts['db']    = self::run_db_engine($plan, $chain_d, $seq, $key_file);
+				// Offloaded files first, so that at commit the shelf holds
+				// everything the archive leaves out: what the shelf holds, the
+				// exclude list, the store step.
+				$objects = self::begin_objects($plan, $chain_id . '/' . $seq);
+				// The files archive streams straight to the bucket: by the time
+				// run_files_engine() returns, the object is complete on the shelf
+				// and the artifact carries its key. It is never on this disk.
+				$artifacts['files'] = self::run_files_engine($plan, $chain_id, $chain_d, $seq, $snar, $key_file,
+					$objects ? $objects['exclude'] : '');
+				$artifacts['db']    = self::run_db_engine($plan, $chain_id, $chain_d, $seq, $key_file);
 				$meta = self::build_meta($plan, $chain_d, $seq, $key_file);
 				if ($meta) { $artifacts['meta'] = $meta; }
+				if ($objects) {
+					$artifacts['objects'] = self::write_index_artifact($plan, $objects,
+						$chain_d . '/' . BackupChain::artifact_name('objects', $seq));
+				}
 			} finally {
 				self::shred($key_file);
+				if ($objects && $objects['exclude'] !== '') { @unlink($objects['exclude']); }
 			}
 
 			$level = ($reason !== '') ? 0 : 1;
@@ -715,7 +821,7 @@ class BackupRunner {
 			// large site would strand its archives on disk until chain retention
 			// finally removed the whole chain — weeks, on a disk that may not
 			// have them to spare.
-			self::discard_failed_run($chain_d, $seq, $artifacts, $manifest_path, $manifest_pre);
+			self::discard_failed_run($chain_d, $seq, $artifacts, $manifest_path, $manifest_pre, $plan);
 			throw $e;
 		}
 
@@ -731,26 +837,39 @@ class BackupRunner {
 		$history->set('bkh_finish_time', gmdate('Y-m-d H:i:s'));
 		$history->set('bkh_message', ($level === 0 ? 'Full' : 'Incremental') . ' run ' . $seq . ' of ' . $chain_id
 			. ($reason !== '' ? ' (new chain: ' . $reason . ')' : '')
+			. ($objects ? self::objects_note($objects) : '')
 			. ($warning !== '' ? ' — WARNING: ' . $warning : ''));
 		$history->save();
 
 		if ($plan['delete_local']) {
 			// A machine that asked for its disk back gets it in chain mode too.
 			// The chain stays extendable from just the manifest and the
-			// snapshot; the uploaded artifacts need no local copy.
-			foreach ($artifacts as $a) { @unlink($a['path']); }
+			// snapshot; the uploaded artifacts need no local copy. A streamed
+			// artifact has no path: there was never a local copy to remove.
+			foreach ($artifacts as $a) {
+				if (!empty($a['path'])) { @unlink($a['path']); }
+			}
 		}
+
+		// The run is committed: record what the shelf now holds, and release
+		// the local bytes every enabled profile holds.
+		$released = $objects ? self::finish_objects($plan, $objects) : 0;
 
 		// Both retention families run on every backup, so a site switched
 		// between modes still ages its old backups out. Each pass only ever
 		// sees its own kind: cloud retention skips chain rows entirely, so it
 		// can never delete a chain's full out from under its incrementals.
-		$pruned = self::enforce_chain_retention($plan) + self::enforce_cloud_retention($plan);
+		// Objects are a third family, pruned by what the first two pruned.
+		$pruned_indexes = array();
+		$pruned = self::enforce_chain_retention($plan, $pruned_indexes) + self::enforce_cloud_retention($plan, $pruned_indexes);
+		$objects_pruned = self::enforce_object_retention($plan, $pruned_indexes);
 		$swept  = self::sweep_local($plan);
 
 		$msg = ($level === 0 ? 'Full backup' : 'Incremental backup') . ' (' . self::human($artifacts['files']['bytes']) . ' of files)'
 			. ' in ' . $chain_id . ' to ' . $plan['target']->get('bkt_name');
+		if ($objects) { $msg .= self::objects_message($objects, $released); }
 		if ($pruned) { $msg .= "; pruned {$pruned} old backup" . ($pruned === 1 ? '' : 's'); }
+		if ($objects_pruned) { $msg .= "; removed {$objects_pruned} offloaded file" . ($objects_pruned === 1 ? '' : 's') . ' no kept backup names'; }
 		if ($swept)  { $msg .= "; swept {$swept} local file" . ($swept === 1 ? '' : 's'); }
 
 		if ($warning !== '') {
@@ -806,12 +925,29 @@ class BackupRunner {
 	 * restored to its pre-run state ($manifest_before), or deleted when the run
 	 * was starting a brand-new chain and there was no pre-run state to restore.
 	 *
+	 * An artifact that streamed to the bucket has no local file to delete; it
+	 * has an object, which is deleted where the credential can delete (the
+	 * site profile). Under the manager profile's write-only credential the
+	 * object stays until its chain is pruned whole — a bounded orphan the
+	 * manifest never names, the same one a failed upload_chain() can leave.
+	 *
 	 * Every step is best-effort: this runs on the failure path, and the failure
 	 * being reported must stay the real one.
 	 */
-	private static function discard_failed_run($chain_d, $seq, array $artifacts, $manifest_path, $manifest_before) {
+	private static function discard_failed_run($chain_d, $seq, array $artifacts, $manifest_path, $manifest_before, ?array $plan = null) {
 		foreach ($artifacts as $a) {
 			if (!empty($a['path'])) { @unlink($a['path']); }
+		}
+		if ($plan !== null && !empty($plan['prunes_cloud'])) {
+			foreach ($artifacts as $a) {
+				if (empty($a['key']) || !empty($a['path'])) { continue; }
+				try {
+					list($creds, $bucket) = self::destination($plan);
+					S3Signer::delete($creds, $bucket, '/' . ltrim($a['key'], '/'));
+				} catch (\Throwable $e) {
+					error_log('BackupRunner: could not delete ' . $a['key'] . ' after a failed run: ' . $e->getMessage());
+				}
+			}
 		}
 		foreach (BackupChain::KINDS as $kind) {
 			@unlink($chain_d . '/' . BackupChain::artifact_name($kind, $seq, true));
@@ -844,87 +980,204 @@ class BackupRunner {
 		@rmdir($chain_d);
 	}
 
-	/** Archive the file tree, incrementally when the chain is being extended. */
-	private static function run_files_engine(array $plan, $chain_d, $seq, $snar, $key_file) {
-		$tools = PathHelper::getSiteRoot() . '/maintenance_scripts/sysadmin_tools';
-		$name  = 'files-' . str_pad((string)(int)$seq, 4, '0', STR_PAD_LEFT);
+	/**
+	 * Archive the file tree, incrementally when the chain is being extended,
+	 * streaming the encrypted archive straight into the bucket.
+	 *
+	 * The engine's stdout IS the archive (`--archive -`); its verdict on
+	 * itself arrives afterwards in the report file (`--report`), because tar's
+	 * exit status is known only once its output has closed. The upload is
+	 * completed only when the report says the archive is whole: exit 0, tar 0
+	 * or 1 (a file changed while being read — normal on a live tree), openssl
+	 * 0, and at least 64 bytes sent. An openssl envelope around an empty
+	 * stream is 32 bytes; whatever produced fewer than 64 was not tar archiving
+	 * this tree, and a backup of nothing is never recorded as a backup.
+	 */
+	private static function run_files_engine(array $plan, $chain_id, $chain_d, $seq, $snar, $key_file, $exclude_file = '') {
+		$tools  = PathHelper::getSiteRoot() . '/maintenance_scripts/sysadmin_tools';
+		$name   = BackupChain::artifact_name('files', $seq);
+		$report = $chain_d . '/.files-report-' . getmypid();
 
 		$cmd = 'bash ' . escapeshellarg($tools . '/backup_files.sh')
 			. ' ' . escapeshellarg($plan['project'])
-			. ' --project-dir ' . escapeshellarg(PathHelper::getSiteRoot())
-			. ' --output-dir ' . escapeshellarg($chain_d)
-			. ' --name ' . escapeshellarg($name)
+			. ' --project-dir ' . escapeshellarg($plan['project_dir'] ?? PathHelper::getSiteRoot())
+			. ' --archive - --report ' . escapeshellarg($report)
 			. ' --snar ' . escapeshellarg($snar)
 			. ' --key-file ' . escapeshellarg($key_file);
 
 		foreach (self::extra_excludes() as $x) {
 			$cmd .= ' --exclude ' . escapeshellarg($x);
 		}
-
-		$out = array(); $rc = 0;
-		exec($cmd . ' 2>&1', $out, $rc);
-		$output = implode("\n", $out);
-		if ($rc !== 0) {
-			throw new BackupRunnerException('The files engine exited ' . $rc . '. ' . self::tail($output));
+		// Every cloud blob's local paths: the objects index accounts for them,
+		// so they never enter an archive — not even while they wait on disk
+		// for a shelf.
+		if ($exclude_file !== '') {
+			$cmd .= ' --exclude-from ' . escapeshellarg($exclude_file);
 		}
 
-		$fields = self::parse_kv($output);
-		if (empty($fields['ARCHIVE']) || !is_file($fields['ARCHIVE'])) {
-			throw new BackupRunnerException('The files engine reported no archive. ' . self::tail($output));
+		$artifact = self::stream_engine($plan, $cmd, $report, $chain_id . '/', $name, 'files',
+			function (array $r, $bytes) {
+				$tar = (int)($r['TAR_RC'] ?? 2);
+				$enc = (int)($r['ENC_RC'] ?? 1);
+				if ($enc !== 0) { return 'encrypting the archive failed (openssl exit ' . $enc . ')'; }
+				if ($tar !== 0 && $tar !== 1) { return 'the archive failed (tar exit ' . $tar . ')'; }
+				if ($bytes < self::MIN_ARCHIVE_BYTES) {
+					return 'the archive is ' . $bytes . ' bytes — nothing was archived (tar exit ' . $tar
+						. '). Refusing to record an empty backup';
+				}
+				return '';
+			});
+		$artifact['level'] = (int)($artifact['report']['LEVEL'] ?? 1);
+		unset($artifact['report']);
+		return $artifact;
+	}
+
+	/**
+	 * Fewer bytes than this is not an archive. A gzipped tar holding even one
+	 * entry is longer; an openssl envelope around an empty stream is 32 bytes.
+	 */
+	const MIN_ARCHIVE_BYTES = 64;
+
+	/**
+	 * Run an engine in stream mode and put its stdout in the bucket as one
+	 * object, with nothing landing on disk.
+	 *
+	 * The engine's stdout goes to S3Signer::put_stream() with completion
+	 * deferred; when the stream closes the process is reaped, its report file
+	 * read, and $accept asked whether the archive is whole — it returns '' to
+	 * complete the upload, or the reason to refuse it. A refused upload is
+	 * aborted, so nothing partial or empty is ever on the shelf, and the
+	 * refusal is thrown with the engine's stderr tail. The exit status is
+	 * checked before $accept: an engine that exited non-zero is refused whatever
+	 * its report says.
+	 *
+	 * Returns the artifact: name, key, bytes, sha256, kind, and the parsed
+	 * report under 'report' for the caller to read LEVEL and the like. No path.
+	 *
+	 * @param callable $accept function(array $report, int $bytes): string
+	 */
+	private static function stream_engine(array $plan, $cmd, $report_file, $sub, $name, $kind, callable $accept) {
+		list($creds, $bucket, $base_key) = self::destination($plan);
+		$key = $base_key . $sub . $name;
+
+		$err_file = tempnam(sys_get_temp_dir(), 'jy_engine_err_');
+		@chmod($err_file, 0600);
+		@unlink($report_file);
+
+		$descriptors = array(
+			0 => array('file', '/dev/null', 'r'),
+			1 => array('pipe', 'w'),
+			2 => array('file', $err_file, 'w'),
+		);
+		$proc = @proc_open(array('bash', '-c', $cmd), $descriptors, $pipes);
+		if (!is_resource($proc)) {
+			@unlink($err_file);
+			throw new BackupRunnerException('The ' . $kind . ' engine could not be started.');
+		}
+
+		$resp = null;
+		$failure = null;
+		try {
+			$resp = S3Signer::put_stream($creds, $bucket, '/' . ltrim($key, '/'), $pipes[1], 'application/octet-stream', false);
+		} catch (\Throwable $e) {
+			$failure = $e;
+		}
+		// Whatever became of the upload, the engine is reaped: closing its
+		// stdout ends a producer still writing, and proc_close collects the
+		// status. Only then are the report and stderr complete.
+		@fclose($pipes[1]);
+		$rc = (int)proc_close($proc);
+		$stderr = (string)@file_get_contents($err_file);
+		@unlink($err_file);
+		$report = is_file($report_file) ? self::parse_kv((string)@file_get_contents($report_file)) : array();
+		@unlink($report_file);
+
+		if ($failure !== null) {
+			throw new BackupRunnerException('Streaming ' . $name . ' to the bucket failed: ' . $failure->getMessage()
+				. ($stderr !== '' ? ' | engine: ' . self::tail($stderr) : ''));
+		}
+		if (empty($resp['pending'])) {
+			// A part was refused; put_stream() has already aborted the upload.
+			$msg = S3Signer::extract_error($resp['body'] ?? '') ?: ('HTTP ' . (int)($resp['status'] ?? 0));
+			throw new BackupRunnerException('Upload of ' . $name . ' failed: ' . $msg
+				. ($rc !== 0 ? ' (the ' . $kind . ' engine exited ' . $rc . ')' : ''));
+		}
+
+		$bytes = (int)$resp['bytes'];
+		if ($rc !== 0) {
+			// The report, when there is one, says which stage failed; the exit
+			// status alone does not.
+			$why = 'the ' . $kind . ' engine exited ' . $rc;
+			$reason = $report ? (string)$accept($report, $bytes) : '';
+			if ($reason !== '') { $why .= ': ' . $reason; }
+		} elseif (!$report) {
+			$why = 'the ' . $kind . ' engine wrote no report';
+		} else {
+			$why = (string)$accept($report, $bytes);
+		}
+		if ($why !== '') {
+			S3Signer::abort_stream($resp['pending']);
+			throw new BackupRunnerException(ucfirst($why) . '. ' . self::tail($stderr));
+		}
+
+		$final = S3Signer::complete_stream($resp['pending']);
+		$status = (int)($final['status'] ?? 0);
+		if ($status < 200 || $status >= 300) {
+			$msg = S3Signer::extract_error($final['body'] ?? '') ?: ('HTTP ' . $status);
+			throw new BackupRunnerException('Upload of ' . $name . ' failed: ' . $msg);
+		}
+
+		// Recorded from the hash taken as the bytes went up: the ledger's claim
+		// — this machine made these bytes — holds exactly as for a file.
+		if (!BackupLedger::record_hash($plan['profile'], $sub . $name, (string)$final['sha256'], $bytes, $key)) {
+			self::report_unledgered(array($name));
 		}
 
 		return array(
-			'name'   => basename($fields['ARCHIVE']),
-			'path'   => $fields['ARCHIVE'],
-			'bytes'  => (int)($fields['BYTES'] ?? filesize($fields['ARCHIVE'])),
-			'sha256' => (string)($fields['SHA256'] ?? hash_file('sha256', $fields['ARCHIVE'])),
-			'level'  => (int)($fields['LEVEL'] ?? 1),
-			'kind'   => 'files',
+			'name'   => $name,
+			'key'    => $key,
+			'bytes'  => $bytes,
+			'sha256' => (string)$final['sha256'],
+			'kind'   => $kind,
+			'report' => $report,
 		);
 	}
 
-	/** Dump the database in full, as its own artifact, on every run. */
-	private static function run_db_engine(array $plan, $chain_d, $seq, $key_file) {
+	/**
+	 * Dump the database in full, as its own artifact, on every run — streamed
+	 * straight to the bucket as db-{seq}.sql.gz.enc, the object key from the
+	 * start. The upload completes only when pg_dump exited 0 and openssl 0: a
+	 * dump that failed part-way is never on the shelf.
+	 */
+	private static function run_db_engine(array $plan, $chain_id, $chain_d, $seq, $key_file) {
+		$name   = BackupChain::artifact_name('db', $seq);
+		$report = $chain_d . '/.db-report-' . getmypid();
+		$cmd = self::database_stream_command($plan, $key_file, $report);
+		$artifact = self::stream_engine($plan, $cmd, $report, $chain_id . '/', $name, 'db', array(__CLASS__, 'accept_dump'));
+		unset($artifact['report']);
+		return $artifact;
+	}
+
+	/** The database engine in stream mode: encrypted dump on stdout, verdict in the report. */
+	private static function database_stream_command(array $plan, $key_file, $report) {
 		$tools = PathHelper::getSiteRoot() . '/maintenance_scripts/sysadmin_tools';
-		$db    = self::database_name();
-
-		$before = glob($chain_d . '/*.sql.gz.enc') ?: array();
-		$before = array_flip($before);
-
-		$cmd = 'cd ' . escapeshellarg($chain_d)
-			. ' && bash ' . escapeshellarg($tools . '/backup_database.sh')
+		$db    = $plan['database'] ?? self::database_name();
+		return 'bash ' . escapeshellarg($tools . '/backup_database.sh')
 			. ' --non-interactive --key-file ' . escapeshellarg($key_file)
+			. ' --archive - --report ' . escapeshellarg($report)
 			. ' ' . escapeshellarg($db);
+	}
 
-		$out = array(); $rc = 0;
-		exec($cmd . ' 2>&1', $out, $rc);
-		if ($rc !== 0) {
-			throw new BackupRunnerException('The database engine exited ' . $rc . '. ' . self::tail(implode("\n", $out)));
+	/** The stream_engine() acceptance rule for a dump: pg_dump 0, openssl 0, and more than an empty envelope. */
+	public static function accept_dump(array $r, $bytes) {
+		$dump = (int)($r['DUMP_RC'] ?? 1);
+		$enc  = (int)($r['ENC_RC'] ?? 1);
+		if ($dump !== 0) { return 'the database dump failed (pg_dump exit ' . $dump . ')'; }
+		if ($enc !== 0) { return 'encrypting the dump failed (openssl exit ' . $enc . ')'; }
+		if ($bytes < self::MIN_ARCHIVE_BYTES) {
+			return 'the dump is ' . $bytes . ' bytes — nothing was dumped. Refusing to record an empty backup';
 		}
-
-		$made = null;
-		foreach (glob($chain_d . '/*.sql.gz.enc') ?: array() as $p) {
-			if (!isset($before[$p])) { $made = $p; break; }
-		}
-		if ($made === null) {
-			throw new BackupRunnerException('The database engine produced no dump.');
-		}
-
-		// The engine names dumps after the database and a timestamp; the chain
-		// wants them positional, so a restore can find run N's dump without
-		// parsing dates.
-		$target = $chain_d . '/' . BackupChain::artifact_name('db', $seq);
-		if (!@rename($made, $target)) {
-			throw new BackupRunnerException('Could not place the database dump at ' . basename($target) . '.');
-		}
-
-		return array(
-			'name'   => basename($target),
-			'path'   => $target,
-			'bytes'  => (int)filesize($target),
-			'sha256' => hash_file('sha256', $target),
-			'kind'   => 'db',
-		);
+		return '';
 	}
 
 	/**
@@ -1006,7 +1259,7 @@ class BackupRunner {
 		);
 	}
 
-	/** Upload every artifact of a run plus the rewritten manifest. */
+	/** Upload what a run made on disk plus the rewritten manifest; streamed artifacts pass through keyed. */
 	private static function upload_chain(array $plan, $chain_id, array $artifacts, $manifest_path) {
 		$to_send = array_values($artifacts);
 		$to_send[] = array(
@@ -1026,7 +1279,7 @@ class BackupRunner {
 	 * backup, it is no backup, and it would look like a restore point right up
 	 * until someone needed it.
 	 */
-	public static function enforce_chain_retention(array $plan) {
+	public static function enforce_chain_retention(array $plan, ?array &$pruned_indexes = null) {
 		if (empty($plan['prunes_cloud'])) {
 			return 0;
 		}
@@ -1057,6 +1310,11 @@ class BackupRunner {
 		$pruned = 0;
 		foreach ($surplus as $cid) {
 			try {
+				// Read what this chain's indexes name BEFORE they go: the object
+				// family is pruned by exactly that (enforce_object_retention).
+				if ($pruned_indexes !== null) {
+					$pruned_indexes += self::index_entries_of_rows($plan, $chains[$cid]);
+				}
 				foreach ($chains[$cid] as $row) {
 					foreach ($row->object_keys() as $key) {
 						$resp = S3Signer::delete($creds, $bucket, '/' . ltrim($key, '/'));
@@ -1097,116 +1355,172 @@ class BackupRunner {
 			throw new BackupRunnerException("The backup directory {$dir} is not writable by " . self::whoami() . '.');
 		}
 
-		// Anything already sitting here is from an earlier run; remember it so
-		// the artifact this run produced is identified by being NEW, not by
-		// being newest. A clock skew or a same-second file would otherwise let
-		// the run upload someone else's archive under its own envelope.
-		$before = array_flip(BackupNaming::list_dir($dir));
-
-		$mint     = BackupEnvelope::mint('pending', $plan['recipients']);
-		$key_file = $dir . '/.jy_selfbackup_' . getmypid() . '.key';
-		$sidecar  = $dir . '/.jy_selfbackup_' . getmypid() . '.keys.json';
-
-		self::write_private($key_file, $mint['data_key']);
-		BackupEnvelope::write_sidecar($sidecar, $mint['envelope']);
-
-		try {
-			$output = self::run_engine($plan, $key_file);
-		} finally {
-			self::shred($key_file);
+		$objects = null;
+		if ($plan['type'] === 'project') {
+			// The archive is named before it is made (its envelope is minted for
+			// the name), so the index that goes with it can be named here too.
+			$name     = $plan['project'] . '-' . gmdate('Ymd_His');
+			$objects  = self::begin_objects($plan, $name . '.tar.gz.enc');
+			try {
+				$artifacts = self::stream_standalone_project($plan, $dir, $name, $objects ? $objects['exclude'] : '');
+			} finally {
+				if ($objects && $objects['exclude'] !== '') { @unlink($objects['exclude']); }
+			}
+			if ($objects) {
+				$artifacts[] = self::write_index_artifact($plan, $objects, $dir . '/' . BackupNaming::index_for_archive($artifacts[0]['name']));
+			}
+		} else {
+			$artifacts = self::stream_standalone_database($plan, $dir);
 		}
-
-		$archive = self::produced_archive($dir, $before);
-		if ($archive === null) {
-			@unlink($sidecar);
-			throw new BackupRunnerException(
-				'The backup engine finished but produced no archive. Engine output: ' . self::tail($output));
-		}
-
-		// The envelope now belongs to a specific file and is named for it.
-		$final_sidecar = $archive . BackupEnvelope::SIDECAR_SUFFIX;
-		$envelope = BackupEnvelope::read_sidecar($sidecar);
-		$envelope['artifact'] = basename($archive);
-		BackupEnvelope::write_sidecar($final_sidecar, $envelope);
-		@unlink($sidecar);
-
-		$artifacts = array(
-			array('name' => basename($archive), 'path' => $archive,
-			      'bytes' => (int)@filesize($archive), 'kind' => 'archive'),
-			array('name' => basename($final_sidecar), 'path' => $final_sidecar,
-			      'bytes' => (int)@filesize($final_sidecar), 'kind' => 'envelope'),
-		);
+		$archive_name  = $artifacts[0]['name'];
+		$archive_bytes = (int)$artifacts[0]['bytes'];
 
 		$uploaded = self::upload($plan, $artifacts);
 		$history->set_artifacts($uploaded);
 		$history->set('bkh_upload_time', gmdate('Y-m-d H:i:s'));
 		$history->set('bkh_outcome', 'success');
 		$history->set('bkh_finish_time', gmdate('Y-m-d H:i:s'));
-		$history->set('bkh_message', 'Backed up ' . basename($archive));
+		$history->set('bkh_message', 'Backed up ' . $archive_name . ($objects ? self::objects_note($objects) : ''));
 		$history->save();
 
 		if ($plan['delete_local']) {
-			foreach ($artifacts as $a) { @unlink($a['path']); }
+			// A streamed archive has no local copy; what is left is the envelope
+			// sidecar beside where it would have been, and the objects index.
+			foreach ($artifacts as $a) {
+				if (!empty($a['path'])) { @unlink($a['path']); }
+			}
 		}
+
+		$released = $objects ? self::finish_objects($plan, $objects) : 0;
 
 		// Only now, with this run safely offsite, is it sound to delete anything.
 		// Chains are pruned here too, so a site switched from chain mode to full
 		// still ages its old chains out — whole, via the chain-atomic pass.
-		$pruned = self::enforce_cloud_retention($plan) + self::enforce_chain_retention($plan);
+		$pruned_indexes = array();
+		$pruned = self::enforce_cloud_retention($plan, $pruned_indexes) + self::enforce_chain_retention($plan, $pruned_indexes);
+		$objects_pruned = self::enforce_object_retention($plan, $pruned_indexes);
 		$swept  = self::sweep_local($plan);
 
-		$msg = 'Backed up ' . basename($archive) . ' (' . self::human((int)@filesize($archive) ?: $artifacts[0]['bytes']) . ')'
+		$msg = 'Backed up ' . $archive_name . ' (' . self::human($archive_bytes) . ')'
 			. ' to ' . $plan['target']->get('bkt_name');
+		if ($objects) { $msg .= self::objects_message($objects, $released); }
 		if ($pruned) { $msg .= "; pruned {$pruned} old restore point" . ($pruned === 1 ? '' : 's'); }
+		if ($objects_pruned) { $msg .= "; removed {$objects_pruned} offloaded file" . ($objects_pruned === 1 ? '' : 's') . ' no kept backup names'; }
 		if ($swept)  { $msg .= "; swept {$swept} local file" . ($swept === 1 ? '' : 's'); }
 
 		return array('status' => 'success', 'message' => $msg);
 	}
 
-	/** Shell the engine that ships with every install. */
-	private static function run_engine(array $plan, $key_file) {
-		$tools = PathHelper::getSiteRoot() . '/maintenance_scripts/sysadmin_tools';
+	/**
+	 * A standalone whole-site archive, streamed: backup_project.sh archives the
+	 * staged dump, apache_config/ and shape.json together with the LIVE tree in
+	 * one tar, piped through openssl to stdout, and stream_engine() puts it in
+	 * the bucket as it flows. No copy of the site is made and no archive lands
+	 * on disk; the staging directory holds the compressed dump for the length
+	 * of the tar and is removed with it.
+	 *
+	 * The object is named here, before the engine runs, so the envelope can be
+	 * minted for it and its sidecar written beside where the archive would
+	 * have been — the sidecar is the one artifact of this run that is a file.
+	 *
+	 * Returns [archive artifact (streamed: key, no path), envelope artifact (path)].
+	 */
+	private static function stream_standalone_project(array $plan, $dir, $name = '', $exclude_file = '') {
+		$tools  = PathHelper::getSiteRoot() . '/maintenance_scripts/sysadmin_tools';
+		if ($name === '') { $name = $plan['project'] . '-' . gmdate('Ymd_His'); }
+		$object = $name . '.tar.gz.enc';
 
-		if ($plan['type'] === 'database') {
-			$db = self::database_name();
-			$cmd = 'cd ' . escapeshellarg($plan['output_dir'])
-				. ' && bash ' . escapeshellarg($tools . '/backup_database.sh')
-				. ' --non-interactive --key-file ' . escapeshellarg($key_file)
-				. ' ' . escapeshellarg($db);
-		} else {
-			$cmd = 'bash ' . escapeshellarg($tools . '/backup_project.sh')
-				. ' ' . escapeshellarg($plan['project'])
-				. ' --non-interactive --output-dir ' . escapeshellarg($plan['output_dir'])
-				. ' --key-file ' . escapeshellarg($key_file);
+		$mint     = BackupEnvelope::mint($object, $plan['recipients']);
+		$key_file = $dir . '/.jy_selfbackup_' . getmypid() . '.key';
+		$report   = $dir . '/.project-report-' . getmypid();
+		self::write_private($key_file, $mint['data_key']);
+
+		$cmd = 'bash ' . escapeshellarg($tools . '/backup_project.sh')
+			. ' ' . escapeshellarg($plan['project'])
+			. ' --non-interactive --output-dir ' . escapeshellarg($dir)
+			. ' --key-file ' . escapeshellarg($key_file)
+			. ' --name ' . escapeshellarg($name)
+			. ' --archive - --report ' . escapeshellarg($report);
+		if (!empty($plan['project_dir'])) {
+			$cmd .= ' --project-dir ' . escapeshellarg($plan['project_dir']);
+		}
+		if ($exclude_file !== '') {
+			$cmd .= ' --exclude-from ' . escapeshellarg($exclude_file);
 		}
 
-		$out = array();
-		$rc = 0;
-		exec($cmd . ' 2>&1', $out, $rc);
-		$output = implode("\n", $out);
-
-		if ($rc !== 0) {
-			throw new BackupRunnerException('The backup engine exited ' . $rc . '. ' . self::tail($output));
+		try {
+			$artifact = self::stream_engine($plan, $cmd, $report, '', $object, 'archive',
+				function (array $r, $bytes) {
+					$tar = (int)($r['TAR_RC'] ?? 2);
+					$enc = (int)($r['ENC_RC'] ?? 1);
+					if ($enc !== 0) { return 'encrypting the archive failed (openssl exit ' . $enc . ')'; }
+					if ($tar !== 0 && $tar !== 1) { return 'the archive failed (tar exit ' . $tar . ')'; }
+					if ($bytes < self::MIN_ARCHIVE_BYTES) {
+						return 'the archive is ' . $bytes . ' bytes — nothing was archived (tar exit ' . $tar
+							. '). Refusing to record an empty backup';
+					}
+					return '';
+				});
+		} finally {
+			self::shred($key_file);
 		}
-		return $output;
+		unset($artifact['report']);
+
+		$sidecar = $dir . '/' . $object . BackupEnvelope::SIDECAR_SUFFIX;
+		BackupEnvelope::write_sidecar($sidecar, $mint['envelope']);
+
+		return array(
+			$artifact,
+			array('name' => basename($sidecar), 'path' => $sidecar,
+			      'bytes' => (int)@filesize($sidecar), 'kind' => 'envelope'),
+		);
 	}
 
 	/**
-	 * The archive this run created: a backup artifact that was not here before.
-	 * Identified by being new rather than newest, so a stale file with a strange
-	 * mtime can never be mistaken for this run's output and shipped under this
-	 * run's envelope.
+	 * A standalone database dump, streamed: named the way the engine names a
+	 * dump ({database}-{stamp}.sql.gz.enc), so nothing that reads the shelf can
+	 * tell it from one the engine wrote. The envelope is minted for the name up
+	 * front and its sidecar is the run's one file.
+	 *
+	 * Returns [archive artifact (streamed: key, no path), envelope artifact (path)].
 	 */
-	private static function produced_archive($dir, array $before) {
-		foreach (BackupNaming::list_dir($dir) as $path) {
-			if (!isset($before[$path])) {
-				return $path;
-			}
+	private static function stream_standalone_database(array $plan, $dir) {
+		$db     = $plan['database'] ?? self::database_name();
+		$object = $db . '-' . gmdate('Ymd_His') . '.sql.gz.enc';
+
+		$mint     = BackupEnvelope::mint($object, $plan['recipients']);
+		$key_file = $dir . '/.jy_selfbackup_' . getmypid() . '.key';
+		$report   = $dir . '/.db-report-' . getmypid();
+		self::write_private($key_file, $mint['data_key']);
+
+		try {
+			$artifact = self::stream_engine($plan, self::database_stream_command($plan, $key_file, $report),
+				$report, '', $object, 'archive', array(__CLASS__, 'accept_dump'));
+		} finally {
+			self::shred($key_file);
 		}
-		return null;
+		unset($artifact['report']);
+
+		$sidecar = $dir . '/' . $object . BackupEnvelope::SIDECAR_SUFFIX;
+		BackupEnvelope::write_sidecar($sidecar, $mint['envelope']);
+
+		return array(
+			$artifact,
+			array('name' => basename($sidecar), 'path' => $sidecar,
+			      'bytes' => (int)@filesize($sidecar), 'kind' => 'envelope'),
+		);
 	}
 
-	private static function upload(array $plan, array $artifacts, $sub = '') {
+	/**
+	 * Where a run's objects go: the target's credentials, its bucket, and the
+	 * key prefix every artifact of this profile is filed under.
+	 *
+	 * The profile segment is what stops two parties' backups landing in one
+	 * pile: without it a listing cannot tell whose backup is whose, and
+	 * neither party's retention can reason about the shelf it is responsible
+	 * for.
+	 */
+	private static function destination(array $plan) {
 		$target = $plan['target'];
 		$creds  = $target->get_credentials();
 		if (empty($creds)) {
@@ -1217,16 +1531,25 @@ class BackupRunner {
 			throw new BackupRunnerException('The backup target has no bucket configured.');
 		}
 		$prefix = rtrim(trim((string)$target->get('bkt_path_prefix')) ?: 'joinery-backups', '/');
-
-		// The profile segment is what stops two parties' backups landing in one
-		// pile: without it a listing cannot tell whose backup is whose, and
-		// neither party's retention can reason about the shelf it is responsible
-		// for.
 		$base_key = $prefix . '/' . $plan['slug'] . '/' . BackupProfile::path_segment($plan['profile']) . '/';
+		return array($creds, $bucket, $base_key);
+	}
+
+	/**
+	 * Upload a run's file artifacts and return every artifact keyed, in order.
+	 * An artifact that streamed to the bucket already carries its key and no
+	 * path; it is passed through as it is.
+	 */
+	private static function upload(array $plan, array $artifacts, $sub = '') {
+		list($creds, $bucket, $base_key) = self::destination($plan);
 
 		$out = array();
 		$unledgered = array();
 		foreach ($artifacts as $a) {
+			if (!empty($a['key'])) {
+				$out[] = $a;
+				continue;
+			}
 			$key = $base_key . $sub . $a['name'];
 			$resp = S3Signer::put_file($creds, $bucket, '/' . ltrim($key, '/'), $a['path']);
 			$status = (int)($resp['status'] ?? 0);
@@ -1249,20 +1572,260 @@ class BackupRunner {
 			$out[] = $a;
 		}
 
-		// Said out loud rather than logged quietly. An artifact that reached the
-		// bucket but was not recorded here is a real backup that cannot be
-		// restored over the agent channel — the node refuses an archive it has
-		// no record of making — and the operator should learn that now rather
-		// than during a restore. The usual cause is a backup run by an
-		// unprivileged user: the ledger is root-owned on purpose.
 		if ($unledgered) {
-			error_log('BackupRunner: uploaded but NOT recorded in the integrity ledger ('
-				. BackupLedger::dir() . ' is not writable by ' . self::whoami() . '): '
-				. implode(', ', $unledgered)
-				. ' — these archives cannot be restored over the agent channel.');
+			self::report_unledgered($unledgered);
 		}
 
 		return $out;
+	}
+
+	/**
+	 * Said out loud rather than logged quietly. An artifact that reached the
+	 * bucket but was not recorded here is a real backup that cannot be
+	 * restored over the agent channel — the node refuses an archive it has
+	 * no record of making — and the operator should learn that now rather
+	 * than during a restore. The usual cause is a backup run by an
+	 * unprivileged user: the ledger is root-owned on purpose.
+	 */
+	private static function report_unledgered(array $names) {
+		error_log('BackupRunner: uploaded but NOT recorded in the integrity ledger ('
+			. BackupLedger::dir() . ' is not writable by ' . self::whoami() . '): '
+			. implode(', ', $names)
+			. ' — these archives cannot be restored over the agent channel.');
+	}
+
+	// ---------------------------------------------------------------- objects
+
+	/**
+	 * The object-store steps a run takes BEFORE its archive, for a profile
+	 * that stores offloaded files (plan['objects']): what the shelf holds, the
+	 * archive's exclude list, the store step, and — site profile, after a
+	 * recovery-key rotation — the re-seal of older epoch envelopes.
+	 *
+	 * Returns the run's objects context, or null when this run does not carry
+	 * them (a database-only backup; a manager run whose request did not ask).
+	 * Anything thrown here fails the run under the existing discard rule;
+	 * objects already uploaded stay, content-addressed and correct, and the
+	 * next run finds them held.
+	 */
+	private static function begin_objects(array $plan, $run_label) {
+		if (empty($plan['objects'])) {
+			return null;
+		}
+		$objects = BackupObjects::cloud_objects();
+		$picture = BackupObjects::held($plan, self::previous_index_key($plan));
+		$held    = $picture['held'];
+
+		$project_dir = $plan['project_dir'] ?? PathHelper::getSiteRoot();
+		$exclude = BackupObjects::write_exclude_file($plan, $objects, $project_dir);
+
+		$epoch = null;
+		$epoch_fn = function () use ($plan, &$epoch) {
+			if ($epoch === null) { $epoch = BackupObjects::epoch($plan); }
+			return $epoch;
+		};
+		$store = BackupObjects::store_missing($plan, $epoch_fn, $objects, $held,
+			self::OBJECT_STORE_BUDGET_BYTES, self::OBJECT_STORE_BUDGET_SECONDS, $picture['unhashed']);
+
+		// Older epochs sealed to a previous recovery key are re-sealed to the
+		// current one: the site profile reads their envelopes off its shelf,
+		// the manager profile reads the ones its request linked.
+		$resealed = array('resealed' => array(), 'unopenable' => array());
+		$examined = false;
+		if (($plan['objects_source'] ?? 'listing') === 'listing') {
+			if (!empty($picture['shelf']['envelopes'])) {
+				$resealed = BackupObjects::reseal_epochs($plan, BackupObjects::envelopes_site($plan, $picture['shelf']));
+			}
+			$examined = is_array($picture['shelf'] ?? null);
+		} elseif (!empty($plan['epoch_envelope_urls'])) {
+			$resealed = BackupObjects::reseal_epochs($plan, BackupObjects::envelopes_from_links($plan, $plan['epoch_envelope_urls']));
+			$examined = true;
+		}
+		// What Recovery Readiness reports: the epochs only a retired recovery
+		// key opens, as this run found them. Written whenever the run looked.
+		if ($examined) {
+			try {
+				BackupObjects::write_retired_epochs($plan, $resealed['unopenable']);
+			} catch (\Throwable $e) {
+				error_log('BackupRunner: could not record the retired epochs: ' . $e->getMessage());
+			}
+		}
+
+		// A manager run whose request carried the object store: from here the
+		// manager profile holds local bytes until its shelf has them.
+		if ($plan['profile'] === BackupProfile::MANAGER) {
+			BackupObjects::mark_enabled($plan);
+		}
+
+		return array(
+			'label'     => (string)$run_label,
+			'objects'   => $objects,
+			'held'      => $held,
+			'held_file' => $picture['file'],
+			'stored'    => $store['stored'],
+			'store'     => $store,
+			'exclude'   => $exclude,
+			'epoch'     => $epoch,
+			'resealed'  => $resealed,
+			'index'     => null,
+		);
+	}
+
+	/** Step 6: the index, from the enumeration, what was held and what this run stored. */
+	private static function write_index_artifact(array $plan, array &$ctx, $path) {
+		$index = BackupObjects::build_index($plan, $ctx['label'], $ctx['objects'], $ctx['held'], $ctx['stored']);
+		$ctx['index'] = $index;
+		return BackupObjects::write_index($index, $path);
+	}
+
+	/**
+	 * Steps 8 and 9, after the run is committed: held.json from what was held
+	 * plus what this run stored, then the release of every cloud blob's local
+	 * bytes that every enabled profile now holds. Returns how many were
+	 * released. Never fails a run that is already offsite.
+	 */
+	private static function finish_objects(array $plan, array $ctx) {
+		try {
+			BackupObjects::write_held($plan, $ctx['stored'] + $ctx['held'], array_keys($ctx['held_file']));
+		} catch (\Throwable $e) {
+			error_log('BackupRunner: could not record the held set: ' . $e->getMessage());
+		}
+		try {
+			return BackupObjects::release_waiting($ctx['objects'], BackupProfile::enabled(), $plan['base_dir']);
+		} catch (\Throwable $e) {
+			error_log('BackupRunner: could not release local copies of offloaded files: ' . $e->getMessage());
+			return 0;
+		}
+	}
+
+	/** What the history row says about the run's offloaded files. */
+	private static function objects_note(array $ctx) {
+		$total  = count($ctx['objects']);
+		if ($total === 0) {
+			return '';
+		}
+		$store  = $ctx['store'];
+		$stored = count($ctx['stored']);
+		$on_shelf = 0;
+		foreach (($ctx['index']['objects'] ?? array()) as $e) { if (!empty($e['stored'])) { $on_shelf++; } }
+		$note = ' — ' . $on_shelf . ' of ' . $total . ' offloaded file' . ($total === 1 ? '' : 's') . ' on the shelf';
+		if ($stored) { $note .= ', ' . $stored . ' copied this run (' . self::human($store['bytes']) . ')'; }
+		if (!empty($store['budget_hit'])) { $note .= ', budget reached'; }
+		if (!empty($store['failed'])) { $note .= ', ' . $store['failed'] . ' failed'; }
+		if (!empty($store['fetch_failed'])) { $note .= ', ' . $store['fetch_failed'] . ' not in the file store'; }
+		return $note;
+	}
+
+	/** The task message's clause about offloaded files. */
+	private static function objects_message(array $ctx, $released) {
+		$msg = '';
+		$stored = count($ctx['stored']);
+		if ($stored) {
+			$msg .= "; copied {$stored} offloaded file" . ($stored === 1 ? '' : 's') . ' (' . self::human($ctx['store']['bytes']) . ') to the shelf';
+		}
+		if (!empty($ctx['store']['budget_hit'])) {
+			$left = 0;
+			foreach (($ctx['index']['objects'] ?? array()) as $e) { if (empty($e['stored'])) { $left++; } }
+			$msg .= "; {$left} still to copy (budget reached)";
+		}
+		if (!empty($ctx['store']['fetch_failed'])) {
+			$msg .= '; ' . $ctx['store']['fetch_failed'] . ' offloaded file' . ($ctx['store']['fetch_failed'] === 1 ? '' : 's')
+				. ' could not be read from the file store';
+		}
+		if ($released) { $msg .= "; released {$released} local cop" . ($released === 1 ? 'y' : 'ies'); }
+		if (!empty($ctx['resealed']['resealed'])) { $msg .= '; re-sealed ' . count($ctx['resealed']['resealed']) . ' epoch envelope(s) to the current recovery key'; }
+		if (!empty($ctx['resealed']['unopenable'])) {
+			$n = count($ctx['resealed']['unopenable']);
+			$msg .= "; {$n} epoch envelope" . ($n === 1 ? '' : 's') . ' (' . implode(', ', $ctx['resealed']['unopenable'])
+				. ') open' . ($n === 1 ? 's' : '') . ' only with a retired recovery key — keep that key';
+		}
+		return $msg;
+	}
+
+	/**
+	 * The bucket key of the newest objects index this profile committed, from
+	 * this site's own history — chain runs and standalone fulls alike — or ''
+	 * when there is none. Read from history rather than from the local chain
+	 * manifest so a machine restored from a backup (backups/ is in no archive)
+	 * still finds the hashes its shelf's objects were recorded with.
+	 */
+	private static function previous_index_key(array $plan) {
+		$rows = new MultiBackupHistory(
+			array('outcome' => 'success', 'offsite' => true, 'deleted' => false, 'slug' => $plan['slug'],
+			      'profile' => $plan['profile']),
+			array('bkh_start_time' => 'DESC'), 50, 0);
+		foreach ($rows as $r) {
+			foreach ($r->artifacts() as $a) {
+				if (($a['kind'] ?? '') === 'objects' && !empty($a['key'])) {
+					return (string)$a['key'];
+				}
+			}
+		}
+		return '';
+	}
+
+	/** The stored objects of every objects index these history rows carry, keyed by shelf location (epoch/name). */
+	private static function index_entries_of_rows(array $plan, array $rows) {
+		if (empty($plan['objects'])) {
+			return array();
+		}
+		$out = array();
+		foreach ($rows as $row) {
+			foreach ($row->artifacts() as $a) {
+				if (($a['kind'] ?? '') !== 'objects' || empty($a['key'])) { continue; }
+				$index = BackupObjects::fetch_index_key($plan, (string)$a['key']);
+				if ($index !== null) {
+					$out += BackupObjects::index_locations($index);
+				}
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Site shelf, third retention family: once chains and standalone fulls
+	 * have been pruned, every object their indexes named that no retained
+	 * run's index names is deleted. Driven by this site's own records, as its
+	 * other retention is. Returns objects deleted.
+	 */
+	public static function enforce_object_retention(array $plan, array $pruned_indexes) {
+		if (empty($plan['prunes_cloud']) || empty($plan['objects']) || !$pruned_indexes) {
+			return 0;
+		}
+		try {
+			return BackupObjects::prune_site($plan, $pruned_indexes, self::retained_index_keys($plan));
+		} catch (\Throwable $e) {
+			error_log('BackupRunner: object retention failed: ' . $e->getMessage());
+			return 0;
+		}
+	}
+
+	/**
+	 * Bucket keys of the retained runs' indexes: the newest index of each
+	 * retained chain first, then every standalone full's, then the older chain
+	 * runs — so a live object is usually cleared by the first few reads.
+	 */
+	private static function retained_index_keys(array $plan) {
+		$rows = new MultiBackupHistory(
+			array('outcome' => 'success', 'offsite' => true, 'deleted' => false, 'slug' => $plan['slug'],
+			      'profile' => $plan['profile']),
+			array('bkh_start_time' => 'DESC'), 1500, 0);
+		$first = array(); $rest = array(); $seen_chain = array();
+		foreach ($rows as $r) {
+			$key = '';
+			foreach ($r->artifacts() as $a) {
+				if (($a['kind'] ?? '') === 'objects' && !empty($a['key'])) { $key = (string)$a['key']; }
+			}
+			if ($key === '') { continue; }
+			$cid = (string)$r->get('bkh_chain_id');
+			if ($cid === '' || !isset($seen_chain[$cid])) {
+				$first[] = $key;
+				if ($cid !== '') { $seen_chain[$cid] = true; }
+			} else {
+				$rest[] = $key;
+			}
+		}
+		return array_merge($first, $rest);
 	}
 
 	// -------------------------------------------------------------- retention
@@ -1282,7 +1845,7 @@ class BackupRunner {
 	 * its incrementals, leaving restore points that look fine and restore
 	 * nothing. Chains are pruned whole by enforce_chain_retention.
 	 */
-	public static function enforce_cloud_retention(array $plan) {
+	public static function enforce_cloud_retention(array $plan, ?array &$pruned_indexes = null) {
 		if (empty($plan['prunes_cloud'])) {
 			return 0;
 		}
@@ -1309,6 +1872,9 @@ class BackupRunner {
 		$pruned = 0;
 		foreach ($surplus as $old) {
 			try {
+				if ($pruned_indexes !== null) {
+					$pruned_indexes += self::index_entries_of_rows($plan, array($old));
+				}
 				foreach ($old->object_keys() as $key) {
 					$resp = S3Signer::delete($creds, $bucket, '/' . ltrim($key, '/'));
 					$status = (int)($resp['status'] ?? 0);
@@ -1383,14 +1949,23 @@ class BackupRunner {
 	 * A window of 0 means never sweep.
 	 */
 	public static function sweep_local(array $plan) {
+		// Temporaries of the object store — one object's ciphertext a budget or
+		// an interrupt left behind — are not backups and go by their own age,
+		// whatever the window says.
+		$swept = BackupObjects::sweep_tmp($plan);
+
 		$days = $plan['keep_local'];
 		if ($days <= 0) {
-			return 0;
+			return $swept;
 		}
 		$cutoff = time() - ($days * 86400);
 		$dir = $plan['output_dir'];
 
 		$candidates = BackupNaming::list_dir($dir);
+		// A standalone run's objects index ages out with the archive it names.
+		foreach (glob($dir . '/*' . BackupNaming::INDEX_SUFFIX) ?: array() as $p) {
+			if (is_file($p)) { $candidates[] = $p; }
+		}
 		// Pre-restore dumps. NOTHING WRITES THESE ANY MORE — a restore keeps
 		// nothing of what it replaces (owner, 2026-08-30; see
 		// restore_database.sh stage 2) — but machines that restored before that
@@ -1407,9 +1982,12 @@ class BackupRunner {
 		}
 		foreach (glob($dir . '/' . BackupChain::DIR_PREFIX . '*', GLOB_ONLYDIR) ?: array() as $chain_d) {
 			foreach (BackupNaming::list_dir($chain_d) as $p) { $candidates[] = $p; }
+			foreach (glob($chain_d . '/objects-*.json.gz') ?: array() as $p) {
+				if (is_file($p)) { $candidates[] = $p; }
+			}
 		}
 
-		$swept = self::sweep_staged_restores($plan, $cutoff) + self::sweep_verify_work($plan);
+		$swept += self::sweep_staged_restores($plan, $cutoff) + self::sweep_verify_work($plan);
 		foreach (array_unique($candidates) as $path) {
 			if (!is_file($path) || filemtime($path) >= $cutoff) {
 				continue;

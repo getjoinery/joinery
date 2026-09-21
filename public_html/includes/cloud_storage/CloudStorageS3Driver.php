@@ -9,6 +9,7 @@
  * Path-style vs virtual-hosted addressing is auto-detected from the
  * endpoint hostname (AWS → virtual-hosted, everything else → path-style).
  *
+ * @version 1.1 - head(): HeadObject as size and ETag, the interface's presence check; size() reads it
  * @version 1.0
  */
 
@@ -172,15 +173,28 @@ class CloudStorageS3Driver implements CloudStorageDriver {
 	 * blob backfill to size cloud-resident rows without pulling their bytes.
 	 */
 	public function size(string $remote_key): ?int {
+		$head = $this->head($remote_key);
+		return $head === null ? null : (int)$head['size'];
+	}
+
+	/**
+	 * HeadObject: size and ETag, or null when the object is absent or the
+	 * bucket could not answer. An absent object and an unanswered question are
+	 * the same fact to every caller — the bytes cannot be served from here.
+	 */
+	public function head(string $remote_key): ?array {
 		try {
 			$r = $this->client->headObject([
 				'Bucket' => $this->bucket,
 				'Key'    => self::pathPrefix() . '/' . ltrim($remote_key, '/'),
 			]);
 			$len = $r['ContentLength'] ?? null;
-			return ($len === null) ? null : (int)$len;
+			if ($len === null) {
+				return null;
+			}
+			return ['size' => (int)$len, 'etag' => trim((string)($r['ETag'] ?? ''), '"')];
 		} catch (Exception $e) {
-			error_log('CloudStorageS3Driver::size head failed for ' . $remote_key . ': ' . $e->getMessage());
+			error_log('CloudStorageS3Driver::head failed for ' . $remote_key . ': ' . $e->getMessage());
 			return null;
 		}
 	}

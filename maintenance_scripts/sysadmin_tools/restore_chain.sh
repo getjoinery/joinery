@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 
 # restore_chain.sh - Restore a project from an incremental backup chain
+# Version: 1.4.1 - the offloaded-files step checks that the uploads owner can read the tree and
+#                  the index before running as that account, and says what to fix when not
+# Version: 1.4.0 - --objects DIR brings the run's offloaded files home after the database is
+#                  loaded (utils/restore_objects.php over the shelf's objects/ tree, downloaded
+#                  with the site's own credential); --objects-mode and --epoch-key go with it
 # Version: 1.3.1 - the sudo probe lists the rules and requires NOPASSWD: ALL (see backup_files.sh 1.1.2)
 # Version: 1.3.0 - config/backup-ledger is held across the extraction. The incremental extract
 #                  replays deletions, and the directory is absent from the listings of runs
@@ -56,6 +61,15 @@
 #                     machine's identity alone" is the right default. A restore
 #                     run as a job requires the value.
 #   --skip-database   Files only
+#   --objects DIR     Bring the run's offloaded files home after the database is
+#                     loaded: DIR is the shelf's objects/ tree ({epoch}/envelope.json
+#                     and {epoch}/{name}.enc), downloaded with the site's own
+#                     credential. Runs the restored tree's utils/restore_objects.php
+#                     over the run's index (objects-NNNN.json.gz in --artifacts).
+#   --objects-mode M  missing (default): only what the file store cannot serve;
+#                     all: every offloaded file (a site leaving its bucket).
+#   --epoch-key E=F   A recovered key file for epoch E, where this machine's own
+#                     key does not open its envelope (repeatable).
 #   --skip-reconcile  Do not reconcile to this machine (files-only rehearsals and
 #                     restores into a scratch --target-dir)
 #   --dry-run         Verify the chain and report the plan; change nothing
@@ -70,7 +84,7 @@
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.2.1"
+SCRIPT_VERSION="1.4.1"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; CYAN='\033[0;36m'; NC='\033[0m'
@@ -90,6 +104,9 @@ FORCE=false
 SKIP_DATABASE=false
 DOMAIN=""
 SKIP_RECONCILE=false
+OBJECTS_DIR=""
+OBJECTS_MODE="missing"
+EPOCH_KEYS=()
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -101,6 +118,9 @@ while [[ $# -gt 0 ]]; do
         --domain=*)       DOMAIN="${1#*=}"; shift ;;
         --skip-reconcile) SKIP_RECONCILE=true; shift ;;
         --skip-database)  SKIP_DATABASE=true; shift ;;
+        --objects)        OBJECTS_DIR="$2"; shift 2 ;;
+        --objects-mode)   OBJECTS_MODE="$2"; shift 2 ;;
+        --epoch-key)      EPOCH_KEYS+=("$2"); shift 2 ;;
         --dry-run|-n)    DRY_RUN=true; shift ;;
         --force|-f)      FORCE=true; shift ;;
         # Print the header block to its end rather than a fixed line range, which
@@ -118,6 +138,10 @@ done
 [ -n "$PROJECT_NAME" ] || { print_error "Project name is required."; exit 1; }
 [ -n "$ARTIFACT_DIR" ] || { print_error "--artifacts is required."; exit 1; }
 [ -d "$ARTIFACT_DIR" ] || { print_error "Artifact directory not found: $ARTIFACT_DIR"; exit 1; }
+if [ -n "$OBJECTS_DIR" ]; then
+    [ -d "$OBJECTS_DIR" ] || { print_error "Offloaded-files directory not found: $OBJECTS_DIR"; exit 1; }
+    case "$OBJECTS_MODE" in missing|all) ;; *) print_error "--objects-mode must be missing or all."; exit 1 ;; esac
+fi
 
 MANIFEST="${ARTIFACT_DIR}/manifest.json"
 [ -f "$MANIFEST" ] || { print_error "No manifest.json in $ARTIFACT_DIR"; exit 1; }
@@ -210,6 +234,7 @@ if [ "$DRY_RUN" = true ]; then
     print_dry "Would apply, in order:"
     for a in "${FILES_ARCHIVES[@]}"; do print_dry "  $(basename "$a")"; done
     [ -n "$DB_ARCHIVE" ] && print_dry "Then restore database from $(basename "$DB_ARCHIVE")"
+    [ -n "$OBJECTS_DIR" ] && print_dry "Then bring offloaded files home from ${OBJECTS_DIR} (${OBJECTS_MODE})"
     echo "RESTORE_PLAN_OK"
     exit 0
 fi
@@ -421,6 +446,61 @@ if [ "$SKIP_DATABASE" = false ] && [ -n "$DB_ARCHIVE" ]; then
     fi
 fi
 
+# ── Offloaded files ─────────────────────────────────────────────────────────
+#
+# The archives carry no offloaded file: those are on the shelf under objects/,
+# named by the run's index. Now that the database is back, the restored tree's
+# own restore_objects.php puts them where the site expects them — only the
+# ones the file store cannot serve, unless --objects-mode all. It runs as the
+# account that owns the uploads directory, so what lands there is the web
+# user's and not root's. A failure here does not stop the reconcile below: a
+# site that disagrees with its machine is broken in ways nobody would trace to
+# a missing photo, and this step can be run again on its own.
+OBJECTS_FAILED=false
+if [ -n "$OBJECTS_DIR" ]; then
+    INDEX_NAME="objects-$(printf '%04d' "$RESTORE_SEQ").json.gz"
+    INDEX_FILE="${ARTIFACT_DIR}/${INDEX_NAME}"
+    OBJECTS_ENGINE="${PROJECT_DIR}/public_html/utils/restore_objects.php"
+    if [ ! -f "$INDEX_FILE" ]; then
+        print_warning "Run ${RESTORE_SEQ} carries no offloaded-files index (${INDEX_NAME} is not in ${ARTIFACT_DIR}),"
+        print_warning "so there is nothing to bring home from ${OBJECTS_DIR}."
+    elif [ ! -f "$OBJECTS_ENGINE" ]; then
+        print_error "The restored tree has no utils/restore_objects.php, so its offloaded files cannot be brought home here."
+        print_error "Once the site is upgraded, run: php public_html/utils/restore_objects.php --index ${INDEX_FILE} --objects ${OBJECTS_DIR} --mode ${OBJECTS_MODE}"
+        OBJECTS_FAILED=true
+    else
+        OBJECTS_ARGS=(--index "$INDEX_FILE" --objects "$OBJECTS_DIR" --mode "$OBJECTS_MODE")
+        for ek in ${EPOCH_KEYS[@]+"${EPOCH_KEYS[@]}"}; do OBJECTS_ARGS+=(--epoch-key "$ek"); done
+        RUN_AS=()
+        UPLOADS_OWNER="$(stat -c %U "${PROJECT_DIR}/public_html/static_files/uploads" 2>/dev/null || true)"
+        if [ -n "$UPLOADS_OWNER" ] && [ "$UPLOADS_OWNER" != "$(id -un)" ]; then
+            if [ "$(id -u)" -eq 0 ]; then RUN_AS=(runuser -u "$UPLOADS_OWNER" --)
+            elif [ -n "$SUDO" ]; then RUN_AS=(sudo -n -u "$UPLOADS_OWNER")
+            fi
+        fi
+        # The tree and the index were downloaded by whoever is running this,
+        # often root with a private umask; the engine runs as the uploads
+        # owner and has to be able to read them, or it refuses the request
+        # by a message that looks like a missing file.
+        if [ ${#RUN_AS[@]} -gt 0 ] && ! "${RUN_AS[@]}" test -r "$INDEX_FILE" -a -r "$OBJECTS_DIR" -a -x "$OBJECTS_DIR"; then
+            print_error "The offloaded files at ${OBJECTS_DIR} (or the index ${INDEX_FILE}) are not readable by ${UPLOADS_OWNER},"
+            print_error "who owns the uploads directory and runs this step. Make them readable, then run:"
+            print_error "  php ${OBJECTS_ENGINE} --index ${INDEX_FILE} --objects ${OBJECTS_DIR} --mode ${OBJECTS_MODE}"
+            OBJECTS_FAILED=true
+        else
+        print_info "Bringing offloaded files home from ${OBJECTS_DIR} (${OBJECTS_MODE})"
+        if ${RUN_AS[@]+"${RUN_AS[@]}"} php "$OBJECTS_ENGINE" "${OBJECTS_ARGS[@]}"; then
+            print_success "Offloaded files brought home"
+        else
+            print_error "Not every offloaded file came home; see the RESTORE_OBJECTS_ lines above."
+            print_error "Run it again once the cause is fixed:"
+            print_error "  php ${OBJECTS_ENGINE} --index ${INDEX_FILE} --objects ${OBJECTS_DIR} --mode ${OBJECTS_MODE}"
+            OBJECTS_FAILED=true
+        fi
+        fi
+    fi
+fi
+
 # ── Reconcile to this machine ───────────────────────────────────────────────
 #
 # Same step the archive path runs, for the same reason: the chain came off a
@@ -461,6 +541,10 @@ else
 fi
 
 echo "=========================================" >&2
+if [ "$OBJECTS_FAILED" = true ]; then
+    print_error "Files and database restored from chain ${CHAIN_ID} at run ${RESTORE_SEQ}, but its offloaded files are not all home (see above)."
+    exit 1
+fi
 print_success "RESTORE COMPLETE — chain ${CHAIN_ID} at run ${RESTORE_SEQ}"
 echo "RESTORE_OK"
 exit 0

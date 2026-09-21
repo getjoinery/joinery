@@ -8,8 +8,10 @@
  * offload consumer adds a StorageProfile and zero tasks. The orchestration lives
  * in CloudStorageLifecycle::runOffloadTick(); this is the scheduler entry point.
  * Self-deactivates (via the 'deactivate' result key) when no store is offloading
- * or draining.
+ * or draining and no offloaded file remains: while any does, the tick keeps
+ * running so the daily file-store check can see it.
  *
+ * @version 1.1 - stays active while any offloaded file exists (the daily file-store check)
  * @version 1.0
  */
 

@@ -19,6 +19,7 @@
  * is all a plugin needs. A renderer that throws is logged and skipped — an
  * admin page never fails to render because a notice could not decide.
  *
+ * @version 1.8 - backup_objects joins the core notices (specs/backup_offloaded_files.md § Admin surfaces, offloaded files waiting for a backup)
  * @version 1.7 - agent_log_access joins the core notices (specs/agent_log_access.md §4.1, the one-time notice on an already-connected node)
  * @version 1.6 - recipe_case joins the core notices (specs/agent_tier1_recipes.md, the case on an unpaired node)
  * @version 1.5 - site_backup joins the core notices (specs/post_release_fleet_defects.md B3)
@@ -60,6 +61,10 @@ class AdminNotices {
 			// engine's last line. Silent while runs succeed, and silent on a
 			// site that has never configured one.
 			'site_backup'    => array('SiteBackupNotice', 'render'),
+			// Offloaded files whose local copy is waiting for a backup that is
+			// not taking them: over 2 GB of them, or anything waiting on a
+			// backup that has not succeeded in a week. Silent while nothing waits.
+			'backup_objects' => array('BackupObjectsNotice', 'render'),
 			// A box whose own agent's recipe gave up says so, from the case
 			// the agent rendered outward, "as reported by the agent's ledger".
 			// Silent while no case is open.

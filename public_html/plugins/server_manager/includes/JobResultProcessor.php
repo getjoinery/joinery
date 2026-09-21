@@ -5,6 +5,10 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.33 - restore_objects: process_restore_objects records the node's answer (a survey's names,
+ *                 a page's counts) and issues the next job of the loop through FleetObjectRestore;
+ *                 process_restore_chain starts that loop in missing mode as the chain restore's last
+ *                 step (specs/backup_offloaded_files.md § Restore)
  * @version 1.32 - the hosted welcome email carries the A-record instruction when the buyer brought their
  *                 own domain (no registration row for the order), and says there is nothing to add only
  *                 when this plane registered the name (specs/managed_hosting_phase1_purchase.md §14)
@@ -17,6 +21,8 @@
  *                 process_run_plugin_installers reads the full run: host_housekeeping.sh: ok is green,
  *                 a WARNING, a refusal, a lock it never got or silence is red with the reason; a
  *                 completed run queues one host_report so the Host card shows the machine after it
+ * @version 1.29 - process_verify_backup carries the offloaded-files counters of the contract (objects,
+ *                 object_bytes, objects_sampled) into the job's result, beside the rest
  * @version 1.28 - process_host_report stores a host_report job's object in mgn_last_host_report with
  *                 mgn_last_host_report_time, after sanitise_host_report caps it on intake: every key
  *                 present, every list and string bounded, anything unreadable the string unknown.
@@ -935,8 +941,8 @@ class JobResultProcessor {
 			'level'         => (int)($verdict['level'] ?? 0),
 			'message'       => $verdict['message'],
 		];
-		foreach (['run', 'run_time', 'artifacts', 'bytes', 'files', 'tables', 'rows', 'duration', 'reason',
-		          'needs_bytes', 'free_bytes'] as $k) {
+		foreach (['run', 'run_time', 'artifacts', 'bytes', 'files', 'objects', 'object_bytes', 'objects_sampled',
+		          'tables', 'rows', 'duration', 'reason', 'needs_bytes', 'free_bytes'] as $k) {
 			if (isset($verdict[$k])) { $result[$k] = $verdict[$k]; }
 		}
 
@@ -962,6 +968,116 @@ class JobResultProcessor {
 
 		$job->set('mjb_result', json_encode($result));
 		$job->save();
+	}
+
+	/**
+	 * A chain restore's last step: once the archives and the database are
+	 * back, the run's offloaded files are brought home in missing mode
+	 * (specs/backup_offloaded_files.md § Restore). The loop is
+	 * FleetObjectRestore's; here the restore is recorded and the survey is
+	 * started. A node whose agent lacks the word, or a run with no index, is
+	 * recorded as such — the restore itself stands either way.
+	 *
+	 * Only a FRESH result starts the loop. Results are processed lazily, and
+	 * a restore that finished before this plane knew about offloaded files
+	 * has sat with no result since; the sweep reaching it months later must
+	 * not start bringing files home behind an operator who restored again
+	 * since. Fresh means within the restore's own claim budget, the longest
+	 * a genuine result can lag its job.
+	 */
+	const RESTORE_CHAIN_OBJECTS_WINDOW_SECONDS = 15720;
+
+	private static function process_restore_chain($job) {
+		$result = ['status' => (string)$job->get('mjb_status')];
+		$stamp = trim((string)$job->get('mjb_completed_time'));
+		$completed = ($stamp !== '') ? strtotime($stamp . ' UTC') : false;
+		if ($job->get('mjb_status') === 'completed'
+				&& $completed !== false && (time() - $completed) > self::RESTORE_CHAIN_OBJECTS_WINDOW_SECONDS) {
+			$result['objects'] = 'Offloaded files were not brought home: this restore finished at '
+				. (string)$job->get('mjb_completed_time') . ' UTC, before its result was read. Use Bring them back.';
+		} elseif ($job->get('mjb_status') === 'completed') {
+			$params = $job->get('mjb_parameters');
+			if (is_string($params)) { $params = json_decode($params, true); }
+			$params = is_array($params) ? $params : [];
+			try {
+				require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetObjectRestore.php'));
+				$node = new ManagedNode((int)$job->get('mjb_mgn_managed_node_id'), TRUE);
+				$survey = FleetObjectRestore::start($node, [
+					'chain_id' => (string)($params['chain_id'] ?? ''),
+					'profile'  => (string)($params['profile'] ?? ''),
+					'seq'      => $params['seq'] ?? '',
+					'mode'     => BackupObjectRestore::MODE_MISSING,
+				], $job->get('mjb_created_by'), (int)$job->key);
+				$result['objects_job'] = (int)$survey->key;
+				$result['objects'] = 'Bringing the offloaded files home the file store cannot serve: job #' . (int)$survey->key . '.';
+			} catch (Throwable $e) {
+				$result['objects'] = 'Offloaded files were not brought home: ' . $e->getMessage();
+			}
+		}
+		$job->set('mjb_result', json_encode($result));
+		$job->save();
+	}
+
+	/**
+	 * One job of the offloaded-files loop: a survey's answer (the names the
+	 * node would bring home) or a page's counts, recorded as the job's
+	 * result; then the next job of the loop, issued by FleetObjectRestore
+	 * from this one's record and answer. A job that failed ends the loop with
+	 * its reason in its own result.
+	 */
+	private static function process_restore_objects($job) {
+		$verdict = self::parse_restore_objects_result(
+			$job->get('mjb_output') ?: '',
+			(string)$job->get('mjb_status'),
+			trim((string)$job->get('mjb_error_message'))
+		);
+		$result = $verdict;
+		$result['restore_status'] = $verdict['result'];
+		// The result is written BEFORE the next job is issued: a page reads
+		// the survey's names out of the survey's result.
+		$job->set('mjb_result', json_encode($result));
+		$job->save();
+
+		try {
+			require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetObjectRestore.php'));
+			$why = '';
+			$next = FleetObjectRestore::continue_after($job, $verdict, $why);
+			$result['next_job'] = $next ? (int)$next->key : null;
+			$result['next']     = $next ? 'job #' . (int)$next->key : $why;
+		} catch (Throwable $e) {
+			$result['next_job'] = null;
+			$result['next']     = 'no further job could be issued: ' . $e->getMessage();
+			error_log('JobResultProcessor: restore_objects loop stopped after job ' . $job->key . ': ' . $e->getMessage());
+		}
+		$job->set('mjb_result', json_encode($result));
+		$job->save();
+	}
+
+	/**
+	 * Read a restore_objects job's answer out of its output. Pure. The
+	 * contract is BackupObjectRestore's, printed by the node and parsed by
+	 * the same class here. A job that failed before printing a result is a
+	 * failed step with the job's own error as its reason.
+	 *
+	 * @return array the parsed contract plus 'message' in plain words
+	 */
+	public static function parse_restore_objects_result(string $output, string $job_status, string $job_error = ''): array {
+		require_once(PathHelper::getIncludePath('includes/BackupObjectRestore.php'));
+
+		$envelope = self::extract_api_envelope_data($output);
+		if ($envelope !== null && isset($envelope['output']) && is_string($envelope['output'])) {
+			$output = $envelope['output'];
+		}
+
+		$parsed = BackupObjectRestore::parse_contract($output);
+		if (!preg_match('/^RESTORE_OBJECTS_RESULT=/m', $output)) {
+			$parsed['result'] = BackupObjectRestore::RESULT_FAIL;
+			$parsed['reason'] = ($job_status === 'failed' && $job_error !== '')
+				? $job_error
+				: 'the node reported no result';
+		}
+		$parsed['message'] = BackupObjectRestore::describe($parsed);
+		return $parsed;
 	}
 
 	/**

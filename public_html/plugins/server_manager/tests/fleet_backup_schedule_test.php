@@ -582,4 +582,195 @@ check(is_array($r) && strpos($r['problem'], 'holds files-0001.tar.gz.enc at 150 
 check(is_array($r) && stripos($r['problem'], 'could not be read') === false,
 	'and "could not be read" never appears in what is stamped on the card');
 
+// ── The object family ───────────────────────────────────────────────────────
+section('objects/ is not a restore point');
+
+$base = 'joinery-backups/demo/manager/';
+$shelf = array(
+	array('key' => $base . 'chain-20260901_030000/manifest.json', 'size' => 900),
+	array('key' => $base . 'chain-20260901_030000/files-0000.tar.gz.enc', 'size' => 5000),
+	array('key' => $base . 'chain-20260901_030000/objects-0000.json.gz', 'size' => 300),
+	array('key' => $base . 'chain-20260901_030000/objects-0001.json.gz', 'size' => 310),
+	array('key' => $base . 'chain-20260820_030000/manifest.json', 'size' => 900),
+	array('key' => $base . 'chain-20260820_030000/objects-0002.json.gz', 'size' => 200),
+	array('key' => $base . 'demo-20260825_120000.tar.gz.enc', 'size' => 7000),
+	array('key' => $base . 'demo-20260825_120000.tar.gz.enc.keys.json', 'size' => 800),
+	array('key' => $base . 'demo-20260825_120000.objects.json.gz', 'size' => 250),
+	array('key' => $base . 'objects/epoch-20260801_000000/envelope.json', 'size' => 800, 'last_modified' => '2026-08-01T00:00:00.000Z'),
+	array('key' => $base . 'objects/epoch-20260801_000000/beach.jpg.enc', 'size' => 4000, 'last_modified' => '2026-08-02T10:00:00.000Z'),
+	array('key' => $base . 'objects/epoch-20260801_000000/old.jpg.enc', 'size' => 4100, 'last_modified' => '2026-08-03T10:00:00.000Z'),
+	array('key' => $base . 'objects/epoch-20260901_000000/envelope.json', 'size' => 800, 'last_modified' => '2026-09-01T00:00:00.000Z'),
+	array('key' => $base . 'objects/epoch-20260901_000000/dune.png.enc', 'size' => 1200, 'last_modified' => '2026-09-01T12:00:00.000Z'),
+	array('key' => $base . 'objects/epoch-20260901_000000/fresh.png.enc', 'size' => 1300, 'last_modified' => '2026-09-02T04:00:00.000Z'),
+	array('key' => $base . 'objects/epoch-20260810_000000/envelope.json', 'size' => 800, 'last_modified' => '2026-08-10T00:00:00.000Z'),
+	array('key' => $base . 'objects/epoch-20260810_000000/lonely.gif.enc', 'size' => 50, 'last_modified' => '2026-08-11T00:00:00.000Z'),
+	array('key' => $base . 'objects/tmp/stray', 'size' => 1),
+);
+$groups = FleetBackupRetention::group($shelf, $base);
+check(!isset($groups['objects']) && array_keys($groups) === array('chain-20260901_030000', 'demo-20260825_120000.tar.gz.enc', 'chain-20260820_030000'),
+	'group() files nothing under objects/ as a restore point, so a prune never deletes the store', implode(' > ', array_keys($groups)));
+check(count($groups['demo-20260825_120000.tar.gz.enc']['keys']) === 3, 'a standalone index is filed with its archive and envelope', json_encode($groups['demo-20260825_120000.tar.gz.enc']['keys']));
+check(FleetBackupRetention::total_bytes($shelf) === 28711, 'the shelf size still counts the objects — they are what the customer keeps', (string)FleetBackupRetention::total_bytes($shelf));
+$store = FleetBackupRetention::object_store($shelf, $base);
+check(array_keys($store['objects']) === array('epoch-20260801_000000/beach.jpg', 'epoch-20260801_000000/old.jpg', 'epoch-20260901_000000/dune.png',
+	'epoch-20260901_000000/fresh.png', 'epoch-20260810_000000/lonely.gif'), 'object_store() keys objects by shelf location', json_encode(array_keys($store['objects'])));
+check(array_keys($store['envelopes']) === array('epoch-20260801_000000', 'epoch-20260901_000000', 'epoch-20260810_000000') && !isset($store['objects']['tmp/stray']),
+	'and envelopes by epoch; a stray under objects/ is neither');
+
+section('The request carries the newest index and every envelope');
+$links = FleetBackupRetention::index_links($shelf, $base);
+check($links['index'] === $base . 'chain-20260901_030000/objects-0001.json.gz', 'the newest restore point\'s newest index', $links['index']);
+check(array_keys($links['envelopes']) === array('epoch-20260801_000000', 'epoch-20260901_000000', 'epoch-20260810_000000'), 'every epoch envelope, by epoch');
+$standalone_first = array_filter($shelf, function ($o) { return strpos($o['key'], '/chain-20260901_030000/') === false; });
+check(FleetBackupRetention::index_links(array_values($standalone_first), $base)['index'] === $base . 'demo-20260825_120000.objects.json.gz',
+	'a standalone full\'s index is picked when it is the newest restore point');
+check(FleetBackupRetention::index_links(array(array('key' => $base . 'chain-20260901_030000/manifest.json')), $base)['index'] === '',
+	'no index on the shelf means no link — the node then holds nothing');
+
+section('The shelf check reads the newest run\'s index and wants every stored object there');
+$idx = array('version' => 1, 'created' => '2026-09-02T03:00:00Z', 'epochs' => array('epoch-20260801_000000', 'epoch-20260901_000000'), 'objects' => array(
+	array('name' => 'beach.jpg', 'epoch' => 'epoch-20260801_000000', 'object_bytes' => 4000, 'object_sha256' => 'a', 'stored' => true),
+	array('name' => 'dune.png', 'epoch' => 'epoch-20260901_000000', 'object_bytes' => 1200, 'object_sha256' => 'b', 'stored' => true),
+	array('name' => 'waiting.jpg', 'epoch' => '', 'object_bytes' => 0, 'object_sha256' => '', 'stored' => false),
+));
+$set = 'begun 2026-09-01 03:00 UTC';
+check(FleetBackupRetention::compare_index($idx, $store['objects'], $store['envelopes'], $set) === '', 'a whole store has nothing to say');
+$gone = $store['objects']; unset($gone['epoch-20260801_000000/beach.jpg']);
+$p = FleetBackupRetention::compare_index($idx, $gone, $store['envelopes'], $set);
+check($p === 'the backup set begun 2026-09-01 03:00 UTC names 1 offloaded file its shelf does not hold (beach.jpg)', 'a missing object is named', $p);
+$short = $store['objects']; $short['epoch-20260901_000000/dune.png']['size'] = 7;
+$p = FleetBackupRetention::compare_index($idx, $short, $store['envelopes'], $set);
+check(strpos($p, 'holds the offloaded file dune.png at 7 bytes on the shelf where its index records 1200') !== false, 'a wrong size is named', $p);
+$no_env = $store['envelopes']; unset($no_env['epoch-20260901_000000']);
+$p = FleetBackupRetention::compare_index($idx, $store['objects'], $no_env, $set);
+check(strpos($p, 'epoch-20260901_000000 but that epoch\'s envelope is not on the shelf') !== false, 'a missing epoch envelope is named', $p);
+check(FleetBackupRetention::compare_index($idx, array(), array(), $set) !== '' && FleetBackupRetention::compare_index(array('objects' => array()), array(), array(), $set) === '',
+	'an index naming nothing stored is whole on an empty store');
+
+$manifest_o = array('version' => 1, 'chain_id' => 'chain-20260901_030000', 'created' => '2026-09-01T03:00:00Z',
+	'envelope' => array('version' => 1, 'recipients' => array()),
+	'runs' => array(
+		array('seq' => 0, 'level' => 0, 'artifacts' => array('files' => array('name' => 'files-0000.tar.gz.enc', 'bytes' => 5000),
+			'objects' => array('name' => 'objects-0000.json.gz', 'bytes' => 300))),
+		array('seq' => 1, 'level' => 1, 'artifacts' => array('files' => array('name' => 'files-0001.tar.gz.enc', 'bytes' => 20),
+			'objects' => array('name' => 'objects-0001.json.gz', 'bytes' => 310))),
+	));
+$shelf_o = array_merge(array(array('key' => $base . 'chain-20260901_030000/files-0001.tar.gz.enc', 'size' => 20)),
+	array_values(array_filter($shelf, function ($o) { return strpos($o['key'], '/chain-20260820_030000/') === false && strpos($o['key'], 'demo-2026') === false; })));
+$by_key = function (array $answers) {
+	return function ($key) use ($answers) {
+		foreach ($answers as $suffix => $answer) {
+			if (substr($key, -strlen($suffix)) === $suffix) {
+				if ($answer instanceof Exception) { throw $answer; }
+				return $answer;
+			}
+		}
+		throw new Exception('unexpected key ' . $key);
+	};
+};
+$r = FleetBackupRetention::check_shelf($shelf_o, $base, $creds, 'bucket', $by_key(array('manifest.json' => $manifest_o, 'objects-0001.json.gz' => $idx)));
+check($r['problem'] === '' && $r['unread'] === '', 'manifest whole, newest index whole: nothing to say', json_encode($r));
+$r = FleetBackupRetention::check_shelf(array_values(array_filter($shelf_o, function ($o) { return basename($o['key']) !== 'dune.png.enc'; })), $base, $creds, 'bucket',
+	$by_key(array('manifest.json' => $manifest_o, 'objects-0001.json.gz' => $idx)));
+check(strpos($r['problem'], 'names 1 offloaded file its shelf does not hold (dune.png)') !== false, 'an object missing from the shelf is the backup set\'s problem', json_encode($r));
+$r = FleetBackupRetention::check_shelf($shelf_o, $base, $creds, 'bucket', $by_key(array('manifest.json' => $manifest_o, 'objects-0001.json.gz' => new Exception('HTTP 503'))));
+check($r['problem'] === '' && strpos($r['unread'], 'offloaded-files index of the backup set begun 2026-09-01 03:00 UTC could not be read (HTTP 503)') !== false,
+	'an index that could not be read is this pass\'s problem, never stamped', json_encode($r));
+
+// A standalone full's index joins the check by the same rule.
+$idx_full = array('version' => 1, 'created' => '2026-08-25T12:00:00Z', 'epochs' => array('epoch-20260810_000000'), 'objects' => array(
+	array('name' => 'lonely.gif', 'epoch' => 'epoch-20260810_000000', 'object_bytes' => 50, 'object_sha256' => 'c', 'stored' => true),
+));
+$shelf_f = array_values(array_filter($shelf, function ($o) { return strpos($o['key'], '/chain-2026') === false; }));   // the standalone and the store
+$r = FleetBackupRetention::check_shelf($shelf_f, $base, $creds, 'bucket', $by_key(array('demo-20260825_120000.objects.json.gz' => $idx_full)));
+check($r['problem'] === '' && $r['unread'] === '', 'a standalone full whose index is whole has nothing to say', json_encode($r));
+$r = FleetBackupRetention::check_shelf(array_values(array_filter($shelf_f, function ($o) { return basename($o['key']) !== 'lonely.gif.enc'; })),
+	$base, $creds, 'bucket', $by_key(array('demo-20260825_120000.objects.json.gz' => $idx_full)));
+check(strpos($r['problem'], 'the backup set begun 2026-08-25 12:00 UTC names 1 offloaded file its shelf does not hold (lonely.gif)') !== false,
+	'an object a standalone full\'s index names and the shelf lacks is that backup\'s problem', json_encode($r));
+$r = FleetBackupRetention::check_shelf(array_values(array_filter($shelf_f, function ($o) { return strpos($o['key'], 'epoch-20260810_000000/envelope.json') === false; })),
+	$base, $creds, 'bucket', $by_key(array('demo-20260825_120000.objects.json.gz' => $idx_full)));
+check(strpos($r['problem'], 'epoch-20260810_000000 but that epoch\'s envelope is not on the shelf') !== false, 'and so is its epoch\'s missing envelope', json_encode($r));
+$r = FleetBackupRetention::check_shelf($shelf_f, $base, $creds, 'bucket', $by_key(array('demo-20260825_120000.objects.json.gz' => new Exception('HTTP 503'))));
+check($r['problem'] === '' && strpos($r['unread'], 'offloaded-files index of the backup set begun 2026-08-25 12:00 UTC could not be read (HTTP 503)') !== false,
+	'a standalone index that could not be read is this pass\'s problem, never stamped', json_encode($r));
+
+section('An object is deleted only when no retained index names it and it landed before the newest run');
+$idx_old = array('version' => 1, 'created' => '2026-08-20T03:30:00Z', 'epochs' => array('epoch-20260801_000000', 'epoch-20260810_000000'), 'objects' => array(
+	array('name' => 'beach.jpg', 'epoch' => 'epoch-20260801_000000', 'object_bytes' => 4000, 'object_sha256' => 'a', 'stored' => true),
+	array('name' => 'old.jpg', 'epoch' => 'epoch-20260801_000000', 'object_bytes' => 4100, 'object_sha256' => 'c', 'stored' => true),
+	array('name' => 'lonely.gif', 'epoch' => 'epoch-20260810_000000', 'object_bytes' => 50, 'object_sha256' => 'd', 'stored' => true),
+));
+$idx_standalone = array('version' => 1, 'created' => '2026-08-25T12:10:00Z', 'epochs' => array('epoch-20260801_000000'), 'objects' => array(
+	array('name' => 'beach.jpg', 'epoch' => 'epoch-20260801_000000', 'object_bytes' => 4000, 'object_sha256' => 'a', 'stored' => true),
+	array('name' => 'old.jpg', 'epoch' => 'epoch-20260801_000000', 'object_bytes' => 4100, 'object_sha256' => 'c', 'stored' => true),
+));
+$idx0 = array('version' => 1, 'created' => '2026-09-01T03:10:00Z', 'epochs' => array('epoch-20260801_000000'), 'objects' => array(
+	array('name' => 'beach.jpg', 'epoch' => 'epoch-20260801_000000', 'object_bytes' => 4000, 'object_sha256' => 'a', 'stored' => true),
+	array('name' => 'old.jpg', 'epoch' => 'epoch-20260801_000000', 'object_bytes' => 4100, 'object_sha256' => 'c', 'stored' => true),
+));
+$reads = array(); $deleted = array();
+$read = function ($key) use (&$reads, $idx, $idx0, $idx_old, $idx_standalone) {
+	$reads[] = basename($key);
+	$file = basename($key);
+	if ($file === 'objects-0001.json.gz' && strpos($key, 'chain-20260901') !== false) { return $idx; }
+	if ($file === 'objects-0000.json.gz' && strpos($key, 'chain-20260901') !== false) { return $idx0; }
+	if (strpos($key, 'chain-20260820') !== false) { return $idx_old; }
+	if (strpos($key, 'demo-20260825') !== false) { return $idx_standalone; }
+	throw new Exception('unexpected ' . $key);
+};
+$delete = function ($key) use (&$deleted) { $deleted[] = $key; };
+
+// Everything kept: chain 0901 (indexes 0000, 0001), the standalone, chain 0820.
+$groups = FleetBackupRetention::group($shelf, $base);
+$gone = FleetBackupRetention::prune_objects($shelf, $base, array_values($groups), $read, $delete);
+check($gone === array(), 'with every run retained nothing is deleted (fresh.png is unnamed but landed after the newest run)', json_encode($gone));
+check(in_array('objects-0001.json.gz', $reads, true) && in_array('demo-20260825_120000.objects.json.gz', $reads, true) && in_array('objects-0002.json.gz', $reads, true),
+	'each retained chain\'s newest index and the standalone\'s were read', json_encode($reads));
+
+// Chain 0820 pruned (keep 2): lonely.gif was named only there → deleted, and
+// its epoch's envelope with it (an emptied epoch, not the newest). old.jpg is
+// still named by the standalone's index; beach.jpg by everything.
+$reads = array(); $deleted = array();
+$gone = FleetBackupRetention::prune_objects($shelf, $base, array_slice(array_values($groups), 0, 2), $read, $delete);
+check($gone === array($base . 'objects/epoch-20260810_000000/lonely.gif.enc', $base . 'objects/epoch-20260810_000000/envelope.json'),
+	'an object no retained index names goes, and its emptied epoch\'s envelope with it', json_encode($gone));
+check(!in_array('objects-0002.json.gz', $reads, true), 'the pruned chain\'s index is not consulted');
+check(in_array('objects-0000.json.gz', $reads, true), 'the older index of a retained chain is read because an object the newest ones did not clear remained (lonely.gif)');
+$reads = array();
+FleetBackupRetention::prune_objects(array_values(array_filter($shelf, function ($o) { return strpos($o['key'], 'lonely') === false && strpos($o['key'], 'fresh') === false && strpos($o['key'], 'epoch-20260810') === false; })),
+	$base, array_slice(array_values($groups), 0, 2), $read, $delete);
+check(!in_array('objects-0000.json.gz', $reads, true), 'and not read when the newest indexes clear every object');
+
+// Only chain 0901 kept: old.jpg loses its last namer (the standalone) — but
+// chain 0901's OLDER index still names it, and is read for exactly that.
+$reads = array(); $deleted = array();
+$gone = FleetBackupRetention::prune_objects($shelf, $base, array_slice(array_values($groups), 0, 1), $read, $delete);
+check($gone === array($base . 'objects/epoch-20260810_000000/lonely.gif.enc', $base . 'objects/epoch-20260810_000000/envelope.json'),
+	'old.jpg stays: the retained chain\'s older run still names it', json_encode($gone));
+check(in_array('objects-0000.json.gz', $reads, true), 'and that older index was read to find out');
+
+// The newest epoch's envelope is never deleted, even emptied.
+$only_new = array(
+	array('key' => $base . 'chain-20260901_030000/objects-0001.json.gz', 'size' => 310),
+	array('key' => $base . 'objects/epoch-20260901_000000/envelope.json', 'size' => 800, 'last_modified' => '2026-09-01T00:00:00.000Z'),
+	array('key' => $base . 'objects/epoch-20260901_000000/gone.png.enc', 'size' => 1200, 'last_modified' => '2026-08-30T12:00:00.000Z'),
+);
+$deleted = array();
+$gone = FleetBackupRetention::prune_objects($only_new, $base, array_values(FleetBackupRetention::group($only_new, $base)),
+	function ($key) { return array('version' => 1, 'created' => '2026-09-01T03:10:00Z', 'epochs' => array(), 'objects' => array()); }, $delete);
+check($gone === array($base . 'objects/epoch-20260901_000000/gone.png.enc'), 'the object goes; the newest epoch keeps its envelope for the node\'s next store', json_encode($gone));
+
+// No retained index at all: nothing is judged.
+$gone = FleetBackupRetention::prune_objects($shelf, $base, array(), $read, $delete);
+check($gone === array(), 'with no retained index nothing is deleted');
+$gone = FleetBackupRetention::prune_objects($shelf, $base, array_values($groups), function ($key) { throw new Exception('HTTP 503'); }, $delete);
+check($gone === array(), 'a newest index that cannot be read leaves the store alone this pass');
+// An OLDER retained index that cannot be read: it may be the only one naming
+// what remains (lonely.gif here), so nothing goes either.
+$reads = array(); $deleted = array();
+$gone = FleetBackupRetention::prune_objects($shelf, $base, array_slice(array_values($groups), 0, 1),
+	function ($key) use ($read) { $r = $read($key); if (strpos($key, 'objects-0000') !== false) { throw new Exception('HTTP 503'); } return $r; }, $delete);
+check($gone === array() && in_array('objects-0000.json.gz', $reads, true), 'an older retained index that cannot be read leaves the store alone too', json_encode($gone));
+
 harness_finish();

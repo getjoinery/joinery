@@ -279,6 +279,52 @@ check(!rde_sentinel_survives($scratch, $db_user, $db_pass),
 	'restore_database replaces a schema; a sentinel that survived it means the load ran somewhere '
 	. 'other than where the test was looking');
 
+section('A dump the engine streamed opens unchanged');
+
+// The production shape: backup_database.sh --archive - writes the encrypted
+// dump to stdout under a key file, and the runner puts those bytes on the
+// shelf as they flow. A restore downloads them to a file and opens it with
+// the envelope, exactly as it opens a dump the engine wrote to disk. Proven
+// end to end: a second scratch database is streamed under the same data key,
+// and restoring the stream over the first brings its rows across.
+$source = 'jy_rde_src_' . bin2hex(random_bytes(4));
+list($rc, $out) = rde_psql("CREATE DATABASE {$source}", $live_db, $db_user, $db_pass);
+if ($rc !== 0) {
+	harness_skip('streamed dump restore', 'could not create a second scratch database: ' . $out);
+} else {
+	harness_defer(function () use ($source, $live_db, $db_user, $db_pass) {
+		rde_psql("DROP DATABASE IF EXISTS {$source}", $live_db, $db_user, $db_pass);
+	});
+	rde_psql('CREATE TABLE rde_streamed (id int); INSERT INTO rde_streamed VALUES (7), (8)', $source, $db_user, $db_pass);
+
+	$key_file = $backups . '/stream.key';
+	file_put_contents($key_file, $data_key . "\n");
+	chmod($key_file, 0600);
+	$streamed = $backups . '/' . $source . '-20260920_000000.sql.gz.enc';
+	$report   = $backups . '/stream.report';
+	$cmd = 'bash ' . escapeshellarg($src . '/backup_database.sh') . ' --non-interactive'
+		. ' --key-file ' . escapeshellarg($key_file) . ' --archive - --report ' . escapeshellarg($report)
+		. ' ' . escapeshellarg($source) . ' > ' . escapeshellarg($streamed) . ' 2>/dev/null';
+	$env = ['PATH' => getenv('PATH'), 'HOME' => $home, 'PGPASSWORD' => $db_pass];
+	$proc = proc_open(['bash', '-c', $cmd], [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null, $env);
+	fclose($pipes[1]); fclose($pipes[2]);
+	$rc = proc_close($proc);
+	@unlink($key_file);
+	$rep = is_file($report) ? file_get_contents($report) : '';
+	check($rc === 0 && strpos($rep, 'DUMP_RC=0') !== false && strpos($rep, 'ENC_RC=0') !== false,
+		'the engine streamed the dump and reported success', 'rc ' . $rc . ' report: ' . trim($rep));
+	check(filesize($streamed) > 64 && substr((string)file_get_contents($streamed, false, null, 0, 8), 0, 8) === 'Salted__',
+		'the stream is an openssl envelope', 'size ' . @filesize($streamed));
+
+	rde_write_sidecar($streamed, $data_key, $site_pub);
+	rde_plant_sentinel($scratch, $db_user, $db_pass);
+	list($marker, $stderr) = rde_restore($engine, $scratch, $streamed, $home, $db_user, $db_pass);
+	check($marker === 'RESTORE_OK', 'the streamed dump restores from the envelope alone', "marker '{$marker}'. stderr:\n" . $stderr);
+	list($rc, $out) = rde_psql('SELECT sum(id) FROM rde_streamed', $scratch, $db_user, $db_pass);
+	check($rc === 0 && $out === '15', 'and the restored database holds exactly what was streamed', $out);
+	check(!rde_sentinel_survives($scratch, $db_user, $db_pass), 'the schema it replaced is gone');
+}
+
 section('Nothing is left holding a usable key');
 
 $leftovers = glob('/tmp/jy_restore_*key*') ?: [];

@@ -26,10 +26,15 @@
  *       files-0000.tar.gz.enc      the full
  *       db-0000.sql.gz.enc
  *       meta-0000.tar.gz.enc
+ *       objects-0000.json.gz       the index of offloaded files, plain
  *       files-0001.tar.gz.enc      an incremental
  *       db-0001.sql.gz.enc
  *       ...
  *
+ * @version 1.3 - the `objects` kind: a run's index of the site's offloaded files
+ *                (objects-0003.json.gz, plain gzipped JSON like the manifest), named by
+ *                artifact_name(), returned by restore_plan(), deleted with the chain by
+ *                object_keys() — the objects it names are outside the chain and are not.
  * @version 1.2 - should_start_new breaks the chain when the recovery recipient changed: a chain's
  *                one data key is sealed at chain start, so after a key rotation an extended chain
  *                would stay openable only by the rotated-away key
@@ -53,7 +58,7 @@ class BackupChain {
 	const DIR_PREFIX = 'chain-';
 
 	/** The database is dumped in full every run — see the class comment. */
-	const KINDS = array('files', 'db', 'meta');
+	const KINDS = array('files', 'db', 'meta', 'objects');
 
 	// ------------------------------------------------------------------ shape
 
@@ -89,13 +94,21 @@ class BackupChain {
 		return count($manifest['runs'] ?? array());
 	}
 
-	/** Artifact filename for a kind and sequence, e.g. files-0003.tar.gz.enc. */
+	/**
+	 * Artifact filename for a kind and sequence, e.g. files-0003.tar.gz.enc.
+	 * The objects index is plain (objects-0003.json.gz) whatever $encrypted
+	 * says: the management node prunes by it and cannot open a chain key.
+	 */
 	public static function artifact_name($kind, $seq, $encrypted = true) {
 		if (!in_array($kind, self::KINDS, true)) {
 			throw new BackupChainException("Unknown chain artifact kind '{$kind}'.");
 		}
+		$n = str_pad((string)(int)$seq, 4, '0', STR_PAD_LEFT);
+		if ($kind === 'objects') {
+			return $kind . '-' . $n . '.json.gz';
+		}
 		$ext = ($kind === 'db') ? '.sql.gz' : '.tar.gz';
-		return $kind . '-' . str_pad((string)(int)$seq, 4, '0', STR_PAD_LEFT) . $ext . ($encrypted ? '.enc' : '');
+		return $kind . '-' . $n . $ext . ($encrypted ? '.enc' : '');
 	}
 
 	/**
@@ -187,7 +200,7 @@ class BackupChain {
 	/**
 	 * The artifacts needed to restore a chain at a given run, in the order they
 	 * must be applied: the full first, then every incremental up to and
-	 * including $seq, plus that run's database and metadata.
+	 * including $seq, plus that run's database, metadata and objects index.
 	 *
 	 * Order is not cosmetic. tar's incremental extraction replays deletions from
 	 * each archive's directory listings, so applying them out of order, or
@@ -225,6 +238,7 @@ class BackupChain {
 			'files'    => $files,
 			'db'       => $runs[$seq]['artifacts']['db'] ?? null,
 			'meta'     => $runs[$seq]['artifacts']['meta'] ?? null,
+			'objects'  => $runs[$seq]['artifacts']['objects'] ?? null,
 		);
 	}
 

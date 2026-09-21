@@ -28,6 +28,12 @@
  * each store to its own rows via the profile's optional reverseEligibilityWhere()
  * ownership gate.
  *
+ * @version 1.5 - the tick stays active, and the daily file-store check runs, while any offloaded file
+ *                exists — a paused store serves the same files as an active one, and a file the bucket
+ *                lost is otherwise invisible until a visitor gets a 404. It deactivates only when no
+ *                store is in motion and no cloud row remains
+ * @version 1.4 - the tick runs the daily file-store check (CloudStoreInventory) while any store is
+ *                offloading or draining, a slice per tick; its line joins the tick's message
  * @version 1.3
  */
 
@@ -35,6 +41,7 @@ require_once(PathHelper::getIncludePath('includes/cloud_storage/StorageProfile.p
 require_once(PathHelper::getIncludePath('includes/cloud_storage/StorageProfileRegistry.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudOffloadEngine.php'));
+require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStoreInventory.php'));
 require_once(PathHelper::getIncludePath('data/settings_class.php'));
 require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
 
@@ -386,22 +393,46 @@ class CloudStorageLifecycle {
 		}
 
 		// A store finishes draining when no cloud rows remain across its profiles.
-		$still_active = false;
+		$in_motion = false;
+		$cloud_rows = 0;
 		foreach (['public', 'private'] as $visibility) {
+			$rows = self::cloudRowCount($visibility);
+			$cloud_rows += $rows;
 			$mode = self::modeForVisibility($visibility);
-			if ($mode === 'drain' && self::cloudRowCount($visibility) === 0) {
+			if ($mode === 'drain' && $rows === 0) {
 				self::stopDrain($visibility, null);
 				$mode = 'idle';
 			}
-			if ($mode !== 'idle') $still_active = true;
+			if ($mode !== 'idle') $in_motion = true;
 		}
 
+		// While any offloaded file exists, the daily file-store check takes its
+		// slice: every offloaded file HEADed once a day, the ones the bucket
+		// cannot serve written down for the cloud-storage and Backups pages. A
+		// paused store serves the same files as an active one, so the check
+		// does not stop with the offloading. Its failure is its own line, never
+		// the tick's status: a bucket that will not answer a HEAD is not a
+		// reason to stop offloading.
+		if ($cloud_rows > 0) {
+			try {
+				$inv = CloudStoreInventory::tick();
+				if (($inv['message'] ?? '') !== '') $msgs[] = $inv['message'];
+			} catch (\Throwable $e) {
+				$msgs[] = 'file store check: ' . $e->getMessage();
+			}
+		}
+
+		if (!$msgs) {
+			$msgs[] = $cloud_rows > 0
+				? 'no store offloading or draining; ' . number_format($cloud_rows) . ' offloaded file' . ($cloud_rows === 1 ? '' : 's') . ' under the daily check'
+				: 'no store offloading or draining';
+		}
 		$out = [
 			'status'  => $had_error ? 'error' : 'success',
-			'message' => $msgs ? implode('; ', $msgs) : 'no store offloading or draining',
+			'message' => implode('; ', $msgs),
 		];
-		if (!$still_active) {
-			$out['deactivate'] = true; // nothing to do → scheduler deactivates this task
+		if (!$in_motion && $cloud_rows === 0) {
+			$out['deactivate'] = true; // nothing to move and nothing to check → scheduler deactivates this task
 		}
 		return $out;
 	}

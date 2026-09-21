@@ -2,6 +2,16 @@
 /**
  * admin_backups — the Backups page.
  *
+ * @version 1.11 - the Offloaded files box carries the figures: what each backup holds on the shelf and when
+ *                 it was last indexed, what is still to copy from the file store, what waits on this
+ *                 server for a backup before its local copy goes, and the same-account line when the
+ *                 file store and this site's target share an access key
+ * @version 1.10 - the Offloaded files box: what the daily file-store check found, "N offloaded files are
+ *                 missing from the file store; the backup holds M of them", and Bring them back — run
+ *                 here on a site with a backup of its own, named as the management node's job otherwise
+ * @version 1.9 - the Keeping row says what a run leaves on this server (a chain run's metadata
+ *                artifact, a standalone archive's envelope); archives and dumps stream to the
+ *                bucket and there is no local copy to remove
  * @version 1.8 - a verify that proved nothing either way (skipped, or refused before it read
  *                anything) shows as "Last attempt" in the Status box and "not verified" / "since
  *                then" on the run's row, so a verify a person started never vanishes without a word
@@ -38,6 +48,9 @@ $is_managed   = $page_vars['is_managed'];
 $manager_url  = $page_vars['manager_url'];
 $approval     = $page_vars['approval'];
 $decommission_approval = $page_vars['decommission_approval'];
+$inventory      = $page_vars['inventory'];
+$objects_source = $page_vars['objects_source'];
+$objects_status = $page_vars['objects_status'];
 
 $page = new AdminPage();
 $page->admin_header(array(
@@ -286,6 +299,49 @@ if (!$recovery['is_ready'] || $rotating) {
 	$page->end_box();
 }
 
+// ── Offloaded files ─────────────────────────────────────────────────────────
+// Files whose bytes live in the file bucket are in no archive; each is on the
+// backup shelf once, and the daily check asks the bucket whether it still has
+// every one. Shown once the check has run or a Bring them back has happened,
+// so a site that offloads nothing never sees an empty box.
+if (BackupObjectsStatus::has_content($objects_status) || CloudStoreInventoryPanel::has_content($inventory)) {
+	$page->begin_box(array('title' => 'Offloaded files'));
+	// What each backup holds, what is still to copy, what waits here.
+	$total = $objects_status['total'];
+	echo '<p class="mb-1">' . htmlspecialchars(BackupObjectsStatus::files_words($total['count'], $total['bytes']))
+	   . ' live in the cloud file store.</p>';
+	foreach (BackupObjectsStatus::shelf_sentences($objects_status) as $line) {
+		echo '<p class="mb-1">' . htmlspecialchars($line) . '</p>';
+	}
+	if (!$objects_status['enabled'] && $total['count'] > 0) {
+		echo '<p class="mb-1 text-muted">No backup of this site stores offloaded files yet: a backup target of this site\'s own '
+		   . '(with a proven recovery key and a backup type that includes files), or a management node, copies each one to '
+		   . 'its shelf from its next run on.</p>';
+	}
+	$catchup = BackupObjectsStatus::catchup_sentence($objects_status);
+	if ($catchup !== '') {
+		echo '<p class="mb-1">' . htmlspecialchars($catchup) . ' <span class="text-muted">Each run copies more, one at a time '
+		   . 'inside its budget, until this reaches zero.</span></p>';
+	}
+	$waiting = BackupObjectsStatus::waiting_sentence($objects_status);
+	if ($waiting !== '') {
+		echo '<p class="mb-1">' . htmlspecialchars($waiting) . '</p>';
+	}
+	$same = BackupObjectsStatus::same_account_line($objects_status);
+	if ($same !== '') {
+		echo '<div class="alert alert-warning mb-2">' . htmlspecialchars($same) . '</div>';
+	}
+	if (CloudStoreInventoryPanel::has_content($inventory)) {
+		echo '<hr class="my-2">';
+		echo CloudStoreInventoryPanel::render($inventory, $objects_source, '/admin/admin_backups', $manager_url);
+	}
+	echo '<p class="text-muted small mt-2 mb-0">Files moved to the cloud file store are served from there and are not '
+	   . 'in the backup archives; each is copied to the backup shelf once instead, and its local copy stays on this server '
+	   . 'until every backup that stores offloaded files holds it. Once a day every offloaded file is '
+	   . 'checked in the file store. <a href="/admin/admin_cloud_storage">Cloud storage</a></p>';
+	$page->end_box();
+}
+
 // ── Targets and schedule ────────────────────────────────────────────────────
 // Configured here only when this site runs its own backups. On a managed node
 // the target, schedule and retention live on the management node, so both boxes
@@ -442,9 +498,13 @@ if ($editing_schedule) {
 	echo '<tr><th>Uploads to</th><td>'
 	   . ($target_name !== '' ? htmlspecialchars($target_name) : '<span class="text-muted">missing target</span>')
 	   . ', filed under ' . htmlspecialchars($slug) . '</td></tr>';
-	echo '<tr><th>Keeping</th><td>Newest ' . $keep . ' offsite; local copies '
-	   . ($local_days > 0 ? $local_days . ' days' : 'forever')
-	   . ($settings->get_setting('backup_delete_local_after_upload') === '1' ? '; local copy removed once uploaded' : '')
+	// Archives and dumps stream to the bucket and are never on this server;
+	// what a run leaves behind is a chain run's metadata artifact or a
+	// standalone archive's envelope file, and that is what these two govern.
+	echo '<tr><th>Keeping</th><td>Newest ' . $keep . ' offsite; what a run leaves on this server '
+	   . ($settings->get_setting('backup_delete_local_after_upload') === '1'
+	       ? 'is removed once uploaded'
+	       : ($local_days > 0 ? 'is kept ' . $local_days . ' days' : 'is kept'))
 	   . '</td></tr>';
 	if ($excludes !== '') {
 		echo '<tr><th>Leaving out</th><td>' . htmlspecialchars($excludes) . '</td></tr>';
