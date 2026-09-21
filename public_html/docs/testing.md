@@ -129,9 +129,13 @@ holds, and the summary names which:
   `theme/`, `serve.php`) or its own plugin changed — Apache-side reach is not
   in the process's include list.
 
-A change under `tests/lib/` or to `tests/run.php` runs the whole batch: the
-harness changing invalidates every recorded reach. A stale or missing map can
-therefore only widen a run, never wrongly narrow it.
+A change to `tests/run.php`, `tests/lib/harness.php`, `tests/lib/coverage.php`
+or `tests/lib/discovery.php` runs the whole batch: the harness changing
+invalidates every recorded reach, and no suite loads the runner, the
+selection or the discovery, so reach cannot see them. Every other file under
+`tests/lib/` — a fixture library, the HTTP or logic helpers — is loaded by the
+suites that use it and recorded in their reach, so it selects only those. A
+stale or missing map can therefore only widen a run, never wrongly narrow it.
 
 **What the output says.** The summary states how many changed files selected
 how many suites and why each ran; the aggregate JSON carries the same as

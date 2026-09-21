@@ -66,6 +66,14 @@ section('The overrides');
 
 $r = coverage_select($tests, $map, array('public_html/tests/lib/harness.php'));
 check($r['run_all'] !== '', 'a harness change runs the whole batch, with the reason stated', $r['run_all']);
+foreach (array('public_html/tests/run.php', 'public_html/tests/lib/coverage.php', 'public_html/tests/lib/discovery.php') as $f) {
+	$r = coverage_select($tests, $map, array($f));
+	check($r['run_all'] !== '', 'the runner, the selection and the discovery changing run the whole batch (' . $f . ')');
+}
+
+$r = coverage_select($tests, $map, array('public_html/tests/lib/http.php'));
+check($r['run_all'] === '' && array_keys($r['selected']) === array('public_html/tests/functional/api/member_screens_test.php'),
+	'a helper library under tests/lib selects only the suites that load it, never the whole batch', json_encode(array_keys($r['selected'])));
 
 $r = coverage_select($tests, $map, array('public_html/tests/vault/registry_test.php'));
 check(isset($r['selected']['public_html/tests/vault/registry_test.php']), "a suite's own file selects it");
