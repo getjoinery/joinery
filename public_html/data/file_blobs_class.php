@@ -28,6 +28,7 @@ class FileBlobException extends SystemBaseException {}
  * pointing at a blob is in the same visibility class. Dedup scoping and the
  * flip / copy-on-write split in File::move_to_correct_directory() maintain it.
  *
+ * @version 1.2.3 - fbb_sync_last_error: why the last offload attempt did not move the blob
  * @version 1.2.2 - one private store: the driver is resolved with no visibility; a cloud blob is always
  *                  a private blob, and flipping one public pulls its bytes home before the record flips
  * @version 1.2.1 - a cloud row can hold local bytes while it waits for a backup storage, so
@@ -59,6 +60,7 @@ class FileBlob extends SystemBase {
 		'fbb_encrypted_variant_key' => array('type'=>'varchar(32)','is_nullable'=>true),
 		'fbb_sync_failed_count' => array('type'=>'int4','is_nullable'=>false,'default'=>0,'zero_on_create'=>true),
 		'fbb_sync_last_attempt' => array('type'=>'timestamp(6)','is_nullable'=>true),
+		'fbb_sync_last_error'   => array('type'=>'varchar(255)','is_nullable'=>true),
 		'fbb_create_time'       => array('type'=>'timestamp(6)','is_nullable'=>false,'default'=>'now()'),
 	);
 

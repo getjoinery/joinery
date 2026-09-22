@@ -10,6 +10,9 @@
  * the bucket, everything otherwise. Save runs the bucket and key check, the
  * privacy gate among its steps, and persists only when it passes.
  *
+ * @version 2.0.2 - records with no bytes on this server are listed apart from stuck files, without Retry;
+ *                  the stuck table shows each file's last error
+ * @version 2.0.1 - Pause and Disable and Pull Files Back are plain grey buttons
  * @version 2.0 - one private store (specs/cloud_storage_private_only.md): the intro says what moves;
  *                the forms draw provider, endpoint, region, bucket and the key; the private-store lines,
  *                the second pull-back, the egress banner and the pre-save confirm are gone
@@ -104,6 +107,16 @@ if (!empty($health['sync_task']) && $health['sync_task']['is_active'] && $health
 if ((int)$c['stuck'] > 0) {
 	$problem('<strong>' . $files($c['stuck']) . ' failed to move 5 or more times.</strong> Retry below.');
 }
+if ((int)$c['missing'] > 0) {
+	// Nothing to retry: the bytes were gone before the bucket was set up.
+	$names = array();
+	foreach ($health['missing_rows'] as $row) {
+		$names[] = htmlspecialchars((string)($row['fbb_stored_name'] ?? ('#' . (int)($row['id'] ?? 0))));
+	}
+	$problem('<strong>' . $files($c['missing']) . ' ' . ((int)$c['missing'] === 1 ? 'has' : 'have') . ' no bytes on this server,</strong> so there is nothing to move. '
+		. 'Each was deleted or lost before the bucket was set up; permanently deleting the file releases its record.'
+		. ($names ? '<br><small class="text-muted">' . implode(', ', $names) . ((int)$c['missing'] > count($names) ? ', …' : '') . '</small>' : ''));
+}
 
 // What is worth knowing.
 if (CloudStoreInventoryPanel::has_content($inventory)) {
@@ -122,13 +135,14 @@ if ($same_account !== '') {
 if (!empty($health['stuck_rows'])) {
 	echo '<div style="margin-top: 8px;">';
 	echo '<table class="table table-sm" style="margin-top: 6px;"><thead><tr>';
-	echo '<th>File</th><th>Last attempt</th><th>Failures</th><th></th>';
+	echo '<th>File</th><th>Last attempt</th><th>Failures</th><th>Last error</th><th></th>';
 	echo '</tr></thead><tbody>';
 	foreach ($health['stuck_rows'] as $row) {
 		echo '<tr>';
 		echo '<td>' . htmlspecialchars($row['fbb_stored_name']) . ' <small class="text-muted">(#' . (int)$row['fbb_file_blob_id'] . ')</small></td>';
 		echo '<td>' . ($row['fbb_sync_last_attempt'] ? $when($row['fbb_sync_last_attempt']) : '—') . '</td>';
 		echo '<td>' . (int)$row['fbb_sync_failed_count'] . '</td>';
+		echo '<td><small>' . htmlspecialchars((string)($row['fbb_sync_last_error'] ?? '')) . '</small></td>';
 		echo '<td>';
 		echo '<form method="post" action="/admin/admin_cloud_storage" style="display:inline;">';
 		echo '<input type="hidden" name="action" value="retry_stuck">';
@@ -260,7 +274,7 @@ if (!$configured) {
 		echo AdminPage::action_button('Pause', '/admin/admin_cloud_storage', array(
 			'hidden'  => array('action' => 'pause'),
 			'confirm' => 'Pause cloud storage? Files already in the bucket keep serving from it; new uploads stay on this server. Enable again at any time.',
-			'class'   => 'btn btn-warning',
+			'class'   => 'btn btn-secondary',
 		));
 	} else {
 		echo AdminPage::action_button('Enable', '/admin/admin_cloud_storage', array(
@@ -274,7 +288,7 @@ if (!$configured) {
 		echo AdminPage::action_button('Disable and Pull Files Back to Local', '/admin/admin_cloud_storage', array(
 			'hidden'  => array('action' => 'disable_and_pull'),
 			'confirm' => 'Disable cloud storage and pull all ' . (int)$cloud_count . ' bucket-stored files back to this server? Local disk: ' . $free_label . '. Ensure several GB of free space before continuing.',
-			'class'   => 'btn btn-danger',
+			'class'   => 'btn btn-secondary',
 		));
 	}
 	if (!$locked && !$enabled) {

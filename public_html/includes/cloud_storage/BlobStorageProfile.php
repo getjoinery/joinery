@@ -15,6 +15,7 @@
  * served from the bucket. A cloud blob that is made public is pulled back
  * before its record flips (FileBlob::flipVisibility()).
  *
+ * @version 1.4 - lastErrorColumn()
  * @version 1.3 - one private store: visibility() answers private, eligibility is fbb_is_private = TRUE,
  *                the public profile is gone (specs/cloud_storage_private_only.md)
  * @version 1.2 - sizeColumn(): the health figures carry bytes beside counts
@@ -36,6 +37,7 @@ class BlobStorageProfile implements StorageProfile {
 	public function driverColumn(): string      { return 'fbb_storage_driver'; }
 	public function failedCountColumn(): string { return 'fbb_sync_failed_count'; }
 	public function lastAttemptColumn(): string { return 'fbb_sync_last_attempt'; }
+	public function lastErrorColumn(): string   { return 'fbb_sync_last_error'; }
 	/** The column a row's size is read from, so the status can say how much sits where. */
 	public function sizeColumn(): string        { return 'fbb_size_bytes'; }
 

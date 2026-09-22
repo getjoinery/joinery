@@ -103,6 +103,7 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.31 - iem_raw_sync_last_error: why the last offload attempt did not move the raw message
  * @version 1.30
  * @changelog 1.30 - iem_to / iem_cc: the To and Cc lists as the message carried
  *   them (MailAddressList canonical form), sealed on every direction, so a
@@ -364,6 +365,7 @@ class InboundEmailMessage extends SystemBase {
 		'iem_raw_storage_key'       => array('type'=>'varchar(500)'),                     // tier-invariant relative key (local/cloud); null for inline/remote
 		'iem_raw_sync_failed_count' => array('type'=>'int4', 'default'=>0),               // offload retry counter (engine failure cap)
 		'iem_raw_sync_last_attempt' => array('type'=>'timestamp(6)'),                     // offload breadcrumb
+		'iem_raw_sync_last_error'   => array('type'=>'varchar(255)'),                     // why the last offload attempt did not move it
 		'iem_message_id_header'   => array('type'=>'varchar(255)', 'unique_with'=>array('iem_recipient', 'iem_direction')),
 		'iem_thread_key'          => array('type'=>'varchar(255)'), // indexed via migration iem_001 (no declarative non-unique index support)
 		'iem_direction'           => array('type'=>'varchar(10)', 'default'=>'inbound', 'is_nullable'=>false), // inbound | outbound (reply/forward sent from the reader)

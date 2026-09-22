@@ -33,6 +33,7 @@
  *
  * Run: php tests/integration/cloud_storage_live_b2_test.php
  *
+ * @version 2.2 - profiles answer lastErrorColumn(); the scratch tables carry last_error
  * @version 2.1 - one store: the factory's single binding, the Save check's steps, the registry's refusal
  * @version 2.0
  */
@@ -95,6 +96,7 @@ class LiveProfile implements StorageProfile {
 	public function driverColumn(): string { return 'drv'; }
 	public function failedCountColumn(): string { return 'failed'; }
 	public function lastAttemptColumn(): string { return 'last_attempt'; }
+	public function lastErrorColumn(): string   { return 'last_error'; }
 	public function visibility(): string { return 'private'; }
 	public function eligibilityWhere(): string { return 'eligible = true'; }
 	private function _row($id) { $db = DbConnector::get_instance()->get_db_link(); $q = $db->prepare("SELECT * FROM {$this->table} WHERE id=?"); $q->execute([$id]); return $q->fetch(PDO::FETCH_ASSOC); }
@@ -164,7 +166,7 @@ try {
 
 	section('B. Full offload cycle through the engine + real driver');
 	$TABLE = 'cloud_live_rows_' . $RUN; $temp_tables[] = $TABLE;
-	$dblink->exec("CREATE TABLE $TABLE (id BIGSERIAL PRIMARY KEY, drv VARCHAR(32), failed INT DEFAULT 0, last_attempt TIMESTAMP, eligible BOOLEAN DEFAULT TRUE)");
+	$dblink->exec("CREATE TABLE $TABLE (id BIGSERIAL PRIMARY KEY, drv VARCHAR(32), failed INT DEFAULT 0, last_attempt TIMESTAMP, last_error VARCHAR(255), eligible BOOLEAN DEFAULT TRUE)");
 	$ids = [];
 	for ($i = 0; $i < 2; $i++) {
 		$id = (int)$dblink->query("INSERT INTO $TABLE (drv) VALUES ('local') RETURNING id")->fetchColumn(); $ids[] = $id;
@@ -204,7 +206,7 @@ try {
 
 	section('E. Image rows: multi-object (original + variants) through the bucket');
 	$ITABLE = 'cloud_live_img_' . $RUN; $temp_tables[] = $ITABLE;
-	$dblink->exec("CREATE TABLE $ITABLE (id BIGSERIAL PRIMARY KEY, drv VARCHAR(32), failed INT DEFAULT 0, last_attempt TIMESTAMP, eligible BOOLEAN DEFAULT TRUE)");
+	$dblink->exec("CREATE TABLE $ITABLE (id BIGSERIAL PRIMARY KEY, drv VARCHAR(32), failed INT DEFAULT 0, last_attempt TIMESTAMP, last_error VARCHAR(255), eligible BOOLEAN DEFAULT TRUE)");
 	$iid = (int)$dblink->query("INSERT INTO $ITABLE (drv) VALUES ('local') RETURNING id")->fetchColumn();
 	@mkdir("$BASE/disk/$iid", 0777, true);
 	foreach (['original', 'avatar', 'content'] as $k) { file_put_contents("$BASE/disk/$iid/$k", "img-$iid-$k\n"); $created_keys[] = "$PREFIX/row$iid/$k"; }
@@ -245,7 +247,7 @@ try {
 
 	section('G. Per-row advisory-lock SKIP');
 	$GTABLE = 'cloud_live_lock_' . $RUN; $temp_tables[] = $GTABLE;
-	$dblink->exec("CREATE TABLE $GTABLE (id BIGSERIAL PRIMARY KEY, drv VARCHAR(32), failed INT DEFAULT 0, last_attempt TIMESTAMP, eligible BOOLEAN DEFAULT TRUE)");
+	$dblink->exec("CREATE TABLE $GTABLE (id BIGSERIAL PRIMARY KEY, drv VARCHAR(32), failed INT DEFAULT 0, last_attempt TIMESTAMP, last_error VARCHAR(255), eligible BOOLEAN DEFAULT TRUE)");
 	$gid = (int)$dblink->query("INSERT INTO $GTABLE (drv) VALUES ('local') RETURNING id")->fetchColumn();
 	@mkdir("$BASE/disk/$gid", 0777, true); file_put_contents("$BASE/disk/$gid/original", "lock-$gid\n");
 	$gprofile = new LiveProfile($GTABLE, $BASE, $PREFIX);
@@ -292,6 +294,7 @@ try {
 		. "  public function driverColumn(): string { return 'drv'; }\n"
 		. "  public function failedCountColumn(): string { return 'failed'; }\n"
 		. "  public function lastAttemptColumn(): string { return 'last_attempt'; }\n"
+		. "  public function lastErrorColumn(): string { return 'last_error'; }\n"
 		. "  public function visibility(): string { return 'private'; }\n"
 		. "  public function eligibilityWhere(): string { return ''; }\n"
 		. "  public function rowExists(int \$id): bool { return false; }\n"
@@ -302,7 +305,7 @@ try {
 	@chmod($temp_plugin_dir, 0777); @chmod($temp_plugin_dir . '/includes', 0777);
 	@chmod($temp_plugin_dir . '/plugin.json', 0666); @chmod($temp_plugin_dir . '/includes/' . $cls . '.php', 0666);
 
-	$dblink->exec("CREATE TABLE $JTABLE (id BIGSERIAL PRIMARY KEY, drv VARCHAR(32), failed INT DEFAULT 0, last_attempt TIMESTAMP)");
+	$dblink->exec("CREATE TABLE $JTABLE (id BIGSERIAL PRIMARY KEY, drv VARCHAR(32), failed INT DEFAULT 0, last_attempt TIMESTAMP, last_error VARCHAR(255))");
 
 	StorageProfileRegistry::reset();
 	$classes = array_map('get_class', StorageProfileRegistry::all());

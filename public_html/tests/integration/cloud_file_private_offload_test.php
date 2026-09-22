@@ -26,6 +26,7 @@
  *
  * Run: php tests/integration/cloud_file_private_offload_test.php
  *
+ * @version 2.1 - the scratch table carries last_error
  * @version 2.0 - one private store: get_url() is always local; the flip-to-public invariant
  * @version 1.0
  */
@@ -65,7 +66,7 @@ try {
 	$dblink->exec("DROP TABLE IF EXISTS $TABLE");
 	$dblink->exec("CREATE TABLE $TABLE (
 		id BIGSERIAL PRIMARY KEY, drv VARCHAR(32), failed INT DEFAULT 0,
-		last_attempt TIMESTAMP, kind VARCHAR(8))");
+		last_attempt TIMESTAMP, last_error VARCHAR(255), kind VARCHAR(8))");
 	$ins = function($drv, $kind) use ($dblink, $TABLE) {
 		$q = $dblink->prepare("INSERT INTO $TABLE (drv, kind) VALUES (?, ?) RETURNING id");
 		$q->execute([$drv, $kind]); return (int)$q->fetchColumn();

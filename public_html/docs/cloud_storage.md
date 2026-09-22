@@ -622,7 +622,8 @@ Every bucket is **private**. Save refuses one that is not.
 
 | Mode | Behavior | Recovery |
 |------|----------|----------|
-| Sync push fails | `fbb_sync_failed_count` increments; next cron tick retries. After 5 failures the blob is excluded and surfaces as "stuck". | Click Retry on the stuck-files list. |
+| Sync push fails | `fbb_sync_failed_count` increments and `fbb_sync_last_error` says why; next cron tick retries. After 5 failures the blob is excluded and surfaces as "stuck", with its last error. | Click Retry on the stuck-files list. |
+| A record has no bytes on this server | Nothing to move: the record is parked at once (count at the cap, reason "no bytes on this server") and the run is not an error. The page lists it apart from stuck files, without Retry. Such a record dates from before the bucket was set up: a file deleted or lost before its blob record was made. | Permanently delete the file; that releases the record. |
 | Credentials become invalid | Driver health-check goes red; the offload tick fails every row. New uploads keep landing locally. | Save again with fixed creds. |
 | Bucket runs out of quota / billing failure | Sync task fails; uploads continue locally. | Resolve at the provider; sync resumes. |
 | `permanent_delete` bucket-delete fails | Logged as `CLOUD_STORAGE_ORPHAN`; row is still deleted. | Manual cleanup via `aws s3 rm` or equivalent. |

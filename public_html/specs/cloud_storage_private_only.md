@@ -1,6 +1,6 @@
 # Cloud storage: one private bucket, private files only
 
-**Status:** Approved 2026-09-21 for an executor to build; the author of this spec checks the work. Nothing built yet. The executor reads § Build plan and § Executor rules first.
+**Status:** Built by the executor and committed 2026-09-21 (c4ec9d05); reviewed by the spec's author the same day against § The rule, § What is removed and § Tests, full db gate 464 of 465 with only the unrelated agent_bundle_drift red. Hand-back: `specs/cloud_storage_private_only_report.md`. Awaiting the owner's live gate (§ Live gate 2–7) and the CLAUDE.md docs-index line edited at /admin/admin_agent_files.
 Supersedes the egress warning and the public store wherever
 `specs/cloud_storage_provider_picker.md` and `docs/cloud_storage.md` describe
 them.

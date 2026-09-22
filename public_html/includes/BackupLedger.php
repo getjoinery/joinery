@@ -63,6 +63,7 @@
  * backups that matter are taken by the root agent (the backup_run primitive), so
  * they are ledgered as a matter of course.
  *
+ * @version 1.4 - a ledger directory this account cannot read is named as such, not as a missing ledger
  * @version 1.3 - record_hash(): an artifact streamed to the bucket is recorded from the hash and
  *                count taken as it went, sharing record()'s entry, history and eviction code
  * @version 1.2 - untrusted() — a ledger group or other can write is refused here, not only by
@@ -269,14 +270,17 @@ class BackupLedger {
 			// "this predates the ledger" reading as an attack — and the answer
 			// to it is the same either way, which is why refusing is still
 			// right.
-			$reason = static::exists($profile)
+			$reason = !is_readable(static::dir())
+				? 'this account cannot read the upload ledger directory ' . static::dir()
+					. '; backups and verifies run as the web user, and only it can read what it made'
+				: (static::exists($profile)
 				? 'this machine has no record of uploading ' . $relname
 					. '. Either it was uploaded before this machine started keeping an upload ledger, '
 					. 'or it is not the archive it is being offered as — and this machine cannot tell '
 					. 'those apart, so it will not load it'
 				: 'this machine has no upload ledger for the ' . self::profile_key($profile)
 					. ' profile yet, so it cannot confirm any archive is one it made. It starts one on '
-					. 'its next backup run';
+					. 'its next backup run');
 			return array('ok' => false, 'reason' => $reason, 'entry' => null);
 		}
 

@@ -25,6 +25,7 @@
  *
  * Run: php tests/backups/bucket_check_test.php
  *
+ * @version 1.2 - the no-bucket check skips on a box with a bucket stored (a blank cannot be forced in memory)
  * @version 1.1 - one file store bucket, labelled "the file store"; the cloud storage check's steps
  * @version 1.0
  */
@@ -88,8 +89,12 @@ check($s['status'] === 'fail' && strpos($s['message'], 'already the backup targe
 
 section('The file store bucket is the one bucket, from the settings');
 harness_set_setting_mem('cloud_storage_endpoint', 'https://s3.example');
-harness_set_setting_mem('cloud_storage_bucket', '');
-check(BucketCheck::file_store_buckets() === array(), 'no bucket set: none');
+if (harness_stored_setting_is_blank('cloud_storage_bucket')) {
+	harness_set_setting_mem('cloud_storage_bucket', '');
+	check(BucketCheck::file_store_buckets() === array(), 'no bucket set: none');
+} else {
+	harness_skip('no bucket set: none', 'this box has a bucket configured and a blank cannot be forced in memory');
+}
 harness_set_setting_mem('cloud_storage_bucket', 'files');
 check(BucketCheck::file_store_buckets() === array(array('bucket' => 'files', 'endpoint' => 'https://s3.example', 'label' => 'the file store')),
 	'the one bucket, labelled the file store', json_encode(BucketCheck::file_store_buckets()));

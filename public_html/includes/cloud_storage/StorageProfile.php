@@ -13,6 +13,7 @@
  * Implementations must have a no-argument constructor: the registry
  * instantiates each declared class with `new $class()`.
  *
+ * @version 1.1 - lastErrorColumn(): why a row did not move, so a record with no bytes is told apart from a failed push
  * @version 1.0
  */
 
@@ -34,6 +35,9 @@ interface StorageProfile {
 
 	/** Column stamped with the last offload attempt time. */
 	public function lastAttemptColumn(): string;
+
+	/** Column holding why the last attempt on a row did not move it (NULL once it does). */
+	public function lastErrorColumn(): string;
 
 	// --- visibility — the only public/private signal a consumer gives ------
 
