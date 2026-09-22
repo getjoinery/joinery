@@ -7,6 +7,11 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
+ * @version 2.27.0 - passwordinput() takes `stored` (a stored credential draws
+ *   locked, with a Reset button) and `rows` (a multi-line credential);
+ *   process_secretinput() reads the submission as keep / clear / set; the bound
+ *   value no longer infers "stored"; validate() passes a locked field that did
+ *   not arrive (specs/stored_secret_fields_mask.md)
  * @version 2.26.1 - phpRegexToJs(): a pattern rule reaches the browser with any PHP
  *   delimiter stripped and its flags carried, not only /.../ — #...# rules (the
  *   Stripe keys, the URL settings) refused every correct value client-side
@@ -406,6 +411,14 @@ abstract class FormWriterV2Base {
             }
 
             $field_name = $field['name'];
+
+            // A locked stored credential is disabled, so it never arrives; what
+            // is stored satisfies its rules. Unlocked, it is checked as usual.
+            if ($field['input_type'] === 'password' && !empty($field['options']['stored'])
+                && !array_key_exists($field_name, $data)) {
+                continue;
+            }
+
             $field_value = $data[$field_name] ?? null;
 
             // Validate field
@@ -3720,25 +3733,97 @@ JS;
      * anything that archives a rendered page. The value is discarded here rather
      * than at the call sites so no future caller can reintroduce it.
      *
-     * A field with something stored says so in its placeholder. Every write path
-     * that handles a password treats an empty submission as "keep the stored
-     * value" — the two rules only work together.
+     * A stored credential is said with the `stored` option and nothing else.
+     * The bound value is never consulted: a form rebuilt from a submitted
+     * request would read "the person typed something" as "something is
+     * stored", and a locked field's absence as "nothing is". A stored field is
+     * drawn locked — disabled, the dots as its placeholder — with a Reset
+     * button that unlocks an empty one. A browser does not submit a disabled
+     * field, so a form saved without touching it leaves the field out of the
+     * request, and process_secretinput() reads that as "keep".
+     *
+     * `rows` draws a multi-line credential (a PEM key, a service-account JSON)
+     * with the same three states.
      */
     protected function preparePasswordData($name, $label, $options) {
-        $bound = $options['value'] ?? ($this->values[$name] ?? '');
-        $has_stored = ($bound !== null && (string)$bound !== '');
+        $stored = !empty($options['stored']);
+        // A field the page itself disabled or made read-only stays that way:
+        // it shows that something is stored and offers no Reset.
+        $page_locked = !empty($options['disabled']) || !empty($options['readonly']);
 
         $options['value'] = '';
         $data = $this->prepareTextData($name, $label, $options);
         $data['value'] = '';
 
-        if ($has_stored && $data['placeholder'] === '') {
-            $data['placeholder'] = '(stored — leave blank to keep)';
-        }
-
         $data['type'] = 'password';
         $data['strength_meter'] = !empty($options['strength_meter']);
+        $data['rows'] = isset($options['rows']) ? max(2, (int)$options['rows']) : 0;
+        $data['stored'] = $stored;
+        $data['resettable'] = $stored && !$page_locked;
+        $data['stored_required'] = false;
+
+        // A caller that says whether something is stored is drawing a
+        // credential, not a sign-in field, so a password manager must not fill it.
+        if (array_key_exists('stored', $options) && $data['autocomplete'] === '') {
+            $data['autocomplete'] = 'new-password';
+        }
+
+        if ($stored) {
+            // Twelve, whatever the length stored, so the length is never told.
+            // A caller's own placeholder would read as the value.
+            $data['placeholder'] = self::STORED_SECRET_PLACEHOLDER;
+            $data['disabled'] = true;
+            // What is stored satisfies `required` while the field is locked;
+            // Reset puts it back.
+            $data['stored_required'] = $data['required'];
+            $data['required'] = false;
+            $data['strength_meter'] = false;
+        }
         return $data;
+    }
+
+    /** What a locked stored-credential field shows. Display text, never submitted. */
+    const STORED_SECRET_PLACEHOLDER = '••••••••••••';
+
+    /** process_secretinput() answers. */
+    const SECRET_KEEP  = 'keep';
+    const SECRET_CLEAR = 'clear';
+    const SECRET_SET   = 'set';
+
+    /**
+     * What a submitted credential field asks for.
+     *
+     * The pair of passwordinput()'s `stored` option. A locked field is
+     * disabled, so the browser leaves it out of the request: absent means keep.
+     * An unlocked field (Reset, or nothing was stored) is submitted like any
+     * other: empty means remove, text means replace.
+     *
+     *   no such field        → keep
+     *   empty after trimming → clear when something is stored, keep when not
+     *   text                 → set, with the trimmed text
+     *
+     * It takes the request and the name rather than the value because absent
+     * and empty are different answers, and `$post[$name] ?? ''` erases the
+     * difference.
+     *
+     * @param array  $post_vars  The submitted fields ($_POST, or an API body)
+     * @param string $field_name The field's name
+     * @param bool   $has_stored Whether a value is stored now
+     * @return array{0:string,1:?string} [SECRET_KEEP|SECRET_CLEAR|SECRET_SET, the value when SECRET_SET]
+     */
+    public static function process_secretinput($post_vars, $field_name, $has_stored) {
+        if (!is_array($post_vars) || !array_key_exists($field_name, $post_vars)) {
+            return array(self::SECRET_KEEP, null);
+        }
+        $value = $post_vars[$field_name];
+        if ($value === null || is_array($value) || is_object($value)) {
+            return array(self::SECRET_KEEP, null);
+        }
+        $value = trim((string)$value);
+        if ($value === '') {
+            return array($has_stored ? self::SECRET_CLEAR : self::SECRET_KEEP, null);
+        }
+        return array(self::SECRET_SET, $value);
     }
 
     protected function prepareNumberData($name, $label, $options) {

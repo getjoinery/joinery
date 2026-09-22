@@ -2,6 +2,7 @@
 /**
  * admin_backups — the Backups page.
  *
+ * @version 1.13 - the target form shows the key ID, region and endpoint; a stored secret is a locked field with Reset
  * @version 1.12 - the target form's bucket and key fields say what each must be; Save proves it
  * @version 1.11 - the Offloaded files box carries the figures: what each backup holds in backup storage and when
  *                 it was last indexed, what is still to copy from the file store, what waits on this
@@ -424,15 +425,22 @@ if ($editing || $adding) {
 		'helptext' => 'A private bucket used for nothing else.'));
 	$fw->textinput('bkt_path_prefix', 'Folder inside the bucket',
 		array('value' => $editing ? (string)$editing->get('bkt_path_prefix') : 'joinery-backups'));
+	// The key ID, region and endpoint are not secrets and show their values;
+	// the secret never does — stored, it is a locked field with Reset.
+	try {
+		$editing_creds = $editing ? ($editing->get_credentials() ?: array()) : array();
+	} catch (BackupTargetException $e) {
+		$editing_creds = array();
+	}
 	$fw->textinput('access_key', 'Access key ID',
-		array('autocomplete' => 'off', 'helptext' => ($editing ? 'Leave blank to keep the stored key. ' : '')
-			. 'A key for this bucket only, with list, read, write and delete. Backblaze: listFiles, readFiles, writeFiles, deleteFiles. '
+		array('autocomplete' => 'off', 'value' => (string)($editing_creds['access_key'] ?? ''),
+			'helptext' => 'A key for this bucket only, with list, read, write and delete. Backblaze: listFiles, readFiles, writeFiles, deleteFiles. '
 			. 'Amazon: s3:ListBucket, s3:GetObject, s3:PutObject, s3:DeleteObject.'));
 	$fw->passwordinput('secret_key', 'Secret key',
-		array('autocomplete' => 'new-password', 'helptext' => $editing ? 'Leave blank to keep the stored key.' : ''));
-	$fw->textinput('region', 'Region', array('value' => ''));
+		array('stored' => (string)($editing_creds['secret_key'] ?? '') !== ''));
+	$fw->textinput('region', 'Region', array('value' => (string)($editing_creds['region'] ?? '')));
 	$fw->textinput('endpoint', 'Endpoint hostname',
-		array('value' => '', 'helptext' => 'The provider\'s S3-compatible endpoint, e.g. s3.us-east-1.amazonaws.com.'));
+		array('value' => (string)($editing_creds['endpoint'] ?? ''), 'helptext' => 'The provider\'s S3-compatible endpoint, e.g. s3.us-east-1.amazonaws.com.'));
 	$fw->checkboxinput('bkt_enabled', 'Enabled', array('checked' => $editing ? (bool)$editing->get('bkt_enabled') : true));
 	$fw->submitbutton('btn_save_target', $editing ? 'Save target' : 'Add target');
 	$fw->end_form();

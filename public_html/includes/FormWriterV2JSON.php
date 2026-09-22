@@ -19,7 +19,8 @@
  * browsers never attach cross-origin, and the CSRF token is bound to a
  * web session that API clients do not have.
  *
- * @version 1.1.0
+ * @version 1.2.0
+ * @changelog 1.2.0 - A password field carries `stored` and `rows`: a native client draws a stored credential locked and follows the keep / clear / set wire contract of FormWriterV2Base::process_secretinput()
  * @changelog 1.1.0 - Opts out of the error summary container: a definition has no markup, and the API error envelope already carries per-field messages for native renderers
  */
 
@@ -151,6 +152,11 @@ class FormWriterV2JSON extends FormWriterV2Base {
             'minlength' => $data['minlength'] ?? null,
             'maxlength' => $data['maxlength'] ?? null,
             'autocomplete' => $data['autocomplete'] ?? '',
+            // A stored credential: the client draws its own locked state and
+            // omits the field to keep it, sends it empty to remove it, or
+            // sends text to replace it (FormWriterV2Base::process_secretinput()).
+            'stored' => !empty($data['stored']),
+            'rows' => !empty($data['rows']) ? (int)$data['rows'] : null,
         ]);
         return $this->addField($field);
     }

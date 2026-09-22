@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.7 - a stored secret is a locked field with Reset; the separate Clear form is gone (clearing
+ *                the public key removes the pair)
  * @version 1.6 - a join from a machine this plane provisioned names its provision, instance and age on
  *                the card, and where the install password stands; approval checks it with the provider
  * @version 1.5 - switched-off nodes read as switched off, not as broken: the going-quiet stamp is
@@ -51,7 +53,9 @@
 		'placeholder' => 'paste public_key here',
 	]);
 	$fw_api->passwordinput('mgn_api_secret_key', 'Secret key', [
-		'placeholder' => $has_api_sec ? '(leave blank to keep current secret)' : 'paste secret_key here',
+		'stored'      => $has_api_sec,
+		'placeholder' => 'paste secret_key here',
+		'helptext'    => 'Clear the public key and save to remove the credential; jobs then route via SSH.',
 	]);
 	$fw_api->checkboxinput('mgn_tls_insecure', 'Skip TLS certificate verification (only for dev/local instances without a trusted CA cert)', [
 		'checked' => (bool)$api_tls_insecure,
@@ -61,18 +65,6 @@
 	}
 	$fw_api->submitbutton('btn_api_save', 'Save', ['class' => 'btn btn-sm btn-primary']);
 	$fw_api->end_form();
-	if ($has_api_pub) {
-		echo ' <button type="button" class="btn btn-sm btn-outline-danger" '
-		   . 'onclick="JoineryModal.confirm(\'Clear API credentials? Jobs will fall back to SSH.\', function(){ document.getElementById(\'api_keys_clear_form\').submit(); })">Clear</button>';
-	}
-
-	if ($has_api_pub) {
-		$fw_api_clear = $page->getFormWriter('api_keys_clear_form');
-		$fw_api_clear->begin_form();
-		$fw_api_clear->hiddeninput('action', '', ['id' => 'api_clear_action', 'value' => 'clear_api_credential']);
-		$fw_api_clear->hiddeninput(SmAdminCsrf::FIELD, '', ['value' => SmAdminCsrf::token()]);
-		$fw_api_clear->end_form();
-	}
 	$page->end_box();
 
 	// ── The agent channel (specs/agent_on_node_architecture.md §3.1, Phase 1.5) ──

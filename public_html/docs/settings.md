@@ -92,7 +92,7 @@ before declarations are loadable.
 | `options_include` | Path to the file defining that class, when it is not one of the always-loaded core classes. |
 | `validation` | A FormWriter validation rule array, verbatim. |
 | `show_when` | `{ "other_setting": "value" }`, or a list of values any one of which shows the field. Compiles to FormWriter `visibility_rules`. |
-| `secret` | A credential: never emits its stored value, and only a non-empty submission is written. |
+| `secret` | A credential: never emits its stored value; a stored one is a locked field with Reset (see Credentials below). |
 | `vault_gated` | Changing it requires an open vault unlock window. |
 | `managed` | Machine-written. Never rendered on a form. Mutually exclusive with `label`. |
 | `rows` | Rows for a `textarea`. |
@@ -139,46 +139,42 @@ cache-busting index) are not per-field, and stay in the page's logic file.
 
 ### Credentials
 
-A field declared `secret` never carries its stored value into the page.
-`FormWriterV2Base::preparePasswordData()` discards any bound value and shows a
-`(stored — leave blank to keep)` placeholder instead, so no caller can put a
-credential into page source. The matching write rule is that a blank submission
-keeps what is stored.
+A field declared `secret` never carries its stored value into the page. It is
+drawn by FormWriter's stored-credential field (see
+[FormWriter § Stored credentials](formwriter.md#stored-credentials)):
 
-The two rules only work together: a field that renders empty, saved by a path
-that takes an empty submission literally, blanks every credential on the page.
+| State | The admin sees | Saving the form does |
+|---|---|---|
+| nothing stored | an empty field | stores what was typed; nothing when left blank |
+| stored | a locked field showing dots, with a **Reset** button | keeps the stored value |
+| stored, after Reset | an empty field, with **Undo** | stores what was typed; **removes** the value when left blank |
+
+A locked field is disabled, so the browser does not submit it: a credential
+missing from the request is kept. One that arrives blank is removed, and one
+with text replaces what was there. `SettingsWriter` reads each submitted secret
+through `FormWriterV2Base::process_secretinput()`, which is the whole rule.
 
 A `secret` normally renders as a password input. Declare `"type": "textarea"`
 alongside it for a genuinely multi-line credential — a PEM private key, a
-service-account JSON. The value is withheld either way.
+service-account JSON. It is drawn with the same three states, and the value is
+withheld either way.
 
-**Removing a credential.** A blank field cannot mean both "I did not touch this"
-and "delete this", so removal is said out loud. A credential that has something
-stored renders with a **Clear** checkbox beside it, named `clear__<setting>`.
-Three cases, and the writer honours all three:
-
-| What the admin does | What happens |
-|---|---|
-| types a value | that value is written |
-| leaves it blank | the stored value is kept |
-| leaves it blank and ticks Clear | the stored value is wiped |
-
-A typed value wins over a ticked Clear box, so pasting a new key after changing
-your mind cannot silently throw it away. The checkbox appears only when there is
-something to clear, and `clear__*` is a reserved name — it is an instruction
-about a setting, never a setting.
-
-`SettingsFieldRenderer::secretField()` draws the field and its Clear box
-together. A page that still draws its own credential field calls it directly so
-the contract is the same everywhere:
+`SettingsFieldRenderer::secretField()` draws one credential. A page that draws
+its own credential field calls it directly so the contract is the same
+everywhere:
 
 ```php
 SettingsFieldRenderer::secretField($formwriter, 'myplugin_api_key', 'API Key',
     $settings->get_setting('myplugin_api_key'));
 ```
 
-It also picks up the declared `validation` rules, so the browser check on that
-page matches what the writer enforces on save.
+The stored value is read only to decide whether anything is stored. It also
+picks up the declared `validation` rules, so the browser check on that page
+matches what the writer enforces on save.
+
+A page that saves a credential outside `SettingsWriter` forwards the field only
+when it arrived — `array_key_exists()`, never `$input[$name] ?? ''`, which turns
+a locked field's absence into a blank that removes the value.
 
 ### Machine-written settings
 
@@ -330,7 +326,7 @@ plugin declares.
 | `textarea` | multi-line box | `rows` sets the height |
 | `color` | colour picker | stores the hex value |
 | `password` | password input | never emits a value |
-| plus `secret: true` | password input, or textarea with `type` | never emits a value; blank keeps |
+| plus `secret: true` | password input, or textarea with `type` | never emits a value; locked with Reset when stored |
 
 A `checkbox` is drawn with a hidden `0` of the same name in front of it, so an
 unticked box still submits. Without that, a browser sends nothing for an unticked
@@ -437,7 +433,7 @@ field the manifest does not declare.
 | `skip` | leave these out |
 | `disabled` | render these, but not editable |
 | `values` | show these values instead of the stored ones |
-| `field_options` | extra FormWriter options per field, for page context. Two keys are read by the renderer: `helptext_append` adds to the declared help rather than replacing it, and `clearable => false` drops a credential's Clear box on a page whose save cannot honour it |
+| `field_options` | extra FormWriter options per field, for page context. `helptext_append` is read by the renderer and adds to the declared help rather than replacing it; select fields also take `skip_options` and `option_labels` |
 | `heading_level` | tag for `renderGroups` headings, default `h4` |
 
 `only` and `skip` both narrow a set the manifest decided; neither can add a field.
@@ -471,8 +467,7 @@ It returns what happened:
 | `refused` | submitted names that are not writable settings |
 | `vault_blocked` | names held back for want of an unlock window |
 | `errors` | `name => messages` from the declared validation |
-| `kept_secrets` | credentials left alone because the field came back blank |
-| `cleared_secrets` | credentials wiped because the field came back blank with Clear ticked |
+| `cleared_secrets` | credentials removed: the field was unlocked with Reset and came back blank |
 
 `reportTo()` turns that into the messages an admin sees. A refused name is a
 manifest bug, not admin error, and it is said out loud — silence is how junk rows
@@ -605,18 +600,18 @@ offending field is one you just touched.
 
 ### A credential came back blank after a save
 
-It should not — a blank credential submission keeps the stored value, and wiping
-one takes a ticked Clear box. If a value really was lost, check that the setting
-is declared `secret`; the write path keys off the declaration, not off the field
-type.
+A locked credential is not submitted and is kept; only one unlocked with Reset
+and saved blank is removed. If a value was lost without that, check two things:
+that the setting is declared `secret` (the write path keys off the declaration,
+not off the field type), and that a page saving outside `SettingsWriter`
+forwards the field only when it arrived rather than defaulting it to `''`.
 
-### The Clear box is missing next to a credential
+### A credential shows no Reset button
 
-It only renders when something is stored. An empty credential has nothing to
-clear, and an unconditional checkbox would invite an admin to tick it and wonder
-what happened. A page that writes outside `SettingsWriter` can also suppress it
-with `clearable => false`, because a control the save path cannot honour is worse
-than no control.
+The field is drawn locked only when the page passes `stored => true` (the
+renderer does this from the stored value). An empty credential has nothing to
+reset. A field the page itself drew `disabled` or `readonly` shows the dots and
+offers no Reset.
 
 ### A page throws saying it may not draw its own field
 
@@ -644,7 +639,7 @@ Confirm the setting has a `default` in its manifest, and that `update_database`
 3. **Put the rule on the declaration**, not in the page. That is what makes two
    pages agree.
 4. **Mark credentials `secret`.** It is what keeps them out of page source and
-   what makes a blank save mean "keep". A test enforces this by name: a setting
+   what draws a stored one locked, so a save that never touches it keeps it. A test enforces this by name: a setting
    called `*_secret`, `*_password`, `*_token`, `*api_key*`, `*private_key*`,
    `*signing_key*` or `*service_account*` must either be `secret` or be listed
    in `$public_by_design` in

@@ -13,9 +13,10 @@
  *     undeclared name is a manifest bug and is reported as one.
  *   - Validation. The declared `validation` rule array, run through
  *     FormWriterV2Base::validate() — the platform's validator, unchanged.
- *   - Credentials. A `secret` never carries its stored value into the page, so
- *     an empty submission means "keep". Removal is said out loud, with the
- *     Clear checkbox the renderer puts beside the field.
+ *   - Credentials. A `secret` never carries its stored value into the page.
+ *     A stored one is drawn locked and is not submitted until Reset unlocks
+ *     it; one that arrives blank removes the value, one with text replaces it
+ *     (FormWriterV2Base::process_secretinput()).
  *   - The vault gate. A change to a `vault_gated` name needs an open unlock
  *     window; everything else on the page still saves, and the caller is told
  *     what was held back.
@@ -37,7 +38,9 @@
  * settings writes is a circularity nobody wants to debug at 2am. Rollback is
  * reverting the constant.
  *
- * @version 1.1
+ * @version 1.2 - secrets go through FormWriterV2Base::process_secretinput(): absent keeps, blank
+ *   removes, text replaces; the Clear checkbox and kept_secrets are gone
+ * @changelog 1.1
  */
 class SettingsWriter {
 
@@ -65,15 +68,12 @@ class SettingsWriter {
 	 *   @type string[] $refused       Submitted names that are not writable settings.
 	 *   @type string[] $vault_blocked Names held back for want of an unlock window.
 	 *   @type array    $errors        name => list of validation messages.
-	 *   @type string[] $kept_secrets  Secrets left alone because the field came back blank.
-	 *   @type string[] $cleared_secrets Secrets wiped because the field came back blank
-	 *                                   with its Clear box ticked.
+	 *   @type string[] $cleared_secrets Secrets removed: the field was unlocked and came back blank.
 	 * }
 	 */
 	public static function write(array $input, array $options = array()): array {
 		require_once(PathHelper::getIncludePath('data/settings_class.php'));
 		require_once(PathHelper::getIncludePath('includes/SettingsDeclarations.php'));
-		require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
 		require_once(PathHelper::getIncludePath('includes/VaultGatedSettings.php'));
 		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
@@ -89,7 +89,6 @@ class SettingsWriter {
 			'refused'         => array(),
 			'vault_blocked'   => array(),
 			'errors'          => array(),
-			'kept_secrets'    => array(),
 			'cleared_secrets' => array(),
 		);
 
@@ -196,27 +195,20 @@ class SettingsWriter {
 		foreach ($candidates as $name => $value) {
 			$current = isset($stored[$name]) ? (string)$stored[$name]->get('stg_value') : null;
 
-			// A credential field renders empty by design
-			// (FormWriterV2Base::preparePasswordData), so a blank submission
-			// cannot mean "clear this" — there would be no way to tell it from
-			// "I did not touch it". The Clear checkbox beside the field is how
-			// removal is said out loud.
-			//
-			//   typed a value       → write it
-			//   blank               → keep what is stored
-			//   blank + Clear       → wipe it
-			//
-			// A typed value wins over a ticked Clear box: pasting a new key
-			// after changing your mind must not silently throw it away.
-			if (SettingsDeclarations::isSecret($name) && (string)$value === '') {
-				if (empty($input[SettingsFieldRenderer::CLEAR_PREFIX . $name])) {
-					if ($current !== null && $current !== '') $result['kept_secrets'][] = $name;
+			// A credential with something stored is drawn locked, and a locked
+			// field is not submitted, so one that arrives was unlocked on purpose
+			// (FormWriterV2Base::process_secretinput()): blank removes, text
+			// replaces. A blank one with nothing stored writes nothing.
+			if (SettingsDeclarations::isSecret($name)) {
+				list($action, $secret) = FormWriterV2Base::process_secretinput(
+					array($name => $value), $name, $current !== null && $current !== '');
+				if ($action === FormWriterV2Base::SECRET_KEEP) continue;
+				if ($action === FormWriterV2Base::SECRET_CLEAR) {
+					$result['cleared_secrets'][] = $name;
+					$changes[$name] = '';
 					continue;
 				}
-				if ($current === null || $current === '') continue;   // nothing to clear
-				$result['cleared_secrets'][] = $name;
-				$changes[$name] = '';
-				continue;
+				$value = $secret;
 			}
 
 			if ($current !== null && (string)$value === $current) continue;

@@ -7,7 +7,8 @@
  * actually reach for.
  * Included by views/setup.php with $page, $settings, $next_key in scope.
  *
- * @version 1.3
+ * @version 1.4
+ * @changelog 1.4 - the key fields toggle alone; a stored key is a locked field with Reset, not a field plus a Clear box
  * @changelog 1.3 - the choice radio and provider select are FormWriter fields
  *                  driving visibility_rules, and the declared settings render
  *                  through SettingsFieldRenderer; the hand-rolled markup and
@@ -80,15 +81,14 @@ echo $setup_ai_form->dropinput('ai_cloud_provider', 'Provider', array(
 		'fireworks' => 'Fireworks (they guarantee your data stays private)',
 	),
 	'value' => $setup_ai_provider,
-	// A stored key grows a clear__ checkbox beside it; toggle both together.
 	'visibility_rules' => array(
 		'anthropic' => array(
-			'show' => array('joinery_ai_anthropic_api_key', 'clear__joinery_ai_anthropic_api_key'),
-			'hide' => array('joinery_ai_fireworks_api_key', 'clear__joinery_ai_fireworks_api_key'),
+			'show' => array('joinery_ai_anthropic_api_key'),
+			'hide' => array('joinery_ai_fireworks_api_key'),
 		),
 		'fireworks' => array(
-			'show' => array('joinery_ai_fireworks_api_key', 'clear__joinery_ai_fireworks_api_key'),
-			'hide' => array('joinery_ai_anthropic_api_key', 'clear__joinery_ai_anthropic_api_key'),
+			'show' => array('joinery_ai_fireworks_api_key'),
+			'hide' => array('joinery_ai_anthropic_api_key'),
 		),
 	),
 ));

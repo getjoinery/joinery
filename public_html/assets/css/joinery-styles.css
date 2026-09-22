@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   Joinery Default UI Kit  ·  custom.css  ·  v2.14.0
+   Joinery Default UI Kit  ·  custom.css  ·  v2.15.0
    Pure Slate design. Themeable values live in --jy-* tokens on
    :root so branded themes can override them without understanding
    internals. Component rules are scoped under .jy-ui to prevent
@@ -993,6 +993,12 @@ body.jy-default .jy-app-bar h1 { font-size: var(--jy-text-xl); font-weight: 600;
   margin-top: var(--jy-space-1);
   font-size: var(--jy-text-xs);
   color: var(--jy-color-text-muted);
+}
+
+/* A stored credential: FormWriter's Reset button and the line saying what
+   the locked field holds (passwordinput 'stored'). */
+.jy-ui .jy-stored-secret {
+  margin-top: var(--jy-space-1);
 }
 
 /* "How do I get this?" — FormWriter's help_modal trigger. A link-weight button

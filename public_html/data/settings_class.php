@@ -94,8 +94,8 @@ private function _check_for_duplicate_setting() {
 	 *   - `submit_*` buttons. A page with several independent forms names each
 	 *     button after its section (`submit_vault`, `submit_store`), so the
 	 *     fixed list cannot cover them — the prefix can.
-	 *   - `clear__*` checkboxes, which tell the save to wipe a credential. An
-	 *     instruction about a setting, never a setting.
+	 *   - `clear__*` names. No field emits one; the prefix stays reserved so a
+	 *     stale or crafted form posting one cannot mint a row.
 	 *   - `*_readonly` display mirrors of Globalvars_site.php values, which are
 	 *     rendered readonly and post their value straight back. They are output,
 	 *     not input — the real setting is the name without the suffix.
@@ -124,9 +124,8 @@ private function _check_for_duplicate_setting() {
 		if (strncmp($name, 'submit_', 7) === 0) {
 			return true;
 		}
-		// clear__<setting> is the "wipe this credential" checkbox that rides
-		// alongside a secret field. It is an instruction about a setting, not a
-		// setting — SettingsWriter reads it and it is never stored.
+		// clear__<setting> is no field's name. Reserved so a stale or crafted
+		// form posting one cannot mint a row.
 		if (strncmp($name, 'clear__', 7) === 0) {
 			return true;
 		}

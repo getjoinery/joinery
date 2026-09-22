@@ -5,6 +5,9 @@
  *
  * CRUD page for managing backup storage targets (B2, S3, Linode).
  *
+ * @version 2.8 - stored secrets are locked fields with Reset (FormWriter 'stored' +
+ *                process_secretinput()); Reset and save blank removes the node credential, and
+ *                the Remove node credential box is gone
  * @version 2.7 - an enabled target is proven before it is saved (TargetTester 4.0: own bucket, private,
  *                prune, the node key write-only, Backblaze capabilities); a failing one is not saved;
  *                the key fields name the permissions each key needs
@@ -133,14 +136,18 @@ if ($_POST && isset($_POST['bkt_name'])) {
 		$target = new BackupTarget(NULL);
 	}
 
+	// A stored secret belongs to the provider it was saved under; switching
+	// provider starts that provider's fields from nothing.
+	$old_provider = $target->key ? $target->get('bkt_provider') : null;
 	$target->set('bkt_name', trim($_POST['bkt_name'] ?? ''));
 	$target->set('bkt_provider', trim($_POST['bkt_provider'] ?? 'b2'));
 	$target->set('bkt_bucket', trim($_POST['bkt_bucket'] ?? ''));
 	$target->set('bkt_path_prefix', trim($_POST['bkt_path_prefix'] ?? 'joinery-backups'));
 	$target->set('bkt_enabled', isset($_POST['bkt_enabled']) ? true : false);
 
-	// Leave-blank-to-keep: secret fields are never prefilled into the form, so a
-	// blank secret on an edit means "keep the stored one" rather than wipe it (S-5).
+	// Secret fields are never prefilled (S-5): a stored one is a locked field,
+	// which is not posted and keeps the stored secret; after Reset, blank
+	// removes it and text replaces it (FormWriterV2Base::process_secretinput()).
 	// Undecryptable stored credentials mean there is nothing to keep — surface
 	// that instead of silently merging with nothing.
 	try {
@@ -153,16 +160,22 @@ if ($_POST && isset($_POST['bkt_name'])) {
 	// Build credentials JSON — canonical shape for all providers:
 	// {access_key, secret_key, region, endpoint}
 	$provider = $target->get('bkt_provider');
+	$secret_fields = ['b2' => 'cred_app_key', 's3' => 'cred_s3_secret_key', 'linode' => 'cred_linode_secret_key'];
+	$main_stored = !empty($existing_creds['secret_key']) && $old_provider === $provider;
+	list($main_what, $main_secret) = FormWriterV2Base::process_secretinput(
+		$_POST, $secret_fields[$provider] ?? '', $main_stored);
+	$keep_main = ($main_what === FormWriterV2Base::SECRET_KEEP && $main_stored);
+	$new_secret = ($main_what === FormWriterV2Base::SECRET_SET) ? $main_secret : '';
 	$creds = [];
 	if ($provider === 'b2') {
 		// User enters B2 applicationKeyId + applicationKey. Detect the S3-compat
 		// endpoint automatically via b2_authorize_account; store unified shape.
 		$key_id = trim($_POST['cred_key_id'] ?? '');
-		$app_key = trim($_POST['cred_app_key'] ?? '');
-		if ($app_key === '' && !empty($existing_creds['secret_key'])) {
-			// Leave-blank-to-keep: preserve stored B2 credentials (and the detected
-			// region/endpoint) verbatim; do not re-authorize. A changed key ID with
-			// a blank secret still keeps the stored secret.
+		$app_key = $new_secret;
+		if ($keep_main) {
+			// Kept: preserve stored B2 credentials (and the detected
+			// region/endpoint) verbatim; do not re-authorize. A changed key ID
+			// with a kept secret still keeps the stored secret.
 			$creds = $existing_creds;
 			if ($key_id !== '') { $creds['access_key'] = $key_id; }
 		} else {
@@ -192,8 +205,7 @@ if ($_POST && isset($_POST['bkt_name'])) {
 		}
 	} elseif ($provider === 's3') {
 		$region = trim($_POST['cred_s3_region'] ?? 'us-east-1');
-		$secret = trim($_POST['cred_s3_secret_key'] ?? '');
-		if ($secret === '' && !empty($existing_creds['secret_key'])) { $secret = $existing_creds['secret_key']; }
+		$secret = $keep_main ? $existing_creds['secret_key'] : $new_secret;
 		$creds = [
 			'access_key' => trim($_POST['cred_s3_access_key'] ?? ''),
 			'secret_key' => $secret,
@@ -201,8 +213,7 @@ if ($_POST && isset($_POST['bkt_name'])) {
 			'endpoint' => 'https://s3.' . $region . '.amazonaws.com',
 		];
 	} elseif ($provider === 'linode') {
-		$linode_secret = trim($_POST['cred_linode_secret_key'] ?? '');
-		if ($linode_secret === '' && !empty($existing_creds['secret_key'])) { $linode_secret = $existing_creds['secret_key']; }
+		$linode_secret = $keep_main ? $existing_creds['secret_key'] : $new_secret;
 		$creds = [
 			'access_key' => trim($_POST['cred_linode_access_key'] ?? ''),
 			'secret_key' => $linode_secret,
@@ -217,20 +228,29 @@ if ($_POST && isset($_POST['bkt_name'])) {
 	$target->set('bkt_mint_run_keys', $provider === 'b2' && !empty($_POST['bkt_mint_run_keys']));
 
 	// Node (write-only) credential — an optional second key handed to nodes
-	// during a backup run in place of the delete-capable one above. Same
-	// leave-blank-to-keep semantics; empty means "not configured" and nodes
-	// receive the main credential.
+	// during a backup run in place of the delete-capable one above. A stored
+	// one is a locked field like the main secret; Reset and save blank removes
+	// it, and nodes go back to receiving the main credential.
 	try {
 		$existing_node = ($target->key ? $target->get_node_credentials() : []);
 	} catch (BackupTargetException $e) {
 		$existing_node = [];
 	}
-	if (isset($_POST['node_creds_remove'])) {
+	$node_fields = ['b2' => 'node_cred_app_key', 's3' => 'node_cred_s3_secret_key'];
+	$node_stored = !empty($existing_node['secret_key']) && $old_provider === $provider;
+	$node_what = FormWriterV2Base::SECRET_KEEP;
+	$node_secret = '';
+	if (isset($node_fields[$provider])) {
+		list($node_what, $node_secret) = FormWriterV2Base::process_secretinput(
+			$_POST, $node_fields[$provider], $node_stored);
+	}
+	$keep_node = ($node_what === FormWriterV2Base::SECRET_KEEP && $node_stored);
+	if ($node_what === FormWriterV2Base::SECRET_CLEAR) {
 		$target->set('bkt_node_credentials', null);
 	} elseif ($provider === 'b2') {
 		$nk_id  = trim($_POST['node_cred_key_id'] ?? '');
-		$nk_key = trim($_POST['node_cred_app_key'] ?? '');
-		if ($nk_key === '' && !empty($existing_node['secret_key'])) {
+		$nk_key = (string)$node_secret;
+		if ($keep_node) {
 			$node_creds = $existing_node;
 			if ($nk_id !== '') { $node_creds['access_key'] = $nk_id; }
 			$target->set('bkt_node_credentials', json_encode($node_creds));
@@ -260,8 +280,8 @@ if ($_POST && isset($_POST['bkt_name'])) {
 		}
 	} elseif ($provider === 's3') {
 		$ns_access = trim($_POST['node_cred_s3_access_key'] ?? '');
-		$ns_secret = trim($_POST['node_cred_s3_secret_key'] ?? '');
-		if ($ns_secret === '' && !empty($existing_node['secret_key'])) {
+		$ns_secret = (string)$node_secret;
+		if ($keep_node) {
 			$node_creds = $existing_node;
 			if ($ns_access !== '') { $node_creds['access_key'] = $ns_access; }
 			$target->set('bkt_node_credentials', json_encode($node_creds));
@@ -470,6 +490,26 @@ if ($target !== null) {
 		$node_creds = [];
 	}
 
+	// Whether a secret is stored is read from the saved row, never from this
+	// request's unsaved copy: a refused save must not draw a typed key as saved.
+	$saved_target = $target->key ? new BackupTarget($target->key, TRUE) : null;
+	$saved_provider = $saved_target ? $saved_target->get('bkt_provider') : null;
+	try {
+		$main_secret_stored = $saved_target && !empty($saved_target->get_credentials()['secret_key']);
+	} catch (BackupTargetException $e) {
+		$main_secret_stored = false;
+	}
+	try {
+		$node_secret_stored = $saved_target && $saved_target->has_node_credentials()
+			&& !empty($saved_target->get_node_credentials()['secret_key']);
+	} catch (BackupTargetException $e) {
+		$node_secret_stored = false;
+	}
+	$secret_stored_for = function ($provider, $which) use ($saved_provider, $main_secret_stored, $node_secret_stored) {
+		if ($saved_provider !== $provider) return false;
+		return $which === 'node' ? $node_secret_stored : $main_secret_stored;
+	};
+
 	$form_title = $is_edit ? 'Edit Target: ' . htmlspecialchars($target->get('bkt_name')) : 'Add Target';
 	$pageoptions = ['title' => $form_title];
 	$page->begin_box($pageoptions);
@@ -481,16 +521,12 @@ if ($target !== null) {
 			'bkt_bucket'             => $target->get('bkt_bucket') ?: '',
 			'bkt_path_prefix'        => $target->get('bkt_path_prefix') ?: 'joinery-backups',
 			'cred_key_id'            => $creds['access_key'] ?? '',
-			// Secret fields are NEVER prefilled — leave blank to keep the stored key (S-5).
-			'cred_app_key'           => '',
 			'cred_s3_access_key'     => $current_provider === 's3' ? ($creds['access_key'] ?? '') : '',
 			'cred_s3_region'         => $current_provider === 's3' ? ($creds['region'] ?? 'us-east-1') : 'us-east-1',
 			'cred_linode_access_key' => $current_provider === 'linode' ? ($creds['access_key'] ?? '') : '',
 			'cred_linode_region'     => $current_provider === 'linode' ? ($creds['region'] ?? '') : '',
 			'cred_linode_endpoint'   => $current_provider === 'linode' ? ($creds['endpoint'] ?? '') : '',
 			'node_cred_key_id'        => $current_provider === 'b2' ? ($node_creds['access_key'] ?? '') : '',
-			// Node secret fields are never prefilled either — leave blank to keep.
-			'node_cred_app_key'       => '',
 			'node_cred_s3_access_key' => $current_provider === 's3' ? ($node_creds['access_key'] ?? '') : '',
 		],
 	]);
@@ -533,7 +569,8 @@ if ($target !== null) {
 		'helptext' => 'A key for this bucket only, with listFiles, readFiles, writeFiles, deleteFiles. Add writeKeys, listKeys, deleteKeys to mint a key per run. The master account key will not work.',
 	]);
 	$formwriter->passwordinput('cred_app_key', 'Application Key', [
-		'helptext' => $is_edit ? 'Leave blank to keep the current key. Region is auto-detected on save.' : 'Region is auto-detected on save.',
+		'stored'   => $secret_stored_for('b2', 'main'),
+		'helptext' => 'Region is auto-detected on save.',
 	]);
 	echo '</div>';
 
@@ -543,7 +580,7 @@ if ($target !== null) {
 	$formwriter->textinput('cred_s3_access_key', 'Access Key', [
 		'helptext' => 'An IAM user with s3:ListBucket, s3:GetObject, s3:PutObject, s3:DeleteObject on this bucket only.',
 	]);
-	$formwriter->passwordinput('cred_s3_secret_key', 'Secret Key', $is_edit ? ['helptext' => 'Leave blank to keep the current key.'] : []);
+	$formwriter->passwordinput('cred_s3_secret_key', 'Secret Key', ['stored' => $secret_stored_for('s3', 'main')]);
 	$formwriter->textinput('cred_s3_region', 'Region', ['placeholder' => 'us-east-1']);
 	echo '</div>';
 
@@ -551,7 +588,7 @@ if ($target !== null) {
 	echo '<div id="linodeFields"' . ($current_provider === 'linode' ? '' : ' hidden') . '>';
 	echo '<p class="fw-semibold text-muted mt-2 mb-1">Linode Object Storage Credentials</p>';
 	$formwriter->textinput('cred_linode_access_key', 'Access Key');
-	$formwriter->passwordinput('cred_linode_secret_key', 'Secret Key', $is_edit ? ['helptext' => 'Leave blank to keep the current key.'] : []);
+	$formwriter->passwordinput('cred_linode_secret_key', 'Secret Key', ['stored' => $secret_stored_for('linode', 'main')]);
 	$formwriter->textinput('cred_linode_region', 'Region', ['placeholder' => 'us-east-1']);
 	$formwriter->textinput('cred_linode_endpoint', 'Endpoint URL', ['placeholder' => 'https://us-east-1.linodeobjects.com']);
 	echo '</div>';
@@ -564,7 +601,8 @@ if ($target !== null) {
 		'helptext' => 'Optional. A key for this bucket with writeFiles and not deleteFiles. Nodes are handed it for each run, so a compromised node cannot erase backups.',
 	]);
 	$formwriter->passwordinput('node_cred_app_key', 'Node Application Key', [
-		'helptext' => $has_node_creds ? 'Leave blank to keep the current key.' : 'Leave empty to keep handing nodes the main key.',
+		'stored'   => $secret_stored_for('b2', 'node'),
+		'helptext' => 'Without one, nodes are handed the main key during a run.',
 	]);
 	echo '</div>';
 
@@ -575,19 +613,14 @@ if ($target !== null) {
 		'helptext' => 'Optional second key from an IAM user allowed s3:PutObject but not s3:DeleteObject on this bucket. Nodes are handed this key during a backup run; the main key above never leaves this management node.',
 	]);
 	$formwriter->passwordinput('node_cred_s3_secret_key', 'Node Secret Key', [
-		'helptext' => $has_node_creds ? 'Leave blank to keep the current key.' : 'Leave empty to keep handing nodes the main key.',
+		'stored'   => $secret_stored_for('s3', 'node'),
+		'helptext' => 'Without one, nodes are handed the main key during a run.',
 	]);
 	echo '</div>';
 
 	echo '<div id="nodeCredLinode"' . ($current_provider === 'linode' ? '' : ' hidden') . '>';
 	echo '<p class="text-muted mt-2 mb-1">Linode Object Storage keys are read-only or read-write per bucket — write-without-delete is not expressible, so nodes are handed the main key during a run. B2 and S3 targets can hold a separate write-only node credential.</p>';
 	echo '</div>';
-
-	if ($has_node_creds) {
-		$formwriter->checkboxinput('node_creds_remove', 'Remove node credential', [
-			'helptext' => 'Nodes go back to being handed the main key during a run.',
-		]);
-	}
 
 	// ── Per-run minted keys ──
 	//

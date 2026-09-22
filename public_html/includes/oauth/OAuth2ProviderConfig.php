@@ -8,11 +8,12 @@
  * the provider's own configFields(), so neither can drift from the other or from
  * what the provider actually reads.
  *
- * Secrets are written through SecretBox and never echoed back, so a blank secret
- * field means "leave the stored value alone" — an admin can correct a client id
- * without re-entering a secret they cannot read.
+ * Secrets are written through SecretBox and never echoed back. A stored secret
+ * is drawn locked (passwordinput 'stored'), so an admin can correct a client id
+ * without re-entering a secret they cannot read; FormWriterV2Base::
+ * process_secretinput() decides keep, remove or replace.
  *
- * @version 1.0
+ * @version 1.1 - secrets go through process_secretinput(): after Reset, a blank field removes the stored secret
  */
 
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Provider.php'));
@@ -37,10 +38,25 @@ class OAuth2ProviderConfig {
 		$box = null;
 		$writes = array();
 
+		$settings = Globalvars::get_instance();
 		foreach ($provider_class::configFields() as $setting => $spec) {
-			$value = trim((string)($input[$prefix . $setting] ?? ''));
-			if ($value === '') {
-				continue;
+			if (!empty($spec['secret'])) {
+				// A stored secret is a locked field: absent keeps it, unlocked and
+				// blank removes it, text replaces it.
+				$has_stored = (string)$settings->get_setting($setting, false, true) !== '';
+				list($action, $value) = FormWriterV2Base::process_secretinput($input, $prefix . $setting, $has_stored);
+				if ($action === FormWriterV2Base::SECRET_KEEP) {
+					continue;
+				}
+				if ($action === FormWriterV2Base::SECRET_CLEAR) {
+					$writes[$setting] = '';
+					continue;
+				}
+			} else {
+				$value = trim((string)($input[$prefix . $setting] ?? ''));
+				if ($value === '') {
+					continue;
+				}
 			}
 			if (!empty($spec['secret'])) {
 				if ($box === null) {

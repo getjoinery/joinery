@@ -5,7 +5,8 @@
  * Pure HTML5 form generation with semantic markup and no CSS framework dependencies.
  * Provides accessible, standards-compliant forms that any theme can style.
  *
- * @version 2.5.0 - One editor for htmlmode and markdownmode (assets/js/joinery-editor.js): editor_view and editor_cleanup options, no jQuery
+ * @version 2.6.0 - A stored credential (passwordinput 'stored') draws locked with a Reset button (assets/js/stored-secret.js); 'rows' draws a multi-line credential as a textarea
+ * @changelog 2.5.0 - One editor for htmlmode and markdownmode (assets/js/joinery-editor.js): editor_view and editor_cleanup options, no jQuery
  * @changelog 2.4.1 - jQuery for the Trumbowyg editor is served from assets/vendor, not a CDN (CSP has no script CDN)
  * @changelog 2.4.0 - textbox markdownmode option: toolbar + server-rendered live preview (assets/js/markdown-editor.js)
  * @changelog 2.3.0 - renderTextInput emits the help_modal trigger/template (text, password and number fields)
@@ -62,8 +63,10 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
             'minlength' => 'minlength', 'maxlength' => 'maxlength',
         ]);
         $html .= $this->buildErrorAttributes($data);
+        $html .= $this->storedSecretAttributes($data);
 
         $html .= '>';
+        $html .= $data['after_control'] ?? '';
 
         if ($data['has_errors']) {
             $html .= '<div id="' . htmlspecialchars($data['name']) . '_error" class="form-error">';
@@ -97,7 +100,64 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
      */
     protected function renderPasswordInput($data) {
         // Password is essentially text with type="password"; strength_meter not used in HTML5
+        if (!empty($data['resettable'])) {
+            $data['after_control'] = $this->storedSecretControls($data);
+        }
+        if (!empty($data['rows'])) {
+            // A multi-line credential: a textarea, still with no value.
+            $data['cols'] = 80;
+            return $this->renderTextarea($data);
+        }
         return $this->renderTextInput($data);
+    }
+
+    /**
+     * The Reset button and the line that says what the field holds.
+     *
+     * assets/js/stored-secret.js binds by data attribute: Reset enables and
+     * empties the field (restoring `required`), Undo locks it again. Nothing
+     * here is inline script, so the page stays clean under the CSP.
+     *
+     * @param array $data Prepared field data from preparePasswordData()
+     * @return string HTML
+     */
+    protected function storedSecretControls($data) {
+        $locked_note = 'A value is saved. Reset to replace or remove it.';
+        $open_note = 'Type a new value, or leave this blank to remove the saved one when you save.';
+        $html = self::storedSecretScriptTag();
+        $html .= '<div class="jy-stored-secret">';
+        $html .= '<button type="button" class="btn btn-sm btn-secondary"'
+            . ' data-stored-secret-for="' . htmlspecialchars($data['id']) . '"'
+            . ' aria-controls="' . htmlspecialchars($data['id']) . '"'
+            . ' data-reset-label="Reset" data-undo-label="Undo">Reset</button> ';
+        $html .= '<small class="form-help" data-stored-secret-note'
+            . ' data-locked-text="' . htmlspecialchars($locked_note) . '"'
+            . ' data-open-text="' . htmlspecialchars($open_note) . '">'
+            . htmlspecialchars($locked_note) . '</small>';
+        $html .= '</div>';
+        return $html;
+    }
+
+    /** The data attributes a locked stored-credential control carries. */
+    protected function storedSecretAttributes($data) {
+        if (empty($data['stored'])) return '';
+        $attrs = ' data-stored-secret';
+        if (!empty($data['stored_required'])) $attrs .= ' data-required';
+        return $attrs;
+    }
+
+    /**
+     * The stored-credential script, once per request however many fields a
+     * page carries. Returned rather than echoed so a deferred-output form
+     * places it with the field.
+     */
+    protected static function storedSecretScriptTag() {
+        static $emitted = false;
+        if ($emitted) return '';
+        $emitted = true;
+        $js = PathHelper::getIncludePath('assets/js/stored-secret.js');
+        return '<script src="/assets/js/stored-secret.js?v='
+            . (is_file($js) ? filemtime($js) : '1') . '" defer></script>';
     }
 
     /**
@@ -1284,10 +1344,12 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
             $html .= ' aria-invalid="true"';
             $html .= ' aria-describedby="' . htmlspecialchars($data['name']) . '_error"';
         }
+        $html .= $this->storedSecretAttributes($data);
 
         $html .= '>';
         $html .= htmlspecialchars($data['value']);
         $html .= '</textarea>';
+        $html .= $data['after_control'] ?? '';
 
         if ($data['has_errors']) {
             $html .= '<div id="' . htmlspecialchars($data['name']) . '_error" class="form-error">';

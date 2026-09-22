@@ -15,7 +15,8 @@
  * The mailbox itself is built by ImapFeedProvisioner, the one path a pulled-in
  * mailbox comes into being by; this page collects answers and nothing more.
  *
- * @version 1.5 - the configure step's compose / Sent-sync box is checked by
+ * @version 1.6 - a stored OAuth client secret is a locked field with Reset; the clearable opt-out is gone
+ * @changelog 1.5 - the configure step's compose / Sent-sync box is checked by
  *   default: it is what keeps a sent message to one Sent row and one thread
  * @version 1.4
  * @changelog 1.4 - the configure step offers Keep in step with the original
@@ -174,11 +175,6 @@ if ($state === 'register') {
 		}
 		$declaration = SettingsDeclarations::get($setting);
 		$is_secret = !empty($declaration['secret']) || !empty($spec['secret']);
-		if ($is_secret) {
-			// Written by OAuth2ProviderConfig, not SettingsWriter, so the
-			// renderer's Clear box would do nothing.
-			$options['clearable'] = false;
-		}
 		if ($declaration !== null) {
 			SettingsFieldRenderer::renderGroup($formwriter, $declaration['_group'], array(
 				'only'          => array($setting),

@@ -7,7 +7,7 @@
  * handlers could not:
  *
  *   - CSRF once, for every action. The token is validated a single time before
- *     any handler runs, so all 18 actions are covered (the inline version only
+ *     any handler runs, so every action is covered (the inline version only
  *     guarded delete_node).
  *   - Uniform error handling (R-3). A builder that throws produces a user-facing
  *     message and a redirect back to the right tab — never an unhandled 500.
@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.33 - save_api_credential reads the secret through FormWriterV2Base::process_secretinput()
+ *                 (Reset and save blank removes it); clear_api_credential is gone
  * @version 1.32 - reset_failed_unit: the Clear button beside a failed unit
  * @version 1.31 - unit_journal and disk_usage: the Why? button beside a failed unit and the disk
  *                 button on the Host card post here; the unit is checked against the compiled list
@@ -131,7 +133,6 @@ class NodeDetailActions {
 		'approve_join'             => 'api_keys',
 		'reject_join'              => 'api_keys',
 		'unpair_agent'             => 'api_keys',
-		'clear_api_credential'     => 'api_keys',
 		'case_note'                => 'overview',
 		'case_read'                => 'overview',
 		'save_node'                => 'overview',
@@ -619,31 +620,26 @@ class NodeDetailActions {
 
 			case 'save_api_credential': {
 				$pub = trim($_POST['mgn_api_public_key'] ?? '');
-				$sec = trim($_POST['mgn_api_secret_key'] ?? '');
 				$tls_insecure = !empty($_POST['mgn_tls_insecure']);
 				$node->set('mgn_api_public_key', $pub !== '' ? $pub : null);
-				// Empty secret on an existing-credentials form means "keep current".
-				if ($sec !== '') {
+				// A stored secret is a locked field: not posted, it is kept; after
+				// Reset, blank removes it and text replaces it. A secret without
+				// its public half is useless, so clearing the public key removes
+				// the secret with it — the pair is gone and jobs route via SSH.
+				list($sec_what, $sec) = FormWriterV2Base::process_secretinput(
+					$_POST, 'mgn_api_secret_key', (bool)$node->get('mgn_api_secret_key'));
+				if ($sec_what === FormWriterV2Base::SECRET_SET) {
 					$node->set('mgn_api_secret_key', $sec);
-				} elseif ($pub === '') {
-					$node->set('mgn_api_secret_key', null); // both cleared → wipe secret
+				} elseif ($sec_what === FormWriterV2Base::SECRET_CLEAR || $pub === '') {
+					$node->set('mgn_api_secret_key', null);
 				}
 				$node->set('mgn_tls_insecure', $tls_insecure);
 				$node->save();
 				$node->load();
 				$session->save_message(new DisplayMessage(
-					'API credential saved.', 'Success', $page_regex,
-					DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
-				));
-				return $base_url . '&tab=api_keys';
-			}
-
-			case 'clear_api_credential': {
-				$node->set('mgn_api_public_key', null);
-				$node->set('mgn_api_secret_key', null);
-				$node->save();
-				$session->save_message(new DisplayMessage(
-					'API credential cleared. Jobs will now route via SSH.', 'Success', $page_regex,
+					($node->get('mgn_api_public_key') && $node->get('mgn_api_secret_key'))
+						? 'API credential saved.' : 'API credential saved. Without both keys, jobs route via SSH.',
+					'Success', $page_regex,
 					DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 				));
 				return $base_url . '&tab=api_keys';

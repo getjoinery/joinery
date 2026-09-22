@@ -10,7 +10,8 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  * identity and the health run: Setup is where you check whether things work.
  * One POST saves the whole form; values are read back fresh on the redirect.
  *
- * @version 1.5
+ * @version 1.6 - the relay secret is forwarded only when posted: a locked stored secret is absent, which keeps it
+ * @changelog 1.5
  */
 function admin_mailbox_settings_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -71,13 +72,11 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 		if (array_key_exists('mailbox_fleet_service_url', $input)) {
 			$to_write['mailbox_fleet_service_url'] = trim((string)$input['mailbox_fleet_service_url']);
 			$to_write['mailbox_fleet_api_public_key'] = trim((string)($input['mailbox_fleet_api_public_key'] ?? ''));
-			// A blank secret keeps the stored one, and its Clear box wipes it —
-			// SettingsWriter applies both rules to every `secret` declaration,
-			// so the clear instruction has to be carried through with it.
-			$to_write['mailbox_fleet_api_secret_key'] = trim((string)($input['mailbox_fleet_api_secret_key'] ?? ''));
-			$clear_key = SettingsFieldRenderer::CLEAR_PREFIX . 'mailbox_fleet_api_secret_key';
-			if (!empty($input[$clear_key])) {
-				$to_write[$clear_key] = $input[$clear_key];
+			// A stored secret is a locked field and is not posted, which
+			// SettingsWriter reads as "keep"; forward it only when it came, so
+			// absent stays absent rather than turning into a blank "remove".
+			if (array_key_exists('mailbox_fleet_api_secret_key', $input)) {
+				$to_write['mailbox_fleet_api_secret_key'] = $input['mailbox_fleet_api_secret_key'];
 			}
 		}
 
@@ -96,7 +95,6 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 
 		$outbound_note = '';
 
-		require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
 		require_once(PathHelper::getIncludePath('includes/SettingsWriter.php'));
 		$write = SettingsWriter::write($to_write, array(
 			'page'   => 'admin_mailbox_settings',
