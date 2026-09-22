@@ -99,7 +99,7 @@
  * migration, just one rebuild per owner on their next unlocked visit.
  * @version 1.11 - the persisted index is one file per user at a fixed path
  *   under cache/, not a File per persist: a second copy has no name to take
- *   (specs/mailbox_search_index_blob_leak.md)
+ *   (specs/implemented/mailbox_search_index_blob_leak.md)
  * @version 1.10 - a fold primes its messages in chunks so the HTML-only ones
  *   read their text through ONE extraction subprocess per chunk (received
  *   HTML opens in the parser jail, specs/parser_jail.md), not one per message

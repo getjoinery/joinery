@@ -7,7 +7,7 @@
  */
 /**
  * The File era's index copies that no File holds any more are counted and
- * reclaimed (specs/mailbox_search_index_blob_leak.md).
+ * reclaimed (specs/implemented/mailbox_search_index_blob_leak.md).
  *
  * Before the index moved to one path per owner, every persist uploaded a
  * private File, so its bytes sit in the upload directory as

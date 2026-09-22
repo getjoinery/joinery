@@ -22,13 +22,13 @@
  * persist. Every persist writes null here and deletes the File it names, so a
  * row carrying one is an owner who has not folded since the upgrade. The
  * column goes once every node reports zero
- * (specs/mailbox_search_index_blob_leak.md WP7).
+ * (specs/implemented/mailbox_search_index_blob_leak.md WP7).
  *
  * @version 1.5 - sweepLegacyBlobs(): the File era's index bytes that no File
  *   row holds any more are counted and reclaimed by the same sweep
  * @version 1.4 - the persisted index is a path, not a File: permanent_delete()
  *   takes the file with the row, a deleted user takes both, and the sweep
- *   collects anything left behind (specs/mailbox_search_index_blob_leak.md)
+ *   collects anything left behind (specs/implemented/mailbox_search_index_blob_leak.md)
  * @version 1.3 - imi_format: the shape of the persisted blob, checked before a restore
  * @version 1.2 - imi_blob_high_water: what the persisted blob covers
  * @version 1.1

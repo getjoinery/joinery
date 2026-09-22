@@ -25,7 +25,7 @@
  *                 reported to a management node (fleet_report in plugin.json)
  * @version 1.19 - checkSearchIndexStorage(): the search index is one file per owner,
  *                 and a count that says otherwise is named before a disk fills
- *                 (specs/mailbox_search_index_blob_leak.md)
+ *                 (specs/implemented/mailbox_search_index_blob_leak.md)
  * @version 1.17 - checkSearchIndexEngine() probes the index's real table shape
  * @version 1.18 - the relay is inbound only: hiddenOriginSendAllowed() and originProbeVerdict()
  *                 are the sending gate (an API provider passes by construction, an SMTP path
@@ -450,7 +450,7 @@ class InboundEmailHealth {
         if ($file_rows > 0) {
             $problems[] = $file_rows . ' search-index file record' . ($file_rows === 1 ? '' : 's')
                 . ' left from before the index moved to one path per owner — every one is a copy '
-                . 'nothing reads (specs/mailbox_search_index_blob_leak.md)';
+                . 'nothing reads (specs/implemented/mailbox_search_index_blob_leak.md)';
         }
         if ($sweep['removed'] > 0) {
             $problems[] = $sweep['removed'] . ' stray file' . ($sweep['removed'] === 1 ? '' : 's')

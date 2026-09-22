@@ -7,7 +7,7 @@
  */
 /**
  * The search index lives at ONE path per owner
- * (specs/mailbox_search_index_blob_leak.md).
+ * (specs/implemented/mailbox_search_index_blob_leak.md).
  *
  * The invariant nothing asserted before: however many times an owner's index
  * is persisted, they end up with one file. The shape this replaced wrote a new

@@ -24,7 +24,7 @@
  * hook either way, and what is under test here is the blob lifecycle.
  *
  * @version 1.2 - the persisted index is one path per owner, not a File per persist
- *                (specs/mailbox_search_index_blob_leak.md)
+ *                (specs/implemented/mailbox_search_index_blob_leak.md)
  * @version 1.1 - the format stamp refuses a blob of another shape before decrypting it
  * @version 1.0
  */

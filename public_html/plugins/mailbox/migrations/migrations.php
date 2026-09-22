@@ -1029,7 +1029,7 @@ return [
 	],
 	[
 		// The persisted search index is one sealed file per owner under
-		// cache/mailfts (specs/mailbox_search_index_blob_leak.md). Before that it
+		// cache/mailfts (specs/implemented/mailbox_search_index_blob_leak.md). Before that it
 		// was a private File per persist, and on a node where the delete of the
 		// previous one failed silently the copies accumulated until the disk
 		// filled. Every File carrying the index source is a copy nothing reads:

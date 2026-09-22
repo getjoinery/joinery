@@ -20,6 +20,11 @@
  * expiry is near, and when www reaches the origin uncovered. See
  * check_cert_expiry().
  *
+ * @version 2.5 - a check_status is due when no check_status job completed inside the window, read
+ *                from the job table: mgn_last_status_check is also stamped by the probe's health
+ *                document, which kept every site looking fresh so the agent-only facts (plugin
+ *                checks, version, backups) were never refreshed. Window one hour, matching the
+ *                hourly plugin health report
  * @version 2.4 - queues a host_report beside the check_status, on the same cadence, for every
  *                enabled node whose agent offers the word and whose last report is older than
  *                STATUS_REFRESH_SECONDS: the Host card stays fresh without anyone asking
@@ -58,7 +63,7 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	const FAILURE_THRESHOLD       = 2;
 	const CERT_RECHECK_ALERT_DAYS = 3;
 	/** How old an agent node's status facts may be before a check_status is queued. */
-	const STATUS_REFRESH_SECONDS  = 6 * 3600;
+	const STATUS_REFRESH_SECONDS  = 3600;
 
 	public function run(array $config): array {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
@@ -186,10 +191,14 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	 * was measured when a person pressed the button or a deploy ran, then
 	 * never again, and the fleet page showed the version a node had answered
 	 * weeks earlier. Every enabled node whose agent offers the primitive and
-	 * whose facts are older than STATUS_REFRESH_SECONDS gets one queued here,
-	 * whatever its uptime setting — the up/down probe and the facts measure
-	 * different things. A queued or running job, or one completed inside the
-	 * window, is cover, so one stale node yields one job per window.
+	 * with no check_status completed inside STATUS_REFRESH_SECONDS gets one
+	 * queued here, whatever its uptime setting — the up/down probe and the
+	 * facts measure different things. A queued or running job, or one
+	 * completed inside the window, is cover, so one stale node yields one job
+	 * per window. The job table decides, not mgn_last_status_check: the probe
+	 * stamps that too when it reads a site's health document, and a site
+	 * whose document answered every tick never had its agent asked for what
+	 * only the agent knows (the recorded plugin checks, the version, backups).
 	 *
 	 * The host report rides the same cadence: check_status is the site and
 	 * host_report is the machine (agent_tier1_recipes.md Q2), each with its own
@@ -206,8 +215,10 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 		$queued = 0;
 		$floor = strtotime($now_utc . ' UTC') - self::STATUS_REFRESH_SECONDS;
+		// The stamp only host_report's own job writes; check_status has none
+		// of its own, so only the job table speaks for it.
 		$words = [
-			'check_status' => 'mgn_last_status_check',
+			'check_status' => null,
 			'host_report'  => 'mgn_last_host_report_time',
 		];
 		foreach ($nodes as $node) {
@@ -218,7 +229,7 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 				if (!JobCommandBuilder::has_primitive($node, $word)) {
 					continue;
 				}
-				$last = trim((string)$node->get($stamp_column));
+				$last = $stamp_column === null ? '' : trim((string)$node->get($stamp_column));
 				if ($last !== '' && strtotime($last . ' UTC') >= $floor) {
 					continue;
 				}
