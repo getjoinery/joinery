@@ -13,6 +13,15 @@
  * nothing queued that job on a cadence (defect B6). The uptime pass now does:
  * one check_status per stale agent node per window, deduped against the job
  * table, and none for a node measured recently or without the primitive.
+ *
+ * Measured recently means a check_status JOB completed inside the window.
+ * mgn_last_status_check is no proof: the probe stamps it whenever it reads a
+ * site's health document, and on 2026-09-22 every fleet site looked fresh
+ * that way while its agent had not been asked for days (the plugin checks
+ * never reached the dashboard).
+ *
+ * @version 1.1 - the probe-stamped node still gets its check_status; a node with a recently
+ *                completed check_status job gets none
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -49,18 +58,24 @@ function srt_jobs($node, $type = 'check_status') {
 $stale_at = gmdate('Y-m-d H:i:s', time() - 2 * 86400);
 $stale = srt_node($tag, 'stale', array('mgn_agent_public_key' => 'harnesstest-key', 'mgn_agent_primitives' => 'check_status', 'mgn_last_status_check' => $stale_at));
 $never = srt_node($tag, 'never', array('mgn_agent_public_key' => 'harnesstest-key', 'mgn_agent_primitives' => 'check_status'));
-$fresh = srt_node($tag, 'fresh', array('mgn_agent_public_key' => 'harnesstest-key', 'mgn_agent_primitives' => 'check_status', 'mgn_last_status_check' => gmdate('Y-m-d H:i:s')));
+$probed = srt_node($tag, 'probed', array('mgn_agent_public_key' => 'harnesstest-key', 'mgn_agent_primitives' => 'check_status', 'mgn_last_status_check' => gmdate('Y-m-d H:i:s')));
+$fresh = srt_node($tag, 'fresh', array('mgn_agent_public_key' => 'harnesstest-key', 'mgn_agent_primitives' => 'check_status', 'mgn_last_status_check' => $stale_at));
+$done = ManagementJob::createFromBuild($fresh->key, 'check_status', JobCommandBuilder::build_check_status_primitive($fresh), null, null);
+$done->set('mjb_status', 'completed');
+$done->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
+$done->save();
 $noagent = srt_node($tag, 'noagent', array('mgn_last_status_check' => $stale_at));
 $off = srt_node($tag, 'off', array('mgn_enabled' => false, 'mgn_agent_public_key' => 'harnesstest-key', 'mgn_agent_primitives' => 'check_status', 'mgn_last_status_check' => $stale_at));
-$nodes = array($stale, $never, $fresh, $noagent, $off);
+$nodes = array($stale, $never, $probed, $fresh, $noagent, $off);
 
 section('A stale or never-measured agent node gets one check_status queued');
 $task = new RunNodeUptimeChecks();
 $queued = $task->refresh_status_facts($nodes, gmdate('Y-m-d H:i:s'));
-check($queued === 2, 'two nodes were refreshed: the stale one and the never-measured one', "queued=$queued");
+check($queued === 3, 'three nodes were refreshed: the stale one, the never-measured one, and the one only the probe stamped', "queued=$queued");
 check(srt_jobs($stale) === 1, 'the stale node has one check_status job');
 check(srt_jobs($never) === 1, 'the never-measured node has one check_status job');
-check(srt_jobs($fresh) === 0, 'a node measured just now gets none');
+check(srt_jobs($probed) === 1, 'a node whose stamp is fresh only from the probe still gets its check_status');
+check(srt_jobs($fresh) === 1, 'a node whose check_status completed just now gets no second one');
 check(srt_jobs($noagent) === 0, 'a node with no agent gets none — there is nothing to ask');
 check(srt_jobs($off) === 0, 'a disabled node gets none');
 
@@ -75,13 +90,16 @@ $both_stale = srt_node($tag, 'bothstale', array('mgn_agent_public_key' => 'harne
 	'mgn_last_status_check' => $stale_at, 'mgn_last_host_report_time' => $stale_at));
 $host_fresh = srt_node($tag, 'hostfresh', array('mgn_agent_public_key' => 'harnesstest-key', 'mgn_agent_primitives' => 'check_status,host_report',
 	'mgn_last_status_check' => $stale_at, 'mgn_last_host_report_time' => gmdate('Y-m-d H:i:s')));
-$host_never = srt_node($tag, 'hostnever', array('mgn_agent_public_key' => 'harnesstest-key', 'mgn_agent_primitives' => 'check_status,host_report',
-	'mgn_last_status_check' => gmdate('Y-m-d H:i:s')));
+$host_never = srt_node($tag, 'hostnever', array('mgn_agent_public_key' => 'harnesstest-key', 'mgn_agent_primitives' => 'check_status,host_report'));
+$host_never_done = ManagementJob::createFromBuild($host_never->key, 'check_status', JobCommandBuilder::build_check_status_primitive($host_never), null, null);
+$host_never_done->set('mjb_status', 'completed');
+$host_never_done->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
+$host_never_done->save();
 $queued = $task->refresh_status_facts(array($both_stale, $host_fresh, $host_never), gmdate('Y-m-d H:i:s'));
 check($queued === 4, 'four jobs: both for the node stale on both stamps, one status for the host-fresh node, one host for the status-fresh node', "queued=$queued");
 check(srt_jobs($both_stale) === 1 && srt_jobs($both_stale, 'host_report') === 1, 'the node stale on both gets one of each');
 check(srt_jobs($host_fresh) === 1 && srt_jobs($host_fresh, 'host_report') === 0, 'a fresh host report is not asked for again');
-check(srt_jobs($host_never) === 0 && srt_jobs($host_never, 'host_report') === 1, 'a node that never reported its host gets one, and its fresh status none');
+check(srt_jobs($host_never) === 1 && srt_jobs($host_never, 'host_report') === 1, 'a node that never reported its host gets one, and its fresh status none');
 $queued = $task->refresh_status_facts(array($both_stale, $host_fresh, $host_never), gmdate('Y-m-d H:i:s'));
 check($queued === 0, 'the window dedupes host reports too', "queued=$queued");
 

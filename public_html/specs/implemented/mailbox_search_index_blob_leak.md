@@ -1,8 +1,12 @@
 # The Search Index Lives at One Path Per User
 
-**Status:** WP1–WP6 built 2026-09-22 (mailbox plugin 1.119.0). WP1 ran on dev
-by hand (903 Files); on every other node it runs as the mailbox migration
-`imi_002_reclaim_search_index_files` at the next upgrade. WP7 waits on that release.
+**Status:** IMPLEMENTED 2026-09-22. WP1–WP6 built 2026-09-22 (mailbox plugin 1.119.0);
+WP1 ran on dev by hand (903 Files) and on every other node as the mailbox migration
+`imi_002_reclaim_search_index_files` (released in 0.8.420). WP7 read 2026-09-22 on
+0.8.421 / agent 1.42.0: the only mailbox nodes are dev (verified, zero) and
+jeremytunnell.com (176: one unheld pre-move copy, `mailfts_1_ttjre2po.bin`, 0 MiB,
+which the nightly mailbox index sweep removes). The confirming re-read of 176 is
+tracked outside this spec.
 
 ## Brief
 
