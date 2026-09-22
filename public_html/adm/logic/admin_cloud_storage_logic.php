@@ -11,6 +11,7 @@
  * the tick drives every profile from the registry, so the admin never names a
  * profile or a per-store task.
  *
+ * @version 3.0.1 - Retry clears the recorded reason with the count
  * @version 3.0 - one private store (specs/cloud_storage_private_only.md): one Save, one binding, one
  *                pull-back; the private-store fields and disable_and_pull_private are gone
  * @version 2.6 - the provider picker: StorageProvider::complete() settles the endpoint and region a
@@ -191,7 +192,7 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 		}
 		elseif ($action === 'retry_stuck' && isset($input['fbb_file_blob_id'])) {
 			$dblink = DbConnector::get_instance()->get_db_link();
-			$q = $dblink->prepare("UPDATE fbb_file_blobs SET fbb_sync_failed_count = 0 WHERE fbb_file_blob_id = ?");
+			$q = $dblink->prepare("UPDATE fbb_file_blobs SET fbb_sync_failed_count = 0, fbb_sync_last_error = NULL WHERE fbb_file_blob_id = ?");
 			$q->execute([(int)$input['fbb_file_blob_id']]);
 			return LogicResult::redirect('/admin/admin_cloud_storage');
 		}

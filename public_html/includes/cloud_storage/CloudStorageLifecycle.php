@@ -27,6 +27,8 @@
  * and the health cloud-side counts to its own rows via its optional
  * reverseEligibilityWhere() ownership gate.
  *
+ * @version 2.1 - health() tells a record with no bytes on this server (missing, missing_rows) apart from a
+ *                push that failed five times (stuck, stuck_rows with the last error)
  * @version 2.0 - one private store (specs/cloud_storage_private_only.md): testConnection() takes only
  *                $opts and runs own bucket and key, reach, write, the privacy gate, delete; every
  *                helper loses its visibility argument; _settings_map() writes provider, endpoint,
@@ -490,6 +492,8 @@ class CloudStorageLifecycle {
 		$drv = $profile->driverColumn();
 		$failed = $profile->failedCountColumn();
 		$last_attempt = $profile->lastAttemptColumn();
+		$last_error = $profile->lastErrorColumn();
+		$missing_sql = "$last_error = " . $dblink->quote(CloudOffloadEngine::MISSING_BYTES);
 		// Bytes beside the counts, where the profile names a size column.
 		$size = method_exists($profile, 'sizeColumn') ? $profile->sizeColumn() : '0';
 		try {
@@ -501,7 +505,8 @@ class CloudStorageLifecycle {
 				                   AND COALESCE($failed, 0) < " . CloudOffloadEngine::FAILED_COUNT_CAP . "$gate_sql), 0) AS pending_bytes,
 				  COUNT(*) FILTER (WHERE $drv = 'cloud'$own_sql) AS cloud,
 				  COALESCE(SUM($size) FILTER (WHERE $drv = 'cloud'$own_sql), 0) AS cloud_bytes,
-				  COUNT(*) FILTER (WHERE COALESCE($failed, 0) >= " . CloudOffloadEngine::FAILED_COUNT_CAP . ") AS stuck,
+				  COUNT(*) FILTER (WHERE COALESCE($failed, 0) >= " . CloudOffloadEngine::FAILED_COUNT_CAP . " AND NOT ($missing_sql)) AS stuck,
+				  COUNT(*) FILTER (WHERE $missing_sql) AS missing,
 				  COUNT(*) FILTER (WHERE $drv = 'cloud'$own_sql
 				                   AND $last_attempt > now() - interval '7 days') AS migrated_this_week
 				FROM {$profile->table()}")->fetch(PDO::FETCH_ASSOC);
@@ -510,30 +515,34 @@ class CloudStorageLifecycle {
 			}
 		} catch (Exception $e) { /* schema might not be in place yet */ }
 
-		// Stuck rows list. The file-blob store carries a stored-name column for the
-		// admin retry UI; a generic store returns id + counters only.
+		// Two lists, told apart by the reason. Stuck: a push that failed five
+		// times, with its last error, which Retry may cure. Missing: a record
+		// with no bytes on this server, which no retry can; permanently
+		// deleting the file releases it. The file-blob store carries a
+		// stored-name column; a generic store returns id + counters only.
 		$h['stuck_rows'] = [];
-		if ($h['counts']['stuck'] > 0) {
+		$h['missing_rows'] = [];
+		$stuck_where = "COALESCE($failed, 0) >= " . CloudOffloadEngine::FAILED_COUNT_CAP . " AND NOT ($missing_sql)";
+		foreach (['stuck_rows' => $stuck_where, 'missing_rows' => $missing_sql] as $list => $where) {
+			if ($h['counts'][$list === 'stuck_rows' ? 'stuck' : 'missing'] <= 0) continue;
 			try {
 				if ($profile->table() === 'fbb_file_blobs') {
 					$q = $dblink->prepare("
-						SELECT fbb_file_blob_id, fbb_stored_name, fbb_sync_last_attempt, fbb_sync_failed_count
+						SELECT fbb_file_blob_id, fbb_stored_name, fbb_sync_last_attempt, fbb_sync_failed_count, fbb_sync_last_error
 						FROM fbb_file_blobs
-						WHERE COALESCE(fbb_sync_failed_count, 0) >= " . CloudOffloadEngine::FAILED_COUNT_CAP . "
+						WHERE $where
 						ORDER BY fbb_sync_last_attempt DESC
 						LIMIT 25");
-					$q->execute();
-					$h['stuck_rows'] = $q->fetchAll(PDO::FETCH_ASSOC);
 				} else {
 					$q = $dblink->prepare("
-						SELECT {$profile->pkeyColumn()} AS id, $failed AS failed_count, $last_attempt AS last_attempt
+						SELECT {$profile->pkeyColumn()} AS id, $failed AS failed_count, $last_attempt AS last_attempt, $last_error AS last_error
 						FROM {$profile->table()}
-						WHERE COALESCE($failed, 0) >= " . CloudOffloadEngine::FAILED_COUNT_CAP . "
+						WHERE $where
 						ORDER BY $last_attempt DESC
 						LIMIT 25");
-					$q->execute();
-					$h['stuck_rows'] = $q->fetchAll(PDO::FETCH_ASSOC);
 				}
+				$q->execute();
+				$h[$list] = $q->fetchAll(PDO::FETCH_ASSOC);
 			} catch (Exception $e) { /* swallow */ }
 		}
 

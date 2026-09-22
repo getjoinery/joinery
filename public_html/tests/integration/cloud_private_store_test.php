@@ -22,6 +22,7 @@
  *
  * Run: php tests/integration/cloud_private_store_test.php
  *
+ * @version 2.1 - the latch-off case uses 0, and the empty-bucket checks skip on a box with a bucket stored
  * @version 2.0 - one store: the factory's single binding, the registry's refusal, the Save gate over the fixture
  * @version 1.0
  */
@@ -55,19 +56,27 @@ $bind = function ($endpoint, $bucket, $key, $secret) {
 	CloudStorageDriverFactory::reset();
 };
 
-// Latch off ⇒ null regardless of bucket.
-harness_set_setting_mem('cloud_storage_enabled', '');
+// Latch off ⇒ null regardless of bucket. ('0', not blank: a blank in memory
+// reads the stored row, and this box may have the store enabled.)
+harness_set_setting_mem('cloud_storage_enabled', '0');
 $bind('s3.example.com', 'some-bucket', 'k', 's');
 ok('latch off ⇒ driver null', CloudStorageDriverFactory::driver() === null);
 ok('latch off ⇒ unlatched driver still built from the binding', CloudStorageDriverFactory::driverUnlatched() !== null);
 ok('latch off ⇒ with-fallback answers (a paused store still serves)', CloudStorageDriverFactory::driverWithFallback() !== null);
 
-// Latch on but no bucket ⇒ null.
+// Latch on but no bucket ⇒ null. A blank bucket cannot be forced in memory
+// on a box that has one stored, so the three checks skip there.
 harness_set_setting_mem('cloud_storage_enabled', '1');
-$bind('s3.example.com', '', 'k', 's');
-ok('latch on + empty bucket ⇒ driver null', CloudStorageDriverFactory::driver() === null);
-ok('empty bucket ⇒ unlatched driver null', CloudStorageDriverFactory::driverUnlatched() === null);
-ok('empty bucket ⇒ with-fallback null (the store is unconfigured)', CloudStorageDriverFactory::driverWithFallback() === null);
+if (harness_stored_setting_is_blank('cloud_storage_bucket')) {
+	$bind('s3.example.com', '', 'k', 's');
+	ok('latch on + empty bucket ⇒ driver null', CloudStorageDriverFactory::driver() === null);
+	ok('empty bucket ⇒ unlatched driver null', CloudStorageDriverFactory::driverUnlatched() === null);
+	ok('empty bucket ⇒ with-fallback null (the store is unconfigured)', CloudStorageDriverFactory::driverWithFallback() === null);
+} else {
+	foreach (array('latch on + empty bucket ⇒ driver null', 'empty bucket ⇒ unlatched driver null', 'empty bucket ⇒ with-fallback null (the store is unconfigured)') as $label) {
+		harness_skip($label, 'this box has a bucket configured and a blank cannot be forced in memory');
+	}
+}
 
 // Latch on, whole binding ⇒ a driver.
 $bind('s3.example.com', 'some-bucket', 'k', 's');
@@ -94,6 +103,7 @@ $src = function ($cls, $visibility) {
 		. "  public function driverColumn(): string { return 'drv'; }\n"
 		. "  public function failedCountColumn(): string { return 'failed'; }\n"
 		. "  public function lastAttemptColumn(): string { return 'last_attempt'; }\n"
+		. "  public function lastErrorColumn(): string { return 'last_error'; }\n"
 		. "  public function visibility(): string { return '$visibility'; }\n"
 		. "  public function eligibilityWhere(): string { return ''; }\n"
 		. "  public function rowExists(int \$id): bool { return false; }\n"

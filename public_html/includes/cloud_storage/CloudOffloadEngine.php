@@ -14,6 +14,8 @@
  * cloud rows via the optional reverseEligibilityWhere() ownership gate, probed
  * with method_exists() — the same capability-probe style used for putMany().
  *
+ * @version 1.4 - a row with no bytes on this server is parked at once with the reason, not counted as a
+ *                failed push; every failure records why in the profile's last-error column
  * @version 1.3 - one store: the driver is resolved with no visibility argument
  * @version 1.2 - after the flip to cloud, the backup's object store has its say before the local
  *                bytes go (BackupObjects::after_offload): it copies the original to the site's
@@ -32,6 +34,8 @@ class CloudOffloadEngine {
 	const REVERSE_BATCH_LIMIT = 25;
 	const TIME_BUDGET_SECONDS = 60;
 	const FAILED_COUNT_CAP    = 5;
+	/** The reason recorded on a row that has nothing on this server to move. */
+	const MISSING_BYTES       = 'no bytes on this server';
 	/** First key of the per-row pg advisory lock — namespaces it away from
 	 *  runner-level locks. Exposed so a test can contend on the SAME namespace. */
 	const ADVISORY_LOCK_NAMESPACE = -42;
@@ -67,7 +71,7 @@ class CloudOffloadEngine {
 		$q->execute();
 		$rows = $q->fetchAll(PDO::FETCH_COLUMN, 0);
 
-		$pushed = 0; $failed = 0; $skipped = 0;
+		$pushed = 0; $failed = 0; $skipped = 0; $missing = 0;
 		$started = time();
 
 		foreach ($rows as $id) {
@@ -81,6 +85,7 @@ class CloudOffloadEngine {
 				$result = self::_sync_row($profile, $id, $driver);
 				if ($result === 'pushed')      $pushed++;
 				elseif ($result === 'skipped') $skipped++;
+				elseif ($result === 'missing') $missing++;
 				else                           $failed++;
 			} catch (Exception $e) {
 				error_log('CloudOffload forward ' . get_class($profile) . ' row ' . $id . ' fatal: ' . $e->getMessage());
@@ -90,11 +95,15 @@ class CloudOffloadEngine {
 			}
 		}
 
-		return ['status' => $failed > 0 ? 'error' : 'success', 'message' => "pushed=$pushed failed=$failed skipped=$skipped"];
+		// A record with no bytes is parked, not failed: it is a fact about the
+		// record, not a fault in the run.
+		return ['status' => $failed > 0 ? 'error' : 'success',
+			'message' => "pushed=$pushed failed=$failed skipped=$skipped" . ($missing > 0 ? " missing=$missing" : '')];
 	}
 
 	/**
-	 * Sync a single row. Returns 'pushed' | 'failed' | 'skipped' (no work).
+	 * Sync a single row. Returns 'pushed' | 'failed' | 'skipped' (no work) |
+	 * 'missing' (nothing on this server to move; parked with the reason).
 	 */
 	private static function _sync_row(StorageProfile $profile, int $id, CloudStorageDriver $driver): string {
 		if (!$profile->rowExists($id)) {
@@ -108,8 +117,8 @@ class CloudOffloadEngine {
 		// Build the items to push: original + variants, filtered to what's on disk.
 		$items = $profile->itemsForRow($id);
 		if ($items === null) {
-			self::_record_failure($profile, $id, 'required bytes missing on disk');
-			return 'failed';
+			self::_park_missing($profile, $id);
+			return 'missing';
 		}
 
 		// Concurrent PUTs — single RTT instead of N. The S3 driver exposes putMany().
@@ -166,6 +175,7 @@ class CloudOffloadEngine {
 			"UPDATE {$profile->table()}
 			 SET {$profile->driverColumn()} = 'cloud',
 			     {$profile->failedCountColumn()} = 0,
+			     {$profile->lastErrorColumn()} = NULL,
 			     {$profile->lastAttemptColumn()} = now()
 			 WHERE {$profile->pkeyColumn()} = ?"
 		);
@@ -315,6 +325,7 @@ class CloudOffloadEngine {
 					"UPDATE {$profile->table()}
 					 SET {$profile->driverColumn()} = 'local',
 					     {$profile->failedCountColumn()} = 0,
+					     {$profile->lastErrorColumn()} = NULL,
 					     {$profile->lastAttemptColumn()} = now()
 					 WHERE {$profile->pkeyColumn()} = ?"
 				);
@@ -375,11 +386,31 @@ class CloudOffloadEngine {
 		$q = $dblink->prepare(
 			"UPDATE {$profile->table()}
 			 SET {$profile->failedCountColumn()} = COALESCE({$profile->failedCountColumn()}, 0) + 1,
+			     {$profile->lastErrorColumn()} = ?,
 			     {$profile->lastAttemptColumn()} = now()
 			 WHERE {$profile->pkeyColumn()} = ?"
 		);
-		$q->execute([$id]);
+		$q->execute([mb_substr($message, 0, 255), $id]);
 		error_log('CloudOffload ' . $profile->table() . ' id=' . $id . ': ' . $message);
+	}
+
+	/**
+	 * Park a row that has nothing on this server to move: the count goes
+	 * straight to the cap so no tick tries again, and the reason says why, so
+	 * the page can list it apart from a failed push. Its bytes were gone
+	 * before the store was set up; permanently deleting the file releases it.
+	 */
+	private static function _park_missing(StorageProfile $profile, int $id): void {
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$q = $dblink->prepare(
+			"UPDATE {$profile->table()}
+			 SET {$profile->failedCountColumn()} = ?,
+			     {$profile->lastErrorColumn()} = ?,
+			     {$profile->lastAttemptColumn()} = now()
+			 WHERE {$profile->pkeyColumn()} = ?"
+		);
+		$q->execute([self::FAILED_COUNT_CAP, self::MISSING_BYTES, $id]);
+		error_log('CloudOffload ' . $profile->table() . ' id=' . $id . ': ' . self::MISSING_BYTES . '; parked');
 	}
 
 	/** Per-row advisory lock; ADVISORY_LOCK_NAMESPACE namespaces it from runner-level locks. */

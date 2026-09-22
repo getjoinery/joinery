@@ -18,6 +18,7 @@
  *
  * Run: php tests/integration/cloud_offload_engine_test.php
  *
+ * @version 1.1 - a missing-on-disk row is parked with the reason, and the batch is a success
  * @version 1.0
  */
 
@@ -56,6 +57,7 @@ try {
 		drv VARCHAR(32),
 		failed INT DEFAULT 0,
 		last_attempt TIMESTAMP,
+		last_error VARCHAR(255),
 		eligible BOOLEAN DEFAULT TRUE
 	)");
 
@@ -88,14 +90,15 @@ try {
 	};
 	$res = CloudOffloadEngine::syncBatch($profile, $fwd);
 
-	// status is 'error' here precisely because the batch contains one deliberate
-	// missing-on-disk row (failed>0) — the same rule the original task applied.
-	ok('forward: status error (one deliberate failure in batch)', $res['status'] === 'error');
-	ok('forward: message reports pushed=2 failed=1', strpos($res['message'], 'pushed=2') !== false && strpos($res['message'], 'failed=1') !== false);
+	// A missing-on-disk row is parked, not failed: the batch is a success and
+	// says missing=1, so a record with no bytes never turns the run red.
+	ok('forward: status success (the missing row is parked, not failed)', $res['status'] === 'success');
+	ok('forward: message reports pushed=2 failed=0 missing=1', strpos($res['message'], 'pushed=2') !== false && strpos($res['message'], 'failed=0') !== false && strpos($res['message'], 'missing=1') !== false);
 	ok('forward: ok rows flipped to cloud', $drvflag($ok1) === 'cloud' && $drvflag($ok2) === 'cloud');
 	ok('forward: ok local bytes deleted', !file_exists("$BASE/disk/$ok1/original") && !file_exists("$BASE/disk/$ok2/original"));
 	ok('forward: missing-on-disk stays local', $drvflag($miss) === 'local');
-	ok('forward: missing-on-disk counter incremented', $failcount($miss) === 1);
+	ok('forward: missing-on-disk parked at the cap', $failcount($miss) === CloudOffloadEngine::FAILED_COUNT_CAP);
+	ok('forward: missing-on-disk carries the reason', $dblink->query("SELECT last_error FROM $TABLE WHERE id = " . (int)$miss)->fetchColumn() === CloudOffloadEngine::MISSING_BYTES);
 	ok('forward: capped row never pushed (stays local)', $drvflag($capd) === 'local');
 	ok('forward: capped local bytes untouched', file_exists("$BASE/disk/$capd/original"));
 	ok('forward: mid-flight row undone (stays local)', $drvflag($mid) === 'local');

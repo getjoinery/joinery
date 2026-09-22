@@ -962,6 +962,11 @@ function get_setting_raw($name) {
 	return $row ? $row['stg_value'] : null;
 }
 
+/** True when the stored row for a setting is blank or absent, so an in-memory blank holds. */
+function harness_stored_setting_is_blank($name) {
+	return trim((string)get_setting_raw($name)) === '';
+}
+
 function set_setting_raw($name, $value) {
 	$db = DbConnector::get_instance()->get_db_link();
 	$q = $db->prepare("UPDATE stg_settings SET stg_value = ? WHERE stg_name = ?");
@@ -997,6 +1002,14 @@ function harness_settings_restore($snapshot) {
  * Override one setting in the Globalvars in-memory cache only — never persisted,
  * scoped to this process. On first use it snapshots the cache and defers a
  * restore, so overrides evaporate at teardown.
+ */
+/**
+ * A BLANK cannot be forced this way: Globalvars::get_setting() treats a blank
+ * in-memory value as "not cached" and reads the stored row, so a test that
+ * needs a setting to be blank must first ask harness_stored_setting_is_blank()
+ * and skip the check when the box has a value. Writing the row instead is
+ * not an option: a safe-tier test runs on production, and a blanked bucket
+ * setting there would fail a real request for as long as the test ran.
  */
 function harness_set_setting_mem($key, $value) {
 	static $snapshotted = false;

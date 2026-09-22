@@ -19,6 +19,7 @@
  *
  * Run: php tests/integration/cloud_storage_characterization_test.php
  *
+ * @version 3.1 - a record with no bytes is parked with the reason; a failed push records why; health tells them apart
  * @version 3.0 - one private store: the fixtures are private blobs; a public blob is never eligible
  * @version 2.0
  */
@@ -89,15 +90,16 @@ try {
 	ok('forward: local original deleted after flip', !file_exists($orig_path));
 
 	// -------------------------------------------------------------------
-	// 2. Missing-on-disk: failure recorded, counter increments, stays local
+	// 2. Missing-on-disk: parked at once with the reason, stays local
 	// -------------------------------------------------------------------
 	$b2 = make_blob_row();   // no file placed on disk
 	$driver2 = new RecordingMockDriver();
 	$res2 = $sync_row->invoke(null, $profile, (int)$b2->key, $driver2);
 	$reloaded2 = new FileBlob($b2->key, true);
-	ok('missing: returns failed', $res2 === 'failed');
+	ok('missing: returns missing, not failed', $res2 === 'missing');
 	ok('missing: nothing pushed', count($driver2->ops('put')) === 0);
-	ok('missing: failed_count incremented to 1', (int)$reloaded2->get('fbb_sync_failed_count') === 1);
+	ok('missing: parked at the cap in one step', (int)$reloaded2->get('fbb_sync_failed_count') === CloudOffloadEngine::FAILED_COUNT_CAP);
+	ok('missing: the reason is recorded', $reloaded2->get('fbb_sync_last_error') === CloudOffloadEngine::MISSING_BYTES);
 	ok('missing: row stays local', $reloaded2->get('fbb_storage_driver') === 'local');
 
 	// (The failure-count cap is covered end-to-end by cloud_offload_engine_test
@@ -183,6 +185,42 @@ try {
 	$deactivated = null;
 	foreach ($m2 as $t) { $deactivated = $t; }
 	ok('admin: deactivate clears is_active', $deactivated && (bool)$deactivated->get('sct_is_active') === false);
+
+	// -------------------------------------------------------------------
+	// A record with no bytes on this server is parked at once, not failed;
+	// a push that fails records why; the page tells the two apart.
+	// -------------------------------------------------------------------
+	$bm = make_blob_row();   // no file is written for it
+	$dm = new RecordingMockDriver();
+	$rm = $sync_row->invoke(null, $profile, (int)$bm->key, $dm);
+	ok('missing bytes: the row answers missing, not failed', $rm === 'missing');
+	ok('missing bytes: nothing was pushed', count($dm->ops('put')) === 0);
+	$bm_row = $dblink->query("SELECT fbb_storage_driver, fbb_sync_failed_count, fbb_sync_last_error FROM fbb_file_blobs WHERE fbb_file_blob_id = " . (int)$bm->key)->fetch(PDO::FETCH_ASSOC);
+	ok('missing bytes: the row stays local', $bm_row['fbb_storage_driver'] === 'local');
+	ok('missing bytes: parked at the cap in one step', (int)$bm_row['fbb_sync_failed_count'] === CloudOffloadEngine::FAILED_COUNT_CAP);
+	ok('missing bytes: the reason is recorded', $bm_row['fbb_sync_last_error'] === CloudOffloadEngine::MISSING_BYTES);
+	$rm2 = $sync_row->invoke(null, $profile, (int)$bm->key, $dm);
+	ok('missing bytes: a second look is the same answer', $rm2 === 'missing');
+
+	$bf = make_blob_row();
+	$bf_path = $upload_dir . '/' . $bf->get('fbb_stored_name');
+	file_put_contents($bf_path, "bytes-that-fail\n");
+	$temp_paths[] = $bf_path;
+	$df = new RecordingMockDriver();
+	$df->fail_all = true;
+	$rf = $sync_row->invoke(null, $profile, (int)$bf->key, $df);
+	ok('failed push: the row answers failed', $rf === 'failed');
+	$bf_row = $dblink->query("SELECT fbb_sync_failed_count, fbb_sync_last_error FROM fbb_file_blobs WHERE fbb_file_blob_id = " . (int)$bf->key)->fetch(PDO::FETCH_ASSOC);
+	ok('failed push: one failure counted', (int)$bf_row['fbb_sync_failed_count'] === 1);
+	ok('failed push: the reason is recorded', strpos((string)$bf_row['fbb_sync_last_error'], 'push failed') === 0);
+
+	require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageLifecycle.php'));
+	$h = CloudStorageLifecycle::health($profile);
+	$missing_ids = array_map(function ($r) { return (int)$r['fbb_file_blob_id']; }, $h['missing_rows']);
+	$stuck_ids   = array_map(function ($r) { return (int)$r['fbb_file_blob_id']; }, $h['stuck_rows']);
+	ok('health: the parked record is counted as missing', (int)$h['counts']['missing'] >= 1);
+	ok('health: the parked record is listed as missing', in_array((int)$bm->key, $missing_ids, true));
+	ok('health: the parked record is not a stuck file', !in_array((int)$bm->key, $stuck_ids, true));
 
 } finally {
 	// Teardown — remove every fixture this test created.

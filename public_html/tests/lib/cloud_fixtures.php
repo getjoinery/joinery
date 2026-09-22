@@ -20,6 +20,7 @@
  *     options so one class serves the plain and the ownership-gated cases. It
  *     answers visibility() 'private', as every profile of the one store does.
  *
+ * @version 1.2 - ScratchTableProfile answers lastErrorColumn()
  * @version 1.1 - one private store: ScratchTableProfile answers private, with no visibility option
  * @version 1.0
  */
@@ -140,8 +141,8 @@ class InMemoryBlobDriver implements CloudStorageDriver {
  * A StorageProfile over a caller-owned scratch table + on-disk base dir.
  *
  * Options (all optional):
- *   pkey, driver_col, failed_col, last_attempt_col — column names (defaults
- *     'id' / 'drv' / 'failed' / 'last_attempt')
+ *   pkey, driver_col, failed_col, last_attempt_col, last_error_col — column names
+ *     (defaults 'id' / 'drv' / 'failed' / 'last_attempt' / 'last_error')
  *   eligibility_where        — forward-offload SQL gate (default 'TRUE')
  *   reverse_eligibility_where — reverse (restore) ownership gate; default ''
  *     means "no reverse gate", identical to a profile that omits the method
@@ -162,6 +163,7 @@ class ScratchTableProfile implements StorageProfile {
 			'driver_col'                => 'drv',
 			'failed_col'                => 'failed',
 			'last_attempt_col'          => 'last_attempt',
+			'last_error_col'            => 'last_error',
 			'eligibility_where'         => 'TRUE',
 			'reverse_eligibility_where' => '',
 			'is_eligible'               => null,
@@ -177,6 +179,7 @@ class ScratchTableProfile implements StorageProfile {
 	public function driverColumn(): string { return $this->opts['driver_col']; }
 	public function failedCountColumn(): string { return $this->opts['failed_col']; }
 	public function lastAttemptColumn(): string { return $this->opts['last_attempt_col']; }
+	public function lastErrorColumn(): string   { return $this->opts['last_error_col']; }
 	public function visibility(): string { return 'private'; }
 	public function eligibilityWhere(): string { return $this->opts['eligibility_where']; }
 	public function reverseEligibilityWhere(): string { return $this->opts['reverse_eligibility_where']; }

@@ -29,6 +29,7 @@
  * outside the web root; the cloud tier is the verified-private bucket reached
  * only through the shared driver's server-side get() — never a public URL.
  *
+ * @version 1.5 - lastErrorColumn()
  * @version 1.4 - one store: the driver is resolved with no visibility argument
  * @version 1.3
  */
@@ -51,6 +52,7 @@ class RawMessageStore implements StorageProfile {
 	public function driverColumn(): string      { return 'iem_raw_storage_driver'; }
 	public function failedCountColumn(): string { return 'iem_raw_sync_failed_count'; }
 	public function lastAttemptColumn(): string { return 'iem_raw_sync_last_attempt'; }
+	public function lastErrorColumn(): string   { return 'iem_raw_sync_last_error'; }
 
 	public function visibility(): string { return 'private'; }
 
