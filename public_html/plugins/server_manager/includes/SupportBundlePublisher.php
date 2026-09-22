@@ -40,6 +40,8 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.7 - carries reset_failed_unit.sh: the Clear beside a failed unit works on a siteless host
+ *                as the Why? beside it does
  * @version 1.6 - carries unit_journal.sh and disk_usage.sh: the two observe words of
  *                specs/disk_headroom_and_unit_diagnosis.md answer about a machine, and a siteless
  *                host has units and a disk like any other
@@ -124,6 +126,9 @@ class SupportBundlePublisher {
 		// question the host can perfectly well answer.
 		'maintenance_scripts/sysadmin_tools/unit_journal.sh',
 		'maintenance_scripts/sysadmin_tools/disk_usage.sh',
+		// reset_failed_unit: unit_journal's counterpart, same list, sources
+		// nothing. A unit a host can be asked about is one it can clear.
+		'maintenance_scripts/sysadmin_tools/reset_failed_unit.sh',
 		// host_converge on a machine with no site: the runner in --machine
 		// mode, rooted at this bundle, runs the two host installers. The
 		// runner sources _tree_trust.sh (refusing to run anything as root

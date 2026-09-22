@@ -5,6 +5,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.9 - a reset_failed_unit result renders the unit's state before and after the reset
  * @version 1.8 - a unit_journal result renders the unit's verdict above its journal lines, and a
  *                disk_usage result renders two size tables — the site tree's biggest directories
  *                and the machine's usual ones
@@ -339,6 +340,22 @@ if ($result) {
 			echo '<pre class="svm-logbox">' . htmlspecialchars(SmSecretRedactor::redact(implode("\n", $lines))) . '</pre>';
 		}
 		echo '</div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && $job_type === 'reset_failed_unit' && !empty($result_data['read'])) {
+		$state = function ($s) {
+			$s = is_array($s) ? $s : array();
+			return htmlspecialchars((string)($s['active_state'] ?? 'unknown')) . ' ('
+				. htmlspecialchars((string)($s['sub_state'] ?? 'unknown')) . '), result '
+				. htmlspecialchars((string)($s['result'] ?? 'unknown'));
+		};
+		echo '<div class="card mb-3"><div class="card-header"><strong>'
+			. htmlspecialchars((string)($result_data['unit'] ?? '')) . '</strong> <small class="text-muted">— '
+			. (!empty($result_data['reset']) ? 'failed record cleared' : 'systemd did not accept the reset')
+			. '</small></div><div class="card-body">'
+			. '<div>Before: ' . $state($result_data['before'] ?? null) . '</div>'
+			. '<div>After: ' . $state($result_data['after'] ?? null) . '</div>'
+			. '<small class="text-muted">Clearing changes nothing that runs: a unit that is still broken fails again the next time it starts, and the next host report names it again.</small>'
+			. '</div></div>';
 		$result_data = null;
 	} elseif (is_array($result_data) && $job_type === 'disk_usage' && !empty($result_data['read'])) {
 		$fmt = function ($v) {

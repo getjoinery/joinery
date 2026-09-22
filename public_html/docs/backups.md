@@ -412,8 +412,10 @@ matters.
 half-applied database is not something anyone wants to restore.
 
 A run starts a **new chain** when there is nothing to extend, when the snapshot
-file is missing or empty, when the chain is older than the configured interval,
-when one full is carrying more than 30 incrementals, or when the chain's
+file is missing or empty, when the chain is older than the configured interval
+(measured with an hour's slack, so a weekly run on a fixed schedule rolls on the
+seventh day even when the tick lands a few seconds earlier in the minute than
+the run that started the chain), when one full is carrying more than 30 incrementals, or when the chain's
 envelope no longer opens with the site key (the site key is disposable; a chain
 sealed to a lost one cannot be extended, only restored). Losing the snapshot —
 or the local manifest — is therefore safe: the next run costs one extra full,
@@ -1228,6 +1230,28 @@ Three guards keep a files archive honest:
   shrink is flagged once and then measured against its new size
   (`BackupRunner::full_size_warning()`).
 
+**A run checks the disk before it writes anything.** Archives and dumps stream
+to the bucket, so what a run lands on its own disk is the tar snapshot, the
+chain manifest and a few small files (the metadata artifact, the offloaded-files
+index, an envelope sidecar, the engine's reports). `BackupRunner::local_need()`
+adds those up — the current snapshot and manifest by size, the small files as a
+fixed 64 MiB — and the run refuses when free space is under that need plus a
+fifth, plus 1 GiB kept free on top. The refusal names both figures (*"Not
+started: this run needs about 1.1 GB on disk and 800 MB is free."*) and, when the
+local chain manifest knows it, the size the files archive is expected to be.
+It is thrown before a chain is minted, a snapshot cleared or a key file
+written, so a refused run leaves the chain exactly as it was, and it is
+recorded as a failed run like any other. A run that streams essentially never
+refuses; the check exists so the one that would take the last of the disk says
+so first. When the filesystem cannot report its free space the run proceeds.
+
+**A run says its level and size as numbers.** `utils/run_backup.php` prints a
+small contract after its human line: `BACKUP_RESULT`, `BACKUP_TIME`, and — on a
+success — `BACKUP_LEVEL` (0 for a full, 1 for an incremental; always 0 for a
+standalone archive) and `BACKUP_BYTES` (the files archive's byte count), then
+`BACKUP_WARNING` when there is one. A management node stores the level and
+size on the job result, so a run's size is a field and never prose to parse.
+
 One file is left out of an unprivileged run on purpose, and announced: the
 release signing key on a publishing box, `config/agent_signing_key`, is
 readable by root only. The root-run manager backup of that box carries it. Any
@@ -1270,6 +1294,17 @@ It reads the newest site-profile row; a run still recorded as running is not a
 failure, and a manager-profile row never speaks for the site's own backup. The
 next site-profile success clears it. A site that has never configured a target
 has no row and hears nothing.
+
+A row still marked `running` whose start is more than six hours old
+(`SiteBackupNotice::STALE_RUN_HOURS`) is a run that died without writing its
+end — the kernel killed it, or it lost its database and could not get it back.
+The notice names it as *started at … and never finished*. The runner makes the
+second case rare: when recording a failure throws, `BackupRunner::fail()` asks
+`DbConnector::reconnect()` for a fresh connection once and saves again, because
+the failure that ended the run (a full disk, a PostgreSQL restart) is often the
+one that killed the connection. `reconnect()` rebuilds the current mode's link
+from the same settings; it is for a long-running CLI process, and nothing that
+runs inside a web request calls it.
 
 Because manager-profile rows land in the site's own database, the site can
 answer "does someone back me up?" locally: `BackupHistory::manager_coverage()`

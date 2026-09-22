@@ -1173,4 +1173,65 @@ section('unit_journal and disk_usage: the two observe words land as bounded resu
 		'absent is an answer a size may take: the directory is not there');
 }
 
+section('reset_failed_unit: before and after, and a fresh host report behind an accepted reset');
+
+{
+	$rf_node = jrp_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x0d", 32)),
+		'mgn_agent_version'    => '1.41.0',
+		'mgn_agent_primitives' => 'check_status,host_report,unit_journal,reset_failed_unit',
+	));
+	$rf_envelope = function ($object) {
+		return "=== [Step 1/1] word ===\n" . json_encode(array(
+			'api_version' => '1.0',
+			'data' => array('output' => json_encode($object), 'output_bytes' => 1),
+		));
+	};
+	$host_reports = function () use ($rf_node) {
+		$n = 0;
+		foreach (new MultiManagementJob(array('node_id' => (int)$rf_node->key, 'job_type' => 'host_report')) as $j) {
+			harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $j->key);
+			$n++;
+		}
+		return $n;
+	};
+
+	$rf_job = jrp_job($rf_node, 'reset_failed_unit', $rf_envelope(array(
+		'unit' => 'man-db.service',
+		'before' => array('active_state' => 'failed', 'sub_state' => 'failed', 'result' => 'exit-code'),
+		'reset' => true,
+		'after' => array('active_state' => 'inactive', 'sub_state' => 'dead', 'result' => 'success'),
+	)));
+	JobResultProcessor::process($rf_job);
+	$r = json_decode((string)$rf_job->get('mjb_result'), true);
+	check(is_array($r) && $r['read'] === true && $r['unit'] === 'man-db.service' && $r['reset'] === true
+		&& $r['before']['active_state'] === 'failed' && $r['after']['active_state'] === 'inactive'
+		&& $r['after']['result'] === 'success',
+		'the unit\'s state before and after is recorded', var_export($r, true));
+	check($host_reports() === 1, 'an accepted reset queues one host report, so the Host card re-measures');
+
+	$again = jrp_job($rf_node, 'reset_failed_unit', $rf_envelope(array(
+		'unit' => 'cron.service', 'before' => array(), 'reset' => true, 'after' => array(),
+	)));
+	JobResultProcessor::process($again);
+	check($host_reports() === 1, 'a second reset while that report is queued does not pile on another');
+
+	$hostile = jrp_job($rf_node, 'reset_failed_unit', $rf_envelope(array(
+		'unit' => '<b>x</b>', 'before' => 'nope', 'reset' => 'yes',
+		'after' => array('active_state' => array('nested')), 'surprise' => 1,
+	)));
+	JobResultProcessor::process($hostile);
+	$h = json_decode((string)$hostile->get('mjb_result'), true);
+	check(is_array($h) && !isset($h['surprise']) && $h['reset'] === false && $h['unit'] === 'bxb',
+		'a reset that is not literally true is false; unknown keys go; the name is reduced', var_export($h, true));
+	check(is_array($h) && $h['before']['active_state'] === 'unknown' && $h['after']['active_state'] === 'unknown',
+		'a state that is not a word is unknown');
+
+	$unread = jrp_job($rf_node, 'reset_failed_unit', "=== [Step 1/1] word ===\nrefused\n");
+	JobResultProcessor::process($unread);
+	check(json_decode((string)$unread->get('mjb_result'), true) === array('read' => false),
+		'a job that came back with no object records read=false');
+}
+
+
 harness_finish();

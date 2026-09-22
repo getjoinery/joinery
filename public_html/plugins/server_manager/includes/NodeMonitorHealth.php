@@ -13,6 +13,8 @@
  * It also surfaces backup recovery problems (backup_recovery_problems), in the
  * same shape, so an unrecoverable-backup node is as visible as broken monitoring.
  *
+ * @version 1.17 - backup_runs_from_here rows carry `level` and `bytes` (null when the run did not say);
+ *                 backup_run_figures() words them for the Backups tab's run list
  * @version 1.16 - a skip after a pass is recognised by BackupVerifier::is_attempt_message, the one rule
  *                 the site page uses too
  * @version 1.15 - fleet_backup_health says whether the node's backups are verified restorable: a
@@ -896,9 +898,27 @@ class NodeMonitorHealth {
 				'outcome' => $outcome,
 				'time'    => preg_match('/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/', $time, $m) ? $m[1] : $time,
 				'message' => $message,
+				'level'   => (is_array($result) && isset($result['level'])) ? (int)$result['level'] : null,
+				'bytes'   => (is_array($result) && isset($result['bytes'])) ? (int)$result['bytes'] : null,
 			);
 		}
 		return $rows;
+	}
+
+	/**
+	 * A run's level and size as the run list shows them — "Full, 5.8 GB",
+	 * "Incremental, 41 MB" — or '' when the run printed neither (a failure,
+	 * or a node whose runner predates the lines). Pure.
+	 */
+	public static function backup_run_figures(array $row): string {
+		$parts = array();
+		if (isset($row['level']) && $row['level'] !== null) {
+			$parts[] = ((int)$row['level'] === 0) ? 'Full' : 'Incremental';
+		}
+		if (isset($row['bytes']) && $row['bytes'] !== null) {
+			$parts[] = BackupChainListHelper::format_size((int)$row['bytes']);
+		}
+		return implode(', ', $parts);
 	}
 
 	/**

@@ -33,6 +33,14 @@
  * profile sweeps its own working directory by age, because the machine holding
  * the files is the only one that can.
  *
+ * @version 1.19 - pre-flight headroom (specs/disk_headroom_and_unit_diagnosis.md §5): a chain or
+ *                standalone run refuses before it writes anything when this disk cannot hold what the
+ *                run lands locally, naming both figures; the refusal is a recorded failure
+ * @version 1.18.4 - a successful run's result carries `level` and `bytes` (the files artifact's level
+ *                  and size) as numbers; run_backup.php prints them as BACKUP_LEVEL / BACKUP_BYTES
+ * @version 1.18.3 - fail() reconnects once and retries when recording the failure throws: the
+ *                  failure that ended the run (a full disk, a restarted PostgreSQL) is often the
+ *                  one that killed the connection, and a row left `running` is never noticed
  * @version 1.18.2 - the run's message names the epoch envelopes only a retired recovery key opens, so a
  *                   management node's job result and the node's own history say so
  * @version 1.18.1 - a run that examined the epoch envelopes records the ones only a retired recovery
@@ -738,6 +746,17 @@ class BackupRunner {
 			}
 		}
 
+		// Before anything is minted, unlinked or written: can this disk hold
+		// what the run lands here? A refusal is thrown like any other failure,
+		// so it is recorded on the history row and reaches the notices.
+		$refusal = self::preflight_refusal(
+			self::local_need($plan, $snar, $chain_id ? self::chain_dir($plan, $chain_id) . '/' . BackupChain::MANIFEST_NAME : ''),
+			self::free_bytes($plan, $dir),
+			self::expected_bytes($manifest, $reason !== '' ? 0 : 1));
+		if ($refusal !== '') {
+			throw new BackupRunnerException($refusal);
+		}
+
 		if ($reason !== '') {
 			// A new chain gets a new data key and a clean snapshot. Reusing the
 			// previous chain's key would mean one compromised key opened both,
@@ -872,10 +891,94 @@ class BackupRunner {
 		if ($objects_pruned) { $msg .= "; removed {$objects_pruned} offloaded file" . ($objects_pruned === 1 ? '' : 's') . ' no kept backup names'; }
 		if ($swept)  { $msg .= "; swept {$swept} local file" . ($swept === 1 ? '' : 's'); }
 
+		$figures = array('level' => $level, 'bytes' => (int)$artifacts['files']['bytes']);
 		if ($warning !== '') {
-			return array('status' => 'success', 'message' => 'WARNING: ' . $warning . ' — ' . $msg, 'warning' => $warning);
+			return array('status' => 'success', 'message' => 'WARNING: ' . $warning . ' — ' . $msg, 'warning' => $warning) + $figures;
 		}
-		return array('status' => 'success', 'message' => $msg);
+		return array('status' => 'success', 'message' => $msg) + $figures;
+	}
+
+	// ------------------------------------------------------------ pre-flight
+
+	/**
+	 * What a run writes to this disk besides the archive, which streams: the
+	 * metadata artifact, the offloaded-files index, the envelope sidecar and
+	 * the engine's report files. Generous on purpose — a large site's index is
+	 * the biggest of them and still a few megabytes.
+	 */
+	const PREFLIGHT_LOCAL_OVERHEAD = 67108864;   // 64 MiB
+
+	/** Room kept free on top of the need, so a run never takes the last of the disk. */
+	const PREFLIGHT_FLOOR = 1073741824;          // 1 GiB
+
+	/**
+	 * Bytes this run lands on local disk. Every archive and dump streams to the
+	 * bucket, so what is left is the tar snapshot (rewritten in full by every
+	 * chain run, so the current one's size is the estimate), the chain
+	 * manifest, and PREFLIGHT_LOCAL_OVERHEAD. A standalone run passes '' for
+	 * both paths.
+	 */
+	public static function local_need(array $plan, $snar_path, $manifest_path): int {
+		$need = self::PREFLIGHT_LOCAL_OVERHEAD;
+		foreach (array($snar_path, $manifest_path) as $p) {
+			if ($p !== '' && is_file($p)) {
+				$need += (int)@filesize($p);
+			}
+		}
+		return $need;
+	}
+
+	/**
+	 * The size the run's files archive is expected to be, for the refusal's
+	 * wording: for a full, the newest full in the local chain manifest; for an
+	 * incremental, the newest run. 0 when the manifest has nothing to say.
+	 */
+	public static function expected_bytes(?array $manifest, int $level): int {
+		$runs = ($manifest && !empty($manifest['runs'])) ? $manifest['runs'] : array();
+		for ($i = count($runs) - 1; $i >= 0; $i--) {
+			if ($level === 0 && (int)($runs[$i]['level'] ?? 1) !== 0) {
+				continue;
+			}
+			return (int)($runs[$i]['artifacts']['files']['bytes'] ?? 0);
+		}
+		return 0;
+	}
+
+	/**
+	 * Free bytes where the run writes, or null when the filesystem will not
+	 * say. `free_bytes` on the plan is the measured figure when a caller has
+	 * one already; tests pass it to exercise the refusal.
+	 */
+	private static function free_bytes(array $plan, $dir) {
+		if (isset($plan['free_bytes'])) {
+			return (int)$plan['free_bytes'];
+		}
+		$free = @disk_free_space($dir);
+		return ($free === false) ? null : (int)$free;
+	}
+
+	/**
+	 * The refusal for a run this disk cannot hold, or '' when it can (or when
+	 * free space is unknowable — the engine then finds out for itself, as it
+	 * did before this check existed). The need is padded by a fifth and
+	 * PREFLIGHT_FLOOR is kept free on top, and the message names both figures.
+	 * Pure.
+	 */
+	public static function preflight_refusal(int $local_need, ?int $free, int $expected_bytes): string {
+		if ($free === null) {
+			return '';
+		}
+		$required = (int)ceil($local_need * 1.2) + self::PREFLIGHT_FLOOR;
+		if ($free >= $required) {
+			return '';
+		}
+		$msg = 'Not started: this run needs about ' . self::human($required) . ' on disk and '
+			. self::human($free) . ' is free.';
+		if ($expected_bytes > 0) {
+			$msg .= ' (The files archive itself, about ' . self::human($expected_bytes)
+				. ' last time, streams to backup storage and is not written here.)';
+		}
+		return $msg;
 	}
 
 	/**
@@ -1355,6 +1458,11 @@ class BackupRunner {
 			throw new BackupRunnerException("The backup directory {$dir} is not writable by " . self::whoami() . '.');
 		}
 
+		$refusal = self::preflight_refusal(self::local_need($plan, '', ''), self::free_bytes($plan, $dir), 0);
+		if ($refusal !== '') {
+			throw new BackupRunnerException($refusal);
+		}
+
 		$objects = null;
 		if ($plan['type'] === 'project') {
 			// The archive is named before it is made (its envelope is minted for
@@ -1408,7 +1516,8 @@ class BackupRunner {
 		if ($objects_pruned) { $msg .= "; removed {$objects_pruned} offloaded file" . ($objects_pruned === 1 ? '' : 's') . ' no kept backup names'; }
 		if ($swept)  { $msg .= "; swept {$swept} local file" . ($swept === 1 ? '' : 's'); }
 
-		return array('status' => 'success', 'message' => $msg);
+		// A standalone archive is whole by construction: level 0.
+		return array('status' => 'success', 'message' => $msg, 'level' => 0, 'bytes' => $archive_bytes);
 	}
 
 	/**
@@ -2104,11 +2213,25 @@ class BackupRunner {
 
 	// --------------------------------------------------------------- internals
 
+	/**
+	 * Record a run as failed. The failure that ended the run is often the one
+	 * that killed the database connection too — a full disk, a PostgreSQL
+	 * restart — so a first save that throws gets one fresh connection and one
+	 * more try. A row left `running` is invisible to SiteBackupNotice until it
+	 * ages out, which is the backstop for a process that wrote nothing at all.
+	 */
 	private static function fail(BackupHistory $history, $message) {
+		$history->set('bkh_outcome', 'failed');
+		$history->set('bkh_finish_time', gmdate('Y-m-d H:i:s'));
+		$history->set('bkh_message', substr((string)$message, 0, 4000));
 		try {
-			$history->set('bkh_outcome', 'failed');
-			$history->set('bkh_finish_time', gmdate('Y-m-d H:i:s'));
-			$history->set('bkh_message', substr((string)$message, 0, 4000));
+			$history->save();
+			return;
+		} catch (\Throwable $e) {
+			error_log('BackupRunner: recording the failure failed, reconnecting once: ' . $e->getMessage());
+		}
+		try {
+			DbConnector::get_instance()->reconnect();
 			$history->save();
 		} catch (\Throwable $e) {
 			error_log('BackupRunner: could not record failure: ' . $e->getMessage());

@@ -31,6 +31,8 @@
  *
  * Run: php plugins/server_manager/tests/agent_case_intake_test.php
  *
+ * @version 1.2 - the failed-backup notice: loaded by the database, escaped, capped at five, linked
+ *                to the failing run, silent for a healthy node and below permission 10
  * @version 1.1 - an unchanged case is not written on every poll; a newer note with a lower count is taken;
  *                reports_failed_units loads only the nodes with a failed unit
  * @version 1.0
@@ -450,5 +452,68 @@ if ($shown !== null) {
 	check(strpos($mail, 'http://') === false && strpos($mail, 'https://') === false, 'The mail carries no link at all');
 	check(strpos($mail, "as reported by the agent's ledger") !== false, 'The mail says the record is as reported by the agent\'s ledger');
 }
+
+// ---------------------------------------------------------------------------
+section('A failed scheduled backup is named in the header');
+
+$failed_backup_loaded = function () use ($node_id): bool {
+	foreach (new MultiManagedNode(['reports_failed_backup' => true, 'deleted' => false]) as $n) {
+		if ((int)$n->key === $node_id) { return true; }
+	}
+	return false;
+};
+foreach ([['success', false], ['warning', false], [null, false], ['failed', true]] as [$outcome, $expect]) {
+	$node->set('mgn_last_backup_outcome', $outcome);
+	$node->set('mgn_last_backup_time', '2026-09-22 04:00:09');
+	$node->save();
+	check($failed_backup_loaded() === $expect, ($expect ? 'Loaded' : 'Not loaded') . ' for the failed-backup notice: outcome '
+		. var_export($outcome, true));
+}
+
+// The newest backup_run job, when it is the failure, supplies the reason and the link.
+$bjob = new ManagementJob(NULL);
+$bjob->set('mjb_mgn_managed_node_id', $node_id);
+$bjob->set('mjb_job_type', 'backup_run');
+$bjob->set('mjb_status', 'completed');
+$bjob->set('mjb_commands', array('primitive' => 'backup_run', 'params' => array()));
+$bjob->set('mjb_result', array('backup_status' => 'error', 'message' => '<b>No space left on device</b>'));
+$bjob->save();
+$bjob->load();
+harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $bjob->key);
+
+$_SESSION['permission'] = 10;
+$html = FleetAttentionNotice::render_failed_backups();
+check(strpos($html, 'mgn_managed_node_id=' . $node_id . '&amp;tab=backups') !== false, 'The node is named, linked to its Backups tab');
+check(strpos($html, 'job_detail?job_id=' . (int)$bjob->key) !== false, 'The failing run is linked');
+check(strpos($html, '&lt;b&gt;No space left on device') !== false && strpos($html, '<b>No space') === false,
+	'The run\'s reason is shown, escaped');
+check(strpos($html, 'at 2026-09-22 04:00 UTC') !== false, 'It says when');
+$_SESSION['permission'] = 5;
+check(FleetAttentionNotice::render_failed_backups() === '', 'Silent below permission 10');
+$_SESSION['permission'] = 10;
+
+// A job that succeeded after the stamp is not this failure's reason.
+$bjob->set('mjb_result', array('backup_status' => 'success'));
+$bjob->save();
+$html = FleetAttentionNotice::render_failed_backups();
+check(strpos($html, 'job_detail?job_id=' . (int)$bjob->key) === false, 'A successful newest job is not offered as the failure');
+
+$node->set('mgn_last_backup_outcome', 'success');
+$node->save();
+check(strpos(FleetAttentionNotice::render_failed_backups(), 'mgn_managed_node_id=' . $node_id . '&amp;') === false,
+	'A node whose next run succeeded is no longer named');
+
+section('The failed-backup notice, pure');
+check(FleetAttentionNotice::failed_backups_for([]) === '', 'Silent with nothing to say');
+$seven = [];
+for ($i = 1; $i <= 7; $i++) {
+	$seven[1000 + $i] = ['name' => 'node-' . $i, 'time' => '', 'reason' => '', 'job_id' => 0];
+}
+$capped = FleetAttentionNotice::failed_backups_for($seven);
+check(strpos($capped, 'node-5') !== false && strpos($capped, 'node-6') === false, 'Five nodes are named');
+check(strpos($capped, 'and 2 more') !== false, 'and the rest are counted');
+check(strpos($capped, '7 nodes') !== false, 'The lead counts them all');
+$escaped = FleetAttentionNotice::failed_backups_for([$node_id => ['name' => '<i>n</i>', 'time' => '', 'reason' => '', 'job_id' => 0]]);
+check(strpos($escaped, '<i>') === false && strpos($escaped, '&lt;i&gt;n') !== false, 'The node name is escaped');
 
 harness_finish();

@@ -31,6 +31,9 @@
  *       db-0001.sql.gz.enc
  *       ...
  *
+ * @version 1.4 - should_start_new rolls on age with a one-hour grace: the scheduled tick runs a few
+ *                seconds earlier in the minute than the run it follows wrote `created`, so an exact
+ *                comparison missed by seconds and every chain ran eight days instead of seven
  * @version 1.3 - the `objects` kind: a run's index of the site's offloaded files
  *                (objects-0003.json.gz, plain gzipped JSON like the manifest), named by
  *                artifact_name(), returned by restore_plan(), deleted with the chain by
@@ -56,6 +59,14 @@ class BackupChain {
 
 	/** Prefix of a chain directory in the bucket. */
 	const DIR_PREFIX = 'chain-';
+
+	/**
+	 * Slack on the age rule. A chain's `created` is stamped some seconds into the
+	 * run that started it; the next scheduled tick at the same hour can arrive
+	 * seconds earlier in the minute. Without slack, "7 days" misses by those
+	 * seconds and the chain runs a whole extra day.
+	 */
+	const AGE_GRACE_SECONDS = 3600;
 
 	/** The database is dumped in full every run — see the class comment. */
 	const KINDS = array('files', 'db', 'meta', 'objects');
@@ -184,7 +195,7 @@ class BackupChain {
 		$now = strtotime(($now_utc ?: gmdate('Y-m-d H:i:s')) . ' UTC');
 		$started = strtotime((string)($manifest['created'] ?? ''));
 		if ($started && $full_interval_days > 0
-			&& ($now - $started) >= ($full_interval_days * 86400)) {
+			&& ($now - $started) >= ($full_interval_days * 86400 - self::AGE_GRACE_SECONDS)) {
 			return 'age';
 		}
 

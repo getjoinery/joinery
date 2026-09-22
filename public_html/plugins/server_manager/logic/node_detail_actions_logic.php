@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.32 - reset_failed_unit: the Clear button beside a failed unit
  * @version 1.31 - unit_journal and disk_usage: the Why? button beside a failed unit and the disk
  *                 button on the Host card post here; the unit is checked against the compiled list
  *                 in the builder, and disk_usage takes nothing at all
@@ -218,6 +219,12 @@ class NodeDetailActions {
 				$built = JobCommandBuilder::build_unit_journal($node,
 					(string)($_POST['unit'] ?? ''), (int)($_POST['lines'] ?? 100));
 				$job = ManagementJob::createFromBuild($node->key, 'unit_journal', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'reset_failed_unit': {
+				$built = JobCommandBuilder::build_reset_failed_unit($node, (string)($_POST['unit'] ?? ''));
+				$job = ManagementJob::createFromBuild($node->key, 'reset_failed_unit', $built, null, $uid);
 				return self::jobUrl($job);
 			}
 

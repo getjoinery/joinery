@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.21 - a Clear button beside each failed unit on the compiled list (reset_failed_unit),
+ *                 with a confirm that says what it does and does not do
  * @version 1.20 - the Logs picker offers what this node's agent will answer about
  *                 (JobCommandBuilder::site_log_files_for), so the PostgreSQL entry appears only
  *                 on an agent that has it
@@ -774,6 +776,8 @@
 				// without one, because the node would refuse it.
 				$can_ask = JobCommandBuilder::has_primitive($node, 'unit_journal')
 					&& JobCommandBuilder::log_access_refusal($node) === null;
+				// Clear needs no log access: it reads nothing.
+				$can_clear = JobCommandBuilder::has_primitive($node, 'reset_failed_unit');
 				echo '<ul class="list-unstyled mb-0 text-danger">';
 				foreach ($hr['failed_units'] as $unit) {
 					echo '<li>' . $hr_str($unit);
@@ -787,6 +791,21 @@
 							. '<input type="hidden" name="action" value="unit_journal">'
 							. '<input type="hidden" name="unit" value="' . $hr_str($bare) . '">'
 							. '<input type="hidden" name="lines" value="100">'
+							. SmAdminCsrf::field() . '</form>';
+					}
+					if ($can_clear && array_key_exists($bare, JobCommandBuilder::UNIT_JOURNAL_UNITS)) {
+						$form_id = 'nodeActionResetUnit_' . $bare;
+						$confirm = 'Clear the failed record for ' . $bare . '? This clears the record only: it does not start, '
+							. 'stop or fix the unit. If the unit is still broken it fails again the next time it runs, '
+							. 'and the Host card names it again.';
+						echo ' <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
+							. ' title="Clear systemd\'s record that this unit failed"'
+							. ' onclick="' . $hr_str('JoineryModal.confirm(' . json_encode($confirm) . ', function(){ document.getElementById('
+								. json_encode($form_id) . ').submit(); })') . '">Clear</button>';
+						echo '<form id="' . $hr_str($form_id) . '" method="post" action="'
+							. htmlspecialchars($base_url, ENT_QUOTES, 'UTF-8') . '" hidden>'
+							. '<input type="hidden" name="action" value="reset_failed_unit">'
+							. '<input type="hidden" name="unit" value="' . $hr_str($bare) . '">'
 							. SmAdminCsrf::field() . '</form>';
 					}
 					echo '</li>';

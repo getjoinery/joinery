@@ -134,6 +134,8 @@ check($object !== null, 'the files object is in backup storage under the chain k
 check($object !== null && (int)$files0['bytes'] === strlen($object), 'the manifest\'s bytes equal the object\'s', ($files0['bytes'] ?? '?') . ' vs ' . strlen((string)$object));
 check($object !== null && $files0['sha256'] === hash('sha256', $object), 'the manifest\'s sha256 equals the object\'s');
 check((int)$run0['level'] === 0, 'the first run is a full');
+check(($result['level'] ?? null) === 0 && ($result['bytes'] ?? null) === (int)($files0['bytes'] ?? -1),
+	'the run\'s result carries its level and the files artifact\'s size as numbers', json_encode($result));
 $db_object = s3fx_object($fx, 'bkt', '/joinery-backups/' . $slug . '/manager/' . $chain_id . '/db-0000.sql.gz.enc');
 check($db_object !== null, 'the database dump is in backup storage');
 check(!is_file($chain_d . '/db-0000.sql.gz.enc') && !glob($chain_d . '/*.sql.gz.enc'), 'and no dump is on disk',

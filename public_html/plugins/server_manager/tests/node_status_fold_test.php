@@ -498,4 +498,23 @@ check(JobResultProcessor::parse_backup_run_verdict($runner, 'completed')['warnin
 check(preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', JobResultProcessor::backup_run_stamp_time($v, '')) === 1,
 	'a job with neither still gets a well-formed stamp');
 
+// A run's level and size are numbers, not prose to parse out of the message.
+$figured = "[2026-09-22 04:30:00 UTC] manager success: Full backup (16.0 GB of files) in chain-y to B2\n"
+	. "BACKUP_RESULT=success\nBACKUP_TIME=2026-09-22 04:00:09\nBACKUP_LEVEL=0\nBACKUP_BYTES=17230000000\n";
+$v = JobResultProcessor::parse_backup_run_verdict(json_encode(['api_version' => '1.0', 'data' => ['output' => $figured]]), 'completed');
+check(($v['level'] ?? null) === 0 && ($v['bytes'] ?? null) === 17230000000,
+	'BACKUP_LEVEL and BACKUP_BYTES are read as integers, through the envelope', var_export($v, true));
+$v = JobResultProcessor::parse_backup_run_verdict($runner, 'completed');
+check(!array_key_exists('level', $v) && !array_key_exists('bytes', $v),
+	'a runner that printed neither line leaves both absent, not zero');
+$v = JobResultProcessor::parse_backup_run_verdict("BACKUP_RESULT=success\nBACKUP_LEVEL=zero\nBACKUP_BYTES=-5\n", 'completed');
+check(!array_key_exists('level', $v) && !array_key_exists('bytes', $v),
+	'a non-numeric level or a negative size is not taken');
+check(NodeMonitorHealth::backup_run_figures(['level' => 0, 'bytes' => 17230000000]) === 'Full, 16 GB',
+	'the run list words a full and its size', NodeMonitorHealth::backup_run_figures(['level' => 0, 'bytes' => 17230000000]));
+check(NodeMonitorHealth::backup_run_figures(['level' => 3, 'bytes' => null]) === 'Incremental',
+	'an incremental with no size says only that');
+check(NodeMonitorHealth::backup_run_figures(['level' => null, 'bytes' => null]) === '',
+	'a run that said neither shows nothing');
+
 harness_finish();

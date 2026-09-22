@@ -5,6 +5,11 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.35 - process_reset_failed_unit: the unit's state before and after, and a host_report
+ *                queued behind a reset the node accepted, so the Host card re-measures rather than
+ *                showing the cleared unit until the next report
+ * @version 1.34 - parse_backup_run_verdict reads BACKUP_LEVEL / BACKUP_BYTES and process_backup_run
+ *                stores them in mjb_result (level, bytes)
  * @version 1.33 - restore_objects: process_restore_objects records the node's answer (a survey's names,
  *                 a page's counts) and issues the next job of the loop through FleetObjectRestore;
  *                 process_restore_chain starts that loop in missing mode as the chain restore's last
@@ -891,6 +896,9 @@ class JobResultProcessor {
 		}
 
 		$result = ['backup_status' => $status];
+		foreach (['level', 'bytes'] as $k) {
+			if (isset($verdict[$k])) { $result[$k] = $verdict[$k]; }
+		}
 		if ($verdict['warning'] !== '') {
 			$result['warning'] = $verdict['warning'];
 		}
@@ -1183,7 +1191,17 @@ class JobResultProcessor {
 			$warning = trim($m[1]);
 		}
 
-		return ['status' => $status, 'time' => $time, 'message' => $message, 'warning' => $warning];
+		// The files artifact's level and size, as the run printed them. Absent
+		// on a failed run and from a runner that predates the lines.
+		$figures = [];
+		if (preg_match('/^BACKUP_LEVEL=(\d{1,2})$/m', $output, $m)) {
+			$figures['level'] = (int)$m[1];
+		}
+		if (preg_match('/^BACKUP_BYTES=(\d{1,18})$/m', $output, $m)) {
+			$figures['bytes'] = (int)$m[1];
+		}
+
+		return ['status' => $status, 'time' => $time, 'message' => $message, 'warning' => $warning] + $figures;
 	}
 
 	/**
@@ -2218,6 +2236,60 @@ HTML;
 	private static function unit_journal_word($v) {
 		$name = self::host_report_name($v);
 		return ($name !== '') ? $name : 'unknown';
+	}
+
+	/**
+	 * A reset_failed_unit job's result: the unit's state before and after, and
+	 * whether systemd accepted the reset. Compiled facts only, bounded the way
+	 * unit_journal's are.
+	 *
+	 * A reset the node accepted is followed by a host_report, because the
+	 * Host card that offered the Clear button is rendered from the last one:
+	 * without a fresh report the cleared unit would stay named until the next
+	 * scheduled read. Not queued when one is already queued or ran in the
+	 * last minute.
+	 */
+	private static function process_reset_failed_unit($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		$text = (is_array($data) && isset($data['output'])) ? (string)$data['output'] : '';
+		$decoded = ($text !== '') ? json_decode(trim($text), true) : null;
+		if (!is_array($decoded) || !isset($decoded['unit'])) {
+			$job->set('mjb_result', json_encode(['read' => false]));
+			$job->save();
+			return;
+		}
+		$state = function ($v) {
+			$v = is_array($v) ? $v : [];
+			return [
+				'active_state' => self::unit_journal_word($v['active_state'] ?? ''),
+				'sub_state'    => self::unit_journal_word($v['sub_state'] ?? ''),
+				'result'       => self::unit_journal_word($v['result'] ?? ''),
+			];
+		};
+		$reset = ($decoded['reset'] ?? false) === true;
+		$job->set('mjb_result', json_encode([
+			'read'   => true,
+			'unit'   => self::host_report_name($decoded['unit'] ?? ''),
+			'reset'  => $reset,
+			'before' => $state($decoded['before'] ?? null),
+			'after'  => $state($decoded['after'] ?? null),
+		]));
+		$job->save();
+
+		$node_id = (int)$job->get('mjb_mgn_managed_node_id');
+		if ($reset && $node_id) {
+			try {
+				$node = new ManagedNode($node_id, TRUE);
+				if (JobCommandBuilder::has_primitive($node, 'host_report')
+						&& !ManagementJob::activeOrRecentForNode($node_id, 'host_report', 60)) {
+					ManagementJob::createFromBuild($node_id, 'host_report',
+						JobCommandBuilder::build_host_report($node), null, $job->get('mjb_created_by'));
+				}
+			} catch (Exception $e) {
+				// The reset happened; not being able to re-measure is not a
+				// reason to call it anything else.
+			}
+		}
 	}
 
 	/** One journal line, capped on the plane as the node caps it. */
