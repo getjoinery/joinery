@@ -11,6 +11,7 @@
  * the Mailbox Reader's thread-key index is created here (same pattern as the
  * server_manager plugin's index migration).
  *
+ * @version 1.31.0 - imi_002_reclaim_search_index_files: delete every File the search index left behind
  * @version 1.30.0 - ief_001_inbound_email_filter_prefix: fil_inbound_email_filters -> ief_inbound_email_filters
  * @version 1.29.0 - rcl_001_relay_cloud_provision_prefix: rcp_relay_cloud_provisions -> rcl_relay_cloud_provisions
  * @version 1.28.0
@@ -1021,6 +1022,79 @@ return [
 			$db->exec("DROP TABLE fil_inbound_email_filters");
 			$db->exec("DROP SEQUENCE IF EXISTS fil_inbound_email_filters_fil_inbound_email_filter_id_seq");
 			error_log("mailbox ief_001_inbound_email_filter_prefix: {$copied} filters carried to ief_inbound_email_filters, old table dropped");
+			return true;
+		},
+	],
+	[
+		// The persisted search index is one sealed file per owner under
+		// cache/mailfts (specs/mailbox_search_index_blob_leak.md). Before that it
+		// was a private File per persist, and on a node where the delete of the
+		// previous one failed silently the copies accumulated until the disk
+		// filled. Every File carrying the index source is a copy nothing reads:
+		// delete each through File::permanent_delete() so the row, the blob and
+		// the bytes go together, and log every outcome. Refused and logged
+		// instead: a File a live bookkeeping row still names (an owner who has
+		// not folded since the upgrade sheds it on their next fold) and a File
+		// whose blob is referenced more than once. A refusal or a failure never
+		// stops the upgrade. Idempotent: nothing found, nothing to do.
+		'id' => 'imi_002_reclaim_search_index_files',
+		'version' => '1.119.0',
+		'up' => function($dbconnector) {
+			$db = $dbconnector->get_db_link();
+			$exists = function ($table) use ($db) {
+				$q = $db->prepare("SELECT to_regclass(:t)");
+				$q->execute(array(':t' => 'public.' . $table));
+				return $q->fetchColumn() !== null;
+			};
+			if (!$exists('imi_inbound_mailbox_search_index')) {
+				return true;
+			}
+			require_once(PathHelper::getIncludePath('data/files_class.php'));
+
+			$named = array();
+			$q = $db->query('SELECT imi_fil_file_id FROM imi_inbound_mailbox_search_index WHERE imi_fil_file_id IS NOT NULL');
+			foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $id) {
+				$named[(int)$id] = true;
+			}
+			$q = $db->prepare(
+				'SELECT f.fil_file_id, b.fbb_size_bytes, b.fbb_reference_count
+				   FROM fil_files f
+				   LEFT JOIN fbb_file_blobs b ON b.fbb_file_blob_id = f.fil_fbb_file_blob_id
+				  WHERE f.fil_source = ?
+				  ORDER BY f.fil_file_id');
+			$q->execute(array(File::SOURCE_MAILBOX_SEARCH_INDEX));
+			$rows = $q->fetchAll(PDO::FETCH_ASSOC);
+			if (!count($rows)) {
+				return true;
+			}
+
+			$deleted = 0; $bytes = 0; $skipped = 0; $failed = 0;
+			foreach ($rows as $r) {
+				$id = (int)$r['fil_file_id'];
+				if (isset($named[$id])) {
+					error_log("mailbox imi_002: File {$id} skipped - a live bookkeeping row still names it");
+					$skipped++;
+					continue;
+				}
+				if ((int)$r['fbb_reference_count'] > 1) {
+					error_log("mailbox imi_002: File {$id} skipped - its blob is referenced more than once");
+					$skipped++;
+					continue;
+				}
+				try {
+					$file = new File($id, TRUE);
+					if ($file->key) {
+						$file->permanent_delete();
+					}
+					$deleted++;
+					$bytes += (int)$r['fbb_size_bytes'];
+				} catch (Throwable $e) {
+					error_log("mailbox imi_002: File {$id} FAILED: " . get_class($e) . ': ' . $e->getMessage());
+					$failed++;
+				}
+			}
+			error_log('mailbox imi_002_reclaim_search_index_files: ' . count($rows) . ' search-index File records found, '
+				. "{$deleted} deleted (" . round($bytes / 1048576) . " MiB), {$skipped} skipped, {$failed} failed");
 			return true;
 		},
 	],

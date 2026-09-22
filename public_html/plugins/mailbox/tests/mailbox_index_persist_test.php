@@ -28,6 +28,7 @@
  *    a live owner's alone;
  *  - the health check passes at zero and fails naming the count otherwise.
  *
+ * @version 1.1 - the held File is released before the health section, so the pass case can pass
  * @version 1.0
  */
 
@@ -231,6 +232,11 @@ if ((int)$q->fetchColumn() === 0) {
 	check(strpos($logged, (string)$held_id) !== false && stripos($logged, 'stray') !== false,
 		'and the log says so, naming the id (ten weeks of silence is what this replaces)',
 		$logged === '' ? '(nothing was logged)' : $logged);
+
+	// Let the stray go now, not at teardown: the health section below asserts
+	// a clean node, and this File would otherwise be the one thing dirtying it.
+	$db->prepare('DELETE FROM esf_event_session_files WHERE esf_fil_file_id = ?')->execute(array($held_id));
+	$still_held->permanent_delete();
 }
 
 // ------------------------------------------------- purge
