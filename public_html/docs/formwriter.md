@@ -325,6 +325,87 @@ $formwriter->passwordinput('password_confirm', 'Confirm Password', [
 ]);
 ```
 
+A password field never carries a value into the page — not the stored secret,
+not what was just submitted. Whatever `value`, `set_values()` or `set_model()`
+passes is discarded.
+
+### Stored credentials
+
+A field for a credential the site already holds (an API key, a client secret, a
+mailbox password) says so with `stored`. That is the only way FormWriter learns
+a value exists; the bound value is never consulted.
+
+```php
+// Drawing the field
+$formwriter->passwordinput('ncp_api_key', 'Namecheap API key', [
+    'stored' => $key_present,   // bool
+]);
+
+// A multi-line credential: a PEM key, a service-account JSON
+$formwriter->passwordinput('service_account', 'Service account JSON', [
+    'stored' => $json_present,
+    'rows'   => 6,
+]);
+```
+
+The person at the keyboard sees one of three states:
+
+| State | The field | Saving the form |
+|---|---|---|
+| nothing stored (`stored => false`) | empty and open | stores what was typed; nothing when left blank |
+| stored (`stored => true`) | locked, showing dots, with a **Reset** button | keeps the stored value |
+| stored, after Reset | empty and open, with **Undo** | stores what was typed; removes the value when left blank |
+
+A locked field is `disabled`, and a browser does not submit a disabled field, so
+a save that never touches it leaves the field out of the request. The save
+handler reads the submission with one static method:
+
+```php
+list($action, $value) = FormWriterV2Base::process_secretinput($_POST, 'ncp_api_key', $key_present);
+
+if ($action === FormWriterV2Base::SECRET_SET) {
+    // store $value (trimmed)
+} elseif ($action === FormWriterV2Base::SECRET_CLEAR) {
+    // remove the stored value
+}
+// SECRET_KEEP: leave it alone
+```
+
+| The request carries | Answer |
+|---|---|
+| no such field | `SECRET_KEEP` |
+| the field, empty after trimming | `SECRET_CLEAR` when something is stored, `SECRET_KEEP` when not |
+| the field, with text | `SECRET_SET`, with the trimmed text |
+
+It takes the request and the field name, not the value: absent and empty are
+different answers, and `$_POST[$name] ?? ''` erases the difference. A handler
+that forwards a credential to another writer (such as `SettingsWriter`) forwards
+it only when `array_key_exists()` says it arrived.
+
+What FormWriter does around it:
+
+- The dots are the field's `placeholder`, twelve whatever the length stored. A
+  caller's own `placeholder` is ignored on a stored field.
+- A `required` stored field drops `required` while locked (what is stored
+  satisfies it), and `validate()` passes it when it did not arrive. Reset puts
+  `required` back.
+- A field that passes `stored` at all gets `autocomplete="new-password"` unless
+  it sets its own, so a password manager does not fill a credential field.
+- A stored field the page itself draws `disabled` or `readonly` shows the dots
+  and offers no Reset.
+- The Reset and Undo behaviour lives in `assets/js/stored-secret.js`, emitted
+  once per request by the first stored field and bound by data attribute — no
+  inline script. Pages add nothing.
+- A save refused for another field's error comes back with the credential
+  locked again; what was typed into it is not kept.
+
+`FormWriterV2JSON` emits `"stored": true` and no value. A native client draws
+its own locked state and follows the same wire contract: omit the field to
+keep, send it empty to remove, send text to replace.
+
+Declared settings do all of this through `SettingsFieldRenderer`; see
+[Settings § Credentials](settings.md#credentials).
+
 ### Telling the user where a credential comes from (`help_modal`)
 
 A field that asks for an API key, token or secret can say where to get one. Pass
@@ -1560,7 +1641,7 @@ $formwriter->passwordinput('client_secret', 'Client Secret', [
 
 // ✅ CORRECT — plain text help
 $formwriter->passwordinput('client_secret', 'Client Secret', [
-    'helptext' => 'Currently set — leave blank to keep',
+    'helptext' => 'From the app registration page.',
 ]);
 ```
 
@@ -1898,7 +1979,7 @@ class FormWriterV2MyTheme extends FormWriterV2Base {
 | Method | Key fields in `$data` |
 |--------|----------------------|
 | `renderTextInput` | `name, label, id, value, type, placeholder, class, readonly, disabled, autofocus, required, autocomplete, onchange, pattern, min, max, step, minlength, maxlength, prepend, has_errors, errors, helptext` |
-| `renderPasswordInput` | Same as textInput + `strength_meter` |
+| `renderPasswordInput` | Same as textInput + `strength_meter`, `rows` (textarea), `stored` / `resettable` / `stored_required` (the locked stored-credential field) |
 | `renderNumberInput` | Same as textInput (type='number') |
 | `renderDropInput` | `name, label, id, value, options_list ([value=>label]), empty_option, class, multiple, disabled, required, onchange, ajaxendpoint, has_errors, errors, helptext, visibility_rules, custom_script` |
 | `renderCheckboxInput` | `name, label, id, checked_value, is_checked, class, disabled, required, onchange, has_errors, errors, helptext, visibility_rules, custom_script` |
@@ -2007,7 +2088,7 @@ Call before adding fields — fields capture their value when created. Both appl
 | FormWriter method | JSON `type` | Notes |
 |---|---|---|
 | `textinput` | `text` | HTML subtypes (`email`, `url`, ...) serialize as `input_type`; `prepend`, `pattern`, `min`/`max`/`step`, `minlength`/`maxlength` included |
-| `passwordinput` | `password` | `strength_meter` flag; the value is **never** serialized |
+| `passwordinput` | `password` | `strength_meter` flag, `stored` (a credential is held: draw it locked), `rows`; the value is **never** serialized |
 | `numberinput` | `number` | `min`/`max`/`step` |
 | `textarea` | `textarea` | |
 | `dropinput` | `drop` | `options`, `empty_option`, `multiple`; `ajaxendpoint` serializes as `search_endpoint` |

@@ -15,7 +15,7 @@
  * Connection details for a known provider come from the preset catalog; the
  * app/basic password is a non-model field stored encrypted via setPassword().
  *
- * @version 2.6
+ * @version 2.7 - the password goes through FormWriterV2Base::process_secretinput(): Reset and save blank removes it
  * @changelog 2.6 - edit-only, enforced: any arrival that resolves no existing
  *   feed is handed to the connect wizard, POSTs included; the ceremony actions
  *   (grant removal, seal/unseal batches) answer only to a POST.
@@ -339,11 +339,16 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 			$account->set('iia_imap_encryption', $preset['encryption']);
 		}
 
-		// Password: only for password-auth providers; blank-on-edit keeps the existing.
+		// Password: only for password-auth providers. A stored one is a locked
+		// field — not posted, it is kept; after Reset, blank removes it (the
+		// account then fails its next sync with "no password", which is the
+		// truthful state) and text replaces it.
 		if ($preset['auth'] === InboundImapAccount::AUTH_PASSWORD) {
-			$pw = (string)($input['imap_password'] ?? '');
-			if ($pw !== '') {
+			list($pw_what, $pw) = FormWriterV2Base::process_secretinput($input, 'imap_password', $account->hasPassword());
+			if ($pw_what === FormWriterV2Base::SECRET_SET) {
 				$account->setPassword($pw);
+			} elseif ($pw_what === FormWriterV2Base::SECRET_CLEAR) {
+				$account->setPassword(null);
 			}
 		}
 

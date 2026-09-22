@@ -11,7 +11,9 @@
  * the tick drives every profile from the registry, so the admin never names a
  * profile or a per-store task.
  *
- * @version 3.1 - replace_key: a rotated key is proved and stored on its own, leaving the enabled latch
+ * @version 3.2 - the secret key is read through FormWriterV2Base::process_secretinput(): a locked field keeps
+ *                the stored key, Reset and blank fails as required
+ * @changelog 3.1 - replace_key: a rotated key is proved and stored on its own, leaving the enabled latch
  *                and the draining flag untouched — the save path's activate-and-stop-draining is what
  *                a full Save means, not what replacing a key means
  * @version 3.0.1 - Retry clears the recorded reason with the count
@@ -59,6 +61,14 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 		return array_key_exists($key, $input) ? trim((string)$input[$key]) : trim((string)$settings->get_setting($key));
 	};
 
+	$submitted_secret_key = function () use ($input, $settings) {
+		$stored = (string)$settings->get_setting('cloud_storage_secret_key');
+		list($action, $value) = FormWriterV2Base::process_secretinput($input, 'cloud_storage_secret_key', $stored !== '');
+		if ($action === FormWriterV2Base::SECRET_KEEP) return $stored;
+		if ($action === FormWriterV2Base::SECRET_CLEAR) return '';
+		return $value;
+	};
+
 	if ($input && isset($input['action'])) {
 		$action = $input['action'];
 		if ($action === 'enable') {
@@ -66,13 +76,11 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 		}
 
 		if ($action === 'save') {
-			// The secret key is a password field, so it never carries its stored
-			// value into the page. A blank submission therefore means "keep the
-			// stored key" — the check below needs a real key to run.
-			$secret_key = trim($input['cloud_storage_secret_key'] ?? '');
-			if ($secret_key === '') {
-				$secret_key = (string)$settings->get_setting('cloud_storage_secret_key');
-			}
+			// The secret key never carries its stored value into the page; a
+			// stored one is a locked field, and the check below needs the real
+			// key, so "keep" reads it back. Removed, it fails as required: a
+			// bucket with no key is not a state this page stores.
+			$secret_key = $submitted_secret_key();
 			$opts = array(
 				'provider'   => $posted('cloud_storage_provider'),
 				'endpoint'   => $posted('cloud_storage_endpoint'),
@@ -134,10 +142,7 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 			// cannot repoint the store; and it writes the key alone, so a paused
 			// store stays paused and a drain in progress keeps draining with the
 			// new key.
-			$secret_key = trim($input['cloud_storage_secret_key'] ?? '');
-			if ($secret_key === '') {
-				$secret_key = (string)$settings->get_setting('cloud_storage_secret_key');
-			}
+			$secret_key = $submitted_secret_key();
 			$opts = array(
 				'provider'   => (string)$settings->get_setting('cloud_storage_provider'),
 				'endpoint'   => (string)$settings->get_setting('cloud_storage_endpoint'),
@@ -271,7 +276,8 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 			'region'          => $pick('cloud_storage_region'),
 			'bucket'          => $pick('cloud_storage_bucket'),
 			'access_key'      => $pick('cloud_storage_access_key'),
-			'secret_key'      => $pick('cloud_storage_secret_key'),
+			// Only whether one is stored: the field never shows the key.
+			'secret_key'      => (string)$settings->get_setting('cloud_storage_secret_key'),
 		),
 		'enabled'              => (bool)$settings->get_setting('cloud_storage_enabled'),
 		// The page's shape: the store is configured once a bucket, endpoint and

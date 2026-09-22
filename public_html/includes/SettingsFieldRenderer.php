@@ -12,7 +12,11 @@
  * reasoning about the deployment, which is the page's job. What it may not do
  * is invent a field the manifest does not declare.
  *
- * @version 1.5
+ * @version 1.6
+ * @changelog 1.6 - a credential is one passwordinput() with `stored`: FormWriter
+ *   draws it locked with a Reset button; the Clear checkbox, CLEAR_PREFIX and
+ *   `clearable` are gone, and a textarea credential no longer goes through
+ *   textbox().
  * @changelog 1.5 - a show_when may list several values; the visibility rules
  *   are built over the whole group before `only` narrows it, so a group a
  *   page draws one field at a time keeps its show/hide.
@@ -21,12 +25,6 @@
  *   still narrowing and labeling only, never inventing a choice.
  */
 class SettingsFieldRenderer {
-
-	/**
-	 * Prefix for the checkbox that wipes a credential. Reserved by
-	 * Setting::isReservedName(), so it can never become a row itself.
-	 */
-	const CLEAR_PREFIX = 'clear__';
 
 	/**
 	 * Set while this class is emitting. FormWriterV2Base::registerField() reads
@@ -57,12 +55,10 @@ class SettingsFieldRenderer {
 	 *   @type array       $skip      Field names this page handles itself.
 	 *   @type array       $values    Override stored values, name => value.
 	 *   @type array       $field_options  name => extra FormWriter options, for
-	 *                                page context around a declared field. Four
+	 *                                page context around a declared field. Three
 	 *                                keys are read here rather than passed on:
 	 *                                `helptext_append` adds to the declared help
 	 *                                rather than replacing it;
-	 *                                `clearable => false` drops a credential's
-	 *                                Clear box on a page that cannot honour it;
 	 *                                `skip_options` (select only) drops declared
 	 *                                choices the page cannot offer — narrowing
 	 *                                only, it cannot invent a choice; and
@@ -209,19 +205,13 @@ class SettingsFieldRenderer {
 	}
 
 	/**
-	 * Render one credential field, plus the checkbox that wipes it.
+	 * Render one credential field.
 	 *
-	 * A credential never carries its stored value into the page — the field
-	 * says only that something is stored, and a blank submission keeps it. That
-	 * leaves no way to express "remove this", so a field with something stored
-	 * gets a Clear box beside it. The three cases the writer honours:
-	 *
-	 *   typed a value          → that value is written
-	 *   left blank             → the stored value is kept
-	 *   left blank + Clear     → the stored value is wiped
-	 *
-	 * A typed value wins over a ticked Clear box, so pasting a new key after
-	 * changing your mind cannot silently throw it away.
+	 * A credential never carries its stored value into the page. With something
+	 * stored, FormWriter draws the field locked with a Reset button; untouched,
+	 * it is not submitted and the save keeps the value. After Reset, typed text
+	 * replaces it and a blank field removes it
+	 * (FormWriterV2Base::process_secretinput()).
 	 *
 	 * Public because pages that still draw their own credential fields (the
 	 * Email tab's provider loop, the store's payment page) need the same
@@ -231,7 +221,7 @@ class SettingsFieldRenderer {
 	 * @param string $name  Declared setting name.
 	 * @param string $label Field label.
 	 * @param mixed  $stored Current stored value — used only to decide whether
-	 *                       anything is there to clear. Never rendered.
+	 *                       anything is stored. Never rendered.
 	 * @param array  $field  Extra FormWriter options (helptext, validation, …).
 	 * @param array  $declaration The declaration, for `type` and `rows`.
 	 */
@@ -247,18 +237,8 @@ class SettingsFieldRenderer {
 
 	private static function emitSecretField($form, string $name, string $label, $stored,
 	                                        array $field, array $declaration): void {
-		$has_stored = ((string)$stored !== '');
-
-		// A page whose save path cannot honour the Clear box suppresses it,
-		// rather than showing a control that does nothing. Only a page that
-		// writes outside SettingsWriter ever needs this.
-		$clearable = !isset($field['clearable']) || $field['clearable'];
-		unset($field['clearable']);
-
-		if (!isset($field['placeholder'])) {
-			$field['placeholder'] = $has_stored ? '(stored — leave blank to keep)' : '';
-		}
-		$field['value'] = '';
+		$field['stored'] = ((string)$stored !== '');
+		unset($field['value']);
 
 		// A hand-drawn caller gets the declared rules too, so the browser check
 		// on its page matches what SettingsWriter enforces on save.
@@ -269,30 +249,11 @@ class SettingsFieldRenderer {
 		}
 
 		// Some credentials are genuinely multi-line — a PEM private key, a
-		// service-account JSON — and a one-line input is the wrong control. The
-		// value is withheld either way.
+		// service-account JSON — and a one-line input is the wrong control.
 		if (($declaration['type'] ?? 'password') === 'textarea') {
 			$field['rows'] = $declaration['rows'] ?? 4;
-			$form->textbox($name, $label, $field);
-		} else {
-			$field['autocomplete'] = 'new-password';
-			$form->passwordinput($name, $label, $field);
 		}
-
-		// Nothing stored means nothing to clear, and an unconditional checkbox
-		// would invite an admin to tick it and wonder what happened.
-		if (!$has_stored || !$clearable) return;
-
-		// The label goes in verbatim apart from a trailing parenthetical — those
-		// carry an example value ("(Example: sk_live_xxxx)") that reads as
-		// noise on a checkbox. No case folding: lcfirst() turns "Mailgun" into
-		// "mailgun".
-		$short = trim(preg_replace('/\s*\([^)]*\)\s*$/', '', $label));
-
-		$form->checkboxinput(self::CLEAR_PREFIX . $name, 'Clear the stored ' . ($short !== '' ? $short : $label), array(
-			'checked'  => false,
-			'helptext' => 'Removes the stored value on save. Ignored if you enter a new one above.',
-		));
+		$form->passwordinput($name, $label, $field);
 	}
 
 	// ── internals ────────────────────────────────────────────────────────────
@@ -408,8 +369,9 @@ class SettingsFieldRenderer {
 				return;
 
 			case 'password':
-				$field['placeholder'] = ((string)$value !== '') ? '(stored — leave blank to keep)' : '';
-				$form->passwordinput($name, $label, $field);
+				// Every declared password is a secret (tests/integration/
+				// password_field_no_value_test.php C); drawn the same way if not.
+				self::secretField($form, $name, $label, $value, $field, $declaration);
 				return;
 
 			case 'color':
@@ -452,14 +414,6 @@ class SettingsFieldRenderer {
 				foreach ((array)$trigger_values as $trigger_value) {
 					$key = self::visibilityKey($by_name[$trigger] ?? array(), $trigger_value);
 					$dependants[$trigger][$key][] = $declaration['name'];
-					// A credential's Clear box travels with the field it clears.
-					// Left out, a hidden credential leaves an orphaned "Clear the
-					// stored X" checkbox on screen with no field above it. The
-					// generated script skips ids it cannot find, so naming the box
-					// when it was not rendered costs nothing.
-					if (!empty($declaration['secret'])) {
-						$dependants[$trigger][$key][] = self::CLEAR_PREFIX . $declaration['name'];
-					}
 				}
 			}
 		}

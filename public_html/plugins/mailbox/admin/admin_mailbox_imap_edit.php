@@ -10,7 +10,8 @@
  * When no mailboxes (store-mode aliases) exist yet, the editor shows a callout
  * linking to the alias editor so the bound-mailbox requirement isn't a dead-end.
  *
- * @version 1.5
+ * @version 1.6
+ * @changelog 1.6 - a stored password is a locked field with Reset
  * @changelog 1.5 - a pulled-in mailbox picks its own protection level here, with
  *   the scoped ceremony checklist before the raise and the receipt after it
  * @changelog 1.3 - the day-window field renders the stored value whatever the
@@ -134,9 +135,12 @@ $formwriter->numberinput('iia_import_days', 'Days of email to import', array(
 ));
 
 // Password — shown only for password-auth providers (visibility rules above).
+// Whether one is stored is read from the saved row, never from a refused
+// save's unsaved copy, so a typed password is never drawn as saved.
 $formwriter->passwordinput('imap_password', 'App / mailbox password', array(
+	'stored' => $is_edit && (new InboundImapAccount($account->key, TRUE))->hasPassword(),
 	'helptext' => 'For Yahoo / iCloud / Fastmail / generic IMAP, use an app-specific password. '
-		. 'Stored encrypted. Leave blank when editing to keep the existing password.',
+		. 'Stored encrypted.',
 	'autocomplete' => 'new-password',
 ));
 

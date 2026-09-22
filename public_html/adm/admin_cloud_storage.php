@@ -10,7 +10,8 @@
  * in the bucket, everything otherwise. Either one runs the bucket and key check, the
  * privacy gate among its steps, and persists only when it passes.
  *
- * @version 2.1 - while files are in the bucket the key folds behind Replace key, which proves the key
+ * @version 2.2 - a stored secret key is a locked field with Reset
+ * @changelog 2.1 - while files are in the bucket the key folds behind Replace key, which proves the key
  *                and stores it alone; it opens itself when the bucket stopped answering
  * @version 2.0.2 - records with no bytes on this server are listed apart from stuck files, without Retry;
  *                  the stuck table shows each file's last error
@@ -229,15 +230,12 @@ $field_values = array(
 // only one that draws them: a plain settings save would store a bucket and
 // key nobody proved. Drawn one at a time so the form reads
 // in the order a person fills it in, and so the locked form can draw a subset.
-// The provider's show_when rules ride on the picker whichever fields follow. No Clear box
-// on the secret key: this page writes its own settings after a live bucket
-// test, and a bucket with no key is not a state worth offering.
+// The provider's show_when rules ride on the picker whichever fields follow.
 $draw_fields = function ($formwriter, array $names) use ($field_values) {
 	foreach ($names as $name) {
 		SettingsFieldRenderer::renderGroup($formwriter, 'cloud_storage', array(
 			'source'        => 'core',
 			'only'          => array($name),
-			'field_options' => array('cloud_storage_secret_key' => array('clearable' => false)),
 			'values'        => $field_values,
 		));
 	}

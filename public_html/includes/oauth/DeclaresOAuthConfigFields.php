@@ -16,7 +16,7 @@
  * A provider needing more than the two (Microsoft's tenant) overrides
  * configFields() and calls self::defaultConfigFields() to keep them.
  *
- * @version 1.0
+ * @version 1.1 - the client secret carries no "leave blank" help: a stored one is a locked field with Reset
  */
 
 trait DeclaresOAuthConfigFields {
@@ -61,7 +61,6 @@ trait DeclaresOAuthConfigFields {
             ],
             'oauth_' . $key . '_client_secret' => [
                 'label'  => $label . ' client secret',
-                'help'   => 'Leave blank to keep the stored secret unchanged.',
                 'secret' => true,
             ],
         ];

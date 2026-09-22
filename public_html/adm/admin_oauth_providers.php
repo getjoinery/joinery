@@ -12,7 +12,8 @@
  * paste into each provider's console — derived from the same helper
  * exchangeCode() uses, so it matches byte-for-byte.
  *
- * @version 2.1
+ * @version 2.2
+ * @changelog 2.2 - A stored client secret is a locked field with Reset; after Reset a blank save removes it
  * @changelog 2.1 - Fields come from SettingsFieldRenderer. Hand-drawing them stopped the whole page on any deployment with debug on, because these settings are declared in settings.json
  * @changelog 2.0 - Registry-driven fields and per-provider registration guides; the previous hardcoded field list omitted DigitalOcean and DNSimple, leaving them unconfigurable anywhere
  */
@@ -117,13 +118,6 @@ field carries a link explaining where to register the app.</p>
             // hand-drawn field, which the manifest rule permits.
             $declaration = SettingsDeclarations::get($setting);
             $is_secret = !empty($declaration['secret']) || !empty($spec['secret']);
-            if ($is_secret) {
-                // Credentials here are written by OAuth2ProviderConfig, not
-                // SettingsWriter, so the renderer's Clear box would do nothing.
-                // (Only a secret field has one; offering the option elsewhere is
-                // a field option nothing reads, which FormWriter refuses.)
-                $options['clearable'] = false;
-            }
             if ($declaration !== null) {
                 SettingsFieldRenderer::renderGroup($formwriter, $declaration['_group'], [
                     'only'          => [$setting],

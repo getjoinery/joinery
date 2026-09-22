@@ -968,7 +968,7 @@ never overwritten.
 | `options` / `options_from` | For `select` | — | Literal `value: label` map, or `Class::method` returning one. `options_from` needs `options_include` unless the class is core. |
 | `validation` | No | — | A FormWriter rule array, verbatim. Enforced on every write path. |
 | `show_when` | No | — | `{ "other_setting": "value" }` — reveals this field when that setting has that value; a list of values reveals it for any one of them. |
-| `secret` | No | `false` | A credential: never emits its stored value, a blank submission keeps it, and a Clear checkbox beside it wipes it. |
+| `secret` | No | `false` | A credential: never emits its stored value. Stored, it is a locked field with a Reset button; left locked it is kept, and after Reset a blank save removes it. See [Settings § Credentials](settings.md#credentials). |
 | `vault_gated` | No | `false` | Changing it requires an open vault unlock window. |
 | `managed` | No | `false` | Machine-written. Never rendered. Mutually exclusive with `label`. |
 | `legacy_core` | No | `false` | Opts this one setting out of the prefix rule so it keeps an unprefixed core-era name. See below. |

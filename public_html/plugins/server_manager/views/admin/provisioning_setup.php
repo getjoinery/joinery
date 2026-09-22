@@ -7,6 +7,7 @@
  * item shows its live state with a one-click action where the platform can
  * do the work itself.
  *
+ * @version 1.6 - stored credentials are locked fields with Reset (passwordinput 'stored'); the promotion code's remove box is gone
  * @version 1.5 - the hosted card's master-key field is named hosted_smtp2go_master_key: smtp2go_api_key is the core email provider's declared setting, which FormWriter refuses to hand-draw
  * @version 1.4 - the registrar promotion code on the domain card; the domain question card serves
  *                shared-host products only and a customer-cloud site is configured on the buyer's
@@ -292,9 +293,8 @@ echo '<input type="hidden" name="action" value="save_domains">';
 $fw_domains->textinput('ncp_api_user', 'Namecheap username', ['value' => $domains['api_user'],
 	'helptext' => 'The account the API calls are made as.']);
 $fw_domains->passwordinput('ncp_api_key', 'Namecheap API key', [
-	'helptext' => $domains['key_present']
-		? 'A key is stored. Leave blank to keep it; enter a new one to replace it.'
-		: 'From Profile, Tools, Namecheap API Access.']);
+	'stored' => $domains['key_present'],
+	'helptext' => 'From Profile, Tools, Namecheap API Access.']);
 $fw_domains->textinput('ncp_client_ip', 'Allowlisted IP', ['value' => $domains['client_ip'],
 	'helptext' => 'This server\'s public IPv4 address, added to the Whitelisted IPs list in the '
 		. 'Namecheap API panel. IPv6 is not accepted there.']);
@@ -304,13 +304,9 @@ $fw_domains->checkboxinput('ncp_sandbox', 'Use the Namecheap sandbox',
 	['checked' => $domains['sandbox'],
 	 'helptext' => 'Point registrar calls at the sandbox for an end-to-end rehearsal.']);
 $fw_domains->passwordinput('ncp_promotion_code', 'Namecheap promotion code', [
-	'helptext' => $domains['promotion_present']
-		? 'A code is stored. Leave blank to keep it; enter a new one to replace it.'
-		: 'A registrar coupon, if the account holds one. Leave blank for none.']);
-if ($domains['promotion_present']) {
-	$fw_domains->checkboxinput('ncp_promotion_code_clear', 'Remove the promotion code',
-		['helptext' => 'Quotes and registrations go back to the ordinary price.']);
-}
+	'stored' => $domains['promotion_present'],
+	'helptext' => 'A registrar coupon, if the account holds one. Without one, quotes and '
+		. 'registrations are at the ordinary price.']);
 $fw_domains->submitbutton('btn_save_domains', 'Save domain registrar settings');
 echo $fw_domains->end_form();
 ?>
@@ -358,23 +354,20 @@ $fw_hosted = $page->getFormWriter('form_hosted');
 echo $fw_hosted->begin_form();
 echo '<input type="hidden" name="action" value="save_hosted">';
 $fw_hosted->passwordinput('operator_cloud_token', 'Operator cloud token', [
-	'helptext' => ($hosted['token_present']
-		? 'A token is stored. Leave blank to keep it; enter a new one to replace it.'
-		: 'A Linode personal access token scoped linodes:read_write.')
+	'stored' => $hosted['token_present'],
+	'helptext' => 'A Linode personal access token scoped linodes:read_write.'
 		. ' It stays on this management node — no machine this plane creates ever receives it.']);
 $fw_hosted->passwordinput('hosted_smtp2go_master_key', 'SMTP2GO master API key', [
-	'helptext' => ($hosted['smtp2go_present']
-		? 'A key is stored. Leave blank to keep it; enter a new one to replace it.'
-		: 'The master key every customer subaccount is administered with.')
+	'stored' => $hosted['smtp2go_present'],
+	'helptext' => 'The master key every customer subaccount is administered with.'
 		. ' Only a per-customer SMTP user ever reaches a customer\'s box.']);
 $fw_hosted->checkboxinput('smtp2go_sandbox_users', 'Sandbox the SMTP users this plane mints',
 	['checked' => $hosted['smtp2go_sandbox_users'],
 	 'helptext' => 'Every customer SMTP user is created in SMTP2GO\'s sandbox status: accepted and counted, never '
 		. 'delivered. For a rehearsal plane. Leave off where real customers are hosted.']);
 $fw_hosted->passwordinput('smtp2go_webhook_secret', 'SMTP2GO webhook secret', [
-	'helptext' => ($hosted['webhook_present']
-		? 'A secret is stored. Leave blank to keep it; enter a new one to replace it.'
-		: 'Set the same value as the basic-auth password on the SMTP2GO webhook.')
+	'stored' => $hosted['webhook_present'],
+	'helptext' => 'Set the same value as the basic-auth password on the SMTP2GO webhook.'
 		. ' SMTP2GO does not sign its webhooks, so a spoofed one can move a banner and never a cap.']);
 $fw_hosted->textinput('send_allowance', 'Sends per month, per customer',
 	['value' => $hosted['send_allowance'],

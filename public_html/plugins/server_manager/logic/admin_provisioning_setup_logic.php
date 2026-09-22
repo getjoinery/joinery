@@ -6,6 +6,8 @@
  * POST actions delegate to ProvisioningSetup and redirect back with a
  * session message; GET renders the live status of every checklist item.
  *
+ * @version 1.5 - credentials go through FormWriterV2Base::process_secretinput(); the promotion code's
+ *   remove box is gone (Reset and save blank removes it)
  * @version 1.4 - the master-key field arrives as hosted_smtp2go_master_key (the view's field name; smtp2go_api_key is core's)
  * @version 1.3 - the hosted card saves the SMTP2GO sandbox-users switch
  * @version 1.2 - the registrar promotion code is saved (and cleared) with the registrar card
@@ -23,6 +25,19 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 	$page_regex = '/\/admin\/server_manager\/provisioning_setup/';
 
 	$action = $_SERVER['REQUEST_METHOD'] === 'POST' ? ($input['action'] ?? '') : '';
+
+	// A stored credential is a locked field: not posted, it is kept; after
+	// Reset, blank removes it and text replaces it.
+	$save_secret = function (string $field, string $setting) use ($input) {
+		list($what, $value) = FormWriterV2Base::process_secretinput($input, $field,
+			trim(ProvisioningSetup::readSecret($setting)) !== '');
+		if ($what === FormWriterV2Base::SECRET_CLEAR) {
+			ProvisioningSetup::writeSecret($setting, '');
+		} elseif ($what === FormWriterV2Base::SECRET_SET) {
+			ProvisioningSetup::writeSecret($setting, $value);
+		}
+	};
+
 	if ($action !== '') {
 		$message = null;
 		$error = null;
@@ -63,21 +78,8 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 					!empty($input['ncp_sandbox']) ? '1' : '');
 				ProvisioningSetup::writeSetting('server_manager_domain_tlds',
 					trim($input['domain_tlds'] ?? '') ?: 'com net org');
-				// A blank key field means "leave the stored key alone" — the
-				// field never shows the key, so blank cannot mean "erase it"
-				// without erasing it every time the rest of the card is saved.
-				$key = trim($input['ncp_api_key'] ?? '');
-				if ($key !== '') {
-					ProvisioningSetup::writeSecret('server_manager_namecheap_api_key', $key);
-				}
-				// The coupon follows the same blank-keeps rule, and unlike a key
-				// it can lapse, so there is an explicit way to remove it.
-				$code = trim($input['ncp_promotion_code'] ?? '');
-				if (!empty($input['ncp_promotion_code_clear'])) {
-					ProvisioningSetup::writeSecret('server_manager_namecheap_promotion_code', '');
-				} elseif ($code !== '') {
-					ProvisioningSetup::writeSecret('server_manager_namecheap_promotion_code', $code);
-				}
+				$save_secret('ncp_api_key', 'server_manager_namecheap_api_key');
+				$save_secret('ncp_promotion_code', 'server_manager_namecheap_promotion_code');
 				$message = 'Domain registrar settings saved.';
 			} elseif ($action === 'save_hosted') {
 				ProvisioningSetup::writeSetting('server_manager_smtp2go_sandbox_users',
@@ -98,19 +100,9 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 					trim($input['smtp2go_referral_url'] ?? ''));
 				ProvisioningSetup::writeSetting('server_manager_storage_referral_url',
 					trim($input['storage_referral_url'] ?? ''));
-				// Blank means "leave the stored credential alone" — these fields
-				// never show a value, so blank cannot mean "erase it" without
-				// erasing it every time the rest of the card is saved.
-				foreach (array(
-					'operator_cloud_token'   => 'server_manager_operator_cloud_token',
-					'hosted_smtp2go_master_key' => 'server_manager_smtp2go_api_key',
-					'smtp2go_webhook_secret' => 'server_manager_smtp2go_webhook_secret',
-				) as $field => $setting) {
-					$value = trim($input[$field] ?? '');
-					if ($value !== '') {
-						ProvisioningSetup::writeSecret($setting, $value);
-					}
-				}
+				$save_secret('operator_cloud_token', 'server_manager_operator_cloud_token');
+				$save_secret('hosted_smtp2go_master_key', 'server_manager_smtp2go_api_key');
+				$save_secret('smtp2go_webhook_secret', 'server_manager_smtp2go_webhook_secret');
 				$message = 'Hosted tier settings saved.';
 			} else {
 				$error = 'Unknown action.';

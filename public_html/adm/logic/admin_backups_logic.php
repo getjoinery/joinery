@@ -6,6 +6,9 @@
  * opens them, how many are kept, and what has actually happened. No fleet, no
  * agent — server_manager is a layer on top of this, not a prerequisite for it.
  *
+ * @version 1.12 - save_target reads the secret through FormWriterV2Base::process_secretinput() (a stored
+ *                one is a locked field; Reset and blank removes it) and keeps the key ID, region and
+ *                endpoint the form now shows
  * @version 1.11 - save_target proves an enabled target before saving it (TargetTester 4.0) and refuses
  *                 one that fails, saying why
  * @version 1.10 - objects_status (BackupObjectsStatus::compute()): what each backup holds of the offloaded
@@ -242,18 +245,42 @@ function _admin_backups_handle($action, array $input, $session) {
 				$target->set('bkt_bucket', trim((string)($input['bkt_bucket'] ?? '')));
 				$target->set('bkt_path_prefix', trim((string)($input['bkt_path_prefix'] ?? '')) ?: 'joinery-backups');
 
-				// A blank secret on an edit means "leave it alone" — the stored
-				// value is never rendered back into the form, so an operator
-				// changing a bucket name must not have to re-enter the key.
-				$access = trim((string)($input['access_key'] ?? ''));
-				$secret = trim((string)($input['secret_key'] ?? ''));
-				if ($access !== '' || $secret !== '' || !$id) {
+				// The secret is never rendered back into the form: stored, it is a
+				// locked field, not posted, and kept; after Reset, blank removes it
+				// and text replaces it. The key ID, region and endpoint are not
+				// secrets and come back with their values. The credentials are
+				// only recomputed (which asks Backblaze for the endpoint) when one
+				// of them changed.
+				try {
 					$existing = $id ? ($target->get_credentials() ?: array()) : array();
+				} catch (BackupTargetException $e) {
+					$existing = array();
+				}
+				$stored_secret = (string)($existing['secret_key'] ?? '');
+				list($secret_what, $typed_secret) = FormWriterV2Base::process_secretinput(
+					$input, 'secret_key', $stored_secret !== '');
+				$secret = ($secret_what === FormWriterV2Base::SECRET_SET) ? $typed_secret
+					: (($secret_what === FormWriterV2Base::SECRET_CLEAR) ? '' : $stored_secret);
+				$access   = trim((string)($input['access_key'] ?? ($existing['access_key'] ?? '')));
+				$region   = trim((string)($input['region'] ?? ($existing['region'] ?? '')));
+				$endpoint = trim((string)($input['endpoint'] ?? ($existing['endpoint'] ?? '')));
+				// Backblaze's region and endpoint belong to the key: a new key is
+				// asked for its own.
+				if ((string)$target->get('bkt_provider') === 'b2'
+						&& ($secret_what !== FormWriterV2Base::SECRET_KEEP || $access !== (string)($existing['access_key'] ?? ''))) {
+					$region = '';
+					$endpoint = '';
+				}
+				$changed = !$id || $secret_what !== FormWriterV2Base::SECRET_KEEP
+					|| $access !== (string)($existing['access_key'] ?? '')
+					|| $region !== (string)($existing['region'] ?? '')
+					|| $endpoint !== (string)($existing['endpoint'] ?? '');
+				if ($changed) {
 					$completed = BackupTarget::complete_credentials((string)$target->get('bkt_provider'), array(
-						'access_key' => $access !== '' ? $access : (string)($existing['access_key'] ?? ''),
-						'secret_key' => $secret !== '' ? $secret : (string)($existing['secret_key'] ?? ''),
-						'region'     => (string)($input['region'] ?? ($existing['region'] ?? '')),
-						'endpoint'   => (string)($input['endpoint'] ?? ($existing['endpoint'] ?? '')),
+						'access_key' => $access,
+						'secret_key' => $secret,
+						'region'     => $region,
+						'endpoint'   => $endpoint,
 					));
 					if ($completed['note'] !== '') {
 						$b2_note = ' ' . $completed['note'];
