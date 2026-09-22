@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: relay_map_pending
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

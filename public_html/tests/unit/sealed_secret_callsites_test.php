@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: sealed_secret_callsites
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

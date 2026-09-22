@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: package_signature
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

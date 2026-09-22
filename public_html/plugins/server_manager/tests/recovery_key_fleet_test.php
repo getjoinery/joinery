@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: recovery_key_fleet
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

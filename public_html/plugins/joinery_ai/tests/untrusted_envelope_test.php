@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: untrusted_envelope
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

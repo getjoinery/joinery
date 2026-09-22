@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: setup_steps_copy
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

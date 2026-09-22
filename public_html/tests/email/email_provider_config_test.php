@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: email_provider_config
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

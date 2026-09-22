@@ -47,8 +47,19 @@ running anything:
  * needs: []             # e.g. [stripe-test-keys, macmini, mailgun, b2, rust, curl, chrome]
  * covers: []            # optional repo-relative globs the suite reaches WITHOUT loading
  * timeout: 180          # optional wall-clock cap in seconds (default 180, max 1800)
+ * parallel: true        # optional, safe tier only: runs beside other suites
  */
 ```
+
+`parallel: true` puts a safe-tier suite in a pool that runs three at a time
+ahead of the serial batch. Declare it only for a suite that shares nothing
+written: no database writes (not even rolled-back ones), no site settings, no
+mail, no fixed file paths (temp names carry `getmypid()` or random bytes), no
+servers or ports, and no assertion on a machine-wide quantity such as free disk
+space. Two parts of that are enforced. The harness makes a parallel suite's
+database session read-only, so a write fails on the spot, and skips the shared
+mail and fixture cleanup passes. The runner fails any suite outside the safe
+tier that declares it. `--serial` and `--only` run parallel suites serially.
 
 Set `timeout:` only when a suite genuinely needs longer than the 180-second
 default — a multi-minute build gate or a live third-party flow. The runner kills
@@ -98,6 +109,11 @@ serial *within* the lane (they share the copy), lane results carry a
 `[test-db]` tag in the output, and a lane failure — including a crash of the
 lane worker — fails the gate. `--serial` forces the fully serial order, for
 debugging or as a fallback.
+
+Every PHP suite shares one compile cache (`{site root}/cache/tests/opcache`),
+checked against each file's modification time on every include. Temp
+directories and the site's `cache/` are excluded, because suites write PHP
+there and rewrite it within the same second. The `deploy` tier does not use it.
 
 ### `--changed`: run what the change can reach
 
@@ -190,8 +206,8 @@ The working loop is a scoped run: `php tests/run.php --changed` executes only
 the safe suites the edited files can reach — typically seconds. Pre-checkin,
 `php tests/run.php db --changed` does the same over the full gate's batch.
 The complete gate, `php tests/run.php db`, is the pre-publish proof: about
-350 tests in six to seven minutes on the dev box (the `safe` batch alone is
-just over a minute; the test-db lane hides inside the db batch's wall clock).
+470 tests in about twelve minutes on the dev box (the test-db lane hides
+inside the db batch's wall clock).
 
 Most suites are cheap — over 200 finish in under a second each. The expensive
 ones are expensive for a legible reason — they drive a real subsystem end to

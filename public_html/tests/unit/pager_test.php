@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: pager
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

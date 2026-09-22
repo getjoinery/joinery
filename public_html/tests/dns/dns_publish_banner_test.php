@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: dns_publish_banner
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: direct_mail_handler
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

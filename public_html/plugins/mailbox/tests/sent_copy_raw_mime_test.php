@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: sent_copy_raw_mime
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

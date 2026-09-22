@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: compose_stores_its_row
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

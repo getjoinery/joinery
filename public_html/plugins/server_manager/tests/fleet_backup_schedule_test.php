@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: fleet_backup_schedule
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

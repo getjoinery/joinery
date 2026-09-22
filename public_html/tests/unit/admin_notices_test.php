@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: admin_notices
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

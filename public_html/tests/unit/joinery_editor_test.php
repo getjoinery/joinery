@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: joinery_editor
  * tier: safe
+ * parallel: true
  * env: dev-only
  * needs: [chrome]
  * timeout: 90

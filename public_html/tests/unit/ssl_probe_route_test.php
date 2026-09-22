@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: ssl_probe_route
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

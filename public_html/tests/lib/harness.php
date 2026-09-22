@@ -93,7 +93,7 @@ function harness_parse_metadata($filepath) {
 	// the dashboard only marks a test CLI-only when its author explicitly set a
 	// long cap, so default-cap tests stay web-runnable.
 	$meta = array('name' => '', 'tier' => 'safe', 'env' => 'dev-only', 'needs' => array(),
-		'covers' => array(), 'timeout' => 180, 'timeout_explicit' => false);
+		'covers' => array(), 'timeout' => 180, 'timeout_explicit' => false, 'parallel' => false);
 	$after = substr($head, $marker_offset);
 	$lines = preg_split('/\r\n|\r|\n/', $after);
 	foreach ($lines as $i => $raw) {
@@ -103,7 +103,7 @@ function harness_parse_metadata($filepath) {
 		if ($line === '' ) continue;
 		// End of the comment block.
 		if (strpos($raw, '*/') !== false && strpos($raw, ':') === false) break;
-		if (!preg_match('/^(name|tier|env|needs|covers|timeout)\s*:\s*(.*)$/i', $line, $m)) {
+		if (!preg_match('/^(name|tier|env|needs|covers|timeout|parallel)\s*:\s*(.*)$/i', $line, $m)) {
 			// A non key:value line ends the header region (blank framing aside).
 			if (strpos($line, '@') === 0) continue;
 			break;
@@ -129,6 +129,9 @@ function harness_parse_metadata($filepath) {
 			// Per-test wall-clock cap (seconds). Non-numeric → default; clamp 1–1800.
 			$meta['timeout'] = is_numeric($val) ? max(1, min(1800, (int)$val)) : 180;
 			$meta['timeout_explicit'] = true;
+		} elseif ($key === 'parallel') {
+			// Only the literal `true` opts in; anything else is serial.
+			$meta['parallel'] = (strtolower($val) === 'true');
 		} else {
 			$meta[$key] = $val;
 		}
@@ -240,29 +243,41 @@ function harness_boot(array $overrides = array()) {
 		// in memory unless the suite says otherwise.
 		CloudStoreInventory::$test_hooks['record'] = array();
 
-		// Mail this run sends is cleaned up at BOTH ends, because one end is not
-		// enough. Redirecting it keeps it away from people; this is what keeps it
-		// from accumulating for good, since a message delivered to an address no
-		// alias claims is in no mailbox and so is never trashed by anyone.
-		//
-		// Both passes gate themselves — see harness_mail_cleanup_allowed(). They
-		// are DELETE passes, and this block is reached by more than the dev box:
-		// a deploy-tier test declares `env: any` and runs on a customer node.
-		//
-		// Now: whatever earlier runs left behind, which has certainly finished
-		// being delivered. This is the pass that actually empties the box.
-		harness_cleanup_stale_delivered_mail();
+		// A `parallel: true` suite runs beside other suites, so it must share
+		// nothing that is written. It sends no mail and makes no fixtures, so
+		// the cleanup passes below — which delete from the shared test inbox
+		// and the shared fixture tables — are not its business, and running
+		// them from three suites at once would be. And the promise is checked
+		// rather than trusted: its database session is read-only, so a
+		// parallel suite that starts writing fails loudly the first time it
+		// does, instead of flaking one run in fifty against a neighbour.
+		if (!empty($h['meta']['parallel'])) {
+			DbConnector::get_instance()->get_db_link()->exec('SET SESSION default_transaction_read_only = on');
+		} else {
+			// Mail this run sends is cleaned up at BOTH ends, because one end is not
+			// enough. Redirecting it keeps it away from people; this is what keeps it
+			// from accumulating for good, since a message delivered to an address no
+			// alias claims is in no mailbox and so is never trashed by anyone.
+			//
+			// Both passes gate themselves — see harness_mail_cleanup_allowed(). They
+			// are DELETE passes, and this block is reached by more than the dev box:
+			// a deploy-tier test declares `env: any` and runs on a customer node.
+			//
+			// Now: whatever earlier runs left behind, which has certainly finished
+			// being delivered. This is the pass that actually empties the box.
+			harness_cleanup_stale_delivered_mail();
 
-		// And fixture ROWS a killed run stranded — a plain SIGKILL skips both
-		// teardown paths, so rows outlive their run just as mail does. Same
-		// two-pass philosophy, its own guards. See harness_cleanup_stale_fixtures().
-		harness_cleanup_stale_fixtures();
+			// And fixture ROWS a killed run stranded — a plain SIGKILL skips both
+			// teardown paths, so rows outlive their run just as mail does. Same
+			// two-pass philosophy, its own guards. See harness_cleanup_stale_fixtures().
+			harness_cleanup_stale_fixtures();
 
-		// And at the end: registered FIRST so LIFO teardown runs it LAST, giving
-		// the relay every spare moment to hand over what this run sent. It still
-		// misses anything delivered after that — measured, not assumed — which is
-		// exactly what the boot pass above collects on the next run.
-		harness_defer('harness_cleanup_delivered_mail');
+			// And at the end: registered FIRST so LIFO teardown runs it LAST, giving
+			// the relay every spare moment to hand over what this run sent. It still
+			// misses anything delivered after that — measured, not assumed — which is
+			// exactly what the boot pass above collects on the next run.
+			harness_defer('harness_cleanup_delivered_mail');
+		}
 	}
 
 	register_shutdown_function('harness_shutdown_report');

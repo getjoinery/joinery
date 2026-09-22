@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: dns_relocation
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

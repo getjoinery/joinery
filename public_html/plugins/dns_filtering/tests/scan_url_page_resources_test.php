@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: scan_url_page_resources
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

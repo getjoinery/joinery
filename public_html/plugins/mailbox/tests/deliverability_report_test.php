@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: deliverability_report
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

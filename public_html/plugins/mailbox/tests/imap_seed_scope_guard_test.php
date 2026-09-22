@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: imap_seed_scope_guard
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: composer_validator
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: routing_render_exceptions
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

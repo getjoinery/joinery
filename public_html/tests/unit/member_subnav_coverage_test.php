@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: member_subnav_coverage
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

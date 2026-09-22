@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: agent_bundle_drift
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

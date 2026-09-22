@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: recipe_schedule
  * tier: safe
+ * parallel: true
  * env: dev-only
  * needs: []
  */

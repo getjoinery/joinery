@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: backup_fetch
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

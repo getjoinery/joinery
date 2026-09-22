@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: components_manifest
  * tier: safe            # read-only manifest validation, no DB writes
+ * parallel: true
  * env: any
  * needs: []
  */

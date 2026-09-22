@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: product_validation_rules
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

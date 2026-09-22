@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: arbitrary_command_retirement
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

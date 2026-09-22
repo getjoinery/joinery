@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: sealed_read_paths
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

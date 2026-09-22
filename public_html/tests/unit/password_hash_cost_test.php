@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: password_hash_cost
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

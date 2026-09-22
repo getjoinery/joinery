@@ -28,6 +28,15 @@
 // environment is discarded and replaced: a setuid binary that honours the
 // caller's environment is a privilege bug waiting for a library that reads one.
 //
+// Version 1.0.2 - the whole fence is built on ONE OS thread. Unshare, NO_NEW_PRIVS
+// and the seccomp filter are all per-thread, and the Go scheduler moves a
+// goroutine between threads between any two calls: the filter then met a
+// thread without NO_NEW_PRIVS and was refused ("seccomp: permission denied",
+// about 1 run in 40), or the exec ran on a thread with no fence at all and the
+// command parsed unfiltered, unprivileged-only, on the host network (1 in 500,
+// measured). The thread is locked in init(), and the exec refuses unless the
+// thread doing it reports the filter and NO_NEW_PRIVS.
+//
 // Version 1.0.1 - the address-space cap is applied by util-linux prlimit as
 // the last hop before the command, never on this process: a Go runtime
 // reserves memory lazily, and capping its own address space made the second
@@ -41,6 +50,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"os/user"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -73,6 +83,12 @@ type options struct {
 	rlimitFsize uint64
 	rlimitCPU   int
 	argv        []string
+}
+
+// Every step of the fence is per-thread, so this process runs on one: locked
+// here, before main, the main goroutine never leaves the main thread.
+func init() {
+	runtime.LockOSThread()
 }
 
 func main() {
@@ -340,12 +356,24 @@ func stage2() {
 		fail(exitUsage, "PR_SET_NO_NEW_PRIVS: %v", e)
 	}
 	installSeccomp()
+	assertFenced()
 
 	// 5. Files the command creates are its own.
 	syscall.Umask(0077)
 
 	if err := syscall.Exec(path, argv, childEnv); err != nil {
 		fail(exitUsage, "exec %s: %v", path, err)
+	}
+}
+
+// The thread about to exec is the one whose fence the command inherits.
+// Refuse unless it carries both the filter and NO_NEW_PRIVS: a fence that
+// landed on another thread must fail closed, never run the command bare.
+func assertFenced() {
+	nnp, _, e1 := syscall.RawSyscall(syscall.SYS_PRCTL, prGetNoNewPrivs, 0, 0)
+	mode, _, e2 := syscall.RawSyscall(syscall.SYS_PRCTL, prGetSeccomp, 0, 0)
+	if e1 != 0 || e2 != 0 || nnp != 1 || mode != seccompModeFilter {
+		fail(exitUsage, "fence not on the exec thread (no_new_privs=%d seccomp=%d); refusing to run", nnp, mode)
 	}
 }
 
@@ -362,6 +390,8 @@ const (
 	prSetDumpable     = 4
 	prSetNoNewPrivs   = 38
 	prSetSeccomp      = 22
+	prGetSeccomp      = 21
+	prGetNoNewPrivs   = 39
 	seccompModeFilter = 2
 
 	bpfLdWAbs   = 0x20 // BPF_LD  | BPF_W   | BPF_ABS

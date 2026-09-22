@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: node_health_probe
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

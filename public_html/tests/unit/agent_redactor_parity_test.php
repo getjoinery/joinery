@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: agent_redactor_parity
  * tier: safe
+ * parallel: true
  * env: dev-only
  * needs: []
  */

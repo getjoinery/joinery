@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: formwriter_error_summary
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

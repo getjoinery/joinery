@@ -27,6 +27,7 @@
  *
  * Run: php tests/backups/backup_restore_objects_test.php
  *
+ * @version 1.2 - the run dumps a scratch database, not the site's
  * @version 1.1 - one file store: the cloud rows are private blobs, the store seam takes no argument
  * @version 1.0
  */
@@ -73,6 +74,16 @@ harness_defer(function() use ($work) {
 // Three offloaded blobs with real rows on this database: one row records a
 // hash, one only a size, one both. Their names are unique to this run.
 $pdo = DbConnector::get_instance()->get_db_link();
+
+// The run dumps a database of its own, not this site's: the dump is the
+// run's first artifact and nothing here reads it, and the site's is most of
+// a gigabyte on dev — a real full dump was most of this suite's wall clock.
+$scratch_db = 'jy_restore_objects_' . getmypid();
+$pdo->exec('CREATE DATABASE "' . $scratch_db . '" TEMPLATE template0');
+harness_defer(function() use ($pdo, $scratch_db) { $pdo->exec('DROP DATABASE IF EXISTS "' . $scratch_db . '" WITH (FORCE)'); });
+$scratch = new PDO('pgsql:host=localhost dbname=' . $scratch_db, 'postgres', (string)Globalvars::get_instance()->get_setting('dbpassword', true, true));
+$scratch->exec('CREATE TABLE t (id int); INSERT INTO t VALUES (1)');
+$scratch = null;
 $tag = 'jyro' . getmypid() . '_';
 $plain = array($tag . 'big.jpg' => random_bytes(60000), $tag . 'mid.bin' => random_bytes(9000), $tag . 'tiny.pdf' => 'tiny ' . random_bytes(300));
 $hashed = array($tag . 'big.jpg' => true, $tag . 'mid.bin' => false, $tag . 'tiny.pdf' => true);
@@ -125,7 +136,7 @@ $plan = BackupRunner::plan(array('profile' => 'manager', 'manager' => array(
 	'target_name' => 'local fixture',
 )));
 $plan['base_dir'] = $out; $plan['output_dir'] = $out . '/manager';
-$plan['project'] = 'site'; $plan['project_dir'] = $tree;
+$plan['project'] = 'site'; $plan['project_dir'] = $tree; $plan['database'] = $scratch_db;
 $plan['objects'] = true; $plan['objects_source'] = 'listing';
 $base = 'joinery-backups/' . $slug . '/manager/';
 

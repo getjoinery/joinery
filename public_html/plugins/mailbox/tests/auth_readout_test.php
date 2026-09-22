@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: auth_readout
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

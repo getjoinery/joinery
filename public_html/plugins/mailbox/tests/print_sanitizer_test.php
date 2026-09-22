@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: print_sanitizer
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

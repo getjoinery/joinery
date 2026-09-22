@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: inbound_forwarding_relay
  * tier: safe
+ * parallel: true
  * env: dev-only
  * needs: []
  */

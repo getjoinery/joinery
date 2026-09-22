@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: imap_draft_ingest
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

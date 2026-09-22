@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: mime_parse
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

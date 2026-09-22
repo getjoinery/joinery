@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: manifest_licensing
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

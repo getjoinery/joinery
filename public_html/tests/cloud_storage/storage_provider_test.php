@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: storage_provider
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

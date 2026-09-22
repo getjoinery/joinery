@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: api_action_feature_gate
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

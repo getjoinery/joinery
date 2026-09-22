@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: recovery_key_encoding
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

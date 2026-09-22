@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: provider_dkim
  * tier: safe
+ * parallel: true
  * env: dev-only
  * needs: []
  */

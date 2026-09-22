@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: backup_objects_notice
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

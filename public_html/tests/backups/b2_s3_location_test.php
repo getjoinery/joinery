@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: b2_s3_location
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

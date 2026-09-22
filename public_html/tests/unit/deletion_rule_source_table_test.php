@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: deletion_rule_source_table
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

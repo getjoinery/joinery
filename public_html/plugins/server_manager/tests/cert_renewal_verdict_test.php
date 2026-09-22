@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: cert_renewal_verdict
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

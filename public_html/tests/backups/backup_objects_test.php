@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: backup_objects
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */
@@ -79,10 +80,16 @@ foreach (array(0, 15, 16, 17, 4096, 1048576, 1048583) as $n) {
 	}
 }
 
+// CBC has no integrity check: a wrong key fails the final block's padding
+// about 255 times in 256, and on the rest decrypts to garbage with valid
+// padding. So the property is not "always throws" — it is that a wrong key
+// never hands back the plaintext, and a refusal leaves no file behind. The
+// size and hash checks in the restore and the verifier catch the 1 in 256.
 $threw = '';
 try { BackupObjects::decrypt_file($work . '/obj.enc', $work . '/x', 'not-the-key'); }
 catch (BackupObjectsException $e) { $threw = $e->getMessage(); }
-check($threw !== '' && !is_file($work . '/x'), 'a wrong key is refused and leaves no output', $threw);
+check($threw !== '' ? !is_file($work . '/x') : md5_file($work . '/x') !== md5_file($work . '/plain'),
+	'a wrong key never yields the plaintext, and a refusal leaves no output', $threw);
 
 file_put_contents($work . '/trunc.enc', substr(file_get_contents($work . '/obj.enc'), 0, -5));
 $threw = '';

@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: joinery_ai_owner_scope
  * tier: safe
+ * parallel: true
  * env: dev-only
  * needs: []
  */

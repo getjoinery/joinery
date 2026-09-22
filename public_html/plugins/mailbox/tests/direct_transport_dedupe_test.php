@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: direct_transport_dedupe
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

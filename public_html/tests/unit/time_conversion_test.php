@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: time_conversion
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

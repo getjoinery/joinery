@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: calendar_core
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */
