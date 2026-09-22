@@ -20,6 +20,9 @@
  * checkRelayReachable is a pinned ping; the two provider
  * checks are no-ops. The check list always matches the chosen path.
  *
+ * @version 1.19 - checkSearchIndexStorage(): the search index is one file per owner,
+ *                 and a count that says otherwise is named before a disk fills
+ *                 (specs/mailbox_search_index_blob_leak.md)
  * @version 1.17 - checkSearchIndexEngine() probes the index's real table shape
  * @version 1.18 - the relay is inbound only: hiddenOriginSendAllowed() and originProbeVerdict()
  *                 are the sending gate (an API provider passes by construction, an SMTP path
@@ -401,6 +404,52 @@ class InboundEmailHealth {
                 'ext-sqlite3 is loaded but FTS5 with contentless_delete (SQLite 3.43+) is unavailable: '
                 . $e->getMessage()
             );
+        }
+    }
+
+    /**
+     * The search index is not accumulating copies of itself.
+     *
+     * Each mailbox owner's persisted index is one file at one path, so the
+     * healthy answer is one file per owner and nothing else. Two things say
+     * otherwise, and both did happen: a File row carrying the index's source
+     * (the shape this replaced, where every persist wrote a new one and relied
+     * on deleting the last — on one node that delete failed for ten weeks and
+     * filled the disk), and a file in the index directory that the sweep would
+     * take. Nothing anywhere asserted a count before, which is why ten weeks
+     * passed; this is that assertion.
+     *
+     * @throws ProvisioningCheckFailed naming what is there to be reclaimed.
+     */
+    public static function checkSearchIndexStorage() {
+        require_once(PathHelper::getIncludePath('data/files_class.php'));
+        require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_mailbox_search_index_class.php'));
+
+        $db = DbConnector::get_instance()->get_db_link();
+        $stmt = $db->prepare('SELECT COUNT(*) FROM fil_files WHERE fil_source = ?');
+        $stmt->execute(array(File::SOURCE_MAILBOX_SEARCH_INDEX));
+        $file_rows = (int)$stmt->fetchColumn();
+
+        $sweep = InboundMailboxSearchIndex::sweepPersistedIndexes(true);
+        $bytes = (int)$sweep['bytes'];
+        $size = $bytes >= 1048576 ? round($bytes / 1048576, 1) . ' MB'
+            : ($bytes >= 1024 ? round($bytes / 1024) . ' KB' : $bytes . ' bytes');
+
+        $problems = array();
+        if ($file_rows > 0) {
+            $problems[] = $file_rows . ' search-index file record' . ($file_rows === 1 ? '' : 's')
+                . ' left from before the index moved to one path per owner — every one is a copy '
+                . 'nothing reads (specs/mailbox_search_index_blob_leak.md)';
+        }
+        if ($sweep['removed'] > 0) {
+            $problems[] = $sweep['removed'] . ' stray file' . ($sweep['removed'] === 1 ? '' : 's')
+                . ' in ' . MailboxIndex::blobDir() . ': ' . implode(', ', array_map('basename', $sweep['paths']));
+        }
+        if (count($problems)) {
+            throw new ProvisioningCheckFailed(implode('; ', $problems)
+                . '. The persisted indexes hold ' . $size . '. The mailbox index sweep '
+                . '(Retention) removes the stray files; the file records are reclaimed with '
+                . 'File::permanent_delete().');
         }
     }
 

@@ -17,6 +17,8 @@
  * under the umask; the umask is opened to 0 here so the second path cannot
  * pass by luck either.
  *
+ * @version 1.1 - the persisted index is one path per owner, so a restore is
+ *                proven by its bytes holding rather than by a File id
  * @version 1.0
  */
 
@@ -91,9 +93,6 @@ $m->save();
 harness_register_model('InboundEmailMessage', (int)$m->key);
 $mid = (int)$m->key;
 
-$blob_file_id = function () use ($uid) {
-	return intval(InboundMailboxSearchIndex::loadOrCreateForUser($uid)->get('imi_fil_file_id'));
-};
 $mode_of = function (string $path) {
 	clearstatcache(true, $path);
 	return is_file($path) ? sprintf('%04o', fileperms($path) & 0777) : 'missing';
@@ -101,16 +100,22 @@ $mode_of = function (string $path) {
 
 $idx = new MailboxIndex();
 $path = $idx->shmPath($uid);
+// A persist reseals under a fresh DEK, so identical bytes mean no persist ran.
+$blob_bytes = function () use ($idx, $uid) {
+	clearstatcache(true, $idx->blobPath($uid));
+	return is_file($idx->blobPath($uid)) ? md5_file($idx->blobPath($uid)) : '';
+};
+harness_defer(function () use ($uid) { MailboxIndex::removePersisted($uid); });
 $idx->wipe($uid);
+MailboxIndex::removePersisted($uid);
 
 // ------------------------------------------------------------- rebuild
 
 section('rebuild() creates the working copy 0600');
 
 $idx->fold($uid, vault_fixture_key($kp['secret']));   // no blob yet: ensureOpen() rebuilds
-$fil_1 = $blob_file_id();
-harness_register_model('File', $fil_1);
-check($fil_1 > 0, 'the first fold rebuilt and persisted (no blob existed)', 'fil=' . $fil_1);
+$bytes_1 = $blob_bytes();
+check($bytes_1 !== '', 'the first fold rebuilt and persisted (no blob existed)', $idx->blobPath($uid));
 check($idx->search($uid, 'shmmodekw') === array($mid), 'the rebuilt copy searches');
 check($mode_of($path) === '0600', 'the rebuilt working copy is 0600 ', $mode_of($path));
 
@@ -121,7 +126,7 @@ section('restoreFromBlob() leaves the working copy 0600');
 $idx->wipe($uid);
 check(!is_file($path), 'the working copy is gone');
 $idx->fold($uid, vault_fixture_key($kp['secret']));   // blob exists: ensureOpen() restores
-check($blob_file_id() === $fil_1, 'the blob id held, so this copy came from a restore, not a rebuild', 'fil=' . $blob_file_id());
+check($blob_bytes() === $bytes_1, 'the persisted bytes held, so this copy came from a restore, not a rebuild');
 check($idx->search($uid, 'shmmodekw') === array($mid), 'the restored copy searches');
 check($mode_of($path) === '0600', 'the restored working copy is 0600 ', $mode_of($path));
 SealedEgressGuard::reset();

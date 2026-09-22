@@ -135,11 +135,29 @@ echo "authorizedkeysfile .ssh/authorized_keys"
 STUB
 cat > "$T/bin/journalctl" <<'STUB'
 #!/bin/bash
-echo "Failed password for invalid user eve from 203.0.113.9 port 4444 ssh2"
-echo "Invalid user eve from 203.0.113.9 port 4444"
-echo "Accepted publickey for ops from 198.51.100.7 port 5555 ssh2"
-echo "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.9  user=mallory"
-echo "Failed password for mallory from 203.0.113.9 port 4445 ssh2"
+# The SSH read is unit-filtered; the event reads pass a pattern to -g. Answering
+# each the way the real journalctl would is what makes the counts meaningful.
+case "$*" in
+    *"-u ssh"*)
+        echo "Failed password for invalid user eve from 203.0.113.9 port 4444 ssh2"
+        echo "Invalid user eve from 203.0.113.9 port 4444"
+        echo "Accepted publickey for ops from 198.51.100.7 port 5555 ssh2"
+        echo "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.9  user=mallory"
+        echo "Failed password for mallory from 203.0.113.9 port 4445 ssh2"
+        ;;
+    *"No space left on device"*)
+        # The line that actually proved a full disk on 2026-09-22: userspace,
+        # from mandb, carrying a path and a pid. A kernel-ring read never saw it.
+        echo "mandb[3420559]: /usr/bin/mandb: can not write to /var/cache/man/3420559: No space left on device"
+        echo "mandb[3420559]: /usr/bin/mandb: can not create index cache /var/cache/man/3420559: No space left on device"
+        ;;
+    *"Out of memory"*)
+        echo "Out of memory: Killed process 1234 (postgres) total-vm:900000kB"
+        ;;
+    *"I/O error"*)
+        echo "-- No entries --"
+        ;;
+esac
 STUB
 chmod 755 "$T/bin"/*
 PATH="$T/bin:$PATH" bash "$SCRIPT" > "$T/root.json" 2> "$T/root.err"; rc=$?
@@ -154,6 +172,9 @@ chk "a jail with nothing banned says 0" "$(jv "$T/root.json" fail2ban_jails.1.na
 chk "a hostile jail name is reduced to safe characters" "$(jv "$T/root.json" fail2ban_jails.2.name)" "weirdjailname"
 chk "ssh auth failures are a count of the matching lines" "$(jv "$T/root.json" ssh_auth_failures_24h)" "4"
 chk "sshd posture as sshd -T prints it" "$(jv "$T/root.json" sshd.password_authentication)/$(jv "$T/root.json" sshd.permit_root_login)" "no/prohibit-password"
+chk "the three events are counted from the system journal" "$(jv "$T/root.json" kernel_events_24h.oom)/$(jv "$T/root.json" kernel_events_24h.enospc)/$(jv "$T/root.json" kernel_events_24h.io_error)" "1/2/0"
+chk "journalctl's own no-entries line is not counted as an event" "$(jv "$T/root.json" kernel_events_24h.io_error)" "0"
+chk "no text from an event line reaches the object" "$(grep -c -E 'mandb|/var/cache/man|3420559|total-vm|Killed process' "$T/root.json")" "0"
 chk "the banned IP list never reaches the object" "$(grep -c '203.0.113.9\|198.51.100' "$T/root.json")" "0"
 # Anchored to word edges on purpose: an unanchored 'eve' also matches the key
 # name kernel_events_24h, which would make this check pass or fail for a reason
@@ -204,12 +225,16 @@ chk "no systemd: disk is still measured" "$(jv "$T/nosd.json" disk.total_bytes t
 
 echo "=== Static pins ==="
 chk "every command runs under the per-command timeout" "$(grep -c '^run() { timeout "\$CMD_TIMEOUT"' "$SCRIPT")" "1"
-# Four counts, and every one of them is a count: the SSH auth failures, and the
-# three kernel events. A journal read that is not piped into grep -c is a
-# journal read whose text could reach the object.
-chk "the journal is only ever counted (grep -c), never printed" "$(grep -c 'grep -c -E' "$SCRIPT")" "4"
+# Two, and both are counts: the SSH auth failures, and journal_event_count,
+# which every event pattern goes through. A journal read that is not piped into
+# grep -c is a journal read whose text could reach the object.
+chk "the journal is only ever counted (grep -c), never printed" "$(grep -c 'grep -c -E' "$SCRIPT")" "2"
 chk "journalctl appears twice, under run both times" "$(grep -c 'run journalctl --system' "$SCRIPT")" "2"
-chk "the kernel read is the kernel ring only (-k)" "$(grep -c 'run journalctl --system -k' "$SCRIPT")" "1"
+# journalctl does the matching itself, so a day of log is never handed to the
+# shell; and the read is the SYSTEM journal, because an ENOSPC line comes from
+# the program that hit it and never from the kernel ring.
+chk "the event read filters in journalctl (-g) over the system journal" "$(grep -c 'run journalctl --system --since "24 hours ago" --no-pager -o cat -g' "$SCRIPT")" "1"
+chk "no kernel-ring read is left" "$(grep -c 'journalctl --system -k' "$SCRIPT")" "0"
 chk "the list cap is 20" "$(grep -c '^MAX_LIST=20' "$SCRIPT")" "1"
 chk "the name cap is 64" "$(grep -c '^MAX_NAME=64' "$SCRIPT")" "1"
 chk "sshd is invoked once, read-only (-T)" "$(grep -o 'run sshd[^)]*' "$SCRIPT" | sort -u | tr '\n' ' ')" "run sshd -T "

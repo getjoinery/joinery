@@ -9,18 +9,22 @@
  * MailboxIndex persistence in the streaming era
  * (specs/mailbox_search_index_streaming_seal.md § 3.3–3.4):
  *
- *  - persist() stores the sealed index as a v1.stream. file, path-to-path;
- *  - a fold that changed nothing performs no File write (the blob id holds),
- *    a fold with one new row rotates the blob;
- *  - wipe + ensureOpen restores from the stream blob WITHOUT a rebuild
- *    (proven by the blob id holding — a rebuild always re-persists);
- *  - a legacy v1.aead. whole-string blob is refused by restore, and the
- *    ensuing rebuild produces a searchable index persisted as stream-format.
+ *  - persist() seals the index to the owner's one path, path-to-path, in the
+ *    v1.stream. format;
+ *  - a fold that changed nothing rewrites nothing (the bytes hold), a fold
+ *    with one new row rewrites them;
+ *  - wipe + ensureOpen restores from that file WITHOUT a rebuild (proven by
+ *    the bytes holding — a rebuild always re-persists);
+ *  - a file at the path that is not this build's — wrong container format,
+ *    wrong format stamp — is refused, and the ensuing rebuild leaves a
+ *    searchable index sealed in stream format at the same path.
  *
  * Uses an owner WITH a vault row (persist seals to uev_public_key) whose
  * message rows are unsealed — the index reads content through the same get()
  * hook either way, and what is under test here is the blob lifecycle.
  *
+ * @version 1.2 - the persisted index is one path per owner, not a File per persist
+ *                (specs/mailbox_search_index_blob_leak.md)
  * @version 1.1 - the format stamp refuses a blob of another shape before decrypting it
  * @version 1.0
  */
@@ -98,17 +102,24 @@ $make_msg = function ($subject, $body) use ($domain, $alias_id) {
 	return (int)$m->key;
 };
 
-$blob_file_id = function () use ($uid) {
-	return intval(InboundMailboxSearchIndex::loadOrCreateForUser($uid)->get('imi_fil_file_id'));
+$idx = new MailboxIndex();
+$blob = $idx->blobPath($uid);
+// A persist rewrites the file under a fresh DEK, so identical bytes mean the
+// persist did not run — which is what "restored, not rebuilt" comes down to.
+$blob_bytes = function () use ($blob) {
+	clearstatcache(true, $blob);
+	return is_file($blob) ? md5_file($blob) : '';
 };
-$blob_path = function (int $fil_id) {
-	$file = new File($fil_id, TRUE);
-	$blob = $file->key ? $file->_blob() : null;
-	return $blob ? $blob->filesystem_path('original') : '';
+$index_file_rows = function () use ($uid) {
+	$db = DbConnector::get_instance()->get_db_link();
+	$q = $db->prepare('SELECT COUNT(*) FROM fil_files WHERE fil_usr_user_id = ? AND fil_source = ?');
+	$q->execute(array($uid, File::SOURCE_MAILBOX_SEARCH_INDEX));
+	return (int)$q->fetchColumn();
 };
 
-$idx = new MailboxIndex();
+harness_defer(function () use ($uid) { MailboxIndex::removePersisted($uid); });
 $idx->wipe($uid);
+MailboxIndex::removePersisted($uid);
 
 // -------------------------------------------------------- stream persist
 
@@ -117,12 +128,13 @@ section('the persisted blob is stream-format');
 $m1 = $make_msg('First', 'alpha streamkwone');
 $idx->fold($uid, vault_fixture_key($kp['secret']));
 
-$fil_1 = $blob_file_id();
-harness_register_model('File', $fil_1);
-check($fil_1 > 0, 'the first fold persisted a blob (no blob existed yet)', 'fil=' . $fil_1);
-$path_1 = $blob_path($fil_1);
-check($path_1 !== '' && is_file($path_1), 'the blob is on local disk', $path_1);
-check(SealedBox::isStreamFile($path_1), 'and is in the v1.stream. format');
+$bytes_1 = $blob_bytes();
+check($bytes_1 !== '', 'the first fold persisted the index (none existed yet)', $blob);
+check(SealedBox::isStreamFile($blob), 'and it is in the v1.stream. format');
+check(sprintf('%04o', fileperms($blob) & 0777) === '0660', 'the persisted index is 0660',
+	sprintf('%04o', fileperms($blob) & 0777));
+check(!is_file($idx->blobTmpPath($uid)), 'and the temp name it was sealed under is gone');
+check($index_file_rows() === 0, 'nothing was stored as a File', 'rows=' . $index_file_rows());
 check($idx->search($uid, 'streamkwone') === array($m1), 'the folded message is searchable');
 
 // -------------------------------------------------------- dirty flag
@@ -130,14 +142,16 @@ check($idx->search($uid, 'streamkwone') === array($m1), 'the folded message is s
 section('a fold that changed nothing writes nothing');
 
 $idx->fold($uid, vault_fixture_key($kp['secret']));
-check($blob_file_id() === $fil_1, 'no new mail, no refolds — the blob id holds', 'fil=' . $blob_file_id());
+check($blob_bytes() === $bytes_1, 'no new mail, no refolds — the persisted bytes hold');
 
 $m2 = $make_msg('Second', 'beta streamkwtwo');
 $idx->fold($uid, vault_fixture_key($kp['secret']));
-$fil_2 = $blob_file_id();
-harness_register_model('File', $fil_2);
-check($fil_2 > 0 && $fil_2 !== $fil_1, 'one new row rotates the blob', "was $fil_1 now $fil_2");
-check(SealedBox::isStreamFile($blob_path($fil_2)), 'the rotated blob is stream-format too');
+$bytes_2 = $blob_bytes();
+check($bytes_2 !== '' && $bytes_2 !== $bytes_1, 'one new row rewrites the persisted index');
+check(SealedBox::isStreamFile($blob), 'the rewritten index is stream-format too');
+check(count((array)glob($idx->blobPath($uid) . '*')) === 1,
+	'and it is still the only file for this owner',
+	implode(' ', array_map('basename', (array)glob($idx->blobPath($uid) . '*'))));
 
 // -------------------------------------------------------- restore, not rebuild
 
@@ -147,42 +161,30 @@ $idx->wipe($uid);
 check(!is_file($idx->shmPath($uid)), 'the working copy is gone');
 $idx->fold($uid, vault_fixture_key($kp['secret']));
 check($idx->search($uid, 'streamkwtwo') === array($m2), 'search works again after the restore');
-check($blob_file_id() === $fil_2,
-	'the blob id held — restored, not rebuilt (a rebuild always re-persists), and nothing new meant no write',
-	'fil=' . $blob_file_id());
+check($blob_bytes() === $bytes_2,
+	'the bytes held — restored, not rebuilt (a rebuild always re-persists), and nothing new meant no write');
 // Restoring opened stored sealed content, so this process is now hot; return
 // it to cold so the remaining fixture writes are not refused.
 SealedEgressGuard::reset();
 
 // -------------------------------------------------------- legacy blob
 
-section('a legacy v1.aead. blob is refused and rebuilt as stream-format');
+section('a file at the path that is not stream-format is refused and rebuilt');
 
-// Hand-build what the whole-string seal used to persist: the index bytes
-// sealed as one v1.aead. text blob, stored as the bookkeeping's File.
+// What the whole-string seal used to produce, written where the stream file
+// belongs: refused by the container check before a key is ever applied.
 $shm_bytes = file_get_contents($idx->shmPath($uid));
 $dek = $crypto->newItemDek();
-$legacy_blob = $crypto->sealField($shm_bytes, $dek, 'mail:ftsindex:' . $uid);
-$legacy_file = File::createFromBytes($legacy_blob, 'mailfts_' . $uid . '.bin', 'application/octet-stream', $uid, array(
-	'fil_private' => true,
-	'fil_source'  => File::SOURCE_MAILBOX_SEARCH_INDEX,
-));
-harness_register_model('File', (int)$legacy_file->key);
-
-$bk = InboundMailboxSearchIndex::loadOrCreateForUser($uid);
-$bk->set('imi_fil_file_id', (int)$legacy_file->key);
-$bk->set('imi_sealed_key', $crypto->sealItemDek($dek, $kp['public']));
-$bk->save();
+file_put_contents($blob, $crypto->sealField($shm_bytes, $dek, 'mail:ftsindex:' . $uid));
+check(!SealedBox::isStreamFile($blob), 'the file at the path is not stream-format');
 
 $idx->wipe($uid);
 $idx->fold($uid, vault_fixture_key($kp['secret']));
 check($idx->search($uid, 'streamkwone') === array($m1) && $idx->search($uid, 'streamkwtwo') === array($m2),
 	'the rebuild produced a searchable index');
-$fil_3 = $blob_file_id();
-harness_register_model('File', $fil_3);
-check($fil_3 > 0 && $fil_3 !== (int)$legacy_file->key,
-	'the rebuild persisted a fresh blob in place of the legacy one', "legacy={$legacy_file->key} now=$fil_3");
-check(SealedBox::isStreamFile($blob_path($fil_3)), 'and it is stream-format');
+$bytes_3 = $blob_bytes();
+check(SealedBox::isStreamFile($blob), 'the rebuild left a stream-format index at the same path');
+check($index_file_rows() === 0, 'and still nothing is stored as a File', 'rows=' . $index_file_rows());
 SealedEgressGuard::reset();
 
 // -------------------------------------------------------- format stamp
@@ -196,9 +198,8 @@ $bk->set('imi_format', MailboxIndex::FORMAT - 1);
 $bk->save();
 $idx->wipe($uid);
 $idx->fold($uid, vault_fixture_key($kp['secret']));
-$fil_4 = $blob_file_id();
-harness_register_model('File', $fil_4);
-check($fil_4 > 0 && $fil_4 !== $fil_3, 'a mismatched stamp skips the restore and rebuilds', "before=$fil_3 now=$fil_4");
+$bytes_4 = $blob_bytes();
+check($bytes_4 !== '' && $bytes_4 !== $bytes_3, 'a mismatched stamp skips the restore and rebuilds');
 check($idx->search($uid, 'streamkwone') === array($m1), 'and the rebuilt index searches');
 check(intval(InboundMailboxSearchIndex::loadOrCreateForUser($uid)->get('imi_format')) === MailboxIndex::FORMAT,
 	'and the rebuild re-stamped the format');

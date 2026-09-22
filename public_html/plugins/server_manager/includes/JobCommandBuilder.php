@@ -8,6 +8,10 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.73 - site_log offers the PostgreSQL cluster log (agent 1.40.0): the database is the only
+ *                 thing on a node that records a connection dying or a write being refused, and
+ *                 nothing else read it. The floor is per VALUE (SITE_LOG_POSTGRES_MIN_AGENT_VERSION,
+ *                 site_log_files_for) because an older agent refuses the value, not the word
  * @version 1.72 - unit_journal / disk_usage: the two observe words of
  *                 specs/disk_headroom_and_unit_diagnosis.md (agent 1.39.0). unit_journal answers "why"
  *                 about a failed unit the Host card already names, from a compiled list mirrored here;
@@ -382,7 +386,28 @@ class JobCommandBuilder {
 		'joinery_ai_worker'    => 'AI worker log',
 		'install_executor'     => 'Install executor log',
 		'host_converger'       => 'Host converger log',
+		'postgresql'           => 'PostgreSQL cluster log',
 	];
+
+	/**
+	 * The agent that resolves the PostgreSQL entry above. Every other value in
+	 * SITE_LOG_FILES has been on the node's own list since the word shipped;
+	 * this one is newer than the word, and an older agent refuses it as an
+	 * unknown enum value. So the floor is per VALUE, not per word: the picker
+	 * leaves it out below this version and the builder refuses it with the fix
+	 * in the message, rather than queuing a job the node will reject.
+	 */
+	const SITE_LOG_POSTGRES_MIN_AGENT_VERSION = '1.40.0';
+
+	/** Which of SITE_LOG_FILES this node's agent will actually answer about. */
+	public static function site_log_files_for($node) {
+		$files = self::SITE_LOG_FILES;
+		$version = trim((string)$node->get('mgn_agent_version'));
+		if ($version === '' || version_compare($version, self::SITE_LOG_POSTGRES_MIN_AGENT_VERSION, '<')) {
+			unset($files['postgresql']);
+		}
+		return $files;
+	}
 
 	/** The log tables log_table_tail may name; same mirror discipline. */
 	const LOG_TABLES = [
@@ -1680,6 +1705,13 @@ class JobCommandBuilder {
 		if (!array_key_exists($file, self::SITE_LOG_FILES)) {
 			throw new Exception("'" . $file . "' is not a log file the node offers. Choose one of: "
 				. implode(', ', array_keys(self::SITE_LOG_FILES)) . '.');
+		}
+		if (!array_key_exists($file, self::site_log_files_for($node))) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot read its " . self::SITE_LOG_FILES[$file]
+				. ": its agent is older than " . self::SITE_LOG_POSTGRES_MIN_AGENT_VERSION
+				. " and does not have that file on its own list. Apply an update to the node; "
+				. "the agent that ships with it does.");
 		}
 		return ['primitive' => 'site_log', 'params' => [
 			'file'     => $file,
