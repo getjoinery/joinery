@@ -1,7 +1,8 @@
 # The Search Index Lives at One Path Per User
 
-**Status:** WP2–WP6 built 2026-09-22 (mailbox plugin 1.119.0). WP1 is still
-gated on the owner's go-ahead, and WP7 waits on a release.
+**Status:** WP1–WP6 built 2026-09-22 (mailbox plugin 1.119.0). WP1 ran on dev
+by hand (903 Files); on every other node it runs as the mailbox migration
+`imi_002_reclaim_search_index_files` at the next upgrade. WP7 waits on that release.
 
 ## Brief
 
@@ -11,11 +12,10 @@ per user means a second copy cannot exist, whatever fails. Cleanup on user
 deletion, a standing sweep, and a health count make any leftover visible.
 
 **Rules that bind this work** (CLAUDE.md governs; these are the ones that
-bite here): no commit, no `git add`; no schema change; docs describe the
+bite here): no commit, no `git add`; no schema change (a data migration is fine); docs describe the
 current state only; bump `@version` on every PHP file touched; `php -l` and
 `validate_php_file.php` on every class file edited; tests use the harness and
-carry `@joinery-test`; never run the runner as root; WP1 does not run until
-the owner says so.
+carry `@joinery-test`; never run the runner as root.
 
 **Decided, do not reopen:** the index is regenerable (a lost copy costs CPU);
 it is not a File and not a file version; the in-place blob swap is rejected;
@@ -70,13 +70,13 @@ written to `{user_id}.bin.tmp` in the same directory, then `rename()`.
 
 | WP | Do | Done when |
 |----|----|-----------|
-| WP1 | **Gated.** On node 176 and dev: for every `fil_files` row with `fil_source = 'mailbox_search_index'` that no live bookkeeping row names, `permanent_delete()` it, printing id, size, outcome. Skip and name any whose blob `fbb_reference_count > 1`. Report the one blob on 176 with no live file row before touching it. | 13 GiB back on 176; 903 gone on dev; every outcome printed |
+| WP1 | Mailbox migration `imi_002_reclaim_search_index_files`: every `fil_files` row with `fil_source = 'mailbox_search_index'` that no live bookkeeping row names is deleted through `permanent_delete()`; a shared blob or a failure is logged and skipped, never stops the upgrade. | Node 176 logs 157 deleted at its next upgrade; the health check reads zero |
 | WP2 | Every catch around a File delete or unlink in `MailboxIndex` (persist ~527, `purgePersisted` ~300) logs the id or path and the exception. | A failed cleanup appears in the error log |
 | WP3 | `MailboxIndex`: persist to and restore from the path as above; the transition step; `purgePersisted()` unlinks. Class docblock updated. | 100 persists leave one `.bin`, no `.tmp`, no File |
 | WP4 | `plugins/mailbox/data/inbound_mailbox_search_index_class.php`: `permanent_delete()` override unlinks `.bin` and `.tmp` then calls parent; `imi_usr_user_id` action `cascade` → `permanent_delete`; remove the `imi_fil_file_id` action; docblock updated. Run plugin sync so the rules re-register. | Deleting a user removes their index file |
 | WP5 | `sweepWorkingCopies()` (same class, ~103) also removes any `cache/mailfts/{uid}.bin` whose uid has no bookkeeping row and any `.tmp` older than an hour; returns counts. `InboundEmailHealth::checkSearchIndexStorage()` beside `checkSearchIndexEngine()` (~382): fails naming the count when any `mailbox_search_index` File exists or the sweep would remove anything; reports directory size. Register it wherever `checkSearchIndexEngine()` is listed. | Health page names a stray; the next sweep removes it |
 | WP6 | Docs: `plugins/mailbox/docs/overview.md` index paragraph (~1584–1620); the two docblocks above; one line in the incident report pointing here. | — |
-| WP7 | After release: every mailbox node checked through WP5's count; any File count above zero reclaimed as in WP1. | Every mailbox node reports zero |
+| WP7 | After release: every mailbox node checked through WP5's count; the migration's log line names what each reclaimed. | Every mailbox node reports zero |
 
 ## Tests (tier db)
 
