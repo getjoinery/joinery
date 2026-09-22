@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: mailbox_mail_stack_packages
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

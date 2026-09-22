@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: email_template_iteration
  * tier: safe            # pure reflection over EmailTemplateRenderer; no DB, no mail
+ * parallel: true
  * env: any
  * needs: []
  */

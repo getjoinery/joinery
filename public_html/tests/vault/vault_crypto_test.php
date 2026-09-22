@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: vault_crypto_envelope
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

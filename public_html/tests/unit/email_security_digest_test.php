@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: email_security_digest
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

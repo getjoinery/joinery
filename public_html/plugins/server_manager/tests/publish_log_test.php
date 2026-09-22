@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: publish_log
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

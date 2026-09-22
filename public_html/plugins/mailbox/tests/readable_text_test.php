@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: readable_text
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

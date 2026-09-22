@@ -41,6 +41,7 @@
  * Nothing here prints a key or a credential; the index and every result carry
  * names, sizes and hashes of ciphertext only.
  *
+ * @version 1.2.2 - decrypt_file() says plainly that padding catches a wrong key only usually
  * @version 1.2.1 - fetch_from_store() reads the one file store; an object's visibility field only ever
  *                  reads private
  * @version 1.2 - retired-epochs.json: a run writes down the epochs it found sealed to a retired recovery
@@ -229,7 +230,11 @@ class BackupObjects {
 	/**
 	 * Decrypt an object written by encrypt_file() or by `openssl enc -aes-256-cbc
 	 * -salt -pbkdf2`. Returns the plaintext byte count. A wrong key or a
-	 * damaged object fails on the final block's padding and throws.
+	 * damaged object USUALLY fails on the final block's padding and throws —
+	 * but CBC carries no integrity check, so about one wrong key in 256 lands
+	 * on valid padding and returns garbage. A caller must check the plaintext
+	 * against what it expects (size, hash) before trusting it; the restore and
+	 * the verifier both do.
 	 */
 	public static function decrypt_file($src, $dst, $data_key) {
 		$in = @fopen($src, 'rb');

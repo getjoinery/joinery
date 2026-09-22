@@ -48,6 +48,9 @@
  *                completed only after a fresh login with the password is refused by the machine
  * @version 1.4 - every install shape runs: the shape refusal and the scp/other-node refusals are gone,
  *                since the bootstrap is one session and a clone travels over HTTPS
+ * @version 1.4 - a readiness or refusal probe never waits to CONNECT past what is left of its budget:
+ *                the connect wait was a fixed 20s, so a 2s budget took 20s and a 300s one up to 320s.
+ *                A machine that did answer still gets the whole probe to say what it says
  * @version 1.3 - processes the job result itself once the job is finished, as the channel endpoint does
  *                for an agent-run job; a retried install otherwise completes and clears nothing
  * @version 1.2 - waits for the target to answer SSH before the first remote step: a provider reports
@@ -269,7 +272,8 @@ class InstallJobExecutor {
 		$attempt = 0;
 		while (true) {
 			$attempt++;
-			$probe = array('type' => 'ssh', 'cmd' => 'echo SSH_READY', 'timeout' => 30);
+			$probe = array('type' => 'ssh', 'cmd' => 'echo SSH_READY', 'timeout' => 30,
+				'connect_timeout' => self::connect_budget($budget, $started));
 			list($out, $code) = $this->run_step($probe, $ctx);
 			$this->last_ssh_probe_output = (string)$out;
 			if ($stop_on_refusal && stripos((string)$out, 'Permission denied') !== false) {
@@ -293,6 +297,11 @@ class InstallJobExecutor {
 			}
 			sleep(min(self::SSH_READY_PROBE_INTERVAL, max(1, $budget - (time() - $started))));
 		}
+	}
+
+	/** How long one probe may wait for a connection: never past what is left of its budget. */
+	private static function connect_budget($budget, $started) {
+		return max(1, $budget - (time() - $started));
 	}
 
 	/** The readiness budget in seconds; tests shorten it through the environment. */
@@ -324,7 +333,8 @@ class InstallJobExecutor {
 		$this->append($job, "\n=== Confirming the machine refuses the install password ===\n", $step_index);
 		$last = '';
 		while (true) {
-			$probe = array('type' => 'ssh', 'cmd' => 'echo STILL_ACCEPTED', 'timeout' => 30);
+			$probe = array('type' => 'ssh', 'cmd' => 'echo STILL_ACCEPTED', 'timeout' => 30,
+				'connect_timeout' => self::connect_budget($budget, $started));
 			list($out, $code) = $this->run_step($probe, $ctx);
 			if ($code === 0 && strpos($out, 'STILL_ACCEPTED') !== false) {
 				$this->append($job, "[the machine STILL ACCEPTED the install password]\n", $step_index);
@@ -352,6 +362,7 @@ class InstallJobExecutor {
 	private function run_step($step, $ctx) {
 		$type = (string)($step['type'] ?? '');
 		$timeout = (int)($step['timeout'] ?? 1800);
+		$connect_timeout = max(1, min(20, (int)($step['connect_timeout'] ?? 20)));
 
 		if ($type === 'local') {
 			list($out, $code) = $this->shell((string)($step['cmd'] ?? ''), array(), $timeout);
@@ -378,7 +389,7 @@ class InstallJobExecutor {
 			$ssh = 'sshpass -e ssh'
 				. ' -o StrictHostKeyChecking=accept-new'
 				. ' -o UserKnownHostsFile=/dev/null'
-				. ' -o ConnectTimeout=20'
+				. ' -o ConnectTimeout=' . $connect_timeout
 				. ' -p ' . escapeshellarg((string)$ctx['port'])
 				. ' ' . escapeshellarg($ctx['user'] . '@' . $ctx['host'])
 				. ' ' . escapeshellarg((string)($step['cmd'] ?? ''));

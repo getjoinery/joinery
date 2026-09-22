@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: relay_pickup_alarm
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

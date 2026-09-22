@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: dns_reconciler
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

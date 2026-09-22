@@ -51,10 +51,13 @@ if ! command -v cargo >/dev/null 2>&1; then
 	fi
 fi
 
+# The `sim` profile is opt-level 2 (sync/Cargo.toml): the seeded workloads are
+# pure computation, and unoptimised they made this the slowest gate in the estate.
+#
 # More threads than cores on purpose. jd-soak's conductor tests are dominated by
 # deliberate waiting — a storm segment, a settle deadline — rather than by work,
 # so the default (one thread per core) leaves the box idle and the gate slow.
-nice -n 19 cargo test -p jd-sim -p jd-soak --manifest-path "$SYNC_DIR/Cargo.toml" --quiet \
+nice -n 19 cargo test -p jd-sim -p jd-soak --profile sim --manifest-path "$SYNC_DIR/Cargo.toml" --quiet \
 	-- --test-threads=8
 
 echo "sync sim gate: jd-sim and jd-soak green"

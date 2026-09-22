@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: fetch_url_reader
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

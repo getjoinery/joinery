@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: descriptor_validator_base
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

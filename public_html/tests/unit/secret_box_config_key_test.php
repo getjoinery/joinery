@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: secret_box_config_key
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

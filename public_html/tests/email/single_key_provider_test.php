@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: single_key_provider
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

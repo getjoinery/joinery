@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: agent_file_target_name
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

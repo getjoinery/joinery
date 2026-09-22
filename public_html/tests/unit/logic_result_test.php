@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: logic_result
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

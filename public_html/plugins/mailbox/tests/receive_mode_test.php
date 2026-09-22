@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: mailbox_receive_mode
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

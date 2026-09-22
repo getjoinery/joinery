@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: dns_auth_checker
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

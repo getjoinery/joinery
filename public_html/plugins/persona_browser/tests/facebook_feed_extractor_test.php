@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: facebook_feed_extractor
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

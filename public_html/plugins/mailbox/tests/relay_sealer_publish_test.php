@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: relay_sealer_publish
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  * timeout: 60

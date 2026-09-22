@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: plugin_tables_before_migrations
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

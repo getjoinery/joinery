@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: root_request
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

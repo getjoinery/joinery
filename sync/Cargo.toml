@@ -30,3 +30,11 @@ lto = "thin"
 # backtraces file and line numbers, which is all the gates ever read.
 [profile.dev]
 debug = "line-tables-only"
+
+# The simulator gate (sync_sim_gate.sh) runs seeded workloads that are pure
+# computation — minutes at opt-level 0, a third of that optimised. Its own
+# profile, so it builds into target/sim and leaves the debug builds the other
+# gates share untouched.
+[profile.sim]
+inherits = "dev"
+opt-level = 2

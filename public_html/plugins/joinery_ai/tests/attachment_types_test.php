@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: ai_attachment_types
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  * timeout: 120

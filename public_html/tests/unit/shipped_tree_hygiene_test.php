@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: shipped_tree_hygiene
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

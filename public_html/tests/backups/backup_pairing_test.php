@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: backup_pairing
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

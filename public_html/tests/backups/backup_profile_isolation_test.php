@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: backup_profile_isolation
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

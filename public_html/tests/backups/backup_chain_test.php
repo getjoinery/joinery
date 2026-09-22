@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: backup_chain_manifest
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

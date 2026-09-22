@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: uptime_name_resolution
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

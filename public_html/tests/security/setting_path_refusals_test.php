@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: setting_path_refusals
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

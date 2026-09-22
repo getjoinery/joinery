@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: slot_generator
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

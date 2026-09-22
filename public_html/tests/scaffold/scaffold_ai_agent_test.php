@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: scaffold_ai_agent
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

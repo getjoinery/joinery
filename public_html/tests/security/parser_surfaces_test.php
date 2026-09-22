@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: parser_surfaces
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

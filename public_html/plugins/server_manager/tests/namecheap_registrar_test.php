@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: namecheap_registrar
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

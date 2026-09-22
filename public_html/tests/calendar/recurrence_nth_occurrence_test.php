@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: recurrence_nth_occurrence
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

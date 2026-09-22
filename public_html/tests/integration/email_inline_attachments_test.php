@@ -15,6 +15,7 @@
 /** @joinery-test
  * name: email_inline_attachments
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

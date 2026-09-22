@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: joinery_direct_protocol
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

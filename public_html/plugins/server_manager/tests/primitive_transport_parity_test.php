@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: primitive_transport_parity
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

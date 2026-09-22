@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: formwriter_visibility_script
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

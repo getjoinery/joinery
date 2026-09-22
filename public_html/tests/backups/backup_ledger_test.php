@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: backup_ledger
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

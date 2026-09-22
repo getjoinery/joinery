@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: tables_without_model
  * tier: safe
+ * parallel: true
  * env: dev-only
  * needs: []
  */

@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: mail_archive_readers
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: routing_security
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

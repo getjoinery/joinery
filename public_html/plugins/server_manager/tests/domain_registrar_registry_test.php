@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: domain_registrar_registry
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

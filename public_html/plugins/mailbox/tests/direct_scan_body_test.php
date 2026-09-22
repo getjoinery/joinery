@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: direct_scan_body
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

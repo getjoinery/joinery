@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: provider_auth
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

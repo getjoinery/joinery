@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: script_version_banner
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

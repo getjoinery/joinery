@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: publish_test_gate
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

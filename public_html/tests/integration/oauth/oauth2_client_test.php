@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: oauth2_client
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

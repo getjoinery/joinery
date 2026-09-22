@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: relay_auth_trust
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

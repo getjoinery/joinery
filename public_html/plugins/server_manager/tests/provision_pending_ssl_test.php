@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: provision_pending_ssl_backoff
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

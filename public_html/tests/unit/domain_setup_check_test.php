@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: domain_setup_check
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

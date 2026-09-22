@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: cloud_store_inventory
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

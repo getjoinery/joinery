@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: sealed_stream_file
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

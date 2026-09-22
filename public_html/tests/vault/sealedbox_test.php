@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: vault_sealedbox
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

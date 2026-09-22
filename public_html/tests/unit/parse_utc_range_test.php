@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: parse_utc_range
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

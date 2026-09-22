@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: takeout_split_parts
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

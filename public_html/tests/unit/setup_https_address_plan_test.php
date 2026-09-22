@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: setup_https_address_plan
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

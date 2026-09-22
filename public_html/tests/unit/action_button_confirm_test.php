@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: action_button_confirm
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

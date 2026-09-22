@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: sealed_file_container
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

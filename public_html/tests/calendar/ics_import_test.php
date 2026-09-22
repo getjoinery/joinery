@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: ics_import
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

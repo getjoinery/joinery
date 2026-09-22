@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: static_page_cache
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

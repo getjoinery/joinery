@@ -138,6 +138,8 @@ $ROOT = dirname(__DIR__); // public_html
 // `_timeout` the parent resolved.
 // ---------------------------------------------------------------------------
 const JOINERY_LANE_SENTINEL = '::JOINERY-LANE-RESULT::';
+/** How many `parallel: true` suites run at once. The box has four cores; one is the lane's. */
+const PARALLEL_WIDTH = 3;
 if (in_array('--lane-worker', $args, true)) {
 	$payload = json_decode((string)stream_get_contents(STDIN), true);
 	if (!is_array($payload)) {
@@ -448,8 +450,39 @@ if (count($lane_tests) > 0 && $debug_on) {
 	if ($test_db_refresh !== '' && !$want_json) echo $test_db_refresh . "\n";
 }
 
+// `parallel: true` suites run in a pool ahead of the serial batch. The line is
+// honoured only on the safe tier — anything else declaring it fails by name
+// rather than running beside suites it could collide with — and --serial or
+// --only turns the pool off.
 $results = array();
+$pool_tests = array();
+$split_pool = function (array $list) use (&$pool_tests, &$results, $want_serial, $only, $ROOT, $want_json) {
+	$serial = array();
+	foreach ($list as $d) {
+		if (empty($d['meta']['parallel'])) { $serial[] = $d; continue; }
+		if ($d['meta']['tier'] !== 'safe') {
+			$r = array('name' => $d['meta']['name'], 'path' => harness_rel($d['path'], $ROOT),
+				'tier' => $d['meta']['tier'], 'env' => $d['meta']['env'], 'status' => 'fail',
+				'stats' => array('total' => 0, 'passed' => 0, 'failed' => 1, 'skipped' => 0),
+				'sections' => array(), 'duration_ms' => 0, 'exit' => 0,
+				'note' => "'parallel: true' is for safe-tier suites only; this one is tier '" . $d['meta']['tier'] . "'");
+			$results[] = $r;
+			if (!$want_json) print_human_line($r, $ROOT);
+			continue;
+		}
+		if ($want_serial || $only !== '') { $serial[] = $d; continue; }
+		$pool_tests[] = $d;
+	}
+	return $serial;
+};
+$pool_done = function ($r) use (&$results, $ROOT, $want_json) {
+	$results[] = $r;
+	if (!$want_json) print_human_line($r, $ROOT);
+};
+
 if (!$overlap) {
+	$to_run = $split_pool($to_run);
+	run_pool($pool_tests, $ROOT, $timeout_override, $pool_done, function () {});
 	foreach ($to_run as $d) {
 		// A test uses its own declared timeout unless --timeout= overrides all tests.
 		$effective_timeout = $timeout_override !== null ? $timeout_override : ($d['meta']['timeout'] ?? 180);
@@ -490,6 +523,10 @@ if (!$overlap) {
 		}
 	};
 
+	$main_tests = $split_pool($main_tests);
+	run_pool($pool_tests, $ROOT, $timeout_override, $pool_done, function () use (&$absorb, &$lane_state) {
+		$absorb(lane_drain($lane_state));
+	});
 	foreach ($main_tests as $d) {
 		$effective_timeout = $timeout_override !== null ? $timeout_override : ($d['meta']['timeout'] ?? 180);
 		$results[] = run_one($d, $ROOT, $effective_timeout);
@@ -544,9 +581,71 @@ function lane_drain(&$st) {
 	return $records;
 }
 
+/**
+ * A compile cache shared by every suite in the run. Each suite is a fresh PHP
+ * process, and with opcache off on the CLI each one compiled the platform from
+ * source — about an eighth of a small suite's time. The cache lives on disk
+ * beside the coverage map, is checked against every file's mtime on every
+ * include (revalidate_freq=0), and never holds anything under the temp
+ * directories or the site's cache/ (the generated class map), where PHP is
+ * written and rewritten within the same second. Returns '' when the cache cannot be set up, so a suite simply
+ * runs uncached.
+ */
+function opcache_flags($root) {
+	static $flags = null;
+	if ($flags !== null) return $flags;
+	$flags = '';
+	// The deploy tier runs as root on customer nodes during an upgrade; it
+	// leaves nothing behind in their site cache, and gains nothing worth it.
+	if (($GLOBALS['tier_arg'] ?? '') === 'deploy') return $flags;
+	if (!extension_loaded('Zend OPcache')) return $flags;
+	$dir = dirname($root) . '/cache/tests/opcache';
+	if (!is_dir($dir) && !@mkdir($dir, 0700, true)) return $flags;
+	$blacklist = $dir . '/.blacklist';
+	$lines = array_unique(array(rtrim(sys_get_temp_dir(), '/') . '/*', '/tmp/*', '/dev/shm/*',
+		dirname($root) . '/cache/*'));
+	if (@file_put_contents($blacklist, implode("\n", $lines) . "\n") === false) return $flags;
+	$flags = '-d opcache.enable_cli=1 -d opcache.file_cache=' . escapeshellarg($dir)
+		. ' -d opcache.file_cache_only=1 -d opcache.validate_timestamps=1 -d opcache.revalidate_freq=0'
+		. ' -d opcache.blacklist_filename=' . escapeshellarg($blacklist) . ' ';
+	return $flags;
+}
+
+/**
+ * Run `parallel: true` suites PARALLEL_WIDTH at a time, handing each result to
+ * $done as it lands. Only safe-tier suites may declare it, and the harness
+ * makes their database session read-only, so a pooled suite that writes fails
+ * on its own write rather than against a neighbour. $tick runs while the pool
+ * waits, so the test-db lane's completions still print as they land.
+ */
+function run_pool(array $tests, $root, $timeout_override, callable $done, callable $tick) {
+	$queue = $tests;
+	$running = array();
+	while ($queue || $running) {
+		while ($queue && count($running) < PARALLEL_WIDTH) {
+			$d = array_shift($queue);
+			$t = $timeout_override !== null ? $timeout_override : ($d['meta']['timeout'] ?? 180);
+			$running[] = run_one_start($d, $root, $t);
+		}
+		foreach ($running as $i => $h) {
+			$st = proc_get_status($h['proc']);
+			if ($st['running']) continue;
+			unset($running[$i]);
+			$done(run_one_finish($h, $st['exitcode']));
+		}
+		$tick();
+		if ($running) usleep(20000);
+	}
+}
+
 /** Run a single test in a subprocess and normalize it to a result record. A
  *  hung test is killed after $timeout_s (coreutils `timeout`, exit 124/137). */
 function run_one($d, $root, $timeout_s) {
+	return run_one_finish(run_one_start($d, $root, $timeout_s));
+}
+
+/** Start one suite's subprocess and return the handle run_one_finish() reads. */
+function run_one_start($d, $root, $timeout_s) {
 	$path = $d['path'];
 	$is_sh = strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'sh';
 	// -d apc.enable_cli=1: APCu is off in CLI by default, so any suite that
@@ -556,7 +655,7 @@ function run_one($d, $root, $timeout_s) {
 	// actually execute; suites that don't touch APCu are unaffected.
 	$inner = $is_sh
 		? 'bash ' . escapeshellarg($path)
-		: escapeshellarg(PHP_BINARY) . ' -d apc.enable_cli=1 ' . escapeshellarg($path) . ' --json';
+		: escapeshellarg(PHP_BINARY) . ' -d apc.enable_cli=1 ' . opcache_flags($root) . escapeshellarg($path) . ' --json';
 	// -k 5s sends SIGKILL 5s after SIGTERM if the test ignores the term.
 	//
 	// The child starts with ONLY stdio open. This process inherits descriptors
@@ -579,8 +678,21 @@ function run_one($d, $root, $timeout_s) {
 	$descriptors = array(1 => $out, 2 => $err);
 	$start = microtime(true);
 	$proc = proc_open($cmd, $descriptors, $pipes, $root);
-	$exit = proc_close($proc);
-	$ms = (int)round((microtime(true) - $start) * 1000);
+	return array('d' => $d, 'root' => $root, 'timeout_s' => $timeout_s, 'is_sh' => $is_sh,
+		'proc' => $proc, 'out' => $out, 'err' => $err, 'start' => $start);
+}
+
+/**
+ * Wait for a started suite and normalize it to a result record. $exit is the
+ * code proc_get_status() already reported when a pool saw the process end:
+ * PHP hands an exit code out once, so proc_close() would then answer -1.
+ */
+function run_one_finish(array $h, $exit = null) {
+	$d = $h['d']; $root = $h['root']; $timeout_s = $h['timeout_s']; $is_sh = $h['is_sh'];
+	$path = $d['path']; $out = $h['out']; $err = $h['err'];
+	$closed = proc_close($h['proc']);
+	if ($exit === null) $exit = $closed;
+	$ms = (int)round((microtime(true) - $h['start']) * 1000);
 	rewind($out); $stdout = stream_get_contents($out); fclose($out);
 	rewind($err); $stderr = stream_get_contents($err); fclose($err);
 

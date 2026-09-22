@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: queued_email_filters
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: relay_instance_label
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  *

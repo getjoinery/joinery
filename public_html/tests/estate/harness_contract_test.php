@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: harness_contract
  * tier: safe
+ * parallel: true
  * env: dev-only
  * needs: []
  */

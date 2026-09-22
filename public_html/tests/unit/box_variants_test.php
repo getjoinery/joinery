@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: box_variants
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

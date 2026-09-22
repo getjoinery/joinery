@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: csp_header
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

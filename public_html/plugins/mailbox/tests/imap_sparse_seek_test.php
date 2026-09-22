@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: imap_sparse_seek
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

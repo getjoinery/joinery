@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: node_pinned_recovery_key
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */

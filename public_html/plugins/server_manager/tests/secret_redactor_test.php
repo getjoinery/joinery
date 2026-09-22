@@ -2,6 +2,7 @@
 /** @joinery-test
  * name: secret_redactor
  * tier: safe
+ * parallel: true
  * env: any
  * needs: []
  */
