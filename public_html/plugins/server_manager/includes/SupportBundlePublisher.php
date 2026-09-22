@@ -40,6 +40,9 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.6 - carries unit_journal.sh and disk_usage.sh: the two observe words of
+ *                specs/disk_headroom_and_unit_diagnosis.md answer about a machine, and a siteless
+ *                host has units and a disk like any other
  * @version 1.5 - carries the host runner and the host installers (specs/agent_tier1_recipes.md item 6b):
  *                _plugin_installers_start.sh, _tree_trust.sh, host_housekeeping.sh,
  *                install_host_converger.sh and the Cloudflare range list housekeeping reads, so a
@@ -112,6 +115,15 @@ class SupportBundlePublisher {
 		// machine as one bounded object, which a Docker host has as much as
 		// a site does.
 		'maintenance_scripts/sysadmin_tools/host_report.sh',
+		// unit_journal and disk_usage, for the same reason as host_report: a
+		// Docker host has failing units and a filling disk as much as a site
+		// does, and both scripts source nothing and read nothing from their
+		// caller. Without them here, a siteless machine refuses both words
+		// with "its support bundle does not carry" — which is the correct
+		// refusal for a script nobody shipped, and the wrong answer for a
+		// question the host can perfectly well answer.
+		'maintenance_scripts/sysadmin_tools/unit_journal.sh',
+		'maintenance_scripts/sysadmin_tools/disk_usage.sh',
 		// host_converge on a machine with no site: the runner in --machine
 		// mode, rooted at this bundle, runs the two host installers. The
 		// runner sources _tree_trust.sh (refusing to run anything as root

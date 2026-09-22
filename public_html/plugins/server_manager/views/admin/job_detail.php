@@ -5,6 +5,9 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.8 - a unit_journal result renders the unit's verdict above its journal lines, and a
+ *                disk_usage result renders two size tables — the site tree's biggest directories
+ *                and the machine's usual ones
  * @version 1.7 - a log job whose result records read=false says so instead of dumping the flag
  * @version 1.6 - a site_log result renders its text as a log box and a log_table_tail result as a table,
  *                both through the redactor a second time (specs/agent_log_access.md §4); a pruned
@@ -312,6 +315,60 @@ if ($result) {
 			echo '</tr>';
 		}
 		echo '</tbody></table></div></div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && $job_type === 'unit_journal' && !empty($result_data['read'])) {
+		// The verdict first, because it is usually the whole answer: Result
+		// names the kind of failure and exit_status is the number the unit
+		// left behind. The journal is underneath for when it is not.
+		$unit = (string)($result_data['unit'] ?? '');
+		echo '<div class="card mb-3"><div class="card-header"><strong>' . htmlspecialchars($unit) . '</strong>'
+			. ' <small class="text-muted">— ' . htmlspecialchars((string)($result_data['active_state'] ?? 'unknown'))
+			. ' (' . htmlspecialchars((string)($result_data['sub_state'] ?? 'unknown')) . ')'
+			. ', result ' . htmlspecialchars((string)($result_data['result'] ?? 'unknown'))
+			. ', exit status ' . htmlspecialchars((string)($result_data['exit_status'] ?? 'unknown'));
+		if (is_int($result_data['last_run_unix'] ?? null) && $result_data['last_run_unix'] > 0) {
+			echo ', last ran ' . htmlspecialchars(LibraryFunctions::convert_time(
+				gmdate('Y-m-d H:i:s', (int)$result_data['last_run_unix']), 'UTC',
+				SessionControl::get_instance()->get_timezone(), 'M j, Y g:i A'));
+		}
+		echo '</small></div>';
+		$lines = is_array($result_data['journal'] ?? null) ? $result_data['journal'] : array();
+		if (count($lines) === 0) {
+			echo '<div class="card-body text-muted">The node read no journal lines for this unit.</div>';
+		} else {
+			echo '<pre class="svm-logbox">' . htmlspecialchars(SmSecretRedactor::redact(implode("\n", $lines))) . '</pre>';
+		}
+		echo '</div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && $job_type === 'disk_usage' && !empty($result_data['read'])) {
+		$fmt = function ($v) {
+			if ($v === 'absent') { return 'not present'; }
+			return is_int($v) ? JobResultProcessor::format_size($v) : 'unknown';
+		};
+		$tree = is_array($result_data['tree'] ?? null) ? $result_data['tree'] : array();
+		$fs   = is_array($result_data['filesystem'] ?? null) ? $result_data['filesystem'] : array();
+		echo '<div class="card mb-3"><div class="card-header"><strong>Disk usage</strong> <small class="text-muted">— '
+			. htmlspecialchars($fmt($fs['used_bytes'] ?? null)) . ' used of '
+			. htmlspecialchars($fmt($fs['total_bytes'] ?? null)) . ', '
+			. htmlspecialchars($fmt($fs['avail_bytes'] ?? null)) . ' free'
+			. (!empty($tree['partial']) ? ' — the walk could not read everything, so the tree figures are a floor' : '')
+			. '</small></div><div class="card-body">';
+		echo '<p class="mb-1"><strong>' . htmlspecialchars((string)($tree['path'] ?? '')) . '</strong>: '
+			. htmlspecialchars($fmt($tree['total_bytes'] ?? null)) . '</p>';
+		$rows = function ($entries) use ($fmt) {
+			echo '<table class="table table-sm mb-3"><tbody>';
+			foreach ((is_array($entries) ? $entries : array()) as $e) {
+				echo '<tr><td>' . htmlspecialchars((string)($e['path'] ?? '')) . '</td>'
+					. '<td class="text-end">' . htmlspecialchars($fmt($e['bytes'] ?? null)) . '</td></tr>';
+			}
+			echo '</tbody></table>';
+		};
+		// Depth two, so a parent and a child both appear: the pair is the
+		// answer to "which part of it", not a double count.
+		$rows($tree['entries'] ?? array());
+		echo '<p class="mb-1 text-muted small">Machine directories</p>';
+		$rows($result_data['machine'] ?? array());
+		echo '</div></div>';
 		$result_data = null;
 	}
 	if ($result_data) {

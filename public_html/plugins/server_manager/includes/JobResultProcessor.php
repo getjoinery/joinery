@@ -12,6 +12,10 @@
  * @version 1.32 - the hosted welcome email carries the A-record instruction when the buyer brought their
  *                 own domain (no registration row for the order), and says there is nothing to add only
  *                 when this plane registered the name (specs/managed_hosting_phase1_purchase.md §14)
+ * @version 1.32 - process_unit_journal and process_disk_usage: the two observe words of
+ *                 specs/disk_headroom_and_unit_diagnosis.md land as bounded results the job page
+ *                 renders; sanitise_host_report carries avail_bytes, inodes_used_pct and the three
+ *                 kernel-event counts
  * @version 1.31 - process_site_log and process_log_table_tail record a log word's envelope as the job's
  *                 result, bounded on intake, so the job page renders the excerpt (specs/agent_log_access.md)
  * @version 1.30 - a status check on a node that hosts no site (ManagedNode::hosts_site) queues no
@@ -2162,6 +2166,130 @@ HTML;
 	 * node that printed something else — records that it was asked and changes
 	 * no stored fact: a silent node is not a node with an empty host.
 	 */
+	/**
+	 * A unit_journal job's result: why one unit is in the state it is in.
+	 *
+	 * The node printed a bounded JSON object and the agent redacted it before
+	 * it left the machine; this keeps the compiled facts as their own kinds
+	 * (a state is one of a known set, an exit status is a number) and the
+	 * journal as a capped list of capped strings. A hostile node can lie about
+	 * its own unit; it cannot put anything but these keys and these kinds of
+	 * value on the plane.
+	 */
+	private static function process_unit_journal($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		$text = (is_array($data) && isset($data['output'])) ? (string)$data['output'] : '';
+		$decoded = ($text !== '') ? json_decode(trim($text), true) : null;
+		if (!is_array($decoded) || !isset($decoded['unit'])) {
+			$job->set('mjb_result', json_encode(['read' => false]));
+			$job->save();
+			return;
+		}
+
+		$journal = [];
+		if (isset($decoded['journal']) && is_array($decoded['journal'])) {
+			foreach (array_slice(array_values($decoded['journal']), 0, JobCommandBuilder::LOG_MAX_COUNT) as $line) {
+				if (!is_scalar($line)) { continue; }
+				$journal[] = substr((string)$line, 0, self::UNIT_JOURNAL_MAX_LINE);
+			}
+		}
+
+		$job->set('mjb_result', json_encode([
+			'read'           => true,
+			'unit'           => self::host_report_name($decoded['unit'] ?? ''),
+			'load_state'     => self::unit_journal_word($decoded['load_state'] ?? ''),
+			'active_state'   => self::unit_journal_word($decoded['active_state'] ?? ''),
+			'sub_state'      => self::unit_journal_word($decoded['sub_state'] ?? ''),
+			'result'         => self::unit_journal_word($decoded['result'] ?? ''),
+			'exit_status'    => self::host_report_count($decoded['exit_status'] ?? null),
+			'last_run_unix'  => self::host_report_count($decoded['last_run_unix'] ?? null),
+			'lines_returned' => count($journal),
+			'journal'        => $journal,
+		]));
+		$job->save();
+	}
+
+	/**
+	 * One of the unit's compiled facts — a state, a result — as the script
+	 * bounds it, and the string unknown where the node said nothing usable.
+	 * Unknown rather than empty, so the card reads the same way the Host card
+	 * reads: a fact nobody could establish says so.
+	 */
+	private static function unit_journal_word($v) {
+		$name = self::host_report_name($v);
+		return ($name !== '') ? $name : 'unknown';
+	}
+
+	/** One journal line, capped on the plane as the node caps it. */
+	const UNIT_JOURNAL_MAX_LINE = 2000;
+	/** Directories reported from a disk_usage walk; the script caps at the same figure. */
+	const DISK_USAGE_MAX_ENTRIES = 20;
+
+	/**
+	 * A disk_usage job's result: where the space went.
+	 *
+	 * Sizes only, and the shape enforces it — every entry is one path and one
+	 * byte count, and nothing else the node sent is kept. Paths are reduced to
+	 * the same safe set the script already reduced them to, so a directory
+	 * named in a way that would break a page cannot.
+	 */
+	private static function process_disk_usage($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		$text = (is_array($data) && isset($data['output'])) ? (string)$data['output'] : '';
+		$decoded = ($text !== '') ? json_decode(trim($text), true) : null;
+		if (!is_array($decoded) || !isset($decoded['tree'])) {
+			$job->set('mjb_result', json_encode(['read' => false]));
+			$job->save();
+			return;
+		}
+
+		$fs = is_array($decoded['filesystem'] ?? null) ? $decoded['filesystem'] : [];
+		$tree = is_array($decoded['tree'] ?? null) ? $decoded['tree'] : [];
+
+		$job->set('mjb_result', json_encode([
+			'read'       => true,
+			'filesystem' => [
+				'path'        => self::disk_usage_path($fs['path'] ?? ''),
+				'used_bytes'  => self::host_report_count($fs['used_bytes'] ?? null),
+				'total_bytes' => self::host_report_count($fs['total_bytes'] ?? null),
+				'avail_bytes' => self::host_report_count($fs['avail_bytes'] ?? null),
+			],
+			'tree' => [
+				'path'        => self::disk_usage_path($tree['path'] ?? ''),
+				'total_bytes' => self::host_report_count($tree['total_bytes'] ?? null),
+				'partial'     => !empty($tree['partial']),
+				'entries'     => self::disk_usage_entries($tree['entries'] ?? null),
+			],
+			'machine'      => self::disk_usage_entries($decoded['machine'] ?? null),
+			'generated_at' => self::host_report_count($decoded['generated_at'] ?? null),
+		]));
+		$job->save();
+	}
+
+	/** A path as the walker bounds it: safe characters, capped, never empty. */
+	private static function disk_usage_path($v) {
+		if (!is_string($v)) { return 'unknown'; }
+		$p = substr(preg_replace('#[^A-Za-z0-9._/@:-]#', '', $v), 0, 200);
+		return ($p !== '') ? $p : 'unknown';
+	}
+
+	/** A list of {path, bytes}, capped, with anything else in it dropped. */
+	private static function disk_usage_entries($in) {
+		if (!is_array($in)) { return []; }
+		$out = [];
+		foreach (array_slice(array_values($in), 0, self::DISK_USAGE_MAX_ENTRIES) as $e) {
+			if (!is_array($e)) { continue; }
+			$path = self::disk_usage_path($e['path'] ?? '');
+			if ($path === 'unknown') { continue; }
+			// "absent" is an answer — the directory is not there — and it is
+			// the one non-numeric value a size may take.
+			$bytes = (isset($e['bytes']) && $e['bytes'] === 'absent')
+				? 'absent' : self::host_report_count($e['bytes'] ?? null);
+			$out[] = ['path' => $path, 'bytes' => $bytes];
+		}
+		return $out;
+	}
+
 	private static function process_host_report($job) {
 		$output = $job->get('mjb_output') ?: '';
 		$data = self::extract_api_envelope_data($output);
@@ -2255,7 +2383,15 @@ HTML;
 		$disk = self::host_report_gauge($in['disk'] ?? null);
 		$path = (isset($in['disk']['path']) && is_string($in['disk']['path']))
 			? substr(preg_replace('#[^A-Za-z0-9._/-]#', '', $in['disk']['path']), 0, 200) : '';
-		$disk = ['path' => ($path !== '' ? $path : 'unknown')] + $disk;
+		// avail is NOT total minus used: a filesystem holds blocks back for
+		// root, and the subtraction overstates what a writer can use by exactly
+		// the amount that matters when a disk is filling. The node reports the
+		// real figure; a node too old to report it says unknown, which reads
+		// differently from zero.
+		$disk = ['path' => ($path !== '' ? $path : 'unknown')] + $disk + [
+			'avail_bytes'     => self::host_report_count($in['disk']['avail_bytes'] ?? null),
+			'inodes_used_pct' => self::host_report_percent($in['disk']['inodes_used_pct'] ?? null),
+		];
 
 		$reboot = $in['reboot_required'] ?? null;
 		$reboot = is_bool($reboot) ? $reboot : 'unknown';
@@ -2265,6 +2401,7 @@ HTML;
 			'expected_units'               => $expected,
 			'fail2ban_jails'               => $jails,
 			'ssh_auth_failures_24h'        => self::host_report_count($in['ssh_auth_failures_24h'] ?? null),
+			'kernel_events_24h'            => self::host_report_kernel_events($in['kernel_events_24h'] ?? null),
 			'sshd'                         => $sshd,
 			'disk'                         => $disk,
 			'memory'                       => self::host_report_gauge($in['memory'] ?? null),
@@ -2273,6 +2410,34 @@ HTML;
 			'unattended_upgrades_last_run' => self::host_report_count($in['unattended_upgrades_last_run'] ?? null),
 			'generated_at'                 => self::host_report_count($in['generated_at'] ?? null),
 		];
+	}
+
+	/**
+	 * A percentage as the script bounds it: 0..100, or unknown. A filesystem
+	 * that does not count inodes (btrfs, zfs) has no figure at all, which is
+	 * unknown and not zero.
+	 */
+	private static function host_report_percent($v) {
+		if (!is_int($v) && !(is_string($v) && ctype_digit($v))) { return 'unknown'; }
+		$n = (int)$v;
+		return ($n >= 0 && $n <= 100) ? $n : 'unknown';
+	}
+
+	/**
+	 * The three kernel-event counts, or the string unknown for the whole
+	 * object. COUNTS ONLY — the node counts the matching journal lines and
+	 * discards them, so there is no text here to bound, only three numbers.
+	 *
+	 * A machine with no kernel journal (a container) answers unknown, which is
+	 * the honest answer and reads differently from three zeros.
+	 */
+	private static function host_report_kernel_events($in) {
+		if (!is_array($in)) { return 'unknown'; }
+		$out = [];
+		foreach (['oom', 'enospc', 'io_error'] as $k) {
+			$out[$k] = self::host_report_count($in[$k] ?? null);
+		}
+		return $out;
 	}
 
 	/** A unit or jail name as the script bounds it: safe characters, capped. */

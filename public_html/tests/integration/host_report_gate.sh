@@ -49,7 +49,7 @@ jv() {
     ' "$1" "$2" "${3:-value}"
 }
 
-KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,sshd,disk,memory,swap,reboot_required,unattended_upgrades_last_run,generated_at"
+KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,disk,memory,swap,reboot_required,unattended_upgrades_last_run,generated_at"
 
 echo "=== The real run on this box, unprivileged ==="
 if [ "$(id -u)" = "0" ]; then
@@ -73,6 +73,10 @@ chk "ssh auth failures without journal access are unknown" "$(jv "$T/real.json" 
 chk "sshd posture without root is unknown" "$(jv "$T/real.json" sshd.password_authentication)/$(jv "$T/real.json" sshd.permit_root_login)" "unknown/unknown"
 chk "disk path is this site's web root" "$(jv "$T/real.json" disk.path)" "$ROOT/public_html"
 chk "disk figures are integers" "$(jv "$T/real.json" disk.used_bytes type)/$(jv "$T/real.json" disk.total_bytes type)" "integer/integer"
+chk "disk reports what a writer can use, not total minus used" "$(jv "$T/real.json" disk.avail_bytes type)" "integer"
+chk "avail is below total minus used (the root reserve is not free space)" "$( a=$(jv "$T/real.json" disk.avail_bytes); u=$(jv "$T/real.json" disk.used_bytes); t=$(jv "$T/real.json" disk.total_bytes); [ "$a" -le $((t-u)) ]; echo $? )" "0"
+chk "inode use is a percentage or unknown" "$( v=$(jv "$T/real.json" disk.inodes_used_pct); [ "$v" = unknown ] || { [ "$v" -ge 0 ] && [ "$v" -le 100 ]; }; echo $? )" "0"
+chk "kernel events are three counts or unknown" "$( t=$(jv "$T/real.json" kernel_events_24h type); [ "$t" = object ] && [ "$(jv "$T/real.json" kernel_events_24h keys)" = "oom,enospc,io_error" ] || [ "$(jv "$T/real.json" kernel_events_24h)" = unknown ]; echo $? )" "0"
 chk "memory figures are integers" "$(jv "$T/real.json" memory.used_bytes type)/$(jv "$T/real.json" memory.total_bytes type)" "integer/integer"
 chk "swap figures are integers" "$(jv "$T/real.json" swap.used_bytes type)/$(jv "$T/real.json" swap.total_bytes type)" "integer/integer"
 chk "reboot_required is a boolean" "$(jv "$T/real.json" reboot_required type)" "boolean"
@@ -151,7 +155,10 @@ chk "a hostile jail name is reduced to safe characters" "$(jv "$T/root.json" fai
 chk "ssh auth failures are a count of the matching lines" "$(jv "$T/root.json" ssh_auth_failures_24h)" "4"
 chk "sshd posture as sshd -T prints it" "$(jv "$T/root.json" sshd.password_authentication)/$(jv "$T/root.json" sshd.permit_root_login)" "no/prohibit-password"
 chk "the banned IP list never reaches the object" "$(grep -c '203.0.113.9\|198.51.100' "$T/root.json")" "0"
-chk "no username from the journal reaches the object" "$(grep -c 'eve\|mallory\|ops' "$T/root.json")" "0"
+# Anchored to word edges on purpose: an unanchored 'eve' also matches the key
+# name kernel_events_24h, which would make this check pass or fail for a reason
+# that has nothing to do with a username.
+chk "no username from the journal reaches the object" "$(grep -c -E '(^|[^a-z])(eve|mallory|ops)([^a-z]|$)' "$T/root.json")" "0"
 chk "no quote, semicolon, dollar or angle bracket from a planted name survives" "$(grep -c '\$(\|<b>\|;' "$T/root.json")" "0"
 # The planted unit name is the 26th line and falls outside the cap; plant it
 # first to prove the sanitiser rather than the cap.
@@ -197,8 +204,12 @@ chk "no systemd: disk is still measured" "$(jv "$T/nosd.json" disk.total_bytes t
 
 echo "=== Static pins ==="
 chk "every command runs under the per-command timeout" "$(grep -c '^run() { timeout "\$CMD_TIMEOUT"' "$SCRIPT")" "1"
-chk "the journal is only ever counted (grep -c), never printed" "$(grep -c 'grep -c -E' "$SCRIPT")" "1"
-chk "journalctl appears once, under run" "$(grep -c 'run journalctl --system' "$SCRIPT")" "1"
+# Four counts, and every one of them is a count: the SSH auth failures, and the
+# three kernel events. A journal read that is not piped into grep -c is a
+# journal read whose text could reach the object.
+chk "the journal is only ever counted (grep -c), never printed" "$(grep -c 'grep -c -E' "$SCRIPT")" "4"
+chk "journalctl appears twice, under run both times" "$(grep -c 'run journalctl --system' "$SCRIPT")" "2"
+chk "the kernel read is the kernel ring only (-k)" "$(grep -c 'run journalctl --system -k' "$SCRIPT")" "1"
 chk "the list cap is 20" "$(grep -c '^MAX_LIST=20' "$SCRIPT")" "1"
 chk "the name cap is 64" "$(grep -c '^MAX_NAME=64' "$SCRIPT")" "1"
 chk "sshd is invoked once, read-only (-T)" "$(grep -o 'run sshd[^)]*' "$SCRIPT" | sort -u | tr '\n' ' ')" "run sshd -T "

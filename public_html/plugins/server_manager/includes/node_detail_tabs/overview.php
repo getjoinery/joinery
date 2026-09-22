@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.19 - the Host card asks the two new questions: Why? beside a failed unit
+ *                 (unit_journal) and What is using it? beside the disk figures (disk_usage);
+ *                 the Machine box shows free space, inode use and any kernel event the node counted
  * @version 1.18 - the Logs box: read a log file or a log table from a node whose agent ships site_log /
  *                log_table_tail; shown disabled with the owner's reason when the node last reported
  *                its log-access switch off (specs/agent_log_access.md §4)
@@ -74,6 +77,10 @@
 </form>
 <form id="run_plugin_installers_form" method="post" action="<?php echo $base_url; ?>" hidden>
 	<input type="hidden" name="action" value="run_plugin_installers">
+	<?php echo SmAdminCsrf::field(); ?>
+</form>
+<form id="nodeActionDiskUsage" method="post" action="<?php echo $base_url; ?>" hidden>
+	<input type="hidden" name="action" value="disk_usage">
 	<?php echo SmAdminCsrf::field(); ?>
 </form>
 <form id="host_converge_form" method="post" action="<?php echo $base_url; ?>" hidden>
@@ -755,8 +762,29 @@
 			} elseif (count($hr['failed_units']) === 0) {
 				echo '<div class="text-success">none</div>';
 			} else {
+				// A failed unit the plane can name and could not ask about was
+				// the whole reason unit_journal exists. The button is offered
+				// for a unit on the compiled list; anything else is named
+				// without one, because the node would refuse it.
+				$can_ask = JobCommandBuilder::has_primitive($node, 'unit_journal')
+					&& JobCommandBuilder::log_access_refusal($node) === null;
 				echo '<ul class="list-unstyled mb-0 text-danger">';
-				foreach ($hr['failed_units'] as $unit) { echo '<li>' . $hr_str($unit) . '</li>'; }
+				foreach ($hr['failed_units'] as $unit) {
+					echo '<li>' . $hr_str($unit);
+					$bare = preg_replace('/\.service$/', '', (string)$unit);
+					if ($can_ask && array_key_exists($bare, JobCommandBuilder::UNIT_JOURNAL_UNITS)) {
+						echo ' <button type="submit" form="nodeActionUnitJournal_' . $hr_str($bare)
+							. '" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
+							. ' title="Read this unit\'s state, its exit status and the last 100 lines of its journal, redacted on the node">Why?</button>';
+						echo '<form id="nodeActionUnitJournal_' . $hr_str($bare) . '" method="post" action="'
+							. htmlspecialchars($base_url, ENT_QUOTES, 'UTF-8') . '" hidden>'
+							. '<input type="hidden" name="action" value="unit_journal">'
+							. '<input type="hidden" name="unit" value="' . $hr_str($bare) . '">'
+							. '<input type="hidden" name="lines" value="100">'
+							. SmAdminCsrf::field() . '</form>';
+					}
+					echo '</li>';
+				}
 				echo '</ul>';
 				if (count($hr['failed_units']) >= JobResultProcessor::HOST_REPORT_MAX_LIST) {
 					echo '<small class="text-muted">first ' . (int)JobResultProcessor::HOST_REPORT_MAX_LIST . ' only</small>';
@@ -806,7 +834,44 @@
 				$line = (is_int($used) && is_int($total) && $total > 0)
 					? JobResultProcessor::format_size($used) . ' of ' . JobResultProcessor::format_size($total)
 					: 'unknown';
-				echo '<div>' . $hr_str($label) . ': ' . $hr_str($line) . '</div>';
+				echo '<div>' . $hr_str($label) . ': ' . $hr_str($line);
+				// Free space is the figure a filling disk is judged by, and it
+				// is the node's own avail rather than total minus used: the
+				// difference is the root reserve, which is exactly the part
+				// that is not there when it matters.
+				if ($key === 'disk' && is_int($hr['disk']['avail_bytes'])) {
+					$thin = is_int($total) && $total > 0 && ($hr['disk']['avail_bytes'] < $total * 0.10);
+					echo ' <span class="' . ($thin ? 'text-warning' : 'text-muted') . '">('
+						. $hr_str(JobResultProcessor::format_size($hr['disk']['avail_bytes'])) . ' free)</span>';
+				}
+				echo '</div>';
+			}
+			if (is_int($hr['disk']['inodes_used_pct'])) {
+				echo '<div class="' . ($hr['disk']['inodes_used_pct'] >= 90 ? 'text-warning' : '')
+					. '">Inodes used: ' . $hr_str($hr['disk']['inodes_used_pct']) . '%</div>';
+			}
+			// The three kernel events, and the reason this card carries them:
+			// a write that failed is explained by one of them, and all three
+			// are counts — nothing from a kernel message is quoted.
+			if (is_array($hr['kernel_events_24h'])) {
+				$ke = $hr['kernel_events_24h'];
+				$any = false;
+				foreach ($ke as $n) { if (is_int($n) && $n > 0) { $any = true; } }
+				if ($any) {
+					$bits = [];
+					foreach (['oom' => 'out of memory', 'enospc' => 'disk full', 'io_error' => 'I/O errors'] as $k => $word) {
+						if (is_int($ke[$k]) && $ke[$k] > 0) { $bits[] = $ke[$k] . ' ' . $word; }
+					}
+					echo '<div class="text-danger">Kernel, last 24h: ' . $hr_str(implode(', ', $bits)) . '</div>';
+				} else {
+					echo '<div class="text-muted">Kernel, last 24h: nothing</div>';
+				}
+			}
+			if (JobCommandBuilder::has_primitive($node, 'disk_usage')) {
+				echo '<div class="mt-2"><button type="submit" form="nodeActionDiskUsage"'
+					. ' class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
+					. ' title="The biggest directories in the site tree and the usual machine directories — sizes only">'
+					. 'What is using it?</button></div>';
 			}
 			echo '</div></div>';
 

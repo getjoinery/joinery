@@ -6,6 +6,9 @@
 # sshd's password and root-login posture, disk, memory, swap, whether a reboot
 # is pending, and when unattended-upgrades last ran.
 #
+# Version: 1.2 - disk carries avail_bytes and inodes_used_pct (what a writer can
+#                actually use, and the other way a disk fills); kernel_events_24h
+#                counts the three kernel events that explain a write that failed.
 # Version: 1.1 - ssh_auth_failures_24h is unknown, not 0, where systemd does
 #                not answer: a container has no system journal to count from.
 # Version: 1.0 - the host_report observe word of specs/agent_tier1_recipes.md.
@@ -27,9 +30,10 @@
 #     is capped and reduced to a safe character set, so the agent's output cap
 #     is never the thing that bounds this report and nothing a unit or jail
 #     was named can break the JSON.
-#   - COUNTS ONLY for SSH authentication failures. No usernames, no source
-#     addresses, ever: the journal lines are counted and discarded. The spec
-#     records this as the line (agent_tier1_recipes.md, "Accepted risk").
+#   - COUNTS ONLY for SSH authentication failures and for kernel events. No
+#     usernames, no source addresses, no kernel message text, ever: the journal
+#     lines are counted and discarded. The spec records this as the line
+#     (agent_tier1_recipes.md, "Accepted risk").
 #   - READ ONLY. Every command here is a read: systemctl show and list-units,
 #     fail2ban-client status, sshd -T, journalctl, df, /proc, stat. The sshd
 #     posture is reported, never written.
@@ -196,13 +200,24 @@ emit_sshd() {
 # ---------------------------------------------------------------------------
 # disk, memory, swap
 # ---------------------------------------------------------------------------
+# avail is NOT total minus used. A filesystem keeps blocks back for root (5% by
+# default on ext4 — 2.4 GiB on a 48 GiB disk), so the subtraction overstates
+# what a writer can use by exactly the amount that matters when a disk is
+# filling. df knows the real figure; it is reported rather than inferred.
+#
+# inodes_used_pct is the other way a disk fills: a table with no free inodes
+# refuses writes while df shows space. A filesystem that does not count inodes
+# (btrfs, zfs) prints "-" for it, which is unknown, not zero.
 emit_disk() {
-    local line used total
-    line="$(run df -B1 --output=used,size "$WEB_ROOT" | tail -n 1)"
-    read -r used total <<< "$line"
-    printf '{"path":%s,"used_bytes":%s,"total_bytes":%s}' \
+    local line used total avail ipct
+    line="$(run df -B1 --output=used,size,avail "$WEB_ROOT" | tail -n 1)"
+    read -r used total avail <<< "$line"
+    ipct="$(run df -i --output=ipcent "$WEB_ROOT" | tail -n 1)"
+    ipct="${ipct//[^0-9]/}"
+    printf '{"path":%s,"used_bytes":%s,"total_bytes":%s,"avail_bytes":%s,"inodes_used_pct":%s}' \
         "\"$(printf '%s' "$WEB_ROOT" | tr -cd 'A-Za-z0-9._/-' | head -c 200)\"" \
-        "$(json_num_or_unknown "${used:-}")" "$(json_num_or_unknown "${total:-}")"
+        "$(json_num_or_unknown "${used:-}")" "$(json_num_or_unknown "${total:-}")" \
+        "$(json_num_or_unknown "${avail:-}")" "$(json_num_or_unknown "${ipct:-}")"
 }
 
 meminfo_kb() { awk -v k="$1" '$1==k":" {print $2; exit}' /proc/meminfo 2>/dev/null; }
@@ -220,6 +235,35 @@ emit_swap() {
     total="$(meminfo_kb SwapTotal)"; free="$(meminfo_kb SwapFree)"
     [[ "$total" =~ ^[0-9]+$ && "$free" =~ ^[0-9]+$ ]] && used=$(( total - free ))
     printf '{"used_bytes":%s,"total_bytes":%s}' "$(kb_to_bytes_or_unknown "$used")" "$(kb_to_bytes_or_unknown "$total")"
+}
+
+# ---------------------------------------------------------------------------
+# Kernel events, last 24 hours: THREE COUNTS and nothing else.
+#
+# The three things that make a write fail, in the kernel's own words: the OOM
+# killer ran, a filesystem had no space, or the device errored. Each is a
+# number; the matched lines are counted and discarded, exactly as the SSH
+# figure above is, so nothing from a kernel message — a path, a process name,
+# an address — ever reaches the object.
+#
+# Why it earns its place: on 2026-09-22 a node filled its disk for fifteen
+# minutes, took PostgreSQL and the man-page index down with it, and freed the
+# space again on the way out. Every gauge read normal afterwards. One of these
+# three numbers would have named it.
+#
+# -k is the kernel ring. A container has none: journalctl exits non-zero and
+# the whole object is unknown, which is the same signal the unit states use.
+# ---------------------------------------------------------------------------
+emit_kernel_events() {
+    local lines oom enospc io
+    run systemctl show -p Version --value >/dev/null || { printf '"unknown"'; return; }
+    lines="$(run journalctl --system -k --since "24 hours ago" --no-pager -o cat)" \
+        || { printf '"unknown"'; return; }
+    oom="$(printf '%s\n' "$lines" | grep -c -E 'Out of memory: Kill|oom-kill:|oom_reaper:')"
+    enospc="$(printf '%s\n' "$lines" | grep -c -E 'No space left on device')"
+    io="$(printf '%s\n' "$lines" | grep -c -E 'I/O error|Buffer I/O error|EXT4-fs error|Remounting filesystem read-only')"
+    printf '{"oom":%s,"enospc":%s,"io_error":%s}' \
+        "$(json_num_or_unknown "$oom")" "$(json_num_or_unknown "$enospc")" "$(json_num_or_unknown "$io")"
 }
 
 # ---------------------------------------------------------------------------
@@ -247,6 +291,7 @@ printf '"failed_units":%s,' "$(emit_failed_units)"
 printf '"expected_units":%s,' "$(emit_expected_units)"
 printf '"fail2ban_jails":%s,' "$(emit_fail2ban_jails)"
 printf '"ssh_auth_failures_24h":%s,' "$(emit_ssh_auth_failures)"
+printf '"kernel_events_24h":%s,' "$(emit_kernel_events)"
 printf '"sshd":%s,' "$(emit_sshd)"
 printf '"disk":%s,' "$(emit_disk)"
 printf '"memory":%s,' "$(emit_memory)"

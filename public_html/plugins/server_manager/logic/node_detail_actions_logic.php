@@ -19,6 +19,9 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.31 - unit_journal and disk_usage: the Why? button beside a failed unit and the disk
+ *                 button on the Host card post here; the unit is checked against the compiled list
+ *                 in the builder, and disk_usage takes nothing at all
  * @version 1.30 - site_log and log_table_tail: the Logs forms on the overview post here; the picks are
  *                bounded by JobCommandBuilder's mirrored lists and the node refuses again on its own
  *                (specs/agent_log_access.md §4)
@@ -208,6 +211,19 @@ class NodeDetailActions {
 				$built = JobCommandBuilder::build_log_table_tail($node,
 					(string)($_POST['table'] ?? ''), (int)($_POST['rows'] ?? 50));
 				$job = ManagementJob::createFromBuild($node->key, 'log_table_tail', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'unit_journal': {
+				$built = JobCommandBuilder::build_unit_journal($node,
+					(string)($_POST['unit'] ?? ''), (int)($_POST['lines'] ?? 100));
+				$job = ManagementJob::createFromBuild($node->key, 'unit_journal', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'disk_usage': {
+				$built = JobCommandBuilder::build_disk_usage($node);
+				$job = ManagementJob::createFromBuild($node->key, 'disk_usage', $built, null, $uid);
 				return self::jobUrl($job);
 			}
 
