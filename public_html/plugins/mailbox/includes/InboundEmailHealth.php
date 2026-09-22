@@ -20,6 +20,9 @@
  * checkRelayReachable is a pinned ping; the two provider
  * checks are no-ops. The check list always matches the chosen path.
  *
+ * @version 1.20 - checkSearchIndexStorage() also counts the File era's index bytes no File
+ *                 holds any more (a leaked blob, or a file no row names), and the check is
+ *                 reported to a management node (fleet_report in plugin.json)
  * @version 1.19 - checkSearchIndexStorage(): the search index is one file per owner,
  *                 and a count that says otherwise is named before a disk fills
  *                 (specs/mailbox_search_index_blob_leak.md)
@@ -416,8 +419,15 @@ class InboundEmailHealth {
      * (the shape this replaced, where every persist wrote a new one and relied
      * on deleting the last — on one node that delete failed for ten weeks and
      * filled the disk), and a file in the index directory that the sweep would
-     * take. Nothing anywhere asserted a count before, which is why ten weeks
-     * passed; this is that assertion.
+     * take. A third is what the File era can leave even after its rows are
+     * gone: index bytes in the private upload directory that no File holds (a
+     * blob whose reference leaked, or a file no row names at all). Nothing
+     * anywhere asserted a count before, which is why ten weeks passed; this is
+     * that assertion.
+     *
+     * The same answer reaches a management node: plugin.json marks this check
+     * fleet_report, so the hourly plugin health report carries it to the
+     * node's status.
      *
      * @throws ProvisioningCheckFailed naming what is there to be reclaimed.
      */
@@ -431,6 +441,7 @@ class InboundEmailHealth {
         $file_rows = (int)$stmt->fetchColumn();
 
         $sweep = InboundMailboxSearchIndex::sweepPersistedIndexes(true);
+        $legacy = InboundMailboxSearchIndex::sweepLegacyBlobs(true);
         $bytes = (int)$sweep['bytes'];
         $size = $bytes >= 1048576 ? round($bytes / 1048576, 1) . ' MB'
             : ($bytes >= 1024 ? round($bytes / 1024) . ' KB' : $bytes . ' bytes');
@@ -445,11 +456,17 @@ class InboundEmailHealth {
             $problems[] = $sweep['removed'] . ' stray file' . ($sweep['removed'] === 1 ? '' : 's')
                 . ' in ' . MailboxIndex::blobDir() . ': ' . implode(', ', array_map('basename', $sweep['paths']));
         }
+        if ($legacy['removed'] > 0) {
+            $problems[] = $legacy['removed'] . ' search-index cop' . ($legacy['removed'] === 1 ? 'y' : 'ies')
+                . ' from before the move that no file record holds any more ('
+                . round($legacy['bytes'] / 1048576, 1) . ' MiB in the upload directory): '
+                . implode(', ', $legacy['names']);
+        }
         if (count($problems)) {
             throw new ProvisioningCheckFailed(implode('; ', $problems)
                 . '. The persisted indexes hold ' . $size . '. The mailbox index sweep '
-                . '(Retention) removes the stray files; the file records are reclaimed with '
-                . 'File::permanent_delete().');
+                . '(Retention) removes the stray files and the unheld copies; the file records '
+                . 'are reclaimed with File::permanent_delete().');
         }
     }
 

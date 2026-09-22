@@ -1,7 +1,7 @@
 {
     "name": "Mailbox",
     "description": "Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS",
-    "version": "1.119.1",
+    "version": "1.120.0",
     "author": "Joinery",
     "license": "PolyForm-Noncommercial-1.0.0",
     "status": "stable",
@@ -123,11 +123,12 @@
         {
             "key": "search_index_storage",
             "label": "Sealed mailbox search index is one file per owner",
-            "details": "Each mailbox owner's persisted search index is one sealed file at one path, so a second copy has no name to take. Fails naming any file record left from the shape this replaced (where every persist wrote a new one and relied on deleting the last) and any stray file in the index directory, with what the indexes occupy. The mailbox index sweep under Retention removes the stray files.",
+            "details": "Each mailbox owner's persisted search index is one sealed file at one path, so a second copy has no name to take. Fails naming any file record left from the shape this replaced (where every persist wrote a new one and relied on deleting the last), any copy from that shape that no file record holds any more, and any stray file in the index directory, with what the indexes occupy. The mailbox index sweep under Retention removes the stray files and the unheld copies. Reported to a management node, where a failure fails the node's health.",
             "check": {
                 "type": "code",
                 "call": "InboundEmailHealth::checkSearchIndexStorage"
-            }
+            },
+            "fleet_report": true
         },
         {
             "key": "content_spam_scanner",

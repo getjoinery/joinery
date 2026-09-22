@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.22 - a Plugin Checks card: each plugin check the node records for fleet reporting,
+ *                 naming any that does not pass (the same list that fails the node's badge)
  * @version 1.21 - a Clear button beside each failed unit on the compiled list (reset_failed_unit),
  *                 with a confirm that says what it does and does not do
  * @version 1.20 - the Logs picker offers what this node's agent will answer about
@@ -596,6 +598,39 @@
 				}
 			} else {
 				echo '<div class="mt-1"><span class="badge bg-success">All readable</span></div>';
+			}
+			echo '</div></div>';
+		}
+
+		// Plugin checks the node records for fleet reporting (plugin.json
+		// fleet_report). One that does not pass fails the node's badge; the
+		// reason is the node's own sentence, so it is escaped like everything
+		// else the node says.
+		if (isset($status_data['plugin_checks']['checks']) && is_array($status_data['plugin_checks']['checks'])) {
+			$pc_failing = JobCommandBuilder::plugin_checks_failing($status_data);
+			$pc_total = count($status_data['plugin_checks']['checks']);
+			echo '<div class="col-md-6 col-xl-4">';
+			echo '<div class="border rounded p-3 h-100">';
+			echo '<div class="text-muted small text-uppercase">Plugin Checks</div>';
+			if (count($pc_failing)) {
+				echo '<div class="mt-1"><span class="badge bg-danger">' . count($pc_failing) . ' not passing</span></div>';
+				foreach ($pc_failing as $pc) {
+					echo '<div class="small mt-2"><strong>' . htmlspecialchars($pc['plugin'] . ': ' . ($pc['label'] !== '' ? $pc['label'] : $pc['key']))
+						. '</strong> (' . htmlspecialchars($pc['state']) . ')';
+					if ($pc['reason'] !== '') {
+						echo '<div class="text-muted" style="overflow-wrap:anywhere">' . htmlspecialchars($pc['reason']) . '</div>';
+					}
+					echo '</div>';
+				}
+			} elseif ($pc_total > 0) {
+				echo '<div class="mt-1"><span class="badge bg-success">All ' . (int)$pc_total . ' passing</span></div>';
+			} else {
+				echo '<div class="mt-1"><span class="badge bg-secondary">None declared</span></div>';
+			}
+			$pc_checked = (string)($status_data['plugin_checks']['checked'] ?? '');
+			if ($pc_checked !== '' && strtotime($pc_checked . ' UTC')) {
+				echo '<div class="text-muted small mt-2">Checked on the node: ' . htmlspecialchars(LibraryFunctions::time_ago_or_time(
+					substr($pc_checked, 0, 19), 'UTC', $session->get_timezone(), 'M j, g:i A')) . '</div>';
 			}
 			echo '</div></div>';
 		}

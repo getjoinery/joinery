@@ -3,6 +3,7 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.27 - the result sweep reads its terminal statuses from JobResultProcessor::TERMINAL_STATUSES
  * @version 1.26 - the readiness alert's warning clause no longer lists two kinds when a card can carry a third
  *                 (offloaded files sealed to a retired recovery key)
  * @version 1.25 - a host group is a Docker box: its own agent node in the header, its containers as the
@@ -136,18 +137,21 @@ $db = DbConnector::get_instance()->get_db_link();
 // handle — the Go agent completes jobs by writing the DB directly, so without
 // this an unwatched job is never reconciled. The type list comes from the
 // processor itself, so relay/SSL/backup results aren't silently skipped (P-17).
+// The same rule JobResultProcessor::process_if_due applies to one job.
 $processable  = JobResultProcessor::processable_types();
 $placeholders = implode(',', array_fill(0, count($processable), '?'));
+$terminal     = JobResultProcessor::TERMINAL_STATUSES;
+$status_marks = implode(',', array_fill(0, count($terminal), '?'));
 $q = $db->prepare(
 	"SELECT j.mjb_management_job_id FROM mjb_management_jobs j " .
 	"JOIN mgn_managed_nodes n ON n.mgn_managed_node_id = j.mjb_mgn_managed_node_id " .
-	"WHERE j.mjb_status IN ('completed','failed') " .
+	"WHERE j.mjb_status IN ($status_marks) " .
 	"  AND j.mjb_job_type IN ($placeholders) " .
 	"  AND j.mjb_result IS NULL " .
 	"  AND j.mjb_delete_time IS NULL " .
 	"  AND n.mgn_delete_time IS NULL"
 );
-$q->execute($processable);
+$q->execute(array_merge($terminal, $processable));
 foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
 	$unprocessed_job = new ManagementJob($row['mjb_management_job_id'], TRUE);
 	JobResultProcessor::process($unprocessed_job);

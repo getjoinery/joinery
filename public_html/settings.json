@@ -2718,6 +2718,12 @@
       "helptext": "Timestamp of the last scheduled-task cron tick. Written by the runner; read by the health display."
     },
     {
+      "name": "plugin_fleet_report",
+      "default": "",
+      "managed": true,
+      "helptext": "The last result of every active plugin's provisioning checks declared fleet_report, as JSON. Written hourly by the Plugin health report task; read by a management node with the rest of this node's status."
+    },
+    {
       "name": "scheduled_tasks_cron_observed_interval",
       "default": "300",
       "managed": true,

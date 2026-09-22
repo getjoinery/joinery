@@ -5,6 +5,9 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.36 - process_if_due(): the one rule for folding a single finished job (terminal, handled type,
+ *                unprocessed, live node), used by the agent channel as a result arrives and by the job page;
+ *                TERMINAL_STATUSES names completed and failed once
  * @version 1.35 - process_reset_failed_unit: the unit's state before and after, and a host_report
  *                queued behind a reset the node accepted, so the Host card re-measures rather than
  *                showing the cleared unit until the next report
@@ -100,8 +103,12 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_
 class JobResultProcessor {
 
 	/**
-	 * Process a completed job. Dispatches to type-specific handler if one exists.
+	 * The terminal statuses a result is folded for. A failed job carries a
+	 * result too — a verify or a backup that failed is exactly what the node
+	 * card must say — and a node's refusal is recorded as 'failed'.
 	 */
+	const TERMINAL_STATUSES = ['completed', 'failed'];
+
 	/**
 	 * Every job type this processor can reconcile — i.e. each type with a
 	 * process_<type> handler. The dashboard sweep derives its list from this so
@@ -331,6 +338,35 @@ class JobResultProcessor {
 		return ($age === null) || ($age > self::STATUS_STALE_AFTER_SECONDS);
 	}
 
+	/**
+	 * Fold a job's result if it is due: terminal, of a type this processor
+	 * handles, not yet processed (no mjb_result), and on a node that has not
+	 * been removed. The one rule every caller that meets a single finished
+	 * job uses — the agent channel as a result arrives, and the job page — and
+	 * the same rule the dashboard sweep applies as a query over all of them.
+	 *
+	 * @return bool whether it was processed
+	 */
+	public static function process_if_due($job) {
+		if (!in_array((string)$job->get('mjb_status'), self::TERMINAL_STATUSES, true)) { return false; }
+		if (!in_array((string)$job->get('mjb_job_type'), self::processable_types(), true)) { return false; }
+		if ($job->get('mjb_result')) { return false; }
+		$node_id = $job->get('mjb_mgn_managed_node_id');
+		if ($node_id) {
+			try {
+				$node = new ManagedNode($node_id, TRUE);
+			} catch (Exception $e) {
+				return false;
+			}
+			if ($node->get('mgn_delete_time')) { return false; }
+		}
+		self::process($job);
+		return true;
+	}
+
+	/**
+	 * Process a finished job. Dispatches to the type-specific handler if one exists.
+	 */
 	public static function process($job) {
 		$type = $job->get('mjb_job_type');
 		$method = 'process_' . $type;
@@ -348,7 +384,7 @@ class JobResultProcessor {
 			// and would re-process it on every render, forever. Handlers record
 			// their own richer shapes; this backstop covers every path that
 			// returns without recording.
-			if (in_array($job->get('mjb_status'), ['completed', 'failed'], true)
+			if (in_array($job->get('mjb_status'), self::TERMINAL_STATUSES, true)
 				&& !$job->get('mjb_result')) {
 				$job->set('mjb_result', json_encode(['status' => (string)$job->get('mjb_status')]));
 				$job->save();

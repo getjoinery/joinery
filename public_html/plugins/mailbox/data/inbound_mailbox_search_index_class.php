@@ -24,6 +24,8 @@
  * column goes once every node reports zero
  * (specs/mailbox_search_index_blob_leak.md WP7).
  *
+ * @version 1.5 - sweepLegacyBlobs(): the File era's index bytes that no File
+ *   row holds any more are counted and reclaimed by the same sweep
  * @version 1.4 - the persisted index is a path, not a File: permanent_delete()
  *   takes the file with the row, a deleted user takes both, and the sweep
  *   collects anything left behind (specs/mailbox_search_index_blob_leak.md)
@@ -175,6 +177,144 @@ class InboundMailboxSearchIndex extends SystemBase {
 		return $result;
 	}
 
+	/** A File-era index's stored name: the persist uploaded mailfts_{uid}.bin
+	 *  and the upload minted mailfts_{uid}_{token}.bin (a second token when the
+	 *  first collided). Nothing writes that shape any more. */
+	const LEGACY_BLOB_NAME = '/^mailfts_\\d+(_[A-Za-z0-9]+)+\\.bin$/';
+
+	/**
+	 * The File era's index bytes that nothing holds any more.
+	 *
+	 * Before the index moved to one path per owner, every persist uploaded a
+	 * private File, so its bytes landed in the private upload directory
+	 * (the upload_dir setting) under a FileBlob named mailfts_{uid}_{token}.bin.
+	 * Deleting those File rows reclaims their bytes; this finds what that
+	 * cannot reach, in the two shapes it can take:
+	 *
+	 *  - a blob row whose name is an index's and that no File and no file
+	 *    version references (its reference count leaked). It is released
+	 *    through FileBlob::release() until it reaches zero, which deletes the
+	 *    bytes wherever they are, local or bucket, and the row;
+	 *  - a file in the upload directory whose name is an index's and that no
+	 *    blob row and no File names at all. Nothing can reclaim it through a
+	 *    model, so it is unlinked.
+	 *
+	 * Anything younger than an hour is left alone: an upload stages its bytes
+	 * before it writes the rows that hold them. A name a live row holds is
+	 * never touched, whatever its age.
+	 *
+	 * @param bool $dry_run  count and name, remove nothing (the health check)
+	 * @return array  removed, bytes (of what was or would be removed), names
+	 */
+	public static function sweepLegacyBlobs($dry_run = false) {
+		require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
+
+		$result = array('removed' => 0, 'bytes' => 0, 'names' => array());
+		$db = DbConnector::get_instance()->get_db_link();
+		$has_table = function ($table) use ($db) {
+			$q = $db->prepare('SELECT to_regclass(?)');
+			$q->execute(array('public.' . $table));
+			return $q->fetchColumn() !== null;
+		};
+		if (!$has_table('fbb_file_blobs') || !$has_table('fil_files')) {
+			return $result;
+		}
+		$versions = $has_table('fvr_file_versions')
+			? ' AND NOT EXISTS (SELECT 1 FROM fvr_file_versions v WHERE v.fvr_fbb_file_blob_id = b.fbb_file_blob_id)'
+			: '';
+		$referenced = $db->prepare('SELECT 1 FROM fbb_file_blobs b WHERE b.fbb_file_blob_id = ?
+			AND (EXISTS (SELECT 1 FROM fil_files f WHERE f.fil_fbb_file_blob_id = b.fbb_file_blob_id)'
+			. ($versions !== '' ? ' OR EXISTS (SELECT 1 FROM fvr_file_versions v WHERE v.fvr_fbb_file_blob_id = b.fbb_file_blob_id)' : '')
+			. ')');
+
+		$seen = array();
+
+		// Blob rows nothing references. Soft-deleted File rows count as
+		// references: a File in the trash still owns its bytes.
+		$q = $db->query("SELECT b.fbb_file_blob_id, b.fbb_stored_name, b.fbb_size_bytes
+			  FROM fbb_file_blobs b
+			 WHERE b.fbb_stored_name LIKE 'mailfts\\_%'
+			   AND b.fbb_create_time < now() - interval '1 hour'
+			   AND NOT EXISTS (SELECT 1 FROM fil_files f WHERE f.fil_fbb_file_blob_id = b.fbb_file_blob_id)"
+			. $versions . '
+			 ORDER BY b.fbb_file_blob_id');
+		foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+			$name = (string)$row['fbb_stored_name'];
+			if (!preg_match(self::LEGACY_BLOB_NAME, $name)) {
+				continue;
+			}
+			$seen[$name] = true;
+			if ($dry_run) {
+				$result['removed']++;
+				$result['names'][] = $name;
+				$result['bytes'] += (int)$row['fbb_size_bytes'];
+				continue;
+			}
+			$blob_id = (int)$row['fbb_file_blob_id'];
+			try {
+				// One release per leaked reference; the last one reclaims. The
+				// referrer check is repeated before every release, so a row that
+				// takes the blob meanwhile stops the loop with its reference
+				// intact. A bound, so a count that keeps climbing cannot spin.
+				for ($i = 0; $i < 1000; $i++) {
+					$blob = new FileBlob($blob_id, TRUE);
+					if (!$blob->key || (int)$blob->get('fbb_reference_count') <= 0) {
+						break;
+					}
+					$referenced->execute(array($blob_id));
+					if ($referenced->fetchColumn()) {
+						break;
+					}
+					FileBlob::release($blob_id);
+				}
+				$left = new FileBlob($blob_id, TRUE);
+				if ($left->key) {
+					error_log('InboundMailboxSearchIndex: legacy index blob ' . $blob_id . ' (' . $name
+						. ') was not reclaimed: a row took it, or its references did not reach zero.');
+					continue;
+				}
+				$result['removed']++;
+				$result['names'][] = $name;
+				$result['bytes'] += (int)$row['fbb_size_bytes'];
+			} catch (Throwable $e) {
+				error_log('InboundMailboxSearchIndex: could not reclaim legacy index blob ' . $blob_id
+					. ' (' . $name . '): ' . $e->getMessage());
+			}
+		}
+
+		// Files on disk that no row names at all.
+		$dir = rtrim((string)Globalvars::get_instance()->get_setting('upload_dir'), '/');
+		if ($dir === '' || !is_dir($dir)) {
+			return $result;
+		}
+		$by_blob = $db->prepare('SELECT 1 FROM fbb_file_blobs WHERE fbb_stored_name = ? LIMIT 1');
+		$by_file = $db->prepare('SELECT 1 FROM fil_files WHERE fil_name = ? LIMIT 1');
+		$stale_before = time() - 3600;
+		foreach ((array)glob($dir . '/mailfts_*.bin') as $path) {
+			$name = basename($path);
+			if (!is_file($path) || !preg_match(self::LEGACY_BLOB_NAME, $name)
+					|| @filemtime($path) > $stale_before
+					|| isset($seen[$name])) {
+				continue;
+			}
+			$by_blob->execute(array($name));
+			$named = (bool)$by_blob->fetchColumn();
+			$by_file->execute(array($name));
+			if ($named || $by_file->fetchColumn()) {
+				continue; // a row holds it — the model owns its bytes
+			}
+			$size = (int)@filesize($path);
+			if ($dry_run || @unlink($path)) {
+				$result['removed']++;
+				$result['names'][] = $name;
+				$result['bytes'] += $size;
+			} else {
+				error_log('InboundMailboxSearchIndex: could not remove the legacy index file ' . $path . '.');
+			}
+		}
+		return $result;
+	}
+
 	/**
 	 * Passive-close safety net for the /dev/shm working copies of this index
 	 * (specs/implemented/inbound_email_encryption_at_rest.md § 6.4).
@@ -188,8 +328,9 @@ class InboundMailboxSearchIndex extends SystemBase {
 	 * Unconditional: a copy whose vault window has closed is plaintext nobody
 	 * asked for, so there is no window to wait out. $window is ignored.
 	 *
-	 * Sweeps sweepPersistedIndexes() in the same pass — one task, both places
-	 * a file belonging to this index can outlive what named it.
+	 * Sweeps sweepPersistedIndexes() and sweepLegacyBlobs() in the same pass —
+	 * one task, every place a file belonging to this index can outlive what
+	 * named it.
 	 *
 	 * @return array  removed, message
 	 */
@@ -198,12 +339,13 @@ class InboundMailboxSearchIndex extends SystemBase {
 		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 
 		$persisted = self::sweepPersistedIndexes();
+		$legacy = self::sweepLegacyBlobs();
 
 		$files = glob('/dev/shm/mailfts_*.sqlite');
 		if ($files === false || !count($files)) {
 			return array(
-				'removed' => $persisted['removed'],
-				'message' => self::sweepMessage(0, $persisted['removed']),
+				'removed' => $persisted['removed'] + $legacy['removed'],
+				'message' => self::sweepMessage(0, $persisted['removed'], $legacy),
 			);
 		}
 
@@ -221,19 +363,23 @@ class InboundMailboxSearchIndex extends SystemBase {
 		}
 
 		return array(
-			'removed' => $swept + $persisted['removed'],
-			'message' => self::sweepMessage($swept, $persisted['removed']),
+			'removed' => $swept + $persisted['removed'] + $legacy['removed'],
+			'message' => self::sweepMessage($swept, $persisted['removed'], $legacy),
 		);
 	}
 
-	/** What one sweep did, in the two places it can do anything. */
-	private static function sweepMessage($working_copies, $persisted) {
+	/** What one sweep did, in the three places it can do anything. */
+	private static function sweepMessage($working_copies, $persisted, array $legacy) {
 		$parts = array();
 		if ($working_copies > 0) {
 			$parts[] = $working_copies . ' orphaned working cop' . ($working_copies === 1 ? 'y' : 'ies');
 		}
 		if ($persisted > 0) {
 			$parts[] = $persisted . ' stray persisted ' . ($persisted === 1 ? 'index' : 'indexes');
+		}
+		if ($legacy['removed'] > 0) {
+			$parts[] = $legacy['removed'] . ' unheld file-era index ' . ($legacy['removed'] === 1 ? 'copy' : 'copies')
+				. ' (' . round($legacy['bytes'] / 1048576, 1) . ' MiB: ' . implode(', ', $legacy['names']) . ')';
 		}
 		return count($parts) ? implode(', ', $parts) : 'nothing to sweep';
 	}

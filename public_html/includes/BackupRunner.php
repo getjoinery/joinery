@@ -33,6 +33,11 @@
  * profile sweeps its own working directory by age, because the machine holding
  * the files is the only one that can.
  *
+ * @version 1.20 - a chain never spans a code-tree swap: the files engine names the tree its snapshot
+ *                describes (SNAR.tree) and the tree now on disk, and a difference — or no record —
+ *                starts a new chain (tree_changed); an engine that finds the tree swapped after the
+ *                decision fails the run rather than file a full inside the chain. The manifest
+ *                records why its chain started.
  * @version 1.19 - pre-flight headroom (specs/disk_headroom_and_unit_diagnosis.md §5): a chain or
  *                standalone run refuses before it writes anything when this disk cannot hold what the
  *                run lands locally, naming both figures; the refusal is a recorded failure
@@ -709,6 +714,37 @@ class BackupRunner {
 		}
 	}
 
+	/**
+	 * Does the snapshot describe the code tree now on disk? The files engine
+	 * writes the identity of the tree it archived beside the snapshot
+	 * (SNAR.tree) and is the one place that identity is computed — asked here
+	 * with --print-tree-id rather than recomputed, so the decision and the
+	 * engine can never disagree about what counts as the same tree. No record
+	 * is a no: a chain whose snapshot predates the record cannot show it spans
+	 * no swap, and an incremental across a swap cannot be extracted.
+	 */
+	private static function snapshot_matches_tree(array $plan, $snar) {
+		$recorded = is_file($snar . '.tree') ? trim((string)@file_get_contents($snar . '.tree')) : '';
+		if ($recorded === '') {
+			return false;
+		}
+		$cmd = 'bash ' . escapeshellarg(PathHelper::getSiteRoot() . '/maintenance_scripts/sysadmin_tools/backup_files.sh')
+			. ' ' . escapeshellarg($plan['project'])
+			. ' --project-dir ' . escapeshellarg($plan['project_dir'] ?? PathHelper::getSiteRoot())
+			. ' --print-tree-id 2>&1';
+		$out = array(); $rc = 0;
+		exec($cmd, $out, $rc);
+		$current = '';
+		foreach ($out as $line) {
+			if (strpos($line, 'TREE_ID=') === 0) { $current = trim(substr($line, 8)); }
+		}
+		if ($rc !== 0 || $current === '') {
+			throw new BackupRunnerException('Could not read the identity of the code tree ('
+				. trim(implode(' ', array_slice($out, -2))) . ').');
+		}
+		return hash_equals($recorded, $current);
+	}
+
 	private static function chain_dir(array $plan, $chain_id) {
 		return rtrim($plan['output_dir'], '/') . '/' . $chain_id;
 	}
@@ -721,7 +757,8 @@ class BackupRunner {
 		list($chain_id, $manifest) = self::current_chain($plan);
 
 		$reason = BackupChain::should_start_new($manifest, is_file($snar) && filesize($snar) > 0,
-			$plan['full_days'], $plan['max_inc'], null, (string)$plan['recovery_fpr']);
+			$plan['full_days'], $plan['max_inc'], null, (string)$plan['recovery_fpr'],
+			self::snapshot_matches_tree($plan, $snar));
 		if ($reason === 'recovery_rotated') {
 			error_log('BackupRunner: the recovery key changed since chain ' . $chain_id
 				. ' started; starting a new chain sealed to the current key.');
@@ -765,7 +802,7 @@ class BackupRunner {
 			$chain_id = BackupChain::new_chain_id();
 			$mint     = BackupEnvelope::mint($chain_id, $plan['recipients']);
 			$data_key = $mint['data_key'];
-			$manifest = BackupChain::start($chain_id, $plan['slug'], $mint['envelope']);
+			$manifest = BackupChain::start($chain_id, $plan['slug'], $mint['envelope'], $reason);
 			@unlink($snar);
 			self::ensure_dir(self::chain_dir($plan, $chain_id));
 		}
@@ -815,6 +852,15 @@ class BackupRunner {
 				throw new BackupRunnerException(
 					'A new chain was started but the files engine produced an incremental. '
 					. 'The snapshot at ' . $snar . ' was not cleared.');
+			}
+			if ($level === 1 && (int)$artifacts['files']['level'] === 0) {
+				// The engine found the code tree swapped after this run decided to
+				// extend the chain (an upgrade landed mid-backup). A full filed
+				// inside the chain is not what the chain describes; failing clears
+				// the snapshot, so the next run starts a new chain.
+				throw new BackupRunnerException(
+					'The code tree changed while this backup ran (an upgrade or a restore), so chain '
+					. $chain_id . ' was not extended. The next run starts a new chain.');
 			}
 			$level = (int)$artifacts['files']['level'];
 

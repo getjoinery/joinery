@@ -29,6 +29,8 @@
  *
  * Run: php plugins/server_manager/tests/agent_channel_test.php
  *
+ * @version 1.7 - a result is folded as it arrives through record_result, failed and refused as much as
+ *                completed, and no terminal control code survives into any field the card reads
  * @version 1.6 - the claim's closed field set gains cases (an object keyed by source); a list, and a
  *                field that would close a case from the plane's side, are refused
  * @version 1.5 - a join with no node record is approved by making the record from the request
@@ -819,6 +821,85 @@ $db->prepare("UPDATE ajr_agent_join_requests SET ajr_update_time = ?, ajr_create
 	->execute([gmdate('Y-m-d H:i:s', time() - 3 * 86400), gmdate('Y-m-d H:i:s', time() - 3 * 86400), $old_reject->key]);
 $listed = array_map(function ($r) { return (int)$r->key; }, AgentJoinRequest::recently_rejected());
 check(!in_array((int)$old_reject->key, $listed, true), 'a rejection older than a day is not offered for reopening');
+
+// ---------------------------------------------------------------------------
+section('A result is folded as it arrives, failed as much as completed, with no terminal codes');
+
+// What a script primitive's colour output looks like on the wire: the node's
+// words in data.output, the escapes as raw ESC bytes.
+$esc = "\x1b";
+$verify_node = agent_channel_node('agtest-verify-' . substr(bin2hex(random_bytes(4)), 0, 8));
+$made_nodes[] = $verify_node->key;
+
+$running_job = function ($type) use ($verify_node, $db) {
+	$j = ManagementJob::createPrimitiveJob($verify_node->key, $type, $type, [], null);
+	$db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_time=now() WHERE mjb_management_job_id=?")
+		->execute([$j->key]);
+	$j->load();
+	return $j;
+};
+
+$coloured = "VERIFY_RESULT=fail\nVERIFY_LEVEL=3\nVERIFY_RUN=chain-20260922_184000/3\nVERIFY_RUN_TIME=2026-09-22 18:40:00\n"
+	. "VERIFY_REASON=replaying the files into scratch failed: {$esc}[0;34m[INFO]{$esc}[0m Applying files-0003.tar.gz.enc (4/4) | "
+	. "{$esc}[0;31m[ERROR]{$esc}[0m Failed applying files-0003.tar.gz.enc (exit 2).\n";
+$vjob = $running_job('verify_backup');
+AgentChannelEndpoint::record_result($verify_node, $vjob, [
+	'status' => 'failed',
+	'data'   => ['output' => $coloured, 'exit_code' => 1],
+	'log'    => "{$esc}[0;31m[ERROR]{$esc}[0m verify failed\n",
+	'refusal_reason' => "{$esc}[1mexit status 1{$esc}[0m",
+]);
+$vjob->load();
+$verify_node->load();
+check($vjob->get('mjb_status') === 'failed' && (string)$vjob->get('mjb_result') !== '',
+	'A failed verify is processed the moment its result arrives, not on the next dashboard view',
+	var_export($vjob->get('mjb_result'), true));
+check($verify_node->get('mgn_backup_verify_outcome') === 'fail',
+	'and the node card reads the failure at once, not the last pass',
+	var_export($verify_node->get('mgn_backup_verify_outcome'), true));
+$msg = (string)$verify_node->get('mgn_backup_verify_message');
+check(strpos($msg, 'Failed applying files-0003') !== false && strpos($msg, '[ERROR]') !== false,
+	'The node\'s own words reach the card', $msg);
+$vresult = json_decode((string)$vjob->get('mjb_result'), true);
+foreach (['mgn_backup_verify_message' => $msg,
+          'mjb_result'        => is_array($vresult) ? (string)($vresult['message'] ?? '') : '',
+          'mjb_output'        => (string)$vjob->get('mjb_output'),
+          'mjb_error_message' => (string)$vjob->get('mjb_error_message')] as $field => $text) {
+	check($text !== '' && strpos($text, $esc) === false && strpos($text, '\u001b') === false && strpos($text, '[0;3') === false,
+		"No terminal code survives into $field", json_encode($text));
+}
+check($vjob->get('mjb_error_message') === 'exit status 1', 'The failure reason is kept, without its escapes',
+	var_export($vjob->get('mjb_error_message'), true));
+
+// A refusal is recorded as 'failed' and folded the same way.
+$rjob = $running_job('verify_backup');
+AgentChannelEndpoint::record_result($verify_node, $rjob, ['status' => 'refused', 'refusal_reason' => 'no such primitive']);
+$rjob->load();
+$verify_node->load();
+check($rjob->get('mjb_status') === 'failed' && $rjob->get('mjb_agent_outcome') === 'refused' && (string)$rjob->get('mjb_result') !== '',
+	'A refused verify is folded as it arrives too', var_export($rjob->get('mjb_result'), true));
+check(strpos((string)$verify_node->get('mgn_backup_verify_message'), 'no such primitive') !== false,
+	'with the node\'s reason on the card', (string)$verify_node->get('mgn_backup_verify_message'));
+
+// A completed one still is, and a type with no processor is left alone.
+$cjob = $running_job('verify_backup');
+AgentChannelEndpoint::record_result($verify_node, $cjob, ['status' => 'completed', 'data' => ['output' =>
+	"VERIFY_RESULT=pass\nVERIFY_LEVEL=2\nVERIFY_RUN=chain-20260922_184000/3\nVERIFY_RUN_TIME=2026-09-22 18:40:00\nVERIFY_ARTIFACTS=4\n"]]);
+$verify_node->load();
+check($verify_node->get('mgn_backup_verify_outcome') === 'pass', 'A completed verify is folded as it arrives',
+	var_export($verify_node->get('mgn_backup_verify_outcome'), true));
+check(!in_array('no_such_job_type', JobResultProcessor::processable_types(), true), 'the unhandled type used below has no processor');
+$ujob = $running_job('no_such_job_type');
+AgentChannelEndpoint::record_result($verify_node, $ujob, ['status' => 'failed']);
+$ujob->load();
+check($ujob->get('mjb_status') === 'failed' && $ujob->get('mjb_result') === null,
+	'A failed job of a type with no processor is recorded and left unprocessed, as the sweep would leave it');
+
+// The stripper on its own: every string anywhere in the data, nothing else touched.
+$clean = AgentChannelEndpoint::strip_terminal_codes(['a' => "{$esc}[0;34mblue{$esc}[0m", 'n' => 3,
+	'deep' => ['b' => "{$esc}]0;title\x07x{$esc}(By"], 'plain' => 'é [0;34m stays']);
+check($clean === ['a' => 'blue', 'n' => 3, 'deep' => ['b' => 'xy'], 'plain' => 'é [0;34m stays'],
+	'CSI, OSC and character-set escapes go; integers, UTF-8 and escape-free text stay as they were', json_encode($clean));
 
 section('Cleanup');
 

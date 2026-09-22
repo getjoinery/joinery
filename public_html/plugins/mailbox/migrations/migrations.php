@@ -11,6 +11,8 @@
  * the Mailbox Reader's thread-key index is created here (same pattern as the
  * server_manager plugin's index migration).
  *
+ * @version 1.31.1 - imi_002 logs one line on every node it runs on, including one where it
+ *                   found nothing or the table is absent
  * @version 1.31.0 - imi_002_reclaim_search_index_files: delete every File the search index left behind
  * @version 1.30.0 - ief_001_inbound_email_filter_prefix: fil_inbound_email_filters -> ief_inbound_email_filters
  * @version 1.29.0 - rcl_001_relay_cloud_provision_prefix: rcp_relay_cloud_provisions -> rcl_relay_cloud_provisions
@@ -1036,7 +1038,9 @@ return [
 		// instead: a File a live bookkeeping row still names (an owner who has
 		// not folded since the upgrade sheds it on their next fold) and a File
 		// whose blob is referenced more than once. A refusal or a failure never
-		// stops the upgrade. Idempotent: nothing found, nothing to do.
+		// stops the upgrade. It always logs exactly one summary line, so every
+		// node's upgrade output says what it reclaimed — found nothing and
+		// table absent included.
 		'id' => 'imi_002_reclaim_search_index_files',
 		'version' => '1.119.0',
 		'up' => function($dbconnector) {
@@ -1047,6 +1051,7 @@ return [
 				return $q->fetchColumn() !== null;
 			};
 			if (!$exists('imi_inbound_mailbox_search_index')) {
+				error_log('mailbox imi_002_reclaim_search_index_files: search index table absent, nothing to reclaim');
 				return true;
 			}
 			require_once(PathHelper::getIncludePath('data/files_class.php'));
@@ -1065,6 +1070,7 @@ return [
 			$q->execute(array(File::SOURCE_MAILBOX_SEARCH_INDEX));
 			$rows = $q->fetchAll(PDO::FETCH_ASSOC);
 			if (!count($rows)) {
+				error_log('mailbox imi_002_reclaim_search_index_files: 0 search-index File records found, nothing to reclaim');
 				return true;
 			}
 

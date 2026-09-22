@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 
 # backup_files.sh - Archive a project's files, optionally as an incremental
+# Version: 1.4.0 - a snapshot describes one code tree: SNAR.tree records its identity (the inodes of
+#                  public_html and of each directory directly inside it), and a snapshot whose
+#                  recorded identity is missing or differs is discarded and the run is a level 0.
+#                  An upgrade swaps those directories, freed inodes are reused by new ones, and tar
+#                  records renames across the swap that no extraction can apply.
+#                  `--print-tree-id` prints the current identity (TREE_ID=) and archives nothing.
 # Version: 1.3.0 - `--exclude-from FILE`: paths relative to the project directory, one per line,
 #                  left out of the archive — the local paths of every file the backup's object
 #                  store accounts for (specs/backup_offloaded_files.md). Literal, unanchored:
@@ -54,8 +60,11 @@
 #                     tested against a throwaway tree rather than a live site.
 #   --output-dir DIR  Where to write the archive (required)
 #   --name NAME       Archive filename, without extension (required)
-#   --snar PATH       Snapshot file. Present and non-empty -> incremental;
-#                     absent -> this run starts a chain and creates it.
+#   --snar PATH       Snapshot file. Present and non-empty, with PATH.tree
+#                     naming this code tree -> incremental; otherwise this run
+#                     starts a chain and writes both.
+#   --print-tree-id   Print TREE_ID=<hex>, the identity of the code tree a
+#                     snapshot of this project would describe, and exit.
 #   --key-file PATH   Encryption key. Omit only with --plaintext.
 #   --exclude NAME    Additional directory name to skip. Repeatable.
 #   --exclude-from F  A file of paths, relative to the project directory, one
@@ -87,7 +96,7 @@
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.3.0"
+SCRIPT_VERSION="1.4.0"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 print_info()    { echo -e "${BLUE}[INFO]${NC} $1" >&2; }
@@ -96,7 +105,7 @@ print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1" >&2; }
 print_error()   { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 
 show_help() {
-    sed -n '3,86p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '3,95p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 PROJECT_NAME=""
@@ -110,6 +119,7 @@ EXCLUDE_FROM=""
 ENCRYPT=true
 STREAM=false
 REPORT_FILE=""
+PRINT_TREE_ID=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -125,6 +135,7 @@ while [[ $# -gt 0 ]]; do
             if [ "$2" != "-" ]; then print_error "--archive only accepts '-' (stdout)."; exit 1; fi
             STREAM=true; shift 2 ;;
         --report)     REPORT_FILE="$2"; shift 2 ;;
+        --print-tree-id) PRINT_TREE_ID=true; shift ;;
         --help|-h)    show_help; exit 0 ;;
         -*)           print_error "Unknown option: $1"; exit 1 ;;
         *)
@@ -136,6 +147,33 @@ while [[ $# -gt 0 ]]; do
 done
 
 [ -n "$PROJECT_NAME" ] || { print_error "Project name is required."; exit 1; }
+
+PROJECT_DIR="${PROJECT_DIR_OVERRIDE:-/var/www/html/${PROJECT_NAME}}"
+PROJECT_DIR="${PROJECT_DIR%/}"
+[ -d "$PROJECT_DIR" ] || { print_error "Project directory does not exist: $PROJECT_DIR"; exit 1; }
+
+# The identity of the code tree a snapshot describes: the inode of public_html
+# and the name and inode of every directory directly inside it (the project
+# directory itself when it has no public_html). utils/upgrade.php deploys by
+# moving every child of public_html out and the staged children in; the staged
+# directories are created while the live ones still exist, so none of them can
+# carry the inode of the directory it replaces, and this changes on EVERY swap —
+# a same-version redeploy included, which VERSION would miss. A restore that
+# lays the tree down again changes it the same way. Ordinary edits never do.
+tree_identity() {
+    local code="${PROJECT_DIR}/public_html"
+    [ -d "$code" ] || code="$PROJECT_DIR"
+    local listing
+    listing="$(stat -c '.:%i' "$code" && find "$code" -mindepth 1 -maxdepth 1 -type d -printf '%f:%i\n' | LC_ALL=C sort)" || return 1
+    printf '%s\n' "$listing" | sha256sum | cut -d' ' -f1
+}
+
+if [ "$PRINT_TREE_ID" = true ]; then
+    ID="$(tree_identity)" || { print_error "Could not read the code tree under $PROJECT_DIR"; exit 1; }
+    echo "TREE_ID=${ID}"
+    exit 0
+fi
+
 if [ "$STREAM" = true ]; then
     [ -n "$REPORT_FILE" ] || { print_error "--archive - requires --report FILE."; exit 1; }
     [ -d "$(dirname "$REPORT_FILE")" ] || { print_error "Report directory does not exist: $(dirname "$REPORT_FILE")"; exit 1; }
@@ -145,10 +183,6 @@ else
     [ -n "$ARCHIVE_NAME" ] || { print_error "--name is required."; exit 1; }
     [ -d "$OUTPUT_DIR" ]   || { print_error "Output directory does not exist: $OUTPUT_DIR"; exit 1; }
 fi
-
-PROJECT_DIR="${PROJECT_DIR_OVERRIDE:-/var/www/html/${PROJECT_NAME}}"
-PROJECT_DIR="${PROJECT_DIR%/}"
-[ -d "$PROJECT_DIR" ] || { print_error "Project directory does not exist: $PROJECT_DIR"; exit 1; }
 
 if [ "$ENCRYPT" = true ]; then
     if [ -z "$KEY_FILE" ]; then
@@ -179,12 +213,27 @@ write_report() {
 # empty snar is not an error: it is how a chain starts, and it is what makes
 # snapshot loss degrade to "one extra full" instead of "a broken backup".
 LEVEL=1
+TREE_ID=""
+TREE_ID_FILE=""
 if [ -z "$SNAR" ]; then
     LEVEL=0
-elif [ ! -s "$SNAR" ]; then
-    LEVEL=0
-    if [ -e "$SNAR" ]; then
-        print_warning "Snapshot file is empty — starting a new chain with a full backup."
+else
+    TREE_ID_FILE="${SNAR}.tree"
+    TREE_ID="$(tree_identity)" || { print_error "Could not read the code tree under $PROJECT_DIR"; exit 1; }
+    if [ ! -s "$SNAR" ]; then
+        LEVEL=0
+        if [ -e "$SNAR" ]; then
+            print_warning "Snapshot file is empty — starting a new chain with a full backup."
+        fi
+    elif [ ! -f "$TREE_ID_FILE" ] || [ "$(cat "$TREE_ID_FILE" 2>/dev/null)" != "$TREE_ID" ]; then
+        # The snapshot describes another code tree (an upgrade or a restore
+        # swapped it since), or records none. An incremental across a swap
+        # carries renames onto paths that already exist and cannot be
+        # extracted, so this run starts over from a full.
+        LEVEL=0
+        print_warning "The code tree changed since the snapshot was taken — starting a new chain with a full backup."
+        rm -f "$SNAR"
+        [ ! -e "$SNAR" ] || { print_error "Could not discard the snapshot $SNAR"; exit 1; }
     fi
 fi
 
@@ -323,6 +372,9 @@ fi
 if [ -n "$SNAR" ] && [ -f "$SNAR" ]; then
     ${SUDO} chmod 600 "$SNAR" 2>/dev/null || true
     if [ -n "$SUDO" ]; then ${SUDO} chown "$(id -u):$(id -g)" "$SNAR" 2>/dev/null || true; fi
+    # The identity read BEFORE tar ran: a swap during this run then reads as
+    # a changed tree next time, never as the one this snapshot describes.
+    ( umask 077; printf '%s\n' "$TREE_ID" > "$TREE_ID_FILE" )
 fi
 
 if [ "$STREAM" = true ]; then

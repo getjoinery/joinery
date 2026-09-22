@@ -252,6 +252,21 @@ try { BackupStaging::plan($manifest, 7); } catch (BackupStagingException $e) { $
 check($threw !== null && $threw->getCode() === BackupStagingException::FAILED && strpos($threw->getMessage(), 'no run 7') !== false,
 	'a run the chain does not have is refused with BackupChain\'s own words');
 
+// The links are a listing of backup storage: a name the manifest needs with no
+// link is an artifact backup storage no longer holds, and fails as `gone`
+// (spec § Retention interplay) before anything is fetched.
+$plan = BackupStaging::plan($manifest, 1);
+$threw = null;
+try {
+	BackupStaging::fetch_artifacts('manager', sys_get_temp_dir() . '/verify-no-such-dir', 'chain-20260901_040000',
+		BackupStaging::wanted($plan), array('db-0001.sql.gz.enc' => 'https://x.invalid/d?sig=1'), 1);
+} catch (BackupStagingException $e) { $threw = $e; }
+check($threw !== null && $threw->getCode() === BackupStagingException::FAILED
+	&& strpos($threw->getMessage(), 'gone: files-0000.tar.gz.enc is no longer in backup storage') === 0
+	&& strpos($threw->getMessage(), 'run 1 needs it') !== false,
+	'an artifact the manifest needs with no link is gone, by name, as a failure (not a malformed request)',
+	$threw ? $threw->getMessage() : 'no exception');
+
 // The request shape is shared with stage_chain, plus 'level'.
 $req = BackupStaging::parse_request(array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager',
 	'manifest_url' => 'https://x/m', 'artifact_urls' => array('files-0000.tar.gz.enc' => 'https://x/a'), 'level' => 3), array('level'));

@@ -19,6 +19,11 @@
  * See specs/implemented/plugin_provisioning_checks.md and the
  * "Declaring host provisioners" section of docs/plugin_developer_guide.md.
  *
+ * A provisioner declared `"fleet_report": true` is also run on a schedule
+ * (tasks/PluginHealthReport.php) and its result recorded, so a management
+ * node reads it with the rest of the node's status. See recordFleetReport().
+ *
+ * @version 1.2 - fleet reporting: recordFleetReport() / recordedFleetReport()
  * @version 1.1
  */
 
@@ -68,6 +73,72 @@ class PluginProvisioning {
             }
         }
         return $output;
+    }
+
+    /** The setting the recorded fleet report lives in (settings.json). */
+    const FLEET_REPORT_SETTING = 'plugin_fleet_report';
+
+    /** Bounds on one recorded report: a reason is prose for a person, and the
+     *  whole report rides every status report a management node receives. */
+    const FLEET_REASON_MAX = 500;
+    const FLEET_CHECKS_MAX = 50;
+
+    /**
+     * Run every active plugin's provisioners declared `fleet_report`, live.
+     *
+     * @return array ['checked' => UTC 'Y-m-d H:i:s', 'checks' => [
+     *                 ['plugin', 'key', 'label', 'state', 'reason'], ...]]
+     */
+    public static function runFleetReport() {
+        $checks = [];
+        foreach (self::getProvisioners() as $plugin => $provisioners) {
+            foreach ($provisioners as $declaration) {
+                if (!is_array($declaration) || empty($declaration['key'])
+                        || empty($declaration['fleet_report'])) {
+                    continue;
+                }
+                if (count($checks) >= self::FLEET_CHECKS_MAX) {
+                    break 2;
+                }
+                $one = self::runOne($plugin, $declaration);
+                $checks[] = [
+                    'plugin' => (string)$plugin,
+                    'key'    => (string)$one['key'],
+                    'label'  => (string)$one['label'],
+                    'state'  => (string)$one['state'],
+                    'reason' => mb_substr((string)$one['reason'], 0, self::FLEET_REASON_MAX),
+                ];
+            }
+        }
+        return ['checked' => gmdate('Y-m-d H:i:s'), 'checks' => $checks];
+    }
+
+    /**
+     * Run the fleet-reported provisioners and record the result.
+     *
+     * Recorded rather than run on request because the node's status reaches a
+     * management node two ways, and one of them (the agent's check_status)
+     * reads the database and runs no PHP. Both read this one record, so the
+     * two transports report the same answer.
+     *
+     * @return array the report recorded
+     */
+    public static function recordFleetReport() {
+        $report = self::runFleetReport();
+        Setting::put(self::FLEET_REPORT_SETTING, json_encode($report));
+        return $report;
+    }
+
+    /**
+     * The last recorded fleet report, or null when none has been recorded.
+     */
+    public static function recordedFleetReport() {
+        $raw = (string)Globalvars::get_instance()->get_setting(self::FLEET_REPORT_SETTING, true, true);
+        if ($raw === '') {
+            return null;
+        }
+        $report = json_decode($raw, true);
+        return (is_array($report) && isset($report['checks']) && is_array($report['checks'])) ? $report : null;
     }
 
     /**

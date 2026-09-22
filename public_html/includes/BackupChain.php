@@ -31,6 +31,9 @@
  *       db-0001.sql.gz.enc
  *       ...
  *
+ * @version 1.5 - should_start_new breaks the chain when the code tree was swapped under the snapshot
+ *                (tree_changed): an incremental across an upgrade records renames no extraction can
+ *                apply. A manifest records why its chain started (`started_because`).
  * @version 1.4 - should_start_new rolls on age with a one-hour grace: the scheduled tick runs a few
  *                seconds earlier in the minute than the run it follows wrote `created`, so an exact
  *                comparison missed by seconds and every chain ran eight days instead of seven
@@ -73,12 +76,17 @@ class BackupChain {
 
 	// ------------------------------------------------------------------ shape
 
-	/** A fresh manifest for a chain starting now. */
-	public static function start($chain_id, $slug, array $envelope) {
+	/**
+	 * A fresh manifest for a chain starting now. $reason is should_start_new()'s
+	 * answer — why the previous chain was not extended — kept as
+	 * `started_because` so a reader of the chain can see it.
+	 */
+	public static function start($chain_id, $slug, array $envelope, $reason = '') {
 		return array(
 			'version'   => self::VERSION,
 			'chain_id'  => (string)$chain_id,
 			'slug'      => (string)$slug,
+			'started_because' => (string)$reason,
 			'created'   => gmdate('Y-m-d\TH:i:s\Z'),
 			'updated'   => gmdate('Y-m-d\TH:i:s\Z'),
 			// One envelope for the whole chain: every artifact in it is
@@ -154,6 +162,10 @@ class BackupChain {
 	 *   no_chain          nothing to extend
 	 *   snar_lost         the snapshot file is gone, so tar cannot produce a valid
 	 *                     incremental — this is the safe degradation, not a failure
+	 *   tree_changed      the snapshot describes another code tree, or records
+	 *                     none: an upgrade or a restore swapped the tree since, and
+	 *                     tar's incremental across a swap records directory renames
+	 *                     that cannot be applied when the chain is extracted
 	 *   recovery_rotated  the chain's envelope is sealed to a recovery key that is
 	 *                     no longer this site's — extending it would keep filing
 	 *                     runs only the rotated-away key can open
@@ -167,12 +179,16 @@ class BackupChain {
 	 */
 	public static function should_start_new(?array $manifest = null, $snar_exists = false,
 	                                        $full_interval_days = 7, $max_incrementals = 30,
-	                                        $now_utc = null, $current_recovery_fpr = null) {
+	                                        $now_utc = null, $current_recovery_fpr = null,
+	                                        $tree_unchanged = true) {
 		if (!$manifest || empty($manifest['runs'])) {
 			return 'no_chain';
 		}
 		if (!$snar_exists) {
 			return 'snar_lost';
+		}
+		if (!$tree_unchanged) {
+			return 'tree_changed';
 		}
 
 		// A chain has ONE data key, sealed when the chain starts. Rotating the

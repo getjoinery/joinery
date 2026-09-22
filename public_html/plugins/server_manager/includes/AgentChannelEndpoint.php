@@ -36,6 +36,10 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.24 - record_result(): a result is recorded and folded outside the HTTP handler; a failed
+ *                 (or refused) result is folded as it arrives, through JobResultProcessor::process_if_due,
+ *                 like a completed one; terminal control codes are stripped from the data, log and
+ *                 refusal reason before anything is stored (strip_terminal_codes)
  * @version 1.23 - the join spec declares the addresses list the join has carried since 1.17, so the
  *                 strict validator stops refusing every join from an agent that sends one; the
  *                 validator gains the 'list' type; the spec is public so a test holds the agent's
@@ -1236,6 +1240,29 @@ class AgentChannelEndpoint {
 		}
 
 		$job = self::load_running_job((int)$in['job_id'], (int)$node->key);
+		self::record_result($node, $job, $in);
+
+		api_success(['recorded' => true], '', 200);
+	}
+
+	/**
+	 * Record a node's validated result on its running job, and fold it into the
+	 * node's own columns.
+	 *
+	 * The one point a node's result is written on this plane, so it is also the
+	 * one point terminal control codes are taken out: a script that colours its
+	 * log lines (`\e[0;34m[INFO]\e[0m`) would otherwise carry the escapes into
+	 * mjb_output, into every field a processor reads out of it (mjb_result, the
+	 * node's backup and verify messages) and so onto the card. Stripped from
+	 * every string in the data object, the log and the refusal reason.
+	 *
+	 * $in is the validated result body (status, data, log, log_truncated,
+	 * log_total_bytes, refusal_reason); $job is the node's running job.
+	 */
+	public static function record_result($node, $job, array $in) {
+		$in['data']           = self::strip_terminal_codes($in['data'] ?? null);
+		$in['log']            = self::strip_terminal_codes($in['log'] ?? null);
+		$in['refusal_reason'] = self::strip_terminal_codes($in['refusal_reason'] ?? null);
 
 		// The envelope is CONSTRUCTED here, by re-encoding the object that just
 		// passed validation. The node never supplies a string this plane stores
@@ -1291,32 +1318,58 @@ class AgentChannelEndpoint {
 		}
 
 		// Fold the result into the node's own columns NOW, rather than leaving it
-		// for whoever next opens a page.
+		// for whoever next opens a page — a failed one as much as a completed
+		// one. A verify or a backup that failed is exactly what the card must
+		// say, and left for the dashboard sweep it read as the last pass to
+		// every health check that ran first.
 		//
 		// Every other caller of the processor is a page view or a scheduled pass,
-		// so a completed job sat unprocessed until someone looked — and the node
+		// so a finished job sat unprocessed until someone looked — and the node
 		// columns it feeds (mgn_joinery_version, mgn_last_status_data, the SSL
-		// state) went on reporting the previous answer. Eighteen check_status jobs
-		// completed over one night's rollout while the dashboard still showed the
-		// version from three releases earlier, which is the worst possible moment
-		// for it to be wrong.
+		// state, the backup and verify outcomes) went on reporting the previous
+		// answer. Eighteen check_status jobs completed over one night's rollout
+		// while the dashboard still showed the version from three releases
+		// earlier, which is the worst possible moment for it to be wrong.
+		// JobResultProcessor::process_if_due is the same rule the sweep applies.
 		//
 		// Never fatal: the node has done its part and been told so. A plane-side
 		// folding error is this plane's problem to log, not a reason to make the
 		// node believe its result was rejected and send it again.
-		if ($job->get('mjb_status') === 'completed') {
-			try {
-				require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
-				if (in_array((string)$job->get('mjb_job_type'), JobResultProcessor::processable_types(), true)) {
-					JobResultProcessor::process($job);
-				}
-			} catch (Throwable $e) {
-				error_log('AgentChannelEndpoint: could not process result for job '
-					. $job->key . ': ' . $e->getMessage());
-			}
+		try {
+			require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
+			JobResultProcessor::process_if_due($job);
+		} catch (Throwable $e) {
+			error_log('AgentChannelEndpoint: could not process result for job '
+				. $job->key . ': ' . $e->getMessage());
 		}
+	}
 
-		api_success(['recorded' => true], '', 200);
+	/**
+	 * Terminal control sequences taken out of a node's words: CSI (colours,
+	 * cursor moves — `ESC [ … final`), OSC (`ESC ] … BEL` or `ESC ] … ESC \`),
+	 * character-set selections (`ESC ( B`), the remaining two-byte escapes,
+	 * and any ESC left over. Strings anywhere
+	 * in an array are cleaned, keys and non-strings are left as they are.
+	 */
+	public static function strip_terminal_codes($value) {
+		if (is_array($value)) {
+			foreach ($value as $k => $v) {
+				$value[$k] = self::strip_terminal_codes($v);
+			}
+			return $value;
+		}
+		if (!is_string($value) || (strpos($value, "\x1b") === false && strpos($value, "\xc2\x9b") === false)) {
+			return $value;
+		}
+		$clean = preg_replace([
+			'/\x1b\[[0-?]*[ -\/]*[@-~]/',            // CSI
+			'/\xc2\x9b[0-?]*[ -\/]*[@-~]/',          // 8-bit CSI, UTF-8 encoded
+			'/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\\\)?/', // OSC
+			'/\x1b[!-\/]+[0-~]/',                     // character-set and other nF escapes (ESC ( B)
+			'/\x1b[@-Z\\\\-_]/',                     // other two-byte escapes
+			'/\x1b/',                                // a lone ESC
+		], '', $value);
+		return ($clean === null) ? str_replace("\x1b", '', $value) : $clean;
 	}
 
 	/**

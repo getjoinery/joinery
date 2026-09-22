@@ -3,6 +3,9 @@
 # install_agent.sh - install or converge the joinery-agent on this machine from
 # the shipped agent_dist artifact, or stop it where it is switched off.
 #
+# Version: 2.11 - The busy-agent message says "already current" when the running agent is at or
+#           above the shipped artifact, and "new artifact staged" only when the shipped one is
+#           newer. It said "staged" on every run, including runs with nothing to install.
 # Version: 2.10 - The job marker's second line is read as a label, not a number: a plane job
 #           writes its id there and a recipe attempt (agent 1.27.0, recipes/loop.go) writes
 #           "recipe <name>", and both deferral messages name whichever it is. Digits-only
@@ -676,7 +679,27 @@ ensure_supervision
 # operator reading an upgrade transcript needs to see that the new agent is
 # staged and pending, not that there was nothing to do.
 if [ "$DEFER_TO_AGENT" = "1" ]; then
-    say "new agent artifact staged in ${DIST_DIR}, restart deferred to agent - v$(installed_version) keeps running (${AGENT_JOB_LABEL:-marker unreadable}) and will self-update within a minute of finishing it"
+    # converge_binary did not run, so the shipped version is read here. "Staged"
+    # is only true when the shipped artifact is newer than what is running.
+    case "$(uname -m)" in
+        x86_64)  ARCH="linux-amd64" ;;
+        aarch64) ARCH="linux-arm64" ;;
+        *)       ARCH="" ;;
+    esac
+    SHIPPED=""
+    if [ -n "$ARCH" ] && [ -f "${DIST_DIR}/manifest.json" ]; then
+        read -r SHIPPED _ _ <<EOF
+$(read_manifest_entry "${DIST_DIR}/manifest.json" "$ARCH")
+EOF
+    fi
+    RUNNING="$(installed_version)"
+    if [ -z "$SHIPPED" ]; then
+        say "v${RUNNING} left running (${AGENT_JOB_LABEL:-marker unreadable}) - no shipped ${ARCH:-$(uname -m)} artifact to compare, nothing staged"
+    elif [ -n "$RUNNING" ] && ! version_is_older "$RUNNING" "$SHIPPED"; then
+        say "v${RUNNING} already current (shipped v${SHIPPED}) - nothing staged; left running (${AGENT_JOB_LABEL:-marker unreadable})"
+    else
+        say "new agent artifact staged in ${DIST_DIR}, restart deferred to agent - v${RUNNING} keeps running (${AGENT_JOB_LABEL:-marker unreadable}) and will self-update within a minute of finishing it"
+    fi
     exit 0
 fi
 

@@ -1474,6 +1474,34 @@ $dot_relay_down = jcb_node(array('mgn_skip_joinery_checks' => true,
 check(JobCommandBuilder::status_color_for_node($dot_relay_down, null, false) === 'danger',
 	'skip-Joinery uptime-down node shows red');
 
+section('Status dot: a plugin check the node reports as not passing fails it');
+
+// plugin_checks is the node's recorded result of the checks its plugins declare
+// fleet_report. The mailbox's search-index count is one: a copy nobody holds
+// is a disk filling, so it reads red the way a full disk does.
+$pc_measured = array('disk_usage_percent' => 40, 'postgres_status' => 'accepting connections',
+	'load_1m' => 0.2);
+$pc_passing = $pc_measured + array('plugin_checks' => array('checked' => gmdate('Y-m-d H:i:s'), 'checks' => array(
+	array('plugin' => 'mailbox', 'key' => 'search_index_storage', 'label' => 'one file per owner',
+		'state' => 'verified', 'reason' => ''))));
+$pc_failing = $pc_measured + array('plugin_checks' => array('checked' => gmdate('Y-m-d H:i:s'), 'checks' => array(
+	array('plugin' => 'mailbox', 'key' => 'search_index_storage', 'label' => 'one file per owner',
+		'state' => 'unmet', 'reason' => '1 search-index copy from before the move that no file record holds'))));
+$pc_node = jcb_node(array('mgn_last_status_check' => gmdate('Y-m-d H:i:s')));
+$fold = function ($measured) { return JobResultProcessor::fold_status_data(null, $measured, 'primitive'); };
+check(JobCommandBuilder::status_color_for_node($pc_node, $fold($pc_measured), false) === 'success',
+	'a node reporting no plugin checks is not failed by their absence');
+check(JobCommandBuilder::status_color_for_node($pc_node, $fold($pc_passing), false) === 'success',
+	'a node whose plugin checks all pass stays green');
+check(JobCommandBuilder::status_color_for_node($pc_node, $fold($pc_failing), false) === 'danger',
+	'a node reporting a plugin check that does not pass shows red');
+$pc_named = JobCommandBuilder::plugin_checks_failing($fold($pc_failing));
+check(count($pc_named) === 1 && $pc_named[0]['key'] === 'search_index_storage'
+	&& strpos($pc_named[0]['reason'], 'no file record holds') !== false,
+	'and the failing check is named with the node\'s reason', json_encode($pc_named));
+check(JobCommandBuilder::plugin_checks_failing(array('plugin_checks' => 'not a report')) === array(),
+	'a malformed report names nothing rather than throwing');
+
 // ---------------------------------------------------------------------------
 section('Nothing composes work that nothing will run');
 

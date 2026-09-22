@@ -7,6 +7,8 @@
  * from SSH output, so the two transports populate mgn_last_status_data
  * identically.
  *
+ * @version 1.2 - plugin_checks: the recorded result of every plugin check declared fleet_report,
+ *                the same record the agent's check_status reads
  * @version 1.1 - each backup profile's summary carries last_verify_time / _level / _outcome /
  *                _message, so a management node learns of a verify the site ran itself
  * @version 1.0
@@ -136,6 +138,20 @@ function stats_handler($request) {
 		);
 	} catch (Throwable $e) {
 		// No registry on this node yet — omit the key entirely.
+	}
+
+	// Plugin checks declared fleet_report, as the hourly Plugin health report
+	// recorded them. The recorded result rather than a live run: the agent's
+	// check_status reads this same record straight from the database, and two
+	// transports reporting one answer is the contract of this endpoint.
+	try {
+		require_once(PathHelper::getIncludePath('includes/PluginProvisioning.php'));
+		$report = PluginProvisioning::recordedFleetReport();
+		if ($report !== null) {
+			$result['plugin_checks'] = $report;
+		}
+	} catch (Throwable $e) {
+		// A node too old to record one answers the rest normally.
 	}
 
 	// Cron health — last time process_scheduled_tasks.php fired
