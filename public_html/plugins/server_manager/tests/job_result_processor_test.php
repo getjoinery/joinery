@@ -401,7 +401,7 @@ $hostile = array(
 	'surprise' => 'key',
 );
 $capped = JobResultProcessor::sanitise_host_report($hostile);
-check(!isset($capped['surprise']) && count($capped) === 11, 'unknown keys are dropped and every known key is present', var_export(array_keys($capped), true));
+check(!isset($capped['surprise']) && count($capped) === 12, 'unknown keys are dropped and every known key is present', var_export(array_keys($capped), true));
 check(count($capped['failed_units']) === JobResultProcessor::HOST_REPORT_MAX_LIST, 'failed units are capped at the list bound');
 check($capped['failed_units'][0] === 'scriptalert1script.service' && $capped['failed_units'][1] === 'abrm-rf',
 	'unit names are reduced to safe characters', var_export(array_slice($capped['failed_units'], 0, 2), true));
@@ -417,6 +417,18 @@ check($capped['sshd'] === array('password_authentication' => 'yesb', 'permit_roo
 	'sshd values are lowercased letters and dashes only', var_export($capped['sshd'], true));
 check($capped['disk']['path'] === '../../etc/passwdx' && $capped['disk']['used_bytes'] === 12 && $capped['disk']['total_bytes'] === 'unknown',
 	'the disk path is reduced to path characters and byte figures must be numbers');
+check($capped['disk']['avail_bytes'] === 'unknown' && $capped['disk']['inodes_used_pct'] === 'unknown',
+	'a node too old to report free space or inode use says unknown, which reads differently from zero');
+check($capped['kernel_events_24h'] === 'unknown',
+	'kernel events that are not an object are unknown for the whole object, not three zeros');
+$ke = JobResultProcessor::sanitise_host_report(array(
+	'kernel_events_24h' => array('oom' => 2, 'enospc' => '1', 'io_error' => 'lots', 'extra' => 9),
+	'disk' => array('avail_bytes' => 5, 'inodes_used_pct' => 120),
+));
+check($ke['kernel_events_24h'] === array('oom' => 2, 'enospc' => 1, 'io_error' => 'unknown'),
+	'each kernel count is a number or unknown, and an extra key is dropped', var_export($ke['kernel_events_24h'], true));
+check($ke['disk']['avail_bytes'] === 5 && $ke['disk']['inodes_used_pct'] === 'unknown',
+	'a percentage outside 0..100 is unknown');
 check($capped['memory'] === array('used_bytes' => 'unknown', 'total_bytes' => 'unknown') && $capped['swap'] === array('used_bytes' => 'unknown', 'total_bytes' => 'unknown'),
 	'a gauge that is not an object, or is missing, is unknown in both figures');
 check($capped['reboot_required'] === 'unknown' && $capped['unattended_upgrades_last_run'] === 'unknown' && $capped['generated_at'] === 'unknown',
@@ -1077,6 +1089,88 @@ if (!$ro_target) {
 	$plain_res = json_decode((string)$rc_plain->get('mjb_result'), true);
 	check(strpos((string)($plain_res['objects'] ?? ''), 'paired agent of at least') !== false && count($ro_jobs('restore_objects', $rc_plain->key)) === 0,
 		'a node whose agent lacks the word gets its restore recorded and the reason no files followed', json_encode($plain_res));
+}
+
+section('unit_journal and disk_usage: the two observe words land as bounded results');
+
+{
+	$uj_node = jrp_node();
+	$envelope = function ($object) {
+		return "=== [Step 1/1] word ===\n" . json_encode(array(
+			'api_version' => '1.0',
+			'data' => array('output' => json_encode($object), 'output_bytes' => 1),
+		));
+	};
+
+	// A whole answer, of the shape the node's script prints.
+	$uj_job = jrp_job($uj_node, 'unit_journal', $envelope(array(
+		'unit' => 'man-db.service', 'load_state' => 'loaded', 'active_state' => 'failed',
+		'sub_state' => 'failed', 'result' => 'exit-code', 'exit_status' => 1,
+		'last_run_unix' => 1790050543, 'lines_requested' => 100, 'lines_returned' => 2,
+		'journal' => array('mandb: No space left on device', 'man-db.service: Failed with result exit-code.'),
+	)));
+	JobResultProcessor::process($uj_job);
+	$r = json_decode((string)$uj_job->get('mjb_result'), true);
+	check(is_array($r) && $r['read'] === true && $r['unit'] === 'man-db.service' && $r['result'] === 'exit-code'
+		&& $r['exit_status'] === 1 && $r['last_run_unix'] === 1790050543,
+		'the verdict survives: the unit, the result systemd recorded and the number the unit left behind',
+		var_export($r, true));
+	check(is_array($r) && $r['lines_returned'] === 2 && strpos($r['journal'][0], 'No space left') !== false,
+		'and so do the journal lines the node redacted before sending them');
+
+	// A hostile node: the shape is rebuilt, never trusted.
+	$hostile = jrp_job($uj_node, 'unit_journal', $envelope(array(
+		'unit' => "<script>x</script>; rm -rf /",
+		'load_state' => array('nested'), 'active_state' => 'failed', 'sub_state' => 'failed',
+		'result' => 'exit-code', 'exit_status' => -3, 'last_run_unix' => 'yesterday',
+		'journal' => array_merge(array(str_repeat('x', 5000), array('nested')), array_fill(0, 400, 'line')),
+		'surprise' => 'key',
+	)));
+	JobResultProcessor::process($hostile);
+	$h = json_decode((string)$hostile->get('mjb_result'), true);
+	check(is_array($h) && !isset($h['surprise']) && $h['unit'] === 'scriptxscriptrm-rf'
+		&& $h['load_state'] === 'unknown' && $h['exit_status'] === 'unknown' && $h['last_run_unix'] === 'unknown',
+		'unknown keys are dropped, a name is reduced to safe characters, a negative status and a word are unknown',
+		var_export($h, true));
+	// 200 taken, one of them a non-scalar that is dropped rather than coerced:
+	// the cap is a maximum, not a quota to fill.
+	check(is_array($h) && count($h['journal']) === JobCommandBuilder::LOG_MAX_COUNT - 1
+		&& strlen($h['journal'][0]) === JobResultProcessor::UNIT_JOURNAL_MAX_LINE
+		&& $h['lines_returned'] === count($h['journal']),
+		'the list is capped at the plane\'s own bound, each line is capped, and a non-scalar line is dropped',
+		count($h['journal'] ?? array()));
+
+	// Nothing readable: the flag says so rather than the page showing a
+	// transcript with no explanation.
+	$unread = jrp_job($uj_node, 'unit_journal', "=== [Step 1/1] word ===\nbash: unit_journal.sh: No such file\n");
+	JobResultProcessor::process($unread);
+	check(json_decode((string)$unread->get('mjb_result'), true) === array('read' => false),
+		'a job that came back with no object records read=false');
+
+	// disk_usage: sizes only, and the shape enforces it.
+	$du_job = jrp_job($uj_node, 'disk_usage', $envelope(array(
+		'filesystem' => array('path' => '/var/www/html/x/public_html', 'used_bytes' => 100, 'total_bytes' => 200, 'avail_bytes' => 80),
+		'tree' => array('path' => '/var/www/html/x', 'total_bytes' => 90, 'partial' => true, 'entries' => array_merge(
+			array(array('path' => 'uploads', 'bytes' => 50, 'files' => 900), array('path' => '<b>bad</b>', 'bytes' => 1)),
+			array_fill(0, 40, array('path' => 'd', 'bytes' => 1)))),
+		'machine' => array(array('path' => '/var/log', 'bytes' => 7), array('path' => '/var/lib/docker', 'bytes' => 'absent')),
+		'generated_at' => 1790050543,
+	)));
+	JobResultProcessor::process($du_job);
+	$d = json_decode((string)$du_job->get('mjb_result'), true);
+	check(is_array($d) && $d['read'] === true && $d['filesystem']['avail_bytes'] === 80 && $d['tree']['partial'] === true,
+		'the filesystem figures and the partial flag survive', var_export($d['filesystem'] ?? null, true));
+	check(is_array($d) && count($d['tree']['entries']) === JobResultProcessor::DISK_USAGE_MAX_ENTRIES,
+		'the entry list is capped on the plane too');
+	check(is_array($d) && $d['tree']['entries'][0] === array('path' => 'uploads', 'bytes' => 50),
+		'an entry is one path and one byte count: a file count the node sent is dropped, not stored',
+		var_export($d['tree']['entries'][0] ?? null, true));
+	// The slash survives because a path is made of them; the angle brackets do
+	// not, because nothing in a path is.
+	check(is_array($d) && $d['tree']['entries'][1]['path'] === 'bbad/b',
+		'a path is reduced to path characters', var_export($d['tree']['entries'][1] ?? null, true));
+	check(is_array($d) && $d['machine'][1] === array('path' => '/var/lib/docker', 'bytes' => 'absent'),
+		'absent is an answer a size may take: the directory is not there');
 }
 
 harness_finish();

@@ -8,6 +8,10 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.72 - unit_journal / disk_usage: the two observe words of
+ *                 specs/disk_headroom_and_unit_diagnosis.md (agent 1.39.0). unit_journal answers "why"
+ *                 about a failed unit the Host card already names, from a compiled list mirrored here;
+ *                 disk_usage answers "with what" about a disk that is filling, and takes nothing
  * @version 1.71 - restore_objects: bring a run's offloaded files home from the manager-profile backup storage, paged
  *                 (specs/backup_offloaded_files.md § Restore). build_restore_objects signs the run's
  *                 index and, on a page job, a page of object links with the envelopes of their epochs,
@@ -359,6 +363,10 @@ class JobCommandBuilder {
 		// The agent that carries the object store on backup_run and
 		// verify_backup carries this word too.
 		'restore_objects' => '1.38.0',
+		// Why a unit failed, and where the disk went: the two observe words of
+		// specs/disk_headroom_and_unit_diagnosis.md, new in 1.39.0.
+		'unit_journal' => '1.39.0',
+		'disk_usage'   => '1.39.0',
 	];
 
 	/**
@@ -387,6 +395,33 @@ class JobCommandBuilder {
 
 	/** The most lines or rows either log word returns; the node caps at the same figure. */
 	const LOG_MAX_COUNT = 200;
+
+	/**
+	 * The units unit_journal may be asked about, and how the plane labels them.
+	 * A mirror of the enum compiled into the agent
+	 * (primitives/observe_unit_journal.go) and of the list in the node's
+	 * unit_journal.sh: the node refuses anything outside its own copy whatever
+	 * this says, so the mirror exists only so the picker offers what the node
+	 * accepts and a bad value fails here with a message rather than there with
+	 * a refusal.
+	 *
+	 * sshd is deliberately absent: that journal is a record of who connected
+	 * and from where, which host_report counts and refuses to quote.
+	 */
+	const UNIT_JOURNAL_UNITS = [
+		'fail2ban'            => 'fail2ban',
+		'apache2'             => 'Apache',
+		'cron'                => 'cron',
+		'postgresql'          => 'PostgreSQL',
+		'joinery-agent'       => 'Joinery agent',
+		'man-db'              => 'man-db (man page index)',
+		'unattended-upgrades' => 'Unattended upgrades',
+		'logrotate'           => 'logrotate',
+		'apt-daily'           => 'apt-daily',
+		'apt-daily-upgrade'   => 'apt-daily-upgrade',
+		'fstrim'              => 'fstrim',
+		'e2scrub_all'         => 'e2scrub_all',
+	];
 
 	/**
 	 * The platform release that carries the decommission approval panel
@@ -1682,6 +1717,68 @@ class JobCommandBuilder {
 			'table' => $table,
 			'rows'  => self::bounded_log_count($rows, 'rows'),
 		]];
+	}
+
+	/**
+	 * Why one unit is in the state it is in: its state, the result systemd
+	 * recorded, its exit status and the last lines of its journal, read on the
+	 * node and redacted there (specs/disk_headroom_and_unit_diagnosis.md § 8).
+	 * PRIMITIVE ONLY, like host_report and the two log words.
+	 *
+	 * Behind the same owner switch as site_log, because it reads a log.
+	 *
+	 * @param string $unit  one of UNIT_JOURNAL_UNITS' keys
+	 * @param int    $lines 1..LOG_MAX_COUNT
+	 */
+	public static function build_unit_journal($node, $unit, $lines = 100) {
+		if (!self::has_primitive($node, 'unit_journal')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot read a unit's journal: its agent "
+				. "does not offer the unit_journal primitive. Apply an update to the node; "
+				. "the agent that ships with it does.");
+		}
+		self::assert_log_access($node);
+		return self::build_unit_journal_primitive($node, $unit, $lines);
+	}
+
+	public static function build_unit_journal_primitive($node, $unit, $lines = 100) {
+		$unit = (string)$unit;
+		// A unit name arrives from a card that renders whatever the node
+		// reported failed, so it is checked against the list rather than
+		// trusted for being on screen.
+		if (!array_key_exists($unit, self::UNIT_JOURNAL_UNITS)) {
+			throw new Exception("'" . $unit . "' is not a unit the node will read a journal for. Choose one of: "
+				. implode(', ', array_keys(self::UNIT_JOURNAL_UNITS)) . '.');
+		}
+		return ['primitive' => 'unit_journal', 'params' => [
+			'unit'  => $unit,
+			'lines' => self::bounded_log_count($lines, 'lines'),
+		]];
+	}
+
+	/**
+	 * Where the disk went: the filesystem's figures, the site tree's biggest
+	 * directories to depth two, and the usual machine directories
+	 * (specs/disk_headroom_and_unit_diagnosis.md § 11). PRIMITIVE ONLY, and it
+	 * takes nothing — the tree comes from the node's own layout and the
+	 * machine list is compiled into the script.
+	 *
+	 * No log-access check: it reads no log and no content. Sizes are not
+	 * secrets in the way a log line is, and gating a size report behind the
+	 * log switch would make it look like one.
+	 */
+	public static function build_disk_usage($node) {
+		if (!self::has_primitive($node, 'disk_usage')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot report its disk usage: its agent "
+				. "does not offer the disk_usage primitive. Apply an update to the node; "
+				. "the agent that ships with it does.");
+		}
+		return self::build_disk_usage_primitive($node);
+	}
+
+	public static function build_disk_usage_primitive($node) {
+		return ['primitive' => 'disk_usage', 'params' => []];
 	}
 
 	/**

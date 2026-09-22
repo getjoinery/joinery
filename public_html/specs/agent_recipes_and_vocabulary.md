@@ -183,7 +183,8 @@ Named here so the vocabulary has a starting shape; built under
 `sentinel_managed_recovery.md` §15 (the rest).
 
 **Words:** `host_report` (observe, no parameters); `unit_journal {unit, lines}`
-and `file_head {file, lines}` (observe, closed lists, capped);
+— **BUILT** (agent 1.39.0), `disk_headroom_and_unit_diagnosis.md` § 8 — and
+`file_head {file, lines}` (observe, closed lists, capped);
 `host_converge` (operate, no parameters, runs `host_housekeeping.sh`);
 `run_installer {name}`, `restart_unit {unit}`, `fail2ban_reset_config`
 (operate, closed parameters).
@@ -212,6 +213,23 @@ no shell was opened; what follows is what the operator could not see.
 | The site's own log tables after the swap: the last logins, request log rows, event log rows and webhook rows | Nothing | `log_table_tail {table, rows}` (observe): the newest N rows of one log table from a compiled list (`log_logins`, `rql_request_logs`, `evl_event_logs`, `wbh_webhook_logs`, `lfe_log_form_errors`), compiled column list per table, rows capped; the node's own query, no SQL taken from the plane. With `site_log`, gated by one owner-set switch on the node, on by default, redacted on the node — **BUILT** (agent 1.35.0), `agent_log_access.md` |
 | The affected pages rendered on the node as a signed-in user | Only `/` and `/login` from outside; the pages were checked on dev with a throwaway superadmin | `page_probe {view}` (observe): the node renders a view from a closed list as a throwaway session of the platform's own making and reports status, size and any SQL or PHP error in the body — the `deploy_site_responds` test, given a list |
 | Roll a release across the fleet in risk order, one node at a time, stopping at the first problem | Queued `apply_update` by hand per node from a script, waited on each job, grepped each transcript, queued the next | Not a node word — the node has `apply_update`. A **tier 2 recipe on the plane**, `staged_rollout {release, order}`: an ordered node list, one `apply_update` at a time, a gate between them read from the structured result above (completed, deploy tier green, version reported, no rollback), halt on the first miss and say which node and why. "Apply update to all on host" is its unordered ancestor |
+
+**2026-09-22, the node that filled its disk for fifteen minutes.**
+jeremytunnell.com built its weekly full backup on a disk that could no longer
+hold one. The backup died, PostgreSQL went away and the nightly man-page index
+failed; the space came back on the way out, so by the time anyone looked the
+only survivor was `man-db.service` in the failed-unit notice. The whole
+diagnosis was reconstructed from job rows on the management node. Incident:
+`/var/www/html/joinerytest/incidents/2026-09-22-jeremytunnell-full-backup-enospc.md`.
+
+| Wanted | Done instead | Word or recipe |
+|---|---|---|
+| Why `man-db.service` failed — its result, its exit status, its last journal lines | Nothing. The plane could render the name and not ask about it | `unit_journal {unit, lines}` (observe): a closed list of twelve units, capped lines, redacted on the node, behind the same owner switch as `site_log` — **BUILT** (agent 1.39.0) |
+| What the ten gigabytes were that arrived in four days | Inferred from two stored series agreeing — the disk total and the incremental archive sizes — which is evidence, not an answer | `disk_usage` (observe, no parameters): the site tree's biggest directories to depth two and a compiled list of machine directories, sizes only, never a file name — **BUILT** (agent 1.39.0) |
+| Whether the kernel had said "no space left on device" | Nothing; the journal was 33 hours old by the time anyone asked | `host_report` carries `kernel_events_24h`: three counts, OOM / ENOSPC / I/O error — **BUILT** (platform, no agent release: `host_report.sh` is a script word) |
+| How much room a writer actually has | `total - used`, which quietly includes the root reserve — 2.4 GiB on that node | `host_report` carries `disk.avail_bytes` and `disk.inodes_used_pct` — **BUILT** |
+| To clear the failed unit once it was understood | Nothing; it will keep being named until someone logs in or the box reboots | `reset_failed_unit {unit}` (operate, same closed list) — specced, not built |
+| To be told the disk was filling before it filled | Nothing. Four days of warning sat unread in stored host reports | Not a node word: a plane-side notice over the samples the plane already keeps, floor **and** slope (`disk_headroom_and_unit_diagnosis.md` § 2) — specced, not built |
 
 ## What complies with what
 

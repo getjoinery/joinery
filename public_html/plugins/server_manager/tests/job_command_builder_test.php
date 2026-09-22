@@ -2015,4 +2015,80 @@ section('site_log / log_table_tail: closed choices, bounded counts, the owner\'s
 	check($threw, 'and build_site_log names the missing word in its refusal');
 }
 
+section('unit_journal / disk_usage: why a unit failed, and where the disk went (specs/disk_headroom_and_unit_diagnosis.md)');
+
+{
+	$ask_node = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x08", 32)),
+		'mgn_agent_version'    => '1.39.0',
+		'mgn_agent_primitives' => 'check_status,host_report,unit_journal,disk_usage',
+		'mgn_agent_log_access' => 'on',
+	));
+
+	$built = JobCommandBuilder::build_unit_journal($ask_node, 'man-db', 100);
+	check($built === array('primitive' => 'unit_journal', 'params' => array('unit' => 'man-db', 'lines' => 100)),
+		'unit_journal travels as the name, a unit from the closed list and a bounded count',
+		var_export($built, true));
+	check(JobCommandBuilder::build_unit_journal($ask_node, 'postgresql', '200')['params']['lines'] === 200,
+		'the count is an int whatever the form posted');
+
+	// The unit comes off a card rendering whatever the node said failed, so it
+	// is checked against the list rather than trusted for being on screen.
+	foreach (array('sshd', 'ssh', 'man-db.service', 'man-db; reboot', '../../etc/shadow', '*', '') as $bad) {
+		$threw = false;
+		try { JobCommandBuilder::build_unit_journal($ask_node, $bad, 10); } catch (Exception $e) { $threw = true; }
+		check($threw, 'unit_journal refuses on the plane: ' . var_export($bad, true));
+	}
+	foreach (array(0, 201, 9999) as $bad) {
+		$threw = false;
+		try { JobCommandBuilder::build_unit_journal($ask_node, 'cron', $bad); } catch (Exception $e) { $threw = true; }
+		check($threw, 'unit_journal refuses a line count outside 1..200: ' . var_export($bad, true));
+	}
+	check(!array_key_exists('sshd', JobCommandBuilder::UNIT_JOURNAL_UNITS),
+		'sshd is not on the list: that journal is who connected and from where, which host_report counts and refuses to quote');
+	check(count(JobCommandBuilder::UNIT_JOURNAL_UNITS) === 12, 'the mirrored list is the twelve units the spec names');
+
+	$built = JobCommandBuilder::build_disk_usage($ask_node);
+	check($built === array('primitive' => 'disk_usage', 'params' => array()),
+		'disk_usage travels as the name and nothing else: no path, no depth, no count',
+		var_export($built, true));
+	check(JobCommandBuilder::transports_for('unit_journal') === array('primitive')
+		&& JobCommandBuilder::transports_for('disk_usage') === array('primitive'),
+		'both words have exactly one transport, the primitive: no SSH route, no API route');
+
+	// unit_journal reads a log, so the owner's switch governs it. disk_usage
+	// reads no log and no content, so it does not — a size report gated behind
+	// the log switch would look like a content read.
+	$off_node = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x09", 32)),
+		'mgn_agent_version'    => '1.39.0',
+		'mgn_agent_primitives' => 'check_status,host_report,unit_journal,disk_usage',
+		'mgn_agent_log_access' => 'off',
+	));
+	$threw = false;
+	try { JobCommandBuilder::build_unit_journal($off_node, 'man-db'); } catch (Exception $e) { $threw = strpos($e->getMessage(), 'not allowed log access') !== false; }
+	check($threw, 'unit_journal refuses with the owner\'s reason when the switch is off');
+	$built = JobCommandBuilder::build_disk_usage($off_node);
+	check($built['primitive'] === 'disk_usage', 'disk_usage is unaffected by the log switch: it reports sizes, not content');
+
+	$older = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x0a", 32)),
+		'mgn_agent_version'    => '1.38.0',
+		'mgn_agent_primitives' => 'check_status,host_report,site_log',
+	));
+	check(!JobCommandBuilder::has_primitive($older, 'unit_journal') && !JobCommandBuilder::has_primitive($older, 'disk_usage'),
+		'a node whose vocabulary lacks the words is not offered them');
+	foreach (array('build_unit_journal', 'build_disk_usage') as $m) {
+		$threw = '';
+		try { ($m === 'build_disk_usage') ? JobCommandBuilder::$m($older) : JobCommandBuilder::$m($older, 'cron'); }
+		catch (Exception $e) { $threw = $e->getMessage(); }
+		check(strpos($threw, 'Apply an update') !== false, $m . ' names the missing word and the fix');
+	}
+
+	check(in_array('unit_journal', ManagementJob::LOG_EXCERPT_TYPES, true),
+		'a unit journal ages out on the log-excerpt window: it is the same kind of thing as a site log');
+	check(!in_array('disk_usage', ManagementJob::LOG_EXCERPT_TYPES, true),
+		'a size report does not: there is nothing in it to age out');
+}
+
 harness_finish();
