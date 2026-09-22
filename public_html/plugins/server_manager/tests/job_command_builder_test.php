@@ -1977,8 +1977,37 @@ section('site_log / log_table_tail: closed choices, bounded counts, the owner\'s
 		check($threw, 'log_table_tail refuses on the plane: ' . var_export($bad, true));
 	}
 	check(!array_key_exists('access', JobCommandBuilder::SITE_LOG_FILES), 'the access log is not on the list (visitor addresses and URLs)');
-	check(count(JobCommandBuilder::SITE_LOG_FILES) === 5 && count(JobCommandBuilder::LOG_TABLES) === 5,
-		'the mirrored lists are the five files and five tables the spec names');
+	check(count(JobCommandBuilder::SITE_LOG_FILES) === 6 && count(JobCommandBuilder::LOG_TABLES) === 5,
+		'the mirrored lists are the six files and five tables the spec names');
+
+	// The PostgreSQL entry is newer than the word, so the floor is per value:
+	// an older agent refuses the value rather than the word, which would queue
+	// a job the node throws away. $log_node above is an agent below the floor.
+	$pg_node = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x0b", 32)),
+		'mgn_agent_version'    => '1.40.0',
+		'mgn_agent_primitives' => 'check_status,site_log,log_table_tail',
+		'mgn_agent_log_access' => 'on',
+	));
+	$built = JobCommandBuilder::build_site_log($pg_node, 'postgresql', false, 100);
+	check($built === array('primitive' => 'site_log', 'params' => array('file' => 'postgresql', 'previous' => false, 'lines' => 100)),
+		'an agent at the floor reads the database log', var_export($built, true));
+	check(array_key_exists('postgresql', JobCommandBuilder::site_log_files_for($pg_node))
+		&& count(JobCommandBuilder::site_log_files_for($pg_node)) === 6,
+		'and the picker offers it, beside the five that were always there');
+
+	check(!array_key_exists('postgresql', JobCommandBuilder::site_log_files_for($log_node)),
+		'an agent below the floor is not offered it');
+	check(count(JobCommandBuilder::site_log_files_for($log_node)) === 5,
+		'and still gets the five that have always been on its own list');
+	$threw = '';
+	try { JobCommandBuilder::build_site_log($log_node, 'postgresql'); } catch (Exception $e) { $threw = $e->getMessage(); }
+	check(strpos($threw, 'Apply an update') !== false,
+		'asking anyway is refused here with the fix, not queued for the node to reject', $threw);
+	foreach (array('error', 'cron_scheduled_tasks') as $always) {
+		check(JobCommandBuilder::build_site_log($log_node, $always)['params']['file'] === $always,
+			'the older agent still answers about ' . $always);
+	}
 
 	// The owner's switch, as the node last reported it: off is a refusal
 	// before a job exists, with the reason naming the switch.

@@ -11,8 +11,8 @@
  *
  * Lifecycle, all keyed to the owner's user id:
  *   - ensureOpen()  restores the /dev/shm working copy from its sealed blob
- *                    (a private File), or rebuild()s from scratch if there is
- *                    none / it fails to open.
+ *                    (one file at a fixed path per user), or rebuild()s from
+ *                    scratch if there is none / it fails to open.
  *   - fold()        folds messages newer than the high-water mark into the
  *                    open working copy — batched, checkpointed, and bounded by
  *                    an optional deadline, under a per-user flock so only one
@@ -40,6 +40,18 @@
  *   - purgePersisted() deletes the persisted sealed blob itself (key rotation
  *                    — sealed under the now-superseded key) and resets the
  *                    high-water mark, so the next unlock rebuild()s fresh.
+ *
+ * ONE PATH PER USER: the persisted blob is {site root}/cache/mailfts/{uid}.bin,
+ * sealed into {uid}.bin.tmp and renamed over it. A persist cannot leave a
+ * second copy behind, because there is no second name for one to take — which
+ * is the whole point: the blob was a File per persist, each one relying on a
+ * delete of its predecessor to succeed, and on one node that delete failed for
+ * ten weeks and filled the disk with 157 copies
+ * (incidents/2026-09-22-jeremytunnell-full-backup-enospc.md). cache/ is in the
+ * backup engine's always-skipped set, so a regenerable multi-megabyte file per
+ * owner no longer rides in every archive. Bookkeeping
+ * (imi_inbound_mailbox_search_index) still records the sealed DEK, the format
+ * and the coverage mark; it no longer records a file id.
  *
  * DISPOSABLE CACHE: every stored byte here is reconstructible from the sealed
  * message rows. Missing, stale, corrupt, or post-rotation — rebuild(), never
@@ -85,6 +97,9 @@
  * a working copy or restored blob of another format fails to open and is
  * rebuilt — the disposable-cache contract, so a shape change never needs a
  * migration, just one rebuild per owner on their next unlocked visit.
+ * @version 1.11 - the persisted index is one file per user at a fixed path
+ *   under cache/, not a File per persist: a second copy has no name to take
+ *   (specs/mailbox_search_index_blob_leak.md)
  * @version 1.10 - a fold primes its messages in chunks so the HTML-only ones
  *   read their text through ONE extraction subprocess per chunk (received
  *   HTML opens in the parser jail, specs/parser_jail.md), not one per message
@@ -113,6 +128,13 @@ class MailboxIndexException extends Exception {}
 class MailboxIndex {
 
 	const SHM_DIR = '/dev/shm';
+
+	/** The persisted sealed index lives here, one file per user, under the site
+	 *  root. `cache` is in the backup engine's always-skipped set
+	 *  (maintenance_scripts/sysadmin_tools/backup_files.sh) and the host
+	 *  converger does not walk it, so a multi-megabyte regenerable blob per
+	 *  owner costs nothing but the disk it sits on. */
+	const BLOB_DIR = 'cache/mailfts';
 
 	/** The working copy's schema. See SHAPE in the class comment. */
 	const FTS_DDL = "CREATE VIRTUAL TABLE mailfts USING fts5(content, content='', detail=none, contentless_delete=1)";
@@ -145,6 +167,22 @@ class MailboxIndex {
 	/** The /dev/shm working-copy path for a user's index. */
 	public function shmPath(int $user_id): string {
 		return self::SHM_DIR . '/mailfts_' . $user_id . '.sqlite';
+	}
+
+	/** Where every user's persisted sealed index lives. */
+	public static function blobDir(): string {
+		return rtrim((string)PathHelper::getSiteRoot(), '/') . '/' . self::BLOB_DIR;
+	}
+
+	/** The persisted sealed index for a user. ONE name per user: a second copy
+	 *  cannot exist, whatever fails mid-write. */
+	public function blobPath(int $user_id): string {
+		return self::blobDir() . '/' . $user_id . '.bin';
+	}
+
+	/** Where a persist seals before renaming into place. */
+	public function blobTmpPath(int $user_id): string {
+		return $this->blobPath($user_id) . '.tmp';
 	}
 
 	/**
@@ -196,7 +234,7 @@ class MailboxIndex {
 			// persisted blob is exactly current, so skipping the write loses
 			// nothing.
 			$fresh = InboundMailboxSearchIndex::loadOrCreateForUser($user_id);
-			$no_blob = intval($fresh->get('imi_fil_file_id')) <= 0;
+			$no_blob = !is_file($this->blobPath($user_id));
 			$blob_mark = $fresh->get('imi_blob_high_water');
 			$advance = ($blob_mark === null || $blob_mark === '')
 				? PHP_INT_MAX   // legacy blob with unrecorded coverage — record it now
@@ -292,13 +330,13 @@ class MailboxIndex {
 	 */
 	public function purgePersisted(int $user_id): void {
 		$this->wipe($user_id);
+		self::removePersisted($user_id);
 		$bookkeeping = InboundMailboxSearchIndex::loadOrCreateForUser($user_id);
+		// A row still naming a File predates the fixed path (see the transition
+		// in persistOrThrow); purging is the other place that File goes away.
 		$fil_id = intval($bookkeeping->get('imi_fil_file_id'));
 		if ($fil_id > 0) {
-			$file = new File($fil_id, TRUE);
-			if ($file->key) {
-				try { $file->permanent_delete(); } catch (Throwable $e) { /* best-effort */ }
-			}
+			self::deleteLegacyFile($fil_id, $user_id);
 		}
 		$bookkeeping->set('imi_fil_file_id', null);
 		$bookkeeping->set('imi_sealed_key', null);
@@ -391,22 +429,20 @@ class MailboxIndex {
 	}
 
 	/**
-	 * Restore the /dev/shm working copy from the persisted sealed blob. False
+	 * Restore the /dev/shm working copy from the persisted sealed index. False
 	 * if there is none / it fails to open — the caller then rebuild()s.
 	 *
-	 * Streams from the blob's on-disk path straight to the /dev/shm working
-	 * path (index blobs are private files on local disk), so restore memory is
-	 * bounded by a chunk, never by the index. A blob that is not in the stream
-	 * format — including one sealed by a build that used the whole-blob string
-	 * seal — is refused here, which is just the disposable-cache contract: the
-	 * caller rebuilds from the sealed message rows and the next persist writes
-	 * stream-format.
+	 * Streams from the fixed path straight to the /dev/shm working path, so
+	 * restore memory is bounded by a chunk, never by the index. Anything that
+	 * is not this build's format — a missing file, a file that is not in the
+	 * stream format, a stamp from another shape — is refused here, which is
+	 * just the disposable-cache contract: the caller rebuilds from the sealed
+	 * message rows and the next persist writes the current format.
 	 */
 	private function restoreFromBlob(int $user_id, VaultKey $key): bool {
 		$bookkeeping = InboundMailboxSearchIndex::loadOrCreateForUser($user_id);
-		$fil_id = intval($bookkeeping->get('imi_fil_file_id'));
 		$sealed_key = $bookkeeping->get('imi_sealed_key');
-		if ($fil_id <= 0 || !$sealed_key) {
+		if (!$sealed_key) {
 			return false;
 		}
 		if (intval($bookkeeping->get('imi_format')) !== self::FORMAT) {
@@ -416,13 +452,8 @@ class MailboxIndex {
 			// format stamp exists to avoid. The caller rebuilds.
 			return false;
 		}
-		$file = new File($fil_id, TRUE);
-		if (!$file->key || $file->get('fil_delete_time')) {
-			return false;
-		}
-		$blob = $file->_blob();
-		$src = $blob ? $blob->filesystem_path('original') : '';
-		if ($src === '' || !is_file($src) || !SealedBox::isStreamFile($src)) {
+		$src = $this->blobPath($user_id);
+		if (!is_file($src) || !SealedBox::isStreamFile($src)) {
 			return false;
 		}
 		try {
@@ -456,7 +487,7 @@ class MailboxIndex {
 
 	/**
 	 * Seal-after-fold: seal the /dev/shm file path-to-path (memory bounded by
-	 * a chunk at any index size) and persist the sealed file as a private File.
+	 * a chunk at any index size) into this user's one persisted path.
 	 *
 	 * Never throws. The persisted blob is a restore shortcut for the next
 	 * unlock, not the index itself — the working copy in /dev/shm is already
@@ -497,25 +528,36 @@ class MailboxIndex {
 		$bookkeeping = InboundMailboxSearchIndex::loadOrCreateForUser($user_id);
 		$old_fil_id = intval($bookkeeping->get('imi_fil_file_id'));
 
-		// Seal to a temp file, then hand it to the path-based ingest — the index
-		// content is never held as a string anywhere on this path.
-		$tmp = tempnam(sys_get_temp_dir(), 'mailfts_seal_');
-		if ($tmp === false) {
-			throw new MailboxIndexException('MailboxIndex: unable to create a temp file for the sealed index.');
+		// Seal to this user's temp name and rename it over their one blob. The
+		// name is derived from the user id, so a persist interrupted anywhere
+		// leaves at most that one temp file to overwrite next time — there is
+		// no name a second copy could take.
+		self::ensureBlobDir();
+		$tmp = $this->blobTmpPath($user_id);
+		if (is_file($tmp)) {
+			@unlink($tmp);   // a previous persist died mid-seal; its bytes are worthless
 		}
 		try {
 			$crypto->sealFieldFile($path, $tmp, $dek, $this->blobAd($user_id));
-			$file = File::createFromUpload($tmp, 'mailfts_' . $user_id . '.bin', 'application/octet-stream', $user_id, array(
-				'fil_private' => true,
-				'fil_source'  => File::SOURCE_MAILBOX_SEARCH_INDEX,
-			));
+			// Before it is visible under its real name: the site's own user and
+			// group read it, nobody else.
+			@chmod($tmp, 0660);
+			if (!@rename($tmp, $this->blobPath($user_id))) {
+				throw new MailboxIndexException('MailboxIndex: could not move the sealed index into place at '
+					. $this->blobPath($user_id) . '.');
+			}
 		} finally {
 			if (is_file($tmp)) {
 				@unlink($tmp);
 			}
 		}
 
-		$bookkeeping->set('imi_fil_file_id', intval($file->key));
+		// Nothing names a File any more. Saved BEFORE the old File is deleted,
+		// because while the row still points at it the File's delete runs a
+		// deletion rule against this row — and on a node whose rules predate
+		// this change that rule is a cascade, which would take the owner's
+		// sealed key and marks with the File.
+		$bookkeeping->set('imi_fil_file_id', null);
 		$bookkeeping->set('imi_sealed_key', $sealed_key);
 		$bookkeeping->set('imi_format', self::FORMAT);
 		// What the sealed file covers. The fold checkpointed the mark before
@@ -524,12 +566,56 @@ class MailboxIndex {
 		$bookkeeping->set('imi_blob_high_water', intval($bookkeeping->get('imi_fts_high_water')));
 		$bookkeeping->save();
 
-		if ($old_fil_id > 0 && $old_fil_id !== intval($file->key)) {
-			$old = new File($old_fil_id, TRUE);
-			if ($old->key) {
-				try { $old->permanent_delete(); } catch (Throwable $e) { /* best-effort */ }
+		// Transition: this owner's index used to be a File. The bytes are now at
+		// the path, so the File is dead weight — but its delete is best-effort,
+		// because a persist that already succeeded must not fail over cleanup.
+		if ($old_fil_id > 0) {
+			self::deleteLegacyFile($old_fil_id, $user_id);
+		}
+	}
+
+	/**
+	 * Delete a File that used to hold a user's persisted index. Never throws —
+	 * the persist it follows has already succeeded — but never silent either:
+	 * a delete that cannot happen is exactly the failure that filled a disk
+	 * with ten weeks of copies before anyone saw it
+	 * (incidents/2026-09-22-jeremytunnell-full-backup-enospc.md).
+	 */
+	private static function deleteLegacyFile(int $fil_id, int $user_id): void {
+		try {
+			$file = new File($fil_id, TRUE);
+			if ($file->key) {
+				$file->permanent_delete();
+			}
+		} catch (Throwable $e) {
+			error_log('MailboxIndex: could not delete the superseded index File ' . $fil_id
+				. ' for user ' . $user_id . ' (it is now a stray): ' . $e->getMessage());
+		}
+	}
+
+	/** Remove a user's persisted index and any temp file left beside it. */
+	public static function removePersisted(int $user_id): void {
+		$base = self::blobDir() . '/' . $user_id . '.bin';
+		foreach (array_merge(array($base), (array)glob($base . '.tmp*')) as $path) {
+			if (is_file($path) && !@unlink($path)) {
+				error_log('MailboxIndex: could not remove the persisted index at ' . $path . '.');
 			}
 		}
+	}
+
+	/** The blob directory, created on first use. Group-writable and setgid:
+	 *  php-fpm and the CLI both persist, exactly as they both write uploads/,
+	 *  and on a box where those are two accounts the setgid bit is what keeps
+	 *  each one able to read what the other sealed. */
+	private static function ensureBlobDir(): void {
+		$dir = self::blobDir();
+		if (is_dir($dir)) {
+			return;
+		}
+		if (!@mkdir($dir, 0770, true) && !is_dir($dir)) {
+			throw new MailboxIndexException('MailboxIndex: could not create the index directory at ' . $dir . '.');
+		}
+		@chmod($dir, 02770);
 	}
 
 	/**

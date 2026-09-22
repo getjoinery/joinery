@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.20 - the Logs picker offers what this node's agent will answer about
+ *                 (JobCommandBuilder::site_log_files_for), so the PostgreSQL entry appears only
+ *                 on an agent that has it
  * @version 1.19 - the Host card asks the two new questions: Why? beside a failed unit
  *                 (unit_journal) and What is using it? beside the disk figures (disk_usage);
  *                 the Machine box shows free space, inode use and any kernel event the node counted
@@ -355,7 +358,10 @@
 				$fw_log->begin_form();
 				$fw_log->hiddeninput('action', '', ['id' => 'site_log_action', 'value' => 'site_log']);
 				$fw_log->hiddeninput(SmAdminCsrf::FIELD, '', ['id' => 'site_log_csrf', 'value' => SmAdminCsrf::token()]);
-				$fw_log->dropinput('file', 'Log file', ['options' => JobCommandBuilder::SITE_LOG_FILES]);
+				// What this node's own agent will answer about: the PostgreSQL
+				// entry is newer than the word, so an older agent does not
+				// offer it and the picker does not either.
+				$fw_log->dropinput('file', 'Log file', ['options' => JobCommandBuilder::site_log_files_for($node)]);
 				$fw_log->checkboxinput('previous', 'Previous rotation (yesterday\'s file)');
 				$fw_log->numberinput('lines', 'Lines (1 to ' . JobCommandBuilder::LOG_MAX_COUNT . ')', ['min' => 1, 'max' => JobCommandBuilder::LOG_MAX_COUNT]);
 				$fw_log->submitbutton('btn_site_log', 'Read log file', ['class' => 'btn btn-sm btn-outline-secondary']);

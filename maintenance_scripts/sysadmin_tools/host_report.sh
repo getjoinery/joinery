@@ -6,6 +6,12 @@
 # sshd's password and root-login posture, disk, memory, swap, whether a reboot
 # is pending, and when unattended-upgrades last ran.
 #
+# Version: 1.3 - inode use is read with --output=ipcent alone (df refuses -i beside
+#                --output, so the figure was always unknown); the three kernel
+#                counts read the SYSTEM journal, because ENOSPC is an errno a
+#                userspace program reports and never appears in the kernel ring —
+#                the read that proved it (2026-09-22) was a mandb line, not a
+#                kernel line.
 # Version: 1.2 - disk carries avail_bytes and inodes_used_pct (what a writer can
 #                actually use, and the other way a disk fills); kernel_events_24h
 #                counts the three kernel events that explain a write that failed.
@@ -212,7 +218,7 @@ emit_disk() {
     local line used total avail ipct
     line="$(run df -B1 --output=used,size,avail "$WEB_ROOT" | tail -n 1)"
     read -r used total avail <<< "$line"
-    ipct="$(run df -i --output=ipcent "$WEB_ROOT" | tail -n 1)"
+    ipct="$(run df --output=ipcent "$WEB_ROOT" | tail -n 1)"
     ipct="${ipct//[^0-9]/}"
     printf '{"path":%s,"used_bytes":%s,"total_bytes":%s,"avail_bytes":%s,"inodes_used_pct":%s}' \
         "\"$(printf '%s' "$WEB_ROOT" | tr -cd 'A-Za-z0-9._/-' | head -c 200)\"" \
@@ -238,30 +244,53 @@ emit_swap() {
 }
 
 # ---------------------------------------------------------------------------
-# Kernel events, last 24 hours: THREE COUNTS and nothing else.
+# The three events that explain a write that failed, last 24 hours: THREE
+# COUNTS and nothing else.
 #
-# The three things that make a write fail, in the kernel's own words: the OOM
-# killer ran, a filesystem had no space, or the device errored. Each is a
-# number; the matched lines are counted and discarded, exactly as the SSH
-# figure above is, so nothing from a kernel message — a path, a process name,
-# an address — ever reaches the object.
+# The OOM killer ran, a filesystem had no space, or the device errored. Each is
+# a number; the matched lines are counted and discarded, exactly as the SSH
+# figure above is, so nothing from a message — a path, a process name, an
+# address — ever reaches the object.
+#
+# THE SYSTEM JOURNAL, not the kernel ring, and that is the correction this
+# version exists for. "No space left on device" is an errno handed to a
+# userspace program, which is the one that says so: on 2026-09-22 the line that
+# proved a node's disk had filled came from mandb, and a kernel-ring read
+# (journalctl -k) returned zero for the same window. The system journal carries
+# the kernel's own messages too, so the OOM and I/O counts lose nothing by
+# being read here.
+#
+# journalctl does the matching itself (-g, its own PCRE pass) so the shell is
+# never handed a day of log to filter, and the count is taken again here with
+# the same pattern — which also drops journalctl's own "-- No entries --".
 #
 # Why it earns its place: on 2026-09-22 a node filled its disk for fifteen
 # minutes, took PostgreSQL and the man-page index down with it, and freed the
 # space again on the way out. Every gauge read normal afterwards. One of these
 # three numbers would have named it.
 #
-# -k is the kernel ring. A container has none: journalctl exits non-zero and
-# the whole object is unknown, which is the same signal the unit states use.
+# A machine whose journal cannot be read (a container, or an unprivileged run)
+# answers unknown for the whole object, which is the same signal the unit
+# states use.
 # ---------------------------------------------------------------------------
+KERNEL_EVENT_OOM='Out of memory: Kill|oom-kill:|oom_reaper:'
+KERNEL_EVENT_ENOSPC='No space left on device'
+KERNEL_EVENT_IO='I/O error|Buffer I/O error|EXT4-fs error|Remounting filesystem read-only'
+
+# One pattern's count over the last day, or nothing at all when the journal
+# could not be read (which the caller turns into unknown for all three).
+journal_event_count() {
+    local out
+    out="$(run journalctl --system --since "24 hours ago" --no-pager -o cat -g "$1")" || return 1
+    printf '%s' "$(printf '%s\n' "$out" | grep -c -E "$1")"
+}
+
 emit_kernel_events() {
-    local lines oom enospc io
+    local oom enospc io
     run systemctl show -p Version --value >/dev/null || { printf '"unknown"'; return; }
-    lines="$(run journalctl --system -k --since "24 hours ago" --no-pager -o cat)" \
-        || { printf '"unknown"'; return; }
-    oom="$(printf '%s\n' "$lines" | grep -c -E 'Out of memory: Kill|oom-kill:|oom_reaper:')"
-    enospc="$(printf '%s\n' "$lines" | grep -c -E 'No space left on device')"
-    io="$(printf '%s\n' "$lines" | grep -c -E 'I/O error|Buffer I/O error|EXT4-fs error|Remounting filesystem read-only')"
+    oom="$(journal_event_count "$KERNEL_EVENT_OOM")"       || { printf '"unknown"'; return; }
+    enospc="$(journal_event_count "$KERNEL_EVENT_ENOSPC")" || { printf '"unknown"'; return; }
+    io="$(journal_event_count "$KERNEL_EVENT_IO")"         || { printf '"unknown"'; return; }
     printf '{"oom":%s,"enospc":%s,"io_error":%s}' \
         "$(json_num_or_unknown "$oom")" "$(json_num_or_unknown "$enospc")" "$(json_num_or_unknown "$io")"
 }

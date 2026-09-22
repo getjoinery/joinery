@@ -1608,9 +1608,14 @@ carries `search_indexing: {remaining, total}` and the reader shows a non-blockin
 last contiguous success — the mark never advances past a message that is not actually
 in the index.
 
-A fold that completed or processed refolds re-seals and persists the working copy as
-a private File (seal-after-fold; the sealed blob and its bookkeeping — high-water
-mark, blob coverage, sealed DEK — live in `imi_inbound_mailbox_search_index`); a fold
+A fold that completed or processed refolds re-seals and persists the working copy to
+**one path per owner** — `{site root}/cache/mailfts/{uid}.bin`, sealed into
+`{uid}.bin.tmp` and renamed over it (seal-after-fold; the bookkeeping — high-water
+mark, blob coverage, sealed DEK — lives in `imi_inbound_mailbox_search_index`). One
+name per owner is the storage invariant: a persist that fails anywhere leaves at most
+that one temp file to overwrite next time, and a second copy has no name it could
+take. `cache/` is in the backup engine's always-skipped set, so a regenerable
+multi-megabyte file per owner never rides in an archive. A fold
 mid-backlog persists every `PERSIST_MIN_ADVANCE` messages, so a window close costs at
 most one chunk of re-folding rather than a per-slice rewrite of a multi-hundred-
 megabyte blob. The blob records the mark it covers (`imi_blob_high_water`) and a
@@ -1625,6 +1630,15 @@ from the sealed message rows; the cache is never the source of truth. `InboundMa
 passive-close safety net for a working copy the wipe callback missed (an idle APCu
 expiry, a worker recycle); it is declared as that class's `$retention_policy` and runs
 in the daily retention sweep, so worst case a copy lingers until the next sweep.
+Two things keep that invariant honest. `InboundMailboxSearchIndex::permanent_delete()`
+removes the owner's file with their bookkeeping row, and the `usr_users` rule runs
+through the model, so deleting a user takes their index with them.
+`InboundMailboxSearchIndex::sweepPersistedIndexes()` — run by the same retention sweep
+— removes an index whose bookkeeping row has gone and a temp file older than an hour.
+The provisioning check `checkSearchIndexStorage()` is the count that says so out loud:
+it fails naming any stray the sweep would take, and any `fil_files` row carrying the
+search index's source, with what the indexes occupy.
+
 `MailboxService::listThreads()`'s `q` path consults the **viewer's** index for
 whatever part of the scope the viewer holds a grant for — one mailbox or all of
 them (`sealedIndexScope()`) — and unions those hits with the plain Postgres

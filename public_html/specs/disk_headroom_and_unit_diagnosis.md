@@ -69,7 +69,7 @@ was the man-page index, which is the one that did not matter. The cause was
 visible in stored facts for four days beforehand and nobody had written the
 line that reads them.
 
-This spec builds the missing lines. Eleven items, in three groups:
+This spec builds the missing lines. Twelve items, in three groups:
 
 | # | What | Where | WP |
 |---|---|---|---|
@@ -84,6 +84,7 @@ This spec builds the missing lines. Eleven items, in three groups:
 | 9 | `reset_failed_unit` — and can clear it once the answer is known | Agent | WP9 |
 | 10 | `disk_headroom` recipe — an unpaired node warns itself | Agent | WP10 |
 | 11 | `disk_usage` — what is actually using the space | Agent | WP11 |
+| 12 | `site_log` reads the PostgreSQL cluster log | Agent | WP13 |
 
 ## The incident, in the two sentences that matter here
 
@@ -116,8 +117,14 @@ card renders them and the fold test pins them.
 with free space and a different errno, and the report should be able to tell
 the two apart.
 
-**`kernel_events_24h`: `{oom, enospc, io_error}`.** Three integers, from one
-capped `journalctl -k --since -24h` pass. **Counts and nothing else** — no
+**`kernel_events_24h`: `{oom, enospc, io_error}`.** Three integers, each from
+one capped `journalctl --system --since -24h -g <pattern>` pass — the **system**
+journal, not the kernel ring. That distinction was learned the hard way on the
+first live read: `journalctl -k` returned zero for all three on a node whose
+disk had demonstrably filled ten hours earlier, because "No space left on
+device" is an errno handed to a userspace program, and the program is what says
+so. The line that proved this incident came from `mandb`. The system journal
+carries the kernel's own messages too, so the OOM and I/O counts lose nothing. **Counts and nothing else** — no
 lines, no process names, no addresses — exactly the rule the SSH auth-failure
 count already obeys, and for the same reason: a count answers "did this
 happen" without carrying anything that needs redacting. Any one of the three
@@ -440,7 +447,7 @@ Platform first: WP1–WP7 ship in one release and need no agent.
 
 | WP | Scope | Done when |
 |----|-------|-----------|
-| WP1 | **BUILT.** `host_report.sh` 1.2: `disk.avail_bytes`, `disk.inodes_used_pct`, `kernel_events_24h`. Intake in `sanitise_host_report` (+ `host_report_percent`, `host_report_kernel_events`). Host card renders free space, inode use and any non-zero kernel count. `host_report_gate.sh` extended to 63 checks | The gate passes on dev. The container case (no kernel journal → `unknown`) is the owner's live gate |
+| WP1 | **BUILT.** `host_report.sh` 1.3: `disk.avail_bytes`, `disk.inodes_used_pct`, `kernel_events_24h`. Intake in `sanitise_host_report` (+ `host_report_percent`, `host_report_kernel_events`). Host card renders free space, inode use and any non-zero kernel count. `host_report_gate.sh` extended to 67 checks | The gate passes on dev. Two defects found by the first live read and fixed: `df -i --output=ipcent` is refused by df (the figure was always `unknown`), and the events must be read from the system journal, not the kernel ring |
 | WP2 | `mgn_disk_history` column; `process_host_report` writes one sample a day; `NodeDiskTrend`; `FleetAttentionNotice::render_disk_headroom`; registered in `bootstrap.php`; Host card shows headroom and direction | The replay test raises the notice on 09-16 and not on 09-10 |
 | WP3 | `MultiManagedNode` option `reports_failed_backup`; `FleetAttentionNotice::render_failed_backups`; registered | A node whose last backup failed is named in the header; a healthy fleet renders nothing |
 | WP4 | `BACKUP_LEVEL` / `BACKUP_BYTES` from `run_backup.php`; parsed into `mjb_result`; shown per run on the Backups tab | A run's level and size are fields, not prose |
@@ -451,6 +458,7 @@ Platform first: WP1–WP7 ship in one release and need no agent.
 | WP9 | **Agent**: `reset_failed_unit` + plane-side *Clear* button | A failed unit can be cleared from the dashboard |
 | WP10 | **Agent**: `Recipe.NoRepair`; `disk_headroom` recipe — **after Q1 is answered** | An unpaired node opens a case on its own full disk |
 | WP11 | **BUILT.** `observe_disk_usage.go`, `disk_usage.sh` 1.0, `disk_usage_gate.sh` (35 checks), the builder, the action, `process_disk_usage`, the job-page render, the *What is using it?* button | Green. The live gate is the owner's |
+| WP13 | **BUILT.** `site_log` takes `postgresql`, resolved to the newest cluster log in the compiled `/var/log/postgresql`; the plane gates the value on agent 1.40.0 (`SITE_LOG_POSTGRES_MIN_AGENT_VERSION`, `site_log_files_for`) and the picker follows | The database's own account of a refused write is readable without a login |
 | WP12 | Docs, the running-list row, the incident report's pointers, spec to `implemented/` | — |
 
 **Built out of order, and why.** WP1, WP8 and WP11 shipped first because the
