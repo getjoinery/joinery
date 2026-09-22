@@ -27,6 +27,9 @@
  * and the health cloud-side counts to its own rows via its optional
  * reverseEligibilityWhere() ownership gate.
  *
+ * @version 2.2 - persistKey() stores a replacement key alone, leaving the enabled latch and the
+ *                draining flag as they were; health() pings through driverWithFallback(), so a paused
+ *                or draining store reports a key that stopped working
  * @version 2.1 - health() tells a record with no bytes on this server (missing, missing_rows) apart from a
  *                push that failed five times (stuck, stuck_rows with the last error)
  * @version 2.0 - one private store (specs/cloud_storage_private_only.md): testConnection() takes only
@@ -224,6 +227,51 @@ class CloudStorageLifecycle {
 		self::_write_settings(self::_settings_map($opts), $session);
 		CloudStorageDriverFactory::reset();
 		return ['ok' => true];
+	}
+
+	/**
+	 * Store a replacement key against the store's existing binding.
+	 *
+	 * Writes the key and nothing else. The enabled latch and the draining flag
+	 * say what the store is doing; replacing a key says nothing about either,
+	 * so a paused store stays paused and a drain in progress keeps draining
+	 * with the new key. That last case is the reason the key stays editable at
+	 * all: the pull-back reads every object out of the bucket with this key, so
+	 * a revoked key with no way to replace it would strand the files it was
+	 * meant to rescue.
+	 *
+	 * The binding is the caller's stored one; a key that names a different
+	 * endpoint (Backblaze settles the endpoint from the key) is refused here
+	 * rather than stored against objects it cannot reach.
+	 */
+	public static function persistKey(array $opts, $session): array {
+		$stored = CloudStorageDriverFactory::binding();
+		$endpoint = StorageProvider::host($opts['endpoint'] ?? '');
+		$stored_endpoint = StorageProvider::host($stored['endpoint']);
+		if ($endpoint !== '' && $stored_endpoint !== '' && $endpoint !== $stored_endpoint) {
+			return ['ok' => false,
+				'message' => 'This key belongs to ' . $endpoint . ', and the store is on ' . $stored_endpoint
+					. '. A key that moves the store is a new store: disable and pull the files back first.'];
+		}
+		if (trim((string)($opts['bucket'] ?? '')) !== trim((string)$stored['bucket'])) {
+			return ['ok' => false, 'message' => 'The bucket cannot change while replacing a key.'];
+		}
+		self::_write_settings(self::keySettingsMap($opts), $session);
+		CloudStorageDriverFactory::reset();
+		return ['ok' => true];
+	}
+
+	/**
+	 * The settings a key replacement writes: the key, and nothing else. Set
+	 * against _settings_map(), which a full Save uses and which carries the
+	 * enabled latch — the difference between the two maps is the whole of what
+	 * "replacing a key changes nothing else" means.
+	 */
+	public static function keySettingsMap(array $opts): array {
+		return [
+			'cloud_storage_access_key' => $opts['access_key'] ?? '',
+			'cloud_storage_secret_key' => $opts['secret_key'] ?? '',
+		];
 	}
 
 	/** The setting map a Save writes: the binding, and the enabled latch. */
@@ -440,9 +488,12 @@ class CloudStorageLifecycle {
 		}
 		$h['cron'] = ['ok' => $cron_ok, 'last' => $last_cron];
 
-		// Driver ping (only if the store is usable).
+		// Driver ping. The resolver is the one request-time byte I/O uses: a
+		// paused store still serves every offloaded file from the bucket, and a
+		// draining one still reads every object back out of it, so a key that
+		// stopped working matters just as much off the latch as on it.
 		$h['driver'] = null;
-		$driver = CloudStorageDriverFactory::driver();
+		$driver = CloudStorageDriverFactory::driverWithFallback();
 		if ($driver) {
 			try {
 				$start = microtime(true);

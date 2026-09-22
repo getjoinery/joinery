@@ -150,8 +150,27 @@ Save runs the check, in this order, and stores nothing on a fail
 The `(endpoint, bucket)` identity of the store is **immutable while it holds
 any `cloud` row** (summed across every profile). A Save that would change the
 bucket or endpoint while offloaded objects exist is rejected: pull them back
-to local first (Disable and Pull Files Back to Local). Access-key rotation —
-same `(endpoint, bucket)` — stays allowed.
+to local first (Disable and Pull Files Back to Local).
+
+### Replacing the key
+
+The key is the one part of a store holding files that may change, and it has
+to be: the pull-back reads every object out of the bucket with this key, so a
+revoked key with no way to replace it would strand the files that pulling back
+is meant to rescue. Rotation at the provider and a leaked key needing immediate
+revocation are the everyday cases.
+
+`CloudStorageLifecycle::persistKey()` proves the new key against the store's
+own binding — read from settings, never from the request — and then writes
+`cloud_storage_access_key` and `cloud_storage_secret_key` and nothing else
+(`keySettingsMap()`). The enabled latch and the draining flag describe what the
+store is doing; replacing a key says nothing about either, so a paused store
+stays paused and a pull-back in progress carries on with the new key. A key
+naming a different endpoint — Backblaze settles the endpoint from the key — is
+refused by name rather than stored against objects it cannot reach.
+
+On the admin page this is the **Replace key** disclosure, folded away while the
+store is healthy and opened for you when the bucket has stopped answering.
 
 ### Offload modes
 

@@ -6,10 +6,12 @@
  * form when nothing is configured, headed by a provider picker that shows only
  * the fields the provider needs (StorageProvider); what is stored, read-only, with Pause or
  * Enable, Disable and Pull Files Back to Local, and Remove as the state
- * allows; and a form for what may change — only the key while files are in
- * the bucket, everything otherwise. Save runs the bucket and key check, the
+ * allows; and a form for what may change — Replace key while files are
+ * in the bucket, everything otherwise. Either one runs the bucket and key check, the
  * privacy gate among its steps, and persists only when it passes.
  *
+ * @version 2.1 - while files are in the bucket the key folds behind Replace key, which proves the key
+ *                and stores it alone; it opens itself when the bucket stopped answering
  * @version 2.0.2 - records with no bytes on this server are listed apart from stuck files, without Retry;
  *                  the stuck table shows each file's last error
  * @version 2.0.1 - Pause and Disable and Pull Files Back are plain grey buttons
@@ -98,8 +100,13 @@ if (!$health['cron']['ok']) {
 	$problem('<strong>Cron is not running;</strong> nothing moves until it does. Last tick: '
 		. ($health['cron']['last'] ? $when($health['cron']['last']) : '<em>never</em>') . '.');
 }
-if ($enabled && !empty($health['driver']) && !$health['driver']['ok']) {
-	$problem('<strong>The bucket did not answer:</strong> ' . htmlspecialchars((string)($health['driver']['message'] ?? 'unknown')) . ' Save to run the full check.');
+// The ping runs off the latch too, so a paused or draining store reports a key
+// that stopped working — those stores still serve every offloaded file. A
+// store that is off and holds nothing says nothing: there is no file to lose.
+$driver_failed = !empty($health['driver']) && !$health['driver']['ok'];
+if ($driver_failed && ($enabled || $locked)) {
+	$problem('<strong>The bucket did not answer:</strong> ' . htmlspecialchars((string)($health['driver']['message'] ?? 'unknown'))
+		. ' If the key was revoked or has expired, replace it below; the files in the bucket cannot be served or pulled back until one works.');
 }
 if (!empty($health['sync_task']) && $health['sync_task']['is_active'] && $health['sync_task']['last_status'] === 'error') {
 	$problem('<strong>The last run failed:</strong> ' . htmlspecialchars((string)$health['sync_task']['last_message']));
@@ -301,17 +308,26 @@ if (!$configured) {
 	echo '</div>';
 
 	if ($locked) {
-		// Only what may change while files are in the bucket.
+		// Only the key may change while files are in the bucket, and it is
+		// folded away: a store doing its job is a set of facts and actions, not
+		// two credential boxes. It opens on its own when the bucket stopped
+		// answering — a revoked key is the one fault only this box can fix.
 		echo '<p class="text-muted small" style="margin-top: 14px; margin-bottom: 6px;">The provider, endpoint, region and bucket cannot change while files are in the bucket: their records point at objects there. '
-			. 'To move to another bucket, disable and pull the files back first. The key may change at any time; Save proves the new key before it is stored.</p>';
-		$formwriter = $page->getFormWriter('cloud_storage_form', ['action' => '/admin/admin_cloud_storage', 'method' => 'post', 'id' => 'cloud_storage_form']);
+			. 'To move to another bucket, disable and pull the files back first.</p>';
+		echo '<details' . ($save_failed || $driver_failed ? ' open' : '') . '>';
+		echo '<summary style="cursor: pointer; font-weight: 600;">Replace key</summary>';
+		echo '<p class="text-muted small" style="margin-top: 8px;">Paste the replacement key — after rotating it at your provider, or after revoking one that leaked. '
+			. 'The new key is proved against this same bucket before it is stored, and storing it changes nothing else: '
+			. 'a paused store stays paused, and a pull-back in progress carries on with the new key.</p>';
+		$formwriter = $page->getFormWriter('cloud_storage_key_form', ['action' => '/admin/admin_cloud_storage', 'method' => 'post', 'id' => 'cloud_storage_key_form']);
 		$formwriter->begin_form();
-		$formwriter->hiddeninput('action', '', array('value' => 'save'));
+		$formwriter->hiddeninput('action', '', array('value' => 'replace_key'));
 		$draw_fields($formwriter, array('cloud_storage_access_key', 'cloud_storage_secret_key'));
 		echo '<div style="margin-top: 12px;">';
-		$formwriter->submitbutton('btn_save', 'Save', array('class' => 'btn btn-primary'));
+		$formwriter->submitbutton('btn_replace_key', 'Replace key', array('class' => 'btn btn-primary'));
 		echo '</div>';
 		echo $formwriter->end_form();
+		echo '</details>';
 	} else {
 		// Nothing is in the bucket, so everything may change. Folded away
 		// until asked for; open when a save just failed so the fix is in view.
