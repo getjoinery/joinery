@@ -22,6 +22,8 @@
  *
  * Run: php tests/integration/cloud_storage_guards_test.php
  *
+ * @version 3.1 - replacing a key: the map it writes carries no latch and no drain flag, and a key
+ *                naming another endpoint or bucket is refused
  * @version 3.0 - one store: one binding, one latch, one drain flag; the cloud row is a private blob
  * @version 2.0
  */
@@ -75,6 +77,29 @@ try {
 
 	$r = CloudStorageLifecycle::assertBindingMutable(['endpoint' => 'ep1.example.com', 'bucket' => 'bucket-A']);
 	ok('cloud rows + same binding ⇒ allowed (key rotation)', $r['ok'] === true);
+
+	section('Replacing a key writes the key and nothing else');
+
+	// The store's state — paused, draining — belongs to the store, not to the
+	// key. The pull-back reads every object out of the bucket with this key, so
+	// a replacement landing mid-drain must leave the drain running.
+	$map = CloudStorageLifecycle::keySettingsMap(['access_key' => 'AK', 'secret_key' => 'SK']);
+	ok('the key map is the two key settings', array_keys($map) === ['cloud_storage_access_key', 'cloud_storage_secret_key']);
+	ok('the key map does not touch the enabled latch', !array_key_exists('cloud_storage_enabled', $map));
+	ok('the key map does not touch the draining flag', !array_key_exists('cloud_storage_draining', $map));
+
+	// A key that names another endpoint is a different store; refused by name
+	// rather than stored against objects it cannot reach. (Backblaze settles
+	// the endpoint from the key, so this is how a wrong-account key arrives.)
+	$r = CloudStorageLifecycle::persistKey(
+		['endpoint' => 'ep2.example.com', 'bucket' => 'bucket-A', 'access_key' => 'AK', 'secret_key' => 'SK'], null);
+	ok('a key naming another endpoint ⇒ REJECTED', $r['ok'] === false);
+	ok('the refusal names both endpoints', $r['ok'] === false
+		&& strpos($r['message'], 'ep2.example.com') !== false && strpos($r['message'], 'ep1.example.com') !== false);
+
+	$r = CloudStorageLifecycle::persistKey(
+		['endpoint' => 'ep1.example.com', 'bucket' => 'bucket-B', 'access_key' => 'AK', 'secret_key' => 'SK'], null);
+	ok('a key replacement may not change the bucket ⇒ REJECTED', $r['ok'] === false);
 
 	section('Offload mode dispatch (mode)');
 

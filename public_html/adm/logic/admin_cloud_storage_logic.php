@@ -11,6 +11,9 @@
  * the tick drives every profile from the registry, so the admin never names a
  * profile or a per-store task.
  *
+ * @version 3.1 - replace_key: a rotated key is proved and stored on its own, leaving the enabled latch
+ *                and the draining flag untouched — the save path's activate-and-stop-draining is what
+ *                a full Save means, not what replacing a key means
  * @version 3.0.1 - Retry clears the recorded reason with the count
  * @version 3.0 - one private store (specs/cloud_storage_private_only.md): one Save, one binding, one
  *                pull-back; the private-store fields and disable_and_pull_private are gone
@@ -122,6 +125,57 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 					DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 				));
 				return LogicResult::redirect('/admin/admin_cloud_storage');
+			}
+			// otherwise fall through and render diagnostics inline
+		}
+		elseif ($action === 'replace_key') {
+			// Rotate the key against the stored binding. The endpoint, region and
+			// bucket are read from settings and never from the post, so this path
+			// cannot repoint the store; and it writes the key alone, so a paused
+			// store stays paused and a drain in progress keeps draining with the
+			// new key.
+			$secret_key = trim($input['cloud_storage_secret_key'] ?? '');
+			if ($secret_key === '') {
+				$secret_key = (string)$settings->get_setting('cloud_storage_secret_key');
+			}
+			$opts = array(
+				'provider'   => (string)$settings->get_setting('cloud_storage_provider'),
+				'endpoint'   => (string)$settings->get_setting('cloud_storage_endpoint'),
+				'region'     => (string)$settings->get_setting('cloud_storage_region'),
+				'bucket'     => (string)$settings->get_setting('cloud_storage_bucket'),
+				'access_key' => trim((string)($input['cloud_storage_access_key'] ?? '')),
+				'secret_key' => $secret_key,
+			);
+			foreach (['access_key', 'secret_key'] as $field) {
+				if ($opts[$field] === '') {
+					$errors[] = ucfirst(str_replace('_', ' ', $field)) . ' is required.';
+				}
+			}
+			// Backblaze settles the endpoint and region from the key, so a key
+			// belonging to another endpoint shows up here; persistKey refuses it
+			// by name rather than storing it against objects it cannot reach.
+			if (empty($errors)) {
+				$settled = StorageProvider::complete($opts);
+				$opts = $settled['opts'];
+				if (!$settled['ok']) {
+					$errors[] = $settled['message'];
+				}
+			}
+			if (empty($errors)) {
+				$test_results = CloudStorageLifecycle::testConnection($opts);
+				if ($test_results['ok']) {
+					$persist = CloudStorageLifecycle::persistKey($opts, $session);
+					if ($persist['ok']) {
+						$session->save_message(new DisplayMessage(
+							'Key replaced. The store keeps doing what it was doing.',
+							'Saved', '/\/admin\/admin_cloud_storage/',
+							DisplayMessage::MESSAGE_ANNOUNCEMENT,
+							DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+						));
+						return LogicResult::redirect('/admin/admin_cloud_storage');
+					}
+					$errors[] = $persist['message'];
+				}
 			}
 			// otherwise fall through and render diagnostics inline
 		}
