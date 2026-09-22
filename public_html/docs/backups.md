@@ -419,7 +419,20 @@ the run that started the chain), when one full is carrying more than 30 incremen
 envelope no longer opens with the site key (the site key is disposable; a chain
 sealed to a lost one cannot be extended, only restored). Losing the snapshot —
 or the local manifest — is therefore safe: the next run costs one extra full,
-and never produces a broken backup.
+and never produces a broken backup. The manifest records why its chain started
+(`started_because`).
+
+**A chain never spans a swap of the code tree.** An upgrade deploys by moving
+every directory in `public_html/` out and the staged ones in; the new
+directories can reuse inode numbers the snapshot recorded for other paths, and
+tar then records directory renames that no extraction can apply — every restore
+point after the upgrade would fail. So the files engine writes the identity of
+the tree it archived beside the snapshot (`.{slug}.snar.tree`: the inodes of
+`public_html` and of each directory directly inside it), and a run whose tree
+differs from that record — or that finds no record — starts a new chain
+(`tree_changed`). A restore that lays the tree down again counts the same way.
+If an upgrade lands while a run is extending a chain, the run fails and the
+next one starts the new chain.
 
 A run that **fails** partway clears the snapshot for the same reason: the
 snapshot advances while tar runs, before the run is committed to the manifest

@@ -189,6 +189,12 @@ chk "the restart deferral names the label" \
     "$(grep -c 'keeps running (\${AGENT_JOB_LABEL' "$INSTALLER")" "1"
 chk "nothing reads the label as a job number any more" \
     "$(grep -c 'AGENT_JOB_ID' "$INSTALLER")" "0"
+# "Staged" is only said when the shipped artifact is newer than the running agent.
+chk "the restart deferral says 'already current' when nothing is newer" \
+    "$(grep -c 'already current (shipped v' "$INSTALLER")" "1"
+chk "the restart deferral compares running against shipped" \
+    "$(awk '/^if \[ "\$DEFER_TO_AGENT" = "1" \]; then/{n++} n==2&&/version_is_older "\$RUNNING" "\$SHIPPED"/{print "yes"; exit}' "$INSTALLER")" \
+    "yes"
 
 echo "== the deferral exits before start_agent, and says so =="
 DEFER_LINE="$(grep -n 'restart deferred to agent' "$INSTALLER" | head -1 | cut -d: -f1)"

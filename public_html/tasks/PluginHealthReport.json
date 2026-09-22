@@ -1,0 +1,7 @@
+{
+    "name": "Plugin health report",
+    "description": "Runs every active plugin's provisioning checks that are declared for fleet reporting and records the result, so a management node sees them with the rest of this node's status and fails the node's health on one that does not pass. Checks with nothing declared cost nothing.",
+    "activate_on_install": true,
+    "default_frequency": "hourly",
+    "config_fields": {}
+}

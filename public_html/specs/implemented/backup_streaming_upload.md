@@ -1,6 +1,6 @@
 # Backups — The Archive Never Lands on Disk
 
-**Status:** Built and reviewed 2026-09-21; tests green. Awaiting the release and the owner's live gate (stop point 1).
+**Status:** Built and reviewed 2026-09-21; tests green. Awaiting the release and the owner's live gate (stop point 1). Live gate passed 2026-09-22 on 0.8.420 / agent 1.41.0: streamed manager chain runs on dev (job 28616), getjoinery (28621) and jeremytunnell (28658, 2.8 GB level 0), a streamed database-only run on dev (28642), no archive or dump left in any chain directory, level 2 verifies pass (28620, 28622, 28912).
 **Date:** 2026-09-20
 
 ## For the executor — read this first

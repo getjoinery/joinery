@@ -1635,9 +1635,18 @@ removes the owner's file with their bookkeeping row, and the `usr_users` rule ru
 through the model, so deleting a user takes their index with them.
 `InboundMailboxSearchIndex::sweepPersistedIndexes()` — run by the same retention sweep
 — removes an index whose bookkeeping row has gone and a temp file older than an hour.
+`InboundMailboxSearchIndex::sweepLegacyBlobs()` — the same sweep again — reclaims an
+index copy from when each persist uploaded a private File: bytes in the private upload
+directory named `mailfts_{uid}_{token}.bin` that no File holds. A blob row with that
+name that no File or file version references is released through `FileBlob::release()`
+until it is reclaimed (bytes, local or bucket, and row); a file with that name that no
+blob row or File names is unlinked. Anything younger than an hour, and anything a row
+holds, is left alone.
 The provisioning check `checkSearchIndexStorage()` is the count that says so out loud:
-it fails naming any stray the sweep would take, and any `fil_files` row carrying the
-search index's source, with what the indexes occupy.
+it fails naming any stray the sweep would take, any unheld File-era copy, and any
+`fil_files` row carrying the search index's source, with what the indexes occupy. It is
+declared `fleet_report`, so the node's hourly Plugin health report records it and a
+management node shows it with the node's status, where a failure fails the node's health.
 
 `MailboxService::listThreads()`'s `q` path consults the **viewer's** index for
 whatever part of the scope the viewer holds a grant for — one mailbox or all of

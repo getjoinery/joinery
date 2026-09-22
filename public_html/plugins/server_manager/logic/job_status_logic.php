@@ -5,6 +5,7 @@
  * Input: job_id, output_offset. Returns status, new output tail, step counts,
  * and (once the job settles) the processed result. Superadmin only (floor 10).
  *
+ * @version 1.4.0 - a settled job is folded through JobResultProcessor::process_if_due, the one rule
  * @version 1.3.0 - polls $job->transcript(), the same text the job page renders, so offsets agree
  * @version 1.2.0 - full-output redaction with offsets in redacted coordinates (no chunk-boundary leak)
  * @version 1.1.0
@@ -52,8 +53,7 @@ function job_status_logic(array $input): LogicResult {
 	];
 
 	if ($job->get('mjb_status') === 'completed' || $job->get('mjb_status') === 'failed') {
-		if (!$job->get('mjb_result')) {
-			JobResultProcessor::process($job);
+		if (JobResultProcessor::process_if_due($job)) {
 			$job->load();
 		}
 		$result = $job->get('mjb_result');

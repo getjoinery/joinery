@@ -5,6 +5,8 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.10 - a finished job's result is folded through JobResultProcessor::process_if_due, so a failed
+ *                 job is folded here as it is everywhere else
  * @version 1.9 - a reset_failed_unit result renders the unit's state before and after the reset
  * @version 1.8 - a unit_journal result renders the unit's verdict above its journal lines, and a
  *                disk_usage result renders two size tables — the site tree's biggest directories
@@ -77,9 +79,9 @@ if ($post_action === 'rerun_job') {
 	exit;
 }
 
-// Process result if completed but not yet processed
-if ($job->get('mjb_status') === 'completed' && !$job->get('mjb_result')) {
-	JobResultProcessor::process($job);
+// Fold the result if it has not been yet — the same rule the agent channel
+// and the dashboard sweep apply, so a failed job is folded here too.
+if (JobResultProcessor::process_if_due($job)) {
 	$job->load();
 }
 

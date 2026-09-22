@@ -1491,6 +1491,7 @@ Declare runtime dependencies as a `provisioners` array in `plugin.json`, alongsi
 | `details` | no | One-line explanation shown under the label. |
 | `check` | yes | A check object; `type` is `code` or `probe`. |
 | `script` | no | Path to a fix script, relative to the plugin root. Include it only when the fix is a host-level install; omit it when the failure is a configuration problem the admin fixes directly. |
+| `fleet_report` | no | `true` to report this check to a management node. See [Reporting a check to a management node](#reporting-a-check-to-a-management-node). |
 
 ### Two check types — when to use each
 
@@ -1530,6 +1531,12 @@ Checks run asynchronously (via the `plugin_provisioning_check` API action) after
 The teal state is deliberate: a plugin whose green status rests on probes never claims the unqualified "Setup complete." Expanding the badge lists each provisioner, with the reason and — for `unmet` provisioners that declare a `script` — the fix command as an absolute path.
 
 The CLI equivalent is `php utils/check_provisioning.php`, which prints the same results and exits non-zero when anything is `unmet` or `error`.
+
+### Reporting a check to a management node
+
+A provisioner declared `"fleet_report": true` also reaches the management node that manages this site. The core **Plugin health report** task runs every such check hourly (`PluginProvisioning::recordFleetReport()`) and records the results in the `plugin_fleet_report` setting: the time checked, and each check's plugin, key, label, state and reason (capped at 500 characters, at most 50 checks). The node's status carries that record as `plugin_checks` — the agent's `check_status` reads it from the database, and `GET /api/v1/management/stats` returns the same record — so both transports report one answer. On the management node, the node's Overview shows a **Plugin Checks** card, and any check whose state is not `verified` or `reachable` turns the node's health dot red.
+
+Declare it only on a check that is cheap enough to run hourly and whose failure means the site needs someone's attention; the reason is shown to the fleet operator as written.
 
 ## Parsing Outside Bytes
 

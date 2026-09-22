@@ -25,6 +25,8 @@
  * should use — 2 for a malformed request, 1 for a transfer, envelope or
  * integrity failure — and whose message is exactly what the script used to say.
  *
+ * @version 1.4 - an artifact the manifest needs with no link fails as `gone` (the links are a listing of
+ *                backup storage), the outcome a link that answers 404 has
  * @version 1.3 - fetch_envelopes(), fetch_object() and fetch_index() stand alone, so the object
  *                restore (utils/restore_objects.php) brings objects back one at a time through the
  *                same checks a verify's sample passes; fetch_objects() composes them
@@ -375,8 +377,13 @@ class BackupStaging {
 		$bytes   = 0;
 		foreach ($wanted as $name) {
 			if (!isset($artifact_urls[$name])) {
-				throw new BackupStagingException('no download link was supplied for ' . $name
-					. ', which this chain\'s manifest says run ' . (int)$seq . ' needs');
+				// The links are signed from a listing of the chain's prefix in
+				// backup storage (the management node's builder and the site's
+				// own launcher both), so a name the manifest needs with no link
+				// is a name backup storage did not hold when the request was
+				// signed — the same outcome as a link that answers 404.
+				throw new BackupStagingException('gone: ' . $name . ' is no longer in backup storage (no download link '
+					. 'was signed for it), and this chain\'s manifest says run ' . (int)$seq . ' needs it');
 			}
 			$local = $work . '/' . $name;
 			if (is_file($local)) {

@@ -7,7 +7,13 @@ the claim, B5) RELEASED 2026-09-16 as agent 1.33.0 / 0.8.403, LIVE on all
 eleven agented nodes, and the ARMING PROOF run the same day (12 minutes
 from a hand-stopped fail2ban to its repair, no case). The site-posture proof ran
 on dev the same day. WP4's recipe `agent_supervision` and its two words
-BUILT 2026-09-16 as agent 1.34.0, awaiting release and its live proof; the
+BUILT 2026-09-16 as agent 1.34.0, released, and LIVE-PROVEN 2026-09-22
+(fleet on agent 1.41.0 / 0.8.420): `agent_report` jobs 28610–28613 answered
+supervised on dev, joinerydemo (cron keepalive), jeremytunnell and
+docker-prod (systemd); `agent_converge` job 28614 on dev ran
+`install_agent.sh: ok` and restarted nothing, job 28615 refused on siteless
+docker-prod; every site node's claim reads `agent_supervision:armed:pass`,
+docker-prod's `not-applicable`. The
 four diagnosis words and WP5 go to the driver's spec (see the work
 packages).** Design set 2026-09-13. Owner's order:
 every other package in `post_release_fleet_defects.md` ships first, then this
@@ -494,8 +500,8 @@ review is in the file header before the code.
    Run from the node page against dev, then jeremytunnell; read the
    transcript. Proves the `--only` path, the manifest check, the lock and
    the compiled constant under the job model, where every run is already
-   ledgered. **Built 2026-09-14, agent 1.26.0, reviewed; awaiting the
-   release and the owner's proof on dev, then jeremytunnell.** Shape as
+   ledgered. **Built 2026-09-14, agent 1.26.0, reviewed, released; proven
+   on jeremytunnell 2026-09-14 (job 18336) and dev 2026-09-22 (job 28623).** Shape as
    built: the same runner as `run_plugin_installers`, with one argv element
    that is a package constant in the agent (`--only=host_housekeeping.sh`;
    no parameter, no `{param}` slot, no `ArgsFrom`, and the test pins all

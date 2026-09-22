@@ -6,7 +6,7 @@ eleven agented nodes, each reporting both words and its switch (`on` everywhere 
 reading the design asks for). Live proof (§5) run on dev 2026-09-18: `site_log {error, 50}`
 (job 22104) and `log_table_tail {logins, 20}` (job 22105) completed with IPs masked on the node;
 with dev's switch off, the same two words (jobs 22160, 22161) were refused with the owner's
-reason; switch restored. The proof found one defect, fixed the same day and uncommitted:
+reason; switch restored. The proof found one defect, fixed the same day (8b83f02e):
 `JobResultProcessor` had no handler for either word, so a completed log job never recorded a
 result and the job page showed only the raw transcript. `process_site_log` and
 `process_log_table_tail` record the envelope as the job's result, bounded on intake; the job
@@ -14,11 +14,12 @@ page's log box and table render from it. The credential-line half of the proof (
 planted line carrying `dbpassword=...`, `api_key=...`, an address, an IP and a token) found the
 second defect: the address, IP and token were masked on the node, the two lowercase assignments
 were not, because both redactors matched the assignment shape only in uppercase. Fixed the same
-day on both sides, uncommitted: `SmSecretRedactor` 1.2 and the agent's `redact` package (agent
+day on both sides (8b83f02e): `SmSecretRedactor` 1.2 and the agent's `redact` package (agent
 1.35.1) mask `name=value` in any case for a name carrying password/passwd/token/secret or naming
-a secret key (`api_key` joins both lists); a lowercase name ending in `_key` stays readable. Still
-open before the spec moves: commit both repos, a platform release (which carries agent 1.35.1 to
-the fleet), then re-read the planted line on dev and see both values masked. Original design note follows. Closes two rows of the running list in
+a secret key (`api_key` joins both lists); a lowercase name ending in `_key` stays readable. Verified
+2026-09-22 on platform 0.8.420 (`SmSecretRedactor` 1.2) and dev agent 1.41.0: job 28609 (`site_log
+{error, 20}`) read a freshly planted line with `dbpassword=`, `api_key=`, the address, the IP and the
+token all masked, and the job page renders it. Original design note follows. Closes two rows of the running list in
 `agent_recipes_and_vocabulary.md` (`site_log`, `log_table_tail`) and builds
 the node-side redaction pass that `sentinel_managed_recovery.md` §11 names
 as mandatory v1 work. Obeys every rule of `agent_recipes_and_vocabulary.md`

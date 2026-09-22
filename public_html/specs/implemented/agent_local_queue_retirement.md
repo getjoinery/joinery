@@ -3,7 +3,9 @@
 **Status: BUILT 2026-09-07. WP1–WP4 all done; the queue does not exist.** The
 agent has one job source, the signed channel, on every machine including the
 management node. A row written into `mjb_management_jobs` by hand executes
-nothing, anywhere.
+nothing, anywhere. The fleet dispatch that closes the apply_update routing
+proof ran 2026-09-22 (0.8.420): jobs 28466–28474, all nine agented site nodes
+routed primitive and completed.
 
 What was deleted, agent side (v1.21.0): `localqueue.go`, `runner.go`, `api.go`,
 `creds.go` and `server.go` in full, with the `local`, `ssh`, `scp` and `api`
@@ -389,8 +391,8 @@ as the 1.10.0 delivery event, not a routing fault:
 That last line is the version gate working, and a live end-to-end proof of the
 primitive on a container node. Today all nine report 1.10.0, the floor is
 exactly 1.10.0, so apply_update routes primitive fleet-wide on next dispatch.
-Status: **proven on node 30; the other eight route by version floor and have
-not dispatched since.** One fleet dispatch closes it.
+Status: **proven fleet-wide 2026-09-22: the 0.8.420 apply_update dispatch (jobs
+28466–28474) routed primitive on all nine nodes and completed.**
 
 
 ## Work

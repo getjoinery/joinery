@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.75 - plugin_checks_failing(): a plugin check the node reports as not passing
+ *                 (plugin_checks, the node's recorded fleet_report checks) fails the node's badge
  * @version 1.74 - reset_failed_unit (agent 1.41.0): the Clear beside a failed unit, the same compiled
  *                 unit list as unit_journal, operate, no log-access check (it reads nothing)
  * @version 1.73 - site_log offers the PostgreSQL cluster log (agent 1.40.0): the database is the only
@@ -923,6 +925,14 @@ class JobCommandBuilder {
 			return 'danger';
 		}
 
+		// A plugin check the node reports as not passing. Each one is a plugin
+		// saying its own feature is broken or accumulating something it should
+		// not (the mailbox's search-index copies filled a disk in ten weeks), so
+		// it fails the badge the way a full disk does.
+		if (count(self::plugin_checks_failing($status_data)) > 0) {
+			return 'danger';
+		}
+
 		// SSL absence: FQDN domain with SSL not active → warning
 		$ssl_domain = $node->get('mgn_site_url') ? parse_url($node->get('mgn_site_url'), PHP_URL_HOST) : null;
 		$ssl_warn = $ssl_domain
@@ -945,6 +955,42 @@ class JobCommandBuilder {
 			return 'warning';
 		}
 		return 'success';
+	}
+
+	/**
+	 * The plugin checks a node reports as not passing, from its status blob.
+	 *
+	 * plugin_checks is the node's recorded result of every provisioning check a
+	 * plugin declares fleet_report (PluginProvisioning::recordFleetReport on the
+	 * node), carried by check_status and the stats endpoint alike. It is the
+	 * node's own words, so every field is capped here and escaped wherever it
+	 * is shown. Passing is 'verified' or 'reachable'; anything else fails.
+	 *
+	 * @param array|null $status_data the folded status blob
+	 * @return array [['plugin', 'key', 'label', 'state', 'reason'], ...]
+	 */
+	public static function plugin_checks_failing($status_data) {
+		$checks = (is_array($status_data) && isset($status_data['plugin_checks']['checks'])
+				&& is_array($status_data['plugin_checks']['checks']))
+			? $status_data['plugin_checks']['checks'] : array();
+		$failing = array();
+		foreach (array_slice($checks, 0, 50) as $check) {
+			if (!is_array($check)) {
+				continue;
+			}
+			$state = substr((string)($check['state'] ?? ''), 0, 16);
+			if ($state === 'verified' || $state === 'reachable') {
+				continue;
+			}
+			$failing[] = array(
+				'plugin' => substr((string)($check['plugin'] ?? ''), 0, 64),
+				'key'    => substr((string)($check['key'] ?? ''), 0, 64),
+				'label'  => substr((string)($check['label'] ?? ''), 0, 200),
+				'state'  => $state !== '' ? $state : 'unknown',
+				'reason' => substr((string)($check['reason'] ?? ''), 0, 500),
+			);
+		}
+		return $failing;
 	}
 
 	/**
