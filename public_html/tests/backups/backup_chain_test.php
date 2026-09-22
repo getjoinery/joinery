@@ -67,6 +67,15 @@ check(BackupChain::should_start_new($fresh, true, 7, 30, '2026-08-03 00:00:00') 
 	var_export(BackupChain::should_start_new($fresh, true, 7, 30, '2026-08-03 00:00:00'), true));
 check(BackupChain::should_start_new($fresh, true, 7, 30, '2026-08-08 00:00:01') === 'age',
 	'past the interval a new full is taken');
+// The scheduled tick runs a few seconds earlier in the minute than the run that
+// stamped `created`; seven days must still mean seven days, not eight.
+$ticked = $fresh;
+$ticked['created'] = '2026-09-15T04:00:21Z';
+check(BackupChain::should_start_new($ticked, true, 7, 30, '2026-09-22 04:00:09') === 'age',
+	'a chain created at 04:00:21 rolls on the 04:00:09 tick seven days later',
+	var_export(BackupChain::should_start_new($ticked, true, 7, 30, '2026-09-22 04:00:09'), true));
+check(BackupChain::should_start_new($ticked, true, 7, 30, '2026-09-21 04:00:09') === '',
+	'the same chain continues on the tick one day earlier');
 check(BackupChain::should_start_new($fresh, true, 0, 30, '2030-01-01 00:00:00') === '',
 	'an interval of 0 means never roll on age');
 

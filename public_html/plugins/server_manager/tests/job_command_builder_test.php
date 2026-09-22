@@ -2120,4 +2120,37 @@ section('unit_journal / disk_usage: why a unit failed, and where the disk went (
 		'a size report does not: there is nothing in it to age out');
 }
 
+section('reset_failed_unit: clear a failed unit from the same list (specs/disk_headroom_and_unit_diagnosis.md § 9)');
+
+{
+	$clear_node = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x0b", 32)),
+		'mgn_agent_version'    => '1.41.0',
+		'mgn_agent_primitives' => 'check_status,host_report,unit_journal,reset_failed_unit',
+		'mgn_agent_log_access' => 'off',
+	));
+	$built = JobCommandBuilder::build_reset_failed_unit($clear_node, 'man-db');
+	check($built === array('primitive' => 'reset_failed_unit', 'params' => array('unit' => 'man-db')),
+		'reset_failed_unit travels as the name and one unit from the closed list', var_export($built, true));
+	check(JobCommandBuilder::transports_for('reset_failed_unit') === array('primitive'),
+		'one transport, the primitive');
+	// Clearing reads nothing, so the owner's log switch (off here) does not govern it.
+	check($built['primitive'] === 'reset_failed_unit', 'the log switch being off does not refuse a Clear');
+	foreach (array('sshd', 'man-db.service', 'man-db; reboot', '*', '', '--all') as $bad) {
+		$threw = false;
+		try { JobCommandBuilder::build_reset_failed_unit($clear_node, $bad); } catch (Exception $e) { $threw = true; }
+		check($threw, 'reset_failed_unit refuses on the plane: ' . var_export($bad, true));
+	}
+	$older = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x0c", 32)),
+		'mgn_agent_version'    => '1.40.0',
+		'mgn_agent_primitives' => 'check_status,host_report,unit_journal,disk_usage',
+	));
+	check(!JobCommandBuilder::has_primitive($older, 'reset_failed_unit'), 'an agent without the word is not offered it');
+	$threw = '';
+	try { JobCommandBuilder::build_reset_failed_unit($older, 'cron'); } catch (Exception $e) { $threw = $e->getMessage(); }
+	check(strpos($threw, 'Apply an update') !== false, 'and the refusal names the fix');
+}
+
+
 harness_finish();

@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.74 - reset_failed_unit (agent 1.41.0): the Clear beside a failed unit, the same compiled
+ *                 unit list as unit_journal, operate, no log-access check (it reads nothing)
  * @version 1.73 - site_log offers the PostgreSQL cluster log (agent 1.40.0): the database is the only
  *                 thing on a node that records a connection dying or a write being refused, and
  *                 nothing else read it. The floor is per VALUE (SITE_LOG_POSTGRES_MIN_AGENT_VERSION,
@@ -371,6 +373,9 @@ class JobCommandBuilder {
 		// specs/disk_headroom_and_unit_diagnosis.md, new in 1.39.0.
 		'unit_journal' => '1.39.0',
 		'disk_usage'   => '1.39.0',
+		// And clearing the failed record once the answer is known (§ 9 of the
+		// same spec), new in 1.41.0. The same compiled unit list.
+		'reset_failed_unit' => '1.41.0',
 	];
 
 	/**
@@ -1786,6 +1791,37 @@ class JobCommandBuilder {
 			'unit'  => $unit,
 			'lines' => self::bounded_log_count($lines, 'lines'),
 		]];
+	}
+
+	/**
+	 * Clear systemd's failed record for one unit, and report its state before
+	 * and after (specs/disk_headroom_and_unit_diagnosis.md § 9). PRIMITIVE
+	 * ONLY. The unit list is UNIT_JOURNAL_UNITS: a unit the plane can ask why
+	 * about is one it can clear once the answer is known.
+	 *
+	 * No log-access check: it reads nothing, and prints only the unit's states.
+	 * It is an operate word, so a node whose policy accepts only observe words
+	 * refuses it there.
+	 *
+	 * @param string $unit one of UNIT_JOURNAL_UNITS' keys
+	 */
+	public static function build_reset_failed_unit($node, $unit) {
+		if (!self::has_primitive($node, 'reset_failed_unit')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot clear a failed unit: its agent "
+				. "does not offer the reset_failed_unit primitive. Apply an update to the node; "
+				. "the agent that ships with it does.");
+		}
+		return self::build_reset_failed_unit_primitive($node, $unit);
+	}
+
+	public static function build_reset_failed_unit_primitive($node, $unit) {
+		$unit = (string)$unit;
+		if (!array_key_exists($unit, self::UNIT_JOURNAL_UNITS)) {
+			throw new Exception("'" . $unit . "' is not a unit the node will clear. Choose one of: "
+				. implode(', ', array_keys(self::UNIT_JOURNAL_UNITS)) . '.');
+		}
+		return ['primitive' => 'reset_failed_unit', 'params' => ['unit' => $unit]];
 	}
 
 	/**

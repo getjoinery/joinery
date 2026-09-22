@@ -199,7 +199,9 @@ check(CloudStoreInventory::sentence(CloudStoreInventory::summary($none, $held)) 
 section('A Bring them back leaves its mark and clears what it brought home');
 
 CloudStoreInventory::write($rec);
-CloudStoreInventory::note_bring_back(array('started' => '2026-09-22 06:00:00', 'finished' => null, 'mode' => 'missing', 'restored' => 0, 'by' => 'this site'));
+// A running bring back is judged against the real clock (in_progress), so its
+// start is a minute ago rather than a fixed date that ages out of the window.
+CloudStoreInventory::note_bring_back(array('started' => gmdate('Y-m-d H:i:s', time() - 60), 'finished' => null, 'mode' => 'missing', 'restored' => 0, 'by' => 'this site'));
 $s = CloudStoreInventory::summary($record(), $held);
 check(is_array($s['bring_back']) && $s['bring_back']['finished'] === null, 'a running bring back is on the record');
 $words = BackupObjectRestoreLauncher::describe_last($s['bring_back']);

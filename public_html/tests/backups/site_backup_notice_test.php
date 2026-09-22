@@ -56,10 +56,16 @@ section('A manager-profile run is not this site\'s own backup');
 $row('failed', 'manager failure', '2026-09-13 07:00:00', 'manager');
 check(strpos(SiteBackupNotice::render(), '06:00 UTC') !== false, 'the newest SITE run still decides');
 
-section('A run in progress is not a failure');
+section('A run that started hours ago and never finished is a failure');
+// The process the kernel kills, or the one whose database went away, writes
+// nothing: its row stays `running` for ever.
 $row('running', '', '2026-09-13 08:00:00');
-check(SiteBackupNotice::lastFinishedRun() === null && SiteBackupNotice::render() === '',
-	'while the newest run is running, the header is quiet');
+$stale = SiteBackupNotice::lastFinishedRun();
+check($stale !== null && $stale->get('bkh_outcome') === 'running', 'a stale running row is returned as the last run');
+$html = SiteBackupNotice::render();
+check(strpos($html, 'started at 2026-09-13 08:00 UTC and never finished') !== false,
+	'the header names it as a run that never finished', strip_tags($html));
+check(strpos($html, 'Harness target') !== false, 'naming the target');
 
 section('The next success clears it');
 $row('success', 'Backed up site.tar', '2026-09-13 09:00:00');
@@ -72,11 +78,23 @@ check(SiteBackupNotice::forRun('success', 'x', '2026-01-01 00:00:00', 't') === '
 check(SiteBackupNotice::forRun('failed', '', '2026-01-01 00:00:00', '') !== '', 'a failure with no message still renders');
 check(strpos(SiteBackupNotice::forRun('failed', '<b>x</b>', '2026-01-01 00:00:00', ''), '<b>') === false, 'the message is escaped');
 
+section('The run window, pure');
+$now = strtotime('2026-09-22 12:00:00 UTC');
+check(SiteBackupNotice::isStale('2026-09-22 04:00:00', $now), 'eight hours running is stale');
+check(!SiteBackupNotice::isStale('2026-09-22 07:00:00', $now), 'five hours running is not');
+check(!SiteBackupNotice::isStale('', $now), 'no start time is never stale');
+check(strpos(SiteBackupNotice::forStaleRun('2026-09-22 04:00:00', '<i>t</i>'), '<i>') === false, 'the target is escaped');
+
 section('Only a superadmin sees it');
 $_SESSION['permission'] = 5;
 $row('failed', 'again', '2026-09-13 10:00:00');
 check(SiteBackupNotice::render() === '', 'an admin below 10 sees nothing');
 $_SESSION['permission'] = 10;
 check(SiteBackupNotice::render() !== '', 'a superadmin does');
+
+section('A run in progress is not a failure');
+$row('running', '', gmdate('Y-m-d H:i:s', time() - 3600));
+check(SiteBackupNotice::lastFinishedRun() === null && SiteBackupNotice::render() === '',
+	'while the newest run started an hour ago and is running, the header is quiet');
 
 harness_finish();

@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.13 - Recent runs from here: the last runs this plane dispatched, each with its outcome and,
+ *                 when the run said, its level and size (BACKUP_LEVEL / BACKUP_BYTES)
  * @version 1.12 - "Offloaded files in backup storage: N objects, X GB by <party>; last indexed at the run of …"
  *                 from the listing's object-store totals (BackupChainListHelper 1.3)
  * @version 1.11 - Bring them back: the node's offloaded files the file store has lost, brought home from the
@@ -201,6 +203,25 @@
 		       ? ' <a href="/admin/server_manager/job_detail?job_id=' . (int)$health['job_id'] . '">See the failed job.</a>'
 		       : '')
 		   . '</p>';
+
+		// The runs this plane dispatched, with the level and size each one
+		// printed. The storage listing below says what is kept; this says what
+		// each run did, including the ones that failed.
+		$recent_runs = NodeMonitorHealth::backup_runs_from_here((int)$node->key, 7);
+		if ($recent_runs) {
+			echo '<details class="mb-3"><summary>Recent runs from here</summary>'
+			   . '<table class="table table-sm mb-0"><thead><tr><th>When</th><th>Outcome</th><th>Level and size</th><th></th></tr></thead><tbody>';
+			foreach ($recent_runs as $run) {
+				$when = $run['time'] !== ''
+					? LibraryFunctions::convert_time($run['time'], 'UTC', $session->get_timezone(), 'M j, Y g:i A T')
+					: '';
+				echo '<tr><td>' . htmlspecialchars($when) . '</td>'
+				   . '<td>' . htmlspecialchars($run['outcome'] !== '' ? $run['outcome'] : 'not yet read') . '</td>'
+				   . '<td>' . htmlspecialchars(NodeMonitorHealth::backup_run_figures($run)) . '</td>'
+				   . '<td><a href="/admin/server_manager/job_detail?job_id=' . (int)$run['id'] . '">Job</a></td></tr>';
+			}
+			echo '</tbody></table></details>';
+		}
 
 		echo '<p class="text-muted">Encrypted on the node, sealed to the node\'s own verified recovery key '
 		   . htmlspecialchars(RecoveryKeyFleet::short($rk_node['fingerprint'])) . '&hellip; and to the '

@@ -11,12 +11,24 @@
  * the text, until a run succeeds. A site that has never configured a backup
  * has no history row and hears nothing: zero-config means no nagging.
  *
- * Reads one stored fact: the newest finished site-profile run in
- * bkh_backup_history. A run still recorded as running is not a failure.
+ * Reads one stored fact: the newest site-profile run in bkh_backup_history. A
+ * run still recorded as running is not a failure — unless it started longer
+ * ago than any run takes. A process the kernel kills, or one that lost its
+ * database and could not get it back, writes nothing at all; its row stays
+ * `running`, and past STALE_RUN_HOURS it is named as the run that never
+ * finished.
  *
+ * @version 1.1 - a `running` row older than STALE_RUN_HOURS reads as a run that never finished
  * @version 1.0
  */
 class SiteBackupNotice {
+
+	/**
+	 * How long a run may stay `running` before it is taken to have died.
+	 * Generous on purpose: a slow full on a large site must not be named as
+	 * dead while it is still working.
+	 */
+	const STALE_RUN_HOURS = 6;
 
 	public static function render(): string {
 		if ((int)($_SESSION['permission'] ?? 0) < 10) {
@@ -26,6 +38,9 @@ class SiteBackupNotice {
 		if ($last === null) {
 			return '';
 		}
+		if ((string)$last->get('bkh_outcome') === 'running') {
+			return self::forStaleRun((string)$last->get('bkh_start_time'), (string)$last->get('bkh_target_name'));
+		}
 		return self::forRun((string)$last->get('bkh_outcome'), (string)$last->get('bkh_message'),
 			(string)$last->get('bkh_finish_time'), (string)$last->get('bkh_target_name'));
 	}
@@ -33,7 +48,9 @@ class SiteBackupNotice {
 	/**
 	 * The newest site-profile run, or null when there is none or the newest is
 	 * still running (a run in progress is not a failure; the next page load
-	 * after it finishes decides). Public so tests read the same fact the
+	 * after it finishes decides). A `running` row that started more than
+	 * STALE_RUN_HOURS ago is returned as it is — still `running` — because
+	 * nothing is going to finish it. Public so tests read the same fact the
 	 * notice does.
 	 */
 	public static function lastFinishedRun(): ?BackupHistory {
@@ -44,9 +61,37 @@ class SiteBackupNotice {
 			array('profile' => BackupProfile::SITE, 'deleted' => false),
 			array('bkh_start_time' => 'DESC'), 1, 0);
 		foreach ($rows as $row) {
-			return (string)$row->get('bkh_outcome') === 'running' ? null : $row;
+			if ((string)$row->get('bkh_outcome') !== 'running') {
+				return $row;
+			}
+			return self::isStale((string)$row->get('bkh_start_time')) ? $row : null;
 		}
 		return null;
+	}
+
+	/** Whether a run that started at $start_time (UTC) is past the run window. */
+	public static function isStale(string $start_time, ?int $now = null): bool {
+		$started = strtotime($start_time . ' UTC');
+		if ($started === false) {
+			return false;
+		}
+		return (($now ?? time()) - $started) > self::STALE_RUN_HOURS * 3600;
+	}
+
+	/** The notice for a run that started and never recorded an end. Public and pure. */
+	public static function forStaleRun(string $start_time, string $target_name): string {
+		$started = strtotime($start_time . ' UTC');
+		$when = $started !== false ? gmdate('Y-m-d H:i', $started) . ' UTC' : 'an unknown time';
+		$lead = 'This site\'s own backup started at ' . $when . ' and never finished.';
+		$body = ($target_name !== '' ? 'Target: ' . $target_name . '. ' : '')
+			. 'The process stopped without recording why — a full disk or a lost database connection are the usual causes. '
+			. 'Nothing new is offsite until a run succeeds; the next scheduled run clears this if it does.';
+		return self::css()
+			. '<div class="jy-site-backup-notice" role="status">'
+			. '<div class="jy-site-backup-notice__text"><strong>' . htmlspecialchars($lead, ENT_QUOTES, 'UTF-8') . '</strong> '
+			. htmlspecialchars($body, ENT_QUOTES, 'UTF-8')
+			. ' <a href="/admin/admin_backups">Backups</a></div>'
+			. '</div>';
 	}
 
 	/** The notice for one run. Public and pure so the wording can be tested. */

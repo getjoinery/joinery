@@ -1,4 +1,8 @@
 <?php
+/**
+ * @version 1.1 - reconnect(): rebuild the current mode's link, for a long-running CLI process
+ *                whose connection died under it
+ */
 require_once('Globalvars.php');
 require_once(__DIR__ . '/GuardedPdo.php');
 
@@ -15,18 +19,45 @@ class DbConnector {
 	public $last_query_params = array();
 
 	private function __construct() {
-		$settings = Globalvars::get_instance();
 		$this->test_mode = false;
+		$this->dblink = self::connect('');
+	}
 
-		// GuardedPdo is a PDO — everything downstream is unchanged — that runs
-		// the hot-turn rule over every write. See includes/SealedEgressGuard.php.
-		// Credentials go in as constructor arguments, never in the DSN: PDO
-		// quotes them for libpq, whereas a password pasted into the DSN has to
-		// avoid spaces, quotes and backslashes to survive the parse.
-		$this->dblink = new GuardedPdo('pgsql:host=localhost port=5432 dbname=' . $settings->get_setting('dbname'),
-			$settings->get_setting('dbusername'), $settings->get_setting('dbpassword'));
-		$this->dblink->setAttribute (PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);				
+	/**
+	 * Open a link to the live database ($suffix '') or the test one ('_test').
+	 *
+	 * GuardedPdo is a PDO — everything downstream is unchanged — that runs the
+	 * hot-turn rule over every write. See includes/SealedEgressGuard.php.
+	 * Credentials go in as constructor arguments, never in the DSN: PDO quotes
+	 * them for libpq, whereas a password pasted into the DSN has to avoid
+	 * spaces, quotes and backslashes to survive the parse.
+	 */
+	private static function connect($suffix) {
+		$settings = Globalvars::get_instance();
+		$link = new GuardedPdo('pgsql:host=localhost port=5432 dbname=' . $settings->get_setting('dbname' . $suffix),
+			$settings->get_setting('dbusername' . $suffix), $settings->get_setting('dbpassword' . $suffix));
+		$link->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+		return $link;
+	}
 
+	/**
+	 * Replace the current mode's link with a fresh one, from the same settings.
+	 *
+	 * For a long-running CLI process whose connection died under it — a backup
+	 * that ran for an hour while PostgreSQL restarted — and which still has a
+	 * row to write about it. Not a retry policy: nothing that runs inside a web
+	 * request calls this, and a caller that does calls it once. Statements
+	 * prepared on the old link are not carried over.
+	 */
+	public function reconnect() {
+		if ($this->test_mode) {
+			$this->dblink_test = NULL;
+			$this->dblink_test = self::connect('_test');
+		} else {
+			$this->dblink = NULL;
+			$this->dblink = self::connect('');
+		}
+		return true;
 	}
 
 	public static function get_instance() {
@@ -121,10 +152,7 @@ class DbConnector {
 	}
 
 	public function set_test_mode() {
-		$settings = Globalvars::get_instance();
-		$this->dblink_test = new GuardedPdo('pgsql:host=localhost port=5432 dbname=' . $settings->get_setting('dbname_test'),
-			$settings->get_setting('dbusername_test'), $settings->get_setting('dbpassword_test'));
-		$this->dblink_test->setAttribute (PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+		$this->dblink_test = self::connect('_test');
 		$this->test_mode = true;
 		$this->test_mode_was_used = true;
 		return true;

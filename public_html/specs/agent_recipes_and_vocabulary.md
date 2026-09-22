@@ -183,14 +183,17 @@ Named here so the vocabulary has a starting shape; built under
 `sentinel_managed_recovery.md` §15 (the rest).
 
 **Words:** `host_report` (observe, no parameters); `unit_journal {unit, lines}`
-— **BUILT** (agent 1.39.0), `disk_headroom_and_unit_diagnosis.md` § 8 — and
-`file_head {file, lines}` (observe, closed lists, capped);
+— **BUILT** (agent 1.39.0), `disk_headroom_and_unit_diagnosis.md` § 8 — and its
+counterpart `reset_failed_unit {unit}` (operate, the same list) — **BUILT** (agent
+1.41.0), § 9; `file_head {file, lines}` (observe, closed lists, capped);
 `host_converge` (operate, no parameters, runs `host_housekeeping.sh`);
 `run_installer {name}`, `restart_unit {unit}`, `fail2ban_reset_config`
 (operate, closed parameters).
 
-**Recipes:** `fail2ban`, then `agent_supervision`, then Sentinel's rungs 1
-and 2 where the check is local and the repair deterministic.
+**Recipes:** `fail2ban`, then `agent_supervision`, then `disk_headroom` — the
+first check-only recipe (`Recipe.NoRepair`, a case on the first failing check,
+`disk_headroom_and_unit_diagnosis.md` § 10) — then Sentinel's rungs 1 and 2
+where the check is local and the repair deterministic.
 
 ## Words the fleet has asked for — a running list
 
@@ -228,8 +231,8 @@ diagnosis was reconstructed from job rows on the management node. Incident:
 | What the ten gigabytes were that arrived in four days | Inferred from two stored series agreeing — the disk total and the incremental archive sizes — which is evidence, not an answer | `disk_usage` (observe, no parameters): the site tree's biggest directories to depth two and a compiled list of machine directories, sizes only, never a file name — **BUILT** (agent 1.39.0) |
 | Whether the kernel had said "no space left on device" | Nothing; the journal was 33 hours old by the time anyone asked | `host_report` carries `kernel_events_24h`: three counts, OOM / ENOSPC / I/O error — **BUILT** (platform, no agent release: `host_report.sh` is a script word) |
 | How much room a writer actually has | `total - used`, which quietly includes the root reserve — 2.4 GiB on that node | `host_report` carries `disk.avail_bytes` and `disk.inodes_used_pct` — **BUILT** |
-| To clear the failed unit once it was understood | Nothing; it will keep being named until someone logs in or the box reboots | `reset_failed_unit {unit}` (operate, same closed list) — specced, not built |
-| To be told the disk was filling before it filled | Nothing. Four days of warning sat unread in stored host reports | Not a node word: a plane-side notice over the samples the plane already keeps, floor **and** slope (`disk_headroom_and_unit_diagnosis.md` § 2) — specced, not built |
+| To clear the failed unit once it was understood | Nothing; it will keep being named until someone logs in or the box reboots | `reset_failed_unit {unit}` (operate, same closed list, starts and stops nothing) — **BUILT** (agent 1.41.0), with a *Clear* button beside the failed unit |
+| To be told the disk was filling before it filled | Nothing. Four days of warning sat unread in stored host reports | The plane-side notice over stored samples (floor **and** slope, § 2 of the spec) was **dropped by the owner 2026-09-22**: disk space is the operator's responsibility and a daily notice is noise. What was built is the node's own floor: recipe `disk_headroom` (check-only, `Recipe.NoRepair`: 10% or 5 GiB available, a case on the first failing check) — **BUILT** (agent 1.41.0) |
 
 ## What complies with what
 

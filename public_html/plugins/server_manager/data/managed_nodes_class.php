@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.24 - MultiManagedNode option reports_failed_backup: the nodes whose last scheduled
+ *                (manager-profile) backup is recorded as failed
  * @version 1.23 - mgn_agent_server_manager: whether Server Manager is active on the node as its agent
  *                last reported at poll (active|inactive); is_management_node() reads it first, the
  *                check_status blob second, because nothing runs check_status routinely
@@ -478,6 +480,12 @@ class MultiManagedNode extends SystemMultiBase {
 			// must be safe on a string: a jsonb compare, not an array length.
 			$filters["jsonb_typeof(mgn_last_host_report->'failed_units')"] =
 				"= 'array' AND mgn_last_host_report->'failed_units' <> '[]'::jsonb";
+		}
+
+		// Nodes whose last scheduled backup failed. A warning (kept, but not
+		// vouched for) and a run still in flight are not failures.
+		if (!empty($this->options['reports_failed_backup'])) {
+			$filters['mgn_last_backup_outcome'] = "= 'failed'";
 		}
 
 		if (!empty($this->options['reports_failing_recipe'])) {

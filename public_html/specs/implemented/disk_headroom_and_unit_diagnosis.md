@@ -4,8 +4,12 @@
 question rather than raise one, brought forward so this incident can be
 finished with the fleet's own words instead of a login. Tests green (the two
 new gates, the host-report gate, the builder and processor suites, the whole
-agent suite). Awaiting the owner's commit of both repos and a release. WP2–WP7,
-WP9 and WP10 not started.
+agent suite). Committed in ed0dcfee and be045cac, released in 0.8.419. Owner decisions
+2026-09-22: WP2 DROPPED (disk space is the operator's responsibility, and a
+headroom notice risks noise); WP3–WP7, WP9, WP10 and WP12 go ahead; Q1
+answered yes; Q2 moot with WP2. WP3–WP7, WP9, WP10 and WP12 built 2026-09-22,
+uncommitted: platform (WP3–WP7, WP9's plane half) and agent 1.41.0 (WP9, WP10),
+which ships inside the next platform release. Live gates are the owner's.
 Written 2026-09-22 from the incident report at
 `/var/www/html/joinerytest/incidents/2026-09-22-jeremytunnell-full-backup-enospc.md`.
 **Date:** 2026-09-22
@@ -448,25 +452,25 @@ Platform first: WP1–WP7 ship in one release and need no agent.
 | WP | Scope | Done when |
 |----|-------|-----------|
 | WP1 | **BUILT.** `host_report.sh` 1.3: `disk.avail_bytes`, `disk.inodes_used_pct`, `kernel_events_24h`. Intake in `sanitise_host_report` (+ `host_report_percent`, `host_report_kernel_events`). Host card renders free space, inode use and any non-zero kernel count. `host_report_gate.sh` extended to 67 checks | The gate passes on dev. Two defects found by the first live read and fixed: `df -i --output=ipcent` is refused by df (the figure was always `unknown`), and the events must be read from the system journal, not the kernel ring |
-| WP2 | `mgn_disk_history` column; `process_host_report` writes one sample a day; `NodeDiskTrend`; `FleetAttentionNotice::render_disk_headroom`; registered in `bootstrap.php`; Host card shows headroom and direction | The replay test raises the notice on 09-16 and not on 09-10 |
-| WP3 | `MultiManagedNode` option `reports_failed_backup`; `FleetAttentionNotice::render_failed_backups`; registered | A node whose last backup failed is named in the header; a healthy fleet renders nothing |
-| WP4 | `BACKUP_LEVEL` / `BACKUP_BYTES` from `run_backup.php`; parsed into `mjb_result`; shown per run on the Backups tab | A run's level and size are fields, not prose |
-| WP5 | Pre-flight headroom in `BackupRunner` (chain and standalone) | A run that cannot fit refuses, names both figures, and records a failure; a streaming run is unaffected |
-| WP6 | **B1**: `DbConnector::reconnect()`; `BackupRunner::fail()` retries once; `SiteBackupNotice` ages out a stale `running` row | Both halves under test; the node's own admin names a failed backup whose process died |
-| WP7 | **B2**: the chain interval grace | Seven days means seven days |
+| WP2 | **DROPPED 2026-09-22 by the owner.** No headroom notice, no disk history, no Host card headroom. Disk space is the operator's responsibility; a notice that names a node every day is noise. §2 stands as the record of what was considered. | — |
+| WP3 | **BUILT.** `MultiManagedNode` option `reports_failed_backup`; `FleetAttentionNotice::render_failed_backups` (the newest `backup_run` job's reason and link, or the Backups tab when no job here carries it); registered as `fleet_failed_backups` | `agent_case_intake_test` extended: loaded only for `failed`, named, escaped, linked, capped at five, silent below permission 10 |
+| WP4 | **BUILT.** `BACKUP_LEVEL` / `BACKUP_BYTES` from `run_backup.php` (1.4) out of the runner's result; parsed into `mjb_result` (`level`, `bytes`); **Recent runs from here** on the Backups tab (`NodeMonitorHealth::backup_run_figures`) | `node_status_fold_test` and `backup_runner_stream_test` extended |
+| WP5 | **BUILT.** `BackupRunner::preflight_refusal` / `local_need` / `expected_bytes`, in `execute_chain()` before anything is minted and in `execute_full()`. Every path streams, so the need is the snapshot, the manifest and a fixed 64 MiB, padded by a fifth, plus 1 GiB kept free | `tests/backups/backup_preflight_test.php` (new) |
+| WP6 | **BUILT.** **B1**: `DbConnector::reconnect()`; `BackupRunner::fail()` retries once; `SiteBackupNotice` names a `running` row older than six hours as a run that never finished | `tests/backups/backup_failure_recording_test.php` (new, kills its own backend); `site_backup_notice_test` extended |
+| WP7 | **BUILT.** **B2**: `BackupChain::AGE_GRACE_SECONDS` (one hour) on the age rule | `backup_chain_test`: a chain created at 04:00:21 rolls on the 04:00:09 tick seven days later |
 | WP8 | **BUILT.** `Primitive.RequiresLogAccess` (the dispatcher's check; `site_log` and `log_table_tail` adopted it and dropped their in-body call), `ScriptSpec.Redact`, `observe_unit_journal.go`, `unit_journal.sh` 1.0, `unit_journal_gate.sh` (53 checks), the builder, the action, `process_unit_journal`, the job-page render, the *Why?* button, and `unit_journal` in `LOG_EXCERPT_TYPES`. Two new agent gates pin the flags: every log-reading word declares the switch, and `Redact` is set on exactly the word that needs it | Green. The live gate — a real `man-db.service` on node 176 — is the owner's |
-| WP9 | **Agent**: `reset_failed_unit` + plane-side *Clear* button | A failed unit can be cleared from the dashboard |
-| WP10 | **Agent**: `Recipe.NoRepair`; `disk_headroom` recipe — **after Q1 is answered** | An unpaired node opens a case on its own full disk |
+| WP9 | **BUILT.** Agent 1.41.0: `operate_reset_failed_unit.go` (unit_journal's list), `reset_failed_unit.sh` 1.0, `reset_failed_unit_gate.sh` (46 checks, stub systemctl). Plane: the builder (min agent 1.41.0), the action, `process_reset_failed_unit` (queues a `host_report` behind an accepted reset), the job-page render, the *Clear* button with its confirm, and the support bundle | Green. The live gate — clearing node 176's `man-db.service` — is the owner's |
+| WP10 | **BUILT.** Agent 1.41.0: `Recipe.NoRepair` (Register permits it only with no repair word and no repair function; the loop opens a case on the first failing tick and spends no attempts); `recipes/disk_headroom.go`, floor only (`avail < 10%` or `< 5 GiB`), unknown without `avail_bytes`. Pinned in `registry_test.go` (`pinnedCheckOnly`) | Green. An unpaired node's live case is the owner's gate |
 | WP11 | **BUILT.** `observe_disk_usage.go`, `disk_usage.sh` 1.0, `disk_usage_gate.sh` (35 checks), the builder, the action, `process_disk_usage`, the job-page render, the *What is using it?* button | Green. The live gate is the owner's |
 | WP13 | **BUILT.** `site_log` takes `postgresql`, resolved to the newest cluster log in the compiled `/var/log/postgresql`; the plane gates the value on agent 1.40.0 (`SITE_LOG_POSTGRES_MIN_AGENT_VERSION`, `site_log_files_for`) and the picker follows | The database's own account of a refused write is readable without a login |
-| WP12 | Docs, the running-list row, the incident report's pointers, spec to `implemented/` | — |
+| WP12 | **DONE.** `docs/backups.md`, `plugins/server_manager/docs/overview.md`, the running-list rows in `agent_recipes_and_vocabulary.md`, one pointer per item in the incident report's §7, spec to `implemented/` | — |
 
 **Built out of order, and why.** WP1, WP8 and WP11 shipped first because the
 incident that produced this spec is not finished: the plane can name a failed
 unit and cannot ask why, and can say a disk is filling and cannot say with
 what. Those three are the ones that answer a question. Everything else here
 raises one — a notice, a refusal, a case — and none of it is urgent in the same
-way. The agent is 1.39.0.
+way. WP13 took the agent to 1.40.0; WP9 and WP10 take it to 1.41.0.
 
 **Stop points.** Hand back after WP7 (platform release, and the owner's live
 gate on the two notices), and again after WP11 (agent release, and the owner's
@@ -475,14 +479,6 @@ is still failed by then, is the first real use of both new words).
 
 ## Open questions
 
-**Q1.** Is a check-only recipe a recipe? (§10. Recommendation: yes, narrowly,
-via `NoRepair`.)
-
-**Q2.** Should the headroom notice be suppressible per node? A node that is
-*meant* to run at 92% full will name itself every day for ever. The hold
-marker (`/etc/joinery-agent/hold/<recipe>`) already answers this for the
-recipe; the plane-side notice has no equivalent. Options: reuse the hold
-marker, which the node reports; add a per-node "acknowledged until" stamp; or
-do nothing until a node actually nags. Recommendation: do nothing yet — ten
-nodes, none of them chronically full, and an acknowledgement stamp that
-silences a disk warning is a thing to add on purpose rather than in advance.
+None. **Q1** (is a check-only recipe a recipe?) — **yes**, narrowly, via
+`NoRepair`, decided by the owner 2026-09-22 with the go-ahead for WP10.
+**Q2** (a per-node mute for the headroom notice) is moot: WP2 is dropped.
