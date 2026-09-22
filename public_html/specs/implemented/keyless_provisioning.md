@@ -1,6 +1,6 @@
 # Keyless provisioning — we never put a key on a machine we create
 
-**Status: BUILT 2026-09-03, live gate open.** 2026-09-07: `install.sh
+**Status: IMPLEMENTED 2026-09-22. Live gate passed 2026-09-08 (testing day, `implemented/testing_day_agent_wizard_install.md` B1/B3): a docker site (keyless11), a bare docker host (keyless12) and a bare-metal site (keyless13) each reached `retired` through the primary path, sshd went from (publickey,password) to (publickey), and approving a join against the wrong node was refused. Not run: the provider-reports-stopped refusal (B1 step 9, powered-off half).** Built 2026-09-03. 2026-09-07: `install.sh
 host-harden` is gone (owner: nothing in it but the sshd step needed a gate, and
 the agent-side job does that step itself). Its housekeeping runs on every
 docker and server install (`host_housekeeping`, install.sh 2.63); the retire

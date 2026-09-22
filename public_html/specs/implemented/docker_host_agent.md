@@ -1,6 +1,8 @@
 # The Docker host becomes a paired node, and decommission crosses off SSH
 
-**Status: BUILT 2026-09-01 (WP0–WP6, both repos; agent 1.15.0, artifact
+**Status: IMPLEMENTED 2026-09-22.** Acceptance 1–4 passed live 2026-09-08 on keyless11 (`implemented/testing_day_agent_wizard_install.md` B2; a re-dispatch after the site is gone is refused by the host, owner decision D9). The real host 23.239.11.53 enrolled 2026-09-15 as node 38103 (docker-prod) through `install.sh docker`; its fail2ban runs with five jails and the fail2ban recipe reads armed, pass (acceptance 7). Follow-up found at close: a siteless agent reported its whole compiled vocabulary, so the plane dispatched site words to the host and collected refusals; agent 1.42.0 reports only the Machine words there (`primitives.RunnableNames`). The history below is as it stood before close.
+
+**BUILT 2026-09-01 (WP0–WP6, both repos; agent 1.15.0, artifact
 rebuilt and signed; db gate 133/133). Reviewed READY FOR BUILD 2026-08-31 —
 c3 findings (B1–B5, Q1–Q2) folded; Q3 resolved by the owner (rebuild-in-place
 from backup, in the container-install round). REMAINING before this moves to
