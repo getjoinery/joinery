@@ -100,7 +100,9 @@ Rules:
    hacked live server" answer depends on add-ons, so wherever the level is
    displayed — the picker, a level chip, a setup checklist — the active add-ons
    show with it. A member never has to open settings to learn what their
-   resource actually promises.
+   resource actually promises. Chips and badges stay short (owner 2026-09-23):
+   the level with a "+" when any add-on is on ("Private+"), the add-ons named
+   on hover; the picker and settings name them in full.
 5. **An add-on whose protection depends on the window being closed shortens
    the unlock window.** Such an add-on only helps while no window is open; a
    week-long window quietly undoes it. When any of a member's resources has one

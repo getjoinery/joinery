@@ -106,10 +106,10 @@ foreach ($conversations as $cnv) {
 		: ($participants->count() > 2 ? 'Group' : 'Direct');
 	$level = $cnv->protection_level();
 	if ($level !== ProtectionLevel::STANDARD) {
-		// The level with its active add-ons, as members see it.
-		$kind .= ' &middot; ' . htmlspecialchars(ProtectionLevelPicker::summary($level,
-			$cnv->sealed_exits_only() ? array(ProtectionLevelPicker::ADDON_SEALED_EXITS_ONLY) : array()),
-			ENT_QUOTES, 'UTF-8');
+		// The level as members' chip shows it; hover names the add-ons.
+		$addons = $cnv->sealed_exits_only() ? array(ProtectionLevelPicker::ADDON_SEALED_EXITS_ONLY) : array();
+		$kind .= ' &middot; <span title="' . htmlspecialchars(ProtectionLevelPicker::summaryTitle($level, $addons), ENT_QUOTES, 'UTF-8') . '">'
+			. htmlspecialchars(ProtectionLevelPicker::summary($level, $addons), ENT_QUOTES, 'UTF-8') . '</span>';
 	}
 
 	$rowvalues = array();

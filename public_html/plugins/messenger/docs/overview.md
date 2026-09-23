@@ -16,7 +16,7 @@ piece of extra protection, **Nothing leaves unsealed**: no message text appears
 in notifications or crosses to another server unencrypted — at the cost that
 notifications don't show the message, and people on servers without encryption
 can't be reached. Like the level, it can be turned on but never off, and the
-thread's level chip shows it ("Private · Nothing leaves unsealed").
+thread's level chip marks it: "Private+", with the add-on named on hover.
 
 ## Where things are
 

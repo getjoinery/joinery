@@ -49,6 +49,7 @@
  * The picker echoes its markup, so it belongs in a direct-output form (not one
  * built with FormWriter's deferred_output).
  *
+ * @version 1.3.0 - chips read "Private+" when an add-on is on; summaryTitle() names them on hover
  * @version 1.2.0
  * @changelog 1.2.0 - mail card copy; add-on note and link; addons_note;
  *   consumer visibility_rules merged into the picker's
@@ -175,22 +176,38 @@ class ProtectionLevelPicker {
 	}
 
 	/**
-	 * A level and the add-ons that are on, as one short line — for chips,
-	 * badges and checklists (Add-ons rule 4): "Private · Nothing leaves unsealed".
-	 * Standard never carries add-ons, so its active list is ignored.
+	 * A level as a chip or badge shows it (Add-ons rule 4): the level's name,
+	 * with a trailing "+" when any add-on is on — "Private+". The add-ons
+	 * themselves are named in summaryTitle(), the chip's hover text. Standard
+	 * never carries add-ons, so its active list is ignored.
 	 *
 	 * @param string   $level
 	 * @param string[] $active_keys add-on keys that are on
 	 */
 	public static function summary(string $level, array $active_keys = array()): string {
-		$out = ProtectionLevel::label($level);
+		return self::chipText($level, self::levelTakesAddons($level) ? count($active_keys) : 0);
+	}
+
+	/** The hover text naming a chip's add-ons, or '' when none are on. */
+	public static function summaryTitle(string $level, array $active_keys = array()): string {
 		if (!self::levelTakesAddons($level)) {
-			return $out;
+			return '';
 		}
+		$labels = array();
 		foreach ($active_keys as $key) {
-			$out .= ' · ' . self::addonCopy((string)$key)['label'];
+			$labels[] = self::addonCopy((string)$key)['label'];
 		}
-		return $out;
+		return self::chipTitle($labels);
+	}
+
+	/** Chip text from a level and how many add-ons are on: "Private" or "Private+". */
+	public static function chipText(string $level, int $addon_count): string {
+		return ProtectionLevel::label($level) . ($addon_count > 0 ? '+' : '');
+	}
+
+	/** Chip hover text from add-on labels: "Extra protection: A, B", or ''. */
+	public static function chipTitle(array $labels): string {
+		return $labels ? 'Extra protection: ' . implode(', ', $labels) : '';
 	}
 
 	/** Add-ons exist on Private and Fortress; Standard has nothing sealed to guard. */

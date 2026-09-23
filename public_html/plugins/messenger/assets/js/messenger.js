@@ -357,6 +357,7 @@
 			// actually promises, without opening the dialog.
 			el.level.hidden = false;
 			el.level.textContent = payload.protection_summary || payload.protection_label;
+			el.level.title = payload.protection_summary_title || '';
 			el.level.className = 'msgr-level-chip msgr-level-chip--' + payload.protection_level
 				+ (payload.sealed_exits_only ? ' msgr-level-chip--sealed-exits' : '');
 		} else {

@@ -443,13 +443,14 @@
 				}
 			});
 		}
-		// The active add-ons show with the level, so the chip states what this
-		// mailbox actually promises.
+		// "Private+" when an add-on is on; hover names them.
 		chip.hidden = !level;
 		chip.textContent = level
-			? [level.charAt(0).toUpperCase() + level.slice(1)].concat(addons).join(' · ') : '';
+			? level.charAt(0).toUpperCase() + level.slice(1) + (addons.length ? '+' : '') : '';
 		chip.className = 'mbx-level-badge' + (level ? ' mbx-level-' + level : '');
-		chip.title = level ? 'Mail protection level and extra protection (set on the domain)' : '';
+		chip.title = level
+			? 'Mail protection level (set on the domain)' + (addons.length ? '. Extra protection: ' + addons.join(', ') : '')
+			: '';
 	}
 
 	// True for a real mailbox id (a positive serial) as opposed to a pseudo-box such as
