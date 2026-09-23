@@ -36,6 +36,7 @@
  *
  * See specs/safe_attachment_preview.md and docs/document_text.md.
  *
+ * @version 1.4.0 - clip(): UTF-8-safe truncation for byte-limited columns
  * @version 1.3.0
  * @changelog 1.3.0 - the parser jail: the subprocess runs under joinery-jail
  *   where installed (fallback + finding where not); the vendor path travels on
@@ -1379,6 +1380,19 @@ class DocumentText {
 			$converted = @iconv($charset, 'UTF-8//IGNORE', $bytes);
 		}
 		return self::scrub(is_string($converted) ? $converted : $bytes);
+	}
+
+	/**
+	 * Text headed for a byte-limited database column: valid UTF-8, cut to at most
+	 * $bytes without splitting a character. A plain substr() at a byte offset can
+	 * land inside a multi-byte character, and a UTF-8 database refuses the whole
+	 * row over it. Input that is not valid UTF-8 goes through toUtf8()'s
+	 * detection first.
+	 */
+	public static function clip(string $text, int $bytes): string {
+		if ($text === '') return $text;
+		$text = mb_check_encoding($text, 'UTF-8') ? self::scrub($text) : self::toUtf8($text);
+		return strlen($text) <= $bytes ? $text : mb_strcut($text, 0, max(0, $bytes), 'UTF-8');
 	}
 
 	/** Drop anything still not valid UTF-8, plus control bytes that are not

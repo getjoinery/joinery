@@ -244,7 +244,7 @@ if ($state === 'signin') {
 			));
 			$formwriter->numberinput('iia_imap_port', 'IMAP port', array('value' => 993));
 			$formwriter->dropinput('iia_imap_encryption', 'Encryption', array(
-				'options' => array('ssl' => 'SSL/TLS (993)', 'tls' => 'STARTTLS (143)', 'none' => 'None'),
+				'options' => array('ssl' => 'SSL/TLS (993)', 'tls' => 'STARTTLS (143)'),
 			));
 		}
 	}

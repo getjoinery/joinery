@@ -34,6 +34,9 @@
  * the stored grant power SMTP send (SmtpConfig::fromConnectedAccount), and the
  * outbound helpers below report SMTP send-capability and granted-scope state.
  *
+ * @version 1.6 - no plaintext encryption mode; resolveImapHost() refuses internal
+ *   addresses and pins the connection; DUE_SQL backs off failing feeds
+ *   (specs/implemented/imap_client_hardening.md Q1, F17, F14)
  * @version 1.5 - feed health: iia_health_state / iia_consecutive_failures / iia_broken_since,
  *   feedHealthTransition() (pure rule) and observeFetchOutcome(), which announces
  *   mailbox.imap_feed_broken / _recovered on transition only — a dead
@@ -68,10 +71,23 @@ class InboundImapAccount extends SystemBase {
 	const SYNC_PULL = 'pull';   // Read-only: source → Joinery
 	const SYNC_BOTH = 'both';   // Two-way: bidirectional
 
-	// Encryption modes (maps onto the IMAP connection's secure transport)
+	// Encryption modes (maps onto the IMAP connection's secure transport). There
+	// is no unencrypted mode: a feed logs in with full-mailbox credentials, and a
+	// plaintext connection would send them across the network in the clear.
 	const ENC_SSL = 'ssl';
 	const ENC_TLS = 'tls';
-	const ENC_NONE = 'none';
+
+	/**
+	 * The SQL for "this feed is due": its poll interval has elapsed, doubled for
+	 * each consecutive failure (capped at 2^6) and never more than six hours. A
+	 * failing feed — a revoked password, a provider block — is otherwise retried
+	 * at full cadence for ever, and Gmail and Microsoft lengthen their blocks while
+	 * a client keeps knocking (specs/implemented/imap_client_hardening.md F14). A never-polled
+	 * account is always due. Shared by the "due" filter and the poller's claim.
+	 */
+	const DUE_SQL = "(iia_last_poll_time IS NULL OR iia_last_poll_time
+		+ LEAST(iia_poll_interval_seconds * POWER(2, LEAST(COALESCE(iia_consecutive_failures, 0), 6)), 21600)
+		* INTERVAL '1 second' <= now())";
 
 	// How far back into the source mailbox a feed reaches. Future-only is the
 	// default: the cursor seeds to the mailbox head, so a ten-year archive and an
@@ -158,7 +174,7 @@ class InboundImapAccount extends SystemBase {
 		'iia_iea_inbound_email_alias_id'=> array('type'=>'int4'),
 		'iia_imap_host'                 => array('type'=>'varchar(255)'),
 		'iia_imap_port'                 => array('type'=>'int4', 'default'=>'993'),
-		'iia_imap_encryption'           => array('type'=>'varchar(10)', 'default'=>'ssl', 'allowed_values'=>array(self::ENC_SSL, self::ENC_TLS, self::ENC_NONE)),
+		'iia_imap_encryption'           => array('type'=>'varchar(10)', 'default'=>'ssl', 'allowed_values'=>array(self::ENC_SSL, self::ENC_TLS)),
 		'iia_imap_folder'               => array('type'=>'varchar(255)', 'default'=>'INBOX'),
 		'iia_username'                  => array('type'=>'varchar(255)'),
 		'iia_auth_method'               => array('type'=>'varchar(10)', 'default'=>'password', 'is_nullable'=>false),
@@ -227,7 +243,7 @@ class InboundImapAccount extends SystemBase {
 		}
 
 		$enc = $this->get('iia_imap_encryption') ?: self::ENC_SSL;
-		if (!in_array($enc, array(self::ENC_SSL, self::ENC_TLS, self::ENC_NONE), true)) {
+		if (!in_array($enc, array(self::ENC_SSL, self::ENC_TLS), true)) {
 			throw new InboundImapAccountException('Invalid encryption: ' . htmlspecialchars($enc));
 		}
 		$this->set('iia_imap_encryption', $enc);
@@ -649,6 +665,70 @@ class InboundImapAccount extends SystemBase {
 		return (bool)$this->get('iia_oauth_access_token_enc');
 	}
 
+	/**
+	 * Resolve an IMAP host to the address a connection may be pinned to, refusing
+	 * loopback, private, link-local and reserved addresses (the same ranges
+	 * UrlSafetyValidator refuses for outbound HTTP). An operator-entered host is
+	 * otherwise a way to make this server connect into its own network — and a
+	 * Test button that says whether something answered is a port scanner
+	 * (specs/implemented/imap_client_hardening.md F17). Resolving here and connecting to the
+	 * returned address, rather than re-resolving, closes DNS rebinding.
+	 *
+	 * @return array{host:string,connect:string} connect is the pinned address
+	 *   (an IPv6 one bracketed); host stays the name the certificate must carry.
+	 * @throws InboundImapAccountException naming why the host is refused.
+	 */
+	static function resolveImapHost(string $host, int $port): array {
+		$host = trim($host);
+		if ($host === '') {
+			throw new InboundImapAccountException('No IMAP host is configured for this account.');
+		}
+		$literal = trim($host, '[]');
+		$url = 'https://' . (filter_var($literal, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) ? '[' . $literal . ']' : $host)
+			. ':' . max(1, $port);
+		try {
+			$resolved = UrlSafetyValidator::checkAndResolve($url, array('allowed_ports' => null));
+		} catch (UnsafeUrlException $e) {
+			throw new InboundImapAccountException('The IMAP host ' . $host . ' cannot be used: ' . $e->getMessage());
+		}
+		$ips = $resolved['ips'];
+		if (!count($ips)) {
+			// An IP literal: already checked, nothing to pin.
+			$ips = array($literal);
+		}
+		$pick = null;
+		foreach ($ips as $ip) {
+			if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) { $pick = $ip; break; }
+		}
+		if ($pick === null) {
+			$pick = '[' . $ips[0] . ']';
+		}
+		return array('host' => $literal, 'connect' => $pick);
+	}
+
+	/**
+	 * Why a host may not be saved on a feed, or null when it may. For the editors.
+	 * Only an address inside this server's network is refused here: a host that
+	 * does not resolve right now (a typo, a DNS hiccup) is the connection test's
+	 * to report, and must not block saving the rest of the feed.
+	 */
+	static function imapHostProblem(string $host, int $port): ?string {
+		$host = trim($host);
+		if ($host === '') {
+			return null;
+		}
+		$literal = trim($host, '[]');
+		$ips = filter_var($literal, FILTER_VALIDATE_IP) ? array($literal) : DnsResolver::resolveHostIps($host);
+		foreach ($ips as $ip) {
+			try {
+				UrlSafetyValidator::checkIp($ip);
+			} catch (UnsafeUrlException $e) {
+				return 'The IMAP host ' . $host . ' cannot be used: ' . $e->getMessage();
+			}
+		}
+		return null;
+	}
+
 	/** Is this account credentialed enough to attempt a poll? */
 	function isConnectable(): bool {
 		if ($this->isOAuth()) {
@@ -844,8 +924,7 @@ class MultiInboundImapAccount extends SystemMultiBase {
 		// split-parenthesis OR convention so the NULL case groups with the
 		// interval test without widening any other clause.
 		if (!empty($this->options['due'])) {
-			$filters['(iia_last_poll_time'] =
-				"IS NULL OR iia_last_poll_time + (iia_poll_interval_seconds * INTERVAL '1 second') <= now())";
+			$filters['(iia_last_poll_time'] = substr(InboundImapAccount::DUE_SQL, strlen('(iia_last_poll_time '));
 		}
 
 

@@ -491,7 +491,7 @@ function _connect_password_signin(array $input, string $provider_key, array $int
 		$probe->set('iia_imap_host', trim((string)($input['iia_imap_host'] ?? '')));
 		$probe->set('iia_imap_port', intval($input['iia_imap_port'] ?? 993) ?: 993);
 		$enc = (string)($input['iia_imap_encryption'] ?? 'ssl');
-		$probe->set('iia_imap_encryption', in_array($enc, array('ssl', 'tls', 'none'), true) ? $enc : 'ssl');
+		$probe->set('iia_imap_encryption', in_array($enc, array('ssl', 'tls'), true) ? $enc : 'ssl');
 	} else {
 		$probe->set('iia_imap_host', $preset['host']);
 		$probe->set('iia_imap_port', $preset['port']);
@@ -532,7 +532,7 @@ function _connect_password_signin(array $input, string $provider_key, array $int
 			$account->set('iia_imap_host', trim((string)($input['iia_imap_host'] ?? '')));
 			$account->set('iia_imap_port', intval($input['iia_imap_port'] ?? 993) ?: 993);
 			$enc = (string)($input['iia_imap_encryption'] ?? 'ssl');
-			$account->set('iia_imap_encryption', in_array($enc, array('ssl', 'tls', 'none'), true) ? $enc : 'ssl');
+			$account->set('iia_imap_encryption', in_array($enc, array('ssl', 'tls'), true) ? $enc : 'ssl');
 		}
 		$account->setPassword($password);
 		$account->set('iia_last_status', 'Password stored ' . gmdate('Y-m-d H:i') . ' UTC.');

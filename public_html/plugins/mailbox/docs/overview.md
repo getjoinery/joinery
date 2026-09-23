@@ -4185,6 +4185,15 @@ setters). Adding a host is a one-line edit there. Authentication is a single
 branch in `ImapIngestor`: `password` LOGIN vs. `XOAUTH2` with a bearer token. The
 IMAP library (`horde/imap_client`) is wrapped entirely behind `ImapIngestor`.
 
+Every connection is encrypted and authenticated: implicit TLS (`ssl`, port 993)
+or STARTTLS (`tls`); there is no plaintext mode. The server's certificate is
+verified against the host name the operator entered (Horde's socket layer would
+otherwise skip verification), and a certificate that fails — wrong name,
+self-signed, expired — is reported as such, with nothing sent to the server. The
+host is resolved once and the connection pinned to that address, and a host that
+resolves inside this server's own network (loopback, private, link-local,
+metadata) is refused at save and at connect (`InboundImapAccount::resolveImapHost()`).
+
 ### OAuth accounts (Gmail / Microsoft)
 
 OAuth accounts use the platform's [OAuth2 Core](/docs/oauth2.md) — the IMAP
@@ -4332,6 +4341,32 @@ imports in batches across successive fetches rather than one enormous fetch. A U
 choice. Failures are per-account and non-fatal: one unreachable mailbox or expired
 token never stops the rest, and the reason is recorded in the account's last status
 (`iia_needs_reauth` is set when a token refresh/auth fails, surfacing a Reconnect).
+A feed that keeps failing is polled less often: its interval doubles with each
+consecutive failure, up to six hours (`InboundImapAccount::DUE_SQL`), so a revoked
+password or a provider block is not hammered at full cadence.
+
+**Messages that will not import.** A message that fails to store holds the folder
+cursor just below it, so the next poll retries it — but only three times
+(`InboundImapIngestFailure::MAX_ATTEMPTS`, counted per folder, UIDVALIDITY and UID
+in `ifl_inbound_imap_ingest_failures`). After that it is marked skipped and the walk
+moves past it; the Accounts page shows how many messages were skipped, with a
+**Retry** that re-imports exactly those. A message the client cannot parse fails
+alone: a batch fetch that errors is split until the bad UID stands by itself. A
+dropped connection, a throttle or a missing folder is never counted against a
+message, and neither is a store collision or a sealing mailbox with no key — those
+hold the cursor until they clear.
+
+**What the fetch trusts from the server.** The highest UID comes from `UIDNEXT`,
+or, when a server leaves it out, from the last message by sequence number. A
+folder whose server reports no `UIDVALIDITY` is not read. A folder whose
+`UIDVALIDITY` changes three times within a day is paused rather than re-seeded on
+every poll (`iif_sync_paused_time`); the Accounts page names it with a **Resume**.
+A text body is fetched only up to the 2 MB body ceiling, and every stored header
+and body is cut on a character boundary (`DocumentText::clip()`). A message's date
+is its `Date` header, or — when that is missing, unreadable or more than a day in
+the future — the server's `INTERNALDATE`. A message with no Message-ID is
+deduplicated by a hash of its header block (`iem_source_message_key`), which is
+identical in every folder of the same server.
 
 ### The run record
 
@@ -4434,12 +4469,16 @@ a locator (account + UID + UIDVALIDITY + folder) back to the message, and leaves
 Every message view shows a clickable **attachment list** (filename, size,
 type), built from the `ima_inbound_message_attachments` manifest. For **IMAP
 (`remote`) mail the bytes stay on the server** — clicking one fetches exactly that
-MIME part on demand (`FETCH BODY[<section>]`, Message-ID fallback if UIDVALIDITY
-changed), decodes it, and streams it pass-through with `Content-Disposition:
+MIME part on demand (`FETCH BODY[<section>]`), decodes it, and streams it
+pass-through with `Content-Disposition:
 attachment` + `X-Content-Type-Options: nosniff`. For **push (Postfix/Mailgun) mail
 the part is a private `File`** streamed the same way. Inline (`cid:`) parts belong to
-the HTML body and are excluded from the list. If a part can't be retrieved (message
-deleted/moved/account disabled), the endpoint says so honestly. The manifest +
+the HTML body and are excluded from the list. The locator is checked before it is
+used (`ImapIngestor::locate()`): its UIDVALIDITY must match and its UID must still
+answer; otherwise the message is found by Message-ID in the same folder, then in the
+feed's other tracked folders, and the locator follows it. A message the source no
+longer holds anywhere is kept and marked `iem_source_gone_time`; the reader says so
+above its attachments instead of failing on each click. The manifest +
 endpoint + reader list are **transport-agnostic**: the download dispatches on where
 the bytes live — a `File` for push mail, an IMAP fetch for `remote` mail, a raw
 section for a legacy/fallback row (see **Attachment & message storage**) — through the
@@ -4530,6 +4569,23 @@ and shadow share one row. Adding a label is a `COPY` (a Gmail label add) on a
 multi-folder host or a `MOVE` on a classic one-folder host; removing is `STORE
 \Deleted` + `EXPUNGE`; deleting is a `MOVE`/`COPY` to Trash. Operators pick which
 folders are tracked on the mailbox editor; special-use folders are pre-selected.
+
+**A UID is only good in its folder's generation.** A server can renumber a folder
+(a restore, a migration, a folder recreated under the same name), announced by a new
+`UIDVALIDITY`; after that, a stored UID names some other message. So every write the
+sync makes — `STORE`, `MOVE`/`COPY` to Trash, `EXPUNGE` — and every pull match goes by
+a UID of the folder's **current** `UIDVALIDITY`, asked of the server once per cycle.
+A stored UID from another generation is re-found by Message-ID (exactly one match,
+or the write waits) and written back; label memberships are re-found the same way,
+a bounded batch per cycle, and a membership that cannot be re-found is kept, never
+read as a removal. A moved message's locator carries the destination folder's
+`UIDVALIDITY`. Removal by UID diff trusts the server's list only when it is as long
+as the folder's `STATUS MESSAGES`, so a short or failed answer removes nothing. A
+push the server keeps refusing (its folder deleted at the source) backs off —
+doubling from a minute to a day (`iem_push_retry_after`) — instead of holding the
+head of the queue. With QRESYNC, a message that vanishes from INBOX or another
+non-label folder is looked for in the feed's other tracked folders and followed, or
+kept and marked gone from the source (`iem_source_gone_time`).
 
 **Changing labels from the reader.** The open-thread toolbar has a **Move to** (folder
 icon, exclusive feeds) / **Labels** (tag icon, non-exclusive feeds, e.g. Gmail) control:

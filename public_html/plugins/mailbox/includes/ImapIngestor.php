@@ -53,6 +53,15 @@
  * interactive fetch (the reader's Refresh, the admin's Fetch now) stays inside
  * the time a browser, and the proxy in front of it, will wait.
  *
+ * @version 1.22
+ * @changelog 1.22 - specs/implemented/imap_client_hardening.md: certificates verified and the
+ *   host pinned (F1, F17); a message that fails MAX_ATTEMPTS polls is skipped and
+ *   retryable instead of wedging the folder, and an unparsable one is isolated
+ *   from its batch (F3); a missing body throws (F4); bodies clipped UTF-8-safely
+ *   (F5) and fetched only up to the ceiling (F13); no-Message-ID dedup by header
+ *   hash (F6); INTERNALDATE date fallback (F7); missing UIDNEXT/UIDVALIDITY
+ *   handled (F8); UIDVALIDITY churn pauses a folder (F9); locators refreshed
+ *   after a renumbering and relocated or marked source-gone on fetch (F2, F15)
  * @version 1.21
  * @changelog 1.21 - fetchHeaderText()/fetchHeaderTexts() retired with the To/Cc backfill
  * @version 1.20
@@ -298,15 +307,9 @@ class ImapIngestor {
 			return $this->client;
 		}
 
-		$enc = $this->account->get('iia_imap_encryption') ?: 'ssl';
-		$secure = ($enc === 'ssl') ? 'ssl' : (($enc === 'tls') ? 'tls' : false);
-
-		$params = array(
-			'username' => (string)$this->account->get('iia_username'),
-			'hostspec' => (string)$this->account->get('iia_imap_host'),
-			'port'     => intval($this->account->get('iia_imap_port')) ?: 993,
-			'secure'   => $secure,
-		);
+		$target = $this->connectionTarget();
+		$params = self::connectionParams($target, (string)$this->account->get('iia_username'),
+			(string)$this->account->get('iia_imap_encryption'), intval($this->account->get('iia_imap_port')) ?: 993);
 
 		if ($this->account->isOAuth()) {
 			$accessToken = $this->freshAccessToken();
@@ -340,10 +343,18 @@ class ImapIngestor {
 			// Gmail's Invalid credentials — which is the difference between an
 			// answerable error and a shrug.
 			$detail = trim((string)($e->details ?? ''));
+			// A refused password never gets as far as the certificate question.
+			if (($e->getCode() < 100 || $e->getCode() >= 200)
+					&& self::isCertificateFailure($target, intval($params['port']), (string)$params['secure'])) {
+				throw new ImapIngestorException(self::certificateMessage($target['host']));
+			}
 			throw new ImapIngestorException('IMAP login failed: ' . $e->getMessage()
 				. ($detail !== '' ? ' (' . $detail . ')' : ''));
 		} catch (Throwable $e) {
 			$this->lap('connect', microtime(true) - $connectStarted);
+			if (self::isCertificateFailure($target, intval($params['port']), (string)$params['secure'])) {
+				throw new ImapIngestorException(self::certificateMessage($target['host']));
+			}
 			throw new ImapIngestorException('IMAP connection failed: ' . $e->getMessage());
 		}
 		$this->lap('connect', microtime(true) - $connectStarted);
@@ -362,6 +373,81 @@ class ImapIngestor {
 
 		$this->client = new HordeImapClient($socket);
 		return $this->client;
+	}
+
+	/**
+	 * Where to connect: the host resolved once, refused when it is an address
+	 * inside this server's own network, and pinned so the connection goes to
+	 * exactly the address that was checked (specs/implemented/imap_client_hardening.md F17).
+	 *
+	 * @return array{host:string,connect:string}
+	 */
+	private function connectionTarget(): array {
+		$port = intval($this->account->get('iia_imap_port')) ?: 993;
+		try {
+			return InboundImapAccount::resolveImapHost((string)$this->account->get('iia_imap_host'), $port);
+		} catch (InboundImapAccountException $e) {
+			throw new ImapIngestorException($e->getMessage());
+		}
+	}
+
+	/**
+	 * The Horde connection parameters, credentials aside. Always encrypted:
+	 * implicit TLS, or STARTTLS where the operator chose it — there is no
+	 * plaintext mode (Q1). The server's certificate is verified against the host
+	 * NAME the operator entered: Horde's socket layer turns verification off
+	 * unless told otherwise, which let anyone on the network path pose as the
+	 * mail server and collect the credentials that follow (F1). peer_name also
+	 * sets SNI, since the connection itself goes to the pinned address.
+	 */
+	private static function connectionParams(array $target, string $username, string $encryption, int $port): array {
+		return array(
+			'username' => $username,
+			'hostspec' => $target['connect'],
+			'port'     => $port,
+			'secure'   => ($encryption === InboundImapAccount::ENC_TLS) ? 'tls' : 'ssl',
+			'context'  => array('ssl' => array(
+				'verify_peer'       => true,
+				'verify_peer_name'  => true,
+				'peer_name'         => $target['host'],
+				'allow_self_signed' => false,
+				'SNI_enabled'       => true,
+			)),
+		);
+	}
+
+	/**
+	 * Did this connect fail on the server's certificate? Horde reports every
+	 * failed connect as "Error connecting to mail server", swallowing PHP's TLS
+	 * warning, so ask directly: the same handshake once with verification and
+	 * once without. Refused with it, accepted without it — the certificate is
+	 * what failed. Implicit TLS only (a STARTTLS failure surfaces from Horde's
+	 * own TLS step). Nothing but a handshake is sent; no credentials.
+	 */
+	private static function isCertificateFailure(array $target, int $port, string $secure): bool {
+		if ($secure !== 'ssl') {
+			return false;
+		}
+		$try = function (bool $verify) use ($target, $port): bool {
+			$ctx = stream_context_create(array('ssl' => array(
+				'verify_peer' => $verify, 'verify_peer_name' => $verify,
+				'peer_name' => $target['host'], 'allow_self_signed' => !$verify, 'SNI_enabled' => true,
+			)));
+			$s = @stream_socket_client('ssl://' . $target['connect'] . ':' . $port, $errno, $errstr, 10,
+				STREAM_CLIENT_CONNECT, $ctx);
+			if ($s === false) {
+				return false;
+			}
+			fclose($s);
+			return true;
+		};
+		return !$try(true) && $try(false);
+	}
+
+	private static function certificateMessage(string $host): string {
+		return 'The server\'s certificate could not be verified for ' . $host
+			. '. Nothing was sent to it. Check the host name matches the one on the server\'s '
+			. 'certificate; a self-signed certificate is not accepted.';
 	}
 
 	/**
@@ -563,6 +649,82 @@ class ImapIngestor {
 		}
 	}
 
+	/**
+	 * Re-import the messages the walk gave up on (InboundImapIngestFailure rows
+	 * marked skipped) — the operator's Retry. Each is fetched and stored on its
+	 * own; one that imports now loses its failure row, one that still fails keeps
+	 * it with the new reason. Under the same per-account lock as poll(), so a
+	 * retry never races a poll. Returns ['imported'=>int, 'failed'=>int].
+	 */
+	public function retrySkipped(): array {
+		$account_id = intval($this->account->key);
+		$db = DbConnector::get_instance()->get_db_link();
+		$lock = $db->prepare('SELECT pg_try_advisory_lock(?, ?)');
+		$lock->execute(array(self::FETCH_LOCK_CLASS, $account_id));
+		if (!$lock->fetchColumn()) {
+			throw new ImapFetchBusyException(
+				'A fetch for this mailbox is already running; retry once it finishes.');
+		}
+		$imported = 0; $failed = 0;
+		try {
+			$alias = $this->resolveAlias();
+			$domain = new InboundEmailDomain($alias->get('iea_ied_inbound_email_domain_id'), TRUE);
+			$recipient = strtolower($alias->get_full_address());
+			$client = $this->client();
+			$router = new InboundEmailRouter();
+
+			$stmt = $db->prepare(
+				'SELECT f.ifl_iif_inbound_imap_folder_id AS folder_id, f.ifl_uidvalidity AS uidvalidity, f.ifl_uid AS uid
+				 FROM ifl_inbound_imap_ingest_failures f
+				 JOIN iif_inbound_imap_folders d ON d.iif_inbound_imap_folder_id = f.ifl_iif_inbound_imap_folder_id
+				 WHERE d.iif_iia_inbound_imap_account_id = ? AND f.ifl_skipped_time IS NOT NULL
+				 ORDER BY f.ifl_iif_inbound_imap_folder_id, f.ifl_uid');
+			$stmt->execute(array($account_id));
+			foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+				$folder = new InboundImapFolder(intval($r['folder_id']), TRUE);
+				$name = (string)$folder->get('iif_name');
+				$uid = intval($r['uid']);
+				$uidvalidity = intval($r['uidvalidity']);
+				$st = $client->status($name, Horde_Imap_Client::STATUS_UIDVALIDITY);
+				if (intval($st['uidvalidity'] ?? 0) !== $uidvalidity) {
+					// The folder was renumbered since: that UID names nothing now.
+					InboundImapIngestFailure::clear(intval($folder->key), $uidvalidity, $uid);
+					continue;
+				}
+				$unreadable = array();
+				$meta = $this->fetchWindowIsolating($client, $name, $uid, $uid, $unreadable);
+				$data = $meta[$uid] ?? null;
+				if ($data === null) {
+					if (!isset($unreadable[$uid])) {
+						// Gone from the source: nothing left to import.
+						InboundImapIngestFailure::clear(intval($folder->key), $uidvalidity, $uid);
+						continue;
+					}
+					InboundImapIngestFailure::recordAttempt(intval($folder->key), $uidvalidity, $uid, $unreadable[$uid]);
+					$failed++;
+					continue;
+				}
+				if ($this->isSourceDraft($data)) {
+					InboundImapIngestFailure::clear(intval($folder->key), $uidvalidity, $uid);
+					continue;
+				}
+				try {
+					$this->ingestOne($client, $folder, $uid, $data, $router, $alias, $domain, $recipient,
+						$uidvalidity, $folder->isMembership());
+					InboundImapIngestFailure::clear(intval($folder->key), $uidvalidity, $uid);
+					$imported++;
+				} catch (Throwable $e) {
+					InboundImapIngestFailure::recordAttempt(intval($folder->key), $uidvalidity, $uid, $e->getMessage());
+					$failed++;
+				}
+			}
+		} finally {
+			$unlock = $db->prepare('SELECT pg_advisory_unlock(?, ?)');
+			$unlock->execute(array(self::FETCH_LOCK_CLASS, $account_id));
+		}
+		return array('imported' => $imported, 'failed' => $failed);
+	}
+
 	private function pollLocked(int $maxPerRun): array {
 		$alias = $this->resolveAlias();
 		$domain = new InboundEmailDomain($alias->get('iea_ied_inbound_email_domain_id'), TRUE);
@@ -687,20 +849,37 @@ class ImapIngestor {
 	 * change, then ingest up to $maxPerRun new messages (UID > iif_last_seen_uid).
 	 * When $recordMembership, each ingested/deduped message gets an `imf_` row for
 	 * this folder (local = base = true).
+	 *
+	 * A message that fails is retried on the next poll (the cursor holds below it)
+	 * — but only InboundImapIngestFailure::MAX_ATTEMPTS times. After that it is
+	 * recorded as skipped and the walk moves past it, so one message that can
+	 * never import cannot stop the rest of the folder (specs/implemented/imap_client_hardening.md F3).
 	 */
 	private function ingestFolder(InboundImapFolder $folder, int $maxPerRun, bool $recordMembership,
 			$alias, $domain, $recipient): array {
 		$client = $this->client();
 		$folderName = (string)$folder->get('iif_name');
 		$seekStarted = microtime(true);
+		$empty = array('stored' => 0, 'dedup' => 0, 'seen' => 0, 'failed' => 0, 'out_of_scope' => 0,
+			'source_draft' => 0, 'failed_detail' => array());
+
+		if ($folder->isPaused()) {
+			return $empty + array('status' => $folderName . ': paused — the server keeps resetting its message numbers');
+		}
 
 		$status = $client->status(
 			$folderName,
 			Horde_Imap_Client::STATUS_UIDVALIDITY | Horde_Imap_Client::STATUS_UIDNEXT
+				| Horde_Imap_Client::STATUS_MESSAGES
 		);
 		$serverUidValidity = intval($status['uidvalidity'] ?? 0);
-		$uidNext = intval($status['uidnext'] ?? 0);
-		$highUid = $uidNext > 0 ? $uidNext - 1 : 0;
+		if ($serverUidValidity <= 0) {
+			// Without UIDVALIDITY a renumbering of this folder could never be
+			// detected, and every stored UID would be trusted blind (F8).
+			throw new ImapIngestorException('The server did not report UIDVALIDITY for ' . $folderName
+				. '; the folder is not read until it does.');
+		}
+		$highUid = $this->highestUid($client, $folderName, $status);
 
 		$storedUidValidity = $folder->get('iif_uidvalidity');
 		$lastSeenUid = intval($folder->get('iif_last_seen_uid'));
@@ -711,6 +890,18 @@ class ImapIngestor {
 		// days" seeks the boundary UID; "Full history" starts at 0. The latter two
 		// fall through to the windowed backfill below.
 		if ($storedUidValidity === null || intval($storedUidValidity) !== $serverUidValidity) {
+			// A real change (not a first connect) counts toward the churn limit: a
+			// server that resets a folder over and over would reseed it every poll
+			// — a future-only feed would never ingest, a full-history feed would
+			// re-walk the whole folder each time (F9). The third change in a day
+			// pauses the folder instead.
+			if ($storedUidValidity !== null && $folder->noteUidvalidityChange()) {
+				$folder->prepare();
+				$folder->save();
+				error_log('ImapIngestor: account ' . $this->account->key . ' folder ' . $folderName
+					. ' paused — UIDVALIDITY changed ' . intval($folder->get('iif_uidvalidity_changes')) . ' times in a day');
+				return $empty + array('status' => $folderName . ': paused — the server keeps resetting its message numbers');
+			}
 			$folder->set('iif_uidvalidity', $serverUidValidity);
 			$folder->set('iif_last_sync_modseq', null);
 			// Where the backfill ends: UIDs at or below this existed when the cursor
@@ -728,9 +919,7 @@ class ImapIngestor {
 				$folder->set('iif_last_seen_uid', $highUid);
 				$folder->prepare();
 				$folder->save();
-				return array('stored' => 0, 'dedup' => 0, 'seen' => 0, 'failed' => 0, 'out_of_scope' => 0,
-					'source_draft' => 0,
-					'failed_detail' => array(), 'status' => $folderName . ': seeded cursor');
+				return $empty + array('status' => $folderName . ': seeded cursor');
 			}
 			$folder->set('iif_last_seen_uid', $lastSeenUid);
 		}
@@ -740,19 +929,22 @@ class ImapIngestor {
 			$folder->set('iif_last_seen_uid', max($lastSeenUid, $highUid));
 			$folder->prepare();
 			$folder->save();
-			return array('stored' => 0, 'dedup' => 0, 'seen' => 0, 'failed' => 0, 'out_of_scope' => 0,
-				'source_draft' => 0,
-				'failed_detail' => array(), 'status' => $folderName . ': no new');
+			return $empty + array('status' => $folderName . ': no new');
 		}
 
 		// Walk forward one bounded UID window per run (oldest-first). A numeric UID
 		// FETCH range (not SEARCH) avoids the ESEARCH form Gmail rejects. The
-		// window search jumps deserts — see nextOccupiedWindow.
-		list($lastSeenUid, $windowEnd, $uids, $metaFetch) =
+		// window search jumps deserts — see nextOccupiedWindow. $unreadable holds
+		// UIDs whose own FETCH the server could not answer in a form the client
+		// parses (a malformed BODYSTRUCTURE): they fail on their own, the rest of
+		// the window still imports.
+		list($lastSeenUid, $windowEnd, $uids, $metaFetch, $unreadable) =
 			$this->nextOccupiedWindow($client, $folderName, $lastSeenUid, $highUid, max(1, $maxPerRun));
 		$this->lapFolder($folderName, 'seek', microtime(true) - $seekStarted);
 
 		$router = new InboundEmailRouter();
+		$folderId = intval($folder->key);
+		$knownFailures = $this->failureUidsInWindow($folderId, $serverUidValidity, $lastSeenUid + 1, $windowEnd);
 
 		// Day-window scope guard (specs/imap_seed_scope_guard.md): the seek decides
 		// where to LOOK, the scope decides what to KEEP. During the backfill — UIDs
@@ -766,9 +958,23 @@ class ImapIngestor {
 		$seedHighUid = intval($folder->get('iif_seed_high_uid'));
 
 		$stored = 0; $dedup = 0; $seen = 0; $failed = 0; $outOfScope = 0; $sourceDraft = 0;
-		$deferred = 0;
+		$deferred = 0; $skipped = 0;
 		$failedDetail = array();
 		$maxUid = $windowEnd;
+		// A failure either holds the cursor below the message (retry next poll) or,
+		// once the message has failed too often, lets the walk pass it.
+		$fail = function (int $uid, string $reason) use (&$failed, &$failedDetail, &$maxUid, &$skipped,
+				$folderId, $serverUidValidity, $folderName) {
+			$failed++;
+			$gaveUp = InboundImapIngestFailure::recordAttempt($folderId, $serverUidValidity, $uid, $reason);
+			if ($gaveUp) {
+				$skipped++;
+				$reason .= ' (skipped after ' . InboundImapIngestFailure::MAX_ATTEMPTS . ' attempts)';
+			} else {
+				$maxUid = min($maxUid, $uid - 1);
+			}
+			$failedDetail[] = array('uid' => $uid, 'folder' => $folderName, 'reason' => $reason);
+		};
 		foreach ($uids as $uid) {
 			if ($this->pastDeadline()) {
 				// Out of time: hold the cursor below this UID so the next poll
@@ -780,14 +986,15 @@ class ImapIngestor {
 				break;
 			}
 			$seen++;
+			if (isset($unreadable[$uid])) {
+				$fail($uid, $unreadable[$uid]);
+				continue;
+			}
 			$data = $metaFetch[$uid] ?? null;
 			if ($data === null) {
 				// The UID was in the window but the server returned nothing for it.
 				// Counting it keeps stored + dup + failed reconciled against seen.
-				$failed++;
-				$failedDetail[] = array('uid' => $uid, 'folder' => $folderName,
-					'reason' => 'The server returned no data for this message.');
-				$maxUid = min($maxUid, $uid - 1);
+				$fail($uid, 'The server returned no data for this message.');
 				continue;
 			}
 
@@ -811,11 +1018,29 @@ class ImapIngestor {
 				$result = $this->ingestOne($client, $folder, $uid, $data, $router,
 					$alias, $domain, $recipient, $serverUidValidity, $recordMembership);
 				if ($result['dedup']) { $dedup++; } else { $stored++; }
-			} catch (Throwable $e) {
-				// Logged in one bounded batch by recordRun, not one call per message.
+				if (isset($knownFailures[$uid])) {
+					InboundImapIngestFailure::clear($folderId, $serverUidValidity, $uid);
+				}
+			} catch (InboundStoreCollisionException | MailboxSealTargetMissing $e) {
+				// Not faults of this message: a concurrent store that resolves on the
+				// next pass, or a sealing mailbox with no key to seal to — which must
+				// hold the mail on the source until one exists, never skip it. The
+				// cursor holds and nothing is counted toward giving up.
 				$failed++;
 				$failedDetail[] = array('uid' => $uid, 'folder' => $folderName, 'reason' => $e->getMessage());
 				$maxUid = min($maxUid, $uid - 1);
+			} catch (Throwable $e) {
+				if (self::isTransportFailure($e)) {
+					// The connection or the folder failed, not this message: hold
+					// the cursor here without counting it against the message, and
+					// stop — the rest of the window would fail the same way.
+					$failed++;
+					$failedDetail[] = array('uid' => $uid, 'folder' => $folderName, 'reason' => $e->getMessage());
+					$maxUid = min($maxUid, $uid - 1);
+					break;
+				}
+				// Logged in one bounded batch by recordRun, not one call per message.
+				$fail($uid, $e->getMessage());
 			}
 			// The network half (bodies, inline images) and the stored half
 			// (the transaction) are lapped separately; a failure mid-way lands
@@ -835,9 +1060,51 @@ class ImapIngestor {
 			'deferred' => $deferred,
 			'failed_detail' => $failedDetail,
 			'status' => $folderName . ': ' . $stored . ' stored, ' . $dedup . ' dup, ' . $failed . ' failed'
+				. ($skipped ? ' (' . $skipped . ' skipped for good — retry from the Accounts page)' : '')
 				. ($outOfScope ? ', ' . $outOfScope . ' out of scope' : '')
 				. ($sourceDraft ? ', ' . $sourceDraft . ' source draft' : '')
 				. ($deferred ? ', ' . $deferred . ' deferred (time budget)' : ''));
+	}
+
+	/** UIDs in [$from,$to] of this folder generation that have a failure on record. */
+	private function failureUidsInWindow(int $folderId, int $uidvalidity, int $from, int $to): array {
+		if ($folderId <= 0 || $to < $from) {
+			return array();
+		}
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare(
+			'SELECT ifl_uid FROM ifl_inbound_imap_ingest_failures
+			 WHERE ifl_iif_inbound_imap_folder_id = ? AND ifl_uidvalidity = ? AND ifl_uid BETWEEN ? AND ?');
+		$stmt->execute(array($folderId, $uidvalidity, $from, $to));
+		return array_flip(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)));
+	}
+
+	/**
+	 * The highest UID in the folder. UIDNEXT - 1 when the server reports UIDNEXT;
+	 * when it does not (some servers omit it from STATUS), the UID of the last
+	 * message by sequence number — asked directly, because reading the missing
+	 * value as 0 made the folder report "no new" for ever (F8). 0 for an empty
+	 * folder. Public for the sibling ImapSyncer, which bounds its ranges the same way.
+	 */
+	public function highestUid(ImapClient $client, string $folderName, array $status): int {
+		$uidNext = intval($status['uidnext'] ?? 0);
+		if ($uidNext > 0) {
+			return $uidNext - 1;
+		}
+		$count = isset($status['messages']) ? intval($status['messages'])
+			: intval(($client->status($folderName, Horde_Imap_Client::STATUS_MESSAGES))['messages'] ?? 0);
+		if ($count <= 0) {
+			return 0;
+		}
+		$query = new Horde_Imap_Client_Fetch_Query();
+		$query->uid();
+		$res = $client->fetch($folderName, $query, array('ids' => new Horde_Imap_Client_Ids(array($count), true)));
+		$max = 0;
+		foreach ($res as $key => $data) {
+			$uid = (is_object($data) && method_exists($data, 'getUid')) ? intval($data->getUid()) : 0;
+			$max = max($max, $uid > 0 ? $uid : intval($key));
+		}
+		return $max;
 	}
 
 	// ── Run record ─────────────────────────────────────────────────────────
@@ -1217,7 +1484,7 @@ class ImapIngestor {
 
 	/**
 	 * The next UID window at/above $lastSeenUid that actually holds messages,
-	 * as [cursor floor, window end, sorted uids, metaFetch].
+	 * as [cursor floor, window end, sorted uids, metaFetch, unreadable].
 	 *
 	 * A window that fetches empty proves only that those UIDs are deleted —
 	 * routine at Gmail scale, where archiving leaves the folder's UID space a
@@ -1230,17 +1497,25 @@ class ImapIngestor {
 	 * A jump that lands in dense mail is trimmed back to $maxPerRun messages
 	 * (window end pulled to the last uid kept), so one poll never ingests more
 	 * than a normal window — the next poll continues from there.
+	 *
+	 * $unreadable (uid => reason) are UIDs whose own FETCH failed: one message
+	 * the client cannot parse fails the whole batch it rides in, so a failing
+	 * window is split until the bad UIDs stand alone (fetchWindowIsolating).
 	 */
 	private function nextOccupiedWindow(ImapClient $client, string $folderName,
 			int $lastSeenUid, int $highUid, int $maxPerRun): array {
 		$span = $maxPerRun;
 		while (true) {
 			$windowEnd = min($highUid, $lastSeenUid + $span);
-			$metaFetch = $this->fetchWindow($client, $folderName, $lastSeenUid + 1, $windowEnd);
+			$unreadable = array();
+			$metaFetch = $this->fetchWindowIsolating($client, $folderName, $lastSeenUid + 1, $windowEnd, $unreadable);
 			$uids = array();
 			foreach ($metaFetch->ids() as $uid) {
 				$uid = intval($uid);
 				if ($uid > $lastSeenUid && $uid <= $windowEnd) { $uids[] = $uid; }
+			}
+			foreach (array_keys($unreadable) as $uid) {
+				if (!in_array($uid, $uids, true)) { $uids[] = $uid; }
 			}
 			sort($uids, SORT_NUMERIC);
 			if (!empty($uids) || $windowEnd >= $highUid) {
@@ -1248,11 +1523,67 @@ class ImapIngestor {
 					$uids = array_slice($uids, 0, $maxPerRun);
 					$windowEnd = intval($uids[count($uids) - 1]);
 				}
-				return array($lastSeenUid, $windowEnd, $uids, $metaFetch);
+				return array($lastSeenUid, $windowEnd, $uids, $metaFetch, $unreadable);
 			}
 			$lastSeenUid = $windowEnd;
 			$span *= 2;
 		}
+	}
+
+	/**
+	 * fetchWindow, with the bad message isolated when the batch fails. Returns the
+	 * fetch results for every UID that could be read; each UID whose own
+	 * single-UID fetch still fails lands in $unreadable with the reason. A window
+	 * that fails outright is halved until it succeeds or is one UID wide, so one
+	 * unparsable message costs a handful of extra round trips, not the folder.
+	 */
+	private function fetchWindowIsolating(ImapClient $client, string $folder, int $startUid, int $endUid,
+			array &$unreadable) {
+		try {
+			return $this->fetchWindow($client, $folder, $startUid, $endUid);
+		} catch (ImapIngestorException $e) {
+			throw $e;
+		} catch (Throwable $e) {
+			// A lost connection, a throttle or a vanished folder is the whole
+			// folder's problem, not one message's: splitting would only mark
+			// every UID unreadable. Only a failure to READ an answer isolates.
+			if (self::isTransportFailure($e)) {
+				throw $e;
+			}
+			if ($startUid >= $endUid) {
+				$unreadable[$startUid] = 'The server\'s answer for this message could not be read: ' . $e->getMessage();
+				return new Horde_Imap_Client_Fetch_Results();
+			}
+		}
+		$mid = intdiv($startUid + $endUid, 2);
+		$merged = new Horde_Imap_Client_Fetch_Results();
+		foreach (array(array($startUid, $mid), array($mid + 1, $endUid)) as $half) {
+			$part = $this->fetchWindowIsolating($client, $folder, $half[0], $half[1], $unreadable);
+			foreach ($part as $uid => $data) {
+				$merged[$uid] = $data;
+			}
+		}
+		return $merged;
+	}
+
+	/** A failure of the connection or the folder, never of one message's content. */
+	private static function isTransportFailure(Throwable $e): bool {
+		if (!$e instanceof Horde_Imap_Client_Exception) {
+			return false;
+		}
+		$code = $e->getCode();
+		return in_array($code, array(
+			Horde_Imap_Client_Exception::DISCONNECT,
+			Horde_Imap_Client_Exception::SERVER_CONNECT,
+			Horde_Imap_Client_Exception::SERVER_READERROR,
+			Horde_Imap_Client_Exception::SERVER_READTIMEOUT,
+			Horde_Imap_Client_Exception::SERVER_WRITEERROR,
+			Horde_Imap_Client_Exception::INUSE,
+			Horde_Imap_Client_Exception::LIMIT,
+			Horde_Imap_Client_Exception::OVERQUOTA,
+			Horde_Imap_Client_Exception::NONEXISTENT,
+			Horde_Imap_Client_Exception::MAILBOX_NOOPEN,
+		), true) || ($code >= 100 && $code < 200);
 	}
 
 	private function fetchWindow(ImapClient $client, string $folder, int $startUid, int $endUid) {
@@ -1260,7 +1591,7 @@ class ImapIngestor {
 		$query->structure();
 		$query->envelope();
 		$query->size();
-		$query->imapDate(); // INTERNALDATE, for the day-window scope guard
+		$query->imapDate(); // INTERNALDATE, for the day-window scope guard and the Date fallback
 		$query->flags();    // \Draft, so a half-written source draft is never ingested
 		$query->headerText(array('peek' => true));
 		return $client->fetch($folder, $query, array(
@@ -1304,9 +1635,11 @@ class ImapIngestor {
 			$attachParts[] = $part;
 		}
 
-		// Fetch only the chosen text parts (decoded), never the attachments.
-		$plain = $bodyPlainId !== null ? $this->fetchTextPart($client, $folderName, $uid, $structure, $bodyPlainId) : '';
-		$html  = $bodyHtmlId  !== null ? $this->fetchTextPart($client, $folderName, $uid, $structure, $bodyHtmlId)  : '';
+		// Fetch only the chosen text parts (decoded), never the attachments — and
+		// of those only the first TEXT_BODY_CEILING bytes' worth (F13).
+		$cut = false;
+		$plain = $bodyPlainId !== null ? $this->fetchTextPart($client, $folderName, $uid, $structure, $bodyPlainId, $cut) : '';
+		$html  = $bodyHtmlId  !== null ? $this->fetchTextPart($client, $folderName, $uid, $structure, $bodyHtmlId, $cut)  : '';
 
 		// …except inline images, which ARE body content: the HTML references
 		// them by cid: and the reader can only render what is file-backed
@@ -1316,19 +1649,22 @@ class ImapIngestor {
 		// leaves the part reference-backed, exactly as it was.
 		$inlineBytes = $this->fetchInlineImageParts($client, $folderName, $uid, $structure, $attachParts);
 
-		// Generous ceiling: truncate-and-mark rather than skip.
-		if (strlen($plain) + strlen($html) > self::TEXT_BODY_CEILING) {
+		// Generous ceiling: truncate-and-mark rather than skip. Cut with clip(),
+		// never substr(): a byte offset can land inside a multi-byte character,
+		// and the UTF-8 database refuses the whole row over it (F5).
+		if ($cut || strlen($plain) + strlen($html) > self::TEXT_BODY_CEILING) {
 			$marker = "\n\n[Message body truncated — exceeded the inbound IMAP text-body ceiling. "
 				. "Fetch the full body part on demand if needed.]";
 			if ($html !== '') {
-				$html = substr($html, 0, self::TEXT_BODY_CEILING) . $marker;
-				$plain = ($plain !== '') ? substr($plain, 0, 4096) . $marker : '';
+				$html = DocumentText::clip($html, self::TEXT_BODY_CEILING) . $marker;
+				$plain = ($plain !== '') ? DocumentText::clip($plain, 4096) . $marker : '';
 			} else {
-				$plain = substr($plain, 0, self::TEXT_BODY_CEILING) . $marker;
+				$plain = DocumentText::clip($plain, self::TEXT_BODY_CEILING) . $marker;
 			}
 		}
 
-		$headers = $this->parseHeaderText((string)$data->getHeaderText());
+		$headerText = (string)$data->getHeaderText();
+		$headers = $this->parseHeaderText($headerText);
 
 		// Everything from here down is ONE unit of work
 		// (specs/mail_import_loss_proof.md D1). The message row and its attachment
@@ -1352,7 +1688,7 @@ class ImapIngestor {
 		try {
 			$outcome = $this->ingestOneStored($folder, $uid, $data, $router,
 				$alias, $domain, $recipient, $serverUidValidity, $recordMembership,
-				$attachParts, $plain, $html, $headers, $inlineBytes);
+				$attachParts, $plain, $html, $headers, $inlineBytes, $headerText);
 			if ($owns_tx) {
 				$db->commit();
 			}
@@ -1381,10 +1717,27 @@ class ImapIngestor {
 	private function ingestOneStored(InboundImapFolder $folder, $uid, $data, InboundEmailRouter $router,
 			$alias, $domain, $recipient, $serverUidValidity, bool $recordMembership,
 			array $attachParts, string $plain, string $html, array $headers,
-			array $inlineBytes = array()): array {
+			array $inlineBytes = array(), string $headerText = ''): array {
 
 		$folderName = (string)$folder->get('iif_name');
 		$envelope = $data->getEnvelope();
+
+		// A message with no Message-ID is invisible to the (Message-ID, recipient)
+		// dedup key, so without another identity each folder pass and each rescan
+		// stored it again (F6). Its raw header block is byte-identical in every
+		// folder of the same server: that hash is its identity on this feed.
+		$sourceKey = null;
+		if (trim((string)$envelope->message_id) === '' && $headerText !== '') {
+			$sourceKey = 'hdr:' . hash('sha256', $headerText);
+			$existingId = $this->messageIdBySourceKey($sourceKey);
+			if ($existingId > 0) {
+				$this->refreshLocator($existingId, intval($uid), intval($serverUidValidity), $folderName);
+				if ($recordMembership) {
+					$this->recordFolderMembership($folder, $existingId, intval($uid), intval($serverUidValidity));
+				}
+				return array('dedup' => true, 'message_id' => $existingId);
+			}
+		}
 
 		$msg = array(
 			'sender'  => $this->addrString($envelope->from),
@@ -1394,7 +1747,8 @@ class ImapIngestor {
 			'message_id_header' => (string)$envelope->message_id,
 			'headers' => $headers,
 			'size_bytes' => intval($data->getSize()),
-			'received_time' => $this->envelopeDate($envelope),
+			'received_time' => $this->envelopeDate($envelope, $data),
+			'source_message_key' => $sourceKey,
 			'imap_account_id' => intval($this->account->key),
 			'imap_uid' => intval($uid),
 			'imap_uidvalidity' => intval($serverUidValidity),
@@ -1422,7 +1776,7 @@ class ImapIngestor {
 		$sentRole = (string)$folder->get('iif_role') === InboundImapFolder::ROLE_SENT;
 		$composedId = $this->aliasMessageIdByMessageId($alias, (string)$envelope->message_id, true);
 		if ($composedId > 0) {
-			$this->adoptLocatorIfMissing($composedId, intval($uid), intval($serverUidValidity), $folderName);
+			$this->refreshLocator($composedId, intval($uid), intval($serverUidValidity), $folderName);
 			if (!$sentRole && $this->envelopeAddressedToSelf($envelope)) {
 				InboundEmailMessage::markSelfDelivered($composedId);
 			}
@@ -1442,7 +1796,7 @@ class ImapIngestor {
 		if ($sentRole) {
 			$existingId = $this->aliasMessageIdByMessageId($alias, (string)$envelope->message_id);
 			if ($existingId > 0) {
-				$this->adoptLocatorIfMissing($existingId, intval($uid), intval($serverUidValidity), $folderName);
+				$this->refreshLocator($existingId, intval($uid), intval($serverUidValidity), $folderName);
 				if ($recordMembership) {
 					$this->recordFolderMembership($folder, $existingId, intval($uid), intval($serverUidValidity));
 				}
@@ -1488,6 +1842,9 @@ class ImapIngestor {
 			}
 		} elseif ($result['dedup']) {
 			$messageId = $this->existingMessageId((string)$envelope->message_id, $recipient);
+			if ($messageId > 0) {
+				$this->refreshLocator($messageId, intval($uid), intval($serverUidValidity), $folderName);
+			}
 			// Same promotion on the (Message-ID, recipient) dedup path — reachable
 			// when the §9 lookup missed because the alias's copy is soft-deleted.
 			if ($messageId > 0 && (string)$folder->get('iif_role') === InboundImapFolder::ROLE_SENT
@@ -1597,14 +1954,41 @@ class ImapIngestor {
 		return $id ? intval($id) : 0;
 	}
 
-	/** Adopt the IMAP locator on a row that has none (e.g. a local outbound row), so its parts become fetchable. */
-	private function adoptLocatorIfMissing(int $messageId, int $uid, int $uidvalidity, string $folderName): void {
+	/**
+	 * Point a row's locator at the copy just seen in $folderName, when the row has
+	 * no usable locator: none at all (a local outbound row), a lost UID (a move
+	 * the server did not number), a locator in this same folder from an older
+	 * UIDVALIDITY or at another UID (the folder was renumbered —
+	 * specs/implemented/imap_client_hardening.md F2), or a message marked gone from the
+	 * source that has turned up again. A good locator in another folder is left
+	 * alone — seeing a Gmail message in a second label is not a move.
+	 */
+	private function refreshLocator(int $messageId, int $uid, int $uidvalidity, string $folderName): void {
 		$db = DbConnector::get_instance()->get_db_link();
 		$stmt = $db->prepare(
 			'UPDATE iem_inbound_email_messages
-			 SET iem_iia_inbound_imap_account_id = ?, iem_imap_uid = ?, iem_imap_uidvalidity = ?, iem_imap_folder = ?
-			 WHERE iem_inbound_email_message_id = ? AND iem_iia_inbound_imap_account_id IS NULL');
-		$stmt->execute(array(intval($this->account->key), $uid, $uidvalidity, $folderName, $messageId));
+			 SET iem_iia_inbound_imap_account_id = ?, iem_imap_uid = ?, iem_imap_uidvalidity = ?, iem_imap_folder = ?,
+			     iem_source_gone_time = NULL
+			 WHERE iem_inbound_email_message_id = ?
+			   AND (iem_iia_inbound_imap_account_id IS NULL
+			        OR iem_imap_uid IS NULL
+			        OR iem_source_gone_time IS NOT NULL
+			        OR (iem_iia_inbound_imap_account_id = ? AND iem_imap_folder = ?
+			            AND (iem_imap_uidvalidity IS DISTINCT FROM ? OR iem_imap_uid IS DISTINCT FROM ?)))');
+		$stmt->execute(array(intval($this->account->key), $uid, $uidvalidity, $folderName, $messageId,
+			intval($this->account->key), $folderName, $uidvalidity, $uid));
+	}
+
+	/** This feed's row carrying a source identity key (F6), or 0. */
+	private function messageIdBySourceKey(string $key): int {
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare(
+			'SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
+			 WHERE iem_iia_inbound_imap_account_id = ? AND iem_source_message_key = ?
+			 ORDER BY iem_inbound_email_message_id ASC LIMIT 1');
+		$stmt->execute(array(intval($this->account->key), $key));
+		$id = $stmt->fetchColumn();
+		return $id ? intval($id) : 0;
 	}
 
 	/** Mark a row as spam (a message the remote filed in a junk-role folder). */
@@ -1850,12 +2234,12 @@ class ImapIngestor {
 			$isInline = self::partIsInline($part);
 			InboundMessageAttachment::CreateEntry(array(
 				'ima_iem_inbound_email_message_id' => intval($messageId),
-				'ima_filename'     => $part->getName() ? substr($part->getName(), 0, 500) : null,
-				'ima_content_type' => substr((string)$part->getType(), 0, 255),
+				'ima_filename'     => $part->getName() ? DocumentText::clip((string)$part->getName(), 500) : null,
+				'ima_content_type' => DocumentText::clip((string)$part->getType(), 255),
 				'ima_size_bytes'   => intval($part->getBytes()),
 				'ima_mime_part'    => substr((string)$part->getMimeId(), 0, 40),
 				'ima_encoding'     => substr($this->partEncoding($part), 0, 40),
-				'ima_content_id'   => $cid ? substr(trim($cid, '<>'), 0, 255) : null,
+				'ima_content_id'   => $cid ? DocumentText::clip(trim($cid, '<>'), 255) : null,
 				'ima_is_inline'    => $isInline,
 			));
 		}
@@ -1878,10 +2262,11 @@ class ImapIngestor {
 			$client = $this->client();
 			$folder = $folder ?: ($this->account->get('iia_imap_folder') ?: 'INBOX');
 
-			$resolvedUid = $this->resolveUid($client, $folder, $uid, $uidvalidity, $messageId);
-			if ($resolvedUid === null) {
-				return array('ok' => false, 'message' => 'This message is no longer available in the source mailbox.');
+			$loc = $this->locate($client, $folder, $uid, $uidvalidity, $messageId);
+			if ($loc === null) {
+				return array('ok' => false, 'message' => 'This message is no longer on the source server.');
 			}
+			list($folder, $resolvedUid) = $loc;
 
 			$ids = new Horde_Imap_Client_Ids(array($resolvedUid));
 			$fq = new Horde_Imap_Client_Fetch_Query();
@@ -1921,10 +2306,11 @@ class ImapIngestor {
 			$client = $this->client();
 			$folder = $folder ?: ($this->account->get('iia_imap_folder') ?: 'INBOX');
 
-			$resolvedUid = $this->resolveUid($client, $folder, $uid, $uidvalidity, $messageId);
-			if ($resolvedUid === null) {
-				return array('ok' => false, 'message' => 'This message is no longer available in the source mailbox.');
+			$loc = $this->locate($client, $folder, $uid, $uidvalidity, $messageId);
+			if ($loc === null) {
+				return array('ok' => false, 'message' => 'This message is no longer on the source server.');
 			}
+			list($folder, $resolvedUid) = $loc;
 
 			$ids = new Horde_Imap_Client_Ids(array($resolvedUid));
 
@@ -1971,24 +2357,109 @@ class ImapIngestor {
 	}
 
 	/**
-	 * Resolve the UID to fetch: the stored UID when UIDVALIDITY still matches,
-	 * else a Message-ID header search (the stale-UID fallback). Returns null if
-	 * the message can't be located.
+	 * Where a stored message lives on the source now, as [folder, uid], or null.
+	 *
+	 * The stored locator when its UIDVALIDITY still matches AND the UID still
+	 * answers; else a Message-ID search in the same folder (the folder was
+	 * renumbered); else in each of the feed's other tracked folders (it was moved
+	 * — archived in another mail client, say). A new position is written back to
+	 * the row. When the source holds it nowhere, the row is marked source-gone
+	 * and KEPT: Joinery is the archive, and the reader then says the parts can no
+	 * longer be fetched instead of failing on every click
+	 * (specs/implemented/imap_client_hardening.md F15, Q2).
 	 */
-	private function resolveUid($client, string $folder, int $uid, ?int $uidvalidity, ?string $messageId): ?int {
+	private function locate($client, string $folder, int $uid, ?int $uidvalidity, ?string $messageId): ?array {
 		$status = $client->status($folder, Horde_Imap_Client::STATUS_UIDVALIDITY);
 		$serverUidValidity = intval($status['uidvalidity'] ?? 0);
-
-		if ($uidvalidity !== null && intval($uidvalidity) === $serverUidValidity && $uid > 0) {
-			return $uid;
+		if ($uid > 0 && $uidvalidity !== null && intval($uidvalidity) === $serverUidValidity
+				&& $this->uidExists($client, $folder, $uid)) {
+			return array($folder, $uid);
 		}
+		$messageId = (string)$messageId;
+		if ($messageId === '') {
+			return null; // nothing to search by; leave the row as it is
+		}
+		$found = $this->searchByMessageId($client, $folder, $messageId);
+		if ($found !== null) {
+			$this->moveLocator($folder, $uid, $messageId, $folder, $found, $serverUidValidity);
+			return array($folder, $found);
+		}
+		$others = new MultiInboundImapFolder(array(
+			'account_id' => intval($this->account->key),
+			'tracked'    => true,
+		), array('iif_inbound_imap_folder_id' => 'ASC'));
+		foreach ($others as $row) {
+			$name = (string)$row->get('iif_name');
+			if ($name === $folder) {
+				continue;
+			}
+			try {
+				$found = $this->searchByMessageId($client, $name, $messageId);
+			} catch (Throwable $e) {
+				continue;
+			}
+			if ($found !== null) {
+				$st = $client->status($name, Horde_Imap_Client::STATUS_UIDVALIDITY);
+				$this->moveLocator($folder, $uid, $messageId, $name, $found, intval($st['uidvalidity'] ?? 0) ?: null);
+				return array($name, $found);
+			}
+		}
+		$this->markSourceGone($folder, $uid, $messageId);
+		return null;
+	}
 
-		// UIDVALIDITY changed (or unknown) — fall back to a Message-ID search.
-		return $this->searchByMessageId($client, $folder, (string)$messageId);
+	/**
+	 * For the sync engine: a message the source reported gone from $folder at
+	 * $uid — find it in another tracked folder and move the locator there, or mark
+	 * it source-gone. Returns TRUE when it was found elsewhere.
+	 */
+	public function relocateOrMarkGone(string $folder, int $uid, ?string $messageId): bool {
+		$messageId = (string)$messageId;
+		if ($messageId === '') {
+			return false;
+		}
+		// A null UIDVALIDITY skips the stored-UID check (it is known gone) while
+		// $uid still names which row to rewrite.
+		return $this->locate($this->client(), $folder, $uid, null, $messageId) !== null;
+	}
+
+	/** Does this UID still exist in the folder? One UID-only fetch. */
+	private function uidExists($client, string $folder, int $uid): bool {
+		$q = new Horde_Imap_Client_Fetch_Query();
+		$q->uid();
+		$res = $client->fetch($folder, $q, array('ids' => new Horde_Imap_Client_Ids(array($uid))));
+		foreach ($res as $key => $data) {
+			if (intval($key) === $uid) { return true; }
+		}
+		return false;
+	}
+
+	/** Rewrite the locator of this feed's row at ($oldFolder, $oldUid) with that Message-ID. */
+	private function moveLocator(string $oldFolder, int $oldUid, string $messageId,
+			string $folder, int $uid, ?int $uidvalidity): void {
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare(
+			'UPDATE iem_inbound_email_messages
+			 SET iem_imap_folder = ?, iem_imap_uid = ?, iem_imap_uidvalidity = ?, iem_source_gone_time = NULL
+			 WHERE iem_iia_inbound_imap_account_id = ? AND iem_imap_folder = ?
+			   AND iem_imap_uid IS NOT DISTINCT FROM ? AND iem_message_id_header = ?');
+		$stmt->execute(array($folder, $uid, $uidvalidity, intval($this->account->key), $oldFolder,
+			$oldUid > 0 ? $oldUid : null, DocumentText::clip($messageId, 255)));
+	}
+
+	/** Mark this feed's row at ($folder, $uid) with that Message-ID as gone from the source. */
+	private function markSourceGone(string $folder, int $uid, string $messageId): void {
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare(
+			'UPDATE iem_inbound_email_messages SET iem_source_gone_time = COALESCE(iem_source_gone_time, now())
+			 WHERE iem_iia_inbound_imap_account_id = ? AND iem_imap_folder = ?
+			   AND iem_imap_uid IS NOT DISTINCT FROM ? AND iem_message_id_header = ?');
+		$stmt->execute(array(intval($this->account->key), $folder, $uid > 0 ? $uid : null,
+			DocumentText::clip($messageId, 255)));
 	}
 
 	/** The current UID of the message carrying this Message-ID, or null when the folder has none. */
-	private function searchByMessageId($client, string $folder, string $messageId): ?int {
+	public function searchByMessageId($client, string $folder, string $messageId): ?int {
 		if ($messageId === '') {
 			return null;
 		}
@@ -2006,22 +2477,79 @@ class ImapIngestor {
 
 	// ── Helpers ────────────────────────────────────────────────────────────
 
-	/** Fetch one text part decoded + converted to UTF-8. */
-	private function fetchTextPart($client, string $folder, int $uid, $structure, string $mimePart): string {
+	/**
+	 * How many bytes of a text part to ask the server for. The stored body keeps
+	 * TEXT_BODY_CEILING; the request is larger because a part the server does not
+	 * decode for us arrives transfer-encoded (base64 grows 4/3, plus line breaks).
+	 */
+	const TEXT_FETCH_BYTES = 2945024; // TEXT_BODY_CEILING * 1.4, rounded up to 4 KB
+
+	/**
+	 * Fetch one text part decoded + converted to UTF-8 — only its first
+	 * TEXT_FETCH_BYTES, never the whole part: a text part can be hundreds of
+	 * megabytes (a log dump, a mailer that inlines an archive), and fetching it
+	 * whole to keep 2 MB of it held every byte in memory several times over (F13).
+	 * Sets $cut when the part was longer than what was fetched.
+	 *
+	 * Throws when the server returns nothing for a part the structure says
+	 * exists — storing '' would save the message without its body for good,
+	 * since the dedup path never refetches a stored message (F4).
+	 */
+	private function fetchTextPart($client, string $folder, int $uid, $structure, string $mimePart, bool &$cut = false): string {
 		$fq = new Horde_Imap_Client_Fetch_Query();
-		$fq->bodyPart($mimePart, array('decode' => true, 'peek' => true));
+		$fq->bodyPart($mimePart, array('decode' => true, 'peek' => true,
+			'start' => 0, 'length' => self::TEXT_FETCH_BYTES));
 		$res = $client->fetch($folder, $fq, array('ids' => new Horde_Imap_Client_Ids(array($uid))));
 		$data = $res[$uid] ?? null;
-		if ($data === null) { return ''; }
+		if ($data === null || !self::hasBodyPart($data, $mimePart)) {
+			throw new ImapIngestorException('The server returned no body for part ' . $mimePart
+				. ' of this message; it is retried on the next poll.');
+		}
 
-		$content = $data->getBodyPart($mimePart);
+		$content = (string)$data->getBodyPart($mimePart);
+		if (strlen($content) >= self::TEXT_FETCH_BYTES) {
+			$cut = true;
+		}
 		$part = $structure->getPart($mimePart);
 		if ($part !== null && !$data->getBodyPartDecode($mimePart)) {
-			$part->setContents($content);
-			$content = $part->getContents();
+			$content = self::decodeTransfer($content, $this->partEncoding($part), strlen($content) >= self::TEXT_FETCH_BYTES);
 		}
 		$charset = ($part !== null) ? (string)$part->getContentTypeParameter('charset') : '';
-		return $this->toUtf8((string)$content, $charset);
+		return $this->toUtf8($content, $charset);
+	}
+
+	/** Did the server answer for this body part at all? ('' is an answer: an empty part.) */
+	private static function hasBodyPart($data, string $mimePart): bool {
+		if (method_exists($data, 'getRawData')) {
+			$raw = $data->getRawData();
+			return isset($raw[Horde_Imap_Client::FETCH_BODYPART][$mimePart]);
+		}
+		return $data->getBodyPart($mimePart) !== null;
+	}
+
+	/**
+	 * Undo a transfer encoding on text the server did not decode. When $partial,
+	 * the text is the head of a longer part and may end mid-unit: base64 is cut
+	 * back to whole 4-character groups and quoted-printable to its last line
+	 * break, so the tail decodes to nothing rather than to garbage.
+	 */
+	private static function decodeTransfer(string $content, string $encoding, bool $partial): string {
+		switch (strtolower($encoding)) {
+			case 'base64':
+				$b64 = preg_replace('/[^A-Za-z0-9+\/=]/', '', $content);
+				if ($partial) {
+					$b64 = substr($b64, 0, intdiv(strlen($b64), 4) * 4);
+				}
+				$out = base64_decode($b64, false);
+				return $out === false ? '' : $out;
+			case 'quoted-printable':
+				if ($partial && ($nl = strrpos($content, "\n")) !== false) {
+					$content = substr($content, 0, $nl + 1);
+				}
+				return quoted_printable_decode($content);
+			default:
+				return $content;
+		}
 	}
 
 	/** The transfer encoding for a BODYSTRUCTURE part (best-effort, informational). */
@@ -2050,15 +2578,29 @@ class ImapIngestor {
 		}
 	}
 
-	/** Envelope date → UTC 'Y-m-d H:i:s', or now() if absent/invalid. */
-	private function envelopeDate($envelope): string {
+	/**
+	 * The message's date as UTC 'Y-m-d H:i:s': its Date header; when that is
+	 * absent, unreadable, or more than a day in the future (spam dates itself
+	 * ahead to stay at the top), the server's INTERNALDATE — when it arrived
+	 * there; now() only when neither is known. Falling straight to now() dated
+	 * an old imported message as today's newest mail (F7).
+	 */
+	private function envelopeDate($envelope, $data = null): string {
 		try {
-			$d = $envelope->date;
-			if ($d !== null) {
+			// isset() first: Horde answers an ABSENT Date with the current time,
+			// which is exactly how an undated message came to be dated today.
+			$d = isset($envelope->date) ? $envelope->date : null;
+			if ($d !== null && !(method_exists($d, 'error') && $d->error())) {
 				$ts = $d->getTimestamp();
-				if ($ts > 0) { return gmdate('Y-m-d H:i:s', $ts); }
+				if ($ts > 0 && $ts <= time() + 86400) { return gmdate('Y-m-d H:i:s', $ts); }
 			}
 		} catch (Throwable $e) { /* fall through */ }
+		if ($data !== null) {
+			try {
+				$internal = $this->internalDateUtc($data);
+				if ($internal !== '') { return $internal; }
+			} catch (Throwable $e) { /* fall through */ }
+		}
 		return gmdate('Y-m-d H:i:s');
 	}
 

@@ -1,6 +1,8 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.69 — the selection's Labels panel shows what the
+ * No framework. @version 2.70 — a message gone from its source server says so
+ * above its attachments (source_gone).
+ * @version 2.69 — the selection's Labels panel shows what the
  * ticked conversations already carry (ticked / mixed / clear per label) and
  * stays open across changes; the thread re-opened in place after a send keeps
  * its labels ticked.
@@ -2209,7 +2211,7 @@
 
 		// Gmail-style attachment chips below the content area.
 		if (m.attachments && m.attachments.length) {
-			wrap.appendChild(attachmentsBlock(m.attachments));
+			wrap.appendChild(attachmentsBlock(m.attachments, !!m.source_gone));
 		}
 
 		return wrap;
@@ -2219,10 +2221,17 @@
 	// a link: the download is the link inside it, and an eye button sits beside
 	// it for anything we can read as text (a button cannot legally nest inside
 	// a link, which is why the chip itself is a div).
-	function attachmentsBlock(atts) {
+	function attachmentsBlock(atts, sourceGone) {
 		var box = el('div', 'mbx-attachments');
 		box.appendChild(el('div', 'mbx-attachments-label',
 			atts.length + (atts.length === 1 ? ' attachment' : ' attachments')));
+		// The source server no longer holds this message: attachments that were
+		// only ever fetched from it on demand cannot be opened any more. Said up
+		// front rather than as an error on each click.
+		if (sourceGone) {
+			box.appendChild(el('div', 'mbx-attachments-note',
+				'This message is no longer on the source mail server, so attachments not saved here can\'t be opened.'));
+		}
 
 		var grid = el('div', 'mbx-attachment-grid');
 		atts.forEach(function (a) {

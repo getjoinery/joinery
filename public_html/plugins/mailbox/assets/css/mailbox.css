@@ -28,6 +28,8 @@ summary.fix-toggle:hover { color: #0d6efd; text-decoration: underline; }
 .iea-mb-addr { font-weight: 600; color: #1f2933; font-size: 14px; }
 .iea-mb-route { color: #4b5563; font-size: 13px; margin-top: 3px; }
 .iea-mb-imap { color: #374151; font-size: 12px; margin-top: 5px; }
+.iea-mb-imap-attention { color: #92400e; }
+.iea-mb-imap-attention form { display: inline; margin-left: 6px; }
 .iea-mb-actions { flex: 0 0 auto; display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
 .iea-empty-mb { padding: 11px 14px; color: #9097a1; font-size: 13px; }
 .iea-tag {

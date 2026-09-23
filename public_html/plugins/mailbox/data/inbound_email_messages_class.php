@@ -103,6 +103,8 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.32 - iem_source_message_key, iem_source_gone_time, iem_push_attempts,
+ *   iem_push_retry_after (specs/implemented/imap_client_hardening.md F6, F15, F11)
  * @version 1.31.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.31 - iem_raw_sync_last_error: why the last offload attempt did not move the raw message
  * @version 1.30
@@ -430,6 +432,17 @@ class InboundEmailMessage extends SystemBase {
 		'iem_imap_uid'            => array('type'=>'int8'),
 		'iem_imap_uidvalidity'    => array('type'=>'int8'),
 		'iem_imap_folder'         => array('type'=>'varchar(255)'),
+		// The source's own identity for a message that carries no Message-ID:
+		// 'hdr:' + sha256 of its raw header block, which is byte-identical in every
+		// folder of the same server. The (Message-ID, recipient) dedup key cannot
+		// see such a message, so without this each folder pass and each rescan
+		// stored it again (specs/implemented/imap_client_hardening.md F6).
+		'iem_source_message_key'  => array('type'=>'varchar(80)'),
+		// Set when the source no longer holds this message anywhere a tracked
+		// folder can find it (moved to an untracked folder, or deleted there). The
+		// row is kept — Joinery is the archive — and the reader says the parts can
+		// no longer be fetched instead of failing on click (F15).
+		'iem_source_gone_time'    => array('type'=>'timestamp(6)'),
 		// Two-way sync flag-state tracking (specs/two_way_imap_sync.md §5, §7.1).
 		// local_modified is stamped by MailboxService when flags change locally;
 		// synced_state_time is stamped by push. A flag row is dirty iff
@@ -437,6 +450,11 @@ class InboundEmailMessage extends SystemBase {
 		// ilm_ row (present_local vs present_base); see specs/inbound_email_labels.md.
 		'iem_local_state_modified' => array('type'=>'timestamp(6)'),
 		'iem_synced_state_time'    => array('type'=>'timestamp(6)'),
+		// Push back-off (F11): a flag or trash push that keeps failing (its folder
+		// was deleted on the source) waits out iem_push_retry_after instead of
+		// holding the head of the push queue and starving every newer change.
+		'iem_push_attempts'        => array('type'=>'int4', 'default'=>'0', 'is_nullable'=>false),
+		'iem_push_retry_after'     => array('type'=>'timestamp(6)'),
 		// The archive import run that created this row (specs/mail_archive_import.md
 		// §3.3). NULL for everything that arrived normally, and this tag IS the undo
 		// mechanism: reversing a run permanently deletes exactly the rows carrying its
@@ -477,6 +495,9 @@ class InboundEmailMessage extends SystemBase {
 		// Trash by mailbox: the discarded rows are a sliver of the table and
 		// the Trash view must not scan the live 99.9% to find them.
 		array('columns' => array('iem_iea_inbound_email_alias_id'), 'where' => 'iem_delete_time IS NOT NULL'),
+		// The no-Message-ID dedup lookup (F6) — per feed, only rows that have a key.
+		array('columns' => array('iem_iia_inbound_imap_account_id', 'iem_source_message_key'),
+			'where' => 'iem_source_message_key IS NOT NULL'),
 	);
 
 	function authenticate_write($data) {

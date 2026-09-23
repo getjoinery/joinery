@@ -15,6 +15,7 @@
  * busy account as skipped). Failures are per-account and non-fatal — one
  * unreachable mailbox or expired token never stops the rest.
  *
+ * @version 1.4 - the claim backs off a failing feed (InboundImapAccount::DUE_SQL)
  * @version 1.3
  * @changelog 1.3 - the fetch cycle itself lives in ImapFetch::run(), shared
  *   with every manual fetch path so none of them can do less than this task
@@ -125,8 +126,7 @@ class PollImapAccounts implements ScheduledTaskInterface {
 				WHERE iia_inbound_imap_account_id = :id
 				  AND iia_is_enabled = true
 				  AND iia_delete_time IS NULL
-				  AND (iia_last_poll_time IS NULL
-				       OR iia_last_poll_time + (iia_poll_interval_seconds * INTERVAL '1 second') <= now())";
+				  AND " . InboundImapAccount::DUE_SQL;
 		$stmt = $db->prepare($sql);
 		$stmt->execute(array(':id' => $accountId));
 		return $stmt->rowCount() > 0;

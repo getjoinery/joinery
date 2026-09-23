@@ -18,6 +18,7 @@
  * sync pull) — with the cursor untouched and the leftovers counted as deferred,
  * never as seen. No live server: an in-memory client stands in for IMAP.
  *
+ * @version 1.1 - teardown also removes the folders' ingest-failure rows
  * @version 1.0
  */
 
@@ -324,6 +325,11 @@ class ImapFetchBudgetTest {
 		$ain = $aids ? implode(',', array_map('intval', $aids)) : 'NULL';
 		$this->db->exec("DELETE FROM isp_inbound_imap_seed_proofs WHERE isp_iia_inbound_imap_account_id IN
 			(SELECT iia_inbound_imap_account_id FROM iia_inbound_imap_accounts WHERE iia_iea_inbound_email_alias_id IN ($ain))");
+		// The fake messages here fail to ingest on purpose (the budget is what is
+		// under test), so the folders carry ingest-failure rows of their own.
+		$this->db->exec("DELETE FROM ifl_inbound_imap_ingest_failures WHERE ifl_iif_inbound_imap_folder_id IN
+			(SELECT iif_inbound_imap_folder_id FROM iif_inbound_imap_folders WHERE iif_iia_inbound_imap_account_id IN
+			(SELECT iia_inbound_imap_account_id FROM iia_inbound_imap_accounts WHERE iia_iea_inbound_email_alias_id IN ($ain)))");
 		$this->db->exec("DELETE FROM iif_inbound_imap_folders WHERE iif_iia_inbound_imap_account_id IN
 			(SELECT iia_inbound_imap_account_id FROM iia_inbound_imap_accounts WHERE iia_iea_inbound_email_alias_id IN ($ain))");
 		$this->db->exec("DELETE FROM iia_inbound_imap_accounts WHERE iia_iea_inbound_email_alias_id IN ($ain)");

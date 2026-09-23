@@ -1,7 +1,7 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.41
+ * Vanilla CSS, no framework. @version 2.42 — .mbx-attachments-note (source-gone note)
  */
 
 /* Every size the reader renders text at, in one ladder. Nothing in this file
@@ -720,6 +720,10 @@
 .mbx-attachments-label {
 	font-size: var(--mbx-text-sm); color: #6b7280; font-weight: 600;
 	margin: 8px 0 6px;
+}
+.mbx-attachments-note {
+	font-size: var(--mbx-text-sm); color: #6b7280;
+	margin: 0 0 8px;
 }
 .mbx-attachment-grid {
 	display: flex; flex-wrap: wrap; gap: 8px;

@@ -17,6 +17,9 @@
  *
  * See specs/two_way_imap_sync.md (§5, §6) and ImapSyncer.
  *
+ * @version 1.3
+ * @changelog 1.3 - UIDVALIDITY churn counter and the folder pause it trips
+ *   (specs/implemented/imap_client_hardening.md F9)
  * @version 1.2
  * @changelog 1.2 - iif_seed_high_uid: where the backfill ends and live ingest
  *   begins, recorded at seed time so the day-window scope guard knows which
@@ -68,6 +71,14 @@ class InboundImapFolder extends SystemBase {
 		// folders seeded before the column existed: no guard, the pre-guard behavior.
 		'iif_seed_high_uid'               => array('type'=>'int8'),
 		'iif_last_sync_modseq'            => array('type'=>'int8'),
+		// UIDVALIDITY churn (specs/implemented/imap_client_hardening.md F9). A server that
+		// resets a folder's UIDs over and over would otherwise reseed it every
+		// poll — a future-only feed never ingests, a full-history feed re-walks
+		// the whole folder. Three changes inside a day pause the folder
+		// (iif_sync_paused_time) until the operator resumes it.
+		'iif_uidvalidity_changes'         => array('type'=>'int4', 'default'=>'0', 'is_nullable'=>false),
+		'iif_uidvalidity_changed_time'    => array('type'=>'timestamp(6)'),
+		'iif_sync_paused_time'            => array('type'=>'timestamp(6)'),
 		'iif_is_tracked'                  => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),
 		// A folder created in Joinery that does not yet exist on the source. The sync
 		// push step issues the IMAP CREATE and clears this flag (specs/two_way_imap_sync.md §14).
@@ -181,6 +192,16 @@ class InboundImapFolder extends SystemBase {
 		if ($n === 'inbox') {
 			return self::ROLE_INBOX;
 		}
+		// Gmail's German/Austrian locale names its system parent "[Google Mail]".
+		if (strpos($n, '[google mail]/') === 0) {
+			$n = '[gmail]/' . substr($n, strlen('[google mail]/'));
+		}
+		// Servers that keep every folder under INBOX (Courier, older Dovecot and
+		// many shared hosts) name them INBOX.Sent or INBOX/Trash. Only a direct
+		// child of INBOX is read this way — a user's "Projects/Sent" is not Sent.
+		if (preg_match('~^inbox[./]([^./]+)$~', $n, $m)) {
+			$n = $m[1];
+		}
 		// Provider name maps (Gmail's [Gmail]/* names carry no SPECIAL-USE in some setups).
 		$byName = array(
 			'[gmail]/sent mail' => self::ROLE_SENT,
@@ -202,6 +223,45 @@ class InboundImapFolder extends SystemBase {
 			'all mail'          => self::ROLE_ALL,
 		);
 		return $byName[$n] ?? null;
+	}
+
+	// ── UIDVALIDITY churn (specs/implemented/imap_client_hardening.md F9) ──────────────
+
+	/** Changes within this window count toward a pause. */
+	const UIDVALIDITY_CHURN_WINDOW_SECONDS = 86400;
+	/** The change that pauses the folder. */
+	const UIDVALIDITY_CHURN_LIMIT = 3;
+
+	function isPaused(): bool {
+		return $this->get('iif_sync_paused_time') !== null;
+	}
+
+	/**
+	 * Count one UIDVALIDITY change. Returns TRUE when this change pauses the folder:
+	 * the third inside a day. A change after a quiet day starts the count over. The
+	 * caller saves.
+	 */
+	function noteUidvalidityChange(): bool {
+		$last = $this->get('iif_uidvalidity_changed_time');
+		$recent = $last !== null
+			&& (time() - strtotime($last . ' UTC')) < self::UIDVALIDITY_CHURN_WINDOW_SECONDS;
+		$changes = $recent ? intval($this->get('iif_uidvalidity_changes')) + 1 : 1;
+		$this->set('iif_uidvalidity_changes', $changes);
+		$this->set('iif_uidvalidity_changed_time', gmdate('Y-m-d H:i:s'));
+		if ($changes >= self::UIDVALIDITY_CHURN_LIMIT) {
+			$this->set('iif_sync_paused_time', gmdate('Y-m-d H:i:s'));
+			return true;
+		}
+		return false;
+	}
+
+	/** The operator's Resume: clear the pause and the count behind it. Saves. */
+	function resume(): void {
+		$this->set('iif_sync_paused_time', null);
+		$this->set('iif_uidvalidity_changes', 0);
+		$this->set('iif_uidvalidity_changed_time', null);
+		$this->prepare();
+		$this->save();
 	}
 
 	/**
@@ -280,6 +340,10 @@ class MultiInboundImapFolder extends SystemMultiBase {
 
 		if (isset($this->options['label_id'])) {
 			$filters['iif_ilb_inbound_email_label_id'] = array($this->options['label_id'], PDO::PARAM_INT);
+		}
+
+		if (isset($this->options['paused'])) {
+			$filters['iif_sync_paused_time'] = $this->options['paused'] ? 'IS NOT NULL' : 'IS NULL';
 		}
 
 		if (isset($this->options['tracked'])) {
