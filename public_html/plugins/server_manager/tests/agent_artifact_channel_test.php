@@ -19,9 +19,9 @@
  *     vocabulary; the 0.8.352 rollout made that inference for nine agents and
  *     collected nine refusals. A primitive absent from a node's reported list
  *     must not be dispatched to it, whatever the version map would allow.
- *   - The fallback stays live. Agents at 1.10.0 and earlier never report, so
- *     PRIMITIVE_MIN_AGENT_VERSION is a contract, not dead code, and a test that
- *     only exercised the new path would let it rot.
+ *   - The version floor holds. Below AgentVocabulary::FLOOR a node is offered
+ *     apply_update and nothing else, whatever it reports; an agent that
+ *     reports nothing at all is below it.
  *   - What a node reports is normalised before it is believed. It is
  *     attacker-controllable text that decides routing.
  *   - The bundle really is signed, with the key the agent verifies against, and
@@ -75,13 +75,13 @@ check(JobCommandBuilder::has_primitive($claims_it, 'apply_update'),
 	'a primitive the node reports IS routed to it',
 	'the node said it ships apply_update and the plane declined to use it');
 
-// The node's word beats the version floor in the permissive direction too. A
-// machine running a hand-built or pre-release agent that genuinely ships the
-// primitive is not held back by a version string it does not match.
-$old_version_new_vocabulary = artifact_test_node('1.9.1', 'apply_update');
-check(JobCommandBuilder::has_primitive($old_version_new_vocabulary, 'apply_update'),
-	'the reported vocabulary outranks the version floor',
-	'a node that says it ships apply_update was refused on the strength of its version number');
+// Below the floor, the only word a node is offered is apply_update, whatever
+// it reports: the plane no longer carries the code that spoke to older agents.
+$below_reports_more = artifact_test_node('1.42.0', 'apply_update,check_status,host_report');
+check(JobCommandBuilder::has_primitive($below_reports_more, 'apply_update'),
+	'a node below the floor is still offered apply_update, the way up');
+check(!JobCommandBuilder::has_primitive($below_reports_more, 'host_report'),
+	'and nothing else, even a word it reports');
 
 check(!JobCommandBuilder::has_primitive($claims_it, 'definitely_not_an_operation'),
 	'an operation with no builder is never routed as a primitive',
@@ -94,27 +94,21 @@ check(!JobCommandBuilder::has_primitive($unpaired, 'apply_update'),
 	'a reported vocabulary must not stand in for a pairing');
 
 // ======================================================================
-section('The version floor stays live for agents that never report');
+section('An agent that never reports is below the floor');
 // ======================================================================
 
-// Agents at 1.10.0 and earlier send no vocabulary. Their column is empty, and
-// the map is the only thing that can answer for them — which is why it is a
-// fallback rather than something deleted once the report exists.
+// Agents at 1.10.0 and earlier send no vocabulary. They are below the floor,
+// so the only job they are offered is apply_update; the per-word version map
+// that once answered for them is gone.
 check(JobCommandBuilder::has_primitive(artifact_test_node('1.10.0', ''), 'apply_update'),
-	'a silent agent at the floor version is still routed the primitive',
-	'the PRIMITIVE_MIN_AGENT_VERSION fallback stopped working for agents that predate the report');
-
-check(!JobCommandBuilder::has_primitive(artifact_test_node('1.9.1', ''), 'apply_update'),
-	'a silent agent below the floor version is not routed the primitive',
-	'this is the exact case that produced nine refusals on the 0.8.352 rollout');
-
-check(!JobCommandBuilder::has_primitive(artifact_test_node('', ''), 'apply_update'),
-	'a node whose agent version is unknown routes away from the primitive',
-	'an unknown vocabulary must not be guessed at optimistically');
-
-check(array_key_exists('apply_update', JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION),
-	'PRIMITIVE_MIN_AGENT_VERSION still carries its fallback rows',
-	'the map is the contract for every agent that predates vocabulary reporting; it is not dead code');
+	'a silent agent is offered apply_update');
+check(!JobCommandBuilder::has_primitive(artifact_test_node('1.10.0', ''), 'check_status'),
+	'and nothing else');
+check(!JobCommandBuilder::has_primitive(artifact_test_node(AgentVocabulary::FLOOR, ''), 'check_status'),
+	'a node at the floor that reports nothing is routed nothing but apply_update',
+	'every agent at the floor reports its words; an empty list is no evidence of one');
+check(!defined('JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION'),
+	'the per-word version map is deleted: the floor and the reported words decide');
 
 // ======================================================================
 section('A reported vocabulary is normalised before it is believed');

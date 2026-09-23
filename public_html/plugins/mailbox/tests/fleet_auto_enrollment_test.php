@@ -143,7 +143,7 @@ $paired->set('mgn_slug', 'harnesstest-fleet-paired-' . substr(md5(uniqid('', tru
 $paired->set('mgn_host', '192.0.2.41');
 $paired->set('mgn_uptime_enabled', false);
 $paired->set('mgn_agent_public_key', base64_encode(str_repeat("\x0f", 32)));
-$paired->set('mgn_agent_version', '1.17.0');
+$paired->set('mgn_agent_version', AgentVocabulary::FLOOR);
 $paired->set('mgn_agent_primitives', 'check_status,fleet_enroll');
 $paired->save();
 $paired->load();

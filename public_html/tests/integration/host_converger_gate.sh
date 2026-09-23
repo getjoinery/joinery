@@ -365,6 +365,21 @@ mv "$T/config/release_verify_keys.off" "$T/config/release_verify_keys"
 touch "$T/config/agent_signing_key"
 out=$(JOINERY_CONVERGER_ENTRY=/dev/null JOINERY_ACTIVE_PLUGINS='unsignedp' bash "$T/nogate.sh" --site-root="$T" 2>&1)
 chk "the publishing box runs its own unsigned plugin's installer" "$(echo "$out" | grep -c '^ran-unsignedp$')" "1"
+echo "== --only-plugin=NAME: one active plugin's installer and nothing else =="
+out=$(JOINERY_CONVERGER_ENTRY=/dev/null JOINERY_ACTIVE_PLUGINS=$'signedp\nunsignedp' bash "$T/nogate.sh" --only-plugin=unsignedp --site-root="$T" 2>&1); rc=$?
+chk "--only-plugin runs that plugin's installer, exit 0" "$rc:$(echo "$out" | grep -c '^ran-unsignedp$')" "0:1"
+chk "and no other plugin's" "$(echo "$out" | grep -c '^ran-signedp$')" "0"
+chk "and says ok on the runner's own line" "$(echo "$out" | grep -c '^plugin installers: unsignedp: ok$')" "1"
+chk "no core installer, no certificate summary, no key file" "$(echo "$out" | grep -c 'core installers:\|certificates:\|release key:')" "0"
+out=$(JOINERY_CONVERGER_ENTRY=/dev/null JOINERY_ACTIVE_PLUGINS='signedp' bash "$T/nogate.sh" --only-plugin=unsignedp --site-root="$T" 2>&1); rc=$?
+chk "a plugin that is not active here is refused" "$rc:$(echo "$out" | grep -c 'unsignedp: not an active plugin here - refused')" "0:1"
+out=$(bash "$T/nogate.sh" "--only-plugin=../x" --site-root="$T" 2>&1); rc=$?
+chk "a name that is not a plugin identifier is refused with exit 2" "$rc:$(echo "$out" | grep -c 'is not a plugin name - refused')" "2:1"
+mkdir -p "$PH/plugins/emptyp"; printf '{"name":"emptyp","host_installer":""}' > "$PH/plugins/emptyp/plugin.json"
+out=$(JOINERY_CONVERGER_ENTRY=/dev/null JOINERY_ACTIVE_PLUGINS='emptyp' bash "$T/nogate.sh" --only-plugin=emptyp --site-root="$T" 2>&1); rc=$?
+chk "an empty host_installer is refused with a line, not run as nothing" "$rc:$(echo "$out" | grep -c 'emptyp: declares no host_installer - refused')" "0:1"
+out=$(bash "$T/nogate.sh" --only-plugin=signedp --when-changed --site-root="$T" 2>&1); rc=$?
+chk "--only-plugin beside another mode is refused with exit 2" "$rc" "2"
 rm -f "$T/config/agent_signing_key"
 # A tree without the verifier runs nothing rather than everything.
 out=$(JOINERY_CONVERGER_ENTRY=/dev/null JOINERY_ACTIVE_PLUGINS='signedp' JOINERY_VERIFY_PACKAGE="$T/no-such-tool.php" bash "$T/nogate.sh" --site-root="$T" 2>&1)

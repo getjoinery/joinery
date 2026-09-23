@@ -3,6 +3,12 @@
 # render_vhost.sh - keep this site's Apache vhost in step with the template the
 # deployed release ships.
 #
+# Version: 1.8 - Reclaim: with the vhost moved aside by the agent's
+#               reclaim_managed_file, which leaves a one-shot marker naming the
+#               dated copy, the facts are read from that copy and the render is
+#               written back in its place, parse-checked, with the copy restored
+#               when Apache refuses the render. No marker (or one over an hour
+#               old): an absent vhost is skipped as before, never resurrected.
 # Version: 1.7 - Mints the site's placeholder certificate on every converge when
 #                neither it nor the Let's Encrypt lineage exists
 #                (_placeholder_cert.sh, specs/implemented/tls_and_origin_trust.md WP12), so
@@ -91,16 +97,34 @@ command -v apache2ctl >/dev/null 2>&1 || command -v apachectl >/dev/null 2>&1 ||
     say "no Apache on this machine - skipping"; exit 0; }
 
 CONF="/etc/apache2/sites-available/${SITENAME}.conf"
-[[ -f "${CONF}" ]] || { say "no vhost at ${CONF} - skipping (this site was not installed by install.sh)"; exit 0; }
-
-# Which template this site's vhost was rendered from. A Docker site is served
-# through a reverse proxy on the host and has no DocumentRoot of its own, so
-# rendering the bare-metal template over it would take the site down.
-if grep -q 'ProxyPass' "${CONF}"; then
+# The facts a render needs (the domain, the proxy port, the address) are read
+# out of the vhost on disk. The one exception is a reclaim: the agent's
+# reclaim_managed_file moves an edited vhost to a dated copy and leaves a
+# one-shot marker naming it, and only then is the render read from the copy
+# and written back in its place. A vhost that is simply absent - a site moved
+# off this machine - is never brought back (review B9, 2026-09-23).
+RECLAIM_MARKER="${JOINERY_RECLAIM_DIR:-/var/lib/joinery/reclaimed}/vhost-pending.${SITENAME}"
+[[ "$(id -u)" == "0" ]] && RECLAIM_MARKER="/var/lib/joinery/reclaimed/vhost-pending.${SITENAME}"
+SOURCE="${CONF}"
+RECLAIMING=0
+if [[ ! -f "${CONF}" ]]; then
+    SOURCE=""
+    if [[ -f "${RECLAIM_MARKER}" ]] && [[ -z "$(find "${RECLAIM_MARKER}" -mmin +60 2>/dev/null)" ]]; then
+        SOURCE="$(head -n 1 "${RECLAIM_MARKER}")"
+    fi
+    rm -f "${RECLAIM_MARKER}"
+    if [[ -z "${SOURCE}" || ! -f "${SOURCE}" ]]; then
+        say "no vhost at ${CONF} - skipping (this site was not installed by install.sh)"
+        exit 0
+    fi
+    RECLAIMING=1
+    say "reclaiming ${CONF}: rendering the template with the facts read from ${SOURCE}"
+fi
+if grep -q 'ProxyPass' "${SOURCE}"; then
     TEMPLATE="${SCRIPT_DIR}/default_proxy_vhost.conf"
-    PORT="$(grep -oE 'ProxyPass[[:space:]]+/[[:space:]]+http://(127\.0\.0\.1|localhost):[0-9]+' "${CONF}" \
+    PORT="$(grep -oE 'ProxyPass[[:space:]]+/[[:space:]]+http://(127\.0\.0\.1|localhost):[0-9]+' "${SOURCE}" \
         | grep -oE '[0-9]+$' | head -1)"
-    [[ -n "${PORT}" ]] || { say "could not read the proxy port out of ${CONF} - skipping"; exit 0; }
+    [[ -n "${PORT}" ]] || { say "could not read the proxy port out of ${SOURCE} - skipping"; exit 0; }
 else
     TEMPLATE="${SCRIPT_DIR}/default_virtualhost.conf"
     PORT=""
@@ -109,10 +133,10 @@ fi
 
 # The domain and bind address come from what is already deployed, not from a
 # fresh guess: re-rendering must not silently move a site to a different name.
-DOMAIN="$(grep -m1 -oE '^[[:space:]]*ServerName[[:space:]]+\S+' "${CONF}" | awk '{print $2}')"
-[[ -n "${DOMAIN}" ]] || { say "no ServerName in ${CONF} - skipping"; exit 0; }
+DOMAIN="$(grep -m1 -oE '^[[:space:]]*ServerName[[:space:]]+\S+' "${SOURCE}" | awk '{print $2}')"
+[[ -n "${DOMAIN}" ]] || { say "no ServerName in ${SOURCE} - skipping"; exit 0; }
 
-SERVER_IP="$(grep -m1 -oE '<VirtualHost[[:space:]]+[^:]+:' "${CONF}" | sed -E 's/<VirtualHost[[:space:]]+//; s/:$//')"
+SERVER_IP="$(grep -m1 -oE '<VirtualHost[[:space:]]+[^:]+:' "${SOURCE}" | sed -E 's/<VirtualHost[[:space:]]+//; s/:$//')"
 [[ -n "${SERVER_IP}" ]] || SERVER_IP="*"
 
 # certbot's Apache installer edits the vhost this script owns: on every renewal
@@ -256,6 +280,27 @@ vhost_matches_history() {
     rm -f "${rendered_old}"
     return 1
 }
+
+# Reclaiming: the render goes where the moved file was, checked first, and the
+# moved copy comes back if Apache will not parse the render.
+if [[ "${RECLAIMING}" == 1 ]]; then
+    cp "${RENDERED}" "${CONF}"
+    chmod 644 "${CONF}"
+    if ! parse_out="$(apache2ctl -t 2>&1)"; then
+        say "the reclaimed vhost does not parse; putting ${SOURCE} back" >&2
+        say "  $(printf '%s' "${parse_out}" | grep -viE 'AH00558|Syntax' | head -3 | tr '\n' ' ')" >&2
+        cp "${SOURCE}" "${CONF}"
+        exit 1
+    fi
+    cp "${RENDERED}" "${STATE}" 2>/dev/null || true
+    chmod 600 "${STATE}" 2>/dev/null || true
+    if apache2ctl graceful >/dev/null 2>&1 || systemctl reload apache2 >/dev/null 2>&1; then
+        say "reclaimed ${CONF} from ${TEMPLATE##*/} (the edited copy is kept at ${SOURCE}) and reloaded Apache"
+    else
+        say "reclaimed ${CONF} (the edited copy is kept at ${SOURCE}); Apache could not be reloaded - it applies at the next restart" >&2
+    fi
+    exit 0
+fi
 
 if cmp -s "${RENDERED}" "${CONF}"; then
     # Already current. Record it as ours so a later template change can be

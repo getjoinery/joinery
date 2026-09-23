@@ -68,7 +68,7 @@ function ht_node($slug) {
 	$node->set('mgn_port', 8080);
 	$node->set('mgn_uptime_enabled', false);
 	$node->set('mgn_agent_public_key', 'ht-agent-' . $slug);
-	$node->set('mgn_agent_version', '1.20.0');
+	$node->set('mgn_agent_version', AgentVocabulary::FLOOR);
 	$node->set('mgn_agent_primitives', 'hosted_mail_settings,hosted_plan_notice,backup_run');
 	$node->save();
 	$node->load();

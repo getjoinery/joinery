@@ -36,6 +36,9 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.25 - known_claim_fields(): a claim field this plane does not know is set aside unread, not a
+ *                 refusal of the whole claim, so an agent newer than its management node keeps reporting
+ *                 its vocabulary (specs/agent_recipes_and_vocabulary.md, Different agent versions).
  * @version 1.24 - record_result(): a result is recorded and folded outside the HTTP handler; a failed
  *                 (or refused) result is folded as it arrives, through JobResultProcessor::process_if_due,
  *                 like a completed one; terminal control codes are stripped from the data, log and
@@ -878,10 +881,28 @@ class AgentChannelEndpoint {
 		];
 	}
 
+	/**
+	 * A claim with the fields this plane does not know set aside, before the
+	 * strict validation every declared field still gets.
+	 *
+	 * A claim is a REPORT: the node saying what it runs and what it can do.
+	 * A newer agent reporting something this plane has no column for yet
+	 * (specs/agent_recipes_and_vocabulary.md, Different agent versions) must
+	 * not cost the plane the rest of the report — refusing the whole claim
+	 * made the agent drop every capability field and poll bare, so a node
+	 * newer than its management node reported no vocabulary at all. A field
+	 * set aside here is never read or stored; the body is already bounded by
+	 * read_body(). Every other endpoint stays strict: a join, a result or an
+	 * artifact request carries nothing a newer agent could add unasked.
+	 */
+	public static function known_claim_fields(array $body): array {
+		return array_intersect_key($body, self::claim_request_spec());
+	}
+
 	private static function handle_claim($body) {
 		$node = self::authenticate_node('/api/v1/agent/claim', self::body_hash());
 
-		$in = self::validate($body, self::claim_request_spec());
+		$in = self::validate(self::known_claim_fields($body), self::claim_request_spec());
 		if ((int)$in['node_id'] !== (int)$node->key) {
 			api_error('The signed identity and the stated node do not match.', 'AuthenticationError', 401);
 		}
@@ -911,8 +932,8 @@ class AgentChannelEndpoint {
 		// in, so only the node says it.
 		//
 		// Absent is meaningful and is left alone: an agent at 1.10.0 or earlier
-		// never reports, and its empty column is what keeps
-		// PRIMITIVE_MIN_AGENT_VERSION a live fallback instead of dead code.
+		// never reports, and an empty column is read as below the floor
+		// (AgentVocabulary), where apply_update is the only job offered.
 		if (array_key_exists('primitives', $in)) {
 			$vocabulary = self::normalised_vocabulary($in['primitives']);
 			if ($vocabulary !== (string)$node->get('mgn_agent_primitives')) {

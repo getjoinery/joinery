@@ -4,8 +4,30 @@
 # failed units, the expected units and their state, fail2ban's jails and how
 # many addresses each has banned, how many SSH logins failed in the last day,
 # sshd's password and root-login posture, disk, memory, swap, whether a reboot
-# is pending, and when unattended-upgrades last ran.
+# is pending, when unattended-upgrades last ran, and the operating system with
+# the release upgrade Ubuntu last said it offers.
 #
+# Version: 1.5 - sshd widens to the effective settings a lockout turns on
+#                (specs/agent_recipes_and_vocabulary.md, Host files): public-key
+#                and keyboard-interactive authentication, maximum auth tries,
+#                the ports, and the allowed users and groups, each read out of
+#                sshd -T by a compiled key. The two existing keys are unchanged.
+#                answers: whether Apache, PHP-FPM and PostgreSQL answer, not
+#                merely run (Apache and FPM by one loopback request for the
+#                site's own name, PostgreSQL by pg_isready, no credential read).
+#                php-fpm is "no" only on Apache's 502/503/504 without the
+#                version header; any other headerless answer is unknown.
+#                containers: each Joinery container's state, health, and
+#                whether its site answers. Both feed the service_health recipe.
+#                served_certificates: days left on the certificate each of the
+#                site's names serves, the vhost's ServerName marked primary (the
+#                name certificate_expiry renews), for the certificate_expiry recipe.
+#                php-fpm in answers resolves to the ACTIVE unit, else the newest.
+# Version: 1.4 - os:the distribution, its version and codename from
+#                os-release, and the release upgrade Ubuntu's own daily check
+#                last recorded (the release it offers, or none) with when it
+#                recorded it. The check's cache is read, never refreshed: this
+#                script makes no network call.
 # Version: 1.3 - inode use is read with --output=ipcent alone (df refuses -i beside
 #                --output, so the figure was always unknown); the three kernel
 #                counts read the SYSTEM journal, because ENOSPC is an errno a
@@ -53,7 +75,8 @@
 # the object says which path it measured.
 #
 # Runs on: any systemd host. Nothing here is Ubuntu-specific except the
-# unattended-upgrades stamp path, which is unknown where it is absent.
+# unattended-upgrades stamp and the release-upgrade cache, each unknown where
+# it is absent.
 
 set -u
 export LC_ALL=C
@@ -103,11 +126,17 @@ unit_state() {
     esac
 }
 
-# The php-fpm unit carries its version in its name (php8.3-fpm.service); the
-# first unit file matching is the one this host runs.
+# The php-fpm unit carries its version in its name (php8.3-fpm.service). The
+# one this host runs is the ACTIVE one; with none active, the newest version
+# installed (a host with 8.1 left beside 8.3 serves 8.3). The same rule as
+# restart_unit.sh, so a restart lands on the unit this report judged.
 php_fpm_unit() {
-    run systemctl list-unit-files 'php*-fpm.service' --plain --no-legend --no-pager \
-        | awk 'NR==1 {print $1}'
+    local u
+    u="$(run systemctl list-units 'php*-fpm.service' --state=active --plain --no-legend --no-pager | awk 'NR==1 {print $1}')"
+    if [[ -z "$u" ]]; then
+        u="$(run systemctl list-unit-files 'php*-fpm.service' --plain --no-legend --no-pager | awk '{print $1}' | sort -V | tail -n 1)"
+    fi
+    printf '%s' "$u"
 }
 
 emit_expected_units() {
@@ -190,17 +219,49 @@ emit_ssh_auth_failures() {
 # sshd posture, as sshd -T prints it (root only: it has to open the host keys).
 # Reported, never written.
 # ---------------------------------------------------------------------------
+#
+# The EFFECTIVE settings, not a file: Ubuntu's cloud images set
+# PasswordAuthentication in sshd_config.d/, so sshd_config alone misreads a
+# lockout. Only the compiled keys below are read out of sshd -T; nothing else
+# it prints (host key paths, the authorized-keys file) reaches the object.
+SSHD_WORDS=(passwordauthentication permitrootlogin pubkeyauthentication kbdinteractiveauthentication maxauthtries)
+sshd_value() { printf '%s\n' "$2" | awk -v k="$1" '$1==k {print $2; exit}'; }
+# Every value of a key sshd -T may print more than once (port, allowusers,
+# allowgroups), as a JSON list, capped and sanitised.
+sshd_list() {
+    local key="$1" conf="$2" v n=0 first=1
+    printf '['
+    while read -r v; do
+        [[ -n "$v" ]] || continue
+        (( n < MAX_LIST )) || break
+        (( first )) || printf ','
+        first=0
+        json_str "$v"
+        n=$((n+1))
+    done < <(printf '%s\n' "$conf" | awk -v k="$key" '$1==k { for (i = 2; i <= NF; i++) print $i }')
+    printf ']'
+}
+
 emit_sshd() {
-    local conf pw root
+    local conf k v
+    local -A val=()
     if conf="$(run sshd -T)" && [[ -n "$conf" ]]; then
-        pw="$(printf '%s\n' "$conf" | awk '$1=="passwordauthentication" {print $2; exit}')"
-        root="$(printf '%s\n' "$conf" | awk '$1=="permitrootlogin" {print $2; exit}')"
-        [[ -n "$pw" ]] || pw=unknown
-        [[ -n "$root" ]] || root=unknown
+        for k in "${SSHD_WORDS[@]}"; do
+            v="$(sshd_value "$k" "$conf")"
+            val[$k]="${v:-unknown}"
+        done
+        printf '{"password_authentication":%s,"permit_root_login":%s' \
+            "$(json_str "${val[passwordauthentication]}")" "$(json_str "${val[permitrootlogin]}")"
+        printf ',"pubkey_authentication":%s,"kbd_interactive_authentication":%s,"max_auth_tries":%s' \
+            "$(json_str "${val[pubkeyauthentication]}")" "$(json_str "${val[kbdinteractiveauthentication]}")" \
+            "$(json_num_or_unknown "${val[maxauthtries]}")"
+        printf ',"ports":%s,"allow_users":%s,"allow_groups":%s}' \
+            "$(sshd_list port "$conf")" "$(sshd_list allowusers "$conf")" "$(sshd_list allowgroups "$conf")"
     else
-        pw=unknown; root=unknown
+        printf '{"password_authentication":"unknown","permit_root_login":"unknown"'
+        printf ',"pubkey_authentication":"unknown","kbd_interactive_authentication":"unknown","max_auth_tries":"unknown"'
+        printf ',"ports":"unknown","allow_users":"unknown","allow_groups":"unknown"}'
     fi
-    printf '{"password_authentication":%s,"permit_root_login":%s}' "$(json_str "$pw")" "$(json_str "$root")"
 }
 
 # ---------------------------------------------------------------------------
@@ -313,6 +374,217 @@ emit_unattended_upgrades_last_run() {
 }
 
 # ---------------------------------------------------------------------------
+# The operating system, and the release upgrade Ubuntu offers it.
+#
+# id, version and codename come from os-release. version is the point release
+# (24.04.4) where VERSION carries one, else VERSION_ID.
+#
+# The upgrade answer is Ubuntu's own: update-motd's release-upgrade step runs
+# check-new-release once a day and writes what it printed to a cache file.
+# Empty means no release is offered to this machine (under its own Prompt=
+# setting); "New release '26.04.1 LTS' available." names one. The cache is
+# refreshed only when someone logs in, so its time travels with the answer and
+# the reader judges its age. Reading it is the whole of this: the script never
+# runs the check, because the check fetches from the network and writes.
+# ---------------------------------------------------------------------------
+RELEASE_UPGRADE_CACHE=/var/lib/ubuntu-release-upgrader/release-upgrade-available
+
+os_release_field() {
+    local f
+    for f in /etc/os-release /usr/lib/os-release; do
+        [[ -r "$f" ]] || continue
+        run head -c 4096 "$f" | awk -F= -v k="$1" '$1==k { v=$2; gsub(/"/, "", v); print v; exit }'
+        return
+    done
+}
+
+# The version a check-new-release line offers (26.04.1), none for an empty
+# cache, or unknown for text it does not recognise. Reads the cache on stdin.
+release_offered_from() {
+    local text version
+    text="$(head -c 4096)"
+    if [[ -z "${text//[[:space:]]/}" ]]; then printf 'none'; return; fi
+    version="$(printf '%s\n' "$text" | grep -o -E "New release '[0-9]+(\.[0-9]+)*" | head -n 1)"
+    version="${version#New release \'}"
+    if [[ "$version" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then printf '%s' "${version:0:16}"; else printf 'unknown'; fi
+}
+
+emit_os() {
+    local id version codename offered=unknown checked=""
+    id="$(os_release_field ID)"
+    version="$(os_release_field VERSION)"
+    version="$(printf '%s' "$version" | grep -o -E '^[0-9]+(\.[0-9]+)*' | head -n 1)"
+    [[ -n "$version" ]] || version="$(os_release_field VERSION_ID)"
+    codename="$(os_release_field VERSION_CODENAME)"
+    [[ -n "$id" ]] || id=unknown
+    [[ -n "$version" ]] || version=unknown
+    [[ -n "$codename" ]] || codename=unknown
+    if [[ -r "$RELEASE_UPGRADE_CACHE" ]]; then
+        offered="$(run head -c 4096 "$RELEASE_UPGRADE_CACHE" | release_offered_from)"
+        checked="$(run stat -c %Y "$RELEASE_UPGRADE_CACHE")"
+    fi
+    printf '{"id":%s,"version":%s,"codename":%s,"release_upgrade":{"offered":%s,"checked_at":%s}}' \
+        "$(json_str "$id")" "$(json_str "$version")" "$(json_str "$codename")" \
+        "$(json_str "$offered")" "$(json_num_or_unknown "$checked")"
+}
+
+# ---------------------------------------------------------------------------
+# Does each service ANSWER, not merely run (the service_health recipe of
+# specs/agent_recipes_and_vocabulary.md, Settled 2026-09-23). systemd already
+# restarts a crashed unit; what it cannot see is one that runs and does not
+# answer.
+#
+#   apache2    - any HTTP response on the loopback, for this site's own name
+#   php-fpm    - that response came through PHP: serve.php sets
+#                X-Joinery-Version on every request it handles, and Apache
+#                answers a request it could not hand to FPM without it
+#   postgresql - pg_isready: the server accepts connections. No credential is
+#                read (the site's config is a secret), so this is the
+#                credential-free form of SELECT 1.
+#
+# Each is yes, no, or unknown (no site on this machine, no tool). Only the
+# verdicts are printed; the site's name is read to address the request and
+# never reaches the object.
+# ---------------------------------------------------------------------------
+site_vhost() {
+    local vhost="/etc/apache2/sites-available/$(basename "$SITE_ROOT").conf"
+    [[ -r "$vhost" ]] && run head -c 65536 "$vhost"
+}
+site_server_name() {
+    site_vhost | awk 'tolower($1)=="servername" {print $2; exit}'
+}
+# The address the site's vhost is bound to: install.sh binds it to the
+# server's own IP (default_virtualhost.conf), a proxy vhost to *. A request to
+# the loopback would reach only the default site on the first shape.
+site_vhost_address() {
+    local a
+    a="$(site_vhost | grep -m1 -oE '<VirtualHost[[:space:]]+[^:>]+:' | sed -E 's/<VirtualHost[[:space:]]+//; s/:$//')"
+    if [[ "$a" =~ ^[0-9.]{7,15}$ ]]; then printf '%s' "$a"; else printf '127.0.0.1'; fi
+}
+
+# HTTP headers from this machine for NAME at ADDR: https first (the plain
+# vhost of a site with a certificate redirects without reaching PHP), plain
+# http when https does not answer. Prints nothing when neither answered.
+loopback_headers() {
+    local name="$1" addr="$2" h
+    h="$(run curl -sk --max-time 8 -o /dev/null -D - --resolve "${name}:443:${addr}" "https://${name}/")"
+    if [[ ! "$h" =~ ^HTTP/ ]]; then
+        h="$(run curl -s --max-time 8 -o /dev/null -D - --resolve "${name}:80:${addr}" "http://${name}/")"
+    fi
+    printf '%s' "$h"
+}
+
+emit_answers() {
+    local name headers code apache=unknown fpm=unknown pg=unknown
+    name="$(site_server_name)"
+    if [[ "$name" =~ ^[A-Za-z0-9.-]{1,253}$ ]] && command -v curl >/dev/null 2>&1; then
+        headers="$(loopback_headers "$name" "$(site_vhost_address)")"
+        if [[ "$headers" =~ ^HTTP/ ]]; then
+            apache=yes
+            # PHP answered when serve.php's header is there. Without it, only
+            # Apache's own gateway failures (502, 503, 504: it could not hand
+            # the request to FPM) say FPM does not answer; a redirect, a 403
+            # or anything else without the header says nothing about FPM.
+            code="$(printf '%s\n' "$headers" | awk 'NR==1 {print $2}')"
+            if printf '%s\n' "$headers" | grep -q -i '^x-joinery-version:'; then fpm=yes
+            elif [[ "$code" == 502 || "$code" == 503 || "$code" == 504 ]]; then fpm=no
+            else fpm=unknown
+            fi
+        else
+            apache=no
+        fi
+    fi
+    if command -v pg_isready >/dev/null 2>&1 && [[ -n "$name" ]]; then
+        if run pg_isready -q -t 5; then pg=yes
+        else
+            case $? in 1|2) pg=no ;; *) pg=unknown ;; esac
+        fi
+    fi
+    printf '{"apache2":"%s","php-fpm":"%s","postgresql":"%s"}' "$apache" "$fpm" "$pg"
+}
+
+# ---------------------------------------------------------------------------
+# The certificate each of this site's names SERVES, read over this machine's
+# own connection to its vhost address, with SNI: what a visitor is handed, not
+# what certbot holds (check_status reads the held ones). The certificate_expiry
+# recipe reads it: fewer than 14 days left means certbot's own timer failed.
+#
+# The names are the site vhost's own ServerName and ServerAlias lines (its
+# configuration; the recipe's repair takes the domain from this list, never
+# from the wire). A name whose handshake does not complete is left out, not
+# guessed at. Only the name and whole days left are printed.
+# ---------------------------------------------------------------------------
+MAX_CERT_NAMES=10
+site_names() {
+    local site f
+    site="$(basename "$SITE_ROOT")"
+    for f in "/etc/apache2/sites-available/${site}.conf" "/etc/apache2/sites-available/${site}-le-ssl.conf"; do
+        [[ -r "$f" ]] || continue
+        run head -c 65536 "$f" | awk 'tolower($1)=="servername" || tolower($1)=="serveralias" { for (i = 2; i <= NF; i++) print $i }'
+    done | grep -E '^[A-Za-z0-9.-]{1,253}$' | grep -v '^\*' | awk '!seen[$0]++' | head -n "$MAX_CERT_NAMES"
+}
+
+emit_served_certificates() {
+    local addr name end end_s now days n=0 first=1 primary
+    command -v openssl >/dev/null 2>&1 || { printf '"unknown"'; return; }
+    addr="$(site_vhost_address)"
+    now="$(date -u +%s)"
+    primary="$(site_server_name)"
+    printf '['
+    while read -r name; do
+        [[ -n "$name" ]] || continue
+        end="$(run openssl s_client -connect "${addr}:443" -servername "$name" < /dev/null | run openssl x509 -noout -enddate)"
+        end="${end#notAfter=}"
+        [[ -n "$end" ]] || continue
+        end_s="$(date -u -d "$end" +%s 2>/dev/null)" || continue
+        [[ "$end_s" =~ ^[0-9]+$ ]] || continue
+        days=$(( (end_s - now) / 86400 ))
+        (( first )) || printf ','
+        first=0
+        printf '{"domain":%s,"days_left":%s,"primary":%s}' "$(json_str "$name")" "$days" "$([[ "$name" == "$primary" ]] && echo true || echo false)"
+        n=$((n+1))
+    done < <(site_names)
+    printf ']'
+}
+
+# ---------------------------------------------------------------------------
+# This host's Joinery containers: every container whose name is its SITENAME,
+# the shape install.sh creates. Each with docker's state and health, and
+# whether the site inside answers through PHP on its published web port.
+# "none" where the machine has no docker; "unknown" where docker would not
+# answer (not root). Names are site slugs, the same list restart_container
+# accepts.
+# ---------------------------------------------------------------------------
+emit_containers() {
+    local names c site state health port headers answers n=0 first=1
+    command -v docker >/dev/null 2>&1 || { printf '"none"'; return; }
+    names="$(run docker ps -a --format '{{.Names}}')" || { printf '"unknown"'; return; }
+    printf '['
+    for c in $names; do
+        (( n < MAX_LIST )) || break
+        [[ "$c" =~ ^[a-z0-9_-]{1,50}$ ]] || continue
+        site="$(run docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$c" | awk -F= '$1=="SITENAME" {print $2; exit}')"
+        [[ "$site" == "$c" ]] || continue
+        state="$(run docker inspect -f '{{.State.Status}}' "$c")"
+        health="$(run docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$c")"
+        answers=unknown
+        port="$(run docker port "$c" 80/tcp | awk -F: 'NR==1 {print $NF}')"
+        if [[ "$state" != "running" ]]; then
+            answers=no
+        elif [[ "$port" =~ ^[0-9]+$ ]]; then
+            headers="$(run curl -s --max-time 8 -o /dev/null -D - "http://127.0.0.1:${port}/")"
+            if printf '%s\n' "$headers" | grep -q -i '^x-joinery-version:'; then answers=yes; else answers=no; fi
+        fi
+        (( first )) || printf ','
+        first=0
+        printf '{"name":%s,"state":%s,"health":%s,"answers":"%s"}' \
+            "$(json_str "$c")" "$(json_str "${state:-unknown}")" "$(json_str "${health:-unknown}")" "$answers"
+        n=$((n+1))
+    done
+    printf ']'
+}
+
+# ---------------------------------------------------------------------------
 # The object. One line, every key, in this order.
 # ---------------------------------------------------------------------------
 printf '{'
@@ -327,6 +599,10 @@ printf '"memory":%s,' "$(emit_memory)"
 printf '"swap":%s,' "$(emit_swap)"
 printf '"reboot_required":%s,' "$(emit_reboot_required)"
 printf '"unattended_upgrades_last_run":%s,' "$(emit_unattended_upgrades_last_run)"
+printf '"os":%s,' "$(emit_os)"
+printf '"answers":%s,' "$(emit_answers)"
+printf '"served_certificates":%s,' "$(emit_served_certificates)"
+printf '"containers":%s,' "$(emit_containers)"
 printf '"generated_at":%s' "$(date -u +%s)"
 printf '}\n'
 exit 0

@@ -8,6 +8,13 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.76 - WP6 of specs/agent_recipes_and_vocabulary.md: PRIMITIVE_MIN_AGENT_VERSION and the
+ *                 no-vocabulary fallback are deleted; AgentVocabulary::FLOOR decides, a node below it is
+ *                 offered apply_update only, and every refusal for a missing word is the one standard
+ *                 "needs a newer agent" sentence. New builders: restart_unit, restart_container,
+ *                 run_installer, file_head, schema_probe. The per-value floors the new one passes are
+ *                 deleted too: SITE_LOG_POSTGRES_MIN_AGENT_VERSION, BACKUP_RUN_OBJECTS_ and
+ *                 VERIFY_BACKUP_OBJECTS_MIN_AGENT_VERSION (all below 1.43.0).
  * @version 1.75 - plugin_checks_failing(): a plugin check the node reports as not passing
  *                 (plugin_checks, the node's recorded fleet_report checks) fails the node's badge
  * @version 1.74 - reset_failed_unit (agent 1.41.0): the Clear beside a failed unit, the same compiled
@@ -286,101 +293,6 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * Routing decision at job-build time: should this (node, operation) pair
-	 * run as a primitive job on the node's own agent?
-	 */
-	/**
-	 * A primitive added to the agent after a node's running version does not
-	 * exist on that node, whatever the plane can build. The plane learns each
-	 * node's agent version on every claim, so the floor is checkable here —
-	 * and the first rollout of a new primitive is exactly when it matters:
-	 * the 0.8.352 upgrade was dispatched as an apply_update primitive to nine
-	 * agents whose compiled-in vocabulary predated it, and all nine refused.
-	 * The upgrade that DELIVERS a new agent can never require the new agent.
-	 *
-	 * Only primitives newer than some fielded agent need a row. An operation
-	 * absent here is in every agent the fleet has ever paired.
-	 */
-	const PRIMITIVE_MIN_AGENT_VERSION = [
-		'apply_update'     => '1.10.0',
-		// The restore family. These floors are live now: the destructive gate
-		// below opens for a node whose agent can ask its own operator for
-		// approval, and that verifier landed in 1.13.0. A 1.12.0 agent ships the
-		// restore vocabulary and refuses every job in it at a compiled ceiling,
-		// so routing to it would trade a transport for a guaranteed refusal —
-		// during a restore, which is the worst moment on the list to find that
-		// out.
-		'restore_database' => '1.13.0',
-		'restore_project'  => '1.13.0',
-		'restore_chain'    => '1.13.0',
-		// Bringing a backup back from backup storage, which is what makes any of the
-		// above have something to restore FROM.
-		'download_backup'  => '1.13.0',
-		'stage_chain'      => '1.13.0',
-		// The managed-domain pair, new in 1.14.0 and therefore newer than every
-		// agent in the field. A node that reports its vocabulary is answered by
-		// that report; these floors are for the agents at 1.10.0 and earlier
-		// that never send one, where routing to a vocabulary this plane cannot
-		// confirm buys a guaranteed refusal.
-		'managed_domain_prepare' => '1.14.0',
-		'managed_domain_notice'  => '1.14.0',
-		// The management node's own release build, on its own agent. New in
-		// 1.19.0; the plane's node reports its vocabulary, so this floor is
-		// only ever consulted for an agent too old to report one.
-		'publish_upgrade' => '1.19.0',
-		// Removing a container site from its host, dispatched to the HOST's
-		// own machine-posture agent. Its own floor rather than the restore
-		// family's: the restore verifier (1.13.0) must not vouch for a
-		// primitive that only exists from 1.15.0.
-		'decommission_site' => '1.15.0',
-		// The two compiled-names settings writers that retire an SSH session
-		// each (specs/ssh_single_bootstrap.md): arming a clone source, and
-		// seeding fleet credentials. New in 1.17.0.
-		'clone_export_arm' => '1.17.0',
-		'fleet_enroll'     => '1.17.0',
-		// The hosted tier's two, new in 1.20.0 and the same compiled-names
-		// shape as the three above.
-		'hosted_mail_settings' => '1.20.0',
-		'hosted_plan_notice'   => '1.20.0',
-		// How the node's first-boot install went, read off the logs it left.
-		// New in 1.23.0.
-		'install_report' => '1.23.0',
-		// Proving a backup restorable without restoring it: the node stages
-		// the set and reads it to the end, or rehearses a restore into scratch.
-		// The script it runs ships in the same release as the agent.
-		'verify_backup' => '1.24.0',
-		// The machine as one bounded object: the host_report observe word of
-		// specs/agent_tier1_recipes.md, new in 1.25.0. The node runs a shipped
-		// script it verifies against the manifest first; the plane sends the
-		// name and nothing else.
-		'host_report' => '1.25.0',
-		// Run host_housekeeping.sh through the host runner, the first operate
-		// word of the same spec, new in 1.26.0. The plane sends the name and
-		// nothing else; which installer runs is compiled into the agent.
-		'host_converge' => '1.26.0',
-		// The agent's own supervision, observed and repaired: the two words of
-		// recipe agent_supervision, new in 1.34.0. Same compiled-names shape.
-		'agent_report'   => '1.34.0',
-		'agent_converge' => '1.34.0',
-		// The site's own logs, redacted on the node, behind the owner's switch:
-		// the two words of specs/agent_log_access.md, new in 1.35.0.
-		'site_log'       => '1.35.0',
-		'log_table_tail' => '1.35.0',
-		// Bringing a run's offloaded files home from backup storage, a page of
-		// signed links at a time (specs/implemented/backup_offloaded_files.md § Restore).
-		// The agent that carries the object store on backup_run and
-		// verify_backup carries this word too.
-		'restore_objects' => '1.38.0',
-		// Why a unit failed, and where the disk went: the two observe words of
-		// specs/disk_headroom_and_unit_diagnosis.md, new in 1.39.0.
-		'unit_journal' => '1.39.0',
-		'disk_usage'   => '1.39.0',
-		// And clearing the failed record once the answer is known (§ 9 of the
-		// same spec), new in 1.41.0. The same compiled unit list.
-		'reset_failed_unit' => '1.41.0',
-	];
-
-	/**
 	 * The log files site_log may name, and how the plane labels them. A mirror
 	 * of the enum compiled into the agent (primitives/observe_site_log.go): the
 	 * node refuses anything outside its own list whatever this says, so the
@@ -397,23 +309,11 @@ class JobCommandBuilder {
 	];
 
 	/**
-	 * The agent that resolves the PostgreSQL entry above. Every other value in
-	 * SITE_LOG_FILES has been on the node's own list since the word shipped;
-	 * this one is newer than the word, and an older agent refuses it as an
-	 * unknown enum value. So the floor is per VALUE, not per word: the picker
-	 * leaves it out below this version and the builder refuses it with the fix
-	 * in the message, rather than queuing a job the node will reject.
+	 * Which of SITE_LOG_FILES this node's agent will answer about: all of them,
+	 * on every agent at the version floor (AgentVocabulary::FLOOR).
 	 */
-	const SITE_LOG_POSTGRES_MIN_AGENT_VERSION = '1.40.0';
-
-	/** Which of SITE_LOG_FILES this node's agent will actually answer about. */
 	public static function site_log_files_for($node) {
-		$files = self::SITE_LOG_FILES;
-		$version = trim((string)$node->get('mgn_agent_version'));
-		if ($version === '' || version_compare($version, self::SITE_LOG_POSTGRES_MIN_AGENT_VERSION, '<')) {
-			unset($files['postgresql']);
-		}
-		return $files;
+		return self::SITE_LOG_FILES;
 	}
 
 	/** The log tables log_table_tail may name; same mirror discipline. */
@@ -478,23 +378,6 @@ class JobCommandBuilder {
 	const DESTRUCTIVE_PRIMITIVES = ['restore_database', 'restore_project', 'restore_chain', 'decommission_site'];
 
 	/**
-	 * The agent version whose backup_run vocabulary accepts the object-store
-	 * fields (objects, objects_index_url, epoch_envelope_urls). An older
-	 * agent refuses a job carrying them as out-of-vocabulary, so they are sent
-	 * only to a node at or past this version; every other node runs its
-	 * backup exactly as before and holds no offloaded files for it.
-	 */
-	const BACKUP_RUN_OBJECTS_MIN_AGENT_VERSION = '1.38.0';
-
-	/**
-	 * The agent version whose verify_backup vocabulary accepts the
-	 * offloaded-files links (epoch_envelope_urls, object_urls). Sent only to
-	 * a node at or past it; an older agent's verify proves the archives as
-	 * before and reports its offloaded files unproven.
-	 */
-	const VERIFY_BACKUP_OBJECTS_MIN_AGENT_VERSION = '1.38.0';
-
-	/**
 	 * May this node be sent a destructive primitive job?
 	 *
 	 * TRUE FOR A NODE WHOSE AGENT CAN ASK ITS OWN OPERATOR, and that is the
@@ -536,18 +419,10 @@ class JobCommandBuilder {
 		if (!self::has_agent_channel($node)) {
 			return false;
 		}
-		// Every destructive operation carries its OWN floor. Falling back to
-		// another operation's — the restore family's 1.13.0 was the tempting
-		// one — is how a verifier quietly vouches for work it predates, so an
-		// operation with no declared floor fails closed: adding a destructive
-		// primitive means adding its PRIMITIVE_MIN_AGENT_VERSION row, and a
-		// forgotten row is a refusal at build time, not an inherited pass.
-		$min = self::PRIMITIVE_MIN_AGENT_VERSION[$operation] ?? null;
-		if ($min === null) {
-			return false;
-		}
-		$version = trim((string)$node->get('mgn_agent_version'));
-		return $version !== '' && version_compare($version, $min, '>=');
+		// A destructive job needs the node's own approval verifier, which every
+		// agent at or above the floor carries. The operation's own presence in
+		// the node's vocabulary is then has_primitive's question.
+		return !AgentVocabulary::below_floor($node) && AgentVocabulary::version($node) !== '';
 	}
 
 	public static function has_primitive($node, $operation) {
@@ -567,35 +442,27 @@ class JobCommandBuilder {
 			return false;
 		}
 
-		// THE NODE'S OWN LIST WINS, because it is the only account of a node's
-		// vocabulary that is not a guess. An agent reports what its binary
-		// actually compiled in on every claim; a version number is an inference
-		// about that, and the inference is what failed — the 0.8.352 rollout
-		// dispatched apply_update to nine agents whose vocabulary predated it
-		// and collected nine refusals.
-		//
-		// A primitive absent from a reported vocabulary is NOT routed to that
-		// node, whatever the version map would have allowed. That direction
-		// matters more than the permissive one: dispatching to a node that
-		// cannot run it buys a guaranteed refusal in place of a working
-		// transport.
-		$reported = trim((string)$node->get('mgn_agent_primitives'));
-		if ($reported !== '') {
-			return in_array($operation, explode(',', $reported), true);
+		// BELOW THE FLOOR, the only job a node is offered is the one that
+		// raises it (specs/agent_recipes_and_vocabulary.md, Different agent
+		// versions). The compatibility code for older agents is deleted when
+		// the floor rises, so there is nothing else this plane can say to them.
+		if (AgentVocabulary::below_floor($node) && $operation !== AgentVocabulary::BELOW_FLOOR_OPERATION) {
+			return false;
 		}
 
-		// No report: an agent at 1.10.0 or earlier, which never sends one. The
-		// version floor is the fallback contract for exactly those, and stays.
-		$min = self::PRIMITIVE_MIN_AGENT_VERSION[$operation] ?? null;
-		if ($min === null) {
-			return true;
+		// THE NODE'S OWN LIST WINS, because it is the only account of a node's
+		// vocabulary that is not a guess (rule 7). A primitive absent from the
+		// reported vocabulary is not routed to that node: dispatching to a
+		// node that cannot run it buys a guaranteed refusal.
+		$reported = AgentVocabulary::reported_words($node);
+		if ($reported) {
+			return in_array($operation, $reported, true);
 		}
-		// An unknown agent version routes away from the primitive: sending a
-		// job to a vocabulary we cannot confirm trades a working SSH dispatch
-		// for a guaranteed refusal. Stale-by-one-poll after a self-update is
-		// the known cost, and it only means one extra SSH dispatch.
-		$version = (string)$node->get('mgn_agent_version');
-		return $version !== '' && version_compare($version, $min, '>=');
+
+		// No report at all is an agent too old to send one, which is below the
+		// floor: apply_update is offered (it has been in every agent since
+		// 1.10.0, and an older one refuses it legibly); nothing else is.
+		return $operation === AgentVocabulary::BELOW_FLOOR_OPERATION;
 	}
 
 	/**
@@ -1162,12 +1029,12 @@ class JobCommandBuilder {
 				?? $node->get('mgn_delete_local_after_upload')),
 		];
 
-		// The object store, for an agent that accepts the fields. The newest
+		// The object store (every agent at the version floor accepts it). The newest
 		// index in the manager-profile backup storage and every epoch envelope are
 		// signed here, per run; the node reads them by link and never holds
 		// a credential that could. The scheduler hands over the keys it read
 		// from the listing it took to prune; a run started by hand lists.
-		if ($config['type'] === 'project' && self::agent_accepts_backup_run_objects($node)) {
+		if ($config['type'] === 'project') {
 			$links = $params['objects_links'] ?? null;
 			if (!is_array($links)) {
 				$links = self::shelf_index_links($node, $target, $slug);
@@ -1194,12 +1061,6 @@ class JobCommandBuilder {
 		}
 
 		return $config;
-	}
-
-	/** Does this node's agent accept the object-store fields on backup_run? */
-	public static function agent_accepts_backup_run_objects($node) {
-		$version = trim((string)$node->get('mgn_agent_version'));
-		return $version !== '' && version_compare($version, self::BACKUP_RUN_OBJECTS_MIN_AGENT_VERSION, '>=');
 	}
 
 	/** The newest index and every epoch envelope in the node's manager-profile backup storage, by key, from a fresh listing. */
@@ -1555,8 +1416,8 @@ class JobCommandBuilder {
 		}
 		if (!self::has_primitive($node, 'apply_update')) {
 			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' cannot apply an update: that needs a paired agent "
-				. 'of at least ' . self::PRIMITIVE_MIN_AGENT_VERSION['apply_update'] . '. Pair the node.');
+				"Node '{$node->get('mgn_slug')}' cannot apply an update: it has no paired agent that "
+				. 'offers apply_update. Pair the node.');
 		}
 		return self::build_apply_update_primitive($node);
 	}
@@ -1684,9 +1545,8 @@ class JobCommandBuilder {
 	public static function build_install_report($node) {
 		if (!self::has_primitive($node, 'install_report')) {
 			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' cannot report its install: its agent "
-				. "does not offer the install_report primitive. Apply an update to the node; "
-				. "the agent that ships with it does.");
+				"Node '{$node->get('mgn_slug')}' cannot report its install. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['install_report']));
 		}
 		return self::build_install_report_primitive($node);
 	}
@@ -1719,9 +1579,8 @@ class JobCommandBuilder {
 	public static function build_host_report($node) {
 		if (!self::has_primitive($node, 'host_report')) {
 			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' cannot report its host: its agent "
-				. "does not offer the host_report primitive. Apply an update to the node; "
-				. "the agent that ships with it does.");
+				"Node '{$node->get('mgn_slug')}' cannot report its host. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['host_report']));
 		}
 		return self::build_host_report_primitive($node);
 	}
@@ -1743,9 +1602,8 @@ class JobCommandBuilder {
 	public static function build_site_log($node, $file, $previous = false, $lines = 100) {
 		if (!self::has_primitive($node, 'site_log')) {
 			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' cannot read its logs: its agent "
-				. "does not offer the site_log primitive. Apply an update to the node; "
-				. "the agent that ships with it does.");
+				"Node '{$node->get('mgn_slug')}' cannot read its logs. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['site_log']));
 		}
 		self::assert_log_access($node);
 		return self::build_site_log_primitive($node, $file, $previous, $lines);
@@ -1756,13 +1614,6 @@ class JobCommandBuilder {
 		if (!array_key_exists($file, self::SITE_LOG_FILES)) {
 			throw new Exception("'" . $file . "' is not a log file the node offers. Choose one of: "
 				. implode(', ', array_keys(self::SITE_LOG_FILES)) . '.');
-		}
-		if (!array_key_exists($file, self::site_log_files_for($node))) {
-			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' cannot read its " . self::SITE_LOG_FILES[$file]
-				. ": its agent is older than " . self::SITE_LOG_POSTGRES_MIN_AGENT_VERSION
-				. " and does not have that file on its own list. Apply an update to the node; "
-				. "the agent that ships with it does.");
 		}
 		return ['primitive' => 'site_log', 'params' => [
 			'file'     => $file,
@@ -1782,9 +1633,8 @@ class JobCommandBuilder {
 	public static function build_log_table_tail($node, $table, $rows = 50) {
 		if (!self::has_primitive($node, 'log_table_tail')) {
 			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' cannot read its log tables: its agent "
-				. "does not offer the log_table_tail primitive. Apply an update to the node; "
-				. "the agent that ships with it does.");
+				"Node '{$node->get('mgn_slug')}' cannot read its log tables. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['log_table_tail']));
 		}
 		self::assert_log_access($node);
 		return self::build_log_table_tail_primitive($node, $table, $rows);
@@ -1816,9 +1666,8 @@ class JobCommandBuilder {
 	public static function build_unit_journal($node, $unit, $lines = 100) {
 		if (!self::has_primitive($node, 'unit_journal')) {
 			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' cannot read a unit's journal: its agent "
-				. "does not offer the unit_journal primitive. Apply an update to the node; "
-				. "the agent that ships with it does.");
+				"Node '{$node->get('mgn_slug')}' cannot read a unit's journal. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['unit_journal']));
 		}
 		self::assert_log_access($node);
 		return self::build_unit_journal_primitive($node, $unit, $lines);
@@ -1840,6 +1689,278 @@ class JobCommandBuilder {
 	}
 
 	/**
+	 * The units restart_unit may restart, and how the plane labels them. A
+	 * mirror of restartUnitUnits in the agent (primitives/operate_restart_unit.go)
+	 * and UNITS in restart_unit.sh: host_report's expected units. The agent is
+	 * never among them (it restarts only through restart_agent), nor sshd.
+	 */
+	const RESTART_UNIT_UNITS = [
+		'fail2ban'   => 'fail2ban',
+		'apache2'    => 'Apache',
+		'php-fpm'    => 'PHP-FPM',
+		'cron'       => 'cron',
+		'postgresql' => 'PostgreSQL',
+	];
+
+	/**
+	 * Restart one of the host's expected units, reporting its state before and
+	 * after (specs/agent_recipes_and_vocabulary.md, First words). PRIMITIVE
+	 * ONLY; the node's service_health recipe runs the same word on its own.
+	 */
+	public static function build_restart_unit($node, $unit) {
+		if (!self::has_primitive($node, 'restart_unit')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot restart a service. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['restart_unit']));
+		}
+		return self::build_restart_unit_primitive($node, $unit);
+	}
+
+	public static function build_restart_unit_primitive($node, $unit) {
+		$unit = (string)$unit;
+		if (!array_key_exists($unit, self::RESTART_UNIT_UNITS)) {
+			throw new Exception("'" . $unit . "' is not a service the node will restart. Choose one of: "
+				. implode(', ', array_keys(self::RESTART_UNIT_UNITS)) . '.');
+		}
+		return ['primitive' => 'restart_unit', 'params' => ['unit' => $unit]];
+	}
+
+	/**
+	 * Restart one of a Docker host's site containers (a container whose name
+	 * is its SITENAME; the node refuses any other). PRIMITIVE ONLY, to the
+	 * host's own machine-posture agent.
+	 */
+	public static function build_restart_container($node, $name) {
+		if (!self::has_primitive($node, 'restart_container')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot restart a container. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['restart_container']));
+		}
+		return self::build_restart_container_primitive($node, $name);
+	}
+
+	public static function build_restart_container_primitive($node, $name) {
+		$name = (string)$name;
+		if (!preg_match('/^[a-z0-9][a-z0-9_-]{0,49}$/', $name)) {
+			throw new Exception("'" . $name . "' is not a container name the node will accept.");
+		}
+		return ['primitive' => 'restart_container', 'params' => ['name' => $name]];
+	}
+
+	/**
+	 * The core installers run_installer may name: a mirror of the runner's
+	 * CORE_INSTALLERS and the agent's runInstallerCore. A plugin's
+	 * host_installer is named plugin:NAME, and the node's runner runs it only
+	 * when that plugin is active there and declares one.
+	 */
+	const RUN_INSTALLER_CORE = [
+		'install_agent.sh'          => 'Agent',
+		'install_parser_jail.sh'    => 'Parser jail',
+		'install_host_converger.sh' => 'Host timer',
+		'render_vhost.sh'           => 'Site vhost',
+		'host_housekeeping.sh'      => 'Host housekeeping (fail2ban, Apache, PHP, journald)',
+		'site_housekeeping.sh'      => 'Site housekeeping (log rotation, scheduled tasks)',
+	];
+
+	/**
+	 * The files reclaim_managed_file may put back, each with the installer
+	 * that owns it. A mirror of reclaimFiles in the agent and the case table
+	 * in reclaim_managed_file.sh; every one is also on FILE_HEAD_FILES.
+	 * apache2.conf is never here (owner, 2026-09-23): nothing on the machine
+	 * can rebuild it once it is moved aside.
+	 */
+	const RECLAIM_FILES = [
+		'fail2ban_jail_local'     => 'host_housekeeping.sh',
+		'fail2ban_joinery_sshd'   => 'host_housekeeping.sh',
+		'fail2ban_joinery_apache' => 'host_housekeeping.sh',
+		'apache_remoteip'         => 'host_housekeeping.sh',
+		'apache_mpm_event'        => 'host_housekeeping.sh',
+		'journald_size_limit'     => 'host_housekeeping.sh',
+		'php_fpm_ini'             => 'host_housekeeping.sh',
+		'apache_site'             => 'render_vhost.sh',
+		'cron_agent'              => 'install_agent.sh',
+		'logrotate_site'          => 'site_housekeeping.sh',
+		'cron_site'               => 'site_housekeeping.sh',
+	];
+
+	/**
+	 * Put one host file back to the platform's definition: the node moves it
+	 * aside to a dated copy and runs the installer that owns it. PRIMITIVE
+	 * ONLY. The driver reads the file with file_head first.
+	 */
+	public static function build_reclaim_managed_file($node, $file) {
+		if (!self::has_primitive($node, 'reclaim_managed_file')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot reset a host file. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['reclaim_managed_file']));
+		}
+		return self::build_reclaim_managed_file_primitive($node, $file);
+	}
+
+	public static function build_reclaim_managed_file_primitive($node, $file) {
+		$file = (string)$file;
+		if (!array_key_exists($file, self::RECLAIM_FILES)) {
+			throw new Exception("'" . $file . "' is not a file the node will reset. Choose one of: "
+				. implode(', ', array_keys(self::RECLAIM_FILES)) . '.');
+		}
+		return ['primitive' => 'reclaim_managed_file', 'params' => ['file' => $file]];
+	}
+
+	/**
+	 * Run one installer by name through the host runner, and return the
+	 * transcript. PRIMITIVE ONLY.
+	 *
+	 * @param string $name a key of RUN_INSTALLER_CORE, or plugin:NAME
+	 */
+	public static function build_run_installer($node, $name) {
+		if (!self::has_primitive($node, 'run_installer')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot run a single installer. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['run_installer']));
+		}
+		return self::build_run_installer_primitive($node, $name);
+	}
+
+	public static function build_run_installer_primitive($node, $name) {
+		$name = (string)$name;
+		if (!array_key_exists($name, self::RUN_INSTALLER_CORE)
+				&& !preg_match('/^plugin:[a-z][a-z0-9_]{1,49}$/', $name)) {
+			throw new Exception("'" . $name . "' is not an installer the node will run. Choose one of: "
+				. implode(', ', array_keys(self::RUN_INSTALLER_CORE)) . ', or plugin:NAME.');
+		}
+		return ['primitive' => 'run_installer', 'params' => ['name' => $name]];
+	}
+
+	/**
+	 * The host configuration files file_head may read, and how the plane
+	 * labels them. A mirror of fileHeadFiles in the agent
+	 * (primitives/observe_file_head.go), which IS the readable table of
+	 * specs/agent_recipes_and_vocabulary.md, Host files. The node refuses
+	 * anything outside its own list whatever this says.
+	 */
+	const FILE_HEAD_FILES = [
+		'fail2ban_jail_local'     => 'fail2ban jail.local',
+		'fail2ban_joinery_sshd'   => 'fail2ban joinery-sshd.local',
+		'fail2ban_joinery_apache' => 'fail2ban joinery-apache.local',
+		'apache_site'             => 'Apache site vhost',
+		'apache_site_ssl'         => 'Apache site vhost (certbot, -le-ssl)',
+		'apache2_conf'            => 'apache2.conf',
+		'apache_mpm_event'        => 'Apache mpm_event.conf',
+		'apache_remoteip'         => 'Apache joinery-remoteip.conf',
+		'php_fpm_ini'             => 'PHP-FPM php.ini (settings only)',
+		'journald_size_limit'     => 'journald size-limit.conf',
+		'logrotate_site'          => 'logrotate for the site',
+		'cron_site'               => 'cron for the site',
+		'cron_agent'              => 'cron for the agent',
+		'cron_certbot'            => 'cron for certbot',
+		'apt_auto_upgrades'       => 'apt 20auto-upgrades',
+		'apt_unattended_upgrades' => 'apt 50unattended-upgrades',
+		'docker_daemon'           => 'docker daemon.json',
+		'sysctl_security'         => 'sysctl 99-security.conf',
+		'postfix_main'            => 'Postfix main.cf',
+		'postfix_master'          => 'Postfix master.cf',
+		'opendkim_conf'           => 'opendkim.conf',
+		'opendmarc_conf'          => 'opendmarc.conf',
+		'rspamd_actions'          => 'rspamd actions.conf',
+		'rspamd_classifier_bayes' => 'rspamd classifier-bayes.conf',
+		'rspamd_milter_headers'   => 'rspamd milter_headers.conf',
+		'rspamd_redis'            => 'rspamd redis.conf',
+		'rspamd_worker_proxy'     => 'rspamd worker-proxy.inc',
+	];
+
+	/** The agent's cap on file_head lines. */
+	const FILE_HEAD_MAX_LINES = 400;
+
+	/**
+	 * The first lines of one host configuration file, redacted on the node.
+	 * Behind the owner's log-access switch, like site_log.
+	 *
+	 * @param string      $file  a key of FILE_HEAD_FILES
+	 * @param int         $lines 1..FILE_HEAD_MAX_LINES
+	 * @param string|null $site  for a per-site file on a machine with no site
+	 *                           of its own (a Docker host's proxy vhosts)
+	 */
+	public static function build_file_head($node, $file, $lines = 200, $site = null) {
+		if (!self::has_primitive($node, 'file_head')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot read a configuration file. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['file_head']));
+		}
+		self::assert_log_access($node);
+		return self::build_file_head_primitive($node, $file, $lines, $site);
+	}
+
+	public static function build_file_head_primitive($node, $file, $lines = 200, $site = null) {
+		$file = (string)$file;
+		if (!array_key_exists($file, self::FILE_HEAD_FILES)) {
+			throw new Exception("'" . $file . "' is not a file the node will read. Choose one of: "
+				. implode(', ', array_keys(self::FILE_HEAD_FILES)) . '.');
+		}
+		$lines = (int)$lines;
+		if ($lines < 1 || $lines > self::FILE_HEAD_MAX_LINES) {
+			throw new Exception('lines must be between 1 and ' . self::FILE_HEAD_MAX_LINES . '.');
+		}
+		$params = ['file' => $file, 'lines' => $lines];
+		if ($site !== null && $site !== '') {
+			if (!preg_match('/^[a-z0-9][a-z0-9_-]{0,49}$/', (string)$site)) {
+				throw new Exception("'" . $site . "' is not a site name.");
+			}
+			$params['site'] = (string)$site;
+		}
+		return ['primitive' => 'file_head', 'params' => $params];
+	}
+
+	/**
+	 * One table of the node's own database, described by the database: whether
+	 * it exists, its columns, its indexes and its row count. No SQL travels.
+	 */
+	public static function build_schema_probe($node, $table) {
+		if (!self::has_primitive($node, 'schema_probe')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot describe a table. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['schema_probe']));
+		}
+		return self::build_schema_probe_primitive($node, $table);
+	}
+
+	public static function build_schema_probe_primitive($node, $table) {
+		$table = (string)$table;
+		if (!preg_match('/^[a-z][a-z0-9_]{0,62}$/', $table)) {
+			throw new Exception("'" . $table . "' is not a table name.");
+		}
+		return ['primitive' => 'schema_probe', 'params' => ['table' => $table]];
+	}
+
+	/** The viewers page_probe renders as. */
+	const PAGE_PROBE_VIEWERS = ['anonymous' => 'Anonymous visitor', 'member' => 'Member', 'admin' => 'Administrator'];
+
+	/**
+	 * Render one of the node's own pages as a throwaway viewer and report
+	 * facts about the render (specs/agent_recipes_and_vocabulary.md,
+	 * page_probe). The node refuses a page not on its own list or one that
+	 * acts on arrival; this refuses anything not shaped like a page first.
+	 */
+	public static function build_page_probe($node, $page, $viewer) {
+		if (!self::has_primitive($node, 'page_probe')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot probe a page. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['page_probe']));
+		}
+		return self::build_page_probe_primitive($node, $page, $viewer);
+	}
+
+	public static function build_page_probe_primitive($node, $page, $viewer) {
+		$page = '/' . ltrim(trim((string)$page), '/');
+		if (!preg_match('#^/([a-z0-9_-]{1,80}(/[a-z0-9_-]{1,80}){0,5})?$#', $page)) {
+			throw new Exception("'" . $page . "' is not a page path (no query string, lowercase, at most six segments).");
+		}
+		if (!array_key_exists((string)$viewer, self::PAGE_PROBE_VIEWERS)) {
+			throw new Exception("'" . $viewer . "' is not a viewer. Choose one of: " . implode(', ', array_keys(self::PAGE_PROBE_VIEWERS)) . '.');
+		}
+		return ['primitive' => 'page_probe', 'params' => ['page' => $page, 'viewer' => (string)$viewer]];
+	}
+
+	/**
 	 * Clear systemd's failed record for one unit, and report its state before
 	 * and after (specs/disk_headroom_and_unit_diagnosis.md § 9). PRIMITIVE
 	 * ONLY. The unit list is UNIT_JOURNAL_UNITS: a unit the plane can ask why
@@ -1854,9 +1975,8 @@ class JobCommandBuilder {
 	public static function build_reset_failed_unit($node, $unit) {
 		if (!self::has_primitive($node, 'reset_failed_unit')) {
 			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' cannot clear a failed unit: its agent "
-				. "does not offer the reset_failed_unit primitive. Apply an update to the node; "
-				. "the agent that ships with it does.");
+				"Node '{$node->get('mgn_slug')}' cannot clear a failed unit. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['reset_failed_unit']));
 		}
 		return self::build_reset_failed_unit_primitive($node, $unit);
 	}
@@ -1884,9 +2004,8 @@ class JobCommandBuilder {
 	public static function build_disk_usage($node) {
 		if (!self::has_primitive($node, 'disk_usage')) {
 			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' cannot report its disk usage: its agent "
-				. "does not offer the disk_usage primitive. Apply an update to the node; "
-				. "the agent that ships with it does.");
+				"Node '{$node->get('mgn_slug')}' cannot report its disk usage. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['disk_usage']));
 		}
 		return self::build_disk_usage_primitive($node);
 	}
@@ -1952,9 +2071,8 @@ class JobCommandBuilder {
 	public static function build_host_converge($node) {
 		if (!self::has_primitive($node, 'host_converge')) {
 			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' cannot run host housekeeping: its agent "
-				. "does not offer the host_converge primitive. Apply an update to the node; "
-				. "the agent that ships with it does.");
+				"Node '{$node->get('mgn_slug')}' cannot run host housekeeping. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['host_converge']));
 		}
 		return self::build_host_converge_primitive($node);
 	}
@@ -1976,9 +2094,8 @@ class JobCommandBuilder {
 	public static function build_agent_report($node) {
 		if (!self::has_primitive($node, 'agent_report')) {
 			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' cannot report its supervision: its agent "
-				. "does not offer the agent_report primitive. Apply an update to the node; "
-				. "the agent that ships with it does.");
+				"Node '{$node->get('mgn_slug')}' cannot report its supervision. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['agent_report']));
 		}
 		return self::build_agent_report_primitive($node);
 	}
@@ -2005,9 +2122,8 @@ class JobCommandBuilder {
 	public static function build_agent_converge($node) {
 		if (!self::has_primitive($node, 'agent_converge')) {
 			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' cannot converge its agent's supervision: its agent "
-				. "does not offer the agent_converge primitive. Apply an update to the node; "
-				. "the agent that ships with it does.");
+				"Node '{$node->get('mgn_slug')}' cannot converge its agent's supervision. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['agent_converge']));
 		}
 		return self::build_agent_converge_primitive($node);
 	}
@@ -2091,8 +2207,8 @@ class JobCommandBuilder {
 		if (!self::has_primitive($node, 'publish_upgrade')) {
 			throw new Exception(
 				"Node '{$node->get('mgn_slug')}' cannot publish: that needs this management node's own "
-				. 'agent at ' . self::PRIMITIVE_MIN_AGENT_VERSION['publish_upgrade'] . ' or later, paired to '
-				. 'this site. Its agent is ' . ((string)$node->get('mgn_agent_version') ?: 'not reporting') . '.');
+				. 'agent, paired to this site and offering publish_upgrade. '
+				. AgentVocabulary::needs_newer_agent_text($node, ['publish_upgrade']));
 		}
 		if (!$node->is_management_node()) {
 			throw new Exception(
@@ -2357,8 +2473,8 @@ class JobCommandBuilder {
 	public static function build_download_backup($node, $params = []) {
 		if (!self::has_primitive($node, 'download_backup')) {
 			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' cannot fetch its own backups back: that needs a paired "
-				. 'agent of at least ' . self::PRIMITIVE_MIN_AGENT_VERSION['download_backup'] . '. '
+				"Node '{$node->get('mgn_slug')}' cannot fetch its own backups back. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['download_backup']) . ' '
 				. 'There is no SSH equivalent — the old one shipped a downloader with the bucket '
 				. 'credentials inside it.');
 		}
@@ -2437,8 +2553,8 @@ class JobCommandBuilder {
 	public static function build_stage_chain($node, $params = []) {
 		if (!self::has_primitive($node, 'stage_chain')) {
 			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' cannot stage a backup chain: that needs a paired agent "
-				. 'of at least ' . self::PRIMITIVE_MIN_AGENT_VERSION['stage_chain'] . '.');
+				"Node '{$node->get('mgn_slug')}' cannot stage a backup chain. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['stage_chain']));
 		}
 		return self::build_stage_chain_primitive($node, $params);
 	}
@@ -2465,8 +2581,8 @@ class JobCommandBuilder {
 	public static function build_verify_backup($node, $params = []) {
 		if (!self::has_primitive($node, 'verify_backup')) {
 			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' cannot verify a backup: that needs a paired agent "
-				. 'of at least ' . self::PRIMITIVE_MIN_AGENT_VERSION['verify_backup'] . '.');
+				"Node '{$node->get('mgn_slug')}' cannot verify a backup. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['verify_backup']));
 		}
 		return self::build_verify_backup_primitive($node, $params);
 	}
@@ -2486,34 +2602,26 @@ class JobCommandBuilder {
 		$primitive_params = $signed['params'];
 		$primitive_params['level'] = $level;
 
-		// The run's offloaded files, for an agent that accepts the links: the
+		// The run's offloaded files (every agent at the floor accepts the links): the
 		// run's index is read here (one small GET), a link is signed per epoch
 		// envelope it names, and a rehearsal also gets the sample. The node
 		// opens the envelopes with its own key and never lists backup storage.
-		if (self::agent_accepts_verify_backup_objects($node)) {
-			$index = self::shelf_run_index($signed, $primitive_params['seq'] ?? null);
-			if ($index !== null) {
-				require_once(PathHelper::getIncludePath('includes/BackupVerifyLauncher.php'));
-				$base = dirname($signed['chain_key']) . '/';
-				$expires = self::signed_link_seconds('verify_backup');
-				$links = BackupVerifyLauncher::object_links($index, $level, function ($relname) use ($signed, $base, $expires) {
-					return self::sign_shelf_key($signed['target'], $base . $relname, $expires);
-				});
-				$primitive_params = array_merge($primitive_params, $links);
-				$size = strlen((string)json_encode($primitive_params));
-				if ($size > ManagementJob::MAX_PARAMS_BYTES) {
-					throw new Exception("Verifying {$primitive_params['chain_id']} would need {$size} bytes of signed links, over the "
-						. ManagementJob::MAX_PARAMS_BYTES . '-byte job limit.');
-				}
+		$index = self::shelf_run_index($signed, $primitive_params['seq'] ?? null);
+		if ($index !== null) {
+			require_once(PathHelper::getIncludePath('includes/BackupVerifyLauncher.php'));
+			$base = dirname($signed['chain_key']) . '/';
+			$expires = self::signed_link_seconds('verify_backup');
+			$links = BackupVerifyLauncher::object_links($index, $level, function ($relname) use ($signed, $base, $expires) {
+				return self::sign_shelf_key($signed['target'], $base . $relname, $expires);
+			});
+			$primitive_params = array_merge($primitive_params, $links);
+			$size = strlen((string)json_encode($primitive_params));
+			if ($size > ManagementJob::MAX_PARAMS_BYTES) {
+				throw new Exception("Verifying {$primitive_params['chain_id']} would need {$size} bytes of signed links, over the "
+					. ManagementJob::MAX_PARAMS_BYTES . '-byte job limit.');
 			}
 		}
 		return ['primitive' => 'verify_backup', 'params' => $primitive_params];
-	}
-
-	/** Does this node's agent accept the offloaded-files links on verify_backup? */
-	public static function agent_accepts_verify_backup_objects($node) {
-		$version = trim((string)$node->get('mgn_agent_version'));
-		return $version !== '' && version_compare($version, self::VERIFY_BACKUP_OBJECTS_MIN_AGENT_VERSION, '>=');
 	}
 
 	/**
@@ -2604,8 +2712,8 @@ class JobCommandBuilder {
 	public static function build_restore_objects($node, $params = []) {
 		if (!self::has_primitive($node, 'restore_objects')) {
 			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' cannot bring offloaded files home from its backup storage: that needs a paired agent "
-				. 'of at least ' . self::PRIMITIVE_MIN_AGENT_VERSION['restore_objects'] . '.');
+				"Node '{$node->get('mgn_slug')}' cannot bring offloaded files home from its backup storage. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['restore_objects']));
 		}
 		return self::build_restore_objects_primitive($node, $params);
 	}
@@ -2811,12 +2919,10 @@ class JobCommandBuilder {
 				. 'Restores travel to the node\'s own agent and are approved on the node itself; '
 				. 'the SSH route was removed. Pair the node, or rebuild it from a backup.');
 		}
-		$min     = self::PRIMITIVE_MIN_AGENT_VERSION[$operation] ?? '';
-		$version = (string)$node->get('mgn_agent_version');
 		throw new Exception(
-			"Node '{$slug}' is running agent " . ($version !== '' ? $version : 'an unknown version')
-			. ", which cannot ask its own operator to approve a restore. That needs at least {$min}. "
-			. 'Apply an update to the node first — there is no SSH route left to fall back to.');
+			"Node '{$slug}' cannot ask its own operator to approve a restore. "
+			. AgentVocabulary::needs_newer_agent_text($node, [$operation])
+			. ' There is no SSH route left to fall back to.');
 	}
 
 	/**
@@ -3059,9 +3165,8 @@ class JobCommandBuilder {
 		$host_node = self::decommission_host_node_for($node);
 		if (!self::has_primitive($host_node, 'decommission_site')) {
 			throw new Exception(
-				"The host agent '{$host_node->get('mgn_slug')}' cannot remove a site: that needs a "
-				. "paired agent of at least " . self::PRIMITIVE_MIN_AGENT_VERSION['decommission_site']
-				. " reporting the decommission_site primitive. Update the host's agent."
+				"The host agent '{$host_node->get('mgn_slug')}' cannot remove a site. "
+				. AgentVocabulary::needs_newer_agent_text($host_node, ['decommission_site'])
 			);
 		}
 

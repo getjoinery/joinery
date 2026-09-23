@@ -1063,7 +1063,7 @@ index's recorded size and hash instead, and lands it under
 `objects/{epoch}/` in the working directory. `BackupVerifier` is the level 2
 and 3 engine over an already-staged directory (`read_all`, `rehearse`,
 `disk_needed`, `sample_objects`). A management node sends the two link maps
-only to an agent at or past `JobCommandBuilder::VERIFY_BACKUP_OBJECTS_MIN_AGENT_VERSION`;
+with every verify of a run whose index names offloaded files;
 a run that carries offloaded files but whose request links no envelope for an
 epoch they need fails by name, because the objects under it cannot be opened
 here.

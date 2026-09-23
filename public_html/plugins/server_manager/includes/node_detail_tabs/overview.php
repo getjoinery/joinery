@@ -9,6 +9,11 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.24 - specs/agent_recipes_and_vocabulary.md: services answer/Restart, served certificates, site
+ *                 containers, sshd's widened settings; config/page/table/installer/reset forms; a paired node
+ *                 lacking any word this tab offers shows the one "needs a newer agent" state (AgentVocabulary)
+ * @version 1.23 - the Machine box names the operating system and the release upgrade the node's own
+ *                 check last offered, with the date of that check
  * @version 1.22 - a Plugin Checks card: each plugin check the node records for fleet reporting,
  *                 naming any that does not pass (the same list that fails the node's badge)
  * @version 1.21 - a Clear button beside each failed unit on the compiled list (reset_failed_unit),
@@ -338,13 +343,29 @@
 	}
 	echo '</div>';
 
+	// The words this tab offers, declared once (AgentVocabulary). A paired
+	// node that lacks any of them gets the one standard state, naming what it
+	// lacks, where the buttons and forms for them would be - never a blank.
+	if ($node->get('mgn_agent_public_key')) {
+		$tab_words = ['host_report', 'site_log', 'log_table_tail', 'file_head', 'unit_journal', 'reset_failed_unit',
+			'disk_usage', 'restart_unit', 'schema_probe', 'run_installer', 'page_probe', 'reclaim_managed_file'];
+		if (!$node->hosts_site()) {
+			$tab_words = array_values(array_diff($tab_words, ['site_log', 'log_table_tail', 'schema_probe', 'page_probe']));
+		}
+		$tab_missing = AgentVocabulary::missing_words($node, $tab_words);
+		if ($tab_missing) {
+			echo '<div class="mt-2 ps-3">' . AgentVocabulary::needs_newer_agent_html($node, $tab_missing) . '</div>';
+		}
+	}
+
 	// The site's own logs, read on the node and redacted there, for a node
 	// whose agent ships the two log words. The owner's switch on the node
 	// decides; the node reports it at every poll, so a node that has said
 	// "off" gets the reason here instead of a job that would be refused.
 	$has_site_log  = JobCommandBuilder::has_primitive($node, 'site_log');
 	$has_log_table = JobCommandBuilder::has_primitive($node, 'log_table_tail');
-	if ($has_site_log || $has_log_table) {
+	$has_file_head = JobCommandBuilder::has_primitive($node, 'file_head');
+	if ($has_site_log || $has_log_table || $has_file_head) {
 		$log_refusal = JobCommandBuilder::log_access_refusal($node);
 		echo '<details class="mt-2 ps-3"><summary class="small text-muted" style="cursor:pointer;">Logs</summary>';
 		if ($log_refusal !== null) {
@@ -387,9 +408,96 @@
 				$fw_tbl->end_form();
 				echo '</div>';
 			}
+			// Host configuration, from the compiled readable list: the node
+			// returns a line whose key names a credential as the key alone,
+			// and never reads a file that is itself a secret.
+			if ($has_file_head) {
+				echo '<div>';
+				$fw_cfg = $page->getFormWriter('file_head_form', [
+					'action' => $base_url . '&tab=overview',
+					'values' => ['file' => 'fail2ban_joinery_sshd', 'lines' => '200'],
+				]);
+				$fw_cfg->begin_form();
+				$fw_cfg->hiddeninput('action', '', ['id' => 'file_head_action', 'value' => 'file_head']);
+				$fw_cfg->hiddeninput(SmAdminCsrf::FIELD, '', ['id' => 'file_head_csrf', 'value' => SmAdminCsrf::token()]);
+				$fw_cfg->dropinput('file', 'Configuration file', ['options' => JobCommandBuilder::FILE_HEAD_FILES]);
+				$fw_cfg->numberinput('lines', 'Lines (1 to ' . JobCommandBuilder::FILE_HEAD_MAX_LINES . ')', ['min' => 1, 'max' => JobCommandBuilder::FILE_HEAD_MAX_LINES]);
+				$fw_cfg->submitbutton('btn_file_head', 'Read configuration', ['class' => 'btn btn-sm btn-outline-secondary']);
+				$fw_cfg->end_form();
+				echo '</div>';
+			}
 			echo '</div>';
 		}
 		echo '</details>';
+	}
+
+	// Asking the node about its own database, and running one installer.
+	$has_schema_probe = JobCommandBuilder::has_primitive($node, 'schema_probe');
+	$has_run_installer = JobCommandBuilder::has_primitive($node, 'run_installer');
+	$has_page_probe = JobCommandBuilder::has_primitive($node, 'page_probe');
+	$has_reclaim = JobCommandBuilder::has_primitive($node, 'reclaim_managed_file');
+	if ($has_schema_probe || $has_run_installer || $has_page_probe || $has_reclaim) {
+		echo '<details class="mt-2 ps-3"><summary class="small text-muted" style="cursor:pointer;">Diagnose and repair</summary>';
+		echo '<div class="d-flex flex-wrap gap-4 mt-2">';
+		if ($has_schema_probe) {
+			echo '<div>';
+			$fw_sp = $page->getFormWriter('schema_probe_form', ['action' => $base_url . '&tab=overview']);
+			$fw_sp->begin_form();
+			$fw_sp->hiddeninput('action', '', ['id' => 'schema_probe_action', 'value' => 'schema_probe']);
+			$fw_sp->hiddeninput(SmAdminCsrf::FIELD, '', ['id' => 'schema_probe_csrf', 'value' => SmAdminCsrf::token()]);
+			$fw_sp->textinput('table', 'Table', ['placeholder' => 'usr_users', 'maxlength' => 63,
+				'helptext' => 'Whether it exists, its columns and indexes, and its row count. No row is read.']);
+			$fw_sp->submitbutton('btn_schema_probe', 'Describe table', ['class' => 'btn btn-sm btn-outline-secondary']);
+			$fw_sp->end_form();
+			echo '</div>';
+		}
+		if ($has_page_probe) {
+			echo '<div>';
+			$fw_pp = $page->getFormWriter('page_probe_form', ['action' => $base_url . '&tab=overview', 'values' => ['viewer' => 'admin']]);
+			$fw_pp->begin_form();
+			$fw_pp->hiddeninput('action', '', ['id' => 'page_probe_action', 'value' => 'page_probe']);
+			$fw_pp->hiddeninput(SmAdminCsrf::FIELD, '', ['id' => 'page_probe_csrf', 'value' => SmAdminCsrf::token()]);
+			$fw_pp->textinput('page', 'Page', ['placeholder' => '/admin/admin_users', 'maxlength' => 201,
+				'helptext' => 'One of the site\'s own pages. The node renders it as a throwaway viewer and reports status, timing, queries, warnings and structure — never its text.']);
+			$fw_pp->dropinput('viewer', 'Viewer', ['options' => JobCommandBuilder::PAGE_PROBE_VIEWERS]);
+			$fw_pp->submitbutton('btn_page_probe', 'Probe page', ['class' => 'btn btn-sm btn-outline-secondary']);
+			$fw_pp->end_form();
+			echo '</div>';
+		}
+		if ($has_reclaim) {
+			echo '<div>';
+			$reclaimable = [];
+			foreach (JobCommandBuilder::RECLAIM_FILES as $key => $owner) {
+				if (!$node->hosts_site() && !in_array($owner, ['host_housekeeping.sh'], true)) { continue; }
+				$reclaimable[$key] = JobCommandBuilder::FILE_HEAD_FILES[$key] ?? $key;
+			}
+			$fw_rc = $page->getFormWriter('reclaim_form', ['action' => $base_url . '&tab=overview']);
+			$fw_rc->begin_form();
+			$fw_rc->hiddeninput('action', '', ['id' => 'reclaim_action', 'value' => 'reclaim_managed_file']);
+			$fw_rc->hiddeninput(SmAdminCsrf::FIELD, '', ['id' => 'reclaim_csrf', 'value' => SmAdminCsrf::token()]);
+			$fw_rc->dropinput('file', 'Reset a host file', ['options' => $reclaimable,
+				'helptext' => 'Moves the file aside to a dated copy on the node and runs the installer that owns it. Read it first (Logs, Configuration file): a hand edit may be deliberate.']);
+			$fw_rc->submitbutton('btn_reclaim', 'Reset to the platform\'s version', ['class' => 'btn btn-sm btn-outline-secondary']);
+			$fw_rc->end_form();
+			echo '</div>';
+		}
+		if ($has_run_installer) {
+			echo '<div>';
+			$installers = JobCommandBuilder::RUN_INSTALLER_CORE;
+			if (!$node->hosts_site()) {
+				$installers = array_intersect_key($installers, array_flip(['host_housekeeping.sh', 'install_host_converger.sh']));
+			}
+			$fw_ri = $page->getFormWriter('run_installer_form', ['action' => $base_url . '&tab=overview']);
+			$fw_ri->begin_form();
+			$fw_ri->hiddeninput('action', '', ['id' => 'run_installer_action', 'value' => 'run_installer']);
+			$fw_ri->hiddeninput(SmAdminCsrf::FIELD, '', ['id' => 'run_installer_csrf', 'value' => SmAdminCsrf::token()]);
+			$fw_ri->dropinput('name', 'Installer', ['options' => $installers,
+				'helptext' => 'Runs as root through the host runner. Idempotent: the host timer runs every one daily.']);
+			$fw_ri->submitbutton('btn_run_installer', 'Run installer', ['class' => 'btn btn-sm btn-outline-secondary']);
+			$fw_ri->end_form();
+			echo '</div>';
+		}
+		echo '</div></details>';
 	}
 
 	// Uptime monitoring status
@@ -768,7 +876,7 @@
 			if (JobCommandBuilder::has_primitive($node, 'host_report')) {
 				echo ' One is queued on the status cadence; Host Report above reads the machine now.';
 			} else {
-				echo ' Its agent does not offer the host_report word; the agent that ships with the next update does.';
+				echo ' ' . htmlspecialchars(AgentVocabulary::needs_newer_agent_text($node, ['host_report']));
 			}
 			echo '</p>';
 		} else {
@@ -791,11 +899,78 @@
 			// Expected units
 			echo '<div class="col-md-6 col-xl-4"><div class="border rounded p-3 h-100">';
 			echo '<div class="text-uppercase small text-muted">Services</div>';
+			// Running is not answering: host_report 1.5 says whether Apache,
+			// PHP-FPM and PostgreSQL answer, and the node's service_health
+			// recipe restarts one that runs and does not. Restart is the same
+			// word, offered for a service on the node's own list.
+			$answers = is_array($hr['answers'] ?? null) ? $hr['answers'] : null;
+			$can_restart = JobCommandBuilder::has_primitive($node, 'restart_unit');
 			echo '<ul class="list-unstyled mb-0">';
 			foreach ($hr['expected_units'] as $unit => $state) {
-				echo '<li><span class="' . $hr_state_class($state) . '">' . $hr_str($unit) . ': ' . $hr_str($state) . '</span></li>';
+				echo '<li><span class="' . $hr_state_class($state) . '">' . $hr_str($unit) . ': ' . $hr_str($state) . '</span>';
+				if ($answers !== null && isset($answers[$unit])) {
+					$a = $answers[$unit];
+					echo ' <small class="' . ($a === 'no' ? 'text-danger' : 'text-muted') . '">'
+						. ($a === 'yes' ? 'answers' : ($a === 'no' ? 'does not answer' : 'answer unknown')) . '</small>';
+				}
+				if ($can_restart && $state !== 'absent' && array_key_exists($unit, JobCommandBuilder::RESTART_UNIT_UNITS)) {
+					$form_id = 'nodeActionRestartUnit_' . $unit;
+					$confirm = 'Restart ' . JobCommandBuilder::RESTART_UNIT_UNITS[$unit] . ' on this machine now? '
+						. 'Connections it holds are dropped; nothing stored is lost.';
+					echo ' <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
+						. ' onclick="' . $hr_str('JoineryModal.confirm(' . json_encode($confirm) . ', function(){ document.getElementById('
+							. json_encode($form_id) . ').submit(); })') . '">Restart</button>';
+					echo '<form id="' . $hr_str($form_id) . '" method="post" action="'
+						. htmlspecialchars($base_url, ENT_QUOTES, 'UTF-8') . '" hidden>'
+						. '<input type="hidden" name="action" value="restart_unit">'
+						. '<input type="hidden" name="unit" value="' . $hr_str($unit) . '">'
+						. SmAdminCsrf::field() . '</form>';
+				}
+				echo '</li>';
 			}
-			echo '</ul></div></div>';
+			echo '</ul>';
+			if ($answers === null) {
+				echo '<small class="text-muted">Whether each service answers: not reported by this node\'s agent.</small>';
+			}
+			// The certificate each of the site's names serves, read on the
+			// machine itself: the node's certificate_expiry recipe renews one
+			// under 14 days.
+			$served = $hr['served_certificates'] ?? null;
+			if (is_array($served) && $served) {
+				echo '<div class="mt-2 small">';
+				foreach ($served as $c) {
+					$thin = $c['days_left'] < 14;
+					echo '<div class="' . ($thin ? 'text-danger' : 'text-muted') . '">' . $hr_str($c['domain'])
+						. ': certificate, ' . $hr_str($c['days_left']) . ' days left</div>';
+				}
+				echo '</div>';
+			}
+			// A Docker host's site containers, each with a Restart.
+			$containers = $hr['containers'] ?? null;
+			if (is_array($containers) && $containers) {
+				$can_restart_c = JobCommandBuilder::has_primitive($node, 'restart_container');
+				echo '<div class="mt-2 small"><div class="text-uppercase text-muted">Site containers</div>';
+				foreach ($containers as $c) {
+					$bad = $c['state'] !== 'running' || $c['answers'] === 'no';
+					echo '<div class="' . ($bad ? 'text-danger' : '') . '">' . $hr_str($c['name']) . ': ' . $hr_str($c['state'])
+						. ($c['answers'] === 'yes' ? ', answers' : ($c['answers'] === 'no' ? ', does not answer' : ''));
+					if ($can_restart_c) {
+						$form_id = 'nodeActionRestartContainer_' . $c['name'];
+						$confirm = 'Restart the container ' . $c['name'] . '? The site is down while it restarts; its data and volumes are kept.';
+						echo ' <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
+							. ' onclick="' . $hr_str('JoineryModal.confirm(' . json_encode($confirm) . ', function(){ document.getElementById('
+								. json_encode($form_id) . ').submit(); })') . '">Restart</button>';
+						echo '<form id="' . $hr_str($form_id) . '" method="post" action="'
+							. htmlspecialchars($base_url, ENT_QUOTES, 'UTF-8') . '" hidden>'
+							. '<input type="hidden" name="action" value="restart_container">'
+							. '<input type="hidden" name="name" value="' . $hr_str($c['name']) . '">'
+							. SmAdminCsrf::field() . '</form>';
+					}
+					echo '</div>';
+				}
+				echo '</div>';
+			}
+			echo '</div></div>';
 
 			// Failed units
 			echo '<div class="col-md-6 col-xl-4"><div class="border rounded p-3 h-100">';
@@ -876,6 +1051,24 @@
 			$rl = $hr['sshd']['permit_root_login'];
 			echo '<div class="' . ($pw === 'yes' ? 'text-warning' : '') . '">Password authentication: ' . $hr_str($pw) . '</div>';
 			echo '<div class="' . ($rl === 'yes' ? 'text-warning' : '') . '">Root login: ' . $hr_str($rl) . '</div>';
+			// The effective settings a lockout turns on (sshd -T, compiled keys
+			// only). Shown only when this node's report carries them.
+			$sshd = $hr['sshd'];
+			if (isset($sshd['pubkey_authentication'])) {
+				echo '<div>Public-key authentication: ' . $hr_str($sshd['pubkey_authentication']) . '</div>';
+			}
+			if (isset($sshd['kbd_interactive_authentication'])) {
+				echo '<div>Keyboard-interactive: ' . $hr_str($sshd['kbd_interactive_authentication']) . '</div>';
+			}
+			if (isset($sshd['max_auth_tries'])) {
+				echo '<div>Max auth tries: ' . $hr_str($sshd['max_auth_tries']) . '</div>';
+			}
+			foreach (['ports' => 'Port', 'allow_users' => 'Allowed users', 'allow_groups' => 'Allowed groups'] as $k => $label) {
+				if (!isset($sshd[$k])) { continue; }
+				$v = $sshd[$k];
+				$line = is_array($v) ? ($v ? implode(', ', $v) : 'any') : 'unknown';
+				echo '<div>' . $hr_str($label) . ': ' . htmlspecialchars($line) . '</div>';
+			}
 			echo '</div></div>';
 
 			// Machine
@@ -889,6 +1082,27 @@
 				echo '<div class="text-muted">Reboot required: unknown</div>';
 			}
 			echo '<div>Unattended upgrades last ran: ' . $hr_str($hr_when($hr['unattended_upgrades_last_run'])) . '</div>';
+			// The operating system, and the release upgrade Ubuntu's own daily
+			// check last offered. That check runs only when someone logs in, so
+			// its date is shown with the answer and an old one is said to be old.
+			if (is_array($hr['os'])) {
+				$os = $hr['os'];
+				$os_line = ($os['id'] === 'unknown' && $os['version'] === 'unknown')
+					? 'unknown'
+					: ucfirst($os['id']) . ' ' . $os['version'] . ($os['codename'] !== 'unknown' ? ' (' . $os['codename'] . ')' : '');
+				echo '<div>OS: ' . $hr_str($os_line) . '</div>';
+				$ru = $os['release_upgrade'];
+				if ($ru['offered'] === 'unknown') {
+					echo '<div class="text-muted">Release upgrade: unknown — Ubuntu has no recorded check on this machine</div>';
+				} else {
+					$checked = is_int($ru['checked_at']) ? $ru['checked_at'] : null;
+					$stale = ($checked === null || $checked < time() - 7 * 86400);
+					$answer = ($ru['offered'] === 'none') ? 'none offered' : $ru['offered'] . ' offered';
+					echo '<div class="' . ($ru['offered'] !== 'none' ? 'text-info' : '') . '">Release upgrade: ' . $hr_str($answer)
+						. ' <small class="' . ($stale ? 'text-warning' : 'text-muted') . '">(checked ' . $hr_str($hr_when($checked))
+						. ($stale ? '; Ubuntu re-checks only when someone logs in' : '') . ')</small></div>';
+				}
+			}
 			foreach (['disk' => 'Disk', 'memory' => 'Memory', 'swap' => 'Swap'] as $key => $label) {
 				$used = $hr[$key]['used_bytes']; $total = $hr[$key]['total_bytes'];
 				$line = (is_int($used) && is_int($total) && $total > 0)

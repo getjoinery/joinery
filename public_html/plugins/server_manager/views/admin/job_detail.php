@@ -5,6 +5,9 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.11 - an apply_update job renders its structured apply result (versions, migrations, schema
+ *                changes, plugins, deploy tier, rollback); restart_unit/_container, run_installer,
+ *                file_head and schema_probe results render as cards
  * @version 1.10 - a finished job's result is folded through JobResultProcessor::process_if_due, so a failed
  *                 job is folded here as it is everywhere else
  * @version 1.9 - a reset_failed_unit result renders the unit's state before and after the reset
@@ -278,6 +281,57 @@ if ($result) {
 		echo '<div class="card mb-3"><div class="card-body text-muted">The log excerpt this job returned has been '
 			. 'removed by the retention sweep; the job itself is kept as the record that it ran.</div></div>';
 		$result_data = null;
+	} elseif (is_array($result_data) && $job_type === 'apply_update' && is_array($result_data['apply'] ?? null)) {
+		// The node's own structured account of the apply (APPLY_RESULT), then
+		// the plane's probe of the version it now serves. The transcript above
+		// stays for forensics.
+		$a = $result_data['apply'];
+		$h = function ($v) { return htmlspecialchars((string)$v); };
+		$rb = $a['rolled_back'];
+		$ok = $a['outcome'] === 'completed' && empty($rb['rolled_back']);
+		echo '<div class="card mb-3"><div class="card-header"><strong>Apply result</strong> <small class="'
+			. ($ok ? 'text-success' : 'text-danger') . '">— '
+			. $h($a['version_before'] ?? '?') . ' → ' . $h($a['version_after'] ?? '?') . ', '
+			. ($ok ? 'completed' : (!empty($rb['rolled_back']) ? 'rolled back at ' . $h($rb['step'] ?? 'an unnamed step') : 'did not complete'))
+			. (!empty($a['self_updated']) ? '; the pipeline updated itself and re-ran' : '')
+			. ', ' . (int)$a['duration_seconds'] . 's</small></div><div class="card-body">';
+		if (!empty($rb['rolled_back']) && !empty($rb['schema_ahead_of_code'])) {
+			echo '<div class="alert alert-warning small">The code was rolled back and the schema was not: migrations had already run. Upgrade forward rather than leaving the node here.</div>';
+		}
+		$tier = $a['deploy_tier'];
+		echo '<div>Deploy tier: <strong>' . $h(str_replace('_', ' ', $tier['verdict'])) . '</strong>'
+			. ($tier['failed_tests'] ? ' — failed: ' . $h(implode(', ', $tier['failed_tests'])) : '') . '</div>';
+		if (isset($result_data['version'])) {
+			echo '<div>The site now serves version ' . $h($result_data['version'] ?? 'unknown') . '.</div>';
+		}
+		if (!empty($a['truncated'])) {
+			echo '<div class="small text-muted">The lists below were cut to fit the node\'s report; the counts are the full ones. The transcript above has every line.</div>';
+		}
+		echo '<div class="mt-2"><strong>Migrations</strong> (' . (int)($a['migrations_total'] ?? count($a['migrations'])) . ')</div>';
+		if ($a['migrations']) {
+			echo '<ul class="small mb-1">';
+			foreach ($a['migrations'] as $m) {
+				echo '<li class="' . ($m['outcome'] === 'failed' ? 'text-danger' : '') . '">' . $h($m['version']) . ': ' . $h($m['outcome'])
+					. ($m['rows'] !== null ? ', ' . (int)$m['rows'] . ' row(s)' : '') . '</li>';
+			}
+			echo '</ul>';
+		}
+		echo '<div class="mt-2"><strong>Schema changes</strong> (' . (int)($a['schema_changes_total'] ?? count($a['schema_changes'])) . ')</div>';
+		if ($a['schema_changes']) {
+			echo '<ul class="small mb-1">';
+			foreach ($a['schema_changes'] as $c) { echo '<li>' . $h($c) . '</li>'; }
+			echo '</ul>';
+		}
+		echo '<div class="mt-2"><strong>Plugins synced</strong> (' . (int)($a['plugins_total'] ?? count($a['plugins'])) . ')</div>';
+		if ($a['plugins']) {
+			echo '<ul class="small mb-0">';
+			foreach ($a['plugins'] as $p) {
+				echo '<li>' . $h($p['name']) . ': ' . $h($p['before'] !== '' ? $p['before'] : 'new') . ' → ' . $h($p['after']) . '</li>';
+			}
+			echo '</ul>';
+		}
+		echo '</div></div>';
+		$result_data = null;
 	} elseif (is_array($result_data) && $job_type === 'site_log' && array_key_exists('text', $result_data)) {
 		// The node redacted this before it left; the plane's redactor is the
 		// second pass, as it is for every transcript shown here.
@@ -358,6 +412,130 @@ if ($result) {
 			. '<div>After: ' . $state($result_data['after'] ?? null) . '</div>'
 			. '<small class="text-muted">Clearing changes nothing that runs: a unit that is still broken fails again the next time it starts, and the next host report names it again.</small>'
 			. '</div></div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && in_array($job_type, array('restart_unit', 'restart_container'), true) && !empty($result_data['read'])) {
+		$state = function ($s) {
+			$s = is_array($s) ? $s : array();
+			$bits = array();
+			foreach ($s as $k => $v) { $bits[] = str_replace('_', ' ', $k) . ' ' . htmlspecialchars((string)$v); }
+			return $bits ? implode(', ', $bits) : 'unknown';
+		};
+		echo '<div class="card mb-3"><div class="card-header"><strong>'
+			. htmlspecialchars((string)($result_data['target'] ?? '')) . '</strong> <small class="text-muted">— '
+			. (!empty($result_data['absent']) ? 'not on this machine; nothing was restarted'
+				: (!empty($result_data['restarted']) ? 'restarted' : 'the restart was not accepted'))
+			. '</small></div><div class="card-body">'
+			. '<div>Before: ' . $state($result_data['before'] ?? null) . '</div>'
+			. '<div>After: ' . $state($result_data['after'] ?? null) . '</div>'
+			. '</div></div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && in_array($job_type, array('run_installer', 'reclaim_managed_file'), true) && isset($result_data['ran'])) {
+		echo '<div class="card mb-3"><div class="card-header"><strong>'
+			. htmlspecialchars($job_type === 'reclaim_managed_file'
+				? (JobCommandBuilder::FILE_HEAD_FILES[$result_data['file'] ?? ''] ?? (string)($result_data['file'] ?? '')) . ' — reset by ' . (string)($result_data['name'] ?? '')
+				: (string)($result_data['name'] ?? ''))
+			. '</strong> <small class="text-muted">— ' . (!empty($result_data['ran']) ? 'ran to its ok line' : 'did not complete') . '</small></div>';
+		if (!empty($result_data['reclaim'])) {
+			echo '<ul class="list-group list-group-flush">';
+			foreach ((array)$result_data['reclaim'] as $line) { echo '<li class="list-group-item small">' . htmlspecialchars((string)$line) . '</li>'; }
+			echo '</ul>';
+		}
+		$failures = is_array($result_data['failures'] ?? null) ? $result_data['failures'] : array();
+		if ($failures) {
+			echo '<ul class="list-group list-group-flush">';
+			foreach ($failures as $f) { echo '<li class="list-group-item text-danger small">' . htmlspecialchars((string)$f) . '</li>'; }
+			echo '</ul>';
+		}
+		echo '</div>';
+		// The transcript below stays: the card says what the runner concluded.
+	} elseif (is_array($result_data) && $job_type === 'file_head' && array_key_exists('text', $result_data)) {
+		$file = (string)($result_data['file'] ?? '');
+		echo '<div class="card mb-3"><div class="card-header"><strong>'
+			. htmlspecialchars(JobCommandBuilder::FILE_HEAD_FILES[$file] ?? $file)
+			. '</strong> <small class="text-muted">— ' . htmlspecialchars((string)($result_data['path'] ?? '')) . ', '
+			. (empty($result_data['present'])
+				? 'not present on the node'
+				: (int)($result_data['lines_returned'] ?? 0) . ' line(s)'
+					. (!empty($result_data['truncated']) ? ', more in the file' : '')
+					. ', ' . number_format((int)($result_data['size_bytes'] ?? 0)) . ' bytes on disk'
+					. ', modified ' . htmlspecialchars((string)($result_data['modified_time'] ?? '')))
+			. '</small></div>';
+		echo '<pre class="svm-logbox">' . htmlspecialchars(SmSecretRedactor::redact((string)$result_data['text'])) . '</pre>'
+			. '<div class="card-footer small text-muted">A line whose setting names a credential is shown as the setting alone; the node never sent its value.</div></div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && $job_type === 'schema_probe' && !empty($result_data['read'])) {
+		$table = htmlspecialchars((string)($result_data['table'] ?? ''));
+		echo '<div class="card mb-3"><div class="card-header"><strong>' . $table . '</strong> <small class="text-muted">— ';
+		if (empty($result_data['exists'])) {
+			echo 'does not exist in the site\'s schema</small></div></div>';
+		} else {
+			$n = (int)($result_data['row_count'] ?? -1);
+			echo ($n < 0 ? 'row count unknown' : number_format($n) . ' row(s)' . (empty($result_data['row_count_exact']) ? ' (planner estimate; too large to count in time)' : ''))
+				. '</small></div>';
+			echo '<div class="table-responsive"><table class="table table-sm mb-0"><thead><tr><th>Column</th><th>Type</th><th>Nullable</th><th>Default</th></tr></thead><tbody>';
+			foreach ((array)($result_data['columns'] ?? array()) as $c) {
+				echo '<tr><td>' . htmlspecialchars((string)($c['name'] ?? '')) . '</td><td>' . htmlspecialchars((string)($c['type'] ?? ''))
+					. (isset($c['max_length']) ? '(' . (int)$c['max_length'] . ')' : '') . '</td><td>'
+					. (!empty($c['nullable']) ? 'yes' : '<strong>NOT NULL</strong>') . '</td><td><small>'
+					. htmlspecialchars((string)($c['default'] ?? '')) . '</small></td></tr>';
+			}
+			echo '</tbody></table></div>';
+			$idx = (array)($result_data['indexes'] ?? array());
+			if ($idx) {
+				echo '<ul class="list-group list-group-flush small">';
+				foreach ($idx as $i) {
+					echo '<li class="list-group-item"><strong>' . htmlspecialchars((string)($i['name'] ?? '')) . '</strong> '
+						. htmlspecialchars((string)($i['definition'] ?? '')) . '</li>';
+				}
+				echo '</ul>';
+			}
+			echo '</div>';
+		}
+		$result_data = null;
+	} elseif (is_array($result_data) && $job_type === 'page_probe' && !empty($result_data['read'])) {
+		$h = function ($v) { return htmlspecialchars((string)$v); };
+		$st = (int)$result_data['status'];
+		$lm = $result_data['landmarks'];
+		echo '<div class="card mb-3"><div class="card-header"><strong>' . $h($result_data['page']) . '</strong> <small class="'
+			. ($st >= 200 && $st < 400 ? 'text-muted' : 'text-danger') . '">— as ' . $h($result_data['viewer']) . ', HTTP ' . $st
+			. ', ' . number_format((int)$result_data['bytes']) . ' bytes'
+			. ($result_data['render_ms'] !== null ? ', ' . (int)$result_data['render_ms'] . ' ms' : '')
+			. ($result_data['statements'] !== null ? ', ' . (int)$result_data['statements'] . ' queries' : '')
+			. ($result_data['peak_memory'] !== null ? ', ' . $h(JobResultProcessor::format_size((int)$result_data['peak_memory'])) . ' peak memory' : '')
+			. '</small></div><div class="card-body">';
+		echo '<div>Landmarks: header ' . ($lm['header'] ? 'yes' : '<strong>no</strong>') . ', main ' . ($lm['main'] ? 'yes' : '<strong>no</strong>')
+			. ', footer ' . ($lm['footer'] ? 'yes' : '<strong>no</strong>') . '; ' . (int)$lm['forms'] . ' form(s)</div>';
+		echo '<div class="small text-muted">Structure hash ' . $h(substr($result_data['structure_hash'], 0, 16)) . ' — the same page renders to the same hash while its structure is unchanged.</div>';
+		if (!$result_data['reported']) {
+			echo '<div class="text-warning small">The render left no report (it may have died before its end); timing, queries and warnings are unknown.</div>';
+		}
+		if ($result_data['warnings']) {
+			echo '<div class="mt-2"><strong>PHP warnings and errors</strong></div><ul class="small mb-1">';
+			foreach ($result_data['warnings'] as $w) { echo '<li>' . $h($w['type']) . ' at ' . $h($w['at']) . '</li>'; }
+			echo '</ul>';
+		}
+		if ($result_data['failed_assets']) {
+			echo '<div class="mt-2"><strong>Assets that failed to load</strong></div><ul class="small mb-1">';
+			foreach ($result_data['failed_assets'] as $a) { echo '<li>' . $h($a['path']) . ' — HTTP ' . (int)$a['status'] . '</li>'; }
+			echo '</ul>';
+		}
+		if (!empty($result_data['failed_assets_unnamed'])) {
+			echo '<div class="small text-muted">' . (int)$result_data['failed_assets_unnamed']
+				. ' more asset path(s) failed that the release does not ship; they may come from what members wrote, so they are counted, not named.</div>';
+		}
+		if (!empty($result_data['truncated'])) {
+			echo '<div class="small text-muted">The page was larger than 4 MiB; its structure was read from the first 4 MiB.</div>';
+		}
+		foreach ($result_data['warnings'] as $w) {
+			if ($w['type'] === 'refused_write') {
+				echo '<div class="small text-danger">The render tried to write (at ' . $h($w['at']) . '); the probe session is view-only and refused it.</div>';
+				break;
+			}
+		}
+		if ($result_data['cleanup'] !== 'done') {
+			echo '<div class="text-danger small">Cleanup: ' . $h($result_data['cleanup']) . '</div>';
+		}
+		echo '</div></div>';
 		$result_data = null;
 	} elseif (is_array($result_data) && $job_type === 'disk_usage' && !empty($result_data['read'])) {
 		$fmt = function ($v) {

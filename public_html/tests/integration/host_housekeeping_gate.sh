@@ -222,6 +222,30 @@ out="$(JOINERY_HOUSEKEEPING_ROOT="$R" bash "$SCRIPT" --machine "$T/absent-root" 
 chk "--machine with no such root skips, exit 0" "$rc:$(printf '%s\n' "$out" | grep -c -- '--machine needs the bundle root')" "0:1"
 chk "the flag is the first argument and the root the second" "$(grep -c '^if \[\[ "\${1:-}" == "--machine" \]\]; then$' "$SCRIPT")" "1"
 
+echo "=== Host files: written when absent, never over an owner's edit ==="
+RH="$T/hostfiles"
+mkdir -p "$RH/etc/apache2/mods-available" "$RH/etc/php/8.3/fpm" "$RH/etc/php/8.1/fpm" "$RH/usr/lib/php/8.3"
+printf 'upload_max_filesize = 2M\nmemory_limit = 128M\n;date.timezone =\n;extension=pdo_pgsql\n' > "$RH/usr/lib/php/8.3/php.ini-production"
+printf 'memory_limit = 999M\n' > "$RH/etc/php/8.1/fpm/php.ini"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$RH" bash "$SCRIPT" 2>&1)"
+chk "mpm_event.conf absent: written" "$(grep -c '^MaxRequestWorkers       50$' "$RH/etc/apache2/mods-available/mpm_event.conf" 2>/dev/null)" "1"
+chk "the journal cap absent: written" "$(grep -c '^SystemMaxUse=100M$' "$RH/etc/systemd/journald.conf.d/size-limit.conf" 2>/dev/null)" "1"
+chk "php.ini absent: rebuilt from php.ini-production and tuned" "$(grep -cE '^(upload_max_filesize = 32M|date.timezone = UTC|extension=pdo_pgsql)$' "$RH/etc/php/8.3/fpm/php.ini" 2>/dev/null)" "3"
+chk "a php.ini that exists is never touched" "$(cat "$RH/etc/php/8.1/fpm/php.ini")" "memory_limit = 999M"
+printf 'MaxRequestWorkers 400\n' > "$RH/etc/apache2/mods-available/mpm_event.conf"
+printf '[Journal]\nSystemMaxUse=2G\n' > "$RH/etc/systemd/journald.conf.d/size-limit.conf"
+JOINERY_HOUSEKEEPING_ROOT="$RH" bash "$SCRIPT" >/dev/null 2>&1
+chk "an owner's mpm_event.conf survives a converge" "$(cat "$RH/etc/apache2/mods-available/mpm_event.conf")" "MaxRequestWorkers 400"
+chk "an owner's journal cap survives a converge" "$(grep -c 'SystemMaxUse=2G' "$RH/etc/systemd/journald.conf.d/size-limit.conf")" "1"
+rm -f "$RH/etc/php/8.1/fpm/php.ini"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$RH" bash "$SCRIPT" 2>&1)"; rc=$?
+chk "a php.ini with no template to rebuild from is named, and does not fail the run" "$rc:$(printf '%s\n' "$out" | grep -c 'no .*php.ini-production to rebuild it from')" "0:1"
+RJ="$T/journal-owner"; mkdir -p "$RJ/etc/systemd/journald.conf.d"
+printf '[Journal]\nSystemMaxUse=200M\n' > "$RJ/etc/systemd/journald.conf.d/size-cap.conf"
+JOINERY_HOUSEKEEPING_ROOT="$RJ" bash "$SCRIPT" >/dev/null 2>&1
+chk "an owner's own journal cap under another name is respected: ours is not added" "$([ -e "$RJ/etc/systemd/journald.conf.d/size-limit.conf" ] && echo added || echo absent)" "absent"
+chk "install.sh uses the same definitions" "$(grep -c 'host_files_write_mpm_event\|host_files_write_journald_limit\|host_files_tune_php_ini' "$SITE_ROOT/maintenance_scripts/install_tools/install.sh")" "3"
+
 echo
 echo "host_housekeeping gate: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]

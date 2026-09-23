@@ -67,7 +67,7 @@ $node->set('mgn_enabled', true);
 // A paired agent reporting the managed-domain vocabulary; has_primitive() reads
 // exactly these columns.
 $node->set('mgn_agent_public_key', 'mdw-agent-key-' . $suffix);
-$node->set('mgn_agent_version', '1.14.0');
+$node->set('mgn_agent_version', AgentVocabulary::FLOOR);
 $node->set('mgn_agent_primitives', 'managed_domain_prepare,managed_domain_notice');
 $node->prepare();
 $node->save();

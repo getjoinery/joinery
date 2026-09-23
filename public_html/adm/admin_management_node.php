@@ -7,6 +7,9 @@
  * a person approves the request on the management node after comparing the
  * key fingerprint both screens show (Phase 1.5, decision A6).
  *
+ * @version 1.4 - the log-access switch names everything it grants: the site logs, a service's journal and
+ *                the host configuration files, and says member data and keys are never sent
+ *                (specs/agent_recipes_and_vocabulary.md, rule 8)
  * @version 1.3 - The log-access switch (specs/agent_log_access.md), between the agent switch and the
  *                connection: what a connected management node may read of this site's logs, in
  *                the owner's words, with the switch beside the explanation
@@ -108,11 +111,14 @@ if ($log_access_switched === 'on') {
 	echo '<div class="alert alert-info" role="alert">Log access is off. The agent refuses every log request from a management node from now on.</div>';
 }
 echo '<div class="card mb-3" style="max-width:46rem;"><div class="card-body">';
-echo '<h5 class="card-title mb-2">Let the management node read this site\'s logs <span class="badge ' . ($log_access ? 'bg-success' : 'bg-secondary') . '">' . ($log_access ? 'On' : 'Off') . '</span></h5>';
-echo '<p class="text-muted mb-2">When on, a management node this machine is connected to can ask for the last lines of the site\'s '
-   . 'error and task logs and the newest rows of the login, request, event, form-error and webhook logs. '
-   . 'Passwords, keys, tokens, addresses and the personal half of email addresses are masked on this machine before anything is sent; '
-   . 'member addresses, submitted forms and raw payloads are never sent at all. '
+echo '<h5 class="card-title mb-2">Let the management node read this site\'s logs and host configuration <span class="badge ' . ($log_access ? 'bg-success' : 'bg-secondary') . '">' . ($log_access ? 'On' : 'Off') . '</span></h5>';
+echo '<p class="text-muted mb-2">When on, a management node this machine is connected to can ask for: the last lines of the site\'s '
+   . 'error and task logs; the newest rows of the login, request, event, form-error and webhook logs; the last lines of a '
+   . 'service\'s journal (Apache, PostgreSQL, cron, fail2ban and the agent among them); and the first lines of the host\'s '
+   . 'configuration files (fail2ban, Apache, PHP, logging, scheduled tasks, updates, Docker, mail settings). '
+   . 'Member data and keys are never sent: member addresses, submitted forms and raw payloads are left out entirely, files that '
+   . 'hold a key or a password are never read, and passwords, tokens, addresses and the personal half of email addresses are '
+   . 'masked on this machine before anything is sent. '
    . 'When off, every such request is refused here, and the management node is told why. '
    . 'On by default. It has no effect until this machine is connected to a management node.</p>';
 echo '<form method="POST" action="/admin/admin_management_node" class="d-inline">'

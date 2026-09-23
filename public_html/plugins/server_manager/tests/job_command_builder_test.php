@@ -46,6 +46,23 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nod
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 
 /** A node fixture. Defaults give it SSH but no API credentials. */
+// Every agent at the version floor stores offloaded files, so a project
+// backup_run reads the node's backup storage for the newest index. No test
+// here reaches real storage: an empty listing stands in unless a section
+// sets its own, and a section that is done with its own puts this back.
+JobCommandBuilder::set_shelf_listing_for_tests(array());
+harness_defer(function () { JobCommandBuilder::set_shelf_listing_for_tests(null); });
+
+/** Every word this plane has a primitive builder for, as a node would report them. */
+function jcb_current_vocabulary() {
+	$words = array();
+	foreach (get_class_methods('JobCommandBuilder') as $m) {
+		if (preg_match('/^build_([a-z0-9_]+)_primitive$/', $m, $mm)) { $words[] = $mm[1]; }
+	}
+	sort($words);
+	return implode(',', $words);
+}
+
 function jcb_node(array $fields = array()) {
 	$node = new ManagedNode(NULL);
 	$suffix = bin2hex(random_bytes(3));
@@ -61,6 +78,14 @@ function jcb_node(array $fields = array()) {
 	// that happens to build a backup.
 	$node->set('mgn_last_status_data', json_encode(array('backup_recovery_state' => 'proven')));
 	$node->set('mgn_backup_recovery_fpr', str_repeat('c3', 32));
+	// A paired node is a CURRENT one unless the test says otherwise: an agent
+	// at the version floor that reports every word this plane can build. Below
+	// the floor, or with an empty report, a node is offered apply_update only
+	// (AgentVocabulary), and the tests that are about that say so.
+	if (!empty($fields['mgn_agent_public_key'])) {
+		$node->set('mgn_agent_version', AgentVocabulary::FLOOR);
+		$node->set('mgn_agent_primitives', jcb_current_vocabulary());
+	}
 	foreach ($fields as $k => $v) {
 		$node->set($k, $v);
 	}
@@ -236,7 +261,7 @@ section('Local backup delete: a name, never a path');
 // ability to point rm at anything.
 $del_paired = jcb_node(array(
 	'mgn_agent_public_key' => base64_encode(str_repeat("\x05", 32)),
-	'mgn_agent_version'    => '1.13.0'));
+	'mgn_agent_version'    => AgentVocabulary::FLOOR));
 $del_built = JobCommandBuilder::build_delete_backup($del_paired,
 	array('target' => 'local', 'local_path' => '/backups/auto_pre_install_x.sql.gz'));
 check(($del_built['primitive'] ?? '') === 'delete_backup',
@@ -396,7 +421,7 @@ foreach (array('build_provision_ssl', 'build_enable_agent', 'build_discover_node
 // the issuer, and refuses by name when the host has no paired agent.
 $cert_host_node = jcb_node(array('mgn_host' => '192.0.2.77',
 	'mgn_agent_public_key' => base64_encode(str_repeat("\x0c", 32)),
-	'mgn_agent_version'    => '1.16.3',
+	'mgn_agent_version'    => AgentVocabulary::FLOOR,
 	'mgn_agent_primitives' => 'check_status,provision_certificate,decommission_site'));
 $cert_host = ManagedHost::ensure_for_node($cert_host_node);
 harness_register_row('mgh_managed_hosts', 'mgh_managed_host_id', $cert_host->key);
@@ -421,7 +446,7 @@ check((int)JobCommandBuilder::certificate_issuer_for($cert_host_node)->key === (
 
 // The two compiled-names settings writers.
 $arm_paired = jcb_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x0d", 32)),
-	'mgn_agent_version' => '1.17.0', 'mgn_agent_primitives' => 'clone_export_arm,fleet_enroll'));
+	'mgn_agent_version' => AgentVocabulary::FLOOR, 'mgn_agent_primitives' => 'clone_export_arm,fleet_enroll'));
 $arm_built = JobCommandBuilder::build_clone_export_arm($arm_paired, array('export_key' => $clone_key));
 check($arm_built === array('primitive' => 'clone_export_arm', 'params' => array('export_key' => $clone_key)),
 	'clone_export_arm carries the key and nothing else', json_encode($arm_built));
@@ -504,7 +529,7 @@ section('Plugin installers');
 $installer_paired = jcb_node(array(
 	'mgn_web_root'         => '/var/www/html/jeremytunnell/public_html',
 	'mgn_agent_public_key' => base64_encode(str_repeat("\x08", 32)),
-	'mgn_agent_version'    => '1.13.0'));
+	'mgn_agent_version'    => AgentVocabulary::FLOOR));
 $pi_built = JobCommandBuilder::build_run_plugin_installers($installer_paired);
 check(($pi_built['primitive'] ?? '') === 'run_plugin_installers',
 	'a paired node runs the installers as a primitive');
@@ -544,7 +569,7 @@ check(strpos($rp_threw, 'rebuild it from a backup') !== false,
 $paired_restore = jcb_node(array(
 	'mgn_web_root'         => '/var/www/html/restoresite/public_html',
 	'mgn_agent_public_key' => base64_encode(str_repeat("\x01", 32)),
-	'mgn_agent_version'    => '1.13.0'));
+	'mgn_agent_version'    => AgentVocabulary::FLOOR));
 $rp_built = JobCommandBuilder::build_restore_project($paired_restore, array(
 	'filename' => 'restoresite-2026-01-01-000000.tar.gz',
 	'domain'   => 'restored.example.com',
@@ -584,7 +609,7 @@ $chain_node = jcb_node(array(
 	'mgn_web_root'         => '/var/www/html/chainsite/public_html',
 	'mgn_slug'             => 'chainsite',
 	'mgn_agent_public_key' => base64_encode(str_repeat("\x02", 32)),
-	'mgn_agent_version'    => '1.13.0'));
+	'mgn_agent_version'    => AgentVocabulary::FLOOR));
 
 $chain_threw = '';
 try {
@@ -727,7 +752,7 @@ check($install_teardown === 0, 'install_node emits no teardown step');
 // notes. There is no local step, no shell string and no other transport: the
 // signing key is root-only and the root agent is its one reader.
 $publisher = jcb_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x0e", 32)),
-	'mgn_agent_version' => '1.19.0', 'mgn_agent_primitives' => 'check_status,publish_upgrade',
+	'mgn_agent_version' => AgentVocabulary::FLOOR, 'mgn_agent_primitives' => 'check_status,publish_upgrade',
 	'mgn_last_status_data' => json_encode(array('backup_recovery_state' => 'proven', 'server_manager_active' => true))));
 check(JobCommandBuilder::can_publish_release($publisher), 'a node whose agent carries the primitive and which reports Server Manager active is offered a publish');
 $pub_params = array('release_notes' => 'harness test', 'major' => 0, 'minor' => 8, 'patch' => 371);
@@ -744,7 +769,7 @@ try {
 } catch (Exception $e) { $pub_refused = $e->getMessage(); }
 check($pub_refused !== '', 'a publish without a full version number is refused at build time', $pub_refused);
 
-$pub_no_channel = jcb_node(array('mgn_agent_version' => '1.19.0'));
+$pub_no_channel = jcb_node(array('mgn_agent_version' => AgentVocabulary::FLOOR));
 $pub_refused = '';
 try {
 	JobCommandBuilder::build_publish_upgrade($pub_no_channel, $pub_params);
@@ -753,19 +778,19 @@ check(strpos($pub_refused, 'cannot publish') !== false,
       'a node with no agent channel cannot publish, and the refusal says so', $pub_refused);
 
 $pub_old_agent = jcb_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x0f", 32)),
-	'mgn_agent_version' => '1.17.2', 'mgn_agent_primitives' => 'check_status,apply_update'));
+	'mgn_agent_version' => AgentVocabulary::FLOOR, 'mgn_agent_primitives' => 'check_status,apply_update'));
 $pub_refused = '';
 try {
 	JobCommandBuilder::build_publish_upgrade($pub_old_agent, $pub_params);
 } catch (Exception $e) { $pub_refused = $e->getMessage(); }
-check(strpos($pub_refused, '1.17.2') !== false,
-      'an agent that does not report the primitive is refused, naming its version', $pub_refused);
+check(strpos($pub_refused, 'publish_upgrade') !== false && strpos($pub_refused, 'update this node') !== false,
+      'an agent that does not report the primitive is refused with the standard state, naming the word', $pub_refused);
 
 // A plain site never publishes: every agent compiles the primitive in, so the
 // node's own account of whether Server Manager is active decides, and a node
 // that has not said (an older agent) is not one.
 $pub_plain = jcb_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x1a", 32)),
-	'mgn_agent_version' => '1.36.0', 'mgn_agent_primitives' => 'check_status,publish_upgrade',
+	'mgn_agent_version' => AgentVocabulary::FLOOR, 'mgn_agent_primitives' => 'check_status,publish_upgrade',
 	'mgn_last_status_data' => json_encode(array('server_manager_active' => false))));
 check(!JobCommandBuilder::can_publish_release($pub_plain), 'a plain site with a modern agent is not offered a publish');
 check($pub_plain->reports_management_status(), 'but it has answered the question');
@@ -777,18 +802,18 @@ check(strpos($pub_refused, 'not a management node') !== false,
       'and a hand-made POST is refused at build time, saying why', $pub_refused);
 
 $pub_unreported = jcb_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x1b", 32)),
-	'mgn_agent_version' => '1.35.0', 'mgn_agent_primitives' => 'check_status,publish_upgrade'));
+	'mgn_agent_version' => AgentVocabulary::FLOOR, 'mgn_agent_primitives' => 'check_status,publish_upgrade'));
 check(!JobCommandBuilder::can_publish_release($pub_unreported) && !$pub_unreported->reports_management_status(),
       'an agent that has not reported either way is not offered a publish, and the page can tell it apart from a plain site');
 $pub_self = jcb_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x1c", 32)),
-	'mgn_agent_version' => '1.35.0', 'mgn_agent_primitives' => 'check_status,publish_upgrade',
+	'mgn_agent_version' => AgentVocabulary::FLOOR, 'mgn_agent_primitives' => 'check_status,publish_upgrade',
 	'mgn_site_url' => rtrim((string)LibraryFunctions::get_absolute_url(), '/')));
 check($pub_self->is_self() && JobCommandBuilder::can_publish_release($pub_self),
       'the plane\'s own record is a management node without a report: the code answering is the plugin');
 // The fact arrives at poll on every cycle (mgn_agent_server_manager) and is
 // read before the check_status blob, which nothing runs routinely.
 $pub_polled = jcb_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x1d", 32)),
-	'mgn_agent_version' => '1.37.0', 'mgn_agent_primitives' => 'check_status,publish_upgrade',
+	'mgn_agent_version' => AgentVocabulary::FLOOR, 'mgn_agent_primitives' => 'check_status,publish_upgrade',
 	'mgn_agent_server_manager' => 'active'));
 check(JobCommandBuilder::can_publish_release($pub_polled) && $pub_polled->reports_management_status(),
       'a node whose poll says Server Manager is active is offered a publish with no check_status report at all');
@@ -850,7 +875,7 @@ check(strpos($enc_engine, '.joinery_backup_key') !== false,
 $enc_paired = jcb_node(array(
 	'mgn_web_root'         => '/var/www/html/encnode/public_html',
 	'mgn_agent_public_key' => base64_encode(str_repeat("\x03", 32)),
-	'mgn_agent_version'    => '1.13.0'));
+	'mgn_agent_version'    => AgentVocabulary::FLOOR));
 $enc_built = JobCommandBuilder::build_restore_database($enc_paired,
 	array('filename' => 'site-20260802.sql.gz.enc'));
 $enc_json = (string)json_encode($enc_built);
@@ -872,7 +897,7 @@ $cloud_node = jcb_node(array(
 	'mgn_web_root' => '/var/www/html/credmode/public_html',
 	'mgn_bkt_backup_target_id' => $bkt->key,
 	'mgn_agent_public_key' => base64_encode(str_repeat("\x06", 32)),
-	'mgn_agent_version'    => '1.13.0',
+	'mgn_agent_version'    => AgentVocabulary::FLOOR,
 	'mgn_delete_local_after_upload' => false));
 
 $ph_built = JobCommandBuilder::build_upload_backup($cloud_node, array('filename' => 'credmode.sql.gz'));
@@ -896,7 +921,7 @@ $run_node = jcb_node(array(
 	'mgn_web_root' => '/var/www/html/runnode/public_html',
 	'mgn_bkt_backup_target_id' => $bkt->key,
 	'mgn_agent_public_key' => base64_encode(str_repeat("\x09", 32)),
-	'mgn_agent_version'    => '1.13.0'));
+	'mgn_agent_version'    => AgentVocabulary::FLOOR));
 
 // Refusals: a job that cannot say where the backup goes, or which site to back
 // up, fails at build time with a message the operator sees — not part-way
@@ -916,7 +941,7 @@ try {
 	JobCommandBuilder::build_backup_run(jcb_node(array(
 		'mgn_web_root' => '/var/www/html/notarget/public_html',
 		'mgn_agent_public_key' => base64_encode(str_repeat("\x0a", 32)),
-		'mgn_agent_version'    => '1.13.0')));
+		'mgn_agent_version'    => AgentVocabulary::FLOOR)));
 } catch (Exception $e) { $threw = true; $refusal = $e->getMessage(); }
 
 if ($enabled_now > 1) {
@@ -996,7 +1021,9 @@ foreach (array($PAYLOAD, $SUBSHELL, 'has space', '../../etc') as $bad_slug) {
 }
 
 // The happy path: a primitive envelope carrying the run config as declared
-// parameters. Nothing this plane sends is executed as syntax.
+// parameters. Nothing this plane sends is executed as syntax. Every agent at
+// the version floor stores offloaded files, so the builder reads the node's
+// backup storage for the newest index: an empty listing stands in for it.
 $run_built = JobCommandBuilder::build_backup_run($run_node);
 check(($run_built['primitive'] ?? '') === 'backup_run',
 	'backup_run travels as a primitive');
@@ -1065,7 +1092,7 @@ $obj_node = jcb_node(array(
 	'mgn_web_root' => '/var/www/html/objnode/public_html',
 	'mgn_bkt_backup_target_id' => $bkt->key,
 	'mgn_agent_public_key' => base64_encode(str_repeat("\x0a", 32)),
-	'mgn_agent_version'    => JobCommandBuilder::BACKUP_RUN_OBJECTS_MIN_AGENT_VERSION));
+	'mgn_agent_version'    => AgentVocabulary::FLOOR));
 $obj_base = 'joinery-backups/' . $obj_node->get('mgn_slug') . '/manager/';
 foreach ($obj_listing as &$o) { $o['key'] = $obj_base . substr($o['key'], strpos($o['key'], '/manager/') + 9); }
 unset($o);
@@ -1082,12 +1109,16 @@ check(($obj_config['objects'] ?? null) === true && !isset($obj_config['objects_i
 	'links the scheduler hands over are used as they are: an empty backup storage sends the flag and no link');
 $obj_config = JobCommandBuilder::build_backup_run($obj_node, array('type' => 'database'))['params'];
 check(!isset($obj_config['objects']), 'a database-only run carries no object store');
-JobCommandBuilder::set_shelf_listing_for_tests(null);
-$old_config = JobCommandBuilder::build_backup_run($run_node)['params'];
-check(!isset($old_config['objects']) && !isset($old_config['objects_index_url']) && !isset($old_config['epoch_envelope_urls']),
-	'an older agent is sent none of the object-store fields (it would refuse the job)');
-check(!JobCommandBuilder::agent_accepts_backup_run_objects(jcb_node(array('mgn_agent_version' => ''))),
-	'an unknown agent version is not sent them either');
+JobCommandBuilder::set_shelf_listing_for_tests(array());
+$below_threw = '';
+try {
+	JobCommandBuilder::build_backup_run(jcb_node(array(
+		'mgn_web_root' => '/var/www/html/belowrun/public_html',
+		'mgn_bkt_backup_target_id' => $bkt->key,
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x0c", 32)),
+		'mgn_agent_version'    => '1.37.0')));
+} catch (Exception $e) { $below_threw = $e->getMessage(); }
+check($below_threw !== '', 'an agent below the version floor is not sent a backup at all: apply_update is all it is offered', $below_threw);
 
 // An unpaired node with an otherwise valid config is refused with the fix.
 $bru_threw = '';
@@ -1156,7 +1187,7 @@ $split_node = jcb_node(array(
 	'mgn_web_root' => '/var/www/html/splitnode/public_html',
 	'mgn_bkt_backup_target_id' => $bkt_split->key,
 	'mgn_agent_public_key' => base64_encode(str_repeat("\x07", 32)),
-	'mgn_agent_version'    => '1.13.0'));
+	'mgn_agent_version'    => AgentVocabulary::FLOOR));
 
 $split_config = JobCommandBuilder::build_backup_run($split_node)['params'];
 $node_token = '__SM_NODE_CREDS_' . (int)$bkt_split->key . '__';
@@ -1198,7 +1229,7 @@ $split_paired = jcb_node(array(
 	'mgn_slug'                 => 'splitnode',
 	'mgn_bkt_backup_target_id' => $bkt_split->key,
 	'mgn_agent_public_key'     => base64_encode(str_repeat("\x04", 32)),
-	'mgn_agent_version'        => '1.13.0'));
+	'mgn_agent_version'        => AgentVocabulary::FLOOR));
 $split_download = JobCommandBuilder::build_download_backup($split_paired, array(
 	'filename'   => 'splitnode-20260101.sql.gz.enc',
 	'cloud_path' => 'joinery-backups/splitnode/manager/splitnode-20260101.sql.gz.enc'));
@@ -1228,7 +1259,7 @@ function jcb_host_with_agent(array $host_agent_fields = array()) {
 	$suffix = bin2hex(random_bytes(3));
 	$host_node = jcb_node(array_merge(array(
 		'mgn_agent_public_key' => base64_encode(str_repeat("\x0b", 32)),
-		'mgn_agent_version'    => '1.15.0',
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
 		'mgn_agent_primitives' => 'check_status,decommission_site',
 	), $host_agent_fields));
 	$host = new ManagedHost(NULL);
@@ -1332,19 +1363,19 @@ check(strpos($np_msg, "Pair the host's agent") !== false,
 // report; one that predates reporting refuses on the 1.15.0 floor — the
 // restore floor (1.13.0) must not vouch for a primitive it predates.
 list($host_old) = jcb_host_with_agent(array(
-	'mgn_agent_version' => '1.13.1', 'mgn_agent_primitives' => 'check_status,restore_database'));
+	'mgn_agent_version' => AgentVocabulary::FLOOR, 'mgn_agent_primitives' => 'check_status,restore_database'));
 $decom_old = jcb_decom_victim($host_old, array('mgn_container_name' => 'decomsite4'));
 $old_msg = '';
 try { JobCommandBuilder::build_decommission_node($decom_old); } catch (Exception $e) { $old_msg = $e->getMessage(); }
-check(strpos($old_msg, "Update the host's agent") !== false,
+check(strpos($old_msg, 'update this node') !== false && strpos($old_msg, 'decommission_site') !== false,
 	'a host agent that does not report decommission_site refuses loudly', $old_msg);
 list($host_mute) = jcb_host_with_agent(array(
 	'mgn_agent_version' => '1.10.0', 'mgn_agent_primitives' => ''));
 $decom_mute = jcb_decom_victim($host_mute, array('mgn_container_name' => 'decomsite5'));
 $mute_msg = '';
 try { JobCommandBuilder::build_decommission_node($decom_mute); } catch (Exception $e) { $mute_msg = $e->getMessage(); }
-check(strpos($mute_msg, "Update the host's agent") !== false,
-	'a pre-report host agent refuses on the 1.15.0 floor, not the restore floor', $mute_msg);
+check(strpos($mute_msg, AgentVocabulary::FLOOR) !== false,
+	'a pre-report host agent is below the floor and refuses naming it', $mute_msg);
 
 // A victim below the release carrying the approval panel cannot render the
 // consent it would be asked for: refused, with the upgrade in the message.
@@ -1389,10 +1420,10 @@ try { JobCommandBuilder::build_decommission_node($decom_v2); } catch (Exception 
 check(strpos($inflight_msg, 'already has a site removal') !== false,
 	'a host with a removal pending refuses a second dispatch', $inflight_msg);
 
-// A destructive operation with no declared version floor fails closed rather
-// than inheriting the restore family's.
-check(JobCommandBuilder::node_can_dispatch_destructive($decom_host_node, 'no_such_destructive_op') === false,
-	'an undeclared destructive floor refuses instead of inheriting');
+// A destructive operation the node does not report is never routed at, even
+// to an agent that can ask its own operator.
+check(JobCommandBuilder::has_primitive($decom_host_node, 'no_such_destructive_op') === false,
+	'a destructive word the node does not report is refused');
 
 section('Placement records: the FK survives what the host-row lifecycle does');
 
@@ -1590,7 +1621,7 @@ $verify_node = jcb_node(array(
 	'mgn_slug'                 => 'verifysite',
 	'mgn_bkt_backup_target_id' => $verify_bkt->key,
 	'mgn_agent_public_key'     => base64_encode(str_repeat("\x03", 32)),
-	'mgn_agent_version'        => JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION['verify_backup']));
+	'mgn_agent_version'        => AgentVocabulary::FLOOR));
 $verify_target = JobCommandBuilder::get_target($verify_node);
 if (!$verify_target) {
 	harness_skip('verify_backup builder', 'no enabled backup target on this management node to resolve a shelf against');
@@ -1656,13 +1687,13 @@ if (!$verify_target) {
 		'mgn_slug'                 => 'verifysite-old',
 		'mgn_bkt_backup_target_id' => $verify_bkt->key,
 		'mgn_agent_public_key'     => base64_encode(str_repeat("\x04", 32)),
-		'mgn_agent_version'        => '1.13.0'));
+		'mgn_agent_version'        => '1.23.0'));
 	$threw = '';
 	try {
 		JobCommandBuilder::build_verify_backup($old_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager', 'level' => 2));
 	} catch (Exception $e) { $threw = $e->getMessage(); }
-	check(strpos($threw, JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION['verify_backup']) !== false,
-		'an agent that predates verify_backup is refused, naming the version it needs', $threw);
+	check(strpos($threw, AgentVocabulary::FLOOR) !== false && strpos($threw, 'update this node') !== false,
+		'an agent below the floor is refused verify_backup, naming the floor and the fix', $threw);
 
 	// ── Offloaded files ─────────────────────────────────────────────────────
 	// The chain's newest run carries an index; the plane reads it, signs a
@@ -1691,7 +1722,7 @@ if (!$verify_target) {
 		'mgn_slug'                 => 'verifysite-objects',
 		'mgn_bkt_backup_target_id' => $verify_bkt->key,
 		'mgn_agent_public_key'     => base64_encode(str_repeat("\x04", 32)),
-		'mgn_agent_version'        => JobCommandBuilder::VERIFY_BACKUP_OBJECTS_MIN_AGENT_VERSION));
+		'mgn_agent_version'        => AgentVocabulary::FLOOR));
 	$vbase = dirname(rtrim($oprefix, '/')) . '/';
 	$v2 = JobCommandBuilder::build_verify_backup($objects_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager', 'level' => 2));
 	check(array_keys($v2['params']['epoch_envelope_urls'] ?? array()) === array('epoch-20260801_000000', 'epoch-20260901_000000'),
@@ -1712,10 +1743,6 @@ if (!$verify_target) {
 	$vjson = (string)json_encode($v3);
 	check(strpos($vjson, 'recovery') === false && strpos($vjson, 'credential') === false && strpos($vjson, 'access_key') === false,
 		'still no key and no credential travel', $vjson);
-	JobCommandBuilder::set_shelf_listing_for_tests($vlisting);
-	$v_old = JobCommandBuilder::build_verify_backup($verify_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager', 'level' => 3));
-	check(!isset($v_old['params']['epoch_envelope_urls']) && !isset($v_old['params']['object_urls']),
-		'an agent before ' . JobCommandBuilder::VERIFY_BACKUP_OBJECTS_MIN_AGENT_VERSION . ' is sent the request it always got');
 	JobCommandBuilder::set_shelf_listing_for_tests(array_slice($vlisting_o, 0, count($vlisting)));
 	$v_none = JobCommandBuilder::build_verify_backup($objects_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager', 'level' => 3));
 	check(!isset($v_none['params']['epoch_envelope_urls']) && !isset($v_none['params']['object_urls']),
@@ -1779,10 +1806,10 @@ if (!$verify_target) {
 	catch (Exception $e) { $threw = $e->getMessage(); }
 	check(strpos($threw, 'mode') !== false, 'a mode that is not missing or all is refused', $threw);
 	$threw = '';
-	try { JobCommandBuilder::build_restore_objects($verify_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager')); }
+	try { JobCommandBuilder::build_restore_objects($old_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager')); }
 	catch (Exception $e) { $threw = $e->getMessage(); }
-	check(strpos($threw, JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION['restore_objects']) !== false,
-		'an agent before ' . JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION['restore_objects'] . ' is refused, naming the version', $threw);
+	check(strpos($threw, AgentVocabulary::FLOOR) !== false,
+		'an agent below the floor is refused restore_objects, naming the floor', $threw);
 	JobCommandBuilder::set_shelf_listing_for_tests($vlisting_gap, array($oprefix . 'objects-0001.json.gz' => $vindex));
 	$threw = '';
 	try { JobCommandBuilder::build_restore_objects($objects_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager')); }
@@ -1850,7 +1877,7 @@ section('apply_update: a node that hosts no site has no release to apply');
 // refusal on the host (2026-09-15). The builder refuses first, and says why.
 $machine = jcb_node(array(
 	'mgn_agent_public_key' => base64_encode(str_repeat("\x0d", 32)),
-	'mgn_agent_version'    => '1.30.0',
+	'mgn_agent_version'    => AgentVocabulary::FLOOR,
 	'mgn_agent_primitives' => 'check_status,host_report,host_converge,apply_update',
 	'mgn_web_root'         => '',
 ));
@@ -1863,7 +1890,7 @@ try {
 }
 $site = jcb_node(array(
 	'mgn_agent_public_key' => base64_encode(str_repeat("\x0e", 32)),
-	'mgn_agent_version'    => '1.30.0',
+	'mgn_agent_version'    => AgentVocabulary::FLOOR,
 	'mgn_agent_primitives' => 'check_status,host_report,host_converge,apply_update',
 	'mgn_web_root'         => '/var/www/html/fixture/public_html',
 ));
@@ -1875,7 +1902,7 @@ section('host_report: primitive only, no parameters, refused without the word');
 {
 	$hr_node = jcb_node(array(
 		'mgn_agent_public_key' => base64_encode(str_repeat("\x02", 32)),
-		'mgn_agent_version'    => '1.25.0',
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
 		'mgn_agent_primitives' => 'check_status,host_report',
 	));
 	$built = JobCommandBuilder::build_host_report($hr_node);
@@ -1890,7 +1917,7 @@ section('host_report: primitive only, no parameters, refused without the word');
 
 	$without = jcb_node(array(
 		'mgn_agent_public_key' => base64_encode(str_repeat("\x03", 32)),
-		'mgn_agent_version'    => '1.25.0',
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
 		'mgn_agent_primitives' => 'check_status,install_report',
 	));
 	check(!JobCommandBuilder::has_primitive($without, 'host_report'),
@@ -1905,9 +1932,7 @@ section('host_report: primitive only, no parameters, refused without the word');
 		'mgn_agent_version'    => '1.10.0',
 	));
 	check(!JobCommandBuilder::has_primitive($silent_old, 'host_report'),
-		'an agent too old to report a vocabulary is held to the 1.25.0 floor and refused');
-	check(JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION['host_report'] === '1.25.0',
-		'the floor is the release that first ships the word');
+		'an agent too old to report a vocabulary is below the floor and refused');
 
 	$no_agent = jcb_node();
 	$threw = '';
@@ -1924,7 +1949,7 @@ section('host_converge: primitive only, no parameters, refused without the word'
 {
 	$hc_node = jcb_node(array(
 		'mgn_agent_public_key' => base64_encode(str_repeat("\x05", 32)),
-		'mgn_agent_version'    => '1.26.0',
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
 		'mgn_agent_primitives' => 'check_status,host_report,host_converge',
 	));
 	$built = JobCommandBuilder::build_host_converge($hc_node);
@@ -1939,7 +1964,7 @@ section('host_converge: primitive only, no parameters, refused without the word'
 
 	$without = jcb_node(array(
 		'mgn_agent_public_key' => base64_encode(str_repeat("\x06", 32)),
-		'mgn_agent_version'    => '1.26.0',
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
 		'mgn_agent_primitives' => 'check_status,host_report',
 	));
 	check(!JobCommandBuilder::has_primitive($without, 'host_converge'),
@@ -1954,9 +1979,7 @@ section('host_converge: primitive only, no parameters, refused without the word'
 		'mgn_agent_version'    => '1.10.0',
 	));
 	check(!JobCommandBuilder::has_primitive($silent_old, 'host_converge'),
-		'an agent too old to report a vocabulary is held to the 1.26.0 floor and refused');
-	check(JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION['host_converge'] === '1.26.0',
-		'the floor is the release that first ships the word');
+		'an agent too old to report a vocabulary is below the floor and refused');
 
 	$no_agent = jcb_node();
 	$threw = '';
@@ -1974,7 +1997,7 @@ section('site_log / log_table_tail: closed choices, bounded counts, the owner\'s
 {
 	$log_node = jcb_node(array(
 		'mgn_agent_public_key' => base64_encode(str_repeat("\x04", 32)),
-		'mgn_agent_version'    => '1.35.0',
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
 		'mgn_agent_primitives' => 'check_status,site_log,log_table_tail',
 		'mgn_agent_log_access' => 'on',
 	));
@@ -2008,40 +2031,26 @@ section('site_log / log_table_tail: closed choices, bounded counts, the owner\'s
 	check(count(JobCommandBuilder::SITE_LOG_FILES) === 6 && count(JobCommandBuilder::LOG_TABLES) === 5,
 		'the mirrored lists are the six files and five tables the spec names');
 
-	// The PostgreSQL entry is newer than the word, so the floor is per value:
-	// an older agent refuses the value rather than the word, which would queue
-	// a job the node throws away. $log_node above is an agent below the floor.
+	// Every agent at the version floor has the PostgreSQL entry on its own
+	// list; the per-value floor it once needed is deleted with the rest.
 	$pg_node = jcb_node(array(
 		'mgn_agent_public_key' => base64_encode(str_repeat("\x0b", 32)),
-		'mgn_agent_version'    => '1.40.0',
 		'mgn_agent_primitives' => 'check_status,site_log,log_table_tail',
 		'mgn_agent_log_access' => 'on',
 	));
 	$built = JobCommandBuilder::build_site_log($pg_node, 'postgresql', false, 100);
 	check($built === array('primitive' => 'site_log', 'params' => array('file' => 'postgresql', 'previous' => false, 'lines' => 100)),
 		'an agent at the floor reads the database log', var_export($built, true));
-	check(array_key_exists('postgresql', JobCommandBuilder::site_log_files_for($pg_node))
-		&& count(JobCommandBuilder::site_log_files_for($pg_node)) === 6,
-		'and the picker offers it, beside the five that were always there');
-
-	check(!array_key_exists('postgresql', JobCommandBuilder::site_log_files_for($log_node)),
-		'an agent below the floor is not offered it');
-	check(count(JobCommandBuilder::site_log_files_for($log_node)) === 5,
-		'and still gets the five that have always been on its own list');
-	$threw = '';
-	try { JobCommandBuilder::build_site_log($log_node, 'postgresql'); } catch (Exception $e) { $threw = $e->getMessage(); }
-	check(strpos($threw, 'Apply an update') !== false,
-		'asking anyway is refused here with the fix, not queued for the node to reject', $threw);
-	foreach (array('error', 'cron_scheduled_tasks') as $always) {
-		check(JobCommandBuilder::build_site_log($log_node, $always)['params']['file'] === $always,
-			'the older agent still answers about ' . $always);
-	}
+	check(count(JobCommandBuilder::site_log_files_for($pg_node)) === 6,
+		'and the picker offers all six files');
+	check(!defined('JobCommandBuilder::SITE_LOG_POSTGRES_MIN_AGENT_VERSION'),
+		'the per-value floor the version floor passed is deleted');
 
 	// The owner's switch, as the node last reported it: off is a refusal
 	// before a job exists, with the reason naming the switch.
 	$off_node = jcb_node(array(
 		'mgn_agent_public_key' => base64_encode(str_repeat("\x05", 32)),
-		'mgn_agent_version'    => '1.35.0',
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
 		'mgn_agent_primitives' => 'check_status,site_log,log_table_tail',
 		'mgn_agent_log_access' => 'off',
 	));
@@ -2054,7 +2063,7 @@ section('site_log / log_table_tail: closed choices, bounded counts, the owner\'s
 	check(JobCommandBuilder::log_access_refusal($log_node) === null, 'a node that reported on is not refused here');
 	$unreported = jcb_node(array(
 		'mgn_agent_public_key' => base64_encode(str_repeat("\x06", 32)),
-		'mgn_agent_version'    => '1.35.0',
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
 		'mgn_agent_primitives' => 'check_status,site_log,log_table_tail',
 	));
 	check(JobCommandBuilder::log_access_refusal($unreported) === null,
@@ -2062,7 +2071,7 @@ section('site_log / log_table_tail: closed choices, bounded counts, the owner\'s
 
 	$without = jcb_node(array(
 		'mgn_agent_public_key' => base64_encode(str_repeat("\x07", 32)),
-		'mgn_agent_version'    => '1.34.0',
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
 		'mgn_agent_primitives' => 'check_status,host_report',
 	));
 	check(!JobCommandBuilder::has_primitive($without, 'site_log') && !JobCommandBuilder::has_primitive($without, 'log_table_tail'),
@@ -2077,7 +2086,7 @@ section('unit_journal / disk_usage: why a unit failed, and where the disk went (
 {
 	$ask_node = jcb_node(array(
 		'mgn_agent_public_key' => base64_encode(str_repeat("\x08", 32)),
-		'mgn_agent_version'    => '1.39.0',
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
 		'mgn_agent_primitives' => 'check_status,host_report,unit_journal,disk_usage',
 		'mgn_agent_log_access' => 'on',
 	));
@@ -2118,7 +2127,7 @@ section('unit_journal / disk_usage: why a unit failed, and where the disk went (
 	// the log switch would look like a content read.
 	$off_node = jcb_node(array(
 		'mgn_agent_public_key' => base64_encode(str_repeat("\x09", 32)),
-		'mgn_agent_version'    => '1.39.0',
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
 		'mgn_agent_primitives' => 'check_status,host_report,unit_journal,disk_usage',
 		'mgn_agent_log_access' => 'off',
 	));
@@ -2130,7 +2139,7 @@ section('unit_journal / disk_usage: why a unit failed, and where the disk went (
 
 	$older = jcb_node(array(
 		'mgn_agent_public_key' => base64_encode(str_repeat("\x0a", 32)),
-		'mgn_agent_version'    => '1.38.0',
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
 		'mgn_agent_primitives' => 'check_status,host_report,site_log',
 	));
 	check(!JobCommandBuilder::has_primitive($older, 'unit_journal') && !JobCommandBuilder::has_primitive($older, 'disk_usage'),
@@ -2139,7 +2148,7 @@ section('unit_journal / disk_usage: why a unit failed, and where the disk went (
 		$threw = '';
 		try { ($m === 'build_disk_usage') ? JobCommandBuilder::$m($older) : JobCommandBuilder::$m($older, 'cron'); }
 		catch (Exception $e) { $threw = $e->getMessage(); }
-		check(strpos($threw, 'Apply an update') !== false, $m . ' names the missing word and the fix');
+		check(strpos($threw, 'update this node') !== false, $m . ' names the missing word and the fix');
 	}
 
 	check(in_array('unit_journal', ManagementJob::LOG_EXCERPT_TYPES, true),
@@ -2153,7 +2162,7 @@ section('reset_failed_unit: clear a failed unit from the same list (specs/disk_h
 {
 	$clear_node = jcb_node(array(
 		'mgn_agent_public_key' => base64_encode(str_repeat("\x0b", 32)),
-		'mgn_agent_version'    => '1.41.0',
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
 		'mgn_agent_primitives' => 'check_status,host_report,unit_journal,reset_failed_unit',
 		'mgn_agent_log_access' => 'off',
 	));
@@ -2171,13 +2180,13 @@ section('reset_failed_unit: clear a failed unit from the same list (specs/disk_h
 	}
 	$older = jcb_node(array(
 		'mgn_agent_public_key' => base64_encode(str_repeat("\x0c", 32)),
-		'mgn_agent_version'    => '1.40.0',
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
 		'mgn_agent_primitives' => 'check_status,host_report,unit_journal,disk_usage',
 	));
 	check(!JobCommandBuilder::has_primitive($older, 'reset_failed_unit'), 'an agent without the word is not offered it');
 	$threw = '';
 	try { JobCommandBuilder::build_reset_failed_unit($older, 'cron'); } catch (Exception $e) { $threw = $e->getMessage(); }
-	check(strpos($threw, 'Apply an update') !== false, 'and the refusal names the fix');
+	check(strpos($threw, 'update this node') !== false, 'and the refusal names the fix');
 }
 
 

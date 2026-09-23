@@ -2,6 +2,8 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.25 - file_head joins LOG_EXCERPT_TYPES: a configuration excerpt read behind the owner's switch ages
+ *                 out on the same window.
  * @version 1.24 - unit_journal joins LOG_EXCERPT_TYPES: a unit's journal lines age out on the same
  *                 window as a site log's, because they are the same kind of thing
  * @version 1.23 - MAX_PARAMS_BYTES is 60 KiB, 4 KiB under the 64 KiB job body an agent reads (the
@@ -71,7 +73,7 @@ class ManagementJob extends SystemBase {
 	);
 
 	/** The job types whose result is a log excerpt and is pruned on the window above. */
-	const LOG_EXCERPT_TYPES = array('site_log', 'log_table_tail', 'unit_journal');
+	const LOG_EXCERPT_TYPES = array('site_log', 'log_table_tail', 'unit_journal', 'file_head');
 
 	public static $field_specifications = array(
 		'mjb_management_job_id'                => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),

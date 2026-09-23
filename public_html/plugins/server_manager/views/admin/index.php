@@ -3,6 +3,8 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.28 - each node row shows its agent version, how far behind the agent this management node
+ *                 ships, and a below-minimum badge under AgentVocabulary::FLOOR
  * @version 1.27 - the result sweep reads its terminal statuses from JobResultProcessor::TERMINAL_STATUSES
  * @version 1.26 - the readiness alert's warning clause no longer lists two kinds when a card can carry a third
  *                 (offloaded files sealed to a retired recovery key)
@@ -825,6 +827,22 @@ function render_node_row($node, $db, $session, $role_badge = '') {
 						<span class="badge bg-danger ms-1" title="Management node is at <?php echo htmlspecialchars($cp_version ?? ''); ?>">ahead of management node</span>
 					<?php endif; ?>
 				</span>
+				<?php
+				// Agent version spread (specs/agent_recipes_and_vocabulary.md,
+				// Different agent versions): each node's agent, how far behind
+				// the agent this management node ships, and whether it is below
+				// the oldest this management node supports — where the only job
+				// it is offered is Apply Update.
+				$spread = AgentVocabulary::spread($node);
+				if ($spread !== null):
+					if ($spread['below_floor']): ?>
+						<span class="badge bg-danger ms-1" title="Below <?php echo htmlspecialchars(AgentVocabulary::FLOOR); ?>, the oldest agent this management node supports. Apply an update to this node; nothing else is offered until then."><?php echo htmlspecialchars($spread['label']); ?> — below minimum</span>
+					<?php elseif ((int)$spread['behind'] > 0): ?>
+						<span class="badge bg-light text-dark border ms-1" title="This management node ships agent <?php echo htmlspecialchars((string)AgentVocabulary::newest()); ?>"><?php echo htmlspecialchars($spread['label']); ?></span>
+					<?php else: ?>
+						<small class="text-muted ms-1"><?php echo htmlspecialchars($spread['label']); ?></small>
+					<?php endif;
+				endif; ?>
 				<small class="text-muted ms-1 js-last-check"><?php
 					if ($last_check) {
 						echo '(' . htmlspecialchars(LibraryFunctions::time_ago_or_time($last_check, 'UTC', $session->get_timezone(), 'M j, g:i A')) . ')';

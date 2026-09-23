@@ -49,6 +49,11 @@ class RequestLogger {
 		if (isset($options['error_type']))  $log->set('rql_error_type', $options['error_type']);
 		if (isset($options['response_ms'])) $log->set('rql_response_ms', $options['response_ms']);
 		if (self::$api_key_type !== null)   $log->set('rql_api_key_type', self::$api_key_type);
+		// A page_probe request is logged as a probe, never as the throwaway
+		// viewer's own activity: the viewer is deleted when the probe returns.
+		if (class_exists('PageProbe', false) && PageProbe::active()) {
+			$log->set('rql_api_key_type', 'page_probe');
+		}
 
 		// The note is free text a caller hands us — most often an exception
 		// message. On a request that has opened sealed content, that message may

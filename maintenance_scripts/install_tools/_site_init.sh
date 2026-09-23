@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.4 - The logrotate file and the cron entry come from site_housekeeping.sh, the core
+#                installer the host timer also runs (specs/agent_recipes_and_vocabulary.md).
 # VERSION: 3.3 - The sending provider is detected from the key when none is named.
 # VERSION: 3.2 - Three optional services a fresh site can be handed at install,
 #                honoured here so every path that reaches this script - bare
@@ -925,53 +927,22 @@ else
 fi
 
 # =============================================================================
-# LOG ROTATION SETUP
+# LOG ROTATION AND CRON
 # =============================================================================
+# One implementation: site_housekeeping.sh, the core installer the host timer
+# also runs, writes the site's logrotate file and (on bare metal) its cron
+# entry. In a container the start command in Dockerfile.template owns the cron
+# entry, because /etc/cron.d does not survive a rebuild; --no-cron says so.
 
-log "Setting up log rotation..."
-
-LOGROTATE_TEMPLATE="${SCRIPT_DIR}/logrotate_joinery.conf"
-LOGROTATE_DEST="/etc/logrotate.d/joinery-${SITENAME}"
-
-if [ -f "$LOGROTATE_TEMPLATE" ]; then
-    cp "$LOGROTATE_TEMPLATE" "$LOGROTATE_DEST"
-    sed -i "s|{{SITE_ROOT}}|${SITE_ROOT}|g" "$LOGROTATE_DEST"
-    chmod 644 "$LOGROTATE_DEST"
-    log "Log rotation configured: $LOGROTATE_DEST"
+log "Setting up log rotation and scheduled tasks..."
+SITE_HK_ARGS=()
+[ "$DOCKER_MODE" = true ] && SITE_HK_ARGS+=(--no-cron)
+if bash "${SCRIPT_DIR}/site_housekeeping.sh" "${SITE_HK_ARGS[@]}" "$SITENAME" "$SITE_ROOT"; then
+    log "Log rotation and scheduled tasks configured"
 else
-    log_error "Warning: logrotate template not found at $LOGROTATE_TEMPLATE (non-fatal)"
+    log_error "Warning: site housekeeping reported a problem (non-fatal; the host timer retries)"
 fi
-
-# =============================================================================
-# CRON SETUP
-# =============================================================================
-
-log "Setting up cron jobs..."
-
-# One writer per artifact: on bare metal this script owns the cron file; in a
-# container the start command in Dockerfile.template owns it, because
-# /etc/cron.d does not survive a container rebuild and this script only runs
-# on first boot. Writing it here as well meant two files running the same
-# task runner, colliding on every shared tick.
-if [ "$DOCKER_MODE" = false ]; then
-    # Write to /etc/cron.d/ — more durable than user crontab (survives script
-    # re-runs). /etc/cron.d/ format requires the username in the line; file
-    # must not be world-writable.
-    #
-    # Every minute, not every five: the tick interval is the floor on latency
-    # for every every_run task, and inbound mail is the one users feel — a
-    # relay-fronted deployment cannot see a message until the next
-    # PullRelaySpool. A full pass costs about a second, and the runner holds a
-    # per-task advisory lock, so a slow task is skipped rather than run
-    # concurrently.
-    CRON_FILE="/etc/cron.d/joinery-${SITENAME}"
-    CRON_LINE="* * * * * www-data php ${SITE_ROOT}/public_html/utils/process_scheduled_tasks.php >> ${SITE_ROOT}/logs/cron_scheduled_tasks.log 2>&1"
-    printf '%s\n' "$CRON_LINE" > "$CRON_FILE" && chmod 644 "$CRON_FILE" && {
-        log "Scheduled tasks cron entry installed: $CRON_FILE"
-    } || {
-        log_error "Warning: Could not write $CRON_FILE (non-fatal)"
-    }
-else
+if [ "$DOCKER_MODE" = true ]; then
     log "Docker mode: cron entry is written by the container start command"
     # In Docker, cron isn't started automatically — ensure it's running.
     service cron start 2>/dev/null || true

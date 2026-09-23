@@ -55,8 +55,8 @@ class RestoreDispatchNode {
 		$this->fields = array_merge(array(
 			'mgn_slug'             => 'testnode',
 			'mgn_agent_public_key' => 'AAAA',
-			'mgn_agent_version'    => '1.13.0',
-			'mgn_agent_primitives' => '',
+			'mgn_agent_version'    => AgentVocabulary::FLOOR,
+			'mgn_agent_primitives' => 'check_status,restore_database,restore_project,restore_chain,download_backup,stage_chain',
 			'mgn_web_root'         => '/var/www/html/testnode/public_html',
 		), $fields);
 	}
@@ -68,7 +68,7 @@ section('The destructive gate opens only for a node that can ask its own operato
 
 $paired = new RestoreDispatchNode();
 check(JobCommandBuilder::node_can_dispatch_destructive($paired) === true,
-	'a paired node may be sent a restore — its agent will ask before running one');
+	'a paired node at the version floor may be sent a restore — its agent will ask before running one');
 
 $unpaired = new RestoreDispatchNode(array('mgn_agent_public_key' => ''));
 check(JobCommandBuilder::node_can_dispatch_destructive($unpaired) === false,
@@ -76,47 +76,31 @@ check(JobCommandBuilder::node_can_dispatch_destructive($unpaired) === false,
 
 foreach (array('restore_database', 'restore_project', 'restore_chain') as $op) {
 	check(JobCommandBuilder::has_primitive($paired, $op) === true,
-		"{$op} routes to the node's own agent on a 1.13.0 node");
+		"{$op} routes to the node's own agent at the floor when it reports the word");
 	check(JobCommandBuilder::has_primitive($unpaired, $op) === false,
 		"{$op} does not route to an unpaired node");
 }
 
-// The version floor is live now, not decorative: a 1.12.0 agent ships the
-// restore vocabulary and refuses every job in it at a compiled ceiling, so
-// routing to it would trade a transport for a guaranteed refusal.
-$old = new RestoreDispatchNode(array('mgn_agent_version' => '1.12.0'));
+// Below the floor, a node is offered apply_update and nothing else, whatever
+// it reports: the code that spoke to older agents is gone
+// (specs/agent_recipes_and_vocabulary.md, Different agent versions).
+$old = new RestoreDispatchNode(array('mgn_agent_version' => '1.42.0'));
+check(JobCommandBuilder::node_can_dispatch_destructive($old) === false,
+	'a node below the floor may not be sent a restore, even reporting the words');
 foreach (array('restore_database', 'restore_chain', 'download_backup', 'stage_chain') as $op) {
 	check(JobCommandBuilder::has_primitive($old, $op) === false,
-		"{$op} is not routed to an agent that predates the approval verifier");
+		"{$op} is not routed to an agent below the floor");
 }
-
-// THE SAME NODE, REPORTING ITS VOCABULARY — which is what a real 1.12.0 node
-// does, and which the check above does not model.
-//
-// A node's own reported list normally WINS over any version inference, and that
-// is right for every other operation: the report is the only account of a
-// node's vocabulary that is not a guess. It is wrong here, because shipping the
-// restore primitives and being able to AUTHORIZE a job in one are different
-// facts — 1.12.0 ships them and refuses the whole class at a compiled ceiling.
-// A gate that only caught nodes reporting nothing would have missed every node
-// the rollout actually produces.
 $old_reporting = new RestoreDispatchNode(array(
 	'mgn_agent_version'    => '1.12.0',
 	'mgn_agent_primitives' => 'check_status,backup_run,restore_database,restore_project,restore_chain',
 ));
 check(JobCommandBuilder::node_can_dispatch_destructive($old_reporting) === false,
-	'a 1.12.0 node that reports the restore primitives still may not be sent one',
-	'it ships them and refuses them; routing there swaps this plane\'s legible '
-	. '"apply an update first" for the agent\'s opaque "does not accept destructive primitives"');
-foreach (array('restore_database', 'restore_project', 'restore_chain') as $op) {
-	check(JobCommandBuilder::has_primitive($old_reporting, $op) === false,
-		"{$op} is refused for a vocabulary-reporting 1.12.0 node");
-}
+	'a 1.12.0 node that reports the restore primitives may not be sent one');
 
-// And the reported list still wins in the direction that matters — a current
-// node that does NOT report a restore primitive is not sent one.
+// The reported list wins in the direction that matters — a current node that
+// does NOT report a restore primitive is not sent one.
 $current_partial = new RestoreDispatchNode(array(
-	'mgn_agent_version'    => '1.13.0',
 	'mgn_agent_primitives' => 'check_status,restore_database',
 ));
 check(JobCommandBuilder::has_primitive($current_partial, 'restore_database') === true,
@@ -124,13 +108,13 @@ check(JobCommandBuilder::has_primitive($current_partial, 'restore_database') ===
 check(JobCommandBuilder::has_primitive($current_partial, 'restore_chain') === false,
 	'and one it does not report is still refused — the node\'s own list is not overridden');
 
-// A node's own reported vocabulary still wins over the version inference.
-$reported = new RestoreDispatchNode(array(
-	'mgn_agent_version'    => '1.13.0',
-	'mgn_agent_primitives' => 'check_status,list_backups',
-));
-check(JobCommandBuilder::has_primitive($reported, 'restore_database') === false,
-	'a node that does not report the primitive is not sent it, whatever its version says');
+// A node at the floor that reports nothing is not routed at either: every
+// agent at the floor reports, so an empty list is no evidence of a word.
+$silent = new RestoreDispatchNode(array('mgn_agent_primitives' => ''));
+check(JobCommandBuilder::has_primitive($silent, 'restore_database') === false,
+	'a node that reports no vocabulary is sent nothing but apply_update');
+check(JobCommandBuilder::has_primitive($silent, 'apply_update') === true,
+	'and apply_update, which is how it gets a vocabulary');
 
 // ── 2. The wire format ──────────────────────────────────────────────────────
 section('No restore can carry an approval on the wire');
@@ -253,8 +237,8 @@ try {
 	JobCommandBuilder::build_restore_database($old, $params + array('local_path' => '/backups/db.sql.gz.enc'));
 	check(false, 'an out-of-date agent refuses a restore');
 } catch (Exception $e) {
-	check(strpos($e->getMessage(), '1.13.0') !== false,
-		'an out-of-date agent refuses a restore and names the version needed', $e->getMessage());
+	check(strpos($e->getMessage(), AgentVocabulary::FLOOR) !== false && strpos($e->getMessage(), 'update this node') !== false,
+		'an agent below the floor refuses a restore, names the floor and says to update', $e->getMessage());
 }
 
 try {

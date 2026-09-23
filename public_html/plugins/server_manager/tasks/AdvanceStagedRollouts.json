@@ -1,0 +1,7 @@
+{
+  "name": "Advance Staged Rollouts",
+  "description": "Moves a staged rollout along: queues the next node's apply_update when the one before it proved good by its structured apply result, and halts at the first node that did not. A rollout runs for minutes per node; this tick is what carries it between them.",
+  "activate_on_install": true,
+  "default_frequency": "every_run",
+  "config_fields": {}
+}

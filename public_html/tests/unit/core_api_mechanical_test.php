@@ -246,6 +246,7 @@ $permitted = array(
 	'data/backup_targets_class.php'                            => 'a Backblaze credential completed with the region and endpoint Backblaze itself reports, written back once on the read that found them missing',
 	'data/general_errors_class.php'                           => 'error rows, recorded on whatever request failed',
 	'data/logins_class.php'                                   => 'the login row and usr_lastlogin_time stamp, written when a remembered cookie resumes a session on a read request',
+	'includes/PageProbe.php'                                  => 'a page_probe grant consumed and its render report written, by the probe request itself from this machine',
 	'includes/RequestLogger.php'                              => 'request log rows, including for reads',
 	'includes/setup_steps/mail_send.php'                      => 'receiving-domain row reconciled from the stored From address on a wizard view — the Direct records cannot be listed without it',
 	'includes/VaultAudit.php'                                 => 'vault window opened/closed, observed on whatever request noticed',
