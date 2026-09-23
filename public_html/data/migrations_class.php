@@ -239,6 +239,7 @@ function authenticate_write($data) {
 			$migration_hash = null;
 			$output = '';
 			$sql_executed = '';
+			$rows_affected = null;
 			
 			if (isset($migration['migration_sql']) && $migration['migration_sql']) {
 				// SQL-based migration
@@ -258,6 +259,11 @@ function authenticate_write($data) {
 				}
 				
 				$output = "SQL migration executed successfully";
+				// Rows the statement touched, for the structured apply result
+				// (specs/agent_recipes_and_vocabulary.md): a count, never a row.
+				// For a migration of several statements PDO reports the last
+				// statement's count.
+				$rows_affected = $q->rowCount();
 				
 			} elseif (isset($migration['migration_file']) && $migration['migration_file']) {
 				// File-based migration
@@ -309,6 +315,7 @@ function authenticate_write($data) {
 				'success' => true,
 				'sql' => $sql_executed,
 				'output' => $output,
+				'rows' => $rows_affected,
 				'version' => $migration['database_version']
 			];
 			

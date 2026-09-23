@@ -34,6 +34,8 @@
 	 * lives under uploads/ and could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.3 - the structured apply result: an APPLY_RESULT line at the end of every CLI run
+	 *               (versions, migrations with rows, schema changes, plugins, deploy tier, rollback)
 	 * @version 1.2 - the browser-upgrade note says a minute, which is the host
 	 *                timer's tick, and that a runner transcript showing it
 	 *                waited out the runner lock is converged by that tick too
@@ -136,6 +138,69 @@
 		$force_upgrade = isset($_REQUEST['force-upgrade']);
 	}
 
+	// ------------------------------------------------------------------
+	// THE STRUCTURED APPLY RESULT (specs/agent_recipes_and_vocabulary.md,
+	// "The structured apply result"). One bounded JSON object, printed as the
+	// last line of a CLI run — APPLY_RESULT: {...} — beside the transcript,
+	// which stays for forensics. It is what a person, the management node's
+	// job page and staged_rollout read instead of grepping the transcript:
+	// the versions, each migration and schema change, the plugins synced, the
+	// deploy tier's verdict, and whether and where it rolled back. Counts and
+	// names only, never row data.
+	// ------------------------------------------------------------------
+	function upgrade_read_version($path) {
+		$v = is_readable($path) ? trim((string)@file_get_contents($path)) : '';
+		return preg_match('/^\d+\.\d+\.\d+$/', $v) ? $v : null;
+	}
+
+	/** Record where a rollback happened and whether the schema was already migrated. */
+	function apply_result_rolled_back($step, $schema_ahead) {
+		$GLOBALS['APPLY_RESULT']['rolled_back'] = array(
+			'rolled_back' => true, 'step' => $step, 'schema_ahead_of_code' => (bool)$schema_ahead);
+	}
+
+	function apply_result_emit() {
+		if (!empty($GLOBALS['APPLY_RESULT_SUPPRESS'])) {
+			return; // a self-update re-ran the pipeline; the child printed the result
+		}
+		$r = $GLOBALS['APPLY_RESULT'];
+		$r['version_after'] = upgrade_read_version(__DIR__ . '/../VERSION');
+		$r['duration_seconds'] = max(0, time() - (int)$GLOBALS['APPLY_RESULT_STARTED']);
+		// Under 24 KiB, so the line survives the agent's 48 KiB output tail
+		// whatever the transcript around it (review B19): the long lists are
+		// cut from the end, their full counts kept, and the cut is said.
+		$r['migrations_total'] = count($r['migrations']);
+		$r['schema_changes_total'] = count($r['schema_changes']);
+		$r['plugins_total'] = count($r['plugins']);
+		$r['truncated'] = false;
+		while (strlen(json_encode($r)) > 24000) {
+			$r['truncated'] = true;
+			if (count($r['schema_changes']) > 0) { array_pop($r['schema_changes']); continue; }
+			if (count($r['migrations']) > 0)     { array_pop($r['migrations']); continue; }
+			if (count($r['plugins']) > 0)        { array_pop($r['plugins']); continue; }
+			break;
+		}
+		echo "\nAPPLY_RESULT: " . json_encode($r) . "\n";
+	}
+	$GLOBALS['APPLY_RESULT'] = array(
+		'version_before'   => upgrade_read_version(__DIR__ . '/../VERSION'),
+		'version_after'    => null,
+		'self_updated'     => getenv('JOINERY_UPGRADE_RERUN') === '1',
+		'outcome'          => 'failed',
+		'migrations'       => array(),
+		'schema_changes'   => array(),
+		'plugins'          => array(),
+		'deploy_tier'      => array('verdict' => 'not_run', 'failed_tests' => array()),
+		'rolled_back'      => array('rolled_back' => false, 'step' => null, 'schema_ahead_of_code' => false),
+		'duration_seconds' => 0,
+	);
+	$GLOBALS['APPLY_RESULT_STARTED'] = time();
+	$GLOBALS['APPLY_RESULT_SUPPRESS'] = false;
+
+	if ($is_cli) {
+		register_shutdown_function('apply_result_emit');
+	}
+
 	// Helper function to output and flush immediately
 	function upgrade_echo($message) {
 		echo $message;
@@ -173,6 +238,7 @@
 			fclose($upgrade_lock_handle);
 			$upgrade_lock_handle = null;
 		}
+		$GLOBALS['APPLY_RESULT_SUPPRESS'] = true;
 		passthru($cmd, $exit_code);
 		exit($exit_code);
 	}
@@ -338,6 +404,7 @@
 	// nobody watches, a failure. So the deploy rolls back to the tree that was
 	// serving a moment ago, which is at least a tree whose permissions are known.
 	function upgrade_permissions_failed($site_template, $verbose, $detail) {
+		apply_result_rolled_back('permissions', false);
 		echo '<strong>Permissions could not be set on the deployed tree.</strong><br>';
 		echo $detail . '<br>';
 		echo 'Rolling back — a tree whose ownership is unknown is not left serving.<br>';
@@ -1505,6 +1572,7 @@
 				//FAILED, LETS LOAD FROM BACKUP
 				echo '<strong>Upgrade failed, loading from backup.</strong><br>';
 				$deployment_failed = true;
+				apply_result_rolled_back('deploy', false);
 				$rollback = DeploymentHelper::performRollback($site_template, true, $verbose);
 				if ($rollback['success']) {
 					echo "✓ Rollback completed successfully<br>";
@@ -1668,6 +1736,7 @@
 				echo "<strong>ERROR: Composer dependency setup failed.</strong><br>";
 				echo implode('<br>', $composer_output) . "<br>";
 				echo '<br><strong>Rolling back deployment...</strong><br>';
+				apply_result_rolled_back('composer', false);
 				$rollback = DeploymentHelper::performRollback($site_template, true, $verbose);
 				if ($rollback['success']) {
 					echo "✓ Rollback completed successfully<br>";
@@ -1724,8 +1793,22 @@
 			// update_database.php uses standard exit codes: 0 = success, 1 = failure
 			$migration_result = ($update_return === 0);
 
+			// Its UPDATE_DATABASE_RESULT line: each migration and schema change.
+			foreach ($update_output as $line) {
+				if (strpos($line, 'UPDATE_DATABASE_RESULT: ') === 0) {
+					$facts = json_decode(substr($line, strlen('UPDATE_DATABASE_RESULT: ')), true);
+					if (is_array($facts)) {
+						$GLOBALS['APPLY_RESULT']['migrations'] = array_slice((array)($facts['migrations'] ?? array()), 0, 200);
+						$GLOBALS['APPLY_RESULT']['schema_changes'] = array_slice((array)($facts['schema_changes'] ?? array()), 0, 300);
+					}
+				}
+			}
+
 			if(!$migration_result){
 				echo '<strong>Migration failed...reverting upgrade.</strong><br>';
+				// Table changes ran before the migrations, and each migration
+				// that committed stays committed: the schema is ahead.
+				apply_result_rolled_back('migrations', true);
 				$rollback = DeploymentHelper::performRollback($site_template, true, $verbose);
 				if ($rollback['success']) {
 					echo "✓ Rollback completed successfully<br>";
@@ -1793,6 +1876,18 @@
 					}
 				}
 
+				if (is_array($sync_result)) {
+					$GLOBALS['APPLY_RESULT']['plugins'] = array_slice((array)($sync_result['plugins']['versions'] ?? array()), 0, 100);
+					foreach ((array)($sync_result['plugins']['table_messages'] ?? array()) as $tm) {
+						if (count($GLOBALS['APPLY_RESULT']['schema_changes']) >= 300) { break; }
+						$GLOBALS['APPLY_RESULT']['schema_changes'][] = 'plugin: ' . mb_substr(strip_tags((string)$tm), 0, 200);
+					}
+					foreach ((array)($sync_result['plugins']['migration_messages'] ?? array()) as $mm) {
+						if (count($GLOBALS['APPLY_RESULT']['migrations']) >= 200) { break; }
+						$GLOBALS['APPLY_RESULT']['migrations'][] = array(
+							'version' => 'plugin: ' . mb_substr(strip_tags((string)$mm), 0, 120), 'outcome' => 'applied', 'rows' => null);
+					}
+				}
 				if ($sync_return === 0 && is_array($sync_result)) {
 					$theme_parts = array();
 					if (!empty($sync_result['themes']['added'])) {
@@ -1899,6 +1994,13 @@
 			// (tests/security/read_only_tree_gate.sh).
 			exec('JOINERY_DEPLOY_VERIFY=1 /usr/bin/php ' . escapeshellarg($test_runner) . ' deploy 2>&1', $test_output, $test_return);
 
+			$GLOBALS['APPLY_RESULT']['deploy_tier']['verdict'] = ($test_return === 0) ? 'passed' : 'failed';
+			foreach ($test_output as $line) {
+				if (preg_match('/^\s+FAIL\s+([a-z0-9_]+)\b/', $line, $fm)
+						&& count($GLOBALS['APPLY_RESULT']['deploy_tier']['failed_tests']) < 50) {
+					$GLOBALS['APPLY_RESULT']['deploy_tier']['failed_tests'][] = $fm[1];
+				}
+			}
 			if ($test_return === 0) {
 				upgrade_echo('✓ Deploy checks passed against the newly deployed code<br>');
 				if ($verbose) {
@@ -1906,6 +2008,7 @@
 				}
 			} else {
 				echo '<strong>Deployed code failed its own tests — reverting.</strong><br>';
+				apply_result_rolled_back('deploy_tier', true);
 				echo nl2br(htmlspecialchars(implode("\n", array_slice($test_output, -40)))) . "<br>\n";
 
 				$rollback = DeploymentHelper::performRollback($site_template, true, $verbose);
@@ -2005,6 +2108,7 @@
 			}
 		}
 
+		$GLOBALS['APPLY_RESULT']['outcome'] = 'completed';
 		upgrade_echo('<br><h2>✓ Upgrade Complete!</h2>');
 		upgrade_echo('System upgraded to version: ' . $decode_response['system_version'] . '<br>');
 	}

@@ -167,7 +167,7 @@ $node->set('mgn_enabled', true);
 // reads exactly these two columns, so this is what makes the phase route to the
 // channel rather than throw.
 $node->set('mgn_agent_public_key', 'pmd-agent-key-' . $suffix);
-$node->set('mgn_agent_version', '1.14.0');
+$node->set('mgn_agent_version', AgentVocabulary::FLOOR);
 $node->set('mgn_agent_primitives', 'managed_domain_prepare,managed_domain_notice');
 $node->prepare();
 $node->save();
@@ -543,9 +543,9 @@ $bare_node->set('mgn_slug', 'pmd-bare-' . $suffix);
 $bare_node->set('mgn_host', '198.51.100.21');
 $bare_node->set('mgn_web_root', '/var/www/html/pmdbare/public_html');
 $bare_node->set('mgn_enabled', true);
-// Paired, but its agent predates the vocabulary.
+// Paired, at the floor, but its agent does not report the vocabulary.
 $bare_node->set('mgn_agent_public_key', 'pmd-bare-key-' . $suffix);
-$bare_node->set('mgn_agent_version', '1.13.1');
+$bare_node->set('mgn_agent_version', AgentVocabulary::FLOOR);
 $bare_node->set('mgn_agent_primitives', 'check_status,backup_run');
 $bare_node->prepare();
 $bare_node->save();

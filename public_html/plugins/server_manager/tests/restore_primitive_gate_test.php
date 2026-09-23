@@ -61,7 +61,7 @@ function rpg_node(array $fields = array()) {
 	$node->set('mgn_ssh_key_path', '/home/user1/.ssh/id_ed25519_claude');
 	$node->set('mgn_web_root', '/var/www/html/gatesite/public_html');
 	$node->set('mgn_agent_public_key', base64_encode(str_repeat("\x01", 32)));
-	$node->set('mgn_agent_version', '1.13.0');
+	$node->set('mgn_agent_version', AgentVocabulary::FLOOR);
 	$node->set('mgn_agent_primitives',
 		'apply_update,backup_run,check_status,restore_chain,restore_database,restore_project');
 	foreach ($fields as $k => $v) { $node->set($k, $v); }
@@ -103,16 +103,17 @@ check(($chain_built['primitive'] ?? null) === 'restore_chain' && !isset($chain_b
 
 section('The version floor is live, and is not the same thing as the gate');
 
+// One floor for the whole plane (AgentVocabulary::FLOOR), not a version per
+// word: below it a node is offered apply_update and nothing else, whatever it
+// reports; at or above it, the node's own reported words decide.
+$below = rpg_node(['mgn_agent_version' => '1.42.0']);
 foreach (RESTORE_OPS as $op) {
-	check((JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION[$op] ?? null) === '1.13.0',
-		"{$op} requires the agent release that can ask for approval",
-		'an earlier agent ships the restore vocabulary and refuses every job in it at a compiled '
-		. 'ceiling, so routing to it trades a transport for a guaranteed refusal — discovered '
-		. 'during a restore');
+	check(JobCommandBuilder::has_primitive($below, $op) === false,
+		"{$op} is not routed to a node below the floor even though it reports the word");
 }
+check(JobCommandBuilder::has_primitive($below, 'apply_update') === true,
+	'a node below the floor is still offered apply_update, the way up');
 
-// Proven, not assumed: an agent below the floor is refused, and so is an
-// unpaired node, and they are refused for different reasons.
 $ancient = rpg_node(['mgn_agent_version' => '1.9.0', 'mgn_agent_primitives' => '']);
 check(JobCommandBuilder::has_primitive($ancient, 'restore_database') === false,
 	'an agent below the floor is not routed at');
@@ -268,7 +269,7 @@ section('A restore with nowhere to go refuses rather than composing a dead trans
 // proven live on a node (WP5). What must never happen is that one of them gets
 // COMPOSED: the agent refuses ssh and scp steps by name, so a job built that way
 // dies at its first step with a message about a step type, during a restore.
-foreach ([[$unpaired, 'no paired agent'], [$ancient, '1.13.0']] as [$node, $expected]) {
+foreach ([[$unpaired, 'no paired agent'], [$ancient, AgentVocabulary::FLOOR]] as [$node, $expected]) {
 	$refused = '';
 	try {
 		JobCommandBuilder::build_restore_database($node,

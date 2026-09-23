@@ -40,6 +40,11 @@ function srt_node($tag, $suffix, array $fields) {
 	$node->set('mgn_host', '127.0.0.1');
 	$node->set('mgn_enabled', true);
 	$node->set('mgn_uptime_enabled', false);
+	// A paired agent at the version floor: below it a node is offered
+	// apply_update only (AgentVocabulary), which is not what this test is about.
+	if (!empty($fields['mgn_agent_public_key']) && !isset($fields['mgn_agent_version'])) {
+		$node->set('mgn_agent_version', AgentVocabulary::FLOOR);
+	}
 	foreach ($fields as $k => $v) { $node->set($k, $v); }
 	$node->save();
 	$node->load();

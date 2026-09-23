@@ -4,6 +4,14 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.4 - review 2026-09-23: the journal cap counts as present when any
+#                drop-in already sets SystemMaxUse (B7); a PHP directory with no
+#                php.ini-production is named and no longer fails the run.
+# Version: 1.3 - Host files written when absent (_host_files.sh, shared with
+#                install.sh): the event MPM's sizing, the journal's cap, and
+#                PHP-FPM's php.ini rebuilt from php.ini-production. Absent-only,
+#                so an owner's tuning survives; moving a file aside is the reset
+#                (specs/agent_recipes_and_vocabulary.md, reclaim_managed_file).
 # Version: 1.2 - `--machine ROOT`: the call the runner makes on a host with no
 #                site (runner 2.17 --machine). ROOT is the agent's support
 #                bundle, laid out as a site root, so the Cloudflare range list
@@ -441,6 +449,78 @@ fi
 if [[ "${RUN_SYSTEM}" == 1 ]] && command -v sshd >/dev/null 2>&1; then
     posture="$(sshd -T 2>/dev/null | grep -iE '^(passwordauthentication|permitrootlogin) ' | tr '\n' ' ')"
     [[ -n "${posture}" ]] && say "sshd: ${posture}(reported, not changed)"
+fi
+
+# --- 4. Host files, written when absent ---------------------------------------
+# The files install.sh once wrote and nothing rewrote (specs/agent_recipes_and_
+# vocabulary.md, "Host files"): the event MPM's sizing, the journal's cap, and
+# PHP-FPM's php.ini. Each is written only when it is ABSENT, so an owner's
+# tuning survives every converge; moving one aside (the agent's
+# reclaim_managed_file does, keeping a dated copy) is how it is put back to
+# the platform's definition. One definition, shared with install.sh.
+if [[ -f "${SCRIPT_DIR}/_host_files.sh" ]]; then
+    # shellcheck source=_host_files.sh
+    . "${SCRIPT_DIR}/_host_files.sh"
+
+    MPM_CONF="${APACHE_DIR}/mods-available/mpm_event.conf"
+    if [[ -d "${APACHE_DIR}/mods-available" && ! -e "${MPM_CONF}" ]]; then
+        host_files_write_mpm_event "${MPM_CONF}"
+        say "wrote ${MPM_CONF} (it was absent)"
+        if [[ "${RUN_SYSTEM}" == 1 ]] && command -v apache2ctl >/dev/null 2>&1; then
+            if ! parse_out="$(apache2ctl -t 2>&1)"; then
+                warn "Apache refuses the configuration with the new ${MPM_CONF}; removing it"
+                warn "  $(printf '%s' "${parse_out}" | grep -viE 'AH00558|Syntax' | head -3 | tr '\n' ' ')"
+                rm -f "${MPM_CONF}"
+                FAILED=1
+            elif pidof apache2 >/dev/null 2>&1; then
+                apache2ctl graceful >/dev/null 2>&1 || systemctl reload apache2 >/dev/null 2>&1 || true
+                say "Apache reloaded"
+            fi
+        fi
+    fi
+
+    # The journal's cap is present when ANY drop-in (or journald.conf itself)
+    # already sets SystemMaxUse: an owner's own size-cap.conf would otherwise
+    # be overridden by ours, which sorts later (review B7, 2026-09-23).
+    JOURNAL_CONF="${FS_ROOT}/etc/systemd/journald.conf.d/size-limit.conf"
+    JOURNAL_CAP_SET=0
+    grep -qsE '^[[:space:]]*SystemMaxUse=' "${FS_ROOT}/etc/systemd/journald.conf" "${FS_ROOT}"/etc/systemd/journald.conf.d/*.conf && JOURNAL_CAP_SET=1
+    if [[ "${IN_CONTAINER}" == 0 && ! -e "${JOURNAL_CONF}" && "${JOURNAL_CAP_SET}" == 0 ]] \
+        && { [[ "${HAVE_SYSTEMD}" == 1 ]] || [[ -n "${FS_ROOT}" ]]; }; then
+        host_files_write_journald_limit "${JOURNAL_CONF}"
+        say "wrote ${JOURNAL_CONF} (it was absent): the journal is capped at 100M"
+        if [[ "${HAVE_SYSTEMD}" == 1 ]]; then
+            systemctl restart systemd-journald >/dev/null 2>&1 || warn "systemd-journald could not be restarted - the cap applies at its next start"
+        fi
+    fi
+
+    # php.ini: rebuilt from the distribution's own production template, then
+    # tuned. A version whose fpm directory exists and holds no php.ini is one
+    # somebody moved aside; one with no template to rebuild from is named.
+    for fpm_dir in "${FS_ROOT}"/etc/php/*/fpm; do
+        [[ -d "${fpm_dir}" ]] || continue
+        php_ver="$(basename "$(dirname "${fpm_dir}")")"
+        [[ "${php_ver}" =~ ^[0-9]+\.[0-9]+$ ]] || continue
+        php_ini="${fpm_dir}/php.ini"
+        [[ -e "${php_ini}" ]] && continue
+        production="${FS_ROOT}/usr/lib/php/${php_ver}/php.ini-production"
+        if [[ ! -f "${production}" ]]; then
+            # A leftover directory of a PHP version no longer installed:
+            # named, and not a failure of every converge. A reclaim of a
+            # php.ini here puts its copy back.
+            say "${php_ini} is absent and there is no ${production} to rebuild it from - left as it is"
+            continue
+        fi
+        cp "${production}" "${php_ini}"
+        chmod 644 "${php_ini}"
+        host_files_tune_php_ini "${php_ini}"
+        say "rebuilt ${php_ini} from php.ini-production with the platform's settings"
+        if [[ "${HAVE_SYSTEMD}" == 1 ]]; then
+            systemctl restart "php${php_ver}-fpm" >/dev/null 2>&1 || warn "php${php_ver}-fpm could not be restarted - the settings apply at its next start"
+        fi
+    done
+else
+    warn "_host_files.sh is missing from ${SCRIPT_DIR} - host files not checked"
 fi
 
 if [[ "${FAILED}" == 1 ]]; then

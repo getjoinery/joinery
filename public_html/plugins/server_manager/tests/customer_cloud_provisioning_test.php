@@ -296,7 +296,7 @@ class CustomerCloudProvisioningTest {
 			'and holds no credential of either kind');
 
 		$src_unpaired->set('mgn_agent_public_key', base64_encode(str_repeat("\x0e", 32)));
-		$src_unpaired->set('mgn_agent_version', '1.17.0');
+		$src_unpaired->set('mgn_agent_version', AgentVocabulary::FLOOR);
 		$src_unpaired->set('mgn_agent_primitives', 'check_status,clone_export_arm');
 		$src_unpaired->save();
 		$clone->set('cvp_status', 'ready');

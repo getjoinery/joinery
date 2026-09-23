@@ -3,6 +3,14 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.18 - site_housekeeping.sh joins CORE_INSTALLERS: the site's logrotate
+#                 file and cron entry, written when absent (they were
+#                 _site_init.sh's alone). --only-plugin=NAME runs one active
+#                 plugin's declared host_installer and nothing else, through
+#                 run_one_plugin_installer, the body the full run shares; a
+#                 name that is not a plugin identifier, or --only-plugin beside
+#                 --machine, --when-changed or --only, is refused with exit 2
+#                 (specs/agent_recipes_and_vocabulary.md, run_installer).
 # Version: 2.17 - --machine: the runner on a host with no site. The root is the
 #                 agent's verified support bundle (/opt/joinery-agent/tree, or
 #                 --site-root=), whose layout is a site root's; SITENAME is
@@ -173,7 +181,7 @@
 # unreachable, or an installer failure all exit 0, so a broken installer can
 # never block the container from starting.
 #
-# Usage:  _plugin_installers_start.sh [--when-changed | --only=INSTALLER] [--site-root=DIR] [SITENAME] [SITE_ROOT]
+# Usage:  _plugin_installers_start.sh [--when-changed | --only=INSTALLER | --only-plugin=PLUGIN] [--site-root=DIR] [SITENAME] [SITE_ROOT]
 #         All optional. SITENAME names a site OTHER than the one this copy
 #         of the script was delivered in; with no argument the script works on
 #         its own site. Nothing is required in the environment - the database
@@ -205,7 +213,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # about them is a plugin's business. Each is idempotent and decides for itself
 # whether it applies here, the same contract plugin installers work under.
 # This list is also the whole of what --only may name.
-CORE_INSTALLERS="install_agent.sh install_parser_jail.sh install_host_converger.sh render_vhost.sh host_housekeeping.sh"
+CORE_INSTALLERS="install_agent.sh install_parser_jail.sh install_host_converger.sh render_vhost.sh host_housekeeping.sh site_housekeeping.sh"
 
 # The host's own installers: what a machine with no site converges to. A
 # subset of CORE_INSTALLERS by construction (each is also a site's), and the
@@ -221,6 +229,8 @@ MACHINE_ROOT_DEFAULT="/opt/joinery-agent/tree"
 WHEN_CHANGED=0
 ONLY_GIVEN=0
 ONLY_INSTALLER=""
+ONLY_PLUGIN_GIVEN=0
+ONLY_PLUGIN=""
 EXPLICIT_ROOT=""
 MACHINE=0
 POSITIONAL=()
@@ -228,6 +238,7 @@ for arg in "$@"; do
     case "${arg}" in
         --when-changed) WHEN_CHANGED=1 ;;
         --only=*)       ONLY_GIVEN=1; ONLY_INSTALLER="${arg#--only=}" ;;
+        --only-plugin=*) ONLY_PLUGIN_GIVEN=1; ONLY_PLUGIN="${arg#--only-plugin=}" ;;
         --site-root=*)  EXPLICIT_ROOT="${arg#--site-root=}" ;;
         --machine)      MACHINE=1 ;;
         *)              POSITIONAL+=("${arg}") ;;
@@ -263,6 +274,21 @@ if [[ "${ONLY_GIVEN}" == "1" ]]; then
     esac
     if [[ "${WHEN_CHANGED}" == "1" ]]; then
         echo "host installers: --only and --when-changed are different modes - refused" >&2
+        exit 2
+    fi
+fi
+
+# --only-plugin=NAME: one active plugin's declared host_installer, and nothing
+# else (the agent's run_installer plugin:NAME). A plugin identifier, never a
+# path; the installer is resolved through the plugin's own plugin.json and
+# passes every check a full run applies. A machine has no plugins.
+if [[ "${ONLY_PLUGIN_GIVEN}" == "1" ]]; then
+    if [[ ! "${ONLY_PLUGIN}" =~ ^[a-z][a-z0-9_]{1,49}$ ]]; then
+        echo "host installers: --only-plugin=${ONLY_PLUGIN:0:64} is not a plugin name - refused" >&2
+        exit 2
+    fi
+    if [[ "${MACHINE}" == "1" || "${WHEN_CHANGED}" == "1" || "${ONLY_GIVEN}" == "1" ]]; then
+        echo "host installers: --only-plugin runs alone, on a site - refused" >&2
         exit 2
     fi
 fi
@@ -572,8 +598,167 @@ run_core_installer() {
 # secrets, no key file, no plugin installers, no root requests. The caller
 # (an agent word with a compiled constant for the name) reads the transcript
 # and verifies the aspect it asked for, never this exit code.
+# --- Only a package we built gets its host installer run ---------------------
+# Every script below runs as root, and a plugin's host_installer is a plugin's
+# own file. The ownership refusal above says root PUT it there; this says WE
+# BUILT it: utils/verify_package.php checks the plugin directory against its
+# signed listing and the keys in config/release_verify_keys
+# (specs/package_signing.md WP5). A plugin installed on the owner's
+# acknowledgement of the unsigned warning stays installed and active - it
+# simply never has a script run as root out of its directory, and the log
+# says so on every converge.
+#
+# The publishing box is the one exemption: it holds the secret half of the
+# release key, every plugin there is the source the archives are built from,
+# and its live manifests are stale the moment a file is edited.
+#
+# JOINERY_VERIFY_PACKAGE, JOINERY_VERIFY_KEYS and JOINERY_ACTIVE_PLUGINS point
+# a test at the real tool, a throwaway key and a fixture's plugin list. They
+# are honoured only when this is NOT root: the gate runs unprivileged, and a
+# root run - the timer, the container start, an operator's sudo - uses its own
+# tool, its own key file (with the ownership guard an explicit key path skips)
+# and the database's answer, whatever the environment says. Root says once
+# that it ignored a hook, so a stray one is visible rather than silent.
+if [[ "$(id -u)" == "0" ]]; then
+    for _hook in JOINERY_VERIFY_PACKAGE JOINERY_VERIFY_KEYS JOINERY_ACTIVE_PLUGINS; do
+        if [[ -n "${!_hook:-}" ]]; then
+            echo "plugin installers: ${_hook} is set but this is root - hook ignored" >&2
+            unset "${_hook}"
+        fi
+    done
+fi
+VERIFY_TOOL="${JOINERY_VERIFY_PACKAGE:-${PUBLIC_HTML}/utils/verify_package.php}"
+plugin_package_verified() {
+    local plugin="$1"
+    local dir="${PUBLIC_HTML}/plugins/${plugin}"
+    if [[ -f "${SITE_ROOT}/config/agent_signing_key" ]]; then
+        return 0
+    fi
+    if [[ ! -f "${VERIFY_TOOL}" ]]; then
+        echo "plugin installers: ${plugin}: no verify_package.php to check the package with - host installer skipped" >&2
+        return 1
+    fi
+    local -a keys_arg=()
+    [[ -n "${JOINERY_VERIFY_KEYS:-}" ]] && keys_arg=(--keys="${JOINERY_VERIFY_KEYS}")
+    local out
+    if out="$(php "${VERIFY_TOOL}" "${dir}" "${keys_arg[@]+"${keys_arg[@]}"}" 2>&1)"; then
+        return 0
+    fi
+    echo "plugin installers: ${plugin}: not a package we built - host installer skipped (${out##*$'\n'})" >&2
+    return 1
+}
+
+read_active_plugins() {
+    php -r '
+        $config = file_get_contents($argv[1]);
+        $val = function ($key) use ($config) {
+            return preg_match("/settings\[.".$key.".\]\s*=\s*.([^\x27\"]*)/", $config, $m) ? $m[1] : "";
+        };
+        $name = $val("dbname");
+        $user = $val("dbusername");
+        $pass = $val("dbpassword");
+        $host = $val("dbhost") ?: "localhost";
+        if ($name === "" || $user === "") { fwrite(STDERR, "no-db-config\n"); exit(3); }
+        try {
+            $pdo = new PDO("pgsql:host={$host};dbname={$name}", $user, $pass,
+                [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_TIMEOUT => 10]);
+            $q = $pdo->prepare("SELECT plg_name FROM plg_plugins WHERE plg_status = ?");
+            $q->execute(["active"]);
+            foreach ($q->fetchAll(PDO::FETCH_NUM) as $row) {
+                echo $row[0] . "\n";
+            }
+        } catch (Exception $e) {
+            fwrite(STDERR, "db-unreachable\n");
+            exit(3);
+        }
+    ' "${CONFIG_FILE}" 2>/dev/null
+}
+
+# One plugin's declared host_installer: resolved through its own plugin.json,
+# refused when the path escapes the plugin directory, when root did not put it
+# there, or when we did not build the package. The one body the full run and
+# --only-plugin share, so the two cannot drift.
+run_one_plugin_installer() {
+    local PLUGIN="$1" MANIFEST INSTALLER_REL INSTALLER
+    MANIFEST="${PUBLIC_HTML}/plugins/${PLUGIN}/plugin.json"
+    [[ -f "${MANIFEST}" ]] || return 0
+
+    # Extract the host_installer path; php-cli is always present on a
+    # Joinery host and is the only reliable JSON parser we can assume.
+    INSTALLER_REL="$(php -r '
+        $m = json_decode(file_get_contents($argv[1]), true);
+        echo isset($m["host_installer"]) && is_string($m["host_installer"]) ? $m["host_installer"] : "";
+    ' "${MANIFEST}" 2>/dev/null || true)"
+    [[ -n "${INSTALLER_REL}" ]] || return 0
+
+    INSTALLER="${PUBLIC_HTML}/plugins/${PLUGIN}/${INSTALLER_REL}"
+
+    # Refuse path escapes (host_installer must stay inside the plugin dir).
+    case "$(realpath -m "${INSTALLER}")" in
+        "$(realpath -m "${PUBLIC_HTML}/plugins/${PLUGIN}")"/*) : ;;
+        *)
+            echo "plugin installers: ${PLUGIN}: host_installer escapes plugin directory - refused" >&2
+            return 0
+            ;;
+    esac
+
+    if [[ ! -f "${INSTALLER}" ]]; then
+        echo "plugin installers: ${PLUGIN}: declared installer missing (${INSTALLER_REL}) - skipping" >&2
+        return 0
+    fi
+
+    if ! installer_is_trusted "${INSTALLER}"; then
+        CONVERGE_OUTCOME="installer-refused"
+        return 0
+    fi
+
+    # Who built it. Ownership says root put it there; the signature says we
+    # did. An unsigned plugin (installed on the owner's acknowledgement) keeps
+    # its files and its row, and never gets a script run as root out of it.
+    if ! plugin_package_verified "${PLUGIN}"; then
+        return 0
+    fi
+
+    echo "plugin installers: ${PLUGIN}: running ${INSTALLER_REL}"
+    if bash "${INSTALLER}"; then
+        echo "plugin installers: ${PLUGIN}: ok"
+    else
+        echo "plugin installers: WARNING - ${PLUGIN} installer failed; its services may be down." >&2
+        CONVERGE_OUTCOME="installer-failed"
+    fi
+}
+
 if [[ -n "${ONLY_INSTALLER}" ]]; then
     run_core_installer "${ONLY_INSTALLER}"
+    exit 0
+fi
+
+# --- --only-plugin: that plugin's installer, and nothing else -----------------
+if [[ -n "${ONLY_PLUGIN}" ]]; then
+    if [[ -n "${JOINERY_ACTIVE_PLUGINS:-}" ]]; then
+        ACTIVE_PLUGINS="${JOINERY_ACTIVE_PLUGINS}"
+    elif ! ACTIVE_PLUGINS="$(read_active_plugins)"; then
+        echo "plugin installers: could not read the site database - skipping" >&2
+        exit 0
+    fi
+    if ! printf '%s\n' ${ACTIVE_PLUGINS} | grep -qxF "${ONLY_PLUGIN}"; then
+        echo "plugin installers: ${ONLY_PLUGIN}: not an active plugin here - refused" >&2
+        exit 0
+    fi
+    # The declared value, resolved once, the way run_one_plugin_installer
+    # reads it: a key with an empty value declares nothing (review B12).
+    ONLY_REL=""
+    if [[ -f "${PUBLIC_HTML}/plugins/${ONLY_PLUGIN}/plugin.json" ]]; then
+        ONLY_REL="$(php -r '
+            $m = json_decode(file_get_contents($argv[1]), true);
+            echo isset($m["host_installer"]) && is_string($m["host_installer"]) ? $m["host_installer"] : "";
+        ' "${PUBLIC_HTML}/plugins/${ONLY_PLUGIN}/plugin.json" 2>/dev/null || true)"
+    fi
+    if [[ -z "${ONLY_REL}" ]]; then
+        echo "plugin installers: ${ONLY_PLUGIN}: declares no host_installer - refused" >&2
+        exit 0
+    fi
+    run_one_plugin_installer "${ONLY_PLUGIN}"
     exit 0
 fi
 
@@ -803,32 +988,6 @@ if [[ -f "${RESOLVER}" ]] && [[ "$(id -u)" == "0" ]] && command -v php >/dev/nul
     done < <(php "${RESOLVER}" --apt 2>/dev/null || true)
 fi
 
-read_active_plugins() {
-    php -r '
-        $config = file_get_contents($argv[1]);
-        $val = function ($key) use ($config) {
-            return preg_match("/settings\[.".$key.".\]\s*=\s*.([^\x27\"]*)/", $config, $m) ? $m[1] : "";
-        };
-        $name = $val("dbname");
-        $user = $val("dbusername");
-        $pass = $val("dbpassword");
-        $host = $val("dbhost") ?: "localhost";
-        if ($name === "" || $user === "") { fwrite(STDERR, "no-db-config\n"); exit(3); }
-        try {
-            $pdo = new PDO("pgsql:host={$host};dbname={$name}", $user, $pass,
-                [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_TIMEOUT => 10]);
-            $q = $pdo->prepare("SELECT plg_name FROM plg_plugins WHERE plg_status = ?");
-            $q->execute(["active"]);
-            foreach ($q->fetchAll(PDO::FETCH_NUM) as $row) {
-                echo $row[0] . "\n";
-            }
-        } catch (Exception $e) {
-            fwrite(STDERR, "db-unreachable\n");
-            exit(3);
-        }
-    ' "${CONFIG_FILE}" 2>/dev/null
-}
-
 # --- Converge only when something changed (--when-changed) -------------------
 if [[ "${WHEN_CHANGED}" == "1" ]]; then
     ACTIVE_PLUGINS_FOR_HASH="$(read_active_plugins 2>/dev/null || echo "db-unreachable")"
@@ -899,56 +1058,6 @@ done
 # and "there is nothing to run" are different facts about a machine, and reading
 # the first as the second is how a partial run looks like a clean one.
 
-# --- Only a package we built gets its host installer run ---------------------
-# Every script below runs as root, and a plugin's host_installer is a plugin's
-# own file. The ownership refusal above says root PUT it there; this says WE
-# BUILT it: utils/verify_package.php checks the plugin directory against its
-# signed listing and the keys in config/release_verify_keys
-# (specs/package_signing.md WP5). A plugin installed on the owner's
-# acknowledgement of the unsigned warning stays installed and active - it
-# simply never has a script run as root out of its directory, and the log
-# says so on every converge.
-#
-# The publishing box is the one exemption: it holds the secret half of the
-# release key, every plugin there is the source the archives are built from,
-# and its live manifests are stale the moment a file is edited.
-#
-# JOINERY_VERIFY_PACKAGE, JOINERY_VERIFY_KEYS and JOINERY_ACTIVE_PLUGINS point
-# a test at the real tool, a throwaway key and a fixture's plugin list. They
-# are honoured only when this is NOT root: the gate runs unprivileged, and a
-# root run - the timer, the container start, an operator's sudo - uses its own
-# tool, its own key file (with the ownership guard an explicit key path skips)
-# and the database's answer, whatever the environment says. Root says once
-# that it ignored a hook, so a stray one is visible rather than silent.
-if [[ "$(id -u)" == "0" ]]; then
-    for _hook in JOINERY_VERIFY_PACKAGE JOINERY_VERIFY_KEYS JOINERY_ACTIVE_PLUGINS; do
-        if [[ -n "${!_hook:-}" ]]; then
-            echo "plugin installers: ${_hook} is set but this is root - hook ignored" >&2
-            unset "${_hook}"
-        fi
-    done
-fi
-VERIFY_TOOL="${JOINERY_VERIFY_PACKAGE:-${PUBLIC_HTML}/utils/verify_package.php}"
-plugin_package_verified() {
-    local plugin="$1"
-    local dir="${PUBLIC_HTML}/plugins/${plugin}"
-    if [[ -f "${SITE_ROOT}/config/agent_signing_key" ]]; then
-        return 0
-    fi
-    if [[ ! -f "${VERIFY_TOOL}" ]]; then
-        echo "plugin installers: ${plugin}: no verify_package.php to check the package with - host installer skipped" >&2
-        return 1
-    fi
-    local -a keys_arg=()
-    [[ -n "${JOINERY_VERIFY_KEYS:-}" ]] && keys_arg=(--keys="${JOINERY_VERIFY_KEYS}")
-    local out
-    if out="$(php "${VERIFY_TOOL}" "${dir}" "${keys_arg[@]+"${keys_arg[@]}"}" 2>&1)"; then
-        return 0
-    fi
-    echo "plugin installers: ${plugin}: not a package we built - host installer skipped (${out##*$'\n'})" >&2
-    return 1
-}
-
 # Wrapped in a function so that "nothing to run here" returns rather than ends
 # the script: the queued root requests below are a separate job, and a site with
 # no active plugins is still a site that can have asked for an upgrade.
@@ -982,52 +1091,7 @@ if [[ -z "${ACTIVE_PLUGINS}" ]]; then
 fi
 
 for PLUGIN in ${ACTIVE_PLUGINS}; do
-    MANIFEST="${PUBLIC_HTML}/plugins/${PLUGIN}/plugin.json"
-    [[ -f "${MANIFEST}" ]] || continue
-
-    # Extract the host_installer path; php-cli is always present on a
-    # Joinery host and is the only reliable JSON parser we can assume.
-    INSTALLER_REL="$(php -r '
-        $m = json_decode(file_get_contents($argv[1]), true);
-        echo isset($m["host_installer"]) && is_string($m["host_installer"]) ? $m["host_installer"] : "";
-    ' "${MANIFEST}" 2>/dev/null || true)"
-    [[ -n "${INSTALLER_REL}" ]] || continue
-
-    INSTALLER="${PUBLIC_HTML}/plugins/${PLUGIN}/${INSTALLER_REL}"
-
-    # Refuse path escapes (host_installer must stay inside the plugin dir).
-    case "$(realpath -m "${INSTALLER}")" in
-        "$(realpath -m "${PUBLIC_HTML}/plugins/${PLUGIN}")"/*) : ;;
-        *)
-            echo "plugin installers: ${PLUGIN}: host_installer escapes plugin directory - refused" >&2
-            continue
-            ;;
-    esac
-
-    if [[ ! -f "${INSTALLER}" ]]; then
-        echo "plugin installers: ${PLUGIN}: declared installer missing (${INSTALLER_REL}) - skipping" >&2
-        continue
-    fi
-
-    if ! installer_is_trusted "${INSTALLER}"; then
-        CONVERGE_OUTCOME="installer-refused"
-        continue
-    fi
-
-    # Who built it. Ownership says root put it there; the signature says we
-    # did. An unsigned plugin (installed on the owner's acknowledgement) keeps
-    # its files and its row, and never gets a script run as root out of it.
-    if ! plugin_package_verified "${PLUGIN}"; then
-        continue
-    fi
-
-    echo "plugin installers: ${PLUGIN}: running ${INSTALLER_REL}"
-    if bash "${INSTALLER}"; then
-        echo "plugin installers: ${PLUGIN}: ok"
-    else
-        echo "plugin installers: WARNING - ${PLUGIN} installer failed; its services may be down." >&2
-        CONVERGE_OUTCOME="installer-failed"
-    fi
+    run_one_plugin_installer "${PLUGIN}"
 done
 }
 

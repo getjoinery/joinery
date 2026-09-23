@@ -5,6 +5,11 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.39 - specs/agent_recipes_and_vocabulary.md: process_restart_unit / _container, process_run_installer,
+ *                 process_file_head, process_schema_probe; sanitise_host_report keeps sshd's widened
+ *                 settings, answers, served_certificates and containers (absent = not reported).
+ * @version 1.38 - sanitise_host_report carries os: the distribution, version and codename, and the
+ *                release upgrade the node's own daily check last offered with when it checked
  * @version 1.37 - backup_run: the BACKUP_KEEP_DAYS line stamps mgn_backup_keep_days, the site's own
  *                retention window the fleet pass prunes by
  * @version 1.36 - process_if_due(): the one rule for folding a single finished job (terminal, handled type,
@@ -1395,8 +1400,91 @@ class JobResultProcessor {
 	 * the job permanently unprocessed — and its HTTPS probe then re-runs on
 	 * every page load, forever, once per accumulated job.
 	 */
+	/** The rollback steps upgrade.php names. */
+	const APPLY_ROLLBACK_STEPS = ['permissions', 'deploy', 'composer', 'migrations', 'deploy_tier'];
+
+	/**
+	 * The structured apply result (specs/agent_recipes_and_vocabulary.md, "The
+	 * structured apply result"): the last APPLY_RESULT line upgrade.php
+	 * printed, rebuilt with only the known keys and bounded values. Null when
+	 * the transcript carries none (an older upgrade.php): not reported.
+	 * Public: staged_rollout gates on it and the test drives it.
+	 */
+	public static function apply_result($output) {
+		$data = self::extract_api_envelope_data($output);
+		$text = (is_array($data) && isset($data['output'])) ? (string)$data['output'] : (string)$output;
+		$line = null;
+		foreach (preg_split('/\r?\n/', $text) as $l) {
+			if (strpos($l, 'APPLY_RESULT: ') === 0) { $line = substr($l, strlen('APPLY_RESULT: ')); }
+		}
+		$in = ($line !== null) ? json_decode($line, true) : null;
+		if (!is_array($in)) {
+			return null;
+		}
+		$ver = function ($v) { return (is_string($v) && preg_match('/^\d+\.\d+\.\d+$/', $v)) ? $v : null; };
+		$str = function ($v, $max) { return mb_substr(preg_replace('/[\x00-\x1f<>]/', '', (string)$v), 0, $max); };
+		$migrations = [];
+		foreach (array_slice((array)($in['migrations'] ?? []), 0, 200) as $m) {
+			if (!is_array($m)) { continue; }
+			$migrations[] = [
+				'version' => $str($m['version'] ?? '', 120),
+				'outcome' => in_array($m['outcome'] ?? '', ['applied', 'failed'], true) ? $m['outcome'] : 'unknown',
+				'rows'    => is_int($m['rows'] ?? null) ? $m['rows'] : null,
+			];
+		}
+		$schema = [];
+		foreach (array_slice((array)($in['schema_changes'] ?? []), 0, 300) as $c) {
+			if (is_scalar($c)) { $schema[] = $str($c, 200); }
+		}
+		$plugins = [];
+		foreach (array_slice((array)($in['plugins'] ?? []), 0, 100) as $p) {
+			if (!is_array($p)) { continue; }
+			$plugins[] = [
+				'name'   => substr(preg_replace('/[^a-z0-9_]/', '', strtolower((string)($p['name'] ?? ''))), 0, 64),
+				'before' => $str($p['before'] ?? '', 32),
+				'after'  => $str($p['after'] ?? '', 32),
+			];
+		}
+		$tier = is_array($in['deploy_tier'] ?? null) ? $in['deploy_tier'] : [];
+		$failed_tests = [];
+		foreach (array_slice((array)($tier['failed_tests'] ?? []), 0, 50) as $t) {
+			$t = preg_replace('/[^a-z0-9_]/', '', strtolower((string)$t));
+			if ($t !== '') { $failed_tests[] = substr($t, 0, 64); }
+		}
+		$rb = is_array($in['rolled_back'] ?? null) ? $in['rolled_back'] : [];
+		return [
+			'version_before'   => $ver($in['version_before'] ?? null),
+			'version_after'    => $ver($in['version_after'] ?? null),
+			'self_updated'     => ($in['self_updated'] ?? false) === true,
+			'outcome'          => in_array($in['outcome'] ?? '', ['completed', 'failed'], true) ? $in['outcome'] : 'failed',
+			'migrations'       => $migrations,
+			'schema_changes'   => $schema,
+			'plugins'          => $plugins,
+			'deploy_tier'      => [
+				'verdict'      => in_array($tier['verdict'] ?? '', ['passed', 'failed', 'not_run'], true) ? $tier['verdict'] : 'not_run',
+				'failed_tests' => $failed_tests,
+			],
+			'rolled_back'      => [
+				'rolled_back'          => ($rb['rolled_back'] ?? false) === true,
+				'step'                 => in_array($rb['step'] ?? null, self::APPLY_ROLLBACK_STEPS, true) ? $rb['step'] : null,
+				'schema_ahead_of_code' => ($rb['schema_ahead_of_code'] ?? false) === true,
+			],
+			'duration_seconds' => max(0, (int)($in['duration_seconds'] ?? 0)),
+			// Present from an upgrade.php that bounds the line: the full counts
+			// when the lists were cut to fit the agent's output tail.
+			'migrations_total'     => max(count($migrations), (int)($in['migrations_total'] ?? 0)),
+			'schema_changes_total' => max(count($schema), (int)($in['schema_changes_total'] ?? 0)),
+			'plugins_total'        => max(count($plugins), (int)($in['plugins_total'] ?? 0)),
+			'truncated'            => ($in['truncated'] ?? false) === true,
+		];
+	}
+
 	private static function record_apply_update_result($job, array $result) {
 		$result['processed_time'] = gmdate('Y-m-d H:i:s');
+		// The node's own account of the apply, beside the probe's reading of
+		// the version it now serves (null from a node whose upgrade.php
+		// predates the line: not reported).
+		$result['apply'] = self::apply_result((string)($job->get('mjb_output') ?: ''));
 		$job->set('mjb_result', json_encode($result));
 		$job->save();
 	}
@@ -2341,6 +2429,276 @@ HTML;
 
 	/** One journal line, capped on the plane as the node caps it. */
 	const UNIT_JOURNAL_MAX_LINE = 2000;
+	/**
+	 * A restart_unit job's result: the unit restarted, whether systemd accepted
+	 * the restart, and its state before and after. Compiled facts only. A
+	 * restart the node accepted is followed by a host_report, as a cleared
+	 * failed unit is, so the Host card shows the service as it now stands.
+	 */
+	private static function process_restart_unit($job) {
+		self::process_restart($job, 'unit');
+	}
+
+	/** A restart_container job's result, the same shape for a container. */
+	private static function process_restart_container($job) {
+		self::process_restart($job, 'container');
+	}
+
+	private static function process_restart($job, $kind) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		$text = (is_array($data) && isset($data['output'])) ? (string)$data['output'] : '';
+		$decoded = ($text !== '') ? json_decode(trim($text), true) : null;
+		if (!is_array($decoded) || !isset($decoded[$kind])) {
+			$job->set('mjb_result', json_encode(['read' => false]));
+			$job->save();
+			return;
+		}
+		$state = function ($v) {
+			$v = is_array($v) ? $v : [];
+			$out = [];
+			foreach (['active_state', 'sub_state', 'result', 'state', 'health'] as $k) {
+				if (array_key_exists($k, $v)) {
+					$out[$k] = self::unit_journal_word($v[$k]);
+				}
+			}
+			return $out;
+		};
+		$restarted = ($decoded['restarted'] ?? false) === true;
+		$job->set('mjb_result', json_encode([
+			'read'      => true,
+			'kind'      => $kind,
+			'target'    => self::host_report_name($decoded[$kind] ?? ''),
+			'absent'    => ($decoded['absent'] ?? false) === true,
+			'restarted' => $restarted,
+			'before'    => $state($decoded['before'] ?? null),
+			'after'     => $state($decoded['after'] ?? null),
+		]));
+		if (!$restarted && $job->get('mjb_status') === 'completed') {
+			$job->set('mjb_status', 'failed');
+			$job->set('mjb_error_message', ($decoded['absent'] ?? false) === true
+				? 'that service is not on this machine'
+				: 'the restart was not accepted');
+		}
+		$job->save();
+		$node_id = (int)$job->get('mjb_mgn_managed_node_id');
+		if ($restarted && $node_id) {
+			try {
+				$node = new ManagedNode($node_id, TRUE);
+				if (JobCommandBuilder::has_primitive($node, 'host_report')
+						&& !ManagementJob::activeOrRecentForNode($node_id, 'host_report', 60)) {
+					ManagementJob::createFromBuild($node_id, 'host_report',
+						JobCommandBuilder::build_host_report($node), null, $job->get('mjb_created_by'));
+				}
+			} catch (Exception $e) {
+				// The restart happened; not being able to re-measure is not a
+				// reason to call it anything else.
+			}
+		}
+	}
+
+	/**
+	 * A run_installer job's transcript, read the way host_converge's is: the
+	 * runner narrates every path it takes, so the job is green only when the
+	 * transcript carries the ok line for the installer that was asked for,
+	 * and names why when it does not.
+	 */
+	private static function process_run_installer($job) {
+		$params = json_decode((string)$job->get('mjb_parameters'), true);
+		self::read_installer_transcript($job, is_array($params) ? (string)($params['name'] ?? '') : '', []);
+	}
+
+	/**
+	 * A reclaim_managed_file job: the installer that owns the file, read as
+	 * run_installer's transcript is, plus the node's own lines saying what it
+	 * moved where and whether the file is the platform's again or was put
+	 * back because its owner does not write it on that machine.
+	 */
+	private static function process_reclaim_managed_file($job) {
+		$params = json_decode((string)$job->get('mjb_parameters'), true);
+		$file = is_array($params) ? (string)($params['file'] ?? '') : '';
+		$owner = JobCommandBuilder::RECLAIM_FILES[$file] ?? '';
+		$output = (string)($job->get('mjb_output') ?: '');
+		$data = self::extract_api_envelope_data($output);
+		if (is_array($data) && isset($data['output'])) {
+			$output = (string)$data['output'];
+		}
+		$reclaim = [];
+		if (preg_match_all('/^reclaim: (.+)$/m', $output, $m)) {
+			foreach (array_slice($m[1], 0, 5) as $line) { $reclaim[] = substr(trim($line), 0, 300); }
+		}
+		self::read_installer_transcript($job, $owner, ['file' => $file, 'reclaim' => $reclaim]);
+	}
+
+	/** The runner's transcript for one installer: green only on its ok line. */
+	private static function read_installer_transcript($job, $name, array $extra) {
+		$output = (string)($job->get('mjb_output') ?: '');
+		$data = self::extract_api_envelope_data($output);
+		if (is_array($data) && isset($data['output'])) {
+			$output = (string)$data['output'];
+		}
+		if (strpos($name, 'plugin:') === 0) {
+			$plugin = substr($name, strlen('plugin:'));
+			$ok_line = 'plugin installers: ' . $plugin . ': ok';
+		} else {
+			$ok_line = 'core installers: ' . $name . ': ok';
+		}
+		$ran = $name !== '' && (bool)preg_match('/^' . preg_quote($ok_line, '/') . '$/m', $output);
+		$failures = [];
+		if (preg_match_all('/^(?:core|plugin) installers: (WARNING - .+|.+ - skipping|.+ - refused|.+ - host installer skipped.*)$/m', $output, $m)) {
+			foreach ($m[1] as $line) { $failures[] = trim($line); }
+		}
+		if (preg_match_all('/^host installers: (another run holds the lock .+|cannot open .+|--only.+ - refused|--machine .+ - refused)$/m', $output, $m)) {
+			foreach ($m[1] as $line) { $failures[] = trim($line); }
+		}
+		if (preg_match_all('/^installer refused: (.+)$/m', $output, $m)) {
+			foreach ($m[1] as $line) { $failures[] = 'installer refused: ' . trim($line); }
+		}
+		if (trim($output) === '') {
+			$failures[] = 'the runner produced no output, so nothing about this run can be confirmed';
+		} elseif (!$ran && !$failures) {
+			$failures[] = 'the transcript never says ' . $ok_line . ', and gives no reason';
+		}
+		$job->set('mjb_result', json_encode(array_merge(['name' => $name, 'ran' => $ran, 'failures' => array_slice($failures, 0, 20)], $extra)));
+		if (($failures || !$ran) && $job->get('mjb_status') === 'completed') {
+			$job->set('mjb_status', 'failed');
+			$job->set('mjb_error_message', $name . ' did not complete: ' . implode('; ', array_slice($failures, 0, 3)));
+		}
+		$job->save();
+	}
+
+	/**
+	 * A file_head job's result: the node redacted each line by its
+	 * configuration shape before it left; kept to the plane's own cap and
+	 * pruned on the log-excerpt window like the other reads behind the
+	 * owner's switch.
+	 */
+	private static function process_file_head($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		if (!is_array($data) || !array_key_exists('text', $data)) {
+			$job->set('mjb_result', json_encode(['read' => false]));
+			$job->save();
+			return;
+		}
+		$text = is_string($data['text']) ? $data['text'] : '';
+		$truncated_here = strlen($text) > self::LOG_EXCERPT_MAX_BYTES;
+		if ($truncated_here) {
+			$text = substr($text, 0, self::LOG_EXCERPT_MAX_BYTES);
+		}
+		$job->set('mjb_result', json_encode([
+			'read'           => true,
+			'file'           => substr(preg_replace('/[^a-z0-9_]/', '', strtolower((string)($data['file'] ?? ''))), 0, 64),
+			'path'           => substr(preg_replace('/[^A-Za-z0-9._\/-]/', '', (string)($data['path'] ?? '')), 0, 200),
+			'present'        => !empty($data['present']),
+			'size_bytes'     => max(0, (int)($data['size_bytes'] ?? 0)),
+			'modified_time'  => substr(preg_replace('/[^0-9TZ:\- ]/', '', (string)($data['modified_time'] ?? '')), 0, 32),
+			'lines_returned' => max(0, min((int)($data['lines_returned'] ?? 0), JobCommandBuilder::FILE_HEAD_MAX_LINES)),
+			'truncated'      => !empty($data['truncated']) || $truncated_here,
+			'text'           => $text,
+		]));
+		$job->save();
+	}
+
+	/**
+	 * A schema_probe job's result: names, types and a count, bounded here as
+	 * well as on the node.
+	 */
+	private static function process_schema_probe($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		if (!is_array($data) || !array_key_exists('exists', $data)) {
+			$job->set('mjb_result', json_encode(['read' => false]));
+			$job->save();
+			return;
+		}
+		$ident = function ($v) { return substr(preg_replace('/[^a-z0-9_]/', '', strtolower((string)$v)), 0, 63); };
+		$columns = [];
+		foreach ((is_array($data['columns'] ?? null) ? $data['columns'] : []) as $c) {
+			if (!is_array($c)) { continue; }
+			$col = [
+				'name'     => $ident($c['name'] ?? ''),
+				'type'     => substr(preg_replace('/[^A-Za-z0-9 _()]/', '', (string)($c['type'] ?? '')), 0, 64),
+				'nullable' => !empty($c['nullable']),
+			];
+			if (isset($c['max_length']) && is_int($c['max_length'])) { $col['max_length'] = $c['max_length']; }
+			if (isset($c['default']) && is_string($c['default'])) { $col['default'] = substr($c['default'], 0, 128); }
+			$columns[] = $col;
+			if (count($columns) >= 200) { break; }
+		}
+		$indexes = [];
+		foreach ((is_array($data['indexes'] ?? null) ? $data['indexes'] : []) as $i) {
+			if (!is_array($i)) { continue; }
+			$indexes[] = ['name' => $ident($i['name'] ?? ''), 'definition' => substr((string)($i['definition'] ?? ''), 0, 512)];
+			if (count($indexes) >= 50) { break; }
+		}
+		$job->set('mjb_result', json_encode([
+			'read'            => true,
+			'table'           => $ident($data['table'] ?? ''),
+			'exists'          => !empty($data['exists']),
+			'columns'         => $columns,
+			'indexes'         => $indexes,
+			'row_count'       => is_int($data['row_count'] ?? null) ? $data['row_count'] : -1,
+			'row_count_exact' => !empty($data['row_count_exact']),
+		]));
+		$job->save();
+	}
+
+	/**
+	 * A page_probe job's result: facts about one render, bounded here as
+	 * well as on the node. Never text: warnings are a type and a file:line,
+	 * assets a /theme or /plugins path.
+	 */
+	private static function process_page_probe($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		$text = (is_array($data) && isset($data['output'])) ? (string)$data['output'] : '';
+		$d = ($text !== '') ? json_decode(trim($text), true) : null;
+		if (!is_array($d) || !isset($d['page'])) {
+			$job->set('mjb_result', json_encode(['read' => false]));
+			$job->save();
+			return;
+		}
+		$int = function ($v) { return is_int($v) ? $v : null; };
+		$warnings = [];
+		foreach (array_slice((array)($d['warnings'] ?? []), 0, 50) as $w) {
+			if (!is_array($w)) { continue; }
+			$warnings[] = [
+				'type' => in_array($w['type'] ?? '', ['warning', 'notice', 'deprecated', 'error', 'refused_write', 'other'], true) ? $w['type'] : 'other',
+				'at'   => substr(preg_replace('#[^A-Za-z0-9._/:\-]#', '', (string)($w['at'] ?? '')), 0, 170),
+			];
+		}
+		$assets = [];
+		foreach (array_slice((array)($d['failed_assets'] ?? []), 0, 40) as $a) {
+			if (!is_array($a)) { continue; }
+			$path = (string)($a['path'] ?? '');
+			if (!preg_match('#^/(theme|plugins)/[A-Za-z0-9_./\-]{1,200}$#', $path)) { continue; }
+			$assets[] = ['path' => $path, 'status' => (int)($a['status'] ?? 0)];
+		}
+		$lm = is_array($d['landmarks'] ?? null) ? $d['landmarks'] : [];
+		$result = [
+			'read'           => true,
+			'page'           => substr(preg_replace('#[^a-z0-9_/\-]#', '', (string)$d['page']), 0, 201),
+			'viewer'         => in_array($d['viewer'] ?? '', ['anonymous', 'member', 'admin'], true) ? $d['viewer'] : 'unknown',
+			'status'         => (int)($d['status'] ?? 0),
+			'bytes'          => max(0, (int)($d['bytes'] ?? 0)),
+			'render_ms'      => $int($d['render_ms'] ?? null),
+			'statements'     => $int($d['statements'] ?? null),
+			'peak_memory'    => $int($d['peak_memory'] ?? null),
+			'warnings'       => $warnings,
+			'failed_assets'  => $assets,
+			'failed_assets_unnamed' => max(0, (int)($d['failed_assets_unnamed'] ?? 0)),
+			'truncated'      => !empty($d['truncated']),
+			'landmarks'      => ['header' => !empty($lm['header']), 'main' => !empty($lm['main']), 'footer' => !empty($lm['footer']),
+			                     'forms' => max(0, (int)($lm['forms'] ?? 0))],
+			'structure_hash' => preg_match('/^[a-f0-9]{64}$/', (string)($d['structure_hash'] ?? '')) ? $d['structure_hash'] : '',
+			'reported'       => !empty($d['reported']),
+			'cleanup'        => substr((string)($d['cleanup'] ?? ''), 0, 200),
+		];
+		$job->set('mjb_result', json_encode($result));
+		if ($result['cleanup'] !== 'done' && $job->get('mjb_status') === 'completed') {
+			$job->set('mjb_status', 'failed');
+			$job->set('mjb_error_message', 'the probe could not clean up after itself: ' . $result['cleanup']);
+		}
+		$job->save();
+	}
+
 	/** Directories reported from a disk_usage walk; the script caps at the same figure. */
 	const DISK_USAGE_MAX_ENTRIES = 20;
 
@@ -2497,6 +2855,23 @@ HTML;
 				$v = isset($in['sshd'][$k]) && is_string($in['sshd'][$k]) ? preg_replace('/[^a-z-]/', '', strtolower($in['sshd'][$k])) : '';
 				$sshd[$k] = ($v !== '') ? substr($v, 0, 32) : 'unknown';
 			}
+			// The effective settings a lockout turns on (host_report.sh 1.5).
+			// Absent from an older node's report: kept absent, which the card
+			// reads as "not reported" (rule 11), never as a value.
+			foreach (['pubkey_authentication', 'kbd_interactive_authentication'] as $k) {
+				if (array_key_exists($k, $in['sshd'])) {
+					$v = is_string($in['sshd'][$k]) ? preg_replace('/[^a-z-]/', '', strtolower($in['sshd'][$k])) : '';
+					$sshd[$k] = ($v !== '') ? substr($v, 0, 32) : 'unknown';
+				}
+			}
+			if (array_key_exists('max_auth_tries', $in['sshd'])) {
+				$sshd['max_auth_tries'] = self::host_report_count($in['sshd']['max_auth_tries']);
+			}
+			foreach (['ports', 'allow_users', 'allow_groups'] as $k) {
+				if (array_key_exists($k, $in['sshd'])) {
+					$sshd[$k] = self::host_report_names($in['sshd'][$k]);
+				}
+			}
 		}
 
 		$disk = self::host_report_gauge($in['disk'] ?? null);
@@ -2527,8 +2902,67 @@ HTML;
 			'swap'                         => self::host_report_gauge($in['swap'] ?? null),
 			'reboot_required'              => $reboot,
 			'unattended_upgrades_last_run' => self::host_report_count($in['unattended_upgrades_last_run'] ?? null),
+			'os'                           => self::host_report_os($in['os'] ?? null),
+			'answers'                      => array_key_exists('answers', $in) ? self::host_report_answers($in['answers']) : null,
+			'served_certificates'          => array_key_exists('served_certificates', $in) ? self::host_report_certificates($in['served_certificates']) : null,
+			'containers'                   => array_key_exists('containers', $in) ? self::host_report_containers($in['containers']) : null,
 			'generated_at'                 => self::host_report_count($in['generated_at'] ?? null),
 		];
+	}
+
+	/** A list of names, capped and sanitised, or the string unknown. */
+	private static function host_report_names($v) {
+		if (!is_array($v)) { return 'unknown'; }
+		$out = [];
+		foreach (array_slice(array_values($v), 0, self::HOST_REPORT_MAX_LIST) as $n) {
+			$name = self::host_report_name($n);
+			if ($name !== '') { $out[] = $name; }
+		}
+		return $out;
+	}
+
+	/** The three services' answers: yes, no or unknown each. */
+	private static function host_report_answers($v) {
+		$out = [];
+		foreach (['apache2', 'php-fpm', 'postgresql'] as $k) {
+			$a = (is_array($v) && isset($v[$k]) && is_string($v[$k])) ? $v[$k] : '';
+			$out[$k] = in_array($a, ['yes', 'no', 'unknown'], true) ? $a : 'unknown';
+		}
+		return $out;
+	}
+
+	/** Served certificates: [{domain, days_left}], or unknown. */
+	private static function host_report_certificates($v) {
+		if (!is_array($v)) { return 'unknown'; }
+		$out = [];
+		foreach (array_slice(array_values($v), 0, 10) as $c) {
+			if (!is_array($c)) { continue; }
+			$domain = self::host_report_name($c['domain'] ?? '');
+			if ($domain === '' || !is_int($c['days_left'] ?? null)) { continue; }
+			$out[] = ['domain' => $domain, 'days_left' => max(-100000, min(100000, $c['days_left'])),
+				'primary' => ($c['primary'] ?? false) === true];
+		}
+		return $out;
+	}
+
+	/** Site containers: [{name, state, health, answers}], or none, or unknown. */
+	private static function host_report_containers($v) {
+		if ($v === 'none') { return 'none'; }
+		if (!is_array($v)) { return 'unknown'; }
+		$out = [];
+		foreach (array_slice(array_values($v), 0, self::HOST_REPORT_MAX_LIST) as $c) {
+			if (!is_array($c)) { continue; }
+			$name = self::host_report_name($c['name'] ?? '');
+			if ($name === '') { continue; }
+			$answers = (isset($c['answers']) && in_array($c['answers'], ['yes', 'no', 'unknown'], true)) ? $c['answers'] : 'unknown';
+			$out[] = [
+				'name'    => $name,
+				'state'   => self::unit_journal_word($c['state'] ?? ''),
+				'health'  => self::unit_journal_word($c['health'] ?? ''),
+				'answers' => $answers,
+			];
+		}
+		return $out;
 	}
 
 	/**
@@ -2557,6 +2991,37 @@ HTML;
 			$out[$k] = self::host_report_count($in[$k] ?? null);
 		}
 		return $out;
+	}
+
+	/**
+	 * The operating system and the release upgrade offered to it, or the
+	 * string unknown for the whole object from a node too old to say.
+	 *
+	 * id and codename are lowercase words; version and offered are dotted
+	 * digits (offered may also be none: the node's check ran and found no
+	 * release). checked_at is when the node's own check last ran, which is
+	 * only when someone logged in, so the reader needs it to judge the answer.
+	 */
+	private static function host_report_os($in) {
+		if (!is_array($in)) { return 'unknown'; }
+		$word = function ($v) {
+			$v = is_string($v) ? substr(preg_replace('/[^a-z0-9._-]/', '', strtolower($v)), 0, 32) : '';
+			return ($v !== '') ? $v : 'unknown';
+		};
+		$dotted = function ($v) {
+			return (is_string($v) && preg_match('/^[0-9]{1,4}(\.[0-9]{1,4}){0,3}$/', $v)) ? $v : 'unknown';
+		};
+		$ru = (isset($in['release_upgrade']) && is_array($in['release_upgrade'])) ? $in['release_upgrade'] : [];
+		$offered = $ru['offered'] ?? null;
+		return [
+			'id'              => $word($in['id'] ?? null),
+			'version'         => $dotted($in['version'] ?? null),
+			'codename'        => $word($in['codename'] ?? null),
+			'release_upgrade' => [
+				'offered'    => ($offered === 'none') ? 'none' : $dotted($offered),
+				'checked_at' => self::host_report_count($ru['checked_at'] ?? null),
+			],
+		];
 	}
 
 	/** A unit or jail name as the script bounds it: safe characters, capped. */

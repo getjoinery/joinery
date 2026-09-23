@@ -20,6 +20,9 @@
 	 *   SYNC_RESULT: {"themes": {...}, "plugins": {...}}
 	 * Exit code 0 on success, 1 on failure.
 	 *
+	 * @version 1.1.0 - plugins.versions: each plugin the sync added or updated, with the version it
+	 *                  had before and has after, for the structured apply result
+	 *                  (specs/agent_recipes_and_vocabulary.md).
 	 * @version 1.0.0
 	 */
 	set_time_limit(1800);
@@ -47,7 +50,18 @@
 	$theme_manifest = $parse_list($options['themes'] ?? null);
 	$plugin_manifest = $parse_list($options['plugins'] ?? null);
 
+	// Each plugin's version as the registry records it, by name.
+	$plugin_versions = function () {
+		$out = [];
+		foreach (new MultiPlugin([]) as $p) {
+			$meta = json_decode((string)$p->get('plg_metadata'), true);
+			$out[(string)$p->get('plg_name')] = is_array($meta) ? (string)($meta['version'] ?? '') : '';
+		}
+		return $out;
+	};
+
 	try {
+		$versions_before = $plugin_versions();
 		$theme_manager = ThemeManager::getInstance();
 		$theme_result = $theme_manager->sync(
 			$theme_manifest !== null ? ['source_manifest' => $theme_manifest] : []
@@ -57,6 +71,13 @@
 		$plugin_result = $plugin_manager->sync(
 			$plugin_manifest !== null ? ['source_manifest' => $plugin_manifest] : []
 		);
+
+		$versions_after = $plugin_versions();
+		$changed = [];
+		foreach (array_merge($plugin_result['added'] ?? [], $plugin_result['updated'] ?? []) as $name) {
+			$name = (string)$name;
+			$changed[] = ['name' => $name, 'before' => $versions_before[$name] ?? '', 'after' => $versions_after[$name] ?? ''];
+		}
 
 		echo 'SYNC_RESULT: ' . json_encode([
 			'themes' => [
@@ -70,6 +91,7 @@
 				'stale_marked' => (int)($plugin_result['stale_marked'] ?? 0),
 				'table_messages' => array_values($plugin_result['table_messages'] ?? []),
 				'migration_messages' => array_values($plugin_result['migration_messages'] ?? []),
+				'versions' => $changed,
 			],
 		]) . "\n";
 		exit(0);

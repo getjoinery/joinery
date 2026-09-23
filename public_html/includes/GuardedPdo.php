@@ -19,9 +19,39 @@ require_once(__DIR__ . '/SealedEgressGuard.php');
  * Cost when the process is cold, which is nearly always: one static boolean
  * check per executed statement.
  *
+ * @version 1.2 - $read_only: while a page_probe request runs (PageProbe::claim_request), a statement
+ *                that writes throws unless it is the server's own (SystemBase::server_initiated_write),
+ *                so the probe session is view-only in fact, not by a log line (review B3).
+ * @version 1.1 - $statements counts every statement run through this layer, for page_probe's query count
+ *                (specs/agent_recipes_and_vocabulary.md): one integer increment per statement.
  * @version 1.0
  */
 class GuardedPdo extends PDO {
+
+	/** Statements run in this process: exec, query, and every prepared execute. */
+	public static $statements = 0;
+
+	/**
+	 * Set for the one request a page_probe claims. A write that is not the
+	 * server's own is refused here, below every model and every raw query, and
+	 * the refusal lands in the probe's report as an error at its file:line.
+	 */
+	public static $read_only = false;
+
+	/** Throw when this process is read-only and the statement would write. */
+	public static function assertMayRun(string $sql): void {
+		if (!self::$read_only || SystemBase::$allow_get_mutation) {
+			return;
+		}
+		if (preg_match('/^\s*(?:WITH\b.*?\)\s*)?(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|ALTER|CREATE|DROP|GRANT|REVOKE|COPY)\b/is', $sql)) {
+			// Named in the probe's report at the caller's file:line before the
+			// throw, so a refused write is visible even when something catches it.
+			if (class_exists('PageProbe', false)) {
+				PageProbe::note_refused_write(debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 12));
+			}
+			throw new RuntimeException('page_probe: this request is view-only, and a statement tried to write');
+		}
+	}
 
 	public function __construct($dsn, $username = null, $password = null, $options = null) {
 		parent::__construct($dsn, $username, $password, $options);
@@ -35,6 +65,8 @@ class GuardedPdo extends PDO {
 	 */
 	#[\ReturnTypeWillChange]
 	public function exec($statement) {
+		self::$statements++;
+		self::assertMayRun((string)$statement);
 		// The isHot() test comes first everywhere: scanning a statement for
 		// literals is only worth doing on the rare process that could leak.
 		if (SealedEgressGuard::isHot()) {
@@ -45,6 +77,8 @@ class GuardedPdo extends PDO {
 
 	#[\ReturnTypeWillChange]
 	public function query($query, $fetchMode = null, ...$fetchModeArgs) {
+		self::$statements++;
+		self::assertMayRun((string)$query);
 		if (SealedEgressGuard::isHot()) {
 			SealedEgressGuard::assertStatementAllowed($query, self::literalsIn($query));
 		}
@@ -100,6 +134,8 @@ class GuardedPdoStatement extends PDOStatement {
 
 	#[\ReturnTypeWillChange]
 	public function execute($params = null) {
+		GuardedPdo::$statements++;
+		GuardedPdo::assertMayRun((string)$this->queryString);
 		if (SealedEgressGuard::isHot()) {
 			SealedEgressGuard::assertStatementAllowed((string)$this->queryString, $this->boundValues($params));
 		}

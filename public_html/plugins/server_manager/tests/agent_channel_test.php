@@ -353,9 +353,10 @@ check(AgentChannelEndpoint::validation_error(
 section('A claim is a closed set of fields, and the recipe list is one of them');
 
 // The endpoint's own spec, not a copy: a copy can agree with itself while
-// disagreeing with the code. An undeclared field is refused, and the agent's
-// answer to that is to drop every extra it sends (its vocabulary included), so
-// what a node may say on a poll is exactly this list.
+// disagreeing with the code. What a node may say on a poll is exactly this
+// list: a field outside it is set aside before validation (known_claim_fields)
+// and never read, so a newer agent's extra report costs the plane nothing
+// else it said (specs/agent_recipes_and_vocabulary.md, Different agent versions).
 $claim_spec = AgentChannelEndpoint::claim_request_spec();
 $claim = ['node_id' => 7, 'agent_version' => '1.27.0', 'primitives' => 'check_status,host_converge,host_report',
 	'recipes' => 'fail2ban:report-only', 'bundle_version' => '', 'script_trust' => 'ok'];
@@ -378,11 +379,20 @@ $bad = $claim; $bad['cases'] = [['recipe' => 'fail2ban']];
 check(AgentChannelEndpoint::validation_error($bad, $claim_spec) !== null,
 	'The cases field is an object keyed by source; a list is refused');
 $bad = $claim; $bad['close_case'] = 4;
-check(stripos((string)AgentChannelEndpoint::validation_error($bad, $claim_spec), 'undeclared') !== false,
-	'Nothing in a claim closes a case from the plane\'s side: such a field is undeclared');
+check(!array_key_exists('close_case', AgentChannelEndpoint::known_claim_fields($bad)),
+	'Nothing in a claim closes a case from the plane\'s side: such a field is set aside unread');
 $bad = $claim; $bad['hold'] = 'fail2ban';
-check(stripos((string)AgentChannelEndpoint::validation_error($bad, $claim_spec), 'undeclared') !== false,
-	'Nothing in a claim names, holds, starts or arms a recipe: such a field is undeclared');
+check(!array_key_exists('hold', AgentChannelEndpoint::known_claim_fields($bad)),
+	'Nothing in a claim names, holds, starts or arms a recipe: such a field is set aside unread');
+// A newer agent's claim: a field this plane has never heard of, and words it
+// has no builder for. The rest of the report is kept and validates.
+$newer = $claim; $newer['page_probe_pages'] = 42; $newer['future_report'] = ['x' => 1];
+$newer['primitives'] = 'apply_update,check_status,host_report,some_word_from_the_future';
+$kept = AgentChannelEndpoint::known_claim_fields($newer);
+check(!isset($kept['page_probe_pages']) && !isset($kept['future_report']) && ($kept['primitives'] ?? '') === $newer['primitives'],
+	'A newer agent\'s unknown fields are set aside and its vocabulary is kept');
+check(AgentChannelEndpoint::validation_error($kept, $claim_spec) === null,
+	'and what is left validates', (string)AgentChannelEndpoint::validation_error($kept, $claim_spec));
 // The owner's log-access switch rides the claim as a closed set
 // (specs/agent_log_access.md §1, reported at poll).
 foreach (array('on', 'off', '') as $v) {

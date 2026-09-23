@@ -276,8 +276,8 @@ class ManagedNode extends SystemBase {
 		// release compiled into it.
 		//
 		// Empty for an agent that predates the report (1.10.0 and earlier),
-		// which is what keeps JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION a
-		// live fallback rather than dead code.
+		// which is below AgentVocabulary::FLOOR: such a node is offered
+		// apply_update and nothing else.
 		'mgn_agent_primitives'    => array('type'=>'text'),
 
 		// The recipes the agent runs on its own clock, each with its mode:

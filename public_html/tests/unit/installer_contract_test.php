@@ -2417,7 +2417,8 @@ section('Exactly one writer per scheduled-task cron file');
 // tick, with the runner's already-running guard as the only thing keeping it
 // safe. One writer per environment: in a container the start command owns the
 // file, because /etc/cron.d does not survive a rebuild and _site_init.sh only
-// runs on first boot; on bare metal _site_init.sh owns it.
+// runs on first boot; on bare metal site_housekeeping.sh owns it, called by
+// _site_init.sh and re-run by the host timer.
 check(substr_count($df_code, 'process_scheduled_tasks.php') === 1,
     'the container start command writes exactly one scheduled-task cron entry',
     'found: ' . substr_count($df_code, 'process_scheduled_tasks.php'));
@@ -2425,9 +2426,11 @@ check(strpos($df_code, '/etc/cron.d/joinery-${SITENAME}') !== false,
     'and it is the per-site file');
 check(strpos($df_code, '/etc/cron.d/scheduled-tasks') === false,
     'the generic file is not written at all');
-check(preg_match('/if \[ "\$DOCKER_MODE" = false \]; then(?:(?!^fi$).)*CRON_FILE="\/etc\/cron\.d\/joinery-/ms',
-        $site_init_src) === 1,
-    '_site_init.sh writes its cron file only on bare metal');
+$site_hk_src = (string)file_get_contents($tools_dir . '/site_housekeeping.sh');
+check(strpos($site_init_src, '[ "$DOCKER_MODE" = true ] && SITE_HK_ARGS+=(--no-cron)') !== false
+        && strpos($site_hk_src, 'if [[ "${NO_CRON}" == 1 || -f "${FS_ROOT}/.dockerenv" ]]; then') !== false
+        && strpos($site_hk_src, 'CRON="${FS_ROOT}/etc/cron.d/joinery-${SITENAME}"') !== false,
+    'the site\'s cron file is written only on bare metal: _site_init.sh passes --no-cron in a container, and site_housekeeping.sh never writes it inside one');
 
 
 section('apt cannot ask a question mid-install');

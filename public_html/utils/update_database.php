@@ -95,6 +95,27 @@
 	-OTHER COLUMNS (INCLUDING THOSE WITH CONSTRAINTS) WILL BE DROPPED IF NOT IN SPECIFICATIONS
 	*/
 
+	/**
+	 * What this run did, for the structured apply result
+	 * (specs/agent_recipes_and_vocabulary.md, "The structured apply result"):
+	 * each migration run with its outcome and rows affected, and each schema
+	 * change as the updater worded it. Counts and names, never row data.
+	 * Printed as one UPDATE_DATABASE_RESULT line when run with --upgrade.
+	 */
+	$GLOBALS['UPDATE_DATABASE_FACTS'] = ['migrations' => [], 'schema_changes' => []];
+	function update_database_fact($kind, $value) {
+		$max = ($kind === 'migrations') ? 200 : 300;
+		if (count($GLOBALS['UPDATE_DATABASE_FACTS'][$kind]) < $max) {
+			$GLOBALS['UPDATE_DATABASE_FACTS'][$kind][] = $value;
+		}
+	}
+	function update_database_schema_facts($messages) {
+		foreach ((array)$messages as $m) {
+			$m = trim(strip_tags((string)$m));
+			if ($m !== '') { update_database_fact('schema_changes', mb_substr($m, 0, 200)); }
+		}
+	}
+
 	function update_database($verbose=false, $upgrade=false, $cleanup=false){
 
 		// Acquire advisory lock to prevent concurrent runs
@@ -120,6 +141,7 @@
 		// Display table operation results (always show schema changes, not just in verbose mode)
 		if (!empty($table_result['messages'])) {
 			echo implode('<br>', $table_result['messages']) . "<br>\n";
+			update_database_schema_facts($table_result['messages']);
 		}
 		
 		// Display warnings from column validation (always show warnings)
@@ -170,6 +192,7 @@
 			// Display results
 			if (!empty($advanced_result['messages'])) {
 				echo implode('<br>', $advanced_result['messages']) . "<br>\n";
+				update_database_schema_facts($advanced_result['messages']);
 			}
 			
 			if (!empty($advanced_result['warnings'])) {
@@ -384,6 +407,7 @@
 			$plugin_tables = PluginManager::getInstance()->syncTables();
 			if (!empty($plugin_tables['messages'])) {
 				echo implode('<br>', $plugin_tables['messages']) . "<br>\n";
+				update_database_schema_facts(array_map(function ($m) { return 'plugin: ' . $m; }, (array)$plugin_tables['messages']));
 			} else {
 				echo "✓ Plugin tables up to date<br>\n";
 			}
@@ -476,6 +500,11 @@
 				}
 
 				$result = $migclass->executeMigration($migration);
+				update_database_fact('migrations', [
+					'version' => (string)($migration['database_version'] ?? 'UNKNOWN'),
+					'outcome' => $result['success'] ? 'applied' : 'failed',
+					'rows'    => isset($result['rows']) && is_int($result['rows']) ? $result['rows'] : null,
+				]);
 
 				if ($result['success']) {
 					echo "  ✓ Successfully applied migration: " . $result['version'] . "<br>\n";
@@ -1228,7 +1257,13 @@
 
 	// Run the database update if not included from another script
 	if(!isset($noautorun)){
-		if(update_database($verbose, $upgrade, $cleanup)){
+		$update_ok = update_database($verbose, $upgrade, $cleanup);
+		// One machine-readable line for upgrade.php, which reads it into the
+		// structured apply result. Only on an upgrade run, only on the CLI.
+		if ($upgrade && $is_cli) {
+			echo "\nUPDATE_DATABASE_RESULT: " . json_encode($GLOBALS['UPDATE_DATABASE_FACTS']) . "\n";
+		}
+		if($update_ok){
 			echo 'Database update script successful'. "<br>\n";
 			exit(0);  // SUCCESS - Standard Unix convention
 		} else {

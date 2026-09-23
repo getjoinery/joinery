@@ -229,6 +229,50 @@ class NodeDetailActions {
 				return self::jobUrl($job);
 			}
 
+			case 'restart_unit': {
+				$built = JobCommandBuilder::build_restart_unit($node, (string)($_POST['unit'] ?? ''));
+				$job = ManagementJob::createFromBuild($node->key, 'restart_unit', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'restart_container': {
+				$built = JobCommandBuilder::build_restart_container($node, (string)($_POST['name'] ?? ''));
+				$job = ManagementJob::createFromBuild($node->key, 'restart_container', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'run_installer': {
+				$built = JobCommandBuilder::build_run_installer($node, (string)($_POST['name'] ?? ''));
+				$job = ManagementJob::createFromBuild($node->key, 'run_installer', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'file_head': {
+				$built = JobCommandBuilder::build_file_head($node,
+					(string)($_POST['file'] ?? ''), (int)($_POST['lines'] ?? 200), (string)($_POST['site'] ?? ''));
+				$job = ManagementJob::createFromBuild($node->key, 'file_head', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'schema_probe': {
+				$built = JobCommandBuilder::build_schema_probe($node, trim((string)($_POST['table'] ?? '')));
+				$job = ManagementJob::createFromBuild($node->key, 'schema_probe', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'reclaim_managed_file': {
+				$built = JobCommandBuilder::build_reclaim_managed_file($node, (string)($_POST['file'] ?? ''));
+				$job = ManagementJob::createFromBuild($node->key, 'reclaim_managed_file', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'page_probe': {
+				$built = JobCommandBuilder::build_page_probe($node,
+					(string)($_POST['page'] ?? ''), (string)($_POST['viewer'] ?? 'anonymous'));
+				$job = ManagementJob::createFromBuild($node->key, 'page_probe', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
 			case 'disk_usage': {
 				$built = JobCommandBuilder::build_disk_usage($node);
 				$job = ManagementJob::createFromBuild($node->key, 'disk_usage', $built, null, $uid);

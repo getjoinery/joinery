@@ -40,6 +40,9 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.9 - carries reclaim_managed_file.sh and _host_files.sh (host_housekeeping.sh sources it)
+ * @version 1.8 - carries restart_unit.sh and restart_container.sh: the repairs of service_health and
+ *                container_health, and the Restart buttons, work on a Docker host
  * @version 1.7 - carries reset_failed_unit.sh: the Clear beside a failed unit works on a siteless host
  *                as the Why? beside it does
  * @version 1.6 - carries unit_journal.sh and disk_usage.sh: the two observe words of
@@ -129,6 +132,16 @@ class SupportBundlePublisher {
 		// reset_failed_unit: unit_journal's counterpart, same list, sources
 		// nothing. A unit a host can be asked about is one it can clear.
 		'maintenance_scripts/sysadmin_tools/reset_failed_unit.sh',
+		// restart_unit and restart_container: the repairs of service_health
+		// and container_health. A Docker host runs its site containers and its
+		// own fail2ban and cron; both scripts source nothing.
+		'maintenance_scripts/sysadmin_tools/restart_unit.sh',
+		'maintenance_scripts/sysadmin_tools/restart_container.sh',
+		// reclaim_managed_file on a host: moves a host file aside and runs the
+		// bundled runner --machine --only=host_housekeeping.sh, which reads
+		// _host_files.sh for the files it writes when absent.
+		'maintenance_scripts/sysadmin_tools/reclaim_managed_file.sh',
+		'maintenance_scripts/install_tools/_host_files.sh',
 		// host_converge on a machine with no site: the runner in --machine
 		// mode, rooted at this bundle, runs the two host installers. The
 		// runner sources _tree_trust.sh (refusing to run anything as root

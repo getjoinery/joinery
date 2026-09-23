@@ -23,6 +23,8 @@
  * The plane already mints this key, holds its hash, and is the API it
  * authenticates TO, so the job row is not a new holder of anything.
  *
+ * @version 2.3 - an agent that cannot be seeded is refused with the standard "needs a newer agent" sentence
+ *               (AgentVocabulary), not an agent version number
  * @version 2.2 - a decommissioned site (its node soft-deleted) no longer holds the buyer's slot
  * @version 2.1 - one seeded site per buyer: seeding a second site is refused, naming the site that
  *                holds the slot, instead of silently revoking that site's credential
@@ -84,8 +86,8 @@ class FleetProvisionSeeding {
 		try {
 			if (!self::nodeReady($node)) {
 				return array('ok' => false, 'job_id' => null, 'message' =>
-					'No route to the node: its agent has not paired with this plane, or does not offer '
-					. 'the fleet_enroll primitive (agent 1.17.0 or later). There is no SSH route for this.');
+					'No route to the node for fleet_enroll. ' . AgentVocabulary::needs_newer_agent_text($node, array('fleet_enroll'))
+					. ' There is no SSH route for this.');
 			}
 
 			// One slot per subscription, so one seeded site per buyer. Minting

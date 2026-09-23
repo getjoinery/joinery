@@ -55,6 +55,16 @@ function jrp_node(array $fields = array()) {
 	$node->set('mgn_host', '192.0.2.20');
 	$node->set('mgn_ssh_user', 'root');
 	$node->set('mgn_ssh_key_path', '/tmp/nokey');
+	// A paired node is a current one unless the test says otherwise: an agent
+	// at the version floor reporting every word the plane can build.
+	if (!empty($fields['mgn_agent_public_key'])) {
+		$node->set('mgn_agent_version', AgentVocabulary::FLOOR);
+		$words = array();
+		foreach (get_class_methods('JobCommandBuilder') as $m) {
+			if (preg_match('/^build_([a-z0-9_]+)_primitive$/', $m, $mm)) { $words[] = $mm[1]; }
+		}
+		$node->set('mgn_agent_primitives', implode(',', $words));
+	}
 	foreach ($fields as $k => $v) { $node->set($k, $v); }
 	$node->save();
 	$node->load();
@@ -353,6 +363,8 @@ $hr_object = array(
 	'swap' => array('used_bytes' => 0, 'total_bytes' => 1024),
 	'reboot_required' => true,
 	'unattended_upgrades_last_run' => 1789281613,
+	'os' => array('id' => 'ubuntu', 'version' => '24.04.4', 'codename' => 'noble',
+		'release_upgrade' => array('offered' => '26.04.1', 'checked_at' => 1789280000)),
 	'generated_at' => 1789341744,
 );
 $hr_envelope = "=== [Step 1/1] host_report ===\n" . json_encode(array('api_version' => '1.0', 'data' => array(
@@ -375,6 +387,8 @@ check(is_array($stored) && $stored['fail2ban_jails'][0] === array('name' => 'ssh
 check(is_array($stored) && $stored['ssh_auth_failures_24h'] === 41 && $stored['reboot_required'] === true
 	&& $stored['sshd']['permit_root_login'] === 'prohibit-password',
 	'the count, the reboot flag and the sshd posture survive');
+check(is_array($stored) && $stored['os'] === $hr_object['os'],
+	'the operating system and the upgrade it is offered survive as sent', var_export($stored['os'] ?? null, true));
 check(!empty($hr_node->get('mgn_last_host_report_time')),
 	'and the read time is stamped');
 $hr_status = $hr_node->get('mgn_last_status_data');
@@ -398,10 +412,36 @@ $hostile = array(
 	'reboot_required' => 'true',
 	'unattended_upgrades_last_run' => -1,
 	'generated_at' => 1.5,
+	'os' => array('id' => 'Ubuntu <b>', 'version' => '24.04; reboot', 'codename' => array('x'),
+		'release_upgrade' => array('offered' => "New release '26.04'", 'checked_at' => 'yesterday')),
 	'surprise' => 'key',
 );
 $capped = JobResultProcessor::sanitise_host_report($hostile);
-check(!isset($capped['surprise']) && count($capped) === 12, 'unknown keys are dropped and every known key is present', var_export(array_keys($capped), true));
+check(!isset($capped['surprise']) && count($capped) === 16, 'unknown keys are dropped and every known key is present', var_export(array_keys($capped), true));
+// Fields an older node never sent are "not reported" (null), never a value
+// (specs/agent_recipes_and_vocabulary.md, rule 11).
+check($capped['answers'] === null && $capped['served_certificates'] === null && $capped['containers'] === null,
+	'answers, served_certificates and containers absent from the report are null, not no');
+check(!array_key_exists('pubkey_authentication', $capped['sshd']) && !array_key_exists('ports', $capped['sshd']),
+	'and sshd\'s widened settings absent from the report are absent, not unknown');
+$widened = JobResultProcessor::sanitise_host_report(array(
+	'sshd' => array('password_authentication' => 'no', 'permit_root_login' => 'no', 'pubkey_authentication' => 'YES',
+		'kbd_interactive_authentication' => 'no', 'max_auth_tries' => '6', 'ports' => array('22', '2222;x'), 'allow_users' => 'ops', 'allow_groups' => array()),
+	'answers' => array('apache2' => 'yes', 'php-fpm' => 'maybe', 'extra' => 'yes'),
+	'served_certificates' => array(array('domain' => 'a.example<b>', 'days_left' => 12), array('domain' => '', 'days_left' => 3), array('domain' => 'b.example', 'days_left' => '9')),
+	'containers' => array(array('name' => 'site1', 'state' => 'running', 'health' => 'none', 'answers' => 'no'), 'junk'),
+));
+check($widened['sshd']['pubkey_authentication'] === 'yes' && $widened['sshd']['max_auth_tries'] === 6
+	&& $widened['sshd']['ports'] === array('22', '2222x') && $widened['sshd']['allow_users'] === 'unknown' && $widened['sshd']['allow_groups'] === array(),
+	'sshd\'s widened settings are kept, sanitised, a non-list list read as unknown', var_export($widened['sshd'], true));
+check($widened['answers'] === array('apache2' => 'yes', 'php-fpm' => 'unknown', 'postgresql' => 'unknown'),
+	'answers keep the three services only, each yes, no or unknown', var_export($widened['answers'], true));
+check($widened['served_certificates'] === array(array('domain' => 'a.exampleb', 'days_left' => 12, 'primary' => false)),
+	'a served certificate needs a name and whole days', var_export($widened['served_certificates'], true));
+check($widened['containers'] === array(array('name' => 'site1', 'state' => 'running', 'health' => 'none', 'answers' => 'no')),
+	'a container keeps its four facts; anything else in the list is dropped', var_export($widened['containers'], true));
+check(JobResultProcessor::sanitise_host_report(array('containers' => 'none'))['containers'] === 'none',
+	'a machine with no docker says none');
 check(count($capped['failed_units']) === JobResultProcessor::HOST_REPORT_MAX_LIST, 'failed units are capped at the list bound');
 check($capped['failed_units'][0] === 'scriptalert1script.service' && $capped['failed_units'][1] === 'abrm-rf',
 	'unit names are reduced to safe characters', var_export(array_slice($capped['failed_units'], 0, 2), true));
@@ -433,6 +473,14 @@ check($capped['memory'] === array('used_bytes' => 'unknown', 'total_bytes' => 'u
 	'a gauge that is not an object, or is missing, is unknown in both figures');
 check($capped['reboot_required'] === 'unknown' && $capped['unattended_upgrades_last_run'] === 'unknown' && $capped['generated_at'] === 'unknown',
 	'a string "true", a negative time and a fractional time are all unknown');
+check($capped['os'] === array('id' => 'ubuntub', 'version' => 'unknown', 'codename' => 'unknown',
+		'release_upgrade' => array('offered' => 'unknown', 'checked_at' => 'unknown')),
+	'os words are lowercased and bounded, versions must be dotted digits, and text is never kept as a version', var_export($capped['os'], true));
+$os_none = JobResultProcessor::sanitise_host_report(array('os' => array('release_upgrade' => array('offered' => 'none', 'checked_at' => 5))));
+check($os_none['os']['release_upgrade'] === array('offered' => 'none', 'checked_at' => 5),
+	'none is kept: the node checked and was offered nothing');
+check(JobResultProcessor::sanitise_host_report(array())['os'] === 'unknown',
+	'a node too old to report its operating system says unknown for the whole object');
 check(json_encode($capped) !== false, 'the capped object encodes');
 
 // An answer that is not the object: the columns are left alone.
@@ -455,7 +503,7 @@ section('host_converge: a completed run asks for the machine after it, once');
 // both come through it), so the queued report is a real row.
 $hc_node = jrp_node(array(
 	'mgn_agent_public_key' => base64_encode(str_repeat("\x09", 32)),
-	'mgn_agent_version'    => '1.26.0',
+	'mgn_agent_version'    => AgentVocabulary::FLOOR,
 	'mgn_agent_primitives' => 'check_status,host_report,host_converge',
 ));
 function jrp_pending_host_reports($node_id) {
@@ -492,7 +540,7 @@ check(count(jrp_pending_host_reports($hc_node->key)) === 1,
 // A run that did not complete asks for nothing: the machine is as it was.
 $hc_node2 = jrp_node(array(
 	'mgn_agent_public_key' => base64_encode(str_repeat("\x0a", 32)),
-	'mgn_agent_version'    => '1.26.0',
+	'mgn_agent_version'    => AgentVocabulary::FLOOR,
 	'mgn_agent_primitives' => 'check_status,host_report,host_converge',
 ));
 $hc_bad = jrp_job($hc_node2, 'host_converge', "=== [Step 1/1] host_converge ===\n" . json_encode(array('api_version' => '1.0', 'data' => array(
@@ -705,7 +753,7 @@ $machine_status = "=== [Step 1/1] check_status ===\n" . json_encode(array('api_v
 	'load_1m' => 0.4, 'memory_total_mb' => 3916, 'memory_used_mb' => 1685, 'uptime' => 'up 3 days'))) . "\n[Step 1/1 OK]";
 $host_node = jrp_node(array(
 	'mgn_agent_public_key' => base64_encode(str_repeat("\x0b", 32)),
-	'mgn_agent_version'    => '1.29.0',
+	'mgn_agent_version'    => AgentVocabulary::FLOOR,
 	'mgn_agent_primitives' => 'check_status,host_report,host_converge,recovery_key_report',
 	'mgn_web_root'         => '',
 ));
@@ -716,7 +764,7 @@ check(jrp_pending_jobs($host_node->key, 'recovery_key_report') === array(),
 // The same agent with a site: the state is unmeasured, and the report is asked for.
 $site_node = jrp_node(array(
 	'mgn_agent_public_key' => base64_encode(str_repeat("\x0c", 32)),
-	'mgn_agent_version'    => '1.29.0',
+	'mgn_agent_version'    => AgentVocabulary::FLOOR,
 	'mgn_agent_primitives' => 'check_status,host_report,host_converge,recovery_key_report',
 	'mgn_web_root'         => '/var/www/html/fixture/public_html',
 ));
@@ -946,7 +994,7 @@ $ro_node = jrp_node(array(
 	'mgn_slug'                 => 'rosite-' . bin2hex(random_bytes(2)),
 	'mgn_bkt_backup_target_id' => $ro_bkt->key,
 	'mgn_agent_public_key'     => base64_encode(str_repeat("\x05", 32)),
-	'mgn_agent_version'        => JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION['restore_objects'],
+	'mgn_agent_version'        => AgentVocabulary::FLOOR,
 	'mgn_last_status_data'     => json_encode(array('backup_recovery_state' => 'proven')),
 	'mgn_backup_recovery_fpr'  => str_repeat('c3', 32)));
 $ro_target = JobCommandBuilder::get_target($ro_node);
@@ -1078,8 +1126,8 @@ if (!$ro_target) {
 	check(!isset($old_res['objects_job']) && strpos((string)($old_res['objects'] ?? ''), 'before its result was read') !== false
 		&& count($ro_jobs('restore_objects', $rc_old->key)) === 0,
 		'a chain restore whose result is read long after it finished starts no loop and says why', json_encode($old_res));
-	$plain_node = jrp_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x06", 32)), 'mgn_agent_version' => '1.13.0',
-		'mgn_bkt_backup_target_id' => $ro_bkt->key));
+	$plain_node = jrp_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x06", 32)), 'mgn_agent_version' => AgentVocabulary::FLOOR,
+		'mgn_agent_primitives' => 'check_status,restore_chain', 'mgn_bkt_backup_target_id' => $ro_bkt->key));
 	$rc_plain = jrp_job($plain_node, 'restore_chain', "RESTORE_OK\n");
 	$rc_plain->set('mjb_parameters', json_encode(array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager')));
 	$rc_plain->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
@@ -1087,7 +1135,7 @@ if (!$ro_target) {
 	JobResultProcessor::process($rc_plain);
 	$rc_plain->load();
 	$plain_res = json_decode((string)$rc_plain->get('mjb_result'), true);
-	check(strpos((string)($plain_res['objects'] ?? ''), 'paired agent of at least') !== false && count($ro_jobs('restore_objects', $rc_plain->key)) === 0,
+	check(strpos((string)($plain_res['objects'] ?? ''), 'update this node') !== false && count($ro_jobs('restore_objects', $rc_plain->key)) === 0,
 		'a node whose agent lacks the word gets its restore recorded and the reason no files followed', json_encode($plain_res));
 }
 
@@ -1178,7 +1226,7 @@ section('reset_failed_unit: before and after, and a fresh host report behind an 
 {
 	$rf_node = jrp_node(array(
 		'mgn_agent_public_key' => base64_encode(str_repeat("\x0d", 32)),
-		'mgn_agent_version'    => '1.41.0',
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
 		'mgn_agent_primitives' => 'check_status,host_report,unit_journal,reset_failed_unit',
 	));
 	$rf_envelope = function ($object) {

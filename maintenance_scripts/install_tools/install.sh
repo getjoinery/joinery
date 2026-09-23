@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#VERSION 2.78 - mpm_event.conf, the journal cap and the php.ini tuning come from _host_files.sh,
+#              the one definition host_housekeeping.sh also uses (writing each when absent), so
+#              install day and repair day run the same code (specs/agent_recipes_and_vocabulary.md).
 #VERSION 2.77 - A host with no agent artifact is told to re-run install.sh docker from a current
 #              tree, not to run install_agent.sh --siteless by hand: the Docker install is the one
 #              moment a host agent is placed (specs/docker_host_agent.md install rule, pinned).
@@ -2223,11 +2226,9 @@ host_housekeeping() {
 
     # --- journald size limit ---
     print_step "Capping systemd journal size..."
-    mkdir -p /etc/systemd/journald.conf.d
-    tee /etc/systemd/journald.conf.d/size-limit.conf > /dev/null << 'EOF'
-[Journal]
-SystemMaxUse=100M
-EOF
+    # One definition, shared with host_housekeeping.sh (_host_files.sh).
+    . "$SCRIPT_DIR/_host_files.sh"
+    host_files_write_journald_limit /etc/systemd/journald.conf.d/size-limit.conf
     systemctl restart systemd-journald
     print_success "journald: capped at 100M"
 
@@ -2823,15 +2824,9 @@ EOF
 
     # Right-size the event MPM for low-traffic sites. PHP work happens in the
     # fpm pool, so Apache threads only shuttle requests and static files.
-    cat > /etc/apache2/mods-available/mpm_event.conf << 'EOF'
-# event MPM
-StartServers             2
-MinSpareThreads         10
-MaxSpareThreads         25
-ThreadsPerChild         25
-MaxRequestWorkers       50
-MaxConnectionsPerChild  2000
-EOF
+    # One definition, shared with host_housekeeping.sh (_host_files.sh).
+    . "$SCRIPT_DIR/_host_files.sh"
+    host_files_write_mpm_event /etc/apache2/mods-available/mpm_event.conf
 
     print_success "Apache configured"
 
@@ -3105,20 +3100,11 @@ EOF
     fi
     cp "$PHP_INI" "${PHP_INI}.backup"
 
-    # Update PHP settings optimized for 1GB VPS
-    sed -i 's/upload_max_filesize = .*/upload_max_filesize = 32M/' "$PHP_INI"
-    sed -i 's/post_max_size = .*/post_max_size = 32M/' "$PHP_INI"
-    sed -i 's/max_execution_time = .*/max_execution_time = 300/' "$PHP_INI"
-    sed -i 's/memory_limit = .*/memory_limit = 128M/' "$PHP_INI"
-    # UTC, matching what the CLI and a Docker site already get. Every stored
-    # time in the platform is UTC and display conversion is per user, so a web
-    # request and a scheduled task on the same box have to agree about what
-    # date() means. Individual users still see their own timezone.
-    sed -i 's/;date.timezone =/date.timezone = UTC/' "$PHP_INI"
-
-    # Enable PDO PostgreSQL extension
-    sed -i 's/^;extension=pdo_pgsql/extension=pdo_pgsql/' "$PHP_INI"
-    sed -i 's/^;extension=pgsql/extension=pgsql/' "$PHP_INI"
+    # Settings for a small VPS, UTC, and the PostgreSQL extensions: one
+    # definition, shared with host_housekeeping.sh (_host_files.sh), which
+    # rebuilds this file from php.ini-production when it is moved aside.
+    . "$SCRIPT_DIR/_host_files.sh"
+    host_files_tune_php_ini "$PHP_INI"
 
     print_success "PHP configured"
 

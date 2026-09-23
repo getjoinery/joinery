@@ -101,7 +101,8 @@ if ($_POST && isset($_POST['mgn_name'])) {
 				if (!$source_node->key || !preg_match('#^https://#', (string)$source_node->get('mgn_site_url'))) {
 					$field_errors['source_node_id'] = 'The source node needs an https site URL; the clone pulls from it.';
 				} elseif (!JobCommandBuilder::has_primitive($source_node, 'clone_export_arm')) {
-					$field_errors['source_node_id'] = 'The source node\'s agent cannot arm a clone export (needs agent 1.17.0 or later, paired). Update it first.';
+					$field_errors['source_node_id'] = 'The source node\'s agent cannot arm a clone export. '
+						. AgentVocabulary::needs_newer_agent_text($source_node, array('clone_export_arm'));
 				}
 			}
 		}

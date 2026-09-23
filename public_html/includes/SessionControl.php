@@ -90,6 +90,8 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.3 - the page_probe session: a request from this machine carrying a one-time probe token runs as
+ *                the probe's viewer for that request only (PageProbe), with no cookie and no PHP session
  * @version 1.2 - clear_return() empties the post-login destination; set_return() with nothing
  *                stores the current request, so it was never a way to clear the slot
  * @version 1.1 - The Cloudflare edge ranges are read from includes/cloudflare_ip_ranges.txt,
@@ -119,6 +121,20 @@ class SessionControl{
 		if (php_sapi_name() === 'cli') {
 			if (!isset($_SESSION)) $_SESSION = array();
 			return;
+		}
+
+		// The page_probe session (includes/PageProbe.php): a request from this
+		// machine carrying a one-time probe token runs as the probe's viewer
+		// for this request only — no cookie read or written, no PHP session
+		// started, nothing persisted. Anything that is not exactly a claimed
+		// probe falls through to the ordinary session below.
+		if (isset($_SERVER[PageProbe::HEADER])) {
+			$probe = PageProbe::claim_request();
+			if ($probe !== null) {
+				$_SESSION = $probe;
+				$_SESSION['saved_messages'] = array();
+				return;
+			}
 		}
 
 		// Set secure session cookie parameters before starting the session
