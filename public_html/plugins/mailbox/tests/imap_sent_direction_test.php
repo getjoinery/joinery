@@ -42,6 +42,7 @@
  *
  * Run: php tests/run.php db --filter=imap_sent_direction
  *
+ * @version 1.3 - teardown removes the folders' ingest-failure rows first
  * @version 1.2
  */
 
@@ -162,8 +163,10 @@ class ImapSentDirectionTest {
 				->fetchAll(PDO::FETCH_COLUMN);
 			if ($aids) {
 				$ain = implode(',', array_map('intval', $aids));
+				$this->db->exec("DELETE FROM ifl_inbound_imap_ingest_failures WHERE ifl_iif_inbound_imap_folder_id IN (SELECT iif_inbound_imap_folder_id FROM iif_inbound_imap_folders WHERE iif_iia_inbound_imap_account_id IN ($ain))");
 				$this->db->exec("DELETE FROM iif_inbound_imap_folders WHERE iif_iia_inbound_imap_account_id IN ($ain)");
 				$this->db->exec("DELETE FROM isp_inbound_imap_seed_proofs WHERE isp_iia_inbound_imap_account_id IN (SELECT iia_inbound_imap_account_id FROM iia_inbound_imap_accounts WHERE iia_inbound_imap_account_id IN ($ain))");
+				$this->db->exec("DELETE FROM ifl_inbound_imap_ingest_failures WHERE ifl_iif_inbound_imap_folder_id IN (SELECT iif_inbound_imap_folder_id FROM iif_inbound_imap_folders WHERE iif_iia_inbound_imap_account_id IN (SELECT iia_inbound_imap_account_id FROM iia_inbound_imap_accounts WHERE iia_inbound_imap_account_id IN ($ain)))");
 				$this->db->exec("DELETE FROM iif_inbound_imap_folders WHERE iif_iia_inbound_imap_account_id IN (SELECT iia_inbound_imap_account_id FROM iia_inbound_imap_accounts WHERE iia_inbound_imap_account_id IN ($ain))");
 				$this->db->exec("DELETE FROM iia_inbound_imap_accounts WHERE iia_inbound_imap_account_id IN ($ain)");
 			}

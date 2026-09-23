@@ -153,7 +153,7 @@ $formwriter->numberinput('iia_imap_port', 'IMAP port', array(
 	'helptext' => 'Usually 993 for SSL.',
 ));
 $formwriter->dropinput('iia_imap_encryption', 'Encryption', array(
-	'options' => array('ssl' => 'SSL/TLS (993)', 'tls' => 'STARTTLS (143)', 'none' => 'None'),
+	'options' => array('ssl' => 'SSL/TLS (993)', 'tls' => 'STARTTLS (143)'),
 ));
 
 // Folder names come from the server, with their real capitalisation and in the

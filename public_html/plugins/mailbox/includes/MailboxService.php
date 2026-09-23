@@ -49,6 +49,8 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.43 - thread rows carry source_gone; a source-gone remote row offers no
+ *   live original (specs/implemented/imap_client_hardening.md F15)
  * @version 1.42 - each mailbox row carries protection_addons: the domain's add-ons
  *   in force, shown beside the level chip
  * @version 1.41 - listThreads() rows carry label_ids: the custom labels any message
@@ -1576,7 +1578,7 @@ class MailboxService {
 					iem_body_plain, iem_body_html, iem_content_sealed, iem_sealed_key,
 					iem_sealed_owner_user_id, iem_pending_parse, iem_ai_danger_score, iem_ai_scan, iem_ai_scan_time,
 					iem_ai_summary, iem_transport, iem_direct_verified,
-					iem_raw_storage_driver, iem_raw_storage_key,
+					iem_raw_storage_driver, iem_raw_storage_key, iem_source_gone_time,
 					(COALESCE(length(iem_raw_message), 0) > 0) AS iem_has_inline_raw,
 					(COALESCE(length(iem_raw_headers), 0) > 0) AS iem_has_raw_headers,
 					CASE WHEN iem_to IS NULL AND iem_cc IS NULL THEN iem_raw_headers END AS iem_raw_headers_for_lists
@@ -1668,6 +1670,11 @@ class MailboxService {
 				// header block supports a labeled reconstruction (no .eml);
 				// 'none' hides both items rather than offering dead ends.
 				'original_source'   => $this->originalSource($r),
+				// The source server no longer holds this message anywhere a
+				// tracked folder can find it. The message is kept here; parts
+				// that were never saved here can no longer be fetched
+				// (specs/implemented/imap_client_hardening.md F15).
+				'source_gone'       => $r['iem_source_gone_time'] !== null,
 				'attachments'       => $att_by_msg[$mid] ?? array(),
 			);
 		}
@@ -1711,7 +1718,8 @@ class MailboxService {
 		}
 		$driver = (string)($row['iem_raw_storage_driver'] ?? '') ?: 'inline';
 		if ($driver === 'remote') {
-			return intval($row['iem_iia_inbound_imap_account_id'] ?? 0) > 0 ? 'imap' : 'none';
+			return (intval($row['iem_iia_inbound_imap_account_id'] ?? 0) > 0
+				&& ($row['iem_source_gone_time'] ?? null) === null) ? 'imap' : 'none';
 		}
 		return $this->pgBool($row['iem_has_raw_headers'] ?? false) ? 'headers' : 'none';
 	}

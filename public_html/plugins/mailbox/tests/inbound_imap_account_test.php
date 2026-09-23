@@ -12,6 +12,7 @@
  * Run: php plugins/mailbox/tests/inbound_imap_account_test.php
  * (requires schema synced — iia_inbound_imap_accounts table + iea aliases).
  *
+ * @version 1.2 - teardown removes the folders' ingest-failure rows first
  * @version 1.1 - saving a feed retires the remembered Setup verdict
  */
 
@@ -89,6 +90,7 @@ class InboundImapAccountTest {
 				if ($aids) {
 					$ain = implode(',', array_map('intval', $aids));
 					$this->db->exec("DELETE FROM isp_inbound_imap_seed_proofs WHERE isp_iia_inbound_imap_account_id IN (SELECT iia_inbound_imap_account_id FROM iia_inbound_imap_accounts WHERE iia_iea_inbound_email_alias_id IN ($ain))");
+					$this->db->exec("DELETE FROM ifl_inbound_imap_ingest_failures WHERE ifl_iif_inbound_imap_folder_id IN (SELECT iif_inbound_imap_folder_id FROM iif_inbound_imap_folders WHERE iif_iia_inbound_imap_account_id IN (SELECT iia_inbound_imap_account_id FROM iia_inbound_imap_accounts WHERE iia_iea_inbound_email_alias_id IN ($ain)))");
 					$this->db->exec("DELETE FROM iif_inbound_imap_folders WHERE iif_iia_inbound_imap_account_id IN (SELECT iia_inbound_imap_account_id FROM iia_inbound_imap_accounts WHERE iia_iea_inbound_email_alias_id IN ($ain))");
 					$this->db->exec("DELETE FROM iia_inbound_imap_accounts WHERE iia_iea_inbound_email_alias_id IN ($ain)");
 				}
@@ -272,6 +274,7 @@ class InboundImapAccountTest {
 			if ($this->account_ids) {
 				$in = implode(',', array_map('intval', $this->account_ids));
 				$this->db->exec("DELETE FROM isp_inbound_imap_seed_proofs WHERE isp_iia_inbound_imap_account_id IN (SELECT iia_inbound_imap_account_id FROM iia_inbound_imap_accounts WHERE iia_inbound_imap_account_id IN ($in))");
+				$this->db->exec("DELETE FROM ifl_inbound_imap_ingest_failures WHERE ifl_iif_inbound_imap_folder_id IN (SELECT iif_inbound_imap_folder_id FROM iif_inbound_imap_folders WHERE iif_iia_inbound_imap_account_id IN (SELECT iia_inbound_imap_account_id FROM iia_inbound_imap_accounts WHERE iia_inbound_imap_account_id IN ($in)))");
 				$this->db->exec("DELETE FROM iif_inbound_imap_folders WHERE iif_iia_inbound_imap_account_id IN (SELECT iia_inbound_imap_account_id FROM iia_inbound_imap_accounts WHERE iia_inbound_imap_account_id IN ($in))");
 				$this->db->exec("DELETE FROM iia_inbound_imap_accounts WHERE iia_inbound_imap_account_id IN ($in)");
 			}

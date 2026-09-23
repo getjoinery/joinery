@@ -6,6 +6,7 @@
  * (begin an OAuth2 consent flow through the OAuth2 Core for Gmail/Microsoft
  * accounts). Loads the accounts plus their bound-alias labels for display.
  *
+ * @version 1.7 - retry_skipped and resume_folder actions (specs/implemented/imap_client_hardening.md F3, F9)
  * @version 1.6 - Fetch now runs inside ImapFetch's interactive budget; what it
  *   could not finish is left due for the scheduled poller and said so
  * @version 1.5 - Fetch now runs the full ImapFetch cycle, so a sync-enabled
@@ -105,6 +106,40 @@ function admin_mailbox_imap_logic(array $input): LogicResult {
 
 		if ($action === 'connect') {
 			return _imap_begin_consent($account, $session, $list_url);
+		}
+
+		// Messages the walk gave up on after repeated failures
+		// (specs/implemented/imap_client_hardening.md F3): import them again, now.
+		if ($action === 'retry_skipped' && LibraryFunctions::isFormSubmission()) {
+			$ingestor = new ImapIngestor($account);
+			try {
+				$res = $ingestor->retrySkipped();
+				$msg = $res['imported'] . ' imported'
+					. ($res['failed'] ? '; ' . $res['failed'] . ' still could not be imported (see the run log)' : '')
+					. '.';
+				$level = $res['failed'] ? DisplayMessage::MESSAGE_WARNING : DisplayMessage::MESSAGE_ANNOUNCEMENT;
+			} catch (ImapFetchBusyException $e) {
+				$msg = $e->getMessage();
+				$level = DisplayMessage::MESSAGE_WARNING;
+			} catch (Throwable $e) {
+				$msg = 'Retry failed: ' . $e->getMessage();
+				$level = DisplayMessage::MESSAGE_ERROR;
+			} finally {
+				$ingestor->close();
+			}
+			return _imap_msg_redirect($session, $msg, $list_url, $level);
+		}
+
+		// A folder paused for UIDVALIDITY churn (F9): the operator says the
+		// server is fixed; the next poll reseeds it.
+		if ($action === 'resume_folder' && LibraryFunctions::isFormSubmission()) {
+			$folder = new InboundImapFolder(intval($input['iif_inbound_imap_folder_id'] ?? 0), TRUE);
+			if ($folder->key && intval($folder->get('iif_iia_inbound_imap_account_id')) === intval($account->key)) {
+				$folder->resume();
+				return _imap_msg_redirect($session, 'Folder ' . (string)$folder->get('iif_name')
+					. ' resumed; the next fetch reads it again.', $list_url);
+			}
+			return LogicResult::redirect($list_url);
 		}
 	}
 

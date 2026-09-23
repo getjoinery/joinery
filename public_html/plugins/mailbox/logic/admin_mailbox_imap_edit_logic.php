@@ -15,6 +15,8 @@
  * Connection details for a known provider come from the preset catalog; the
  * app/basic password is a non-model field stored encrypted via setPassword().
  *
+ * @version 2.9 - no unencrypted connection mode; a generic host inside this
+ *   server's own network is refused at save
  * @version 2.8 - two levels, Standard and Private
  * @version 2.7 - the password goes through FormWriterV2Base::process_secretinput(): Reset and save blank removes it
  * @changelog 2.6 - edit-only, enforced: any arrival that resolves no existing
@@ -333,7 +335,7 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 			$account->set('iia_imap_host', trim((string)($input['iia_imap_host'] ?? '')));
 			$account->set('iia_imap_port', intval($input['iia_imap_port'] ?? 993) ?: 993);
 			$enc = $input['iia_imap_encryption'] ?? 'ssl';
-			$account->set('iia_imap_encryption', in_array($enc, array('ssl', 'tls', 'none'), true) ? $enc : 'ssl');
+			$account->set('iia_imap_encryption', in_array($enc, array('ssl', 'tls'), true) ? $enc : 'ssl');
 		} else {
 			$account->set('iia_imap_host', $preset['host']);
 			$account->set('iia_imap_port', $preset['port']);
@@ -354,6 +356,15 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 		}
 
 		try {
+			// A host that resolves inside this server's own network is refused at
+			// save, not only at the first poll (specs/implemented/imap_client_hardening.md F17).
+			if ($provider === 'imap_generic') {
+				$host_problem = InboundImapAccount::imapHostProblem(
+					(string)$account->get('iia_imap_host'), intval($account->get('iia_imap_port')));
+				if ($host_problem !== null) {
+					throw new InboundImapAccountException($host_problem);
+				}
+			}
 			$account->prepare();
 			$account->save();
 			$account->load();

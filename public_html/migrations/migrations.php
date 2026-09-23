@@ -1574,3 +1574,14 @@
 	$migration['migration_file'] = 'messenger_sealed_exits_only_fold.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// An IMAP feed has no unencrypted connection mode: it logs in with
+	// full-mailbox credentials, and a plaintext connection sends them in the
+	// clear (specs/implemented/imap_client_hardening.md Q1). A feed still set to 'none'
+	// moves to SSL/TLS on 993.
+	$migration = array();
+	$migration['database_version'] = '200';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'imap_feeds_no_plaintext.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

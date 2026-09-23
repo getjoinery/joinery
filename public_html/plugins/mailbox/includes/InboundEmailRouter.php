@@ -90,6 +90,9 @@
  * dedup return adopts from the raw in hand, storeDirectMessage's from the
  * delivered parts. See AttachmentByteCustody.
  *
+ * @version 1.42 - storeExtracted clips header columns UTF-8-safely, carries
+ *   iem_source_message_key, and lets a database error out as itself
+ *   (specs/implemented/imap_client_hardening.md F5, F6)
  * @version 1.41.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.41
  * @changelog 1.41 - relay() names the transport for the attempt row only when the
@@ -1844,12 +1847,12 @@ class InboundEmailRouter {
 			$isInline = ($disp === 'inline') || ($cid !== null && $cid !== '' && $disp !== 'attachment');
 			InboundMessageAttachment::CreateEntry(array(
 				'ima_iem_inbound_email_message_id' => $message_id,
-				'ima_filename'     => $part->getName() ? substr($part->getName(), 0, 500) : null,
-				'ima_content_type' => substr((string)$part->getType(), 0, 255),
+				'ima_filename'     => $part->getName() ? DocumentText::clip((string)$part->getName(), 500) : null,
+				'ima_content_type' => DocumentText::clip((string)$part->getType(), 255),
 				'ima_size_bytes'   => strlen((string)$part->getContents()),
 				'ima_mime_part'    => substr((string)$part->getMimeId(), 0, 40),
 				'ima_encoding'     => substr($this->partTransferEncoding($part), 0, 40),
-				'ima_content_id'   => $cid ? substr(trim($cid, '<>'), 0, 255) : null,
+				'ima_content_id'   => $cid ? DocumentText::clip(trim($cid, '<>'), 255) : null,
 				'ima_is_inline'    => $isInline,
 			));
 		}
@@ -1892,7 +1895,7 @@ class InboundEmailRouter {
 		$message_id_header = $msg['message_id_header'] ?? null;
 		if ($message_id_header !== null) {
 			$message_id_header = trim((string)$message_id_header);
-			$message_id_header = ($message_id_header === '') ? null : substr($message_id_header, 0, 255);
+			$message_id_header = ($message_id_header === '') ? null : DocumentText::clip($message_id_header, 255);
 		}
 
 		$thread_key = $msg['thread_key'] ?? null;
@@ -1912,8 +1915,10 @@ class InboundEmailRouter {
 		$seal = $this->resolveSealTarget($alias, $domain);
 		$sealing = $seal['sealing'];
 
-		$sender  = substr((string)($msg['sender'] ?? ''), 0, 500);
-		$subject = substr((string)($msg['subject'] ?? ''), 0, 1000);
+		// Clipped, never byte-cut: a cut through a multi-byte character makes the
+		// UTF-8 database refuse the whole row (specs/implemented/imap_client_hardening.md F5).
+		$sender  = DocumentText::clip((string)($msg['sender'] ?? ''), 500);
+		$subject = DocumentText::clip((string)($msg['subject'] ?? ''), 1000);
 		$plain   = (string)($msg['body_plain'] ?? '');
 		$html    = (string)($msg['body_html'] ?? '');
 		$lists   = $this->addressListsFromHeaders(is_array($msg['headers'] ?? null) ? $msg['headers'] : array());
@@ -1922,7 +1927,7 @@ class InboundEmailRouter {
 			'iem_ied_inbound_email_domain_id' => $domain->key,
 			'iem_iea_inbound_email_alias_id'  => $alias ? $alias->key : null,
 			'iem_sender'      => $sealing ? '' : $sender,
-			'iem_recipient'   => substr((string)$envelope_recipient, 0, 500),
+			'iem_recipient'   => DocumentText::clip((string)$envelope_recipient, 500),
 			'iem_subject'     => $sealing ? '' : $subject,
 			'iem_body_plain'  => $sealing ? '' : $plain,
 			'iem_body_html'   => $sealing ? '' : $html,
@@ -1942,6 +1947,7 @@ class InboundEmailRouter {
 			'iem_imap_uid'         => isset($msg['imap_uid']) ? intval($msg['imap_uid']) : null,
 			'iem_imap_uidvalidity' => isset($msg['imap_uidvalidity']) ? intval($msg['imap_uidvalidity']) : null,
 			'iem_imap_folder'      => $msg['imap_folder'] ?? null,
+			'iem_source_message_key' => $msg['source_message_key'] ?? null,
 			'iem_received_time' => $msg['received_time'] ?? gmdate('Y-m-d H:i:s'),
 		) + $this->addressListColumns($lists, $sealing);
 
@@ -1964,6 +1970,14 @@ class InboundEmailRouter {
 			if ($this->isUniqueViolation($e)) {
 				throw new InboundStoreCollisionException(
 					'Another process stored this message first; it resolves on the next pass.', 0, $e);
+			}
+			// Any other error the DATABASE raised (an encoding it refused, a value
+			// too long) has aborted the transaction too, so the dedup question
+			// below cannot be asked — it would only fail with "current transaction
+			// is aborted" and bury the real reason in the run record. Let the
+			// original out.
+			if ($e instanceof PDOException || $e->getPrevious() instanceof PDOException) {
+				throw $e;
 			}
 			// SystemBase::save() pre-validates the unique_with
 			// (iem_message_id_header, iem_recipient) and throws a

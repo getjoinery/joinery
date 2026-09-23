@@ -28,6 +28,12 @@
  *
  * See specs/two_way_imap_sync.md and specs/inbound_email_labels.md.
  *
+ * @version 2.3 - specs/implemented/imap_client_hardening.md: every write and every pull match
+ *   goes by a UID of the folder's CURRENT generation, re-found by Message-ID when
+ *   stale (F2); a short UID answer removes nothing (F10); failed pushes back off
+ *   (F11); moved locators carry the destination's UIDVALIDITY (F12); pointer
+ *   folders follow messages moved away or mark them source-gone (F15); the
+ *   folder-exists check matches exactly (F18); paused folders are skipped (F9)
  * @version 2.2 - pull honours the ingestor's deadline (stops between folders,
  *   reporting the rest as deferred) and laps its time into the ingestor's
  *   ledger; push laps too (specs/mailbox_refresh_budget.md)
@@ -57,6 +63,13 @@ class ImapSyncer {
 	private $ingestor;
 	/** @var ImapClient */
 	private $client;
+	/** @var array folder name => the server's UIDVALIDITY, asked once per cycle. */
+	private $uidvalidityCache = array();
+
+	/** Stale label memberships re-found by Message-ID per folder per cycle (F2). */
+	const REBIND_PER_CYCLE = 25;
+	/** Messages gone from a pointer folder relocated per folder per cycle (F15). */
+	const RELOCATE_PER_CYCLE = 25;
 
 	public function __construct(InboundImapAccount $account, ImapIngestor $ingestor) {
 		$this->account = $account;
@@ -136,17 +149,24 @@ class ImapSyncer {
 
 	private function pullFolder(InboundImapFolder $folder): array {
 		$name = (string)$folder->get('iif_name');
+		if ($folder->isPaused()) {
+			return array('flags' => 0, 'vanished' => 0); // the ingest status says why
+		}
 		$status = $this->client->status($name,
 			Horde_Imap_Client::STATUS_UIDVALIDITY | Horde_Imap_Client::STATUS_HIGHESTMODSEQ
-			| Horde_Imap_Client::STATUS_UIDNEXT);
+			| Horde_Imap_Client::STATUS_UIDNEXT | Horde_Imap_Client::STATUS_MESSAGES);
 		$serverUidValidity = intval($status['uidvalidity'] ?? 0);
 		$highestModseq = intval($status['highestmodseq'] ?? 0);
-		$highUid = intval($status['uidnext'] ?? 0) - 1; // numeric range bound (avoids the '*' caveat)
+		// Numeric range bound (avoids the '*' caveat); asked directly when the
+		// server leaves UIDNEXT out (F8).
+		$highUid = $this->ingestor->highestUid($this->client, $name, $status);
+		$this->uidvalidityCache[$name] = $serverUidValidity;
 
-		// UIDVALIDITY mismatch (§7.6): UID→row mappings are stale. Skip pull; ingest
-		// reseeds the folder (clearing the modseq cursor) before sync resumes.
-		if ($folder->get('iif_uidvalidity') !== null
-				&& intval($folder->get('iif_uidvalidity')) !== $serverUidValidity) {
+		// No UIDVALIDITY, or a mismatch (§7.6): UID→row mappings cannot be trusted.
+		// Skip pull; ingest reseeds the folder (clearing the modseq cursor) before
+		// sync resumes.
+		if ($serverUidValidity <= 0 || ($folder->get('iif_uidvalidity') !== null
+				&& intval($folder->get('iif_uidvalidity')) !== $serverUidValidity)) {
 			return array('flags' => 0, 'vanished' => 0);
 		}
 
@@ -167,8 +187,15 @@ class ImapSyncer {
 			return array('flags' => 0, 'vanished' => 0);
 		}
 
-		$flags = $this->reconcileFlags($name, $cursor, $highUid);
-		$vanished = $folder->isMembership() ? $this->reconcileVanished($folder, $cursor, $highUid) : 0;
+		$flags = $this->reconcileFlags($name, $cursor, $highUid, $serverUidValidity);
+		if ($folder->isMembership()) {
+			$this->rebindStaleMemberships($folder, $serverUidValidity);
+			$vanished = $this->reconcileVanished($folder, $cursor, $highUid, $serverUidValidity,
+				intval($status['messages'] ?? -1));
+		} else {
+			$vanished = 0;
+			$this->relocateVanishedPointers($name, $cursor, $serverUidValidity);
+		}
 
 		if ($highestModseq > 0) {
 			// Advance only to a real value: overwriting a good cursor with 0 (a
@@ -187,7 +214,7 @@ class ImapSyncer {
 	 * scalar reconciled via the iem_ locator; iterating every tracked folder
 	 * covers every message (each via its own locator folder).
 	 */
-	private function reconcileFlags(string $name, int $cursor, int $highUid): int {
+	private function reconcileFlags(string $name, int $cursor, int $highUid, int $uidvalidity): int {
 		if ($highUid < 1) {
 			return 0; // empty folder — nothing to reconcile
 		}
@@ -208,7 +235,7 @@ class ImapSyncer {
 			$seen = in_array('\seen', $flags, true);
 			$flagged = in_array('\flagged', $flags, true);
 
-			$row = $this->locatorRow($name, $uid);
+			$row = $this->locatorRow($name, $uid, $uidvalidity);
 			if ($row === null) {
 				continue; // not the locator folder for this message
 			}
@@ -232,18 +259,24 @@ class ImapSyncer {
 	 * CONDSTORE-only server (e.g. Gmail) it falls back to diffing this folder's
 	 * known membership UIDs against the UIDs currently present in the folder.
 	 */
-	private function reconcileVanished(InboundImapFolder $folder, int $cursor, int $highUid): int {
+	private function reconcileVanished(InboundImapFolder $folder, int $cursor, int $highUid,
+			int $uidvalidity, int $messageCount = -1): int {
 		$name = (string)$folder->get('iif_name');
 		$folderId = intval($folder->key);
 
 		$vanishedUids = $this->account->supportsQresync()
 			? $this->vanishedViaQresync($name, $cursor)
-			: $this->vanishedViaUidDiff($name, $folderId, $highUid);
+			: $this->vanishedViaUidDiff($name, $folderId, $highUid, $uidvalidity, $messageCount);
 
 		$count = 0;
 		foreach ($vanishedUids as $uid) {
 			$row = InboundLabelMember::findByFolderUid($folderId, $uid);
 			if ($row === null) {
+				continue;
+			}
+			// A UID from another generation of this folder names some other
+			// message now (F2): never act on it.
+			if (intval($row->get('ilm_imap_uidvalidity')) !== $uidvalidity) {
 				continue;
 			}
 			$messageId = intval($row->get('ilm_iem_inbound_email_message_id'));
@@ -273,7 +306,8 @@ class ImapSyncer {
 	 * membership but no longer in the folder's current UID set. (One full UID-only
 	 * fetch per tracked folder per cycle — cheap, just less efficient than VANISHED.)
 	 */
-	private function vanishedViaUidDiff(string $name, int $folderId, int $highUid): array {
+	private function vanishedViaUidDiff(string $name, int $folderId, int $highUid, int $uidvalidity,
+			int $messageCount = -1): array {
 		// A folder with no messages (or whose UIDNEXT we couldn't read) is treated as
 		// "unknown" — return nothing rather than risk clearing every membership.
 		if ($highUid < 1) {
@@ -288,13 +322,23 @@ class ImapSyncer {
 		foreach ($res as $uid => $data) {
 			$present[intval($uid)] = true;
 		}
+		// A short answer is not a removal (F10). The server said how many messages
+		// the folder holds; a UID list with fewer than that is a truncated or
+		// failed response (Yahoo answers "exists" and then returns nothing), and
+		// diffing against it would drop the label from every message it left out.
+		if ($messageCount >= 0 && count($present) < $messageCount) {
+			error_log('ImapSyncer: ' . $name . ' (account ' . $this->account->key . ') answered '
+				. count($present) . ' UIDs for ' . $messageCount . ' messages; removals skipped this cycle');
+			return array();
+		}
 
-		// Known shadow UIDs for this folder.
+		// Known shadow UIDs for this folder, in its current generation only.
 		$db = $this->db();
 		$stmt = $db->prepare(
 			'SELECT ilm_imap_uid FROM ilm_inbound_label_members
-			 WHERE ilm_iif_inbound_imap_folder_id = ? AND ilm_imap_uid IS NOT NULL');
-		$stmt->execute(array($folderId));
+			 WHERE ilm_iif_inbound_imap_folder_id = ? AND ilm_imap_uid IS NOT NULL
+			   AND ilm_imap_uidvalidity = ?');
+		$stmt->execute(array($folderId, $uidvalidity));
 
 		$gone = array();
 		foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $uid) {
@@ -304,6 +348,67 @@ class ImapSyncer {
 			}
 		}
 		return $gone;
+	}
+
+	/**
+	 * Re-find, by Message-ID, label memberships whose UID belongs to another
+	 * generation of this folder (it was renumbered — F2) or was never learned (a
+	 * COPY the server did not number). Found: the shadow takes the current UID.
+	 * Not found: the row is stamped with the current generation and no UID, so it
+	 * is not searched again every cycle — and is never read as a removal, because
+	 * the diff only trusts UIDs of the current generation. Bounded per cycle.
+	 */
+	private function rebindStaleMemberships(InboundImapFolder $folder, int $uidvalidity): void {
+		$name = (string)$folder->get('iif_name');
+		$stmt = $this->db()->prepare(
+			"SELECT ilm.ilm_inbound_label_member_id AS id, m.iem_message_id_header AS mid
+			 FROM ilm_inbound_label_members ilm
+			 JOIN iem_inbound_email_messages m ON m.iem_inbound_email_message_id = ilm.ilm_iem_inbound_email_message_id
+			 WHERE ilm.ilm_iif_inbound_imap_folder_id = ?
+			   AND ilm.ilm_present_base = true
+			   AND ilm.ilm_imap_uidvalidity IS DISTINCT FROM ?
+			 LIMIT " . self::REBIND_PER_CYCLE);
+		$stmt->execute(array(intval($folder->key), $uidvalidity));
+		$update = $this->db()->prepare(
+			'UPDATE ilm_inbound_label_members SET ilm_imap_uid = ?, ilm_imap_uidvalidity = ?
+			 WHERE ilm_inbound_label_member_id = ?');
+		foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+			$uid = $this->findOneByMessageId($name, (string)$r['mid']);
+			$update->execute(array($uid, $uidvalidity, intval($r['id'])));
+		}
+	}
+
+	/**
+	 * A folder that is a message's locator but not a label (INBOX, All Mail, Sent,
+	 * Trash): a message the server reports gone from it was moved or deleted at
+	 * the source. Find it in another tracked folder and follow it, or mark it
+	 * source-gone — the row itself is kept (F15, Q2). Needs QRESYNC's VANISHED to
+	 * learn of removals cheaply; without it a stale locator is caught the first
+	 * time something is fetched through it (ImapIngestor::locate). Bounded.
+	 */
+	private function relocateVanishedPointers(string $name, int $cursor, int $uidvalidity): void {
+		if (!$this->account->supportsQresync()) {
+			return;
+		}
+		$uids = $this->vanishedViaQresync($name, $cursor);
+		if (!count($uids)) {
+			return;
+		}
+		$uids = array_slice(array_values(array_unique(array_map('intval', $uids))), 0, 1000);
+		$in = implode(',', array_fill(0, count($uids), '?'));
+		$stmt = $this->db()->prepare(
+			"SELECT iem_imap_uid AS uid, iem_message_id_header AS mid FROM iem_inbound_email_messages
+			 WHERE iem_iia_inbound_imap_account_id = ? AND iem_imap_folder = ? AND iem_imap_uidvalidity = ?
+			   AND iem_imap_uid IN ($in)
+			 LIMIT " . self::RELOCATE_PER_CYCLE);
+		$stmt->execute(array_merge(array(intval($this->account->key), $name, $uidvalidity), $uids));
+		foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+			try {
+				$this->ingestor->relocateOrMarkGone($name, intval($r['uid']), (string)$r['mid']);
+			} catch (Throwable $e) {
+				error_log('ImapSyncer: relocating uid ' . intval($r['uid']) . ' of ' . $name . ' failed: ' . $e->getMessage());
+			}
+		}
 	}
 
 	// ── Push (Two-way only) ────────────────────────────────────────────────
@@ -361,8 +466,17 @@ class ImapSyncer {
 	/** Whether a mailbox exists on the server now (used to absorb a CREATE "already exists"). */
 	private function mailboxExists(string $name): bool {
 		try {
+			// LIST takes a pattern: '*' and '%' in a label name would match other
+			// folders and read a failed CREATE as "already exists" (F18). Only an
+			// exact name in the answer counts.
 			$list = $this->client->listMailboxes($name, Horde_Imap_Client::MBOX_ALL, array());
-			return !empty($list);
+			foreach ($list as $key => $info) {
+				$listed = (is_array($info) && isset($info['mailbox'])) ? (string)$info['mailbox'] : (string)$key;
+				if ($listed === $name) {
+					return true;
+				}
+			}
+			return false;
 		} catch (Throwable $e) {
 			return false;
 		}
@@ -371,12 +485,14 @@ class ImapSyncer {
 	private function pushFlags(int $maxPerRun): int {
 		$db = $this->db();
 		$sql = "SELECT iem_inbound_email_message_id AS id, iem_imap_folder AS folder,
-					iem_imap_uid AS uid, iem_is_read AS is_read, iem_is_starred AS is_starred
+					iem_imap_uid AS uid, iem_imap_uidvalidity AS uidvalidity, iem_message_id_header AS mid,
+					iem_is_read AS is_read, iem_is_starred AS is_starred
 				FROM iem_inbound_email_messages
 				WHERE iem_iia_inbound_imap_account_id = ?
-				  AND iem_imap_folder IS NOT NULL AND iem_imap_uid IS NOT NULL
+				  AND iem_imap_folder IS NOT NULL
 				  AND iem_local_state_modified IS NOT NULL
 				  AND (iem_synced_state_time IS NULL OR iem_local_state_modified > iem_synced_state_time)
+				  AND (iem_push_retry_after IS NULL OR iem_push_retry_after <= now())
 				ORDER BY iem_local_state_modified ASC
 				LIMIT " . max(1, $maxPerRun);
 		$stmt = $db->prepare($sql);
@@ -387,15 +503,21 @@ class ImapSyncer {
 		foreach ($rows as $r) {
 			$seen = $this->pgBool($r['is_read']);
 			$flagged = $this->pgBool($r['is_starred']);
-			$ids = new Horde_Imap_Client_Ids(array(intval($r['uid'])));
 			$add = array(); $remove = array();
 			if ($seen) { $add[] = self::FLAG_SEEN; } else { $remove[] = self::FLAG_SEEN; }
 			if ($flagged) { $add[] = self::FLAG_FLAGGED; } else { $remove[] = self::FLAG_FLAGGED; }
 			try {
+				$uid = $this->validUid(intval($r['id']), (string)$r['folder'], $r['uid'], $r['uidvalidity'], (string)$r['mid']);
+				if ($uid === null) {
+					$this->pushFailed(intval($r['id']));
+					continue;
+				}
+				$ids = new Horde_Imap_Client_Ids(array($uid));
 				$this->client->store((string)$r['folder'], array('ids' => $ids, 'add' => $add, 'remove' => $remove));
 				$this->markFlagsSynced(intval($r['id']));
 				$pushed++;
 			} catch (Throwable $e) {
+				$this->pushFailed(intval($r['id']));
 				$this->onWriteError($e, 'flag push');
 			}
 		}
@@ -420,7 +542,7 @@ class ImapSyncer {
 					ilm.ilm_iif_inbound_imap_folder_id AS folder_id,
 					ilm.ilm_ilb_inbound_email_label_id AS label_id,
 					ilm.ilm_present_local AS local, ilm.ilm_present_base AS base,
-					ilm.ilm_imap_uid AS f_uid,
+					ilm.ilm_imap_uid AS f_uid, ilm.ilm_imap_uidvalidity AS f_uidvalidity,
 					f.iif_name AS folder_name, f.iif_role AS folder_role
 				FROM ilm_inbound_label_members ilm
 				JOIN iif_inbound_imap_folders f
@@ -483,11 +605,13 @@ class ImapSyncer {
 			$newUid = $this->moveMessage((string)$loc['folder'], intval($loc['uid']), $destName);
 			// The message now lives only in $dest: that element becomes clean (shadow
 			// advances to the new UID), every other membership of this message on this
-			// feed is dropped, and the locator follows.
+			// feed is dropped, and the locator follows — carrying the DESTINATION
+			// folder's UIDVALIDITY, not the source's (F12).
+			$destValidity = $newUid !== null ? $this->currentUidvalidity($destName) : null;
 			InboundLabelMember::setBaseline($msgId, intval($dest['label_id']), intval($dest['folder_id']),
-				true, $newUid, $newUid !== null ? intval($loc['uidvalidity']) : null);
+				true, $newUid, $destValidity);
 			$this->collapseMembershipTo($msgId, intval($dest['folder_id']));
-			$this->setLocator($msgId, $destName, $newUid ?? 0, $newUid !== null ? intval($loc['uidvalidity']) : null);
+			$this->setLocator($msgId, $destName, $newUid ?? 0, $destValidity);
 			return;
 		}
 
@@ -520,10 +644,13 @@ class ImapSyncer {
 				// Add: COPY from the locator copy into this folder (adds the label).
 				$newUid = $this->copyMessage((string)$loc['folder'], intval($loc['uid']), $folderName);
 				InboundLabelMember::setBaseline($msgId, $labelId, $folderId, true,
-					$newUid, $newUid !== null ? intval($loc['uidvalidity']) : null);
+					$newUid, $newUid !== null ? $this->currentUidvalidity($folderName) : null);
 			} elseif ($base && !$local) {
-				// Remove: EXPUNGE this folder's copy (removes the label).
-				$fUid = $el['f_uid'] !== null ? intval($el['f_uid']) : 0;
+				// Remove: EXPUNGE this folder's copy (removes the label) — by a UID of
+				// this folder's CURRENT generation only, re-found by Message-ID when
+				// the stored one is stale. Expunging a stale UID deletes whatever
+				// message holds that number now (F2).
+				$fUid = $this->validUid(0, $folderName, $el['f_uid'], $el['f_uidvalidity'], (string)$loc['message_id']) ?? 0;
 				if ($fUid > 0) {
 					$this->expungeMessage($folderName, $fUid);
 				}
@@ -559,12 +686,14 @@ class ImapSyncer {
 		$exclusive = $this->account->foldersExclusive();
 		$db = $this->db();
 		$sql = "SELECT iem_inbound_email_message_id AS id, iem_imap_folder AS folder,
-					iem_imap_uid AS uid, iem_imap_uidvalidity AS uidvalidity
+					iem_imap_uid AS uid, iem_imap_uidvalidity AS uidvalidity, iem_message_id_header AS mid
 				FROM iem_inbound_email_messages
 				WHERE iem_iia_inbound_imap_account_id = ?
 				  AND iem_delete_time IS NOT NULL
+				  AND iem_source_gone_time IS NULL
 				  AND iem_imap_folder IS NOT NULL AND iem_imap_uid IS NOT NULL
 				  AND iem_imap_folder <> ?
+				  AND (iem_push_retry_after IS NULL OR iem_push_retry_after <= now())
 				ORDER BY iem_delete_time ASC
 				LIMIT " . max(1, $maxPerRun);
 		$stmt = $db->prepare($sql);
@@ -575,14 +704,23 @@ class ImapSyncer {
 		foreach ($rows as $r) {
 			$msgId = intval($r['id']);
 			try {
+				// Only a UID of the folder's current generation is moved; a stale one
+				// is re-found by Message-ID first, or the push waits (F2).
+				$uid = $this->validUid($msgId, (string)$r['folder'], $r['uid'], $r['uidvalidity'], (string)$r['mid']);
+				if ($uid === null) {
+					$this->pushFailed($msgId);
+					continue;
+				}
 				$newUid = $exclusive
-					? $this->moveMessage((string)$r['folder'], intval($r['uid']), $trashName)
-					: $this->copyMessage((string)$r['folder'], intval($r['uid']), $trashName);
+					? $this->moveMessage((string)$r['folder'], $uid, $trashName)
+					: $this->copyMessage((string)$r['folder'], $uid, $trashName);
 				$this->setLocator($msgId, $trashName, $newUid ?? 0,
-					$newUid !== null ? intval($r['uidvalidity']) : null);
+					$newUid !== null ? $this->currentUidvalidity($trashName) : null);
+				$this->pushSucceeded($msgId);
 				InboundLabelMember::clearForFolders($msgId, $this->feedFolderIds());
 				$moved++;
 			} catch (Throwable $e) {
+				$this->pushFailed($msgId);
 				$this->onWriteError($e, 'trash push');
 			}
 		}
@@ -631,16 +769,19 @@ class ImapSyncer {
 	// ── Row / locator helpers ──────────────────────────────────────────────
 
 	/** The iem_ row this folder+uid is the locator of, or null. */
-	private function locatorRow(string $folder, int $uid): ?array {
+	private function locatorRow(string $folder, int $uid, int $uidvalidity): ?array {
 		$db = $this->db();
+		// The generation is part of the address: the same UID in an older
+		// generation of the folder is a different message (F2).
 		$stmt = $db->prepare(
 			"SELECT iem_inbound_email_message_id AS id, iem_is_read AS is_read,
 					iem_is_starred AS is_starred, iem_local_state_modified AS local_modified,
 					iem_synced_state_time AS synced
 			 FROM iem_inbound_email_messages
 			 WHERE iem_iia_inbound_imap_account_id = ? AND iem_imap_folder = ? AND iem_imap_uid = ?
+			   AND iem_imap_uidvalidity = ?
 			   AND iem_delete_time IS NULL LIMIT 1");
-		$stmt->execute(array(intval($this->account->key), $folder, $uid));
+		$stmt->execute(array(intval($this->account->key), $folder, $uid, $uidvalidity));
 		$row = $stmt->fetch(PDO::FETCH_ASSOC);
 		return $row ?: null;
 	}
@@ -654,10 +795,98 @@ class ImapSyncer {
 			 FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = ? LIMIT 1");
 		$stmt->execute(array($msgId));
 		$row = $stmt->fetch(PDO::FETCH_ASSOC);
-		if (!$row || $row['folder'] === null || $row['uid'] === null) {
+		if (!$row || $row['folder'] === null) {
 			return null;
 		}
+		// The locator is only good in its folder's current generation (F2).
+		$uid = $this->validUid($msgId, (string)$row['folder'], $row['uid'], $row['uidvalidity'], (string)$row['message_id']);
+		if ($uid === null) {
+			return null;
+		}
+		$row['uid'] = $uid;
+		$row['uidvalidity'] = $this->currentUidvalidity((string)$row['folder']);
 		return $row;
+	}
+
+	/** The server's UIDVALIDITY for a folder, asked once per cycle. 0 when unknown. */
+	private function currentUidvalidity(string $folder): int {
+		if (!array_key_exists($folder, $this->uidvalidityCache)) {
+			try {
+				$st = $this->client->status($folder, Horde_Imap_Client::STATUS_UIDVALIDITY);
+				$this->uidvalidityCache[$folder] = intval($st['uidvalidity'] ?? 0);
+			} catch (Throwable $e) {
+				$this->uidvalidityCache[$folder] = 0;
+			}
+		}
+		return $this->uidvalidityCache[$folder];
+	}
+
+	/**
+	 * A UID safe to write to in $folder: the stored one when it belongs to the
+	 * folder's current generation; otherwise the one message there carrying
+	 * $messageId, written back to the locator of $msgId when given. NULL when
+	 * neither holds — the caller skips the write. Every IMAP write the sync engine
+	 * makes goes through this: after a renumbering a stored UID names some other
+	 * message, and a STORE, MOVE or EXPUNGE by it lands on that message (F2).
+	 */
+	private function validUid(int $msgId, string $folder, $uid, $uidvalidity, string $messageId): ?int {
+		$current = $this->currentUidvalidity($folder);
+		if ($current <= 0) {
+			return null;
+		}
+		if ($uid !== null && intval($uid) > 0 && $uidvalidity !== null && intval($uidvalidity) === $current) {
+			return intval($uid);
+		}
+		$found = $this->findOneByMessageId($folder, $messageId);
+		if ($found === null) {
+			return null;
+		}
+		if ($msgId > 0) {
+			$this->setLocator($msgId, $folder, $found, $current);
+		}
+		return $found;
+	}
+
+	/** The UID of the one message in $folder with this Message-ID; null for none or several. */
+	private function findOneByMessageId(string $folder, string $messageId): ?int {
+		$messageId = trim($messageId);
+		if ($messageId === '') {
+			return null;
+		}
+		$query = new Horde_Imap_Client_Search_Query();
+		$query->headerText('message-id', $messageId);
+		try {
+			$res = $this->client->search($folder, $query, array(
+				'results' => array(Horde_Imap_Client::SEARCH_RESULTS_MATCH),
+			));
+		} catch (Throwable $e) {
+			return null;
+		}
+		$match = $res['match'] ?? null;
+		if (!$match instanceof Horde_Imap_Client_Ids) {
+			return null;
+		}
+		$ids = array_map('intval', iterator_to_array($match, false));
+		return count($ids) === 1 ? $ids[0] : null;
+	}
+
+	/**
+	 * A push that could not be made waits before it is tried again — doubling
+	 * from one minute to a day — so a row that can never be pushed (its folder
+	 * was deleted at the source) cannot hold the head of the queue (F11).
+	 */
+	private function pushFailed(int $msgId): void {
+		$this->db()->prepare(
+			"UPDATE iem_inbound_email_messages
+			 SET iem_push_attempts = iem_push_attempts + 1,
+			     iem_push_retry_after = now() + LEAST(POWER(2, LEAST(iem_push_attempts, 11)), 1440) * INTERVAL '1 minute'
+			 WHERE iem_inbound_email_message_id = ?")->execute(array($msgId));
+	}
+
+	private function pushSucceeded(int $msgId): void {
+		$this->db()->prepare(
+			"UPDATE iem_inbound_email_messages SET iem_push_attempts = 0, iem_push_retry_after = NULL
+			 WHERE iem_inbound_email_message_id = ? AND iem_push_attempts > 0")->execute(array($msgId));
 	}
 
 	private function setLocator(int $msgId, string $folder, int $uid, ?int $uidvalidity): void {
@@ -693,6 +922,10 @@ class ImapSyncer {
 			   AND f.iif_name <> ? LIMIT 1");
 		$stmt->execute(array($msgId, $vanishedFolder));
 		$alt = $stmt->fetch(PDO::FETCH_ASSOC);
+		if ($alt && ($alt['uidvalidity'] === null
+				|| intval($alt['uidvalidity']) !== $this->currentUidvalidity((string)$alt['name']))) {
+			$alt = null; // that UID is from another generation of its folder (F2)
+		}
 		if ($alt) {
 			$this->setLocator($msgId, (string)$alt['name'], intval($alt['uid']),
 				$alt['uidvalidity'] !== null ? intval($alt['uidvalidity']) : null);
@@ -739,7 +972,8 @@ class ImapSyncer {
 	private function markFlagsSynced(int $msgId): void {
 		$db = $this->db();
 		$stmt = $db->prepare(
-			"UPDATE iem_inbound_email_messages SET iem_synced_state_time = now()
+			"UPDATE iem_inbound_email_messages SET iem_synced_state_time = now(),
+			        iem_push_attempts = 0, iem_push_retry_after = NULL
 			 WHERE iem_inbound_email_message_id = ?");
 		$stmt->execute(array($msgId));
 	}

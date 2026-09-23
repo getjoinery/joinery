@@ -13,6 +13,7 @@
  * every Edit jump to the existing per-object editors with context pre-filled.
  * DNS/host diagnostics live on the Setup tab.
  *
+ * @version 1.12 - a feed's skipped messages (Retry) and paused folders (Resume)
  * @version 1.11 - the level badges carry the domain's add-ons in force
  * @version 1.10 - the To/Cc catch-up card is retired with the backfill
  * @version 1.9 - the To/Cc catch-up card (specs/mailbox_to_cc_lists.md § 6): one
@@ -237,6 +238,36 @@ $connect_button = function ($imap) use ($imap_action, $oauth_providers) {
 								<span class="iem-imap-status">&middot; <?php echo htmlspecialchars($imap->get('iia_last_status')); ?></span>
 							<?php endif; ?>
 						</div>
+						<?php
+						// What the feed has had to set aside: messages that failed to
+						// import too many times, and folders paused because the server
+						// keeps resetting their message numbers
+						// (specs/implemented/imap_client_hardening.md F3, F9). Each with its way back.
+						$skipped_count = InboundImapIngestFailure::skippedCountForAccount(intval($imap->key));
+						$paused_folders = new MultiInboundImapFolder(array('account_id' => intval($imap->key), 'paused' => true));
+						if ($skipped_count > 0): ?>
+							<div class="iea-mb-imap iea-mb-imap-attention">
+								&#9888; <?php echo $skipped_count; ?> message<?php echo $skipped_count === 1 ? '' : 's'; ?>
+								could not be imported after <?php echo InboundImapIngestFailure::MAX_ATTEMPTS; ?> tries and
+								<?php echo $skipped_count === 1 ? 'was' : 'were'; ?> skipped.
+								<?php echo PublicPageBase::action_button('Retry', $imap_action, array(
+									'hidden' => array('action' => 'retry_skipped', 'iia_inbound_imap_account_id' => $imap->key),
+									'class' => 'btn btn-sm btn-outline-secondary',
+								)); ?>
+							</div>
+						<?php endif;
+						foreach ($paused_folders as $paused): ?>
+							<div class="iea-mb-imap iea-mb-imap-attention">
+								&#9888; Folder <strong><?php echo htmlspecialchars((string)$paused->get('iif_name')); ?></strong>
+								is paused: the server reset its message numbers <?php echo intval($paused->get('iif_uidvalidity_changes')); ?>
+								times in a day, so reading it would re-import it over and over.
+								<?php echo PublicPageBase::action_button('Resume', $imap_action, array(
+									'hidden' => array('action' => 'resume_folder', 'iia_inbound_imap_account_id' => $imap->key,
+										'iif_inbound_imap_folder_id' => $paused->key),
+									'class' => 'btn btn-sm btn-outline-secondary',
+								)); ?>
+							</div>
+						<?php endforeach; ?>
 					<?php endif; ?>
 				</div>
 
