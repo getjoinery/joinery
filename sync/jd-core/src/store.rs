@@ -342,6 +342,34 @@ impl Store {
         Ok(())
     }
 
+    /// This device's park tag, minted the first time it parks anything.
+    ///
+    /// Taken from the key of that first park rather than drawn fresh, so no
+    /// randomness is added here: on the real client the key is random, and
+    /// in the simulator it comes from the device's seeded stream, which a
+    /// fresh draw would shift for every seed. Hashed, so it keeps nothing of
+    /// the key's shape. A store that is reset or re-created mints a new tag,
+    /// and parks made under the old one then read as another device's.
+    pub fn park_tag(&self, minting_key: &str) -> StoreResult<String> {
+        if let Some(tag) = self.own_park_tag()? {
+            return Ok(tag);
+        }
+        use sha2::Digest;
+        let digest = sha2::Sha256::digest(minting_key.as_bytes());
+        let tag: String = digest
+            .iter()
+            .take(crate::order::PARK_TAG_LEN / 2)
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        self.set_meta("park_tag", &tag)?;
+        Ok(tag)
+    }
+
+    /// This device's park tag, if it has ever parked anything.
+    pub fn own_park_tag(&self) -> StoreResult<Option<String>> {
+        self.get_meta("park_tag")
+    }
+
     /// The change-feed position this device has replayed up to.
     pub fn cursor(&self) -> StoreResult<i64> {
         Ok(self

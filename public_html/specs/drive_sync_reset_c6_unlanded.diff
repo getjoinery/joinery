@@ -1,0 +1,283 @@
+--- a/sync/jd-core/src/execute.rs
++++ b/sync/jd-core/src/execute.rs
+@@ -3073,6 +3073,113 @@
+     Ok(OpOutcome::Done)
+ }
+ 
++/// Break a cycle of server renames this device owes, from inside one of them.
++///
++/// `held_by_a_rename_this_device_owes` makes a rename wait while the name it
++/// wants is held by something this device is renaming away. Right for a
++/// chain; wrong for a cycle. Two files trading names each hold the name the
++/// other wants, each is waiting for the other to leave, and neither ever
++/// does -- the planner breaks such a cycle by parking one member under a
++/// scratch name, but that park is made once, when the plan is written. A
++/// kill between the park and the moves that finish it, or a peer that put
++/// the park back (the reset's C6, kill2 75125 on folders and 75298 on files),
++/// leaves the moves queued with no park, and they wait on each other for
++/// ever.
++///
++/// So the rename that meets the wait asks where the chain goes: the holder
++/// of the name it wants, the name THAT holder's queued rename wants, that
++/// name's holder, and on, through this device's queue only. A chain that
++/// comes back to this entity is a cycle this device owns. The first member
++/// to run -- this op, since every member walks the same cycle -- parks the
++/// holder of its own target on the server under that holder's finisher's
++/// scratch name (the name its queued move recognises as its own park) and
++/// the caller then takes the vacated name in the same attempt. A two-member
++/// cycle is closed inside one executor run: the parked holder's finisher
++/// runs later in the same run and lands on the name this op vacated. A
++/// longer cycle is not: the queue is swept once per run, so a member whose
++/// target is still held when its turn comes waits a run, and each such
++/// member costs one pass boundary with the parked holder standing -- which
++/// is safe because no peer puts back another device's park (C10) or follows
++/// it onto a disk (C11).
++///
++/// The walk carries a visited set and ends within the queue's length. The
++/// park is sent under a key made from this op's key and the holder's id: the
++/// holder's own op sends later under its own key, and a replay after a crash
++/// asks for the same park again, which the server answers as done; the
++/// rename that follows then finds the name free. An encrypted FILE is never
++/// parked (its name is sealed and never collides); the cycle then waits, as
++/// before.
++fn break_a_rename_cycle(env: &ExecEnv, op: &Op, target: &Placement) -> Result<bool, ExecError> {
++    let queued = env.store.queued_ops()?;
++    let owed = |id: EntityId| -> Option<(&Op, Placement)> {
++        queued
++            .iter()
++            .filter(|o| o.entity == id && o.kind == "move_remote")
++            .find_map(|o| {
++                serde_json::from_str::<Value>(&o.params)
++                    .ok()
++                    .and_then(|p| read_place(&p).ok())
++                    .map(|to| (o, to))
++            })
++    };
++    let holder = |at: &Placement| -> Result<Option<Entry>, ExecError> {
++        Ok(env
++            .store
++            .children_of(at.parent)?
++            .into_iter()
++            .find(|e| e.remote.name == at.name && !e.remote_deleted))
++    };
++    let Some(first) = holder(target)? else {
++        return Ok(false);
++    };
++    if first.id == op.entity {
++        return Ok(false);
++    }
++    let Some((first_op, _)) = owed(first.id) else {
++        return Ok(false);
++    };
++    let mut visited: std::collections::HashSet<EntityId> = std::collections::HashSet::new();
++    visited.insert(op.entity);
++    let mut at = first.id;
++    let mut closes = false;
++    for _ in 0..=queued.len() {
++        if !visited.insert(at) {
++            break;
++        }
++        let Some((_, next)) = owed(at) else {
++            break;
++        };
++        match holder(&next)? {
++            Some(h) if h.id == op.entity => {
++                closes = true;
++                break;
++            }
++            Some(h) => at = h.id,
++            None => break,
++        }
++    }
++    if !closes || (first.is_encrypted && first.id.entity_type == EntityType::File) {
++        return Ok(false);
++    }
++    let scratch = crate::order::tagged_swap_name(
++        &env.store.park_tag(&first_op.idempotency_key)?,
++        &first_op.idempotency_key,
++    );
++    env.api.action_idempotent(
++        "drive_rename",
++        json!({
++            "entity_type": first.id.entity_type.to_string(),
++            "entity_id": first.id.server_id,
++            "name": scratch,
++        }),
++        &format!("{}-cycle-park-{}", op.idempotency_key, first.id.server_id),
++    )?;
++    let mut parked = first;
++    parked.remote.name = scratch;
++    env.store.put_entry(&parked)?;
++    Ok(true)
++}
++
+ /// Is `name` the scratch name this op parks under, or was parked under by
+ /// the planner on its behalf? Tagged with this device's park tag, or -- for
+ /// an op journaled before names were tagged -- the untagged form.
+@@ -3087,6 +3194,7 @@
+ }
+ 
+ /// Apply this computer's move to the server.
++/// Apply this computer's move to the server.
+ fn move_remote(
+     env: &ExecEnv,
+     op: &Op,
+@@ -3390,11 +3498,25 @@
+     // orders and no conflict name.
+     let mut attempt = 0u32;
+     let mut wanted = to.name.clone();
++    let mut broke_a_cycle = false;
+     loop {
+         match orders(&wanted, attempt) {
+             Ok(()) => break,
+             Err(ExecError::Proto(p)) if p.name_taken() && !sealed_name && attempt < 1000 => {
+                 if held_by_a_rename_this_device_owes(env, &wanted, to.parent)? {
++                    // Unless the holder is waiting for THIS entity's name, in a
++                    // chain that comes back here: then nobody is leaving and
++                    // waiting cannot end it. See `break_a_rename_cycle`.
++                    if !broke_a_cycle
++                        && break_a_rename_cycle(
++                            env,
++                            op,
++                            &Placement { parent: to.parent, name: wanted.clone() },
++                        )?
++                    {
++                        broke_a_cycle = true;
++                        continue;
++                    }
+                     return Ok(OpOutcome::Retry(
+                         "the name is spoken for by something this device is renaming".into(),
+                     ));
+--- pins (never armed C6; recovery re-plans a fresh park) ---
+/// A trade whose cycle-breaking park never happened still finishes (the
+/// reset's C6).
+///
+/// The planner breaks a rename cycle by parking one member under a scratch
+/// name, once, when it writes the plan. Lose that park -- a kill that drops it,
+/// a peer that put it back -- and the two renames that finish the trade are
+/// left queued, each waiting for a name the other holds, each "spoken for by
+/// something this device is renaming", for ever (kill2 75125 on folders,
+/// plain2 75298 on files). Here the park is lost by marking it done without
+/// running it, the plainest way to say "the park is gone and the finishers are
+/// still queued". Asserted as the invariant: the trade ends with each side
+/// under the other's name on the server and on every disk, no scratch name
+/// anywhere, no conflict name minted, and the device goes quiet.
+fn lose_the_planned_park(build: impl Fn() -> World, device: &str) -> World {
+    // The death has to land after the plan is written and before the park is
+    // answered, and where that falls in the pass is not this test's to know,
+    // so it is found.
+    let world = (0..60u64)
+        .find_map(|die_after| {
+            let world = build();
+            let d = world.device(device);
+            d.net.arm_death(die_after);
+            world.pass(d);
+            let queued = d.store.queued_ops().unwrap();
+            let parked = queued.iter().any(|o| o.kind == "park_remote");
+            let finishers = queued.iter().filter(|o| o.kind == "move_remote").count() >= 2;
+            (parked && finishers).then_some(world)
+        })
+        .expect("no arming left the planner's park and its finishers queued");
+    let d = world.device(device);
+    for op in d.store.queued_ops().unwrap() {
+        if op.kind == "park_remote" {
+            d.store.set_op_state(op.op_id, jd_core::store::OpState::Done).unwrap();
+        }
+    }
+    world
+}
+
+fn no_scratch_and_no_conflict_names(world: &World) {
+    let tree = world.server.tree();
+    assert!(!tree.keys().any(|p| p.contains(".jd-") || p.contains("conflicted copy")), "{tree:?}");
+    for d in &world.devices {
+        assert!(!d.fs.all_paths().iter().any(|p| p.contains(".jd-") || p.contains("conflicted copy")), "{}: {:?}", d.name, d.fs.all_paths());
+    }
+}
+
+#[test]
+fn two_folders_trading_names_finish_when_the_planned_park_is_lost() {
+    let world = lose_the_planned_park(
+        || {
+            let world = World::new(9_253, &["mac", "pc"]);
+            let mac = world.device("mac");
+            mac.fs.user_mkdir("ring-1");
+            mac.fs.user_mkdir("ring-2");
+            mac.fs.user_write("ring-1/one.txt", b"one");
+            mac.fs.user_write("ring-2/two.txt", b"two");
+            assert!(world.settle().is_some());
+            mac.fs.user_rename("ring-1", ".swap.tmp");
+            mac.fs.user_rename("ring-2", "ring-1");
+            mac.fs.user_rename(".swap.tmp", "ring-2");
+            world
+        },
+        "mac",
+    );
+    assert!(world.settle().is_some(), "the two renames waited on each other for ever");
+    assert_converged(&world);
+    let tree = world.server.tree();
+    assert_eq!(tree.get("ring-2/one.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b"one")), "{tree:?}");
+    assert_eq!(tree.get("ring-1/two.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b"two")), "{tree:?}");
+    no_scratch_and_no_conflict_names(&world);
+}
+
+#[test]
+fn two_files_trading_names_finish_when_the_planned_park_is_lost() {
+    let one = b"the contents of A";
+    let two = b"the contents of B";
+    let world = lose_the_planned_park(
+        || {
+            let world = World::of(9_254, &[("a", jd_sim::Platform::MacOs), ("b", jd_sim::Platform::MacOs)]);
+            let a = world.device("a");
+            a.fs.user_mkdir("One");
+            a.fs.user_mkdir("Two");
+            a.fs.user_write("One/x.txt", one);
+            a.fs.user_write("Two/y.txt", two);
+            assert!(world.settle().is_some());
+            a.fs.user_rename("One/x.txt", "Two/held");
+            a.fs.user_rename("Two/y.txt", "One/X.txt");
+            a.fs.user_rename("Two/held", "Two/Y.txt");
+            world
+        },
+        "a",
+    );
+    assert!(world.settle().is_some(), "the two renames waited on each other for ever");
+    assert_converged(&world);
+    let tree = world.server.tree();
+    assert_eq!(tree.get("One/X.txt").cloned().flatten(), Some(jd_sim::sha256_hex(two)), "{tree:?}");
+    assert_eq!(tree.get("Two/Y.txt").cloned().flatten(), Some(jd_sim::sha256_hex(one)), "{tree:?}");
+    no_scratch_and_no_conflict_names(&world);
+}
+
+/// Three folders rotating names with the park lost: a cycle longer than two
+/// is not closed inside one executor run (the queue is swept once a run), so
+/// it converges over a few passes with a park standing between them. Asserted
+/// as the end state only.
+#[test]
+fn three_folders_rotating_names_finish_when_the_planned_park_is_lost() {
+    let world = lose_the_planned_park(
+        || {
+            let world = World::new(9_255, &["mac", "pc"]);
+            let mac = world.device("mac");
+            for (d, f) in [("ring-1", "one"), ("ring-2", "two"), ("ring-3", "three")] {
+                mac.fs.user_mkdir(d);
+                mac.fs.user_write(&format!("{d}/{f}.txt"), f.as_bytes());
+            }
+            assert!(world.settle().is_some());
+            mac.fs.user_rename("ring-1", ".swap.tmp");
+            mac.fs.user_rename("ring-2", "ring-1");
+            mac.fs.user_rename("ring-3", "ring-2");
+            mac.fs.user_rename(".swap.tmp", "ring-3");
+            world
+        },
+        "mac",
+    );
+    assert!(world.settle().is_some(), "the rotation waited on itself for ever");
+    assert_converged(&world);
+    let tree = world.server.tree();
+    assert_eq!(tree.get("ring-3/one.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b"one")), "{tree:?}");
+    assert_eq!(tree.get("ring-1/two.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b"two")), "{tree:?}");
+    assert_eq!(tree.get("ring-2/three.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b"three")), "{tree:?}");
+    no_scratch_and_no_conflict_names(&world);
+}
+

@@ -11,8 +11,10 @@ just deleted) closes C2; the belts' instrument (`d5f939ab`, reading 11)
 finds fix 4's bar met and finding C4; change 3 (`a5638dc9`, a recycled
 directory id under a folder's own path is void) lands C5; change 4 (a folder
 record knows its directory from the mint) closes C4, next in the chain C4,
-C6, fix 4's removal, C7, each measured and graded. Every change reviewed by
-public-html-67 (public-html-c6 until 2026-09-14), approach before patch.**
+C6, fix 4's removal, C7, each measured and graded. C10 + C11 (a device puts back only its own
+park; a scratch name is not a placement) NEEDED and VALID 2026-09-22. Every
+change reviewed approach-before-patch: public-html-25 from 2026-09-22
+(public-html-67 from 2026-09-14, public-html-c6 before that).**
 
 Testing is paused. No further guards land on the sync engine until the work
 packages below are done, in order. This spec is the reason, the order, and the
@@ -1732,6 +1734,109 @@ belt in, before the belt lands.** B1 is what happens without this.
 
 ## Open
 
+- **Owner decision D1 (2026-09-22): a file leaving a vault is held, not
+  converted.** Reading 18 (HEAD f86a033e vs engine df2f5c88 on one harness):
+  with swaps on, 209 sealed files leak; with the chaos swap kept to one side of
+  the vault edge (scratch dial), 4. The rest are the swapper moving a sealed
+  file out of the vault by the user's hand, which the file drag-out rule
+  converts to plaintext. The owner chose to treat a file like a folder: the
+  server copy stays sealed and an issue asks the user to unencrypt it. The
+  sealed oracle stays strict. Not built; approach to the reviewer first (R5).
+  Its measurement starts from the D2 package's numbers: swap-on leaks labelled
+  carried-out-by-chaos, among them plat3 75412 at 6 (3 before the package).
+- **Owner decision D2 (2026-09-22): scan rule 1 takes the careful form
+  (`mine4`).** A record refuses bytes at its path as an edit only when its own
+  file still stands elsewhere and the thing at its path is one the store
+  knows, or its file stands on another record's path whose owner is not at
+  home. Backup-by-rename saves, hardlinked twins and a zero Windows file id
+  read as edits, as today. Settles the AH decision (A1); with D1 the crossing
+  half is moot. Re-measured on today's engine before it lands; not built.
+- **Owner decision D3 (2026-09-22): the empty-plain residual stands**, as
+  stated under WP2 (owner item A2, closed): a plain folder never claims by
+  its own directory id, so an empty or never-uploaded plain folder renamed
+  while its old name is rebuilt keeps today's reading, including hostile2
+  74414's files rescued to the root.
+- **C10 + C11 (2026-09-22), NEEDED and VALID (public-html-25), awaiting the
+  owner's commit.** C10: a device puts back only a park it made. Scratch
+  names carry a device tag (`.jd-swap-{tag}-{token}`, tag hashed from the
+  device's first park key and kept in the store's meta); the stranded-park
+  rescue fires only on this device's tag, and untagged parks keep the old
+  rule until every device runs a tagging build. The real client's keys are
+  random, so nothing may read a device from a key (the simulator's
+  `{device}-{token}` keys are a standing trap; filed: mint them in the real
+  shape). C11: a scratch name is not a placement -- `observed_remote` reads
+  the agreement in its place, and an entry with a scratch name and no
+  agreement is `waiting_on_a_park` and is skipped by naming and the pass.
+  Before C11, C10 alone lost data (a peer followed the park onto its disk,
+  the walk hid it, the round trashed it). On HEAD the peer's put-back fired
+  on ten of the 160 seeds and minted a conflict name on a ring folder on
+  six of them; C10 removes that. Pins: `a_peers_park_is_neither_put_back_
+  nor_followed`, `a_peers_park_on_files_this_device_never_had_is_waited_for`,
+  and the residual pin below.
+- **Residual of C10, for the owner:** a device that parks and does not come
+  back with the SAME store -- a reinstall, a wiped or re-created store, a
+  new enrollment on the machine, a lost disk -- leaves that entity under the
+  scratch name on the server, and no peer puts it back. No bytes are lost.
+  Closing it needs the server to say a device is gone (a state, never a
+  timer). Pinned red-to-be:
+  `a_park_left_by_a_reinstalled_device_stays_until_the_server_can_say_it_is_gone`.
+- **D2 (2026-09-23), NEEDED and VALID with its blockers, awaiting the owner.**
+  Scan rule 1 reads a name trade as a trade: a record refuses the bytes at its
+  path as an edit when its own inode stands elsewhere and the file there is
+  another record's that is not at home (by inode, or by non-empty bytes held by
+  exactly one live record), or its own file stands at another record's path
+  whose record is not at home -- unless a hardlinked twin at home holds its
+  inode (p8). Zero file ids never count. Measured on C10+C11: swap-separated
+  pairs 295 -> 69 (160 seeds), 305 -> 101 on the held-out 75200-75299. Its
+  residue is mostly T1 (1116 of 1279 declines are the twin shape).
+  Two blockers found by the always-on zz_sweep tests landed with it:
+  - **C12**: a FILE move the server refuses in prose alone lands beside under
+    a conflict name (the wait for a name this device is vacating asked first),
+    where it was withdrawn and the next scan read a stranger's bytes as the
+    file's edit (frozen 111120, now green). FOLDERS keep the withdrawal: the
+    disk still wears the new name and the next pass re-derives the rename by
+    directory identity, completing it once the name frees up.
+  - **Blocker 2**: a move whose answer was lost after the server completed it
+    is finished as this op's own when the file's own inode stands at the
+    destination (placement only; its bytes are the scan's to judge), where it
+    was stood down and the file was re-uploaded beside itself.
+  **Residual, not measurable in the simulator:** where the file id is unknown
+  (zero, or a filesystem without stable ids) a rename chain interrupted after
+  a completed-but-unheard first rename still ends in a duplicate -- the
+  completed move cannot be recognised without an identity. Sealed files stay
+  stood down (their server name is a placeholder) and the chain in a vault
+  ends clean at every kill point.
+- plain2 75228: pair gained under the D2 package (completed_here), untraced;
+  traced inside T1's trace (T1 is upstream of D2's leftover pairs), four
+  lines of its own if it is not T1's shape.
+- plain2 75292: pair gained under the D2 package (C12 arm), untraced; same.
+- **C6, latent, no reproduction.** The rename-race wait
+  (`held_by_a_rename_this_device_owes`) has no cycle test: two queued server
+  renames that want each other's names wait for ever if the planner's park
+  is absent. With C10 in, the only reproductions (plain2 75298, kill2 75125
+  swap-off) settle -- the lost park was the peer's put-back -- and recovery
+  re-plans a fresh park after a kill. A cycle break was built and measured:
+  no seed needed it, and it added a never-settle (kill2 75110) and a G->R
+  (kill2 75123, swap-off), so it did not land. The unlanded patch and its
+  three pins (which never armed it) are kept in
+  `specs/drive_sync_reset_c6_unlanded.diff`.
+- **C8 re-opened.** Neither variant of the park's disown arm (keep the
+  identity when the directory here is another's; stand down untouched)
+  changes kill2 75110 or plat3 75400 on today's engine, so the disown arm
+  is not C8's cause here. Untraced; with the four other engine-made leaks
+  (hostile2 74424, kill2 75101, plat3 75401, 75412) it is the sealed-leak
+  queue.
+- **T1, open: a second record for a live identity.** Conflict-copy rescue
+  mints a record for an inode or directory another live record still names
+  (files: plain2 75221, 905 and 909 on inode 1003; folders: hostile2 74412,
+  503 and 513 on directory 1003; plat3 75415, 503 and 512). It is upstream
+  of D2's leftover swap pairs and of C9(b). Four lines next after D2.
+- **C9, open: records that do not follow their directories.** A folder
+  move is planned from a stale placement and refused by identity every
+  pass: (a) an all-contested ring whose disk already matches the server
+  (hostile2 74424 on D2's world); (b) a twin record holds the directory
+  (T1). Before its approach: why the contested-ring claim does not fire on
+  74424 (Q5), and plat3 75424's class.
 - The AH owner decision (crossing + `mine4`, or nothing) is outside this
   reset and blocks nothing in it; it is named so the hostile arm's residue
   after WP2 is read correctly.

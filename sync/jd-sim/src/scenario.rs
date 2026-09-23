@@ -155,6 +155,12 @@ pub struct SwapPair {
     /// holds ciphertext for these, so it can never match such a pair; the
     /// count says how much of the record it could judge.
     pub sealed: bool,
+    /// The body that stood under a sealed directory and was sent to a path
+    /// outside every sealed one by this swap: the user's own hand carrying a
+    /// sealed file out of the vault. `None` when the swap stayed on one side
+    /// of the edge. Read by the sealed oracle to say which leaks the workload
+    /// moved out and which the engine published on its own.
+    pub crossed_out: Option<Vec<u8>>,
 }
 
 /// Which operating system's filesystem a device has.
@@ -220,6 +226,19 @@ impl World {
             journal: Default::default(),
             swap_pairs: Default::default(),
         }
+    }
+
+    /// Reinstall a device's client on the same disk: a fresh state store, the
+    /// sync folder as it was. What a reinstall, a wiped store or a new
+    /// enrollment on the same machine looks like to the engine -- it knows
+    /// nothing it agreed before, and nothing it minted before is its own.
+    pub fn reinstall(&mut self, device_name: &str) {
+        let device = self
+            .devices
+            .iter_mut()
+            .find(|d| d.name == device_name)
+            .unwrap_or_else(|| panic!("no device called {device_name}"));
+        device.store = jd_core::store::Store::open_in_memory().expect("in-memory store");
     }
 
     /// Link one device with encrypted folders enabled.
@@ -383,8 +402,13 @@ impl World {
             let (a, b) = (a.clone(), b.clone());
             if let (Some(ba), Some(bb)) = (disk.peek(&a), disk.peek(&b)) {
                 if ba != bb {
-                    let sealed = disk.under_sealed_dir(&a) || disk.under_sealed_dir(&b);
-                    pairs.lock().unwrap().push(SwapPair { a: ba, b: bb, source: "chaos", sealed });
+                    let (sa, sb) = (disk.under_sealed_dir(&a), disk.under_sealed_dir(&b));
+                    let crossed_out = match (sa, sb) {
+                        (true, false) => Some(ba.clone()),
+                        (false, true) => Some(bb.clone()),
+                        _ => None,
+                    };
+                    pairs.lock().unwrap().push(SwapPair { a: ba, b: bb, source: "chaos", sealed: sa || sb, crossed_out });
                 }
             }
             let parked = format!(".swap-{round}.tmp");
@@ -723,6 +747,7 @@ impl World {
                 b: b.to_vec(),
                 source,
                 sealed,
+                crossed_out: None,
             });
         }
     }
