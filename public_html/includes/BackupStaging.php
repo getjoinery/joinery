@@ -30,7 +30,7 @@
  * @version 1.3 - fetch_envelopes(), fetch_object() and fetch_index() stand alone, so the object
  *                restore (utils/restore_objects.php) brings objects back one at a time through the
  *                same checks a verify's sample passes; fetch_objects() composes them
- * @version 1.2 - offloaded files come back the same way (specs/backup_offloaded_files.md § Verification):
+ * @version 1.2 - offloaded files come back the same way (specs/implemented/backup_offloaded_files.md § Verification):
  *                link_map() is the shape of a map of epoch envelope links or object links, and
  *                fetch_objects() stages the envelopes a run's index names and a sample of its
  *                objects, each object checked against the index's size and hash — the index, not

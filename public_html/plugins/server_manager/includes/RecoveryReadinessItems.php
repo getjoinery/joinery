@@ -16,7 +16,7 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  *
  * @version 1.2.0 - the recovery-key card warns when offloaded files in backup storage open only with a
  *                  retired recovery key: "N objects (X GB) open only with a retired recovery key"
- *                  (specs/backup_offloaded_files.md § Key model), from the record the run keeps
+ *                  (specs/implemented/backup_offloaded_files.md § Key model), from the record the run keeps
  * @version 1.1.0
  */
 class RecoveryReadinessItems {

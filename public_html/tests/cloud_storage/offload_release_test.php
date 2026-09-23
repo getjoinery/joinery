@@ -9,7 +9,7 @@
 /**
  * The offload tick, after the flip to cloud: store to the site's backup storage,
  * then release the local bytes only when every enabled backup profile holds
- * the object (specs/backup_offloaded_files.md § The offload tick).
+ * the object (specs/implemented/backup_offloaded_files.md § The offload tick).
  *
  * Driven one row at a time through CloudOffloadEngine::_sync_row() with the
  * real BlobStorageProfile, real blob rows (registered, removed), a mock file

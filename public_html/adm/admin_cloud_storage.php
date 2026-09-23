@@ -16,7 +16,7 @@
  * @version 2.0.2 - records with no bytes on this server are listed apart from stuck files, without Retry;
  *                  the stuck table shows each file's last error
  * @version 2.0.1 - Pause and Disable and Pull Files Back are plain grey buttons
- * @version 2.0 - one private store (specs/cloud_storage_private_only.md): the intro says what moves;
+ * @version 2.0 - one private store (specs/implemented/cloud_storage_private_only.md): the intro says what moves;
  *                the forms draw provider, endpoint, region, bucket and the key; the private-store lines,
  *                the second pull-back, the egress banner and the pre-save confirm are gone
  * @version 1.7 - the provider picker heads the form; the endpoint and region fields show only for

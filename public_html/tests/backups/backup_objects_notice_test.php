@@ -8,7 +8,7 @@
  */
 /**
  * Offloaded files and backup storage, as the admin surfaces say it
- * (specs/backup_offloaded_files.md § Admin surfaces), over fixtures:
+ * (specs/implemented/backup_offloaded_files.md § Admin surfaces), over fixtures:
  *
  *   - the figures: what each enabled backup holds (from its held set), what
  *     waits on this server because a backup lacks it (a real file on disk,

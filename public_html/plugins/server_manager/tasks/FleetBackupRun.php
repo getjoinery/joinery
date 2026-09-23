@@ -29,7 +29,7 @@
  *
  * @version 1.5 - the run request carries the object store: the newest index and every epoch envelope
  *                in the manager-profile backup storage, read off the listing the prune already took, are handed
- *                to the builder to sign (specs/backup_offloaded_files.md § Rollout)
+ *                to the builder to sign (specs/implemented/backup_offloaded_files.md § Rollout)
  * @version 1.4 - a manifest the backup storage check could not read is reported by the pass, not stamped as an
  *                incomplete backup (the stamp is written only from a complete reading); the verify decision is handed the node's newest verify_backup job, so a verify
  *                that failed on the node counts as attempted and is not re-dispatched every tick

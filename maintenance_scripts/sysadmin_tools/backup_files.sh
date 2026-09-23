@@ -9,7 +9,7 @@
 #                  `--print-tree-id` prints the current identity (TREE_ID=) and archives nothing.
 # Version: 1.3.0 - `--exclude-from FILE`: paths relative to the project directory, one per line,
 #                  left out of the archive — the local paths of every file the backup's object
-#                  store accounts for (specs/backup_offloaded_files.md). Literal, unanchored:
+#                  store accounts for (specs/implemented/backup_offloaded_files.md). Literal, unanchored:
 #                  a line matches the member whose trailing components it names, and nothing
 #                  with a wildcard in it is a pattern.
 # Version: 1.2.0 - stream mode: `--archive -` writes the encrypted archive to stdout and nothing

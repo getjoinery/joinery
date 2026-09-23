@@ -14,7 +14,7 @@
  * @version 1.10 - objects_status (BackupObjectsStatus::compute()): what each backup holds of the offloaded
  *                 files, what waits on this server for a backup, what is still to copy from the file
  *                 store, and whether the file store and the site's target share an account
- * @version 1.9 - offloaded files (specs/backup_offloaded_files.md § Verification): the page reads the daily
+ * @version 1.9 - offloaded files (specs/implemented/backup_offloaded_files.md § Verification): the page reads the daily
  *                file-store check (inventory) and who brings a missing file back (objects_source); the
  *                bring_back_objects action starts this site's own Bring them back in the background
  * @version 1.8 - milestones['verify_attempt']: a verify that proved nothing either way (skipped or

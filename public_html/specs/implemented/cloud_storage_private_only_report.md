@@ -1,6 +1,6 @@
 # Cloud storage: one private bucket, private files only — hand back
 
-**Built:** 2026-09-21, from `specs/cloud_storage_private_only.md`. Nothing
+**Built:** 2026-09-21, from `specs/implemented/cloud_storage_private_only.md`. Nothing
 committed, nothing staged, no database written. WP1–WP5 done in order; the
 `--changed` loop and the `db --changed` gate as pasted below.
 
@@ -34,7 +34,7 @@ Where a file was already modified in the tree by the provider-picker work
 | `docs/cloud_storage.md` | — | rewritten as one private store: overview, the rule, the Save check, settings, providers, admin UI, permission flips, URL generation and `/uploads/*` serving, bucket setup per provider (every bucket private; Amazon keeps Block Public Access on), file-by-file; the egress section is gone |
 | `docs/drive.md` | — | placement sentence and the profile row name one private store |
 | `docs/backups.md` | — | "Not the file store's bucket" (one bucket) |
-| `specs/backup_offloaded_files.md` | — | three sentences that stated the public/private pair as current |
+| `specs/implemented/backup_offloaded_files.md` | — | three sentences that stated the public/private pair as current |
 | `specs/DEFERRED_cloud_blob_variant_generation.md` | — | the opening sentence: private uploaded bytes are the only bytes that move |
 | `tests/lib/cloud_fixtures.php` | 1.1 | `ScratchTableProfile` answers `private`; the `visibility` option is gone |
 | `tests/lib/s3_fixtures.php` | 1.2 | HeadBucket (a HEAD with an empty key) answers 200, so the Save check's Reach step passes over the fixture |
@@ -207,7 +207,7 @@ batcat /var/www/html/joinerytest/public_html/adm/admin_cloud_storage.php
 batcat /var/www/html/joinerytest/public_html/docs/cloud_storage.md
 batcat /var/www/html/joinerytest/public_html/docs/drive.md
 batcat /var/www/html/joinerytest/public_html/docs/backups.md
-batcat /var/www/html/joinerytest/public_html/specs/backup_offloaded_files.md
+batcat /var/www/html/joinerytest/public_html/specs/implemented/backup_offloaded_files.md
 batcat /var/www/html/joinerytest/public_html/specs/DEFERRED_cloud_blob_variant_generation.md
 batcat /var/www/html/joinerytest/public_html/tests/lib/cloud_fixtures.php
 batcat /var/www/html/joinerytest/public_html/tests/lib/s3_fixtures.php

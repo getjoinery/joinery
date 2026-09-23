@@ -1,6 +1,6 @@
 # Cloud storage: a provider picker heads the form
 
-**Status:** Built 2026-09-21 and committed in c4ec9d05 with `specs/cloud_storage_private_only.md`, which supersedes the egress paragraph below. Awaiting the owner's live gate on dev.
+**Status:** IMPLEMENTED 2026-09-23. Built 2026-09-21 and committed in c4ec9d05 with `specs/implemented/cloud_storage_private_only.md`, which supersedes the egress paragraph below; the owner declared it finished 2026-09-23.
 
 ## Why
 

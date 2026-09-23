@@ -8,7 +8,7 @@
  */
 /**
  * The provider picker on the cloud storage form
- * (specs/cloud_storage_provider_picker.md):
+ * (specs/implemented/cloud_storage_provider_picker.md):
  *
  *   - the catalogue: the generic choice first, every provider says what it
  *     asks for, and an endpoint is recognised as its provider

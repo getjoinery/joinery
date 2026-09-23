@@ -7,7 +7,7 @@
  */
 /**
  * Private store test — the one file store's safety properties
- * (specs/cloud_storage_private_only.md).
+ * (specs/implemented/cloud_storage_private_only.md).
  *
  *  - The privacy gate verdict: an anonymous 2xx ⇒ FAIL (bucket public); any
  *    denied/unreachable status ⇒ PASS.

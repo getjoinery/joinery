@@ -23,7 +23,7 @@
  *            stored here
  *
  * @version 1.1 - enabled(): which profiles hold a site's offloaded files until their shelf has
- *                them (specs/backup_offloaded_files.md § Enabled profiles). The one place
+ *                them (specs/implemented/backup_offloaded_files.md § Enabled profiles). The one place
  *                the two tests live; the release rule and the offload tick both ask here.
  * @version 1.0
  */

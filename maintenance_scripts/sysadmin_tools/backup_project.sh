@@ -3,7 +3,7 @@
 # backup_project.sh - Complete project backup script
 # Version: 2.8.0 - `--exclude-from FILE` (stream mode): paths relative to the project directory,
 #                  one per line, left out of the archive — the local paths of every file the
-#                  backup's object store accounts for (specs/backup_offloaded_files.md). Literal
+#                  backup's object store accounts for (specs/implemented/backup_offloaded_files.md). Literal
 #                  and unanchored, evaluated on the member name before the rename.
 # Version: 2.7.1 - the stream-mode rename applies to hard-link targets as well as member names
 #                  (transform flags rh, not r): a hard link inside the live tree pointed at the

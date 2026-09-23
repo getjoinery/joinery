@@ -14,7 +14,7 @@
  * posted, it returns the endpoint and region the store will use, or a
  * sentence saying what is missing.
  *
- * @version 1.0 - specs/cloud_storage_provider_picker.md
+ * @version 1.0 - specs/implemented/cloud_storage_provider_picker.md
  */
 
 class StorageProvider {

@@ -7,7 +7,7 @@
  */
 /**
  * Private-file offload test — the private store's rules at the file layer
- * (specs/cloud_storage_private_only.md).
+ * (specs/implemented/cloud_storage_private_only.md).
  *
  *   A. Reverse ownership-gate partition. A profile whose table also holds rows
  *      that are not its own must drain ONLY the cloud rows that are. Exercised

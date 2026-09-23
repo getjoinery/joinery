@@ -1,8 +1,8 @@
 # Cloud storage: one private bucket, private files only
 
-**Status:** Built by the executor and committed 2026-09-21 (c4ec9d05); reviewed by the spec's author the same day against § The rule, § What is removed and § Tests, full db gate 464 of 465 with only the unrelated agent_bundle_drift red. Hand-back: `specs/cloud_storage_private_only_report.md`. Awaiting the owner's live gate (§ Live gate 2–7) and the CLAUDE.md docs-index line edited at /admin/admin_agent_files.
+**Status:** IMPLEMENTED 2026-09-23. Built and committed 2026-09-21 (c4ec9d05), reviewed the same day; the owner declared it finished 2026-09-23 after green backups on dev. Hand-back: `specs/implemented/cloud_storage_private_only_report.md`.
 Supersedes the egress warning and the public store wherever
-`specs/cloud_storage_provider_picker.md` and `docs/cloud_storage.md` describe
+`specs/implemented/cloud_storage_provider_picker.md` and `docs/cloud_storage.md` describe
 them.
 
 ## Why
@@ -256,7 +256,7 @@ lists. Gate: `php tests/run.php db --changed`, then the full
 `php tests/run.php db`.
 
 **WP5, docs.** `docs/cloud_storage.md` (19) as § Docs says; `docs/drive.md`
-(1). `specs/backup_offloaded_files.md` (2) and
+(1). `specs/implemented/backup_offloaded_files.md` (2) and
 `specs/DEFERRED_cloud_blob_variant_generation.md` (2) are specs, not docs:
 change a sentence only where it states the public store as current.
 `migrations/migrate_offload_single_task.php` is a past migration; leave it.
@@ -299,7 +299,7 @@ is the full set; the ones that bite here:
 ## Hand back
 
 When the gate is green, write the report to
-`specs/cloud_storage_private_only_report.md` and stop. The report holds, in
+`specs/implemented/cloud_storage_private_only_report.md` and stop. The report holds, in
 this order:
 
 1. The files changed, one line each: path, new version, what changed.

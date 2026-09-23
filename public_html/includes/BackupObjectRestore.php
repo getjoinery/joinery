@@ -29,7 +29,7 @@
  * The survey is the read-only half: which names would be brought home, from
  * which epochs. A dry run prints it; a management node's first job asks the
  * node for it and signs a page of links per answer, driving the loop from its
- * side (specs/backup_offloaded_files.md § Restore). The survey's list is
+ * side (specs/implemented/backup_offloaded_files.md § Restore). The survey's list is
  * capped so it always fits the agent's output; a truncated one says so and
  * the plane surveys again once the pages are done.
  *

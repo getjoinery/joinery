@@ -1736,7 +1736,7 @@ if (!$verify_target) {
 	check(array_keys($v_gap1['params']['object_urls'] ?? array()) === array('beach.jpg', 'dune.png'), 'while naming run 1 still reads run 1\'s index');
 
 	// ── restore_objects: the index by link, then pages of links ─────────────
-	// (specs/backup_offloaded_files.md § Restore). A survey carries the run's
+	// (specs/implemented/backup_offloaded_files.md § Restore). A survey carries the run's
 	// index and nothing else; a page carries what fits of the names it is
 	// given, with the envelope of each epoch those objects are sealed under.
 	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetObjectRestore.php'));

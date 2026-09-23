@@ -17,7 +17,7 @@
  *                and the draining flag untouched — the save path's activate-and-stop-draining is what
  *                a full Save means, not what replacing a key means
  * @version 3.0.1 - Retry clears the recorded reason with the count
- * @version 3.0 - one private store (specs/cloud_storage_private_only.md): one Save, one binding, one
+ * @version 3.0 - one private store (specs/implemented/cloud_storage_private_only.md): one Save, one binding, one
  *                pull-back; the private-store fields and disable_and_pull_private are gone
  * @version 2.6 - the provider picker: StorageProvider::complete() settles the endpoint and region a
  *                provider decides (Backblaze from the key) before the check runs; remove resets it

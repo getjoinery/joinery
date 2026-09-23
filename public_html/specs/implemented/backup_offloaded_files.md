@@ -1,6 +1,6 @@
 # Backups — Files That Live in the Cloud Store
 
-**Status:** Built, WP0–WP6 reviewed 2026-09-21; tests green. Awaiting agent 1.38.0, the release and the owner's live gate (stop point 3). Reviewed 2026-09-20; findings and decisions D1/D2 folded in.
+**Status:** IMPLEMENTED 2026-09-23. WP0–WP6 built and reviewed 2026-09-21 (1ce6065a), shipped in agent 1.38.0 and later; live gate 2026-09-23: the owner ran a backup on dev, verified and rehearsed it, all backups green. Reviewed 2026-09-20; findings and decisions D1/D2 folded in.
 **Date:** 2026-09-20
 
 ## For the executor — read this first

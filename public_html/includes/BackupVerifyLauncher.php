@@ -19,7 +19,7 @@
  * level in the background the way Run now starts a backup, and the result
  * lands on the run's own history row where Recent backups shows it.
  *
- * @version 1.2 - offloaded files travel with the request (specs/backup_offloaded_files.md § Verification):
+ * @version 1.2 - offloaded files travel with the request (specs/implemented/backup_offloaded_files.md § Verification):
  *                the run's index is read from backup storage, a link is signed for each epoch envelope it
  *                names, and a rehearsal's request also carries the sample — object_links() is the
  *                pure part, shared in shape with the management node's builder

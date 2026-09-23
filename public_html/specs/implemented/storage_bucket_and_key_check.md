@@ -1,6 +1,6 @@
 # Storage bucket and key check
 
-**Status:** Built and reviewed 2026-09-21; tests green (`tests/backups/bucket_check_test.php`). Awaiting the owner's live gate on the two forms.
+**Status:** IMPLEMENTED 2026-09-23. Built and reviewed 2026-09-21 (`tests/backups/bucket_check_test.php`); the owner declared it finished 2026-09-23.
 
 ## Why
 

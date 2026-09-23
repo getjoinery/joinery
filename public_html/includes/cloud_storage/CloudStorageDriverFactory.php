@@ -13,7 +13,7 @@
  * every consumer uses for request-time byte I/O.
  *
  * @version 2.0 - one binding: driver(), driverUnlatched(), driverWithFallback(), binding(); no visibility
- *                argument, no default(), no public_base_url (specs/cloud_storage_private_only.md)
+ *                argument, no default(), no public_base_url (specs/implemented/cloud_storage_private_only.md)
  * @version 1.2
  */
 
