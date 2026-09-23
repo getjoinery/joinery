@@ -28,7 +28,7 @@ use crate::model::{ContentId, Delta, EntityId, EntityType, Entry, LocalStatus, P
 use crate::reconcile::Context;
 use crate::remote::{local_delta, remote_delta, RemoteState};
 use crate::round::{run_round, DeletePolicy, RoundInput, RoundOutcome};
-use crate::scan::{pair, KnownLocal, ObservedFile};
+use crate::scan::{pair_with, KnownLocal, ObservedFile};
 
 /// The server will not answer a stat for more than this many entities at once.
 const STAT_BATCH: usize = 500;
@@ -270,12 +270,12 @@ pub fn run_pass(
     // the scan pairs what is on disk against where the engine believes each
     // entry is, and a stand-in the server has renamed is renamed here first so
     // that belief and the disk agree.
-    placeholders_follow_the_server(env)?;
+    placeholders_follow_the_server(env, key_for)?;
 
     // ---- what this computer did --------------------------------------------
     let observed = observe(env)?;
     let known = known_local(env)?;
-    let scan = pair(&known, &observed);
+    let scan = pair_with(&known, &observed, &awaiting_bytes(env)?);
 
     // Anything on disk that nothing is tracking gets an identity now, so that
     // the loop below can treat it like any other entry. Folders first: a new
@@ -2250,7 +2250,10 @@ fn open_what_the_key_unlocks(env: &ExecEnv) -> Result<(), ExecError> {
 /// tracks keeps the tie waiting, since its own record says where it goes;
 /// anything else is moved aside under a conflict name first, as anything in
 /// the way of a synced copy is.
-fn placeholders_follow_the_server(env: &ExecEnv) -> Result<(), ExecError> {
+fn placeholders_follow_the_server(
+    env: &ExecEnv,
+    key_for: &mut dyn FnMut() -> String,
+) -> Result<(), ExecError> {
     let Some(root) = env.vfs.root() else {
         return Ok(());
     };
@@ -2323,7 +2326,7 @@ fn placeholders_follow_the_server(env: &ExecEnv) -> Result<(), ExecError> {
             // synced copy is. Left in place it would be adopted as a folder
             // of its own, refused by the server for the name the vault holds,
             // and the record and the directory would part company for ever.
-            crate::execute::make_room(env, &to, None)?;
+            crate::execute::make_room(env, &to, None, &key_for())?;
         }
         env.vfs.rename(&root.join(&here), &to)?;
         entry.stand_in = Some(entry.remote.clone());
@@ -3613,6 +3616,40 @@ fn detect_folder_moves(
 
 pub(crate) fn inodes_on_disk(env: &ExecEnv) -> Result<std::collections::HashSet<u64>, ExecError> {
     Ok(observe(env)?.into_iter().map(|o| o.fingerprint.file_id).collect())
+}
+
+/// The paths of live FILE records with nothing of theirs on this disk yet:
+/// not provisional (a provisional was minted from a file here), never agreed
+/// here (no `synced_placement`), not trashed on the server, and going to be
+/// materialized here at all -- not parked (`holds_a_local_file`) and not
+/// waiting on another device's park, whose name is a scratch name and no
+/// slot the user can see. `known_local` leaves every one of them out; scan
+/// rule 1 reads their paths as a record's that is not at home.
+///
+/// Sealed records are in the set on the same terms. Sealing says nothing
+/// about where a record's file stands: a device without the key never counts
+/// one (its vault records are parked `PendingKey`, so they do not hold a
+/// local file), and a device with the key derives the real name the path is
+/// read under, so a trade with a sealed slot is the same question as with a
+/// plain one. A file dragged across the vault's edge by such a trade is read
+/// as the move it is and handled by the drag rules, not by this set.
+fn awaiting_bytes(env: &ExecEnv) -> Result<std::collections::HashSet<String>, ExecError> {
+    let mut out = std::collections::HashSet::new();
+    for entry in all_entries(env)? {
+        if entry.id.entity_type != EntityType::File
+            || entry.id.is_provisional()
+            || entry.remote_deleted
+            || entry.synced_placement.is_some()
+            || !entry.holds_a_local_file()
+            || entry.waiting_on_a_park()
+        {
+            continue;
+        }
+        if let Some(path) = relative_path(env, &entry)? {
+            out.insert(path);
+        }
+    }
+    Ok(out)
 }
 
 fn known_local(env: &ExecEnv) -> Result<Vec<KnownLocal>, ExecError> {

@@ -283,6 +283,11 @@ impl Store {
             store.add_column_if_missing("entries", column, ddl)?;
         }
         store.add_column_if_missing("local_index", "cached_at_ns", "INTEGER")?;
+        // Who holds this disk identity: asked by `make_room` for every file it
+        // moves aside, so it is an index and not a table read.
+        store.conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS entries_synced_id ON entries (entity_type, synced_fp_file_id);",
+        )?;
         match store.get_meta("schema_version")? {
             None => store.set_meta("schema_version", &SCHEMA_VERSION.to_string())?,
             Some(v) => {
@@ -1259,6 +1264,70 @@ impl Store {
             }),
             _ => None,
         })
+    }
+
+    /// The live records of this type whose agreed disk identity is `file_id`.
+    ///
+    /// Not `entity_for_file_id`: that reads the fingerprint cache and answers
+    /// with the newest row, so it cannot say that exactly one record holds an
+    /// identity. This reads the agreement itself. Zero is no identity and
+    /// holds nothing.
+    pub fn live_holders_of(&self, entity_type: EntityType, file_id: u64) -> StoreResult<Vec<Entry>> {
+        if file_id == 0 {
+            return Ok(Vec::new());
+        }
+        let mut stmt = self.conn.prepare(
+            "SELECT entity_type, server_id, parent_folder_id, remote_name, local_name,
+                    is_encrypted, remote_content_sha256, remote_size, remote_modified_time,
+                    head_change_id, remote_deleted, synced_content_sha256, synced_size, synced_parent_id,
+                    synced_name, synced_fp_size, synced_fp_mtime_ns, synced_fp_file_id,
+                    local_status, unsyncable_reason, wrapped_file_key,
+                    content_id, synced_remote_sha256, synced_remote_size,
+                    replaces_type, replaces_id, stand_in_parent_id, stand_in_name
+               FROM entries
+              WHERE entity_type = ?1 AND synced_fp_file_id = ?2 AND remote_deleted = 0",
+        )?;
+        let rows = stmt.query_map(params![entity_type.to_string(), file_id as i64], row_to_entry)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Write a record's new agreed placement together with the server move it
+    /// now owes, as one step: a device killed between the two would come back
+    /// with an agreement nothing is ever going to make true on the server, or
+    /// with a move queued against an agreement that still names the old path.
+    pub fn agree_and_owe_move(&self, entry: &Entry, to: &Placement, key: &str) -> StoreResult<()> {
+        self.conn.execute("BEGIN IMMEDIATE", [])?;
+        let result = (|| -> StoreResult<()> {
+            self.put_entry(entry)?;
+            self.queue_op(
+                "move_remote",
+                entry.id,
+                &serde_json::json!({ "parent": to.parent, "name": to.name }).to_string(),
+                key,
+            )?;
+            Ok(())
+        })();
+        match result {
+            Ok(()) => {
+                self.conn.execute("COMMIT", [])?;
+                Ok(())
+            }
+            Err(e) => {
+                let _ = self.conn.execute("ROLLBACK", []);
+                Err(e)
+            }
+        }
+    }
+
+    /// Is a provisional record standing in for this one -- a held source,
+    /// whose bytes are known to be somewhere else (`KnownLocal::held`)?
+    pub fn is_held_by_a_provisional(&self, id: EntityId) -> StoreResult<bool> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM entries WHERE server_id < 0 AND replaces_type = ?1 AND replaces_id = ?2",
+            params![id.entity_type.to_string(), id.server_id],
+            |r| r.get(0),
+        )?;
+        Ok(n > 0)
     }
 
     // ---- issues ------------------------------------------------------------

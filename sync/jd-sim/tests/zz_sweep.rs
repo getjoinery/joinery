@@ -1506,6 +1506,345 @@ fn two_files_trading_names_keep_two_separate_histories() {
     assert_eq!(tree.get("b.txt").cloned().flatten(), Some(jd_sim::sha256_hex(a)), "{tree:?}");
 }
 
+/// No live disk identity is agreed by two live file records on any device --
+/// the reset's T1, one file with two records, each version history holding
+/// part of the other's.
+fn assert_one_record_per_file(world: &World) {
+    for d in &world.devices {
+        let mut holders: std::collections::HashMap<u64, Vec<i64>> = std::collections::HashMap::new();
+        for e in d.store.every_entry().unwrap() {
+            if e.id.entity_type != jd_core::model::EntityType::File || e.remote_deleted {
+                continue;
+            }
+            if let Some(id) = e.synced_fingerprint.map(|f| f.file_id).filter(|id| *id != 0) {
+                holders.entry(id).or_default().push(e.id.server_id);
+            }
+        }
+        holders.retain(|_, ids| ids.len() > 1);
+        assert!(holders.is_empty(), "{}: one file, two records: {holders:?}", d.name);
+    }
+}
+
+/// T1-B: a name trade with a slot whose download never landed here.
+///
+/// A download lands on the laptop and the user saves over it in the landing
+/// window, so its record has nothing agreed on this disk; the user then trades
+/// that file's name with a synced one. Scan rule 1 must read the trade: the
+/// synced record's own file stands at a path held by a record that is not at
+/// home (it has nothing here to be at home with). Read as an edit, the
+/// synced record took the stranger's bytes as a new version and its own file
+/// was minted again as a second record.
+#[test]
+fn a_trade_with_a_download_the_user_saved_over_is_read_as_a_trade() {
+    let seed = 9_952;
+    let mut world = World::of(seed, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)]);
+    let mine = b"the laptop's own synced file";
+    world.device("laptop").fs.user_write("doc-10.txt", mine);
+    assert!(world.settle().is_some(), "the laptop's file goes up");
+    world.device("desktop").fs.user_write("doc-20.txt", b"the desktop's new file");
+    let desktop = world.device("desktop");
+    world.pass(desktop);
+    world.user_saves_while_downloads_land(1, 1);
+    let laptop = world.device("laptop");
+    world.pass(laptop);
+    assert_eq!(world.saves_made_while_downloads_landed(), 1, "the landing window was entered");
+    let saved = laptop.fs.peek("doc-20.txt").expect("the user's save stands at doc-20");
+    let pending = laptop
+        .store
+        .every_entry()
+        .unwrap()
+        .into_iter()
+        .find(|e| e.remote.name == "doc-20.txt")
+        .expect("the laptop has a record for doc-20");
+    assert!(
+        pending.synced_placement.is_none(),
+        "construction: doc-20's download must not have landed ({pending:?})"
+    );
+    world.record_swap_pair(mine, &saved, "slots", false);
+    laptop.fs.user_rename("doc-10.txt", ".swap.tmp");
+    laptop.fs.user_rename("doc-20.txt", "doc-10.txt");
+    laptop.fs.user_rename(".swap.tmp", "doc-20.txt");
+    assert!(world.settle().is_some(), "the trade settles");
+    assert_converged(&world);
+    assert_one_record_per_file(&world);
+    assert_no_entity_holds_both_sides_of_a_swap(&world, seed);
+}
+
+/// Where a body stands: its paths on a disk, and on the server.
+fn paths_of(world: &World, device: &str, body: &[u8]) -> (Vec<String>, Vec<String>) {
+    let fs = &world.device(device).fs;
+    let disk = fs.all_paths().into_iter().filter(|p| fs.peek(p).as_deref() == Some(body)).collect();
+    let sha = jd_sim::sha256_hex(body);
+    let server = jd_sim::scenario::owner_view_of_the_server(world)
+        .into_iter()
+        .filter(|(_, h)| h.as_deref() == Some(sha.as_str()))
+        .map(|(p, _)| p)
+        .collect();
+    (disk, server)
+}
+
+/// The shared construction for T1-A's pins: in the middle of a laptop pass --
+/// while an upload completes, after the scan and before a planned download of
+/// `incoming` lands -- the user moves the synced `report.txt` onto
+/// `incoming`'s path and saves a new file under the report's old name.
+/// `fail_the_rename` refuses make_room's rename once: the store is written
+/// and the disk is not, which is the state a kill between the two leaves.
+fn move_onto_a_landing_download(
+    world: &World,
+    report_path: &str,
+    incoming_path: &str,
+    mine: &'static [u8],
+    fresh: &'static [u8],
+    fail_the_rename: bool,
+) {
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("other.txt", b"something to upload first");
+    let disk = laptop.fs.clone();
+    let target = incoming_path.to_string();
+    let report = report_path.to_string();
+    let refuse = fail_the_rename.then(|| incoming_path.to_string());
+    let fired = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let armed = fired.clone();
+    world.server.while_completing_an_upload(move || {
+        if armed.load(std::sync::atomic::Ordering::SeqCst)
+            || disk.peek(&target).is_some()
+            || disk.peek(&report).as_deref() != Some(mine)
+        {
+            return;
+        }
+        armed.store(true, std::sync::atomic::Ordering::SeqCst);
+        disk.user_rename(&report, &target);
+        disk.user_write(&report, fresh);
+        if let Some(path) = &refuse {
+            disk.fail_next(jd_sim::FsOp::Rename, Some(path), jd_sim::FailureKind::Io, 1);
+        }
+    });
+    world.record_swap_pair(mine, fresh, "slots", false);
+    world.pass(laptop);
+    assert!(
+        fired.load(std::sync::atomic::Ordering::SeqCst),
+        "construction: the move must happen mid-pass, before the download lands"
+    );
+}
+
+/// T1-A: `make_room` moves aside a file whose record it knows.
+///
+/// The download makes room: the synced report goes aside under the
+/// download's conflict name, and its record follows it there and owes the
+/// server the same move -- the user's move stands. End state: the download
+/// at its name; the report at the download name's conflict name, on the
+/// server too, with its own bytes and history; the new file once, at the
+/// report's old name, as a record of its own; one record per file.
+#[test]
+fn a_file_moved_onto_a_landing_download_keeps_the_users_move() {
+    let seed = 9_953;
+    let world = World::of(seed, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)]);
+    const MINE: &[u8] = b"the laptop's synced report";
+    const FRESH: &[u8] = b"a new file saved under the report's old name";
+    let incoming = b"the desktop's file the laptop is about to download";
+    world.device("laptop").fs.user_write("report.txt", MINE);
+    assert!(world.settle().is_some(), "the report goes up");
+    world.device("desktop").fs.user_write("incoming.txt", incoming);
+    world.pass(world.device("desktop"));
+    move_onto_a_landing_download(&world, "report.txt", "incoming.txt", MINE, FRESH, false);
+    assert!(world.settle().is_some(), "the fleet settles");
+    assert_converged(&world);
+    assert_one_record_per_file(&world);
+    assert_no_entity_holds_both_sides_of_a_swap(&world, seed);
+    let laptop = world.device("laptop");
+    assert_eq!(laptop.fs.peek("incoming.txt").as_deref(), Some(&incoming[..]), "the download is at its name");
+    let (disk, server) = paths_of(&world, "laptop", MINE);
+    assert!(
+        disk.len() == 1 && disk[0].starts_with("incoming (conflicted copy") && server == disk,
+        "the report keeps the user's move, under the download's conflict name, on both sides: disk {disk:?} server {server:?}"
+    );
+    let (disk, server) = paths_of(&world, "laptop", FRESH);
+    assert!(disk == ["report.txt"] && server == disk, "the new file once, at the old name: disk {disk:?} server {server:?}");
+}
+
+/// T1-A across folders -- plat3 75427's shape. The user's move takes the
+/// report out of the root into `Sub`, onto a download's name there. Taken
+/// home to its server name, the report stood in the root, a folder the user
+/// had moved it out of. It stays in `Sub`, under the conflict name, on the
+/// server too.
+#[test]
+fn a_file_moved_across_folders_onto_a_landing_download_stays_in_the_users_folder() {
+    let seed = 9_955;
+    let world = World::of(seed, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)]);
+    const MINE: &[u8] = b"the laptop's synced report, soon in Sub";
+    const FRESH: &[u8] = b"a new file saved under the report's old name at the root";
+    let incoming = b"the desktop's file in Sub";
+    world.device("laptop").fs.user_write("report.txt", MINE);
+    world.device("laptop").fs.user_mkdir("Sub");
+    assert!(world.settle().is_some(), "the report and Sub go up");
+    world.device("desktop").fs.user_write("Sub/incoming.txt", incoming);
+    world.pass(world.device("desktop"));
+    move_onto_a_landing_download(&world, "report.txt", "Sub/incoming.txt", MINE, FRESH, false);
+    assert!(world.settle().is_some(), "the fleet settles");
+    assert_converged(&world);
+    assert_one_record_per_file(&world);
+    assert_no_entity_holds_both_sides_of_a_swap(&world, seed);
+    let (disk, server) = paths_of(&world, "laptop", MINE);
+    assert!(
+        disk.len() == 1 && disk[0].starts_with("Sub/incoming (conflicted copy") && server == disk,
+        "the report stays in the folder the user put it in, on both sides: disk {disk:?} server {server:?}"
+    );
+}
+
+/// T1-A in the window a kill leaves: the owner's agreement and the server
+/// move it owes are written, and make_room's rename then fails once, so the
+/// file is still at the download's name. The move is queued; the file is
+/// found by its own inode; the end state is T1-A's.
+#[test]
+fn a_file_moved_onto_a_landing_download_survives_a_failed_set_aside() {
+    let seed = 9_956;
+    let world = World::of(seed, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)]);
+    const MINE: &[u8] = b"the laptop's synced report, set aside late";
+    const FRESH: &[u8] = b"a new file saved under the old name, before a failed set-aside";
+    let incoming = b"the desktop's file, landing on the second try";
+    world.device("laptop").fs.user_write("report.txt", MINE);
+    assert!(world.settle().is_some(), "the report goes up");
+    world.device("desktop").fs.user_write("incoming.txt", incoming);
+    world.pass(world.device("desktop"));
+    move_onto_a_landing_download(&world, "report.txt", "incoming.txt", MINE, FRESH, true);
+    assert!(world.settle().is_some(), "the fleet settles");
+    assert_converged(&world);
+    assert_one_record_per_file(&world);
+    assert_no_entity_holds_both_sides_of_a_swap(&world, seed);
+    let laptop = world.device("laptop");
+    assert_eq!(laptop.fs.peek("incoming.txt").as_deref(), Some(&incoming[..]), "the download is at its name");
+    let (disk, server) = paths_of(&world, "laptop", MINE);
+    assert!(
+        disk.len() == 1 && disk[0].starts_with("incoming (conflicted copy") && server == disk,
+        "the report keeps the user's move on both sides: disk {disk:?} server {server:?}"
+    );
+}
+
+/// T1-A's owed move under its own key each time one op makes room twice.
+///
+/// The download's first set-aside is written and its rename fails once; before
+/// the retry, the user saves a new file at the first aside name, so the retry
+/// sets the report aside under the next name. Two follows from one op, two
+/// different requests: keyed on the op alone, the second reused the first's
+/// key, the server refused it for good, and the report's record stayed busy
+/// with a move that never completes.
+#[test]
+fn one_download_setting_a_file_aside_twice_owes_each_move_under_its_own_key() {
+    let seed = 9_958;
+    let world = World::of(seed, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)]);
+    const MINE: &[u8] = b"the laptop's synced report, set aside twice";
+    const FRESH: &[u8] = b"a new file under the report's old name";
+    let incoming = b"the desktop's file, landing on the retry";
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("report.txt", MINE);
+    assert!(world.settle().is_some(), "the report goes up");
+    world.device("desktop").fs.user_write("incoming.txt", incoming);
+    world.pass(world.device("desktop"));
+    move_onto_a_landing_download(&world, "report.txt", "incoming.txt", MINE, FRESH, true);
+    let first_aside = "incoming (conflicted copy 2026-07-31 from laptop).txt";
+    assert!(
+        laptop.store.queued_ops().unwrap().iter().any(|o| o.kind == "move_remote" && o.params.contains(first_aside)),
+        "construction: the first follow owes a move to {first_aside}: {:?}",
+        laptop.store.queued_ops().unwrap()
+    );
+    laptop.fs.user_write(first_aside, b"the user's own file at the first aside name");
+    assert!(world.settle().is_some(), "the fleet settles");
+    assert_eq!(world.server.key_conflicts(), 0, "a key was offered again for a different request");
+    assert_converged(&world);
+    assert_one_record_per_file(&world);
+    assert_eq!(laptop.fs.peek("incoming.txt").as_deref(), Some(&incoming[..]), "the download is at its name");
+    let (disk, server) = paths_of(&world, "laptop", MINE);
+    assert!(
+        disk.len() == 1 && disk[0].starts_with("incoming (conflicted copy") && disk[0] != first_aside && server == disk,
+        "the report under the second aside name, on both sides: disk {disk:?} server {server:?}"
+    );
+}
+
+/// T1-A inside a vault: the owed server move goes through `move_remote` like
+/// any other, which sends the sealed file's name sealed. The report keeps
+/// the user's move in the owner's view of the server, nothing reaches the
+/// server in the clear, and one record per file.
+#[test]
+fn a_sealed_file_moved_onto_a_landing_download_keeps_the_users_move() {
+    let seed = 9_957;
+    let vault = jd_sim::SimVault::new(seed);
+    let mut world = World::of(seed, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)]);
+    world.give_vault("laptop", &vault);
+    world.give_vault("desktop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some(), "the vault reaches both devices");
+    const MINE: &[u8] = b"the laptop's sealed report";
+    const FRESH: &[u8] = b"a new sealed file under the report's old name";
+    let incoming = b"the desktop's sealed file";
+    world.device("laptop").fs.user_write("Private/report.txt", MINE);
+    assert!(world.settle().is_some(), "the report goes up sealed");
+    world.device("desktop").fs.user_write("Private/incoming.txt", incoming);
+    world.pass(world.device("desktop"));
+    move_onto_a_landing_download(&world, "Private/report.txt", "Private/incoming.txt", MINE, FRESH, false);
+    assert!(world.settle().is_some(), "the fleet settles");
+    assert_converged(&world);
+    assert_one_record_per_file(&world);
+    assert_no_entity_holds_both_sides_of_a_swap(&world, seed);
+    let (disk, server) = paths_of(&world, "laptop", MINE);
+    assert!(
+        disk.len() == 1 && disk[0].starts_with("Private/incoming (conflicted copy") && server == disk,
+        "the sealed report keeps the user's move, owner's view: disk {disk:?} server {server:?}"
+    );
+    let private = world.server.folder_id_at("Private").expect("the vault folder");
+    let plain: Vec<String> = world
+        .server
+        .files()
+        .into_iter()
+        .filter(|f| !f.trashed && !f.encrypted && f.folder == Some(private))
+        .map(|f| f.name)
+        .collect();
+    assert!(plain.is_empty(), "a vault file reached the server in the clear: {plain:?}");
+}
+
+/// T1-A': an upload does not erase the move it still owes.
+///
+/// The laptop's new version of the report is queued and its first attempt
+/// fails (the read is refused once). Meanwhile the desktop moves the report
+/// into `Moved`. The laptop's next pass absorbs the move -- the record's
+/// `remote` names `Moved/report.txt` -- and runs the queued upload first,
+/// reading the version from the agreed placement at the root. Agreeing
+/// afterwards on the server's placement said the file already stood in
+/// `Moved` while it stood at the root, so the next scan read the laptop as
+/// moving it back, and the desktop's move was undone on the server. Seen
+/// in the sweep through T1-A's owed moves (kill2 75124, held-out 75239); the
+/// shape needs nothing but a rename landing while an upload is queued.
+#[test]
+fn an_edit_uploaded_before_an_owed_move_does_not_erase_the_move() {
+    let seed = 9_954;
+    let world = World::of(seed, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)]);
+    let edited = b"the laptop's report, edited";
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("report.txt", b"the report");
+    world.device("laptop").fs.user_mkdir("Moved");
+    assert!(world.settle().is_some(), "the report goes up");
+    laptop.fs.user_write("report.txt", edited);
+    laptop
+        .fs
+        .fail_next(jd_sim::FsOp::OpenRead, Some("report.txt"), jd_sim::FailureKind::Io, 1);
+    world.pass(laptop);
+    assert!(
+        laptop.store.queued_ops().unwrap().iter().any(|o| o.kind == "upload_version"),
+        "construction: the version upload is still queued"
+    );
+    let desktop = world.device("desktop");
+    desktop.fs.user_rename("report.txt", "Moved/report.txt");
+    world.pass(desktop);
+    assert!(world.settle().is_some(), "the fleet settles");
+    assert_converged(&world);
+    assert_one_record_per_file(&world);
+    let (disk, server) = paths_of(&world, "laptop", edited);
+    assert!(
+        disk == ["Moved/report.txt"] && server == disk,
+        "the edit lands where the desktop moved the report, on both sides: disk {disk:?} server {server:?}"
+    );
+}
+
 /// The custody oracle sees a file that keeps its bytes and loses its folder.
 ///
 /// The pin for the instrument itself: the Defect AA shape, made by hand. A
@@ -4112,8 +4451,13 @@ fn frozen_contested_name_loop_seeds() {
     // disk's pass 7), the chaos name-swapper then fires at different moments,
     // and one of its swaps meets scan rule 1 (file 913 holds both sides of a
     // chaos pair). Swap-off green on the engine before and after the change:
-    // AH residue, not a fault of the change.
-    for (seed, poisoned_by_ah) in [(111_740u64, true), (111_201, true), (111_120, true)] {
+    // AH residue, not a fault of the change. Green outright since the reset's
+    // T1 (2026-09-23): the pair is a trade with a download the user saved
+    // over as it landed. Scan rule 1 reading that slot as not at home closes
+    // it alone; make_room's file owner following the aside closes it too, but
+    // only with the upload keeping its owed move (each measured with the
+    // others switched off).
+    for (seed, poisoned_by_ah) in [(111_740u64, false), (111_201, true), (111_120, true)] {
         let run = || {
             workload_core(seed, 70, &refs, true, Vault::None, false, Names::Ordinary);
         };

@@ -1212,10 +1212,117 @@ fn the_owner_follows_its_directory(env: &ExecEnv, aside: &std::path::Path) -> Re
     Ok(())
 }
 
+/// A file was just moved aside under a conflict name: whose was it? The
+/// file-side twin of `the_owner_follows_its_directory`, for the same reason.
+///
+/// A download's destination is taken by a file this store already agrees on:
+/// the user moved it there after the pass planned the download (a mid-pass
+/// rename; no scan stands between the two). Moved aside with no owner, it
+/// was the next scan's stranger: that record's inode under a conflict name
+/// was minted as a new file, while the record, finding another file at its
+/// agreed path, read those bytes as its edit -- one file with two records,
+/// and each version history holding the other file's past (the reset's T1).
+/// The engine moved this file itself and knows exactly whose it is.
+///
+/// The record's agreed placement takes the aside, and the server is owed
+/// the same move: a `move_remote` to the aside is queued with it, in one
+/// write, so the user's move stands -- under the conflict name, in the folder
+/// the user put the file in. Undoing it instead (reconcile reading the
+/// server's placement as a remote move and taking the file home) put the
+/// file back in a folder the user had moved it out of whenever the move
+/// crossed folders (plat3 75427), which breaks the reset's custody invariant.
+/// End state: the download at the name it came for, the user's file at that
+/// name's conflict name in the folder the user chose, on the server too;
+/// nothing duplicated and no bytes lost. The entity is busy while the move
+/// is queued, so no pass plans it back in between. A sealed file's move goes
+/// through `move_remote` like any other, which sends its sealed name.
+///
+/// The key is derived from the op that made room, the way an op's own
+/// retries derive theirs -- the executor has no key source of its own, and
+/// this move exists only because that op ran -- plus the owner and the
+/// placement it is sent to (see `owed_key`).
+///
+/// Parent and name, where the folder rule sets only the name: the aside sits
+/// beside the download's destination, and the move that put the file there
+/// can have crossed folders. An agreement naming the owner's old folder with
+/// the aside's name points at a path where nothing stands, and the next scan
+/// reads the file as gone. The aside's folder is read by its directory
+/// identity; if no single live folder record holds it, nothing follows.
+///
+/// Only for exactly one live FILE record holding that identity (nonzero),
+/// whose file is not standing at its own agreed path (then it was not
+/// moved), with an agreed placement to move, and not a held source (a provisional
+/// stands in for it and its bytes are known to be elsewhere): two holders is
+/// a question this cannot answer, and a held record's hold is not the
+/// engine's to lift.
+fn the_owner_follows_its_file(
+    env: &ExecEnv,
+    file_id: u64,
+    aside: &std::path::Path,
+    key: &str,
+) -> Result<(), ExecError> {
+    let mut owners = env.store.live_holders_of(EntityType::File, file_id)?;
+    if owners.len() != 1 {
+        return Ok(());
+    }
+    let mut owner = owners.remove(0);
+    if owner.synced_placement.is_none() || env.store.is_held_by_a_provisional(owner.id)? {
+        return Ok(());
+    }
+    // Not moved at all: the file stands where its record agrees it does, and
+    // is in the way only because the incoming name lands on the same slot --
+    // a case twin on a disk that folds case. That is naming's question (the
+    // loser is re-mapped), not the user's move, and following it would push a
+    // conflict name to the server for a file nobody touched. Asked of the
+    // disk by identity, so a folded spelling of the agreed path counts.
+    if let Placed::At(home) = local_path(env, &owner)? {
+        if env.vfs.fingerprint(&home)?.is_some_and(|fp| fp.file_id == file_id) {
+            return Ok(());
+        }
+    }
+    let (Some(root), Some(dir)) = (env.vfs.root(), aside.parent()) else {
+        return Ok(());
+    };
+    let parent = if dir == root.as_path() {
+        None
+    } else {
+        let Some(dir_id) = env.vfs.directory_id(dir)?.filter(|id| *id != 0) else {
+            return Ok(());
+        };
+        let folders = env.store.live_holders_of(EntityType::Folder, dir_id)?;
+        let [folder] = folders.as_slice() else {
+            return Ok(());
+        };
+        Some(folder.id.server_id)
+    };
+    let name = aside
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let to = Placement { parent, name };
+    owner.synced_placement = Some(to.clone());
+    owner.local_name = None;
+    // Keyed on everything the request says. One op can make room more than
+    // once -- a download retried after its rename failed, with something new
+    // standing at the first aside name, or another owner's file in the way --
+    // and the server refuses for good a key offered again with a different
+    // body (`idempotency_key_reused`), leaving the entity busy with a move
+    // that never completes. The same follow repeated is the same request.
+    let owed_key = format!(
+        "{key}-owner-{}-{}-{}",
+        owner.id.server_id,
+        to.parent.map_or_else(|| "root".to_string(), |p| p.to_string()),
+        to.name
+    );
+    env.store.agree_and_owe_move(&owner, &to, &owed_key)?;
+    Ok(())
+}
+
 pub(crate) fn make_room(
     env: &ExecEnv,
     path: &std::path::Path,
     incoming: Option<&str>,
+    key: &str,
 ) -> Result<(), ExecError> {
     match env.vfs.fingerprint(path)? {
         Some(fingerprint) => {
@@ -1258,6 +1365,16 @@ pub(crate) fn make_room(
     // No server-side names to avoid: this moves aside whatever is sitting at a
     // path, which may be nothing the server has ever heard of.
     let aside = free_conflict_path(env, path, &name, &[])?;
+    // A file's owner follows BEFORE the rename: its agreement and the server
+    // move it owes are written first, so a device killed between the two
+    // comes back with the move queued and the file where it was, which the
+    // next scan finds by its own inode. Renamed first, a kill there left the
+    // file under the conflict name with nothing to say whose it was -- the
+    // very state this exists to prevent. (A directory's owner reads the
+    // directory at the aside, so it follows after.)
+    if let Some(fp) = env.vfs.fingerprint(path)? {
+        the_owner_follows_its_file(env, fp.file_id, &aside, key)?;
+    }
     env.vfs.rename(path, &aside)?;
     the_owner_follows_its_directory(env, &aside)?;
     env.store.raise_issue(
@@ -1470,7 +1587,7 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         // Compared in the plaintext domain: the question is whether the file
         // already sitting there is this same file, and what is on disk is
         // plaintext whatever the server holds.
-        make_room(env, &path, Some(&arrived.plain.sha256))?;
+        make_room(env, &path, Some(&arrived.plain.sha256), &op.idempotency_key)?;
     }
 
     // The last gate before bytes are destroyed, and the only one that cannot be
@@ -1767,6 +1884,7 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
     };
     let mut vetoed = false;
     let mut found = None;
+    let mut found_at: Option<Placement> = None;
     let candidates = [
         as_new.clone(),
         Some(entry.local_placement().clone()),
@@ -1782,6 +1900,7 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
             Placed::At(path) => {
                 if let Some(fp) = env.vfs.fingerprint(&path)? {
                     found = Some((path, fp));
+                    found_at = Some(candidate.clone());
                     break;
                 }
             }
@@ -2214,6 +2333,22 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
         sha256: sha.clone(),
         size: fingerprint.size,
     };
+    // A new version read from the record's own agreed placement while the
+    // server names another keeps that placement. The move between the two is
+    // still owed -- `make_room` has just had the record follow its file aside,
+    // or the server renamed it and the rename has not run here yet -- and
+    // agreeing on the server's placement would erase it: the file stays where
+    // it is, the record says it is at the server's name, and the next scan
+    // reads whatever stands there as this record's edit (the reset's T1,
+    // held-out 75239). Only then: an ordinary upload agrees in full.
+    let owed_move = if as_new.is_none()
+        && found_at.as_ref() == entry.synced_placement.as_ref()
+        && entry.synced_placement.as_ref() != Some(&entry.remote)
+    {
+        entry.synced_placement.clone()
+    } else {
+        None
+    };
     match settled {
         Some(fp) => {
             agree(&mut entry, Some(content), Some(fp));
@@ -2255,6 +2390,9 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
             agree(&mut entry, Some(content), None);
             entry.synced_fingerprint = None;
         }
+    }
+    if owed_move.is_some() {
+        entry.synced_placement = owed_move;
     }
     env.store.put_entry(&entry)?;
     Ok(OpOutcome::Done)
@@ -2803,7 +2941,7 @@ fn create_remote_folder(
             (local_path(env, &entry)?, path_for(env, &placement)?)
         {
             if from != to && env.vfs.read_dir(&from).is_ok() {
-                make_room(env, &to, None)?;
+                make_room(env, &to, None, &op.idempotency_key)?;
                 env.vfs.rename(&from, &to)?;
             }
         }
@@ -2898,7 +3036,7 @@ fn create_local_folder(
     // destroying it. Only a FILE: a directory already here IS this folder, and
     // moving that aside would rename the tree out from under itself every pass.
     if env.vfs.fingerprint(&path)?.is_some() {
-        make_room(env, &path, None)?;
+        make_room(env, &path, None, &op.idempotency_key)?;
     }
     // A directory has been standing in for this folder while the device had
     // no key (`Entry::stand_in`). It is this folder, and what the user saved
@@ -3519,7 +3657,7 @@ fn move_remote(
                 _ => !nothing_at(env, &from)?,
             };
             if from != dest && its_own {
-                make_room(env, &dest, None)?;
+                make_room(env, &dest, None, &op.idempotency_key)?;
                 env.vfs.rename(&from, &dest)?;
             }
         }
@@ -3925,7 +4063,7 @@ fn move_local(
                     .ok()
                     .flatten()
             });
-        make_room(env, &dest, moving.as_deref())?;
+        make_room(env, &dest, moving.as_deref(), &op.idempotency_key)?;
         match env.vfs.rename(&from, &dest) {
             Ok(()) => {}
             // Already at the destination — a repeat of a move that landed

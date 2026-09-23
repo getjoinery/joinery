@@ -1744,6 +1744,11 @@ belt in, before the belt lands.** B1 is what happens without this.
   sealed oracle stays strict. Not built; approach to the reviewer first (R5).
   Its measurement starts from the D2 package's numbers: swap-on leaks labelled
   carried-out-by-chaos, among them plat3 75412 at 6 (3 before the package).
+  T1's scan rule (below) reads more of the swapper's cross-edge drags as the
+  moves they are, so the drag-out rule converts them: hostile2 74405 and
+  74418 newly fire the sealed oracle under T1, both carried out by chaos
+  (not_carried_out=0). Accepted as D1's, not guarded; D1's four lines are
+  the next item after T1.
 - **Owner decision D2 (2026-09-22): scan rule 1 takes the careful form
   (`mine4`).** A record refuses bytes at its path as an edit only when its own
   file still stands elsewhere and the thing at its path is one the store
@@ -1806,10 +1811,8 @@ belt in, before the belt lands.** B1 is what happens without this.
   completed move cannot be recognised without an identity. Sealed files stay
   stood down (their server name is a placeholder) and the chain in a vault
   ends clean at every kill point.
-- plain2 75228: pair gained under the D2 package (completed_here), untraced;
-  traced inside T1's trace (T1 is upstream of D2's leftover pairs), four
-  lines of its own if it is not T1's shape.
-- plain2 75292: pair gained under the D2 package (C12 arm), untraced; same.
+- plain2 75228 and 75292 (pairs gained under the D2 package): T1's shape;
+  both green under T1.
 - **C6, latent, no reproduction.** The rename-race wait
   (`held_by_a_rename_this_device_owes`) has no cycle test: two queued server
   renames that want each other's names wait for ever if the planner's park
@@ -1862,11 +1865,79 @@ belt in, before the belt lands.** B1 is what happens without this.
 - The C8b-4 constructed pin (a displaced plain folder that loses a path to a
   vault's claim, searched by contents, no two records on one path) is owed:
   a hand-built rotation is resolved by the ring walk before the claim runs.
-- **T1, open: a second record for a live identity.** Conflict-copy rescue
-  mints a record for an inode or directory another live record still names
-  (files: plain2 75221, 905 and 909 on inode 1003; folders: hostile2 74412,
-  503 and 513 on directory 1003; plat3 75415, 503 and 512). It is upstream
-  of D2's leftover swap pairs and of C9(b). Four lines next after D2.
+- **T1 (2026-09-23), files, NEEDED and VALID (public-html-25), awaiting the
+  owner's commit: one file, two records.** Traced with a probe on every
+  record written with a disk identity another live record holds. A file's
+  identity was given to a second record in three ways, each landed:
+  - **B, scan rule 1:** a path held by a live file record with nothing of
+    its own on this disk yet (a download still to come, or one the user
+    saved over as it landed) is a record's path that is not at home. Left
+    out of `known_local`, a trade with such a slot read as an edit and this
+    record's own file was minted again (plain2 75292). Sealed records count
+    on the same terms: a keyless device never counts one (parked), a keyed
+    one reads the real name (measured exclude vs include: a wash, 2 seeds
+    one each way). Pin: `a_trade_with_a_download_the_user_saved_over_is_read_as_a_trade`.
+  - **A, make_room's file owner follows the aside:** a file moved onto a
+    download's name mid-pass (no scan between) was set aside with no owner
+    and minted again. Exactly one live file record holding its identity
+    (not held, with an agreed placement, and not standing at its own agreed
+    path -- a case twin on a folding disk has not moved) follows it by
+    parent and name, and owes the server the same move: agreement and a
+    `move_remote` op are written in one transaction, BEFORE the rename, so
+    a kill between leaves the op queued and the file found by inode. The
+    user's move stands (the reviewer's ruling (ii)): undone, a move that
+    crossed folders put the file back in a folder the user moved it out of
+    (plat3 75427, custody). The owed move's key is derived from the op that
+    made room plus the owner and the placement, so one op making room twice
+    sends two requests under two keys (server key-reuse count 0 over 420
+    runs). Pins: `a_file_moved_onto_a_landing_download_keeps_the_users_move`,
+    `a_file_moved_across_folders_onto_a_landing_download_stays_in_the_users_folder`,
+    `a_file_moved_onto_a_landing_download_survives_a_failed_set_aside`,
+    `a_sealed_file_moved_onto_a_landing_download_keeps_the_users_move`,
+    `one_download_setting_a_file_aside_twice_owes_each_move_under_its_own_key`.
+  - **A', an upload keeps an owed move:** a version read from the agreed
+    placement while the server names another keeps that placement after
+    agreeing; agreeing on the server's said the file already stood there,
+    and the next scan pushed the move back (a peer's rename undone; kill2
+    75124, held-out 75239). Pre-existing without A. Pin:
+    `an_edit_uploaded_before_an_owed_move_does_not_erase_the_move`.
+  Every pin is red with its own part switched off. Frozen 111740 green
+  outright (B alone closes it; A only with A'), wrapper off.
+  Measured vs 16c5a38c: 160 swaps on, swap-separated pairs 69 -> 47, seeds
+  48 -> 34, custody 10 -> 8, sealed 82 -> 84, R->G 1 (hostile2 74419), G->R 0;
+  held-out plain2 green 37 -> 59, pairs 99 -> 59, G->R 2; swaps off 160/160
+  identical. Every new per-oracle fire, traced:
+  - sealed hostile2 74405, 74418: chaos-carried cross-edge drags, D1.
+  - chain plain2 75212 (held-out): T1-C.
+  - chain hostile2 74401, 74413, plain2 75236, plat3 75418: T1-D.
+  - custody kill2 75109: folder T1 / C9 -- the mac mints `ring-1/ring-3.txt`
+    under folder 503 because the path map gives `ring-1` to 503, while the
+    directory there carries identity 1004, held by 504 alone, after a
+    two-device folder-ring rename.
+- **T1-C, open: a record for a file never uploaded carries no inode.** An
+  engine-rescued provisional (rescue_unsynced out of a trashed folder) is
+  swapped with a synced file; no clause can name it, and the trade reads as
+  an edit (held-out plain2 75212). Folders learn their directory at mint;
+  files do not. Four lines after D1's.
+- **T1-D, open: executor ops act on whatever file stands at the path.**
+  `move_local` checks a folder's directory identity at `from` but not a
+  file's inode, and a queued version upload sends the bytes at the agreed
+  path, while the record's own inode is known and stands elsewhere (hostile2
+  74401: a stranger the swapper put at 907's from path moved as 907;
+  74413, plat3 75418, plain2 75236: a set-aside stranger swapped onto a
+  record's path mid-pass, sent as its version). After T1-C.
+- **Finding, the folder make_room rule:** `the_owner_follows_its_directory`
+  sets the agreed NAME only, so a directory the user moved across folders
+  onto a destination gets a wrong agreed parent, and it undoes the user's
+  move, so the custody argument that decided T1's (ii) applies to folders
+  too. Four lines of its own after T1-D.
+- **Folder T1, open:** a folder mint for a directory a live plain folder
+  names. Mostly inside D3's empty-plain residual (hostile2 74412, 74424's
+  second mint, plat3 75409). Not inside it: 74424's first (a path vacated
+  by a claim mid-scan is never a candidate), plat3 75412 (its own directory
+  with its own file, refused as not moved wholesale because the user moved
+  one of its files out), plat3 75415 (the directory holds another folder's
+  file), and kill2 75109's custody above. After the folder-rule finding.
 - **C9, open: records that do not follow their directories.** A folder
   move is planned from a stale placement and refused by identity every
   pass: (a) an all-contested ring whose disk already matches the server

@@ -31,7 +31,7 @@
 //! Every pairing above rests on a content hash, never on a fingerprint. The
 //! fingerprint only decides whether hashing is worth the read.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::model::EntityId;
 
@@ -106,6 +106,18 @@ impl ScanOutcome {
 /// observation would read as mass deletion, which is why the caller only passes
 /// a subtree when it has genuinely walked all of it.
 pub fn pair(known: &[KnownLocal], observed: &[ObservedFile]) -> ScanOutcome {
+    pair_with(known, observed, &HashSet::new())
+}
+
+/// `pair`, told which paths belong to live records with nothing of theirs on
+/// this disk yet (see `awaiting_bytes` in rule 1). `known` leaves those
+/// records out -- there is no local file to have moved away from -- so this
+/// is the only way rule 1 can see that such a path is somebody's.
+pub fn pair_with(
+    known: &[KnownLocal],
+    observed: &[ObservedFile],
+    awaiting_bytes: &HashSet<String>,
+) -> ScanOutcome {
     let mut out = ScanOutcome::default();
 
     let by_path: HashMap<&str, &ObservedFile> =
@@ -218,6 +230,15 @@ pub fn pair(known: &[KnownLocal], observed: &[ObservedFile]) -> ScanOutcome {
     // the name while that record still holds it: the move then lands beside
     // under a conflict name, never dropped (the reset's C12, frozen 111120).
     // A hardlinked twin at home anywhere keeps the reading an edit (p8).
+    //
+    // A path held by a live record whose bytes have not landed here yet
+    // (`awaiting_bytes`: a download still to come, or one the user saved over
+    // as it landed) is another record's path whose record is not at home: it
+    // has nothing on this disk to be at home with. Left out, a trade with such
+    // a slot read as an edit and this record's own file was minted again as a
+    // new one under the other name (the reset's T1, plain2 75292). A backup
+    // made by renaming still reads as an edit: its backup lands on a path no
+    // record holds.
     const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
     let arrived_by_a_trade = |n: usize, k: &KnownLocal, obs: &ObservedFile| -> bool {
         if k.sha256.as_deref() == Some(obs.sha256.as_str()) {
@@ -259,6 +280,7 @@ pub fn pair(known: &[KnownLocal], observed: &[ObservedFile]) -> ScanOutcome {
                 record_at
                     .get(o.path.as_str())
                     .is_some_and(|rs| rs.iter().any(|r| another_not_at_home(*r)))
+                    || awaiting_bytes.contains(o.path.as_str())
             });
         by_inode || by_content || mine_on_anothers_path
     };
