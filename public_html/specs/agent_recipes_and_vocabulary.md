@@ -4,12 +4,17 @@
 family complies with this one; where an older spec disagrees, this one wins
 and the older spec carries a dated note saying so.** It reverses one owner
 decision (A10, 2026-08-26: "the agent never initiates work of its own") and
-records the reversal below. Nothing here is built yet except the parts it
-inherits: the primitive registry and its three classes, the poll-time
-vocabulary report, the destructive approval gate, the root-request queue and
-the host timer. The first installer it needs ships with `post_release_fleet_defects.md` B2;
-the tier 1 build is `agent_tier1_recipes.md`, sequenced after every other
-defect package by the owner's order, because it is the one major piece.
+records the reversal below.
+
+**BUILT 2026-09-23 (agent 1.43.0), reviewed, all findings fixed; not yet
+released or proven live on a node.** Every word, recipe and work package
+below is built except the items marked **Open** or **Not built**: the plugin
+set in `host_report` (running list, Open) and the optional `page_probe` gate
+in `staged_rollout`. The tier 1 contract it builds on is
+`implemented/agent_tier1_recipes.md`; the first installer shipped with
+`post_release_fleet_defects.md` B2. The spec stays here, not in
+`implemented/`, because it governs the agent family and its running list of
+words keeps growing.
 
 ## The goal, in one sentence
 
@@ -218,7 +223,8 @@ Named here so the vocabulary has a starting shape; built under
 `agent_tier1_recipes.md` (the two words and two recipes it needs) and
 `sentinel_managed_recovery.md` §15 (the rest).
 
-**Words:** `host_report` (observe, no parameters); `unit_journal {unit, lines}`
+**Words:** `host_report` (observe, no parameters) — **BUILT** (agent 1.25.0;
+widened in host_report.sh 1.5); `unit_journal {unit, lines}`
 — **BUILT** (agent 1.39.0), `disk_headroom_and_unit_diagnosis.md` § 8 — and its
 counterpart `reset_failed_unit {unit}` (operate, the same list) — **BUILT** (agent
 1.41.0), § 9; `file_head {file, lines}` (observe, the readable list in
@@ -260,10 +266,10 @@ B6–B12).
 
 **Recipes:** `fail2ban`, then `agent_supervision`, then `disk_headroom` — the
 first check-only recipe (`Recipe.NoRepair`, a case on the first failing check,
-`disk_headroom_and_unit_diagnosis.md` § 10) — then Sentinel's rungs 1 and 2
-where the check is local and the repair deterministic. Which of those rungs
-become recipes is settled below (*Settled 2026-09-23*, `service_health` and
-`certificate_expiry`).
+`disk_headroom_and_unit_diagnosis.md` § 10) — all **BUILT** — then Sentinel's
+rungs 1 and 2 where the check is local and the repair deterministic:
+`service_health`, `container_health` and `certificate_expiry`, **BUILT**
+(agent 1.43.0; *Settled 2026-09-23* below).
 
 ## Host files: what may be read and what may be reset
 
@@ -354,8 +360,8 @@ no shell was opened; what follows is what the operator could not see.
 | The site's error log for the minutes after the swap | Nothing | `site_log {file, previous, lines}` (observe): the last N lines of one of the site's own log files from a compiled list, capped, redacted on the node — **BUILT** (agent 1.35.0), `agent_log_access.md` |
 | A deploy result to read rather than a transcript to grep | Grepped 70 KB of routing debug for six lines | `apply_update` posts a structured result beside the transcript: version before and after, each migration run with its row counts, schema changes, deploy-tier verdict, rollback yes/no. The transcript stays for forensics. Field list in *Settled 2026-09-23* below; `staged_rollout` depends on it — **BUILT** |
 | The site's own log tables after the swap: the last logins, request log rows, event log rows and webhook rows | Nothing | `log_table_tail {table, rows}` (observe): the newest N rows of one log table from a compiled list (`log_logins`, `rql_request_logs`, `evl_event_logs`, `wbh_webhook_logs`, `lfe_log_form_errors`), compiled column list per table, rows capped; the node's own query, no SQL taken from the plane. With `site_log`, gated by one owner-set switch on the node, on by default, redacted on the node — **BUILT** (agent 1.35.0), `agent_log_access.md` |
-| The affected pages rendered on the node as a signed-in user | Only `/` and `/login` from outside; the pages were checked on dev with a throwaway superadmin | `page_probe {page, viewer}` (observe) — settled 2026-09-23, see *Settled 2026-09-23* below |
-| Roll a release across the fleet in risk order, one node at a time, stopping at the first problem | Queued `apply_update` by hand per node from a script, waited on each job, grepped each transcript, queued the next | Not a node word — the node has `apply_update`. A **tier 2 recipe on the plane**, `staged_rollout {release, order}`: an ordered node list, one `apply_update` at a time, a gate between them read from the structured result above (completed, deploy tier green, version reported, no rollback), halt on the first miss and say which node and why. "Apply update to all on host" is its unordered ancestor — settled 2026-09-23, see *Settled 2026-09-23* below |
+| The affected pages rendered on the node as a signed-in user | Only `/` and `/login` from outside; the pages were checked on dev with a throwaway superadmin | `page_probe {page, viewer}` (observe) — **BUILT** (agent 1.43.0), see *Settled 2026-09-23* below |
+| Roll a release across the fleet in risk order, one node at a time, stopping at the first problem | Queued `apply_update` by hand per node from a script, waited on each job, grepped each transcript, queued the next | Not a node word — the node has `apply_update`. A **tier 2 recipe on the plane**, `staged_rollout {release, order}`: an ordered node list, one `apply_update` at a time, a gate between them read from the structured result above (completed, deploy tier green, version reported, no rollback), halt on the first miss and say which node and why. "Apply update to all on host" is its unordered ancestor — **BUILT**, see *Settled 2026-09-23* below |
 
 **2026-09-22, the node that filled its disk for fifteen minutes.**
 jeremytunnell.com built its weekly full backup on a disk that could no longer
@@ -586,13 +592,14 @@ with the agent's `vocabulary_test.go`.
 
 | WP | Scope | Spec |
 |----|-------|------|
-| WP1 | `host_housekeeping.sh` in `CORE_INSTALLERS`; installer stops writing the broken jail file; Apache jails behind `mod_remoteip` in proxy mode | `post_release_fleet_defects.md` B2 |
-| WP2–WP5 | recipes package, check loop, case, first words and recipes, Sentinel rungs 1–2 as recipes | `agent_tier1_recipes.md`; this spec's words and recipes **BUILT** 2026-09-23 except WP7 |
+| WP1 | **BUILT.** `host_housekeeping.sh` in `CORE_INSTALLERS`; installer stops writing the broken jail file; Apache jails behind `mod_remoteip` in proxy mode | `post_release_fleet_defects.md` B2 |
+| WP2–WP5 | **BUILT.** Recipes package, check loop, case, first words and recipes (`implemented/agent_tier1_recipes.md`); this spec's words and recipes, and Sentinel rungs 1–2 as recipes, 2026-09-23 | `agent_tier1_recipes.md`, this spec |
 | WP7 | **BUILT** 2026-09-23. `reclaim_managed_file`: the files `install.sh` and `_site_init.sh` write once move into re-runnable installers (see *Host files*), the runner gains `--only-plugin=` for `run_installer plugin:NAME`, then the word. Needs the host timer stopped on dev while installers are edited. `apache2.conf` stays readable only (owner, option A) | this spec |
-| WP6 | **BUILT** 2026-09-23. Version spread: the plane's declared-words helper and its standard "needs a newer agent" state; the version floor (setting, node-list flag, `apply_update`-only below it) set to the agent release that completes this spec, with `PRIMITIVE_MIN_AGENT_VERSION` and the no-vocabulary fallback deleted; the two-direction channel test; version spread on the node list | this spec, last |
+| WP6 | **BUILT** 2026-09-23. Version spread: the plane's declared-words helper and its standard "needs a newer agent" state; the version floor (`AgentVocabulary::FLOOR` = 1.43.0, a constant; node-list flag; `apply_update`-only below it), with `PRIMITIVE_MIN_AGENT_VERSION` and the no-vocabulary fallback deleted; the two-direction channel test; version spread on the node list | this spec, last |
 
-WP1 lands with the other defect packages. Everything else waits, by the
-owner's order, until those have shipped.
+All work packages are built. What remains is the release (agent 1.43.0 with
+the platform) and a live proof on one node: a `page_probe`, a recipe repair,
+a reset, and a staged rollout.
 
 ## Open questions
 
