@@ -7,7 +7,7 @@
  * needs: []
  */
 /**
- * The daily file-store check (specs/backup_offloaded_files.md § Verification,
+ * The daily file-store check (specs/implemented/backup_offloaded_files.md § Verification,
  * "The file store is checked too"), over fixtures:
  *
  *   - a pass HEADs every cloud row and names the ones the bucket cannot serve

@@ -8,7 +8,7 @@
  */
 /**
  * This site bringing its own offloaded files back from its own backup storage
- * (specs/backup_offloaded_files.md § Verification, "The file store is
+ * (specs/implemented/backup_offloaded_files.md § Verification, "The file store is
  * checked too"; BackupObjectRestoreLauncher), against a real run on the
  * local-provider fixture:
  *

@@ -22,7 +22,7 @@
  * @version 1.2 - file_store_buckets() is the one file store bucket; a collision names one deletion, not
  *                a public read, since both kinds of bucket are private
  * @version 1.1 - b2_allowed() also carries the S3 endpoint Backblaze names for the key
- * @version 1.0 - specs/storage_bucket_and_key_check.md
+ * @version 1.0 - specs/implemented/storage_bucket_and_key_check.md
  */
 
 class BucketCheck {

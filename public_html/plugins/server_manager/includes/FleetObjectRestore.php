@@ -5,7 +5,7 @@
  *
  * A node never lists its manager-profile backup storage and never holds a read credential, so
  * every object it brings home arrives by a link this plane signed
- * (specs/backup_offloaded_files.md § Restore). A link is a few hundred bytes
+ * (specs/implemented/backup_offloaded_files.md § Restore). A link is a few hundred bytes
  * and a job is ManagementJob::MAX_PARAMS_BYTES, so a store is many small jobs,
  * and the loop is driven from here:
  *

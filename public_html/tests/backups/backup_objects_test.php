@@ -8,7 +8,7 @@
  */
 /**
  * The object store's rules, each pure and asserted directly
- * (specs/backup_offloaded_files.md):
+ * (specs/implemented/backup_offloaded_files.md):
  *
  *   - the PHP cipher and `openssl enc` open each other's output, at every
  *     awkward length, and a wrong key is refused

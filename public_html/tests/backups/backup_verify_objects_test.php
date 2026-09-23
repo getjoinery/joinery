@@ -7,7 +7,7 @@
  * timeout: 300
  */
 /**
- * Verifying a backup's offloaded files (specs/backup_offloaded_files.md
+ * Verifying a backup's offloaded files (specs/implemented/backup_offloaded_files.md
  * § Verification), against a real run on the local-provider fixture:
  *
  *   - level 2 stages the epoch envelope the run's index names and opens it

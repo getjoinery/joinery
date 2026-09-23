@@ -9,7 +9,7 @@
  * setting says). Keeping those until they age out is a convenience for a
  * restore that would otherwise download them; on a 25 GB node it is the
  * difference between a backup that runs and one that fills the disk
- * (specs/backup_offloaded_files.md § Settings).
+ * (specs/implemented/backup_offloaded_files.md § Settings).
  *
  * A settings.json default only seeds a row that does not exist yet, so stored
  * '0' rows move with the default. A deliberate '0' is indistinguishable from

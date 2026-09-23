@@ -6,7 +6,7 @@
  *                 window as a site log's, because they are the same kind of thing
  * @version 1.23 - MAX_PARAMS_BYTES is 60 KiB, 4 KiB under the 64 KiB job body an agent reads (the
  *                 wrapper around the params is ~150 bytes), so a Bring them back page fills the body
- *                 with links (specs/backup_offloaded_files.md § Restore); agent 1.38.0 matches it
+ *                 with links (specs/implemented/backup_offloaded_files.md § Restore); agent 1.38.0 matches it
  * @version 1.22 - restore_objects has a claim budget sized to the agent's declared two hours
  * @version 1.21 - site_log and log_table_tail are filterable job types, and their excerpts have a retention
  *                window: purgeLogExcerpts blanks the result and output of completed log jobs older than

@@ -7,7 +7,7 @@
  * timeout: 300
  */
 /**
- * Bringing a backup's offloaded files home (specs/backup_offloaded_files.md
+ * Bringing a backup's offloaded files home (specs/implemented/backup_offloaded_files.md
  * § Restore), against a real run on the local-provider fixture:
  *
  *   - the survey: missing mode wants only what the file bucket cannot serve,

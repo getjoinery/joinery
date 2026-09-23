@@ -25,7 +25,7 @@
  * All providers (Backblaze via its S3 endpoint included) go through S3Signer;
  * only step 7 asks Backblaze itself.
  *
- * @version 4.0 - the full check (specs/storage_bucket_and_key_check.md): own bucket, private,
+ * @version 4.0 - the full check (specs/implemented/storage_bucket_and_key_check.md): own bucket, private,
  *                prune, the node key proven write-only, Backblaze capabilities; steps returned
  * @version 3.0
  */

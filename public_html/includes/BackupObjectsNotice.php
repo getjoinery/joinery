@@ -2,7 +2,7 @@
 /**
  * BackupObjectsNotice — the admin-header notice when offloaded files are
  * piling up on this server waiting for a backup that is not taking them
- * (specs/backup_offloaded_files.md § Admin surfaces).
+ * (specs/implemented/backup_offloaded_files.md § Admin surfaces).
  *
  * A file the site moved to its cloud file store keeps its local bytes until
  * every backup that stores offloaded files holds it. That is what makes the

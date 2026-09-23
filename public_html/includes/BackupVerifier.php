@@ -32,7 +32,7 @@
  * the shape format_contract() prints; nothing here prints, and nothing here
  * accepts a key other than the file it is pointed at.
  *
- * @version 1.3 - offloaded files at each level (specs/backup_offloaded_files.md § Verification): level 2
+ * @version 1.3 - offloaded files at each level (specs/implemented/backup_offloaded_files.md § Verification): level 2
  *                opens every epoch envelope the run's index names with the site key, and 'objects' /
  *                'object_bytes' count the stored objects that proved; level 3 also opens the staged
  *                sample (the 5 largest and 15 random, picked by sample_objects()) and compares each
@@ -42,7 +42,7 @@
  * @version 1.2 - the objects index is read with the run's other artifacts: sized and hashed against
  *                the manifest, then opened as a gzipped index; its entry count is carried as
  *                'objects'. disk_needed() counts it. Per-object checks are backup storage's and the
- *                rehearsal's (specs/backup_offloaded_files.md § Verification)
+ *                rehearsal's (specs/implemented/backup_offloaded_files.md § Verification)
  * @version 1.1 - stamp_history()/note_history() are the history stamp, here so the test can drive it:
  *                a skip or a refusal stamps the run's message only, so a verify a person started
  *                leaves a trace on the page whatever became of it; is_attempt_message() names one.

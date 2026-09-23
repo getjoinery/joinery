@@ -21,7 +21,7 @@
  *                 about a failed unit the Host card already names, from a compiled list mirrored here;
  *                 disk_usage answers "with what" about a disk that is filling, and takes nothing
  * @version 1.71 - restore_objects: bring a run's offloaded files home from the manager-profile backup storage, paged
- *                 (specs/backup_offloaded_files.md § Restore). build_restore_objects signs the run's
+ *                 (specs/implemented/backup_offloaded_files.md § Restore). build_restore_objects signs the run's
  *                 index and, on a page job, a page of object links with the envelopes of their epochs,
  *                 filled to the job's byte ceiling (FleetObjectRestore::page); a survey carries the
  *                 index alone. PRIMITIVE_MIN_AGENT_VERSION['restore_objects'] is the agent floor.
@@ -31,13 +31,13 @@
  * @version 1.70 - verify_backup carries the offloaded-files links to a node whose agent accepts them
  *                 (VERIFY_BACKUP_OBJECTS_MIN_AGENT_VERSION): the run's index is read from backup storage, a
  *                 link is signed per epoch envelope it names, and a rehearsal's request also carries
- *                 the sample (specs/backup_offloaded_files.md § Verification)
+ *                 the sample (specs/implemented/backup_offloaded_files.md § Verification)
  * @version 1.69 - services joins the hosting states the banner renders (one list in four places)
  * @version 1.68 - backup_run carries the object store to a node whose agent accepts it
  *                 (BACKUP_RUN_OBJECTS_MIN_AGENT_VERSION): objects, a signed link to the newest index
  *                 in the manager-profile backup storage, and a signed link per epoch envelope — from the
  *                 listing the scheduler already took, or one taken here for a run started by hand
- *                 (specs/backup_offloaded_files.md § Rollout)
+ *                 (specs/implemented/backup_offloaded_files.md § Rollout)
  * @version 1.67 - the management-node fact is read at poll (mgn_agent_server_manager) before check_status
  * @version 1.66 - can_publish_release / build_publish_upgrade: a publish is offered to, and built for, a
  *                 node that reports itself a management node (server_manager_active), not to every
@@ -367,7 +367,7 @@ class JobCommandBuilder {
 		'site_log'       => '1.35.0',
 		'log_table_tail' => '1.35.0',
 		// Bringing a run's offloaded files home from backup storage, a page of
-		// signed links at a time (specs/backup_offloaded_files.md § Restore).
+		// signed links at a time (specs/implemented/backup_offloaded_files.md § Restore).
 		// The agent that carries the object store on backup_run and
 		// verify_backup carries this word too.
 		'restore_objects' => '1.38.0',
@@ -2577,7 +2577,7 @@ class JobCommandBuilder {
 
 	/**
 	 * Bring a run's offloaded files home from the node's backup storage, one page at a
-	 * time (specs/backup_offloaded_files.md § Restore).
+	 * time (specs/implemented/backup_offloaded_files.md § Restore).
 	 *
 	 * The node never lists backup storage and never holds a read credential: it
 	 * gets the run's index by signed link and, on a page job, a signed link

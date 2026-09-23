@@ -17,11 +17,11 @@
  *
  * @version 1.4 - lastErrorColumn()
  * @version 1.3 - one private store: visibility() answers private, eligibility is fbb_is_private = TRUE,
- *                the public profile is gone (specs/cloud_storage_private_only.md)
+ *                the public profile is gone (specs/implemented/cloud_storage_private_only.md)
  * @version 1.2 - sizeColumn(): the health figures carry bytes beside counts
  * @version 1.1 - backupObjects()/backupObject(): the enumeration the backup's object store reads —
  *                every cloud row of this store with its name and the local paths its bytes
- *                occupy or would occupy (specs/backup_offloaded_files.md). A capability the
+ *                occupy or would occupy (specs/implemented/backup_offloaded_files.md). A capability the
  *                backup probes with method_exists(), the way the engine probes putMany().
  * @version 1.0
  */

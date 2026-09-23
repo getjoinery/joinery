@@ -16,7 +16,7 @@
  * @version 1.33 - restore_objects: process_restore_objects records the node's answer (a survey's names,
  *                 a page's counts) and issues the next job of the loop through FleetObjectRestore;
  *                 process_restore_chain starts that loop in missing mode as the chain restore's last
- *                 step (specs/backup_offloaded_files.md § Restore)
+ *                 step (specs/implemented/backup_offloaded_files.md § Restore)
  * @version 1.32 - the hosted welcome email carries the A-record instruction when the buyer brought their
  *                 own domain (no registration row for the order), and says there is nothing to add only
  *                 when this plane registered the name (specs/managed_hosting_phase1_purchase.md §14)
@@ -1021,7 +1021,7 @@ class JobResultProcessor {
 	/**
 	 * A chain restore's last step: once the archives and the database are
 	 * back, the run's offloaded files are brought home in missing mode
-	 * (specs/backup_offloaded_files.md § Restore). The loop is
+	 * (specs/implemented/backup_offloaded_files.md § Restore). The loop is
 	 * FleetObjectRestore's; here the restore is recorded and the survey is
 	 * started. A node whose agent lacks the word, or a run with no index, is
 	 * recorded as such — the restore itself stands either way.

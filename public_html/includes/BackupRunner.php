@@ -50,13 +50,13 @@
  *                   management node's job result and the node's own history say so
  * @version 1.18.1 - a run that examined the epoch envelopes records the ones only a retired recovery
  *                   key opens (objects/retired-epochs.json) for Recovery Readiness
- * @version 1.18 - the manager profile carries offloaded files too (specs/backup_offloaded_files.md
+ * @version 1.18 - the manager profile carries offloaded files too (specs/implemented/backup_offloaded_files.md
  *                 § Rollout): plan_manager() reads the three request fields a management node
  *                 running the object store sends — objects, objects_index_url,
  *                 epoch_envelope_urls — and a run whose request carried objects writes the
  *                 profile's enabled marker; epoch envelopes arriving by link are re-sealed after
  *                 a recovery-key rotation the same way the site profile re-seals its own.
- * @version 1.17 - offloaded files are part of the backup (specs/backup_offloaded_files.md): a run
+ * @version 1.17 - offloaded files are part of the backup (specs/implemented/backup_offloaded_files.md): a run
  *                 with files in it reads what its backup storage holds, stores every cloud blob backup storage
  *                 lacks (one at a time, inside OBJECT_STORE_BUDGET_*), excludes every cloud blob's
  *                 local paths from the archive, writes the objects index as an artifact of the

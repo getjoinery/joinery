@@ -2,7 +2,7 @@
 /**
  * BackupObjectsStatus — the figures the Backups page, the cloud-storage page
  * and the admin notice show about offloaded files and their place on the
- * backup storage (specs/backup_offloaded_files.md § Admin surfaces).
+ * backup storage (specs/implemented/backup_offloaded_files.md § Admin surfaces).
  *
  * A file the site moved to its cloud file store is in no archive; each is
  * copied to backup storage once, and its local bytes stay on this server

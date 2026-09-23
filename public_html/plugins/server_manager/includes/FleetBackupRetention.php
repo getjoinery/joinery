@@ -27,7 +27,7 @@
  *                checked by the same rule (compare_index)
  * @version 1.4.1 - an objects index that cannot be read, newest or older, ends the object prune with
  *                  nothing deleted: a transient read failure never costs a retained run its objects
- * @version 1.4 - the object family (specs/backup_offloaded_files.md § Retention): group() files
+ * @version 1.4 - the object family (specs/implemented/backup_offloaded_files.md § Retention): group() files
  *                nothing under objects/ as a restore point; prune_objects() deletes an object only
  *                when no retained run's index names its backup storage location and it landed before the
  *                newest retained run, and an emptied epoch's envelope with it (never the newest

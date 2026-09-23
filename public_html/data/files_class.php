@@ -48,7 +48,7 @@ interface FileStreamingDecryptor {
  * @version 1.12.0
  * @changelog 1.12.0 - get_url() always mints a local /uploads/* URL: a public
  *   file is a local file, and nothing on a page is served from the bucket
- *   (specs/cloud_storage_private_only.md).
+ *   (specs/implemented/cloud_storage_private_only.md).
  * @changelog 1.11.0 - source_opens_through_hook(): a listing can ask whether a
  *   source's bytes are opened server-side, so it never mints a thumbnail URL
  *   for ciphertext. fil_usr_user_id indexed: DriveUsage sums a member's files

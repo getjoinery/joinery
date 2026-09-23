@@ -8,7 +8,7 @@
  */
 /**
  * A run that carries the site's offloaded files
- * (specs/backup_offloaded_files.md), against a local provider, a throwaway
+ * (specs/implemented/backup_offloaded_files.md), against a local provider, a throwaway
  * tree and a throwaway database:
  *
  *   - the first run stores every cloud blob backup storage lacks — local originals

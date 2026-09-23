@@ -2,7 +2,7 @@
 // serve.php - Hybrid routing system with RouteHelper
 // Core dependencies (PathHelper, Globalvars, SessionControl) are loaded by RouteHelper after static route check
 // @version 1.9.0 — /uploads/* never redirects to a bucket: a cloud file is a
-// private file, gate-streamed through this server (specs/cloud_storage_private_only.md).
+// private file, gate-streamed through this server (specs/implemented/cloud_storage_private_only.md).
 // @version 1.8.0 — /services/authorize is the server_manager plugin's Connect
 // approval page (specs/services_phase2_platform.md §4).
 // @version 1.7.0 — a signed /uploads request may carry a serve grant

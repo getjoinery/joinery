@@ -32,7 +32,7 @@
  *                or draining store reports a key that stopped working
  * @version 2.1 - health() tells a record with no bytes on this server (missing, missing_rows) apart from a
  *                push that failed five times (stuck, stuck_rows with the last error)
- * @version 2.0 - one private store (specs/cloud_storage_private_only.md): testConnection() takes only
+ * @version 2.0 - one private store (specs/implemented/cloud_storage_private_only.md): testConnection() takes only
  *                $opts and runs own bucket and key, reach, write, the privacy gate, delete; every
  *                helper loses its visibility argument; _settings_map() writes provider, endpoint,
  *                region, bucket, access key, secret key, enabled

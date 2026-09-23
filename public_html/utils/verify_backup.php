@@ -16,7 +16,7 @@
  *   under the backup working area and loads the dump into a throwaway database
  *   on this machine's own PostgreSQL, counts what came back, and deletes both.
  *
- * Offloaded files (specs/backup_offloaded_files.md § Verification) are proven
+ * Offloaded files (specs/implemented/backup_offloaded_files.md § Verification) are proven
  * with the rest. Level 2 opens the epoch envelope of every epoch the run's
  * index names with this machine's own key — no request per object; backup storage
  * listing already proved presence and size. Level 3 also brings back the

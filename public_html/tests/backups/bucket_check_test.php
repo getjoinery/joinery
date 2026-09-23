@@ -7,7 +7,7 @@
  */
 /**
  * The bucket and key check both bucket forms run before they save
- * (specs/storage_bucket_and_key_check.md), over the loopback S3 fixture and
+ * (specs/implemented/storage_bucket_and_key_check.md), over the loopback S3 fixture and
  * BucketCheck::$test_hooks:
  *
  *   - same_bucket(): a name match on the same host, or with a host unknown
