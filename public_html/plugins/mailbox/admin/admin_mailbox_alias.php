@@ -81,19 +81,15 @@ if ($is_edit && $alias->get('iea_ied_inbound_email_domain_id')) {
 			? ('/plugins/mailbox/admin/admin_mailbox_imap_edit?domain_id=' . $alias_domain_id
 				. '&alias_id=' . intval($alias->key))
 			: ('/plugins/mailbox/admin/admin_mailbox_domains?ied_inbound_email_domain_id=' . $alias_domain_id);
+		// "Private+" when the domain has an add-on on; hover names them (a
+		// pulled-in mailbox has none: they belong to a domain this deployment hosts).
+		$alias_addons = (!$level_is_own && $alias->seals_content()) ? $alias_domain->addon_labels() : array();
+		$alias_addon_title = ProtectionLevelPicker::chipTitle($alias_addons);
 		echo '<p class="jy-security-note" style="margin-top:-0.5rem;">Mail protection: '
 			. '<a class="iea-badge iea-badge-level iea-badge-level-' . htmlspecialchars($alias_level)
-			. '" href="' . htmlspecialchars($level_url) . '" title="Mail protection level — set on '
-			. ($level_is_own ? 'this mailbox' : 'the domain') . '">'
-			. htmlspecialchars(ucfirst($alias_level)) . '</a>';
-		// The domain's add-ons in force show with the level (a pulled-in mailbox
-		// has none: they belong to a domain this deployment hosts).
-		if (!$level_is_own && $alias->seals_content()) {
-			foreach ($alias_domain->addon_labels() as $addon_label) {
-				echo ' <span class="iea-badge iea-badge-addon" title="Extra protection — set on the domain">'
-					. htmlspecialchars($addon_label) . '</span>';
-			}
-		}
+			. '" href="' . htmlspecialchars($level_url) . '" title="' . htmlspecialchars('Mail protection level — set on '
+			. ($level_is_own ? 'this mailbox' : 'the domain') . ($alias_addon_title !== '' ? '. ' . $alias_addon_title : '')) . '">'
+			. htmlspecialchars(ucfirst($alias_level) . ($alias_addons ? '+' : '')) . '</a>';
 		echo '</p>';
 	}
 }

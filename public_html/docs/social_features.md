@@ -287,9 +287,10 @@ $conversation->turn_on_sealed_exits_only($actor_user_id);
 It takes the same authority as a raise — any participant, and only on a Private
 conversation — writes a sealed system message ("Alice turned on Nothing leaves
 unsealed"), and is one-way: `Conversation::set()` refuses turning the flag off,
-for the same consent reason levels only tighten. Wherever the level is shown —
-the thread chip, the admin conversation list — the active add-on shows with it
-(`ProtectionLevelPicker::summary()`: "Private · Nothing leaves unsealed").
+for the same consent reason levels only tighten. Wherever the level is shown as
+a chip — the thread header, the admin conversation list — it reads "Private+"
+when the add-on is on, and hovering names it (`ProtectionLevelPicker::summary()`
+and `summaryTitle()`).
 
 **Fortress is deliberately not offered.** Client custody for a multi-party thread
 is a different key-management problem — per-participant browser ceremonies,

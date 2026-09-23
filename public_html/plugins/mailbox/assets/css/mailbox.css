@@ -49,7 +49,6 @@ summary.fix-toggle:hover { color: #0d6efd; text-decoration: underline; }
 a.iea-badge-level, a.iea-badge-level:link, a.iea-badge-level:visited { text-decoration: none; }
 .iea-badge-level-standard { background: #e4e7eb; color: #374151; }
 .iea-badge-level-private { background: #d7e7fb; color: #1e40af; }
-.iea-badge-addon { background: #ede9fe; color: #5b21b6; }
 a.iea-badge-level-standard:link, a.iea-badge-level-standard:visited { color: #374151; }
 a.iea-badge-level-private:link, a.iea-badge-level-private:visited { color: #1e40af; }
 /* Real warning pill (an anchor) — amber fill + border, and an explicit color at

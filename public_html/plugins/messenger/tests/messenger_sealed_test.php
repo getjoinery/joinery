@@ -421,7 +421,8 @@ check(strpos((string)$note['ntf_title'], 'Sealed ' . $suffix) !== false,
 
 $payload = Messenger::conversationPayload($room, $alice['id']);
 check($payload['sealed_exits_only'] === true, 'the conversation payload carries the add-on');
-check($payload['protection_summary'] === 'Private · Nothing leaves unsealed',
+check($payload['protection_summary'] === 'Private+'
+		&& $payload['protection_summary_title'] === 'Extra protection: Nothing leaves unsealed',
 	'and the chip text names the level with its add-on');
 
 // =====================================================================

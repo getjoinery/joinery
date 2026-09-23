@@ -143,14 +143,13 @@ $connect_button = function ($imap) use ($imap_action, $oauth_providers) {
 			// § D), which is where those badges are.
 			if (!$is_imap_src) {
 				$level = $domain->security_level();
+				// "Private+" when an add-on is on; hover names them.
+				$addon_labels = $domain->addon_labels();
+				$addon_title = ProtectionLevelPicker::chipTitle($addon_labels);
 				echo ' <a class="iea-badge iea-badge-level iea-badge-level-' . htmlspecialchars($level)
 					. '" href="' . $domain_base . '?ied_inbound_email_domain_id=' . (int)$domain->key . '"'
-					. ' title="Mail protection level — click to change">' . htmlspecialchars(ucfirst($level)) . '</a>';
-				// The add-ons in force show with the level.
-				foreach ($domain->addon_labels() as $addon_label) {
-					echo ' <span class="iea-badge iea-badge-addon" title="Extra protection">'
-						. htmlspecialchars($addon_label) . '</span>';
-				}
+					. ' title="' . htmlspecialchars('Mail protection level — click to change' . ($addon_title !== '' ? '. ' . $addon_title : '')) . '">'
+					. htmlspecialchars(ucfirst($level) . ($addon_labels ? '+' : '')) . '</a>';
 			}
 			?>
 			<span class="iea-spacer"></span>
@@ -210,13 +209,12 @@ $connect_button = function ($imap) use ($imap_action, $oauth_providers) {
 						$mb_level_title = $is_imap_src
 							? 'Mail protection level — set on this mailbox'
 							: 'Mail protection level — set on the domain';
-						if ($mb_level !== InboundEmailDomain::LEVEL_STANDARD): ?>
+						if ($mb_level !== InboundEmailDomain::LEVEL_STANDARD):
+							$mb_addons = $is_imap_src ? array() : $domain->addon_labels();
+							$mb_addon_title = ProtectionLevelPicker::chipTitle($mb_addons); ?>
 							<a class="iea-badge iea-badge-level iea-badge-level-<?php echo htmlspecialchars($mb_level); ?>"
 							   href="<?php echo $mb_level_url; ?>"
-							   title="<?php echo htmlspecialchars($mb_level_title); ?>"><?php echo htmlspecialchars(ucfirst($mb_level)); ?></a>
-							<?php if (!$is_imap_src) { foreach ($domain->addon_labels() as $addon_label): ?>
-								<span class="iea-badge iea-badge-addon" title="Extra protection — set on the domain"><?php echo htmlspecialchars($addon_label); ?></span>
-							<?php endforeach; } ?>
+							   title="<?php echo htmlspecialchars($mb_level_title . ($mb_addon_title !== '' ? '. ' . $mb_addon_title : '')); ?>"><?php echo htmlspecialchars(ucfirst($mb_level) . ($mb_addons ? '+' : '')); ?></a>
 						<?php endif; ?>
 					</div>
 					<div class="iea-mb-route"><?php echo $mode_label($alias); ?></div>

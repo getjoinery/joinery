@@ -240,8 +240,11 @@ class Messenger {
 			'protection_level' => $conversation->protection_level(),
 			'protection_label' => ProtectionLevel::label($conversation->protection_level()),
 			'sealed_exits_only' => $conversation->sealed_exits_only(),
-			// The level with its active add-ons, the way every chip shows it.
+			// The chip text ("Private+" when an add-on is on) and its hover
+			// text naming the add-ons.
 			'protection_summary' => ProtectionLevelPicker::summary($conversation->protection_level(),
+				$conversation->sealed_exits_only() ? array(ProtectionLevelPicker::ADDON_SEALED_EXITS_ONLY) : array()),
+			'protection_summary_title' => ProtectionLevelPicker::summaryTitle($conversation->protection_level(),
 				$conversation->sealed_exits_only() ? array(ProtectionLevelPicker::ADDON_SEALED_EXITS_ONLY) : array()),
 			'avatar'  => self::conversationAvatar($conversation, $user_id),
 			'unread'  => $unread,
