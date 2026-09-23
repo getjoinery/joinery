@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.14 - retention: the site's own window, at least policy_keep_days; the tab says which applies
  * @version 1.13 - Recent runs from here: the last runs this plane dispatched, each with its outcome and,
  *                 when the run said, its level and size (BACKUP_LEVEL / BACKUP_BYTES)
  * @version 1.12 - "Offloaded files in backup storage: N objects, X GB by <party>; last indexed at the run of …"
@@ -165,11 +166,10 @@
 		// no schedule reads as ongoing.
 		// One sentence for a policy, used for this node's summary and for the
 		// fleet default in the dropdown below, so the two never describe the
-		// same settings in two ways. "keeping 4" on its own read as four days of
-		// backups; what is kept is four FULL backups, each with its incrementals,
-		// which at a weekly full is about a month.
+		// same settings in two ways.
 		$describe_policy = function (array $p) {
-			$keep = (int)$p['keep'];
+			$keep = (int)$p['keep_days'];
+			$kept = ', keeping the site\'s own window of backups, at least ' . $keep . ' day' . ($keep === 1 ? '' : 's');
 			// How often the newest backup is proven restorable, in the same
 			// sentence as the schedule: a schedule nobody verifies is a hope.
 			$every = (int)($p['verify_every_days'] ?? 0);
@@ -179,16 +179,23 @@
 			if ($p['mode'] === 'chain') {
 				$days = (int)$p['full_interval_days'];
 				return $p['frequency'] . ' backups: a full backup every ' . $days . ' day' . ($days === 1 ? '' : 's')
-				   . ' and incrementals in between, keeping the newest ' . $keep
-				   . ' full backup' . ($keep === 1 ? '' : 's') . ' with their incrementals'
-				   . ' (about ' . (int)round($keep * max(1, $days)) . ' days of history)' . $verify;
+				   . ' and incrementals in between' . $kept . $verify;
 			}
-			return $p['frequency'] . ' full backups, keeping the newest ' . $keep . $verify;
+			return $p['frequency'] . ' full backups' . $kept . $verify;
 		};
 		echo '<p class="mb-1">';
 		if (!empty($policy['enabled'])) {
 			echo '<strong>Scheduled:</strong> ' . htmlspecialchars($describe_policy($policy))
 			   . ', starting at ' . htmlspecialchars(FleetBackupPolicy::slot_time($policy, (string)$node->get('mgn_slug')));
+			// What that comes to for this node, and whose number it is.
+			$site_days = (int)$node->get('mgn_backup_keep_days');
+			$kept_days = FleetBackupPolicy::retention_days($policy, $node);
+			echo '. <strong>Keeping ' . $kept_days . ' days:</strong> '
+			   . htmlspecialchars($site_days <= 0
+			       ? 'the site has not reported its own setting yet, so its default of ' . BackupRunner::DEFAULT_KEEP_DAYS . ' days'
+			       : ($site_days >= (int)$policy['keep_days']
+			           ? 'the site\'s own setting'
+			           : 'the site asks for ' . $site_days . ', raised to the minimum here'));
 		} else {
 			echo '<strong>Not scheduled.</strong> This management node takes no backups of this node '
 			   . 'except when someone runs one.';
@@ -260,7 +267,7 @@
 		$fw_pol->hiddeninput(SmAdminCsrf::FIELD, '', ['value' => SmAdminCsrf::token()]);
 
 		$custom_fields = ['policy_schedule', 'policy_window_start', 'policy_window_minutes',
-			'policy_mode', 'policy_keep', 'policy_full_interval_days', 'policy_verify_every_days'];
+			'policy_mode', 'policy_keep_days', 'policy_full_interval_days', 'policy_verify_every_days'];
 		$fw_pol->dropinput('backup_policy_source', 'Schedule for this node', [
 			'options' => [
 				'default' => $default_label,
@@ -299,10 +306,10 @@
 			'options' => ['chain' => 'A full backup, then incrementals', 'full' => 'A full backup every time'],
 			'value'   => $policy['mode'],
 		]);
-		$fw_pol->numberinput('policy_keep', 'Full backups kept', [
-			'value'    => $policy['keep'],
+		$fw_pol->numberinput('policy_keep_days', 'Fewest days of backups kept', [
+			'value'    => $policy['keep_days'],
 			'min'      => 1,
-			'helptext' => 'A full backup and the incrementals after it are kept or deleted together, never partly.',
+			'helptext' => 'The site chooses how many days of backups it keeps; this is the floor under its choice, so an intruder on the site cannot shorten the window to erase its history. A full backup and the incrementals after it are kept or deleted together, never partly.',
 		]);
 		$fw_pol->numberinput('policy_full_interval_days', 'Days between full backups', [
 			'value' => $policy['full_interval_days'],

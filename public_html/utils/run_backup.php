@@ -33,6 +33,8 @@
  * Concurrency is handled by the runner itself: a run that finds another in
  * progress — either profile — reports itself skipped rather than racing it.
  *
+ * @version 1.5 - BACKUP_KEEP_DAYS line on a manager-profile run: this site's retention window, which the
+ *                management node prunes its copies by
  * @version 1.4 - BACKUP_LEVEL / BACKUP_BYTES lines: a successful run's files-artifact level and byte
  *                count, as numbers a management node stores rather than prose it would have to parse
  * @version 1.3 - BACKUP_WARNING line: a run the engine kept but does not vouch for (a full a tenth
@@ -116,6 +118,11 @@ if (isset($result['bytes'])) {
 }
 if (!empty($result['warning'])) {
 	echo 'BACKUP_WARNING=' . str_replace(array("\r", "\n"), ' ', (string)$result['warning']) . "\n";
+}
+// How many days of backups this site keeps. The management node deletes its
+// copies of this site by it, never keeping fewer than its own minimum.
+if ($profile === BackupProfile::MANAGER) {
+	echo 'BACKUP_KEEP_DAYS=' . BackupRunner::keep_days() . "\n";
 }
 
 exit((($result['status'] ?? '') === 'error') ? 1 : 0);

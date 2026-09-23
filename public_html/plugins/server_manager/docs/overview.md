@@ -197,7 +197,7 @@ The node detail page (`/admin/server_manager/node_detail?mgn_managed_node_id=N&t
 | Tab | Purpose |
 |-----|---------|
 | **Overview** | Status summary (health dot, disk/memory/load/postgres/version, and the **Plugin Checks** card: each check the node's plugins declare `fleet_report`, as the node last recorded it, naming any that does not pass — one that does not pass turns the health dot red; see [Reporting a check to a management node](../../../docs/plugin_developer_guide.md#reporting-a-check-to-a-management-node)), action buttons (Check Status, Install Report and Host Report on a node whose agent ships the primitive, Test Connection), the **Host card** (below), recent jobs for this node, connection settings (collapsed by default), delete node. The Actions dropdown also offers **Run Plugin Installers** — queues a `run_plugin_installers` job that executes every active plugin's declared `host_installer` on the node as root (idempotent); this is how a bare-metal node picks up system-service configuration (e.g. the mail stack) after a plugin is activated, since it has no container-start moment — and **Run Host Housekeeping** on a node whose agent ships `host_converge`: fail2ban housekeeping now, as root, through the host runner (idempotent; the job's transcript is the record, and a `host_report` follows so the Host card shows the machine after the run). Below the buttons, a **Logs** disclosure on a node whose agent ships `site_log` / `log_table_tail`: read the last lines of one of the site's log files, or the newest rows of one of its log tables, on the node; the result is on the job page. When the node last reported its owner's log-access switch off, the disclosure shows that reason instead of the forms |
-| **Host card** (on Overview) | The machine as the `host_report` observe primitive last described it, from `mgn_last_host_report`: the expected services (fail2ban, apache2, php-fpm, cron, postgresql) each active, inactive, failed or absent; failed units; fail2ban jails with their banned counts; SSH auth failures in the last 24 hours as a count; sshd's password-authentication and root-login posture; reboot-required; when unattended-upgrades last ran; disk, memory and swap, with the disk's free space as the node's own `avail` figure (not total minus used — the difference is the root reserve, which is exactly the part that is not there when a disk is filling) and its inode use; the events of the last 24 hours as three counts (out of memory, disk full, I/O errors), read from the system journal — an ENOSPC line comes from the program that hit it, never from the kernel ring — which is what names a write that failed; and when the report was read. Every value is escaped and an unreadable fact shows as `unknown`. Beside each failed unit on a node whose agent ships `unit_journal`, a **Why?** button queues that unit's journal, and on a node whose agent ships `reset_failed_unit`, a **Clear** button (with a confirm saying it clears the record only and starts, stops and fixes nothing) queues the reset; both are POST forms, offered only for a unit on the compiled list; beside the disk figures, on a node whose agent ships `disk_usage`, **What is using it?** queues the directory sizes. Both answers render on the job page. A node with an agent that has never reported shows the card with one line saying so. Host Report queues one now; the uptime pass queues one on the status cadence. The card opens with the node's **recipes**, each with its mode and what its check last said (`fail2ban (armed, check: pass)`), from `mgn_agent_recipes` as the agent reported them at its last poll — see *Recipes* under the agent channel |
+| **Host card** (on Overview) | The machine as the `host_report` observe primitive last described it, from `mgn_last_host_report`: the expected services (fail2ban, apache2, php-fpm, cron, postgresql) each active, inactive, failed or absent; failed units; fail2ban jails with their banned counts; SSH auth failures in the last 24 hours as a count; sshd's password-authentication and root-login posture; reboot-required; when unattended-upgrades last ran; the operating system (distribution, point release, codename) and the release upgrade Ubuntu's own daily check last offered — a version, or none offered — with the date of that check, since Ubuntu re-checks only when someone logs in (the node reads the check's cache and never runs it; a check older than a week says so); disk, memory and swap, with the disk's free space as the node's own `avail` figure (not total minus used — the difference is the root reserve, which is exactly the part that is not there when a disk is filling) and its inode use; the events of the last 24 hours as three counts (out of memory, disk full, I/O errors), read from the system journal — an ENOSPC line comes from the program that hit it, never from the kernel ring — which is what names a write that failed; and when the report was read. Every value is escaped and an unreadable fact shows as `unknown`. Beside each failed unit on a node whose agent ships `unit_journal`, a **Why?** button queues that unit's journal, and on a node whose agent ships `reset_failed_unit`, a **Clear** button (with a confirm saying it clears the record only and starts, stops and fixes nothing) queues the reset; both are POST forms, offered only for a unit on the compiled list; beside the disk figures, on a node whose agent ships `disk_usage`, **What is using it?** queues the directory sizes. Both answers render on the job page. A node with an agent that has never reported shows the card with one line saying so. Host Report queues one now; the uptime pass queues one on the status cadence. The card opens with the node's **recipes**, each with its mode and what its check last said (`fail2ban (armed, check: pass)`), from `mgn_agent_recipes` as the agent reported them at its last poll — see *Recipes* under the agent channel |
 | **Backups** | Target indicator, run database/project backup, backup file browser with scan, per-file upload-to-cloud and delete, restore full project from a `.tar.gz` archive, restore from an incremental chain; the Backups box states the last backup, the last full backup, the oldest held and **Last verified restorable**, and each run has Prepare, **Verify** and Restore |
 | **Database** | Restore from a backup file, and the record of database operations |
 | **Updates** | Version comparison (node vs management node), apply update |
@@ -1455,10 +1455,20 @@ ransomware worth the name and the exact thing these copies exist to survive.
 Pruning is driven by a bucket **listing**, which is the opposite of what a site
 does for its own backups, and correct only here: this management node defined the
 whole `{prefix}/{slug}/manager/` path, knows every slug under it, and is the only
-party that can delete from it. It is also stricter — it keeps the newest N sets
-of objects that actually exist, so a run that failed part-way can never be
-counted as a restore point. Chains are grouped by their directory, so they are
-kept or deleted whole by construction.
+party that can delete from it. It is also stricter — it keeps only sets of
+objects that actually exist, so a run that failed part-way can never be counted
+as a restore point. Chains are grouped by their directory, so they are kept or
+deleted whole by construction. How long is the **site's** choice: each backup
+run reports the site's `backup_retention_days` as `BACKUP_KEEP_DAYS`, the result
+processor stores it in `mgn_backup_keep_days`, and the pass keeps that many days
+— never fewer than the policy's `keep_days` (`server_manager_fleet_backup_keep_days`,
+7 by default), the floor that stops an intruder on a site from shortening its
+window to erase its history. A node that has not reported a window is read at the
+site default of 28 days (`FleetBackupPolicy::retention_days()`). Within the window
+the rule is the one a site's own retention uses (`BackupRunner::surplus()`): every
+group started inside it, dated by the stamp in its name, and the newest one started
+before it. The site removes its own records of manager runs outside its window by
+the same rule, so its Backups page lists what is kept.
 
 Two provider notes:
 
@@ -1592,10 +1602,13 @@ when the failure was copied from the node's own history and no job here carries
 it). Five nodes are named, then "and N more". A `warning` is not a failure and is
 not named. It clears when the node's next run succeeds.
 
-**The node's word is cross-checked against the bucket.** The retention pass
-lists each node's backup storage with this management node's own credential before every
-run, and the scheduler stamps what it saw — when backup storage was listed and the
-newest object write on it — onto `mgn_backup_shelf_checked_time` and
+**The node's word is cross-checked against the bucket.** The scheduler lists each
+node's backup storage with this management node's own credential on the first
+pass after the node reports a successful run (`FleetBackupRun::witness_landing`,
+due while the claimed run started after the last listing; a failed listing is
+retried next pass), and the retention pass lists it again before every run. Each
+listing stamps what it saw — when backup storage was listed and the newest object
+write on it — onto `mgn_backup_shelf_checked_time` and
 `mgn_backup_shelf_newest_time`. The health check compares that against the
 node's claimed last run: backup storage listed after a claimed success that holds
 nothing written since raises **"Backups are not landing"**. Backup storage is the

@@ -801,19 +801,35 @@ match.
 
 ## Retention
 
-- **Cloud** — keep the newest N restore points (default 4). Older ones are
-  deleted oldest-first, driven by this site's own run history rather than by a
+- **Cloud** — keep `backup_retention_days` days of restore points (default
+  28): every restore point that started inside the window, and the newest one
+  that started before it, which is what a restore to the window's first day
+  replays from. The window is days rather than a count because every swap of
+  the code tree starts a new chain, so with frequent releases a count of chains
+  would cover only a few days. The rule is `BackupRunner::surplus()`, shared
+  with the management node's retention. Older restore points are deleted,
+  driven by this site's own run history rather than by a
   bucket listing, so it can only ever delete objects this site recorded writing.
   Retention runs last in a backup, and only after an upload is confirmed: a run
   that failed must never be the run that decides an older backup is surplus.
 
   Chains and standalone full backups are retained as **separate families**, and
-  every run prunes both: standalone archives are counted and deleted per restore
-  point, chains only ever whole. A site switched between modes keeps aging its
+  every run prunes both: standalone archives are aged and deleted per restore
+  point, chains only ever whole, by the time their full started. A site switched between modes keeps aging its
   old backups out, and no pass can delete a chain's full out from under its
   incrementals. Offloaded files under `objects/` are a third family, deleted
   only when no retained run's index names them ([Offloaded files in backup
   storage](#offloaded-files-in-backup-storage)).
+- **A management node's copies** — kept by the same setting. The site decides
+  how long; the management node deletes, because the credential a managed site
+  is handed cannot delete (a site that could erase its own offsite copies would
+  lose them to the first intruder). Every manager-profile run prints
+  `BACKUP_KEEP_DAYS=` with the site's window; the management node stores it and
+  prunes by it, never keeping fewer days than its own minimum (see the
+  server_manager overview). The run removes this site's records of manager runs
+  outside the window by the same rule — records only, never objects — so the
+  Backups page lists what is kept. A managed site sets the window in the
+  **How long backups are kept** box on its Backups page.
 - **Local** — keep M days in `/backups` (default 7). What a run leaves on this
   disk is small: the chain's metadata artifact, and a standalone run's envelope
   sidecar. The archives and the dumps stream to the bucket and are never here.
@@ -1397,7 +1413,7 @@ plaintext and hand the restore engine a file it will not decrypt.
 | `backup_mode` | `chain` | Incremental chains, or a full every time |
 | `backup_full_interval_days` | `7` | Days before a chain rolls to a fresh full |
 | `backup_verify_every_days` | `30` | Days between verifications of the newest backup by opening and reading it; 0 never |
-| `backup_retention_count` | `4` | Restore points (or chains) kept offsite |
+| `backup_retention_days` | `28` | Days of restore points kept offsite; blank reads as 28 |
 | `backup_output_dir` | `/backups` | Working directory backups are built in |
 | `backup_exclude` | — | Extra directory names to skip (build output, caches). A name matches a directory of that name at **any depth** — this is tar's exclude semantics, and it applies to the built-in skips (`vendor`, `cache`, `tmp`, `logs`, …) too |
 | `backup_local_retention_days` | `7` | Days kept locally; 0 never sweeps |

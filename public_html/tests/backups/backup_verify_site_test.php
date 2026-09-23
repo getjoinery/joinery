@@ -189,7 +189,7 @@ check($status_start !== false && $status_end !== false && $recent_start !== fals
 
 // The page's variables, assembled the way the logic assembles them but
 // without its session gate (there is no browser here).
-$history = new MultiBackupHistory(array('include_pruned' => true), array('bkh_start_time' => 'DESC'), 30, 0);
+$history = new MultiBackupHistory(array('deleted' => false), array('bkh_start_time' => 'DESC'), 30, 0);
 $history->load();
 $milestones = _admin_backups_milestones();
 $ceremony = _admin_backups_ceremony_time();
@@ -243,7 +243,7 @@ check($m['verify_attempt'] !== null && (int)$m['verify_attempt']->key === (int)$
 	'the attempt on the newest run is a milestone of its own', $m['verify_attempt'] ? 'row ' . $m['verify_attempt']->key : 'null');
 check((int)$m['verified']->key === (int)$r4->key, 'and the last pass still stands');
 
-$history = new MultiBackupHistory(array('include_pruned' => true), array('bkh_start_time' => 'DESC'), 30, 0);
+$history = new MultiBackupHistory(array('deleted' => false), array('bkh_start_time' => 'DESC'), 30, 0);
 $history->load();
 $milestones = $m;
 $rendered = '';
@@ -267,7 +267,7 @@ check(strpos($rendered, 'not verified &middot; Could not verify the backup of 20
 $db->exec("UPDATE bkh_backup_history SET bkh_verify_message = 'Could not verify the backup of 2026-09-09 04:00 UTC: busy: another backup was running'"
 	. " WHERE bkh_backup_history_id = " . (int)$r4->key);
 $db->exec('DELETE FROM bkh_backup_history WHERE bkh_backup_history_id = ' . (int)$r6->key);
-$history = new MultiBackupHistory(array('include_pruned' => true), array('bkh_start_time' => 'DESC'), 30, 0);
+$history = new MultiBackupHistory(array('deleted' => false), array('bkh_start_time' => 'DESC'), 30, 0);
 $history->load();
 $milestones = _admin_backups_milestones();
 ob_start();

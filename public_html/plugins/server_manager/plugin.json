@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.25.4",
+  "version": "1.25.5",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -297,12 +297,12 @@
       "helptext": "Incremental chains send only what changed after the first run — measured at 193 MB then 37 kB — which across a fleet is most of the bandwidth. A full every time makes each restore point self-contained at much greater cost."
     },
     {
-      "name": "server_manager_fleet_backup_keep",
-      "default": "4",
+      "name": "server_manager_fleet_backup_keep_days",
+      "default": "7",
       "group": "backups",
-      "label": "Restore points kept per node",
+      "label": "Fewest days of backups kept per node",
       "type": "number",
-      "helptext": "How many backups to keep in this node's backup storage for each node. Chains are kept or deleted whole, never partly."
+      "helptext": "Each site chooses how many days of backups it keeps, on its own Backups page, and this node deletes its copies of that site by that choice. This is the floor under it: however short a site sets its window, backups younger than this are never deleted from here — so an intruder on a site cannot shorten the window to erase its history."
     },
     {
       "name": "server_manager_fleet_backup_full_interval_days",

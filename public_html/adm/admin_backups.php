@@ -2,6 +2,8 @@
 /**
  * admin_backups — the Backups page.
  *
+ * @version 1.14 - retention reads as days of backups kept offsite; Recent backups lists only backups that
+ *                still exist
  * @version 1.13 - the target form shows the key ID, region and endpoint; a stored secret is a locked field with Reset
  * @version 1.12 - the target form's bucket and key fields say what each must be; Save proves it
  * @version 1.11 - the Offloaded files box carries the figures: what each backup holds in backup storage and when
@@ -112,7 +114,8 @@ if ($is_managed) {
 	   . ($manager_url !== ''
 	       ? '<code>' . htmlspecialchars($manager_url) . '</code>'
 	       : 'a management node')
-	   . '. Where they go, how often they run, and how many are kept are set there, not on this page.</div>';
+	   . '. Where they go and how often they run are set there; how long they are kept is this site\'s '
+	   . 'choice, under <a href="#keep" class="alert-link">How long backups are kept</a>.</div>';
 } elseif ($plan_problem !== '') {
 	echo '<div class="alert alert-warning mb-2">' . htmlspecialchars($plan_problem) . '</div>';
 } elseif (!$active) {
@@ -123,7 +126,7 @@ if ($is_managed) {
 	echo '<div class="alert alert-success mb-2">Backing up ' . htmlspecialchars($plan['project']) . ' '
 	   . ($plan['type'] === 'database' ? '(database only)' : '(whole site)')
 	   . ' to <strong>' . htmlspecialchars($plan['target']->get('bkt_name')) . '</strong>, '
-	   . 'keeping the newest ' . (int)$plan['keep_cloud'] . '.</div>';
+	   . 'keeping ' . (int)$plan['keep_days'] . ' days of backups.</div>';
 }
 
 // The three facts this box exists to answer, each read from the runs still
@@ -495,7 +498,8 @@ if ($editing_schedule) {
 
 	$is_db_only = $settings->get_setting('backup_type') === 'database';
 	$is_full    = $is_db_only || $settings->get_setting('backup_mode') === 'full';
-	$keep       = max(1, (int)$settings->get_setting('backup_retention_count'));
+	$keep_days  = trim((string)$settings->get_setting('backup_retention_days')) === ''
+		? BackupRunner::DEFAULT_KEEP_DAYS : max(1, (int)$settings->get_setting('backup_retention_days'));
 	$local_days = (int)$settings->get_setting('backup_local_retention_days');
 	$slug       = trim((string)$settings->get_setting('backup_path_slug')) ?: $default_slug;
 	$excludes   = trim((string)$settings->get_setting('backup_exclude'));
@@ -513,7 +517,7 @@ if ($editing_schedule) {
 	// Archives and dumps stream to the bucket and are never on this server;
 	// what a run leaves behind is a chain run's metadata artifact or a
 	// standalone archive's envelope file, and that is what these two govern.
-	echo '<tr><th>Keeping</th><td>Newest ' . $keep . ' offsite; what a run leaves on this server '
+	echo '<tr><th>Keeping</th><td>' . $keep_days . ' days of backups offsite; what a run leaves on this server '
 	   . ($settings->get_setting('backup_delete_local_after_upload') === '1'
 	       ? 'is removed once uploaded'
 	       : ($local_days > 0 ? 'is kept ' . $local_days . ' days' : 'is kept'))
@@ -533,6 +537,29 @@ echo '<p class="text-muted small mb-0">When backups run is set on '
 $page->end_box();
 
 endif; // targets + schedule shown only when this site runs its own backups
+
+// ── How long a management node keeps this site's backups ────────────────────
+// The management node takes and stores them, but how long they are kept is this
+// site's choice: each run reports the window and the management node deletes by
+// it, never keeping fewer days than its own minimum. The same setting governs a
+// site's own backups, in What to keep above when it takes them.
+if ($is_managed):
+	echo '<a id="keep"></a>';
+	$page->begin_box(array('title' => 'How long backups are kept'));
+	$fw = $page->getFormWriter('retention_form');
+	$fw->begin_form();
+	$fw->hiddeninput('action', '', array('value' => 'save_retention'));
+	SettingsFieldRenderer::renderGroup($fw, 'backups', array(
+		'source' => 'core',
+		'only'   => array('backup_retention_days'),
+	));
+	$fw->submitbutton('btn_save_retention', 'Save');
+	$fw->end_form();
+	echo '<p class="text-muted small mb-0">The management node reads this at the next backup and deletes its '
+	   . 'older copies of this site by it. It keeps a minimum of its own, so a shorter setting here takes '
+	   . 'effect only down to that minimum.</p>';
+	$page->end_box();
+endif;
 
 // ── Recent backups ──────────────────────────────────────────────────────────
 // One row per run, newest first, whoever ran it: a site's own runs and a
@@ -592,10 +619,8 @@ if (!$hrows) {
 		}
 		echo '</td>';
 		echo '<td>' . htmlspecialchars(BackupRunner::human($h->get('bkh_bytes'))) . '</td>';
-		// Whether the backup is still there, stated on every row so present and
-		// cleaned-up read differently at a glance. Retention that cleaned a backup
-		// up stamped bkh_pruned_time; its upload_time survives the prune, so pruned
-		// is checked first or a gone backup would still read as present offsite.
+		// Where the backup is. Every row here still exists: a run retention
+		// deleted, or one the admin hid, is not listed.
 		//
 		// A management node's run is the one case this site cannot answer. It was
 		// uploaded with a credential that can neither list nor delete, to a shelf
@@ -604,7 +629,6 @@ if (!$hrows) {
 		// so they would read Present forever, including backups deleted weeks ago.
 		// The row states what this machine actually witnessed, which is the upload,
 		// and says who owns the copy from there on.
-		$pruned = (bool)$h->get('bkh_pruned_time');
 		// Verified restorable, or failed verification, from the stamp the
 		// verify left on this run — shown with the availability, since "still
 		// there" and "proven to open" are the two halves of one answer.
@@ -627,9 +651,7 @@ if (!$hrows) {
 			$verify_note = '<div class="text-muted small">not verified &middot; ' . htmlspecialchars($verify_message) . '</div>';
 		}
 		echo '<td>';
-		if ($pruned) {
-			echo '<span class="text-muted">Cleaned up &middot; ' . htmlspecialchars($when($h->get('bkh_pruned_time'))) . '</span>';
-		} elseif ($outcome === 'failed') {
+		if ($outcome === 'failed') {
 			echo '<span class="text-muted">not stored</span>';
 		} elseif ($outcome === 'running') {
 			echo '<span class="text-muted">in progress</span>';
@@ -647,9 +669,8 @@ if (!$hrows) {
 		echo '</td>';
 		echo '<td>';
 		// A management node owns its own records; this site hides only its own — and
-		// hiding only removes the row from this list, never the stored backup. A
-		// cleaned-up run is already gone, so it carries no Hide.
-		if (!$is_manager && !$pruned) {
+		// hiding only removes the row from this list, never the stored backup.
+		if (!$is_manager) {
 			$fh = $page->getFormWriter('delh_' . (int)$h->key);
 			$fh->begin_form();
 			$fh->hiddeninput('action', '', array('value' => 'delete_history'));

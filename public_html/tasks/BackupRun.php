@@ -12,6 +12,7 @@
  * management node, on its own schedule, and must not be startable by editing a row
  * in this site's task table.
  *
+ * @version 1.2 - the dry run says how many days of backups are kept
  * @version 1.1 - pinned to the site profile
  * @version 1.0
  */
@@ -48,10 +49,10 @@ class BackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable {
 		if ($plan['mode'] === 'chain') {
 			$shape = 'Would extend the current backup chain of ' . $plan['project']
 				. ' (a fresh full every ' . $plan['full_days'] . ' days, or sooner if the snapshot is lost)';
-			$kept = 'keeping the newest ' . $plan['keep_cloud'] . ' chains offsite, deleted whole';
+			$kept = 'keeping ' . $plan['keep_days'] . ' days of backups offsite, chains deleted whole';
 		} else {
 			$shape = 'Would take a full ' . $plan['type'] . ' backup of ' . $plan['project'];
-			$kept = 'keeping the newest ' . $plan['keep_cloud'] . ' offsite';
+			$kept = 'keeping ' . $plan['keep_days'] . ' days of backups offsite';
 		}
 
 		$notes = array(

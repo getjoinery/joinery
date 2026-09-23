@@ -6,6 +6,9 @@
  * opens them, how many are kept, and what has actually happened. No fleet, no
  * agent — server_manager is a layer on top of this, not a prerequisite for it.
  *
+ * @version 1.13 - retention is backup_retention_days, floored at one day, and a managed site saves it with
+ *                save_retention; the history lists only backups that still exist, so a run retention
+ *                deleted leaves Recent backups
  * @version 1.12 - save_target reads the secret through FormWriterV2Base::process_secretinput() (a stored
  *                one is a locked field; Reset and blank removes it) and keeps the key ID, region and
  *                endpoint the form now shows
@@ -69,11 +72,10 @@ function admin_backups_logic($input = array()) {
 
 	// Everything that has run, whoever initiated it. A site's own runs and a
 	// management node's copies of it both seal to this site's recovery key, so they
-	// are one history — each row labelled with who ran it. include_pruned keeps
-	// backups retention has cleaned up in the list (shown as such) while still
-	// excluding ones the admin hid; omitting the profile filter loads every
-	// profile.
-	$history = new MultiBackupHistory(array('include_pruned' => true),
+	// are one history — each row labelled with who ran it. Only backups that
+	// still exist: one retention deleted, or one the admin hid, leaves the list.
+	// Omitting the profile filter loads every profile.
+	$history = new MultiBackupHistory(array('deleted' => false),
 		array('bkh_start_time' => 'DESC'), 30, 0);
 	$history->load();
 
@@ -345,10 +347,10 @@ function _admin_backups_handle($action, array $input, $session) {
 				$names = array_values(array_diff($names,
 					array('backup_recovery_public_key', 'backup_recovery_public_key_proven_fpr')));
 
-				// A retention count of zero would mean "keep nothing", which is
-				// not a thing anyone means. Floor it before it is stored.
-				if (isset($input['backup_retention_count'])) {
-					$input['backup_retention_count'] = (string)max(1, (int)$input['backup_retention_count']);
+				// A retention window of zero days would mean "keep nothing", which
+				// is not a thing anyone means. Floor it before it is stored.
+				if (isset($input['backup_retention_days'])) {
+					$input['backup_retention_days'] = (string)max(1, (int)$input['backup_retention_days']);
 				}
 				if (isset($input['backup_local_retention_days'])) {
 					$input['backup_local_retention_days'] = (string)max(0, (int)$input['backup_local_retention_days']);
@@ -365,6 +367,27 @@ function _admin_backups_handle($action, array $input, $session) {
 					return $url;
 				}
 				$say('Backup settings saved.', true);
+				return $url;
+			}
+
+			case 'save_retention': {
+				// The one backup setting a managed site keeps for itself: how
+				// long its backups are kept, which the management node prunes by.
+				require_once(PathHelper::getIncludePath('includes/SettingsWriter.php'));
+				if (isset($input['backup_retention_days'])) {
+					$input['backup_retention_days'] = (string)max(1, (int)$input['backup_retention_days']);
+				}
+				$write = SettingsWriter::write($input, array(
+					'page'   => 'admin_backups',
+					'source' => 'core',
+					'names'  => array('backup_retention_days'),
+				));
+				if (!empty($write['errors'])) {
+					$first = reset($write['errors']);
+					$say(is_array($first) ? implode(' ', $first) : (string)$first, false);
+					return $url;
+				}
+				$say('Saved. The management node applies it at the next backup.', true);
 				return $url;
 			}
 
