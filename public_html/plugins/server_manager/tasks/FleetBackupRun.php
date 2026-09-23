@@ -27,6 +27,9 @@
  *     slow node gets fewer backups rather than a queue;
  *   - no more than N run at once across the whole fleet.
  *
+ * @version 1.6 - retention is the site's own reported window, never below the policy's keep_days; after a node reports a successful run the pass lists its
+ *                backup storage once (witness_landing), so "Backups are not landing" is known within a
+ *                tick instead of at the next night's dispatch
  * @version 1.5 - the run request carries the object store: the newest index and every epoch envelope
  *                in the manager-profile backup storage, read off the listing the prune already took, are handed
  *                to the builder to sign (specs/implemented/backup_offloaded_files.md § Rollout)
@@ -89,6 +92,15 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 			if (trim((string)$node->get('mgn_web_root')) === '') {
 				$skipped[] = $slug . ' (hosts no Joinery site)';
 				continue;
+			}
+
+			// The bucket's word on the run the node just reported, while it is
+			// still news. The listing taken at dispatch predates the upload, so
+			// without this the health check hears about an upload that never
+			// landed only at the next night's dispatch.
+			if (!$dry) {
+				$witness = self::witness_landing($node, $now);
+				if ($witness !== '') { $problems[] = $slug . ' backup storage: ' . $witness; }
 			}
 
 			// A node with no verified recovery key of its own takes no backups,
@@ -177,7 +189,8 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 				$target = JobCommandBuilder::get_target($node);
 				$pruned = null;   // this node's listing, never a previous node's
 				if ($target) {
-					$pruned = FleetBackupRetention::prune($node, $target, $policy['keep']);
+					$pruned = FleetBackupRetention::prune($node, $target,
+						FleetBackupPolicy::retention_days($policy, $node));
 					if ($pruned['error'] !== '') {
 						// Worth saying, never worth stopping for: too many restore
 						// points is a bill, no backup is an outage.
@@ -297,6 +310,35 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 		);
 		$built = JobCommandBuilder::build_verify_backup($node, $params);
 		ManagementJob::createFromBuild($node->key, 'verify_backup', $built, $params, null);
+	}
+
+	/**
+	 * List the node's backup storage once after it reports a successful run,
+	 * and stamp what landed beside the node's claim for the health check
+	 * (NodeMonitorHealth, "Backups are not landing"). Due when the claimed run
+	 * started after the last listing; the stamp makes it not due again until
+	 * the next run, and a failed listing is retried on the next tick.
+	 *
+	 * Returns '' or what went wrong.
+	 */
+	private static function witness_landing($node, $now) {
+		if ((string)$node->get('mgn_last_backup_outcome') !== 'success') { return ''; }
+		$claimed = trim((string)$node->get('mgn_last_backup_time'));
+		if ($claimed === '') { return ''; }
+		$checked = trim((string)$node->get('mgn_backup_shelf_checked_time'));
+		if ($checked !== '' && strtotime($checked . ' UTC') > strtotime($claimed . ' UTC')) { return ''; }
+
+		$target = JobCommandBuilder::get_target($node);
+		if (!$target) { return ''; }
+		try {
+			$newest = FleetBackupRetention::newest_landed($node, $target);
+			$node->set('mgn_backup_shelf_checked_time', $now);
+			$node->set('mgn_backup_shelf_newest_time', $newest !== '' ? $newest : null);
+			$node->save();
+		} catch (Throwable $e) {
+			return $e->getMessage();
+		}
+		return '';
 	}
 
 	/** The job types that must not overlap a verify on one node. */

@@ -117,10 +117,25 @@ check($defaults['enabled'] === true,
 	'the fleet default is ENABLED — a node nobody decided about must not fall through');
 check($defaults['mode'] === 'chain' || $defaults['mode'] === 'full',
 	'and mode always resolves to something real', $defaults['mode']);
-check($defaults['keep'] >= 1, 'retention never resolves to zero', (string)$defaults['keep']);
+check($defaults['keep_days'] >= 1, 'retention never resolves to zero days', (string)$defaults['keep_days']);
 
 check(FleetBackupPolicy::max_concurrent() >= 1,
 	'the concurrency cap is always at least one, so the fleet never deadlocks');
+
+// ── Whose window decides ───────────────────────────────────────────────────
+section('The site\'s window decides, never below the minimum');
+
+$floor = array_merge(FleetBackupPolicy::DEFAULTS, array('keep_days' => 7));
+check(FleetBackupPolicy::DEFAULTS['keep_days'] === 7, 'the shipped minimum is 7 days');
+check(FleetBackupPolicy::retention_days($floor, new FbsHealthNode(array('mgn_backup_keep_days' => 45))) === 45,
+	'a site asking for 45 days gets 45');
+check(FleetBackupPolicy::retention_days($floor, new FbsHealthNode(array('mgn_backup_keep_days' => 2))) === 7,
+	'a site asking for 2 days is raised to the minimum — an intruder cannot shorten it to erase history');
+check(FleetBackupPolicy::retention_days($floor, new FbsHealthNode(array())) === BackupRunner::DEFAULT_KEEP_DAYS,
+	'a site that has not reported a window is read at the site default, not the minimum');
+check(FleetBackupPolicy::retention_days(array_merge($floor, array('keep_days' => 60)),
+		new FbsHealthNode(array('mgn_backup_keep_days' => 45))) === 60,
+	'a minimum above the site\'s window wins');
 
 // ── The three stored positions ──────────────────────────────────────────────
 section('A node\'s stored policy is one of three positions');
@@ -132,7 +147,7 @@ check(FleetBackupPolicy::stored_mode(new FbsNode('')) === 'default',
 check(FleetBackupPolicy::stored_mode(new FbsNode(array('enabled' => false))) === 'off',
 	'a stored enabled=false is OFF — somebody\'s decision, kept as one');
 check(FleetBackupPolicy::stored_mode(new FbsNode(json_encode(array_merge(
-		FleetBackupPolicy::DEFAULTS, array('keep' => 9))))) === 'custom',
+		FleetBackupPolicy::DEFAULTS, array('keep_days' => 9))))) === 'custom',
 	'a stored schedule of its own is custom, whether it arrives decoded or as json');
 
 $off = FleetBackupPolicy::for_node(new FbsNode(json_encode(array('enabled' => false))));
@@ -143,19 +158,19 @@ section('A posted custom schedule normalizes to a full, valid policy');
 
 $p = FleetBackupPolicy::from_form(array('policy_schedule' => '3',
 	'policy_window_start' => '04:30', 'policy_window_minutes' => '60',
-	'policy_mode' => 'full', 'policy_keep' => '6', 'policy_full_interval_days' => '14'));
+	'policy_mode' => 'full', 'policy_keep_days' => '6', 'policy_full_interval_days' => '14'));
 check($p['enabled'] === true && $p['frequency'] === 'weekly' && $p['day_of_week'] === 3,
 	'one schedule field carries both frequency and weekday — they are one decision');
 check($p['window_start'] === '04:30' && $p['window_minutes'] === 60
-	&& $p['mode'] === 'full' && $p['keep'] === 6 && $p['full_interval_days'] === 14,
+	&& $p['mode'] === 'full' && $p['keep_days'] === 6 && $p['full_interval_days'] === 14,
 	'every field the operator saw and saved is stored as chosen');
 
 $p = FleetBackupPolicy::from_form(array('policy_schedule' => 'daily',
-	'policy_window_start' => 'garbage', 'policy_keep' => '0'));
+	'policy_window_start' => 'garbage', 'policy_keep_days' => '0'));
 check($p['frequency'] === 'daily', 'daily is daily');
 check($p['window_start'] === FleetBackupPolicy::DEFAULTS['window_start'],
 	'an unparseable window start falls back to the shipped default', $p['window_start']);
-check($p['keep'] === 1, 'retention never normalizes to zero', (string)$p['keep']);
+check($p['keep_days'] === 1, 'retention never normalizes to zero days', (string)$p['keep_days']);
 
 // ── Retention grouping ──────────────────────────────────────────────────────
 section('A chain is one restore point, kept or deleted whole');

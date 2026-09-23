@@ -22,6 +22,9 @@
  * incrementals whose full is gone, which is not a smaller backup — it is no
  * backup, and it looks like a restore point right up until someone needs it.
  *
+ * @version 1.6 - prune() keeps $keep_days days of restore points by BackupRunner::surplus(), the rule a
+ *                site's own retention uses, instead of a count; newest_landed() is the backup storage
+ *                listing taken after a node reports success
  * @version 1.5 - check_shelf() also reads every standalone full's index and requires its stored
  *                objects in backup storage, as it does a chain's newest run's; the two families are
  *                checked by the same rule (compare_index)
@@ -55,7 +58,10 @@ require_once(PathHelper::getIncludePath('includes/BackupNaming.php'));
 class FleetBackupRetention {
 
 	/**
-	 * Prune one node's manager-profile backup storage to the newest $keep restore points.
+	 * Prune one node's manager-profile backup storage to $keep_days days of restore
+	 * points — the rule is BackupRunner::surplus(), the one a site's own retention
+	 * uses: every point started inside the window, plus the newest one started
+	 * before it.
 	 *
 	 * Called immediately BEFORE dispatching that node's next run, which is the
 	 * right moment for two reasons: it is once per backup cycle rather than once
@@ -86,8 +92,8 @@ class FleetBackupRetention {
 	 *               listed:bool, newest_object_time:string, bytes:int,
 	 *               objects:array, base:string}
 	 */
-	public static function prune($node, $target, $keep, $read = null) {
-		$keep = max(1, (int)$keep);
+	public static function prune($node, $target, $keep_days, $read = null, $now = null) {
+		$now = ($now === null) ? time() : (int)$now;
 		$result = array('kept' => 0, 'pruned' => 0, 'deleted_objects' => 0, 'error' => '',
 			'listed' => false, 'newest_object_time' => '', 'bytes' => 0, 'objects' => array(), 'base' => '');
 
@@ -112,7 +118,12 @@ class FleetBackupRetention {
 			$result['newest_object_time'] = self::newest_object_time($objects);
 
 			$groups = self::group($objects, $base);
-			$result['kept'] = min(count($groups), $keep);
+			$points = array();
+			foreach ($groups as $name => $group) {
+				$points[] = array('item' => $name, 'time' => self::start_time_of($name));
+			}
+			$surplus_names = array_flip(BackupRunner::surplus($points, $keep_days, $now));
+			$result['kept'] = count($groups) - count($surplus_names);
 
 			$delete = function ($key) use ($creds, $bucket) {
 				$resp = S3Signer::delete($creds, $bucket, '/' . ltrim($key, '/'));
@@ -123,7 +134,7 @@ class FleetBackupRetention {
 				}
 			};
 
-			$surplus = array_slice(array_values($groups), $keep);
+			$surplus = array_intersect_key($groups, $surplus_names);
 			$pruned_keys = array();
 			foreach ($surplus as $group) {
 				foreach ($group['keys'] as $key) {
@@ -136,7 +147,7 @@ class FleetBackupRetention {
 
 			// The third family: offloaded files no retained run names any more.
 			// Judged from the runs that are LEFT, so it runs after the groups.
-			$kept_groups = array_slice(array_values($groups), 0, $keep);
+			$kept_groups = array_values(array_diff_key($groups, $surplus_names));
 			if ($read === null) {
 				$read = self::shelf_reader($creds, $bucket);
 			}
@@ -165,6 +176,30 @@ class FleetBackupRetention {
 		}
 
 		return $result;
+	}
+
+	/**
+	 * When something last landed in one node's manager-profile backup storage,
+	 * listed with this management node's credential — UTC 'Y-m-d H:i:s', or ''
+	 * for an empty prefix. Throws when the prefix cannot be listed.
+	 *
+	 * prune()'s listing runs before a run is dispatched, so it cannot see that
+	 * run's upload; this is the same testimony taken after the node reports.
+	 */
+	public static function newest_landed($node, $target) {
+		$creds  = $target->get_credentials();
+		$bucket = trim((string)$target->get('bkt_bucket'));
+		$prefix = rtrim(trim((string)$target->get('bkt_path_prefix')) ?: 'joinery-backups', '/');
+		$slug   = trim((string)$node->get('mgn_slug'));
+		if ($bucket === '' || $slug === '' || empty($creds)) {
+			throw new Exception('no bucket, slug or credentials');
+		}
+		$base = $prefix . '/' . $slug . '/' . BackupProfile::path_segment(BackupProfile::MANAGER) . '/';
+		$objects = S3Signer::list($creds, $bucket, $base);
+		if (!is_array($objects)) {
+			throw new Exception('backup storage could not be listed');
+		}
+		return self::newest_object_time($objects);
 	}
 
 	/**
@@ -252,6 +287,12 @@ class FleetBackupRetention {
 	 */
 	private static function stamp_of($name) {
 		return preg_match('/\d{8}_\d{6}/', (string)$name, $m) ? $m[0] : '00000000_000000';
+	}
+
+	/** When a group started, as a unix time from its name's stamp; 0 for no stamp. */
+	public static function start_time_of($name) {
+		if (!preg_match('/(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/', (string)$name, $m)) { return 0; }
+		return (int)gmmktime((int)$m[4], (int)$m[5], (int)$m[6], (int)$m[2], (int)$m[3], (int)$m[1]);
 	}
 
 	/**

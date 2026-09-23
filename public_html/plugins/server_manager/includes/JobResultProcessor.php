@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.37 - backup_run: the BACKUP_KEEP_DAYS line stamps mgn_backup_keep_days, the site's own
+ *                retention window the fleet pass prunes by
  * @version 1.36 - process_if_due(): the one rule for folding a single finished job (terminal, handled type,
  *                unprocessed, live node), used by the agent channel as a result arrives and by the job page;
  *                TERMINAL_STATUSES names completed and failed once
@@ -932,7 +934,7 @@ class JobResultProcessor {
 		}
 
 		$result = ['backup_status' => $status];
-		foreach (['level', 'bytes'] as $k) {
+		foreach (['level', 'bytes', 'keep_days'] as $k) {
 			if (isset($verdict[$k])) { $result[$k] = $verdict[$k]; }
 		}
 		if ($verdict['warning'] !== '') {
@@ -952,6 +954,9 @@ class JobResultProcessor {
 					self::backup_run_stamp_time($verdict, (string)$job->get('mjb_completed_time')));
 				$node->set('mgn_last_backup_outcome',
 					($status === 'success') ? 'success' : (($status === 'warning') ? 'warning' : 'failed'));
+				if (isset($verdict['keep_days'])) {
+					$node->set('mgn_backup_keep_days', $verdict['keep_days']);
+				}
 				$node->save();
 			} catch (Exception $e) {
 				error_log('JobResultProcessor: could not stamp the backup outcome for node '
@@ -1235,6 +1240,12 @@ class JobResultProcessor {
 		}
 		if (preg_match('/^BACKUP_BYTES=(\d{1,18})$/m', $output, $m)) {
 			$figures['bytes'] = (int)$m[1];
+		}
+		// The site's own retention window, which this management node prunes
+		// its copies by (never below its own minimum). Absent from a runner
+		// that predates the line.
+		if (preg_match('/^BACKUP_KEEP_DAYS=(\d{1,5})$/m', $output, $m) && (int)$m[1] > 0) {
+			$figures['keep_days'] = (int)$m[1];
 		}
 
 		return ['status' => $status, 'time' => $time, 'message' => $message, 'warning' => $warning] + $figures;

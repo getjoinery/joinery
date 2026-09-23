@@ -2,6 +2,7 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.25 - mgn_backup_keep_days: the site's own retention window, reported by its backup runs
  * @version 1.24 - MultiManagedNode option reports_failed_backup: the nodes whose last scheduled
  *                (manager-profile) backup is recorded as failed
  * @version 1.23 - mgn_agent_server_manager: whether Server Manager is active on the node as its agent
@@ -162,6 +163,11 @@ class ManagedNode extends SystemBase {
 		// management node's credential, never the node's word. Comparing these
 		// against the claimed last run is the only check that catches a node
 		// reporting success while nothing actually lands.
+		// How many days of backups the site keeps, as its last backup run
+		// reported it (BACKUP_KEEP_DAYS). The fleet pass deletes this node's
+		// copies by it, never keeping fewer than the policy's keep_days minimum.
+		// Empty until a run reports it.
+		'mgn_backup_keep_days'          => array('type'=>'int4'),
 		'mgn_backup_shelf_checked_time' => array('type'=>'timestamp(6)'),
 		'mgn_backup_shelf_newest_time'  => array('type'=>'timestamp(6)'),
 		// How much this node's backup storage holds, in bytes, as of that same check.

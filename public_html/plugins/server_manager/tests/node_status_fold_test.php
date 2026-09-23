@@ -457,6 +457,14 @@ $v = JobResultProcessor::parse_backup_run_verdict($runner, 'completed');
 check($v['status'] === 'success',
 	'the raw SSH text parses identically');
 
+// The site's retention window rides the output; a runner without the line
+// reports none, and nonsense is not a window.
+check(!isset($v['keep_days']), 'a runner that predates BACKUP_KEEP_DAYS reports no window');
+$v = JobResultProcessor::parse_backup_run_verdict($runner . "BACKUP_KEEP_DAYS=45\n", 'completed');
+check(($v['keep_days'] ?? null) === 45, 'BACKUP_KEEP_DAYS is read as the site\'s window', var_export($v, true));
+$v = JobResultProcessor::parse_backup_run_verdict($runner . "BACKUP_KEEP_DAYS=0\n", 'completed');
+check(!isset($v['keep_days']), 'a zero window is not a window');
+
 // A run the runner skipped (another backup already in progress) is neither
 // success nor failure, so it must not refresh or alarm the stamp.
 $skip = json_encode(['api_version' => '1.0', 'data' => ['output' =>

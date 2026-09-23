@@ -1553,3 +1553,13 @@
 	$migration['migration_file'] = 'cloud_offload_tick_while_files_offloaded.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// Backup retention is days of history, not a count of restore points: every
+	// code-tree swap starts a chain, so a count shrank to days once releases came
+	// daily. The new day settings seed themselves; the count rows go.
+	$migration = array();
+	$migration['database_version'] = '198';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'backup_retention_by_days.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

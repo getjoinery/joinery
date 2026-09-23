@@ -13,6 +13,8 @@
  * on that site's schedule, under its own key, and are not this management node's
  * to schedule, count or alarm about.
  *
+ * @version 1.3 - keep_days is the fewest days of backups kept for a node (7 by default); the site's
+ *                own window, reported by its runs, decides above it (retention_days())
  * @version 1.2 - is_verify_due() keys the last verify on the ATTEMPT — the later of the node's stamp
  *                and its newest verify_backup job's creation, whatever that job's status — so a
  *                verify that failed on the node is not re-dispatched every tick; and no settling
@@ -33,7 +35,10 @@ class FleetBackupPolicy {
 		'window_minutes'     => 120,
 		'mode'               => 'chain',
 		'type'               => 'project',
-		'keep'               => 4,
+		// The fewest days of backups kept for a node, whatever the site asks
+		// for: a site sets its own window (retention_days()), and this floor is
+		// what stops an intruder on the site shortening it to erase history.
+		'keep_days'          => 7,
 		'full_interval_days' => 7,
 		// Days between verifications of the newest backup, by opening and
 		// reading it on the node. 0 means never — stored as a decision, like
@@ -130,7 +135,7 @@ class FleetBackupPolicy {
 			'window_minutes'     => (int)($input['policy_window_minutes'] ?? self::DEFAULTS['window_minutes']),
 			'mode'               => (string)($input['policy_mode'] ?? self::DEFAULTS['mode']),
 			'type'               => self::DEFAULTS['type'],
-			'keep'               => (int)($input['policy_keep'] ?? self::DEFAULTS['keep']),
+			'keep_days'          => (int)($input['policy_keep_days'] ?? self::DEFAULTS['keep_days']),
 			'full_interval_days' => (int)($input['policy_full_interval_days'] ?? self::DEFAULTS['full_interval_days']),
 			'verify_every_days'  => (int)($input['policy_verify_every_days'] ?? self::DEFAULTS['verify_every_days']),
 		));
@@ -146,7 +151,7 @@ class FleetBackupPolicy {
 			'window_start'       => 'server_manager_fleet_backup_window_start',
 			'window_minutes'     => 'server_manager_fleet_backup_window_minutes',
 			'mode'               => 'server_manager_fleet_backup_mode',
-			'keep'               => 'server_manager_fleet_backup_keep',
+			'keep_days'          => 'server_manager_fleet_backup_keep_days',
 			'full_interval_days' => 'server_manager_fleet_backup_full_interval_days',
 			'verify_every_days'  => 'server_manager_fleet_backup_verify_every_days',
 		);
@@ -160,6 +165,21 @@ class FleetBackupPolicy {
 		return self::normalize($policy);
 	}
 
+	/**
+	 * How many days of this node's backups the fleet pass keeps: the site's own
+	 * window, as its last backup run reported it, never below the policy's
+	 * keep_days minimum. A node that has not reported one is read at the site
+	 * default, never at the minimum — the minimum is a floor, and reading it as
+	 * the answer would prune a node that simply runs older code.
+	 */
+	public static function retention_days(array $policy, $node): int {
+		$reported = (int)$node->get('mgn_backup_keep_days');
+		if ($reported <= 0) {
+			$reported = BackupRunner::DEFAULT_KEEP_DAYS;
+		}
+		return max((int)$policy['keep_days'], $reported);
+	}
+
 	public static function max_concurrent(): int {
 		$value = (int)Globalvars::get_instance()->get_setting('server_manager_fleet_backup_max_concurrent', true, true);
 		return max(1, $value ?: 2);
@@ -170,7 +190,7 @@ class FleetBackupPolicy {
 		$p['frequency'] = ((string)$p['frequency'] === 'weekly') ? 'weekly' : 'daily';
 		$p['mode']      = ((string)$p['mode'] === 'full') ? 'full' : 'chain';
 		$p['type']      = ((string)$p['type'] === 'database') ? 'database' : 'project';
-		$p['keep']      = max(1, (int)$p['keep']);
+		$p['keep_days'] = max(1, (int)$p['keep_days']);
 		$p['full_interval_days'] = max(0, (int)$p['full_interval_days']);
 		$p['verify_every_days']  = max(0, (int)($p['verify_every_days'] ?? self::DEFAULTS['verify_every_days']));
 		$p['day_of_week'] = max(0, min(6, (int)$p['day_of_week']));

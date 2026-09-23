@@ -128,7 +128,7 @@ $make_plan = function ($slug, array $over = array()) use ($fx, $out, $tree, $dbn
 	$plan['objects']        = true;
 	$plan['objects_source'] = 'listing';
 	$plan['prunes_cloud']   = true;
-	$plan['keep_cloud']     = 5;
+	$plan['keep_days']      = 365;
 	return array_merge($plan, $over);
 };
 $plan = $make_plan($slug);
@@ -452,40 +452,95 @@ check($rc === 0 && $leaked === array() && in_array(substr($archive, 0, -11) . '/
 // ─────────────────────────────────────────────────────────────────────────────
 section('Site retention deletes an object only when no retained index names it');
 
+// Retention keeps days: every point started inside the window, and the newest
+// one started before it. Everything the runs above made is backdated past a
+// one-day window, so what the next run keeps is decided by that rule alone.
+$age_history = function () use ($slug) {
+	DbConnector::get_instance()->get_db_link()
+		->prepare("UPDATE bkh_backup_history SET bkh_start_time = bkh_start_time - interval '30 days' WHERE bkh_slug = ?")
+		->execute(array($slug));
+};
+
 // Two chains exist under $plan (chain_d and chain2_d) plus the link-plan and
-// no-link-plan runs, which extended chain 2. keep_cloud=1 prunes chain 1,
-// whose indexes name a, b, c, d — all named by chain 2's newest index, so
-// nothing is deleted.
-$keep1 = $make_plan($slug, array('keep_cloud' => 1));
+// no-link-plan runs, which extended chain 2. With both aged, chain 2 covers the
+// window and chain 1 is pruned; its indexes name a, b, c, d — all named by
+// chain 2's newest index, so nothing is deleted.
+$keep1 = $make_plan($slug, array('keep_days' => 1));
+$age_history();
 list($result, $error) = $run($keep1);
-check($error === null, 'a run with keep_cloud=1 succeeds', (string)$error);
+check($error === null, 'a run with a one-day window succeeds', (string)$error);
 check(strpos((string)$result['message'], 'pruned 1 old backup') !== false, 'chain 1 was pruned', $result['message']);
 check(s3fx_object($fx, 'bkt', '/' . $base . 'objects/' . $epoch . '/b.bin.enc') !== null, 'b.bin stays: the retained chain\'s index names it');
 check(strpos((string)$result['message'], 'removed') === false, 'nothing removed', $result['message']);
 
 // b.bin's blob is permanently deleted; the next index lacks it. The
-// standalone full taken earlier still names it, so a second standalone full
-// with keep_cloud=1 retires that one — and chain 2's older indexes still
-// name b.bin, so nothing goes yet. Then a new chain: the prune of chain 2
-// finds b.bin named by chain 2's indexes and by no retained index, and
-// deletes the object.
+// standalone full taken earlier still names it. Two more standalone fulls
+// with the history aged between them: the newer covers the window and the
+// first is retired — and chain 2's older indexes still name b.bin, so nothing
+// goes yet. Then two new chains, aged between: the second prune finds chain 2
+// surplus, b.bin named by its indexes and by no retained index, and deletes
+// the object.
 unset($blobs['b.bin']);
 list($result, $error) = $run($keep1);
 check($error === null, 'a run after b.bin\'s blob is gone succeeds', (string)$error);
+$full1 = $make_plan($slug, array('mode' => 'full', 'keep_days' => 1));
 sleep(1);
-list($result, $error) = $run($make_plan($slug, array('mode' => 'full', 'keep_cloud' => 1)), true);
+list($result, $error) = $run($full1, true);
+check($error === null && strpos((string)$result['message'], 'pruned') === false,
+	'a standalone full beside an older one in the window\'s cover prunes nothing', (string)$error . ' ' . ($result['message'] ?? ''));
+$age_history();
+sleep(1);
+list($result, $error) = $run($full1, true);
 check($error === null && strpos((string)$result['message'], 'pruned 1 old restore point') !== false,
-	'a second standalone full retires the first', (string)$error . ' ' . ($result['message'] ?? ''));
+	'the next standalone full retires the first, past the one covering the window', (string)$error . ' ' . ($result['message'] ?? ''));
 check(s3fx_object($fx, 'bkt', '/' . $base . 'objects/' . $epoch . '/b.bin.enc') !== null, 'b.bin stays: chain 2\'s older indexes still name it');
 @unlink($keep1['output_dir'] . '/.' . $slug . '.snar');
 sleep(1);
 list($result, $error) = $run($keep1);
 check($error === null && strpos((string)$result['message'], 'Full backup') === 0, 'a fresh chain starts', (string)$error . ' ' . ($result['message'] ?? ''));
-check(strpos((string)$result['message'], 'pruned 1 old backup') !== false, 'chain 2 was pruned', $result['message']);
+check(strpos((string)$result['message'], 'pruned') === false, 'chain 2 still covers the window', $result['message']);
+$age_history();
+@unlink($keep1['output_dir'] . '/.' . $slug . '.snar');
+sleep(1);
+list($result, $error) = $run($keep1);
+check($error === null && strpos((string)$result['message'], 'Full backup') === 0, 'another fresh chain starts', (string)$error . ' ' . ($result['message'] ?? ''));
+// Chain 2, and the standalone full the newest standalone now covers for.
+check(strpos((string)$result['message'], 'pruned 2 old backups') !== false, 'chain 2 was pruned', $result['message']);
 check(s3fx_object($fx, 'bkt', '/' . $base . 'objects/' . $epoch . '/b.bin.enc') === null, 'b.bin\'s object is gone from backup storage');
 check(s3fx_object($fx, 'bkt', '/' . $base . 'objects/' . $epoch . '/a.jpg.enc') !== null, 'a.jpg\'s stays');
 check(s3fx_object($fx, 'bkt', '/' . $base . 'objects/' . $epoch . '/envelope.json') !== null, 'the epoch envelope stays while the epoch has objects');
 check(strpos((string)$result['message'], 'removed 1 offloaded file no kept backup names') !== false, 'the message says so', $result['message']);
+
+// ─────────────────────────────────────────────────────────────────────────────
+section('A plan that does not prune the bucket removes the records only');
+
+// The manager profile: the site decides how long, the management node deletes.
+// Retention on this machine stops listing what falls outside the window and
+// leaves every object where it is.
+$live_chains = function () use ($slug) {
+	$q = DbConnector::get_instance()->get_db_link()->prepare(
+		"SELECT bkh_chain_id FROM bkh_backup_history WHERE bkh_slug = ? AND bkh_chain_id <> ''"
+		. " AND bkh_delete_time IS NULL AND bkh_outcome = 'success' GROUP BY bkh_chain_id ORDER BY MIN(bkh_start_time) DESC");
+	$q->execute(array($slug));
+	return $q->fetchAll(PDO::FETCH_COLUMN);
+};
+$age_history();
+$before = $live_chains();
+$doomed = $before[1] ?? '';
+$doomed_keys = array();
+foreach (new MultiBackupHistory(array('slug' => $slug, 'deleted' => false)) as $r) {
+	if ((string)$r->get('bkh_chain_id') === $doomed) { $doomed_keys = array_merge($doomed_keys, $r->object_keys()); }
+}
+check($doomed !== '' && $doomed_keys, 'an older chain with objects is outside the window', json_encode($before));
+@unlink($keep1['output_dir'] . '/.' . $slug . '.snar');
+sleep(1);
+list($result, $error) = $run($make_plan($slug, array('keep_days' => 1, 'prunes_cloud' => false)));
+check($error === null && strpos((string)$result['message'], 'pruned') === false,
+	'the run succeeds and prunes nothing it could not delete', (string)$error . ' ' . ($result['message'] ?? ''));
+check(!in_array($doomed, $live_chains(), true), 'the chain outside the window left the records', json_encode($live_chains()));
+$still = 0;
+foreach ($doomed_keys as $k) { if (s3fx_object($fx, 'bkt', '/' . ltrim($k, '/')) !== null) { $still++; } }
+check($still === count($doomed_keys), 'and every one of its objects is still in backup storage', $still . ' of ' . count($doomed_keys));
 
 // ─────────────────────────────────────────────────────────────────────────────
 section('plan_manager() reads the three request fields');

@@ -33,6 +33,11 @@
  * profile sweeps its own working directory by age, because the machine holding
  * the files is the only one that can.
  *
+ * @version 1.21 - retention keeps days of history (backup_retention_days), not a count of restore
+ *                points: surplus() keeps every point started inside the window and the newest one
+ *                started before it. A manager-profile run carries the site's own window and removes
+ *                the records of runs outside it (the management node deletes the objects); keep_days()
+ *                is public for run_backup.php's BACKUP_KEEP_DAYS line
  * @version 1.20 - a chain never spans a code-tree swap: the files engine names the tree its snapshot
  *                describes (SNAR.tree) and the tree now on disk, and a difference — or no record —
  *                starts a new chain (tree_changed); an engine that finds the tree swapped after the
@@ -399,7 +404,7 @@ class BackupRunner {
 			'project'      => basename(PathHelper::getSiteRoot()),
 			'base_dir'     => $base,
 			'output_dir'   => BackupProfile::output_dir(BackupProfile::SITE, $base),
-			'keep_cloud'   => max(1, (int)self::setting('backup_retention_count')),
+			'keep_days'    => self::keep_days(),
 			'keep_local'   => max(0, (int)self::setting('backup_local_retention_days')),
 			'delete_local' => (string)self::setting('backup_delete_local_after_upload') === '1',
 			// This site prunes its own backup storage. It holds the credentials, and the
@@ -535,12 +540,14 @@ class BackupRunner {
 			'output_dir'   => BackupProfile::output_dir(BackupProfile::MANAGER, $base),
 			'keep_local'   => max(0, (int)($m['keep_local_days'] ?? 7)),
 			'delete_local' => !empty($m['delete_local_after_upload']),
-			// Cloud pruning is not this machine's decision. The credential it
-			// was handed cannot delete, and backup storage being counted belongs to
-			// whoever triggered the run — retention runs there, with a
-			// delete-capable credential that never comes here. This plan carries
-			// no keep count at all: the flag is the whole answer, and there is
-			// no second number for it to disagree with.
+			// How long these backups are kept is this site's decision: the run
+			// reports the window (BACKUP_KEEP_DAYS) and the management node
+			// deletes by it, never below its own minimum. The deleting is not
+			// this machine's — the credential it was handed cannot delete, and a
+			// site that could erase its own offsite copies would lose them to the
+			// first intruder. Retention here removes the records only, by the
+			// same rule and window, so this site's list matches what is kept.
+			'keep_days'    => self::keep_days(),
 			'prunes_cloud' => false,
 			// The object store in the manager-profile backup storage is driven by three request
 			// fields a management node running that code sends. A request
@@ -1427,11 +1434,17 @@ class BackupRunner {
 	 * would leave incrementals whose full is gone — which is not a smaller
 	 * backup, it is no backup, and it would look like a restore point right up
 	 * until someone needed it.
+	 *
+	 * A plan that does not prune the bucket (the manager profile) removes the
+	 * records only, by the same rule and window: the management node deletes
+	 * the objects, so this site's list must stop naming them. Records removed
+	 * that way are not counted as pruned — this machine deleted nothing.
 	 */
 	public static function enforce_chain_retention(array $plan, ?array &$pruned_indexes = null) {
-		if (empty($plan['prunes_cloud'])) {
+		if (empty($plan['keep_days'])) {
 			return 0;
 		}
+		$deletes = !empty($plan['prunes_cloud']);
 		$rows = new MultiBackupHistory(
 			array('outcome' => 'success', 'offsite' => true, 'deleted' => false, 'slug' => $plan['slug'],
 			      'chained' => true, 'profile' => $plan['profile']),
@@ -1447,24 +1460,32 @@ class BackupRunner {
 			$chains[$cid][] = $r;
 		}
 
-		$surplus = self::surplus(array_keys($chains), $plan['keep_cloud']);
+		// A chain started when its oldest run did; rows came back newest first.
+		$points = array();
+		foreach ($chains as $cid => $chain_rows) {
+			$points[] = array('item' => $cid,
+				'time' => (int)strtotime(end($chain_rows)->get('bkh_start_time') . ' UTC'));
+		}
+		$surplus = self::surplus($points, $plan['keep_days'], time());
 		if (!$surplus) {
 			return 0;
 		}
 
-		$target = $plan['target'];
-		$creds  = $target->get_credentials();
-		$bucket = trim((string)$target->get('bkt_bucket'));
+		if ($deletes) {
+			$target = $plan['target'];
+			$creds  = $target->get_credentials();
+			$bucket = trim((string)$target->get('bkt_bucket'));
+		}
 
 		$pruned = 0;
 		foreach ($surplus as $cid) {
 			try {
 				// Read what this chain's indexes name BEFORE they go: the object
 				// family is pruned by exactly that (enforce_object_retention).
-				if ($pruned_indexes !== null) {
+				if ($deletes && $pruned_indexes !== null) {
 					$pruned_indexes += self::index_entries_of_rows($plan, $chains[$cid]);
 				}
-				foreach ($chains[$cid] as $row) {
+				foreach ($deletes ? $chains[$cid] : array() as $row) {
 					foreach ($row->object_keys() as $key) {
 						$resp = S3Signer::delete($creds, $bucket, '/' . ltrim($key, '/'));
 						$status = (int)($resp['status'] ?? 0);
@@ -1490,7 +1511,7 @@ class BackupRunner {
 				error_log('BackupRunner: chain retention failed for ' . $cid . ': ' . $e->getMessage());
 			}
 		}
-		return $pruned;
+		return $deletes ? $pruned : 0;
 	}
 
 	// ------------------------------------------------------------------ full
@@ -1986,8 +2007,8 @@ class BackupRunner {
 	// -------------------------------------------------------------- retention
 
 	/**
-	 * Keep the newest N restore points offsite; delete the objects belonging to
-	 * anything older, oldest first.
+	 * Keep the restore points the retention window needs offsite; delete the
+	 * objects belonging to anything older (surplus()).
 	 *
 	 * Driven by history rather than by a bucket listing, so it can only ever
 	 * delete objects this site recorded itself as having written. A bucket
@@ -2001,36 +2022,40 @@ class BackupRunner {
 	 * nothing. Chains are pruned whole by enforce_chain_retention.
 	 */
 	public static function enforce_cloud_retention(array $plan, ?array &$pruned_indexes = null) {
-		if (empty($plan['prunes_cloud'])) {
+		if (empty($plan['keep_days'])) {
 			return 0;
 		}
-		$keep = $plan['keep_cloud'];
-
+		// Records only for a plan that does not prune the bucket, as for chains.
+		$deletes = !empty($plan['prunes_cloud']);
 		$rows = new MultiBackupHistory(
 			array('outcome' => 'success', 'offsite' => true, 'deleted' => false, 'slug' => $plan['slug'],
 			      'chained' => false, 'profile' => $plan['profile']),
 			array('bkh_start_time' => 'DESC'), 500, 0);
 		$rows->load();
 
-		$all = array();
-		foreach ($rows as $r) { $all[] = $r; }
+		$points = array();
+		foreach ($rows as $r) {
+			$points[] = array('item' => $r, 'time' => (int)strtotime($r->get('bkh_start_time') . ' UTC'));
+		}
 
-		$surplus = self::surplus($all, $keep);
+		$surplus = self::surplus($points, $plan['keep_days'], time());
 		if (!$surplus) {
 			return 0;
 		}
 
-		$target = $plan['target'];
-		$creds  = $target->get_credentials();
-		$bucket = trim((string)$target->get('bkt_bucket'));
+		if ($deletes) {
+			$target = $plan['target'];
+			$creds  = $target->get_credentials();
+			$bucket = trim((string)$target->get('bkt_bucket'));
+		}
 
 		$pruned = 0;
 		foreach ($surplus as $old) {
 			try {
-				if ($pruned_indexes !== null) {
+				if ($deletes && $pruned_indexes !== null) {
 					$pruned_indexes += self::index_entries_of_rows($plan, array($old));
 				}
-				foreach ($old->object_keys() as $key) {
+				foreach ($deletes ? $old->object_keys() : array() as $key) {
 					$resp = S3Signer::delete($creds, $bucket, '/' . ltrim($key, '/'));
 					$status = (int)($resp['status'] ?? 0);
 					// 404 is success for our purposes: the object is not there,
@@ -2053,22 +2078,36 @@ class BackupRunner {
 				error_log('BackupRunner: retention failed for history ' . $old->key . ': ' . $e->getMessage());
 			}
 		}
-		return $pruned;
+		return $deletes ? $pruned : 0;
 	}
 
 	/**
-	 * Which restore points are surplus, given a newest-first list and how many
-	 * to keep. Pure, and separated from the deleting because this is the
-	 * decision that can lose data: it has to be checkable without a bucket, and
-	 * "keep at least one, always" has to be true even when the caller passes
-	 * nonsense.
+	 * Which restore points are surplus, given the newest-first points and how
+	 * many days of history to keep. Pure, and separated from the deleting
+	 * because this is the decision that can lose data: it has to be checkable
+	 * without a bucket, and "keep at least one, always" has to be true even when
+	 * the caller passes nonsense.
+	 *
+	 * Each point is `['item' => mixed, 'time' => unix start]`, and the surplus
+	 * comes back as the items, newest first. A point that started inside the
+	 * window is kept, and so is the newest one that started before it: a
+	 * restore to the window's first day replays from that one. The window is
+	 * days rather than a count because a count is spent by whatever starts
+	 * points — every code-tree swap starts a chain, and a count of chains
+	 * shrinks to a few days of history once releases come daily.
 	 */
-	public static function surplus(array $newest_first, $keep) {
-		$keep = max(1, (int)$keep);
-		if (count($newest_first) <= $keep) {
-			return array();
+	public static function surplus(array $points, $keep_days, $now) {
+		$cutoff = (int)$now - max(1, (int)$keep_days) * 86400;
+		$surplus = array();
+		// The first point started before the window covers its first day, and
+		// when that is the newest point it covers the whole window by itself.
+		$covered = false;
+		foreach ($points as $p) {
+			if ((int)$p['time'] >= $cutoff) { continue; }
+			if (!$covered) { $covered = true; continue; }
+			$surplus[] = $p['item'];
 		}
-		return array_slice($newest_first, $keep);
+		return $surplus;
 	}
 
 	/**
@@ -2293,6 +2332,19 @@ class BackupRunner {
 	 * that saves a target and then asks what the target is — the page, a CLI
 	 * run, a test — must see what it just wrote, not what was true at boot.
 	 */
+	/** backup_retention_days, as settings.json ships it. */
+	const DEFAULT_KEEP_DAYS = 28;
+
+	/**
+	 * Days of backups kept offsite. A blank setting is the shipped default,
+	 * never a one-day window: code can land before its settings are seeded, and
+	 * a run in that gap must not prune a month of history down to a day.
+	 */
+	public static function keep_days() {
+		$raw = trim(self::setting('backup_retention_days'));
+		return ($raw === '') ? self::DEFAULT_KEEP_DAYS : max(1, (int)$raw);
+	}
+
 	private static function setting($name) {
 		try {
 			$db = DbConnector::get_instance()->get_db_link();

@@ -29,34 +29,53 @@ require_once(PathHelper::getIncludePath('includes/BackupRunner.php'));
 require_once(PathHelper::getIncludePath('includes/BackupEnvelope.php'));
 
 // ── Retention selection ─────────────────────────────────────────────────────
-section('Retention never empties backup storage');
+section('Retention keeps days of history and never empties backup storage');
 
-$rows = array('newest', 'a', 'b', 'c', 'd', 'oldest');
-
-check(BackupRunner::surplus($rows, 4) === array('d', 'oldest'),
-	'keeping 4 of 6 drops the two oldest', implode(',', BackupRunner::surplus($rows, 4)));
-check(BackupRunner::surplus($rows, 6) === array(),
-	'keeping exactly as many as exist drops nothing');
-check(BackupRunner::surplus($rows, 10) === array(),
-	'keeping more than exist drops nothing');
-check(BackupRunner::surplus(array(), 4) === array(),
-	'an empty backup storage has nothing surplus');
-check(BackupRunner::surplus(array('only'), 1) === array(),
-	'a single backup is never surplus');
-
-// A misconfigured or corrupted count must not be read as "delete everything".
-foreach (array(0, -1, -100, '0', 'nonsense') as $bad) {
-	$s = BackupRunner::surplus($rows, $bad);
-	check(count($s) === count($rows) - 1,
-		'a keep count of ' . var_export($bad, true) . ' still keeps the newest one',
-		'would drop ' . count($s) . ' of ' . count($rows));
-	check(!in_array('newest', $s, true), 'and never the newest');
+$now = gmmktime(12, 0, 0, 9, 23, 2026);
+$day = 86400;
+// Newest first: points started 0, 1, 2, 9, 20, 30, 40 days ago.
+$pts = array();
+foreach (array('d0' => 0, 'd1' => 1, 'd2' => 2, 'd9' => 9, 'd20' => 20, 'd30' => 30, 'd40' => 40) as $name => $ago) {
+	$pts[] = array('item' => $name, 'time' => $now - $ago * $day);
 }
 
-// The newest is never in the surplus set, at any keep count.
-for ($k = 1; $k <= 8; $k++) {
-	check(!in_array('newest', BackupRunner::surplus($rows, $k), true),
-		"keep={$k} never drops the newest backup");
+$s = BackupRunner::surplus($pts, 28, $now);
+check($s === array('d40'),
+	'28 days keeps everything inside the window and d30, which a restore to day 28 starts from',
+	implode(',', $s));
+$s = BackupRunner::surplus($pts, 5, $now);
+check($s === array('d20', 'd30', 'd40'),
+	'5 days keeps d0-d2 and d9, the point covering the window start', implode(',', $s));
+check(BackupRunner::surplus($pts, 100, $now) === array(),
+	'a window longer than the history drops nothing');
+check(BackupRunner::surplus(array(), 28, $now) === array(),
+	'an empty backup storage has nothing surplus');
+check(BackupRunner::surplus(array(array('item' => 'only', 'time' => $now - 400 * $day)), 1, $now) === array(),
+	'a single backup is never surplus, however old');
+
+// Daily fulls from code-tree swaps: a count would keep days; the window keeps a month.
+$daily = array();
+for ($i = 0; $i < 40; $i++) { $daily[] = array('item' => 'c' . $i, 'time' => $now - $i * $day); }
+$s = BackupRunner::surplus($daily, 28, $now);
+check(count($s) === 10 && $s[0] === 'c30',
+	'a new chain every day keeps days 0-28 and day 29, which covers the window start', count($s) . ' surplus, first ' . ($s[0] ?? ''));
+
+// A stale history: nothing inside the window. The newest is kept and also covers the window.
+$stale = array(
+	array('item' => 'old1', 'time' => $now - 50 * $day),
+	array('item' => 'old2', 'time' => $now - 60 * $day),
+	array('item' => 'old3', 'time' => $now - 70 * $day),
+);
+check(BackupRunner::surplus($stale, 7, $now) === array('old2', 'old3'),
+	'with nothing recent, the newest is kept: it is the point the whole window restores from',
+	implode(',', BackupRunner::surplus($stale, 7, $now)));
+
+// A misconfigured or corrupted window must not be read as "delete everything".
+foreach (array(0, -1, -100, '0', 'nonsense') as $bad) {
+	$s = BackupRunner::surplus($pts, $bad, $now);
+	check(!in_array('d0', $s, true),
+		'a window of ' . var_export($bad, true) . ' never drops the newest', implode(',', $s));
+	check(count($s) <= count($pts) - 1, 'and keeps at least one');
 }
 
 // ── Local sweep ─────────────────────────────────────────────────────────────
